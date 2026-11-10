@@ -409,6 +409,7 @@ NON_BUILD_CONTEXTS = (
     "Vellum freeze",
     "Vellum trusted freeze",
     "drift-fast",
+    "release-configure",
 )
 FULL_CONTRACT = ("macos", *NON_BUILD_CONTEXTS)
 
@@ -501,6 +502,7 @@ CONTEXT_WORKFLOW = {
     "Vellum freeze": ".github/workflows/vellum-freeze-check.yml",
     "Vellum trusted freeze": ".github/workflows/vellum-trusted-gate.yml",
     "drift-fast": ".github/workflows/drift-fast.yml",
+    "release-configure": ".github/workflows/release-configure.yml",
 }
 WORKFLOWS = tuple(dict.fromkeys(CONTEXT_WORKFLOW.values()))
 ALL_GREEN = {name: "success" for name in FULL_CONTRACT}

@@ -487,6 +487,7 @@ ghapp api -X PATCH repos/Generous-Corp/pulp/branches/main/protection/required_st
     -f 'contexts[]=Vellum freeze' \
     -f 'contexts[]=macos' \
     -f 'contexts[]=drift-fast' \
+    -f 'contexts[]=release-configure' \
     -f 'contexts[]=api-contracts'
 ```
 

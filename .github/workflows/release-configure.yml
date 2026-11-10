@@ -1,0 +1,207 @@
+name: Release configure
+
+# Required, hosted pre-merge check that every release leg still CONFIGURES.
+#
+# release-cli.yml runs only when a version tag is pushed, and its `release`
+# job needs every leg. A change that breaks one leg's CMake configure is
+# therefore first seen after it has merged and been tagged, and from then on
+# no tag publishes. That happened from v1.81.0 to v1.96.0: a gpu-runtime
+# forward made the darwin-x64 leg (cross-configured for x86_64 on Apple
+# Silicon) stop at configure with "libdawn_combined.a does not match the lock",
+# while the pull-request gate never configured the release matrix and the
+# weekly dry-run's Intel leg is advisory.
+#
+# This workflow runs that configure for every active release platform
+# (tools/scripts/release_product_matrix.json, via release_build_matrix.py) on
+# GitHub-hosted runners, so it takes no gate VM slot. It keeps no copy of the
+# release flags: tools/ci/release_configure_matrix.py replays release-cli.yml's
+# own build-cli steps by name, from the dependency bootstrap through every
+# `cmake -S`, with their build commands stubbed out. Each leg takes minutes.
+#
+# REQUIRED: `release-configure` is a required status check on `main` (mirrored
+# in .github/rulesets/main-protection.json, decision 33 in .agents/contract.toml).
+# A required check that never reports holds a pull request on "Expected"
+# forever, so the triggers carry no `paths:` filter and the aggregate job runs
+# under `if: always()`. The scope job decides whether the change can affect a
+# release configure; when it cannot, the legs are skipped and the aggregate
+# passes. tools/ci/test_release_configure_matrix.py holds this file to that.
+
+on:
+  pull_request:
+    branches: [main, 'develop/**']
+  merge_group:
+  # Catches what no pull request changes: a runner image update, or a pinned
+  # asset that moved upstream.
+  schedule:
+    - cron: '23 7 * * *'
+  workflow_dispatch:
+
+# A new push supersedes the pull-request run. A merge group's ref is unique per
+# group, so its runs never share a concurrency domain and none is cancelled.
+concurrency:
+  group: release-configure-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  scope:
+    name: Release configure scope
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+      include: ${{ steps.legs.outputs.include }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          lfs: false
+          fetch-depth: 1
+
+      # Planning reads release-cli.yml, so it needs PyYAML; the legs do not
+      # (they run the plan with the runner's own python3, as the release does).
+      - name: Set up Python
+        uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.12'
+
+      - name: Gate self-test
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet 'pyyaml>=6'
+          python3 tools/ci/test_release_configure_matrix.py
+
+      # A pull request and a queue batch are judged by the same list. An
+      # unreadable diff runs every leg.
+      - name: Decide whether this change can affect a release configure
+        id: decide
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          MQ_BASE: ${{ github.event.merge_group.base_sha }}
+          MQ_HEAD: ${{ github.event.merge_group.head_sha }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            pull_request) base="$PR_BASE"; head="$PR_HEAD" ;;
+            merge_group) base="$MQ_BASE"; head="$MQ_HEAD" ;;
+            *) echo "run=true" >> "$GITHUB_OUTPUT"; exit 0 ;;
+          esac
+          run="$(python3 tools/ci/release_configure_matrix.py scope \
+            --repo "$GITHUB_REPOSITORY" --base "$base" --head "$head")"
+          echo "run=${run}" >> "$GITHUB_OUTPUT"
+
+      - name: Plan every release leg
+        id: legs
+        if: steps.decide.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/ci/release_configure_matrix.py legs --github-output | tee -a "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/release-configure-plans"
+          python3 - <<'PY' > "$RUNNER_TEMP/platforms.txt"
+          import json, subprocess, sys
+          out = subprocess.run([sys.executable, "tools/ci/release_configure_matrix.py", "legs"],
+                               check=True, capture_output=True, text=True).stdout
+          print("\n".join(leg["platform"] for leg in json.loads(out)))
+          PY
+          while read -r platform; do
+            python3 tools/ci/release_configure_matrix.py plan --platform "$platform" \
+              --out "$RUNNER_TEMP/release-configure-plans/${platform}.json"
+          done < "$RUNNER_TEMP/platforms.txt"
+
+      - name: Upload plans
+        if: steps.decide.outputs.run == 'true'
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: release-configure-plans
+          path: ${{ runner.temp }}/release-configure-plans/
+          retention-days: 3
+
+  configure:
+    name: Release configure (${{ matrix.platform }})
+    needs: scope
+    if: needs.scope.outputs.run == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.scope.outputs.include) }}
+    # The hosted image each release leg builds on (darwin-x64 cross-configures
+    # on Apple Silicon there too). Never a gate VM.
+    runs-on: ${{ matrix.runs_on }}
+    timeout-minutes: 45
+    steps:
+      # Must run before the checkout to take effect; identical to release-cli.yml's
+      # step of the same name (the self-test compares them).
+      - name: Check out release sources with upstream LF bytes
+        shell: bash
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+      - uses: actions/checkout@v7.0.1
+        with:
+          lfs: false
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/install-linux-build-deps
+        with:
+          profile: native-webview
+
+      - name: Download plans
+        uses: actions/download-artifact@v8
+        with:
+          name: release-configure-plans
+          path: ${{ runner.temp }}/release-configure-plans
+
+      # Replays release-cli.yml's build-cli steps for this leg up to and
+      # including every configure. On failure the CMake error is annotated and
+      # written to the step summary with the local reproduction command.
+      - name: Replay the release configure
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          python3 tools/ci/release_configure_matrix.py run-plan \
+            --plan "$RUNNER_TEMP/release-configure-plans/${PLATFORM}.json"
+
+  release-configure:
+    name: release-configure
+    needs: [scope, configure]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every release leg configures
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          RUN: ${{ needs.scope.outputs.run }}
+          CONFIGURE_RESULT: ${{ needs.configure.result }}
+        run: |
+          set -euo pipefail
+          if [ "$SCOPE_RESULT" = skipped ] && [ "$EVENT" = schedule ]; then
+            echo "Scheduled run outside the primary repository: nothing to check."
+            exit 0
+          fi
+          if [ "$SCOPE_RESULT" != success ]; then
+            echo "::error title=release-configure::The scope job ended '${SCOPE_RESULT}', so no leg was judged."
+            exit 1
+          fi
+          if [ "$RUN" != true ]; then
+            echo "No changed path can affect a release configure; legs skipped."
+            echo "No changed path can affect a release configure; legs skipped." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "$CONFIGURE_RESULT" != success ]; then
+            echo "::error title=release-configure::At least one release leg would fail at configure (${CONFIGURE_RESULT}). A tag cut from this change would publish nothing; see the failing 'Release configure (<platform>)' job."
+            exit 1
+          fi
+          echo "Every release leg configures."

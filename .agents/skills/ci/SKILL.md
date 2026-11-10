@@ -104,8 +104,21 @@ on a real PR. Do them in order.
 
    As of 2026-10-02: `macos`, `Enforce version & skill sync`, `Vellum freeze`,
    `Vellum trusted freeze`, `Build + prove + (owner-gated) deploy`,
-   `drift-fast`. Everything else (Workflow lint, CodeQL, Linux, Windows,
+   `drift-fast`, plus `release-configure` once branch protection carries it
+   (decision 33). Everything else (Workflow lint, CodeQL, Linux, Windows,
    coverage) is advisory — red there does not stop auto-merge.
+
+   **A red `release-configure` means a tag cut from this change would publish
+   nothing.** It replays `release-cli.yml`'s own configure for every release
+   leg (darwin-x64 cross-configured on hosted Apple Silicon, Linux, Windows) on
+   hosted runners. Read the `Release <platform> configure fails` annotation for
+   the CMake error, and reproduce with
+   `python3 tools/ci/release_configure_matrix.py run --platform <platform>` on
+   a matching host. Never "fix" it by renaming or skipping a `release-cli.yml`
+   step: renaming a `build-cli` step, or adding an unclassified one, fails the
+   gate's self-test until `tools/ci/release_configure_matrix.py` classifies it
+   (replayed, mirrored or skipped with a reason). See `docs/guides/local-ci.md`
+   § `release-configure`.
 3. **Open with `shipyard pr` and leave auto-merge armed.** Before you start,
    `shipyard ship-state list` shows whether someone is already landing it.
 4. **Read `mergeStateStatus` correctly:**

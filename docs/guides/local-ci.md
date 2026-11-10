@@ -3426,9 +3426,63 @@ required check equally; see the `contrib-intake` skill.
 Live enforcement is classic branch protection, not a ruleset; the checked-in
 `.github/rulesets/main-protection.json` and `.shipyard/config.toml`
 `[governance]` mirror it, and `base-poison-detector-selftest` fails when those
-two disagree (and the detector judges all six on main's tip). `[governance]` is the full six-context contract, because
+two disagree (and the detector judges all seven on main's tip). `[governance]` is the full seven-context contract, because
 `shipyard governance apply` pushes exactly that list to branch protection.
 Removing it again is the reverse `required_status_checks` edit.
+
+## `release-configure`: every release leg's configure, before merge
+
+`release-cli.yml` runs only on a version-tag push, and its `release` job needs
+every build leg, so a change that breaks one leg's CMake configure is first
+seen after it merges and is tagged; from then on no tag publishes. From
+2026-11-07 to 2026-11-10 that stopped v1.81.0 through v1.96.0: a gpu-runtime
+forward made the `darwin-x64` leg (cross-configured for x86_64 on Apple
+Silicon) stop with `gpu-runtime: libdawn_combined.a does not match the lock`.
+The required gate never configures the release matrix, the weekly dry-run's
+Intel leg is advisory, and `release-path-pr-gate.yml` builds only `linux-x64`
+and `darwin-arm64`.
+
+`.github/workflows/release-configure.yml` closes that gap without building:
+
+- **Legs.** One per active release platform
+  (`tools/scripts/release_product_matrix.json` via `release_build_matrix.py`),
+  on the GitHub-hosted image the release leg uses: `macos-15` for both Darwin
+  legs (`darwin-x64` cross-configures there, as in the release),
+  `ubuntu-24.04`, `ubuntu-24.04-arm`, `windows-latest`, `windows-11-arm`. No
+  gate VM is used.
+- **No copied flags.** `tools/ci/release_configure_matrix.py` reads
+  `release-cli.yml`'s `build-cli` job and replays its steps by name, from the
+  dependency bootstrap and Skia fetch through every `cmake -S`, with the build
+  command inside the SDK configure steps replaced by an echo. Steps run as
+  GitHub runs `shell: bash` (`bash -eo pipefail`), and `GITHUB_ENV` /
+  `GITHUB_PATH` carry between them. Every `build-cli` step must be classified
+  as replayed, mirrored or skipped (with a reason); a new or renamed step fails
+  the gate's self-test, which runs in the gate's scope job and in
+  `workflow-lint.yml`.
+- **Known gap.** The release builds `linux-x64` in an `ubuntu:22.04`
+  container (GCC 13, glibc floor). Replaying that toolchain install costs about
+  20 minutes, so the gate configures `linux-x64` on the bare image.
+- **Scope.** The trigger is unfiltered (a required check must always report).
+  The scope job reads the change through the compare API and runs the legs only
+  when it touches a configure input: any `CMakeLists.txt` or `*.cmake` outside
+  `test/` and `examples/` (the release profile turns both off), `tools/cmake/`,
+  `tools/deps/`, `external/`, `setup.sh`, the toolchain pins, the release
+  workflow and matrix scripts. A root `CMakeLists.txt` change to the project
+  `VERSION` line alone is out of scope. An unreadable diff, or 300+ changed
+  files, runs every leg.
+- **Cost.** About four minutes per leg (bootstrap, Skia fetch, one or two
+  configures), in parallel; out-of-scope changes finish in under a minute.
+- **On failure.** The leg prints the CMake error as an annotation titled
+  `Release <platform> configure fails`, writes it to the step summary, and
+  names the local reproduction:
+  `python3 tools/ci/release_configure_matrix.py run --platform <platform>`
+  (a matching host: macOS for the Darwin legs).
+
+**It is required** (decision 33 in `.agents/contract.toml`). The aggregate job
+`release-configure` runs under `if: always()` and fails unless the scope job
+succeeded and, when in scope, every leg did. Live enforcement is branch
+protection, which `shipyard governance apply` sets from `[governance]`; until
+that is applied the check reports but does not block.
 
 ## Every failed run names its cause: the advisory `ci-cause` job
 
@@ -5901,7 +5955,8 @@ hours with 34 PRs open and nothing merging while every check was green.)
    is read from branch protection at runtime, not hardcoded; if the token cannot
    read protection rules it falls back to the complete documented `main` set:
    `macos`, `Enforce version & skill sync`, `Build + prove + (owner-gated)
-   deploy`, `Vellum trusted freeze`, `Vellum freeze`, and `drift-fast`.
+   deploy`, `Vellum trusted freeze`, `Vellum freeze`, `drift-fast`, and
+   `release-configure`.
 2. **`mergeStateStatus` in `{CLEAN, BEHIND}`** — GitHub's own merge verdict.
    `DIRTY` (conflicts), `BLOCKED` (a required check red/missing/review pending),
    and `UNSTABLE` (a non-required check still moving) are excluded — those wait
@@ -8351,7 +8406,7 @@ plus a local `git show` of the workflow file.
 #### `[landability] workflows` in `.shipyard/config.toml`
 
 The check can only resolve a required context to a lane if it has read the
-workflow that produces it. Branch protection on `main` requires **six**
+workflow that produces it. Branch protection on `main` requires **seven**
 contexts, and the tool's built-in default reads only `build.yml` — which left
 the others `no_producer`: not checked, and reported as a warning that reads
 identically to a clean result. `.shipyard/config.toml` therefore names all six
@@ -8365,8 +8420,9 @@ producers explicitly:
 | `Vellum freeze` | `vellum-freeze-check.yml` |
 | `Vellum trusted freeze` | `vellum-trusted-gate.yml` |
 | `drift-fast` | `drift-fast.yml` |
+| `release-configure` | `release-configure.yml` |
 
-None of the six is path-filtered under `pull_request` — `wclap-cloudflare.yml`
+None of the seven is path-filtered under `pull_request` — `wclap-cloudflare.yml`
 keeps its `paths:` under `push` on purpose, because a path-filtered **required**
 check leaves unrelated pull requests stuck on "Expected — Waiting for status"
 forever. Add a row here whenever a workflow starts producing a required context,

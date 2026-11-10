@@ -104,6 +104,7 @@ DEFAULT_REQUIRED_CHECKS = [
     "Vellum trusted freeze",
     "Vellum freeze",
     "drift-fast",
+    "release-configure",
 ]
 
 # A CheckRun conclusion that satisfies a required-status-check gate. SKIPPED and
