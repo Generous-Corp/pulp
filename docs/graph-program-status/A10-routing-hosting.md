@@ -2,7 +2,7 @@
 
 Status: **PARTIAL — exact-current-head installed consumer passes bounded routing/hosting controls; hostile containment remains HOLD**
 
-Current source authority for this refreshed receipt is merge head `0aca218a213f9c8cbcf26c370ef659abca337ed4`, based on live `origin/main=d8cae12` at build time. The final PR head carries the same source tree plus this receipt/status merge; `source_tree_archive_sha256=0892058080a8113bcabb1ca82734d74784f67fba3c96581686e7f5cf8d060336` binds the installed source tree.
+Current source authority for this refreshed receipt is merge head `1b41de3f9314b36a928938d8b1fdf634bc60aa72`, based on live `origin/main=fb0ca2601cab3f082d72e4bba9f2aaf5675eb3a8` at build time. The governed Release install and consumer were rebuilt from this merge head; `source_tree_archive_sha256=564f65ea259a3591aeabfb417c765f8755a071100b41b6b176426681d8a8b2c9` binds the installed source tree.
 The required graph dependencies are present at exact merged heads:
 
 - G-1 named typed ports: PR [#11428](https://github.com/Generous-Corp/pulp/pull/11428), source head `be70e3c44836605ac1279c65a572e833699e1fbb`, merge `e19f556e67129117ef3a4587bff11fdee16ebf44`.
@@ -29,7 +29,7 @@ an installed consumer once an exact-head SDK is available:
 ## Exact current-main installed-SDK consumer (2026-11-10)
 
 The former SDK-availability blocker is cleared for a bounded public-host
-consumer. A clean checkout at merge source head `0aca218a213f9c8cbcf26c370ef659abca337ed4` (based on live `origin/main=d8cae12`)
+consumer. A clean checkout at merge source head `1b41de3f9314b36a928938d8b1fdf634bc60aa72` (based on live `origin/main=fb0ca2601cab3f082d72e4bba9f2aaf5675eb3a8`)
 was configured as a Pulp `release` profile and CMake Release source install with GPU disabled (the consumer
 does not exercise rendering), and `tools/ci/governed-build.sh cmake --build
 build-a10-sdk-release --target install` completed. The installed
@@ -42,7 +42,7 @@ An installed-prefix consumer configured solely with
 wrapper, and passed CTest 1/1. The executable reports
 `a10-routing-hosting PASS sidechain_route_accepted=1 automation_route_accepted=1 pdc=4 transactional_prepare_accepted=1`.
 The receipt is [`receipt.json`](../evidence/a10-routing-hosting-installed-20261110/receipt.json)
-(`sha256=56c0c24bd8e73f5c5f915df50907e2641bebfae01d97ba397ee40f00145fdc2f`).
+(`sha256=fec24df91fb3e5c495714ce2f08d70e2d7502653aa39f9d6174c72e563341e33`).
 It records accepted named sidechain and automation route registration, prepared
 latency introspection, and transactional topology preparation plus planted
 refusals for a non-plugin sidechain destination and an unknown parameter. The
