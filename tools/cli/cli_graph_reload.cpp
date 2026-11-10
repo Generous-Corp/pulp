@@ -65,7 +65,7 @@ void GraphReloadWatch::poll() {
         }
         std::cout.rdbuf(previous);
         if (renewed != 0) {
-            std::cerr << "graph reload: existing controller lease renewal refused: " << renewal.str();
+            std::cerr << "graph reload: existing controller lease renewal refused: " << renewal.str() << std::flush;
             return;
         }
         lease_ready_ = true;
@@ -111,5 +111,5 @@ void GraphReloadWatch::poll() {
             response["detail"]["generation"].isInt())
             options_.generation = static_cast<std::uint64_t>(response["detail"]["generation"].getInt64());
     } catch (...) {}
-    std::cout << "graph reload: " << receipt.str();
+    std::cout << "graph reload: " << receipt.str() << std::flush;
 }

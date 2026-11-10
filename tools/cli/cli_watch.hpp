@@ -8,6 +8,7 @@
 
 #include "cli_graph_reload.hpp"
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -15,6 +16,7 @@ namespace fs = std::filesystem;
 
 struct WatchOptions {
     GraphReloadOptions graph_reload;
+    std::function<void()> graph_poll;
     fs::path root;
     fs::path build_dir;
     std::vector<std::string> build_args;

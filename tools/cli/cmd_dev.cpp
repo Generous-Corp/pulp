@@ -189,6 +189,11 @@ int cmd_dev(const std::vector<std::string>& args) {
     // Enter the watch loop
     auto watch = plan.watch_options(run_tests, test_filter, run_validate, launch_target,
                                          launch_args, hot_dsp);
-    watch.graph_reload = std::move(graph_reload);
+    watch.graph_reload = graph_reload;
+    std::optional<GraphReloadWatch> reload_watch;
+    if (!graph_reload.file.empty()) {
+        reload_watch.emplace(std::move(graph_reload));
+        watch.graph_poll = [&] { reload_watch->poll(); };
+    }
     return watch_loop(watch);
 }

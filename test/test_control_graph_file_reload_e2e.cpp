@@ -180,24 +180,55 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
                               "in.audio >> gain.audio\ngain.audio >> out.audio\ngain.gain = 0.75\n";
     { std::ofstream save(file); save << patch; }
     const auto watch = [&](const char* command, std::uint64_t generation,
-                           bool acquire = true, std::string watch_grant = {}) {
+                           bool acquire = true, std::string watch_grant = {},
+                           bool revoke_after_publication = false) {
         if (watch_grant.empty()) watch_grant = develop_grant;
-        if (acquire) {
-        const auto reacquired = run(cli, root.runtime,
-            {"control", "call", "--instance", instance, "dev.pulp.session/control@1", "--params",
-             R"({"action":"acquire"})", "--json", "--grant", develop_grant});
-        REQUIRE(reacquired.exit_code == 0);
-        }
         pulp::platform::ProcessOptions options;
         options.capture_stdout = true;
         options.capture_stderr = true;
-        options.timeout_ms = 30000;
+        options.timeout_ms = 210000;
+        bool ready = false, lease_acquired = !acquire;
+        bool publication_seen = false, owner_revoked = false;
+        options.on_stdout_line = [&](std::string_view line) {
+            if (line.starts_with("Dev loop active")) {
+                ready = true;
+                if (acquire) {
+                    const auto acquired = run(cli, root.runtime,
+                        {"control", "call", "--instance", instance, "dev.pulp.session/control@1", "--params",
+                         R"({"action":"acquire"})", "--json", "--grant", develop_grant});
+                    lease_acquired = acquired.exit_code == 0;
+                }
+            }
+            if (revoke_after_publication && !publication_seen &&
+                line.find("committed") != std::string_view::npos) {
+                publication_seen = true;
+                const auto revoked = run(cli, root.runtime,
+                    {"control", "revoke", "--grant", watch_grant, "--json"});
+                owner_revoked = revoked.exit_code == 0;
+                // A second real save must not publish after the owner revokes
+                // the caller's original grant while this watch is running.
+                std::ofstream save(file);
+                auto changed = patch;
+                changed.replace(changed.find("0.75"), 4, "0.25");
+                save << changed;
+            }
+        };
         options.working_directory = project.string();
-        return pulp::platform::ChildProcess::run("/usr/bin/env",
+        auto result = pulp::platform::ChildProcess::run("/usr/bin/env",
             {"TMPDIR=" + root.runtime.string(), "PULP_HOME=" + (project / "pulp-home").string(), cli.string(), command, "--target", "proof",
              "--no-dev-shared", "--graph-file", file.string(), "--graph-instance", instance,
              "--graph-grant", watch_grant, "--graph-generation", std::to_string(generation),
-             "--graph-watch-polls", "3"}, options);
+             "--graph-watch-polls", "12"}, options);
+        INFO(result.stdout_output);
+        INFO(result.stderr_output);
+        INFO("watch exit=" << result.exit_code << " timed_out=" << result.timed_out);
+        REQUIRE(ready);
+        REQUIRE(lease_acquired);
+        if (revoke_after_publication) {
+            REQUIRE(publication_seen);
+            REQUIRE(owner_revoked);
+        }
+        return result;
     };
     const auto dev = watch("dev", 0);
     INFO(dev.stdout_output); INFO(dev.stderr_output);
@@ -251,14 +282,13 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
     REQUIRE(denied_renewal.exit_code == 0);
     REQUIRE(denied_renewal.stderr_output.find("renewal refused") != std::string::npos);
     REQUIRE(denied_renewal.stdout_output.find("committed") == std::string::npos);
-    const auto revoked = run(cli, root.runtime,
-        {"control", "revoke", "--grant", develop_grant, "--json"});
-    REQUIRE(revoked.exit_code == 0);
-    const auto revoked_watch = watch("dev", 2, false);
+    const auto revoked_watch = watch("dev", 2, true, develop_grant, true);
     INFO(revoked_watch.stdout_output); INFO(revoked_watch.stderr_output);
     REQUIRE(revoked_watch.exit_code == 0);
     REQUIRE(revoked_watch.stderr_output.find("renewal refused") != std::string::npos);
-    REQUIRE(revoked_watch.stdout_output.find("committed") == std::string::npos);
+    const auto first_commit = revoked_watch.stdout_output.find("committed");
+    REQUIRE(first_commit != std::string::npos);
+    REQUIRE(revoked_watch.stdout_output.find("committed", first_commit + 1) == std::string::npos);
     const auto final_grant_response = run(cli, root.runtime,
         {"control", "grant-request", "--instance", instance, "--profile", "develop", "--json"});
     REQUIRE(final_grant_response.exit_code == 0);
@@ -270,11 +300,11 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
     REQUIRE(final_lease.exit_code == 0);
     const auto unchanged_generation = run(cli, root.runtime,
         {"control", "call", "--instance", instance, "dev.pulp.graph/file.reload@1", "--params",
-         R"({"text":"malformed","format":"notation","expected_generation":2})",
+         R"({"text":"malformed","format":"notation","expected_generation":3})",
          "--json", "--grant", final_grant});
     REQUIRE(unchanged_generation.exit_code != 0);
     const auto final_receipt = choc::json::parse(unchanged_generation.stdout_output);
-    REQUIRE(final_receipt["detail"]["generation"].getInt64() == 2);
+    REQUIRE(final_receipt["detail"]["generation"].getInt64() == 3);
     REQUIRE(final_receipt["detail"]["code"].getString() == "invalid-document");
     daemon.stop();
 #else

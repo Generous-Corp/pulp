@@ -32,6 +32,8 @@ if(PULP_ENABLE_INSPECTOR AND APPLE AND NOT IOS AND NOT PULP_IOS AND
         pulp::inspect-client pulp::audio Catch2::Catch2WithMain)
     target_compile_definitions(pulp-test-control-graph_file_reload-graph-product-e2e PRIVATE
         PULP_GRAPH_FILE_RELOAD_GRAPH_PRODUCT_FIXTURE="$<TARGET_FILE:pulp-control-graph_file_reload-graph-product-fixture>" PULP_GRAPH_FILE_RELOAD_PROJECT_ROOT="${CMAKE_BINARY_DIR}/test/graph-file-reload-project" PULP_SAMPLE_REGION_EDITABLE_STANDALONE="" PULP_SAMPLE_REGION_FROZEN_STANDALONE="")
+    pulp_test_spawns(pulp-test-control-graph_file_reload-graph-product-e2e
+        pulp-cli pulp-mcp pulp-control-graph_file_reload-graph-product-fixture)
     add_dependencies(pulp-test-control-graph_file_reload-graph-product-e2e
         pulp-control-graph_file_reload-graph-product-fixture pulp-cli pulp-mcp)
     set_target_properties(pulp-test-control-graph_file_reload-graph-product-e2e PROPERTIES
@@ -53,7 +55,7 @@ if(PULP_ENABLE_INSPECTOR AND APPLE AND NOT IOS AND NOT PULP_IOS AND
         COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:pulp-test-control-graph_file_reload-graph-product-e2e>"
                 "$<TARGET_FILE_DIR:pulp-test-control-graph_file_reload-graph-product-e2e>/tools/cli/pulp-cpp"
         VERBATIM)
-    pulp_scaled_test_timeout(_pulp_graph_file_reload_graph_product_timeout 180)
+    pulp_scaled_test_timeout(_pulp_graph_file_reload_graph_product_timeout 600)
     catch_discover_tests(pulp-test-control-graph_file_reload-graph-product-e2e
         PROPERTIES TIMEOUT "${_pulp_graph_file_reload_graph_product_timeout}"
                   LABELS "inspect;control;graph-file-reload;e2e;product")
