@@ -3,7 +3,7 @@
   "event_id": "20261107-midi-learn-view-target-not-inherited",
   "kind": "exported-path-change",
   "created_at": "2026-11-07T19:20:00Z",
-  "receipt_export_id": "20261102-0f616a440cec",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
   "paths": [
     "core/view/include/pulp/view/midi_learn_target.hpp"
   ],
