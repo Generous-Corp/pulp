@@ -236,8 +236,7 @@ TEST_CASE("a header past the decode limit is a fact for inspect and a named limi
             run_pulp({"audio", "validate", "summarize", claim_path.string(), "--json"});
         const auto elapsed = std::chrono::steady_clock::now() - started;
         CHECK(run.exit_code == 1);
-        CHECK_THAT(run.stderr_output,
-                   Catch::Matchers::ContainsSubstring("holds no whole frame"));
+        CHECK_THAT(run.stderr_output, Catch::Matchers::ContainsSubstring("holds no whole frame"));
         CHECK_THAT(run.stderr_output,
                    !Catch::Matchers::ContainsSubstring("unsupported format or corrupt"));
         CHECK_THAT(run.stderr_output, Catch::Matchers::ContainsSubstring("pulp audio inspect"));
