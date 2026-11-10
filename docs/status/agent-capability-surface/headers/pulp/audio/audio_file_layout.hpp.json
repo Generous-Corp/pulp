@@ -1,7 +1,7 @@
 {
   "domain": "audio",
   "source": "core/audio/include/pulp/audio/audio_file_layout.hpp",
-  "fingerprint": "sha256:8fd849f594a11af739d14c42370b2fa74460a1e423cde2cab1ebd60c9ab74694",
+  "fingerprint": "sha256:49e06f8a361b5a0bfd310df5d23bc707ae4ad4243386430021ee3d7023c13912",
   "include": "pulp/audio/audio_file_layout.hpp",
   "disposition": "infrastructure",
   "capability_keys": [],

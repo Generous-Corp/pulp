@@ -201,10 +201,11 @@ TEST_CASE("a header past the decode limit is a fact for inspect and a named limi
 
     fs::remove(path);
 
-    // A WAV header past the registry ceiling must be refused before any
-    // decoder runs: the CHOC WAV path has no ceiling and would allocate what
-    // the header declares. Header-only files make the refusal cheap to prove
-    // and a crash (exit 134/138/139) impossible to mistake for a refusal.
+    // A WAV whose header declares more than the registry admits is refused
+    // cheaply, never by a crash (exit 134/138/139). Readers allocate only the
+    // whole frames present, so the limit binds what a file holds: a header
+    // that holds more is a named limit, and a header-only claim with no whole
+    // frame is refused with the decoder's own reason.
     auto refuse_header_only = [&](const char* name, Bytes header, const char* limit) {
         INFO(name);
         const auto header_path = write_bytes(name, header);
@@ -229,7 +230,19 @@ TEST_CASE("a header past the decode limit is a fact for inspect and a named limi
         auto over_frames = make_wav(make_format(1u, 1u, 48'000u, 16u), Bytes{});
         set_u32(over_frames, 40u, static_cast<std::uint32_t>(((1ull << 30u) + 1u) * 2u));
         set_u32(over_frames, 4u, static_cast<std::uint32_t>(((1ull << 30u) + 1u) * 2u + 36u));
-        refuse_header_only("over-registry-frames.wav", over_frames, "max_frames=1073741824");
+        const auto claim_path = write_bytes("over-registry-frames.wav", over_frames);
+        const auto started = std::chrono::steady_clock::now();
+        const auto run =
+            run_pulp({"audio", "validate", "summarize", claim_path.string(), "--json"});
+        const auto elapsed = std::chrono::steady_clock::now() - started;
+        CHECK(run.exit_code == 1);
+        CHECK_THAT(run.stderr_output, Catch::Matchers::ContainsSubstring("holds no whole frame"));
+        CHECK_THAT(run.stderr_output,
+                   !Catch::Matchers::ContainsSubstring("unsupported format or corrupt"));
+        CHECK_THAT(run.stderr_output, Catch::Matchers::ContainsSubstring("pulp audio inspect"));
+        CHECK(run.stdout_output.empty());
+        CHECK(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() < 1000);
+        fs::remove(claim_path);
     }
     {
         // 65 channels is one past the registry's channel ceiling.
