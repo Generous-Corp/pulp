@@ -15,7 +15,7 @@ def compact(pattern):
 
 def generate():
     # Read only constant token patterns, without executing Rack's runtime imports.
-    source = (Path(__file__).resolve().parents[2] / 'tools/rack/patch_lang.py').read_text()
+    source = (Path(__file__).resolve().parents[2] / 'tools/rack/patch_lang.py').read_text(encoding="utf-8")
     tokens = {}
     def constant(node):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
@@ -54,7 +54,7 @@ if __name__ == '__main__':
     target = Path(__file__).resolve().parents[2] / 'core/host/src/graph_patch_grammar.hpp'
     content = generate()
     if args.check:
-        if target.read_text() != content:
+        if target.read_text(encoding="utf-8") != content:
             raise SystemExit('SignalGraph grammar differs from patch_lang.py; regenerate it')
     else:
-        target.write_text(content)
+        target.write_text(content, encoding="utf-8")

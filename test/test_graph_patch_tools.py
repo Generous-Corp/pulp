@@ -32,7 +32,7 @@ def main():
         directory = Path(temporary)
         for i, (text, code) in enumerate(fixtures):
             path = directory / f'{i}.pat'
-            path.write_text(text)
+            path.write_text(text, encoding="utf-8")
             api = run([args.consumer, '--validate', path])
             cli = run([args.cli, 'graph', 'validate', path, '--json'])
             api_json, cli_json = json.loads(api.stdout), json.loads(cli.stdout)
@@ -52,15 +52,15 @@ def main():
         path = directory / '0.pat'
         first = run([args.cli, 'graph', 'fmt', path, '--json'])
         canonical = json.loads(first.stdout)['notation']
-        path.write_text(canonical)
+        path.write_text(canonical, encoding="utf-8")
         assert json.loads(run([args.cli, 'graph', 'fmt', path, '--json']).stdout)['notation'] == canonical
         saved = directory / 'saved.pulpgraph'
         assert run([args.cli, 'graph', 'save', path, '--output', saved]).returncode == 0
         assert json.loads(run([args.cli, 'graph', 'fmt', saved, '--notation', '--json']).stdout)['notation'] == canonical
-        damaged = json.loads(saved.read_text())
+        damaged = json.loads(saved.read_text(encoding="utf-8"))
         damaged['connections'][0]['source_port'] = 999
         broken = directory / 'dangling.pulpgraph'
-        broken.write_text(json.dumps(damaged))
+        broken.write_text(json.dumps(damaged), encoding="utf-8")
         api = run([args.consumer, '--validate', broken])
         cli = run([args.cli, 'graph', 'validate', broken, '--json'])
         assert api.returncode == cli.returncode == 1
