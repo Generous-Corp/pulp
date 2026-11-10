@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/spectral_gate_blur.hpp",
+  "fingerprint": "sha256:75cf322be3a308259d63737d67320b94a926c9b9fb290c6a751dd07ee781d845"
+}

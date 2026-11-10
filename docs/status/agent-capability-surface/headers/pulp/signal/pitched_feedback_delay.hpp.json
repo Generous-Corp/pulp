@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/pitched_feedback_delay.hpp",
+  "fingerprint": "sha256:a30024dd3bec0bc3808994ccda9a836949da40c43a33cf2cc314b0193c3489ea",
+  "include": "pulp/signal/pitched_feedback_delay.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

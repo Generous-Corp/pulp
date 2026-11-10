@@ -104,8 +104,21 @@ on a real PR. Do them in order.
 
    As of 2026-10-02: `macos`, `Enforce version & skill sync`, `Vellum freeze`,
    `Vellum trusted freeze`, `Build + prove + (owner-gated) deploy`,
-   `drift-fast`. Everything else (Workflow lint, CodeQL, Linux, Windows,
+   `drift-fast`. `release-configure` reports on every pull request but is
+   not required until a follow-up registers it (decision 33). Everything else (Workflow lint, CodeQL, Linux, Windows,
    coverage) is advisory — red there does not stop auto-merge.
+
+   **A red `release-configure` means a tag cut from this change would publish
+   nothing.** It replays `release-cli.yml`'s own configure for every release
+   leg (darwin-x64 cross-configured on hosted Apple Silicon, Linux, Windows) on
+   hosted runners. Read the `Release <platform> configure fails` annotation for
+   the CMake error, and reproduce with
+   `python3 tools/ci/release_configure_matrix.py run --platform <platform>` on
+   a matching host. Never "fix" it by renaming or skipping a `release-cli.yml`
+   step: renaming a `build-cli` step, or adding an unclassified one, fails the
+   gate's self-test until `tools/ci/release_configure_matrix.py` classifies it
+   (replayed, mirrored or skipped with a reason). See `docs/guides/local-ci.md`
+   § `release-configure`.
 3. **Open with `shipyard pr` and leave auto-merge armed.** Before you start,
    `shipyard ship-state list` shows whether someone is already landing it.
 4. **Read `mergeStateStatus` correctly:**
@@ -2941,6 +2954,13 @@ workflow file came from (the trusted merge-group job checks out
 commit predates it; the first merge group would fail with `No such file`. Keep
 such retries inline. The macOS ccache step uses an installed ccache (the gate
 golden bakes it) and never calls `brew install` then.
+
+**apt installs in workflows go through `tools/ci/apt-install-retry.sh`.** A
+mirror publishing a security update mid-job leaves the fetched index pointing at
+a 404 `.deb`; the helper reruns `apt-get update` and retries the install, 3
+attempts (`test_apt_install_retry.py` stubs `apt-get` to prove it). Call it with
+`sudo`. A step that runs before checkout (the `release-cli.yml` container
+pre-setup) carries the same loop inline as `apt_install`.
 
 **A deleted `gh-readonly-queue/...` branch is `merge group gone`, not a red.**
 `hydrate_gpu_provenance_commits.py` prints a `::notice::` for it and falls back

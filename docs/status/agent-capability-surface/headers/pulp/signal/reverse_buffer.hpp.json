@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/reverse_buffer.hpp",
+  "fingerprint": "sha256:cf64121f3ebd0bf931a60baf60860c8562c3d0dd7c4b2c866da07c38e72e5db8",
+  "include": "pulp/signal/reverse_buffer.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Prepared fixed-capacity streaming window reversal with explicit boundary shaping and a finite tail; it is a bounded buffering primitive intended for composition inside effects rather than an advertised generator DSP claim. It has no in-tree consumer today beyond the signal umbrella header."
+}

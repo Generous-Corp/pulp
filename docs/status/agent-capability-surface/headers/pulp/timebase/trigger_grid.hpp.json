@@ -1,0 +1,11 @@
+{
+  "domain": "timebase",
+  "source": "core/timebase/include/pulp/timebase/trigger_grid.hpp",
+  "fingerprint": "sha256:6a5b7dd7f2b1185ed3a3f5c8ae1ffcf506415fe6083ec772f984010476b337ca",
+  "include": "pulp/timebase/trigger_grid.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "timebase.trigger-grid"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

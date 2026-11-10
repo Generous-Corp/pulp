@@ -73,6 +73,7 @@ choc::value::Value stream_to_json(const LayoutStreamFacts& stream) {
     object.setMember("duration_seconds", stream.duration_seconds);
     object.setMember("encoding", stream.encoding);
     object.setMember("bytes_per_frame", json_number(stream.bytes_per_frame));
+    object.setMember("declared_frames", json_number(stream.declared_frames));
     return object;
 }
 
@@ -147,6 +148,7 @@ std::string audio_file_layout_to_json(const AudioFileLayoutReport& report,
         auto decode = choc::value::createObject("");
         decode.setMember("decodable", report.decode->decodable);
         decode.setMember("reason", report.decode->reason);
+        decode.setMember("truncated", report.decode->truncated);
         root.setMember("decode", decode);
     } else {
         root.setMember("decode", choc::value::Value());

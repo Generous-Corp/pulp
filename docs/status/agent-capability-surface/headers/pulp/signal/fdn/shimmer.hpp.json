@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/fdn/shimmer.hpp",
+  "fingerprint": "sha256:bd8f3cd8a59dc48c98068e23ebb1694913a836df77944ca1e0fd640ef99faff4",
+  "include": "pulp/signal/fdn/shimmer.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

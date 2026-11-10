@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/filter_morph.hpp",
+  "fingerprint": "sha256:9065017c36f2451be9b3143efbb63650c2d70e412f197ae6fa2f3ad6871809b3",
+  "include": "pulp/signal/filter_morph.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.filter-morph"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/osc/wt_lofi.hpp",
+  "fingerprint": "sha256:b9cf6a0f9a3938f2131b0df3a59aa0e45ef9d8e302ef9c47ba201f11afdc9668",
+  "include": "pulp/signal/osc/wt_lofi.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

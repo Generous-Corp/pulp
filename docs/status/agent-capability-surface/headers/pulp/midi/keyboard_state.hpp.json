@@ -1,0 +1,9 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/keyboard_state.hpp",
+  "fingerprint": "sha256:34651c7b16a73f0fcc14469e5652039d8350319f4907febad08db449fea8cc34",
+  "include": "pulp/midi/keyboard_state.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Held-key tracker for on-screen keyboards; now also honours All Sound Off and All Notes Off. Not a generator-facing capability."
+}

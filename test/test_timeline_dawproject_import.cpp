@@ -1,5 +1,7 @@
 #include "timeline_dawproject_import_test_support.hpp"
 
+#include <pulp/audio/wav_decoder.hpp>
+
 TEST_CASE("DAWproject import maps the linear subset into the timeline model") {
     auto result = import_dawproject_xml(read_fixture("linear_subset.dawproject.xml"),
                                         fixture_media_resolver());
@@ -240,6 +242,23 @@ TEST_CASE("DAWproject audio import validates metadata against resolved WAV bytes
         REQUIRE_FALSE(result);
         REQUIRE(result.error().code == DawProjectImportErrorCode::InvalidValue);
         REQUIRE(result.error().message.find("audio/bass-copy.wav") != std::string::npos);
+    }
+
+    SECTION("truncated media") {
+        // The WAV reader recovers the whole frames of a cut-off file, but a
+        // sealed asset must hold every frame its header declares.
+        DawProjectMediaResolver truncated =
+            [](std::string_view) -> std::optional<std::vector<std::uint8_t>> {
+            auto bytes = fixture_media_bytes();
+            bytes.resize(bytes.size() - 4'000u);
+            REQUIRE(pulp::audio::inspect_wav(bytes));
+            REQUIRE(pulp::audio::inspect_wav(bytes)->truncated);
+            return bytes;
+        };
+        auto result = import_dawproject_xml(xml, std::move(truncated));
+        REQUIRE_FALSE(result);
+        REQUIRE(result.error().code == DawProjectImportErrorCode::InvalidValue);
+        REQUIRE(result.error().message.find("truncated WAV") != std::string::npos);
     }
 
     SECTION("invalid media") {

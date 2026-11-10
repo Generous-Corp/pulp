@@ -1,0 +1,11 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/arpeggiator.hpp",
+  "fingerprint": "sha256:96ba2417d37bd1ff46876463d61f53fb7345b5aa88c92c9c05f04339e37d4b25",
+  "include": "pulp/midi/arpeggiator.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "midi.arpeggiator"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

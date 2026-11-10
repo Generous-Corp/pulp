@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/slice_point_analyzer.hpp",
+  "fingerprint": "sha256:8df0af8bf567877dcb9c4c24c61a4f6892b4f669db50b737d14cc2c5096df09f",
+  "include": "pulp/audio/slice_point_analyzer.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Off-real-time slice-point analysis that merges detected or supplied onsets with beat-grid, silence, manual and loop markers, with an option to run onset detection first. Background analysis plumbing documented in the signal guide; it makes no installed agent capability claim of its own."
+}

@@ -74,9 +74,13 @@ path or timestamp (the m4a `mvhd`/`tkhd`/`mdhd` times are zeroed).
 | `wav-bwf-bext-before-data.wav` | 2292 | Python | Valid BWF: 640-byte `bext` (602-byte fixed part plus coding history) placed before `data`. |
 | `wav-list-info-heavy.wav` | 1916 | Python | Valid: eight-entry `LIST`/`INFO` before `data` and a second two-entry list after it. |
 | `wav-rf64-ds64.wav` | 1680 | Python | Valid RF64: `RF64` tag, RIFF size and `data` size both 0xFFFFFFFF, `ds64` carries the real sizes and sample count. |
+| `wav-bw64-ds64.wav` | 1680 | Python | Valid BW64 (ITU-R BS.2088): the RF64 seed under the `BW64` tag, same `ds64` layout. |
+| `wav-rf64-ds64-data-size-zero.wav` | 1680 | Python | Malformed: the RF64 seed with its `ds64` data size left at zero, as a recorder that stopped before back-filling it writes; the `data` size stays 0xFFFFFFFF. |
+| `wav-rf64-ds64-data-past-eof.wav` | 613 | Python | Malformed: the RF64 seed cut after one third of its samples; `ds64` still declares the full data size. |
 | `wav-w64-pcm16-mono.wav` | 1704 | Python | Valid Sony Wave64 (`riff` GUID envelope, kept under `.wav`): 16-byte GUID chunk ids, 64-bit sizes that include the 24-byte chunk header, 8-byte alignment. |
 | `wav-odd-chunk-eof-no-pad.wav` | 1643 | Python | Malformed: 1599-byte `data` chunk (odd, one partial frame) at EOF with no pad byte. |
 | `wav-duplicate-fmt.wav` | 1668 | Python | Malformed: two `fmt ` chunks that disagree (mono 8 kHz 16-bit, then stereo 44.1 kHz 8-bit). |
+| `wav-duplicate-fmt-identical.wav` | 1668 | Python | Edge: the `fmt ` chunk repeated byte for byte before `data`. |
 | `wav-fmt-after-data.wav` | 1644 | Python | Malformed: `data` first, `fmt ` after it. |
 | `wav-data-past-eof.wav` | 577 | Python | Malformed: canonical base cut after one third of its samples; `data` and RIFF sizes still declare the full length. |
 | `wav-data-size-zero.wav` | 44 | Python | Edge: complete 44-byte header, `data` size 0. |
@@ -130,6 +134,9 @@ path or timestamp (the m4a `mvhd`/`tkhd`/`mdhd` times are zeroed).
 | `mp3-apev2-size-high-bit.mp3` | 1536 | derived | Valid with trailer: the CBR base plus an APEv2 tag padded so the footer size is 0x1F0, putting 0xF0 in footer byte 12. A reader that widens the size bytes through a signed char reads a sign-extended size. |
 | `mp3-ape-size-below-footer.mp3` | 1040 | derived | Valid with trailer: the CBR base plus a bare APEv2 footer (no header, no items, flags zero) whose size field is 0, below the footer's own 32 bytes. A reader that trusts the size strips less than the footer. |
 | `mp3-apev1-header-flag.mp3` | 1069 | derived | Valid with trailer: the CBR base plus an APEv1 tag (version 1000, one item, no header block) whose footer flags carry bit 31. APEv1 has no header, so a reader that trusts the flag strips 32 bytes of audio. |
+| `mp3-lyrics3v2-before-id3v1.mp3` | 1196 | derived | Valid with trailer: the CBR base plus a Lyrics3v2 block (IND and LYR fields) and then an ID3v1.1 tag. The ID3v1 tag is recognised; the Lyrics3 bytes are not, and must end the stream. |
+| `mp3-trailing-junk.mp3` | 1208 | derived | Valid with trailer: the CBR base plus 200 seeded pseudo-random bytes. |
+| `mp3-id3v1-before-apev2.mp3` | 1229 | derived | Valid with trailer: the CBR base plus an ID3v1.1 tag and then an APEv2 tag, the reverse of the usual order. Once the APE tag is stripped, the ID3v1 bytes remain behind the last frame. |
 | `mp3-truncated-frame.mp3` | 449 | derived | Malformed: cut 17 bytes into the fourth frame. |
 | `mp3-xing-declares-more-than-stream.mp3` | 1776 | derived | Malformed: the Xing VBR seed cut at 80% of its length, so the Xing header still declares 6400 PCM frames while the stream delivers 2351. Reproduces a libFuzzer finding whose artifact was not written. |
 | `mp3-id3v2-scan-counts-undecodable-frame.mp3` | 1777 | fuzzer | Malformed: libFuzzer reproducer mutated from the Xing VBR seed; the Xing frame is damaged so nothing is declared, dr_mp3's header scan counts 4 MP3 frames (4608 PCM) and the decoder delivers 3 (3456). Not produced by the generator script. |
@@ -157,6 +164,10 @@ tests to surface.
 | all 11 valid WAV seeds | decode clean, 0.1 s; `wav-extensible-pcm24in32-stereo.wav` is reported as `pcm_f24le`, 0.133 s (reads the 32-bit container as packed 24-bit) | agree except the extensible seed, read as Int32 stereo 0.1 s (the spec reading) |
 | `wav-odd-chunk-eof-no-pad.wav` | decodes 0.099875 s, complains about the 1-byte partial frame | 0.099875 s, no complaint |
 | `wav-duplicate-fmt.wav` | uses the first `fmt ` (mono 8 kHz 16-bit) | uses the last `fmt ` (stereo 44.1 kHz 8-bit, 0.018 s) |
+| `wav-duplicate-fmt-identical.wav` | decodes clean, 0.1 s | agree |
+| `wav-bw64-ds64.wav` | decodes clean, 0.1 s | agree |
+| `wav-rf64-ds64-data-size-zero.wav` | 0.000125 s (trusts the zero data size) | estimated duration 0 s |
+| `wav-rf64-ds64-data-past-eof.wav` | 0.033375 s then a decoding error on the partial frame | 0.03325 s, no complaint |
 | `wav-fmt-after-data.wav` | decodes 0.1 s | decodes 0.1 s |
 | `wav-data-past-eof.wav` | 0.033 s then a decoding error on the partial frame | 0.03325 s, no complaint |
 | `wav-data-size-zero.wav` | accepted, duration N/A | accepted, 0 s |
@@ -184,6 +195,9 @@ tests to surface.
 | `mp3-apev2-size-high-bit.mp3` | 0.384 s from the byte length, decodes 8064 samples, no complaint | estimated 0.384 s, 7 packets |
 | `mp3-ape-size-below-footer.mp3` | 0.26 s from the byte length, decodes 8064 samples, no complaint | estimated 0.26 s, 7 packets |
 | `mp3-apev1-header-flag.mp3` | 0.26725 s, "Header missing" on the trailing tag bytes, still decodes 8064 samples and exits 0 | estimated 0.26725 s, 7 packets |
+| `mp3-lyrics3v2-before-id3v1.mp3` | 0.299 s, "Header missing" on the Lyrics3 bytes, decodes PCM byte-identical with the CBR base, exits 0 | estimated 0.299 s, 7 packets |
+| `mp3-trailing-junk.mp3` | 0.302 s, "Header missing" on the junk, decodes PCM byte-identical with the CBR base, exits 0 | estimated 0.302 s, 7 packets |
+| `mp3-id3v1-before-apev2.mp3` | 0.30725 s, no complaint, decodes PCM byte-identical with the CBR base | estimated 0.30725 s, 7 packets |
 | `mp3-truncated-frame.mp3` | 0.11225 s, "invalid new backstep -1" | 0.11225 s, no complaint |
 | `mp3-xing-declares-more-than-stream.mp3` | 0.200 s (trusts the Xing count), no complaint | estimated 0.252 s |
 | `mp3-id3v2-scan-counts-undecodable-frame.mp3` | 0.1786 s, no complaint | estimated 0.252 s |

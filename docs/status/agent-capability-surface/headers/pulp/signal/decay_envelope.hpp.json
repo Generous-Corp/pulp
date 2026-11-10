@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/decay_envelope.hpp",
+  "fingerprint": "sha256:0ccde45dd7243ce074abc7e1897c2e6ed3ddd1ef32c456de1058cf686a413cc3",
+  "include": "pulp/signal/decay_envelope.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

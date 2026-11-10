@@ -49,12 +49,16 @@ public:
     }
 
     // The drag left this receiver (moved away, exited the window, or dropped).
-    // Clear any highlight set by accept_drag.
+    // Clear any highlight set by accept_drag. On a drop this runs BEFORE
+    // accept_drop, so state derived from the hover (an insertion index, a
+    // target slot) is already cleared by then; derive the drop's own state
+    // from accept_drop's `local` instead.
     virtual void leave_drag() {}
 
-    // Commit a drop at `local`. Return true if handled — a true return CONSUMES
-    // the drop (dispatch stops bubbling); false lets it fall through to an outer
-    // receiver / View::on_drop.
+    // Commit a drop at `local`, the drop point in this receiver's local
+    // coordinates. Called after leave_drag. Return true if handled: a true
+    // return CONSUMES the drop (dispatch stops bubbling); false lets it fall
+    // through to an outer receiver / View::on_drop.
     virtual bool accept_drop(const DropData& data, Point local) = 0;
 };
 
