@@ -324,8 +324,12 @@ std::string utf8(NSString* s) {
 
 } // namespace
 
-KeyRoute route_key(const KeyEvent&, bool client_holds_text_focus) noexcept {
-    return client_holds_text_focus ? KeyRoute::client_first : KeyRoute::host;
+KeyRoute route_key(const KeyEvent&, KeyboardFocus focus) noexcept {
+    return focus == KeyboardFocus::none ? KeyRoute::host : KeyRoute::client_first;
+}
+
+KeyRoute route_key(const KeyEvent& event, bool client_holds_text_focus) noexcept {
+    return route_key(event, client_holds_text_focus ? KeyboardFocus::text : KeyboardFocus::none);
 }
 
 Key key_for_native_code(std::uint16_t code) noexcept {

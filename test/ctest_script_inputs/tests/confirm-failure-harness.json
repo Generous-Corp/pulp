@@ -4,6 +4,7 @@
   "entry": "tools/scripts/test_confirm_failure.sh",
   "inputs": [
    "tools/scripts/confirm_failure.sh",
+   "tools/scripts/confirm_failure_driver_link.py",
    "tools/scripts/test_confirm_failure.sh"
   ],
   "kind": "shell"

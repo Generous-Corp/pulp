@@ -19,13 +19,13 @@
     {
       "path": "core/host/src/signal_graph_executor_routing.cpp",
       "needles": [
-        "const CustomNodeEventBlock events{ctx.node_midi_in, ctx.node_midi_out};"
+        "const CustomNodeEventBlock events{"
       ]
     },
     {
       "path": "core/host/src/signal_graph_reference_walk.cpp",
       "needles": [
-        "const CustomNodeEventBlock events{&rt.midi_in, &rt.midi_out};"
+        "const CustomNodeEventBlock events{"
       ]
     },
     {
