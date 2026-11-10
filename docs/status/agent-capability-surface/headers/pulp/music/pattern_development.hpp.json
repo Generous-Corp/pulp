@@ -1,0 +1,11 @@
+{
+  "domain": "music",
+  "source": "core/music/include/pulp/music/pattern_development.hpp",
+  "fingerprint": "sha256:00e65ace2fac744dbca18cb278907cef86832ea5f4b97dbdabbe53004dedb0c5",
+  "include": "pulp/music/pattern_development.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "music.pattern-development"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

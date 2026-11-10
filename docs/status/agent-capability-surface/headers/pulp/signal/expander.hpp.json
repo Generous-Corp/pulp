@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/expander.hpp",
+  "fingerprint": "sha256:bf318bbe864c1ea706eed101e63f6469602a7c7c639ce86bffb650c13ef08741",
+  "include": "pulp/signal/expander.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.expander"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

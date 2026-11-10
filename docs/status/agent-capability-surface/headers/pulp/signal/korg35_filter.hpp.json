@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/korg35_filter.hpp",
+  "fingerprint": "sha256:d6466500fb59e0612c1363b84787ec3ff4faf884e54d563a330cba87320d8e7f",
+  "include": "pulp/signal/korg35_filter.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Two-pole lowpass/highpass Sallen-Key-family filter with a saturating feedback path solved in zero-delay form; a change of mode restarts it from rest. A bounded DSP primitive documented in the signal guide; it makes no installed agent capability claim of its own."
+}

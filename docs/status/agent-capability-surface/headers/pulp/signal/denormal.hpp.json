@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/denormal.hpp",
+  "fingerprint": "sha256:e833a00a6974d4fbb18bec9e1c2312285c7387d8f7aa4757b606425e39452277",
+  "include": "pulp/signal/denormal.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Denormal handling helpers: flush-to-zero scopes, value snapping, and the shared snap-chunk length recursive filters use to bound subnormal decay within a block. Internal numeric hygiene that processors call from their own process(); it makes no installed agent capability claim of its own."
+}

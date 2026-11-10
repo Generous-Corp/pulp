@@ -1,0 +1,9 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/production_class.hpp",
+  "fingerprint": "sha256:8321d125d7df42c7892b5ee99accef450073072e79aa575af898ea334faadec4",
+  "include": "pulp/playback/production_class.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Derivations of what a compiled program may honestly claim about being replayed — provider and track production declarations and the resulting program reproducibility. It is an internal honesty derivation over the program graph and binds no installed agent capability of its own."
+}

@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/commuted_string_excitation.hpp",
+  "fingerprint": "sha256:08a2d9afa882ce95923b52afa02fed09733f5c8abd82b323704b0dc2c950f11b",
+  "include": "pulp/signal/commuted_string_excitation.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.commuted-string-excitation"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

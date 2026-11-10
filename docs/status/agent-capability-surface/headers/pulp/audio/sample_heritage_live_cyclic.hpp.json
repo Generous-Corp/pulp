@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/sample_heritage_live_cyclic.hpp",
+  "fingerprint": "sha256:2875957f00decc9d63191beee105dd799408003d6a1006430b26ea651f3edd40",
+  "include": "pulp/audio/sample_heritage_live_cyclic.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

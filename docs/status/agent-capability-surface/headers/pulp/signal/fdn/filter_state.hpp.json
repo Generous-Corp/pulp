@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/fdn/filter_state.hpp",
+  "fingerprint": "sha256:1c9b3f599e1a150cb91cb47e4e6443accc0f5f4e5971c22f1d68dba37de8428b",
+  "include": "pulp/signal/fdn/filter_state.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

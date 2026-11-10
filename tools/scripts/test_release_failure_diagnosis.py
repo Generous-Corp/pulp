@@ -532,6 +532,26 @@ class FirstErrorIsInTheFailingStep(unittest.TestCase):
         self.assertEqual(rfd.first_error_line("ok\nERROR: boom\n"), "ERROR: boom")
 
 
+class EchoedErrorIsNotTheError(unittest.TestCase):
+    """The runner echoes the script source, colored, before running it."""
+
+    LOG = (
+        "##[group]Run overrides=x\n"
+        '\x1b[36;1m  echo "::error::runner environment overrides dependency sources: A=1"\x1b[0m\n'
+        "##[error]runner environment overrides dependency sources: A=1\n"
+        "##[error]Process completed with exit code 1.\n"
+    )
+
+    def test_real_error_line_is_quoted(self) -> None:
+        want = "##[error]runner environment overrides dependency sources: A=1"
+        self.assertEqual(rfd.first_error_line(self.LOG), want)
+        self.assertEqual(rfd.failing_step_error(self.LOG), want)
+
+    def test_control_an_uncolored_echo_is_skipped_too(self) -> None:
+        log = self.LOG.replace("\x1b[36;1m", "").replace("\x1b[0m", "")
+        self.assertTrue(rfd.first_error_line(log).startswith("##[error]runner"))
+
+
 def package_run(run_id: int, job_id: int, step: str = "Package CLI (Unix)") -> tuple[dict, list[dict]]:
     run = {"id": run_id, "status": "completed", "conclusion": "failure",
            "created_at": f"2026-10-14T0{run_id}:00:00Z", "event": "workflow_dispatch"}

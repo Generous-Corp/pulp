@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/spectrum_bin_mapping.hpp",
+  "fingerprint": "sha256:1e4977f44a6ea834278ee0a9d505e9dca3d0af8c82acc792fab9361b7e00e235",
+  "include": "pulp/signal/spectrum_bin_mapping.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Maps FFT magnitude bins onto the columns of a log-frequency display (parabolic interpolation, fractional-edge aggregation); shared by SpectrumView and EqCurveView, with no generator capability claim."
+}

@@ -1,0 +1,9 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/realtime_stretch_state_bank.hpp",
+  "fingerprint": "sha256:dd02d3ef9b543e3d8744772ccfc35d850e6df4fae9d762eadcf49a74a223c28a",
+  "include": "pulp/playback/realtime_stretch_state_bank.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "RealtimeStretchStateSpec and the state bank's refusal vocabulary — duplicate identity, state, channel, time-ratio and byte limits, processor- prepare rejection and allocation failure. It is a bounded preallocated state pool for the realtime stretch path and makes no installed agent capability claim."
+}

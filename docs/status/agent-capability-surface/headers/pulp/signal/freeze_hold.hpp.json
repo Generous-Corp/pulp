@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/freeze_hold.hpp",
+  "fingerprint": "sha256:b21def407d140f2a6c2040444d8db02a74e53ff07a794e0a28fa079f1d2af8c7",
+  "include": "pulp/signal/freeze_hold.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Spectral hold stage composed at the head of a frame chain: inside RealtimePitchTimeProcessor, or as a SpectralMaskProcessor pre-mask stage. It is a frame-domain building block with its own recall image, not a standalone generator DSP claim; its engage, timing, pipeline, snapshot, opt-in per-callback cost modes, and long-hold frequency and phase-lock contract is covered by test/test_freeze_hold.cpp."
+}

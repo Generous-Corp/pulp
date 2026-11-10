@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/parallel_dynamics.hpp",
+  "fingerprint": "sha256:618eb3179e376d9f6ca92fea66e5eefbdb46c14c7cf23373e26462c200ccc62e"
+}
