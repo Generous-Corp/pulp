@@ -771,6 +771,12 @@ if(PULP_PYTHON3_FOR_TESTS)
         set_tests_properties(agent-hook-paths PROPERTIES
             LABELS "tooling;hooks"
             TIMEOUT 30)
+        add_test(NAME clap-preset-library-gate
+            COMMAND ${PULP_PYTHON3_FOR_TESTS}
+                ${CMAKE_SOURCE_DIR}/tools/scripts/test_clap_preset_library_gate.py)
+        set_tests_properties(clap-preset-library-gate PROPERTIES
+            LABELS "tooling;clap"
+            TIMEOUT 30)
         add_test(NAME prepush-gate-output
             COMMAND ${PULP_PYTHON3_FOR_TESTS}
                 ${CMAKE_SOURCE_DIR}/tools/scripts/test_prepush_gate_output.py)
