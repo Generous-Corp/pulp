@@ -188,7 +188,9 @@ class StateStore {
     bool add_parameter(const ParamInfo& info);
 
     /// Registrations refused because the ID was already in use, for this store.
-    std::size_t duplicate_registrations() const noexcept { return duplicate_registrations_; }
+    std::size_t duplicate_registrations() const noexcept {
+        return duplicate_registrations_;
+    }
 
     /// Register a parameter group. Call during initialization only.
     void add_group(const ParamGroup& group);

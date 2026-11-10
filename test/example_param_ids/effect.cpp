@@ -10,4 +10,4 @@ ExampleParams params_of_effect() {
     processor->define_parameters(store);
     return {"effect", store.param_count(), store.duplicate_registrations()};
 }
-}  // namespace pulp::test
+} // namespace pulp::test

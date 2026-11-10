@@ -855,8 +855,7 @@ TEST_CASE("StateStore basic operations", "[state][store]") {
     }
 }
 
-TEST_CASE("StateStore refuses a second registration under a used parameter id",
-          "[state][store]") {
+TEST_CASE("StateStore refuses a second registration under a used parameter id", "[state][store]") {
     StateStore store;
     REQUIRE(store.add_parameter(make_param_info(7, "First", "dB", {-60.0f, 12.0f, -6.0f})));
     REQUIRE_FALSE(store.add_parameter(make_param_info(7, "Second", "%", {0.0f, 100.0f, 25.0f})));
@@ -3242,7 +3241,8 @@ TEST_CASE("a refused duplicate id cannot leave a stale trigger slot to reset",
     ParamInfo trigger = make_param_info(7, "Trigger", "", {0.0f, 1.0f, 0.0f, 1.0f});
     trigger.is_trigger = true;
     REQUIRE(store.add_parameter(trigger));
-    REQUIRE_FALSE(store.add_parameter(make_param_info(7, "Ordinary", "dB", {-60.0f, 12.0f, -6.0f})));
+    REQUIRE_FALSE(
+        store.add_parameter(make_param_info(7, "Ordinary", "dB", {-60.0f, 12.0f, -6.0f})));
     store.set_value(7, 1.0f);
     REQUIRE(store.reset_triggers_rt());
     REQUIRE_THAT(store.get_value(7), WithinAbs(0.0, 0.0001));

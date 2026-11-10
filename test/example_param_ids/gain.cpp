@@ -10,4 +10,4 @@ ExampleParams params_of_gain() {
     processor->define_parameters(store);
     return {"gain", store.param_count(), store.duplicate_registrations()};
 }
-}  // namespace pulp::test
+} // namespace pulp::test

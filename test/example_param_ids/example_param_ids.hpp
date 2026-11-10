@@ -14,4 +14,4 @@ struct ExampleParams {
 ExampleParams params_of_gain();
 ExampleParams params_of_effect();
 ExampleParams params_of_drums();
-}  // namespace pulp::test
+} // namespace pulp::test

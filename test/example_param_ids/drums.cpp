@@ -10,4 +10,4 @@ ExampleParams params_of_drums() {
     processor->define_parameters(store);
     return {"drums", store.param_count(), store.duplicate_registrations()};
 }
-}  // namespace pulp::test
+} // namespace pulp::test
