@@ -22,9 +22,8 @@ inline RetuneResult retune(pulp::format::ProcessorNodeInstance& instrument,
     const auto pitch = provider->note_to_frequency(note, 0);
     if (!pitch.valid || pitch.should_filter_note)
         return RetuneResult::InvalidNote;
-    if (!std::isfinite(sample_rate) || sample_rate <= 0.0 ||
-        !std::isfinite(pitch.frequency_hz) || pitch.frequency_hz <= 0.0 ||
-        pitch.frequency_hz >= sample_rate / 2.0)
+    if (!std::isfinite(sample_rate) || sample_rate <= 0.0 || !std::isfinite(pitch.frequency_hz) ||
+        pitch.frequency_hz <= 0.0 || pitch.frequency_hz >= sample_rate / 2.0)
         return RetuneResult::InvalidFrequency;
     for (const auto& parameter : instrument.parameter_catalog()) {
         if (parameter.name != parameter_path)

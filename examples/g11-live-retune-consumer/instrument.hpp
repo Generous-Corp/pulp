@@ -34,7 +34,8 @@ class Instrument final : public pulp::format::Processor {
         store.add_parameter({.id = kFrequency,
                              .name = kFrequencyPath,
                              .unit = "Hz",
-                             .range = {.min = 20.0f, .max = 2000.0f,
+                             .range = {.min = 20.0f,
+                                       .max = 2000.0f,
                                        .default_value = static_cast<float>(initial_frequency_)}});
     }
 
@@ -74,11 +75,21 @@ class Instrument final : public pulp::format::Processor {
     }
 
     // Read only between callbacks in the offline harness, never concurrently.
-    double phase() const { return oscillator_.phase(); }
-    double envelope() const { return last_envelope_; }
-    std::size_t frames() const { return frames_; }
-    int note_ons() const { return note_ons_; }
-    int prepares() const { return prepares_; }
+    double phase() const {
+        return oscillator_.phase();
+    }
+    double envelope() const {
+        return last_envelope_;
+    }
+    std::size_t frames() const {
+        return frames_;
+    }
+    int note_ons() const {
+        return note_ons_;
+    }
+    int prepares() const {
+        return prepares_;
+    }
 
   private:
     double initial_frequency_;
