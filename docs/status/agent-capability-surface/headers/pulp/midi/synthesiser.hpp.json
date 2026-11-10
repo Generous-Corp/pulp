@@ -1,0 +1,9 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/synthesiser.hpp",
+  "fingerprint": "sha256:2611124e14f31cf1481b9605e99d6bdff7c46fe751073ff1922b01e73e97522c",
+  "include": "pulp/midi/synthesiser.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Polyphonic voice allocator used by instrument processors; reviewed when panic() was added. Not a generator-facing capability."
+}

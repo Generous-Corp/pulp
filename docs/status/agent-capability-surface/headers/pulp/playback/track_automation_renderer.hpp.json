@@ -1,0 +1,9 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/track_automation_renderer.hpp",
+  "fingerprint": "sha256:46f89f442e6010891f5ec1123ed135a767ab7f1388771a20bccfbe9b37a2bf66",
+  "include": "pulp/playback/track_automation_renderer.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Realtime emission of automation to device placements: TrackAutomationEvent with its sample offset and ramp duration, DeviceAutomationBatch with its coalescing flag, and a renderer code set that refuses a program, track or tempo-map mismatch rather than emitting into the wrong target. It is a bounded realtime emitter composed inside the renderer and makes no installed agent capability claim today."
+}

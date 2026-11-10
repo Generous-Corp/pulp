@@ -1,0 +1,11 @@
+{
+  "domain": "timebase",
+  "source": "core/timebase/include/pulp/timebase/tick.hpp",
+  "fingerprint": "sha256:e648c10386afc397349a341787aa4773326b551fb8f8f33e08bc9925aea42452",
+  "include": "pulp/timebase/tick.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "timebase.tick"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

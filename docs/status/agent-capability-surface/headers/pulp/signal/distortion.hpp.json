@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/distortion.hpp",
+  "fingerprint": "sha256:fd4edeb6e3888abe527fb949a09d323ba7ec5208b6ca237f60059aedd93befed",
+  "include": "pulp/signal/distortion.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

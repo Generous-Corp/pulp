@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/stn_decomposer.hpp",
+  "fingerprint": "sha256:18114da3d1be93c7f77d04797c99c1b10b0942c0ec3ad09b004f1995d23b2c9b",
+  "include": "pulp/signal/stn_decomposer.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

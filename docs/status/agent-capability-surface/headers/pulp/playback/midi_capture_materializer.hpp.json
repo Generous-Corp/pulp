@@ -1,0 +1,9 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/midi_capture_materializer.hpp",
+  "fingerprint": "sha256:e6734737a53c8cb9186d17cee9a562500bf29823aacad7b25f67157b0ba3c7b2",
+  "include": "pulp/playback/midi_capture_materializer.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Configuration, result and error types for turning a MIDI capture buffer into materialized lane data. It is one internal step of the recording path inside the playback module and makes no installed agent capability claim."
+}

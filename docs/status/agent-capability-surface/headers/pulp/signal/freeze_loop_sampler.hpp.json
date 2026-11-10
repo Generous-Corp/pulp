@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/freeze_loop_sampler.hpp",
+  "fingerprint": "sha256:fa2406081bd7e78a0097eab797da14d2e1854cd0a6972cf6971728050b19348a",
+  "include": "pulp/signal/freeze_loop_sampler.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "signal.beat-repeat-kernel"
+  ],
+  "rationale": "Single rolling dry-history and immutable exact-capture owner reused by the beat-repeat kernel; legacy freeze and snapshot behavior remains source compatible."
+}

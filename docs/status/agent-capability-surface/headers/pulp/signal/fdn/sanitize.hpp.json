@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/fdn/sanitize.hpp",
+  "fingerprint": "sha256:6fd73a8696cc1632279ca06d5702a1b2193d0e1fee21e6a9eade3623742ad184",
+  "include": "pulp/signal/fdn/sanitize.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

@@ -207,7 +207,7 @@ SKILL.md update.
 counter as a release version: every branch that changed capability material
 claimed base + 1, and each merge staled the rest. Branches now leave them at the
 base value; the regenerated snapshot is *pending* (its material differs from the
-last state `contract-history.json` recorded under the same counter). When a bump
+last state `tools/agent-capabilities/history/` recorded under the same counter). When a bump
 assigns the `sdk` surface, `_assign_capability_counters` runs the repo's own
 `agent_capability_manifest.py --assign-pending`, which advances each pending
 counter by one and regenerates the snapshot, surface ledger and history; the

@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/audio_file_layout_json.hpp",
+  "fingerprint": "sha256:7c02abb2e23707387db7f67ef4612ee8ee411241e1b16de31908866eea49b1ca",
+  "include": "pulp/audio/audio_file_layout_json.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Versioned JSON serializer for the layout report (pulp.audio.file_inspect.v1), a CLI/MCP developer surface. Not a generator-facing capability."
+}

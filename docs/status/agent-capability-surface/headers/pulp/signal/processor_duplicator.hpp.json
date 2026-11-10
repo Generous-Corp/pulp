@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/processor_duplicator.hpp",
+  "fingerprint": "sha256:33de816a4f93227ff63d3e78e95cb43c3a40731a113548622a98e4653f177298",
+  "include": "pulp/signal/processor_duplicator.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Runs one mono processor instance per channel and dispatches to a processor's block path when it has one. Composition infrastructure for multichannel use of existing DSP rather than a generator surface; it makes no installed agent capability claim of its own."
+}

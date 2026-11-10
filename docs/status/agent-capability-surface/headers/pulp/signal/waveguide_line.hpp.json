@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/waveguide_line.hpp",
+  "fingerprint": "sha256:fbedd57acbc69cf0b827c3a17dcc93a90f43bb14af20bd57ce6d10bb4910d995",
+  "include": "pulp/signal/waveguide_line.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.waveguide-primitives"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

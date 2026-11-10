@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/impulse_response.hpp",
+  "fingerprint": "sha256:740702d0bf9e54f8584de49999cfcf91c7c9b71c84c355b46a6a686e283bbe69",
+  "include": "pulp/audio/impulse_response.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Impulse-response loading is host infrastructure consumed by the convolution and offline-render capabilities; it is not an independently selected generator-facing capability in the installed contract."
+}

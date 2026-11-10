@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/detail/simd_lanes.hpp",
+  "fingerprint": "sha256:7f66643caad7bb5dea9e17c238067924f382681b2554f7c8a9deb517f9614e29",
+  "include": "pulp/signal/detail/simd_lanes.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Four-lane float and two-lane double vector helpers for the reverb and meter block kernels. Internal numeric support with no agent-facing surface."
+}

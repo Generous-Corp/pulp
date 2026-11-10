@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/phase_vocoder.hpp",
+  "fingerprint": "sha256:3d2c5d6a9835c5428dcfe92f9f16fbdd0ad814fcff6b968e0098e2c90d3c2dd9",
+  "include": "pulp/signal/phase_vocoder.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}
