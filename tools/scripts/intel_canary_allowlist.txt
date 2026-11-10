@@ -74,11 +74,6 @@ tools/cmake/check_control_shipping_artifact.cmake :: MATCHES "arm64|aarch64|aa64
 tools/cmake/PulpGpuAudioProviderIdentity.cmake :: _pulp_gpu_audio_target_arch MATCHES "^(arm64|aarch64)$"
 tools/cmake/PulpGpuAudioProviderIdentity.cmake :: --platform darwin-arm64
 
-# gpu-runtime coverage resolves the target from CMAKE_OSX_ARCHITECTURES (or the
-# configured processor when unset) and deliberately recognizes both Apple and
-# non-Apple ARM spellings before selecting the Pulp-owned fallback.
-tools/cmake/PulpGpuRuntimeRecord.cmake :: if("arm64" IN_LIST _archs OR "aarch64" IN_LIST _archs)
-
 # Test fixture: a synthetic wgpu cache path exercising the relocatable check.
 tools/cmake/scripts/test_check_bundle_relocatable.py :: wgpu-macos-aarch64
 
