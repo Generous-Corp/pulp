@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/explicit_q_resonator_bank.hpp",
+  "fingerprint": "sha256:1504f5c4bc3752754bc7591e6a6509a9aeb06df018417749bd149802463917da",
+  "include": "pulp/signal/explicit_q_resonator_bank.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.explicit-q-resonator-bank"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

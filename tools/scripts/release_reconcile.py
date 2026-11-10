@@ -61,6 +61,7 @@ OK = "ok"                    # published — nothing to do
 IN_FLIGHT = "in-flight"      # a run is working on it; leave it alone
 GRACE = "grace"              # too young to judge
 TOO_OLD = "too-old"          # outside the reconciliation window
+ABANDONED = "abandoned"      # deliberately not backfilled (tools/release/abandoned-tags.txt)
 SUPERSEDED = "superseded"    # a newer version already shipped; not worth a rebuild
 STUCK_QUEUE = "stuck-queue"  # queued for hours and never started — no runner is coming
 DEFERRED = "deferred"        # a NEWER tag is still building; wait and see
@@ -268,6 +269,45 @@ def superseded(tag: str, newest_published: tuple | None) -> bool:
     return bool(v and newest_published and v < newest_published)
 
 
+ABANDONED_TAGS_FILE = "tools/release/abandoned-tags.txt"
+# Resolved against the repo root so the list applies from any working directory.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def parse_abandoned(text: str) -> tuple[tuple[tuple, tuple], ...]:
+    """Parse the abandoned-tags list into inclusive (low, high) version ranges.
+
+    One entry per line: `vX.Y.Z` or `vX.Y.Z..vA.B.C`. `#` starts a comment.
+    A malformed entry raises, so a typo cannot silently re-enable retries.
+    """
+    ranges = []
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        lo, sep, hi = line.partition("..")
+        if sep and not hi.strip():
+            raise ValueError(f"bad abandoned-tags entry: {raw!r}")
+        low, high = version_of(lo.strip()), version_of((hi if sep else lo).strip())
+        if not low or not high or low > high:
+            raise ValueError(f"bad abandoned-tags entry: {raw!r}")
+        ranges.append((low, high))
+    return tuple(ranges)
+
+
+def read_abandoned(path: str = os.path.join(_REPO_ROOT, ABANDONED_TAGS_FILE)) -> tuple[tuple[tuple, tuple], ...]:
+    try:
+        with open(path, encoding="utf-8") as f:
+            return parse_abandoned(f.read())
+    except FileNotFoundError:
+        return ()
+
+
+def is_abandoned(tag: str, abandoned: Sequence[tuple[tuple, tuple]]) -> bool:
+    v = version_of(tag)
+    return bool(v and any(lo <= v <= hi for lo, hi in abandoned))
+
+
 def at_or_above_floor(tag: str, floor: tuple | None) -> bool:
     """Is this tag subject to the current asset contract?
 
@@ -291,6 +331,7 @@ def decide(
     newest_live: tuple | None = None,
     asset_floor: tuple | None = None,
     stuck_queue_hours: int = 4,
+    abandoned: Sequence[tuple[tuple, tuple]] = (),
 ) -> Decision:
     """Decide what to do about one tag. Pure."""
     age = now - state.created_at
@@ -310,6 +351,14 @@ def decide(
                 f"is immutable, so this needs a new patch tag",
             )
         return Decision(OK, f"{state.tag} is published")
+
+    # A tag a maintainer chose not to backfill is never re-dispatched, reported or
+    # escalated. A run already working on it is left to finish (nothing here
+    # cancels), but no new run is started.
+    if is_abandoned(state.tag, abandoned):
+        return Decision(
+            ABANDONED, f"{state.tag} is listed in {ABANDONED_TAGS_FILE}; not backfilled"
+        )
 
     if age > timedelta(hours=max_age_hours):
         return Decision(TOO_OLD, f"{state.tag} is older than {max_age_hours}h")
@@ -1269,15 +1318,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     # a five-way stampede would starve the release it is trying to repair.
     budget = int(os.environ.get("MAX_REDISPATCH_PER_SWEEP", "1"))
 
+    abandoned = read_abandoned()
     report: list[tuple[str, str]] = []
     for state in states:
         decision = decide(
             state, now,
             grace_minutes=grace, max_age_hours=max_age, max_attempts=max_attempts,
             newest_published=newest_published, newest_live=newest_live,
-            asset_floor=asset_floor,
+            asset_floor=asset_floor, abandoned=abandoned,
             stuck_queue_hours=int(os.environ.get("STUCK_QUEUE_HOURS", "4")),
         )
+        if decision.action == ABANDONED:
+            continue
         print(f"  [{decision.action:11}] {decision.reason}")
         dry_spell = drought(
             state, now, drought_hours=drought_hours, newest_published=newest_published

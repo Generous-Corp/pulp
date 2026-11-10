@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/breakpoint_envelope.hpp",
+  "fingerprint": "sha256:4f37c4c188e7094d8bf615144d0735a629d26a974f394f40e380a69d82a74c06"
+}

@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/path_switcher.hpp",
+  "fingerprint": "sha256:adbf41862725587e477711ac144f5326cdcff3a31560aba47708a42d5cd471f1"
+}

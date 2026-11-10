@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/bridged_t_resonator.hpp",
+  "fingerprint": "sha256:3f756cda95749f4ac85181a5f24791013441738bf952be6970fec3347c127a85",
+  "include": "pulp/signal/bridged_t_resonator.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

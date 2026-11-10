@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/voice_sum_mixer.hpp",
+  "fingerprint": "sha256:8104a916cf3b10c08e16975386527b3b71012838c36642da3eb17e8ed16d1826",
+  "include": "pulp/audio/voice_sum_mixer.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

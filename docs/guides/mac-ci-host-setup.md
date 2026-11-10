@@ -34,7 +34,8 @@ It's idempotent and prints the one thing it can't automate (the Full Disk Access
 
 ## 0. Prerequisites
 ```bash
-# Apple Silicon, macOS matching the golden (Tahoe for Xcode 26.5).
+# Apple Silicon, with the Xcode tools/toolchain/manifest.toml pins (27.2, 27B52)
+# installed as /Applications/Xcode.app; check with tools/toolchain/check_env.py.
 brew install cirruslabs/cli/tart hudochenkov/sshpass/sshpass
 # SSH keypair the golden will trust (or already trusts):
 test -f ~/.ssh/id_ed25519 || ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519
@@ -55,7 +56,7 @@ tart list   # should show pulp-build-runner:latest
 # (optional, for local re-bake capability: also copy the macos-build-base/apple-xcode/pulp-build-base :latest tiers)
 ```
 
-**B — bake from scratch** (needs Xcode 26.5 on the host, or `xcodes`). From `~/Code/pulp`:
+**B: bake from scratch** (needs the pinned Xcode at `/Applications/Xcode.app` on the host, or `xcodes`; the base image, macOS build and Xcode build come from `.shipyard/vm-image.toml`, generated from `tools/toolchain/manifest.toml`, and each tier refuses a mismatch). From `~/Code/pulp`:
 ```bash
 PULP_HOST_XCODE_APP=/Applications/Xcode.app bash tools/ci/tart-provision.sh verify   # preflight
 bash tools/ci/tart-provision.sh base        && bash tools/ci/tart-provision.sh tag macos-build-base  macos-build-base

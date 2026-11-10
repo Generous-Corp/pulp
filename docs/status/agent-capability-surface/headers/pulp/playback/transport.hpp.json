@@ -1,0 +1,9 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/transport.hpp",
+  "fingerprint": "sha256:fd25dfd0e69c3355cce4802bc9bb40771218d35cb4d7c2fd529749b25fceb993",
+  "include": "pulp/playback/transport.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "The transport control surface — play, stop, loop, scrub and tempo — with a refusal vocabulary that rejects a loop or scrub window too short for the maximum block and an epoch advance that fails rather than wrap to an aliased identity. It is the playback engine's own control object; its agent-facing exposure is claimed by the capability rows that bind a transport surface, not by this header."
+}

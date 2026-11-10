@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/detail/fractional_synthesis_hop_accumulator.hpp",
+  "fingerprint": "sha256:75b761a7b99590f6ddc3edae4abafaef951c45cbb36fde84969edb599bef8fe7",
+  "include": "pulp/signal/detail/fractional_synthesis_hop_accumulator.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

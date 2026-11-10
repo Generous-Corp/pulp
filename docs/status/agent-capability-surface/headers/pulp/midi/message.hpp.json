@@ -1,0 +1,9 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/message.hpp",
+  "fingerprint": "sha256:3b3e65207b2467e835cade6fd5ed82d9c22c5ac5515715528cb85dcdf62ee716",
+  "include": "pulp/midi/message.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "The shared MIDI message value type every format adapter builds and reads. It underpins the whole midi.* capability family rather than any single member, so it carries no installed capability claim of its own: a capability is a behavior, and this is the vocabulary those behaviors are written in."
+}
