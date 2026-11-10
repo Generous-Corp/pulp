@@ -424,7 +424,8 @@ class IosCompileRequiredTests(unittest.TestCase):
             self.assertIsNotNone(guarded, f"{subdir} lost its NOT IOS guard")
         # pulp-native is macOS-only: integrations/CMakeLists.txt refuses it on
         # iOS, and the root adds its example plug-in only when the pulp-native
-        # target exists. Its CMake never runs in the iOS gate either.
+        # target exists. Its CMake, and that of packages built on it, never
+        # runs in the iOS gate either.
         integrations_text = (repo / "integrations/CMakeLists.txt").read_text(encoding="utf-8")
         self.assertRegex(
             integrations_text,
@@ -438,8 +439,16 @@ class IosCompileRequiredTests(unittest.TestCase):
             r"integrations/pulp-native/examples/metal-probe\)",
             "the metal-probe example is no longer gated on the pulp-native target",
         )
+        # rmlui-native sits on pulp-native and refuses to build without it.
+        self.assertRegex(
+            integrations_text,
+            r"if\(NOT PULP_ENABLE_PULP_NATIVE\)\s*\n\s*message\(FATAL_ERROR "
+            r"\"PULP_ENABLE_RMLUI_ADAPTER=ON needs PULP_ENABLE_PULP_NATIVE=ON\"\)",
+            "rmlui-native no longer requires pulp-native",
+        )
         desktop_only = (
             "tools/cli/CMakeLists.txt", "tools/cli/gpu_probe/", "integrations/pulp-native/",
+            "integrations/rmlui-native/",
         )
         cmake_files = [
             f for f in listed
