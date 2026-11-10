@@ -262,6 +262,13 @@ pulp::midi::MidiBuffer note_on() {
     return events;
 }
 
+pulp::midi::MidiBuffer note_on_release() {
+    auto events = note_on();
+    auto event = pulp::midi::MidiEvent::note_off(32, 60);
+    events.add(event);
+    return events;
+}
+
 Buffer<float> render_live_events(ModularInstrument& fixture, pulp::midi::MidiBuffer events,
                                  float modulation) {
     REQUIRE(fixture.graph.prepare(kSampleRate, kBlockSize));
@@ -494,6 +501,16 @@ TEST_CASE("X9 bounded MIDI voices and modulation respond through public graph AP
     const auto high = render_live_events(high_modulation, note_on(), 0.9f);
     require_finite_and_different(low, high);
 
+    ModularInstrument held;
+    ModularInstrument released;
+    configure_modular_instrument(held);
+    configure_modular_instrument(released);
+    const auto held_note = render_live_events(held, note_on(), 0.5f);
+    const auto release_events = note_on_release();
+    REQUIRE(release_events.size() == 2);
+    const auto released_note = render_live_events(released, release_events, 0.5f);
+    require_finite_and_different(held_note, released_note);
+
     // Planted negative: MIDI publication to a non-MIDI node is rejected and
     // cannot be mistaken for evidence of host/MPE graph delivery.
     ModularInstrument invalid;
@@ -502,39 +519,111 @@ TEST_CASE("X9 bounded MIDI voices and modulation respond through public graph AP
     REQUIRE_FALSE(invalid.graph.inject_midi(invalid.output, note_on()));
 }
 
+TEST_CASE("X9 prepared removal has an independent restored-route oracle",
+          "[host][graph][x9][mutation][removal][refusal]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "Input");
+    const auto gain = graph.add_gain_node("Removable Effect");
+    const auto output = graph.add_output_node(1, "Output");
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+    REQUIRE(graph.set_node_gain(gain, 0.5f));
+    REQUIRE(graph.prepare(kSampleRate, kBlockSize));
+
+    Buffer<float> input_buffer(1, kBlockSize);
+    std::fill(input_buffer.channel(0).begin(), input_buffer.channel(0).end(), 1.0f);
+    Buffer<float> effected(1, kBlockSize);
+    auto effected_view = effected.view();
+    auto input_view = std::as_const(input_buffer).view();
+    graph.process(effected_view, input_view, kBlockSize);
+    for (const auto sample : effected.channel(0))
+        REQUIRE(sample == 0.5f);
+
+    const auto before = graph.live_snapshot_handle();
+    auto edit = graph.begin_prepared_topology_edit();
+    REQUIRE(edit);
+    REQUIRE(edit->remove_node(gain));
+    REQUIRE(edit->connect(input, 0, output, 0));
+    REQUIRE(edit->prepare(kSampleRate, kBlockSize) ==
+            SignalGraph::PreparedTopologyEdit::Result::Prepared);
+    REQUIRE(edit->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
+    REQUIRE(graph.live_snapshot_handle() != before);
+    REQUIRE(graph.nodes().size() == 2);
+
+    Buffer<float> restored(1, kBlockSize);
+    auto restored_view = restored.view();
+    graph.process(restored_view, input_view, kBlockSize);
+    for (const auto sample : restored.channel(0))
+        REQUIRE(sample == 1.0f);
+
+    auto refused = graph.begin_prepared_topology_edit();
+    REQUIRE(refused);
+    REQUIRE_FALSE(refused->remove_node(gain));
+    REQUIRE(refused->prepare(kSampleRate, kBlockSize) ==
+            SignalGraph::PreparedTopologyEdit::Result::InvalidMutation);
+    REQUIRE(refused->commit() == SignalGraph::PreparedTopologyEdit::Result::NotPrepared);
+}
+
 class SidechainProbe final : public pulp::host::PluginSlot {
-public:
-    const PluginInfo& info() const override { return info_; }
-    bool is_loaded() const override { return true; }
-    bool prepare(double, int) override { return true; }
+  public:
+    const PluginInfo& info() const override {
+        return info_;
+    }
+    bool is_loaded() const override {
+        return true;
+    }
+    bool prepare(double, int) override {
+        return true;
+    }
     void release() override {}
     void process(pulp::audio::BufferView<float>& output,
-                 const pulp::audio::BufferView<const float>& input,
-                 const pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
-                 const pulp::host::ParameterEventQueue&, int frames) override {
+                 const pulp::audio::BufferView<const float>& input, const pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&, const pulp::host::ParameterEventQueue&,
+                 int frames) override {
         for (std::size_t channel = 0; channel < output.num_channels(); ++channel) {
-            const auto* main = channel < input.num_channels() ? input.channel_ptr(channel) : nullptr;
-            const auto* side = channel + 2 < input.num_channels() ?
-                input.channel_ptr(channel + 2) : nullptr;
+            const auto* main =
+                channel < input.num_channels() ? input.channel_ptr(channel) : nullptr;
+            const auto* side =
+                channel + 2 < input.num_channels() ? input.channel_ptr(channel + 2) : nullptr;
             for (int frame = 0; frame < frames; ++frame)
                 output.channel_ptr(channel)[frame] =
                     (main ? main[frame] : 0.0f) + (side ? side[frame] : 0.0f);
         }
     }
-    std::vector<pulp::host::HostParamInfo> parameters() const override { return {}; }
-    float get_parameter(uint32_t) const override { return 0.0f; }
+    std::vector<pulp::host::HostParamInfo> parameters() const override {
+        return {};
+    }
+    float get_parameter(uint32_t) const override {
+        return 0.0f;
+    }
     void set_parameter(uint32_t, float) override {}
-    void set_bypass(bool bypassed) override { bypassed_ = bypassed; }
-    bool is_bypassed() const override { return bypassed_; }
-    std::vector<uint8_t> save_state() const override { return {}; }
-    bool restore_state(const std::vector<uint8_t>&) override { return false; }
-    bool has_editor() const override { return false; }
-    void* create_editor_view() override { return nullptr; }
+    void set_bypass(bool bypassed) override {
+        bypassed_ = bypassed;
+    }
+    bool is_bypassed() const override {
+        return bypassed_;
+    }
+    std::vector<uint8_t> save_state() const override {
+        return {};
+    }
+    bool restore_state(const std::vector<uint8_t>&) override {
+        return false;
+    }
+    bool has_editor() const override {
+        return false;
+    }
+    void* create_editor_view() override {
+        return nullptr;
+    }
     void destroy_editor_view() override {}
-    int latency_samples() const override { return 0; }
-    int tail_samples() const override { return 0; }
+    int latency_samples() const override {
+        return 0;
+    }
+    int tail_samples() const override {
+        return 0;
+    }
 
-private:
+  private:
     PluginInfo info_ = [] {
         PluginInfo info{};
         info.name = "X9 Sidechain Probe";
@@ -574,10 +663,14 @@ TEST_CASE("X9 composes parallel effects with a real sidechain edge",
     REQUIRE(graph.prepare(kSampleRate, kBlockSize));
 
     Buffer<float> input(4, kBlockSize);
-    for (auto& sample : input.channel(0)) sample = 0.2f;
-    for (auto& sample : input.channel(1)) sample = -0.2f;
-    for (auto& sample : input.channel(2)) sample = 0.8f;
-    for (auto& sample : input.channel(3)) sample = -0.8f;
+    for (auto& sample : input.channel(0))
+        sample = 0.2f;
+    for (auto& sample : input.channel(1))
+        sample = -0.2f;
+    for (auto& sample : input.channel(2))
+        sample = 0.8f;
+    for (auto& sample : input.channel(3))
+        sample = -0.8f;
     Buffer<float> output_buffer(2, kBlockSize);
     auto output_view = output_buffer.view();
     auto input_view = std::as_const(input).view();
