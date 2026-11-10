@@ -113,6 +113,44 @@ class ProvisionPinTests(unittest.TestCase):
         self.assertNotIn("macos-tahoe-base:latest", text)
         self.assertNotIn(':-26.5}', text)
 
+    def provision(self, *args: str, pins: str) -> subprocess.CompletedProcess:
+        """Run the real script (set -euo pipefail) with a stand-in tart."""
+        bin_dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (bin_dir / "tart").write_text("#!/bin/sh\necho \"tart $*\" >> \"$TART_LOG\"\n", encoding="utf-8")
+        (bin_dir / "tart").chmod(0o755)
+        env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", PULP_IMAGE_PINS=pins,
+                   TART_HOME=str(bin_dir / "vms"), TART_LOG=str(bin_dir / "tart.log"))
+        for key in ("PULP_MACOS_BASE_IMAGE", "PULP_MACOS_BUILD", "PULP_XCODE_VERSION", "PULP_XCODE_BUILD"):
+            env.pop(key, None)
+        (bin_dir / "vms").mkdir()
+        self.tart_log = bin_dir / "tart.log"
+        return subprocess.run(["bash", str(PROVISION), *args], env=env, capture_output=True, text=True,
+                              encoding="utf-8", check=False)
+
+    def test_inventory_runs_without_pins_and_a_bake_refuses_without_them(self) -> None:
+        listed = self.provision("list", pins="/nonexistent")
+        self.assertEqual(0, listed.returncode, listed.stderr)
+        self.assertIn("tart list", self.tart_log.read_text(encoding="utf-8"))
+        baked = self.provision("base", "x", pins="/nonexistent")
+        self.assertEqual(1, baked.returncode)
+        self.assertIn("cannot read base/macos_build/xcode/xcode_build", baked.stderr)
+        self.assertNotIn("clone", self.tart_log.read_text(encoding="utf-8") if self.tart_log.exists() else "")
+
+    def test_a_key_in_another_table_does_not_shadow_a_pin(self) -> None:
+        decoy = Path(self.enterContext(tempfile.TemporaryDirectory())) / "vm-image.toml"
+        decoy.write_text('name = "x"\n[other]\nxcode = "1.0"\nbase = "decoy"\n'
+                         '[toolchain]\nxcode_build = "27B52"\nxcode = "27.2"\n', encoding="utf-8")
+        reader = provision_snippet("IMAGE_PINS=", "# The guest's Xcode lives")
+        out = self.bash(reader + 'echo "$XCODE_VERSION|$XCODE_BUILD|$BASE_MACOS_IMAGE"', PULP_IMAGE_PINS=str(decoy))
+        self.assertEqual("27.2|27B52|", out.stdout.strip(), out.stderr)
+
+    def test_a_manifest_bake_of_an_xcode_golden_is_refused_before_cloning(self) -> None:
+        out = self.provision("manifest", str(ROOT / ".shipyard/vm-image.toml"),
+                             pins=str(ROOT / ".shipyard/vm-image.toml"))
+        self.assertEqual(1, out.returncode)
+        self.assertIn("bake it with the tier chain", out.stderr)
+        self.assertNotIn("clone", self.tart_log.read_text(encoding="utf-8") if self.tart_log.exists() else "")
+
     def guest(self, answers: str, check: str) -> subprocess.CompletedProcess:
         helpers = provision_snippet("app_build(){", "# ── Tier 0")
         stubs = ('note(){ echo "note: $*"; }\nwarn(){ echo "warn: $*" >&2; }\ndie(){ echo "die: $*" >&2; exit 1; }\n'

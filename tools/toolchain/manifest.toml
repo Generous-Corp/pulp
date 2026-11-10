@@ -108,6 +108,10 @@ backend = "conda:clang-format"
 url_prefixes = ["https://conda.anaconda.org/conda-forge/"]
 unlocked = { windows-arm64 = "conda-forge publishes no windows-arm64 clang-format; that platform keeps its own" }
 
+# ccache and git-lfs are locked here, and the golden's mise layer installs them,
+# but a job uses them only when it activates the pinned tools (MISE_ENV=toolchain,
+# as the mise_candidate lane does). Until the required gate does that, its jobs
+# still take Homebrew's copies from the runner PATH, and check_env reports them.
 [mise.tools.ccache]
 # ccache has no aqua registry entry; conda-forge publishes it for every lock
 # platform with checksums, as it does clang-format.

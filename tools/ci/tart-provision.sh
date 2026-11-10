@@ -39,7 +39,9 @@ SSH_KEY_PRIV="${SSH_KEY_PUB%.pub}"
 # parser: list/tag/resize must still run on a host whose python3 is 3.9.
 IMAGE_PINS="${PULP_IMAGE_PINS:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/.shipyard/vm-image.toml}"
 image_pin(){ # $1=key — the first `key = "value"` in the image manifest
-  [ -f "$IMAGE_PINS" ] && sed -n "s/^$1 *= *\"\([^\"]*\)\".*/\1/p" "$IMAGE_PINS" | head -1
+  # Top level and [toolchain] only, so a key in another table cannot shadow a pin.
+  [ -f "$IMAGE_PINS" ] || return 0
+  awk -v k="$1" '/^\[/{s=$0; next} (s=="" || s=="[toolchain]") && $0 ~ "^"k" *= *\"" {sub("^"k" *= *\"",""); sub("\".*$",""); print; exit}' "$IMAGE_PINS"
 }
 BASE_MACOS_IMAGE="${PULP_MACOS_BASE_IMAGE:-$(image_pin base)}"
 MACOS_BUILD="${PULP_MACOS_BUILD:-$(image_pin macos_build)}"
@@ -348,6 +350,13 @@ cmd_manifest(){ # $1=manifest-path  $2=vm-name(optional)
   vm="${vm:-$MF_NAME}"
   [ -n "$MF_BASE" ] && [ -n "$vm" ] || die "manifest needs base + name (or pass a vm name)"
   note "manifest: name=$MF_NAME strategy=$MF_STRATEGY base=$MF_BASE disk=${MF_DISK}G xcode=${MF_XCODE:-none}"
+  # A manifest that declares Xcode is a full macOS golden: the tier chain
+  # (base, apple-xcode, pulp, runner) installs and verifies the pinned macOS
+  # and Xcode. A manifest bake would clone the base and skip Xcode, leaving an
+  # image that looks like a golden and is not one.
+  if [ -n "$MF_XCODE" ]; then
+    die "$path declares Xcode $MF_XCODE; bake it with the tier chain: $0 base, apple-xcode, pulp, runner (each refuses a guest that is not the pin)"
+  fi
   [ -f "$SSH_KEY_PUB" ] || die "ssh pubkey not found: $SSH_KEY_PUB"
 
   note "cloning $MF_BASE → $vm"
@@ -381,10 +390,6 @@ cmd_manifest(){ # $1=manifest-path  $2=vm-name(optional)
     note "installing the pinned toolchain (mise --locked, Rust by name); receipt in $receipt_dir/$vm-mise.json"
     "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/mise-golden-layer.sh" "$path" "$ip" "$receipt_dir/$vm-mise.json" \
       || { stop_vm "$vm" "$rpid"; die "pinned toolchain layer failed; $vm is incomplete: tart delete $vm"; }
-  fi
-  # Toolchain: only repos that declare toolchain.xcode pay the Xcode cost.
-  if [ -n "$MF_XCODE" ]; then
-    warn "manifest declares Xcode $MF_XCODE — run '$0 apple-xcode $vm $vm' or set PULP_HOST_XCODE_APP to copy a host Xcode; skipping in manifest bake to keep it unattended"
   fi
   if [ "$MF_STRATEGY" = "configure-on-boot" ]; then
     note "configure-on-boot: $vm is provisioned and left as a reusable base. Clone per-job with tart clone."
