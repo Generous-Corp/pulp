@@ -1,9 +1,0 @@
-# SDK tags the release reconciler must not backfill. One entry per line:
-# `vX.Y.Z` or an inclusive range `vX.Y.Z..vA.B.C`. `#` starts a comment.
-# A listed tag is never re-dispatched, reported or escalated; a run already in
-# flight is left alone. The git tags themselves stay in place.
-
-# darwin-x64 could not build: the pinned gpu-runtime has no macos-x64 Dawn entry.
-# These tags are intentionally left unpublished; the next tag after the fix
-# publishes normally.
-v1.81.0..v1.96.0
