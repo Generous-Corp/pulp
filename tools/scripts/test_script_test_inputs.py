@@ -1273,6 +1273,34 @@ class CompiledDataTests(unittest.TestCase):
             self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
             self.assertEqual(self.run_tool(repo, "--check", "--full").returncode, 0)
 
+    def test_clean_refresh_resolves_private_inspector_header_and_refuses_its_removal(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); compiled_evidence(repo)
+            source = write(repo.root, "test/test_d.cpp",
+                           '#include "support/helper.hpp"\nint run() { return fork(); }\n')
+            write(repo.root, "test/support/helper.hpp", '#include "control_broker_daemon.hpp"\n')
+            header = write(repo.root, "inspect/src/control_broker_daemon.hpp", "struct Broker {};\n")
+            seeded = self.run_tool(repo, "--write")
+            self.assertEqual(seeded.returncode, 0, seeded.stdout + seeded.stderr)
+            list_path = repo.root / sti.DEFAULT_LIST
+
+            source.write_text('#include "support/helper.hpp"\nint run() { return 0; }\n',
+                              encoding="utf-8")
+            refreshed = self.run_tool(repo, "--write")
+            self.assertEqual(refreshed.returncode, 0, refreshed.stdout + refreshed.stderr)
+            self.assertEqual(store.load_path(list_path)["executables"]["pulp-test-d"]["data"],
+                             "none")
+            self.assertEqual(self.run_tool(repo, "--check", "--full").returncode, 0)
+
+            before = tree_bytes(list_path)
+            header.unlink()
+            for mode in ("--write", "--check"):
+                rejected = self.run_tool(repo, mode)
+                self.assertEqual(rejected.returncode, 2, rejected.stdout + rejected.stderr)
+                self.assertIn('unresolved quoted include "control_broker_daemon.hpp"',
+                              rejected.stderr)
+                self.assertEqual(tree_bytes(list_path), before)
+
     def test_detected_sources_lists_only_what_a_signal_matched(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Repo(Path(tmp)); compiled_evidence(repo)

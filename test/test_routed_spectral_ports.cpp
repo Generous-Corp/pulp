@@ -1,3 +1,5 @@
+#include "../examples/g10-routed-consumer/asset_morph_oracle.hpp"
+#include "harness/rt_allocation_probe.hpp"
 #include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <cmath>
@@ -426,4 +428,318 @@ TEST_CASE("Spectral batches carry canonical versioned frame fields",
     REQUIRE(static_cast<std::uint8_t>(SpectralError::IdentityMismatch) == 3);
     REQUIRE(static_cast<std::uint8_t>(SpectralError::OutputUnderrun) == 19);
     REQUIRE(static_cast<std::uint8_t>(SpectralError::InvalidContract) == 20);
+}
+
+namespace {
+struct AssetGraph {
+    pulp::host::SignalGraph graph;
+    pulp::host::SpectralAssetMorphPorts source;
+    AssetGraph(std::span<const std::uint8_t> a, std::span<const std::uint8_t> b,
+               std::uint64_t length, bool stage = false) {
+        using namespace pulp::host;
+        const auto input = graph.add_input_node(1), output = graph.add_output_node(1);
+        const auto result = graph.add_spectral_asset_morph_v1(a, b, length, "owned assets");
+        REQUIRE(result);
+        source = *result.value;
+        const auto shape = *SpectralIdentity::make(256, 64, 1, 48000).value;
+        const auto synthesis = *graph.add_spectral_synthesis(shape, "synthesis").value;
+        REQUIRE(graph.connect(graph.node(input)->out("audio"), source.morph));
+        if (stage) {
+            const auto identity =
+                *graph
+                     .add_spectral_stage(shape, *QualifiedSpectralStage::identity_v1(shape).value,
+                                         "identity")
+                     .value;
+            REQUIRE(graph.connect(source.frames, identity.frames_in));
+            REQUIRE(graph.connect(identity.frames_out, synthesis.frames));
+        } else
+            REQUIRE(graph.connect(source.frames, synthesis.frames));
+        REQUIRE(graph.connect(synthesis.audio[0], graph.node(output)->in("audio")));
+        REQUIRE(graph.prepare(48000, 4096));
+        REQUIRE(graph.latency_samples() == 320);
+    }
+    std::vector<float> render(const std::vector<float>& control, int partition,
+                              bool reset = false) {
+        std::vector<float> audio(control.size());
+        for (int pos = 0; pos < int(control.size());) {
+            const auto count =
+                std::min(int(control.size()) - pos, partition ? partition : 1 + pos * 17 % 511);
+            const float* ip[] = {control.data() + pos};
+            float* op[] = {audio.data() + pos};
+            pulp::audio::BufferView<const float> iv(ip, 1, count);
+            pulp::audio::BufferView<float> ov(op, 1, count);
+            pulp::format::ProcessContext transport;
+            transport.reset_requested = reset && pos == 0;
+            transport.position_samples = 99999; // reset is a restart, not an asset seek
+            std::size_t allocations = 0;
+            {
+                pulp::test::RtAllocationProbe probe;
+                graph.process(ov, iv, count, transport);
+                allocations = probe.allocation_count();
+            }
+            REQUIRE(allocations == 0);
+            pos += count;
+        }
+        return audio;
+    }
+    void clean_diagnostics() {
+        for (const auto& diagnostic : graph.poll_live_dsp_telemetry().spectral)
+            REQUIRE(diagnostic.first_error == 0);
+        REQUIRE(graph.routed_walk_fallbacks() == 0);
+    }
+    std::uint64_t epoch() {
+        for (const auto& diagnostic : graph.poll_live_dsp_telemetry().spectral)
+            if (diagnostic.node == source.node)
+                return diagnostic.epoch;
+        FAIL("source diagnostic absent");
+        return 0;
+    }
+};
+} // namespace
+
+TEST_CASE("Owned asset morph agrees with independent direct DFT live audio oracle",
+          "[host][spectral-asset-morph][asset-audio-oracle]") {
+    using namespace asset_oracle;
+    const auto input_a = stimulus(0), input_b = stimulus(1);
+    const auto a = analyze(input_a), b = analyze(input_b);
+    const auto bytes_a = encode(a), bytes_b = encode(b);
+    for (float amount : {0.0f, 1.0f, 0.37f, -1.0f}) {
+        std::vector<float> control(a.size() * 64 + 1024, amount);
+        if (amount < 0)
+            for (std::size_t i = 0; i < control.size(); ++i)
+                control[i] = float((i * 13 % 257) / 256.0);
+        const auto wanted = expected(a, b, control);
+        // Calibrate the independent oracle against known analytic delay before
+        // comparing candidate audio. Expected output never calls production DSP.
+        if (amount == 0 || amount == 1) {
+            const auto& input = amount == 0 ? input_a : input_b;
+            for (std::size_t t = 0; t < input.size(); ++t)
+                REQUIRE(std::abs(wanted[t + 320] - input[t]) < 1e-11);
+        }
+        std::vector<float> reference;
+        for (int partition : {32, 64, 128, 0, 4096}) {
+            AssetGraph fixture(bytes_a.view(), bytes_b.view(), input_a.size(), partition == 0);
+            const auto audio = fixture.render(control, partition);
+            compare(audio, wanted);
+            REQUIRE((reference.empty() || audio == reference));
+            reference = audio;
+            for (std::size_t t = 0; t < audio.size(); ++t)
+                if (t < 320 || t >= fixture.source.render_frames)
+                    REQUIRE(audio[t] == 0);
+            fixture.clean_diagnostics();
+            const auto old_epoch = fixture.epoch();
+            REQUIRE(old_epoch != 0);
+            fixture.render(std::vector<float>(113, 0.25f), 32, true);
+            REQUIRE(fixture.render(control, partition, true) == audio);
+            const auto fresh_epoch = fixture.epoch();
+            REQUIRE(fresh_epoch != old_epoch);
+            fixture.clean_diagnostics();
+        }
+    }
+}
+
+TEST_CASE("Asset morph phase wrap and self conjugate bins follow normalized control",
+          "[host][spectral-asset-morph][asset-audio-oracle]") {
+    using namespace asset_oracle;
+    std::vector<Frame> a(8), b(8);
+    for (std::size_t f = 0; f < a.size(); ++f) {
+        a[f][9] = std::polar(2.0, 3.10);
+        b[f][9] = std::polar(4.0, -3.10);
+        a[f][0] = 3;
+        b[f][0] = -1;
+        a[f][128] = -2;
+        b[f][128] = 4;
+    }
+    auto bytes_a = encode(a), bytes_b = encode(b);
+    for (float amount : {0.0f, 0.25f, 0.5f, 0.75f, 1.0f}) {
+        std::vector<float> control(a.size() * 64 + 1024, amount);
+        AssetGraph fixture(bytes_a.view(), bytes_b.view(), 320);
+        compare(fixture.render(control, 0), expected(a, b, control));
+        fixture.clean_diagnostics();
+    }
+}
+
+TEST_CASE("Asset impulses preserve startup and final support with absolute hop means",
+          "[host][spectral-asset-morph][asset-audio-oracle]") {
+    using namespace asset_oracle;
+    for (int position : {0, 13, 320}) {
+        std::vector<float> input_a(321), input_b(321);
+        input_a[position] = 0.5f;
+        input_b[position] = 0.25f;
+        const auto a = analyze(input_a), b = analyze(input_b);
+        auto bytes_a = encode(a), bytes_b = encode(b);
+        for (float amount : {0.0f, 0.37f, 1.0f}) {
+            CAPTURE(position, amount);
+            std::vector<float> control(8192, amount);
+            AssetGraph fixture(bytes_a.view(), bytes_b.view(), 321);
+            REQUIRE_NOTHROW(compare(fixture.render(control, 4096), expected(a, b, control)));
+            fixture.clean_diagnostics();
+        }
+        std::vector<float> constant(8192, 0.5f), stepped(8192);
+        for (std::size_t t = 0; t < stepped.size(); ++t)
+            stepped[t] = t % 64 < 32 ? 0 : 1;
+        AssetGraph first(bytes_a.view(), bytes_b.view(), 321),
+            second(bytes_a.view(), bytes_b.view(), 321);
+        REQUIRE(first.render(constant, 128) == second.render(stepped, 32));
+        first.clean_diagnostics();
+        second.clean_diagnostics();
+        // Terminal controls are not consumed and cannot turn ordinary EOF into
+        // a fatal control error or restart frame synthesis.
+        std::fill(stepped.begin(), stepped.end(), std::numeric_limits<float>::quiet_NaN());
+        const auto silence = second.render(stepped, 4096);
+        REQUIRE(std::all_of(silence.begin(), silence.end(), [](float x) { return x == 0; }));
+        second.clean_diagnostics();
+    }
+}
+
+TEST_CASE("Canonical antipodal bins preserve analytic branches endpoints and partitions",
+          "[host][spectral-asset-morph][asset-audio-oracle]") {
+    using namespace asset_oracle;
+    // Original double DFT endpoints at exactly pi separation can choose the
+    // other equally short arc after float32 serialization. For chronology use
+    // non-antipodal impulses; here exact real serialized bins and canonical +0
+    // imaginary components isolate both analytic half-turn branches.
+    std::vector<Frame> a(8), b(8);
+    for (bool reverse : {false, true}) {
+        for (std::size_t f = 0; f < a.size(); ++f) {
+            a[f][9] = reverse ? -4 : 2;
+            b[f][9] = reverse ? 2 : -4;
+        }
+        auto bytes_a = encode(a), bytes_b = encode(b);
+        for (float amount : {0.0f, 0.25f, 0.5f, 0.75f, 1.0f}) {
+            std::vector<float> control(2048, amount), reference;
+            const auto wanted = expected(a, b, control);
+            const auto bin = interpolate(a[0][9], b[0][9], amount, 9);
+            // Forward +pi branch has nonnegative imaginary component; the
+            // reverse branch traverses the same upper half-plane toward zero.
+            REQUIRE(bin.imag() >= 0);
+            for (int partition : {32, 64, 128, 0}) {
+                AssetGraph fixture(bytes_a.view(), bytes_b.view(), 320);
+                const auto audio = fixture.render(control, partition);
+                compare(audio, wanted);
+                REQUIRE((reference.empty() || audio == reference));
+                reference = audio;
+                fixture.clean_diagnostics();
+            }
+        }
+    }
+}
+
+TEST_CASE("Asset factory refusals preserve authoring and copied asset ownership",
+          "[host][spectral-asset-morph][spectral-refusal]") {
+    using namespace pulp::host;
+    using namespace asset_oracle;
+    const auto a = analyze(stimulus(0)), b = analyze(stimulus(1));
+    auto bytes_a = encode(a), bytes_b = encode(b);
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1);
+    auto refuse = [&](std::span<const std::uint8_t> first, std::span<const std::uint8_t> second,
+                      std::uint64_t length) {
+        REQUIRE_FALSE(graph.add_spectral_asset_morph_v1(first, second, length, "rejected"));
+        REQUIRE(graph.nodes().size() == 1);
+        REQUIRE(graph.connections().empty());
+    };
+    refuse(bytes_a.view(), bytes_b.view(), 0);
+    refuse(bytes_a.view(), bytes_b.view(), 1);
+    refuse(bytes_a.view(), bytes_b.view(), std::numeric_limits<std::uint64_t>::max());
+    refuse(bytes_a.view().first(12), bytes_b.view(), 769);
+    const auto other_rate = encode(b, 44100);
+    refuse(bytes_a.view(), other_rate.view(), 769);
+    for (std::size_t position :
+         {std::size_t(80), std::size_t(64 + 1048), std::size_t(64 + 1048 + 8)}) {
+        std::vector<std::uint8_t> corrupt(bytes_a.view().begin(), bytes_a.view().end());
+        if (position == 80) {
+            corrupt[82] = 0x80;
+            corrupt[83] = 0x7f;
+        } else
+            corrupt[position] ^= 1;
+        refuse(corrupt, bytes_b.view(), 769);
+    }
+    const auto accepted =
+        graph.add_spectral_asset_morph_v1(bytes_a.view(), bytes_b.view(), 769, "valid");
+    REQUIRE(accepted);
+    REQUIRE(accepted.value->node == input + 1);
+    REQUIRE_FALSE(graph.connect(input, 0, accepted.value->node, 0));
+    REQUIRE(graph.connect(graph.node(input)->out("audio"), accepted.value->morph));
+    REQUIRE_FALSE(graph.connect(graph.node(input)->out("audio"), accepted.value->morph));
+    AssetGraph owned(bytes_a.view(), bytes_b.view(), 769);
+    std::fill_n(bytes_a.bytes.get(), bytes_a.size, 0);
+    std::fill_n(bytes_b.bytes.get(), bytes_b.size, 0);
+    std::vector<float> control(a.size() * 64 + 1024, 0.37f);
+    compare(owned.render(control, 64), expected(a, b, control));
+    owned.clean_diagnostics();
+}
+
+TEST_CASE("Invalid live asset control stops at the absolute failing frame origin",
+          "[host][spectral-asset-morph][spectral-fatal-prefix]") {
+    using namespace asset_oracle;
+    const auto a = analyze(stimulus(0)), b = analyze(stimulus(1));
+    auto bytes_a = encode(a), bytes_b = encode(b);
+    std::vector<float> control(a.size() * 64 + 1024, 0.37f);
+    AssetGraph good(bytes_a.view(), bytes_b.view(), 769);
+    const auto reference = good.render(control, 64);
+    for (float invalid : {-0.01f, 1.01f, std::numeric_limits<float>::infinity(),
+                          std::numeric_limits<float>::quiet_NaN()}) {
+        for (int partition : {32, 128, 0, 4096}) {
+            auto bad_control = control;
+            bad_control[701] = invalid;
+            AssetGraph bad(bytes_a.view(), bytes_b.view(), 769);
+            const auto audio = bad.render(bad_control, partition);
+            // Sample 701 is in hop 10, whose frame origin is -192+10*64.
+            constexpr int cutoff = 320 - 192 + 10 * 64;
+            for (std::size_t t = 0; t < audio.size(); ++t)
+                REQUIRE(audio[t] == (t < cutoff ? reference[t] : 0));
+            bool saw_error = false;
+            for (const auto& diagnostic : bad.graph.poll_live_dsp_telemetry().spectral)
+                saw_error |= diagnostic.first_error != 0;
+            REQUIRE(saw_error);
+            REQUIRE(bad.render(control, partition, true) == reference);
+        }
+    }
+}
+
+TEST_CASE("Asset preparation enforces geometry control topology and retained memory bounds",
+          "[host][spectral-asset-morph][spectral-capacity]") {
+    using namespace pulp::host;
+    using namespace asset_oracle;
+    const auto a = analyze(stimulus(0));
+    const auto bytes = encode(a);
+    for (bool connect_control : {false, true}) {
+        SignalGraph graph;
+        const auto source =
+            *graph.add_spectral_asset_morph_v1(bytes.view(), bytes.view(), 769, "source").value;
+        const auto shape = *SpectralIdentity::make(256, 64, 1, 48000).value;
+        const auto synthesis = *graph.add_spectral_synthesis(shape, "synthesis").value;
+        const auto output = graph.add_output_node(1), gain = graph.add_gain_node("delayed control");
+        REQUIRE_FALSE(graph.connect(graph.node(gain)->out("audio"), source.morph));
+        if (connect_control) {
+            const auto input = graph.add_input_node(1);
+            REQUIRE(graph.connect(graph.node(input)->out("audio"), source.morph));
+        }
+        REQUIRE(graph.connect(source.frames, synthesis.frames));
+        REQUIRE(graph.connect(synthesis.audio[0], graph.node(output)->in("audio")));
+        REQUIRE_FALSE(graph.prepare(44100, 64));
+        REQUIRE_FALSE(graph.prepare(48000, 4097));
+        REQUIRE(graph.prepare(48000, 64) == connect_control);
+    }
+    for (auto geometry : {pulp::signal::SpectralStreamGeometry{512, 64, 1, 48000},
+                          pulp::signal::SpectralStreamGeometry{256, 32, 1, 48000},
+                          pulp::signal::SpectralStreamGeometry{256, 64, 2, 48000}}) {
+        auto stream = pulp::signal::make_spectral_stream(geometry, a.size());
+        REQUIRE(stream);
+        auto wrong = pulp::signal::encode_spectral_stream(*stream.value);
+        REQUIRE(wrong);
+        SignalGraph graph;
+        REQUIRE_FALSE(
+            graph.add_spectral_asset_morph_v1(wrong.value->view(), bytes.view(), 769, "wrong"));
+        REQUIRE(graph.nodes().empty());
+    }
+    auto large = pulp::signal::make_spectral_stream({256, 64, 1, 48000}, 33000);
+    REQUIRE(large);
+    auto encoded = pulp::signal::encode_spectral_stream(*large.value);
+    REQUIRE(encoded);
+    SignalGraph graph;
+    REQUIRE_FALSE(graph.add_spectral_asset_morph_v1(encoded.value->view(), encoded.value->view(),
+                                                    33000 * 64 - 192, "over budget"));
+    REQUIRE(graph.nodes().empty());
 }
