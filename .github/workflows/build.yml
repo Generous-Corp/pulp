@@ -3177,19 +3177,44 @@ jobs:
         # extra time is capped at ten minutes;
         # tests left over are listed as skipped, and the merge group still
         # runs everything. Rules and selection: tools/ci/pr_head_affected_tests.py.
+        # An approved head (green `review-verdict`) is an admission run: it
+        # runs what an earlier attempt deferred before the queue does
+        # (deferred-tests-admission.yml re-runs this job for that;
+        # tools/ci/deferred_admission.py, off unless PULP_DEFERRED_ADMISSION
+        # is `enforce`). The summary artifact is what that workflow reads.
         id: pr_affected_tests
         if: (runner.os != 'Windows' && github.event_name == 'pull_request') && matrix.lane != 'contract' && steps.clean_merge.outputs.lane != 'clean-merge'
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PULP_DEFERRED_ADMISSION: ${{ vars.PULP_DEFERRED_ADMISSION || 'shadow' }}
+          MATRIX_KEY: ${{ matrix.key }}
         run: |
           set -euo pipefail
           gate_args="$(python3 tools/ci/ctest_gate_args.py \
             --event-name "$GITHUB_EVENT_NAME" --runner-os "$RUNNER_OS")"
           eval "$gate_args"
           : "${label_exclude:?ctest gate arguments did not resolve}"
+          # A warm build dir keeps files: never upload an earlier run's summary.
+          rm -f "$PULP_BUILD_DIR/pr-affected-summary/pr-affected-summary.json"
+          # Only the required macos leg is an admission run or writes the summary.
+          admission=()
+          if [ "$MATRIX_KEY" = macos ]; then
+            admission=(--summary-json "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/pr-affected-summary/pr-affected-summary.json")
+          fi
+          if [ "$MATRIX_KEY" = macos ] && python3 tools/ci/deferred_admission.py probe --repo "$GITHUB_REPOSITORY" --head "$PR_HEAD_SHA"; then
+            admission+=(--admission)
+            if [ "$GITHUB_RUN_ATTEMPT" -gt 1 ] && python3 tools/ci/deferred_admission.py prior \
+                --repo "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
+                --out "$RUNNER_TEMP/pr-affected-prior.json"; then
+              admission+=(--prior-summary "$RUNNER_TEMP/pr-affected-prior.json")
+            fi
+          fi
           rc=0
           python3 tools/ci/pr_head_affected_tests.py \
             --build-dir "$PULP_BUILD_DIR" --base HEAD^1 --head HEAD \
-            --budget-secs 600 --jobs 4 --label-exclude "$label_exclude" \
+            --budget-secs 600 --jobs 4 --label-exclude "$label_exclude" ${admission[@]+"${admission[@]}"} \
             --junit-dir "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/pr-affected-junit" || rc=$?
           case "$rc" in
             0) ;;
@@ -3197,6 +3222,18 @@ jobs:
             2) echo "::warning title=pr-head-affected-tests::could not read the diff or the ctest inventory, so nothing was selected; this is not a verdict on the pull request" ;;
             *) echo "::error title=pr-head-affected-tests::selector exited $rc"; exit "$rc" ;;
           esac
+
+      - name: Upload the affected-test summary (pull request head)
+        # The macos leg only: an artifact name is unique per run, so a second
+        # leg's upload would fail. Never fails the required check itself.
+        if: always() && github.event_name == 'pull_request' && matrix.key == 'macos' && steps.pr_affected_tests.outcome != 'skipped'
+        continue-on-error: true
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: pr-head-affected-tests-a${{ github.run_attempt }}
+          path: ${{ env.PULP_BUILD_DIR }}/pr-affected-summary/pr-affected-summary.json
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Test (non-Windows)
         id: ctest
