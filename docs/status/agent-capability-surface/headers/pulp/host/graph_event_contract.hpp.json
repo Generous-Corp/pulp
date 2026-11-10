@@ -1,7 +1,7 @@
 {
   "domain": "host",
   "source": "core/host/include/pulp/host/graph_event_contract.hpp",
-  "fingerprint": "sha256:bf803e0fdde789c98e307c9e0ebfce5e1a1445a4589abac4bb2e80a6522ec1db",
+  "fingerprint": "sha256:1364609e77aee4e39fa3c1692e36c715ec9385856515dc3076d1de7ef0b0350a",
   "include": "pulp/host/graph_event_contract.hpp",
   "disposition": "infrastructure",
   "capability_keys": [],

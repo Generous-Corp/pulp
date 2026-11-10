@@ -225,7 +225,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         'include': 'pulp/host/graph_event_contract.hpp',
-        'fingerprint': 'sha256:bf803e0fdde789c98e307c9e0ebfce5e1a1445a4589abac4bb2e80a6522ec1db',
+        'fingerprint': 'sha256:1364609e77aee4e39fa3c1692e36c715ec9385856515dc3076d1de7ef0b0350a',
         'disposition': 'infrastructure',
         'capability_keys': [],
         'rationale': 'Bounded host and graph-authored event lane used by SignalGraph Custom-node callbacks; it is an infrastructure contract, not an independently advertised generator capability.',
