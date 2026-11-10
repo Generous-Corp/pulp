@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iomanip>
 #include <sstream>
 
 namespace fs = std::filesystem;
@@ -131,6 +132,14 @@ int main(int argc, char** argv) {
             for (const auto& d : graph.poll_live_dsp_telemetry().spectral)
                 require(d.first_error == 0, "replay diagnostics");
         }
+        double peak = 0, square = 0;
+        for (std::size_t i = 0; i < reference.size(); ++i) {
+            const double error = std::abs(reference[i] - wanted[i]);
+            peak = std::max(peak, error); square += error * error;
+        }
+        std::cout << std::setprecision(17) << "peak=" << peak << " rms="
+                  << std::sqrt(square / reference.size()) << " output_sha256="
+                  << hash(encode_control(reference)) << '\n';
         std::cout << "A3 saved inputs, asset digests, DFT/Hann/OLA oracle and partitions passed\n";
         return 0;
     } catch (const std::exception& e) {

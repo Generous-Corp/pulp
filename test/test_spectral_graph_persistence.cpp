@@ -121,6 +121,19 @@ TEST_CASE("Spectral identity and real-mask stages persist through existing typed
                                          asset_oracle::expected(inputs().a, inputs().b, control)));
 }
 
+TEST_CASE("Spectral replay matches independent numeric audio without a serialization proxy",
+          "[host][spectral][a3-replay-audio-oracle]") {
+    const auto original = fixture();
+    const auto saved = GraphSerializer::to_json(*original);
+    REQUIRE_FALSE(saved.empty());
+    SignalGraph loaded;
+    REQUIRE(GraphSerializer::from_json(loaded, saved).ok);
+    REQUIRE(loaded.prepare(48000, 4096));
+    const auto control = timeline();
+    REQUIRE_NOTHROW(asset_oracle::compare(render(loaded, control, 0),
+                                         asset_oracle::expected(inputs().a, inputs().b, control)));
+}
+
 TEST_CASE("Spectral asset corruption and unsupported contracts preserve the old prepared graph",
           "[host][spectral][replay][negative]") {
     const auto original = fixture();
