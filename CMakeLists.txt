@@ -1023,6 +1023,9 @@ endif()
 if(TARGET pulp-native AND (PULP_BUILD_TESTS OR PULP_BUILD_EXAMPLES))
     add_subdirectory(integrations/pulp-native/examples/metal-probe)
 endif()
+if(TARGET pulp-rmlui-native AND PULP_BUILD_TESTS)
+    add_subdirectory(integrations/rmlui-native/tests)
+endif()
 
 # ── CPU-only GPU-probe contract model (desktop tooling) ───────────────────
 # MCP remains available in GPU-disabled/package-stripped configurations, so
