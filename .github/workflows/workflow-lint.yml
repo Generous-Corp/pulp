@@ -151,6 +151,7 @@ on:
       - 'tools/scripts/test_node_build_deps_step.py'
       - 'tools/scripts/test_build_fetch_resilience.py'
       - 'tools/ci/net-retry.sh'
+      - 'tools/ci/apt-install-retry.sh'
       - 'tools/install-shipyard.sh'
       - 'tools/scripts/install_shipyard_token_check.py'
       - 'tools/scripts/test_install_shipyard_token_check.py'
