@@ -156,6 +156,7 @@ These directories prove a contract and are exercised by CI. Do not copy them as 
 | `spectral-frame-codec-consumer` | Spectral frame codec from an installed SDK (**SDK project**) | `ctest -R cmake-spectral-frame-codec-consumer` | `test/consumers/spectral-frame-codec-consumer` |
 | `timeline-sdk-consumer` | Timeline SDK closure, cookbook and chord renderer from an installed SDK (**SDK project**) | `ctest -R cmake-timeline-sdk-consumer` | `test/consumers/timeline-sdk-consumer` |
 | `graph-agent-loop` | Bounded agent loop over the public graph API (**SDK project**) | Configure as an SDK project | `test/consumers/graph-agent-loop` |
+| `graph-agent-loop-replay` | Save, edit, and replay a prepared stereo graph with planted refusal controls (**SDK project**) | Configure as an SDK project | `test/consumers/graph-agent-loop-replay` |
 | `graph-edge-probe` | Graph edge kinds from an installed SDK (**SDK project**) | Configure as an SDK project | `test/consumers/graph-edge-probe` |
 | `graph-control-event-probe` | Bounded control/event edge publication and planted mutation (**SDK project**) | Configure as an SDK project | `test/consumers/graph-control-event-probe` |
 | `gpu-fault-continuity` | Plugin that injects GPU faults for the host smoke test; needs `PULP_GPU_AUDIO_FAULT_HOOKS` | `pulp build --examples --target PulpGpuFaultContinuity_CLAP` | `test/consumers/gpu-fault-continuity` |
