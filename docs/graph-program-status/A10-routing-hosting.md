@@ -8,9 +8,11 @@ The required graph dependencies are present at exact merged heads:
 - G-1 named typed ports: PR [#11428](https://github.com/Generous-Corp/pulp/pull/11428), source head `be70e3c44836605ac1279c65a572e833699e1fbb`, merge `e19f556e67129117ef3a4587bff11fdee16ebf44`.
 - G-9 process-group cleanup: PR [#11667](https://github.com/Generous-Corp/pulp/pull/11667), source head `433d47e2413450323376cbf0b10e6e5ce28e6a2f`, merge `89c9be945120b9553f2983d265677292d4876caa`.
 
-Both merge commits are ancestors of the current main head. Open graph PRs
-#11679 (R2 evidence) is merged into this current main line; #11680 (MPE sidecars)
-and #11682 (A9) remain separate open lanes and do not own this A10 lane.
+Both merge commits are ancestors of the current main head. PRs
+[#11679](https://github.com/Generous-Corp/pulp/pull/11679) (R2 evidence),
+[#11680](https://github.com/Generous-Corp/pulp/pull/11680) (MPE sidecars), and
+[#11682](https://github.com/Generous-Corp/pulp/pull/11682) (A9) are merged;
+these separate graph lanes do not own this A10 evidence.
 
 ## Public API audit
 
