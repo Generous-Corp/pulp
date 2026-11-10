@@ -12,7 +12,7 @@ document was committed; the refresh merge now brings the PR to the current
 
 - Evidence source head used for build/test: `2f6aa0d90421a24c9c092c1bc96ab2dd34ad8914`.
 - `origin/main` at the original evidence handoff: `546051b66b44df141b7f0bec1217fa96e971022c`.
-- Current `origin/main` merged for this refresh: `8ec2c7adeeb14fec51b64633bcc5b20b1e7267ff`.
+- Current `origin/main` merged for this refresh: `04a6852f08e68c252a890c4eba0ded73c73adedd`.
 - Worktree: `codex/g7-qualification-20261109`, classified active as
   `g7-qualification-evidence`.
 - Configure: `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=OFF`.
@@ -76,3 +76,11 @@ that inventory does not establish provider or realtime availability.
 
 No prior qualification lane was revived, no duplicate implementation was
 created, and this lane did not arm, enqueue, approve, or merge a pull request.
+
+## Current-main reconciliation
+
+The branch now contains a non-rebased merge of `origin/main`
+(`04a6852f08e68c252a890c4eba0ded73c73adedd`). The bounded G7 tests and
+receipts above remain historical evidence from the stated source head; they
+were not rerun after this merge. The current-main source qualification lane is
+**NOT CHECKED**.
