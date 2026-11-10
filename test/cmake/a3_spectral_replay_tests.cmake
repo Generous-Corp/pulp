@@ -1,5 +1,7 @@
 add_executable(pulp-test-spectral-graph-persistence test_spectral_graph_persistence.cpp)
 target_link_libraries(pulp-test-spectral-graph-persistence PRIVATE pulp::host Catch2::Catch2WithMain)
+pulp_test_spawns(pulp-test-spectral-graph-persistence NONE
+    REASON "GraphSerializer inputs are generated in memory from closed built-in spectral and Audio nodes with no plugin or custom callback registered or loaded")
 catch_discover_tests(pulp-test-spectral-graph-persistence)
 
 # This records the pinned fixture using the same public consumer source. The

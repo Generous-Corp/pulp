@@ -1,9 +1,11 @@
 # A3 spectral save/replay workflow — 2026-11-10
 
 Status: source-backed plan admitted by lead; implementation in progress.
-Local governed Release persistence tests pass: 16,705 assertions in five cases.
+Local governed Release persistence tests pass: 16,724 assertions in six cases.
 Four actual production confirm_failure loops are confirmed with exact restoration.
-Installed-consumer, final numeric exit receipts and qualification remain pending.
+Installed public consumer passed positive/corrupt/restored/missing with exits
+0/42/0/42. All four production mutation receipts are 0/42/0. Final dependency
+integration, exact-head gates/publication and qualification remain pending.
 
 ## Dependency and checkout provenance
 
@@ -92,13 +94,15 @@ Full paced qualification, supported sanitizer lanes and remaining full G10
 obligations remain required after this replay slice. This document is bounded
 branch evidence; the lead owns planning roadmap and master-ledger updates.
 
-## Production mutation evidence (intermediate)
+## Production mutation evidence
 
 Each loop purged/rebuilt the production helper object and subject, passed its
 baseline, failed the intended assertion while broken, restored the exact source,
-and passed again. The driver reported CONFIRMED for all four. Explicit per-phase
-numeric exit receipts remain to be recorded; these intermediate logs do not
-substitute for the final receipt.
+and passed again. The driver reported CONFIRMED for all four. Explicit per-phase numeric logs confirm baseline 0, broken 42, restored 0 for
+each mutation; each `confirm_failure.sh` driver exited 0. The first rerun
+attempt was INCONCLUSIVE (driver 2) because a semicolon in the no-spawn reason
+prevented baseline CMake configuration. It changed no production source and
+was rerun successfully after fixing the declaration.
 
 | Mutation | Test observation while broken |
 |---|---|
@@ -111,3 +115,30 @@ The wrong-asset mutation selects `[a3-replay-audio-oracle]`, which has no
 serialization equality proxy. The other three select `[negative]`. The valid
 alternative canonical-byte digest control is retained unchanged in the final
 source. No morph DSP or codec wire format was edited.
+
+## Verification at the independent persistence milestone
+
+- Full governed Release build completed twice, including the complete Node
+  registration profile after installing locked jsx-runtime dependencies.
+- Focused persistence: 16,724 assertions in six cases. Legacy serializer:
+  4,391 assertions in 58 cases. No unrelated legacy restore contract changed.
+- Installed consumer uses only `find_package(Pulp COMPONENTS host)`, public
+  headers and `Pulp::host`. Its 148-line glue checks saved input hashes before
+  loading, save/load/save bytes, independent numeric output and all partitions.
+  Installed positive/corrupt/restored/missing exits: **0/42/0/42**.
+- Production mutation baseline/broken/restored exits: **0/42/0** for digest,
+  metadata/length binding, edge-kind validation and wrong-asset selection.
+- Official complete-profile inventory was generated to a temporary destination;
+  only `test/ctest_script_inputs/executables/pulp-test-spectral-graph-persistence.json`
+  was selected for this branch. No public transitive loader API was added and
+  existing loader coverage reports no gaps; no scanner rule was changed.
+- Source gates correctly refuse source-selftest/build/diff-coverage suites on
+  this dedicated-builder host. Those lanes remain NOT CHECKED locally. The
+  examples-index entry, clang-format-21 changes and hosting skill note address
+  the actionable local findings; final gates must be rerun before push.
+
+Repaired notation dependency is still OPEN at
+`7704749e0860016662491d128013ac34b6b19f42`, and G5 owns the unpublished shared
+format-5 discriminator/migration scaffold. This branch has not copied or
+published either dependency. Notation integration and a complete unarmed PR
+remain pending those coordinated dependencies.
