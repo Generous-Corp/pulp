@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/true_peak_limiter.hpp",
+  "fingerprint": "sha256:027278e6f446a6eb769576cea18e0007648d7d5bcd25231023f1d09a844a84ca",
+  "include": "pulp/signal/true_peak_limiter.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.true-peak-limiter"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

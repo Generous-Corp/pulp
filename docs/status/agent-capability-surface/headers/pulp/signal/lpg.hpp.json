@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/lpg.hpp",
+  "fingerprint": "sha256:ab452f860d7e5fdd7407d9af9fecdbfe3b75112e0df617444a5c06a44a109b75",
+  "include": "pulp/signal/lpg.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

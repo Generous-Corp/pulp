@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/spectral_band_mask.hpp",
+  "fingerprint": "sha256:4875ea02702d6720a84c14103dd45ba7bc2f157ba43c163772e7c40011bf79d5",
+  "include": "pulp/signal/spectral_band_mask.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.spectral-band-mask"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

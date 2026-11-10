@@ -70,6 +70,14 @@ TOOLS: Tuple[Tuple[str, str, Tuple[str, ...], str], ...] = (
     ("node", "node", ("node",), r"^v([0-9]+\.[0-9]+\.[0-9]+)"),
     ("rust", "rustc", ("rustc",), r"rustc ([0-9]+\.[0-9]+\.[0-9]+)"),
     ("clang_format", "clang-format", ("clang-format",), r"clang-format version ([0-9]+\.[0-9]+\.[0-9]+)"),
+    # ccache prints "4.14" for a .0 release; the pin is always x.y.z.
+    ("ccache", "ccache", ("ccache",), r"ccache version ([0-9]+\.[0-9]+(?:\.[0-9]+)?)"),
+    ("git_lfs", "git-lfs", ("git-lfs",), r"git-lfs/([0-9]+\.[0-9]+\.[0-9]+)"),
+)
+XCODE_FIX = (
+    "install Xcode {version} ({build}) as /Applications/Xcode.app, the path the goldens use, then "
+    "`sudo xcode-select -s /Applications/Xcode.app && sudo xcodebuild -license accept && "
+    "sudo xcodebuild -runFirstLaunch` (an admin step; agents cannot run it)"
 )
 
 
@@ -204,6 +212,9 @@ def check_tools(
     os_name = plat.split("-", 1)[0]
     overrides = expected.get("platform_overrides", {}).get(os_name, {})
     for key, display, exes, pattern in TOOLS:
+        # An expectation written before a tool was pinned does not name it.
+        if key not in expected["tools"]:
+            continue
         want = expected["tools"][key]
         override = overrides.get(key)
         fix = rust_fix(expected) if key == "rust" else ACTIVATE_FIX
@@ -230,6 +241,33 @@ def check_tools(
             note = f"platform.{os_name} {key} = absent, but one is on PATH"
         findings.append(Finding(display, want, found, path, fix, note))
     return findings
+
+
+def check_xcode(
+    expected: dict, plat: str, which: Callable[[str], Optional[str]], run: Runner,
+) -> List[Finding]:
+    """The selected Xcode must be the pinned version and build. A host or guest
+    on another Xcode builds with another clang, so its results are not the
+    gate's and it can never hit the gate's ccache (compiler_check=content)."""
+    pin = expected.get("xcode")
+    if not plat.startswith("macos-") or not isinstance(pin, dict):
+        return []
+    want = f"{pin['version']} ({pin['build']})"
+    fix = XCODE_FIX.format(version=pin["version"], build=pin["build"])
+    path = which("xcodebuild")
+    if path is None:
+        return [Finding("xcode", want, "nothing", "PATH", fix, "no xcodebuild")]
+    text = run([path, "-version"], None) or ""
+    version = re.search(r"^Xcode ([0-9]+\.[0-9]+(?:\.[0-9]+)?)", text, re.M)
+    build = re.search(r"^Build version ([0-9A-Za-z]+)", text, re.M)
+    if version is None or build is None:
+        # Command Line Tools alone answer "requires Xcode"; a hung or unlicensed
+        # Xcode answers nothing parseable. Either way it is not the pin.
+        found = "Command Line Tools only" if "requires Xcode" in text else "unknown"
+        return [Finding("xcode", want, found, path, fix)]
+    if version.group(1) == pin["version"] and build.group(1) == pin["build"]:
+        return []
+    return [Finding("xcode", want, f"{version.group(1)} ({build.group(1)})", path, fix)]
 
 
 def check_mise(
@@ -369,6 +407,7 @@ def collect(
     return (
         tools
         + parts
+        + check_xcode(expected, plat, which, run)
         + check_mise(expected, plat, which, run, home)
         + check_caches(home, exists)
         + check_npm(expected, root)

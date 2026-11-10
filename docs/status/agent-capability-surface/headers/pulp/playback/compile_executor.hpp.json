@@ -1,0 +1,9 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/compile_executor.hpp",
+  "fingerprint": "sha256:047d2b5985fd195f281f501c42435de4b1865140bbebbbe7860cca00a2c4ce44",
+  "include": "pulp/playback/compile_executor.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "CompileSliceBudget, CompileTaskStatus, the abstract CompileTask and CompileExecutor interfaces, and the DeferredCompileExecutor. It is scheduling infrastructure that lets compilation be sliced against a budget, with no capability surface of its own."
+}

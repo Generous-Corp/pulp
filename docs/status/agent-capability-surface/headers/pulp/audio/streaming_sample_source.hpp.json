@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/streaming_sample_source.hpp",
+  "fingerprint": "sha256:c6545cbfd9556d958a6b3a8768b0c0358e654d228cc99fdb1655ac8b4d4d56f9",
+  "include": "pulp/audio/streaming_sample_source.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Preloaded-head plus streamed-tail sample source with a background reader woken by the audio thread; the sampler's disk-streaming infrastructure, with no generator capability claim of its own."
+}

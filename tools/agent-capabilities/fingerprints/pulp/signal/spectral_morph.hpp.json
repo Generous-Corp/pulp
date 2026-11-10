@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/spectral_morph.hpp",
+  "fingerprint": "sha256:0991d2973294306182824a6d8b579007946dff976407511ce064774677c1adb3"
+}

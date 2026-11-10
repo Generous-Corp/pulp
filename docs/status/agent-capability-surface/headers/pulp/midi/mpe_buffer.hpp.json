@@ -1,0 +1,11 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/mpe_buffer.hpp",
+  "fingerprint": "sha256:9b08b7224b5ce9c5aa833547fccd1827d70b18445d0c14fc3775bc21eb072cfb",
+  "include": "pulp/midi/mpe_buffer.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "midi.mpe-voice-tracker"
+  ],
+  "rationale": "Transactional prepared event storage and tracker binding support MPE voice ownership but are not a distinct musical transform."
+}

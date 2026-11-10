@@ -59,6 +59,16 @@ npm trees each checkout installs for itself (`pulp deps resolve`).
 `tools/toolchain/fleet_report.py` runs the check over ssh on several hosts and
 prints one drift table; it installs nothing.
 
+The check also covers what mise does not install. On macOS it reports a
+selected Xcode whose version **or build** differs from `xcode`/`xcode_build`
+(Command Line Tools alone report as such), and it reports `ccache` and
+`git-lfs`, which used to come unpinned from Homebrew and are now locked. Xcode
+is never installed by mise or `host_sync.py`: a host on another Xcode needs an
+admin to install the pinned one as `/Applications/Xcode.app` (the path the
+goldens use too, so hosts and VMs share ccache). ccache prints `4.14` for a
+`.0` release; the pin is always `x.y.z`. conda-forge has no windows-arm64
+ccache, so that lock platform is `unlocked`, as for clang-format.
+
 Read the versions a build actually used from its CMakeCache and configure log
 (`CMAKE_COMMAND`, `CMAKE_MAKE_PROGRAM`, `Found Python3`), not from the profile.
 On macOS, CMake's FindPython prefers a Python.framework install over PATH; the

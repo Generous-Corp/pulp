@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/osc/phase.hpp",
+  "fingerprint": "sha256:038ed76c73f627b3513ed78bda8027a1b94fa50aac33ffbbc64404f1fde47687",
+  "include": "pulp/signal/osc/phase.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/log_ramped_value.hpp",
+  "fingerprint": "sha256:eb488df3faa601ed2a3cae8d01d881e8df33c81c4cb84bb43dc2261f12e40d96",
+  "include": "pulp/signal/log_ramped_value.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

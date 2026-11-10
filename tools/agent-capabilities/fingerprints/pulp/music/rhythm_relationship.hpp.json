@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/music/rhythm_relationship.hpp",
+  "fingerprint": "sha256:bcb234becb7b912a516ebf4d33152fcbf4e326b59251a5977b4c1a2e653de433"
+}

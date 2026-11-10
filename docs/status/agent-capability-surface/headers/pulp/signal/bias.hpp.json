@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/bias.hpp",
+  "fingerprint": "sha256:e1b90f23d44c752132d0feb9e5873a03069a32cf40f9631098d2019231f696d8",
+  "include": "pulp/signal/bias.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

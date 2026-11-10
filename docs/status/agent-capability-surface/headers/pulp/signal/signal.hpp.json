@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/signal.hpp",
+  "fingerprint": "sha256:26407cd80b39ea50a5d842c23c91a7d0136f5efdad6be9a52a8f381c427df22b",
+  "include": "pulp/signal/signal.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "This is the signal module umbrella include; it exposes no distinct consumer capability beyond the headers it aggregates."
+}

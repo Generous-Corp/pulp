@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/waveguide_junction.hpp",
+  "fingerprint": "sha256:3b2bfa32d07f91fc6bdbde2e1544df94b1d0646aca287bb88db58257902cf70d"
+}
