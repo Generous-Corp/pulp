@@ -684,6 +684,14 @@ TEST_CASE("dithered PCM silence with an .mp3 hint gains no frames from the trail
     const auto bytes = dithered_pcm_silence(1);
     CHECK(pulp::audio::AudioReader::open_memory(bytes, ".mp3") == nullptr);
     CHECK(pulp::audio::AudioReader::open_memory(bytes) == nullptr);
+
+    // dr_mp3 has always synced on this buffer as Layer I and decoded 1536
+    // frames. Decoding a synced Layer I frame whatever follows it would
+    // stretch the false run to 1920.
+    const auto synced = dithered_pcm_silence(1402);
+    auto reader = pulp::audio::AudioReader::open_memory(synced, ".mp3");
+    REQUIRE(reader != nullptr);
+    CHECK(reader->info().num_frames == 1536u);
 }
 
 TEST_CASE("a WAV whose bext chunk is shorter than its fixed fields is refused without allocating",
