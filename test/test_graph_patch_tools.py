@@ -8,7 +8,7 @@ import tempfile
 
 
 def run(args, *, data=None, cwd=None):
-    return subprocess.run([str(a) for a in args], input=data, text=True,
+    return subprocess.run([str(a) for a in args], input=data, text=True, encoding="utf-8",
                           capture_output=True, timeout=30, cwd=cwd)
 
 
