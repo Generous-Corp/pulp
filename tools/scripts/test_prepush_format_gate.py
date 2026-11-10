@@ -62,6 +62,11 @@ def branch(block: str, code: str) -> str:
     return m.group(1) if m else ""
 
 
+# A failing arm either sets fail=1 directly or goes through prepush_fail, which
+# sets it and names the gate.
+_FAILS = re.compile(r"\bfail=1\b|\bprepush_fail\b")
+
+
 def check_shell_caller(path: Path, anchor: str, label: str) -> None:
     text = path.read_text(encoding="utf-8")
     block = case_block(text, anchor, label)
@@ -72,13 +77,13 @@ def check_shell_caller(path: Path, anchor: str, label: str) -> None:
     if not one or not three:
         fail(f"{label}: the case block must handle both exit 1 and exit 3 explicitly")
         return
-    if "fail=1" in three:
+    if _FAILS.search(three):
         fail(f"{label}: exit 3 (no clang-format) sets fail=1 — a missing binary is reported as a formatting failure")
     if "INFRASTRUCTURE" not in three:
         fail(f"{label}: exit 3 must say INFRASTRUCTURE so nobody reads it as a verdict")
     if '"${PULP_ENFORCE_PREPUSH_FORMAT:-1}" = "1"' not in one:
         fail(f"{label}: exit 1 must block by default, demoted only by PULP_ENFORCE_PREPUSH_FORMAT=0")
-    if "fail=1" not in one:
+    if not _FAILS.search(one):
         fail(f"{label}: exit 1 never sets fail=1, so the gate cannot block")
     if "tools/scripts/format_changed.sh" not in one:
         fail(f"{label}: the exit 1 message must name the fix command")
@@ -98,6 +103,7 @@ def run_block(block: str, stub_exit: int, env_value: str | None) -> int:
         stub.write_text(f"#!/bin/sh\nexit {stub_exit}\n", encoding="utf-8")
         script = ("fail=0\nBASE=origin/main\n"
                   'run_gate_captured() { "$@"; }\n'
+                  'prepush_fail() { fail=1; }\n'
                   f'FMT="{stub}"\n{block}\necho "fail=$fail"\n')
         env = {k: v for k, v in os.environ.items() if k != "PULP_ENFORCE_PREPUSH_FORMAT"}
         if env_value is not None:
