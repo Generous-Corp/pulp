@@ -1,0 +1,99 @@
+{
+  "schema": "g7-any-edge-local-evidence-v1",
+  "source_producer": "2e299b27b3b854ef5d4f8228fb32668e7e2ba6e8",
+  "base": "6c3ff80830797c201931a63b893c512686329e3e",
+  "runtime_implementation_commit": "9d0bbb897d8bc979cf1571714a90f9631fdd98b0",
+  "platform": "darwin-arm64",
+  "build_type": "Release",
+  "gpu": false,
+  "toolchain": "host tools; initial configure reported manifest drift; no locked-toolchain claim",
+  "source_sha256": {
+    "core/format/src/graph_runtime_executor.cpp": "2518c4b3673d9f342bc90a94feb15b6a326ddb16e29d4d6b14140bce0e78df50",
+    "core/host/src/signal_graph_diagnostics.cpp": "410015de2e011339a7805dd2ec4e55fe6cc14f84d1ed26c97f32b2acf7bcf34a",
+    "core/graph/include/pulp/graph/graph_runtime_probe.hpp": "a1adc1abc5544ab8c94fa3352fdc0b9ed1e4a82c2e894ed78cbc1c7fa42bccfe",
+    "core/format/include/pulp/format/graph_runtime_executor.hpp": "0984ac2cba480187a9baae737908251d5e6f4f5bf5ef6636b14d3f603a146383",
+    "core/host/include/pulp/host/signal_graph_runtime.hpp": "2b14aa19fc2f6038a53eb8c3e75536327b76b6a2ba874f51ba6aedffacadfd6d",
+    "test/test_graph_control_event_probe.cpp": "2fcf6d15e816259c4a8b06ed00176e3ae292d418817cd49dade63d48d548a4df",
+    "test/test_signal_graph_executor_parity.cpp": "bbf8ddad19d163c4fed136bf7102f22c786fe9117a83dd7b5e470b472be89796",
+    "examples/graph-control-event-probe/main.cpp": "692dfc012536f2787b821a5f64733d0dc5139eb53e33b3f1a56a7e31cc3de1b3"
+  },
+  "artifacts": [
+    {
+      "path": "/Volumes/Workshop/Code/agent-worktrees/g7-any-edge-probes-20261110/build-g7/test/pulp-test-graph-control-event-probe",
+      "size": 7399264,
+      "sha256": "2c7fff3626ea1100db26ab5644ec72c8ea0469bc4b2436552609f01510cac8f2"
+    },
+    {
+      "path": "/Volumes/Workshop/Code/agent-worktrees/g7-any-edge-probes-20261110/build-g7/test/pulp-test-signal-graph-executor-parity",
+      "size": 7947976,
+      "sha256": "3f89b369bf8ef693953756681a95a960cdf75e3e13d69dfb8a4563649bbbe9fd"
+    },
+    {
+      "path": "/Volumes/Workshop/Code/agent-worktrees/g7-any-edge-probes-20261110/build-g7/final-sdk-consumer/pulp-graph-control-event-probe",
+      "size": 219040,
+      "sha256": "b31515dddcc6a8d2bc8cc81e226b62603a9dee5caeb19c2d36b3d9c19f8f1795"
+    },
+    {
+      "path": "/Volumes/Workshop/Code/agent-worktrees/g7-any-edge-probes-20261110/build-g7/sdk-2e299b27/lib/libpulp-format-core.a",
+      "size": 1520200,
+      "sha256": "c587468f1f54fa1b5b8c3a34c53da0f4bee6f61e0966394dd94c8dcfd3f1dceb"
+    },
+    {
+      "path": "/Volumes/Workshop/Code/agent-worktrees/g7-any-edge-probes-20261110/build-g7/sdk-2e299b27/lib/libpulp-graph.a",
+      "size": 54664,
+      "sha256": "d6ca69c8b4c84192dfebe944d35794235f817961421a30b1839cd2cf8b97f4fa"
+    },
+    {
+      "path": "/Volumes/Workshop/Code/agent-worktrees/g7-any-edge-probes-20261110/build-g7/full-build.log",
+      "size": 1541339,
+      "sha256": "8130e32909ecf1e3b1f0c315e4de57699de8449ea9aff5b1427807e456c52d53"
+    }
+  ],
+  "tests": {
+    "control_event": {
+      "cases": 4,
+      "assertions": 1900
+    },
+    "executor": {
+      "cases": 74,
+      "assertions": 50394
+    },
+    "installed_sdk": {
+      "passed": 3,
+      "total": 3
+    }
+  },
+  "production_mutations_confirmed": [
+    "audio-publication",
+    "feedback-current-source",
+    "dense-publication",
+    "dense-current-source",
+    "dense-pdc-current-source"
+  ],
+  "normal_gate_status": "NOT COMPLETE: initial normal gate stopped at now-repaired host-header fingerprint; full source/coverage policy reproducibly refuses dedicated-builder host with exit 4; eligible slot held by lead",
+  "publication": {
+    "pr": null,
+    "pushed": false,
+    "approved": false,
+    "armed": false,
+    "enqueued": false,
+    "merged": false
+  },
+  "remaining": [
+    "eligible full applicable normal gates and coverage",
+    "one shipyard pr --base main --no-arm after gates",
+    "actual merged native G5 Control dependency",
+    "separate actual G2 loader/catalog positive-control CLI/MCP parity",
+    "full original G7 phase qualification and independent merged-phase review"
+  ],
+  "full_build_scope": "Governed all-target Release build completed on predecessor working tree before final fixture/docs-only changes. Final changed targets and independent installed consumer rebuilt at clean source producer. Full final normal gates are not claimed.",
+  "advisory_review": {
+    "engine": "codex via Subrouter",
+    "mode": "branch",
+    "base": "6c3ff80830797c201931a63b893c512686329e3e",
+    "source_head": "2e299b27b3b854ef5d4f8228fb32668e7e2ba6e8",
+    "result": "patch is correct; no accepted/actionable findings",
+    "counted_approval": false,
+    "command": "/Users/danielraffel/.codex/skills/autoreview/scripts/autoreview --mode branch --base 6c3ff80830797c201931a63b893c512686329e3e --codex-bin /Volumes/Workshop/Code/agent-worktrees/g7-any-edge-probes-20261110/build-g7/review-codex --prompt-file build-g7/review-context.md --output build-g7/final-autoreview.md --json-output build-g7/final-autoreview.json"
+  }
+}
