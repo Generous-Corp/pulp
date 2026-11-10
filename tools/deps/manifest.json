@@ -1338,7 +1338,7 @@
       "documented_in_notice_md": true,
       "notes": "Prebuilt via skia-builder (danielraffel fork: https://github.com/danielraffel/skia-builder) for Pulp rendering. The fork tracks olilarkin/skia-builder's tag pattern and adds iOS device/simulator, visionOS, mac-x86_64, Windows ARM64, and Skia.xcframework slices the upstream does not ship. The chrome/m158 release ships all required platform slices including linux-arm64 and the native jsonreader/skresources archives. Its two Linux archives were re-cut from the same Skia revision with skia_use_partition_alloc = false (skia-builder run 41466672481); the release notes' replacement ledger records both digests. Visual harness determinism locks Skia plus its bundled HarfBuzz and ICU DEPS revisions; regenerate raster goldens only when any pinned Skia asset, bundled text dependency, font file, or sampler/render configuration changes.",
       "vellum_renderer_drift_check": {
-        "note": "tools/deps/audit.py --strict reads gpu-runtime's renderer lock at this commit, which must equal vellum-gpu-runtime's upstream.commit, and fails unless its macos-arm64 sha256 equals release_assets.mac-universal.sha256 and its milestone equals this entry's version. PULP_VELLUM_CHECKOUT=<vellum checkout> reads the same commit from a local clone instead of raw.githubusercontent.com.",
+        "note": "tools/deps/audit.py --strict reads gpu-runtime's renderer lock at this commit, which must equal vellum-gpu-runtime's upstream.commit, and fails unless its macos-arm64 sha256 equals release_assets.mac-universal.sha256, every other mac-* release asset carries that same digest (an x86_64-only or arm64-only macOS build forwards to gpu-runtime too, and its lock pins one macOS asset), and its milestone equals this entry's version. PULP_VELLUM_CHECKOUT=<vellum checkout> reads the same commit from a local clone instead of raw.githubusercontent.com.",
         "repository": "https://github.com/Generous-Corp/vellum",
         "commit": "14bd4c5e430bc8da6b4204f1daa8a1bdbc6b7f3a",
         "path": "gpu-runtime/renderer-lock.json",
@@ -1378,8 +1378,8 @@
             "sha256": "dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250"
           },
           "mac-x86_64": {
-            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m158/skia-build-mac-x86_64-gpu-release.zip",
-            "sha256": "2a795f54bb22feb46a499d56740f98a15b6e95bfdf5923b82b222ef95edb2f47"
+            "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m158/skia-build-mac-universal-gpu-release.zip",
+            "sha256": "dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250"
           },
           "wasm-wasm32": {
             "url": "https://github.com/danielraffel/skia-builder/releases/download/chrome/m158/skia-build-wasm-wasm32-gpu-release.zip",

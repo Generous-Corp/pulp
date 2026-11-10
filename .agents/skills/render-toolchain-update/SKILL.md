@@ -366,7 +366,13 @@ retain those fields in the PR/landing evidence.
   `vellum-gpu-runtime` entry's `upstream.commit` (the gpu-runtime Pulp builds
   against, `tools/cmake/PulpGpuRuntime.cmake`), and fails unless the lock's
   `macos-arm64.sha256` and `milestone` equal Pulp's
-  `release_assets.mac-universal.sha256` and Skia `version`. A milestone bump
+  `release_assets.mac-universal.sha256` and Skia `version`. The lock pins one
+  macOS asset, and every macOS build forwards to gpu-runtime, so the audit also
+  requires every `mac-*` key (`mac-arm64`, `mac-x86_64`) to carry that universal
+  digest. Never point `mac-x86_64` back at the thin x86_64 archive: its objects
+  are byte-identical to the universal x86_64 slice, but its `.a` digests are not,
+  so every Intel build (the `darwin-x64` release leg) fails gpu-runtime's Dawn
+  check at configure. A milestone bump
   therefore lands in Vellum's lock first, then one Pulp change moves the Skia
   entry, the drift-check commit and the gpu-runtime pin together; pointing
   either commit elsewhere is the negative control. The read is fail-closed (no
