@@ -429,7 +429,13 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         runtime::log_error("SignalGraph: connection identity metadata is out of sync");
         return nullptr;
     }
-    auto cg = std::make_shared<CompiledGraph>(!compiling_trigger_state_);
+    // Trigger generations normally omit the ordinary MIDI egress scratch, but
+    // a G-5 host-ingress generation may carry a routed MidiOutput sink.  Keep
+    // that fixed scratch available whenever the topology admits one.
+    const bool has_midi_output = std::any_of(nodes_.begin(), nodes_.end(), [](const auto& node) {
+        return node.type == NodeType::MidiOutput;
+    });
+    auto cg = std::make_shared<CompiledGraph>(!compiling_trigger_state_ || has_midi_output);
     cg->execution_generation = authoring_generation_;
     if (std::any_of(nodes_.begin(), nodes_.end(),
                     [](const auto& n) { return n.spectral_identity.has_value(); })) {
@@ -443,6 +449,12 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
     if (!cg->spectral)
         cg->legacy_processing_lifetime = processing_handle_lifetime_;
     cg->sample_rate = sample_rate;
+    if (graph_event_edge_) {
+        cg->graph_event_edge = *graph_event_edge_;
+        cg->graph_event_lane = std::make_shared<GraphAuthoredEventLane<>>();
+        if (cg->graph_event_lane->reset(cg->graph_event_epoch) != GraphEventResult::Accepted)
+            return nullptr;
+    }
     cg->sample_region_bank = prepared_sample_region_bank_;
     cg->sample_regions = prepared_sample_regions_;
     cg->custom_registry_generation = custom_registry_generation_; // 2.2b predicate (M6)
@@ -598,9 +610,12 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         }
         auto [runtime_it, inserted] = cg->runtime.emplace(n.id, std::move(rt));
         (void)inserted;
-        // Typed plans reject MIDI nodes and callbacks before compilation. Do not
-        // duplicate unused MIDI/SysEx arenas in their bounded generations.
-        if (!compiling_trigger_state_) {
+        // Every admitted routed generation owns fixed MIDI/UMP/MPE scratch.
+        // Trigger plans now admit the serial host-ingress lane, so leaving
+        // these arenas unprepared would make the graph silently drop the
+        // projected payload before a Processor or MidiOutput can consume it.
+        if (!compiling_trigger_state_ || n.type == NodeType::MidiInput ||
+            n.type == NodeType::MidiOutput || n.type == NodeType::Plugin) {
             prepare_midi_block_storage(runtime_it->second.midi_in, runtime_it->second.midi_in_ump);
             prepare_midi_block_storage(runtime_it->second.midi_out,
                                        runtime_it->second.midi_out_ump);
@@ -1044,6 +1059,11 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         cg->routed.serial.valid = build_routing_snapshot_locked_(
             *cg, /*parallel_safe=*/false, cg->routed.serial.plugin_ctx,
             cg->routed.serial.custom_ctx, cg->routed.serial.snapshot);
+        for (auto& context : cg->routed.serial.custom_ctx) {
+            context.graph_event_lane = cg->graph_event_lane;
+            context.graph_event_edge = cg->graph_event_edge;
+            context.graph_event_epoch = cg->graph_event_epoch;
+        }
         // Size THIS snapshot's own scratch pool (per-snapshot, retired with the
         // snapshot via RCU — never resized under an in-flight reader).
         if (cg->routed.serial.valid && max_block_size > 0) {
@@ -1069,6 +1089,8 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                 const auto kind = plan.nodes[i].kind;
                 if (kind == graph::GraphRuntimeNodeKind::MidiInput) {
                     cg->routed.midi_inputs.push_back({i, plan.nodes[i].id});
+                    if (cg->trigger_state != nullptr && cg->host_event_midi_input == 0)
+                        cg->host_event_midi_input = plan.nodes[i].id;
                     plan_has_midi = true;
                 } else if (kind == graph::GraphRuntimeNodeKind::MidiOutput) {
                     cg->routed.midi_outputs.push_back({i, plan.nodes[i].id});
@@ -1127,6 +1149,11 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
             bool ok = build_routing_snapshot_locked_(
                 *cg, /*parallel_safe=*/true, cg->routed.parallel.plugin_ctx,
                 cg->routed.parallel.custom_ctx, cg->routed.parallel.snapshot);
+            for (auto& context : cg->routed.parallel.custom_ctx) {
+                context.graph_event_lane = cg->graph_event_lane;
+                context.graph_event_edge = cg->graph_event_edge;
+                context.graph_event_epoch = cg->graph_event_epoch;
+            }
             if (ok) {
                 cg->routed.parallel.levelization =
                     graph::build_graph_runtime_levelization(cg->routed.parallel.snapshot.plan());

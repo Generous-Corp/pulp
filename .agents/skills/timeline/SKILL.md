@@ -2890,10 +2890,18 @@ Adding a structural ceiling to `DecodeLimits` means adding a row to
 a ceiling with no axis is a quota the sweep silently never exercises.
 
 `PULP_ENABLE_FUZZING=ON` builds the coverage-guided target and is **off by
-default**: `-fsanitize=fuzzer` needs a compiler runtime Apple's clang does not
-ship, so on macOS it requires a Homebrew LLVM. The configure step fails with
-that cause named rather than at link time. The deterministic replay needs no
-special toolchain and is the lane that runs on the PR path.
+default**. Every libFuzzer target gets its driver through
+`pulp_fuzz_instrument_target()` (tools/cmake/PulpTestSuite.cmake), which also
+probes the toolchain once per configure and fails with the cause named rather
+than at link time. Apple's clang ships no `-fsanitize=fuzzer` driver, but it
+accepts `fuzzer-no-link`, so on macOS set `PULP_FUZZ_RUNTIME_ARCHIVE` to
+Homebrew LLVM's `libclang_rt.fuzzer_osx.a` (same LLVM major as the Xcode
+clang) instead of switching compilers; Homebrew clang's libc++ does not
+compile against current macOS SDK math headers. Under this option the whole
+tree is compiled with `fuzzer-no-link` plus ASan, so a target's coverage
+reaches the timeline decoders it calls, not only its own entry file. The
+deterministic replay needs no special toolchain and is the lane that runs on
+the PR path.
 
 The same `if(PULP_ENABLE_FUZZING)` block in `test/cmake/timeline_tests.cmake`
 also registers `pulp-fuzz-smf` (`test/fuzz/smf_fuzz_target.cpp`), the

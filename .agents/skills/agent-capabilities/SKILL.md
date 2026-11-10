@@ -95,6 +95,13 @@ headers). A legacy header whose bytes change (`wav_decoder.hpp` gaining
 kind of row; `--write` then reports it as reviewed and the baseline count
 shrinks by one.
 
+The fingerprint is over the header's bytes, so a comment-only edit to a covered
+header costs the same row and inventory bump as a signature change; when a
+contract note or a behavior fix can live in the `.cpp`, put it there. A
+header-only class such as `sample_resource.hpp` has no `.cpp` to hide in, so
+its fix takes the row and the bump; say so in the commit rather than reverting
+the fix to dodge the gate.
+
 ## Public-header fingerprint refresh
 
 Change the reviewed fingerprint in `agent_capability_registry.py` only, bump
@@ -263,7 +270,7 @@ For a new public header or symbol:
 4. Leave `SURFACE_INVENTORY_VERSION` and `MANIFEST_REVISION` at the base
    value; the version-at-land bump assigns them (see the top of this skill).
 
-Worked example (2026-11-07): extending `pulp/signal/spectrogram.hpp`
+Worked example: extending `pulp/signal/spectrogram.hpp`
 (FrequencyAxis double overloads) changed the bytes of a header the ledger held
 as frozen `legacy_unreviewed`. The fix was step 3, not a fingerprint refresh:
 add an `infrastructure` row for it in `agent_capability_registry.py` with the
@@ -1227,7 +1234,10 @@ and only some of them run in `gates.sh`:
 
 Keep one include root per module. The Doxygen parity check accepts a second
 public install root only by name, so a module that installs `audio/include`
-beside `include` fails it.
+beside `include` fails it. The same holds for a package outside `core/`
+(`integrations/pulp-native/include`): name its root in
+`doxygen_installed_header_check.py` and add it to the Doxyfile `INPUT`, or the
+check reports "unsupported independent public-header install authority".
 
 ## `gates.sh` does NOT run the capability check — adding a public header passes pre-push and fails in CI
 
@@ -1902,3 +1912,39 @@ an existing renderer or example, changing a widget label) adds no public header
 and changes no installed capability key. Run
 `python3 tools/docs_generate.py generate` so the generated limitations block
 follows the matrix, and do not touch the capability manifest for it.
+
+## Editing `processor.hpp` needs a fingerprint refresh in the catalog-performance script
+
+`tools/scripts/agent_capability_catalog_performance.py` pins
+`pulp/format/processor.hpp`'s SHA-256 in its `processor-hook` binding. Any byte
+change to the header (a new non-virtual member counts) makes `--write`,
+`--check` and `agent_capability_rederive.py` fail with `public header
+fingerprint mismatch for pulp/format/processor.hpp` and no other hint. Set
+`header_fingerprint` to `shasum -a 256 core/format/include/pulp/format/processor.hpp`
+after the final edit (re-hash if you format or edit again), then run
+`agent_capability_manifest.py --write`; for a side-table accessor like
+`set_midi_learn_engine` no registry classification or counter change followed.
+
+## G-5 host ingress header refresh
+
+The host-event ingress adapter changes `pulp/host/graph_event_contract.hpp`
+(reviewed as infrastructure) and `pulp/host/signal_graph_runtime.hpp`. Refresh
+the registry fingerprint and the `agent_capability_catalog_signal.py` binding
+fingerprints to the merged header bytes, then regenerate with
+`agent_capability_manifest.py --write`. Leave `SURFACE_INVENTORY_VERSION`
+alone: the surface change stays pending until version-at-land assigns it, and
+the history keeps main's line-per-entry storage rather than a compact rewrite.
+## Merging main into a branch that rewrote the contract history
+
+A branch older than the digest-keyed history format (see the top of this
+skill) may carry its own re-encoding of
+`tools/agent-capabilities/contract-history.json`, for example a one-line
+compact dump, and a `render_history()` helper to write it. On merge, take
+main's history file and generator (`git checkout origin/main --
+tools/agent-capabilities/contract-history.json
+tools/scripts/agent_capability_manifest.py`), drop the branch's helper and its
+tests, then re-apply only the branch's real counter or fingerprint changes and
+run `--write` and `--check`. Never keep the branch's history blob: it shows up
+as millions of deleted lines and replaces main's format. Worked example
+(2026-11-08, the G5 host-ingress adapter): after the merge, the diff against
+main shrank from -2,530,508 lines to the PR's own 15 files.

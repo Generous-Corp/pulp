@@ -275,7 +275,7 @@ bool MemoryMappedAudioReader::read_frames_impl(float** dest_channels, uint32_t n
                 for (uint32_t channel = 0; channel < ch_count; ++channel) {
                     dest_channels[channel][frame] = detail::decode_aiff_pcm_sample(
                         source_frame + static_cast<size_t>(channel) * layout.bytes_per_sample,
-                        layout.info.bits_per_sample);
+                        layout.info.bits_per_sample, layout.little_endian);
                 }
             }
             return true;

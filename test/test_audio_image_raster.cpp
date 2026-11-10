@@ -11,7 +11,7 @@
 // PNGs with the change that moved them and say why in the commit message.
 // Both comparison and regeneration go through ImageIO, so the golden cases
 // run on macOS (the required gate) and skip elsewhere; every other case runs
-// everywhere. The render layer is deliberately not linked here.
+// everywhere. The render layer is not linked here.
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>

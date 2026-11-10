@@ -2,7 +2,7 @@
 """The sanitizer lanes never run a gate-inventory check.
 
 A gate-inventory check compares a manifest generated from the gate configure
-(test/ctest_script_inputs.json, the changed-surface families, the consumption
+(test/ctest_script_inputs/, the changed-surface families, the consumption
 census, the source-selftest lane) against the configured build's own ctest
 inventory. A sanitizer configure registers a different set of tests by design
 (GPU off, other options), so there the check reports drift that is not drift.

@@ -59,6 +59,78 @@ or the same parameter and returns them in `replaced`.
 `learn_state()` reports `idle`, `listening` or `bound` for the UI, and a listen
 gives up after `timeout_ms`.
 
+## Feedback to the controller
+
+A mapping with `feedback = true` sends its parameter's value back to the
+controller (a motorised fader, an LED ring, a display). The processor makes one
+call per block:
+
+```cpp
+format::midi_learn_process_block(learn_, state(), midi_in, midi_out,
+    format::midi_feedback_capabilities(format::MidiLearnFormat::vst3, descriptor()));
+```
+
+It adopts new mappings, routes the block's input, and writes feedback into
+`midi_out`. A mapping sends when its parameter has moved by at least half a step
+of the controller's resolution; the first block after a mapping appears sends
+its current value so the controller can sync; and a value the controller itself
+just wrote is never echoed back. 14-bit and NRPN mappings send their whole
+message sequence; program change is a trigger and is never sent.
+
+`midi_feedback_capabilities()` reports, per format, which source kinds the
+adapter can carry. VST3, CLAP, AU v2 and AU v3 write a plug-in's MIDI output to
+the host when its descriptor declares `produces_midi`; LV2, AAX and the
+standalone app are not claimed. The flag describes what the adapter writes, not
+what a host does with it.
+
+Register the engine with `format::MidiLearnHandle` (declared after the engine
+member). VST3 then offers `IMidiLearn`, and a controller move the host reports
+binds the parameter being learned without waiting for a burst
+(`MidiLearnEngine::host_reported_controller`).
+
+## Saving and loading
+
+Mappings belong to the controller, not the sound, so by default they are saved
+once per plug-in instance (global) and survive preset changes. A processor that
+wants per-preset mappings stores the chunk in its preset data instead; the
+engine does not decide.
+
+```cpp
+// serialize_plugin_state(): append the chunk to the processor's blob
+auto chunk = learn_.save_state();                    // versioned binary chunk
+// deserialize_plugin_state(): hand the chunk back (an empty span clears)
+auto report = learn_.load_state(chunk, &state());    // drops unknown parameters
+```
+
+`load_state()` reports `status`, how many mappings loaded and how many were
+dropped (invalid, over capacity, or naming a parameter the store does not have).
+A chunk written before mappings existed is empty and loads as no mappings. A
+chunk from a newer version loads its known fields and reports `newer_version`.
+Damaged data (bad magic, size or checksum) is rejected and the current table is
+kept. The wire layout is documented in `midi_learn_persistence.hpp` and pinned by
+a test.
+
+`save_json()` / `load_json()` produce and read a text form for preset and
+import/export files (`{"version":1,"mappings":[...]}`). Import takes a
+`MidiImportMode`: `replace` makes the file the whole table, `merge` lets the
+file's mappings displace overlapping ones and keeps the rest.
+
+## Undo
+
+`MidiLearnEditor` (`midi_learn_undo.hpp`) wraps the engine and an `UndoManager`;
+each edit is one undo step:
+
+```cpp
+MidiLearnEditor editor(learn_, undo_);
+editor.set_mapping(mapping);
+editor.clear(param_id);
+editor.record_learn(*outcome);   // a learn the engine already applied
+```
+
+Undo of a learn removes the new mapping and restores whatever it replaced.
+Mappings keep their `uid` across undo, so takeover state is not reset. The engine
+must outlive the undo history.
+
 ## Pure pieces
 
 `midi_decode.hpp` and `midi_learn.hpp` hold the decoders, `decode_relative`,

@@ -334,8 +334,15 @@ TEST_CASE("specification violations each raise exactly their warning",
         set_u32(bytes, 40u, 0u);
         const auto report = inspect_audio_file_layout(bytes);
         REQUIRE(report.decode);
-        CHECK_FALSE(report.decode->decodable);
-        CHECK_THAT(report.decode->reason, Catch::Matchers::ContainsSubstring("zero frames"));
+        // A zero-frame data chunk is a valid, empty file; the verdict follows
+        // the decoder, which returns zero frames.
+        CHECK(report.decode->decodable);
+        REQUIRE(report.stream);
+        CHECK(report.stream->frames == 0u);
+        const auto decoded = decode_wav(bytes);
+        REQUIRE(decoded);
+        CHECK(decoded->num_frames() == 0u);
+        CHECK(decoded->num_channels() == 1u);
         // The sample bytes that follow parse as chunks the file never declared.
         CHECK(std::any_of(report.regions.begin(), report.regions.end(), [](const LayoutRegion& r) {
             return r.kind == LayoutRegionKind::unknown;

@@ -242,6 +242,15 @@ if(APPLE AND NOT PULP_IOS)
         "-framework AppKit"
         "-framework CoreFoundation")
 endif()
+if(APPLE AND NOT PULP_IOS)
+    # Asynchronous alerts, file panels and open_url, including real NSAlert and
+    # NSOpenPanel sheets on an offscreen window. Own process: the cases pump
+    # the main run loop and hold sheets on a window.
+    pulp_add_test_suite(pulp-test-platform-async-dialogs
+        SOURCES test_platform_async_dialogs.mm
+        LIBRARIES pulp::platform)
+    target_link_libraries(pulp-test-platform-async-dialogs PRIVATE "-framework Cocoa")
+endif()
 if(APPLE)
     # Per-binary unique Objective-C class names. The fixture dylib links its own
     # copy of pulp-platform, standing in for a second plug-in in the process.
@@ -258,6 +267,23 @@ if(APPLE)
         PULP_OBJC_UNIQUE_FIXTURE_PATH="$<TARGET_FILE:pulp-test-objc-unique-fixture>")
     pulp_test_spawns(pulp-test-platform-objc-unique-class pulp-test-objc-unique-fixture)
 endif()
+if(APPLE AND NOT PULP_IOS)
+    # Outbound file drags: validation, the recorder seam automation uses, the
+    # operation mapping, the drag image, event anchoring and the drag source.
+    pulp_add_test_suite(pulp-test-platform-file-drag
+        SOURCES test_platform_file_drag.mm
+        LIBRARIES pulp::platform)
+    target_link_libraries(pulp-test-platform-file-drag PRIVATE "-framework Cocoa")
+endif()
+if(APPLE AND NOT PULP_IOS)
+    # Anchored menus: the NSMenu built from a model, selection reporting for the
+    # synchronous and asynchronous APIs, and tracking a real menu on an
+    # offscreen window. Own process: the cases run menu tracking loops.
+    pulp_add_test_suite(pulp-test-platform-async-menu
+        SOURCES test_platform_async_menu.mm
+        LIBRARIES pulp::platform)
+    target_link_libraries(pulp-test-platform-async-menu PRIVATE "-framework Cocoa")
+endif()
 if(TARGET pulp-native)
     # integrations/pulp-native: the Metal surface on the real system device in
     # offscreen windows (device, client-presented drawables, sizing, geometry
@@ -268,4 +294,50 @@ if(TARGET pulp-native)
         pulp::native Catch2::Catch2WithMain
         "-framework AppKit" "-framework Metal" "-framework QuartzCore")
     catch_discover_tests(pulp-test-native-metal-surface)
+endif()
+if(TARGET pulp-native)
+    # integrations/pulp-native: FramePump on the real display link (no link
+    # until started, rate cap, one-shot, off-screen pause, delivery thread,
+    # no queued frames, start/stop churn).
+    add_executable(pulp-test-native-frame-pump test_native_frame_pump.mm)
+    target_compile_options(pulp-test-native-frame-pump PRIVATE -fobjc-arc)
+    target_link_libraries(pulp-test-native-frame-pump PRIVATE
+        pulp::native Catch2::Catch2WithMain "-framework Foundation")
+    catch_discover_tests(pulp-test-native-frame-pump)
+
+    # integrations/pulp-native: AppKit event translation (pointer, wheel, key,
+    # modifier-only keys, cursors) and the key-routing rule, from synthetic
+    # NSEvents and CGEvents.
+    add_executable(pulp-test-native-input test_native_input.mm)
+    target_compile_options(pulp-test-native-input PRIVATE -fobjc-arc)
+    target_link_libraries(pulp-test-native-input PRIVATE
+        pulp::native Catch2::Catch2WithMain "-framework AppKit")
+    catch_discover_tests(pulp-test-native-input)
+endif()
+if(TARGET pulp-native)
+    # integrations/pulp-native: input reaching the surface's view (pointer,
+    # wheel, host-first keys, text and marked text, focus, cursors, drops).
+    add_executable(pulp-test-native-surface-input test_native_surface_input.mm)
+    target_compile_options(pulp-test-native-surface-input PRIVATE -fobjc-arc)
+    target_link_libraries(pulp-test-native-surface-input PRIVATE
+        pulp::native Catch2::Catch2WithMain "-framework AppKit" "-framework Metal")
+    catch_discover_tests(pulp-test-native-surface-input)
+endif()
+if(TARGET pulp-native)
+    # The installed SDK carries the native surface: an outside project finds
+    # Pulp with COMPONENTS native and links MetalSurface, FramePump and input.
+    add_test(NAME cmake-native-sdk-consumer
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+            "-DPULP_PARENT_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+            "-DPULP_PARENT_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
+            "-DPULP_PARENT_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
+            "-DPULP_PARENT_INSTRUMENTATION_CXX_FLAGS=${_sdk_consumer_instrumentation_compile_flags}"
+            "-DPULP_PARENT_INSTRUMENTATION_LINKER_FLAGS=${_sdk_consumer_instrumentation_link_flags}"
+            "-DPULP_PARENT_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_native_sdk_consumer.cmake)
+    set_tests_properties(cmake-native-sdk-consumer PROPERTIES
+        LABELS "cmake;sdk;native-surface"
+        COST 60
+        TIMEOUT 600)
 endif()

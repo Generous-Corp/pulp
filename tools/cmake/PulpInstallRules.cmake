@@ -164,6 +164,9 @@ endif()
 if(TARGET pulp-inspect-standalone-runtime)
     list(APPEND PULP_SDK_TARGETS pulp-inspect-standalone-runtime)
 endif()
+if(TARGET pulp-inspect-agent-toolkit)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect-agent-toolkit)
+endif()
 if(TARGET pulp-inspect-ui-runtime)
     list(APPEND PULP_SDK_TARGETS pulp-inspect-ui-runtime)
 endif()
@@ -178,6 +181,12 @@ if(TARGET pulp-inspect-telemetry)
 endif()
 if(TARGET pulp-inspect-authoring)
     list(APPEND PULP_SDK_TARGETS pulp-inspect-authoring)
+endif()
+
+# The native surface (integrations/pulp-native) for an editor that brings its
+# own renderer: MetalSurface, FramePump and input translation. macOS only.
+if(TARGET pulp-native)
+    list(APPEND PULP_SDK_TARGETS pulp-native)
 endif()
 
 # pulp-canvas links pulp-bundled-fonts privately when Skia is on.
@@ -363,6 +372,12 @@ foreach(subsystem IN LISTS _pulp_sdk_header_subsystems)
 endforeach()
 unset(_pulp_sdk_header_subsystems)
 
+if(TARGET pulp-native)
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/integrations/pulp-native/include/pulp/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
+        FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
+endif()
+
 # GraphEditorView is an audio-UI header kept outside view-core, while retaining
 # its public pulp/view/widgets include path for installed consumers.
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/core/view/audio/include/pulp/"
@@ -473,6 +488,11 @@ elseif(TARGET pulp-inspect-protocol)
     if(TARGET pulp-inspect-standalone-runtime)
         install(FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_standalone_host.hpp"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
+    endif()
+    if(TARGET pulp-inspect-agent-toolkit)
+        install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_agent_toolkit.hpp"
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp/inspect")
     endif()
     if(TARGET pulp-inspect-authoring)
@@ -911,6 +931,8 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpDocumentTypes.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInspectorShipping.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpControlShipping.cmake"
+    # Read by pulp_control_agent_toolkit_declaration() beside its module.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/control_agent_toolkit_operations.json.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/check_inspector_shipping_artifact.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/check_control_shipping_artifact.cmake"
     # Read by check_control_shipping_artifact.cmake relative to its own

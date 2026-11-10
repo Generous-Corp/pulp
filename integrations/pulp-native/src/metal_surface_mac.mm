@@ -3,6 +3,8 @@
 
 #include <pulp/native/metal_surface.hpp>
 
+#include "surface_input_mac.h"
+
 #include <pulp/platform/objc_unique_class.hpp>
 
 #import <AppKit/AppKit.h>
@@ -42,6 +44,7 @@ bool supported_pixel_format(std::uint32_t format) {
 
 struct MetalSurface::Impl {
     MetalSurfaceOptions options;
+    detail::SurfaceInput input;
     id<MTLDevice> device = nil;
     id<MTLCommandQueue> queue = nil;
     CAMetalLayer* layer = nil;
@@ -160,6 +163,20 @@ struct MetalSurface::Impl {
         watch(NSWindowDidMiniaturizeNotification);
         watch(NSWindowDidDeminiaturizeNotification);
         watch(NSWindowDidChangeScreenNotification);
+
+        auto focus = ^(NSNotificationName name, id object, bool focused, FocusReason reason) {
+          id token = [center addObserverForName:name
+                                         object:object
+                                          queue:nil
+                                     usingBlock:^(NSNotification*) {
+                                       owner->input.emit_focus(focused, reason);
+                                     }];
+          [window_observers addObject:token];
+        };
+        focus(NSWindowDidBecomeKeyNotification, window, true, FocusReason::window);
+        focus(NSWindowDidResignKeyNotification, window, false, FocusReason::window);
+        focus(NSApplicationDidBecomeActiveNotification, NSApp, true, FocusReason::application);
+        focus(NSApplicationDidResignActiveNotification, NSApp, false, FocusReason::application);
     }
 
     // View callbacks (main thread).
@@ -261,6 +278,7 @@ void configure_view_class(void* cls_ptr, void*) {
                     (IMP)imp_view_did_change_backing_properties, "v@:");
     class_addMethod(cls, @selector(setFrameSize:), (IMP)imp_set_frame_size,
                     (std::string("v@:") + @encode(NSSize)).c_str());
+    detail::add_input_methods(cls);
 }
 
 Class view_class() {
@@ -270,6 +288,19 @@ Class view_class() {
 }
 
 } // namespace
+
+namespace detail {
+
+SurfaceInput* surface_input_of(id view) {
+    auto* impl = impl_of(view);
+    return impl ? &impl->input : nullptr;
+}
+
+Class surface_view_class() {
+    return view_class();
+}
+
+} // namespace detail
 
 // ── MetalDrawable ────────────────────────────────────────────────────────────
 
@@ -366,6 +397,7 @@ std::unique_ptr<MetalSurface> MetalSurface::create(const MetalSurfaceOptions& op
     view.wantsLayer = YES;
     view.layerContentsRedrawPolicy = NSViewLayerContentsRedrawNever;
     view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    [view registerForDraggedTypes:@[ NSPasteboardTypeFileURL ]];
     impl->view = view;
     impl->update_geometry();
     return std::unique_ptr<MetalSurface>(new MetalSurface(std::move(impl)));
@@ -492,6 +524,50 @@ void MetalSurface::set_listener(std::function<void(const SurfaceEvent&)> listene
 
 void MetalSurface::set_release_handler(std::function<void()> handler) {
     impl_->release_handler = std::move(handler);
+}
+
+void MetalSurface::set_input_handler(InputHandler handler) {
+    impl_->input.handler = std::move(handler);
+}
+
+void MetalSurface::set_cursor(Cursor cursor) {
+    impl_->input.cursor = cursor;
+    if (impl_->input.pointer_inside)
+        [(__bridge NSCursor*)ns_cursor_for(cursor) set];
+}
+
+bool MetalSurface::set_text_focus(bool held) {
+    NSView* view = impl_->view;
+    NSWindow* window = view.window;
+    if (!view || !window)
+        return false;
+    if (held) {
+        impl_->input.text_focus = true;
+        if (window.firstResponder == view)
+            return true;
+        NSResponder* prior = window.firstResponder;
+        if ([window makeFirstResponder:view]) {
+            impl_->input.prior_responder = prior;
+            return true;
+        }
+        impl_->input.text_focus = false;
+        return false;
+    }
+    impl_->input.text_focus = false;
+    if (window.firstResponder != view)
+        return true;
+    // Hand the keyboard back to whatever held it before, not to nil: a host
+    // whose key routing hangs off its own responder (Musical Typing) goes
+    // silent otherwise.
+    NSResponder* prior = impl_->input.prior_responder;
+    impl_->input.prior_responder = nil;
+    if (prior && prior != view && [window makeFirstResponder:prior])
+        return true;
+    return [window makeFirstResponder:nil];
+}
+
+bool MetalSurface::text_focus() const noexcept {
+    return impl_->input.text_focus;
 }
 
 std::string MetalSurface::view_class_name() {

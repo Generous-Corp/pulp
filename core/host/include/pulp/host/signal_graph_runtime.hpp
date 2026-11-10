@@ -12,6 +12,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <limits>
 #include <optional>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/live_dsp_telemetry.hpp>
@@ -23,6 +24,7 @@
 #include <pulp/host/custom_node_diagnostics.hpp>
 #include <pulp/host/custom_node_type.hpp>
 #include <pulp/host/graph_types.hpp>
+#include <pulp/host/graph_event_contract.hpp>
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/sample_region_authoring.hpp>
 #include <pulp/host/sample_region_runtime.hpp>
@@ -30,6 +32,7 @@
 #include <pulp/host/signal_graph_connection.hpp>
 #include <pulp/host/signal_graph_execution_status.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
+#include <pulp/host/prepared_description.hpp>
 #include <pulp/host/signal_graph_node.hpp>
 #include <pulp/host/trigger_graph.hpp>
 #include <pulp/host/spectral_graph.hpp>
@@ -43,6 +46,7 @@
 #include <pulp/state/modulation_lane.hpp>
 #include <string>
 #include <string_view>
+#include <span>
 #include <thread>
 #include <type_traits>
 #include <unordered_map>
@@ -55,6 +59,22 @@ class ProcessorNodeInstance;
 } // namespace pulp::format
 
 namespace pulp::host {
+
+namespace detail {
+
+// Selection generation is a process-local invalidation token. Saturating the
+// increment prevents an ABA after UINT64_MAX while retaining a lock-free,
+// control-side update for callers that flip routing policy before/after prepare.
+inline void
+advance_execution_selection_generation(std::atomic<std::uint64_t>& generation) noexcept {
+    auto current = generation.load(std::memory_order_relaxed);
+    while (current != std::numeric_limits<std::uint64_t>::max() &&
+           !generation.compare_exchange_weak(current, current + 1, std::memory_order_relaxed,
+                                             std::memory_order_relaxed)) {
+    }
+}
+
+} // namespace detail
 
 class GraphSerializer;
 class SignalGraph;
@@ -83,6 +103,14 @@ class SampleRegionParameterBinding;
 
 class SignalGraph : public format::AudioWorkgroupClient {
   public:
+    static constexpr std::size_t kHostEventIngressCapacity = 256;
+
+    struct HostEventIngressCounters {
+        std::uint64_t epoch = 0;
+        std::uint64_t accepted = 0;
+        std::uint64_t refused = 0;
+        std::uint64_t overflow = 0;
+    };
     class PreparedTopologyEdit;
     class ExecutionSnapshot;
 
@@ -260,8 +288,30 @@ class SignalGraph : public format::AudioWorkgroupClient {
     TriggerGraphResult try_reset_events() noexcept;
     TriggerGraphResult process_checked(audio::BufferView<float>& output,
                                        const audio::BufferView<const float>& input, int frames);
+    /// Start one absolute-sample host-event block for the active prepared
+    /// trigger generation. The caller must publish before process_checked();
+    /// the graph consumes the block exactly once during checked projection.
+    HostEventResult begin_host_event_block(std::uint64_t epoch, std::uint64_t sample_start,
+                                           std::size_t frames) noexcept;
+    /// Publish one immutable MIDI/UMP record into the prepared graph-owned
+    /// ingress. Publication is bounded and refuses stale, late, unbound, or
+    /// duplicate producer identities without changing the queue.
+    HostEventResult publish_host_event(const HostEventRecord& event) noexcept;
+    /// Reset host ingress state to a fresh epoch. The epoch must be the active
+    /// trigger generation's epoch and is checked before queue mutation.
+    HostEventResult reset_host_event_ingress(std::uint64_t epoch) noexcept;
+    HostEventResult host_event_counters(HostEventIngressCounters& counters) const noexcept;
+    /// The bounded publication trace is a diagnostic view and expires at reset
+    /// or replacement of the prepared trigger generation.
+    std::span<const HostEventRecord> host_event_trace() const noexcept;
     TriggerGraphResult trigger_counters(TriggerCounters& counters) const noexcept;
     TriggerResourceReport trigger_resources() const;
+
+    /// Opt in exactly one feed-forward Custom-node event edge. Both nodes must
+    /// expose event callbacks; the prepared snapshot binds the callback-local
+    /// writer/reader handles and refuses plugins, feedback, and fan-out.
+    GraphEventBindingResult connect_graph_event(GraphAuthoredEventEdge edge);
+    std::optional<GraphAuthoredEventEdge> graph_event_edge() const;
     // View expires at the next render/reset/publication boundary. Read while stopped.
     std::span<const TriggerRecord> trigger_trace() const noexcept;
 
@@ -755,6 +805,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // Pick a path before starting a feedback graph and keep it for the stream.
     void set_canonical_executor_routing_enabled(bool enabled) noexcept {
         canonical_executor_routing_enabled_.store(enabled, std::memory_order_relaxed);
+        detail::advance_execution_selection_generation(execution_selection_generation_);
     }
     // Returns the requested opt-in flag, not a promise that the current block
     // is taking the executor path. Actual dispatch also requires an eligible
@@ -772,9 +823,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // GraphRuntimeExecutor::process_parallel; otherwise it falls back to the
     // serial executor (if its opt-in is set) and then the legacy walk. Output is
     // bit-identical across all three paths.
-    void set_parallel_routing_enabled(bool enabled) noexcept {
-        parallel_routing_enabled_.store(enabled, std::memory_order_relaxed);
-    }
+    void set_parallel_routing_enabled(bool enabled) noexcept;
     bool parallel_routing_enabled() const noexcept {
         return parallel_routing_enabled_.load(std::memory_order_relaxed);
     }
@@ -864,6 +913,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // transport-sensitive nodes that anticipation forced exterior.
     void set_anticipation_enabled(bool enabled) noexcept {
         anticipation_enabled_.store(enabled, std::memory_order_relaxed);
+        detail::advance_execution_selection_generation(execution_selection_generation_);
     }
     bool anticipation_enabled() const noexcept {
         return anticipation_enabled_.load(std::memory_order_relaxed);
@@ -960,6 +1010,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     std::size_t custom_node_type_count() const;
 
   private:
+    friend struct detail::TriggerController;
     // The standalone executor-routing builder must resolve every pointer and
     // capture the matching snapshot keepalive as one publication-serialized
     // operation.  It is a friend rather than a new public locking API so the
@@ -1007,6 +1058,31 @@ class SignalGraph : public format::AudioWorkgroupClient {
         MidiBlockSnapshot writer_scratch;
         std::atomic<uint64_t> next_sequence{0};
         std::atomic<uint64_t> sequence_seen{0};
+    };
+
+    struct HostEventProjection {
+        std::array<HostEventRecord, kHostEventIngressCapacity> records{};
+        std::size_t count = 0;
+        midi::MidiBuffer midi;
+        midi::UmpBuffer ump;
+        midi::MpeBuffer mpe;
+        midi::MpeVoiceTracker host_event_tracker;
+        bool incomplete = false;
+
+        HostEventProjection() {
+            midi.reserve(kHostEventIngressCapacity, 128, 4096);
+            midi.set_realtime_capacity_limit(true);
+            ump.reserve(kHostEventIngressCapacity);
+            ump.set_realtime_capacity_limit(true);
+            midi.attach_ump(&ump);
+            // Match the graph mailbox's bounded MPE block capacity so a host
+            // block with several valid records can be projected atomically.
+            // The projection still refuses before mutation when the destination
+            // is smaller; tests and callers can explicitly reserve a larger
+            // destination for larger fanout.
+            mpe.reserve(state::ParameterEventQueue::kCapacity);
+            mpe.set_realtime_capacity_limit(true);
+        }
     };
 
     struct MidiOutputMailbox {
@@ -1203,15 +1279,17 @@ class SignalGraph : public format::AudioWorkgroupClient {
     struct CompiledGraph {
         explicit CompiledGraph(bool reserve_midi = true) : midi_publish_scratch(reserve_midi) {}
         std::shared_ptr<detail::TriggerState> trigger_state;
+        std::shared_ptr<GraphAuthoredEventLane<>> graph_event_lane;
+        GraphAuthoredEventEdge graph_event_edge{};
+        std::uint64_t graph_event_epoch = 1;
         // Keeps candidate-owned per-node measurers alive after publication.
         std::shared_ptr<SignalGraph> trigger_preparation_owner;
 
         std::shared_ptr<SpectralRuntimeBank> spectral;
         std::uint64_t execution_generation = 0;
+        std::shared_ptr<const PreparedDescriptionData> prepared_description;
         std::shared_ptr<int> legacy_processing_lifetime;
-        // Private executable topology. For ordinary graphs this is a copy of
-        // nodes_; region-bearing graphs replace each admitted region with one
-        // synthetic Custom anchor while leaving public authoring state intact.
+        // Private executable topology; region-bearing graphs use synthetic anchors.
         std::vector<GraphNode> executable_nodes;
         std::vector<NodeId> order;
         std::vector<Connection> connections;
@@ -1293,6 +1371,18 @@ class SignalGraph : public format::AudioWorkgroupClient {
         // cannot jump to another domain's stale ring mid-stream.
         PdcExecutionDomain pdc_execution_domain = PdcExecutionDomain::Dynamic;
         MidiBlockSnapshot midi_publish_scratch;
+        // Host ingress is serial-only graph-owned staging. It is populated by
+        // checked projection before either canonical dispatch path runs; the
+        // ordinary MIDI mailbox/gather lane remains independent.
+        HostEventProjection* host_event_projection = nullptr;
+        // The trigger host-ingress binding is deliberately one-to-one: the
+        // prepared graph's first MidiInput is the graph-owned destination for
+        // projected host records.  A zero value means the prepared generation
+        // has no admitted host-event input and projection must refuse rather
+        // than silently dropping the records.
+        NodeId host_event_midi_input = 0;
+        std::uint64_t host_event_epoch = 0;
+        std::uint64_t host_event_sample_start = 0;
         // 2.2b reinit-free-swap predicate inputs (captured at compile so a
         // prepare_swap candidate can be compared against this live snapshot):
         //  - custom_instances: NodeId → raw custom-instance identity for each
@@ -1465,6 +1555,11 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // Invalidates an outstanding PreparedTopologyEdit when any direct authoring
     // or lifecycle operation touches this graph. Guarded by graph_mutation_mutex_.
     std::uint64_t authoring_generation_{0};
+    // Monotonic control-side generation for execution-policy selection. Unlike
+    // the three policy bits, this does not return to its prior value when a
+    // caller toggles a setting away and back (ABA), so detached prepared
+    // receipts cannot be reused after a policy mutation.
+    std::atomic<std::uint64_t> execution_selection_generation_{0};
     NodeId next_id_ = 1;
     NodeId last_prepare_custom_failure_node_ = 0;
     format::ProcessMode hosted_plugin_process_mode_ = format::ProcessMode::Realtime;
@@ -1536,6 +1631,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     std::unordered_map<NodeId, TriggerEnvelopeConfig> trigger_envelopes_;
     std::unordered_map<NodeId, TriggerAudioConfig> trigger_audio_;
     std::vector<TriggerEdge> trigger_edges_;
+    std::optional<GraphAuthoredEventEdge> graph_event_edge_;
     std::atomic<bool> typed_trigger_authoring_{false};
     std::shared_ptr<detail::TriggerController> trigger_controller_;
     std::shared_ptr<detail::TriggerState> compiling_trigger_state_;
@@ -1890,7 +1986,10 @@ class SignalGraph : public format::AudioWorkgroupClient {
     void process_snapshot_impl(audio::BufferView<float>& output,
                                const audio::BufferView<const float>& input, int num_samples,
                                const format::ProcessContext* transport, CompiledGraph* snapshot,
-                               bool trigger_admitted = false);
+                               bool trigger_admitted = false,
+                               HostEventResult* host_event_result = nullptr);
+    HostEventResult project_host_events_(CompiledGraph& snapshot, std::uint64_t sample_start,
+                                         std::size_t frames) noexcept;
     static bool inject_midi_into_snapshot_(CompiledGraph& snapshot, NodeId id,
                                            const midi::MidiBuffer& events,
                                            const midi::MpeBuffer* mpe = nullptr) noexcept;

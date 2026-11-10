@@ -1,0 +1,10 @@
+{
+ "name": "import-validation-diff-against-reference-regions-selftest",
+ "record": {
+  "entry": "tools/import-validation/test_diff_against_reference_regions.py",
+  "inputs": [
+   "tools/import-validation/test_diff_against_reference_regions.py"
+  ],
+  "kind": "python"
+ }
+}

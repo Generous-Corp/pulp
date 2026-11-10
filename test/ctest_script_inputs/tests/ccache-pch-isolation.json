@@ -1,0 +1,10 @@
+{
+ "name": "ccache-pch-isolation",
+ "record": {
+  "entry": "tools/scripts/test_ccache_pch_isolation.py",
+  "inputs": [
+   "tools/scripts/test_ccache_pch_isolation.py"
+  ],
+  "kind": "python"
+ }
+}

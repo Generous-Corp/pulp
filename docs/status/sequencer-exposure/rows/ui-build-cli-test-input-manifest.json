@@ -5,7 +5,7 @@
   "delivery_state": "pending",
   "claim_id": "f8eea7c6-5e4b-4e9a-8b0e-2f02e4c6f7a1",
   "owned_paths": [
-    "test/ctest_script_inputs.json",
+    "test/ctest_script_inputs/executables/pulp-test-cli-ui-command.json",
     "test/cmake/cli_tests.cmake",
     "test/test_cli_ui.cpp",
     "docs/status/sequencer-exposure/rows/ui-build-cli-test-input-manifest.json"
@@ -19,7 +19,7 @@
       ]
     },
     {
-      "path": "test/ctest_script_inputs.json",
+      "path": "test/ctest_script_inputs/executables/pulp-test-cli-ui-command.json",
       "needles": [
         "pulp-test-cli-ui-command"
       ]

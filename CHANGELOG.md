@@ -9,6 +9,69 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1950"></a>
+## [1.95.0] - 2026-11-09
+
+- feature/gates consumption census ([#11886](https://github.com/Generous-Corp/pulp/pull/11886))
+- release/version bump ([#11899](https://github.com/Generous-Corp/pulp/pull/11899))
+- ci/pr fast before build ([#11883](https://github.com/Generous-Corp/pulp/pull/11883))
+- agent/a9 installed qualification ([#11875](https://github.com/Generous-Corp/pulp/pull/11875))
+- feature/install pulp native ([#11882](https://github.com/Generous-Corp/pulp/pull/11882))
+- docs/crisp writing guide 20261109 ([#11887](https://github.com/Generous-Corp/pulp/pull/11887))
+- fix/macos gate debounce ([#11892](https://github.com/Generous-Corp/pulp/pull/11892))
+- feature/confirm failure keep dylibs ([#11893](https://github.com/Generous-Corp/pulp/pull/11893))
+- g11/receipt refresh 3fad 20261109 ([#11877](https://github.com/Generous-Corp/pulp/pull/11877))
+- docs/crisp writing scrub 20261109 ([#11884](https://github.com/Generous-Corp/pulp/pull/11884))
+- docs/crisp writing lint 20261109 ([#11881](https://github.com/Generous-Corp/pulp/pull/11881))
+- docs/crisp writing skill 20261109 ([#11878](https://github.com/Generous-Corp/pulp/pull/11878))
+- feature/midi learn feedback ([#11769](https://github.com/Generous-Corp/pulp/pull/11769))
+
+<a id="v1940"></a>
+## [1.94.0] - 2026-11-09
+
+- release/version bump ([#11872](https://github.com/Generous-Corp/pulp/pull/11872))
+- feature/native surface input ([#11785](https://github.com/Generous-Corp/pulp/pull/11785))
+- fix/vellum receipt repin events ([#11868](https://github.com/Generous-Corp/pulp/pull/11868))
+- feature/platform file drag ([#11773](https://github.com/Generous-Corp/pulp/pull/11773))
+- codex/g5 followup contract 20261109 ([#11860](https://github.com/Generous-Corp/pulp/pull/11860))
+
+<a id="v1930"></a>
+## [1.93.0] - 2026-11-09
+
+- release/version bump ([#11859](https://github.com/Generous-Corp/pulp/pull/11859))
+- feature/g3 d4 prepared export successor ([#11743](https://github.com/Generous-Corp/pulp/pull/11743))
+- feature/audio decoder fuzz 20261107 ([#11796](https://github.com/Generous-Corp/pulp/pull/11796))
+
+<a id="v1920"></a>
+## [1.92.0] - 2026-11-09
+
+- release/version bump ([#11857](https://github.com/Generous-Corp/pulp/pull/11857))
+- feature/platform async dialogs ([#11767](https://github.com/Generous-Corp/pulp/pull/11767))
+- feature/midi learn persistence ([#11762](https://github.com/Generous-Corp/pulp/pull/11762))
+- feature/native input translator ([#11784](https://github.com/Generous-Corp/pulp/pull/11784))
+- release/version bump ([#11854](https://github.com/Generous-Corp/pulp/pull/11854))
+- repair/pulp 11812 hold frame window 20261108 ([#11832](https://github.com/Generous-Corp/pulp/pull/11832))
+
+<a id="v1910"></a>
+## [1.91.0] - 2026-11-09
+
+- release/version bump ([#11852](https://github.com/Generous-Corp/pulp/pull/11852))
+- feature/audio decoder acceptance gaps 20261108 ([#11845](https://github.com/Generous-Corp/pulp/pull/11845))
+- feature/control agent toolkit 20261108 ([#11830](https://github.com/Generous-Corp/pulp/pull/11830))
+- release/version bump ([#11846](https://github.com/Generous-Corp/pulp/pull/11846))
+- feature/format main thread common modes ([#11776](https://github.com/Generous-Corp/pulp/pull/11776))
+- feature/native frame pump ([#11780](https://github.com/Generous-Corp/pulp/pull/11780))
+- repair/pulp 11736 contract blob latest main 20261108 ([#11812](https://github.com/Generous-Corp/pulp/pull/11812))
+- release/version bump ([#11844](https://github.com/Generous-Corp/pulp/pull/11844))
+- fix/vellum framework transfer guard ([#11842](https://github.com/Generous-Corp/pulp/pull/11842))
+- feature/ctest script inputs fragments ([#11834](https://github.com/Generous-Corp/pulp/pull/11834))
+- docs/vellum framework ownership flip ([#11841](https://github.com/Generous-Corp/pulp/pull/11841))
+
+<a id="v1900"></a>
+## [1.90.0] - 2026-11-09
+
+- release/version bump ([#11843](https://github.com/Generous-Corp/pulp/pull/11843))
+
 <a id="v1890"></a>
 ## [1.89.0] - 2026-11-09
 
@@ -12533,6 +12596,12 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.95.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.95.0
+[1.94.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.94.0
+[1.93.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.93.0
+[1.92.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.92.0
+[1.91.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.91.0
+[1.90.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.90.0
 [1.89.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.89.0
 [1.88.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.88.0
 [1.87.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.87.0

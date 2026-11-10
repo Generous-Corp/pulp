@@ -225,10 +225,10 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         'include': 'pulp/host/graph_event_contract.hpp',
-        'fingerprint': 'sha256:edf30e0200f48972611b5253942f684befdc8133e10dbcde43fe0a045eb2032d',
+        'fingerprint': 'sha256:50630f728b4317ff7ef904564705c6d6b6e9ebb79e29d5dd0826985c0a7a75fb',
         'disposition': 'infrastructure',
         'capability_keys': [],
-        'rationale': 'Bounded host and graph-authored event boundary contract; it is not wired into SignalGraph admission or a generator-facing capability.',
+        'rationale': 'Bounded host and graph-authored event lane used by SignalGraph Custom-node callbacks; it is an infrastructure contract, not an independently advertised generator capability.',
     },
     {
         'include': 'pulp/audio/buffer.hpp',
@@ -246,7 +246,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         'include': 'pulp/host/signal_graph_executor_routing.hpp',
-        'fingerprint': 'sha256:e77a455304bffa7e75d94903aee89f5d61ec9155b68281eaa107b8e6facd1088',
+        'fingerprint': 'sha256:e622cc962a04c4ec16c2941789c544f403f448f9eef91bb2dafef676f7a43b1f',
         'disposition': 'infrastructure',
         'capability_keys': [],
         'rationale': 'Existing executor lowering infrastructure with graph-owned opaque spectral resolver; no public native spectral-stage registration or notation capability.',
@@ -264,6 +264,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     {'include': 'pulp/midi/sysex_chunk_assembler.hpp', 'fingerprint': 'sha256:01c367d4c8c832ec83ca837901b08da9b4a8195a3caa8d06cc37f03113bc6c08', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Joins driver receive buffers of one long SysEx message for the Windows multimedia backend; not a generator-facing capability.'},
 
     {'include': 'pulp/audio/live_dsp_telemetry.hpp', 'fingerprint': 'sha256:17577e193b6c51d5596fe6b556630a8c93732eb185eb7bb71e22c7bf988acfe5', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Coherent bounded diagnostic transport, not a generator DSP capability.'},
+    {'include': 'pulp/audio/sample_resource.hpp', 'fingerprint': 'sha256:4c733ef0cfae35564705ba3eea27f79c8c01d87600ba31a6c8d513fe0476a6a2', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Background sample decode service and snapshot handle; reviewed when a zero-frame decode became a load failure with a reason instead of an empty Loaded snapshot. Host infrastructure behind the sampler capabilities, not a generator-facing capability.'},
     {'include': 'pulp/audio/wav_decoder.hpp', 'fingerprint': 'sha256:78e0bfc06ff17643493ebb343f9440348149324221e525de656a016d855be009', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Byte-span RIFF/WAVE inspector and decoder for import surfaces; reviewed when interpret_wav_format exposed the fmt interpretation for the layout report. Not a generator-facing capability.'},
     {'include': 'pulp/audio/audio_file_layout.hpp', 'fingerprint': 'sha256:8fd849f594a11af739d14c42370b2fa74460a1e423cde2cab1ebd60c9ab74694', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Developer-tool byte layout report over audio containers (regions, warnings, decoder verdict) behind `pulp audio inspect`; reads headers only. Not a generator-facing capability.'},
     {'include': 'pulp/audio/audio_file_layout_json.hpp', 'fingerprint': 'sha256:7c02abb2e23707387db7f67ef4612ee8ee411241e1b16de31908866eea49b1ca', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Versioned JSON serializer for the layout report (pulp.audio.file_inspect.v1), a CLI/MCP developer surface. Not a generator-facing capability.'},

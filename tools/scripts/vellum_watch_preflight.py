@@ -855,6 +855,7 @@ def write_event(root: pathlib.Path, base: str, head: str, stream, *,
 # ── export events and unit header lists ───────────────────────────────────
 
 EXPORT_EVENT_DIR_REL = ".github/vellum-export-events"
+EXPORT_PIN_REL = ".github/vellum-export-receipt/pin.json"
 HEADER_EXTS = {".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp"}
 # Directories that hold exactly one Vellum unit, so every header under
 # include/ must be in that unit's list (vellum_closure.unit_public_headers).
@@ -955,17 +956,32 @@ def export_verdict(root: pathlib.Path, base: str, head: str,
 
 
 def build_export_event(report: dict, *, event_id: str, created_at: str, inherits,
-                       rationale: str) -> dict:
+                       rationale: str, export_id: str | None = None) -> dict:
     return {
         "schema_version": 1,
         "event_id": event_id,
         "kind": "exported-path-change",
         "created_at": created_at,
-        "receipt_export_id": report["export_id"],
+        "receipt_export_id": export_id or report["export_id"],
         "paths": sorted(report["missing"]),
         "vellum_inherits": inherits,
         "rationale": rationale,
     }
+
+
+def pinned_export_id(root: pathlib.Path, ref: str) -> str | None:
+    """The receipt id pinned at ``ref``'s tip, the one CI judges a new event by.
+
+    The freeze lanes read the pin at live main, so an event written on a branch
+    that forked before a re-pin must still name main's current receipt.
+    """
+    raw = _git(root, "show", f"{ref}:{EXPORT_PIN_REL}")
+    try:
+        value = json.loads(raw) if raw else None
+    except ValueError:
+        return None
+    export_id = value.get("export_id") if isinstance(value, dict) else None
+    return export_id if isinstance(export_id, str) and export_id else None
 
 
 def _default_export_event_id(root: pathlib.Path, today: dt.date) -> str:
@@ -1001,6 +1017,7 @@ def run_unit_and_export(root: pathlib.Path, base: str, head: str, stream, *,
         return code
 
     created_at = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    export_id = pinned_export_id(root, base)
     if fix:
         if inherits not in ("true", "false") or not rationale \
                 or len(rationale.strip()) < 24 or rationale.lstrip().startswith("<"):
@@ -1019,7 +1036,8 @@ def run_unit_and_export(root: pathlib.Path, base: str, head: str, stream, *,
                   file=stream)
             return WRITE_REFUSED
         event = build_export_event(report, event_id=eid, created_at=created_at,
-                                   inherits=(inherits == "true"), rationale=rationale.strip())
+                                   inherits=(inherits == "true"), rationale=rationale.strip(),
+                                   export_id=export_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(event, indent=2) + "\n", encoding="utf-8")
         print(f"wrote {path.relative_to(root)} (commit it: the checker reads the "
@@ -1029,7 +1047,8 @@ def run_unit_and_export(root: pathlib.Path, base: str, head: str, stream, *,
     event = build_export_event(
         report, event_id=_default_export_event_id(root, now.date()),
         created_at=created_at, inherits=EXPORT_DECISION_PLACEHOLDER,
-        rationale="<what changed, and why Vellum does or does not take it>")
+        rationale="<what changed, and why Vellum does or does not take it>",
+        export_id=export_id)
     lines = ["  ✗ vellum export receipt (BLOCKING — the required `Vellum freeze` checks "
              "fail the same way):",
              "     These exported paths owe an explicit `vellum_inherits` decision:"]

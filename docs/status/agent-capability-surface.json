@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 211,
+  "inventory_version": 213,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -780,11 +780,11 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/sample_resource.hpp",
-      "fingerprint": "sha256:663954f691b0957447899d2b86ea92a9bad7edba92f736eb6806955df7b362ea",
+      "fingerprint": "sha256:4c733ef0cfae35564705ba3eea27f79c8c01d87600ba31a6c8d513fe0476a6a2",
       "include": "pulp/audio/sample_resource.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Background sample decode service and snapshot handle; reviewed when a zero-frame decode became a load failure with a reason instead of an empty Loaded snapshot. Host infrastructure behind the sampler capabilities, not a generator-facing capability."
     },
     {
       "domain": "audio",
@@ -1158,7 +1158,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/custom_node_events.hpp",
-      "fingerprint": "sha256:e01e87078bef719bd88de116aca4259fd465461d56fb59e34a16f5ce1e473676",
+      "fingerprint": "sha256:65e1cee2feab83530094c72b89dc87bde523c9b4ac10e5822e370f6dcc14f114",
       "include": "pulp/host/custom_node_events.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -1181,11 +1181,11 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/graph_event_contract.hpp",
-      "fingerprint": "sha256:edf30e0200f48972611b5253942f684befdc8133e10dbcde43fe0a045eb2032d",
+      "fingerprint": "sha256:50630f728b4317ff7ef904564705c6d6b6e9ebb79e29d5dd0826985c0a7a75fb",
       "include": "pulp/host/graph_event_contract.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Bounded host and graph-authored event boundary contract; it is not wired into SignalGraph admission or a generator-facing capability."
+      "rationale": "Bounded host and graph-authored event lane used by SignalGraph Custom-node callbacks; it is an infrastructure contract, not an independently advertised generator capability."
     },
     {
       "domain": "host",
@@ -1270,7 +1270,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/signal_graph_executor_routing.hpp",
-      "fingerprint": "sha256:e77a455304bffa7e75d94903aee89f5d61ec9155b68281eaa107b8e6facd1088",
+      "fingerprint": "sha256:e622cc962a04c4ec16c2941789c544f403f448f9eef91bb2dafef676f7a43b1f",
       "include": "pulp/host/signal_graph_executor_routing.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -1279,7 +1279,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/signal_graph_prepared_topology_edit.hpp",
-      "fingerprint": "sha256:eb311ea63b6bd1d6684cfacafb61e1cbeb1d20a70522bb730392b792f3c1587e",
+      "fingerprint": "sha256:2c4909390c39a83a2360a1dea23bf6ee1449276edf42949742e818dade300c8d",
       "include": "pulp/host/signal_graph_prepared_topology_edit.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -1290,7 +1290,7 @@
     {
       "domain": "host",
       "source": "core/host/include/pulp/host/signal_graph_runtime.hpp",
-      "fingerprint": "sha256:4774f3fcaca49bddfae57c6e40208f83bdfe310437e28f93dedbb16ee5143db5",
+      "fingerprint": "sha256:18a656271d2371678a12712b64019d70250186fe260bb6ffd61d352f8ff25be0",
       "include": "pulp/host/signal_graph_runtime.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [

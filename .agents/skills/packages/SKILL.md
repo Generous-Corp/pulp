@@ -295,6 +295,19 @@ labeled MIT on all four surfaces while the pinned tree (v3.7.12) was
 "Steinberg VST3 License OR GPLv3". **A name being present says nothing about
 the text being right** — when a license claim matters, read the tree.
 
+### A single-file library vendored inside another dependency's directory is its own entry
+
+`external/dr_libs/` holds `stb_vorbis.c` (nothings/stb, MIT or Unlicense) next
+to the dr_libs headers (mackron, Unlicense or MIT-0). They are different
+projects with different licenses and patch histories, and the audit's
+consistency check walks `manifest.json` entries, so a file that was never
+given an entry is invisible to it. When you vendor or patch a file, check that
+the project that owns it has its own entry, not the directory it happens to live
+in. The control is to list `external/*/` and name the upstream of every file
+whose header credits a different author than the directory's entry; a patch
+in `tools/deps/patches.json` must hang off the entry for the project the
+patch edits.
+
 ### Digest-pinned release assets (`artifacts`)
 
 A dependency shipped as prebuilt release assets records each one in its

@@ -1,0 +1,13 @@
+{
+ "name": "archive-symbol-closure-selftest",
+ "record": {
+  "entry": "tools/scripts/test_archive_symbol_closure_check.py",
+  "inputs": [
+   "tools/scripts/archive_symbol_closure_check.py",
+   "tools/scripts/nm_symbols.py",
+   "tools/scripts/rtti_ownership.py",
+   "tools/scripts/test_archive_symbol_closure_check.py"
+  ],
+  "kind": "python"
+ }
+}

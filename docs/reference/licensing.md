@@ -29,6 +29,7 @@ Tables are sorted alphabetically (case-insensitive) by name. Entries here must s
 | **pugixml** | MIT | XML parsing and generation | [github.com/zeux/pugixml](https://github.com/zeux/pugixml) |
 | **QuickJS** | MIT | Default JavaScript engine, embedded in CHOC's `choc_javascript_QuickJS.h` (`CONFIG_VERSION` 2021-03-27) | [bellard.org/quickjs](https://bellard.org/quickjs/) |
 | **SheenBidi** | Apache-2.0 | Unicode Bidirectional Algorithm engine for Arabic / Hebrew / mixed-direction text in `core/canvas::BidiAnalyzer` (independent of system ICU) | [github.com/Tehreer/SheenBidi](https://github.com/Tehreer/SheenBidi) |
+| **stb_vorbis** | MIT OR Unlicense (public domain) | Ogg Vorbis decoding behind `FormatRegistry` (vendored beside the dr_libs headers, one local header-length patch) | [github.com/nothings/stb](https://github.com/nothings/stb) |
 | **TweetNaCl** | Public domain | Ed25519 sign/verify per RFC 8032 — Sparkle appcast signatures and signed node/package metadata | [tweetnacl.cr.yp.to](https://tweetnacl.cr.yp.to/) |
 | **WOFF2** | MIT | WOFF2-to-sfnt decoder used to register the exact packaged web fonts captured by Chromium | [github.com/google/woff2](https://github.com/google/woff2) |
 | **yaml-cpp** | MIT | YAML frontmatter parser for the DESIGN.md import pipeline (gated to `--from designmd`) | [github.com/jbeder/yaml-cpp](https://github.com/jbeder/yaml-cpp) |

@@ -1,0 +1,49 @@
+{
+ "name": "pulp-test-cli-project-command",
+ "record": {
+  "data": "whole_checkout",
+  "detected_sources": [
+   "test/test_cli_project_command.cpp"
+  ],
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [
+   "pulp-mcp"
+  ],
+  "sources": [
+   "test/test_cli_project_command.cpp",
+   "tools/cli/cli_common.cpp",
+   "tools/cli/cli_delegate.cpp",
+   "tools/cli/cli_doctor_helpers.cpp",
+   "tools/cli/cli_sdk.cpp",
+   "tools/cli/fetchcontent_cache.cpp",
+   "tools/cli/focused_build.cpp",
+   "tools/cli/local_sdk_install.cpp",
+   "tools/cli/local_sdk_profile.cpp",
+   "tools/cli/migration_runtime.cpp",
+   "tools/cli/package_registry.cpp",
+   "tools/cli/package_registry_trust.cpp",
+   "tools/cli/project_bump.cpp",
+   "tools/cli/projects_registry.cpp",
+   "tools/cli/shell_quote.cpp",
+   "tools/cli/shell_redirect.cpp",
+   "tools/cli/tartci_lease.cpp",
+   "tools/cli/update_check.cpp",
+   "tools/cli/version_diag.cpp"
+  ],
+  "spawning_sources": [
+   "tools/cli/cli_common.cpp",
+   "tools/cli/cli_delegate.cpp",
+   "tools/cli/cli_doctor_helpers.cpp",
+   "tools/cli/cli_sdk.cpp",
+   "tools/cli/focused_build.cpp",
+   "tools/cli/local_sdk_install.cpp",
+   "tools/cli/package_registry.cpp",
+   "tools/cli/tartci_lease.cpp",
+   "tools/cli/update_check.cpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

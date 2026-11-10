@@ -94,6 +94,15 @@ class MainThreadScope {
 
     Handle handle() const;
 
+    /// Register `fn` to run on the main thread while this scope is being
+    /// destroyed, after its posts and timers have stopped. Lets a dialog or
+    /// menu opened on behalf of the scope close itself and drop its completion.
+    /// Main thread only. Returns an id for remove_teardown(); 0 if the scope
+    /// is already shutting down.
+    std::uint64_t add_teardown(std::function<void()> fn);
+    /// Forget a teardown registered with add_teardown(). Main thread only.
+    void remove_teardown(std::uint64_t id);
+
   private:
     friend class MainThreadTimer;
     std::shared_ptr<detail::MainThreadScopeState> state_;

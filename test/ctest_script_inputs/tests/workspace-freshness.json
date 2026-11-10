@@ -1,0 +1,10 @@
+{
+ "name": "workspace-freshness",
+ "record": {
+  "entry": "test/test_workspace_freshness.sh",
+  "inputs": [
+   "test/test_workspace_freshness.sh"
+  ],
+  "kind": "shell"
+ }
+}

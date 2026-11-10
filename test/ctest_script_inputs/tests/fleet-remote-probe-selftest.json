@@ -1,0 +1,11 @@
+{
+ "name": "fleet-remote-probe-selftest",
+ "record": {
+  "entry": "tools/fleet/test_probe_remote.py",
+  "inputs": [
+   "tools/fleet/probe_remote.py",
+   "tools/fleet/test_probe_remote.py"
+  ],
+  "kind": "python"
+ }
+}

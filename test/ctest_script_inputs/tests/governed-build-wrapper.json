@@ -1,0 +1,11 @@
+{
+ "name": "governed-build-wrapper",
+ "record": {
+  "entry": "test/test_governed_build.sh",
+  "inputs": [
+   "test/test_governed_build.sh",
+   "tools/ci/governed-build.sh"
+  ],
+  "kind": "shell"
+ }
+}

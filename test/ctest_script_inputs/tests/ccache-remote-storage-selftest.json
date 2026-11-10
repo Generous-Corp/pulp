@@ -1,0 +1,11 @@
+{
+ "name": "ccache-remote-storage-selftest",
+ "record": {
+  "entry": "tools/ci/test_ccache_remote_storage.py",
+  "inputs": [
+   "tools/ci/ccache_remote_storage.py",
+   "tools/ci/test_ccache_remote_storage.py"
+  ],
+  "kind": "python"
+ }
+}

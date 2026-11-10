@@ -1,0 +1,10 @@
+{
+ "name": "examples-index-guard",
+ "record": {
+  "entry": "tools/scripts/examples_index_guard.py",
+  "inputs": [
+   "tools/scripts/examples_index_guard.py"
+  ],
+  "kind": "python"
+ }
+}

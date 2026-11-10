@@ -1,0 +1,11 @@
+{
+ "name": "setup-cache-lock",
+ "record": {
+  "entry": "tools/scripts/test_setup_cache_lock.sh",
+  "inputs": [
+   "setup.sh",
+   "tools/scripts/test_setup_cache_lock.sh"
+  ],
+  "kind": "shell"
+ }
+}

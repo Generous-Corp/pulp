@@ -827,10 +827,9 @@ pulp audio validate assert audio-run/assertions.json
 `validate summarize --json` is `pulp.audio.summarize.v1`: the document carries
 a `schema` string next to the older `schema_version` integer, and its
 `scenario` field is the input's **basename**, not the path you passed (pass
-`--absolute-paths` to get the path back). A script that matched `scenario`
-against a full path broke the day this landed; match on the basename or ask
-for absolute paths. The same document shape is what `pulp audio render
---manifest` and the failing-scenario artifacts write, so all three share the
+`--absolute-paths` to get the path back), so match `scenario` on the basename.
+The same document shape is what `pulp audio render --manifest` and the
+failing-scenario artifacts write, so all three share the
 one schema id. When `summarize` refuses a file because its header declares
 more than the format registry's decode ceiling (2^30 frames, 4 GiB of float
 output), stderr names the limit and points at `pulp audio inspect`, which
@@ -960,6 +959,15 @@ harness or `ctest`.
   `engine [--input <wav>] --character <c>` (validate the REAL stretch engine, reference-free
   on a dry input), `engine-baseline` (regression gate: did an engine change make it worse?),
   `corpus list|add` (versioned, license-guarded corpus).
+- **Decoder differential (developer lane):** `tests/test_decoder_differential.py` decodes
+  every lossless seed in `test/fixtures/fuzz/audio-decoder/` (`.wav` `.flac` `.aiff`) with
+  libsndfile and with `pulp-audio-decode-dump` (built with the C++ tests; set
+  `PULP_AUDIO_DECODE_DUMP_BIN` to it) and requires the float32 streams to be byte-identical.
+  It skips without `soundfile` or the binary, so it never holds a gate. A seed only one side
+  decodes is an acceptance split and must be listed in the test's `EXPECTED_ACCEPTANCE_SPLITS`
+  with its reason (a Pulp contract or a tracked issue); an unlisted split, or a listed
+  one that stops happening, fails the test, and the sample comparison is never relaxed. Lossy
+  seeds stay out because libsndfile's Ogg/MP3 paths are different codecs from Pulp's.
 - **Synth-guidance experiment:** `tools/rack/fidelity.py patch.vcv --wav render.wav`
   writes only the speaker-bound audio taps, using one shared peak-normalization gain while
   refusing a silent source and content-binding original Rack voltage levels in the adjacent

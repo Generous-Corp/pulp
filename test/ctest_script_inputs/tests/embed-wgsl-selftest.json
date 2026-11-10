@@ -1,0 +1,10 @@
+{
+ "name": "embed-wgsl-selftest",
+ "record": {
+  "entry": "tools/cmake/scripts/test_embed_wgsl.py",
+  "inputs": [
+   "tools/cmake/scripts/test_embed_wgsl.py"
+  ],
+  "kind": "python"
+ }
+}

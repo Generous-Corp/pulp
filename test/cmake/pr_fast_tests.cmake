@@ -47,9 +47,10 @@ add_test(NAME ctest-unique-names-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_ctest_unique_names_check.py")
 
-# Declared inputs of script-driven ctests (test/ctest_script_inputs.json) must
-# match what the scripts import and name today, or the affected-test shadow
-# would trust a stale list. Regenerate with
+# Declared inputs of script-driven ctests (test/ctest_script_inputs/, one
+# fragment per entry, tools/scripts/script_inputs_store.py) must match what the
+# scripts import and name today, or the affected-test shadow would trust a
+# stale list. Regenerate with
 #   python3 tools/scripts/script_test_inputs.py --build-dir <dir> --write
 add_test(NAME script-test-inputs-drift
     COMMAND ${Python3_EXECUTABLE}
@@ -70,6 +71,26 @@ set_property(TEST script-test-inputs-drift APPEND PROPERTY LABELS gate-inventory
 add_test(NAME script-test-inputs-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_script_test_inputs.py")
+# The fragment layout itself, including a real git three-way merge of two
+# independent additions (and its single-file negative control).
+add_test(NAME script-inputs-store-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_script_inputs_store.py")
+set_tests_properties(script-inputs-store-selftest PROPERTIES TIMEOUT 120)
+# A branch must not edit a registered shared hotspot aggregate directly
+# (tools/scripts/hotspot_edit_guard.json); it writes the entry's fragment.
+# PULP_DIFF_SCOPED: it judges only this change's diff, so a re-run on a
+# checkout of the base passes by construction.
+add_test(NAME hotspot-edit-guard
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/hotspot_edit_guard.py"
+        --root "${CMAKE_SOURCE_DIR}" --skip-without-base)
+set_tests_properties(hotspot-edit-guard PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77
+    PULP_DIFF_SCOPED TRUE)
+add_test(NAME hotspot-edit-guard-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_hotspot_edit_guard.py")
+set_tests_properties(hotspot-edit-guard-selftest PROPERTIES TIMEOUT 120)
 # pulp_test_data() (tools/cmake/PulpTestData.cmake) writes the configure-time
 # evidence the list folds in for compiled tests; this configures a throwaway
 # project and reads what it wrote.
@@ -118,6 +139,9 @@ set(PULP_PR_FAST_TESTS
 
     script-test-inputs-drift
     script-test-inputs-selftest
+    script-inputs-store-selftest
+    hotspot-edit-guard
+    hotspot-edit-guard-selftest
 
     gate-python-imports
     gate-python-imports-selftest
@@ -242,6 +266,27 @@ set(PULP_PR_FAST_NEEDS_BUILD
 foreach(_pulp_pr_fast_test IN LISTS PULP_PR_FAST_NEEDS_BUILD)
     if(TEST "${_pulp_pr_fast_test}")
         set_property(TEST "${_pulp_pr_fast_test}" APPEND PROPERTY LABELS needs-build)
+    endif()
+endforeach()
+
+# The generated-manifest drift checks that fail most pull-request heads. Each
+# reads only the checkout and what the configure wrote (CTestTestfile.cmake,
+# the CMake file-API codemodel, the census facts), never a built artifact, so
+# the macOS leg runs them between Configure and Build: a stale manifest then
+# fails the required check before the build instead of after it, and the
+# post-build fast tier leaves them out rather than running them twice.
+# `pr-fast-tier-contract` keeps every member inside pr-fast and outside
+# needs-build.
+set(PULP_PR_FAST_CONFIGURE_TESTS
+    script-test-inputs-drift
+    consumption-census-drift
+    consumption-census-drift-description
+    consumption-census-negative-contract
+    agent-capability-manifest-check
+)
+foreach(_pulp_pr_fast_test IN LISTS PULP_PR_FAST_CONFIGURE_TESTS)
+    if(TEST "${_pulp_pr_fast_test}")
+        set_property(TEST "${_pulp_pr_fast_test}" APPEND PROPERTY LABELS pr-fast-configure)
     endif()
 endforeach()
 

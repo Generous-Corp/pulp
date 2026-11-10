@@ -1,0 +1,11 @@
+{
+ "name": "findskia-arch-assert-selftest",
+ "record": {
+  "entry": "tools/scripts/test_findskia_arch_assert.py",
+  "inputs": [
+   "tools/cmake/FindSkia.cmake",
+   "tools/scripts/test_findskia_arch_assert.py"
+  ],
+  "kind": "python"
+ }
+}

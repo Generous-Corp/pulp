@@ -2109,6 +2109,40 @@ jobs:
           git count-objects -v | awk '/^size(-pack)?:/ {kib += $2} END {printf "gate-git-transfer: local_object_kib=%d ", kib}'
           if [ -s .git/objects/info/alternates ]; then echo "alternates=yes"; else echo "alternates=no"; fi
 
+      # A head that is exactly a clean merge of main into a head whose full
+      # macOS lane passed takes the contract lane's steps (configure, pr-fast,
+      # pr-guard): the merge group, not this head, tests the commit that lands
+      # (decisions contract row 31, tools/ci/clean_merge_lane.py). It runs after
+      # hydration, which reconnects the full history it reads. Every steps
+      # condition that skips the build for the contract lane also reads this
+      # step's `lane`; a skipped or failed step leaves it empty, which is the
+      # full lane. PULP_CLEAN_MERGE_LANE_MODE: `shadow` (unset) annotates
+      # `would_take` and runs the full lane, `enforce` takes it, `off` is the
+      # rollback.
+      - name: Decide the clean-merge lane (pull request head)
+        id: clean_merge
+        if: >-
+          runner.os == 'macOS' && matrix.key == 'macos'
+          && github.event_name == 'pull_request' && github.event.action == 'synchronize'
+          && matrix.lane != 'contract'
+        continue-on-error: true
+        timeout-minutes: 5
+        shell: bash
+        env:
+          CLEAN_MERGE_MODE: ${{ vars.PULP_CLEAN_MERGE_LANE_MODE || 'shadow' }}
+          # Read from the environment, never argv, so `ps` on the VM cannot see it.
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BEFORE_SHA: ${{ github.event.before }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_EVENT_ACTION: ${{ github.event.action }}
+        run: |
+          python3 tools/ci/clean_merge_lane.py decide --repo "$GITHUB_WORKSPACE" \
+            --repository "$GITHUB_REPOSITORY" \
+            --head "$PR_HEAD_SHA" --before "$PR_BEFORE_SHA" --base-ref "$PR_BASE_REF" \
+            --action "$PR_EVENT_ACTION" --mode "$CLEAN_MERGE_MODE" \
+            --github-output "$GITHUB_OUTPUT"
+
       - name: Set up Namespace macOS cache
         if: (runner.os == 'macOS' && contains(matrix.runs_on_json, 'namespace-profile')) && inputs.pr_number == ''
         uses: ./.github/actions/setup-namespace-macos-cache
@@ -2525,7 +2559,7 @@ jobs:
       # OFF) never pay for it; danielraffel/pulp sets it to `1`. It is a
       # canary, never a substitute for the Tier-2 nightly Intel build.
       - name: Intel canary — lint + x86_64 GPU-off compile
-        if: (runner.os == 'macOS' && vars.PULP_INTEL_CANARY == '1') && matrix.lane != 'contract'
+        if: (runner.os == 'macOS' && vars.PULP_INTEL_CANARY == '1') && matrix.lane != 'contract' && steps.clean_merge.outputs.lane != 'clean-merge'
         shell: bash
         env:
           # A `pr_number` dispatch lints what a pull request does: its change
@@ -2814,11 +2848,49 @@ jobs:
           echo "::error::could not install $prefix/package-lock.json after 3 attempts; the Three.js bundler would fail the build" >&2
           exit 1
 
+      - name: Test configure-only drift checks before the build (pull request head)
+        # The `pr-fast-configure` members of the fast tier
+        # (test/cmake/pr_fast_tests.cmake) are the generated-manifest drift
+        # checks behind most red pull-request heads: script-test-inputs, the
+        # consumption census and the agent-capability manifest. They read only
+        # the checkout and what Configure wrote, so they run here, before the
+        # build. A forgotten regeneration then fails the required check about
+        # nine minutes sooner (median, over 79 such reds in a week) and frees
+        # the gate VM instead of building a head that cannot pass. The
+        # post-build fast tier leaves these members out when this step passed,
+        # so each runs exactly once. The contract lane, which never builds,
+        # keeps running the whole tier in its own step.
+        #
+        # Like the fast tier, this is not test evidence for the merge: its own
+        # JUnit file, never ctest.junit.xml; the merge queue runs everything.
+        id: pr_fast_configure_tests
+        if: (runner.os != 'Windows' && github.event_name == 'pull_request') && matrix.lane != 'contract'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gate_args="$(python3 tools/ci/ctest_gate_args.py \
+            --event-name "$GITHUB_EVENT_NAME" --runner-os "$RUNNER_OS")"
+          eval "$gate_args"
+          : "${label_exclude:?ctest gate arguments did not resolve}"
+          rc=0
+          ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure -C Release \
+            -L '^pr-fast$' -L '^pr-fast-configure$' -LE "$label_exclude" \
+            --no-tests=error --timeout 120 -j4 \
+            --output-junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest-pr-fast-prebuild.junit.xml" || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            # Configure left the build-in-progress marker and Build will not
+            # run to clear it. Nothing was compiled, so a warm build directory
+            # is still sound: clear the marker rather than make the next job
+            # on this directory start cold (tools/ci/build-dir-sentinel.sh).
+            rm -f "$PULP_BUILD_DIR/.pulp-build-incomplete"
+            exit "$rc"
+          fi
+
       - name: Build
         shell: bash
         id: build
         # The contract lane (an unapproved pull-request head) configures only.
-        if: matrix.lane != 'contract'
+        if: matrix.lane != 'contract' && steps.clean_merge.outputs.lane != 'clean-merge'
         env:
           IOS_COMPILE_REQUIRED: ${{ needs.classify.outputs.ios_compile_required }}
           IOS_GATE_TOKEN: ${{ github.token }}
@@ -2979,7 +3051,7 @@ jobs:
         # only the fast tier. The rule and its fail-closed probe live in
         # tools/ci/ctest_gate_args.py; an unreadable pull request means fast.
         id: pr_suite
-        if: (github.event_name == 'pull_request' && runner.os != 'Windows') && matrix.lane != 'contract'
+        if: (github.event_name == 'pull_request' && runner.os != 'Windows') && matrix.lane != 'contract' && steps.clean_merge.outputs.lane != 'clean-merge'
         shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -3013,11 +3085,17 @@ jobs:
         # members labelled `needs-build`.
         # That lane's green says so in a `deferred` tier annotation, which the
         # arm sweep refuses to arm on.
+        #
+        # On a building lane the `pr-fast-configure` members already ran before
+        # the build; they are left out only when that step passed.
         id: pr_fast_tests
         if: runner.os != 'Windows' && github.event_name == 'pull_request'
         shell: bash
         env:
+          PULP_CLEAN_MERGE_LANE: ${{ steps.clean_merge.outputs.lane }}
+          PULP_CLEAN_MERGE_FROM: ${{ steps.clean_merge.outputs.carried_from }}
           PULP_MACOS_LANE: ${{ matrix.lane }}
+          PR_FAST_CONFIGURE_OUTCOME: ${{ steps.pr_fast_configure_tests.outcome }}
         run: |
           set -euo pipefail
           # Same label exclusions as the full suite, from the same module.
@@ -3025,8 +3103,12 @@ jobs:
             --event-name "$GITHUB_EVENT_NAME" --runner-os "$RUNNER_OS")"
           eval "$gate_args"
           : "${label_exclude:?ctest gate arguments did not resolve}"
-          if [ "$PULP_MACOS_LANE" = contract ]; then
+          # Neither the contract nor the clean-merge lane builds.
+          if [ "$PULP_MACOS_LANE" = contract ] || [ "$PULP_CLEAN_MERGE_LANE" = clean-merge ]; then
             label_exclude="${label_exclude}|^needs-build$"
+          fi
+          if [ "$PR_FAST_CONFIGURE_OUTCOME" = success ]; then
+            label_exclude="${label_exclude}|^pr-fast-configure$"
           fi
           ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure -C Release \
             -L '^pr-fast$' -LE "$label_exclude" \
@@ -3045,6 +3127,19 @@ jobs:
               echo "sweep applies \`macos-ci\` to an approved head, which runs the full"
               echo "lane, and arming waits for that run. To run it now, dispatch"
               echo "\`build.yml\` on this branch."
+            } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          elif [ "$PULP_CLEAN_MERGE_LANE" = clean-merge ]; then
+            # A clean merge of main into a head whose full lane passed: the
+            # merged tree's drift checks ran here; Build and the tests it feeds
+            # run in the merge group (decisions contract row 31).
+            [[ "$PULP_CLEAN_MERGE_FROM" =~ ^[0-9a-f]{40}$ ]] || PULP_CLEAN_MERGE_FROM=""
+            echo "::notice title=shipyard-test-tier::{\"schema\":\"shipyard-test-tier/v1\",\"tier\":\"clean-merge\",\"selector\":\"pr-fast+pr-guard\",\"carried_from\":\"$PULP_CLEAN_MERGE_FROM\",\"full_suite_runs_in\":\"merge_group\"}"
+            {
+              echo "### macos: clean-merge lane, no build on this head"
+              echo
+              echo "This head is a clean merge of main into \`$PULP_CLEAN_MERGE_FROM\`, whose full macOS"
+              echo "lane passed, so this leg configured and ran only the \`pr-fast\` and \`pr-guard\`"
+              echo "tiers. The merge group builds and tests the commit that lands."
             } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
           else
             echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"fast","selector":"pr-fast","full_suite_runs_in":"merge_group"}'
@@ -3083,7 +3178,7 @@ jobs:
         # tests left over are listed as skipped, and the merge group still
         # runs everything. Rules and selection: tools/ci/pr_head_affected_tests.py.
         id: pr_affected_tests
-        if: (runner.os != 'Windows' && github.event_name == 'pull_request') && matrix.lane != 'contract'
+        if: (runner.os != 'Windows' && github.event_name == 'pull_request') && matrix.lane != 'contract' && steps.clean_merge.outputs.lane != 'clean-merge'
         shell: bash
         run: |
           set -euo pipefail
@@ -3125,7 +3220,7 @@ jobs:
           runner.os != 'Windows'
           && (github.event_name != 'pull_request'
               || steps.pr_suite.outputs.suite == 'full')
-          && matrix.lane != 'contract'
+          && matrix.lane != 'contract' && steps.clean_merge.outputs.lane != 'clean-merge'
         continue-on-error: ${{ github.event_name == 'pull_request' && steps.pr_suite.outputs.suite != 'full' }}
         shell: bash
         # Keep one hung ctest entry from burning the full workflow timeout.
@@ -3407,12 +3502,14 @@ jobs:
           junit="$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml"
           # When the full suite did not run (a pull-request head that took the
           # fast tier, or a build that stopped first) there is no full report
-          # by design: observe the fast tier's own report if it exists, and
+          # by design: observe the fast tier's own report if it exists (or the
+          # pre-build drift checks' report, when the head stopped there), and
           # otherwise record a named "not run" instead of an unavailable error.
           # A suite that DID run and left no report stays an error.
           absent=()
           if [ "$CTEST_OUTCOME" = skipped ]; then
             absent=(--fallback "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest-pr-fast.junit.xml"
+                    --fallback "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest-pr-fast-prebuild.junit.xml"
                     --not-run-reason "the full suite did not run on this leg (fast tier only, or the build stopped before ctest)")
           fi
           listing="$(ctest --test-dir "$PULP_BUILD_DIR" -N 2>/dev/null)" || listing=""
@@ -3436,7 +3533,7 @@ jobs:
       # log and out of the required check until the runner's adapter state is
       # established; promote it by deleting that line.
       - name: Observe GPU adapter contract (self-hosted macOS)
-        if: (runner.os == 'macOS' && matrix.key == 'macos' && runner.environment == 'self-hosted') && matrix.lane != 'contract'
+        if: (runner.os == 'macOS' && matrix.key == 'macos' && runner.environment == 'self-hosted') && matrix.lane != 'contract' && steps.clean_merge.outputs.lane != 'clean-merge'
         continue-on-error: true
         shell: bash
         env:
@@ -3455,7 +3552,7 @@ jobs:
           && needs.classify.outputs.agent_capability_installed_sdk_required == 'true'
           && github.event_name == 'pull_request'
           && steps.pr_suite.outputs.suite != 'full'
-          && matrix.lane != 'contract'
+          && matrix.lane != 'contract' && steps.clean_merge.outputs.lane != 'clean-merge'
         shell: bash
         run: |
           set -euo pipefail
@@ -3475,7 +3572,7 @@ jobs:
           && (github.event_name == 'pull_request'
               || github.event_name == 'merge_group'
               || github.event_name == 'workflow_dispatch')
-          && matrix.lane != 'contract'
+          && matrix.lane != 'contract' && steps.clean_merge.outputs.lane != 'clean-merge'
         shell: bash
         env:
           SDK_ARTIFACT_DIR: ${{ runner.temp }}/pulp-gpu-audio-sdk
@@ -3535,7 +3632,7 @@ jobs:
           && (github.event_name == 'pull_request'
               || github.event_name == 'merge_group'
               || github.event_name == 'workflow_dispatch')
-          && matrix.lane != 'contract'
+          && matrix.lane != 'contract' && steps.clean_merge.outputs.lane != 'clean-merge'
           && inputs.pr_number == ''
         continue-on-error: true
         uses: actions/upload-artifact@v7.0.2
@@ -3673,6 +3770,7 @@ jobs:
           path: |
             ${{ env.PULP_BUILD_DIR }}/Testing/Temporary/
             ${{ env.PULP_BUILD_DIR }}/ctest.junit.xml
+            ${{ env.PULP_BUILD_DIR }}/ctest-pr-fast-prebuild.junit.xml
             ${{ env.PULP_BUILD_DIR }}/ctest-pr-fast.junit.xml
             ${{ env.PULP_BUILD_DIR }}/ctest-pr-guard.junit.xml
             ${{ env.PULP_BUILD_DIR }}/ctest.nonruns.json
@@ -3691,7 +3789,7 @@ jobs:
       # in the build directory by an earlier run is never recorded as this one.
       - name: Record per-test results for reuse replay (macOS)
         id: reuse_record
-        if: ${{ (!cancelled() && runner.os == 'macOS' && matrix.key == 'macos') && matrix.lane != 'contract' }}
+        if: ${{ (!cancelled() && runner.os == 'macOS' && matrix.key == 'macos') && matrix.lane != 'contract' && steps.clean_merge.outputs.lane != 'clean-merge' }}
         continue-on-error: true
         shell: bash
         env:
@@ -3703,6 +3801,7 @@ jobs:
           BUILD_OUTCOME: ${{ steps.build.outcome }}
           CTEST_OUTCOME: ${{ steps.ctest.outcome }}
           PR_FAST_OUTCOME: ${{ steps.pr_fast_tests.outcome }}
+          PR_FAST_CONFIGURE_OUTCOME: ${{ steps.pr_fast_configure_tests.outcome }}
           PR_AFFECTED_OUTCOME: ${{ steps.pr_affected_tests.outcome }}
         run: |
           set -uo pipefail
@@ -3712,6 +3811,7 @@ jobs:
           out="$RUNNER_TEMP/reuse-record"
           suites=()
           case "$CTEST_OUTCOME" in success|failure) suites+=(--suite "full=$b/ctest.junit.xml,attempts=$ev/LastTest.full.log,repeat") ;; esac
+          case "$PR_FAST_CONFIGURE_OUTCOME" in success|failure) suites+=(--suite "pr-fast-configure=$b/ctest-pr-fast-prebuild.junit.xml") ;; esac
           case "$PR_FAST_OUTCOME" in success|failure) suites+=(--suite "pr-fast=$b/ctest-pr-fast.junit.xml") ;; esac
           case "$PR_AFFECTED_OUTCOME" in success|failure) suites+=(--suite "pr-affected=$b/pr-affected-junit,repeat") ;; esac
           rc=0
@@ -3720,7 +3820,7 @@ jobs:
             --selected-json "$ev/selected.json" \
             --identity-json "$shadows/our-identity.json" --test-keys "$shadows/test-keys.json" \
             --build-outcome "$BUILD_OUTCOME" --not-before-epoch "${REUSE_RECORD_JOB_START:-}" --link-members --object-deps --codemodel --inventory \
-            --context "ctest=$CTEST_OUTCOME" --context "pr_fast=$PR_FAST_OUTCOME" \
+            --context "ctest=$CTEST_OUTCOME" --context "pr_fast_configure=$PR_FAST_CONFIGURE_OUTCOME" --context "pr_fast=$PR_FAST_OUTCOME" \
             --context "pr_affected=$PR_AFFECTED_OUTCOME" || rc=$?
           if [ "$rc" -ne 0 ] || [ ! -s "$out/job.json" ]; then
             echo "::warning title=reuse-record NOT written::reuse_record.py exited $rc; this job's per-test replay history is lost"
