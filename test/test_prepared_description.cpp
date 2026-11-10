@@ -2,6 +2,8 @@
 
 #include <pulp/format/graph_runtime_executor.hpp>
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/host/graph_identity.hpp>
+#include <pulp/runtime/crypto.hpp>
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 
 #include <algorithm>
@@ -157,6 +159,34 @@ TEST_CASE("D4 binds and exports a closed stereo Gain chain") {
     const auto exported = snapshot.export_prepared_description();
     REQUIRE(exported);
     REQUIRE(exported.value->nodes.size() == 4);
+    const auto resolved = resolved_fingerprint(*exported.value);
+    REQUIRE(resolved);
+    REQUIRE(resolved.value().domain() == "pulp.graph.resolved-plan.v1");
+    REQUIRE(resolved.value().profile() == "pulp.graph.resolved.io-gain.v1");
+    REQUIRE(resolved.value().canonical_bytes().find("\"buffers\"") != std::string_view::npos);
+    const auto receipt = capture_graph_identity_receipt(*exported.value);
+    REQUIRE(receipt);
+    REQUIRE(receipt.value().canonical_bytes().find("pulp.graph.identity.receipt.v1") != std::string::npos);
+    const auto resolved_bytes = std::string(resolved.value().canonical_bytes());
+    REQUIRE(resolved.value().digest() ==
+            "sha256:" + pulp::runtime::sha256_hex(std::string("pulp.graph.resolved-plan.v1") + std::string(1, '\0') + resolved_bytes));
+    const auto receipt_bytes = receipt.value().canonical_bytes();
+    std::vector<std::byte> receipt_input(receipt_bytes.size());
+    std::transform(receipt_bytes.begin(), receipt_bytes.end(), receipt_input.begin(),
+                   [](char c) { return static_cast<std::byte>(static_cast<unsigned char>(c)); });
+    REQUIRE(decode_graph_identity_receipt(receipt_input));
+    receipt_input[receipt_input.size() / 2] ^= std::byte{1};
+    REQUIRE_FALSE(decode_graph_identity_receipt(receipt_input));
+    auto provenance_variant = *exported.value;
+    provenance_variant.snapshot_id += 101;
+    provenance_variant.pool_snapshot_id += 101;
+    provenance_variant.pool_binding_identity ^= 0x55;
+    provenance_variant.execution_generation += 3;
+    provenance_variant.owner_generation += 7;
+    provenance_variant.execution_selection_generation += 11;
+    REQUIRE(resolved_fingerprint(provenance_variant));
+    REQUIRE(resolved_fingerprint(provenance_variant).value().canonical_bytes() == resolved_bytes);
+    REQUIRE(resolved_fingerprint(provenance_variant).value().digest() == resolved.value().digest());
     REQUIRE(exported.value->edges.size() == 6);
     REQUIRE(exported.value->channels == std::vector<std::string>{"L", "R"});
     REQUIRE(exported.value->interfaces.size() == 2);

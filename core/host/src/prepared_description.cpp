@@ -367,3 +367,449 @@ const char* prepared_description_refusal_name(PreparedDescriptionRefusal code) n
 }
 
 } // namespace pulp::host
+
+// The resolved profile is additive: the D4 encoder above is deliberately frozen.
+#include <pulp/host/graph_identity.hpp>
+#include <pulp/host/identity_text.hpp>
+#include <choc/text/choc_JSON.h>
+#include <cmath>
+#include <map>
+#include <set>
+#include <limits>
+
+namespace pulp::host {
+bool validate_resolved_semantic_payload(std::string_view);
+
+struct ResolvedIdentityAccess {
+    static GraphIdentityValue make(std::string domain, std::string profile,
+                                   std::string payload, std::string digest) {
+        GraphIdentityValue value;
+        value.domain_ = std::move(domain);
+        value.profile_ = std::move(profile);
+        value.payload_ = std::move(payload);
+        value.digest_ = std::move(digest);
+        return value;
+    }
+};
+
+namespace {
+using J = choc::value::Value;
+using V = choc::value::ValueView;
+constexpr std::string_view resolved_domain = "pulp.graph.resolved-plan.v1";
+constexpr std::string_view resolved_profile = "pulp.graph.resolved.io-gain.v1";
+constexpr std::string_view semantic_domain = "pulp.graph.semantic.v1";
+constexpr std::string_view semantic_profile = "pulp.graph.identity.v1";
+constexpr std::string_view executor = "pulp.graph.canonical-executor.f32.v1";
+
+J str(std::string_view s) { return J(std::string(s)); }
+J num(std::uint64_t n) {
+    if (n > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()))
+        throw std::invalid_argument("integer outside bounded profile");
+    return J(static_cast<std::int64_t>(n));
+}
+J arr() { return choc::value::createEmptyArray(); }
+J obj(std::initializer_list<std::pair<std::string_view, J>> fields) {
+    auto result = choc::value::createObject("");
+    for (const auto& field : fields)
+        result.addMember(std::string(field.first), field.second);
+    return result;
+}
+J boolean(bool value) { return J(value); }
+J key(std::string_view node) { auto a = arr(); a.addArrayElement(str(node)); return a; }
+J endpoint(const ResolvedEndpoint& e) {
+    return obj({{"node", key(e.node)}, {"port", str("audio")},
+                {"direction", str(e.output ? "out" : "in")}, {"kind", str("audio")},
+                {"channel", J{}}, {"parameter", J{}}});
+}
+J access(const ResolvedBufferAccess& a) {
+    return obj({{"node", key(a.endpoint.node)}, {"port", str("audio")},
+        {"direction", str(a.endpoint.output ? "out" : "in")}, {"channel", str(a.channel)},
+        {"role", str(a.role)}, {"phase", str(a.phase)}, {"ordinal", num(a.ordinal)},
+        {"mode", str(a.mode)}});
+}
+bool unsigned_less(std::string_view a, std::string_view b) {
+    return std::lexicographical_compare(a.begin(), a.end(), b.begin(), b.end(),
+        [](unsigned char x, unsigned char y) { return x < y; });
+}
+void resolved_quote(std::string& out, std::string_view text) {
+    std::string normalized;
+    // Canonical JSON permits controls, but this profile's keys/literals do not.
+    if (!text.empty() && !normalize_authored_identity_text(text, normalized))
+        throw std::invalid_argument("invalid UTF-8 string");
+    out += '"';
+    for (const unsigned char c : text) {
+        if (c == '"' || c == '\\') { out += '\\'; out += static_cast<char>(c); }
+        else if (c < 32) {
+            constexpr char hex[] = "0123456789abcdef";
+            out += "\\u00"; out += hex[c >> 4]; out += hex[c & 15];
+        } else out += static_cast<char>(c);
+    }
+    out += '"';
+}
+void encode(V v, std::string& out) {
+    if (v.isVoid()) out += "null";
+    else if (v.isString()) resolved_quote(out, v.getString());
+    else if (v.isBool()) out += v.getBool() ? "true" : "false";
+    else if (v.isInt()) {
+        if (v.getInt64() < 0) throw std::invalid_argument("negative integer");
+        number(out, static_cast<std::uint64_t>(v.getInt64()));
+    } else if (v.isArray()) {
+        out += '[';
+        for (std::uint32_t i = 0; i < v.size(); ++i) { if (i) out += ','; encode(v[i], out); }
+        out += ']';
+    } else if (v.isObject()) {
+        std::vector<std::string> names;
+        for (std::uint32_t i = 0; i < v.size(); ++i)
+            names.emplace_back(v.getObjectMemberAt(i).name);
+        std::sort(names.begin(), names.end(), unsigned_less);
+        if (std::adjacent_find(names.begin(), names.end()) != names.end())
+            throw std::invalid_argument("duplicate JSON key");
+        out += '{';
+        for (std::size_t i = 0; i < names.size(); ++i) {
+            if (i) out += ',';
+            resolved_quote(out, names[i]); out += ':'; encode(v[names[i]], out);
+        }
+        out += '}';
+    } else throw std::invalid_argument("noncanonical number");
+}
+std::string encoded(V v) { std::string s; encode(v, s); return s; }
+std::string hash(std::string_view domain, std::string_view bytes) {
+    std::string input(domain); input += '\0'; input += bytes;
+    return "sha256:" + runtime::sha256_hex(input);
+}
+std::string bits(std::uint64_t value, unsigned digits) {
+    std::string s = digits == 8 ? "f32:" : "f64:";
+    constexpr char hex[] = "0123456789abcdef";
+    for (unsigned i = digits; i; --i) s += hex[(value >> ((i - 1) * 4)) & 15];
+    return s;
+}
+J limit(std::uint64_t nodes, std::uint64_t connections, std::uint64_t per_node,
+        std::uint64_t ports, std::uint64_t frames, bool nullable) {
+    const auto bound = [nullable](std::uint64_t n) { return nullable && n == 0 ? J{} : num(n); };
+    return obj({{"nodes", bound(nodes)}, {"connections", bound(connections)},
+        {"ports_per_node", bound(per_node)}, {"ports", bound(ports)}, {"block_frames", bound(frames)}});
+}
+J projection(const PreparedDescriptionData& d) {
+    auto nodes = choc::value::createObject("");
+    for (const auto& n : d.nodes) {
+        const auto binding = std::find_if(d.resolved_node_bindings.begin(), d.resolved_node_bindings.end(),
+            [&](const auto& b) { return b.node == n.authored_key; });
+        if (binding == d.resolved_node_bindings.end()) throw std::invalid_argument("missing binding");
+        nodes.addMember(encoded(key(n.authored_key)), obj({{"kind", str(n.kind)},
+            {"kind_contract", str(n.kind_contract)}, {"implementation", str(n.implementation)},
+            {"input_ports", num(n.input_ports)}, {"output_ports", num(n.output_ports)},
+            {"gain", str(bits(n.gain_bits, 8))}, {"latency_samples", num(n.latency_samples)},
+            {"tail_samples", num(n.tail_samples)}, {"transport_sensitive", boolean(n.transport_sensitive)},
+            {"persistent_output", boolean(n.persistent_output)}, {"required", boolean(binding->required)},
+            {"reads_inputs_only", boolean(n.reads_inputs_only)},
+            {"preserve_parameter_events", boolean(binding->preserve_parameter_events)},
+            {"audio_rate_delivery", str(binding->audio_rate_delivery)}}));
+    }
+    auto interfaces = arr();
+    for (const auto& i : d.interfaces) {
+        auto channels = arr(); for (const auto& c : i.channels) channels.addArrayElement(str(c));
+        auto indices = arr(); for (const auto c : i.runtime_channel_indices) indices.addArrayElement(num(c));
+        interfaces.addArrayElement(obj({{"key", str(i.key)}, {"role", str(i.output ? "output" : "input")},
+            {"kind", str("audio")}, {"endpoint", endpoint({i.node, !i.output})},
+            {"channels", channels}, {"bus_index", num(i.runtime_bus_index)},
+            {"channel_indices", indices}}));
+    }
+    if (d.edges.size() != d.resolved_edge_bindings.size()) throw std::invalid_argument("edge count");
+    std::vector<J> edge_records;
+    for (std::size_t i = 0; i < d.edges.size(); ++i) {
+        const auto& e = d.edges[i]; const auto& b = d.resolved_edge_bindings[i];
+        edge_records.push_back(obj({{"source", endpoint(b.source)}, {"destination", endpoint(b.destination)},
+            {"channel_source", str(b.channel_source)}, {"channel_destination", str(b.channel_destination)},
+            {"input_mode", str(e.input_mode)}, {"gather_ordinal", num(e.gather_ordinal)},
+            {"pdc_delay_samples", num(e.pdc_delay_samples)}, {"feedback", str(e.feedback ? "block" : "none")},
+            {"assignment_allowed", boolean(e.assignment_allowed)}, {"final_input_mode", str(e.final_input_mode)}}));
+    }
+    std::sort(edge_records.begin(), edge_records.end(), [](const J& a, const J& b) {
+        const auto tuple = [](V e) { auto v = arr(); v.addArrayElement(e["source"]); v.addArrayElement(e["destination"]);
+            v.addArrayElement(e["channel_source"]); v.addArrayElement(e["channel_destination"]); return encoded(v); };
+        return unsigned_less(tuple(a), tuple(b));
+    });
+    auto edges = arr(); for (const auto& e : edge_records) edges.addArrayElement(e);
+    auto schedule = arr(); for (const auto& n : d.schedule) schedule.addArrayElement(key(n));
+    auto channels = arr(); for (const auto& c : d.channels) channels.addArrayElement(str(c));
+    // Normalize only used classes, by first canonical logical access, never raw slot ID.
+    std::vector<std::pair<std::string, std::uint32_t>> all_accesses;
+    for (const auto& c : d.resolved_buffer_classes)
+        for (const auto& a : c.members) all_accesses.emplace_back(encoded(access(a)), c.id);
+    std::sort(all_accesses.begin(), all_accesses.end(), [](const auto& a, const auto& b) {
+        return unsigned_less(a.first, b.first);
+    });
+    std::map<std::uint32_t, std::uint32_t> ids;
+    for (const auto& a : all_accesses) if (!ids.contains(a.second)) ids.emplace(a.second, ids.size());
+    std::vector<J> class_records(ids.size());
+    for (const auto& c : d.resolved_buffer_classes) {
+        if (!ids.contains(c.id)) throw std::invalid_argument("unused class");
+        std::vector<std::string> sorted;
+        for (const auto& a : c.members) sorted.push_back(encoded(access(a)));
+        std::sort(sorted.begin(), sorted.end(), unsigned_less);
+        auto members = arr(); for (const auto& a : sorted) members.addArrayElement(choc::json::parse(a));
+        class_records[ids.at(c.id)] = obj({{"id", num(ids.at(c.id))}, {"storage_kind", str(c.storage_kind)},
+            {"capacity_frames", num(c.capacity_frames)}, {"sample_format", str(c.sample_format)},
+            {"initialization", str(c.initialization)}, {"members", members}});
+    }
+    auto classes = arr(); for (const auto& c : class_records) classes.addArrayElement(c);
+    std::vector<J> value_records;
+    for (const auto& v : d.resolved_buffer_values) {
+        std::vector<std::string> sorted; for (const auto& a : v.accesses) sorted.push_back(encoded(access(a)));
+        std::sort(sorted.begin(), sorted.end(), unsigned_less);
+        auto accesses = arr(); for (const auto& a : sorted) accesses.addArrayElement(choc::json::parse(a));
+        if (!ids.contains(v.class_id)) throw std::invalid_argument("unbound value");
+        // The channel is part of the endpoint's produced mono value identity.
+        auto producer = endpoint(v.producer); producer["channel"] = str(v.channel);
+        value_records.push_back(obj({{"key", obj({{"producer", producer},
+            {"production_phase", str(v.production_phase)}, {"production_ordinal", num(v.production_ordinal)}})},
+            {"class_id", num(ids.at(v.class_id))}, {"accesses", accesses},
+            {"lifetime_begin", num(v.lifetime_begin)}, {"lifetime_end", num(v.lifetime_end)},
+            {"last_read_phase", v.last_read_phase ? str(*v.last_read_phase) : J{}}}));
+    }
+    std::sort(value_records.begin(), value_records.end(), [](const J& a, const J& b) {
+        return unsigned_less(encoded(a["key"]), encoded(b["key"]));
+    });
+    auto values = arr(); for (const auto& v : value_records) values.addArrayElement(v);
+    auto mappings = arr();
+    if (d.resolved_alias_endpoint) for (const auto& c : d.channels) {
+        auto e = endpoint(*d.resolved_alias_endpoint); e["channel"] = str(c);
+        mappings.addArrayElement(obj({{"source", e}, {"view", e}}));
+    }
+    auto host = obj({{"nodes", d.host_max_nodes ? num(d.host_max_nodes) : J{}},
+        {"connections", d.host_max_connections ? num(d.host_max_connections) : J{}},
+        {"ports", d.host_max_ports ? num(d.host_max_ports) : J{}},
+        {"block_frames", d.host_max_block_frames ? num(d.host_max_block_frames) : J{}},
+        {"max_estimated_work_units", num(d.host_max_estimated_work_units)}});
+    return obj({{"schema", str(resolved_profile)},
+        {"semantic", obj({{"domain", str(semantic_domain)}, {"profile", str(d.semantic_profile)},
+                          {"digest", str(d.semantic_digest)}})},
+        {"preparation", obj({{"contract", str(d.preparation_contract)},
+            {"sample_rate", str(bits(std::bit_cast<std::uint64_t>(d.sample_rate), 16))},
+            {"max_block_frames", num(d.max_block_frames)}, {"sample_precision", str(d.sample_precision)}})},
+        {"execution", obj({{"backend", str(d.execution_backend)}, {"executor_contract", str(d.executor_contract)},
+            {"mode", str(d.execution_mode)}, {"tie_break_contract", str(d.tie_break_contract)},
+            {"fallback_policy", str(d.execution_fallback_policy)}, {"pdc_domain", str(d.pdc_execution_domain)},
+            {"canonical", boolean(d.canonical_executor_routing_enabled)},
+            {"parallel", boolean(d.parallel_routing_enabled)}, {"anticipation", boolean(d.anticipation_enabled)}})},
+        {"channels", channels}, {"interfaces", interfaces}, {"nodes", nodes}, {"edges", edges},
+        {"schedule", schedule}, {"buffers", obj({{"classes", classes}, {"values", values}})},
+        {"host_input_alias_policy", obj({{"eligible", boolean(d.host_input_alias_eligible)},
+            {"mode", str(d.host_input_alias_eligible ? "conditional_host_input" : "internal_copy")},
+            {"fallback", str(d.host_input_alias_fallback)},
+            {"source", d.resolved_alias_endpoint ? endpoint(*d.resolved_alias_endpoint) : J{}},
+            {"view", d.resolved_alias_endpoint ? endpoint(*d.resolved_alias_endpoint) : J{}},
+            {"mappings", mappings}, {"requires_full_width", boolean(d.host_input_alias_requires_full_width)},
+            {"requires_disjoint", boolean(d.host_input_alias_requires_disjoint)}})},
+        {"total_latency_samples", num(d.total_latency_samples)},
+        {"admission_limits", obj({{"profile", limit(d.profile_max_nodes, d.profile_max_connections,
+            d.profile_max_ports_per_node, d.profile_max_ports, d.profile_max_block_frames, false)},
+            {"host", host}, {"runtime", limit(d.runtime_max_nodes, d.runtime_max_connections,
+            d.runtime_max_ports_per_node, d.runtime_max_ports, d.runtime_max_block_frames, true)},
+            {"effective", limit(d.effective_max_nodes, d.effective_max_connections,
+            d.effective_max_ports_per_node, d.effective_max_ports, d.effective_max_block_frames, false)}})}});
+}
+
+void require(bool condition) {
+    if (!condition) throw std::invalid_argument("invalid resolved receipt");
+}
+bool text(V value, std::string_view expected) { return value.isString() && value.getString() == expected; }
+std::string string(V v) { require(v.isString()); return std::string(v.getString()); }
+std::uint64_t integer(V v, std::uint64_t maximum = std::numeric_limits<std::uint32_t>::max()) {
+    require(v.isInt() && v.getInt64() >= 0 && static_cast<std::uint64_t>(v.getInt64()) <= maximum);
+    return static_cast<std::uint64_t>(v.getInt64());
+}
+bool flag(V v) { require(v.isBool()); return v.getBool(); }
+void shape(V v, std::initializer_list<std::string_view> names) {
+    require(v.isObject() && v.size() == names.size());
+    for (const auto name : names) require(v.hasObjectMember(name));
+}
+std::string node_key(V v) {
+    require(v.isArray() && v.size() == 1 && v[0].isString());
+    auto s = string(v[0]); std::string normalized;
+    require(!s.empty() && s.size() <= 4096 && normalize_authored_identity_text(s, normalized) && normalized == s);
+    return s;
+}
+void valid_endpoint(V v, V nodes, bool output, bool mono = false) {
+    shape(v, {"node", "direction", "kind", "port", "channel", "parameter"});
+    const auto name = encoded(v["node"]); node_key(v["node"]);
+    require(nodes.hasObjectMember(name) && text(v["kind"], "audio") && text(v["port"], "audio") &&
+        text(v["direction"], output ? "out" : "in") && v["parameter"].isVoid());
+    require(integer(nodes[name][output ? "output_ports" : "input_ports"]) == 2);
+    require(mono ? v["channel"].isString() : v["channel"].isVoid());
+}
+unsigned phase(V v) {
+    const auto s = string(v);
+    if (s == "gather") return 0;
+    if (s == "execute") return 1;
+    require(s == "output_copy"); return 2;
+}
+std::uint64_t bit_value(V v, unsigned width) {
+    const auto s = string(v);
+    const std::string prefix = width == 8 ? "f32:" : "f64:";
+    require(s.size() == width + 4 && s.starts_with(prefix));
+    std::uint64_t result = 0;
+    for (const char c : std::string_view(s).substr(4)) {
+        require((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
+        result = (result << 4) | static_cast<unsigned>(c <= '9' ? c - '0' : c - 'a' + 10);
+    }
+    return result;
+}
+void validate_projection(V p, std::string_view authored_payload, std::string_view authored_digest) {
+    require(validate_resolved_semantic_payload(authored_payload));
+    require(p.isObject());
+    for (const auto name : {"schema","semantic","preparation","execution","channels","interfaces","nodes","edges","schedule","buffers","host_input_alias_policy","total_latency_samples","admission_limits"})
+        require(p.hasObjectMember(name));
+    require(text(p["schema"], resolved_profile));
+    const auto semantic = p["semantic"]; shape(semantic,{"domain","profile","digest"});
+    require(text(semantic["domain"], semantic_domain) && text(semantic["profile"], semantic_profile) &&
+            text(semantic["digest"], authored_digest) && hash(semantic_domain, authored_payload) == authored_digest);
+    const auto prep=p["preparation"]; shape(prep,{"contract","sample_rate","max_block_frames","sample_precision"});
+    require(text(prep["contract"],"pulp.graph.prepare.io-gain.serial.v1") && text(prep["sample_precision"],"f32"));
+    require(bit_value(prep["sample_rate"],16) != 0 && integer(prep["max_block_frames"],4096)>0);
+    const auto execution=p["execution"]; shape(execution,{"backend","executor_contract","mode","tie_break_contract","fallback_policy","pdc_domain","canonical","parallel","anticipation"});
+    require(text(execution["backend"],executor) && text(execution["executor_contract"],executor) && text(execution["mode"],"serial") && flag(execution["canonical"]) && !flag(execution["parallel"]) && !flag(execution["anticipation"]));
+    require(p["channels"].isArray() && p["interfaces"].isArray() && p["nodes"].isObject() && p["edges"].isArray() && p["schedule"].isArray());
+    require(p["buffers"].isObject() && p["buffers"].hasObjectMember("classes") && p["buffers"].hasObjectMember("values") && p["buffers"]["classes"].isArray() && p["buffers"]["values"].isArray());
+    const auto classes = p["buffers"]["classes"]; const auto values = p["buffers"]["values"];
+    std::set<std::uint64_t> ids;
+    for (std::uint32_t i=0;i<classes.size();++i) {
+        const auto c=classes[i]; shape(c,{"id","storage_kind","capacity_frames","sample_format","initialization","members"});
+        require(ids.insert(integer(c["id"])).second && integer(c["capacity_frames"])>0 && text(c["sample_format"],"f32") && c["members"].isArray() && c["members"].size()>0);
+        for (std::uint32_t j=0;j<c["members"].size();++j) { const auto a=c["members"][j]; shape(a,{"node","port","direction","channel","role","phase","ordinal","mode"}); require(node_key(a["node"]).size()>0); }
+    }
+    std::set<std::pair<std::uint64_t,std::uint64_t>> intervals;
+    for (std::uint32_t i=0;i<values.size();++i) {
+        const auto v=values[i]; shape(v,{"key","class_id","accesses","lifetime_begin","lifetime_end","last_read_phase"});
+        require(ids.contains(integer(v["class_id"])) && v["key"].isObject() && v["accesses"].isArray() && v["accesses"].size()>0);
+        const auto begin=integer(v["lifetime_begin"]), end=integer(v["lifetime_end"]); require(begin<end && intervals.insert({integer(v["class_id"]),begin}).second);
+        for (std::uint32_t j=0;j<v["accesses"].size();++j) { const auto a=v["accesses"][j]; shape(a,{"node","port","direction","channel","role","phase","ordinal","mode"}); node_key(a["node"]); }
+    }
+    const auto alias=p["host_input_alias_policy"]; shape(alias,{"eligible","mode","fallback","source","view","mappings","requires_full_width","requires_disjoint"});
+    require(alias["mappings"].isArray() && text(alias["fallback"],"internal_copy") && flag(alias["requires_full_width"]) && flag(alias["requires_disjoint"]));
+    const auto limits=p["admission_limits"]; shape(limits,{"profile","host","runtime","effective"});
+    for (const auto layer : {"profile","host","runtime","effective"}) require(limits[layer].isObject());
+}
+
+void validate_typed_capture(const PreparedDescriptionData& d) {
+    require(d.typed_resolved_capture && !d.semantic_payload.empty() && !d.semantic_digest.empty());
+    require(std::isfinite(d.sample_rate) && d.sample_rate > 0.0 && d.max_block_frames > 0 && d.max_block_frames <= 4096);
+    require(validate_resolved_semantic_payload(d.semantic_payload));
+    std::set<std::uint32_t> class_ids;
+    for (const auto& c : d.resolved_buffer_classes) {
+        require(class_ids.insert(c.id).second && c.capacity_frames > 0 && c.capacity_frames >= d.max_block_frames && c.sample_format == "f32");
+        require(!c.members.empty());
+        for (const auto& a : c.members) require(!a.endpoint.node.empty() && !a.channel.empty() && !a.phase.empty());
+    }
+    std::set<std::pair<std::uint32_t,std::uint32_t>> intervals;
+    for (const auto& v : d.resolved_buffer_values) {
+        require(class_ids.contains(v.class_id) && !v.producer.node.empty() && !v.channel.empty() && v.lifetime_begin < v.lifetime_end);
+        require(v.lifetime_end <= d.schedule.size() || d.schedule.empty());
+        require(!v.accesses.empty());
+        for (const auto& a : v.accesses) require(!a.endpoint.node.empty() && !a.phase.empty());
+        const auto key = std::pair{v.class_id, v.lifetime_begin};
+        require(intervals.insert(key).second);
+    }
+    if (d.host_input_alias_eligible) {
+        require(d.resolved_alias_endpoint.has_value() && d.resolved_alias_endpoint->output && d.resolved_alias_endpoint->node.size());
+        require(d.channels.size() == d.resolved_edge_bindings.size() || !d.channels.empty());
+    }
+}
+
+} // namespace
+
+GraphIdentityResult resolved_fingerprint(const PreparedDescriptionData& data) {
+    try {
+        validate_typed_capture(data);
+        const auto payload = encoded(projection(data));
+        validate_projection(choc::json::parse(payload), data.semantic_payload, data.semantic_digest);
+        const auto digest = hash(resolved_domain, payload);
+        return GraphIdentityResult(runtime::Ok(ResolvedIdentityAccess::make(
+            std::string(resolved_domain), std::string(resolved_profile), payload, digest)));
+    } catch (const std::bad_alloc&) {
+        return GraphIdentityResult(runtime::Err(GraphIdentityError::AllocationFailed));
+    } catch (const std::exception& error) {
+        return GraphIdentityResult(runtime::Err(GraphIdentityError::UnsupportedPreparedProfile));
+    } catch (...) {
+        return GraphIdentityResult(runtime::Err(GraphIdentityError::UnsupportedPreparedProfile));
+    }
+}
+
+GraphReceiptResult capture_graph_identity_receipt(const PreparedDescriptionData& data) {
+    try {
+        const auto resolved = resolved_fingerprint(data);
+        if (!resolved) return GraphReceiptResult(runtime::Err(resolved.error()));
+        auto authored = ResolvedIdentityAccess::make(std::string(semantic_domain),
+            data.semantic_profile, data.semantic_payload, data.semantic_digest);
+        require(validate_resolved_semantic_payload(data.semantic_payload));
+        GraphIdentityReceipt receipt{std::move(authored), resolved.value(),
+            "capture:snapshot=" + std::to_string(data.snapshot_id), "pulp.graph.identity.receipt.v1"};
+        return GraphReceiptResult(runtime::Ok(std::move(receipt)));
+    } catch (const std::bad_alloc&) {
+        return GraphReceiptResult(runtime::Err(GraphIdentityError::AllocationFailed));
+    } catch (...) {
+        return GraphReceiptResult(runtime::Err(GraphIdentityError::ReceiptBindingInvalid));
+    }
+}
+
+std::string GraphIdentityReceipt::canonical_bytes() const {
+    auto root = obj({{"schema", str("pulp.graph.identity.receipt.v1")},
+        {"authored", obj({{"domain", str(authored.domain_)}, {"profile", str(authored.profile_)},
+            {"payload", choc::json::parse(authored.payload_)}, {"digest", str(authored.digest_)}})},
+        {"resolved", obj({{"domain", str(resolved.domain_)}, {"profile", str(resolved.profile_)},
+            {"payload", choc::json::parse(resolved.payload_)}, {"digest", str(resolved.digest_)}})},
+        {"capture_provenance", str(capture_provenance)}, {"artifact_provenance", str(artifact_provenance)}});
+    return encoded(root);
+}
+
+GraphReceiptResult decode_graph_identity_receipt(std::span<const std::byte> bytes) {
+    try {
+        require(bytes.size() <= 64 * 1024 * 1024);
+        std::string source(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        auto root = choc::json::parse(source);
+        shape(root, {"schema", "authored", "resolved", "capture_provenance", "artifact_provenance"});
+        require(text(root["schema"], "pulp.graph.identity.receipt.v1"));
+        const auto read = [](V v) {
+            shape(v, {"domain", "profile", "payload", "digest"});
+            require(v["payload"].isObject());
+            auto payload = encoded(v["payload"]);
+            auto domain = string(v["domain"]); auto profile = string(v["profile"]); auto digest = string(v["digest"]);
+            require(digest == hash(domain, payload));
+            return ResolvedIdentityAccess::make(std::move(domain), std::move(profile), std::move(payload), std::move(digest));
+        };
+        auto authored = read(root["authored"]); auto resolved = read(root["resolved"]);
+        require(authored.domain() == semantic_domain && resolved.domain() == resolved_domain &&
+            resolved.profile() == resolved_profile && authored.profile() == semantic_profile);
+        validate_projection(choc::json::parse(std::string(resolved.canonical_bytes())), std::string(authored.canonical_bytes()), std::string(authored.digest()));
+        GraphIdentityReceipt result{std::move(authored), std::move(resolved),
+            string(root["capture_provenance"]), string(root["artifact_provenance"])};
+        require(result.canonical_bytes() == source);
+        return GraphReceiptResult(runtime::Ok(std::move(result)));
+    } catch (const std::bad_alloc&) {
+        return GraphReceiptResult(runtime::Err(GraphIdentityError::AllocationFailed));
+    } catch (...) {
+        return GraphReceiptResult(runtime::Err(GraphIdentityError::ReceiptBindingInvalid));
+    }
+}
+
+runtime::Result<bool, GraphIdentityError> compare_graph_identities(
+    const GraphIdentityValue& before, const GraphIdentityValue& after) {
+    if (before.domain_ != after.domain_ || before.profile_ != after.profile_)
+        return runtime::Result<bool, GraphIdentityError>(runtime::Err(GraphIdentityError::IncompatibleProfile));
+    if (before.digest_ != hash(before.domain_, before.payload_) || after.digest_ != hash(after.domain_, after.payload_))
+        return runtime::Result<bool, GraphIdentityError>(runtime::Err(GraphIdentityError::DigestPayloadMismatch));
+    return runtime::Result<bool, GraphIdentityError>(runtime::Ok(before.payload_ == after.payload_));
+}
+
+const char* graph_identity_error_name(GraphIdentityError error) noexcept {
+    switch (error) {
+    case GraphIdentityError::UnsupportedPreparedProfile: return "unsupported_prepared_profile";
+    case GraphIdentityError::ReceiptBindingInvalid: return "receipt_binding_invalid";
+    case GraphIdentityError::DigestPayloadMismatch: return "digest_payload_mismatch";
+    case GraphIdentityError::IncompatibleProfile: return "incompatible_profile";
+    case GraphIdentityError::AllocationFailed: return "allocation_failed";
+    }
+    return "unknown";
+}
+
+} // namespace pulp::host
