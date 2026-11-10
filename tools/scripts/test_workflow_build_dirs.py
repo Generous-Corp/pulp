@@ -404,7 +404,8 @@ class WorkflowBuildDirTests(unittest.TestCase):
         """The three merge-group shadow instruments run from ONE step through
         tools/ci/merge_group_shadows.py, gated on a merge group with a
         successful build, continue-on-error, after ctest; neither Build nor
-        Test reads anything from them."""
+        Test reads anything from them. The separate flake-exoneration gate
+        runs from the trusted queue base; its shadow remains advisory."""
         step = workflow_named_step(BUILD_WORKFLOW, "build", "Merge-group shadow instruments")
         self.assertTrue(step.get("continue-on-error"))
         cond = " ".join(str(step.get("if")).split())
@@ -418,7 +419,7 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertIn("ctest-evidence/selected.json", run)
         for name in ("Build", "Test (non-Windows)"):
             body = str(workflow_named_step(BUILD_WORKFLOW, "build", name)["run"])
-            for token in ("merge_group_shadows", "binary_identity", "affected_tests_shadow", "flake_exoneration",
+            for token in ("merge_group_shadows", "binary_identity", "affected_tests_shadow", "flake_exoneration_shadow",
                           "test_receipts", "test-receipts"):
                 self.assertNotIn(token, body)
 
