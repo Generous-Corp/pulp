@@ -1,4 +1,5 @@
 #include <pulp/host/signal_graph_control.hpp>
+#include <pulp/host/graph_file_reload.hpp>
 
 #include <algorithm>
 
@@ -99,6 +100,27 @@ SignalGraphControlAuthority::apply(std::span<const SignalGraphRouteCommand> comm
 
 void SignalGraphControlAuthority::reset() noexcept {
     ++generation_;
+}
+
+GraphFileReloadResult SignalGraphControlAuthority::reload_graph_file(
+    std::string_view text, GraphFileFormat format, std::uint64_t expected_generation,
+    const std::function<bool()>& can_commit) {
+    if (expected_generation != generation_)
+        return {.code = GraphFileReloadCode::StaleBase,
+                .topology_result = SignalGraph::PreparedTopologyEdit::Result::StaleBase};
+    const GraphPatchCatalog defaults;
+    GraphFileReloadTransaction transaction(graph_);
+    auto result = transaction.prepare(text, format,
+                                     graph_file_catalog_ ? *graph_file_catalog_ : defaults,
+                                     sample_rate_, maximum_block_size_);
+    if (!result)
+        return result;
+    if (can_commit && !can_commit())
+        return {.code = GraphFileReloadCode::CommitFailed};
+    result = transaction.commit();
+    if (result)
+        ++generation_;
+    return result;
 }
 
 } // namespace pulp::host

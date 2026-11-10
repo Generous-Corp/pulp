@@ -1333,9 +1333,38 @@ SignalGraph::PreparedTopologyEdit::~PreparedTopologyEdit() {
     if (!committed_) {
         GraphMutationLock owner_lock(*owner_);
         (void)rollback_quiesced_lifecycles_locked_();
+        {
+            GraphMutationLock candidate_lock(*candidate_);
+            (void)reject_baseline_processor_aliases_locked_();
+        }
         owner_lock.unlock();
         release_new_custom_instances_();
     }
+}
+
+bool SignalGraph::PreparedTopologyEdit::reject_baseline_processor_aliases_locked_() noexcept {
+    owner_->assert_graph_mutation_locked_();
+    candidate_->assert_graph_mutation_locked_();
+    bool rejected = false;
+    for (auto& [id, processor] : candidate_->processor_nodes_) {
+        if (!processor || !processor->instance)
+            continue;
+        const auto aliases = [&](const auto& baseline) {
+            return std::any_of(baseline.begin(), baseline.end(), [&](const auto& entry) {
+                return entry.second && entry.second->instance == processor->instance &&
+                       entry.second.get() != processor.get();
+            });
+        };
+        if (aliases(owner_->processor_nodes_) ||
+            (base_live_ && aliases(base_live_->processors))) {
+            // Re-adding a removed instance creates a second release-owning token.
+            // Disarm that token before refusal (or abandoned-edit destruction):
+            // the baseline snapshot still owns the processor's live lifecycle.
+            processor->instance.reset();
+            rejected = true;
+        }
+    }
+    return rejected;
 }
 
 bool SignalGraph::PreparedTopologyEdit::base_is_current_locked_() const {
@@ -1366,9 +1395,18 @@ SignalGraph::PreparedTopologyEdit::baseline_removal_rejection_locked_() const {
             [&](const GraphNode& node) { return node.id == baseline.id; });
         if (retained)
             continue;
-        if (baseline.type == NodeType::Plugin &&
-            dynamic_cast<const PreparedOwnedBuiltInSlot*>(baseline.plugin.get()) == nullptr)
-            return Result::BaselinePluginRemovalRequiresRelease;
+        if (baseline.type == NodeType::Plugin) {
+            const auto processor = owner_->processor_nodes_.find(baseline.id);
+            // Processor lifetimes ride the compiled snapshots. An old pinned
+            // generation keeps its instance until control-thread retirement;
+            // external or unowned slots still require the stopped lifecycle.
+            const bool graph_owned_processor =
+                !baseline.plugin && processor != owner_->processor_nodes_.end() &&
+                processor->second && processor->second->instance;
+            if (!graph_owned_processor &&
+                dynamic_cast<const PreparedOwnedBuiltInSlot*>(baseline.plugin.get()) == nullptr)
+                return Result::BaselinePluginRemovalRequiresRelease;
+        }
         if (baseline.type == NodeType::Custom) {
             const auto type = owner_->custom_node_types_.find(
                 prepared_custom_key(baseline.custom_type_id, baseline.custom_type_version));
@@ -2245,6 +2283,8 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
             }
         }
         GraphMutationLock candidate_lock(*candidate_);
+        if (reject_baseline_processor_aliases_locked_())
+            return last_result_ = Result::ExternalPluginReprepareRequired;
         if (const auto rejection = sample_region_preparation_result_(sample_rate, max_block_size))
             return last_result_ = *rejection;
         const auto old_keepalive = owner_->spectral_mode_.load(std::memory_order_acquire)

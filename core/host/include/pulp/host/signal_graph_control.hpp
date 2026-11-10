@@ -6,8 +6,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <functional>
+#include <string_view>
 
 namespace pulp::host {
+class GraphPatchCatalog;
+enum class GraphFileFormat;
+struct GraphFileReloadResult;
 
 /// One typed mutation accepted by the host's canonical graph authority.
 /// Modulation routes are edited through PreparedTopologyEdit, so a rejected
@@ -61,6 +66,14 @@ class SignalGraphControlAuthority final {
                                 int maximum_block_size) noexcept;
 
     SignalGraphRouteResult apply(std::span<const SignalGraphRouteCommand> commands);
+    /// The product's existing registry projection must outlive this authority.
+    /// Without one, graph-file reload supports only the default catalog.
+    void set_graph_file_catalog(const GraphPatchCatalog& catalog) noexcept {
+        graph_file_catalog_ = &catalog;
+    }
+    GraphFileReloadResult reload_graph_file(std::string_view text, GraphFileFormat format,
+                                           std::uint64_t expected_generation,
+                                           const std::function<bool()>& can_commit = {});
     void reset() noexcept;
     std::uint64_t generation() const noexcept {
         return generation_;
@@ -71,6 +84,7 @@ class SignalGraphControlAuthority final {
     double sample_rate_ = 0.0;
     int maximum_block_size_ = 0;
     std::uint64_t generation_ = 0;
+    const GraphPatchCatalog* graph_file_catalog_ = nullptr;
 };
 
 } // namespace pulp::host

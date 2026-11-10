@@ -1,0 +1,5 @@
+if(TARGET pulp-host)
+    pulp_add_test_suite(pulp-test-graph-file-reload LIBRARIES pulp::host)
+    pulp_test_data(pulp-test-graph-file-reload NONE)
+    pulp_test_spawns(pulp-test-graph-file-reload NONE REASON "uses in-process prepared edits")
+endif()

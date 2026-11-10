@@ -186,6 +186,7 @@ class SignalGraph::PreparedTopologyEdit {
     bool base_is_current_locked_() const;
     bool is_new_node_(NodeId id) const;
     std::optional<Result> baseline_removal_rejection_locked_() const;
+    bool reject_baseline_processor_aliases_locked_() noexcept;
     bool rollback_quiesced_lifecycles_locked_() noexcept;
     void release_new_custom_instances_() noexcept;
     SampleRegionResult replace_sample_region_(SampleRegionDefinition definition, bool declaration);
