@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -74,6 +76,14 @@ struct Rig {
     std::unique_ptr<PresetManager> manager;
     fs::path overlay, factory, content_root;
 };
+
+// The edit clock in Unix milliseconds. Fixed test clocks start from it so a
+// record is never old enough for tombstone compaction to drop it.
+std::int64_t unix_ms_now() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::system_clock::now().time_since_epoch())
+        .count();
+}
 
 std::vector<std::string> names(const PresetPage& page) {
     std::vector<std::string> out;
@@ -338,7 +348,7 @@ TEST_CASE("the newest edit wins and a removal is not resurrected by a merge",
     auto second = rig.open();
 
     REQUIRE(first->set_favourite("factory:A", true));
-    REQUIRE(second->set_favourite("factory:A", false)); // later, so it wins
+    REQUIRE(second->set_favourite("factory:A", false)); // made over the first, so it wins
     first->refresh();
     REQUIRE_FALSE(first->find("factory:A")->favourite);
 
@@ -347,6 +357,81 @@ TEST_CASE("the newest edit wins and a removal is not resurrected by a merge",
     second->refresh();
     REQUIRE_FALSE(second->find("factory:A")->favourite);
     REQUIRE(rig.open()->orphan_count() == 0);
+}
+
+TEST_CASE("an edit outranks the version it replaces even within one clock tick",
+          "[state][preset][library]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-lib-same-tick");
+    const auto file = sandbox.root / "overlay" / "library.json";
+    const std::int64_t tick = unix_ms_now();
+    const auto frozen = [tick] { return tick; };
+    PresetMetadataStore first(file);
+    PresetMetadataStore second(file); // loaded before the first one's edit
+    first.set_clock(frozen);
+    second.set_clock(frozen);
+    first.load();
+    second.load();
+
+    REQUIRE(first.set_favourite("factory:A", true, "sha256:a"));
+    REQUIRE(second.set_favourite("factory:A", false, "sha256:a")); // same tick, later edit
+
+    PresetMetadataStore reader(file);
+    REQUIRE(reader.load());
+    REQUIRE(reader.find("factory:A") == nullptr);
+    REQUIRE(first.reload_if_changed());
+    REQUIRE(first.find("factory:A") == nullptr);
+}
+
+TEST_CASE("an edit made over a stale record keeps the other writer's same-tick change",
+          "[state][preset][library]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-lib-same-tick-merge");
+    const auto file = sandbox.root / "overlay" / "library.json";
+    const std::int64_t tick = unix_ms_now();
+    const auto frozen = [tick] { return tick; };
+    PresetMetadataStore first(file);
+    PresetMetadataStore second(file);
+    first.set_clock(frozen);
+    second.set_clock(frozen);
+    first.load();
+    second.load();
+
+    REQUIRE(first.add_tag("factory:A", "warm", "sha256:a"));
+    REQUIRE(second.set_display_name("factory:A", "Big Pad", "sha256:a"));
+
+    PresetMetadataStore reader(file);
+    REQUIRE(reader.load());
+    const auto* rec = reader.find("factory:A");
+    REQUIRE(rec != nullptr);
+    REQUIRE(rec->display_name == "Big Pad");
+    REQUIRE(rec->tags_add == std::vector<std::string>{"warm"});
+}
+
+TEST_CASE("a writer whose clock runs behind still wins with a later edit",
+          "[state][preset][library]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-lib-clock-behind");
+    const auto file = sandbox.root / "overlay" / "library.json";
+    PresetMetadataStore ahead(file);
+    PresetMetadataStore behind(file);
+    const std::int64_t now = unix_ms_now();
+    ahead.set_clock([now] { return now; });
+    behind.set_clock([now] { return now - 60'000; }); // a minute slow
+    ahead.load();
+    behind.load();
+
+    REQUIRE(ahead.set_favourite("factory:A", true, "sha256:a"));
+    REQUIRE(behind.set_favourite("factory:A", false, "sha256:a"));
+    REQUIRE(behind.set_favourite("factory:A", true, "sha256:a")); // re-add after the removal
+    REQUIRE(ahead.set_favourite("factory:B", true, "sha256:b"));
+
+    PresetMetadataStore reader(file);
+    REQUIRE(reader.load());
+    REQUIRE(reader.find("factory:A") != nullptr);
+    REQUIRE(reader.find("factory:A")->favourite);
+    REQUIRE(reader.find("factory:B") != nullptr);
+
+    REQUIRE(behind.erase("factory:A"));
+    REQUIRE(reader.reload_if_changed());
+    REQUIRE(reader.find("factory:A") == nullptr);
 }
 
 TEST_CASE("concurrent writers to one overlay file keep every edit", "[state][preset][library]") {

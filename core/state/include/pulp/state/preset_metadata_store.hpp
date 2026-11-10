@@ -8,10 +8,14 @@
 /// One JSON file serves every instance and format of a plug-in on the machine.
 /// Writes read the file again under a lock and merge per record (newest edit
 /// wins), so two instances editing at once do not lose each other's changes.
+/// "Newest" is causal: an edit is stamped after the file is merged, with a
+/// stamp above every version it replaces, so it wins even when two edits share
+/// a clock tick or one machine's clock runs behind.
 /// Not thread-safe by itself; PresetLibrary serialises access.
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
@@ -26,8 +30,10 @@ struct PresetRecord {
     std::string display_name; ///< Empty = no override
     std::vector<std::string> tags_add;
     std::vector<std::string> tags_remove;
-    std::int64_t updated_ms = 0; ///< Unix milliseconds of the last edit
-    bool deleted = false;        ///< Tombstone so a removal survives a merge
+    /// Stamp of the last edit: Unix milliseconds, raised when needed to stay
+    /// above the version it replaced (so it can run slightly ahead of the clock).
+    std::int64_t updated_ms = 0;
+    bool deleted = false; ///< Tombstone so a removal survives a merge
 
     /// True when the record carries no user edit.
     bool empty() const {
@@ -54,6 +60,14 @@ class PresetMetadataStore {
     bool persistent() const {
         return !file_.empty();
     }
+    /// Wall-clock source for edit stamps, in Unix milliseconds. Defaults to the
+    /// system clock; tests set a fixed clock to force edits into one tick. It
+    /// also dates tombstone compaction.
+    using Clock = std::function<std::int64_t()>;
+    void set_clock(Clock clock) {
+        clock_ = std::move(clock);
+    }
+
     /// Incremented on every write to the file.
     std::uint64_t revision() const {
         return revision_;
@@ -80,12 +94,15 @@ class PresetMetadataStore {
   private:
     template <typename Edit>
     bool edit(const std::string& key, const std::string& digest, Edit&& apply);
-    bool commit();
+    template <typename Apply> bool commit(Apply&& apply);
+    std::int64_t clock_now() const;
+    std::int64_t next_stamp(std::int64_t after) const;
     bool read_file(std::map<std::string, PresetRecord>& out) const;
     bool write_file(const std::map<std::string, PresetRecord>& records);
 
     std::filesystem::path file_;
     std::map<std::string, PresetRecord> records_; ///< Includes tombstones
+    Clock clock_;
     std::uint64_t revision_ = 0;
     std::filesystem::file_time_type seen_mtime_{};
     std::uintmax_t seen_size_ = 0;
