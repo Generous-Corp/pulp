@@ -107,3 +107,22 @@ behavior and callback no-wait fallback; worker readback alone is insufficient.
 The safe disposition is to retain **G-10/A3 PARTIAL/HOLD**. A future lane may
 implement the contract above after design ownership is reviewed; this packet
 does not authorize that runtime/API work.
+
+## Current-head revalidation — 2026-11-10
+
+This addendum was inspected from the clean classified worktree at
+`origin/main=d33f5ea7d8e9f7ef2fd54cd3f90fbe44e0e6eb43`. It is a source-surface
+revalidation, not a replay of the historical binaries above. The current tree
+still has the same boundaries: the public spectral graph surface exposes only
+typed analysis, stage, and synthesis records; `SpectralMorphT` and
+`GranularEngineT` remain standalone borrowed/prepared primitives; GPU morph
+and stack rendering explicitly allow blocking readback; and generic
+`format::Processor` nodes do not adapt any of these types.
+
+The current source therefore supplies no newly authorized graph morph/granular
+or GPU runtime seam. The previous focused results remain historical evidence,
+and this revalidation does not promote them to current runtime qualification.
+G-10/A3 remains **PARTIAL / HOLD** with the same next contract: immutable
+analyzed assets, frame chronology and EOF/tail policy, graph-owned rate labels,
+positive and planted-negative controls, and a callback-safe GPU
+transfer/fallback design before implementation is considered.
