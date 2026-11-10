@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/square_osc_bank.hpp",
+  "fingerprint": "sha256:ad27c86ce305091aa25bbc9b5a2d229e230b3ca39268f25216fbed3788939179",
+  "include": "pulp/signal/square_osc_bank.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

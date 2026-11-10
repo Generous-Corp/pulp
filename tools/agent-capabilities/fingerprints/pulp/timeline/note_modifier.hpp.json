@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/timeline/note_modifier.hpp",
+  "fingerprint": "sha256:59c03e00e6e8609d64386afeb49e1bb986d420b94d31c3769d176e2d666be3fd"
+}

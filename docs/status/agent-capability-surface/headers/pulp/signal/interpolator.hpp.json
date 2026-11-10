@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/interpolator.hpp",
+  "fingerprint": "sha256:87600671e64ed34870e2302ca2765b3539d3ec23116db02b85ef813a43916952",
+  "include": "pulp/signal/interpolator.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "signal.window-functions"
+  ],
+  "rationale": "The interpolator reuses the window implementation internally but does not add a distinct generator-facing window contract."
+}

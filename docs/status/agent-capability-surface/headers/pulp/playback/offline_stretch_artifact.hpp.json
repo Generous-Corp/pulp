@@ -1,0 +1,9 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/offline_stretch_artifact.hpp",
+  "fingerprint": "sha256:9df2a677c997570db86c0b0810c766c6735744efda48d56e68eeba83e7c48703",
+  "include": "pulp/playback/offline_stretch_artifact.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Offline stretch artifact identity: a pinned algorithm version, its configuration, and a key built from content hashes plus the source range so a cached artifact can only be reused for exactly the input it was rendered from. It is cache-identity infrastructure, not an advertised capability."
+}

@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/graphic_eq.hpp",
+  "fingerprint": "sha256:a556beb98a3e89254fe51ff90866a8290246410a7e4ae6e0b9f0f3a8cbc2561f",
+  "include": "pulp/signal/graphic_eq.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.graphic-eq"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

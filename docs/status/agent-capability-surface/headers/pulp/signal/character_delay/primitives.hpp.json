@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/character_delay/primitives.hpp",
+  "fingerprint": "sha256:3c90c636f429e11f2912e015919302fcf473067fe3f2a329e70ef7ddd086a65e",
+  "include": "pulp/signal/character_delay/primitives.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

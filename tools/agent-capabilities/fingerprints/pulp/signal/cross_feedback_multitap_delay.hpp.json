@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/cross_feedback_multitap_delay.hpp",
+  "fingerprint": "sha256:14184a88f394c3da92e4d39d7c8c5f9b481f5729acfafd7a0a7e5d773ee68e98"
+}

@@ -1,0 +1,11 @@
+{
+  "domain": "music",
+  "source": "core/music/include/pulp/music/markov.hpp",
+  "fingerprint": "sha256:8b013fa744ad12df04d4efc454330258afa3977371a66582b91448e6f1c086ef",
+  "include": "pulp/music/markov.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "music.markov-transition"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

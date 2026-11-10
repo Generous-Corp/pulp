@@ -1,0 +1,9 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/clip_launch.hpp",
+  "fingerprint": "sha256:4d6a6bae3dafd68547a534466441add75ba3db6b388879d6602b71ec2ef504e5",
+  "include": "pulp/playback/clip_launch.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Realtime clip-launch engine on the monotonic clock, with a constexpr next_launch_boundary() and documented saturation behaviour at the ends of its range. It is a bounded realtime scheduling primitive composed inside the playback engine and binds no installed agent capability of its own."
+}

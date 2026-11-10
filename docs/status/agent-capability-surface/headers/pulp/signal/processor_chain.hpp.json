@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/processor_chain.hpp",
+  "fingerprint": "sha256:a3b3fb80e8b5eea64ecb1fca94ff8972a2f1da7c364de16d214f2e73914b2b4f",
+  "include": "pulp/signal/processor_chain.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

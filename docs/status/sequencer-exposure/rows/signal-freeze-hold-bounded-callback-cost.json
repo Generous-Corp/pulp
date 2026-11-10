@@ -90,7 +90,7 @@
       "evidence": [
         {
           "kind": "capability_definition",
-          "path": "docs/status/agent-capability-surface.json",
+          "path": "docs/status/agent-capability-surface/headers/pulp/signal/staged_transition.hpp.json",
           "needles": [
             "pulp/signal/staged_transition.hpp"
           ]

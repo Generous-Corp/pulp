@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/transient_phase_policy.hpp",
+  "fingerprint": "sha256:4d6ace3ed3644f3d765a78e7beea5f833e661b65e7e6fb2071af52fd47cc6934",
+  "include": "pulp/signal/transient_phase_policy.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

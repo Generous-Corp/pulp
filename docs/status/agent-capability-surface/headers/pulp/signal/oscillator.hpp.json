@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/oscillator.hpp",
+  "fingerprint": "sha256:eeec21c0a6b5e6cdbf9f81af6ad99fd873029ca6b0f154daadf3c72732ba4509",
+  "include": "pulp/signal/oscillator.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "signal.unison-voice-primitives"
+  ],
+  "rationale": "Supersaw uses validated phase reset for deterministic per-voice phases; the generic oscillator remains outside this slice's promise."
+}
