@@ -53,7 +53,8 @@ inline bool param_contract_equal(const state::ParamInfo& a, const state::ParamIn
 /// repeated registration, so the repeat leaves no second entry to find; the
 /// refusal count is what records that the author tried.
 inline bool has_unique_param_ids(const state::StateStore& store) {
-    if (store.duplicate_registrations() != 0) return false;
+    if (store.duplicate_registrations() != 0)
+        return false;
     const auto params = store.all_params();
     for (std::size_t i = 0; i < params.size(); ++i)
         for (std::size_t j = i + 1; j < params.size(); ++j)
