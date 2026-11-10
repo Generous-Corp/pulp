@@ -5667,6 +5667,7 @@ TEST_CASE("CLAP: preset-load loads a library preset by key at the plug-in locati
                                       nullptr, "factory:Missing"));
     REQUIRE_FALSE(load->from_location(&h.plugin.plugin, CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN,
                                       nullptr, nullptr));
+}
 
 // PARAM-2: a range, default and texts generated in code are what the host sees.
 namespace {
