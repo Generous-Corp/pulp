@@ -1,4 +1,4 @@
-// test_rmlui_native_surface.mm — RmlUi on a pulp-native surface: the document
+// test_rmlui_native_surface.mm: RmlUi on a pulp-native surface. The document
 // loads and renders through the caller's renderer, pointer, key and text input
 // reach RmlUi elements, the context follows the surface size, and RmlUi is
 // never entered by two threads at once. A counting Rml::RenderInterface stands
