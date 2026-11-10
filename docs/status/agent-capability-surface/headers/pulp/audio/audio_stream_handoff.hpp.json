@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/audio_stream_handoff.hpp",
+  "fingerprint": "sha256:b28868d228bd317cf55dc711b50cbe4658b0b35666bdfb1b29bad7a8b67084c5",
+  "include": "pulp/audio/audio_stream_handoff.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

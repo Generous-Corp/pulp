@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/dry_wet_mixer.hpp",
+  "fingerprint": "sha256:f4d0619a6a2896582cbb3823cbcf33d08f83312e029ad209e25c3ca842ab6a5d",
+  "include": "pulp/signal/dry_wet_mixer.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

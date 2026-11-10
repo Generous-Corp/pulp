@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/fet_compressor.hpp",
+  "fingerprint": "sha256:45e9524c1ca8d7a5e5a3c7e18c997710e0d5a13b05a5c3c2717f7640c5dd03ee",
+  "include": "pulp/signal/fet_compressor.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "signal.dynamics-envelope-contract"
+  ],
+  "rationale": "Existing dynamics processor adopting the shared exact envelope or canonical non-negative gain-reduction telemetry contract; its topology is not a new capability claim in this slice."
+}

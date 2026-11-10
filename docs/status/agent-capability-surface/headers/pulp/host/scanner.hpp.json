@@ -1,0 +1,9 @@
+{
+  "domain": "host",
+  "source": "core/host/include/pulp/host/scanner.hpp",
+  "fingerprint": "sha256:23c5d2b996ec52b881d3f7f24055af43e751d60f2a70d0bbc547c7730d316b80",
+  "include": "pulp/host/scanner.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Host plugin discovery and explicit strict CLAP selection evidence; not a generator capability or graph identity schema."
+}

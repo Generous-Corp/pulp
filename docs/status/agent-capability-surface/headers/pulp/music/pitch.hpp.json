@@ -1,0 +1,13 @@
+{
+  "domain": "music",
+  "source": "core/music/include/pulp/music/pitch.hpp",
+  "fingerprint": "sha256:2b26eed1a1e6ecfe6357ebbcf95c7ac0d94cd73d6416723144015125cda3e660",
+  "include": "pulp/music/pitch.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "music.chord-recognition",
+    "music.chord-spelling",
+    "music.chord-voicing"
+  ],
+  "rationale": "Checked 12-TET pitch-class values and sets are shared inputs to the curated spelling, recognition, and voicing operations."
+}

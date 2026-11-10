@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/detail/modular_sequencing_common.hpp",
+  "fingerprint": "sha256:035d6f351a02060b781ff442d1b548a15a1f7637a2a1d116efd4ddc0259565d5",
+  "include": "pulp/signal/detail/modular_sequencing_common.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

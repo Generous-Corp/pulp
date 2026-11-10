@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/audio_file.hpp",
+  "fingerprint": "sha256:f498b9bee9d8be7d00d4b108ea6b3e1a3a62ddf92bc4681b806ba9bc3c1f6c6f",
+  "include": "pulp/audio/audio_file.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Whole-file audio decoding (read_audio_file with an admission predicate over the opened reader) is host infrastructure consumed by sample, impulse-response and offline-render capabilities; it is not an independently selected generator-facing capability."
+}

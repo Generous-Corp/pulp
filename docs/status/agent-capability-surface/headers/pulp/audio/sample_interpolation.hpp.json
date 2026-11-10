@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/sample_interpolation.hpp",
+  "fingerprint": "sha256:e37bf8115fb37b1a5f17fbc3eeeefb2f3d9f216f7cf14a6db218cead4c17c224",
+  "include": "pulp/audio/sample_interpolation.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

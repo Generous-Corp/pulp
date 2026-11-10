@@ -1,0 +1,9 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/midi_message_sequence.hpp",
+  "fingerprint": "sha256:27afa05df603d54ce47a409e9aacccbb7291a69232acb833128ac9f6cd74d5df",
+  "include": "pulp/midi/midi_message_sequence.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

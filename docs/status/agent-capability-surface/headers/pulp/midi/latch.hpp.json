@@ -1,0 +1,11 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/latch.hpp",
+  "fingerprint": "sha256:b00c053ad5172fa56273fabcbcd28001ecc4fba71b81564a7cf20aed0e5e9552",
+  "include": "pulp/midi/latch.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "midi.latch"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

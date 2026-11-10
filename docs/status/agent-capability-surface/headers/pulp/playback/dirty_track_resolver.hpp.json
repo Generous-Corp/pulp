@@ -1,0 +1,9 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/dirty_track_resolver.hpp",
+  "fingerprint": "sha256:d0280b67a3ed178db15c9022854b3adcc034b6b0a985fdf1ef39a7c772f76e24",
+  "include": "pulp/playback/dirty_track_resolver.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "DirtyTrackSet and resolve_dirty_tracks(): the canonical translation from transaction dirtiness to root-track compiler dirtiness in one fail-closed path. It is a pure internal derivation shared by the compiler and makes no installed agent capability claim."
+}

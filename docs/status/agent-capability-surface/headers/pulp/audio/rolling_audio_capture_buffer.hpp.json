@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/rolling_audio_capture_buffer.hpp",
+  "fingerprint": "sha256:09b23362101d10ef49e6a5cb27db60dd8e4dae4283972eb2680bd0154718f5b2",
+  "include": "pulp/audio/rolling_audio_capture_buffer.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

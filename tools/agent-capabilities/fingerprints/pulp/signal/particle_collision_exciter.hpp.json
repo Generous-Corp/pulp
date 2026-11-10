@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/particle_collision_exciter.hpp",
+  "fingerprint": "sha256:bfacb7a8890939910c7614e354646a6c9bdfe14d506848a69aa93c93b458d66e"
+}

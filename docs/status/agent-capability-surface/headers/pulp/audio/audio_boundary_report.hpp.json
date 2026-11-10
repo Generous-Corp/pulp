@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/audio_boundary_report.hpp",
+  "fingerprint": "sha256:45c6b48d154b28a714f220c5f27e5b7f201ea8b3540b6f1fdf2eca44de99307e",
+  "include": "pulp/audio/audio_boundary_report.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

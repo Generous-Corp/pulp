@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/audio/voice_runtime_facade.hpp",
+  "fingerprint": "sha256:4237f8cdf64ed1a28330822f41ea8d3fc5a42d955a5b964a54ba24106a7ceab6"
+}

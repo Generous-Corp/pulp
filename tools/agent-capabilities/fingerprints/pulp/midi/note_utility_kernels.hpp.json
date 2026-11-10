@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/midi/note_utility_kernels.hpp",
+  "fingerprint": "sha256:6b4005421eb2f5f98b88765883154451e800a76188a8608887755201f9cc21e6"
+}

@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/osc/blep.hpp",
+  "fingerprint": "sha256:056bf1ae0e7c9ebd6739d8bee2d45fd499dba0471643742de4b1b760dceda4f9",
+  "include": "pulp/signal/osc/blep.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

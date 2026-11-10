@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/six_band_eq.hpp",
+  "fingerprint": "sha256:25699c04e11bdd358bbde25071f8528ec81bfddd3a5defda58f1afc3556def09"
+}

@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/staged_transition.hpp",
+  "fingerprint": "sha256:6578eacace93caba3b14699048a1f16317cba58c02e3985bccf3db85405c0760",
+  "include": "pulp/signal/staged_transition.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Schedule tracker that spreads bounded transition work over several audio callbacks; it owns no DSP and composes inside processors such as FreezeHold rather than being an advertised generator capability."
+}
