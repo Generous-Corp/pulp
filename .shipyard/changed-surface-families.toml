@@ -7834,6 +7834,7 @@ tests = [
   "control-product-b-rust-cli-absence",
   "decisions-contract-selftest",
   "decisions-contract-validate",
+  "deferred-admission-selftest",
   "diff-cover-targets-selftest",
   "example-validation-paths",
   "executable-keys-selftest",
