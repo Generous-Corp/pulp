@@ -11,6 +11,8 @@
 
 #include <pulp/native/frame_pump.hpp>
 
+#include "support/thread_progress.hpp"
+
 #import <Foundation/Foundation.h>
 #include <mach/mach_time.h>
 
@@ -18,17 +20,13 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
+#include <mutex>
 #include <thread>
 
 using namespace pulp::native;
 
 namespace {
-
-double host_now_seconds() {
-    mach_timebase_info_data_t info{};
-    mach_timebase_info(&info);
-    return static_cast<double>(mach_absolute_time()) * info.numer / info.denom / 1e9;
-}
 
 void pump_main(double seconds) {
     [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:seconds]];
@@ -178,47 +176,123 @@ TEST_CASE("frames arrive on the thread the pump was asked for", "[native-surface
     REQUIRE(on_render.on_main.load() == 0);
 }
 
+namespace {
+
+/// Holds a frame callback until the test releases it, so "a frame is still
+/// running" is a state the test controls rather than a duration. The wait is
+/// bounded; it runs on the pump's thread, where a timeout simply ends the
+/// frame and the test's own bounded waits then fail by name.
+struct FrameGate {
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool open = false;
+    void hold_until_released() {
+        std::unique_lock lock(mutex);
+        cv.wait_for(lock, pulp::test::kProgressDeadline, [this] { return open; });
+    }
+    void release() {
+        {
+            std::lock_guard lock(mutex);
+            open = true;
+        }
+        cv.notify_all();
+    }
+};
+
+void run_main_loop_once() {
+    [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                             beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+}
+
+} // namespace
+
 TEST_CASE("a slow frame is skipped, never queued", "[native-surface][frame-pump]") {
+    // Vsyncs come from the test through a manual tick source, and the frame
+    // runs until the test releases it, so nothing here depends on wall-clock
+    // time or host load.
+    FrameGate gate;
     std::atomic<int> running{0};
     std::atomic<int> overlaps{0};
-    std::atomic<int> frames{0};
+    std::atomic<int> started{0};
     FramePump pump(
         [&](const FrameTick&) {
             if (running.fetch_add(1) != 0)
                 overlaps.fetch_add(1);
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
-            frames.fetch_add(1);
+            started.fetch_add(1);
+            gate.hold_until_released();
             running.fetch_sub(1);
         },
-        {300.0, true, FrameThread::render});
-    REQUIRE_STARTED(pump);
-    std::this_thread::sleep_for(std::chrono::milliseconds(600));
+        {300.0, true, FrameThread::render, TickSource::manual});
+    const auto sources = FramePump::live_tick_sources();
+    REQUIRE(pump.start());
+    REQUIRE_FALSE(pump.follows_display());
+    REQUIRE(FramePump::live_tick_sources() == sources);
+
+    const double vsync = 1.0 / 120.0;
+    double t = 1.0;
+    REQUIRE(pump.tick(t, vsync));
+    REQUIRE(pulp::test::wait_for_condition([&] { return started.load() == 1; }));
+
+    // Every vsync while the frame still runs is skipped, not stored up.
+    for (int i = 0; i < 50; ++i) {
+        t += vsync;
+        REQUIRE_FALSE(pump.tick(t, vsync));
+    }
+    gate.release();
+
+    // Once it returns, the next vsync delivers exactly one frame, not the 50
+    // that were due meanwhile.
+    REQUIRE(pulp::test::wait_for_condition([&] {
+        t += vsync;
+        return pump.tick(t, vsync);
+    }));
+    REQUIRE(pulp::test::wait_for_condition([&] { return started.load() == 2; }));
+    REQUIRE(pulp::test::wait_for_condition([&] { return running.load() == 0; }));
     pump.stop();
+    REQUIRE(started.load() == 2);
     REQUIRE(overlaps.load() == 0);
-    // 50 ms frames over 600 ms: about 12, never the ~36+ a queue would pile up.
-    REQUIRE(frames.load() <= 13);
-    REQUIRE(frames.load() >= 5);
 }
 
 TEST_CASE("a slow main-thread frame never builds a backlog", "[native-surface][frame-pump]") {
-    // Each frame takes three vsyncs. A pump that queued a frame per vsync
-    // would fall further behind every frame; one that skips stays within a
-    // frame or two of the display.
+    // Main-thread delivery: a frame is posted to the main run loop. Vsyncs
+    // that arrive before it has run are skipped, so running the loop once
+    // delivers one frame however many vsyncs passed.
     int frames = 0;
-    double worst_lateness = 0.0;
-    FramePump pump(
-        [&](const FrameTick& tick) {
-            worst_lateness = std::max(worst_lateness, host_now_seconds() - tick.target_seconds);
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
-            ++frames;
-        },
-        {300.0, true, FrameThread::main});
-    REQUIRE_STARTED(pump);
-    pump_main(1.0);
+    FramePump pump([&](const FrameTick&) { ++frames; },
+                   {300.0, true, FrameThread::main, TickSource::manual});
+    REQUIRE(pump.start());
+
+    const double vsync = 1.0 / 120.0;
+    double t = 1.0;
+    REQUIRE(pump.tick(t, vsync));
+    for (int i = 0; i < 50; ++i) {
+        t += vsync;
+        REQUIRE_FALSE(pump.tick(t, vsync));
+    }
+    REQUIRE(pulp::test::pump_until([&] { return frames > 0; }, run_main_loop_once));
+    REQUIRE(frames == 1);
+    t += vsync;
+    REQUIRE(pump.tick(t, vsync));
+    REQUIRE(pulp::test::pump_until([&] { return frames > 1; }, run_main_loop_once));
+    REQUIRE(frames == 2);
     pump.stop();
-    INFO("frames " << frames << ", worst lateness " << worst_lateness * 1000.0 << " ms");
-    REQUIRE(frames >= 5);
-    REQUIRE(worst_lateness < 0.12);
+}
+
+TEST_CASE("a manual pump delivers only when ticked and never after stop",
+          "[native-surface][frame-pump]") {
+    std::atomic<int> frames{0};
+    FramePump pump([&](const FrameTick&) { frames.fetch_add(1); },
+                   {60.0, false, FrameThread::render, TickSource::manual});
+    REQUIRE_FALSE(pump.tick(1.0, 1.0 / 60.0)); // not started
+    REQUIRE(pump.start());
+    REQUIRE_FALSE(pump.tick(1.0, 1.0 / 60.0)); // nothing requested
+    pump.request_frame();
+    REQUIRE(pump.tick(1.0, 1.0 / 60.0));
+    REQUIRE(pulp::test::wait_for_condition([&] { return frames.load() == 1; }));
+    pump.stop();
+    pump.request_frame();
+    REQUIRE_FALSE(pump.tick(2.0, 1.0 / 60.0));
+    REQUIRE(frames.load() == 1);
 }
 
 TEST_CASE("start and stop a hundred times leaves no tick source and no late frame",
