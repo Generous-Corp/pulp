@@ -9,6 +9,17 @@ description: |
 
 # hosting
 
+## Opt-in isolated CLAP processing
+
+`pulp/host/isolated_plugin_slot.hpp` supplies experimental MacClapStereo64V1
+and a separate retained lifecycle handle. Use the ordinary `add_plugin_node`
+ownership path. Never load the vendor in the parent or replace the fixed shared
+mapping callback with synchronous RPC. Read `docs/guides/isolated-clap-worker.md`
+for mode, refusal, custody, checkpoint and terminal-silence contracts. Keep real
+hostile-fixture, endpoint, sibling/PDC and production-mutation controls together.
+Functional callback traps do not establish full realtime or A10 qualification;
+host death and deliberate group escape are outside first-mode custody.
+
 ## When this skill applies
 
 - Adding or modifying a format backend under `core/host/src/plugin_slot_<format>.cpp`.
