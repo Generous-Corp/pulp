@@ -959,7 +959,10 @@ combined tree that failed it on 2026-11-10) and could not be made required. The
 
 - **Adding a suite input:** add its path to `tools/ci/workflow_lint_paths.txt`,
   not to the workflow. Tests that pinned paths in the workflow text now read
-  that file.
+  that file. The native-build classifier treats this exact scope list as
+  inert, just like the workflow's former path filter; naming a script in a
+  lint filter does not execute it in the native gate. Keep actual native
+  workflow and action references blocking.
 - **Adding a suite job:** give it `needs: scope` plus
   `if: needs.scope.outputs.run == 'true'`, add it to the aggregate's `needs`,
   and pass its result as a `--job name=result` to `workflow_lint_scope.py

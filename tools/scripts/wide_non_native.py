@@ -107,12 +107,16 @@ REPLAY_FIXTURE = "tools/scripts/fixtures/wide_non_native_replay.json"
 # version-skill-check, never in the native gate. As a referrer it would block
 # every tools/ change from the widening.
 TEXT_ENCODING_BASELINE = "tools/scripts/text_encoding_baseline.json"
+# This data file selects the non-native workflow-lint suites. Its paths used
+# to live in that workflow's inert YAML; it never executes the scripts it names.
+WORKFLOW_LINT_PATHS = "tools/ci/workflow_lint_paths.txt"
 INERT_EXACT = frozenset(
     {
         LANE_MANIFEST,
         TIER_MANIFEST,
         REPLAY_FIXTURE,
         TEXT_ENCODING_BASELINE,
+        WORKFLOW_LINT_PATHS,
         SELECTOR_FAMILIES_FILE,
         ".gitattributes",
         "CODEOWNERS",
