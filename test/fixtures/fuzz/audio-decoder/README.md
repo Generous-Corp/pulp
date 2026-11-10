@@ -40,8 +40,8 @@ encoders when present (`/opt/homebrew/bin/flac`, `/opt/homebrew/bin/lame`,
 -map_metadata -1`, `/usr/bin/afconvert`); a missing encoder skips its seeds
 with a notice and never fails the run. Two consecutive runs on the same host
 produce identical bytes. A different encoder version changes the encoded
-seeds, so regenerate deliberately and commit the new manifest with the
-README.
+seeds; commit the regenerated seeds and update the Bytes and Versions
+tables in this README from the manifest the script prints.
 
 Versions used for the committed files:
 
@@ -149,8 +149,8 @@ path or timestamp (the m4a `mvhd`/`tkhd`/`mdhd` times are zeroed).
 Controls, run on the committed bytes: `ffprobe`/`ffmpeg -f null` (FFmpeg
 8.0) and `afinfo`/`afconvert` (macOS 27.2). `flac -t` covers the FLAC
 seeds. Agreement between the two readers is listed as "agree"; a
-disagreement is recorded as a fact, not a failure, and is exactly what the
-differential tests exist to surface.
+disagreement is recorded as a fact, not a failure, for the differential
+tests to surface.
 
 | File | ffprobe / ffmpeg | afinfo / CoreAudio |
 | --- | --- | --- |
@@ -215,5 +215,5 @@ enumerated from pinned trees without copying any media into this tree.
 | `Tracktion/choc` tests | Tracktion/choc `8af031c2ba4f5723f4b0a5ca14e0b4984af15b0e` | Not applicable: `tests/` holds sources and a zip-reader fixture, no audio. | EXCLUDE: nothing exists. |
 
 Nothing surveyed ships malformed audio under a stated permissive licence.
-Should a qualifying file turn up later, record its source URL, commit,
-licence and sha256 in the seed tables above before adding it.
+Should a qualifying file turn up later, record its source URL, commit and
+licence in the seed tables above before adding it.
