@@ -43,7 +43,7 @@ def check_structure(failures: list[str]) -> int:
     source = PREPUSH.read_text(encoding="utf-8")
 
     blocking = re.findall(
-        r'^\s*\*\) gate_could_not_run "([\w-]+)" "\$gate_rc"; fail=1 ;;$',
+        r'^\s*\*\) gate_could_not_run "([\w-]+)" "\$gate_rc"; (?:fail=1|prepush_fail) ;;$',
         source, re.M,
     )
     # `[^"]+`, not `[\w-]+`: a gate whose label carries arguments, e.g.
