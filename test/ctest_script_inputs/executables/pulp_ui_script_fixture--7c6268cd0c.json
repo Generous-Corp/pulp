@@ -2,7 +2,9 @@
  "name": "Pulp UI Script Fixture",
  "record": {
   "data": "declared",
-  "detected_sources": [],
+  "detected_sources": [
+   "${CMAKE_BINARY_DIR}/test/fixtures/ui_script_plugin/pulp_editor_assets/PulpUiScriptFixture_Standalone.cpp"
+  ],
   "inputs": [
    "test/fixtures/ui_script_plugin/ui/main.js"
   ],
