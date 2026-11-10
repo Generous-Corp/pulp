@@ -342,6 +342,7 @@ bool clap_init(const clap_plugin_t* plugin) {
     auto desc = self->processor->descriptor();
     self->preset_manager = std::make_unique<state::PresetManager>(
         self->store, desc.manufacturer, desc.name);
+#if PULP_CLAP_PRESET_LIBRARY
     if (desc.supports_program_change) {
         self->preset_library = std::make_unique<state::PresetLibrary>(
             *self->preset_manager,
@@ -349,6 +350,7 @@ bool clap_init(const clap_plugin_t* plugin) {
         self->preset_library->enable_program_map();
         self->program_router.set_settings({true, 0, BankSelectMode::msb_lsb});
     }
+#endif
 
     const auto caps = desc.effective_capabilities();
 
@@ -1149,8 +1151,10 @@ static bool clap_phase_prepare_sidecars(PulpClapPlugin* self,
     auto& midi_in = self->midi_in;
     // Bank Select + Program Change: only latches a request here; the preset is
     // loaded on the main thread from clap_on_main_thread().
+#if PULP_CLAP_PRESET_LIBRARY
     if (self->preset_library)
         self->program_router.process(midi_in);
+#endif
     // MPE sidecar: run inbound MIDI through the voice tracker and attach
     // the resulting expression buffer to the processor for the duration
     // of this process() call. Events stay sample-ordered because midi_in
@@ -2216,10 +2220,15 @@ static bool preset_from_location(const clap_plugin_t* plugin, uint32_t location_
     // CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN = 1: the plug-in's own presets,
     // named by the library key (a null location means the plug-in itself).
     if (location_kind == 1) {
+#if PULP_CLAP_PRESET_LIBRARY
         if (!self->preset_library || !load_key)
             return false;
         const auto preset = self->preset_library->find(load_key);
         return preset && self->preset_manager->load(preset->path);
+#else
+        (void)load_key;
+        return false;
+#endif
     }
 
     // CLAP_PRESET_DISCOVERY_LOCATION_FILE = 0
@@ -2312,12 +2321,14 @@ void clap_on_main_thread(const clap_plugin_t* plugin) {
     if (!self || !self->processor || !self->host) return;
 
     // A Program Change latched on the audio thread: resolve and load it here.
+#if PULP_CLAP_PRESET_LIBRARY
     if (self->preset_library) {
         if (const auto request = self->program_router.take_request()) {
             if (const auto preset = self->preset_library->preset_at(request->position))
                 self->preset_manager->load(preset->path);
         }
     }
+#endif
 
     const bool latency_changed =
         self->processor->consume_latency_changed_flag();
