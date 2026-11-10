@@ -8,12 +8,11 @@ sandbox, host-death custody, broader modes/platforms, full realtime or A10
 qualification.
 
 The host uses the separately owned retained-custody dependency, developed at
-`4532d49b5e37a1c9cbe9633bb37641b220ce78cb`. Independent Opus technical recheck
+`41a3983aff65ac379507128f910c32cab06e9e03` (merged custody PR; source head `265b245f6101bb6c481e59b2dc0ce13e02b83e48`). Independent Opus technical recheck
 accepted that head under the admitted custody contract. Development integration
-is a normal merge with rerere disabled; dependency publication/admission remains
-separate and must precede a main-based host PR. Its unarmed prerequisite is
-[the retained-custody PR](https://github.com/Generous-Corp/pulp/pull/11996),
-published at `09b3b3217421fa77ac4f22854aec9c9bd137868d`.
+was reconciled through a normal rerere-disabled merge at
+`4a475d4c54a58648452ffa4fa64837a442d0f1eb`; the host publication now carries
+only the landed dependency through `origin/main`.
 
 ## Functional controls
 
@@ -86,14 +85,13 @@ were verified byte-for-byte restored against the runner's SHA-256 records:
 - Protocol: `53fb7459adb394fff76887070ae536b3a5792abe2f636ded09c047f3e2a22961`.
 
 The exact-head full governed Release build and clean installed-consumer
-provenance passed. Full gates remain pending dependency landing and actual
-main reconciliation. Publication stays
-unarmed and depends on the actual reviewed custody landing; no duplicate
-main-based dependency PR is authorized.
+provenance passed after custody landing and main reconciliation. Capability,
+script-input, consumption-census and docs checks passed; the full gates run is
+ready for the final host PR head. Publication remains unarmed; no duplicate custody source is carried.
 
 ## Integration closeout prerequisites
 
-Generated capability rederivation waits for the required actual dependency/main
+Generated capability rederivation completed against the landed custody/main
 reconciliation. Full source-selftest gates must run on a permitted light host;
 the local dedicated-builder host refuses that lane honestly.
 
@@ -104,7 +102,8 @@ The test-input generator also currently refuses unchanged existing
 fresh Release configure and JSX runtime npm dependencies. No inventory filtering,
 handwritten generated rows or unrelated scanner/control rewrite was used.
 
-A clean-head rerun at `53b882576306d5bfbe98bf9ab3b5d1afba86ae6c`
+A clean-head rerun at the pre-reconciliation host commit was superseded by
+the reconciled head; the current exact head is `59c087cd8717265dd11226507096dbc53ff88777`.
 passed the installed consumer (`source_git_dirty=false`) but hit the correct
 terminal deadline response at publication 974/1024 in the changing-audio
 stress with 5ms functional pacing. The other 19 cases passed. The shared m3
