@@ -310,9 +310,8 @@ applies.
   Never choose it on your own. Do not build on Pulp's frozen
   `pulp/view/rmlui_*` seam headers.
 - **A native surface is for bring-your-own renderers**, such as an existing
-  Metal renderer: `integrations/pulp-native` on macOS
-  ([guide](docs/guides/native-surface-editors.md)). Use it only when the
-  product already has its own renderer.
+  Metal renderer: `integrations/pulp-native` on macOS, only when the product
+  already has its own renderer ([guide](docs/guides/native-surface-editors.md)).
 - **Nobody compiles what they don't use.** A Pulp-only build must not fetch Skia,
   Dawn or RmlUi. A Vellum build must not fetch RmlUi. An RmlUi build must not
   need Skia or Dawn.
