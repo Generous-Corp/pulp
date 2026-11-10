@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/smoothed_value.hpp",
+  "fingerprint": "sha256:6d2a27eec926cbe11fecf51dcddebd91f431038ef08ab7067048fc0ee0397044",
+  "include": "pulp/signal/smoothed_value.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "SmoothedValue is the bounded parameter-ramping primitive used by signal processors; its timing conversion is implementation infrastructure and is not an independently advertised generator-facing capability."
+}

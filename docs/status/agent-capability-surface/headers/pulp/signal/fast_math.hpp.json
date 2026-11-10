@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/fast_math.hpp",
+  "fingerprint": "sha256:1ec60855acbc4b9fd41b37161c308bc3bf499c231be901222b11bfb1bf75a73e",
+  "include": "pulp/signal/fast_math.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "FastMath is shared scalar/SIMD implementation infrastructure rather than a standalone semantic DSP unit. Its bounded trig profiles are advertised through accepted consumer capabilities, not as raw math."
+}

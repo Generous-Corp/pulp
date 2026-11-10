@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/frequency_response.hpp",
+  "fingerprint": "sha256:565a9cd6416db2a6cb57af4b49585a9715605ba516cbd76e6896a21b1bb08bea",
+  "include": "pulp/signal/frequency_response.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "This is the signal module umbrella include; it exposes no distinct consumer capability beyond the headers it aggregates."
+}

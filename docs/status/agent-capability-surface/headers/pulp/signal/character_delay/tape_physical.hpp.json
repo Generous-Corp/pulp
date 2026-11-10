@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/character_delay/tape_physical.hpp",
+  "fingerprint": "sha256:29fc77affb854823d15b2ae2cb6bfda3e06ce9df89c6ffe111d424245c4b8a55",
+  "include": "pulp/signal/character_delay/tape_physical.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

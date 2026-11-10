@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/multichannel_phase_coordinator.hpp",
+  "fingerprint": "sha256:e6ee02f7a7b55e37d58a37aef83f778d6e1bfe8b7337c4f20eb98dcb29d9f84b",
+  "include": "pulp/signal/multichannel_phase_coordinator.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

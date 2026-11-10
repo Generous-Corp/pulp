@@ -1,0 +1,12 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/spectral_gate_blur.hpp",
+  "fingerprint": "sha256:75cf322be3a308259d63737d67320b94a926c9b9fb290c6a751dd07ee781d845",
+  "include": "pulp/signal/spectral_gate_blur.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.spectral-frame-blur",
+    "signal.spectral-gate"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

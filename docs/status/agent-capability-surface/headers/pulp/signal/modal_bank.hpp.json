@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/modal_bank.hpp",
+  "fingerprint": "sha256:9950194ad59c13028feb8ce1246fe20405688c453908dbea8a532d091f72d65a",
+  "include": "pulp/signal/modal_bank.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

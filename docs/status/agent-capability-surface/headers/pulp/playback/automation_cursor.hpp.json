@@ -1,0 +1,9 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/automation_cursor.hpp",
+  "fingerprint": "sha256:e333f64f1409003719d8c56feeea591d5f2dd9d47849c525a28d6c3e7df8e97e",
+  "include": "pulp/playback/automation_cursor.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Realtime block reader over a compiled automation program: AutomationTransition seeds and linear ramps, AutomationBlockEvent, AutomationCursorCode, and AutomationProgramAdoption. It is a bounded realtime cursor primitive intended for composition inside a renderer, and it advertises no installed agent capability of its own."
+}

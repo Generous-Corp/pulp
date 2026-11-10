@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/vactrol.hpp",
+  "fingerprint": "sha256:2c9bbf225eb35d8d17c15b9fda8f5db8c92af2b78bf553b3ae118aef516a4653",
+  "include": "pulp/signal/vactrol.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

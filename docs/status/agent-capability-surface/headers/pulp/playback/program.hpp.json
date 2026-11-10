@@ -1,0 +1,11 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/program.hpp",
+  "fingerprint": "sha256:8475c93fcc8b219d1f1ec4774f1739e9ab08ffb51051f7a2bac680dc21036c42",
+  "include": "pulp/playback/program.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "sequence.controller-playback"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

@@ -1,0 +1,9 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/monotonic_timestamp.hpp",
+  "fingerprint": "sha256:1008341155436ccd7b672cde9b1d7f2c0f948a95e05a81e5c055f37f7d86faa1",
+  "include": "pulp/midi/monotonic_timestamp.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

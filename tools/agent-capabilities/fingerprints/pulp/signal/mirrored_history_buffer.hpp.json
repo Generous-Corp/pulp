@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/mirrored_history_buffer.hpp",
+  "fingerprint": "sha256:5f203acc21d01060d814ec0a19a82cd9aa8ffc669a9836fa929af888c4f31c2a"
+}

@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/fuzz_pair.hpp",
+  "fingerprint": "sha256:7a8baf5f8ee75ae6116a5dd8a26ed2d19c5b51538919f5c07a6cb2d4165f0b2e",
+  "include": "pulp/signal/fuzz_pair.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

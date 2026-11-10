@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/reverb.hpp",
+  "fingerprint": "sha256:381ccdac9cc7ec2297dc1597a20f77a5827101ae948946e2bae86ef6643e4f29",
+  "include": "pulp/signal/reverb.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}
