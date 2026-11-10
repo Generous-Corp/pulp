@@ -219,6 +219,7 @@ def fake_activation_receipt(directory: Path) -> Path:
     binary.write_bytes(b"synthetic executable for receipt corruption controls")
     def artifact(p):
         return {"path": p.name, "sha256": gq.sha256_file(p)}
+    source_sha = gq._source_sha(directory)
     cells = []
     # Literal dimensions and float words are independent of validator constants.
     for rate in (44100, 48000, 96000):
@@ -232,6 +233,7 @@ def fake_activation_receipt(directory: Path) -> Path:
                         for i in range(16)]
                 request = 1000001101 + frames * 7 * 1000000000 // rate
                 meta = (f"G12_CELL rate={rate} frames={frames} backend={backend} callbacks=16 "
+                        f"compiled_source={source_sha} build_type=Release build_dirty=0 "
                         f"prepare_start_ns=100 prepare_end_ns=200 request_ns={request} return_ns={request + 100} "
                         f"committed=1 first_new=8 first_new_sample={8 * frames} "
                         "latency_samples=0 snapshot_latency=0 snapshot_nodes=3 snapshot_edges=2 "
@@ -287,6 +289,7 @@ class PacedActivationQualification(unittest.TestCase):
                 ("short qualify", lambda r: r.update(mode="qualification", timing_qualified=True)),
                 ("raw percentile", lambda r: r["cells"][0]["metrics"].__setitem__("p99_duration_ns", 999)),
                 ("raw miss", lambda r: r["cells"][0]["metrics"].__setitem__("deadline_misses", 1)),
+                ("stale executable", lambda r: r["cells"][0]["metadata"].__setitem__("compiled_source", "0" * 40)),
                 ("raw PDC", lambda r: r["cells"][0]["metadata"].__setitem__("snapshot_latency", 1)),
                 ("raw memory", lambda r: r["cells"][0]["metadata"].__setitem__("prepared_bytes", 1)),
                 ("source", lambda r: r["source_fixture"].__setitem__("sha256", "0" * 64)),
@@ -320,6 +323,8 @@ class PacedActivationQualification(unittest.TestCase):
                 ("wrong transition", "first_new=8 ", "first_new=9 "),
                 ("PDC", "node_latencies=0,0,0", "node_latencies=0,1,0"),
                 ("actual backend", "executor_blocks=0", "executor_blocks=16"),
+                ("dirty source", "build_dirty=0", "build_dirty=1"),
+                ("debug", "build_type=Release", "build_type=Debug"),
                 ("memory", "node_audio_bytes=768", "node_audio_bytes=769"),
                 ("harness", "audio_bytes=2048", "audio_bytes=2049"),
                 ("schedule", "target_ns=1000000000", "target_ns=999999900"),

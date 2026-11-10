@@ -717,7 +717,8 @@ ACTIVATION_META = frozenset("rate frames backend callbacks prepare_start_ns prep
     "committed first_new first_new_sample latency_samples snapshot_latency snapshot_nodes snapshot_edges "
     "node_latencies edge_delays nodes edges voices grains probes node_audio_bytes automation_bytes delay_bytes "
     "spectral_bytes prepared_bytes row_stride row_bytes audio_bytes io_bytes harness_payload_bytes misses "
-    "executor_blocks parallel_levels parallel_enabled walk_fallbacks execution_failures".split())
+    "executor_blocks parallel_levels parallel_enabled walk_fallbacks execution_failures "
+    "compiled_source build_type build_dirty".split())
 
 
 def activation_percentile(values: list[int]) -> int:
@@ -745,7 +746,7 @@ def parse_activation_output(stdout: str) -> dict[str, Any]:
             fields = _tokens(line)
             _require(set(fields) == ACTIVATION_META, "activation metadata fields mismatch")
             try:
-                meta = {key: value if key == "backend" else [int(v) for v in value.split(",")]
+                meta = {key: value if key in ("backend", "compiled_source", "build_type") else [int(v) for v in value.split(",")]
                         if key in ("node_latencies", "edge_delays") else int(value)
                         for key, value in fields.items()}
             except ValueError as exc:
@@ -770,8 +771,10 @@ def parse_activation_output(stdout: str) -> dict[str, Any]:
 def validate_activation_cell(cell: dict[str, Any]) -> dict[str, Any]:
     meta, rows = cell["metadata"], cell["callbacks"]
     _require(set(meta) == ACTIVATION_META, "activation metadata fields mismatch")
-    for key in ACTIVATION_META - {"backend", "node_latencies", "edge_delays"}:
+    for key in ACTIVATION_META - {"backend", "compiled_source", "build_type", "node_latencies", "edge_delays"}:
         _require(type(meta[key]) is int and meta[key] >= 0, f"invalid activation integer {key}")
+    _require(isinstance(meta["compiled_source"], str) and re.fullmatch(r"[0-9a-f]{40}", meta["compiled_source"]) and
+             meta["build_type"] == "Release" and meta["build_dirty"] == 0, "compiled source/build stamp mismatch")
     rate, frames, backend = meta["rate"], meta["frames"], meta["backend"]
     _require((rate, frames, backend) in ACTIVATION_KEYS, "unexpected activation matrix cell")
     count = meta["callbacks"]
@@ -893,7 +896,8 @@ def validate_activation_receipt(path: Path, receipt: dict[str, Any], source_root
         key = (meta["rate"], meta["frames"], meta["backend"])
         _require(key in ACTIVATION_KEYS and key not in seen, "duplicate/unexpected activation cell")
         seen.add(key)
-        _require(meta["callbacks"] == count and cell.get("returncode") == 0, "shortened or failed activation run")
+        _require(meta["compiled_source"] == receipt["source_sha"], "stale executable source commit")
+        _require(meta["callbacks"] == count and type(cell.get("returncode")) is int and cell["returncode"] == 0, "shortened or failed activation run")
         raw = _activation_artifact(path, cell["raw_stdout"])
         stderr = _activation_artifact(path, cell["raw_stderr"])
         _require(not stderr.read_bytes(), "activation run wrote stderr")
@@ -1007,6 +1011,7 @@ def record_activation(args: argparse.Namespace) -> int:
             result = subprocess.run([str(binary_copy), "G12 paced activation receipt cell"], env=env,
                                     stdout=out, stderr=err, timeout=args.timeout_seconds)
         cell = parse_activation_output(stdout_path.read_text(encoding="utf-8"))
+        _require(cell["metadata"]["compiled_source"] == sha, "stale executable source commit")
         cell.pop("callbacks")
         cell.update(returncode=result.returncode, raw_stdout=artifact(stdout_path), raw_stderr=artifact(stderr_path))
         receipt["cells"].append(cell)
