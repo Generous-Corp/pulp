@@ -7,6 +7,7 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/rt_safety_contract.hpp>
 #include <pulp/host/custom_node_events.hpp>
+#include <pulp/host/signal_graph_node.hpp>
 #include <pulp/signal/rt_work_counter.hpp>
 #include <pulp/state/parameter.hpp>
 
@@ -107,6 +108,13 @@ struct CustomNodeRtContract {
     // "one FFT per 256-frame hop; ceil(block/256) hops". Free text, reported
     // verbatim; empty when the node does not declare one.
     std::string loop_bound;
+};
+
+/// A persistent named port on a Custom graph node. Empty descriptor lists on
+/// CustomNodeType preserve the historical all-Audio port shape.
+struct CustomNodePortDescriptor {
+    std::string name;
+    PortKind kind = PortKind::Audio;
 };
 
 struct CustomNodeType {
@@ -272,6 +280,32 @@ struct CustomNodeType {
     // Optional declared realtime contract for the static graph report.
     CustomNodeRtContract rt_contract;
 
+    // Appended to preserve existing positional aggregate initializers.
+    std::vector<CustomNodePortDescriptor> input_ports;
+    std::vector<CustomNodePortDescriptor> output_ports;
+
+    bool matches_ports(const GraphNode& node) const noexcept {
+        if (num_input_ports != node.num_input_ports || num_output_ports != node.num_output_ports ||
+            node.input_ports.size() != static_cast<std::size_t>(num_input_ports) ||
+            node.output_ports.size() != static_cast<std::size_t>(num_output_ports))
+            return false;
+        const auto matches = [](const auto& declared, const auto& actual, bool output) {
+            for (std::size_t i = 0; i < actual.size(); ++i) {
+                const auto expected_name =
+                    declared.empty()
+                        ? (i == 0 ? std::string("audio")
+                                  : std::string(output ? "out" : "in") + std::to_string(i))
+                        : declared[i].name;
+                const auto expected_kind = declared.empty() ? PortKind::Audio : declared[i].kind;
+                if (actual[i].name != expected_name || actual[i].kind != expected_kind)
+                    return false;
+            }
+            return true;
+        };
+        return matches(input_ports, node.input_ports, false) &&
+               matches(output_ports, node.output_ports, true);
+    }
+
     // True when this type declares a usable event-aware execution path.
     // DERIVED from callback presence rather than stored as a flag, so it can
     // never disagree with the callbacks it describes.
@@ -300,6 +334,25 @@ struct CustomNodeType {
             (declares_artifact_latency && has_transport_callback && !has_plain_callback)) {
             return false;
         }
+        const auto valid_ports = [](const auto& ports, int count) {
+            if (ports.empty())
+                return true;
+            if (ports.size() != static_cast<std::size_t>(count))
+                return false;
+            for (std::size_t i = 0; i < ports.size(); ++i) {
+                if (ports[i].name.empty() || ports[i].name.size() > 128 ||
+                    static_cast<unsigned>(ports[i].kind) >
+                        static_cast<unsigned>(PortKind::Spectral))
+                    return false;
+                for (std::size_t j = 0; j < i; ++j)
+                    if (ports[j].name == ports[i].name)
+                        return false;
+            }
+            return true;
+        };
+        if (!valid_ports(input_ports, num_input_ports) ||
+            !valid_ports(output_ports, num_output_ports))
+            return false;
 
         // Per-port latency replaces the scalar declaration; accepting both would
         // leave the node's latency ambiguous. The bake layer lowers one scalar

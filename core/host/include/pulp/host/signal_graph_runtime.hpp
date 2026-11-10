@@ -60,6 +60,24 @@ class ProcessorNodeInstance;
 
 namespace pulp::host {
 
+struct ControlIndexBlock {
+    std::uint64_t epoch = 0;
+    std::uint64_t absolute_start = 0;
+    std::span<const float> indices;
+};
+
+enum class ControlProcessResult : std::uint8_t {
+    Accepted,
+    Unbound,
+    OutOfRange,
+    StaleEpoch,
+    WrongStart,
+    ClockExhausted,
+    Busy,
+    UnsupportedMode,
+    RenderFailed,
+};
+
 namespace detail {
 
 // Selection generation is a process-local invalidation token. Saturating the
@@ -77,6 +95,9 @@ advance_execution_selection_generation(std::atomic<std::uint64_t>& generation) n
 } // namespace detail
 
 class GraphSerializer;
+namespace detail {
+struct ControlIndexInputState;
+}
 class SignalGraph;
 class SpectralRuntimeBank;
 
@@ -292,6 +313,16 @@ class SignalGraph : public format::AudioWorkgroupClient {
     TriggerGraphResult try_reset_events() noexcept;
     TriggerGraphResult process_checked(audio::BufferView<float>& output,
                                        const audio::BufferView<const float>& input, int frames);
+    /// Atomically admit one external table-index block and render the matching
+    /// audio block. Admission refusal leaves output and the graph clock
+    /// unchanged. RenderFailed silences output and consumes the admitted block
+    /// position; the next call must use the following absolute start.
+    ControlProcessResult process_control_checked(
+        audio::BufferView<float>& output, const audio::BufferView<const float>& input,
+        const ControlIndexBlock& block, const format::ProcessContext* transport = nullptr) noexcept;
+    std::uint64_t control_index_refusals() const noexcept {
+        return control_index_refusals_.load(std::memory_order_relaxed);
+    }
     /// Start one absolute-sample host-event block for the active prepared
     /// trigger generation. The caller must publish before process_checked();
     /// the graph consumes the block exactly once during checked projection.
@@ -363,8 +394,13 @@ class SignalGraph : public format::AudioWorkgroupClient {
     }
     NodeId add_custom_node(std::string_view type_id, const std::string& name = {});
     NodeId add_custom_node(std::string_view type_id, int version, const std::string& name = {});
+    NodeId add_control_index_input_node(const std::string& name = {});
     NodeId add_unresolved_custom_node(std::string_view type_id, int version, int num_inputs,
                                       int num_outputs, const std::string& name);
+    NodeId add_unresolved_custom_node(std::string_view type_id, int version, int num_inputs,
+                                      int num_outputs, const std::string& name,
+                                      const std::vector<CustomNodePortDescriptor>& input_ports,
+                                      const std::vector<CustomNodePortDescriptor>& output_ports);
 
     // Opaque per-node state for stateful custom nodes.
     // custom_node_state() returns the live instance's save_state() when the node
@@ -441,6 +477,13 @@ class SignalGraph : public format::AudioWorkgroupClient {
                                        uint32_t dest_param_id, float range_lo, float range_hi,
                                        float smoothing_ms = 0.0f,
                                        AutomationMix mix = AutomationMix::Replace);
+
+    /// Project a named Control output into an AudioRate Processor parameter.
+    /// The Control edge keeps its semantic kind while using the existing dense
+    /// float-buffer modulation lane.
+    bool connect_control_modulation(const PortHandle& source, NodeId dest, uint32_t dest_param_id,
+                                    float range_lo, float range_hi, float smoothing_ms = 0.0f,
+                                    AutomationMix mix = AutomationMix::Replace);
 
     /// Remove one automation or audio-rate modulation edge by its typed target.
     /// The route kind is part of the identity so sparse and dense edges cannot
@@ -1286,6 +1329,8 @@ class SignalGraph : public format::AudioWorkgroupClient {
         std::shared_ptr<GraphAuthoredEventLane<>> graph_event_lane;
         GraphAuthoredEventEdge graph_event_edge{};
         std::uint64_t graph_event_epoch = 1;
+        std::shared_ptr<detail::ControlIndexInputState> control_index_state;
+        std::atomic<bool> control_index_busy{false};
         // Keeps candidate-owned per-node measurers alive after publication.
         std::shared_ptr<SignalGraph> trigger_preparation_owner;
 
@@ -1773,6 +1818,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // Audio-thread writer only: terminal routed processing failures and routed-only
     // lease failures that produce a deterministic silent block.
     std::atomic<std::uint64_t> routed_only_execution_failures_{0};
+    std::atomic<std::uint64_t> control_index_refusals_{0};
     // See transport_suppressed_for_anticipation(): set by compile_() to the count
     // of transport-sensitive nodes that active anticipation forced exterior
     // (excluded from the ahead-rendered interior so they observe the live
@@ -1982,6 +2028,11 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // re-locking the non-recursive mutex.
     bool audio_rate_modulation_lane_locked_(const Connection& connection,
                                             state::ModulationLane& lane) const;
+    bool connect_audio_rate_modulation_impl_(NodeId src, PortIndex src_port, NodeId dest,
+                                             uint32_t dest_param_id, float range_lo, float range_hi,
+                                             float smoothing_ms, AutomationMix mix,
+                                             PortKind expected_kind,
+                                             const PortHandle* source_handle);
     // Shared body of both process() overloads. `transport` is the host
     // transport context for the block, or nullptr for the no-transport path.
     // RT-safe (no allocation per block).
@@ -1991,7 +2042,8 @@ class SignalGraph : public format::AudioWorkgroupClient {
                                const audio::BufferView<const float>& input, int num_samples,
                                const format::ProcessContext* transport, CompiledGraph* snapshot,
                                bool trigger_admitted = false,
-                               HostEventResult* host_event_result = nullptr);
+                               HostEventResult* host_event_result = nullptr,
+                               bool control_admitted = false, bool* control_rendered = nullptr);
     HostEventResult project_host_events_(CompiledGraph& snapshot, std::uint64_t sample_start,
                                          std::size_t frames) noexcept;
     static bool inject_midi_into_snapshot_(CompiledGraph& snapshot, NodeId id,

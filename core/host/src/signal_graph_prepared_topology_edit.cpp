@@ -7,6 +7,7 @@
 // compiled graph and control readers cannot observe a mixed authoring graph.
 
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
+#include <pulp/host/control_index_nodes.hpp>
 
 #include <algorithm>
 #include <array>
@@ -1682,6 +1683,27 @@ bool SignalGraph::PreparedTopologyEdit::connect_audio_rate_modulation(
         return candidate_->connect_audio_rate_modulation(source, source_port, dest, dest_param_id,
                                                          range_lo, range_hi, smoothing_ms, mix);
     });
+}
+
+bool SignalGraph::PreparedTopologyEdit::connect_control_modulation(
+    const PortHandle& source, NodeId dest, uint32_t dest_param_id, float range_lo, float range_hi,
+    float smoothing_ms, AutomationMix mix) {
+    return mutate_([&] {
+        return candidate_->connect_control_modulation(source, dest, dest_param_id, range_lo,
+                                                      range_hi, smoothing_ms, mix);
+    });
+}
+
+bool SignalGraph::PreparedTopologyEdit::set_control_node_state(
+    NodeId id, const std::vector<std::uint8_t>& bytes) {
+    if (baseline_node_ids_.contains(id))
+        return false;
+    const auto* node = candidate_->node(id);
+    if (node == nullptr || node->type != NodeType::Custom || node->custom_instance ||
+        candidate_->custom_node_type(node->custom_type_id, node->custom_type_version) == nullptr ||
+        !validate_control_node_state(node->custom_type_id, bytes))
+        return false;
+    return mutate_([&] { return candidate_->set_custom_node_state(id, bytes); });
 }
 
 bool SignalGraph::PreparedTopologyEdit::connect_feedback(NodeId source, PortIndex source_port,

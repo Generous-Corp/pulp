@@ -6,6 +6,7 @@
 
 #include <pulp/format/processor.hpp>
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/host/control_index_nodes.hpp>
 
 #include <algorithm>
 #include <cassert>
@@ -68,6 +69,19 @@ void populate_named_ports(GraphNode& node, std::uint64_t owner, std::uint64_t in
         node.output_ports.push_back({node.id, static_cast<PortIndex>(i), true,
                                      i == 0 ? "audio" : "out" + std::to_string(i), kind, owner,
                                      incarnation});
+}
+
+void apply_custom_port_descriptors(GraphNode& node,
+                                   const std::vector<CustomNodePortDescriptor>& inputs,
+                                   const std::vector<CustomNodePortDescriptor>& outputs) {
+    for (std::size_t i = 0; i < inputs.size(); ++i) {
+        node.input_ports[i].name = inputs[i].name;
+        node.input_ports[i].kind = inputs[i].kind;
+    }
+    for (std::size_t i = 0; i < outputs.size(); ++i) {
+        node.output_ports[i].name = outputs[i].name;
+        node.output_ports[i].kind = outputs[i].kind;
+    }
 }
 
 } // namespace
@@ -314,20 +328,44 @@ NodeId SignalGraph::add_custom_node(std::string_view type_id, int version,
     const auto* type = custom_node_type(type_id, version);
     if (!type)
         return 0;
-    return add_unresolved_custom_node(type->type_id, type->version, type->num_input_ports,
-                                      type->num_output_ports,
-                                      name.empty() ? type->default_name : name);
+    return add_unresolved_custom_node(
+        type->type_id, type->version, type->num_input_ports, type->num_output_ports,
+        name.empty() ? type->default_name : name, type->input_ports, type->output_ports);
+}
+
+NodeId SignalGraph::add_control_index_input_node(const std::string& name) {
+    const auto* registered = custom_node_type(kControlIndexInputTypeId, kControlIndexInputVersion);
+    if (!registered) {
+        if (!register_custom_node_type(make_control_index_input_type()))
+            return 0;
+    } else if (registered->num_input_ports != 0 || registered->num_output_ports != 1 ||
+               registered->output_ports.size() != 1 ||
+               registered->output_ports[0].name != "index" ||
+               registered->output_ports[0].kind != PortKind::Control) {
+        return 0;
+    }
+    return add_custom_node(kControlIndexInputTypeId, kControlIndexInputVersion, name);
 }
 
 NodeId SignalGraph::add_unresolved_custom_node(std::string_view type_id, int version,
                                                int num_inputs, int num_outputs,
                                                const std::string& name) {
+    return add_unresolved_custom_node(type_id, version, num_inputs, num_outputs, name, {}, {});
+}
+
+NodeId
+SignalGraph::add_unresolved_custom_node(std::string_view type_id, int version, int num_inputs,
+                                        int num_outputs, const std::string& name,
+                                        const std::vector<CustomNodePortDescriptor>& input_ports,
+                                        const std::vector<CustomNodePortDescriptor>& output_ports) {
     CustomNodeType type;
     type.type_id = std::string(type_id);
     type.version = version;
     type.num_input_ports = num_inputs;
     type.num_output_ports = num_outputs;
     type.default_name = name;
+    type.input_ports = input_ports;
+    type.output_ports = output_ports;
     if (!type.is_valid_registration())
         return 0;
 
@@ -336,6 +374,16 @@ NodeId SignalGraph::add_unresolved_custom_node(std::string_view type_id, int ver
     GraphMutationLock mutation_lock(*this);
     if (refuse_spectral_mutation_())
         return 0;
+    if (type_id == kControlIndexInputTypeId) {
+        if (version != kControlIndexInputVersion || num_inputs != 0 || num_outputs != 1 ||
+            !input_ports.empty() || output_ports.size() != 1 || output_ports[0].name != "index" ||
+            output_ports[0].kind != PortKind::Control ||
+            std::any_of(nodes_.begin(), nodes_.end(), [](const auto& existing) {
+                return existing.type == NodeType::Custom &&
+                       existing.custom_type_id == kControlIndexInputTypeId;
+            }))
+            return 0;
+    }
     GraphNode node;
     node.id = next_id_++;
     node.type = NodeType::Custom;
@@ -345,6 +393,7 @@ NodeId SignalGraph::add_unresolved_custom_node(std::string_view type_id, int ver
     node.custom_type_id = std::move(type.type_id);
     node.custom_type_version = version;
     populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
+    apply_custom_port_descriptors(node, input_ports, output_ports);
     nodes_.push_back(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
@@ -407,6 +456,9 @@ bool SignalGraph::connect(NodeId source, PortIndex source_port, NodeId dest, Por
         return false;
     if (!has_input_port(*dst_n, dest_port))
         return false;
+    if (src_n->output_ports[source_port].kind != PortKind::Audio ||
+        dst_n->input_ports[dest_port].kind != PortKind::Audio)
+        return false;
     if (would_create_cycle(source, dest))
         return false;
     Connection conn{source, source_port, dest, dest_port};
@@ -425,7 +477,15 @@ bool SignalGraph::connect_midi(NodeId source, NodeId dest) {
     if (prepared_edit_origin_ == nullptr &&
         (sample_region_for_node_locked_(source) != 0 || sample_region_for_node_locked_(dest) != 0))
         return false;
-    if (!node(source) || !node(dest))
+    const auto* src_n = node(source);
+    const auto* dst_n = node(dest);
+    if (!src_n || !dst_n)
+        return false;
+    const auto has_control = [](const auto& ports) {
+        return std::any_of(ports.begin(), ports.end(),
+                           [](const auto& port) { return port.kind == PortKind::Control; });
+    };
+    if (has_control(src_n->output_ports) || has_control(dst_n->input_ports))
         return false;
     if (would_create_cycle(source, dest))
         return false;
@@ -460,6 +520,9 @@ bool SignalGraph::connect_sidechain(NodeId source, PortIndex source_port, NodeId
         return false;
     if (!has_input_port(*dst_n, dest_sidechain_port))
         return false;
+    if (src_n->output_ports[source_port].kind != PortKind::Audio ||
+        dst_n->input_ports[dest_sidechain_port].kind != PortKind::Audio)
+        return false;
     if (would_create_cycle(source, dest))
         return false;
 
@@ -493,6 +556,8 @@ bool SignalGraph::connect_automation(NodeId src, PortIndex src_audio_port, NodeI
     if (dst_n->type != NodeType::Plugin || (!dst_n->plugin && !processor_nodes_.contains(dest)))
         return false;
     if (!has_output_port(*src_n, src_audio_port))
+        return false;
+    if (src_n->output_ports[src_audio_port].kind != PortKind::Audio)
         return false;
 
     // Reject automation edges that would introduce a cycle. Automation
@@ -545,6 +610,27 @@ bool SignalGraph::connect_audio_rate_modulation(NodeId src, PortIndex src_audio_
                                                 uint32_t dest_param_id, float range_lo,
                                                 float range_hi, float smoothing_ms,
                                                 AutomationMix mix) {
+    return connect_audio_rate_modulation_impl_(src, src_audio_port, dest, dest_param_id, range_lo,
+                                               range_hi, smoothing_ms, mix, PortKind::Audio,
+                                               nullptr);
+}
+
+bool SignalGraph::connect_control_modulation(const PortHandle& source, NodeId dest,
+                                             uint32_t dest_param_id, float range_lo, float range_hi,
+                                             float smoothing_ms, AutomationMix mix) {
+    if (!source.output || source.kind != PortKind::Control)
+        return false;
+    return connect_audio_rate_modulation_impl_(source.node, source.index, dest, dest_param_id,
+                                               range_lo, range_hi, smoothing_ms, mix,
+                                               PortKind::Control, &source);
+}
+
+bool SignalGraph::connect_audio_rate_modulation_impl_(NodeId src, PortIndex src_audio_port,
+                                                      NodeId dest, uint32_t dest_param_id,
+                                                      float range_lo, float range_hi,
+                                                      float smoothing_ms, AutomationMix mix,
+                                                      PortKind expected_kind,
+                                                      const PortHandle* source_handle) {
     // Holds graph_mutation_mutex_ across audio_rate_modulation_lane() below, which
     // is a lock-free helper that assumes the caller holds it (it scans nodes_).
     GraphMutationLock mutation_lock(*this);
@@ -560,6 +646,11 @@ bool SignalGraph::connect_audio_rate_modulation(NodeId src, PortIndex src_audio_
     if (dst_n->type != NodeType::Plugin || (!dst_n->plugin && !processor_nodes_.contains(dest)))
         return false;
     if (!has_output_port(*src_n, src_audio_port))
+        return false;
+    const auto& port = src_n->output_ports[src_audio_port];
+    if (port.kind != expected_kind ||
+        (source_handle && (port.name != source_handle->name || port.owner != source_handle->owner ||
+                           port.incarnation != source_handle->incarnation)))
         return false;
     if (would_create_cycle(src, dest))
         return false;
@@ -593,6 +684,7 @@ bool SignalGraph::connect_audio_rate_modulation(NodeId src, PortIndex src_audio_
     conn.dest_node = dest;
     conn.dest_port = 0;
     conn.audio_rate_modulation = true;
+    conn.control_signal = expected_kind == PortKind::Control;
     conn.automation_param_id = dest_param_id;
     conn.automation_range_lo = range_lo;
     conn.automation_range_hi = range_hi;
@@ -676,6 +768,9 @@ bool SignalGraph::connect_feedback(NodeId source, PortIndex source_port, NodeId 
     if (!has_output_port(*src_n, source_port))
         return false;
     if (!has_input_port(*dst_n, dest_port))
+        return false;
+    if (src_n->output_ports[source_port].kind != PortKind::Audio ||
+        dst_n->input_ports[dest_port].kind != PortKind::Audio)
         return false;
     Connection conn{source, source_port, dest, dest_port, true};
     for (auto& c : connections_)
@@ -950,6 +1045,7 @@ GraphResult SignalGraph::connect(const PortHandle& source, const PortHandle& des
                 "illegal instantaneous cycle", "insert a feedback delay"};
     Connection c{source.node, sp->index, dest.node, dp->index};
     c.spectral = sp->kind == PortKind::Spectral;
+    c.control_signal = sp->kind == PortKind::Control;
     for (const auto& existing : connections_)
         if (existing == c)
             return {GraphResult::Code::Duplicate, dest.node, dp->index, "duplicate connection",

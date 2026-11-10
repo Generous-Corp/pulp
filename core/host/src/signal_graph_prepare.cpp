@@ -18,6 +18,7 @@
 #include <pulp/host/anticipation_partition.hpp>
 #include <pulp/host/anticipation_subgraph.hpp>
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/host/control_index_nodes.hpp>
 #include <pulp/host/signal_graph_execution_snapshot.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
 #include <pulp/runtime/log.hpp>
@@ -43,8 +44,7 @@ std::size_t saturating_mul(std::size_t a, std::size_t b) {
 }
 
 bool custom_type_matches_node_shape(const CustomNodeType& type, const GraphNode& node) {
-    return type.num_input_ports == node.num_input_ports &&
-           type.num_output_ports == node.num_output_ports;
+    return type.matches_ports(node);
 }
 
 std::vector<NodeId> processing_order_for(const std::vector<GraphNode>& nodes,
@@ -449,8 +449,12 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
     if (!cg->spectral)
         cg->legacy_processing_lifetime = processing_handle_lifetime_;
     cg->sample_rate = sample_rate;
-    if (graph_event_edge_) {
-        cg->graph_event_edge = *graph_event_edge_;
+    const bool has_control_index = std::any_of(nodes_.begin(), nodes_.end(), [](const auto& n) {
+        return n.type == NodeType::Custom && n.custom_type_id == kControlIndexInputTypeId;
+    });
+    if (graph_event_edge_ || has_control_index) {
+        if (graph_event_edge_)
+            cg->graph_event_edge = *graph_event_edge_;
         cg->graph_event_lane = std::make_shared<GraphAuthoredEventLane<>>();
         if (cg->graph_event_lane->reset(cg->graph_event_epoch) != GraphEventResult::Accepted)
             return nullptr;
@@ -699,6 +703,16 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                 (mit != prepared_plugin_meta_.end()) && mit->second.wants_transport;
         }
         if (n.type == NodeType::Custom) {
+            const bool has_control_port =
+                std::any_of(n.input_ports.begin(), n.input_ports.end(),
+                            [](const auto& port) { return port.kind == PortKind::Control; }) ||
+                std::any_of(n.output_ports.begin(), n.output_ports.end(),
+                            [](const auto& port) { return port.kind == PortKind::Control; });
+            if (has_control_port) {
+                const auto* registered = custom_node_type(n.custom_type_id, n.custom_type_version);
+                if (!registered || !custom_type_matches_node_shape(*registered, n))
+                    return nullptr;
+            }
             if (const auto* type = custom_node_type(n.custom_type_id, n.custom_type_version);
                 type && custom_type_matches_node_shape(*type, n)) {
                 if (n.custom_instance && type->process_instance) {
@@ -715,6 +729,19 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                                    int num_samples) { fn(inst.get(), out, in, num_samples); };
                 } else if (type->process) {
                     cg->custom_processors[n.id] = type->process;
+                }
+                if (n.custom_type_id == kControlIndexInputTypeId &&
+                    n.custom_type_version == kControlIndexInputVersion) {
+                    cg->control_index_state = std::make_shared<detail::ControlIndexInputState>();
+                    auto state = cg->control_index_state;
+                    cg->custom_processors[n.id] = [state](audio::BufferView<float>& out,
+                                                          const audio::BufferView<const float>&,
+                                                          int frames) {
+                        if (out.num_channels() == 0 || frames <= 0 ||
+                            static_cast<std::size_t>(frames) > state->frames)
+                            return;
+                        std::copy_n(state->indices.data(), frames, out.channel_ptr(0));
+                    };
                 }
                 // Event-aware resolution, with the same instance-lifetime
                 // guarantee: a stateful callback is wrapped in a lambda holding
