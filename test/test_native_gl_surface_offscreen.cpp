@@ -152,7 +152,7 @@ TEST_CASE("two surfaces on two threads keep their own frames",
     REQUIRE(near(pb[2], 255));
 }
 
-TEST_CASE("teardown runs the release handler first and then refuses the context",
+TEST_CASE("destruction runs the release handler once, with the context refused",
           "[native][gl-surface][offscreen]") {
     auto surface = GlSurface::create_offscreen(8, 8);
     REQUIRE(surface != nullptr);
@@ -171,20 +171,17 @@ TEST_CASE("teardown runs the release handler first and then refuses the context"
     while (frames.load() < 3)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     int releases = 0;
-    int frames_while_releasing = 0;
+    bool refused_during_release = false;
     s->set_release_handler([&] {
         ++releases;
-        // The context must still exist while the client is being told to
-        // stop: a client thread mid-frame keeps working until it joins.
-        const int before = frames.load();
-        std::this_thread::sleep_for(std::chrono::milliseconds(30));
-        frames_while_releasing = frames.load() - before;
         stop = true;
         render.join();
+        // Teardown has started: the context is refused from here on.
+        refused_during_release = !s->context().make_current();
     });
     surface.reset();  // destruction is a teardown
     REQUIRE(releases == 1);
-    REQUIRE(frames_while_releasing > 0);
+    REQUIRE(refused_during_release);
 }
 
 TEST_CASE("a surface refuses the context once teardown has started",
