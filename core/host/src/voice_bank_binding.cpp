@@ -95,6 +95,17 @@ bool valid_schema(const VoiceBankManifest& manifest, const SubgraphTemplate& def
 } // namespace
 
 struct VoiceBankBinding::Impl {
+    struct HeldNoteOff {
+        std::uint64_t epoch = 0;
+        midi::MpeNoteState state{};
+        bool active = false;
+    };
+    struct Scope {
+        std::uint8_t channel = 0;
+        bool manager = false;
+        bool upper = false;
+        bool valid = false;
+    };
     std::unique_ptr<VoiceBankOwner> owner;
     SignalGraph graph;
     VoiceBankManifest manifest;
@@ -107,15 +118,154 @@ struct VoiceBankBinding::Impl {
     std::uint64_t block_start = 0;
     std::size_t block_frames = 0;
     bool block_open = false;
+    std::array<HeldNoteOff, kSlots> held{};
+    std::array<bool, 16> member_sustain{};
+    std::array<bool, 2> zone_sustain{};
+    bool suppress_note_off = false;
     std::string stereo_port;
+
+    Scope scope_for(std::uint8_t channel) const noexcept {
+        const auto& config = tracker.config();
+        if (config.lower_zone.member_channels != 0 && channel == 0)
+            return {channel, true, false, true};
+        if (config.upper_zone.member_channels != 0 && channel == 15)
+            return {channel, true, true, true};
+        if (const auto* zone = config.zone_for_channel(channel))
+            return {channel, false, zone->is_upper(), true};
+        return {};
+    }
+    bool covers(Scope scope, std::uint8_t channel) const noexcept {
+        if (!scope.manager)
+            return scope.channel == channel;
+        const auto& config = tracker.config();
+        const auto& zone = scope.upper ? config.upper_zone : config.lower_zone;
+        return zone.contains_channel(channel);
+    }
+    bool pedal_down(std::uint8_t channel) const noexcept {
+        const auto* zone = tracker.config().zone_for_channel(channel);
+        return zone && (member_sustain[channel] || zone_sustain[zone->is_upper() ? 1 : 0]);
+    }
+    void prune_stolen_holds() noexcept {
+        for (std::uint32_t slot = 0; slot < kSlots; ++slot) {
+            auto& hold = held[slot];
+            if (hold.active && (hold.epoch != epoch ||
+                                !owner->live(slot, hold.state.note_id,
+                                             midi::MpeExpressionEvent::Kind::NoteOff, hold.state)))
+                hold = {};
+        }
+    }
+    void release_unheld() noexcept {
+        for (std::uint32_t slot = 0; slot < kSlots; ++slot) {
+            auto& hold = held[slot];
+            if (!hold.active || pedal_down(hold.state.channel))
+                continue;
+            if (hold.epoch == epoch &&
+                owner->live(slot, hold.state.note_id, midi::MpeExpressionEvent::Kind::NoteOff,
+                            hold.state))
+                owner->dispatch({0, midi::MpeExpressionEvent::Kind::NoteOff, hold.state});
+            hold = {};
+        }
+    }
+    void note_off(const midi::MpeNoteState& note) noexcept {
+        if (suppress_note_off)
+            return;
+        if (pedal_down(note.channel)) {
+            for (std::uint32_t slot = 0; slot < kSlots; ++slot) {
+                if (!owner->live(slot, note.note_id, midi::MpeExpressionEvent::Kind::NoteOff, note))
+                    continue;
+                if (!held[slot].active || held[slot].state.note_id != note.note_id)
+                    held[slot] = {epoch, note, true};
+                return;
+            }
+            return; // A stolen note has no voice to hold.
+        }
+        owner->dispatch({0, midi::MpeExpressionEvent::Kind::NoteOff, note});
+    }
+    void reset_expression(std::uint8_t channel) noexcept {
+        (void)tracker.process(midi::MidiEvent::pitch_bend(channel, 8192));
+        (void)tracker.process(midi::MidiEvent{
+            choc::midi::ShortMessage(static_cast<std::uint8_t>(0xd0 | channel), 0, 0), 0, 0.0});
+        (void)tracker.process(midi::MidiEvent::cc(channel, 74, 0));
+    }
+    void reset_orphan_expression(Scope scope) noexcept {
+        for (std::uint32_t slot = 0; slot < kSlots; ++slot) {
+            midi::MpeNoteState note{};
+            bool releasing = false;
+            if (!owner->slot_note(slot, note, releasing) || !covers(scope, note.channel) ||
+                (!releasing && !held[slot].active))
+                continue;
+            note.pitch_bend_semitones = 0.0f;
+            note.pressure = 0.0f;
+            note.timbre = 0.0f;
+            owner->dispatch({0, midi::MpeExpressionEvent::Kind::PitchBend, note});
+            owner->dispatch({0, midi::MpeExpressionEvent::Kind::Pressure, note});
+            owner->dispatch({0, midi::MpeExpressionEvent::Kind::Timbre, note});
+        }
+    }
+    void all_notes_off(Scope scope) noexcept {
+        std::array<midi::MpeNoteState, midi::MpeVoiceTracker::kMaxNotes> notes{};
+        const auto count = tracker.snapshot(notes.data(), notes.size());
+        for (std::size_t i = 0; i < count; ++i)
+            if (covers(scope, notes[i].channel))
+                (void)tracker.process(midi::MidiEvent::note_off(notes[i].channel, notes[i].note));
+    }
+    void all_sound_off(Scope scope) noexcept {
+        suppress_note_off = true;
+        all_notes_off(scope);
+        suppress_note_off = false;
+        for (std::uint32_t slot = 0; slot < kSlots; ++slot) {
+            midi::MpeNoteState note{};
+            bool releasing = false;
+            if (owner->slot_note(slot, note, releasing) && covers(scope, note.channel)) {
+                (void)owner->retire_slot(slot, note.note_id);
+                held[slot] = {};
+            }
+        }
+        if (scope.manager) {
+            const auto& zone =
+                scope.upper ? tracker.config().upper_zone : tracker.config().lower_zone;
+            for (std::uint8_t channel = 0; channel < 16; ++channel) {
+                if (!zone.contains_channel(channel))
+                    continue;
+                member_sustain[channel] = false;
+                reset_expression(channel);
+            }
+            zone_sustain[scope.upper ? 1 : 0] = false;
+        } else {
+            member_sustain[scope.channel] = false;
+        }
+        reset_expression(scope.channel);
+    }
+    void control_change(Scope scope, std::uint8_t control, std::uint8_t value) noexcept {
+        if (control == 64) {
+            if (scope.manager)
+                zone_sustain[scope.upper ? 1 : 0] = value >= 64;
+            else
+                member_sustain[scope.channel] = value >= 64;
+            if (value < 64)
+                release_unheld();
+        } else if (control == 120) {
+            all_sound_off(scope);
+        } else if (control == 121) {
+            if (scope.manager)
+                zone_sustain[scope.upper ? 1 : 0] = false;
+            else
+                member_sustain[scope.channel] = false;
+            reset_expression(scope.channel);
+            if (!scope.manager)
+                reset_orphan_expression(scope);
+            release_unheld();
+        } else if (control == 123) {
+            all_notes_off(scope);
+        }
+    }
 
     Impl() {
         tracker.on_note_on = [this](const midi::MpeNoteState& note) {
             owner->dispatch({0, midi::MpeExpressionEvent::Kind::NoteOn, note});
+            prune_stolen_holds();
         };
-        tracker.on_note_off = [this](const midi::MpeNoteState& note) {
-            owner->dispatch({0, midi::MpeExpressionEvent::Kind::NoteOff, note});
-        };
+        tracker.on_note_off = [this](const midi::MpeNoteState& note) { note_off(note); };
         tracker.on_pitch_bend = [this](const midi::MpeNoteState& note) {
             owner->dispatch({0, midi::MpeExpressionEvent::Kind::PitchBend, note});
         };
@@ -134,7 +284,8 @@ VoiceBankBinding::~VoiceBankBinding() = default;
 std::unique_ptr<VoiceBankBinding>
 VoiceBankBinding::prepare(const VoiceTemplateSchema& schema, SubgraphTemplate definition,
                           std::unique_ptr<VoiceBankOwner> owner, std::string stereo_port,
-                          double sample_rate, int max_frames, VoiceBankBindingResult& result) {
+                          double sample_rate, int max_frames, VoiceBankBindingResult& result,
+                          midi::MpeConfig mpe_config) {
     result = {};
     auto prepared = prepare_voice_bank(schema);
     if (!owner) {
@@ -150,6 +301,17 @@ VoiceBankBinding::prepare(const VoiceTemplateSchema& schema, SubgraphTemplate de
     }
     if (!std::isfinite(sample_rate) || sample_rate <= 0 || max_frames <= 0 || max_frames > 4096) {
         result = {VoiceBankBindingCode::GraphPrepareFailure, 0, {}, "invalid audio preparation"};
+        return {};
+    }
+    if ((mpe_config.lower_zone.member_channels != 0 &&
+         mpe_config.lower_zone.manager_channel != 0) ||
+        (mpe_config.upper_zone.member_channels != 0 &&
+         mpe_config.upper_zone.manager_channel != 15) ||
+        mpe_config.lower_zone.member_channels > 15 || mpe_config.upper_zone.member_channels > 15 ||
+        (mpe_config.lower_zone.member_channels != 0 && mpe_config.upper_zone.member_channels != 0 &&
+         mpe_config.lower_zone.member_channels + mpe_config.upper_zone.member_channels > 14)) {
+        result = {VoiceBankBindingCode::InvalidManifest, 0, "mpe_zone",
+                  "overlapping or invalid MPE zone layout"};
         return {};
     }
     for (std::uint32_t slot = 0; slot < kSlots; ++slot) {
@@ -168,6 +330,7 @@ VoiceBankBinding::prepare(const VoiceTemplateSchema& schema, SubgraphTemplate de
     }
     auto bank = std::unique_ptr<VoiceBankBinding>(new VoiceBankBinding);
     bank->impl_->owner = std::move(owner);
+    bank->impl_->tracker.set_config(mpe_config);
     bank->impl_->manifest = std::move(prepared.manifest);
     bank->impl_->max_frames = static_cast<std::size_t>(max_frames);
     bank->impl_->stereo_port = std::move(stereo_port);
@@ -249,6 +412,9 @@ bool VoiceBankBinding::activate(VoiceBankBindingResult& result) noexcept {
     }
     impl_->tracker.reset();
     impl_->owner->reset();
+    impl_->held.fill({});
+    impl_->member_sustain.fill(false);
+    impl_->zone_sustain.fill(false);
     ++impl_->epoch;
     impl_->ingress.reset(impl_->epoch);
     result = {};
@@ -289,9 +455,7 @@ VoiceBankBindingCode VoiceBankBinding::render(audio::BufferView<float>& stereo,
         impl_->block_open = false;
         return code;
     };
-    // Refuse unsupported MIDI before any slot or output is changed. Pedal and
-    // channel-mode semantics need the separate G5 sustain bridge and are not
-    // silently interpreted as ordinary tracker input here.
+    // Validate the whole block before dispatching any voice or touching audio.
     for (std::size_t index = 0; index < count; ++index) {
         const auto& record = impl_->projected[index];
         const auto* bytes = record.midi.data();
@@ -299,24 +463,32 @@ VoiceBankBindingCode VoiceBankBinding::render(audio::BufferView<float>& stereo,
         const auto status = size == 0 ? 0 : bytes[0];
         const auto kind = status & 0xf0;
         const auto channel = status & 0x0f;
-        const auto& config = impl_->tracker.config();
-        const bool in_zone = config.zone_for_channel(channel) ||
-                             (channel == 0 && config.lower_zone.member_channels != 0) ||
-                             (channel == 15 && config.upper_zone.member_channels != 0);
+        const auto scope = impl_->scope_for(channel);
+        const bool control = kind == 0xb0 && size == 3;
+        const bool channel_mode =
+            control && (bytes[1] == 64 || bytes[1] == 120 || bytes[1] == 121 || bytes[1] == 123);
         const bool supported = kind == 0x80 || kind == 0x90 || kind == 0xd0 || kind == 0xe0 ||
-                               (kind == 0xb0 && size == 3 && bytes[1] == 74);
+                               (control && (bytes[1] == 74 || channel_mode));
         const std::size_t expected_size = kind == 0xd0 ? 2 : 3;
         const bool valid_bytes = size == expected_size && (bytes[1] & 0x80) == 0 &&
                                  (size == 2 || (bytes[2] & 0x80) == 0);
-        if (record.has_ump || !in_zone || !supported || !valid_bytes ||
-            ((kind == 0x80 || kind == 0x90) &&
-             ((channel == 0 && config.lower_zone.member_channels != 0) ||
-              (channel == 15 && config.upper_zone.member_channels != 0))))
+        if (record.has_ump || !valid_bytes)
+            return refuse(VoiceBankBindingCode::IngressFailure);
+        if (!scope.valid)
+            return refuse(VoiceBankBindingCode::OutOfZone);
+        if (!supported || (channel_mode && bytes[1] != 64 && bytes[2] != 0))
+            return refuse(kind == 0xb0 ? VoiceBankBindingCode::UnsupportedControl
+                                       : VoiceBankBindingCode::IngressFailure);
+        // The tracker caches manager expression but does not apply it to live
+        // voices; refuse it until a scoped composition rule has an audio oracle.
+        if (scope.manager && (kind == 0xd0 || kind == 0xe0 || (control && bytes[1] == 74)))
+            return refuse(VoiceBankBindingCode::UnsupportedExpression);
+        if (scope.manager && (kind == 0x80 || kind == 0x90))
             return refuse(VoiceBankBindingCode::IngressFailure);
     }
-    // The tracker can hold 128 distinct physical keys even while the audio
-    // allocator keeps only eight sounding voices. Preview the complete block
-    // in event order so a full table refuses before any output or voice changes.
+    // Preview physical tracker membership in event order. The tracker can hold
+    // 128 distinct keys even though the audio owner renders at most eight slots.
+    // Refuse a full table before any output, voice, or pedal state is changed.
     std::array<std::uint16_t, midi::MpeVoiceTracker::kMaxNotes> membership{};
     for (std::size_t i = 0; i < membership.size(); ++i) {
         const auto& note = impl_->tracker.slots()[i];
@@ -325,6 +497,14 @@ VoiceBankBindingCode VoiceBankBinding::render(audio::BufferView<float>& stereo,
     }
     for (std::size_t index = 0; index < count; ++index) {
         const auto& message = impl_->projected[index].midi;
+        if (message.is_cc() &&
+            (message.cc_number() == 120 || message.cc_number() == 123)) {
+            const auto scope = impl_->scope_for(message.channel());
+            for (auto& key : membership)
+                if (key != 0 && impl_->covers(scope, static_cast<std::uint8_t>((key - 1) >> 7)))
+                    key = 0;
+            continue;
+        }
         if (!message.is_note_on() && !message.is_note_off())
             continue;
         const auto key = static_cast<std::uint16_t>(1u + (message.channel() << 7) + message.note());
@@ -357,11 +537,13 @@ VoiceBankBindingCode VoiceBankBinding::render(audio::BufferView<float>& stereo,
         }
         do {
             const auto& record = impl_->projected[index];
-            if (record.midi.size() != 0 && !impl_->tracker.process(record.midi)) {
-                impl_->ingress.rollback_projection();
-                (void)impl_->ingress.end_block();
-                impl_->block_open = false;
-                return VoiceBankBindingCode::IngressFailure;
+            if (record.midi.is_cc() &&
+                (record.midi.cc_number() == 64 || record.midi.cc_number() == 120 ||
+                 record.midi.cc_number() == 121 || record.midi.cc_number() == 123)) {
+                impl_->control_change(impl_->scope_for(record.midi.channel()),
+                                      record.midi.cc_number(), record.midi.cc_value());
+            } else if (record.midi.size() != 0 && !impl_->tracker.process(record.midi)) {
+                return refuse(VoiceBankBindingCode::IngressFailure);
             }
             ++index;
         } while (index < count &&
@@ -391,7 +573,12 @@ VoiceBankBindingCode VoiceBankBinding::dispatch_deferred(std::uint64_t epoch, st
     if (slot >= kSlots || generation == 0 || !impl_->owner->live(slot, generation, kind, state) ||
         state.note_id != generation)
         return VoiceBankBindingCode::StaleGeneration;
-    impl_->owner->dispatch({0, kind, state});
+    if (kind == midi::MpeExpressionEvent::Kind::NoteOff && impl_->pedal_down(state.channel)) {
+        if (!impl_->held[slot].active || impl_->held[slot].state.note_id != generation)
+            impl_->held[slot] = {epoch, state, true};
+    } else {
+        impl_->owner->dispatch({0, kind, state});
+    }
     return VoiceBankBindingCode::Ok;
 }
 bool VoiceBankBinding::set_slot_parameter(std::uint32_t slot, std::string_view path, float value) {

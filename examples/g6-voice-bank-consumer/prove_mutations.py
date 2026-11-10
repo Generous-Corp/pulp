@@ -59,6 +59,26 @@ MUTATIONS = {
         "const bool supported = kind == 0x80 || kind == 0x90 || kind == 0xa0 || kind == 0xd0 ||",
         "poly-pressure-typed-refusal",
     ),
+    "wrong_cc64_boundary": (
+        "if (control == 64) {",
+        "if (control == 64 && value != 64) {",
+        "pedal-64-down",
+    ),
+    "skip_cc121_hold_drain": (
+        "reset_orphan_expression(scope);\n            release_unheld();",
+        "reset_orphan_expression(scope);",
+        "cc121-drains-last-hold",
+    ),
+    "skip_cc123_note_off": (
+        "} else if (control == 123) {\n            all_notes_off(scope);",
+        "} else if (control == 123) {\n            (void)scope;",
+        "cc123-dispatches-release",
+    ),
+    "widen_member_panic": (
+        "if (!scope.manager) return scope.channel == channel;",
+        "if (!scope.manager) return true;",
+        "member-panic-preserves-other",
+    ),
 }
 
 
@@ -129,7 +149,8 @@ def main() -> None:
             marker = mutation[2]
             if execution.returncode == 0 or marker not in output:
                 raise AssertionError(f"{name}: planted failure was not observed: {output}")
-        elif execution.returncode or "sample3=-0.125" not in output or "sample10=0" not in output:
+        elif (execution.returncode or "g6-voice-bank-public-consumer PASS" not in output
+              or "sample10=0" not in output):
             raise AssertionError(f"{name}: positive numeric oracle failed: {output}")
         results[name] = {
             "exit_code": execution.returncode,

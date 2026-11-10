@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <vector>
 
@@ -17,11 +18,21 @@ void check(bool value, const char* rule) {
         throw std::runtime_error(rule);
 }
 
-std::vector<float> render(std::size_t partition) {
+bool near(float actual, float expected) {
+    return std::isfinite(actual) &&
+           std::abs(actual - expected) <= 2e-6f + 2e-6f * std::abs(expected);
+}
+
+struct Stereo {
+    std::vector<float> left;
+    std::vector<float> right;
+};
+
+Stereo render(std::size_t partition) {
     VoiceBankBindingResult status;
     auto bank = make_bank(schema(), status);
     check(static_cast<bool>(bank), "prepare-eight-processors");
-    std::vector<float> samples;
+    Stereo samples;
     for (std::size_t start = 0; start < 800; start += partition) {
         const auto frames = std::min(partition, std::size_t{800} - start);
         check(bank->begin_block(start, frames) == HostEventResult::Accepted, "begin-block");
@@ -40,9 +51,10 @@ std::vector<float> render(std::size_t partition) {
             throw std::runtime_error("render-code=" +
                                      std::to_string(static_cast<unsigned>(render_code)));
         for (std::size_t i = 0; i < frames; ++i) {
-            check(std::isfinite(view.channel(0)[i]), "finite-audio");
-            check(view.channel(0)[i] == view.channel(1)[i], "stereo-mono-duplicate");
-            samples.push_back(view.channel(0)[i]);
+            check(std::isfinite(view.channel(0)[i]) && std::isfinite(view.channel(1)[i]),
+                  "finite-audio");
+            samples.left.push_back(view.channel(0)[i]);
+            samples.right.push_back(view.channel(1)[i]);
         }
     }
     check(owner(*bank).allocator().active_count() == 0, "finite-release-reclaimed");
@@ -74,6 +86,21 @@ void check_steal_policies() {
         check(bank->render(view, 0, 2) == VoiceBankBindingCode::Ok, "steal-render");
         check(owner(*bank).allocator().voice(victims[policy]).note_number() == 90, "steal-victim");
         check(owner(*bank).allocator().steal_count() == 1, "steal-count");
+        float expected_left = 0.0f;
+        float expected_right = 0.0f;
+        for (std::size_t slot = 0; slot < 8; ++slot) {
+            float source = -1.0f;
+            if (slot != victims[policy]) {
+                const double phase =
+                    440.0 * std::exp2((static_cast<double>(60 + slot) - 69.0) / 12.0) / 48000.0;
+                source = static_cast<float>(4.0 * phase - 1.0) *
+                         (static_cast<float>(100 - slot * 10) / 127.0f);
+            }
+            expected_left += source * kBankGain;
+            expected_right += (source * 0.5f) * kBankGain;
+        }
+        check(near(view.channel(0)[1], expected_left), "steal-hard-no-tail-left");
+        check(near(view.channel(1)[1], expected_right), "steal-hard-no-tail-right");
     }
 }
 
@@ -90,7 +117,7 @@ void check_state_and_generation() {
     audio::Buffer<float> buffer(2, 1);
     auto view = buffer.view();
     check(bank->render(view, 0, 1) == VoiceBankBindingCode::Ok, "state-render");
-    check(std::abs(view.channel(0)[0] + 0.25f) <= 2e-6f, "slot-zero-level-audio");
+    check(std::abs(view.channel(0)[0] + 2.0f * kBankGain) <= 2e-6f, "slot-zero-level-audio");
     const auto generation = owner(*bank).allocator().voice(0).note_id();
     midi::MpeNoteState note{};
     note.note_id = generation;
@@ -185,6 +212,165 @@ void check_capacity_and_poly_pressure() {
           "poly-pressure-atomic-refusal");
 }
 
+void check_eight_voice_sum() {
+    for (const auto partition : {1u, 32u, 64u, 127u, 256u}) {
+        VoiceBankBindingResult status;
+        auto bank = make_bank(schema(), status);
+        check(static_cast<bool>(bank), "sum-prepare");
+        std::array<double, 8> phase{};
+        std::size_t sample = 0;
+        while (sample < 512) {
+            const auto frames = std::min<std::size_t>(partition, 512 - sample);
+            check(bank->begin_block(sample, frames) == HostEventResult::Accepted, "sum-begin");
+            if (sample == 0)
+                for (std::uint8_t slot = 0; slot < 8; ++slot)
+                    check(bank->publish(event(
+                              bank->epoch(), 0, slot + 1,
+                              midi::MidiEvent::note_on(slot + 1, 60 + slot, 100 - slot * 10))) ==
+                              HostEventResult::Accepted,
+                          "sum-note-on");
+            audio::Buffer<float> buffer(2, frames);
+            auto view = buffer.view();
+            check(bank->render(view, sample, frames) == VoiceBankBindingCode::Ok, "sum-render");
+            for (std::size_t frame = 0; frame < frames; ++frame) {
+                float expected_left = 0.0f;
+                float expected_right = 0.0f;
+                for (std::size_t slot = 0; slot < 8; ++slot) {
+                    const float triangle = phase[slot] < 0.5
+                                               ? static_cast<float>(4.0 * phase[slot] - 1.0)
+                                               : static_cast<float>(3.0 - 4.0 * phase[slot]);
+                    const float source = triangle * (static_cast<float>(100 - slot * 10) / 127.0f);
+                    expected_left += source * kBankGain;
+                    expected_right += (source * 0.5f) * kBankGain;
+                    phase[slot] +=
+                        440.0 * std::exp2((static_cast<double>(60 + slot) - 69.0) / 12.0) / 48000.0;
+                    if (phase[slot] >= 1.0)
+                        phase[slot] -= 1.0;
+                }
+                check(near(view.channel(0)[frame], expected_left), "ordered-left-sum");
+                check(near(view.channel(1)[frame], expected_right), "ordered-right-sum");
+            }
+            sample += frames;
+        }
+    }
+}
+
+std::array<float, 2> expression_sample(std::optional<midi::MidiEvent> change) {
+    VoiceBankBindingResult status;
+    auto bank = make_bank(schema(), status);
+    check(static_cast<bool>(bank), "expression-prepare");
+    std::array<float, 2> observed{};
+    for (std::uint64_t sample = 0; sample < 3; ++sample) {
+        check(bank->begin_block(sample, 1) == HostEventResult::Accepted, "expression-begin");
+        if (sample == 0)
+            check(bank->publish(
+                      event(bank->epoch(), sample, 1, midi::MidiEvent::note_on(1, 69, 127))) ==
+                      HostEventResult::Accepted,
+                  "expression-note");
+        if (sample == 1 && change)
+            check(bank->publish(event(bank->epoch(), sample, 1, *change)) ==
+                      HostEventResult::Accepted,
+                  "expression-change");
+        audio::Buffer<float> buffer(2, 1);
+        auto view = buffer.view();
+        check(bank->render(view, sample, 1) == VoiceBankBindingCode::Ok, "expression-render");
+        if (sample == 2)
+            observed = {view.channel(0)[0], view.channel(1)[0]};
+    }
+    return observed;
+}
+
+void check_expression_audio() {
+    const auto baseline = expression_sample(std::nullopt);
+    const auto bend = expression_sample(midi::MidiEvent::pitch_bend(1, 16383));
+    const auto pressure =
+        expression_sample(midi::MidiEvent{choc::midi::ShortMessage(0xd1, 127, 0), 0, 0.0});
+    const auto timbre = expression_sample(midi::MidiEvent::cc(1, 74, 127));
+    check(std::abs(bend[0] - baseline[0]) > 1e-4f, "audible-pitch");
+    check(std::abs(pressure[0] - baseline[0]) > 1e-3f, "audible-pressure");
+    check(std::abs(timbre[1] - baseline[1]) > 1e-3f, "audible-timbre");
+    check(near(pressure[1], baseline[1]), "pressure-channel-independence");
+    check(near(timbre[0], baseline[0]), "timbre-channel-independence");
+}
+
+VoiceBankBindingCode step(VoiceBankBinding& bank, std::uint64_t sample,
+                          std::initializer_list<midi::MidiEvent> messages) {
+    check(bank.begin_block(sample, 1) == HostEventResult::Accepted, "pedal-begin");
+    std::uint64_t sequence = 1;
+    for (const auto& message : messages)
+        check(bank.publish(event(bank.epoch(), sample, sequence++, message)) ==
+                  HostEventResult::Accepted,
+              "pedal-publish");
+    audio::Buffer<float> buffer(2, 1);
+    auto view = buffer.view();
+    return bank.render(view, sample, 1);
+}
+
+void check_pedals_and_modes() {
+    VoiceBankBindingResult status;
+    auto boundary = make_bank(schema(), status);
+    check(static_cast<bool>(boundary), "boundary-prepare");
+    check(step(*boundary, 0,
+               {midi::MidiEvent::note_on(1, 69, 127), midi::MidiEvent::cc(1, 64, 64)}) ==
+              VoiceBankBindingCode::Ok,
+          "boundary-down-render");
+    check(step(*boundary, 1, {midi::MidiEvent::note_off(1, 69)}) == VoiceBankBindingCode::Ok,
+          "boundary-note-off-render");
+    check(!owner(*boundary).allocator().voice(0).releasing(), "pedal-64-down");
+    check(step(*boundary, 2, {midi::MidiEvent::cc(1, 64, 63)}) == VoiceBankBindingCode::Ok,
+          "boundary-up-render");
+    check(owner(*boundary).allocator().voice(0).releasing(), "pedal-63-up");
+
+    auto bank = make_bank(schema(), status);
+    check(static_cast<bool>(bank), "pedal-prepare");
+    check(step(*bank, 0,
+               {midi::MidiEvent::note_on(1, 69, 127), midi::MidiEvent::cc(1, 64, 64),
+                midi::MidiEvent::cc(0, 64, 127)}) == VoiceBankBindingCode::Ok,
+          "pedal-down-render");
+    check(step(*bank, 1, {midi::MidiEvent::note_off(1, 69), midi::MidiEvent::note_off(1, 69)}) ==
+              VoiceBankBindingCode::Ok,
+          "pedal-held-note-off");
+    check(!owner(*bank).allocator().voice(0).releasing(), "pedal-64-down");
+    check(step(*bank, 2, {midi::MidiEvent::cc(1, 64, 63)}) == VoiceBankBindingCode::Ok,
+          "member-pedal-up");
+    check(!owner(*bank).allocator().voice(0).releasing(), "manager-hold-persists");
+    check(step(*bank, 3, {midi::MidiEvent::cc(0, 121, 0)}) == VoiceBankBindingCode::Ok,
+          "manager-cc121");
+    check(owner(*bank).allocator().voice(0).releasing(), "cc121-drains-last-hold");
+    check(step(*bank, 4, {midi::MidiEvent::cc(0, 64, 0)}) == VoiceBankBindingCode::Ok,
+          "duplicate-pedal-up");
+    check(owner(*bank).allocator().voice(0).releasing(), "single-release");
+
+    auto scoped = make_bank(schema(), status, definition(), midi::MpeConfig::dual(2, 2));
+    check(static_cast<bool>(scoped), "scoped-prepare");
+    check(step(*scoped, 0,
+               {midi::MidiEvent::note_on(1, 60, 100), midi::MidiEvent::note_on(2, 62, 100),
+                midi::MidiEvent::note_on(14, 64, 100), midi::MidiEvent::cc(1, 64, 127)}) ==
+              VoiceBankBindingCode::Ok,
+          "scoped-notes");
+    check(step(*scoped, 1, {midi::MidiEvent::cc(1, 123, 0)}) == VoiceBankBindingCode::Ok,
+          "member-cc123");
+    check(!owner(*scoped).allocator().voice(0).releasing(), "cc123-held");
+    check(step(*scoped, 2, {midi::MidiEvent::cc(1, 64, 0)}) == VoiceBankBindingCode::Ok,
+          "member-final-rise");
+    check(owner(*scoped).allocator().voice(0).releasing(), "cc123-dispatches-release");
+    check(step(*scoped, 3, {midi::MidiEvent::cc(2, 120, 0)}) == VoiceBankBindingCode::Ok,
+          "member-panic");
+    check(!owner(*scoped).allocator().voice(1).active(), "member-panic-silences-self");
+    check(owner(*scoped).allocator().voice(2).active(), "member-panic-preserves-other");
+    check(step(*scoped, 4, {midi::MidiEvent::cc(3, 64, 127)}) == VoiceBankBindingCode::OutOfZone,
+          "out-of-zone-typed-refusal");
+    check(step(*scoped, 5, {midi::MidiEvent::cc(14, 66, 0)}) ==
+              VoiceBankBindingCode::UnsupportedControl,
+          "unsupported-control-typed-refusal");
+    check(step(*scoped, 6, {midi::MidiEvent::cc(15, 120, 0)}) == VoiceBankBindingCode::Ok,
+          "manager-panic");
+    check(!owner(*scoped).allocator().voice(2).active(), "manager-panic-zone-scope");
+    check(step(*scoped, 7, {midi::MidiEvent::pitch_bend(15, 12288)}) ==
+              VoiceBankBindingCode::UnsupportedExpression,
+          "manager-expression-typed-refusal");
+}
+
 class AliasedOwner final : public VoiceBankOwner {
   public:
     AliasedOwner()
@@ -211,6 +397,13 @@ class AliasedOwner final : public VoiceBankOwner {
     void set_steal_mode(midi::MpeVoiceStealMode mode) noexcept override {
         backing_.set_steal_mode(mode);
     }
+    bool slot_note(std::uint32_t slot, midi::MpeNoteState& note,
+                   bool& releasing) const noexcept override {
+        return backing_.slot_note(slot, note, releasing);
+    }
+    bool retire_slot(std::uint32_t slot, midi::MpeNoteGeneration generation) noexcept override {
+        return backing_.retire_slot(slot, generation);
+    }
     const void* slot_state_identity(std::uint32_t) const noexcept override {
         return backing_.slot_state_identity(0);
     }
@@ -226,28 +419,36 @@ class AliasedOwner final : public VoiceBankOwner {
 int main() {
     try {
         const auto scalar = render(1);
-        check(scalar.size() == 800, "scalar-length");
+        check(scalar.left.size() == 800 && scalar.right.size() == 800, "scalar-length");
         double phase = 0.0;
-        for (std::size_t i = 0; i < scalar.size(); ++i) {
-            float expected = 0.0f;
+        for (std::size_t i = 0; i < scalar.left.size(); ++i) {
+            float expected_left = 0.0f;
+            float expected_right = 0.0f;
             if (i >= 3 && i < 10) {
                 const float triangle = phase < 0.5 ? static_cast<float>(4.0 * phase - 1.0)
                                                    : static_cast<float>(3.0 - 4.0 * phase);
                 const float release = i < 6 ? 1.0f : (4.0f - static_cast<float>(i - 6)) * 0.25f;
-                expected = triangle * release * 0.125f;
+                expected_left = triangle * release * kBankGain;
+                expected_right = triangle * release * (0.5f * kBankGain);
                 phase += 440.0 / 48000.0;
             }
-            check(std::abs(scalar[i] - expected) <= 2e-6f, "independent-audio-oracle");
+            check(near(scalar.left[i], expected_left), "independent-left-oracle");
+            check(near(scalar.right[i], expected_right), "independent-right-oracle");
         }
         for (const auto partition : {32u, 64u, 127u, 256u}) {
             const auto candidate = render(partition);
-            check(candidate.size() == scalar.size(), "partition-length");
-            for (std::size_t i = 0; i < scalar.size(); ++i)
-                check(std::abs(candidate[i] - scalar[i]) <= 2e-6f, "partition-audio");
+            check(candidate.left.size() == scalar.left.size(), "partition-length");
+            for (std::size_t i = 0; i < scalar.left.size(); ++i) {
+                check(near(candidate.left[i], scalar.left[i]), "partition-left-audio");
+                check(near(candidate.right[i], scalar.right[i]), "partition-right-audio");
+            }
         }
         check_steal_policies();
         check_state_and_generation();
         check_capacity_and_poly_pressure();
+        check_eight_voice_sum();
+        check_expression_audio();
+        check_pedals_and_modes();
         VoiceBankBindingResult status;
         auto malformed = schema();
         malformed.bindings[0].target = "unbound-note-port";
@@ -270,7 +471,8 @@ int main() {
               "aliased-state-refusal");
         std::cout << "g6-voice-bank-public-consumer PASS partitions=1,32,64,127,256"
                      " samples=800 sample3="
-                  << scalar[3] << " sample6=" << scalar[6] << " sample10=" << scalar[10] << '\n';
+                  << scalar.left[3] << " sample6=" << scalar.left[6]
+                  << " sample10=" << scalar.left[10] << '\n';
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "g6-voice-bank-public-consumer FAIL rule=" << error.what() << '\n';
