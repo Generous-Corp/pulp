@@ -851,6 +851,11 @@ carry_excluded_paths = [
     "**/*notariz*",
     "**/*signing*",
 ]
+# Generated paths and known-flaky test names are populated only after this
+# configuration surface has landed on the trusted base branch. Keeping the
+# introducing change empty lets the trusted lane validate the keys first.
+generated_paths = []
+known_flaky_tests = []
 
 [base_health]
 # `shipyard base-health --act` records "would jump PR #n" once per poisoned
