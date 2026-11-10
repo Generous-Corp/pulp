@@ -16,6 +16,7 @@
    "tools/cli/cli_delegate.cpp",
    "tools/cli/cli_doctor_helpers.cpp",
    "tools/cli/cli_fs_util.cpp",
+   "tools/cli/cli_graph_reload.cpp",
    "tools/cli/cli_sdk.cpp",
    "tools/cli/cmd_audio.cpp",
    "tools/cli/cmd_audio_compare.cpp",

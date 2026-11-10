@@ -1,0 +1,14 @@
+{
+ "name": "pulp-test-graph-file-reload",
+ "record": {
+  "data": "declared",
+  "detected_sources": [],
+  "inputs": [],
+  "kind": "compiled",
+  "sources": [
+   "test/test_graph_file_reload.cpp"
+  ],
+  "undeclared_sources": []
+ },
+ "scanned": true
+}
