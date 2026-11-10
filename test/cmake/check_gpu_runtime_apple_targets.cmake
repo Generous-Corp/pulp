@@ -58,7 +58,9 @@ foreach(_case IN LISTS _cases)
             "-DARCHS=${_archs}" "-DPROC=${_processor}" "-DUSE=${_use}" "-DPREFIX=${_prefix}"
             -P "${CMAKE_CURRENT_LIST_FILE}"
         RESULT_VARIABLE _result OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
-    set(_log "${_out}${_err}")
+    # CMake word-wraps FATAL_ERROR text at a width that depends on the prefix
+    # path's length, so collapse whitespace before matching the message.
+    string(REGEX REPLACE "[ \t\r\n]+" " " _log "${_out}${_err}")
     if(NOT _result EQUAL 0 AND _log MATCHES "has no gpu-runtime-artifact.json")
         set(_got reached)
     elseif(_result EQUAL 0 AND _log MATCHES "module-result PULP_HAS_GPU_RUNTIME=FALSE")
