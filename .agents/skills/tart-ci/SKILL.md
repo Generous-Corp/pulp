@@ -96,8 +96,8 @@ is available interactively when you need an exact local proof.
   tools/ci/tart-provision.sh manifest .shipyard/vm-image.intel.toml
   tools/ci/tart-provision.sh tag pulp-intel-build pulp-intel-build
   ```
-- **Use it:** `tools/ci/intel-vm-cross-build.sh [--ref <branch|tag|sha>] [--keep] [--full-build]` clones the golden → runs the cross-build recipe on a ref → asserts exact-thin x86_64 (`lipo -archs`) + a Rosetta `pulp help` run → discards the VM.
-- **THE cross-build gotcha (baked into the recipe):** `setup.sh --ci` prefetches the **host-arch (arm64)** Skia and `fetch_skia_for_release.py`'s flatten step **won't clobber** it, so the x86_64 `cmake` fails `FindSkia`. The recipe does `rm -rf external/skia-build/build` BETWEEN setup.sh and the `darwin-x64` fetch. Native Intel runners never hit this (host==target).
+- **Use it:** `tools/ci/intel-vm-cross-build.sh [--ref <branch|tag|sha>] [--keep] [--full-build]` clones the golden → runs the cross-build recipe on a ref → asserts the fetched universal `libskia.a` has an x86_64 slice and the built binary is exact-thin x86_64 (`lipo -archs`) + a Rosetta `pulp help` run → discards the VM.
+- **Cross-build Skia (baked into the recipe):** `setup.sh --ci` prefetches Skia and `fetch_skia_for_release.py`'s flatten step **won't clobber** it, so the recipe does `rm -rf external/skia-build/build` BETWEEN setup.sh and the `darwin-x64` fetch to get a fresh, receipt-bound generation. `darwin-x64` resolves the universal archive (gpu-runtime's renderer lock pins its Dawn), so the fetched `libskia.a` is fat and the check is for an x86_64 slice, not a thin file.
 - **Replicate to another Mac host:** either copy the baked `pulp-intel-build` image (tart export/clone over the network) OR run the manifest on that host — it needs `pulp-build-runner:latest` present there first (it's the base). Same 2-VM/host kernel cap applies; route Intel builds off the required-gate runners.
 
 ## Pinned-toolchain layer (mise) — a candidate golden, never `:latest` by itself
