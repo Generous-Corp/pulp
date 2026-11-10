@@ -54,6 +54,16 @@ MUTATIONS = {
         "if (free == membership.end())\n                continue;",
         "capacity-typed-refusal",
     ),
+    "skip_cc120_capacity_preview": (
+        "message.cc_number() == 120 || message.cc_number() == 123",
+        "false || message.cc_number() == 123",
+        "capacity-cc120-reuse",
+    ),
+    "skip_cc123_capacity_preview": (
+        "message.cc_number() == 120 || message.cc_number() == 123",
+        "message.cc_number() == 120 || false",
+        "capacity-cc123-reuse",
+    ),
     "silently_accept_poly_pressure": (
         "const bool supported = kind == 0x80 || kind == 0x90 || kind == 0xd0 ||",
         "const bool supported = kind == 0x80 || kind == 0x90 || kind == 0xa0 || kind == 0xd0 ||",
