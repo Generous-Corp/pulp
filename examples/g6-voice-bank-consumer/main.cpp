@@ -123,19 +123,16 @@ void check_capacity_and_poly_pressure() {
     for (std::uint64_t sample = 0; sample < 128; ++sample) {
         check(bank->begin_block(sample, 1) == HostEventResult::Accepted, "capacity-begin");
         check(bank->publish(event(bank->epoch(), sample, 1,
-                                  midi::MidiEvent::note_on(1,
-                                                           static_cast<std::uint8_t>(sample),
+                                  midi::MidiEvent::note_on(1, static_cast<std::uint8_t>(sample),
                                                            127))) == HostEventResult::Accepted,
               "capacity-fill");
         audio::Buffer<float> buffer(2, 1);
         auto view = buffer.view();
-        check(bank->render(view, sample, 1) == VoiceBankBindingCode::Ok,
-              "capacity-fill-render");
+        check(bank->render(view, sample, 1) == VoiceBankBindingCode::Ok, "capacity-fill-render");
     }
     const auto generation = owner(*bank).allocator().voice(0).note_id();
     check(bank->begin_block(128, 1) == HostEventResult::Accepted, "capacity-overflow-begin");
-    check(bank->publish(event(bank->epoch(), 128, 1,
-                              midi::MidiEvent::note_on(2, 0, 127))) ==
+    check(bank->publish(event(bank->epoch(), 128, 1, midi::MidiEvent::note_on(2, 0, 127))) ==
               HostEventResult::Accepted,
           "capacity-overflow-publish");
     audio::Buffer<float> overflow(2, 1);
@@ -156,14 +153,12 @@ void check_capacity_and_poly_pressure() {
     check(bank->render(released_view, 129, 1) == VoiceBankBindingCode::Ok,
           "capacity-release-render");
     check(bank->begin_block(130, 1) == HostEventResult::Accepted, "capacity-retry-begin");
-    check(bank->publish(event(bank->epoch(), 130, 1,
-                              midi::MidiEvent::note_on(2, 0, 127))) ==
+    check(bank->publish(event(bank->epoch(), 130, 1, midi::MidiEvent::note_on(2, 0, 127))) ==
               HostEventResult::Accepted,
           "capacity-retry-publish");
     audio::Buffer<float> resumed(2, 1);
     auto resumed_view = resumed.view();
-    check(bank->render(resumed_view, 130, 1) == VoiceBankBindingCode::Ok,
-          "capacity-retry-render");
+    check(bank->render(resumed_view, 130, 1) == VoiceBankBindingCode::Ok, "capacity-retry-render");
     check(owner(*bank).allocator().voice(0).channel() == 2 &&
               owner(*bank).allocator().voice(0).note_number() == 0 &&
               owner(*bank).allocator().voice(0).note_id() == 129 &&
@@ -173,12 +168,11 @@ void check_capacity_and_poly_pressure() {
     auto pressure = make_bank(schema(), status);
     check(static_cast<bool>(pressure), "pressure-prepare");
     check(pressure->begin_block(0, 1) == HostEventResult::Accepted, "pressure-begin");
-    check(pressure->publish(event(pressure->epoch(), 0, 1,
-                                  midi::MidiEvent::note_on(1, 69, 127))) ==
+    check(pressure->publish(event(pressure->epoch(), 0, 1, midi::MidiEvent::note_on(1, 69, 127))) ==
               HostEventResult::Accepted,
           "pressure-note");
-    check(pressure->publish(event(pressure->epoch(), 0, 2,
-                                  midi::MidiEvent::poly_pressure(1, 69, 127))) ==
+    check(pressure->publish(
+              event(pressure->epoch(), 0, 2, midi::MidiEvent::poly_pressure(1, 69, 127))) ==
               HostEventResult::Accepted,
           "poly-pressure-publish");
     audio::Buffer<float> refused(2, 1);
@@ -186,8 +180,8 @@ void check_capacity_and_poly_pressure() {
     auto refused_view = refused.view();
     check(pressure->render(refused_view, 0, 1) == VoiceBankBindingCode::IngressFailure,
           "poly-pressure-typed-refusal");
-    check(owner(*pressure).allocator().active_count() == 0 &&
-              refused.channel(0)[0] == 7.0f && refused.channel(1)[0] == 7.0f,
+    check(owner(*pressure).allocator().active_count() == 0 && refused.channel(0)[0] == 7.0f &&
+              refused.channel(1)[0] == 7.0f,
           "poly-pressure-atomic-refusal");
 }
 

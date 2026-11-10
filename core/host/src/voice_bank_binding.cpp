@@ -303,8 +303,8 @@ VoiceBankBindingCode VoiceBankBinding::render(audio::BufferView<float>& stereo,
         const bool in_zone = config.zone_for_channel(channel) ||
                              (channel == 0 && config.lower_zone.member_channels != 0) ||
                              (channel == 15 && config.upper_zone.member_channels != 0);
-        const bool supported = kind == 0x80 || kind == 0x90 || kind == 0xd0 ||
-                               kind == 0xe0 || (kind == 0xb0 && size == 3 && bytes[1] == 74);
+        const bool supported = kind == 0x80 || kind == 0x90 || kind == 0xd0 || kind == 0xe0 ||
+                               (kind == 0xb0 && size == 3 && bytes[1] == 74);
         const std::size_t expected_size = kind == 0xd0 ? 2 : 3;
         const bool valid_bytes = size == expected_size && (bytes[1] & 0x80) == 0 &&
                                  (size == 2 || (bytes[2] & 0x80) == 0);
@@ -325,15 +325,17 @@ VoiceBankBindingCode VoiceBankBinding::render(audio::BufferView<float>& stereo,
     }
     for (std::size_t index = 0; index < count; ++index) {
         const auto& message = impl_->projected[index].midi;
-        if (!message.is_note_on() && !message.is_note_off()) continue;
-        const auto key = static_cast<std::uint16_t>(1u + (message.channel() << 7) +
-                                                    message.note());
+        if (!message.is_note_on() && !message.is_note_off())
+            continue;
+        const auto key = static_cast<std::uint16_t>(1u + (message.channel() << 7) + message.note());
         const auto matching = std::find(membership.begin(), membership.end(), key);
         if (message.is_note_off() || message.velocity() == 0) {
-            if (matching != membership.end()) *matching = 0;
+            if (matching != membership.end())
+                *matching = 0;
         } else if (matching == membership.end()) {
             const auto free = std::find(membership.begin(), membership.end(), 0);
-            if (free == membership.end()) return refuse(VoiceBankBindingCode::TrackerCapacity);
+            if (free == membership.end())
+                return refuse(VoiceBankBindingCode::TrackerCapacity);
             *free = key;
         }
     }

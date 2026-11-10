@@ -343,8 +343,7 @@ TEST_CASE("G6 tracker capacity refuses 129th distinct start atomically and recov
     CHECK(owner(*bank).allocator().steal_count() == 120);
     const auto generation = owner(*bank).allocator().voice(0).note_id();
     REQUIRE(bank->begin_block(128, 1) == HostEventResult::Accepted);
-    REQUIRE(bank->publish(event(bank->epoch(), 128, 1,
-                                midi::MidiEvent::note_on(2, 0, 127))) ==
+    REQUIRE(bank->publish(event(bank->epoch(), 128, 1, midi::MidiEvent::note_on(2, 0, 127))) ==
             HostEventResult::Accepted);
     audio::Buffer<float> refused(2, 1);
     refused.channel(0)[0] = 7.0f;
@@ -356,14 +355,13 @@ TEST_CASE("G6 tracker capacity refuses 129th distinct start atomically and recov
     CHECK(owner(*bank).allocator().voice(0).note_id() == generation);
     CHECK(owner(*bank).allocator().steal_count() == 120);
     REQUIRE(bank->begin_block(129, 1) == HostEventResult::Accepted);
-    REQUIRE(bank->publish(event(bank->epoch(), 129, 1,
-                                midi::MidiEvent::note_off(1, 0))) == HostEventResult::Accepted);
+    REQUIRE(bank->publish(event(bank->epoch(), 129, 1, midi::MidiEvent::note_off(1, 0))) ==
+            HostEventResult::Accepted);
     audio::Buffer<float> released(2, 1);
     auto released_view = released.view();
     REQUIRE(bank->render(released_view, 129, 1) == VoiceBankBindingCode::Ok);
     REQUIRE(bank->begin_block(130, 1) == HostEventResult::Accepted);
-    REQUIRE(bank->publish(event(bank->epoch(), 130, 1,
-                                midi::MidiEvent::note_on(2, 0, 127))) ==
+    REQUIRE(bank->publish(event(bank->epoch(), 130, 1, midi::MidiEvent::note_on(2, 0, 127))) ==
             HostEventResult::Accepted);
     audio::Buffer<float> resumed(2, 1);
     auto resumed_view = resumed.view();
@@ -383,10 +381,9 @@ TEST_CASE("G6 capacity preview respects retrigger and equal-sample event order",
         REQUIRE(bank);
         for (std::uint64_t sample = 0; sample < 128; ++sample) {
             REQUIRE(bank->begin_block(sample, 1) == HostEventResult::Accepted);
-            REQUIRE(bank->publish(event(bank->epoch(), sample, 1,
-                                        midi::MidiEvent::note_on(1,
-                                                                 static_cast<std::uint8_t>(sample),
-                                                                 127))) ==
+            REQUIRE(bank->publish(event(
+                        bank->epoch(), sample, 1,
+                        midi::MidiEvent::note_on(1, static_cast<std::uint8_t>(sample), 127))) ==
                     HostEventResult::Accepted);
             audio::Buffer<float> buffer(2, 1);
             auto view = buffer.view();
@@ -396,8 +393,8 @@ TEST_CASE("G6 capacity preview respects retrigger and equal-sample event order",
     };
     auto retrigger = filled();
     REQUIRE(retrigger->begin_block(128, 1) == HostEventResult::Accepted);
-    REQUIRE(retrigger->publish(event(retrigger->epoch(), 128, 1,
-                                     midi::MidiEvent::note_on(1, 127, 100))) ==
+    REQUIRE(retrigger->publish(
+                event(retrigger->epoch(), 128, 1, midi::MidiEvent::note_on(1, 127, 100))) ==
             HostEventResult::Accepted);
     audio::Buffer<float> retrigger_audio(2, 1);
     auto retrigger_view = retrigger_audio.view();
@@ -405,10 +402,9 @@ TEST_CASE("G6 capacity preview respects retrigger and equal-sample event order",
 
     auto off_on = filled();
     REQUIRE(off_on->begin_block(128, 1) == HostEventResult::Accepted);
-    REQUIRE(off_on->publish(event(off_on->epoch(), 128, 1,
-                                  midi::MidiEvent::note_off(1, 0))) == HostEventResult::Accepted);
-    REQUIRE(off_on->publish(event(off_on->epoch(), 128, 2,
-                                  midi::MidiEvent::note_on(2, 0, 127))) ==
+    REQUIRE(off_on->publish(event(off_on->epoch(), 128, 1, midi::MidiEvent::note_off(1, 0))) ==
+            HostEventResult::Accepted);
+    REQUIRE(off_on->publish(event(off_on->epoch(), 128, 2, midi::MidiEvent::note_on(2, 0, 127))) ==
             HostEventResult::Accepted);
     audio::Buffer<float> off_on_audio(2, 1);
     auto off_on_view = off_on_audio.view();
@@ -417,11 +413,10 @@ TEST_CASE("G6 capacity preview respects retrigger and equal-sample event order",
     auto on_off = filled();
     const auto generation = owner(*on_off).allocator().voice(0).note_id();
     REQUIRE(on_off->begin_block(128, 1) == HostEventResult::Accepted);
-    REQUIRE(on_off->publish(event(on_off->epoch(), 128, 1,
-                                  midi::MidiEvent::note_on(2, 0, 127))) ==
+    REQUIRE(on_off->publish(event(on_off->epoch(), 128, 1, midi::MidiEvent::note_on(2, 0, 127))) ==
             HostEventResult::Accepted);
-    REQUIRE(on_off->publish(event(on_off->epoch(), 128, 2,
-                                  midi::MidiEvent::note_off(1, 0))) == HostEventResult::Accepted);
+    REQUIRE(on_off->publish(event(on_off->epoch(), 128, 2, midi::MidiEvent::note_off(1, 0))) ==
+            HostEventResult::Accepted);
     audio::Buffer<float> on_off_audio(2, 1);
     on_off_audio.channel(0)[0] = 7.0f;
     auto on_off_view = on_off_audio.view();
@@ -438,8 +433,7 @@ TEST_CASE("G6 polyphonic pressure refuses before note or output mutation",
     REQUIRE(bank->begin_block(0, 1) == HostEventResult::Accepted);
     REQUIRE(bank->publish(event(bank->epoch(), 0, 1, midi::MidiEvent::note_on(1, 69, 127))) ==
             HostEventResult::Accepted);
-    REQUIRE(bank->publish(event(bank->epoch(), 0, 2,
-                                midi::MidiEvent::poly_pressure(1, 69, 127))) ==
+    REQUIRE(bank->publish(event(bank->epoch(), 0, 2, midi::MidiEvent::poly_pressure(1, 69, 127))) ==
             HostEventResult::Accepted);
     audio::Buffer<float> buffer(2, 1);
     buffer.channel(0)[0] = 7.0f;
@@ -453,8 +447,8 @@ TEST_CASE("G6 polyphonic pressure refuses before note or output mutation",
     REQUIRE(bank->publish(event(bank->epoch(), 1, 1, midi::MidiEvent::note_on(1, 69, 127))) ==
             HostEventResult::Accepted);
     REQUIRE(bank->publish(event(bank->epoch(), 1, 2,
-                                midi::MidiEvent{choc::midi::ShortMessage(0xd1, 127, 0), 0,
-                                                0.0})) == HostEventResult::Accepted);
+                                midi::MidiEvent{choc::midi::ShortMessage(0xd1, 127, 0), 0, 0.0})) ==
+            HostEventResult::Accepted);
     audio::Buffer<float> positive(2, 1);
     auto positive_view = positive.view();
     REQUIRE(bank->render(positive_view, 1, 1) == VoiceBankBindingCode::Ok);
