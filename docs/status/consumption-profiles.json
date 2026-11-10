@@ -1673,8 +1673,10 @@
     ],
     "integrations/pulp-native/include": [
       "pulp/native/frame_pump.hpp",
+      "pulp/native/gl_surface.hpp",
       "pulp/native/input.hpp",
-      "pulp/native/metal_surface.hpp"
+      "pulp/native/metal_surface.hpp",
+      "pulp/native/surface.hpp"
     ],
     "tools/audio/analysis/include": [
       "pulp/audio/analysis/audio_artifacts.hpp",
