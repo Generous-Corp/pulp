@@ -66,6 +66,7 @@
 #include <pulp/state/store.hpp>
 
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -381,6 +382,67 @@ inline bool apply_param_value(state::ParameterEventQueue& queue,
 // format currency. Consumed by `clap_adapter.cpp` and `vst3_adapter.cpp`.
 // ---------------------------------------------------------------------------
 
+/// Work the per-block parameter bookkeeping below does, counted so a test can
+/// hold it to a bound without timing it: values read by the pre-process
+/// snapshot, values compared by the post-process diff, and parameters stepped
+/// over by `find_param_index`. A block with no store write must count nothing,
+/// and one with a write about one pass over the parameters; an accidental
+/// per-block full scan or nested scan shows up here at any parameter count.
+///
+/// Counting compiles in only when `PULP_RT_WORK_COUNTERS` is non-zero (the
+/// root CMake option, on when tests are built), as for `signal::rt` work
+/// counts. Each pass adds once, with a relaxed atomic: no allocation, no lock.
+/// The totals are process-wide, so a test reads them around a single-threaded
+/// render.
+struct ParamSyncCounts {
+    std::uint64_t reads = 0;
+    std::uint64_t compares = 0;
+    std::uint64_t scans = 0;
+    friend constexpr ParamSyncCounts operator-(ParamSyncCounts a, ParamSyncCounts b) noexcept {
+        return {a.reads - b.reads, a.compares - b.compares, a.scans - b.scans};
+    }
+};
+
+namespace detail {
+#if PULP_RT_WORK_COUNTERS
+inline std::atomic<std::uint64_t> g_param_reads{0};
+inline std::atomic<std::uint64_t> g_param_compares{0};
+inline std::atomic<std::uint64_t> g_param_scans{0};
+#endif
+inline void count_param_work([[maybe_unused]] std::uint64_t reads,
+                             [[maybe_unused]] std::uint64_t compares,
+                             [[maybe_unused]] std::uint64_t scans) noexcept {
+#if PULP_RT_WORK_COUNTERS
+    if (reads)
+        g_param_reads.fetch_add(reads, std::memory_order_relaxed);
+    if (compares)
+        g_param_compares.fetch_add(compares, std::memory_order_relaxed);
+    if (scans)
+        g_param_scans.fetch_add(scans, std::memory_order_relaxed);
+#endif
+}
+} // namespace detail
+
+/// True when this build counts parameter-sync work. With counting compiled
+/// out every delta is zero, which a gate must not read as "no work".
+inline constexpr bool kParamSyncCountersEnabled = PULP_RT_WORK_COUNTERS != 0;
+
+/// Current process-wide totals; subtract two readings for a delta.
+inline ParamSyncCounts param_sync_counts() noexcept {
+#if PULP_RT_WORK_COUNTERS
+    return {detail::g_param_reads.load(std::memory_order_relaxed),
+            detail::g_param_compares.load(std::memory_order_relaxed),
+            detail::g_param_scans.load(std::memory_order_relaxed)};
+#else
+    return {};
+#endif
+}
+
+/// Record a post-process diff over `n` parameters.
+inline void count_param_compares(std::size_t n) noexcept {
+    detail::count_param_work(0, n, 0);
+}
+
 /// Index returned by `find_param_index` when the id is not registered.
 inline constexpr std::size_t kParamIndexNotFound = static_cast<std::size_t>(-1);
 
@@ -399,8 +461,12 @@ inline constexpr std::size_t kParamIndexNotFound = static_cast<std::size_t>(-1);
 inline std::size_t find_param_index(std::span<const state::ParamInfo> all_params,
                                     state::ParamID id) noexcept {
     for (std::size_t i = 0; i < all_params.size(); ++i) {
-        if (all_params[i].id == id) return i;
+        if (all_params[i].id == id) {
+            detail::count_param_work(0, 0, i + 1);
+            return i;
+        }
     }
+    detail::count_param_work(0, 0, all_params.size());
     return kParamIndexNotFound;
 }
 
@@ -418,6 +484,7 @@ inline void snapshot_param_values(const state::StateStore& store,
     for (std::size_t i = 0; i < all_params.size(); ++i) {
         snapshot[i] = store.get_value(all_params[i].id);
     }
+    detail::count_param_work(all_params.size(), 0, 0);
 }
 
 /// Generation-gated pre-process snapshot: which generation it was taken at
