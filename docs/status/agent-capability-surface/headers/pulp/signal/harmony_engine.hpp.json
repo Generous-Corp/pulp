@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/harmony_engine.hpp",
+  "fingerprint": "sha256:edf2c597ddeb7b31f07c7cf094e4cfb2b833b4f4fb6b00376b36635d11734f79",
+  "include": "pulp/signal/harmony_engine.hpp",
+  "disposition": "unsupported_capability",
+  "capability_keys": [],
+  "rationale": "The harmonizer is a public DSP API, but it does not yet have the typed bindings, lifecycle contract, parameter semantics, and link probe required for a generator-facing capability claim."
+}

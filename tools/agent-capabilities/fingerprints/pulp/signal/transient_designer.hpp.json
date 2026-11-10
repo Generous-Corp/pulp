@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/transient_designer.hpp",
+  "fingerprint": "sha256:f82fbba753fd01410ff7117cf86f9f8868d071a3979c36d87f677f99cbc34ae2"
+}

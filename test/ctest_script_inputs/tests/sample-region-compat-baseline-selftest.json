@@ -86,6 +86,7 @@
    "core/audio/src/voice_sum_mixer.cpp",
    "core/audio/src/wav_decoder.cpp",
    "core/audio/src/wav_metadata.cpp",
+   "core/audio/src/wave_layout.cpp",
    "core/audio/src/waveform_overview_build.cpp",
    "core/audio/src/waveform_overview_cache.cpp",
    "core/audio/src/waveform_overview_serialization.cpp",

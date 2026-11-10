@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/planar_audio_ring_buffer.hpp",
+  "fingerprint": "sha256:3234f8016508d561dee810e774000fc32421aa1c2da4f6ad8f8edc0b4a03acbe",
+  "include": "pulp/audio/planar_audio_ring_buffer.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Lock-free SPSC sample transport and overrun accounting used by realtime capture paths; it is bounded infrastructure rather than a generator DSP claim."
+}

@@ -1,0 +1,9 @@
+{
+  "domain": "timebase",
+  "source": "core/timebase/include/pulp/timebase/compiled_meter_map.hpp",
+  "fingerprint": "sha256:9e06ac7c08f950aa5cb392d27439a6db85eca47cc3e1746a6c3e7f1272bde6fb",
+  "include": "pulp/timebase/compiled_meter_map.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/music/markov.hpp",
+  "fingerprint": "sha256:8b013fa744ad12df04d4efc454330258afa3977371a66582b91448e6f1c086ef"
+}

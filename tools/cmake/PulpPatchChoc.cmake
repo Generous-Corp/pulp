@@ -201,6 +201,11 @@ function(pulp_patch_choc_file_watcher choc_source_dir)
     endif()
 endfunction()
 
+# CHOC's WAV reader. Pulp's own WAV readers decode through dr_wav behind
+# wave_layout.hpp and never call it; CHOC's WAV header installs with the SDK,
+# so the three patches below protect downstream code that reads WAV through
+# CHOC directly.
+#
 # WAVE_FORMAT_EXTENSIBLE carries two bit counts: wBitsPerSample is the
 # container width, which is the sample width the data chunk is laid out in,
 # and wValidBitsPerSample only says how many of those bits carry audio (the
@@ -208,10 +213,8 @@ endfunction()
 # while keeping the container stride, so a 24-valid-bits-in-32-bit-container
 # file is read as packed 24-bit at a 4-byte stride: three of every four bytes,
 # off by one byte, 256x too loud and sign-garbled. dr_wav and libsndfile scale
-# the container value. The patch reads the field and keeps the container width.
-# Consequence: read_audio_file_info().bits_per_sample reports the container
-# width (32 for a 24-valid-bits-in-32 file, as inspect_wav already does),
-# not the valid-bits count.
+# the container value. The patch reads the field and keeps the container width,
+# so a CHOC reader reports and scales the container width as Pulp's readers do.
 function(pulp_patch_choc_wav_extensible_container_bits choc_source_dir)
     set(_pulp_choc_wav_header
         "${choc_source_dir}/choc/audio/choc_AudioFileFormat_WAV.h")

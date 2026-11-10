@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/ballistics_filter.hpp",
+  "fingerprint": "sha256:cac378cc3b7b0c69765f929d530b292c17743b17ec491fcffcf66b774d350349",
+  "include": "pulp/signal/ballistics_filter.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "signal.dynamics-envelope-contract"
+  ],
+  "rationale": "Implementation base for the exact EnvelopeFollower contract while retaining the established legacy ballistics timing convention."
+}

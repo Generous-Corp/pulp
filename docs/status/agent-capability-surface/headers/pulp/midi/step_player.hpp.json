@@ -1,0 +1,11 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/step_player.hpp",
+  "fingerprint": "sha256:b6589ba86b12b13f051e0cf662324b4b0aa08a952b92ea41ce3aba3f4cab5325",
+  "include": "pulp/midi/step_player.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "midi.linear-step-player"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

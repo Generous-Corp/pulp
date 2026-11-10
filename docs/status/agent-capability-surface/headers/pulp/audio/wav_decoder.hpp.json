@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/wav_decoder.hpp",
+  "fingerprint": "sha256:be93cd6de97b8892c026130d0000e958895142b741b5f1c0ac03d1cd33aa119e",
+  "include": "pulp/audio/wav_decoder.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Byte-span RIFF/WAVE inspector and decoder for import surfaces; reviewed when interpret_wav_format exposed the fmt interpretation for the layout report. Not a generator-facing capability."
+}

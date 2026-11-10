@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/saturator.hpp",
+  "fingerprint": "sha256:667d9d469664030330fd147b71a092407d327a5338fc6e09018c943a2f919e6e",
+  "include": "pulp/signal/saturator.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.saturator"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

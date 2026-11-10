@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/character_delay/hysteresis.hpp",
+  "fingerprint": "sha256:343ce3a241ccfe57ea1949961de81251618954dbcadd2a05cbb032884c6d73d1",
+  "include": "pulp/signal/character_delay/hysteresis.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

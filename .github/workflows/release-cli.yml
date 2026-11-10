@@ -333,9 +333,20 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
         run: |
           set -euo pipefail
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            ca-certificates gnupg software-properties-common
+          # This step runs before checkout, so the retry is inline rather than
+          # tools/ci/apt-install-retry.sh (same behaviour: a stale index 404s a
+          # .deb mid-publish; refresh and retry, 3 attempts).
+          apt_install() {
+            local n
+            for n in 1 2 3; do
+              if apt-get update && apt-get install -y --fix-missing --no-install-recommends "$@"; then
+                return 0
+              fi
+              [ "$n" -lt 3 ] && { echo "apt install attempt $n failed; refreshing index" >&2; sleep $((5 * n)); }
+            done
+            return 1
+          }
+          apt_install ca-certificates gnupg software-properties-common
           # Pulp's logging (core/runtime/log.hpp) includes <format>, which
           # libstdc++ only ships from GCC 13. jammy's default is GCC 11 (no
           # <format>) — ubuntu-latest builds fine because 24.04 defaults to GCC
@@ -344,8 +355,7 @@ jobs:
           # objects still link against jammy's glibc, so the floor stays at the
           # base-image level (measured by the --elf report step below).
           add-apt-repository -y ppa:ubuntu-toolchain-r/test
-          apt-get update
-          apt-get install -y --no-install-recommends \
+          apt_install \
             git git-lfs sudo curl xz-utils \
             build-essential gcc-13 g++-13 pkg-config binutils \
             unzip zip file lcov \
@@ -1048,7 +1058,7 @@ jobs:
 
       - name: Install Linux rpath helper
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y patchelf
+        run: sudo tools/ci/apt-install-retry.sh patchelf
 
       # Bundle the wgpu-native dynamic dependency next to the binary
       # and rewrite the rpath so the artifact is portable. Closes

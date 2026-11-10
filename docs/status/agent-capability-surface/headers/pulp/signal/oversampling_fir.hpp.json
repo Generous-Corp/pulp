@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/oversampling_fir.hpp",
+  "fingerprint": "sha256:2579a2a2e987d5fc1a960d91fd42ea3d645097fb5d5fd96ac85ba94373cfcef0",
+  "include": "pulp/signal/oversampling_fir.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Linear-phase half-band and 2x FIR stages behind the Oversampler linear-phase lane, the drum output stage, character-delay hysteresis and the OTA cascade filter. Implementation infrastructure for those consumers rather than an advertised generator surface."
+}
