@@ -1328,9 +1328,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             asset_floor=asset_floor, abandoned=abandoned,
             stuck_queue_hours=int(os.environ.get("STUCK_QUEUE_HOURS", "4")),
         )
-        print(f"  [{decision.action:11}] {decision.reason}")
         if decision.action == ABANDONED:
             continue
+        print(f"  [{decision.action:11}] {decision.reason}")
         dry_spell = drought(
             state, now, drought_hours=drought_hours, newest_published=newest_published
         )

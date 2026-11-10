@@ -1110,13 +1110,20 @@ class FailedLegs(unittest.TestCase):
         )
 
 
-def sweep(states: list[TagState]) -> tuple[dict[str, str], list[str]]:
+def sweep(
+    states: list[TagState],
+    abandoned: tuple[tuple[tuple, tuple], ...] = (),
+    stdout: list[str] | None = None,
+) -> tuple[dict[str, str], list[str]]:
     """Run main() over `states` with all I/O stubbed; return (report, rebuilt)."""
     import os
 
     captured: dict = {}
     redispatched: list[str] = []
-    saved = (rr.collect, rr.sdk_tags, rr.sync_incident, rr.redispatch, rr.datetime)
+    saved = (
+        rr.collect, rr.sdk_tags, rr.sync_incident, rr.redispatch,
+        rr.datetime, rr.read_abandoned,
+    )
 
     class FrozenDatetime(datetime):
         @classmethod
@@ -1130,13 +1137,20 @@ def sweep(states: list[TagState]) -> tuple[dict[str, str], list[str]]:
         rr.sync_incident = lambda repo, report, dry: captured.setdefault("r", report)
         rr.redispatch = lambda repo, tag, dry: redispatched.append(tag)
         rr.datetime = FrozenDatetime
+        rr.read_abandoned = lambda: abandoned
         os.environ.update({"REPO": "example/repo", "DRY_RUN": "true"})
-        with contextlib.redirect_stdout(io.StringIO()):
+        stream = io.StringIO()
+        with contextlib.redirect_stdout(stream):
             assert rr.main() == 0
+        if stdout is not None:
+            stdout.append(stream.getvalue())
     finally:
         os.environ.clear()
         os.environ.update(old_env)
-        rr.collect, rr.sdk_tags, rr.sync_incident, rr.redispatch, rr.datetime = saved
+        (
+            rr.collect, rr.sdk_tags, rr.sync_incident, rr.redispatch,
+            rr.datetime, rr.read_abandoned,
+        ) = saved
     return dict(captured["r"]), redispatched
 
 
@@ -1225,12 +1239,16 @@ class AbandonedTags(unittest.TestCase):
             with self.assertRaises(ValueError):
                 rr.parse_abandoned(bad)
 
-    def test_shipped_list_covers_the_stuck_tags_and_parses(self) -> None:
-        root = Path(__file__).resolve().parents[2]
-        ranges = rr.read_abandoned()  # default path, from any cwd
-        self.assertTrue(rr.is_abandoned("v1.81.0", ranges))
-        self.assertTrue(rr.is_abandoned("v1.96.0", ranges))
-        self.assertFalse(rr.is_abandoned("v1.97.0", ranges))
+    def test_listed_tag_is_not_reported_or_rebuilt(self) -> None:
+        s = TagState(
+            tag="v1.90.0", created_at=NOW - timedelta(hours=3),
+            published=False, has_release_object=False, assets=frozenset(),
+            run_states=("completed",), validation_failures=(), dispatch_attempts=0,
+        )
+        output: list[str] = []
+        report, rebuilt = sweep([s, PUBLISHED_PRIOR], self.RANGES, stdout=output)
+        self.assertEqual((report, rebuilt), ({}, []))
+        self.assertNotIn("[abandoned", output[0])
 
     def test_missing_file_means_nothing_abandoned(self) -> None:
         self.assertEqual(rr.read_abandoned("/nonexistent/abandoned.txt"), ())
