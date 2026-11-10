@@ -51,19 +51,19 @@
       "unit": "macos_version",
       "floor": "13.4",
       "binding": "skia,dawn,libcxx",
-      "note": "Intel (x86_64) macOS target. Floor is arch-independent and set by Apple's libc++, not Skia/Dawn: std::to_chars(float/double/long double) — reached via std::format in core/runtime/log.hpp — is marked unavailable before macOS 13.4 in the macOS 15.4 SDK, exactly as on macos-arm64. The x86_64 Skia + Dawn prebuilt slices (danielraffel/skia-builder chrome/m158, skia-build-mac-x86_64-gpu-release.zip) both stamp minos 13.0, below the 13.4 toolchain floor. A universal (arm64;x86_64) build's floor is max(macos-arm64, macos-x64) = 13.4.",
+      "note": "Intel (x86_64) macOS target. Floor is arch-independent and set by Apple's libc++, not Skia/Dawn: std::to_chars(float/double/long double) — reached via std::format in core/runtime/log.hpp — is marked unavailable before macOS 13.4 in the macOS 15.4 SDK, exactly as on macos-arm64. The x86_64 Skia + Dawn slices of the universal prebuilt (danielraffel/skia-builder chrome/m158, skia-build-mac-universal-gpu-release.zip, which the mac-x86_64 manifest key selects) both stamp minos 13.0, below the 13.4 toolchain floor. A universal (arm64;x86_64) build's floor is max(macos-arm64, macos-x64) = 13.4.",
       "deps": {
         "skia": {
           "measured": "13.0",
           "expected": "13.0",
           "always_linked": true,
-          "source": "skia-builder chrome/m158 skia-build-mac-x86_64-gpu-release.zip (sha256 2a795f54bb22feb46a499d56740f98a15b6e95bfdf5923b82b222ef95edb2f47); measure_min_os.py --measure over libskia.a"
+          "source": "skia-builder chrome/m158 skia-build-mac-universal-gpu-release.zip (sha256 dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250); measure_min_os.py --measure over the x86_64 slice of libskia.a"
         },
         "dawn": {
           "measured": "13.0",
           "expected": "13.0",
           "always_linked": true,
-          "source": "skia-builder chrome/m158 skia-build-mac-x86_64-gpu-release.zip (sha256 2a795f54bb22feb46a499d56740f98a15b6e95bfdf5923b82b222ef95edb2f47); measure_min_os.py --measure over libdawn_combined.a (bundled in the Skia toolchain)"
+          "source": "skia-builder chrome/m158 skia-build-mac-universal-gpu-release.zip (sha256 dca73c0eee5b0f6d129fe357d0754f7165c6b436051e0de947aeedd3e1bde250); measure_min_os.py --measure over the x86_64 slice of libdawn_combined.a (bundled in the Skia toolchain)"
         },
         "libcxx": {
           "measured": "13.4",

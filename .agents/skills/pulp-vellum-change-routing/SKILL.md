@@ -533,6 +533,11 @@ Traps:
   `false` (a Pulp-only edit) and make a change Vellum needs first in Vellum's
   `framework/`. Frozen paths still need `framework-backport` or
   `emergency-exception`.
+- The local preflight propagates an explicit receipt-mode `status: fail`,
+  including `inherited_after_transfer` when every path already has a decision.
+  An export event's presence is not a passing receipt. A missing diagnostic
+  does not erase a failure verdict; an unavailable checker or absent verdict
+  keeps the existing no-verdict behavior.
 - The rule and the record ship in separate changes, rule first: the trusted
   lanes run protected `main`'s scripts, so a change that adds both would be
   judged without the rule. The record change follows Vellum's merge; in the

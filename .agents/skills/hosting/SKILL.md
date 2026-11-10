@@ -20,6 +20,28 @@ hostile-fixture, endpoint, sibling/PDC and production-mutation controls together
 Functional callback traps do not establish full realtime or A10 qualification;
 host death and deliberate group escape are outside first-mode custody.
 
+
+## Live retuning at a callback boundary
+
+For a graph-owned in-process instrument, retain its public
+`ProcessorNodeInstance` and resolve the frequency parameter by its frozen
+catalog name. Query `TuningProvider` on the control thread, validate the note,
+filter flag, finite frequency, Nyquist and product range, then update the
+instance's `StateStore`. A prepared `ParamReader` can adopt it once per block
+without resetting the existing oscillator or envelope. This does not require
+`set_node_parameter`, whose Plugin-slot contract is different.
+
+Boundary timing must come from the host. An offline test can split callback
+partitions at a pinned absolute sample and join its control writer before the
+next callback; that does not prove an arbitrary UI write's sample timestamp,
+intra-block scheduling or raced realtime control. Give input views the actual
+block frame extent even when rendering an instrument with silence: a
+zero-frame default view can fail the routed `ProcessBlock` validation and
+produce silence. Require a positive sounding render before trusting planted
+timing/reset failures. The installed public-header recipe and its independent
+phase/audio/sibling oracle live in `examples/g11-live-retune-consumer` and
+`docs/guides/g11-live-retune-cookbook.md`.
+
 ## When this skill applies
 
 - Adding or modifying a format backend under `core/host/src/plugin_slot_<format>.cpp`.

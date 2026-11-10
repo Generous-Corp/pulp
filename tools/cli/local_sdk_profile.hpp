@@ -12,10 +12,10 @@ namespace pulp::cli::local_sdk {
 namespace fs = std::filesystem;
 
 // A profile revision moves whenever the archive contract or the provenance
-// text changes (most recently: the configure is pinned to PULP_PROFILE=dev and
-// recorded as `build_profile`), so a prefix built under the old contract keeps
-// its own fingerprint instead of being mistaken for the new one.
-inline constexpr int kForgeProfileRevision = 4;
+// text changes (including the lock-bound archive policy), so a prefix built
+// under the old contract keeps its own fingerprint instead of being mistaken
+// for the new one.
+inline constexpr int kForgeProfileRevision = 5;
 inline constexpr const char* kForgeProfileName = "forge-dev";
 
 // The tracing profile: the forge-dev feature set plus Perfetto compiled in.
@@ -25,7 +25,7 @@ inline constexpr const char* kForgeProfileName = "forge-dev";
 // shipped — and because the two must not collide at one prefix. A prefix whose
 // name promises tracing while its libraries contain none is the exact failure
 // this profile exists to make impossible.
-inline constexpr int kTraceProfileRevision = 3;
+inline constexpr int kTraceProfileRevision = 4;
 inline constexpr const char* kTraceProfileName = "trace";
 inline constexpr const char* kProvenanceSchema = "pulp.sdk-provenance.v1";
 // Both profiles are development SDKs: they keep design import and the GPU on
@@ -82,7 +82,10 @@ enum class ArchiveSliceAction {
 
 InstallRequest parse_install_arguments(const std::vector<std::string>& args,
                                        const std::string& default_version);
-ArchiveSliceAction archive_slice_action(const std::string& lipo_architectures);
+// Prebuilt Skia/Dawn archives are copied from a locked provider asset. They
+// still need an arm64 slice, but changing their bytes invalidates that lock.
+ArchiveSliceAction archive_slice_action(const fs::path& relative_archive,
+                                        const std::string& lipo_architectures);
 std::string input_fingerprint(const Identity& identity);
 Paths profile_paths(const fs::path& pulp_home, const Identity& identity);
 /// `node_runtime`, when present, is staged beside `pulp-import-design` as the

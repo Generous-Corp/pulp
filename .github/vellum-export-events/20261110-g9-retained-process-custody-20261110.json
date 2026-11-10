@@ -8,6 +8,6 @@
     "core/platform/include/pulp/platform/child_process.hpp",
     "core/platform/platform/posix/child_process_posix.cpp"
   ],
-  "vellum_inherits": true,
-  "rationale": "Add opt-in retained child and process-group custody with bounded cleanup to the Pulp-owned platform launcher. The next Vellum re-export should inherit this reusable safety primitive; existing launch behavior and source ownership boundaries remain unchanged."
+  "vellum_inherits": false,
+  "rationale": "Pulp-only retained child and process-group custody for Pulp graph-host worker supervision. This change introduces no Vellum consumer or framework feature and claims no re-export after the completed framework transfer. Source ownership and transfer records remain unchanged."
 }

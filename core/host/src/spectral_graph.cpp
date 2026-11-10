@@ -219,8 +219,8 @@ SpectralError SpectralRuntimeBank::prepare(std::span<const GraphNode> authored,
         const auto identity = *n.spectral_identity;
         if (identity.sample_rate_bits() != std::bit_cast<std::uint64_t>(rate))
             return SpectralError::IdentityMismatch;
-        if (n.type != NodeType::SpectralAnalysis && n.type != NodeType::SpectralStage &&
-            n.type != NodeType::SpectralSynthesis)
+        if (n.type != NodeType::SpectralAnalysis && n.type != NodeType::SpectralAssetMorph &&
+            n.type != NodeType::SpectralStage && n.type != NodeType::SpectralSynthesis)
             return SpectralError::InvalidIdentity;
         if (n.type == NodeType::SpectralStage) {
             if (!n.spectral_stage || n.spectral_stage->identity() != identity)
@@ -254,11 +254,19 @@ SpectralError SpectralRuntimeBank::prepare(std::span<const GraphNode> authored,
         if (!geometry ||
             !charge(sizeof(Node) + 8ull * identity.channels() * identity.bins() +
                     (n.spectral_stage ? n.spectral_stage->gains().size_bytes() : 0)) ||
-            (n.type != NodeType::SpectralStage && !charge(geometry->retained_bytes)))
+            ((n.type == NodeType::SpectralAnalysis || n.type == NodeType::SpectralSynthesis) &&
+             !charge(geometry->retained_bytes)))
             return SpectralError::CapacityExceeded;
         auto state = std::make_unique<Node>(n);
         state->working.resize(static_cast<size_t>(identity.channels()) * identity.bins());
-        if (n.type != NodeType::SpectralStage) {
+        if (n.type == NodeType::SpectralAssetMorph) {
+            if (!n.spectral_asset_morph || !charge(n.spectral_asset_morph->retained_bytes()) ||
+                !state->asset_morph.morph.prepare(1, 129))
+                return SpectralError::CapacityExceeded;
+            state->finite_frames = n.spectral_asset_morph->a.frame_count + 4;
+            state->finite_cutoff = static_cast<std::int64_t>(n.spectral_asset_morph->render_frames);
+        }
+        if (n.type == NodeType::SpectralAnalysis || n.type == NodeType::SpectralSynthesis) {
             state->engine = std::make_unique<signal::SpectralFrameEngine>();
             state->engine->prepare(cfg);
         }
@@ -294,14 +302,28 @@ SpectralError SpectralRuntimeBank::prepare(std::span<const GraphNode> authored,
             if ((source || destination) &&
                 (c.midi || c.automation || c.audio_rate_modulation || c.sidechain || c.feedback))
                 return SpectralError::InvalidConnection;
-            if ((source && source->type != NodeType::SpectralSynthesis) ||
-                (destination && destination->type != NodeType::SpectralAnalysis))
+            if (destination && destination->type == NodeType::SpectralAssetMorph) {
+                const auto producer =
+                    std::find_if(authored.begin(), authored.end(),
+                                 [&](const auto& node) { return node.id == c.source_node; });
+                if (producer == authored.end() || producer->type != NodeType::AudioInput ||
+                    c.dest_port != 0)
+                    return SpectralError::InvalidConnection;
+                // Exactly one direct control producer; ordinary Audio gathers
+                // otherwise sum producers, which would change hop semantics.
+                if (std::count_if(connections.begin(), connections.end(), [&](const auto& edge) {
+                        return edge.dest_node == c.dest_node;
+                    }) != 1)
+                    return SpectralError::InvalidConnection;
+            } else if ((source && source->type != NodeType::SpectralSynthesis) ||
+                       (destination && destination->type != NodeType::SpectralAnalysis))
                 return SpectralError::InvalidConnection;
             continue;
         }
         if (!source || !destination || source->identity != destination->identity ||
             source->type == NodeType::SpectralSynthesis ||
-            destination->type == NodeType::SpectralAnalysis || destination->input ||
+            destination->type == NodeType::SpectralAnalysis ||
+            destination->type == NodeType::SpectralAssetMorph || destination->input ||
             c.source_port != 0 || c.dest_port != 0 || c.feedback || c.midi || c.automation ||
             c.audio_rate_modulation || c.sidechain)
             return SpectralError::InvalidConnection;
@@ -329,13 +351,20 @@ SpectralError SpectralRuntimeBank::prepare(std::span<const GraphNode> authored,
         edges.push_back(std::move(edge));
     }
     for (const auto& n : nodes) {
-        if (n->type != NodeType::SpectralAnalysis && !n->input)
+        if (n->type == NodeType::SpectralAssetMorph &&
+            std::none_of(connections.begin(), connections.end(), [&](const auto& edge) {
+                return edge.dest_node == n->id && !edge.spectral;
+            }))
+            return SpectralError::InvalidConnection;
+        if (n->type != NodeType::SpectralAnalysis && n->type != NodeType::SpectralAssetMorph &&
+            !n->input)
             return SpectralError::InvalidConnection;
         if (n->type != NodeType::SpectralSynthesis && n->outputs.empty())
             return SpectralError::InvalidConnection;
         const Node* ancestor = n.get();
         size_t steps = 0;
-        while (ancestor->type != NodeType::SpectralAnalysis) {
+        while (ancestor->type != NodeType::SpectralAnalysis &&
+               ancestor->type != NodeType::SpectralAssetMorph) {
             if (++steps > nodes.size())
                 return SpectralError::InvalidConnection;
             const Node* parent = nullptr;
@@ -348,6 +377,8 @@ SpectralError SpectralRuntimeBank::prepare(std::span<const GraphNode> authored,
             ancestor = parent;
         }
         n->root = ancestor->id;
+        n->finite_frames = ancestor->finite_frames;
+        n->finite_cutoff = ancestor->finite_cutoff;
     }
     charged_bytes = 0;
     if (!charge(diagnostic_bytes + nodes.capacity() * sizeof(std::unique_ptr<Node>) +
@@ -366,7 +397,8 @@ SpectralError SpectralRuntimeBank::prepare(std::span<const GraphNode> authored,
                     edge->bins.capacity() * sizeof(std::complex<float>)))
             return SpectralError::CapacityExceeded;
     for (const auto& n : authored)
-        if (n.spectral_stage && !charge(n.spectral_stage->retained_config_bytes()))
+        if ((n.spectral_stage && !charge(n.spectral_stage->retained_config_bytes())) ||
+            (n.spectral_asset_morph && !charge(n.spectral_asset_morph->retained_bytes())))
             return SpectralError::CapacityExceeded;
     return SpectralError::None;
 }
@@ -401,6 +433,37 @@ GraphNode spectral_node(NodeId id, NodeType type, SpectralIdentity identity,
     return n;
 }
 } // namespace
+
+SpectralResult<SpectralAssetMorphPorts>
+SignalGraph::add_spectral_asset_morph_v1(std::span<const std::uint8_t> asset_a,
+                                         std::span<const std::uint8_t> asset_b,
+                                         std::uint64_t source_samples, const std::string& name) {
+    GraphMutationLock lock(*this);
+    if (spectral_mode_.load(std::memory_order_acquire) || live_slot_.live())
+        return {std::nullopt, SpectralError::RequiresStoppedController};
+    auto config = SpectralAssetMorphConfig::make(asset_a, asset_b, source_samples,
+                                                 SpectralRuntimeBank::memory_limit);
+    if (!config)
+        return {std::nullopt, config.error};
+    const auto& geometry = (*config.value)->a.geometry;
+    const auto identity = *SpectralIdentity::make(256, 64, 1, geometry.sample_rate).value;
+    auto n = spectral_node(next_id_, NodeType::SpectralAssetMorph, identity, name,
+                           diagnostic_graph_identity_, authoring_generation_ + 1);
+    n.input_ports.clear();
+    n.num_input_ports = 1;
+    n.output_ports.front().name = "frames";
+    n.input_ports.push_back({n.id, 0, false, "morph", PortKind::Audio, diagnostic_graph_identity_,
+                             authoring_generation_ + 1});
+    n.spectral_asset_morph = std::move(*config.value);
+    SpectralAssetMorphPorts result{n.id,
+                                   n.input_ports.front(),
+                                   {n.output_ports.front()},
+                                   n.spectral_asset_morph->render_frames};
+    nodes_.push_back(std::move(n));
+    ++next_id_;
+    invalidate_live_locked_();
+    return {std::move(result)};
+}
 
 SpectralResult<SpectralAnalysisPorts> SignalGraph::add_spectral_analysis(SpectralIdentity identity,
                                                                          const std::string& name) {

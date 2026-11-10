@@ -13,6 +13,8 @@
    "docs/status",
    "docs/status/consumption-profiles.json",
    "examples/pulp-gain/CMakeLists.txt",
+   "inspect/src",
+   "inspect/src/control_broker_daemon.hpp",
    "test/ctest_script_inputs",
    "test/fixtures",
    "test/support",

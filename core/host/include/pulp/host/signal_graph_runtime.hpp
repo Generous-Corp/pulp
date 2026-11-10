@@ -221,6 +221,10 @@ class SignalGraph : public format::AudioWorkgroupClient {
 
     SpectralResult<SpectralAnalysisPorts> add_spectral_analysis(SpectralIdentity identity,
                                                                 const std::string& name);
+    SpectralResult<SpectralAssetMorphPorts>
+    add_spectral_asset_morph_v1(std::span<const std::uint8_t> asset_a,
+                                std::span<const std::uint8_t> asset_b, std::uint64_t source_samples,
+                                const std::string& name);
     SpectralResult<SpectralStagePorts> add_spectral_stage(SpectralIdentity identity,
                                                           QualifiedSpectralStage stage,
                                                           const std::string& name);

@@ -11,6 +11,7 @@
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <string>
 #include <thread>
 
 using namespace pulp::state;
@@ -738,4 +739,174 @@ TEST_CASE("feedback: emitting allocates nothing", "[state][midi-learn][feedback]
         CHECK(probe.allocation_count() == 0);
     }
     CHECK(count > 0);
+}
+
+// ── Reservation ──
+
+namespace {
+
+// Claims Bank Select (CC 0 and 32, 14-bit pair 0) and every program change on
+// one channel, or on any channel when `channel` is kOmni.
+struct BankSelectClaim : MidiSourceReservation {
+    uint8_t channel = MidiSource::kOmni;
+    bool claims(const MidiSource& s) const noexcept override {
+        const bool ch_overlap =
+            channel == MidiSource::kOmni || s.channel == MidiSource::kOmni || s.channel == channel;
+        if (!ch_overlap)
+            return false;
+        switch (s.kind) {
+        case MidiSourceKind::cc7:
+            return s.number == 0 || s.number == 32;
+        case MidiSourceKind::cc14:
+            return s.number == 0;
+        case MidiSourceKind::program_change:
+            return true;
+        default:
+            return false;
+        }
+    }
+    const char* reason() const noexcept override {
+        return "Bank Select / Program Change selects presets";
+    }
+};
+
+} // namespace
+
+TEST_CASE("reservation: claimed sources cannot be mapped", "[state][midi-learn][reservation]") {
+    BankSelectClaim claim;
+    MidiLearnEngine e;
+    e.set_reservation(&claim);
+    CHECK_FALSE(e.set_mapping(map_to({MidiSourceKind::cc7, 0, 0}, kMix)));
+    CHECK_FALSE(e.set_mapping(map_to({MidiSourceKind::cc7, 5, 32}, kMix)));
+    CHECK_FALSE(e.set_mapping(map_to({MidiSourceKind::cc14, 0, 0}, kMix)));
+    CHECK_FALSE(e.set_mapping(map_to({MidiSourceKind::program_change, 2, 7}, kMix)));
+    CHECK_FALSE(e.set_mapping(map_to({MidiSourceKind::cc7, MidiSource::kOmni, 0}, kMix)));
+    CHECK(e.mappings().empty());
+
+    // Unclaimed neighbours still map.
+    CHECK(e.set_mapping(map_to({MidiSourceKind::cc7, 0, 1}, kMix)));
+    CHECK(e.set_mapping(map_to({MidiSourceKind::cc7, 0, 33}, kPan)));
+    CHECK(e.set_mapping(map_to({MidiSourceKind::cc14, 0, 1}, kGain)));
+}
+
+TEST_CASE("reservation: the channel filter and omni overlap are honoured",
+          "[state][midi-learn][reservation]") {
+    BankSelectClaim claim;
+    claim.channel = 3;
+    MidiLearnEngine e;
+    e.set_reservation(&claim);
+    CHECK(e.set_mapping(map_to({MidiSourceKind::cc7, 4, 0}, kMix))); // other channel
+    CHECK_FALSE(e.set_mapping(map_to({MidiSourceKind::cc7, 3, 0}, kPan)));
+    // A mapping on any channel overlaps the router's channel.
+    CHECK_FALSE(e.set_mapping(map_to({MidiSourceKind::cc7, MidiSource::kOmni, 0}, kGain)));
+}
+
+TEST_CASE("reservation: a learn on a claimed controller is refused with the reason",
+          "[state][midi-learn][reservation]") {
+    StateStore s;
+    populate(s);
+    BankSelectClaim claim;
+    MidiLearnEngine e;
+    e.set_reservation(&claim);
+    REQUIRE(e.set_mapping(map_to({MidiSourceKind::cc7, 0, 9}, kMix))); // would be displaced
+
+    e.begin_learn(kMix, 0);
+    send(e, s, cc(0, 0, 10));
+    send(e, s, cc(0, 0, 90));
+    e.poll_learn(10);
+    auto out = e.poll_learn(1000);
+    REQUIRE(out.has_value());
+    CHECK_FALSE(out->bound);
+    REQUIRE(out->refused_reason != nullptr);
+    CHECK(std::string(out->refused_reason) == "Bank Select / Program Change selects presets");
+    CHECK(e.learn_state().phase == MidiLearnState::Phase::idle);
+    CHECK(out->replaced.empty());
+    // The existing mapping for the parameter was not removed by the refused learn.
+    REQUIRE(e.mapping_for(kMix).has_value());
+    CHECK(e.mapping_for(kMix)->source.number == 9);
+
+    // A host-reported claimed controller is refused the same way.
+    e.begin_learn(kPan, 0);
+    e.host_reported_controller({MidiSourceKind::cc7, 1, 32});
+    out = e.poll_learn(1);
+    REQUIRE(out.has_value());
+    CHECK_FALSE(out->bound);
+    CHECK(out->refused_reason != nullptr);
+
+    // An ordinary learn still works and carries no reason.
+    e.begin_learn(kPan, 0);
+    send(e, s, cc(0, 74, 20));
+    send(e, s, cc(0, 74, 70));
+    e.poll_learn(10);
+    out = e.poll_learn(1000);
+    REQUIRE(out.has_value());
+    CHECK(out->bound);
+    CHECK(out->refused_reason == nullptr);
+}
+
+TEST_CASE("reservation: a mapping made before the claim does not fire",
+          "[state][midi-learn][reservation]") {
+    StateStore s;
+    populate(s);
+    BankSelectClaim claim;
+    MidiLearnEngine e;
+    REQUIRE(e.set_mapping(map_to({MidiSourceKind::cc7, 0, 32}, kMix)));
+    REQUIRE(e.set_mapping(map_to({MidiSourceKind::cc7, 0, 20}, kPan)));
+    send(e, s, cc(0, 32, 127));
+    CHECK_THAT(norm(s, kMix), WithinAbs(1.0f, 1e-5f)); // no reservation yet: it fires
+
+    s.set_normalized_rt(kMix, 0.5f);
+    e.set_reservation(&claim); // the plug-in opts into preset routing later
+    CHECK_FALSE(e.route(s, cc(0, 32, 127)));
+    CHECK_THAT(norm(s, kMix), WithinAbs(0.5f, 1e-5f));
+    send(e, s, cc(0, 20, 127)); // unclaimed mappings keep working
+    CHECK_THAT(norm(s, kPan), WithinAbs(1.0f, 1e-5f));
+
+    e.set_reservation(nullptr);
+    send(e, s, cc(0, 32, 127));
+    CHECK_THAT(norm(s, kMix), WithinAbs(1.0f, 1e-5f));
+}
+
+TEST_CASE("reservation: loads and replace_all drop claimed mappings",
+          "[state][midi-learn][reservation]") {
+    StateStore s;
+    populate(s);
+    MidiLearnEngine src;
+    REQUIRE(src.set_mapping(map_to({MidiSourceKind::cc7, 0, 0}, kMix)));
+    REQUIRE(src.set_mapping(map_to({MidiSourceKind::cc7, 0, 20}, kPan)));
+    const auto bytes = src.save_state();
+
+    BankSelectClaim claim;
+    MidiLearnEngine e;
+    e.set_reservation(&claim);
+    const auto report = e.load_state(bytes, &s);
+    CHECK(report.loaded == 1);
+    CHECK(report.dropped == 1);
+    REQUIRE(e.mappings().size() == 1);
+    CHECK(e.mappings()[0].source.number == 20);
+
+    std::vector<MidiMapping> incoming{map_to({MidiSourceKind::program_change, 0, 3}, kMix),
+                                      map_to({MidiSourceKind::cc7, 0, 21}, kGain)};
+    REQUIRE(e.replace_all(incoming));
+    REQUIRE(e.mappings().size() == 1);
+    CHECK(e.mappings()[0].source.number == 21);
+}
+
+TEST_CASE("reservation: routing with a reservation allocates nothing",
+          "[state][midi-learn][reservation][rt-safety]") {
+    StateStore s;
+    populate(s);
+    BankSelectClaim claim;
+    MidiLearnEngine e;
+    REQUIRE(e.set_mapping(map_to({MidiSourceKind::cc7, 0, 74}, kMix)));
+    e.set_reservation(&claim);
+    e.begin_block();
+    s.set_normalized_rt(kMix, 0.3f);
+    pulp::test::RtAllocationProbe probe;
+    for (int i = 0; i < 100; ++i) {
+        e.begin_block();
+        e.route(s, cc(0, 74, static_cast<uint8_t>(i)));
+        e.route(s, cc(0, 32, 1));
+    }
+    CHECK(probe.allocation_count() == 0);
 }

@@ -111,6 +111,7 @@ cmake -S examples/<dir> -B build/<dir> -DPulp_DIR=<sdk>/lib/cmake/Pulp
 | `graph-spatial-cookbook` | Fixed left and right placement of a mono signal (**SDK project**) | Configure as an SDK project, then run `pulp-graph-spatial-cookbook` |
 | `g11-tuning-cookbook` | Asking the public tuning provider for a note's frequency (**SDK project**) | Configure as an SDK project, then run `pulp-graph-tuning-cookbook` |
 | `g11-recording-publication` | Capturing graph input and atomically publishing an immutable sample (**SDK project**) | Configure as an SDK project, then run `pulp-g11-recording-publication` |
+| `g11-live-retune-consumer` | Retuning a sounding graph instrument at pinned callback boundaries (**SDK project**) | Configure as an SDK project, then run `pulp-g11-live-retune` |
 | `timeline-phase1` | Three arrangements: decoded audio, a step pattern, multitrack with automation | `pulp build --examples --target pulp-timeline-audio-player` |
 | `timeline-session` | Launch session, DAW-style project and project session, all headless | `pulp build --examples --target pulp-timeline-daw-project` |
 | `timeline-plugin-proof` | Loadable plugin that owns a timeline document and a piano roll editor | `pulp build --examples --target TimelinePluginProof_CLAP` |
@@ -143,6 +144,7 @@ These directories prove a contract and are exercised by CI. Do not copy them as 
 | `clap-identity-consumer` | Installed SDK exposes the CLAP identity surface (**SDK project**) | Configure as an SDK project | `test/consumers/clap-identity-consumer` |
 | `faust-rt-sdk-consumer` | Faust runtime builds against the installed SDK (**SDK project**) | `ctest -R cmake-faust-rt-sdk-consumer` | `test/consumers/faust-rt-sdk-consumer` |
 | `g10-routed-consumer` | Routed spectral ports work from an installed SDK (**SDK project**) | Configure as an SDK project | `test/consumers/g10-routed-consumer` |
+| `a10-routing-hosting-consumer` | Installed SDK host route-registration and preparation acceptance checks, prepared latency, and planted refusal controls (**SDK project**) | `ctest -R a10-routing-hosting-public-consumer` | `test/consumers/a10-routing-hosting-consumer` |
 | `g2-processor-restore-consumer` | A registered processor restores its state from an installed SDK (**SDK project**) | `ctest -R cmake-g2-processor-restore-sdk-consumer` | `test/consumers/g2-processor-restore-consumer` |
 | `g9-isolated-clap-consumer` | Real isolated CLAP state recovery and 64-sample PDC from an installed SDK (**SDK project**) | `ctest -R cmake-g9-isolated-clap-sdk-consumer` | `test/consumers/g9-isolated-clap-consumer` |
 | `g3-d4-prepared-export-consumer` | Prepared serial I/O + Gain export and provenance from an installed SDK (**SDK project**) | Configure as an SDK project, then run `ctest` | `test/consumers/g3-d4-prepared-export-consumer` |
