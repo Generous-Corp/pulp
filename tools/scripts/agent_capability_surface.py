@@ -96,6 +96,8 @@ REVIEWED_HOST_HEADERS = (
     'pulp/host/sample_region_proof.hpp',
     'pulp/host/sample_region_parameters.hpp',
     'pulp/host/catalog_descriptor.hpp',
+    'pulp/host/signal_graph_subgraph.hpp',
+    'pulp/host/voice_bank_binding.hpp',
 )
 # The reviewed-host table is its own domain. It was previously recorded as
 # `signal`, which mislabeled anything here that is not sample-region work.
