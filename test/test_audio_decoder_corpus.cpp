@@ -162,6 +162,9 @@ const std::map<std::string, SeedExpectation>& seed_expectations() {
         {"mp3-apev2-footer.mp3", E{true, {}, {}, ""}},
         {"mp3-apev2-size-high-bit.mp3", E{true, {}, {}, ""}},
         {"mp3-cbr-mono.mp3", E{true, {}, {}, ""}},
+        {"mp3-id3v1-before-apev2.mp3", E{true, {}, {}, ""}},
+        {"mp3-lyrics3v2-before-id3v1.mp3", E{true, {}, {}, ""}},
+        {"mp3-trailing-junk.mp3", E{true, {}, {}, ""}},
         {"mp3-id3v2-xing-vbr.mp3", E{true, {}, {}, ""}},
         {"ogg-chained-two-streams.ogg", E{true, {}, {}, ""}},
         {"ogg-vorbis-mono.ogg", E{true, {}, {}, ""}},
@@ -588,6 +591,47 @@ TEST_CASE("an MP3 behind an APE tag decodes exactly as the same MP3 without it",
         REQUIRE(stripped_range.has_value());
         require_same_audio(*tagged_range, *stripped_range);
         CHECK(stripped_range->num_frames() == stripped_data->num_frames());
+    }
+}
+
+TEST_CASE("an MP3 followed by bytes no tag reader claims decodes exactly as the stream alone",
+          "[fuzz][audio][mp3]") {
+    // A Lyrics3v2 block before an ID3v1 tag, plain junk, and an ID3v1 tag in
+    // front of an APE tag: each leaves bytes behind the last frame that are
+    // not a frame. The stream must end there with every frame decoded.
+    const auto base = read_bytes(corpus_dir() / "mp3-cbr-mono.mp3");
+    auto& registry = pulp::audio::FormatRegistry::instance();
+    const auto limits = pulp_fuzz::audio_decoder::fuzz_limits();
+    const auto base_path = (corpus_dir() / "mp3-cbr-mono.mp3").string();
+    const auto base_info = registry.read_info(base_path);
+    const auto base_data = registry.read(base_path, limits);
+    REQUIRE(base_info.has_value());
+    REQUIRE(base_data.has_value());
+    auto base_reader = pulp::audio::AudioReader::open_memory(base, ".mp3", limits);
+    REQUIRE(base_reader != nullptr);
+    const auto base_range = base_reader->read(0u, base_reader->info().num_frames);
+    REQUIRE(base_range.has_value());
+    for (const char* name : {"mp3-lyrics3v2-before-id3v1.mp3", "mp3-trailing-junk.mp3",
+                             "mp3-id3v1-before-apev2.mp3"}) {
+        INFO(name);
+        const auto path = corpus_dir() / name;
+        const auto bytes = read_bytes(path);
+        REQUIRE(bytes.size() > base.size());
+        REQUIRE(std::equal(base.begin(), base.end(), bytes.begin()));
+
+        const auto info = registry.read_info(path.string());
+        REQUIRE(info.has_value());
+        CHECK(info->num_frames == base_info->num_frames);
+        const auto data = registry.read(path.string(), limits);
+        REQUIRE(data.has_value());
+        require_same_audio(*data, *base_data);
+
+        auto reader = pulp::audio::AudioReader::open_memory(bytes, ".mp3", limits);
+        REQUIRE(reader != nullptr);
+        REQUIRE(reader->info().num_frames == base_reader->info().num_frames);
+        const auto range = reader->read(0u, reader->info().num_frames);
+        REQUIRE(range.has_value());
+        require_same_audio(*range, *base_range);
     }
 }
 
