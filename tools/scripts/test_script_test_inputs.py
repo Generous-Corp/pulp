@@ -930,7 +930,7 @@ class SpawnScanTests(unittest.TestCase):
         root = HERE.parents[1]
         host = "\n".join((root / "core/host/include/pulp/host" / name).read_text(encoding="utf-8")
                          for name in ("plugin_slot.hpp", "scanner.hpp", "dl_shim.hpp", "node_pack.hpp",
-                                      "signal_graph_runtime.hpp", "graph_serializer.hpp"))
+                                      "signal_graph_runtime.hpp", "graph_serializer.hpp", "graph_patch.hpp"))
         host += "\n" + "\n".join((root / "core/host/src" / name).read_text(encoding="utf-8")
                                   for name in ("plugin_slot.cpp", "plugin_slot_clap.cpp", "scanner_clap.cpp"))
         for api in sti.LOAD_APIS:
@@ -1011,6 +1011,25 @@ class LoaderCoverageTests(unittest.TestCase):
         with mock.patch.object(sti, "LOAD_APIS", tuple(live)):
             missing = sti.loader_coverage(HERE.parents[1])
         self.assertEqual([m.split(" ")[0] for m in missing], ["load_node_pack"])
+
+    def test_graph_patch_loaders_are_spawn_signals(self) -> None:
+        # Both public entry points transitively reach GraphSerializer. Calls
+        # must participate in compiled-test spawn review even when qualified.
+        for name in ("load_graph_patch_json", "load_graph_patch_file"):
+            with self.subTest(loader=name):
+                self.assertIsNotNone(sti.SPAWN_SIGNAL.search(f"{name}(input, catalog)"))
+                self.assertIsNotNone(sti.SPAWN_SIGNAL.search(f"pulp::host::{name}(input)"))
+
+    def test_each_deleted_graph_patch_loader_is_reported(self) -> None:
+        # Planted negatives use the live implementation, so renaming/removing
+        # a real wrapper cannot be hidden by a synthetic fixture's call graph.
+        for name in ("load_graph_patch_json", "load_graph_patch_file"):
+            with self.subTest(loader=name):
+                remaining = tuple(api for api in sti.LOAD_APIS if not api.startswith(name))
+                self.assertEqual(len(remaining), len(sti.LOAD_APIS) - 1)
+                with mock.patch.object(sti, "LOAD_APIS", remaining):
+                    missing = sti.loader_coverage(HERE.parents[1])
+                self.assertEqual([item.split(" ")[0] for item in missing], [name])
 
     def test_a_public_loader_outside_load_apis_is_reported(self) -> None:
         missing = self.host({"core/host/src/a.cpp": "int public_load(const char* p) { return dlopen(p, 0) != 0; }\n"})
