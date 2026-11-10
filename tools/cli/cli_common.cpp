@@ -14,6 +14,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cmath>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -981,7 +982,52 @@ static std::map<fs::path, fs::file_time_type> snapshot_timestamps(const fs::path
     return timestamps;
 }
 
+namespace {
+std::atomic<std::sig_atomic_t> watch_stop_signal{0};
+static_assert(decltype(watch_stop_signal)::is_always_lock_free);
+
+void request_watch_stop(int signal) noexcept {
+    // A signal may run on a heartbeat thread. A lock-free atomic is signal
+    // safe and shares this independent stop value without a cross-thread race.
+    watch_stop_signal.store(signal, std::memory_order_relaxed);
+}
+
+int requested_watch_stop() noexcept {
+    return watch_stop_signal.load(std::memory_order_relaxed);
+}
+
+class WatchSignalScope {
+  public:
+    WatchSignalScope() {
+        watch_stop_signal.store(0, std::memory_order_relaxed);
+        previous_interrupt_ = std::signal(SIGINT, request_watch_stop);
+        previous_terminate_ = std::signal(SIGTERM, request_watch_stop);
+    }
+    ~WatchSignalScope() {
+        if (previous_interrupt_ != SIG_ERR)
+            std::signal(SIGINT, previous_interrupt_);
+        if (previous_terminate_ != SIG_ERR)
+            std::signal(SIGTERM, previous_terminate_);
+    }
+    bool ok() const {
+        return previous_interrupt_ != SIG_ERR && previous_terminate_ != SIG_ERR;
+    }
+
+  private:
+    using Handler = void (*)(int);
+    Handler previous_interrupt_;
+    Handler previous_terminate_;
+};
+} // namespace
+
 int watch_loop(const WatchOptions& opts) {
+    // Handlers only request a return. Child cancellation, joining and lease
+    // retirement must run in ordinary control flow, never in a signal handler.
+    WatchSignalScope signals;
+    if (!signals.ok()) {
+        std::cerr << "pulp watch: could not install stop handlers\n";
+        return 1;
+    }
     auto loop_lease = TartciAgentBuildLease::acquire({
         opts.root,
         "pulp-watch",
@@ -1010,9 +1056,13 @@ int watch_loop(const WatchOptions& opts) {
     // on bounded return or an exception, as well as during an explicit relaunch.
     pulp::platform::ChildProcess launched_child;
     auto launch_child = [&]() {
-        if (opts.launch_target.empty()) return;
+        if (requested_watch_stop())
+            return;
+        if (opts.launch_target.empty())
+            return;
         auto binary = fs::path(opts.launch_target);
-        if (!binary.is_absolute()) binary = opts.build_dir / binary;
+        if (!binary.is_absolute())
+            binary = opts.build_dir / binary;
         if (!fs::exists(binary)) {
             std::cerr << "  " << color::yellow() << "Target not found: "
                       << binary.string() << color::reset() << "\n";
@@ -1035,9 +1085,13 @@ int watch_loop(const WatchOptions& opts) {
 
     for (;;) {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        if (const auto signal = requested_watch_stop())
+            return 128 + signal;
 
         if (opts.graph_poll) {
             opts.graph_poll();
+            if (const auto signal = requested_watch_stop())
+                return 128 + signal;
             if (opts.graph_reload.watch_polls && ++graph_polls >= opts.graph_reload.watch_polls)
                 return 0;
         }
@@ -1073,6 +1127,8 @@ int watch_loop(const WatchOptions& opts) {
         build_cmd = apply_agent_build_watchdog(build_cmd, build_jobs, opts.build_watchdog || loop_lease.active());
         int rc = focused_nothing_to_build(selection) ? 0 : run_with_spinner(
             apply_build_dir_lock(build_cmd, opts.root, opts.build_dir), "Rebuilding");
+        if (const auto signal = requested_watch_stop())
+            return 128 + signal;
 
         if (rc != 0) {
             std::cout << color::red() << "Build failed." << color::reset()
@@ -1112,6 +1168,8 @@ int watch_loop(const WatchOptions& opts) {
         // Relaunch target — UNLESS hot-dsp: there the app stays running and its
         // ReloadableShell watcher hot-swaps the rebuilt logic library live
         // (relaunching would kill the plugin and lose its audio/UI state).
+        if (const auto signal = requested_watch_stop())
+            return 128 + signal;
         if (!opts.launch_target.empty() && opts.hot_dsp) {
             std::cout << color::cyan()
                       << "hot-dsp: rebuilt — running plugin will hot-swap (not relaunching)"

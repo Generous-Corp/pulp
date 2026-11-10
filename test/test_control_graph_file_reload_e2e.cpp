@@ -13,6 +13,7 @@
 #include <iterator>
 #include <optional>
 #include <set>
+#include <sstream>
 #include <string>
 
 TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
@@ -445,5 +446,103 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
 #else
     SKIP("Standalone broker product composition requires macOS; public numeric reload controls run "
          "portably");
+#endif
+}
+
+TEST_CASE("Dev and loop signals join their child without killing an unrelated sleeper",
+          "[inspect][control][graph-file-reload][signal-cleanup]") {
+#ifdef __APPLE__
+    Root root;
+    const auto cli = self().parent_path() / "pulp";
+    const auto project = self().parent_path() / "watch-projects" / root.path.filename();
+    REQUIRE(std::filesystem::create_directories(project / "build"));
+    std::ofstream(project / "pulp.toml") << "[plugin]\nname = \"watch-signal-proof\"\n";
+    std::ofstream(project / "CMakeLists.txt")
+        << "cmake_minimum_required(VERSION 3.24)\nproject(WatchSignal NONE)\n"
+           "add_custom_target(proof)\n";
+    pulp::platform::ProcessOptions configure;
+    configure.capture_stdout = true;
+    configure.capture_stderr = true;
+    configure.timeout_ms = 10000;
+    const auto configured = pulp::platform::ChildProcess::run(
+        "cmake",
+        {"-S", project.string(), "-B", (project / "build").string(), "-G", "Ninja",
+         "-DCMAKE_BUILD_TYPE=Release", "-DPULP_DEV_SHARED_UI=OFF"},
+        configure);
+    INFO(configured.stderr_output);
+    REQUIRE(configured.exit_code == 0);
+    const auto script = project / "build" / "same_sleeper.py";
+    std::ofstream(script)
+        << "import os, time\nprint('watch-child-ready', os.getpid(), os.getppid(), flush=True)\n"
+           "time.sleep(900)\n";
+    // Same executable and script, but a different owned group. Name-based
+    // cleanup would kill this positive control as well as the watch's child.
+    pulp::platform::ChildProcess unrelated;
+    pulp::platform::ProcessOptions unrelated_options;
+    unrelated_options.capture_stdout = true;
+    REQUIRE(unrelated.start("/usr/bin/python3", {script.string()}, unrelated_options));
+    REQUIRE(unrelated.is_running());
+
+    for (const auto* command : {"dev", "loop"}) {
+        for (const int stop_signal : {SIGINT, SIGTERM}) {
+            INFO(command << " signal=" << stop_signal);
+            pulp::platform::ChildProcess watch;
+            int child_pid = -1;
+            bool child_alive = false, parent_matches = false, signalled = false;
+            std::chrono::steady_clock::time_point signalled_at;
+            // Also clean a planted missing-handler failure: the watch's child
+            // has its own group and cannot be reclaimed by cancelling watch.
+            struct SleeperCleanup {
+                int& pid;
+                ~SleeperCleanup() {
+                    if (pid > 0 && ::getpgid(pid) == pid)
+                        (void)::kill(-pid, SIGKILL);
+                }
+            } cleanup{child_pid};
+            pulp::platform::ProcessOptions options;
+            options.capture_stdout = true;
+            options.capture_stderr = true;
+            options.working_directory = project.string();
+            options.timeout_ms = 150000;
+            options.on_stdout_line = [&](std::string_view line) {
+                if (!line.starts_with("watch-child-ready ") || signalled)
+                    return;
+                std::istringstream values{std::string(line)};
+                std::string marker;
+                int parent = -1;
+                values >> marker >> child_pid >> parent;
+                parent_matches = parent == watch.process_id();
+                child_alive = child_pid > 0 && ::kill(child_pid, 0) == 0;
+                if (parent_matches && child_alive) {
+                    signalled_at = std::chrono::steady_clock::now();
+                    signalled = ::kill(watch.process_id(), stop_signal) == 0;
+                }
+            };
+            REQUIRE(watch.start("/usr/bin/env",
+                                {"PULP_BUILD_JOBS=2", "TMPDIR=" + root.runtime.string(),
+                                 "PULP_HOME=" + (project / "pulp-home").string(), cli.string(),
+                                 command, "--target", "proof", "--no-dev-shared", "--run",
+                                 "/usr/bin/python3", "--", script.string()},
+                                options));
+            const auto result = watch.wait();
+            const auto returned_at = std::chrono::steady_clock::now();
+            const bool child_terminated =
+                child_pid > 0 && ::kill(child_pid, 0) != 0 && errno == ESRCH;
+            INFO(result.stdout_output);
+            INFO(result.stderr_output);
+            REQUIRE(parent_matches);
+            REQUIRE(child_alive);
+            REQUIRE(signalled);
+            REQUIRE_FALSE(result.timed_out);
+            REQUIRE(result.exit_code == 128 + stop_signal);
+            REQUIRE(returned_at - signalled_at < std::chrono::seconds(10));
+            REQUIRE(child_terminated);
+            REQUIRE(unrelated.is_running());
+        }
+    }
+    unrelated.cancel();
+    (void)unrelated.wait();
+#else
+    SKIP("Product CLI watch signal proof runs with the macOS control fixture");
 #endif
 }

@@ -32,6 +32,9 @@ with different contents retries it. `--graph-watch-polls N` exits after 1..120
 polls for bounded automation and terminates and joins its own `--run` child process
 group before returning. Source changes continue through the normal governed
 build/test/relaunch path; graph file changes use the control request path.
+SIGINT and SIGTERM request normal watch shutdown: the watch joins its owned
+child group and returns 128 plus the signal number. Signal handlers only set a
+stop flag; process cleanup runs outside the handler.
 
 The operation `dev.pulp.graph/file.reload@1` uses the shared strict notation or
 saved-graph parser, validates every original edge, checks the catalog's state
