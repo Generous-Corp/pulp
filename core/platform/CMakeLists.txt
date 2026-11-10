@@ -15,6 +15,7 @@ target_sources(pulp-platform PRIVATE
     src/dialog_session.cpp
     src/file_dialog_async.cpp
     src/open_url.cpp
+    src/popup_menu_async.cpp
     src/file_dialog_stub.cpp
     src/reveal_in_file_manager.cpp
     src/popup_menu_stub.cpp

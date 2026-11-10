@@ -301,10 +301,8 @@ the text being right** — when a license claim matters, read the tree.
 to the dr_libs headers (mackron, Unlicense or MIT-0). They are different
 projects with different licenses and patch histories, and the audit's
 consistency check walks `manifest.json` entries, so a file that was never
-given an entry is invisible to it: stb_vorbis shipped for seven months with
-no manifest, `DEPENDENCIES.md`, `NOTICE.md` or licensing row until the decoder
-fuzz lane needed to patch it. When you vendor or patch a file, check that the
-project that owns it has its own entry, not the directory it happens to live
+given an entry is invisible to it. When you vendor or patch a file, check that
+the project that owns it has its own entry, not the directory it happens to live
 in. The control is to list `external/*/` and name the upstream of every file
 whose header credits a different author than the directory's entry; a patch
 in `tools/deps/patches.json` must hang off the entry for the project the

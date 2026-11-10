@@ -57,6 +57,10 @@
 #     compile, when no current build exists — PULP_GATES_NO_CONFIGURE=1 opts out;
 #     the changed-surface families check fails rather than NOT CHECKED when it
 #     cannot run on a change to a script, skill doc or generated file)
+#   - consumption census (docs/status/consumption-profiles.json lists every
+#     public header under an exported include root; a header added, deleted or
+#     renamed, or a CMake change, runs `consumption_census.py --check` in the
+#     same lane and prints the --write command on drift)
 #
 # Does NOT run:
 #   - local diff-coverage (slow — builds the cov target, hits ring crate
