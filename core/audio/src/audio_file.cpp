@@ -345,9 +345,8 @@ bool write_wav_file(const std::string& path, const AudioFileData& data, WavBitDe
                     WavReplace replace) {
     if (!can_write_wav(data))
         return false;
-    return write_file_atomically(path, replace, [&](std::ostream& out) {
-        return write_wav_stream(out, data, bit_depth);
-    });
+    return write_file_atomically(
+        path, replace, [&](std::ostream& out) { return write_wav_stream(out, data, bit_depth); });
 }
 
 bool write_wav_file(const std::string& path, const AudioFileData& data, WavBitDepth bit_depth) {

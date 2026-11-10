@@ -3079,7 +3079,8 @@ struct ParsedWav {
 // Walk the chunks the way a reader does, so extra chunks do not matter.
 ParsedWav parse_wav(const std::vector<uint8_t>& b) {
     ParsedWav w;
-    if (b.size() < 12 || std::memcmp(b.data(), "RIFF", 4) != 0 || std::memcmp(b.data() + 8, "WAVE", 4) != 0)
+    if (b.size() < 12 || std::memcmp(b.data(), "RIFF", 4) != 0 ||
+        std::memcmp(b.data() + 8, "WAVE", 4) != 0)
         return w;
     w.riff_size_ok = le32(b, 4) == b.size() - 8;
     size_t at = 12;
@@ -3096,7 +3097,8 @@ ParsedWav parse_wav(const std::vector<uint8_t>& b) {
             w.raw_tag = w.format_tag;
             // WAVE_FORMAT_EXTENSIBLE: the real format is the first two bytes of
             // the sub-format GUID, 24 bytes into the chunk body.
-            if (w.format_tag == 0xFFFE && size >= 40) w.format_tag = le16(b, at + 8 + 24);
+            if (w.format_tag == 0xFFFE && size >= 40)
+                w.format_tag = le16(b, at + 8 + 24);
             have_fmt = true;
         } else if (std::memcmp(b.data() + at, "data", 4) == 0) {
             w.data_size = size;
@@ -3110,17 +3112,21 @@ ParsedWav parse_wav(const std::vector<uint8_t>& b) {
 }
 
 struct ScratchDir {
-    std::filesystem::path root = std::filesystem::temp_directory_path() /
-                                 ("pulp_wav_atomic_" +
-                                  std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    ScratchDir() { std::filesystem::create_directories(root); }
+    std::filesystem::path root =
+        std::filesystem::temp_directory_path() /
+        ("pulp_wav_atomic_" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    ScratchDir() {
+        std::filesystem::create_directories(root);
+    }
     ~ScratchDir() {
         std::error_code ec;
         std::filesystem::remove_all(root, ec);
     }
     size_t entries() const {
         size_t n = 0;
-        for ([[maybe_unused]] const auto& e : std::filesystem::directory_iterator(root)) ++n;
+        for ([[maybe_unused]] const auto& e : std::filesystem::directory_iterator(root))
+            ++n;
         return n;
     }
 };
@@ -3128,7 +3134,8 @@ struct ScratchDir {
 AudioFileData stereo_signal() {
     AudioFileData d;
     d.sample_rate = 48000;
-    d.channels = {{0.0f, 0.5f, -0.5f, 1.0f, -1.0f, 0.25f}, {0.0f, -0.25f, 0.75f, -1.0f, 1.0f, 0.125f}};
+    d.channels = {{0.0f, 0.5f, -0.5f, 1.0f, -1.0f, 0.25f},
+                  {0.0f, -0.25f, 0.75f, -1.0f, 1.0f, 0.125f}};
     return d;
 }
 
@@ -3171,12 +3178,17 @@ TEST_CASE("WAV writer emits the exact header and samples for each bit depth",
                         std::memcpy(&got, &raw, 4);
                         CHECK(got == want);
                     } else {
-                        int32_t code = c.bits == 16 ? static_cast<int16_t>(le16(bytes, at))
-                                                    : static_cast<int32_t>((bytes[at] | (bytes[at + 1] << 8) |
-                                                                            (bytes[at + 2] << 16)) << 8) >> 8;
+                        int32_t code =
+                            c.bits == 16
+                                ? static_cast<int16_t>(le16(bytes, at))
+                                : static_cast<int32_t>(
+                                      (bytes[at] | (bytes[at + 1] << 8) | (bytes[at + 2] << 16))
+                                      << 8) >>
+                                      8;
                         const double full = std::ldexp(1.0, c.bits - 1);
                         CHECK(std::abs(code - want * full) <= 1.0 + 1e-9);
-                        if (want == 0.0f) CHECK(code == 0);
+                        if (want == 0.0f)
+                            CHECK(code == 0);
                     }
                 }
             }
@@ -3212,22 +3224,24 @@ TEST_CASE("a write that fails half-way leaves no file and no temporary file",
     ScratchDir dir;
     const auto path = dir.root / "render.wav";
     bool wrote_something = false;
-    const bool ok = write_file_atomically(path.string(), WavReplace::Replace, [&](std::ostream& out) {
-        out << "RIFF....WAVEfmt ";   // a plausible start
-        out.flush();
-        wrote_something = true;
-        return false;               // the render fails or is cancelled here
-    });
+    const bool ok =
+        write_file_atomically(path.string(), WavReplace::Replace, [&](std::ostream& out) {
+            out << "RIFF....WAVEfmt "; // a plausible start
+            out.flush();
+            wrote_something = true;
+            return false; // the render fails or is cancelled here
+        });
     CHECK(wrote_something);
     CHECK_FALSE(ok);
     CHECK_FALSE(std::filesystem::exists(path));
     CHECK(dir.entries() == 0);
 
     // The same when the producer throws.
-    CHECK_FALSE(write_file_atomically(path.string(), WavReplace::Replace, [&](std::ostream& out) -> bool {
-        out << "partial";
-        throw std::runtime_error("device lost");
-    }));
+    CHECK_FALSE(
+        write_file_atomically(path.string(), WavReplace::Replace, [&](std::ostream& out) -> bool {
+            out << "partial";
+            throw std::runtime_error("device lost");
+        }));
     CHECK_FALSE(std::filesystem::exists(path));
     CHECK(dir.entries() == 0);
 
@@ -3266,7 +3280,8 @@ TEST_CASE("FailIfExists refuses to replace and leaves the old file and no tempor
           "[audio][file][wav-atomic]") {
     ScratchDir dir;
     const auto path = dir.root / "render.wav";
-    REQUIRE(write_wav_file(path.string(), stereo_signal(), WavBitDepth::Int16, WavReplace::FailIfExists));
+    REQUIRE(write_wav_file(path.string(), stereo_signal(), WavBitDepth::Int16,
+                           WavReplace::FailIfExists));
     const auto first = slurp(path);
 
     AudioFileData other;
@@ -3287,19 +3302,21 @@ TEST_CASE("FailIfExists loses to a writer that creates the target while this one
     const auto path = dir.root / "render.wav";
     // The racing writer lands between this call's existence check and its
     // publish; the publish step itself must refuse, not overwrite.
-    const bool ok = write_file_atomically(path.string(), WavReplace::FailIfExists, [&](std::ostream& out) {
-        std::ofstream rival(path, std::ios::binary);
-        rival << "rival";
-        rival.close();
-        out << "mine";
-        return true;
-    });
+    const bool ok =
+        write_file_atomically(path.string(), WavReplace::FailIfExists, [&](std::ostream& out) {
+            std::ofstream rival(path, std::ios::binary);
+            rival << "rival";
+            rival.close();
+            out << "mine";
+            return true;
+        });
     CHECK_FALSE(ok);
     CHECK(slurp(path) == std::vector<uint8_t>{'r', 'i', 'v', 'a', 'l'});
     CHECK(dir.entries() == 1);
 }
 
-TEST_CASE("an unwritable directory fails cleanly and creates nothing", "[audio][file][wav-atomic]") {
+TEST_CASE("an unwritable directory fails cleanly and creates nothing",
+          "[audio][file][wav-atomic]") {
     ScratchDir dir;
     const auto path = dir.root / "no_such_directory" / "render.wav";
     CHECK_FALSE(write_wav_file(path.string(), stereo_signal(), WavBitDepth::Int16));

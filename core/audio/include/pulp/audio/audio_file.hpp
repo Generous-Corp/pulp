@@ -68,8 +68,8 @@ enum class WavReplace { Replace, FailIfExists };
 // sees a truncated file, and no temporary file is left behind on failure.
 // With FailIfExists an existing file at `path` makes the call return false and
 // leaves it as it was.
-bool write_wav_file(const std::string& path, const AudioFileData& data,
-                    WavBitDepth bit_depth, WavReplace replace);
+bool write_wav_file(const std::string& path, const AudioFileData& data, WavBitDepth bit_depth,
+                    WavReplace replace);
 
 // The publication step on its own, for writers that are not WAV: `produce`
 // writes the whole file to the stream it is given and returns false to abandon
