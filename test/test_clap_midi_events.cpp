@@ -47,6 +47,7 @@
 #endif
 #include "harness/rt_allocation_probe.hpp"
 #include "support/step_gain_fixture.hpp"
+#include "support/generated_range_processor.hpp"
 
 #include <clap/ext/preset-load.h>
 
@@ -5666,4 +5667,60 @@ TEST_CASE("CLAP: preset-load loads a library preset by key at the plug-in locati
                                       nullptr, "factory:Missing"));
     REQUIRE_FALSE(load->from_location(&h.plugin.plugin, CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN,
                                       nullptr, nullptr));
+}
+
+// PARAM-2: a range, default and texts generated in code are what the host sees.
+namespace {
+struct GeneratedClap {
+    explicit GeneratedClap(bool widen) {
+        pulp::test::GeneratedRangeProcessor::widen = widen;
+        plugin.factory = pulp::test::make_generated_range_processor;
+        plugin.plugin.plugin_data = &plugin;
+        REQUIRE(clap_adapter::clap_init(&plugin.plugin));
+        params = static_cast<const clap_plugin_params_t*>(
+            clap_generic::get_static_extension(&plugin.plugin, CLAP_EXT_PARAMS));
+        REQUIRE(params != nullptr);
+    }
+    ~GeneratedClap() {
+        pulp::test::GeneratedRangeProcessor::widen = true;
+    }
+    clap_param_info_t pitch_info() const {
+        for (uint32_t i = 0; i < params->count(&plugin.plugin); ++i) {
+            clap_param_info_t info{};
+            REQUIRE(params->get_info(&plugin.plugin, i, &info));
+            if (info.id == pulp::test::kGeneratedPitchId)
+                return info;
+        }
+        FAIL("no Pitch parameter");
+        return {};
+    }
+    clap_adapter::PulpClapPlugin plugin;
+    const clap_plugin_params_t* params = nullptr;
+};
+} // namespace
+
+TEST_CASE("CLAP reports a generated range, default and value texts",
+          "[format][clap][params][generated]") {
+    GeneratedClap c(true);
+    const auto info = c.pitch_info();
+    REQUIRE(info.min_value == 0.0);
+    REQUIRE(info.max_value == 2400.0);
+    REQUIRE(info.default_value == 1200.0);
+
+    char text[64] = {};
+    REQUIRE(c.params->value_to_text(&c.plugin.plugin, info.id, 1200.0, text, sizeof text));
+    REQUIRE(std::string(text) == "12.0 st");
+    double value = 0.0;
+    REQUIRE(c.params->text_to_value(&c.plugin.plugin, info.id, "12.0 st", &value));
+    REQUIRE(value == 1200.0);
+}
+
+TEST_CASE("CLAP generated-range control: the unwidened base range reads differently",
+          "[format][clap][params][generated]") {
+    GeneratedClap c(false);
+    const auto info = c.pitch_info();
+    REQUIRE(info.max_value == 127.0);
+    char text[64] = {};
+    REQUIRE(c.params->value_to_text(&c.plugin.plugin, info.id, 63.5, text, sizeof text));
+    REQUIRE(std::string(text) == "0.6 st");
 }

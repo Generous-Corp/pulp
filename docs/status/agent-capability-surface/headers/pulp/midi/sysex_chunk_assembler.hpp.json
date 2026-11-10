@@ -1,0 +1,9 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/sysex_chunk_assembler.hpp",
+  "fingerprint": "sha256:01c367d4c8c832ec83ca837901b08da9b4a8195a3caa8d06cc37f03113bc6c08",
+  "include": "pulp/midi/sysex_chunk_assembler.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Joins driver receive buffers of one long SysEx message for the Windows multimedia backend; not a generator-facing capability."
+}

@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/fdn/tank.hpp",
+  "fingerprint": "sha256:baa049a48e5171b5e467376568be1e52b73bf72816a47f2096bdf4fe8ac45216",
+  "include": "pulp/signal/fdn/tank.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Internal building block of the FDN reverb engine (fdn/tank). It is reached only through FdnReverb and makes no installed agent capability claim of its own."
+}

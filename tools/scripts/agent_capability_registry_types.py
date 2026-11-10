@@ -19,9 +19,15 @@ def binding(
     include: str,
     qualified_name: str,
     target: str,
-    header_fingerprint: str,
     address_expression: str | None = None,
+    header_fingerprint: str | None = None,
 ) -> dict[str, Any]:
+    """One typed binding. The header's reviewed fingerprint is not passed here:
+    it lives once per header in tools/agent-capabilities/fingerprints/, so two
+    changes on different headers never rewrite the same catalog lines. A
+    `header_fingerprint=` argument is kept only so a catalog row written for the
+    old layout still imports; `agent_capability_manifest.py --check` refuses it
+    and `--migrate-fingerprints` moves it into its fragment."""
     result = {
         "role": role,
         "kind": kind,
@@ -29,8 +35,9 @@ def binding(
         "qualified_name": qualified_name,
         "target": target,
         "availability": availability(),
-        "_header_fingerprint": header_fingerprint,
     }
+    if header_fingerprint is not None:
+        result["_legacy_header_fingerprint"] = header_fingerprint
     if address_expression is not None:
         result["_address_expression"] = address_expression
     return result

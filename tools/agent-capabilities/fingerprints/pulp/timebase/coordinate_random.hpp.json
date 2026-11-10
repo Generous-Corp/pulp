@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/timebase/coordinate_random.hpp",
+  "fingerprint": "sha256:327487f1a49eb2f8729a6db7ba493ad220f634fec2cb4c7295a300f0a68ddae5"
+}

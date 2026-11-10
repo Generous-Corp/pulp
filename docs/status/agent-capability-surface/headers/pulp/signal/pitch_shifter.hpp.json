@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/pitch_shifter.hpp",
+  "fingerprint": "sha256:305f94b441ef957477432f8d5f8febec02deacd1bd76adfeade72ad33a992e10",
+  "include": "pulp/signal/pitch_shifter.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/wavetable.hpp",
+  "fingerprint": "sha256:94e86b5efcbc54989b76312ed5bd270d29bc6d5758e3a240ca3b8ffc4bbecaae",
+  "include": "pulp/signal/wavetable.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "audio.wavetable-authoring"
+  ],
+  "rationale": "The existing realtime Wavetable consumer and its shared band-ceiling plan are the installed output boundary for the offline wavetable-authoring capability."
+}

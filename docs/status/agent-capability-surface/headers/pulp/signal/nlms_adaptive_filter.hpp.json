@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/nlms_adaptive_filter.hpp",
+  "fingerprint": "sha256:ac5d8961a7dc69bd24a4ab8f6389e6e0f62eb5ac7dc433ebabe845e15366298b",
+  "include": "pulp/signal/nlms_adaptive_filter.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.nlms-adaptive-filter"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

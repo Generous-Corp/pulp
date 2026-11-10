@@ -1405,6 +1405,16 @@ def is_sequencer_owned_path(path: str) -> bool:
     # single file it replaced never matched a token either.
     if path.startswith("test/ctest_script_inputs/"):
         return False
+    # The agent-capability records are one file per header or history entry
+    # (agent_capability_store.py), named after the header, so a timeline or
+    # playback header's record carries the token. Each is derived accounting
+    # for a header and catalog row that are themselves judged here.
+    if path.startswith((
+        "docs/status/agent-capability-surface/",
+        "tools/agent-capabilities/history/",
+        "tools/agent-capabilities/fingerprints/",
+    )):
+        return False
     lowered = path.lower()
     if any(
         token in lowered

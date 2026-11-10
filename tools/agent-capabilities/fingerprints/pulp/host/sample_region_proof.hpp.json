@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/host/sample_region_proof.hpp",
+  "fingerprint": "sha256:f40d8f2adf1ba7cb5c2b5e415d1f8c0219b95eb9c470f89041e9f45569f8f4a4"
+}
