@@ -9,6 +9,7 @@ target_include_directories(pulp-platform
 
 target_sources(pulp-platform PRIVATE
     src/platform.cpp
+    src/binary_unique_name.cpp
     src/main_thread.cpp
     src/file_drag.cpp
     src/alert.cpp
@@ -114,6 +115,7 @@ endif()
 # and the closure tool refuses a header under include/ that is not listed.
 set(PULP_PLATFORM_UNIT_HEADERS
     include/pulp/platform/alert.hpp
+    include/pulp/platform/binary_unique_name.hpp
     include/pulp/platform/android/jni.hpp
     include/pulp/platform/android/motion_bridge.h
     include/pulp/platform/child_process.hpp

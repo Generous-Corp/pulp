@@ -17,9 +17,9 @@
 ///   framebuffer object of a fixed size. On macOS it uses CGL, for tests and
 ///   offline capture only (OpenGL is deprecated there; editors use
 ///   `MetalSurface`).
-/// - `create`: a child window of the host's window. It is null where no
-///   windowed backend exists yet (macOS, and Windows and X11 until those
-///   backends land).
+/// - `create`: a child window of the host's window: WGL on Windows. It is
+///   null where no windowed backend exists (macOS, and X11 until that backend
+///   lands).
 ///
 /// Threading:
 /// - Construction, `attach`, `detach`, `invalidate`, the setters and
@@ -165,6 +165,13 @@ class GlSurface {
     void invalidate();
     bool attached() const noexcept;
     bool offscreen() const noexcept;
+    /// The child window (an `HWND`, or an X `Window` id cast to a pointer)
+    /// while attached; null otherwise.
+    void* native_window() const noexcept;
+    /// The window class the child windows use. It is unique to the binary
+    /// that contains this library, so two plug-ins never share one. Empty
+    /// where there is no windowed backend.
+    static std::string window_class_name();
 
     /// The context the client renders with.
     GlContext& context() noexcept;

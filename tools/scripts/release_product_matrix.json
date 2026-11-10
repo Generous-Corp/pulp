@@ -154,10 +154,12 @@
         ],
         "windows": [
             "pulp-bundled-fonts",
+            "pulp-native",
             "pulp-signal-mufft"
         ],
         "windows-x64": [
             "pulp-bundled-fonts",
+            "pulp-native",
             "pulp-signal-mufft"
         ]
     },

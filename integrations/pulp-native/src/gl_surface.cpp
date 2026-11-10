@@ -146,6 +146,14 @@ bool GlSurface::offscreen() const noexcept {
     return impl_->offscreen();
 }
 
+void* GlSurface::native_window() const noexcept {
+    return impl_->native_window();
+}
+
+std::string GlSurface::window_class_name() {
+    return windowed_gl_class_name();
+}
+
 GlContext& GlSurface::context() noexcept {
     return context_;
 }
