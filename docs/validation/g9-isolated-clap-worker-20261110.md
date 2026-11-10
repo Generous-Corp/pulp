@@ -37,12 +37,10 @@ importer corpus: those unrelated importer targets remain unavailable.
   healthy publication.
 - Installed public consumer passed in a fresh prefix and separate source tree:
   public factory, ordinary `add_plugin_node`, half-gain oracle, checkpoint/new
-  generation recovery and 64-sample PDC. Development receipt reports
-  `source_git_dirty=true`; receipts include actual 8-block float32 input/output
-  hashes (block-major, channel-major, native arm64 bytes), installed host library,
-  public header, companion, plugin and consumer hashes. Clean exact-head
-  provenance is still required before
-  publication.
+  generation recovery and 64-sample PDC. The final clean-head receipt reports
+  `source_git_dirty=false` and exact source SHA; receipts include actual 8-block
+  float32 input/output hashes (block-major, channel-major, native arm64 bytes),
+  installed host library, public header, companion, plugin and consumer hashes.
 - Structured autoreview accepted three concrete defects, repaired with real
   controls: bundle-root initialization, stereo graph admission before worker
   prepare, and SysEx/UMP sidecar refusal. Final production and additional
@@ -87,8 +85,9 @@ were verified byte-for-byte restored against the runner's SHA-256 records:
 - Host: `af7c9a151d3932a38ea42689a1a0e894b6d24a64ae20c411d115cfdb5eb9b544`.
 - Protocol: `53fb7459adb394fff76887070ae536b3a5792abe2f636ded09c047f3e2a22961`.
 
-Reconciled exact-head full build/gates and clean
-installed-consumer/provenance closeout remain in progress. Publication stays
+The exact-head full governed Release build and clean installed-consumer
+provenance passed. Full gates remain pending dependency landing and actual
+main reconciliation. Publication stays
 unarmed and depends on the actual reviewed custody landing; no duplicate
 main-based dependency PR is authorized.
 
