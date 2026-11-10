@@ -130,14 +130,27 @@ TEST_CASE("forge development SDK install arguments fail closed", "[cli][sdk][for
                       .ok);
 }
 
-TEST_CASE("forge development SDK normalizes only archives containing arm64",
+TEST_CASE("development SDK preserves locked provider archives and thins owned archives",
           "[cli][sdk][forge-dev]") {
     using Action = local_sdk::ArchiveSliceAction;
-    REQUIRE(local_sdk::archive_slice_action("arm64") == Action::Keep);
-    REQUIRE(local_sdk::archive_slice_action("x86_64 arm64") == Action::ThinToArm64);
-    REQUIRE(local_sdk::archive_slice_action("arm64 x86_64") == Action::ThinToArm64);
-    REQUIRE(local_sdk::archive_slice_action("x86_64") == Action::Reject);
-    REQUIRE(local_sdk::archive_slice_action("") == Action::Reject);
+    const auto action = [](const fs::path& path, const std::string& archs) {
+        return local_sdk::archive_slice_action(path, archs);
+    };
+    REQUIRE(action("external/skia-build/build/mac-gpu/lib/Release/libdawn_combined.a",
+                   "x86_64 arm64") == Action::Keep);
+    REQUIRE(action("external/skia-build/build/mac-gpu/lib/Release/libskia.a",
+                   "arm64 x86_64") == Action::Keep);
+    REQUIRE(action("external/skia-build/build/mac-gpu/lib/Release/libdawn_combined.a",
+                   "x86_64") == Action::Reject);
+    REQUIRE(action("external/skia-build/build/mac-gpu/lib/Release/libdawn_combined.a",
+                   "") == Action::Reject);
+    REQUIRE(action("lib/libpulp-runtime.a", "x86_64 arm64") == Action::ThinToArm64);
+    REQUIRE(action("lib/libpulp-runtime.a", "arm64") == Action::Keep);
+    REQUIRE(action("lib/libpulp-runtime.a", "x86_64") == Action::Reject);
+    // Only this installed provider subtree is locked; similar names remain owned.
+    REQUIRE(action("external/skia-build-copy/libskia.a", "arm64 x86_64") ==
+            Action::ThinToArm64);
+    REQUIRE(action("lib/libdawn_combined.a", "arm64 x86_64") == Action::ThinToArm64);
 }
 
 TEST_CASE("forge development SDK configure profile pins required capabilities",
@@ -550,11 +563,12 @@ TEST_CASE("trace SDK provenance records the profile and stays non-distributable"
     REQUIRE(json.find("\"tracing\": true") != std::string::npos);
     REQUIRE(json.find("\"distribution_eligible\": false") != std::string::npos);
 
-    // Control: the forge-dev marker is byte-stable and carries no tracing key,
-    // so existing prefixes are not invalidated by this profile's arrival.
+    // Control: the forge-dev marker has its own revision and no tracing key.
     const auto forge =
         local_sdk::serialize_provenance(identity(), local_sdk::input_fingerprint(identity()));
     REQUIRE(forge.find("\"profile\": \"forge-dev\"") != std::string::npos);
+    REQUIRE(forge.find("\"profile_revision\": 5") != std::string::npos);
+    REQUIRE(json.find("\"profile_revision\": 4") != std::string::npos);
     REQUIRE(forge.find("\"tracing\"") == std::string::npos);
 }
 

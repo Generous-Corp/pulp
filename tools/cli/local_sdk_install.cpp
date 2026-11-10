@@ -220,7 +220,7 @@ bool normalize_installed_archives_for_arm64(const fs::path& prefix, std::string&
         ++checked;
         const auto archs =
             capture_command_text("xcrun lipo -archs " + shell_quote(entry.path()) + " 2>/dev/null");
-        switch (local_sdk::archive_slice_action(archs)) {
+        switch (local_sdk::archive_slice_action(entry.path().lexically_relative(prefix), archs)) {
             case local_sdk::ArchiveSliceAction::Keep:
                 break;
             case local_sdk::ArchiveSliceAction::Reject:
