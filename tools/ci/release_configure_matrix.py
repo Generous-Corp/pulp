@@ -549,7 +549,6 @@ def annotate(platform: str, step: str, blocks: list[str], rc: int) -> None:
 
 
 def run_plan(data: dict, workdir: Path) -> int:
-    skia_guard()
     bash = find_bash()
     platform = data["platform"]
     env = dict(os.environ)
@@ -561,6 +560,7 @@ def run_plan(data: dict, workdir: Path) -> int:
     in_actions = os.environ.get("GITHUB_ACTIONS") == "true"
     for index, step in enumerate(data["steps"]):
         name = step["name"]
+        skia_guard()
         script = workdir / f"step-{index:02d}.sh"
         script.write_text(step["script"], encoding="utf-8", newline="\n")
         env_file = workdir / f"step-{index:02d}.env"
