@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/probability_gate.hpp",
+  "fingerprint": "sha256:5194b58f07ffce22cd6a5041ce8221ca743d9e8a343527ada867e264f9960441",
+  "include": "pulp/signal/probability_gate.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

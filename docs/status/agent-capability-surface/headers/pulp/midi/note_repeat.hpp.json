@@ -1,0 +1,11 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/note_repeat.hpp",
+  "fingerprint": "sha256:8c00626a60e2ac1813d8ac117f0ce13e0931040107c8383b9265038d932ef763",
+  "include": "pulp/midi/note_repeat.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "midi.note-repeat"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

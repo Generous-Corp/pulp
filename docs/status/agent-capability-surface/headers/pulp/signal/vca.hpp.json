@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/vca.hpp",
+  "fingerprint": "sha256:b9e1b3392d025b0024ca504e7cffefbd382d9eacae448994d38d45225991a481",
+  "include": "pulp/signal/vca.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

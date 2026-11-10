@@ -308,6 +308,15 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(agent-capability-manifest-selftest PROPERTIES
         PROCESSORS 8
         TIMEOUT 300)
+    # The capability records' one-file-per-entry layout: lossless against the
+    # single files it replaced, canonical, and conflict-free for two branches
+    # that add different capability headers (git merge-tree, with the
+    # single-file layout as the negative control).
+    add_test(NAME agent-capability-store-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_store.py")
+    set_tests_properties(agent-capability-store-selftest PROPERTIES
+        LABELS "pr" TIMEOUT 120)
     add_test(NAME agent-capability-rederive-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_rederive.py")
@@ -319,12 +328,14 @@ if(Python3_Interpreter_FOUND)
         PROCESSORS 8
         TIMEOUT 300)
     # The rederive self-test deliberately rewrites the manifest script's two
-    # generated counters before restoring them. Keep readers from observing
-    # that temporary state while retaining parallelism for unrelated tests.
+    # generated counters and a surface record before restoring them. Keep
+    # readers from observing that temporary state while retaining parallelism
+    # for unrelated tests.
     set_tests_properties(
         agent-capability-manifest-check
         agent-capability-manifest-selftest
         agent-capability-rederive-selftest
+        agent-capability-store-selftest
         PROPERTIES RESOURCE_LOCK agent-capability-manifest-source)
     add_test(NAME agent-capability-sdk-handoff-selftest
         COMMAND ${Python3_EXECUTABLE}

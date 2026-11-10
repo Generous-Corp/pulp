@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/drum/voice.hpp",
+  "fingerprint": "sha256:b19c5c5c4d2c5aed42461f9e7bb1a70771d3582684b177ef16da2ad8063594a8",
+  "include": "pulp/signal/drum/voice.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

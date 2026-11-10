@@ -1,0 +1,9 @@
+{
+  "domain": "host",
+  "source": "core/host/include/pulp/host/signal_graph_authoring.hpp",
+  "fingerprint": "sha256:0f505f35215b6fbcc7a9f742b76d0d9f62ccf331d0facfc93c782ec7f4203d02",
+  "include": "pulp/host/signal_graph_authoring.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "A focused value contract for SignalGraph authoring lineage receipts. It lets control and importer code validate graph identity/generation without claiming an installed DSP capability or pulling in the runtime implementation surface."
+}

@@ -25,6 +25,8 @@ on:
       - 'tools/scripts/test_release_package_step.py'
       - 'tools/ci/release_package_cli.sh'
       - 'tools/ci/release_path_changed.py'
+      - 'tools/ci/release_configure_matrix.py'
+      - 'tools/ci/test_release_configure_matrix.py'
       - 'tools/scripts/action_pin_lint.py'
       - 'tools/scripts/view_audio_archive_manifest.py'
       # The manifest and its tests read listings through this reader.
@@ -178,6 +180,8 @@ on:
       - 'tools/scripts/test_release_package_step.py'
       - 'tools/ci/release_package_cli.sh'
       - 'tools/ci/release_path_changed.py'
+      - 'tools/ci/release_configure_matrix.py'
+      - 'tools/ci/test_release_configure_matrix.py'
       - 'tools/scripts/action_pin_lint.py'
       - 'tools/scripts/view_audio_archive_manifest.py'
       # The manifest and its tests read listings through this reader.
@@ -488,6 +492,9 @@ jobs:
           # release-cli, the dry-run and the release-path PR gate package
           # through one script and isolate with one step body.
           python3 tools/scripts/test_release_package_step.py
+          # The release-configure gate replays release-cli.yml's
+          # build-cli steps by name; a renamed or unclassified step fails here.
+          python3 tools/ci/test_release_configure_matrix.py
           # Signing/publishing jobs compile with ccache disabled and re-fetch
           # every dependency into a fresh job root, never a shared host cache.
           python3 tools/scripts/test_release_cache_isolation.py

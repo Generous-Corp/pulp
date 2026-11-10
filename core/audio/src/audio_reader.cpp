@@ -234,6 +234,19 @@ Container container_from_extension(std::string_view hint) {
     return Container::Unknown;
 }
 
+// An MPEG audio frame header (ISO/IEC 11172-3 and 13818-3) that names Layer
+// III with a usable bitrate and sample rate: an 11-bit sync, a version other
+// than the reserved one (MPEG 2.5 included), layer bits 01, a bitrate index
+// other than 15 and a sample-rate index other than 3.
+bool is_layer3_frame_header(const std::uint8_t* h) {
+    const bool sync = h[0] == 0xFF && (h[1] & 0xE0) == 0xE0;
+    const bool version_ok = ((h[1] >> 3) & 0x03) != 0x01;
+    const bool layer3 = (h[1] & 0x06) == 0x02;
+    const bool bitrate_ok = (h[2] >> 4) != 0x0F;
+    const bool sample_rate_ok = ((h[2] >> 2) & 0x03) != 0x03;
+    return sync && version_ok && layer3 && bitrate_ok && sample_rate_ok;
+}
+
 Container sniff_container(AudioByteSource& source) {
     std::array<std::uint8_t, 12> head{};
     const bool rewound = source.seek(0);
@@ -254,7 +267,12 @@ Container sniff_container(AudioByteSource& source) {
     // An ID3v2 tag also prefixes some FLAC files. Such a FLAC with no
     // extension sniffs as MP3, fails to open, and the caller falls back to
     // the registry reader; a ".flac" hint avoids the detour.
-    if (starts_with(0, "ID3") || (got >= 2 && head[0] == 0xFF && (head[1] & 0xE0) == 0xE0))
+    if (starts_with(0, "ID3"))
+        return Container::Mp3;
+    // Without a tag, only a valid Layer III header counts. 16-bit PCM is
+    // full of FF Ex byte pairs, and many of them read as Layer I or II
+    // headers, so a bare frame sync is not evidence of MP3 on its own.
+    if (got >= 4 && is_layer3_frame_header(head.data()))
         return Container::Mp3;
     return Container::Unknown;
 }

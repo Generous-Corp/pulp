@@ -73,7 +73,9 @@
         }
       ],
       "patches": [
-        "tools/deps/patches/dr_libs/0001-dr_mp3-64-bit-xing-frame-count.patch"
+        "tools/deps/patches/dr_libs/0001-dr_mp3-64-bit-xing-frame-count.patch",
+        "tools/deps/patches/dr_libs/0003-dr_mp3-ape-footer-tag-size.patch",
+        "tools/deps/patches/dr_libs/0004-dr_mp3-decode-before-unclassified-trailing-bytes.patch"
       ]
     },
     {

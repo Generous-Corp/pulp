@@ -31,6 +31,7 @@ from release_reconcile import (  # noqa: E402
     REDISPATCH,
     REQUIRED_ASSETS,
     SUPERSEDED,
+    ABANDONED,
     TOO_OLD,
     TagState,
     decide,
@@ -1109,13 +1110,20 @@ class FailedLegs(unittest.TestCase):
         )
 
 
-def sweep(states: list[TagState]) -> tuple[dict[str, str], list[str]]:
+def sweep(
+    states: list[TagState],
+    abandoned: tuple[tuple[tuple, tuple], ...] = (),
+    stdout: list[str] | None = None,
+) -> tuple[dict[str, str], list[str]]:
     """Run main() over `states` with all I/O stubbed; return (report, rebuilt)."""
     import os
 
     captured: dict = {}
     redispatched: list[str] = []
-    saved = (rr.collect, rr.sdk_tags, rr.sync_incident, rr.redispatch, rr.datetime)
+    saved = (
+        rr.collect, rr.sdk_tags, rr.sync_incident, rr.redispatch,
+        rr.datetime, rr.read_abandoned,
+    )
 
     class FrozenDatetime(datetime):
         @classmethod
@@ -1129,13 +1137,20 @@ def sweep(states: list[TagState]) -> tuple[dict[str, str], list[str]]:
         rr.sync_incident = lambda repo, report, dry: captured.setdefault("r", report)
         rr.redispatch = lambda repo, tag, dry: redispatched.append(tag)
         rr.datetime = FrozenDatetime
+        rr.read_abandoned = lambda: abandoned
         os.environ.update({"REPO": "example/repo", "DRY_RUN": "true"})
-        with contextlib.redirect_stdout(io.StringIO()):
+        stream = io.StringIO()
+        with contextlib.redirect_stdout(stream):
             assert rr.main() == 0
+        if stdout is not None:
+            stdout.append(stream.getvalue())
     finally:
         os.environ.clear()
         os.environ.update(old_env)
-        rr.collect, rr.sdk_tags, rr.sync_incident, rr.redispatch, rr.datetime = saved
+        (
+            rr.collect, rr.sdk_tags, rr.sync_incident, rr.redispatch,
+            rr.datetime, rr.read_abandoned,
+        ) = saved
     return dict(captured["r"]), redispatched
 
 
@@ -1199,6 +1214,44 @@ class SweepReportsTheIncidentShape(unittest.TestCase):
         building = tag_state(age_hours=1, run_states=("in_progress",))
         report, rebuilt = sweep([building, PUBLISHED_PRIOR])
         self.assertEqual((report, rebuilt), ({}, []))
+
+
+class AbandonedTags(unittest.TestCase):
+    """A listed tag is never retried, even though it would otherwise redispatch."""
+
+    RANGES = rr.parse_abandoned("# note\nv1.81.0..v1.96.0  # why\nv2.0.0\n")
+
+    def test_listed_tag_is_not_redispatched(self) -> None:
+        self.assertEqual(decide(state(run_states=("completed",)), NOW, **LIMITS).action,
+                         REDISPATCH)  # control: same state, unlisted
+        s = TagState(tag="v1.90.0", created_at=NOW - timedelta(hours=3),
+                     published=False, has_release_object=False, assets=frozenset(),
+                     run_states=("completed",), validation_failures=(), dispatch_attempts=0)
+        self.assertEqual(decide(s, NOW, abandoned=self.RANGES, **LIMITS).action, ABANDONED)
+
+    def test_range_bounds_are_inclusive_and_exclusive_outside(self) -> None:
+        for tag, want in (("v1.81.0", True), ("v1.96.0", True), ("v1.80.9", False),
+                          ("v1.97.0", False), ("v2.0.0", True)):
+            self.assertEqual(rr.is_abandoned(tag, self.RANGES), want, tag)
+
+    def test_malformed_entry_raises(self) -> None:
+        for bad in ("1.81.0", "v1.96.0..v1.81.0", "v1.2", "v1.81.0.."):
+            with self.assertRaises(ValueError):
+                rr.parse_abandoned(bad)
+
+    def test_listed_tag_is_not_reported_or_rebuilt(self) -> None:
+        s = TagState(
+            tag="v1.90.0", created_at=NOW - timedelta(hours=3),
+            published=False, has_release_object=False, assets=frozenset(),
+            run_states=("completed",), validation_failures=(), dispatch_attempts=0,
+        )
+        output: list[str] = []
+        report, rebuilt = sweep([s, PUBLISHED_PRIOR], self.RANGES, stdout=output)
+        self.assertEqual((report, rebuilt), ({}, []))
+        self.assertNotIn("[abandoned", output[0])
+
+    def test_missing_file_means_nothing_abandoned(self) -> None:
+        self.assertEqual(rr.read_abandoned("/nonexistent/abandoned.txt"), ())
 
 
 if __name__ == "__main__":

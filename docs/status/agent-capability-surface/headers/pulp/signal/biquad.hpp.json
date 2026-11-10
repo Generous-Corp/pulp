@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/biquad.hpp",
+  "fingerprint": "sha256:6a885b8c54ff3ba32c66b3647036e7e12d6aeec763d751e967611917a364c396",
+  "include": "pulp/signal/biquad.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "signal.sos-cascade"
+  ],
+  "rationale": "The bounded SOS executor consumes the normalized biquad coefficient type and uses its shared stability predicate and runtime section."
+}

@@ -1,0 +1,9 @@
+{
+  "domain": "sequence",
+  "source": "core/sequence/include/pulp/sequence/sequence_processor.hpp",
+  "fingerprint": "sha256:e3b4f26370fed406bbb195b5f8a5234c1cbb492e20d9b90c6e41ba6948a69e4c",
+  "include": "pulp/sequence/sequence_processor.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/built_in_key_tempo_analyzer.hpp",
+  "fingerprint": "sha256:24cf2445dd67098080321b282140547da7c93aff494321a1d520aab29dd16562",
+  "include": "pulp/audio/built_in_key_tempo_analyzer.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

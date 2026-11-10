@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/tempo_delay.hpp",
+  "fingerprint": "sha256:3ae02d16e00b3463e563d55be1ee0e7abc79db03173e7e1bae2d024ff3a4c059",
+  "include": "pulp/signal/tempo_delay.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Pure BeatDivision-to-fractional-delay conversion over the compiled tempo range; it is a bounded conversion primitive intended for composition inside delay kernels rather than an advertised generator DSP claim. It has no in-tree consumer today beyond the signal umbrella header."
+}
