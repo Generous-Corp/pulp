@@ -18,6 +18,17 @@
 #include <utility>
 
 namespace pulp::host {
+void SignalGraph::set_parallel_routing_enabled(bool enabled) noexcept {
+    GraphMutationLock mutation_lock(*this);
+    // Graph-authored callbacks use one shared, ordered lane.  Parallel
+    // dispatch could invoke the consumer before the producer (or concurrently
+    // with it), so enabling it after the event edge is bound is refused.
+    if (enabled && graph_event_edge_.has_value())
+        return;
+    parallel_routing_enabled_.store(enabled, std::memory_order_relaxed);
+    detail::advance_execution_selection_generation(execution_selection_generation_);
+}
+
 namespace {
 state::ModulationMixMode modulation_mix_for(AutomationMix mix) {
     switch (mix) {
@@ -364,6 +375,9 @@ bool SignalGraph::remove_node(NodeId id) {
     trigger_audio_.erase(id);
     std::erase_if(trigger_edges_,
                   [id](const auto& edge) { return edge.producer == id || edge.consumer == id; });
+    if (graph_event_edge_ &&
+        (graph_event_edge_->producer == id || graph_event_edge_->consumer == id))
+        graph_event_edge_.reset();
     typed_trigger_authoring_.store(!trigger_producers_.empty() || !trigger_envelopes_.empty() ||
                                        !trigger_audio_.empty(),
                                    std::memory_order_release);
@@ -687,6 +701,9 @@ bool SignalGraph::disconnect(NodeId source, PortIndex source_port, NodeId dest,
     if (it == connections_.end())
         return false;
     erase_connection_at_locked_(static_cast<std::size_t>(std::distance(connections_.begin(), it)));
+    if (graph_event_edge_ &&
+        !has_path_locked_(graph_event_edge_->producer, graph_event_edge_->consumer))
+        graph_event_edge_.reset();
     invalidate_live_locked_();
     return true;
 }
@@ -710,6 +727,9 @@ bool SignalGraph::disconnect_modulation(NodeId source, PortIndex source_port, No
     if (it == connections_.end())
         return false;
     erase_connection_at_locked_(static_cast<std::size_t>(std::distance(connections_.begin(), it)));
+    if (graph_event_edge_ &&
+        !has_path_locked_(graph_event_edge_->producer, graph_event_edge_->consumer))
+        graph_event_edge_.reset();
     invalidate_live_locked_();
     return true;
 }

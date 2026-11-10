@@ -354,6 +354,51 @@ std::vector<TriggerEdge> SignalGraph::trigger_edges() const {
     GraphMutationLock lock(*this);
     return trigger_edges_;
 }
+
+GraphEventBindingResult SignalGraph::connect_graph_event(GraphAuthoredEventEdge edge) {
+    GraphMutationLock lock(*this);
+    if (typed_trigger_authoring_.load(std::memory_order_relaxed))
+        return GraphEventBindingResult::Mode;
+    if (parallel_routing_enabled() || anticipation_enabled())
+        return GraphEventBindingResult::Mode;
+    if (graph_event_edge_.has_value())
+        return GraphEventBindingResult::Cardinality;
+    if (edge.producer == 0 || edge.consumer == 0 || edge.producer == edge.consumer ||
+        edge.producer > std::numeric_limits<std::uint32_t>::max() ||
+        edge.consumer > std::numeric_limits<std::uint32_t>::max() || edge.source_port != 0 ||
+        edge.destination_port != 0 || edge.kind != 1)
+        return GraphEventBindingResult::Feedback;
+    const auto find = [&](NodeId id) -> const GraphNode* { return node(id); };
+    const auto* producer = find(edge.producer);
+    const auto* consumer = find(edge.consumer);
+    if (producer == nullptr || consumer == nullptr || producer->type != NodeType::Custom ||
+        consumer->type != NodeType::Custom)
+        return GraphEventBindingResult::Binding;
+    const auto* pt = custom_node_type(producer->custom_type_id, producer->custom_type_version);
+    const auto* ct = custom_node_type(consumer->custom_type_id, consumer->custom_type_version);
+    if (pt == nullptr || ct == nullptr || !pt->consumes_events() || !ct->consumes_events() ||
+        pt->process_transport || pt->process_instance_transport || ct->process_transport ||
+        ct->process_instance_transport)
+        return GraphEventBindingResult::Binding;
+    // The event lane annotates the real feed-forward graph; it is not a
+    // second scheduler. Require a path and prove producer-before-consumer in
+    // the deterministic graph order before publishing the binding.
+    if (!has_path_locked_(edge.producer, edge.consumer))
+        return GraphEventBindingResult::Binding;
+    const auto order = processing_order();
+    const auto producer_it = std::find(order.begin(), order.end(), edge.producer);
+    const auto consumer_it = std::find(order.begin(), order.end(), edge.consumer);
+    if (producer_it == order.end() || consumer_it == order.end() || producer_it >= consumer_it)
+        return GraphEventBindingResult::Binding;
+    graph_event_edge_ = edge;
+    invalidate_live_locked_();
+    return GraphEventBindingResult::Accepted;
+}
+
+std::optional<GraphAuthoredEventEdge> SignalGraph::graph_event_edge() const {
+    GraphMutationLock lock(*this);
+    return graph_event_edge_;
+}
 void SignalGraph::invalidate_trigger_binding_() noexcept {
     if (trigger_controller_)
         trigger_controller_->active.store(nullptr, std::memory_order_release);

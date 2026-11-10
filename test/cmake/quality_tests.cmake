@@ -893,6 +893,11 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME pr-head-affected-tests-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_pr_head_affected_tests.py")
         set_tests_properties(pr-head-affected-tests-selftest PROPERTIES TIMEOUT 120)
+        # An approved head's deferred affected tests run on the head before
+        # the merge queue: the re-run decision and both workflows' wiring.
+        add_test(NAME deferred-admission-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_deferred_admission.py")
+        set_tests_properties(deferred-admission-selftest PROPERTIES TIMEOUT 60)
         # The diff-scoped drift checks must carry PULP_DIFF_SCOPED in this
         # configure's inventory, or their base re-run is believed again.
         add_test(NAME pr-head-diff-scoped-registrations COMMAND ${Python3_EXECUTABLE}
@@ -1825,6 +1830,12 @@ if(Python3_Interpreter_FOUND)
         set_tests_properties(clean-worktree-builds-selftest PROPERTIES TIMEOUT 600)
         # Stages live processes and worktrees on the host it runs on.
         set_property(TEST clean-worktree-builds-selftest APPEND PROPERTY LABELS environment-bound)
+        # The driver-link parsers over captured ninja and CMake output; the
+        # cases that need a real generator are in confirm-failure-harness.
+        add_test(NAME confirm-failure-driver-link-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_confirm_failure_driver_link
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(confirm-failure-driver-link-selftest PROPERTIES TIMEOUT 60)
         add_test(NAME clean-worktree-planning-selftest
             COMMAND ${Python3_EXECUTABLE} -m unittest test_clean_worktree_planning
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")

@@ -45,7 +45,7 @@ Mode: the repository variable `PULP_FLAKE_EXONERATION_MODE`. Only `enforce`
 acts; unset, `shadow` or any other value annotates only: the verdict is
 computed and printed and the job fails as before. Shadow is the default, and
 setting the variable back to `shadow` is the kill switch. Graduation to
-`enforce` is on evidence (decisions contract row 30): at least 5 days in
+`enforce` is on evidence (decisions contract row 33): at least 5 days in
 shadow AND at least 8 would-excuse decisions, each confirmed by a same-head
 retry pass, with zero false excusals; any false excusal resets the count.
 
