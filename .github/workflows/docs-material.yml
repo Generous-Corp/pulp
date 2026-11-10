@@ -73,7 +73,7 @@ jobs:
         run: pip install -r requirements-docs.txt
 
       - name: Install Doxygen
-        run: sudo apt-get install -y doxygen
+        run: sudo tools/ci/apt-install-retry.sh doxygen
 
       - name: Build Material site
         run: mkdocs build --site-dir build/site-material

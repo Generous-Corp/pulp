@@ -432,6 +432,8 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME dependency-request-recorder-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_dependency_request_check.py")
     if(UNIX)
+        add_test(NAME apt-install-retry-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_apt_install_retry.py")
         add_test(NAME ci-cause-notices-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_ci_cause_notices.py")
     endif()
