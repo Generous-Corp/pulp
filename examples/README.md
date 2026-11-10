@@ -155,6 +155,7 @@ These directories prove a contract and are exercised by CI. Do not copy them as 
 | `g5-trigger-runtime-consumer` | Graph-produced onsets render through a typed trigger edge (**SDK project**) | `ctest -R trigger-runtime-public-consumer` | `test/consumers/g5-trigger-runtime-consumer` |
 | `g4-voice-bank-consumer` | Voice-bank persistence save/load/edit/undo/redo and binding refusal from an installed SDK (**SDK project**) | `ctest -R cmake-g4-voice-bank-sdk-consumer` | `test/consumers/g4-voice-bank-consumer` |
 | `g6-voice-contract-consumer` | Existing MIDI voice allocation state (**SDK project**) | `ctest -R cmake-g6-voice-contract-sdk-consumer` | `test/consumers/g6-voice-contract-consumer` |
+| `g6-voice-bank-consumer` | Eight authored graph voices, scalar audio oracle, binding and stale refusals (**SDK project**) | `ctest -R cmake-g6-voice-bank-sdk-consumer` | `test/consumers/g6-voice-bank-consumer` |
 | `g7-latency-pdc-consumer` | Public latency reporting on a graph (**SDK project**) | Configure as an SDK project | `test/consumers/g7-latency-pdc-consumer` |
 | `spectral-frame-codec-consumer` | Spectral frame codec from an installed SDK (**SDK project**) | `ctest -R cmake-spectral-frame-codec-consumer` | `test/consumers/spectral-frame-codec-consumer` |
 | `timeline-sdk-consumer` | Timeline SDK closure, cookbook and chord renderer from an installed SDK (**SDK project**) | `ctest -R cmake-timeline-sdk-consumer` | `test/consumers/timeline-sdk-consumer` |

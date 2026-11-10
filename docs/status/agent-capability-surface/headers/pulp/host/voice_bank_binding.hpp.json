@@ -1,0 +1,9 @@
+{
+  "domain": "host",
+  "source": "core/host/include/pulp/host/voice_bank_binding.hpp",
+  "fingerprint": "sha256:421676961c308c12521087267a79fbc5d063dabbd1ed36aae1c931678191685c",
+  "include": "pulp/host/voice_bank_binding.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Bounded eight-slot graph voice-bank runtime; sustain, saved activation, and paced realtime qualification remain open."
+}
