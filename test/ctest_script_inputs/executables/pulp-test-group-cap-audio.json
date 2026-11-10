@@ -1,4 +1,16 @@
 {
  "name": "pulp-test-group-cap-audio",
+ "record": {
+  "data": "declared",
+  "detected_sources": [],
+  "inputs": [
+   "test/fixtures/fuzz/audio-decoder"
+  ],
+  "kind": "compiled",
+  "sources": [
+   "test/test_audio_reader.cpp"
+  ],
+  "undeclared_sources": []
+ },
  "scanned": true
 }

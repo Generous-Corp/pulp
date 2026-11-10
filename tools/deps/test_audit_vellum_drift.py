@@ -108,6 +108,21 @@ class RendererLockTests(unittest.TestCase):
         self.assertEqual(status, "mismatch")
         self.assertIn("must be the same commit", problems[0])
 
+    def test_every_mac_selector_must_resolve_the_locked_asset(self) -> None:
+        entries = lock_manifest()
+        assets = entries[0]["determinism"]["release_assets"]
+        assets["mac-arm64"] = {"url": "u", "sha256": PULP_SHA}
+        assets["mac-x86_64"] = {"url": "u", "sha256": PULP_SHA}
+        assets["linux-x64"] = {"url": "u", "sha256": OTHER_SHA}
+        self.assertEqual(audit.vellum_renderer_drift(entries, reader(renderer_lock())),
+                         ("match", []))
+        assets["mac-x86_64"] = {"url": "u", "sha256": OTHER_SHA}
+        status, problems = audit.vellum_renderer_drift(entries, reader(renderer_lock()))
+        self.assertEqual(status, "mismatch")
+        self.assertEqual(len(problems), 1)
+        self.assertIn("release_assets.mac-x86_64", problems[0])
+        self.assertIn(OTHER_SHA, problems[0])
+
     def test_a_lock_without_the_platform_fails_closed(self) -> None:
         status, problems = audit.vellum_renderer_drift(
             lock_manifest(lock_platform="windows-x64"), reader(renderer_lock()))

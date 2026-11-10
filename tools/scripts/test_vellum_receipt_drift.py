@@ -811,10 +811,20 @@ class FrameworkTransferTests(unittest.TestCase):
                 with self.assertRaises(drift.ReceiptDriftError):
                     self.fixture.check()
 
-    def test_this_change_ships_the_rule_without_a_record(self):
-        # The rule lands first; the record follows in a later change, after
-        # Vellum's transfer merges. Until then receipt mode behaves as before.
-        self.assertFalse((SCRIPTS.parents[1] / drift.TRANSFER_PATH).exists())
+    def test_the_landed_record_is_vellum_s_transfer_of_the_pinned_export(self):
+        # The record names Vellum's transfer pull request and the export it
+        # transferred; its paths are exactly that export receipt's files.
+        landed = SCRIPTS.parents[1] / drift.TRANSFER_PATH
+        transfer = drift.parse_transfer(landed.read_bytes())
+        self.assertEqual((transfer.export_id, transfer.pull_request), ("20261107-f0ac0a4ff392", 305))
+        self.assertEqual(transfer.record_sha256,
+                         "81e8916ef73d0bf9b4d3a31409208524897ba2795e17fd749fea69756547e65c")
+        receipt = json.loads((landed.parent / f"{transfer.export_id}.json").read_text(encoding="utf-8"))
+        self.assertEqual(json.loads(landed.read_text(encoding="utf-8"))["pulp_sha"], receipt["pulp_sha"])
+        self.assertEqual(set(transfer.paths), {row["pulp_path"] for row in receipt["files"]})
+        self.assertEqual(len(transfer.paths), 911)
+
+    def test_without_a_record_receipt_mode_behaves_as_before(self):
         self.assertIsNone(drift.transfer_in_effect(self.fixture.root, self.fixture.base, self.fixture.base))
         report = self.edit_with_decision(STATE, True)
         self.assertEqual((report["status"], report["transfer"], report["inherited_after_transfer"]),

@@ -245,10 +245,12 @@ endif()
 if(APPLE AND NOT PULP_IOS)
     # Asynchronous alerts, file panels and open_url, including real NSAlert and
     # NSOpenPanel sheets on an offscreen window. Own process: the cases pump
-    # the main run loop and hold sheets on a window.
+    # the main run loop and hold sheets on a window. Shares the menu suite's
+    # lock: a panel opening in a concurrent process can end a tracked menu.
     pulp_add_test_suite(pulp-test-platform-async-dialogs
         SOURCES test_platform_async_dialogs.mm
-        LIBRARIES pulp::platform)
+        LIBRARIES pulp::platform
+        PROPERTIES RESOURCE_LOCK pulp_native_menu_tracking)
     target_link_libraries(pulp-test-platform-async-dialogs PRIVATE "-framework Cocoa")
 endif()
 if(APPLE AND NOT PULP_IOS)
@@ -288,9 +290,13 @@ if(APPLE AND NOT PULP_IOS)
     # Anchored menus: the NSMenu built from a model, selection reporting for the
     # synchronous and asynchronous APIs, and tracking a real menu on an
     # offscreen window. Own process: the cases run menu tracking loops.
+    # One lock with the dialog suite: macOS runs one menu-tracking session at
+    # a time, so a menu (or modal panel) opened by a concurrent test process
+    # ends this process's tracking before its scripted choice lands.
     pulp_add_test_suite(pulp-test-platform-async-menu
         SOURCES test_platform_async_menu.mm
-        LIBRARIES pulp::platform)
+        LIBRARIES pulp::platform
+        PROPERTIES RESOURCE_LOCK pulp_native_menu_tracking)
     target_link_libraries(pulp-test-platform-async-menu PRIVATE "-framework Cocoa")
 endif()
 if(TARGET pulp-native)
