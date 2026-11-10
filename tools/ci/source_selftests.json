@@ -185,6 +185,16 @@
       "timeout": 300.0
     },
     {
+      "name": "confirm-failure-driver-link-selftest",
+      "argv": [
+        "-m",
+        "unittest",
+        "test_confirm_failure_driver_link"
+      ],
+      "cwd": "{repo}/tools/scripts",
+      "timeout": 60.0
+    },
+    {
       "name": "clean-worktrees-selftest",
       "argv": [
         "-m",

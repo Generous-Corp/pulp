@@ -11,6 +11,12 @@ Pulp versions three surfaces independently:
   marker authoring helper and installed `PulpSdkProvenance.cmake` contract are
   mapped here too: changing either changes the identity or admission rules of
   the SDK that downstream consumers receive.
+  Vendored sources compiled into or installed with the SDK (the vendored
+  libraries under `external/`, not the developer-supplied SDK clones; the
+  bundled fonts; and the Skia tree), the patches recorded for them under
+  `tools/deps/patches/`, and the build modules that pin a linked dependency or
+  change compiled SDK code count as the SDK surface too, so a fix to one ships
+  in an SDK release.
 - **Claude Code plugin** — `.claude-plugin/plugin.json` `version`
   and `.claude-plugin/marketplace.json` `version`.
 - **Shipyard pinned binary** — `[shipyard]` in `tools/toolchain/manifest.toml`
