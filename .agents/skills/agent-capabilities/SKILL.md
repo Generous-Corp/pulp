@@ -963,6 +963,12 @@ Product-neutral host catalog seams follow this same rule: classify the reusable
 descriptor/factory machinery as host infrastructure and leave product-specific
 Forge compatibility names and serialization in their existing authority.
 
+The G-5 `control_index_nodes.hpp` factory header is a concrete case: name it in
+`REVIEWED_HOST_HEADERS`, give it a reviewed `infrastructure` row with its byte
+fingerprint, and map its installed compile target to `Pulp::host`. The signal
+math it uses is a separate `control_math.hpp` infrastructure row with
+`Pulp::signal`. Neither header advertises a new generator capability key.
+
 Two further rules, both learned by getting them wrong:
 
 * **A `REVIEWED_HEADERS` row cannot rescue an undiscovered header.**

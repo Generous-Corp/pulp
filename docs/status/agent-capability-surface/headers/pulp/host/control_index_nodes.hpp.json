@@ -1,0 +1,9 @@
+{
+  "domain": "host",
+  "source": "core/host/include/pulp/host/control_index_nodes.hpp",
+  "fingerprint": "sha256:21fa701b4398a6d519041dc592c672754e0ef73d9de5049b1b900561479a11ee",
+  "include": "pulp/host/control_index_nodes.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Graph-owned ControlIndexInput and scalar Control node factories are host graph infrastructure for the G-5 installed consumer, not an independently advertised generator capability."
+}

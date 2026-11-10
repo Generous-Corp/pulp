@@ -9,6 +9,23 @@ description: |
 
 # hosting
 
+## Graph-owned Control indexing
+
+Register `make_control_index_input_type()` and the needed scalar Control
+factories on the graph before adding their nodes. Connect typed Control ports
+from `ControlIndexInput.index` through an indexed table to a Processor Control
+input, then submit one finite index per frame with
+`SignalGraph::process_control_checked()`. Its checked result is part of the
+contract: a routed render failure returns `RenderFailed` and silences the
+output. Keep the table and scalar state bounded, validate it before the
+prepared edit is published, and consume the dense modulation inside the
+Processor's `process_block()`.
+
+`examples/g5-control-index-filter` is the installed SDK fixture. It compares
+one block with a partitioned render and an independent sample recurrence, and
+plants missing-edge and swapped-index failures. Its v4 and v5 emit modes also
+exercise the graph persistence boundary.
+
 ## Live retuning at a callback boundary
 
 For a graph-owned in-process instrument, retain its public

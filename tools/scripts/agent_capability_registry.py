@@ -28,6 +28,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/host/signal_graph_runtime.hpp": "Pulp::host",
     "pulp/host/signal_graph_prepared_topology_edit.hpp": "Pulp::host",
     "pulp/host/custom_node_type.hpp": "Pulp::host",
+    "pulp/host/control_index_nodes.hpp": "Pulp::host",
     "pulp/host/custom_node_events.hpp": "Pulp::host",
     "pulp/host/sample_region_authoring.hpp": "Pulp::host",
     "pulp/host/sample_region_proof.hpp": "Pulp::host",
@@ -305,6 +306,17 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "Bounded scalar mapping and caller-indexed table reads support one G-5 "
             "workflow; they do not establish a graph event transport or independent "
             "generator-facing capability contract."
+        ),
+    },
+    {
+        "include": "pulp/host/control_index_nodes.hpp",
+        "fingerprint": "sha256:21fa701b4398a6d519041dc592c672754e0ef73d9de5049b1b900561479a11ee",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Graph-owned ControlIndexInput and scalar Control node factories are "
+            "host graph infrastructure for the G-5 installed consumer, not an "
+            "independently advertised generator capability."
         ),
     },
     {
