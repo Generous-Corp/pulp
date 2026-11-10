@@ -222,20 +222,21 @@ ChildProcess& ChildProcess::operator=(ChildProcess&&) noexcept = default;
 
 RetainedProcessCustody::~RetainedProcessCustody() = default;
 RetainedProcessCustody::RetainedProcessCustody(RetainedProcessCustody&&) noexcept = default;
-RetainedProcessCustody& RetainedProcessCustody::operator=(RetainedProcessCustody&&) noexcept = default;
+RetainedProcessCustody&
+RetainedProcessCustody::operator=(RetainedProcessCustody&&) noexcept = default;
 RetainedProcessObservation ChildProcess::retained_process_observation() const {
     return {.state = RetainedProcessState::Unsupported};
 }
 RetainedProcessObservation RetainedProcessCustody::retained_process_observation() const {
     return {.state = RetainedProcessState::Unsupported};
 }
-RetainedProcessCleanup ChildProcess::cleanup_retained_process_group(
-    std::chrono::steady_clock::time_point) {
+RetainedProcessCleanup
+ChildProcess::cleanup_retained_process_group(std::chrono::steady_clock::time_point) {
     return {.status = RetainedCleanupStatus::Unsupported,
             .observation = {.state = RetainedProcessState::Unsupported}};
 }
-RetainedProcessCleanup RetainedProcessCustody::cleanup_retained_process_group(
-    std::chrono::steady_clock::time_point) {
+RetainedProcessCleanup
+RetainedProcessCustody::cleanup_retained_process_group(std::chrono::steady_clock::time_point) {
     return {.status = RetainedCleanupStatus::Unsupported,
             .observation = {.state = RetainedProcessState::Unsupported}};
 }
@@ -243,9 +244,11 @@ bool ChildProcess::start_retained(RetainedProcessCustody&, const std::string&,
                                   const std::vector<std::string>&, const ProcessOptions&) {
     return false;
 }
-bool ChildProcess::start_retained_with_standard_input_channel(
-    RetainedProcessCustody&, const std::string&, const std::vector<std::string>&,
-    const StandardInputChannelSession&, const ProcessOptions&) {
+bool ChildProcess::start_retained_with_standard_input_channel(RetainedProcessCustody&,
+                                                              const std::string&,
+                                                              const std::vector<std::string>&,
+                                                              const StandardInputChannelSession&,
+                                                              const ProcessOptions&) {
     return false;
 }
 

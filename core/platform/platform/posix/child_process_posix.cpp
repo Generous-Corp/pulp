@@ -263,9 +263,11 @@ struct ChildProcess::Impl {
     bool retained = false;
     bool custody_lost = false;
     bool retained_reaped = false;
+    bool retained_term_attempted = false;
     bool retained_term_sent = false;
     bool retained_kill_sent = false;
     std::chrono::steady_clock::time_point retained_term_time;
+    std::chrono::steady_clock::time_point retained_kill_time;
     RetainedProcessObservation retained_observation;
     std::shared_ptr<Impl> abandoned_reservation;
 
@@ -274,8 +276,10 @@ struct ChildProcess::Impl {
     void preserve_abandoned_reservation(const std::shared_ptr<Impl>& owner) {
         if (retained && started && !finished && owner.use_count() == 1) {
             abandoned_reservation = owner;
-            std::fprintf(stderr, "ChildProcess: unresolved custody retained until host exit "
-                                 "(pid=%d pgid=%d); cleanup did not complete\n", pid, process_group);
+            std::fprintf(stderr,
+                         "ChildProcess: unresolved custody retained until host exit "
+                         "(pid=%d pgid=%d); cleanup did not complete\n",
+                         pid, process_group);
         }
     }
 };
@@ -295,8 +299,7 @@ bool retained_group_has_no_descendants(pid_t group, pid_t leader) {
 #if defined(__APPLE__) && !TARGET_OS_IPHONE
     int query[] = {CTL_KERN, KERN_PROC, KERN_PROC_PGRP, group};
     std::size_t bytes = 0;
-    if (::sysctl(query, 4, nullptr, &bytes, nullptr, 0) != 0 ||
-        bytes > 4096 * sizeof(kinfo_proc))
+    if (::sysctl(query, 4, nullptr, &bytes, nullptr, 0) != 0 || bytes > 4096 * sizeof(kinfo_proc))
         return false;
     try {
         std::vector<kinfo_proc> processes(bytes / sizeof(kinfo_proc) + 1);
@@ -339,11 +342,19 @@ RetainedProcessObservation ChildProcess::Impl::observe_retained_locked() {
             if (errno == EINTR)
                 return observation;
             custody_lost = true;
-        } else if (info.si_pid == pid) {
+        } else if (info.si_pid == pid &&
+                   (info.si_code == CLD_EXITED || info.si_code == CLD_KILLED ||
+                    info.si_code == CLD_DUMPED)) {
             observation.state = RetainedProcessState::Exited;
             observation.exit_code = info.si_code == CLD_EXITED ? info.si_status : -1;
             observation.termination_signal = info.si_code == CLD_EXITED ? 0 : info.si_status;
+        } else if (observation.state == RetainedProcessState::Exited) {
+            // An unreaped exited child cannot run again. Another reaper and
+            // PID reuse must not turn this receipt into a new signal target.
+            custody_lost = true;
         } else {
+            // Darwin can report CLD_STOPPED for a spawn-suspended child even
+            // with WEXITED. Only terminal si_code values establish exit.
             observation.state = RetainedProcessState::Running;
         }
 #endif
@@ -354,8 +365,8 @@ RetainedProcessObservation ChildProcess::Impl::observe_retained_locked() {
     return observation;
 }
 
-RetainedProcessCleanup ChildProcess::Impl::cleanup_retained(
-    std::chrono::steady_clock::time_point requested_deadline) {
+RetainedProcessCleanup
+ChildProcess::Impl::cleanup_retained(std::chrono::steady_clock::time_point requested_deadline) {
     RetainedProcessCleanup result;
     if (!retained_custody_supported()) {
         result.status = RetainedCleanupStatus::Unsupported;
@@ -369,8 +380,8 @@ RetainedProcessCleanup ChildProcess::Impl::cleanup_retained(
     }
     if (!retained)
         return result;
-    const auto deadline = std::min(requested_deadline,
-        std::chrono::steady_clock::now() + std::chrono::seconds(2));
+    const auto deadline =
+        std::min(requested_deadline, std::chrono::steady_clock::now() + std::chrono::seconds(2));
     result.status = RetainedCleanupStatus::Incomplete;
     const auto finish_result = [&] {
         result.observation = observe_retained_locked();
@@ -421,16 +432,22 @@ RetainedProcessCleanup ChildProcess::Impl::cleanup_retained(
         }
         if (std::chrono::steady_clock::now() >= deadline)
             break;
-        if (!retained_term_sent) {
+        if (!retained_term_attempted) {
             retained_term_time = std::chrono::steady_clock::now();
+            retained_term_attempted = true;
             retained_term_sent = ::kill(-process_group, SIGTERM) == 0;
-        } else if (!retained_kill_sent &&
-                   std::chrono::steady_clock::now() - retained_term_time >=
-                       std::chrono::milliseconds(100)) {
-            retained_kill_sent = ::kill(-process_group, SIGKILL) == 0;
+        } else if (std::chrono::steady_clock::now() - retained_term_time >=
+                       std::chrono::milliseconds(100) &&
+                   std::chrono::steady_clock::now() - retained_kill_time >=
+                       std::chrono::milliseconds(10)) {
+            // Retry while custody is still held: descendants may fork during
+            // delivery, and a failed signal must not disable later attempts.
+            retained_kill_time = std::chrono::steady_clock::now();
+            const bool sent = ::kill(-process_group, SIGKILL) == 0;
+            retained_kill_sent = retained_kill_sent || sent;
         }
-        std::this_thread::sleep_until(std::min(deadline,
-            std::chrono::steady_clock::now() + std::chrono::milliseconds(1)));
+        std::this_thread::sleep_until(
+            std::min(deadline, std::chrono::steady_clock::now() + std::chrono::milliseconds(1)));
     }
     return finish_result();
 }
@@ -537,7 +554,8 @@ ChildProcess::ChildProcess() : impl_(std::make_shared<Impl>()) {}
 ChildProcess::~ChildProcess() {
     if (impl_ && impl_->retained) {
         if (impl_.use_count() == 1)
-            (void)impl_->cleanup_retained(std::chrono::steady_clock::now() + std::chrono::seconds(2));
+            (void)impl_->cleanup_retained(std::chrono::steady_clock::now() +
+                                          std::chrono::seconds(2));
         impl_->preserve_abandoned_reservation(impl_);
         return;
     }
@@ -556,7 +574,8 @@ ChildProcess& ChildProcess::operator=(ChildProcess&& other) noexcept {
     if (this != &other) {
         if (impl_ && impl_->retained) {
             if (impl_.use_count() == 1)
-                (void)impl_->cleanup_retained(std::chrono::steady_clock::now() + std::chrono::seconds(2));
+                (void)impl_->cleanup_retained(std::chrono::steady_clock::now() +
+                                              std::chrono::seconds(2));
             impl_->preserve_abandoned_reservation(impl_);
         }
         impl_ = std::move(other.impl_);
@@ -567,7 +586,8 @@ ChildProcess& ChildProcess::operator=(ChildProcess&& other) noexcept {
 RetainedProcessCustody::~RetainedProcessCustody() {
     if (impl_) {
         if (impl_.use_count() == 1)
-            (void)impl_->cleanup_retained(std::chrono::steady_clock::now() + std::chrono::seconds(2));
+            (void)impl_->cleanup_retained(std::chrono::steady_clock::now() +
+                                          std::chrono::seconds(2));
         impl_->preserve_abandoned_reservation(impl_);
     }
 }
@@ -576,7 +596,8 @@ RetainedProcessCustody& RetainedProcessCustody::operator=(RetainedProcessCustody
     if (this != &other) {
         if (impl_) {
             if (impl_.use_count() == 1)
-                (void)impl_->cleanup_retained(std::chrono::steady_clock::now() + std::chrono::seconds(2));
+                (void)impl_->cleanup_retained(std::chrono::steady_clock::now() +
+                                              std::chrono::seconds(2));
             impl_->preserve_abandoned_reservation(impl_);
         }
         impl_ = std::move(other.impl_);
@@ -586,18 +607,21 @@ RetainedProcessCustody& RetainedProcessCustody::operator=(RetainedProcessCustody
 
 RetainedProcessObservation ChildProcess::retained_process_observation() const {
     if (!impl_)
-        return {};
+        return retained_custody_supported()
+                   ? RetainedProcessObservation{}
+                   : RetainedProcessObservation{.state = RetainedProcessState::Unsupported};
     std::lock_guard lock(impl_->mutex);
     return impl_->observe_retained_locked();
 }
-RetainedProcessCleanup ChildProcess::cleanup_retained_process_group(
-    std::chrono::steady_clock::time_point deadline) {
+RetainedProcessCleanup
+ChildProcess::cleanup_retained_process_group(std::chrono::steady_clock::time_point deadline) {
     return impl_ ? impl_->cleanup_retained(deadline) : RetainedProcessCleanup{};
 }
 RetainedProcessObservation RetainedProcessCustody::retained_process_observation() const {
     if (!impl_)
-        return retained_custody_supported() ? RetainedProcessObservation{}
-            : RetainedProcessObservation{.state = RetainedProcessState::Unsupported};
+        return retained_custody_supported()
+                   ? RetainedProcessObservation{}
+                   : RetainedProcessObservation{.state = RetainedProcessState::Unsupported};
     std::lock_guard lock(impl_->mutex);
     return impl_->observe_retained_locked();
 }
@@ -605,9 +629,11 @@ RetainedProcessCleanup RetainedProcessCustody::cleanup_retained_process_group(
     std::chrono::steady_clock::time_point deadline) {
     if (impl_)
         return impl_->cleanup_retained(deadline);
-    return retained_custody_supported() ? RetainedProcessCleanup{}
-        : RetainedProcessCleanup{.status = RetainedCleanupStatus::Unsupported,
-                                  .observation = {.state = RetainedProcessState::Unsupported}};
+    return retained_custody_supported()
+               ? RetainedProcessCleanup{}
+               : RetainedProcessCleanup{
+                     .status = RetainedCleanupStatus::Unsupported,
+                     .observation = {.state = RetainedProcessState::Unsupported}};
 }
 
 bool ChildProcess::start_retained(RetainedProcessCustody& custody, const std::string& command,
@@ -656,9 +682,9 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
     if (custody) {
         if (!retained_custody_supported() || custody->impl_)
             return false;
-        struct sigaction disposition {};
-        if (::sigaction(SIGCHLD, nullptr, &disposition) != 0 ||
-            disposition.sa_handler == SIG_IGN || (disposition.sa_flags & SA_NOCLDWAIT) != 0)
+        struct sigaction disposition{};
+        if (::sigaction(SIGCHLD, nullptr, &disposition) != 0 || disposition.sa_handler == SIG_IGN ||
+            (disposition.sa_flags & SA_NOCLDWAIT) != 0)
             return false;
     }
     std::unique_lock<std::recursive_mutex> lock(impl_->mutex);
@@ -928,7 +954,7 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
         if (!accepted || ::kill(impl_->pid, SIGCONT) != 0) {
             if (impl_->retained) {
                 (void)impl_->cleanup_retained(std::chrono::steady_clock::now() +
-                                             std::chrono::seconds(2));
+                                              std::chrono::seconds(2));
                 return false;
             }
             signal_process_group(impl_->process_group, impl_->pid, true, SIGKILL);

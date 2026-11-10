@@ -36,9 +36,13 @@ and `is_running()` never reap it. For retained launches, `wait()` returns the
 current result snapshot immediately; it does not wait, drain output, enforce
 `timeout_ms`, or release custody. Use the observation's `exit_code` and
 `termination_signal` to distinguish normal exit from signal termination.
+Output snapshots include only bytes already captured by private-channel
+handshake draining. `read_available_output()` returns stdout bytes directly
+without accumulating them in that snapshot.
 
 Call `cleanup_retained_process_group(deadline)` on a control thread. It attempts
-TERM, allows 100 ms before KILL, and checks group disappearance before a
+TERM, allows 100 ms before KILL, retries KILL every 10 ms while custody remains,
+and checks group disappearance before a
 nonblocking child reap. Each call is capped by the supplied steady-clock
 deadline and two seconds. `Incomplete` and `Busy` leave cleanup pending: retain
 the reservation and retry from the owner. A deadline that has already elapsed
@@ -59,7 +63,8 @@ handle moves, destruction, and launch against other operations. Cleanup may
 return `Busy` when another thread holds the same process state. Do not call
 `waitpid` independently, install `SIGCHLD` auto-reaping, or run another child
 reaper over a retained child. Private-channel callbacks must bound their own
-work to their supplied deadline. Process groups do not contain a descendant
+work to their supplied deadline; internal output draining runs on a worker
+thread and may also request cleanup after a callback failure. Process groups do not contain a descendant
 that deliberately escapes through `setsid`/`setpgid`, and this contract does not
 provide cleanup after host death or a security sandbox.
 
