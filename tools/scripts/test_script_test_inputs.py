@@ -930,7 +930,7 @@ class SpawnScanTests(unittest.TestCase):
         root = HERE.parents[1]
         host = "\n".join((root / "core/host/include/pulp/host" / name).read_text(encoding="utf-8")
                          for name in ("plugin_slot.hpp", "scanner.hpp", "dl_shim.hpp", "node_pack.hpp",
-                                      "signal_graph_runtime.hpp", "graph_serializer.hpp"))
+                                      "signal_graph_runtime.hpp", "graph_serializer.hpp", "graph_patch.hpp"))
         host += "\n" + "\n".join((root / "core/host/src" / name).read_text(encoding="utf-8")
                                   for name in ("plugin_slot.cpp", "plugin_slot_clap.cpp", "scanner_clap.cpp"))
         for api in sti.LOAD_APIS:
