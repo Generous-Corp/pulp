@@ -10,8 +10,8 @@
 #include <iostream>
 #include <map>
 #include <pulp/audio/audio_file.hpp>
-#include <pulp/host/graph_rt_report.hpp>
 #include <pulp/host/graph_patch.hpp>
+#include <pulp/host/graph_rt_report.hpp>
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/offline_signal_graph_host.hpp>
 #include <pulp/host/signal_graph.hpp>
@@ -501,13 +501,12 @@ int cmd_graph(const std::vector<std::string>& args) {
                 // loader exposes its typed diagnostic contract, while the
                 // long-standing .pulpgraph CLI surface reports invalid input
                 // with the generic invalid_graph code.
-                if (!notation)
+                if (!notation && strict.diagnostic.code ==
+                                     pulp::host::GraphPatchDiagnostic::Code::InvalidDocument)
                     json_error("invalid_graph", strict.diagnostic.message());
                 else
-                    std::cout << pulp::host::graph_patch_diagnostic_json(strict.diagnostic)
-                              << '\n';
-            }
-            else
+                    std::cout << pulp::host::graph_patch_diagnostic_json(strict.diagnostic) << '\n';
+            } else
                 std::cerr << "pulp graph: " << strict.diagnostic.message() << '\n';
             return 1;
         }
