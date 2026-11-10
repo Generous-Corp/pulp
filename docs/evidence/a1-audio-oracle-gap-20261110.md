@@ -3,7 +3,7 @@
 ## Disposition
 
 **HOLD: evidence only; no graph runtime or public API change.** This audit is
-bound to Pulp `origin/main` at `68c471e93e46f57517fac64f4ece31148a6f0d93`. The branch was refreshed by a non-rebased merge of this current main before handoff; the audit conclusions and explicit HOLD boundaries remain unchanged.
+bound to Pulp `origin/main` at `6bc132fcb7f4f742ee4ea78f50c8a85a4eca95a3`. The branch was refreshed by a non-rebased merge of this current main before handoff; the audit conclusions and explicit HOLD boundaries remain unchanged.
 It asks whether the existing public surfaces can prove the A1 fixed-voice
 graph requirement. They cannot. The current tree has useful control-side
 identity, event, and audio examples, but no graph-authored voice instance that
