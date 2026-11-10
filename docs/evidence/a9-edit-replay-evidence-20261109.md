@@ -103,3 +103,13 @@ save/edit/replay fixture. It does not establish whole-graph identity, A9
 roadmap completion, model execution, CLI or MCP parity, arbitrary plugin or
 node-family support, realtime behavior, or browser/native parity. Those lanes
 remain **NOT CHECKED** here.
+
+## Current-main reconciliation
+
+The branch now contains a non-rebased merge of `origin/main`
+(`04a6852f08e68c252a890c4eba0ded73c73adedd`). The installed-SDK receipt above
+remains historical evidence from source revision
+`cc6430e25529e3c3f511c3f33178975ac58fc05d`; it was not rerun after this merge.
+A current-main Release build of `pulp-host` completed, but SDK installation
+stopped at the missing optional `inspect/pulp-control-broker` artifact. The
+current-main standalone consumer lane is therefore **NOT CHECKED**.
