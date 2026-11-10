@@ -97,14 +97,65 @@ def _load_journal(path: pathlib.Path) -> list[dict[str, str]]:
         raise RuntimeError(f"invalid capability write transaction fields: {path}")
     entries: list[dict[str, str]] = []
     for entry in document["entries"]:
-        if (
-            not isinstance(entry, dict)
-            or set(entry) != {"target", "staged", "sha256"}
-            or not all(isinstance(entry.get(key), str) for key in entry)
+        if not isinstance(entry, dict) or not all(
+            isinstance(entry.get(key), str) for key in entry
+        ) or (
+            set(entry) != {"target", "staged", "sha256"}
+            and not (set(entry) == {"target", "remove"} and entry["remove"] == "yes")
         ):
             raise RuntimeError(f"invalid capability write transaction entry: {path}")
         entries.append(entry)
     return entries
+
+
+def _permitted(
+    actual: list[pathlib.Path],
+    expected: set[pathlib.Path],
+    directories: list[pathlib.Path],
+) -> bool:
+    """Whether a journal's targets are this generator's outputs.
+
+    Without directories the journal must name exactly the expected files.
+    With them (fragment directories, whose member set varies by write) each
+    target must be an expected file or lie under one of the directories."""
+    if not directories:
+        return len(actual) == len(expected) and set(actual) == expected
+    for target in actual:
+        if target in expected:
+            continue
+        # Lexical containment is only meaningful for a normalized absolute
+        # path: `<dir>/../x` lists <dir> among its parents.
+        if not target.is_absolute() or ".." in target.parts or "." in target.parts:
+            return False
+        if not any(directory in target.parents for directory in directories):
+            return False
+    return len(set(actual)) == len(actual)
+
+
+def _prepare_fragment_parent(
+    path: pathlib.Path, root: pathlib.Path, directories: list[pathlib.Path]
+) -> None:
+    """Create the missing parent of a target that lies under a fragment directory.
+
+    `_validated_target` resolves the parent strictly, so a fragment in a new
+    subdirectory (the first header of a new domain, or the first write of a
+    directory) needs it to exist. Only a lexically contained, normalized path
+    is prepared; anything else is left for `_validated_target` to refuse."""
+    if not path.is_absolute():
+        path = root / path
+    if ".." in path.parts or path.parent.exists():
+        return
+    resolved_root = root.resolve(strict=True)
+    for directory in directories:
+        base = directory if directory.is_absolute() else resolved_root / directory
+        try:
+            path.relative_to(base)
+        except ValueError:
+            continue
+        base.mkdir(parents=True, exist_ok=True)
+        if base.resolve(strict=True).is_relative_to(resolved_root):
+            path.parent.mkdir(parents=True, exist_ok=True)
+        return
 
 
 def recover_transaction(
@@ -113,21 +164,38 @@ def recover_transaction(
     *,
     root: pathlib.Path,
     interrupt_after: int | None = None,
+    allowed_directories: Iterable[pathlib.Path] = (),
 ) -> bool:
     """Finish a journaled replacement, returning whether recovery was needed."""
     if not journal.exists():
         return False
     entries = _load_journal(journal)
     expected_target_set = {_validated_target(path, root) for path in expected_targets}
+    resolved_root = root.resolve(strict=True)
+    directories = [
+        (path if path.is_absolute() else resolved_root / path).resolve()
+        for path in allowed_directories
+    ]
     actual = [pathlib.Path(entry["target"]) for entry in entries]
-    if len(actual) != len(expected_target_set) or set(actual) != expected_target_set:
+    if not _permitted(actual, expected_target_set, directories):
         raise RuntimeError(
             "capability write transaction targets do not match generated outputs"
         )
     transaction_ids: set[str] = set()
-    # Length equality is checked above; avoid zip(strict=...) so the recovery
-    # path also works with Pulp's supported Python 3.9 tooling runtime.
+    # Avoid zip(strict=...) so the recovery path also works with Pulp's
+    # supported Python 3.9 tooling runtime.
     for entry, target in zip(entries, actual):
+        # The journal lives in the working tree, so re-validate every target:
+        # a parent that now resolves elsewhere (a symlinked subdirectory) must
+        # not redirect a replacement or a removal out of the repository.
+        if target.parent.exists() and _validated_target(target, root) != target:
+            raise RuntimeError(f"capability write transaction target moved: {target}")
+        if "remove" in entry:
+            if not any(directory in target.parent.resolve().parents
+                       or directory == target.parent.resolve() for directory in directories) \
+                    and target not in expected_target_set:
+                raise RuntimeError(f"capability removal escapes its directory: {target}")
+            continue
         staged = pathlib.Path(entry["staged"])
         prefix = f".{target.name}."
         suffix = ".staged"
@@ -141,11 +209,23 @@ def recover_transaction(
         ):
             raise RuntimeError(f"invalid staged capability transaction id: {staged}")
         transaction_ids.add(transaction_id)
-    if len(transaction_ids) != 1:
+    if len(transaction_ids) > 1 or (
+        not transaction_ids and not all("remove" in entry for entry in entries)
+    ):
         raise RuntimeError("capability write transaction mixes transaction ids")
     replaced = 0
     for entry in entries:
         target = pathlib.Path(entry["target"])
+        if "remove" in entry:
+            if target.is_symlink():
+                raise RuntimeError(f"generated capability output became a symlink: {target}")
+            if target.is_file():
+                target.unlink()
+                _fsync_directory(target.parent)
+                replaced += 1
+                if interrupt_after is not None and replaced >= interrupt_after:
+                    raise SimulatedInterruption("simulated capability write interruption")
+            continue
         staged = pathlib.Path(entry["staged"])
         expected = entry["sha256"]
         if target.is_symlink():
@@ -176,15 +256,25 @@ def write_transaction(
     *,
     root: pathlib.Path,
     interrupt_after: int | None = None,
+    removals: Iterable[pathlib.Path] = (),
+    allowed_directories: Iterable[pathlib.Path] = (),
 ) -> None:
-    """Stage every output durably, journal the batch, then commit and recover it."""
+    """Stage every output durably, journal the batch, then commit and recover it.
+
+    `removals` are deleted as part of the same journaled batch (a fragment
+    whose entry left the document). `allowed_directories` names the fragment
+    directories whose members may be targets."""
+    allowed_directories = list(allowed_directories)
+    removals = list(removals)
     if journal.exists():
-        recover_transaction(journal, outputs, root=root)
+        recover_transaction(journal, outputs, root=root,
+                            allowed_directories=allowed_directories)
     transaction_id = uuid.uuid4().hex
     entries: list[dict[str, str]] = []
     staged_paths: list[pathlib.Path] = []
     try:
         for target, text in outputs.items():
+            _prepare_fragment_parent(target, root, allowed_directories)
             target = _validated_target(target, root)
             payload = text.encode("utf-8")
             staged = target.with_name(f".{target.name}.{transaction_id}.staged")
@@ -193,9 +283,13 @@ def write_transaction(
             entries.append(
                 {"target": str(target), "staged": str(staged), "sha256": _digest(payload)}
             )
+        for target in removals:
+            entries.append({"target": str(_validated_target(target, root)), "remove": "yes"})
         _write_journal(journal, {"schema": TRANSACTION_SCHEMA, "entries": entries})
         recover_transaction(
-            journal, outputs, root=root, interrupt_after=interrupt_after
+            journal, list(outputs) + removals, root=root,
+            interrupt_after=interrupt_after,
+            allowed_directories=allowed_directories,
         )
     except SimulatedInterruption:
         raise

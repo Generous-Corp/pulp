@@ -19,6 +19,29 @@ function(pulp_check_gpu_runtime_record prefix commit)
     endif()
 endfunction()
 
+# pulp_gpu_runtime_covers_target(<osx-architectures> <system-processor> <out-var>)
+#
+# gpu-runtime's renderer lock names one macOS platform, macos-arm64, and pins
+# the Dawn library of the universal skia-build asset. A build with no arm64
+# slice resolves the thin x86_64 asset instead (the release CLI's darwin-x64
+# leg cross-compiles that way), whose libdawn_combined.a the lock refuses at
+# configure. Such a build keeps Pulp's own device sources, the mode
+# PULP_USE_GPU_RUNTIME=OFF selects. With no CMAKE_OSX_ARCHITECTURES the target
+# is the processor CMake configures for. Sets <out-var> to TRUE when the
+# target includes arm64, FALSE otherwise.
+function(pulp_gpu_runtime_covers_target osx_architectures system_processor out_var)
+    set(_archs "${osx_architectures}")
+    if(_archs STREQUAL "")
+        set(_archs "${system_processor}")
+    endif()
+    string(TOLOWER "${_archs}" _archs)
+    if("arm64" IN_LIST _archs OR "aarch64" IN_LIST _archs)
+        set(${out_var} TRUE PARENT_SCOPE)
+    else()
+        set(${out_var} FALSE PARENT_SCOPE)
+    endif()
+endfunction()
+
 # pulp_check_gpu_runtime_benchmark_flavour(<interface-defs> <pulp_benchmark>)
 #
 # gpu-runtime's benchmark hooks change its GpuCompute vtable, and an image links

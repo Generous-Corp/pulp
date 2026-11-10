@@ -1,0 +1,9 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/ump_sysex7_reassembler.hpp",
+  "fingerprint": "sha256:51b0e3f62886ff000661c5ab250c21f17c09894b863ad3d3d120f63b526f4a8f",
+  "include": "pulp/midi/ump_sysex7_reassembler.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Bounded per-group SysEx7 reassembly and transport diagnostics are MIDI ingress infrastructure, not a generator-facing musical transform."
+}

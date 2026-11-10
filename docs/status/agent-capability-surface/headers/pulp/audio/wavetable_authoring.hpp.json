@@ -1,0 +1,11 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/wavetable_authoring.hpp",
+  "fingerprint": "sha256:52df577e59972f830983062f5c69b9c2f3796597547eb6e6c4fdc011a1951905",
+  "include": "pulp/audio/wavetable_authoring.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "audio.wavetable-authoring"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

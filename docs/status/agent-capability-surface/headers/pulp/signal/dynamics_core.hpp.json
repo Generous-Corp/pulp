@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/dynamics_core.hpp",
+  "fingerprint": "sha256:e1e83d01a6ae7cdc363a8e9f5f02a21374ce91aed731b90eef74d4f0508c8036",
+  "include": "pulp/signal/dynamics_core.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

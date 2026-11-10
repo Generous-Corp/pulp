@@ -14,8 +14,8 @@
     "docs/validation/gpu-handoff-provenance/receipt.json",
     "tools/scripts/agent_capability_manifest.py",
     "docs/status/agent-capabilities.json",
-    "docs/status/agent-capability-surface.json",
-    "tools/agent-capabilities/contract-history.json",
+    "docs/status/agent-capability-surface/meta.json",
+    "tools/agent-capabilities/history/*.json",
     "docs/migrations/v*.md",
     "docs/migrations/unreleased/*.md"
   ],

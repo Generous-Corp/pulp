@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/phaser_stages.hpp",
+  "fingerprint": "sha256:dfd0da542fcd8a1a019d3a65f8720c326dbed04a5b761e544cd9c5fb5eabdceb",
+  "include": "pulp/signal/phaser_stages.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

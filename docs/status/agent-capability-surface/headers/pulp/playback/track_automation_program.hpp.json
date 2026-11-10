@@ -1,0 +1,9 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/track_automation_program.hpp",
+  "fingerprint": "sha256:5c329e154a3d2b33f3817760735982d8f7328a44e3c076c24a23016e658b2535",
+  "include": "pulp/playback/track_automation_program.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Immutable compiler-supplied grouping of one track's compiled automation lanes, with a refusal vocabulary that reports the colliding control verbatim on a duplicate lane or target. Its own documentation is explicit that it validates the grouping without proving document provenance, so it is internal compiled structure rather than an advertised capability."
+}

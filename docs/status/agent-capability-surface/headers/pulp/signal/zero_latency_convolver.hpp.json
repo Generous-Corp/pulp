@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/zero_latency_convolver.hpp",
+  "fingerprint": "sha256:8b48ec3c8df0ff7f8cac45f71468f29bf045452815393b2987253cf76e939db9",
+  "include": "pulp/signal/zero_latency_convolver.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Zero-latency multilevel convolution engine (direct-form head on pulp::simd correlate plus FFT partitions). Like the uniform PartitionedConvolver it is a bounded DSP primitive a plugin drives from its own process(), documented in the space-convolution guide; it makes no installed agent capability claim of its own."
+}

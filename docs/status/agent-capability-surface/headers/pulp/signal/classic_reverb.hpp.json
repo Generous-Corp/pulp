@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/classic_reverb.hpp",
+  "fingerprint": "sha256:ef4d852f267095f4e18a7ed2114640adaeaf8fbbd57087cc3a1aaa1d3a4c796f",
+  "include": "pulp/signal/classic_reverb.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "The classic comb-and-allpass reverb tier, driven by the same fdn::Param set as the FDN engine. A processor primitive driven from the owner's own process(); it makes no installed agent capability claim of its own."
+}

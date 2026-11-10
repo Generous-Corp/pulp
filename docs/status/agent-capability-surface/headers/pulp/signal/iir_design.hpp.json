@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/iir_design.hpp",
+  "fingerprint": "sha256:d45c17451d8410069e3cffd4f911f2a532d525383ff033775d0c38b7c7decb10",
+  "include": "pulp/signal/iir_design.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "signal.sos-cascade"
+  ],
+  "rationale": "The public high-order IIR design helpers produce normalized SOS coefficient vectors accepted by the bounded cascade executor."
+}

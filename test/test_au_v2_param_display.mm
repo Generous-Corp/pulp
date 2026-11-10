@@ -17,6 +17,7 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/format/registry.hpp>
 #include "../examples/pulp-gain/pulp_gain.hpp"
+#include "support/generated_range_processor.hpp"
 
 #include <AudioToolbox/AudioUnit.h>
 #include <Foundation/Foundation.h>
@@ -938,4 +939,66 @@ TEST_CASE("AU v2 labelled Enum parameters report the Indexed unit",
     AudioUnitParameterInfo program{};
     REQUIRE(inst.GetParameterInfo(kAudioUnitScope_Global, 5, program) == noErr);
     REQUIRE(program.unit == kAudioUnitParameterUnit_Generic);
+}
+
+// PARAM-2: a range, default and texts generated in code are what the host sees.
+namespace {
+struct GeneratedFactory {
+    explicit GeneratedFactory(bool widen) : previous(pulp::format::registered_factory()) {
+        pulp::test::GeneratedRangeProcessor::widen = widen;
+        pulp::format::register_plugin(pulp::test::make_generated_range_processor);
+    }
+    ~GeneratedFactory() {
+        pulp::test::GeneratedRangeProcessor::widen = true;
+        pulp::format::register_plugin(previous);
+    }
+    pulp::format::ProcessorFactory previous;
+};
+
+std::string au_text_for(pulp::format::au::PulpAUEffect& effect, Float32 value) {
+    AudioUnitParameterStringFromValue sfv{};
+    sfv.inParamID = pulp::test::kGeneratedPitchId;
+    sfv.inValue = &value;
+    REQUIRE(effect.GetProperty(kAudioUnitProperty_ParameterStringFromValue, kAudioUnitScope_Global,
+                               0, &sfv) == noErr);
+    REQUIRE(sfv.outString != nullptr);
+    char buf[64] = {0};
+    REQUIRE(CFStringGetCString(sfv.outString, buf, sizeof(buf), kCFStringEncodingUTF8));
+    CFRelease(sfv.outString);
+    return buf;
+}
+} // namespace
+
+TEST_CASE("AU v2 reports a generated range, default and value texts",
+          "[au][au-v2][params][generated]") {
+    GeneratedFactory factory(true);
+    pulp::format::au::PulpAUEffect effect(nullptr);
+
+    AudioUnitParameterInfo info{};
+    REQUIRE(effect.GetParameterInfo(kAudioUnitScope_Global, pulp::test::kGeneratedPitchId, info) ==
+            noErr);
+    REQUIRE_THAT(info.minValue, WithinAbs(0.0f, 1e-3f));
+    REQUIRE_THAT(info.maxValue, WithinAbs(2400.0f, 1e-3f));
+    REQUIRE_THAT(info.defaultValue, WithinAbs(1200.0f, 1e-3f));
+    REQUIRE((info.flags & kAudioUnitParameterFlag_ValuesHaveStrings) != 0);
+
+    REQUIRE(au_text_for(effect, 1200.0f) == "12.0 st");
+
+    AudioUnitParameterValueFromString vfs{};
+    vfs.inParamID = pulp::test::kGeneratedPitchId;
+    vfs.inString = CFSTR("12.0 st");
+    REQUIRE(effect.GetProperty(kAudioUnitProperty_ParameterValueFromString, kAudioUnitScope_Global,
+                               0, &vfs) == noErr);
+    REQUIRE_THAT(vfs.outValue, WithinAbs(1200.0f, 1e-2f));
+}
+
+TEST_CASE("AU v2 generated-range control: the unwidened base range reads differently",
+          "[au][au-v2][params][generated]") {
+    GeneratedFactory factory(false);
+    pulp::format::au::PulpAUEffect effect(nullptr);
+    AudioUnitParameterInfo info{};
+    REQUIRE(effect.GetParameterInfo(kAudioUnitScope_Global, pulp::test::kGeneratedPitchId, info) ==
+            noErr);
+    REQUIRE_THAT(info.maxValue, WithinAbs(127.0f, 1e-3f));
+    REQUIRE(au_text_for(effect, 63.5f) == "0.6 st");
 }

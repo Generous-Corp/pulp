@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/oversampling.hpp",
+  "fingerprint": "sha256:08bc7cb21e50cddb3cea2f9aa2405cbbf4e02ca6a2d790e03668e2e23f448760",
+  "include": "pulp/signal/oversampling.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Block-processing up/downsampler that runs a caller's nonlinearity at 2x-16x with minimum-phase IIR, linear-phase FIR or legacy biquad anti-aliasing and truthful latency reporting. A bounded DSP primitive a processor drives from its own process(), documented in the signal guide; it makes no installed agent capability claim of its own."
+}

@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/auto_ducked_send.hpp",
+  "fingerprint": "sha256:8246383c5cfe77391c4a4d609112462ef92917bbd4d9aab6e09ac5dab4e584fb",
+  "include": "pulp/signal/auto_ducked_send.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.auto-ducked-send"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

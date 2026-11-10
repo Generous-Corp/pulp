@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/mod_matrix.hpp",
+  "fingerprint": "sha256:ff8e50d0c9b6a94543073019e1367da206aed7899b2947506cbc9e18d910d186",
+  "include": "pulp/signal/mod_matrix.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

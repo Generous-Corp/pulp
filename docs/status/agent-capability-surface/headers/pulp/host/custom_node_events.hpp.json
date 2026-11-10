@@ -1,0 +1,11 @@
+{
+  "domain": "host",
+  "source": "core/host/include/pulp/host/custom_node_events.hpp",
+  "fingerprint": "sha256:65e1cee2feab83530094c72b89dc87bde523c9b4ac10e5822e370f6dcc14f114",
+  "include": "pulp/host/custom_node_events.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.custom-node-events"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

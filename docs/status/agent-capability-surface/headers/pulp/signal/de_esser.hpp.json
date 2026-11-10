@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/de_esser.hpp",
+  "fingerprint": "sha256:fd61c1c4680c790d8617ec55164367d535cc079878e2bcb9780077c59bbf040d",
+  "include": "pulp/signal/de_esser.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.de-esser"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}
