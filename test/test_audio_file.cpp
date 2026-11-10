@@ -8,6 +8,9 @@
 #include <pulp/audio/streaming_writer.hpp>
 #include <pulp/runtime/base64.hpp>
 #include <algorithm>
+#include <chrono>
+#include <cstring>
+#include <vector>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -3047,4 +3050,261 @@ TEST_CASE("read_impulse_response still accepts a high-resolution 96 kHz IR") {
     std::filesystem::remove(path);
     REQUIRE(ir.has_value());
     for (float v : *ir) REQUIRE(std::isfinite(v));
+}
+
+// ── Atomic WAV publication (APP-8) ───────────────────────────────────────────
+
+namespace {
+
+std::vector<uint8_t> slurp(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+uint32_t le32(const std::vector<uint8_t>& b, size_t at) {
+    return b[at] | (b[at + 1] << 8) | (b[at + 2] << 16) | (static_cast<uint32_t>(b[at + 3]) << 24);
+}
+uint16_t le16(const std::vector<uint8_t>& b, size_t at) {
+    return static_cast<uint16_t>(b[at] | (b[at + 1] << 8));
+}
+
+struct ParsedWav {
+    uint16_t format_tag = 0, raw_tag = 0, channels = 0, block_align = 0, bits = 0;
+    uint32_t rate = 0, byte_rate = 0, data_size = 0;
+    size_t data_at = 0;
+    bool riff_size_ok = false;
+    bool ok = false;
+};
+
+// Walk the chunks the way a reader does, so extra chunks do not matter.
+ParsedWav parse_wav(const std::vector<uint8_t>& b) {
+    ParsedWav w;
+    if (b.size() < 12 || std::memcmp(b.data(), "RIFF", 4) != 0 || std::memcmp(b.data() + 8, "WAVE", 4) != 0)
+        return w;
+    w.riff_size_ok = le32(b, 4) == b.size() - 8;
+    size_t at = 12;
+    bool have_fmt = false;
+    while (at + 8 <= b.size()) {
+        const uint32_t size = le32(b, at + 4);
+        if (std::memcmp(b.data() + at, "fmt ", 4) == 0) {
+            w.format_tag = le16(b, at + 8);
+            w.channels = le16(b, at + 10);
+            w.rate = le32(b, at + 12);
+            w.byte_rate = le32(b, at + 16);
+            w.block_align = le16(b, at + 20);
+            w.bits = le16(b, at + 22);
+            w.raw_tag = w.format_tag;
+            // WAVE_FORMAT_EXTENSIBLE: the real format is the first two bytes of
+            // the sub-format GUID, 24 bytes into the chunk body.
+            if (w.format_tag == 0xFFFE && size >= 40) w.format_tag = le16(b, at + 8 + 24);
+            have_fmt = true;
+        } else if (std::memcmp(b.data() + at, "data", 4) == 0) {
+            w.data_size = size;
+            w.data_at = at + 8;
+            w.ok = have_fmt && w.data_at + size <= b.size();
+            return w;
+        }
+        at += 8 + size + (size & 1);
+    }
+    return w;
+}
+
+struct ScratchDir {
+    std::filesystem::path root = std::filesystem::temp_directory_path() /
+                                 ("pulp_wav_atomic_" +
+                                  std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    ScratchDir() { std::filesystem::create_directories(root); }
+    ~ScratchDir() {
+        std::error_code ec;
+        std::filesystem::remove_all(root, ec);
+    }
+    size_t entries() const {
+        size_t n = 0;
+        for ([[maybe_unused]] const auto& e : std::filesystem::directory_iterator(root)) ++n;
+        return n;
+    }
+};
+
+AudioFileData stereo_signal() {
+    AudioFileData d;
+    d.sample_rate = 48000;
+    d.channels = {{0.0f, 0.5f, -0.5f, 1.0f, -1.0f, 0.25f}, {0.0f, -0.25f, 0.75f, -1.0f, 1.0f, 0.125f}};
+    return d;
+}
+
+} // namespace
+
+TEST_CASE("WAV writer emits the exact header and samples for each bit depth",
+          "[audio][file][wav-atomic]") {
+    const auto data = stereo_signal();
+    struct Case {
+        WavBitDepth depth;
+        uint16_t tag, bits;
+    };
+    for (const auto& c : {Case{WavBitDepth::Int16, 1, 16}, Case{WavBitDepth::Int24, 1, 24},
+                          Case{WavBitDepth::Float32, 3, 32}}) {
+        DYNAMIC_SECTION("bits " << c.bits << " tag " << c.tag) {
+            ScratchDir dir;
+            const auto path = dir.root / "out.wav";
+            REQUIRE(write_wav_file(path.string(), data, c.depth));
+            const auto bytes = slurp(path);
+            const auto w = parse_wav(bytes);
+            REQUIRE(w.ok);
+            CHECK(w.riff_size_ok);
+            CHECK(w.format_tag == c.tag);
+            CHECK(w.channels == 2);
+            CHECK(w.rate == 48000);
+            CHECK(w.bits == c.bits);
+            CHECK(w.block_align == 2 * c.bits / 8);
+            CHECK(w.byte_rate == 48000u * w.block_align);
+            CHECK(w.data_size == 6u * w.block_align);
+
+            // Interleaved samples. Float is bit-exact; an integer depth is within
+            // one code of the exact value, and silence is exactly zero.
+            for (size_t frame = 0; frame < 6; ++frame) {
+                for (size_t ch = 0; ch < 2; ++ch) {
+                    const float want = data.channels[ch][frame];
+                    const size_t at = w.data_at + frame * w.block_align + ch * (c.bits / 8);
+                    if (c.depth == WavBitDepth::Float32) {
+                        uint32_t raw = le32(bytes, at);
+                        float got;
+                        std::memcpy(&got, &raw, 4);
+                        CHECK(got == want);
+                    } else {
+                        int32_t code = c.bits == 16 ? static_cast<int16_t>(le16(bytes, at))
+                                                    : static_cast<int32_t>((bytes[at] | (bytes[at + 1] << 8) |
+                                                                            (bytes[at + 2] << 16)) << 8) >> 8;
+                        const double full = std::ldexp(1.0, c.bits - 1);
+                        CHECK(std::abs(code - want * full) <= 1.0 + 1e-9);
+                        if (want == 0.0f) CHECK(code == 0);
+                    }
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("WAV bit depth is part of the file: a 24-bit file does not read as 16-bit",
+          "[audio][file][wav-atomic]") {
+    // Control for the header check above: the same signal at a different depth
+    // produces a different format field and a different data size.
+    ScratchDir dir;
+    const auto data = stereo_signal();
+    REQUIRE(write_wav_file((dir.root / "a.wav").string(), data, WavBitDepth::Int24));
+    REQUIRE(write_wav_file((dir.root / "b.wav").string(), data, WavBitDepth::Int16));
+    const auto a = parse_wav(slurp(dir.root / "a.wav"));
+    const auto b = parse_wav(slurp(dir.root / "b.wav"));
+    CHECK(a.bits == 24);
+    CHECK(b.bits == 16);
+    CHECK(a.data_size != b.data_size);
+}
+
+TEST_CASE("an atomic write leaves exactly the published file", "[audio][file][wav-atomic]") {
+    ScratchDir dir;
+    const auto path = dir.root / "render.wav";
+    REQUIRE(write_wav_file(path.string(), stereo_signal(), WavBitDepth::Int24));
+    REQUIRE(dir.entries() == 1); // no temporary file left beside it
+    CHECK(read_audio_file(path.string()).has_value());
+}
+
+TEST_CASE("a write that fails half-way leaves no file and no temporary file",
+          "[audio][file][wav-atomic]") {
+    ScratchDir dir;
+    const auto path = dir.root / "render.wav";
+    bool wrote_something = false;
+    const bool ok = write_file_atomically(path.string(), WavReplace::Replace, [&](std::ostream& out) {
+        out << "RIFF....WAVEfmt ";   // a plausible start
+        out.flush();
+        wrote_something = true;
+        return false;               // the render fails or is cancelled here
+    });
+    CHECK(wrote_something);
+    CHECK_FALSE(ok);
+    CHECK_FALSE(std::filesystem::exists(path));
+    CHECK(dir.entries() == 0);
+
+    // The same when the producer throws.
+    CHECK_FALSE(write_file_atomically(path.string(), WavReplace::Replace, [&](std::ostream& out) -> bool {
+        out << "partial";
+        throw std::runtime_error("device lost");
+    }));
+    CHECK_FALSE(std::filesystem::exists(path));
+    CHECK(dir.entries() == 0);
+
+    // Control: a direct write leaves exactly the truncated file this prevents.
+    {
+        std::ofstream direct(path, std::ios::binary);
+        direct << "RIFF....WAVEfmt ";
+    }
+    CHECK(std::filesystem::exists(path));
+    CHECK(std::filesystem::file_size(path) == 16);
+}
+
+TEST_CASE("a failed write leaves an existing file untouched", "[audio][file][wav-atomic]") {
+    ScratchDir dir;
+    const auto path = dir.root / "render.wav";
+    REQUIRE(write_wav_file(path.string(), stereo_signal(), WavBitDepth::Int16));
+    const auto before = slurp(path);
+
+    CHECK_FALSE(write_file_atomically(path.string(), WavReplace::Replace, [](std::ostream& out) {
+        out << "half";
+        return false;
+    }));
+    CHECK(slurp(path) == before);
+    CHECK(dir.entries() == 1);
+
+    // A write that succeeds replaces it.
+    AudioFileData shorter;
+    shorter.sample_rate = 44100;
+    shorter.channels = {{0.5f, 0.5f}};
+    REQUIRE(write_wav_file(path.string(), shorter, WavBitDepth::Float32));
+    CHECK(parse_wav(slurp(path)).rate == 44100);
+    CHECK(dir.entries() == 1);
+}
+
+TEST_CASE("FailIfExists refuses to replace and leaves the old file and no temporary",
+          "[audio][file][wav-atomic]") {
+    ScratchDir dir;
+    const auto path = dir.root / "render.wav";
+    REQUIRE(write_wav_file(path.string(), stereo_signal(), WavBitDepth::Int16, WavReplace::FailIfExists));
+    const auto first = slurp(path);
+
+    AudioFileData other;
+    other.sample_rate = 22050;
+    other.channels = {{0.1f, 0.2f}};
+    CHECK_FALSE(write_wav_file(path.string(), other, WavBitDepth::Int16, WavReplace::FailIfExists));
+    CHECK(slurp(path) == first);
+    CHECK(dir.entries() == 1);
+
+    // Replace does replace it.
+    REQUIRE(write_wav_file(path.string(), other, WavBitDepth::Int16, WavReplace::Replace));
+    CHECK(parse_wav(slurp(path)).rate == 22050);
+}
+
+TEST_CASE("FailIfExists loses to a writer that creates the target while this one is writing",
+          "[audio][file][wav-atomic]") {
+    ScratchDir dir;
+    const auto path = dir.root / "render.wav";
+    // The racing writer lands between this call's existence check and its
+    // publish; the publish step itself must refuse, not overwrite.
+    const bool ok = write_file_atomically(path.string(), WavReplace::FailIfExists, [&](std::ostream& out) {
+        std::ofstream rival(path, std::ios::binary);
+        rival << "rival";
+        rival.close();
+        out << "mine";
+        return true;
+    });
+    CHECK_FALSE(ok);
+    CHECK(slurp(path) == std::vector<uint8_t>{'r', 'i', 'v', 'a', 'l'});
+    CHECK(dir.entries() == 1);
+}
+
+TEST_CASE("an unwritable directory fails cleanly and creates nothing", "[audio][file][wav-atomic]") {
+    ScratchDir dir;
+    const auto path = dir.root / "no_such_directory" / "render.wav";
+    CHECK_FALSE(write_wav_file(path.string(), stereo_signal(), WavBitDepth::Int16));
+    CHECK(dir.entries() == 0);
+    // Invalid audio is refused before any file is made.
+    CHECK_FALSE(write_wav_file((dir.root / "x.wav").string(), AudioFileData{}, WavBitDepth::Int16));
+    CHECK(dir.entries() == 0);
 }
