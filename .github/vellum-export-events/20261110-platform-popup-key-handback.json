@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "event_id": "20261110-platform-popup-key-handback",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-10T12:00:00Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/platform/include/pulp/platform/popup_window.hpp",
+    "core/platform/platform/mac/popup_window_mac.mm"
+  ],
+  "vellum_inherits": true,
+  "rationale": "Fixes PopupWindow closing as focus_lost when activating the application hands key back to the popup's own editor window with no click. The resign-key decision now waits one run-loop pass and takes key back in that case, so only a real move of key elsewhere reports focus_lost. A behaviour fix in the generic platform layer with no view or render dependency, so the next Vellum re-export of core/platform should carry it."
+}

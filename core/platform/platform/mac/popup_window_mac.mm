@@ -144,6 +144,49 @@ struct PopupWindow::Impl : std::enable_shared_from_this<PopupWindow::Impl> {
         observers.push_back([token retain]);
     }
 
+    // The popup losing key is a loss of focus only when key went somewhere
+    // other than its own editor window. Activating the application can hand
+    // key back to the editor window asynchronously, after the popup took it,
+    // with no click; a click on the editor has already closed the popup
+    // through the local monitor. So decide one pass later, once AppKit has
+    // settled the key window: back on the editor means take key again, up to
+    // a few times; anywhere else means focus_lost.
+    static constexpr int kMaxKeyReclaims = 3;
+    int key_reclaims = 0;
+
+    void observe_resign_key() {
+        std::weak_ptr<Impl> weak = weak_from_this();
+        id token = [[NSNotificationCenter defaultCenter]
+            addObserverForName:NSWindowDidResignKeyNotification
+                        object:panel
+                         queue:nil
+                    usingBlock:^(NSNotification*) {
+                      if (auto self = weak.lock())
+                          self->after_resign_key();
+                    }];
+        observers.push_back([token retain]);
+    }
+
+    void after_resign_key() {
+        std::weak_ptr<Impl> weak = weak_from_this();
+        const bool posted = handle.post([weak] {
+            auto self = weak.lock();
+            if (!self || !self->open)
+                return;
+            NSWindow* key = NSApp.keyWindow;
+            if (key == self->panel)
+                return;
+            if (key == self->parent && self->key_reclaims < kMaxKeyReclaims) {
+                ++self->key_reclaims;
+                [self->panel makeKeyWindow];
+                return;
+            }
+            self->dismiss(PopupDismissReason::focus_lost);
+        });
+        if (!posted)
+            dismiss(PopupDismissReason::focus_lost);
+    }
+
     void install_dismissal() {
         std::weak_ptr<Impl> weak = weak_from_this();
         NSPanel* own = panel;
@@ -180,7 +223,7 @@ struct PopupWindow::Impl : std::enable_shared_from_this<PopupWindow::Impl> {
                                           }] retain];
         observe(NSApplicationDidResignActiveNotification, nil, PopupDismissReason::focus_lost);
         if (wants_key)
-            observe(NSWindowDidResignKeyNotification, panel, PopupDismissReason::focus_lost);
+            observe_resign_key();
         observe(NSWindowWillCloseNotification, parent, PopupDismissReason::parent_closed);
     }
 };

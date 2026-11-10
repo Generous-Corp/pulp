@@ -38,7 +38,11 @@ enum class PopupDismissReason {
     client,        ///< PopupWindow::close()
     outside_click, ///< a click outside the popup, in this or another app
     escape,        ///< Escape while the popup has keyboard focus
-    focus_lost,    ///< the popup or the application lost focus
+    /// Key moved to a window other than the editor's, or the application
+    /// lost focus. Key handed back to the editor's own window with no click
+    /// (which activating the application can do) does not count: the popup
+    /// takes key again.
+    focus_lost,
     parent_closed, ///< the editor's window is closing
 };
 

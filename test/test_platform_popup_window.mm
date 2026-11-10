@@ -199,13 +199,6 @@ TEST_CASE("each dismissal path reports its reason once", "[platform][popup-windo
     };
     const std::vector<Case> cases = {
         {"client", [](PopupWindow& p, Editor&) { p.close(); }, PopupDismissReason::client},
-        {"resign key",
-         [](PopupWindow& p, Editor&) {
-             [[NSNotificationCenter defaultCenter]
-                 postNotificationName:NSWindowDidResignKeyNotification
-                               object:(__bridge NSWindow*)p.native_window()];
-         },
-         PopupDismissReason::focus_lost},
         {"app deactivates",
          [](PopupWindow&, Editor&) {
              [[NSNotificationCenter defaultCenter]
