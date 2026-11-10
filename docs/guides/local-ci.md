@@ -1711,6 +1711,56 @@ failures ÷ merge-group failures, and `main_evidence_read` ÷ exonerations,
 which must be 1, with `unique_cause` > 0 and the base-red streak count
 unchanged as controls.
 
+The **enforced** verdict is a stricter rule in `tools/ci/flake_exoneration.py`,
+run inside the ctest step of the merge-group `macos` leg. A failed run passes
+only when every failing test failed on 2 or more OTHER pull requests in the
+last 24 hours, counted by pull request number from their own FULL-SUITE head
+runs (`pull_request` runs whose base is main and whose `Test (non-Windows)`
+step ran, read from `ctest.junit.xml`; the pr-fast, pr-guard and affected-test
+tiers run a pull request's own tests, so their failures are not independent;
+the run's commit resolves the pull request when GitHub leaves `pull_requests`
+empty, and a commit shared by two pull requests counts as none), never a pull
+request in this group, never a run whose head already carries a group pull
+request's head, never a pull request whose own diff touches the test, and
+never a merge-group run (a broken entry fails every group it joins under a
+different tip); passed in main's tip gate run by name (its `ctest.junit.xml`, so a test
+new in the group never qualifies); is not `pr-fast` or drift-fast; is not
+touched by the group (its name in a changed file, or a changed declared input
+or command path, from `compare/main...<sha>`, unread when truncated); and is
+not a build failure (a "not run" test other than a deliberate skip, or
+compiler, linker or CMake errors in the output). ctest must have exited 8 and
+`LastTestsFailed.log` must name nothing the JUnit report does not. An excused
+run first runs the tests `--stop-on-failure` skipped (`--tests-from-file`) and
+judges the union. Known residual: a corroborating failure from a window in
+which main itself was briefly red still counts; the next group after a bad
+landing then fails on main's tip, which stops further excusals. Two narrower residuals: the "touched" check of
+a corroborating pull request reads this group's checkout, so a file that pull
+request adds and that names the test is missed (its input-path check still
+applies), and a pull request branched from an earlier commit of a group pull
+request, without its head, is not recognised as carrying it. The exit-code evidence keeps ctest's own status, so no
+receipt claims an excused run passed. Every excusal is a
+`::warning title=flake-exoneration::` annotation, a job-summary table, and a
+`flake-excusals-macos` artifact (`pulp-flake-excusal/v1`, kept 90 days); a
+record that cannot be uploaded fails the job.
+
+`flake-quarantine.yml` (every 30 minutes) counts those records from trusted
+merge-group runs. A test excused 3 or more times in 7 days gets an owner issue
+labelled `ci:flake` and `flake-quarantine`, carrying a
+`pulp-flake-quarantine/v1` marker with a 14-day expiry. The `macos` gate
+(`Resolve flake quarantine`, merge groups and full-suite pull-request runs)
+excludes active quarantines from ctest, keeping a test the change touches, and
+`Quarantined flaky tests (advisory)` runs them without gating. At expiry the
+sweep removes the label and the test is back in the required lane; closing the
+issue or removing the label ends a quarantine early. Only excusals after a
+test's latest quarantine began count toward the next one.
+
+The mode is the repository variable `PULP_FLAKE_EXONERATION_MODE`. Only
+`enforce` acts; unset, `shadow` or anything else leaves the gate failing as
+before (the verdict is still annotated), quarantines nothing, and makes the
+sweep report only. Shadow is the default, and setting it back is the kill
+switch. Graduation to `enforce` is on evidence, not a date: at least 5 days in shadow AND at least 8 would-excuse decisions, each confirmed by a same-head retry pass, with zero false excusals. Any false excusal resets the count and keeps shadow mode. (decisions contract row 34). The 14-day quarantine
+expiry is a separate rule.
+
 Receipt reuse in a merge group downloads the PR head's exact-tree receipt and
 verifies the run it came from. GitHub leaves `pull_requests` empty on runs of
 App-opened pull requests (most of this repository's), so the verifier binds
