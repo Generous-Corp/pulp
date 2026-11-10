@@ -8,7 +8,10 @@
   ],
   "kind": "compiled",
   "sources": [
-   "test/test_audio_decoder_corpus.cpp"
+   "test/test_audio_decoder_corpus.cpp",
+   "test/test_audio_decoder_corpus_flac_ogg.cpp",
+   "test/test_audio_decoder_corpus_mp3.cpp",
+   "test/test_audio_decoder_corpus_wav.cpp"
   ],
   "undeclared_sources": []
  },

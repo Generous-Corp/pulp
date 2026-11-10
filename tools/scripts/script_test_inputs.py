@@ -893,7 +893,10 @@ def _test_include_closure(root: Path, rel: str, *, unreadable: set[str] | None =
         seen.append(cur)
         include_text = strip_c_comments(text, keep_strings=True) if unreadable is not None else text
         for name in INCLUDE.findall(include_text):
-            for base in (os.path.dirname(cur), "test", "test/support"):
+            # Control product tests also compile with inspect/src on their
+            # include path. A readable private broker header must not make a
+            # clean dependency scan look incomplete.
+            for base in (os.path.dirname(cur), "test", "test/support", "inspect/src"):
                 cand = os.path.normpath(os.path.join(base, name))
                 if unreadable is not None:
                     resolved = (root / cand).resolve()

@@ -57,7 +57,7 @@ jobs:
           cache-dependency-path: requirements-docs.txt
 
       - name: Install Doxygen
-        run: sudo apt-get install -y doxygen
+        run: sudo tools/ci/apt-install-retry.sh doxygen
 
       - name: Install MkDocs Material
         run: pip install -r requirements-docs.txt

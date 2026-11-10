@@ -1002,6 +1002,9 @@ class CleanMergeLaneTest(unittest.TestCase):
     # like the contract lane's other cheap checks; the fast tier then leaves its
     # members out.
     PREBUILD_DRIFT = "Test configure-only drift checks before the build (pull request head)"
+    # Reads the open quarantine issues only; it needs no build, so it does not
+    # read the clean-merge lane.
+    FLAKE_QUARANTINE = "Resolve flake quarantine"
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -1048,12 +1051,14 @@ class CleanMergeLaneTest(unittest.TestCase):
                 sites[name] = condition
         gated = {name for name, cond in sites.items() if "matrix.lane != 'contract'" in cond}
         self.assertEqual(set(MacosApprovalGateTest.BUILD_FED)
-                         | {"Intel canary — lint + x86_64 GPU-off compile", self.PREBUILD_DRIFT},
+                         | {"Intel canary — lint + x86_64 GPU-off compile", self.PREBUILD_DRIFT,
+                            self.FLAKE_QUARANTINE},
                          gated)
-        for name in gated - {self.PREBUILD_DRIFT}:
+        for name in gated - {self.PREBUILD_DRIFT, self.FLAKE_QUARANTINE}:
             with self.subTest(step=name):
                 self.assertIn(self.CONDITION, sites[name])
         self.assertNotIn("clean_merge", sites[self.PREBUILD_DRIFT])
+        self.assertNotIn("clean_merge", sites[self.FLAKE_QUARANTINE])
         # The contract lane's own arm refusal is the only other reader.
         self.assertEqual(set(sites) - gated, {"Refuse a head armed before approval (contract lane)"})
 
