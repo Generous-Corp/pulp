@@ -251,6 +251,15 @@ if(APPLE AND NOT PULP_IOS)
         LIBRARIES pulp::platform)
     target_link_libraries(pulp-test-platform-async-dialogs PRIVATE "-framework Cocoa")
 endif()
+if(APPLE AND NOT PULP_IOS)
+    # Popup windows the client draws into: placement, lifetime, dismissal
+    # reasons and the consumed outside click. Own process: the cases dispatch
+    # synthetic events through the application.
+    pulp_add_test_suite(pulp-test-platform-popup-window
+        SOURCES test_platform_popup_window.mm
+        LIBRARIES pulp::platform)
+    target_link_libraries(pulp-test-platform-popup-window PRIVATE "-framework Cocoa")
+endif()
 if(APPLE)
     # Per-binary unique Objective-C class names. The fixture dylib links its own
     # copy of pulp-platform, standing in for a second plug-in in the process.

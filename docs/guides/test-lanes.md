@@ -115,6 +115,9 @@ Routing is driven entirely by CTest `LABELS`, set in each test's
   non-native tier's manifest, classifier or any `test/` CMake registration adds
   `wide-non-native-selftest`. Extra time is capped at ten minutes (batches stop
   starting; the rest are listed as skipped), and the merge group still runs
+  everything. Once the head is approved, `deferred-tests-admission.yml` re-runs
+  its `macos` job to run the skipped tests on the head before admission
+  (`PULP_DEFERRED_ADMISSION=enforce`; shadow when unset).
   everything.
 - **The clean-merge lane** — a pull-request head that is exactly a clean
   merge of `main` into a head whose full macOS lane passed runs only configure,
