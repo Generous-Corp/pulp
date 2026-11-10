@@ -1,0 +1,198 @@
+name: Release configure
+
+# Hosted pre-merge check that every release leg still CONFIGURES (advisory
+# until a follow-up registers it as required; see below).
+#
+# release-cli.yml runs only when a version tag is pushed, and its `release`
+# job needs every leg. A change that breaks one leg's CMake configure is
+# therefore first seen after it has merged and been tagged, and from then on
+# no tag publishes. That happened from v1.81.0 to v1.96.0: a gpu-runtime
+# forward made the darwin-x64 leg (cross-configured for x86_64 on Apple
+# Silicon) stop at configure with "libdawn_combined.a does not match the lock",
+# while the pull-request gate never configured the release matrix and the
+# weekly dry-run's Intel leg is advisory.
+#
+# This workflow runs that configure for every active release platform
+# (tools/scripts/release_product_matrix.json, via release_build_matrix.py) on
+# GitHub-hosted runners, so it takes no gate VM slot. It keeps no copy of the
+# release flags: tools/ci/release_configure_matrix.py replays release-cli.yml's
+# own build-cli steps by name, from the dependency bootstrap through every
+# `cmake -S`, with their build commands stubbed out. Each leg takes minutes.
+#
+# TO BE REQUIRED: decision 33 in .agents/contract.toml. This workflow lands
+# first and is judged from `main`; a later pull request adds `release-configure`
+# to .github/rulesets/main-protection.json, .shipyard/config.toml and the
+# required-check maps, once every leg is green on `main`. A required check that
+# never reports holds a pull request on "Expected" forever, so the triggers
+# already carry no `paths:` filter and the aggregate job runs under
+# `if: always()`; registering it needs no edit here. The scope job decides whether the change can affect a
+# release configure; when it cannot, the legs are skipped and the aggregate
+# passes. tools/ci/test_release_configure_matrix.py holds this file to that.
+
+on:
+  pull_request:
+    branches: [main, 'develop/**']
+  merge_group:
+  # Catches what no pull request changes: a runner image update, or a pinned
+  # asset that moved upstream.
+  schedule:
+    - cron: '23 7 * * *'
+  workflow_dispatch:
+
+# A new push supersedes the pull-request run. A merge group's ref is unique per
+# group, so its runs never share a concurrency domain and none is cancelled.
+concurrency:
+  group: release-configure-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  scope:
+    name: Release configure scope
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+      include: ${{ steps.legs.outputs.include }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          lfs: false
+          fetch-depth: 1
+
+      # Planning reads release-cli.yml, so it needs PyYAML; the legs do not
+      # (they run the plan with the runner's own python3, as the release does).
+      - name: Set up Python
+        uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.12'
+
+      - name: Gate self-test
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet 'pyyaml>=6'
+          python3 tools/ci/test_release_configure_matrix.py
+
+      # A pull request and a queue batch are judged by the same list. An
+      # unreadable diff runs every leg.
+      - name: Decide whether this change can affect a release configure
+        id: decide
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          MQ_BASE: ${{ github.event.merge_group.base_sha }}
+          MQ_HEAD: ${{ github.event.merge_group.head_sha }}
+        run: |
+          set -euo pipefail
+          run="$(python3 tools/ci/release_configure_matrix.py scope \
+            --repo "$GITHUB_REPOSITORY" --from-event)"
+          echo "run=${run}" >> "$GITHUB_OUTPUT"
+
+      - name: Plan every release leg
+        id: legs
+        if: steps.decide.outputs.run == 'true'
+        shell: bash
+        env:
+          # Routes both Darwin legs when GitHub's hosted macOS pool is starved
+          # (a label or a JSON label array). Same-repository events only: a fork
+          # pull request always gets the hosted image.
+          MACOS_RUNS_ON_JSON: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.PULP_RELEASE_CONFIGURE_MACOS_RUNS_ON_JSON || '' }}
+        run: |
+          set -euo pipefail
+          python3 tools/ci/release_configure_matrix.py legs --github-output | tee -a "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/release-configure-plans"
+          python3 tools/ci/release_configure_matrix.py legs \
+            | python3 -c 'import json, sys; print("\n".join(l["platform"] for l in json.load(sys.stdin)))' \
+            > "$RUNNER_TEMP/platforms.txt"
+          while read -r platform; do
+            python3 tools/ci/release_configure_matrix.py plan --platform "$platform" \
+              --out "$RUNNER_TEMP/release-configure-plans/${platform}.json"
+          done < "$RUNNER_TEMP/platforms.txt"
+
+      - name: Upload plans
+        if: steps.decide.outputs.run == 'true'
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: release-configure-plans
+          path: ${{ runner.temp }}/release-configure-plans/
+          retention-days: 3
+          # A re-run of the workflow uploads the plans again under this name.
+          overwrite: true
+
+  configure:
+    name: Release configure (${{ matrix.platform }})
+    needs: scope
+    if: needs.scope.outputs.run == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.scope.outputs.include) }}
+    # The hosted image each release leg builds on (darwin-x64 cross-configures
+    # on Apple Silicon there too), unless the Darwin override above is set.
+    runs-on: ${{ fromJSON(matrix.runs_on_json) }}
+    timeout-minutes: 45
+    steps:
+      # Must run before the checkout to take effect; identical to release-cli.yml's
+      # step of the same name (the self-test compares them).
+      - name: Check out release sources with upstream LF bytes
+        shell: bash
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+      - uses: actions/checkout@v7.0.1
+        with:
+          lfs: false
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/install-linux-build-deps
+        with:
+          profile: native-webview
+
+      - name: Download plans
+        uses: actions/download-artifact@v8
+        with:
+          name: release-configure-plans
+          path: ${{ runner.temp }}/release-configure-plans
+
+      # Replays release-cli.yml's build-cli steps for this leg up to and
+      # including every configure. On failure the CMake error is annotated and
+      # written to the step summary with the local reproduction command.
+      - name: Replay the release configure
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          python3 tools/ci/release_configure_matrix.py run-plan \
+            --plan "$RUNNER_TEMP/release-configure-plans/${PLATFORM}.json"
+
+  release-configure:
+    name: release-configure
+    needs: [scope, configure]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          lfs: false
+          fetch-depth: 1
+          sparse-checkout: |
+            tools/ci/release_configure_matrix.py
+            tools/ci/release_path_changed.py
+          sparse-checkout-cone-mode: false
+      - name: Every release leg configures
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          RUN: ${{ needs.scope.outputs.run }}
+          CONFIGURE_RESULT: ${{ needs.configure.result }}
+        run: python3 tools/ci/release_configure_matrix.py verdict
