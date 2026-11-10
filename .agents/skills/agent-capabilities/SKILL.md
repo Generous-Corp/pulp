@@ -2039,3 +2039,13 @@ run `--write` and `--check`. Never keep the branch's history blob: it shows up
 as millions of deleted lines and replaces main's format. Worked example
 (2026-11-08, the G5 host-ingress adapter): after the merge, the diff against
 main shrank from -2,530,508 lines to the PR's own 15 files.
+
+## A new overload in `audio_file.hpp` costs a fingerprint refresh, not a bump
+
+`audio_file.hpp` is a reviewed infrastructure header. Adding a declaration to it
+(for example the atomic WAV writer's `WavReplace` overload) changes its bytes, so
+`--check` fails until the fingerprint in `agent_capability_registry.py` is updated.
+Edit only that hash, then run `agent_capability_rederive.py` against the base: it
+confirms the counters stay at the base value (no manual `SURFACE_INVENTORY_VERSION`
+bump) and rewrites `agent-capability-surface.json`. Hand-bumping the version, as
+the section above describes for other headers, was not needed here.
