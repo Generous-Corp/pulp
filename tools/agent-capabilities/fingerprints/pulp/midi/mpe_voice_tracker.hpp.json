@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/midi/mpe_voice_tracker.hpp",
+  "fingerprint": "sha256:c90be261b57145983c90b269c2d4512b9d3211f492032dbc55885c197cfb6299"
+}

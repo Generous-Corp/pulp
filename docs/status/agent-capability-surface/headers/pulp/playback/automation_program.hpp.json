@@ -1,0 +1,11 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/automation_program.hpp",
+  "fingerprint": "sha256:c12cec87efad34083f509829ab4a6b51cde276c3cafb7ed05f0d9697a7b0b716",
+  "include": "pulp/playback/automation_program.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "sequence.controller-playback"
+  ],
+  "rationale": "AutomationProgramInstanceToken, AutomationProgramErrorCode/Error, and AutomationProgramSegment — the compiled automation vocabulary a track program is expressed over, carrying both tick and sample bounds so a segment means the same thing to the document and to the render path. It reaches pulp/playback/program.hpp through track_mixer_program.hpp, so the sequence.controller-playback bindings depend on it at compile time."
+}

@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/sample_starvation_envelope.hpp",
+  "fingerprint": "sha256:18409577e896742b093e477d37c7fd850a548f904c879ea872205334f56b5d3b",
+  "include": "pulp/audio/sample_starvation_envelope.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

@@ -1,0 +1,9 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/midi.hpp",
+  "fingerprint": "sha256:874271b4160eac446ab91943b192f7652c4e340afbb373b70c3affc8ee6a49e8",
+  "include": "pulp/midi/midi.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Convenience umbrella include only; operation-owning headers are bound directly."
+}

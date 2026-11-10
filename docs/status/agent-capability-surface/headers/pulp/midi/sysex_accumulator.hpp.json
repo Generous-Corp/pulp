@@ -1,0 +1,9 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/sysex_accumulator.hpp",
+  "fingerprint": "sha256:d4820481a0bf30553f2990f096cb1684ab4f1762d85df08b38c21d0d63823623",
+  "include": "pulp/midi/sysex_accumulator.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

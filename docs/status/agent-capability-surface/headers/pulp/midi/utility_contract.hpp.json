@@ -1,0 +1,25 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/utility_contract.hpp",
+  "fingerprint": "sha256:3ecd5aa5c92a2ac31e133059c97915257df2018b904f9fce39d1b0c6f1dadb70",
+  "include": "pulp/midi/utility_contract.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "midi.arpeggiator",
+    "midi.channel-routing",
+    "midi.chord-memory",
+    "midi.controller-mapping",
+    "midi.humanize",
+    "midi.keyboard-split",
+    "midi.latch",
+    "midi.linear-step-player",
+    "midi.monophonic-note-selection",
+    "midi.note-delay",
+    "midi.note-length-shaping",
+    "midi.note-range-filtering",
+    "midi.note-repeat",
+    "midi.scale-aware-mpe-pitch",
+    "midi.strum-spread"
+  ],
+  "rationale": "Shared overflow, ordering, transport, reporting, and fail-closed emission vocabulary supports every MIDI utility kernel."
+}

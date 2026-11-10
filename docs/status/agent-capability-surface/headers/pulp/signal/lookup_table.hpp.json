@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/lookup_table.hpp",
+  "fingerprint": "sha256:d7d07aacf201046947b4d9f1cfb27df2dad558cf17d90d66afacb07cbcb5a4ba",
+  "include": "pulp/signal/lookup_table.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

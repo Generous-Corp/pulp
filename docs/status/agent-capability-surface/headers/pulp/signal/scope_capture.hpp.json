@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/scope_capture.hpp",
+  "fingerprint": "sha256:0989e11d3171977da2f2e61d945fb1442fe9a9dfa9df94eb436b19fed3f104b5",
+  "include": "pulp/signal/scope_capture.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.scope-capture"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

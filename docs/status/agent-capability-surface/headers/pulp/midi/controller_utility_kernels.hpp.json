@@ -1,0 +1,12 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/controller_utility_kernels.hpp",
+  "fingerprint": "sha256:4e28f94ab7787db493e743d3f8cf65d1d6c0015dfd15e9425f6006dfe1d9c711",
+  "include": "pulp/midi/controller_utility_kernels.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "midi.controller-mapping",
+    "midi.scale-aware-mpe-pitch"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

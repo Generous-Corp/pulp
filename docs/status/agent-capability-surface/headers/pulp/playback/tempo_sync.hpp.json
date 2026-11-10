@@ -1,0 +1,9 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/tempo_sync.hpp",
+  "fingerprint": "sha256:7c5c6607b7bbbc26622b3f6ab2400c7b9727362ccea6b81a69da3184bbbeae8b",
+  "include": "pulp/playback/tempo_sync.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "The backend-independent external-clock seam: an opaque TempoSyncHostTime that carries its source identity so a device, wall, or different Link clock cannot be handed to the wrong transport, and a TempoSyncCommand bundle applied at the first output sample of a block. It is the licensing- safe abstraction an optional third-party tempo-sync SDK plugs in behind, not an installed capability of its own."
+}

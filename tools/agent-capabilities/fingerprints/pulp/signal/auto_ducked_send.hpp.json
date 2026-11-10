@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/auto_ducked_send.hpp",
+  "fingerprint": "sha256:8246383c5cfe77391c4a4d609112462ef92917bbd4d9aab6e09ac5dab4e584fb"
+}

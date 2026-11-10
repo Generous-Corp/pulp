@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/dynamics_contract.hpp",
+  "fingerprint": "sha256:576ed92bd47a0cce545d9eb5df9a5e83732829944550fff7416c552de2506a2f"
+}

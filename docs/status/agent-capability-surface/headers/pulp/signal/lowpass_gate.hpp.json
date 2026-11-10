@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/lowpass_gate.hpp",
+  "fingerprint": "sha256:c04fd24cabddb1deef4336f06daf639091226cb6e20271bd7ec01f079c356f0a",
+  "include": "pulp/signal/lowpass_gate.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

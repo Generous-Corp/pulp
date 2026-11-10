@@ -3320,7 +3320,7 @@ jobs:
           # Flake exoneration of a failed merge-group run reads other runs'
           # artifacts and main's gate report. It acts only when the repository
           # variable is `enforce`; unset or `shadow` annotates only
-          # (tools/ci/flake_exoneration.py, decisions contract row 33).
+          # (tools/ci/flake_exoneration.py, decisions contract row 34).
           PULP_GH_CLI: gh
           GH_TOKEN: ${{ github.token }}
           PULP_FLAKE_EXONERATION_MODE: ${{ vars.PULP_FLAKE_EXONERATION_MODE }}

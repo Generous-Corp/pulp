@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/blit_oscillator.hpp",
+  "fingerprint": "sha256:8bf6a4bbbc04b30ff2c8e1a63c84c549c90a16813fed0e4409ae7c146f0f75d0",
+  "include": "pulp/signal/blit_oscillator.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.bandlimited-impulse-train"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

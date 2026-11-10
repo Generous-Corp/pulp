@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/tape_machine.hpp",
+  "fingerprint": "sha256:22b96ff46858d85c65b7a1d2ee5c50406759f06d4b944075212243f21536cd00",
+  "include": "pulp/signal/tape_machine.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

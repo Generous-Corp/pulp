@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/rise_fall_generator.hpp",
+  "fingerprint": "sha256:67185305462aff7fef2f089d00f0bf6eeaa5708436e3f042fca6b8271c4b3fa3"
+}
