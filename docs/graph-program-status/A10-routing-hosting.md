@@ -2,7 +2,7 @@
 
 Status: **PARTIAL — exact-current-head installed consumer passes bounded routing/hosting controls; hostile containment remains HOLD**
 
-Current source authority for this refreshed receipt is repair merge head `9cb086b569023c50acd8a76ed20eb0299e6aaa4b`, based on live `origin/main=57bf8800d00329314fc3bb5691182808802195cd`.
+Current source authority for this refreshed receipt is merge head `0aca218a213f9c8cbcf26c370ef659abca337ed4`, based on live `origin/main=d8cae12` at build time. The final PR head carries the same source tree plus this receipt/status merge; `source_tree_archive_sha256=0892058080a8113bcabb1ca82734d74784f67fba3c96581686e7f5cf8d060336` binds the installed source tree.
 The required graph dependencies are present at exact merged heads:
 
 - G-1 named typed ports: PR [#11428](https://github.com/Generous-Corp/pulp/pull/11428), source head `be70e3c44836605ac1279c65a572e833699e1fbb`, merge `e19f556e67129117ef3a4587bff11fdee16ebf44`.
@@ -29,7 +29,7 @@ an installed consumer once an exact-head SDK is available:
 ## Exact current-main installed-SDK consumer (2026-11-10)
 
 The former SDK-availability blocker is cleared for a bounded public-host
-consumer. A clean checkout at repair merge source head `9cb086b569023c50acd8a76ed20eb0299e6aaa4b` (based on live `origin/main=57bf8800d00329314fc3bb5691182808802195cd`)
+consumer. A clean checkout at merge source head `0aca218a213f9c8cbcf26c370ef659abca337ed4` (based on live `origin/main=d8cae12`)
 was configured as a Pulp `release` profile and CMake Release source install with GPU disabled (the consumer
 does not exercise rendering), and `tools/ci/governed-build.sh cmake --build
 build-a10-sdk-release --target install` completed. The installed
@@ -42,7 +42,7 @@ An installed-prefix consumer configured solely with
 wrapper, and passed CTest 1/1. The executable reports
 `a10-routing-hosting PASS sidechain_route_accepted=1 automation_route_accepted=1 pdc=4 transactional_prepare_accepted=1`.
 The receipt is [`receipt.json`](../evidence/a10-routing-hosting-installed-20261110/receipt.json)
-(`sha256=6a64e7deeb1ee6356fe697df1eee7e02087e08674a03df5b069874eee6d03aff).
+(`sha256=56c0c24bd8e73f5c5f915df50907e2641bebfae01d97ba397ee40f00145fdc2f`).
 It records accepted named sidechain and automation route registration, prepared
 latency introspection, and transactional topology preparation plus planted
 refusals for a non-plugin sidechain destination and an unknown parameter. The
