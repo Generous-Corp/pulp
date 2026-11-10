@@ -77,6 +77,28 @@ std::string_view shape_name(Shape shape) {
     return "unknown";
 }
 
+struct PhaseSample {
+    double elapsed_ns = 0.0;
+    std::size_t allocation_bytes = 0;
+};
+
+struct PreparationSample {
+    PhaseSample compile;
+    PhaseSample snapshot_prepare;
+    PhaseSample pool_allocate;
+};
+
+template <typename Function>
+bool measure_phase(PhaseSample& sample, Function&& function) {
+    pulp::test::RtAllocationProbe probe;
+    const auto start = std::chrono::steady_clock::now();
+    const bool ok = function();
+    const auto end = std::chrono::steady_clock::now();
+    sample.elapsed_ns = std::chrono::duration<double, std::nano>(end - start).count();
+    sample.allocation_bytes = probe.allocated_bytes();
+    return ok;
+}
+
 struct Case {
     int scale = 1;
     GraphRuntimeSnapshot snapshot;
@@ -103,7 +125,8 @@ std::vector<float> fixed_input(int frames) {
     return values;
 }
 
-bool build_case(Shape shape, int frames, int scale, Case& result, std::string& error) {
+bool build_case(Shape shape, int frames, int scale, Case& result, std::string& error,
+                PreparationSample& sample) {
     result.scale = scale;
     std::vector<GraphRuntimeNodeSpec> nodes;
     std::vector<GraphRuntimeConnectionSpec> connections;
@@ -171,13 +194,20 @@ bool build_case(Shape shape, int frames, int scale, Case& result, std::string& e
         }
     }
 
-    auto plan = pulp::graph::build_graph_runtime_plan(nodes, connections);
-    if (!plan.ok() || !result.snapshot.reset(std::move(plan.plan), bindings)) {
+    pulp::graph::GraphRuntimePlanResult plan;
+    if (!measure_phase(sample.compile, [&] {
+            plan = pulp::graph::build_graph_runtime_plan(nodes, connections);
+            return plan.ok();
+        }) || !measure_phase(sample.snapshot_prepare, [&] {
+            return result.snapshot.reset(std::move(plan.plan), bindings);
+        })) {
         error = "failed to build graph runtime snapshot";
         return false;
     }
-    if (!result.pool.reset(result.snapshot.buffer_slot_count(),
-                           static_cast<std::uint32_t>(frames))) {
+    if (!measure_phase(sample.pool_allocate, [&] {
+            return result.pool.reset(result.snapshot.buffer_slot_count(),
+                                     static_cast<std::uint32_t>(frames));
+        })) {
         error = "failed to allocate graph runtime pool";
         return false;
     }
@@ -258,10 +288,45 @@ TimedSample timed_sample(Case& test, GraphRuntimeExecutor& executor, double over
             probe.allocation_count()};
 }
 
+void print_phase(std::string_view name,
+                 const std::array<PreparationSample, kSamples>& samples,
+                 PhaseSample PreparationSample::* member) {
+    std::cout << ' ' << name << "_samples_ns=";
+    for (std::size_t i = 0; i < samples.size(); ++i)
+        std::cout << (i ? "," : "") << (samples[i].*member).elapsed_ns;
+    std::cout << ' ' << name << "_allocation_bytes=";
+    for (std::size_t i = 0; i < samples.size(); ++i)
+        std::cout << (i ? "," : "") << (samples[i].*member).allocation_bytes;
+}
+
+bool print_memory(const Case& test, int frames) {
+    const auto& plan = test.snapshot.plan();
+    std::size_t logical_port_slots = 0;
+    for (const auto& node : plan.nodes)
+        logical_port_slots += node.input_ports + node.output_ports;
+    // This public control layout disables liveness reuse; it is constructed
+    // outside every timed phase and never used for the process timing loop.
+    const auto without_reuse = pulp::graph::build_graph_runtime_buffer_assignment(plan, false);
+    if (!without_reuse.ok || without_reuse.slot_count != logical_port_slots ||
+        test.pool.slot_count() > without_reuse.slot_count)
+        return false;
+    const auto scratch_bytes = static_cast<std::size_t>(test.pool.slot_count()) * frames * sizeof(float);
+    std::cout << " node_count=" << plan.node_count()
+              << " edge_count=" << plan.connection_count()
+              << " logical_port_slots=" << logical_port_slots
+              << " no_reuse_slots=" << without_reuse.slot_count
+              << " scratch_slots=" << test.pool.slot_count()
+              << " reused_slots=" << without_reuse.slot_count - test.pool.slot_count()
+              << " sample_bytes=" << sizeof(float)
+              << " scratch_payload_bytes=" << scratch_bytes
+              << " no_reuse_payload_bytes=" << logical_port_slots * frames * sizeof(float);
+    return true;
+}
+
 int run() {
     const auto overhead_ns = timer_overhead_ns();
-    std::cout << "graph_r2_measurement_v1\n";
-    std::cout << "graph_direct_copy_benchmark_v1 timer_overhead_ns=" << std::fixed
+    std::cout << "graph_r2_measurement_v2\n";
+    std::cout << "graph_direct_copy_benchmark_v2 timer_overhead_ns=" << std::fixed
               << std::setprecision(3) << overhead_ns << '\n';
     for (const auto shape : {Shape::Passthrough, Shape::Chain, Shape::Fanout}) {
         for (const int scale : {1, 4, 16, 64}) {
@@ -271,34 +336,31 @@ int run() {
             for (const int frames : {16, 32, 64, 128, 512}) {
                 Case test;
                 std::string error;
-                std::array<double, kSamples> activation_samples{};
-                for (auto& sample : activation_samples) {
+                std::array<PreparationSample, kSamples> preparation_samples{};
+                for (auto& sample : preparation_samples) {
                     Case probe;
-                    const auto build_start = std::chrono::steady_clock::now();
-                    if (!build_case(shape, frames, scale, probe, error)) {
+                    if (!build_case(shape, frames, scale, probe, error, sample)) {
                         std::cerr << "error shape=" << shape_name(shape) << " block=" << frames
                                   << " " << error << '\n';
                         return EXIT_FAILURE;
                     }
-                    const auto build_end = std::chrono::steady_clock::now();
-                    sample =
-                        std::chrono::duration<double, std::nano>(build_end - build_start).count();
                 }
-                if (!build_case(shape, frames, scale, test, error)) {
+                PreparationSample untimed_preparation;
+                if (!build_case(shape, frames, scale, test, error, untimed_preparation)) {
                     std::cerr << "error shape=" << shape_name(shape) << " block=" << frames << " "
                               << error << '\n';
                     return EXIT_FAILURE;
                 }
-                std::sort(activation_samples.begin(), activation_samples.end());
-                const auto activation_p50_ns = activation_samples[kSamples / 2];
-                const auto activation_p99_ns = activation_samples[(kSamples * 99 + 99) / 100 - 1];
-                const auto activation_max_ns = activation_samples.back();
                 std::cout << "shape=" << shape_name(shape) << " scale=" << scale
-                          << " block=" << frames << " activation_p50_ns=" << std::fixed
-                          << std::setprecision(3) << activation_p50_ns
-                          << " activation_p99_sample_ns=" << activation_p99_ns
-                          << " activation_max_ns=" << activation_max_ns
-                          << " scratch_slots=" << test.snapshot.buffer_slot_count() << '\n';
+                          << " block=" << frames;
+                print_phase("compile", preparation_samples, &PreparationSample::compile);
+                print_phase("snapshot_prepare", preparation_samples, &PreparationSample::snapshot_prepare);
+                print_phase("pool_allocate", preparation_samples, &PreparationSample::pool_allocate);
+                if (!print_memory(test, frames)) {
+                    std::cerr << "invalid memory control\n";
+                    return EXIT_FAILURE;
+                }
+                std::cout << '\n';
                 GraphRuntimeExecutor executor;
                 for (int i = 0; i < kWarmupBlocks; ++i) {
                     if (!run_one(test, executor)) {
@@ -364,18 +426,16 @@ int run() {
                         return EXIT_FAILURE;
                     }
                 }
-                std::sort(samples.begin(), samples.end());
-                const auto p50_ns = samples[kSamples / 2];
-                const auto p99_ns = samples[(kSamples * 99 + 99) / 100 - 1];
-                const auto max_ns = samples.back();
-                const auto jitter_ns = max_ns - samples.front();
+                // These are per-block means of unpaced batches. Retain every
+                // mean so the receipt can independently recompute its summary;
+                // none is an individual callback, wakeup, or WCET observation.
                 std::cout << "shape=" << shape_name(shape) << " scale=" << scale
                           << " block=" << frames << " warmup=" << kWarmupBlocks
                           << " iterations=" << kTimedBlocks << " samples=" << kSamples
-                          << " p50_ns=" << std::fixed << std::setprecision(3) << p50_ns
-                          << " p99_sample_ns=" << p99_ns << " max_ns=" << max_ns
-                          << " jitter_ns=" << jitter_ns << " observed_wcet_proxy_ns=" << max_ns
-                          << " oracle=pass"
+                          << " batch_mean_samples_ns=";
+                for (std::size_t i = 0; i < samples.size(); ++i)
+                    std::cout << (i ? "," : "") << samples[i];
+                std::cout                          << " oracle=pass"
                           << " process_allocations=" << process_allocations
                           << " timed_allocations=" << timed_allocations
                           << " timed_allocation_samples=" << kSamples << " output_bits=0x"
