@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/dust.hpp",
+  "fingerprint": "sha256:89ad91c2a9a54ab6f897d379c3587df4566c402abad75b1f71a802b66291684d",
+  "include": "pulp/signal/dust.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.stochastic-sources"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/adsr.hpp",
+  "fingerprint": "sha256:4daa4704d4f686d319cc02512db610cefe5db900eb4d73e47440b355ee2cffa9",
+  "include": "pulp/signal/adsr.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/speaker_cabinet.hpp",
+  "fingerprint": "sha256:458bfadc6e965b3317e69d1d07969ceed4857679d0c4f0a99e449d6f3392e40d",
+  "include": "pulp/signal/speaker_cabinet.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

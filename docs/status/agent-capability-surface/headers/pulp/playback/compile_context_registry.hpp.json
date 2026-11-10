@@ -1,0 +1,9 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/compile_context_registry.hpp",
+  "fingerprint": "sha256:d7da460ae42d89c31bb01a5c1f30da582d96a8abd33e447f2a865f5537a4422f",
+  "include": "pulp/playback/compile_context_registry.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Registry of content-program output kinds and renderer state policies (Reset versus CarryByItemId) plus the ContentFragmentNote fragment type. It is the extension seam the program compiler resolves registered content through, not an advertised installed capability."
+}

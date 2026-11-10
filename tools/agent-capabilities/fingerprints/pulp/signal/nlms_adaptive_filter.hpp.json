@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/nlms_adaptive_filter.hpp",
+  "fingerprint": "sha256:ac5d8961a7dc69bd24a4ab8f6389e6e0f62eb5ac7dc433ebabe845e15366298b"
+}

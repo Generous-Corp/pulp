@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/expander.hpp",
+  "fingerprint": "sha256:bf318bbe864c1ea706eed101e63f6469602a7c7c639ce86bffb650c13ef08741"
+}

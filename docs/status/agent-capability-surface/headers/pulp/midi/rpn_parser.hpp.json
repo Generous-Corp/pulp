@@ -1,0 +1,9 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/rpn_parser.hpp",
+  "fingerprint": "sha256:60f5770bd9ca92bffe45753b864c30388e23072192b7478791248ef7484efd8c",
+  "include": "pulp/midi/rpn_parser.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

@@ -1,0 +1,9 @@
+{
+  "domain": "host",
+  "source": "core/host/include/pulp/host/plugin_identity.hpp",
+  "fingerprint": "sha256:f5d1fe9c5e8038b5cbb564170a8cb23fe7abb79b0c6009f5f6ec8b0d8b578060",
+  "include": "pulp/host/plugin_identity.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Host plugin discovery and explicit strict CLAP selection evidence; not a generator capability or graph identity schema."
+}

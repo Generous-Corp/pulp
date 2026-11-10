@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/signalsmith_time_pitch_processor.hpp",
+  "fingerprint": "sha256:7f690f3e7a61e70061636cc3b7ded24a89b1e41ac4ec1786173c4856fcc26224",
+  "include": "pulp/audio/signalsmith_time_pitch_processor.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

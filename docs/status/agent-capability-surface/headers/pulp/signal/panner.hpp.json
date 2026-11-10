@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/panner.hpp",
+  "fingerprint": "sha256:2642e7237385c323d7d89e434132285f5c917449d7db51c3d8535d754b4fcce6",
+  "include": "pulp/signal/panner.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

@@ -41,9 +41,6 @@ EXPORTS = [
                 include="pulp/signal/osc/minblep.hpp",
                 qualified_name="pulp::signal::osc::MinBlepAccumulator<>",
                 target="Pulp::signal",
-                header_fingerprint=(
-                    "sha256:838567bf66f86f232dc6239d74b77cb7a456eb854831b73f70e9641e0d21c9f6"
-                ),
             ),
         ],
         _link_probes=[
@@ -96,9 +93,6 @@ EXPORTS = [
                 include="pulp/signal/mirrored_history_buffer.hpp",
                 qualified_name="pulp::signal::MirroredHistoryBuffer<float>",
                 target="Pulp::signal",
-                header_fingerprint=(
-                    "sha256:5f203acc21d01060d814ec0a19a82cd9aa8ffc669a9836fa929af888c4f31c2a"
-                ),
             )
         ],
         _link_probes=[{
@@ -148,9 +142,6 @@ EXPORTS = [
                 include="pulp/signal/windowing.hpp",
                 qualified_name="pulp::signal::WindowFunction",
                 target="Pulp::signal",
-                header_fingerprint=(
-                    "sha256:672043aa1a9a0d0a0cd28a82cd7b7d81e57de035b963e0226c23b85b42ce1f7f"
-                ),
             )
         ],
         _link_probes=[{
@@ -198,9 +189,6 @@ EXPORTS = [
                 include="pulp/signal/saturator.hpp",
                 qualified_name="pulp::signal::SaturatorT<float>",
                 target="Pulp::signal",
-                header_fingerprint=(
-                    "sha256:667d9d469664030330fd147b71a092407d327a5338fc6e09018c943a2f919e6e"
-                ),
             )
         ],
         forge_descriptor={"catalog": "forge-catalog.json", "node_key": "saturator"},
@@ -252,9 +240,6 @@ EXPORTS = [
                 include="pulp/signal/sos_cascade.hpp",
                 qualified_name="pulp::signal::SosCascadeT<float>",
                 target="Pulp::signal",
-                header_fingerprint=(
-                    "sha256:d0521809894f9de1c0ab61ab94d5f14d5d6ad90bd64a5f4bb39706f16a817af3"
-                ),
             )
         ],
         _link_probes=[{
@@ -305,9 +290,6 @@ EXPORTS = [
                 include="pulp/audio/instrument_voice_allocator.hpp",
                 qualified_name="pulp::audio::InstrumentVoiceAllocator",
                 target="Pulp::audio",
-                header_fingerprint=(
-                    "sha256:f500f22c9e5ce4a1a26a03245b68e645ef6752dd2f4d0f59cf122681e0a2327f"
-                ),
             )
         ],
         _link_probes=[{
@@ -360,9 +342,6 @@ EXPORTS = [
                 include="pulp/midi/mpe_voice_tracker.hpp",
                 qualified_name="pulp::midi::MpeVoiceTracker",
                 target="Pulp::midi",
-                header_fingerprint=(
-                    "sha256:c90be261b57145983c90b269c2d4512b9d3211f492032dbc55885c197cfb6299"
-                ),
             )
         ],
         _link_probes=[{
@@ -410,9 +389,6 @@ EXPORTS = [
                 include="pulp/music/spelling.hpp",
                 qualified_name="pulp::music::spell_pitch_class",
                 target="Pulp::music",
-                header_fingerprint=(
-                    "sha256:2a0f8acc58dd5525631d694ae6b989ec7d50a2bf305d176414ee51a542673c13"
-                ),
             ),
             binding(
                 role="name-operation",
@@ -420,9 +396,6 @@ EXPORTS = [
                 include="pulp/music/spelling.hpp",
                 qualified_name="pulp::music::spelling_name",
                 target="Pulp::music",
-                header_fingerprint=(
-                    "sha256:2a0f8acc58dd5525631d694ae6b989ec7d50a2bf305d176414ee51a542673c13"
-                ),
             ),
             binding(
                 role="formula-operation",
@@ -430,9 +403,6 @@ EXPORTS = [
                 include="pulp/music/spelling.hpp",
                 qualified_name="pulp::music::spell_chord",
                 target="Pulp::music",
-                header_fingerprint=(
-                    "sha256:2a0f8acc58dd5525631d694ae6b989ec7d50a2bf305d176414ee51a542673c13"
-                ),
                 address_expression=(
                     "static_cast<std::optional<pulp::music::SpelledChord> (*)("
                     "pulp::music::PitchClass, const pulp::music::ChordFormula&, "
@@ -446,9 +416,6 @@ EXPORTS = [
                 include="pulp/music/spelling.hpp",
                 qualified_name="pulp::music::spell_chord",
                 target="Pulp::music",
-                header_fingerprint=(
-                    "sha256:2a0f8acc58dd5525631d694ae6b989ec7d50a2bf305d176414ee51a542673c13"
-                ),
                 address_expression=(
                     "static_cast<std::optional<pulp::music::SpelledChord> (*)("
                     "const pulp::music::Chord&, pulp::music::AccidentalPolicy) noexcept>("
@@ -533,9 +500,6 @@ EXPORTS = [
                 include="pulp/music/harmony.hpp",
                 qualified_name="pulp::music::recognize_chord",
                 target="Pulp::music",
-                header_fingerprint=(
-                    "sha256:8e5ce059f95c6817e05a9b6cf6bf94599d54fdf82da7fe7e9a12ffe27b0b9e60"
-                ),
                 address_expression=(
                     "static_cast<std::optional<pulp::music::ChordRecognitionList> (*)("
                     "pulp::music::PitchClassSet, std::optional<pulp::music::PitchClass>) "
@@ -548,9 +512,6 @@ EXPORTS = [
                 include="pulp/music/harmony.hpp",
                 qualified_name="pulp::music::recognize_chord",
                 target="Pulp::music",
-                header_fingerprint=(
-                    "sha256:8e5ce059f95c6817e05a9b6cf6bf94599d54fdf82da7fe7e9a12ffe27b0b9e60"
-                ),
                 address_expression=(
                     "static_cast<std::optional<pulp::music::ChordRecognitionList> (*)("
                     "std::span<const int>) noexcept>(&pulp::music::recognize_chord)"
@@ -615,9 +576,6 @@ EXPORTS = [
                 include="pulp/music/voicing.hpp",
                 qualified_name="pulp::music::voice_chord",
                 target="Pulp::music",
-                header_fingerprint=(
-                    "sha256:2e9c5c02b29c3cba699b5f4c6cf89207626aa3fd19cbe4b46bfaf2642925d95d"
-                ),
             ),
             binding(
                 role="voice-leading-operation",
@@ -625,9 +583,6 @@ EXPORTS = [
                 include="pulp/music/voicing.hpp",
                 qualified_name="pulp::music::minimum_motion_voice_leading",
                 target="Pulp::music",
-                header_fingerprint=(
-                    "sha256:2e9c5c02b29c3cba699b5f4c6cf89207626aa3fd19cbe4b46bfaf2642925d95d"
-                ),
             ),
         ],
         _link_probes=[

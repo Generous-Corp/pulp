@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/timebase/tick.hpp",
+  "fingerprint": "sha256:e648c10386afc397349a341787aa4773326b551fb8f8f33e08bc9925aea42452"
+}
