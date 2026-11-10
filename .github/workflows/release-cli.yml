@@ -333,9 +333,20 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
         run: |
           set -euo pipefail
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            ca-certificates gnupg software-properties-common
+          # This step runs before checkout, so the retry is inline rather than
+          # tools/ci/apt-install-retry.sh (same behaviour: a stale index 404s a
+          # .deb mid-publish; refresh and retry, 3 attempts).
+          apt_install() {
+            local n
+            for n in 1 2 3; do
+              if apt-get update && apt-get install -y --fix-missing --no-install-recommends "$@"; then
+                return 0
+              fi
+              [ "$n" -lt 3 ] && { echo "apt install attempt $n failed; refreshing index" >&2; sleep $((5 * n)); }
+            done
+            return 1
+          }
+          apt_install ca-certificates gnupg software-properties-common
           # Pulp's logging (core/runtime/log.hpp) includes <format>, which
           # libstdc++ only ships from GCC 13. jammy's default is GCC 11 (no
           # <format>) — ubuntu-latest builds fine because 24.04 defaults to GCC
@@ -344,8 +355,7 @@ jobs:
           # objects still link against jammy's glibc, so the floor stays at the
           # base-image level (measured by the --elf report step below).
           add-apt-repository -y ppa:ubuntu-toolchain-r/test
-          apt-get update
-          apt-get install -y --no-install-recommends \
+          apt_install \
             git git-lfs sudo curl xz-utils \
             build-essential gcc-13 g++-13 pkg-config binutils \
             unzip zip file lcov \
@@ -748,10 +758,10 @@ jobs:
           echo "PULP_CONTROL_STANDALONE_HOST_FLOOR=$control_standalone_host_floor" >> "$GITHUB_ENV"
 
       # The Intel leg cross-compiles on an Apple-Silicon runner, whose
-      # bootstrap (setup.sh --ci) prefetched the darwin-ARM64 Skia and flattened
-      # a thin arm64 `libskia.a` into external/skia-build/build. The x86_64 fetch
-      # below refuses to clobber that flat file, so without this purge the
-      # x86_64 link silently pulls arm64 Skia. Proven by intel-vm-cross-build.sh.
+      # bootstrap (setup.sh --ci) prefetched Skia into external/skia-build/build.
+      # darwin-x64 resolves the same universal archive as darwin-arm64 (the one
+      # gpu-runtime's renderer lock pins), and the purge keeps the fetch below
+      # writing its own darwin-x64 generation instead of trusting a prefetch.
       - name: Purge host-arch Skia before Intel cross-fetch (darwin-x64)
         if: matrix.platform == 'darwin-x64'
         run: rm -rf external/skia-build/build external/skia-build/.skia-asset-sha256
@@ -761,10 +771,10 @@ jobs:
         run: python3 tools/scripts/fetch_skia_for_release.py ${{ matrix.platform }}
         shell: bash
 
-      # Defense-in-depth for the Skia arch-clobber hazard: prove the flat
-      # libskia.a we just fetched is actually x86_64 before we link it. Catches
-      # a stale arm64 Skia surviving the purge above (a wrong-arch link would
-      # otherwise fail much later in the build with cryptic symbol errors).
+      # Defense-in-depth: prove the libskia.a we just fetched contains an x86_64
+      # slice before we link it (the universal archive carries x86_64 and
+      # arm64). A thin arm64 Skia would otherwise fail much later in the build
+      # with cryptic symbol errors.
       - name: Verify fetched Skia is x86_64 (darwin-x64)
         if: matrix.platform == 'darwin-x64'
         run: |
@@ -1048,7 +1058,7 @@ jobs:
 
       - name: Install Linux rpath helper
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y patchelf
+        run: sudo tools/ci/apt-install-retry.sh patchelf
 
       # Bundle the wgpu-native dynamic dependency next to the binary
       # and rewrite the rpath so the artifact is portable. Closes

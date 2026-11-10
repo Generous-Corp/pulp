@@ -88,6 +88,17 @@ member). VST3 then offers `IMidiLearn`, and a controller move the host reports
 binds the parameter being learned without waiting for a burst
 (`MidiLearnEngine::host_reported_controller`).
 
+## Reserving controllers
+
+A plug-in that uses some MIDI messages itself, such as a preset router that
+consumes Bank Select and Program Change, can claim them with a
+`state::MidiSourceReservation` and `engine.set_reservation(&claim)`. A claimed
+source cannot be mapped or learned, a learn on one ends with `bound = false` and
+`refused_reason` set to the reservation's text, mappings on claimed sources are
+dropped when loaded or restored, and a mapping that already exists stays silent
+while the claim is in force. `claims()` runs on the audio thread, so it must not
+allocate or lock, and an omni source overlaps any channel the owner listens on.
+
 ## Saving and loading
 
 Mappings belong to the controller, not the sound, so by default they are saved

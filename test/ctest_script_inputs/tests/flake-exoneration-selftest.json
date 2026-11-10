@@ -1,0 +1,33 @@
+{
+ "name": "flake-exoneration-selftest",
+ "record": {
+  "entry": "tools/ci/test_flake_exoneration.py",
+  "inputs": [
+   ".github/actions",
+   ".github/workflows",
+   ".github/workflows/build.yml",
+   "docs/status/consumption-profiles.json",
+   "docs/status/consumption-profiles.schema.json",
+   "test/cmake/consumption_census_tests.cmake",
+   "test/ctest_script_inputs",
+   "test/ctest_script_inputs/tests",
+   "tools/ci",
+   "tools/ci/base_poison_detector.py",
+   "tools/ci/drift_fast.json",
+   "tools/ci/flake_exoneration.py",
+   "tools/ci/flake_exoneration_shadow.py",
+   "tools/ci/install_visual_python_deps.sh",
+   "tools/ci/test_flake_exoneration.py",
+   "tools/motion/visual/requirements.lock",
+   "tools/motion/visual/requirements.txt",
+   "tools/scripts/consumption_census.py",
+   "tools/scripts/consumption_census_contract.py",
+   "tools/scripts/gate_suite_executed.py",
+   "tools/scripts/queue_batch_attribute.py",
+   "tools/scripts/queue_known_flakes.json",
+   "tools/scripts/script_argv.py",
+   "tools/scripts/script_inputs_store.py"
+  ],
+  "kind": "python"
+ }
+}

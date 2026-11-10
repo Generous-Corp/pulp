@@ -97,6 +97,16 @@ the duration. The pause is deliberately time-boxed —
 subset. When judging "why did no Intel artifact ship for vX.Y.Z", check that
 field for the era before suspecting the cross-compile leg.
 
+**The Intel leg uses the same GPU device layer as arm64.** Every macOS
+architecture forwards to gpu-runtime, whose renderer lock pins the universal
+skia-build asset's Dawn, so `mac-x86_64` resolves that universal archive and
+the cross-compile links its x86_64 slice. The leg's Skia check therefore asks
+for an x86_64 slice, not a thin x86_64 `libskia.a`. A configure failure of the
+form "libdawn_combined.a does not match the lock" on darwin-x64 means a
+`mac-*` selector drifted off the universal digest (`audit.py --strict` catches
+it). Do not answer it with an architecture opt-out back to Pulp's own device
+sources; `gpu-runtime-apple-targets` fails on one.
+
 ## The five lint classes (and why they are scoped the way they are)
 
 1. Raw NEON intrinsics / `arm_neon.h` outside an `__aarch64__`/`__ARM_NEON`
