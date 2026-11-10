@@ -496,8 +496,10 @@ int cmd_graph(const std::vector<std::string>& args) {
         (op == "fmt" && std::find(args.begin() + 2, args.end(), "--notation") != args.end())) {
         auto strict = pulp::host::load_graph_patch_file(path);
         if (!strict) {
-            if (json) std::cout << pulp::host::graph_patch_diagnostic_json(strict.diagnostic) << '\n';
-            else std::cerr << "pulp graph: " << strict.diagnostic.message() << '\n';
+            if (json)
+                std::cout << pulp::host::graph_patch_diagnostic_json(strict.diagnostic) << '\n';
+            else
+                std::cerr << "pulp graph: " << strict.diagnostic.message() << '\n';
             return 1;
         }
         graph_ptr = std::move(strict.graph);
@@ -506,8 +508,10 @@ int cmd_graph(const std::vector<std::string>& args) {
         loaded = pulp::host::GraphSerializer::from_file(*graph_ptr, path, opts);
         if (!loaded.ok) {
             const auto file_error = loaded.error.starts_with("graph file ");
-            if (json) json_error(file_error ? "file_unreadable" : "invalid_graph", loaded.error);
-            else std::cerr << "pulp graph: " << loaded.error << '\n';
+            if (json)
+                json_error(file_error ? "file_unreadable" : "invalid_graph", loaded.error);
+            else
+                std::cerr << "pulp graph: " << loaded.error << '\n';
             return 1;
         }
     }
@@ -516,16 +520,20 @@ int cmd_graph(const std::vector<std::string>& args) {
     if (op == "fmt" && (notation || as_notation)) {
         const auto formatted = pulp::host::format_graph_patch(graph);
         if (!formatted) {
-            if (json) std::cout << pulp::host::graph_patch_diagnostic_json(formatted.diagnostic) << '\n';
-            else std::cerr << formatted.diagnostic.message() << '\n';
+            if (json)
+                std::cout << pulp::host::graph_patch_diagnostic_json(formatted.diagnostic) << '\n';
+            else
+                std::cerr << formatted.diagnostic.message() << '\n';
             return 1;
         }
         if (json) {
             auto result = choc::value::createObject("GraphNotation");
-            result.addMember("valid", true); result.addMember("code", "Ok");
+            result.addMember("valid", true);
+            result.addMember("code", "Ok");
             result.addMember("notation", formatted.text);
             std::cout << choc::json::toString(result) << '\n';
-        } else std::cout << formatted.text;
+        } else
+            std::cout << formatted.text;
         return 0;
     }
     if (op == "validate") {

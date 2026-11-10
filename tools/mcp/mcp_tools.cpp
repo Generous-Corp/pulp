@@ -225,7 +225,8 @@ std::string handle_graph(const std::string& params_json) {
         return "{\"isError\":" + std::string(failed ? "true" : "false") +
                ",\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
     }
-    if (op == "fmt") command += " --notation";
+    if (op == "fmt")
+        command += " --notation";
     const auto result = exec_with_status(command + " 2>&1");
     return "{\"isError\":" + std::string(result.failed() ? "true" : "false") +
            ",\"content\":[{\"type\":\"text\",\"text\":" + json_string(result.output) + "}]}";

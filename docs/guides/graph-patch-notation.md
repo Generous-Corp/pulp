@@ -130,7 +130,7 @@ owning typed APIs. This bounded profile is not full G2 completion.
 ## Installed consumer and evidence
 
 `examples/graph-patch-consumer` is a standalone `find_package(Pulp COMPONENTS
-host)` project. Its Processor plus registration and main are under 100 lines
+host)` project. Its Processor plus registration and main are 100 lines
 of glue. It restores the ten-line notation through `.pulpgraph`, then renders
 257 frames independently checked against 0.375 for the first 64 frames (one
 injected MIDI note) and 0.25 afterward. The numeric oracle follows directly

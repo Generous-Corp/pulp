@@ -14,9 +14,19 @@ namespace pulp::host {
 /// the source line and give an actionable correction; no graph is returned on failure.
 struct GraphPatchDiagnostic {
     enum class Code {
-        Ok, UnknownNode, UnknownPort, KindMismatch, IllegalCycle, Duplicate,
-        SyntaxError, InvalidDocument, UnsupportedContract, ParameterOutOfRange,
-        RestoreFailed, ResourceLimit, FileUnreadable
+        Ok,
+        UnknownNode,
+        UnknownPort,
+        KindMismatch,
+        IllegalCycle,
+        Duplicate,
+        SyntaxError,
+        InvalidDocument,
+        UnsupportedContract,
+        ParameterOutOfRange,
+        RestoreFailed,
+        ResourceLimit,
+        FileUnreadable
     };
     Code code = Code::Ok;
     std::size_t line = 0;
@@ -24,7 +34,9 @@ struct GraphPatchDiagnostic {
     std::string port;
     std::string rule;
     std::string suggested_fix;
-    explicit operator bool() const noexcept { return code == Code::Ok; }
+    explicit operator bool() const noexcept {
+        return code == Code::Ok;
+    }
     std::string message() const;
 };
 const char* graph_patch_code_name(GraphPatchDiagnostic::Code code) noexcept;
@@ -33,12 +45,16 @@ std::string graph_patch_diagnostic_json(const GraphPatchDiagnostic& diagnostic);
 struct GraphPatchResult {
     GraphPatchDiagnostic diagnostic;
     std::unique_ptr<SignalGraph> graph;
-    explicit operator bool() const noexcept { return bool(diagnostic) && bool(graph); }
+    explicit operator bool() const noexcept {
+        return bool(diagnostic) && bool(graph);
+    }
 };
 struct GraphPatchText {
     GraphPatchDiagnostic diagnostic;
     std::string text;
-    explicit operator bool() const noexcept { return bool(diagnostic); }
+    explicit operator bool() const noexcept {
+        return bool(diagnostic);
+    }
 };
 
 /// Projection of existing runtime registrations, not a DSP inventory. Processor
@@ -73,8 +89,8 @@ GraphPatchText format_graph_patch(const SignalGraph& graph, const GraphPatchCata
 /// original edge before returning it. GraphSerializer's tolerant legacy loader
 /// is unchanged. Unsupported contracts are refused, never silently discarded.
 GraphPatchResult load_graph_patch_json(std::string_view json,
-                                      const GraphPatchCatalog& catalog = {});
+                                       const GraphPatchCatalog& catalog = {});
 GraphPatchResult load_graph_patch_file(const std::filesystem::path& path,
-                                      const GraphPatchCatalog& catalog = {});
+                                       const GraphPatchCatalog& catalog = {});
 
 } // namespace pulp::host
