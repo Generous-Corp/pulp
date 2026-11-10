@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/osc/dco.hpp",
+  "fingerprint": "sha256:b68f6d0563c04e0cc22e8fefc8c53166c7d9fd1c19a020c3055e2d0b8a5495cf",
+  "include": "pulp/signal/osc/dco.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

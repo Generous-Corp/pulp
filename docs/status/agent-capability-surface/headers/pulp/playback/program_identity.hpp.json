@@ -1,0 +1,11 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/program_identity.hpp",
+  "fingerprint": "sha256:92ea83fe26d3d39d244ba0860cb9094ff08e0392c1bc19ce6279412b1adbc0b4",
+  "include": "pulp/playback/program_identity.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "sequence.controller-playback"
+  ],
+  "rationale": "ProgramGeneration, RendererProgramKey, and is_monotonic_renderer_adoption: the identity vocabulary that lets a renderer refuse a non-monotonic program swap rather than adopt a stale publication. pulp/playback/program.hpp includes it directly and expresses program publication in these types, so it is required support for the sequence.controller-playback bindings rather than an independent claim."
+}

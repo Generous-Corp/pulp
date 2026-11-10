@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/fir_filter.hpp",
+  "fingerprint": "sha256:6f7610684f4b26bb9cd9cf258ec7131f6ecd9bf69fce36e4fa43caf22a1876df",
+  "include": "pulp/signal/fir_filter.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "General FIR filter over a linear sample history whose outputs are pulp::simd dot and correlate calls. A bounded DSP primitive a processor drives from its own process(); its coefficient generators and taps are documented in the signal guide, and it makes no installed agent capability claim of its own."
+}

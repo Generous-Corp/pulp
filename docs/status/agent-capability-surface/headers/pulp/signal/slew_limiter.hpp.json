@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/slew_limiter.hpp",
+  "fingerprint": "sha256:df25dd785055fa158bff4189eef1cae94911d15219ef7d6c06e8c92a0739aeb4",
+  "include": "pulp/signal/slew_limiter.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

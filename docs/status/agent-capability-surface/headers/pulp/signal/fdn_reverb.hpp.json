@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/fdn_reverb.hpp",
+  "fingerprint": "sha256:c980772afae85436de3904079bfe8cfb3cd328f4c33b03531ce075f974797df5",
+  "include": "pulp/signal/fdn_reverb.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "The multirate sixteen-line FDN reverb engine and its block-processing entry points. A processor primitive driven from the owner's own process(); the Forge FDN reverb catalog exposes it to products, and it makes no installed agent capability claim of its own."
+}

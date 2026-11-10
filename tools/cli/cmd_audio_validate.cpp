@@ -97,6 +97,15 @@ std::optional<DecodedAudio> decode(const std::string& path) {
     }
     auto file = pulp::audio::read_audio_file(path);
     if (!file) {
+        // The layout read already ran the decoder's own acceptance check, so
+        // when it names why the file cannot decode, say that instead of a
+        // generic guess.
+        if (layout.decode && !layout.decode->decodable && !layout.decode->reason.empty()) {
+            std::cerr << "Error: audio file cannot be decoded: " << path << ": "
+                      << layout.decode->reason
+                      << ". `pulp audio inspect` reports the header without decoding.\n";
+            return std::nullopt;
+        }
         std::cerr << "Error: could not decode audio file (unsupported format "
                      "or corrupt): "
                   << path << "\n";

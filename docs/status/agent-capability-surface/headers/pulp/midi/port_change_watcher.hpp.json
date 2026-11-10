@@ -1,0 +1,9 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/port_change_watcher.hpp",
+  "fingerprint": "sha256:dd44aa22142690a6a679adcce7dbdc386128fa381381268ba3c813d0d95398a0",
+  "include": "pulp/midi/port_change_watcher.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Port-list diffing and polling notifier for backends without native hotplug events; not a generator-facing capability."
+}

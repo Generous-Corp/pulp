@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/junction.hpp",
+  "fingerprint": "sha256:fe1f4c67f07ef6565fa3efb4a4414debd8fb903f62f804d2052ccadbc6ade1d1",
+  "include": "pulp/signal/junction.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/tempo_delay_wrapper.hpp",
+  "fingerprint": "sha256:f01d65b929e0137704e32b7a4a6e4dacc4d8f3dbf933ca1fe19529b16c9e0ccd"
+}

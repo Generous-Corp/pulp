@@ -830,11 +830,12 @@ a `schema` string next to the older `schema_version` integer, and its
 `--absolute-paths` to get the path back), so match `scenario` on the basename.
 The same document shape is what `pulp audio render --manifest` and the
 failing-scenario artifacts write, so all three share the
-one schema id. When `summarize` refuses a file because its header declares
-more than the format registry's decode ceiling (2^30 frames, 4 GiB of float
-output), stderr names the limit and points at `pulp audio inspect`, which
-reads the header without decoding; "could not decode" on a big file is a
-limit, not corruption.
+one schema id. When `summarize` refuses a file past the format registry's
+decode ceiling (2^30 frames, 4 GiB of float output), stderr names the limit
+and points at `pulp audio inspect`, which reads the header without decoding.
+For a WAV the ceiling binds the frames the file holds. A WAV whose header
+claims frames it does not hold is refused with the decoder's own reason, such
+as "holds no whole frame", not as a limit.
 
 `pulp audio inspect <file>` is the header-only companion: regions with
 offsets, parsed fields, spec-violation warnings, the in-memory decoder's

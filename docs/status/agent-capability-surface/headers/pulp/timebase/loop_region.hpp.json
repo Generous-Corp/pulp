@@ -1,0 +1,9 @@
+{
+  "domain": "timebase",
+  "source": "core/timebase/include/pulp/timebase/loop_region.hpp",
+  "fingerprint": "sha256:836588746669ec85e7e7fdda636b0a21e70435a17fc1af12d0626721115de59c",
+  "include": "pulp/timebase/loop_region.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}
