@@ -129,8 +129,9 @@ source. No morph DSP or codec wire format was edited.
 - Production mutation baseline/broken/restored exits: **0/42/0** for digest,
   metadata/length binding, edge-kind validation and wrong-asset selection.
 - Official complete-profile inventory was generated to a temporary destination;
-  only `test/ctest_script_inputs/executables/pulp-test-spectral-graph-persistence.json`
-  was selected for this branch. No public transitive loader API was added and
+  only the new `pulp-test-spectral-graph-persistence.json` and
+  `pulp-a3-replay-fixture-writer.json` executable fragments were selected for
+  this branch. No public transitive loader API was added and
   existing loader coverage reports no gaps; no scanner rule was changed.
 - Source gates correctly refuse source-selftest/build/diff-coverage suites on
   this dedicated-builder host. Those lanes remain NOT CHECKED locally. The
@@ -142,3 +143,29 @@ Repaired notation dependency is still OPEN at
 format-5 discriminator/migration scaffold. This branch has not copied or
 published either dependency. Notation integration and a complete unarmed PR
 remain pending those coordinated dependencies.
+
+## Clean dependency handoff
+
+Root requested a stop after independent gates because repaired notation
+`7704749e0860016662491d128013ac34b6b19f42` is OPEN with macOS running and no
+counted verdict, and the shared G5 format-5 scaffold is still being authored.
+No dependency commit was copied and no PR was created or pushed by this branch.
+Resume only when root relays the actual landed dependency heads, then integrate
+catalog spectral bindings, mono boundaries, exact-configuration formatting and
+typed-edge strict loading, extend the pinned notation fixture/consumer, rerun
+exact-head validation, and publish the single unarmed PR.
+
+The final gate pass initially found the fixture-writer executable fragment
+missing. Its official generated fragment is now included alongside the focused
+test fragment. Advisory unrelated inherited inventory differences were left
+untouched. A final reconfigure and source-gate rerun follows this evidence
+commit; its exact process result is supplied in the cmux handoff.
+
+Installed independent-slice executable: 4,003,440 bytes, SHA256
+`9bc25d6131da3b026be4b4c2dcbd607e3230e79373006b4c102e3bfad2057cb5`.
+Producer marker digest:
+`28224cf0e9599bf217fbcf1d485f2db0c789ba8ee99a492212a34971cc8e7a22`.
+Expected numeric output peak `8.0661982593266401e-08`, RMS
+`6.7957485130856682e-09`; rendered binary32 output SHA256
+`76553b80d5d0afdf7e99fd952fdcfbc9ea649603358c324d191925d07532d3b9`.
+These are independent-slice receipts, not final integrated exact-head proof.
