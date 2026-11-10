@@ -1221,13 +1221,13 @@ class AbandonedTags(unittest.TestCase):
             self.assertEqual(rr.is_abandoned(tag, self.RANGES), want, tag)
 
     def test_malformed_entry_raises(self) -> None:
-        for bad in ("1.81.0", "v1.96.0..v1.81.0", "v1.2"):
+        for bad in ("1.81.0", "v1.96.0..v1.81.0", "v1.2", "v1.81.0.."):
             with self.assertRaises(ValueError):
                 rr.parse_abandoned(bad)
 
     def test_shipped_list_covers_the_stuck_tags_and_parses(self) -> None:
         root = Path(__file__).resolve().parents[2]
-        ranges = rr.read_abandoned(str(root / rr.ABANDONED_TAGS_FILE))
+        ranges = rr.read_abandoned()  # default path, from any cwd
         self.assertTrue(rr.is_abandoned("v1.81.0", ranges))
         self.assertTrue(rr.is_abandoned("v1.96.0", ranges))
         self.assertFalse(rr.is_abandoned("v1.97.0", ranges))

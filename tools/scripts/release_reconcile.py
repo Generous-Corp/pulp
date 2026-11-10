@@ -270,6 +270,8 @@ def superseded(tag: str, newest_published: tuple | None) -> bool:
 
 
 ABANDONED_TAGS_FILE = "tools/release/abandoned-tags.txt"
+# Resolved against the repo root so the list applies from any working directory.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def parse_abandoned(text: str) -> tuple[tuple[tuple, tuple], ...]:
@@ -283,15 +285,17 @@ def parse_abandoned(text: str) -> tuple[tuple[tuple, tuple], ...]:
         line = raw.split("#", 1)[0].strip()
         if not line:
             continue
-        lo, _, hi = line.partition("..")
-        low, high = version_of(lo.strip()), version_of((hi or lo).strip())
+        lo, sep, hi = line.partition("..")
+        if sep and not hi.strip():
+            raise ValueError(f"bad abandoned-tags entry: {raw!r}")
+        low, high = version_of(lo.strip()), version_of((hi if sep else lo).strip())
         if not low or not high or low > high:
             raise ValueError(f"bad abandoned-tags entry: {raw!r}")
         ranges.append((low, high))
     return tuple(ranges)
 
 
-def read_abandoned(path: str = ABANDONED_TAGS_FILE) -> tuple[tuple[tuple, tuple], ...]:
+def read_abandoned(path: str = os.path.join(_REPO_ROOT, ABANDONED_TAGS_FILE)) -> tuple[tuple[tuple, tuple], ...]:
     try:
         with open(path, encoding="utf-8") as f:
             return parse_abandoned(f.read())
