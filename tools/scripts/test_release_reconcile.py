@@ -31,6 +31,7 @@ from release_reconcile import (  # noqa: E402
     REDISPATCH,
     REQUIRED_ASSETS,
     SUPERSEDED,
+    ABANDONED,
     TOO_OLD,
     TagState,
     decide,
@@ -1199,6 +1200,40 @@ class SweepReportsTheIncidentShape(unittest.TestCase):
         building = tag_state(age_hours=1, run_states=("in_progress",))
         report, rebuilt = sweep([building, PUBLISHED_PRIOR])
         self.assertEqual((report, rebuilt), ({}, []))
+
+
+class AbandonedTags(unittest.TestCase):
+    """A listed tag is never retried, even though it would otherwise redispatch."""
+
+    RANGES = rr.parse_abandoned("# note\nv1.81.0..v1.96.0  # why\nv2.0.0\n")
+
+    def test_listed_tag_is_not_redispatched(self) -> None:
+        self.assertEqual(decide(state(run_states=("completed",)), NOW, **LIMITS).action,
+                         REDISPATCH)  # control: same state, unlisted
+        s = TagState(tag="v1.90.0", created_at=NOW - timedelta(hours=3),
+                     published=False, has_release_object=False, assets=frozenset(),
+                     run_states=("completed",), validation_failures=(), dispatch_attempts=0)
+        self.assertEqual(decide(s, NOW, abandoned=self.RANGES, **LIMITS).action, ABANDONED)
+
+    def test_range_bounds_are_inclusive_and_exclusive_outside(self) -> None:
+        for tag, want in (("v1.81.0", True), ("v1.96.0", True), ("v1.80.9", False),
+                          ("v1.97.0", False), ("v2.0.0", True)):
+            self.assertEqual(rr.is_abandoned(tag, self.RANGES), want, tag)
+
+    def test_malformed_entry_raises(self) -> None:
+        for bad in ("1.81.0", "v1.96.0..v1.81.0", "v1.2"):
+            with self.assertRaises(ValueError):
+                rr.parse_abandoned(bad)
+
+    def test_shipped_list_covers_the_stuck_tags_and_parses(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        ranges = rr.read_abandoned(str(root / rr.ABANDONED_TAGS_FILE))
+        self.assertTrue(rr.is_abandoned("v1.81.0", ranges))
+        self.assertTrue(rr.is_abandoned("v1.96.0", ranges))
+        self.assertFalse(rr.is_abandoned("v1.97.0", ranges))
+
+    def test_missing_file_means_nothing_abandoned(self) -> None:
+        self.assertEqual(rr.read_abandoned("/nonexistent/abandoned.txt"), ())
 
 
 if __name__ == "__main__":
