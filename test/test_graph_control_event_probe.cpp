@@ -21,7 +21,8 @@ class ProbeSlot final : public pulp::host::PluginSlot {
     std::array<float, 8> delivered{};
     std::size_t delivered_count = 0;
 
-    explicit ProbeSlot(pulp::host::ParamRate rate) : rate_(rate) {
+    explicit ProbeSlot(pulp::host::ParamRate rate, int latency = 0)
+        : rate_(rate), latency_(latency) {
         info_.name = "G7 probe slot";
         info_.format = pulp::host::PluginFormat::CLAP;
         info_.num_inputs = 1;
@@ -83,7 +84,7 @@ class ProbeSlot final : public pulp::host::PluginSlot {
     }
     void destroy_editor_view() override {}
     int latency_samples() const override {
-        return 0;
+        return latency_;
     }
     int tail_samples() const override {
         return 0;
@@ -92,6 +93,7 @@ class ProbeSlot final : public pulp::host::PluginSlot {
   private:
     pulp::host::PluginInfo info_;
     pulp::host::ParamRate rate_;
+    int latency_ = 0;
 };
 
 struct AudioGraph {
@@ -356,5 +358,56 @@ TEST_CASE("G7 dense control probe summarizes the selected slewed contribution be
         REQUIRE(graph.disconnect(input, 0, destination, 0));
         REQUIRE(graph.control_edge_probe_status() == Status::Unprepared);
         REQUIRE_FALSE(graph.read_control_edge_probe(sample));
+    }
+}
+
+TEST_CASE("G7 dense control probe observes PDC history rather than current source",
+          "[host][graph][g7][probe][dense-probe]") {
+    pulp::host::SignalGraph graph;
+    const auto input = graph.add_input_node(1);
+    const auto delay = graph.add_plugin_node(
+        std::make_unique<ProbeSlot>(pulp::host::ParamRate::AudioRate, 3), 1, 1);
+    auto slot = std::make_unique<ProbeSlot>(pulp::host::ParamRate::AudioRate);
+    auto* receiver = slot.get();
+    const auto destination = graph.add_plugin_node(std::move(slot), 1, 1);
+    const auto output = graph.add_output_node(1);
+    REQUIRE(graph.connect(input, 0, delay, 0));
+    REQUIRE(graph.connect(delay, 0, destination, 0));
+    REQUIRE(graph.connect(destination, 0, output, 0));
+    REQUIRE(
+        graph.connect_audio_rate_modulation(input, 0, destination, ProbeSlot::kParam, 0.0f, 1.0f));
+    REQUIRE(graph.prepare(48000, 8));
+    REQUIRE(graph.attach_control_edge_probe(graph.node(input)->out("audio"), destination,
+                                            ProbeSlot::kParam) ==
+            pulp::host::SignalGraph::EdgeProbeStatus::Attached);
+    std::vector<float> history(3, 0.0f);
+    std::uint64_t timestamp = 0;
+    for (const int frames : {8, 1, 3, 7, 5}) {
+        std::array<float, 8> input_samples{}, output_samples{}, expected{};
+        float peak = 0.0f;
+        double squares = 0.0;
+        for (int f = 0; f < frames; ++f) {
+            input_samples[f] = static_cast<float>((timestamp + f) % 7 + 1) * 0.125f;
+            history.push_back(input_samples[f]);
+            expected[f] = history[timestamp + f];
+            peak = std::max(peak, expected[f]);
+            squares += static_cast<double>(expected[f]) * expected[f];
+        }
+        const float* ips[] = {input_samples.data()};
+        float* ops[] = {output_samples.data()};
+        pulp::audio::BufferView<const float> iv(ips, 1, frames);
+        pulp::audio::BufferView<float> ov(ops, 1, frames);
+        graph.process(ov, iv, frames);
+        pulp::graph::GraphRuntimeProbeSample sample;
+        REQUIRE(graph.read_control_edge_probe(sample));
+        REQUIRE(sample.timestamp_samples == timestamp);
+        REQUIRE(sample.value == expected[0]);
+        REQUIRE(sample.value_end == expected[frames - 1]);
+        REQUIRE(sample.peak == peak);
+        REQUIRE(sample.rms == static_cast<float>(std::sqrt(squares / frames)));
+        REQUIRE(receiver->delivered_count == frames);
+        for (int f = 0; f < frames; ++f)
+            REQUIRE(receiver->delivered[f] == expected[f]);
+        timestamp += frames;
     }
 }

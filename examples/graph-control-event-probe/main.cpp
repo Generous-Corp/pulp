@@ -103,7 +103,7 @@ void dense_probe() {
                                 AudioRateModulationDelivery::DenseViews}) {
         const std::array nodes = {
             GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::AudioInput, 0, 1},
-            GraphRuntimeNodeSpec{2, GraphRuntimeNodeKind::Gain, 1, 1, 0, 0, false, 3},
+            GraphRuntimeNodeSpec{2, GraphRuntimeNodeKind::Utility, 1, 1, 0, 0, false, 3},
             GraphRuntimeNodeSpec{3, GraphRuntimeNodeKind::Processor, 1, 1},
             GraphRuntimeNodeSpec{4, GraphRuntimeNodeKind::AudioOutput, 1, 0},
         };
@@ -116,12 +116,41 @@ void dense_probe() {
             edge,
             GraphRuntimeConnectionSpec{3, 0, 4, 0},
         };
+        struct DeliveryOracle {
+            std::array<float, 8> expected{};
+            int frames = 0;
+            AudioRateModulationDelivery delivery;
+        } oracle{{}, 0, delivery};
         const auto receive = [](ProcessBlock&, const GraphRuntimeNodeProcessContext& context,
-                                void*) noexcept { return context.node_param_events != nullptr; };
+                                void* opaque) noexcept {
+            const auto& oracle = *static_cast<const DeliveryOracle*>(opaque);
+            if (oracle.delivery == AudioRateModulationDelivery::DenseViews) {
+                if (context.node_audio_rate_modulations.size() != 1)
+                    return false;
+                const auto& view = context.node_audio_rate_modulations[0];
+                if (view.param_id != 7 || view.values.size() != oracle.frames)
+                    return false;
+                for (int f = 0; f < oracle.frames; ++f)
+                    if (view.values[f] != std::clamp(oracle.expected[f], 0.0f, 1.0f))
+                        return false;
+            } else {
+                if (context.node_param_events == nullptr ||
+                    context.node_param_events->size() != oracle.frames)
+                    return false;
+                int f = 0;
+                for (const auto& event : *context.node_param_events) {
+                    if (event.param_id != 7 || event.sample_offset != f ||
+                        event.value != oracle.expected[f])
+                        return false;
+                    ++f;
+                }
+            }
+            return true;
+        };
         std::array bindings = {
             GraphRuntimeNodeBinding{1, nullptr, nullptr, false},
             GraphRuntimeNodeBinding{2, nullptr, nullptr, false},
-            GraphRuntimeNodeBinding{3, receive, nullptr, true},
+            GraphRuntimeNodeBinding{3, receive, &oracle, true},
             GraphRuntimeNodeBinding{4, nullptr, nullptr, false},
         };
         bindings[2].audio_rate_modulation_delivery = delivery;
@@ -171,6 +200,8 @@ void dense_probe() {
             block.sample_rate = 48000;
             block.frame_count = frames;
             block.buses = &buses;
+            oracle.expected = expected;
+            oracle.frames = frames;
             require(executor
                         .process_routed(block, snapshot, pool, nullptr, &scratch, {}, {}, {}, {},
                                         {}, nullptr, &probes)
@@ -188,6 +219,94 @@ void dense_probe() {
                     "dense-oracle");
             timestamp += frames;
         }
+    }
+}
+
+void audio_probe(bool feedback) {
+    using namespace graph;
+    using namespace format;
+    const std::array nodes = {
+        GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::AudioInput, 0, 2},
+        GraphRuntimeNodeSpec{2, GraphRuntimeNodeKind::Processor, 2, 1},
+        GraphRuntimeNodeSpec{3, GraphRuntimeNodeKind::AudioOutput, 1, 0},
+    };
+    GraphRuntimeConnectionSpec observed{feedback ? 2u : 1u, feedback ? 0u : 1u, 2, 1};
+    observed.feedback = feedback;
+    observed.sidechain = !feedback;
+    const std::array connections = {
+        GraphRuntimeConnectionSpec{1, 0, 2, 0},
+        observed,
+        GraphRuntimeConnectionSpec{2, 0, 3, 0},
+    };
+    const auto receive = [](ProcessBlock& block, const GraphRuntimeNodeProcessContext& context,
+                            void*) noexcept {
+        auto outputs = context.node_outputs;
+        for (std::uint32_t f = 0; f < block.frame_count; ++f)
+            outputs.channel_ptr(0)[f] = 0.5f * context.node_inputs.channel_ptr(0)[f] +
+                                        0.25f * context.node_inputs.channel_ptr(1)[f];
+        return true;
+    };
+    const std::array bindings = {
+        GraphRuntimeNodeBinding{1, nullptr, nullptr, false},
+        GraphRuntimeNodeBinding{2, receive, nullptr, true},
+        GraphRuntimeNodeBinding{3, nullptr, nullptr, false},
+    };
+    auto built = build_graph_runtime_plan(nodes, connections);
+    require(built.ok(), "audio-plan");
+    GraphRuntimeSnapshot snapshot;
+    require(snapshot.reset(std::move(built.plan), bindings), "audio-snapshot");
+    GraphRuntimeBufferPool pool;
+    require(pool.reset(snapshot.buffer_slot_count(), 8), "audio-pool");
+    GraphRuntimeAudioEdgeProbe probe;
+    probe.source_index = feedback ? 1 : 0;
+    probe.source_port = feedback ? 0 : 1;
+    for (std::uint32_t i = 0; i < snapshot.plan().connections.size(); ++i)
+        if (snapshot.plan().connections[i].dest_port == 1)
+            probe.edge_index = i;
+    probe.samples.attach();
+    GraphRuntimeExecutor executor;
+    std::array<float, 8> retained{};
+    std::uint64_t timestamp = 0, sequence = 0;
+    for (const int frames : {8, 3, 1, 7, 8}) {
+        std::array<float, 8> main{}, side{}, output{}, contribution{};
+        float peak = 0.0f;
+        double squares = 0.0;
+        for (int f = 0; f < frames; ++f) {
+            main[f] = static_cast<float>(timestamp + f + 1) / 64.0f;
+            side[f] = static_cast<float>(f + 1) / -16.0f;
+            contribution[f] = feedback ? retained[f] : side[f];
+            peak = std::max(peak, std::abs(contribution[f]));
+            squares += static_cast<double>(contribution[f]) * contribution[f];
+        }
+        const float* ips[] = {main.data(), side.data()};
+        float* ops[] = {output.data()};
+        BusBufferSet buses;
+        require(buses.add_input("main", audio::BufferView<const float>(ips, 2, frames)) &&
+                    buses.add_output("main", audio::BufferView<float>(ops, 1, frames)),
+                "audio-buses");
+        ProcessBlock block;
+        block.sample_rate = 48000;
+        block.frame_count = frames;
+        block.buses = &buses;
+        require(
+            executor
+                .process_routed(block, snapshot, pool, nullptr, nullptr, {}, {}, {}, {}, {}, &probe)
+                .ok(),
+            "audio-process");
+        GraphRuntimeProbeSample sample;
+        require(probe.samples.try_pop(sample), "audio-publication");
+        require(sample.kind == GraphRuntimeProbeKind::Audio && sample.sequence == sequence++ &&
+                    sample.timestamp_samples == timestamp &&
+                    sample.edge_index == probe.edge_index && sample.frames == frames &&
+                    sample.peak == peak &&
+                    sample.rms == static_cast<float>(std::sqrt(squares / frames)),
+                "audio-oracle");
+        for (int f = 0; f < frames; ++f) {
+            const float expected = 0.5f * main[f] + 0.25f * contribution[f];
+            require(output[f] == expected, "audio-delivery-oracle");
+            retained[f] = expected;
+        }
+        timestamp += frames;
     }
 }
 
@@ -243,6 +362,8 @@ int main(int argc, char** argv) try {
     control_probe(argument == "--planted-missing-publication");
     event_probe(argument == "--planted-missing-event-publication");
     dense_probe();
+    audio_probe(false);
+    audio_probe(true);
     std::cout << "graph-control-event-probe PASS\n";
     return 0;
 } catch (const std::exception& error) {
