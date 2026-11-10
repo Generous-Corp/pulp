@@ -1,0 +1,12 @@
+{
+ "name": "cmake-example-guards",
+ "record": {
+  "entry": "tools/scripts/test_cmake_example_guards.py",
+  "inputs": [
+   "examples/CMakeLists.txt",
+   "test/CMakeLists.txt",
+   "tools/scripts/test_cmake_example_guards.py"
+  ],
+  "kind": "python"
+ }
+}
