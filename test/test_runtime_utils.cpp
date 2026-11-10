@@ -1108,9 +1108,13 @@ TEST_CASE("run_process preserves output beyond the platform child default cap",
                      std::string("$n = ") + std::to_string(expected_size) +
                          "; [Console]::Out.Write(('x' * $n)); [Console]::Error.Write(('y' * $n))"});
 #else
-    auto result = run_process(
-        "/bin/sh", {"-c", std::string("yes x | head -c ") + std::to_string(expected_size) +
-                              "; yes y | head -c " + std::to_string(expected_size) + " >&2"});
+    // Keep this output-cap probe finite and independent of the inherited SIGPIPE
+    // disposition.  A producer pipeline can append its own Broken pipe
+    // diagnostic when the reader reaches the cap, changing the measured stderr
+    // size without testing ChildProcess's capture limit.
+    const auto command = std::string("printf '%*s' ") + std::to_string(expected_size) +
+                         " ''; printf '%*s' " + std::to_string(expected_size) + " '' >&2";
+    auto result = run_process("/bin/sh", {"-c", command});
 #endif
 
     REQUIRE(result.has_value());
