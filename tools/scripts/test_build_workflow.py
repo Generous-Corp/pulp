@@ -998,6 +998,10 @@ class CleanMergeLaneTest(unittest.TestCase):
             "needs.classify.outputs.agent_capability_installed_sdk_required": "true",
             "vars.PULP_INTEL_CANARY": "1", "success()": True, "failure()": False}
     CLEAN = {**FULL, "steps.clean_merge.outputs.lane": "clean-merge"}
+    # Reads only the checkout and what Configure wrote, so a clean merge runs it
+    # like the contract lane's other cheap checks; the fast tier then leaves its
+    # members out.
+    PREBUILD_DRIFT = "Test configure-only drift checks before the build (pull request head)"
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -1044,10 +1048,12 @@ class CleanMergeLaneTest(unittest.TestCase):
                 sites[name] = condition
         gated = {name for name, cond in sites.items() if "matrix.lane != 'contract'" in cond}
         self.assertEqual(set(MacosApprovalGateTest.BUILD_FED)
-                         | {"Intel canary — lint + x86_64 GPU-off compile"}, gated)
-        for name in gated:
+                         | {"Intel canary — lint + x86_64 GPU-off compile", self.PREBUILD_DRIFT},
+                         gated)
+        for name in gated - {self.PREBUILD_DRIFT}:
             with self.subTest(step=name):
                 self.assertIn(self.CONDITION, sites[name])
+        self.assertNotIn("clean_merge", sites[self.PREBUILD_DRIFT])
         # The contract lane's own arm refusal is the only other reader.
         self.assertEqual(set(sites) - gated, {"Refuse a head armed before approval (contract lane)"})
 
@@ -1062,7 +1068,7 @@ class CleanMergeLaneTest(unittest.TestCase):
                                              {**self.FULL, "steps.clean_merge.outputs.lane": lane}))
 
     def test_the_clean_merge_lane_still_configures_and_runs_both_cheap_tiers(self) -> None:
-        for name in ("Configure", "Test fast deterministic tier (pull request head)",
+        for name in ("Configure", self.PREBUILD_DRIFT, "Test fast deterministic tier (pull request head)",
                      "Test merge-queue ejection guards (pull request head)"):
             with self.subTest(step=name):
                 self.assertTrue(_evaluate_if(self.steps[name].get("if", True), self.CLEAN))
