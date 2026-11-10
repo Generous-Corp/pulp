@@ -229,22 +229,23 @@ TEST_CASE("the synchronous PopupMenu reports the chosen item", "[platform][menu]
     OffscreenWindow host;
     MainThreadScope scope;
     NSMenu* open_menu = nil;
-    // Fires inside the tracking loop (common modes): pick the second row, then
-    // close the menu.
-    MainThreadTimer chooser(scope, [&] {
-        [open_menu performActionForItemAtIndex:1];
-        [open_menu cancelTracking];
-    });
+    MainThreadTimer closer(scope, [&] { [open_menu cancelTracking]; });
     bool tracked = false;
+    // Choose as tracking begins, then close on the next pass of the tracking
+    // loop. Tracking can also end at any moment from outside (a menu another
+    // process opens ends this one's tracking), so the choice is made with no
+    // delay for that to race against.
     OnTracking on_tracking([&](NSMenu* menu) {
         tracked = true;
         open_menu = menu;
-        chooser.fire_after(50ms);
+        [menu performActionForItemAtIndex:1];
+        closer.fire_after(0ms);
     });
     PopupMenu menu;
     menu.add_item(1, "One");
     menu.add_item(2, "Two");
     const auto chosen = menu.show_at_view((__bridge void*)host.view);
+    closer.cancel();
     REQUIRE(tracked);
     REQUIRE(chosen == 2);
 }
@@ -266,7 +267,10 @@ TEST_CASE("an anchored native menu tracks, keeps scope timers running, and repor
     });
     float tracked_min_width = 0;
     OnTracking on_tracking([&](NSMenu* menu) {
-        tracked = menu; // valid only while it tracks
+        // Retained: if tracking ends before the chooser fires, the chooser
+        // still runs against a live menu and the test fails on the choice
+        // instead of crashing.
+        tracked = [menu retain];
         tracked_min_width = static_cast<float>(menu.minimumWidth);
         tracking = true;
         chooser.fire_after(150ms);
@@ -278,7 +282,9 @@ TEST_CASE("an anchored native menu tracks, keeps scope timers running, and repor
     REQUIRE(pump_until([&] { return got.has_value(); }));
     tracking = false;
     ticker.cancel();
+    chooser.cancel();
     REQUIRE(tracked != nil);
+    [tracked release];
     REQUIRE(tracked_min_width >= 160);
     REQUIRE(*got == 11);
     REQUIRE(ticks_while_tracking >= 2); // repeated firing, not a full rate
