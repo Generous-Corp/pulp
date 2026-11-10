@@ -210,7 +210,32 @@ bool custom_binding(fmt::ProcessBlock& block,
             // drop check to read.
             midi::clear_midi_block(*ctx.node_midi_out);
         }
-        const CustomNodeEventBlock events{ctx.node_midi_in, ctx.node_midi_out};
+        GraphEventWriter<> writer;
+        GraphEventReader<> reader;
+        if (cctx->graph_event_lane && cctx->node_id == cctx->graph_event_edge.producer) {
+            if (cctx->graph_event_lane->begin_producer_block() != GraphEventResult::Accepted) {
+                cctx->graph_event_lane->abort_block();
+                for (std::size_t channel = 0; channel < out.num_channels(); ++channel)
+                    std::memset(out.channel_ptr(channel), 0, sizeof(float) * out.num_samples());
+                return true;
+            }
+            writer =
+                GraphEventWriter<>(*cctx->graph_event_lane, cctx->graph_event_epoch, cctx->node_id);
+        } else if (cctx->graph_event_lane && cctx->node_id == cctx->graph_event_edge.consumer) {
+            if (cctx->graph_event_lane->begin_consumer_block() != GraphEventResult::Accepted) {
+                cctx->graph_event_lane->abort_block();
+                for (std::size_t channel = 0; channel < out.num_channels(); ++channel)
+                    std::memset(out.channel_ptr(channel), 0, sizeof(float) * out.num_samples());
+                return true;
+            }
+            reader = GraphEventReader<>(*cctx->graph_event_lane);
+        }
+        const CustomNodeEventBlock events{
+            ctx.node_midi_in, ctx.node_midi_out, nullptr,
+            cctx->graph_event_lane && cctx->node_id == cctx->graph_event_edge.producer ? &writer
+                                                                                       : nullptr,
+            cctx->graph_event_lane && cctx->node_id == cctx->graph_event_edge.consumer ? &reader
+                                                                                       : nullptr};
         cctx->process_events(out, in, static_cast<int>(frames), events);
         return true;
     }
@@ -687,10 +712,9 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
             // the two paths never disagree about which nodes read events.
             const CustomNodeEventProcessFn* efn =
                 custom_event_for ? custom_event_for(id) : nullptr;
-            custom_ctx->push_back(CustomBindingContext{
-                fn ? *fn : CustomNodeProcessFn{},
-                tfn ? *tfn : CustomNodeTransportProcessFn{},
-                efn ? *efn : CustomNodeEventProcessFn{}});
+            custom_ctx->push_back(CustomBindingContext{id, fn ? *fn : CustomNodeProcessFn{},
+                                                       tfn ? *tfn : CustomNodeTransportProcessFn{},
+                                                       efn ? *efn : CustomNodeEventProcessFn{}});
             bindings.push_back(fmt::GraphRuntimeNodeBinding{
                 id, custom_binding, &custom_ctx->back(), /*required=*/false});
         } else { // AudioInput / AudioOutput / MidiInput / MidiOutput — null

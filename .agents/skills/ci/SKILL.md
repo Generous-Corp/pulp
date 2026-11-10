@@ -526,6 +526,38 @@ macOS.
   record, or a `deferred` one, cannot be armed once `tiered_required_checks`
   is set.
 
+## A clean merge of main takes the contract lane (row 31, shadow first)
+
+Independent of `PULP_MACOS_PR_GATING`, and inert while it is `true` (every
+`synchronize` head is then the contract lane already). A `synchronize` head that is exactly a
+conflict-free merge of a base-branch commit into the previous head
+(`github.event.before`), whose tree equals `git merge-tree --write-tree` of
+those two parents, and whose previous head's newest `macos` check from this
+repository's workflows (any event; a newer red is never skipped) is a
+same-repository `build.yml` `pull_request` full-lane success (`Build`
+succeeded, tier `fast` or `full`), runs only configure, `pr-fast` (minus
+`needs-build`) and `pr-guard`, with tier `clean-merge`.
+`tools/ci/clean_merge_lane.py` decides in the step `Decide the clean-merge lane
+(pull request head)`.
+
+- **Fail closed to the full lane.** Any unreadable input (shallow history, an
+  API error, a missing check, a crash of the step) is `full`. No chaining: a
+  previous green that was a contract or clean-merge lane is `full`. Never
+  republish a previous head's conclusion; the lane runs on the head.
+- **Mode.** `PULP_CLEAN_MERGE_LANE_MODE` is `shadow` when unset (annotate
+  `would_take`, run the full lane), `enforce` takes the lane, `off` is the
+  rollback. `clean_merge_lane.py report --since <date>` gives the enforcement
+  figures; enforce only after 7 days or 50 `would_take` heads with zero
+  `would_take` heads whose Build, affected tests or SDK proof failed.
+- **A new build-fed step must read both lanes.** Every step the contract lane
+  skips is conditioned on
+  `matrix.lane != 'contract' && steps.clean_merge.outputs.lane != 'clean-merge'`,
+  and `tools/scripts/test_build_workflow.py` (`CleanMergeLaneTest`) fails a
+  step that reads `matrix.lane != 'contract'` without the second clause.
+- **After enforcement the merge group is the control.** A clean-merge-lane
+  green followed by a merge-group red in a test the full lane would have run
+  sets the mode back to `shadow` until the input is found.
+
 ## The native-build decision on merge_group uses main, not base_sha
 
 Opposite to the diff-scoped gates below, and on purpose. `classify` decides
@@ -1746,6 +1778,15 @@ consequences worth knowing before you debug:
   `python3 tools/ci/source_selftests.py write --build-dir build`. The protected
   merge receipt pins the same label string as `ctest_gate_args.py`
   (`REQUIRED_LABEL_EXCLUDE`), so change both or receipts stop being reused.
+- A new, deleted or renamed public header under an exported include root, or a
+  CMake change, makes `gates.sh` run `consumption_census.py --check` in the
+  generated-manifest lane (`gates_script_inputs.py`), so a stale
+  `docs/status/consumption-profiles.json` fails locally instead of as
+  `consumption-census-drift` on macos, drift-fast and linux. The header list is
+  read from git's index: `git add` the new header before regenerating with
+  `python3 tools/scripts/consumption_census.py --build-dir <build> --write`. A
+  host that cannot configure reports it NOT CHECKED. The pre-push hook's own
+  merge-tree script-state check does not run it.
 - `gates.sh` now runs this lane scoped to your diff
   (`source_selftests.py run --changed-from "$BASE"`): an entry runs when its own
   script changed or its source names a changed file (full path, a distinctive
@@ -10610,6 +10651,7 @@ Locally:
 
 - `.githooks/pre-push` (install via `tools/scripts/install-githooks.sh`) runs the same fast scripts, including the compat-sync, compat-aggregate, node ABI, and hotspot-size gates, enforcing by default. `PULP_DISABLE_PREPUSH_GATES=1` demotes the fast gates to advisory; `PULP_SKIP_PREPUSH=1` is the single-push emergency bypass.
 - Pre-push gate subprocesses run through `.githooks/lib/gate-output.sh`: their stdout/stderr is captured to a regular temporary file, then replayed best-effort. Keep user-visible fast gates and the slow diff-cover script behind `run_gate_captured`; agent/tool callers can supply nonblocking pipes, and an uncaptured Python `print()` may otherwise raise `BlockingIOError` and turn a healthy gate into a false failure. The wrapper must snapshot and return the real child status before replay, while replay failure never changes that status. `tools/scripts/test_prepush_gate_output.py` pins success, exact nonzero propagation, replay, cleanup, and the slow-lane callsite.
+- A blocked pre-push ends with `FAILED GATE(S):`, one line per failing gate with the line that says why and its fix line, followed by the "gate failure(s) above" verdict. Every failure site in `.githooks/pre-push` calls `prepush_fail` (never a bare `fail=1`), which names the gate that ran last, or takes a label for a check that is not a captured gate; a gate that exits non-zero without failing the push (a skipped lane) is not named. `tools/scripts/test_prepush_gate_output.py` fails if a bare `fail=1` is added.
 - `tools/scripts/docs_noise_lint.py` (pre-push only, report mode) — scans changed/added lines for transient breadcrumbs across the markdown default scope (docs/reference + skills) **and source comments + test tags** under `core/examples/tools/test/apple/inspect/ship`. Source is diff-scoped only (never `--all`), so the historical backlog never blocks; it is comment-aware (only `//`, `/* */`, `#` comment text + string-literal Catch2 `[tag]`s, never code). Escape a legitimate line with an inline `docs-noise-lint: skip <reason>` comment. Full guidance on *writing* durable comments lives in the `code-comments` skill.
 - `tools/scripts/gates.sh` — on-demand runner for JUST the cheap gates (skill-sync + skill-path-map lint + version-bump + compat-sync + compat-aggregate + node-ABI + hotspot-size + deps-audit + codecov-config). Runs in ~1 second, exits non-zero on any hard failure with a one-liner pointing at the right surgical bypass. The codecov-config gate is a *global invariant* (not diff-scoped): it runs the `test_codecov_config.py` / `test_codecov_components.py` contract tests so a new `core/<sub>/` subsystem can't land without a matching `codecov.yml` flag+component (graph/scene drifted onto main exactly this way), no platform subtree gets double-counted, and `codecov.yml`'s `ignore:` stays mirrored to `coverage_config.json`'s `diff_cover_excludes`. Needs PyYAML locally; skips cleanly if absent (the CI `codecov-config-validation` job in `coverage.yml` is the authoritative gate). Use it before `git push` when you've made changes that might touch mapped paths but you don't want to wait for the pre-push hook OR the 20-minute CI roundtrip. Independent of the git hook (no install step needed). Named to align with Shipyard's planned `shipyard gates` subcommand (see `planning/2026-05-19-shipyard-preflight-upstream-proposal.md`); avoids collision with Shipyard's existing `preflight` namespace (SSH backend reachability probes).
 
@@ -13114,6 +13156,15 @@ registered is only reported at configure (some members are platform-conditional)
 real guard is `pr-fast-tier-contract`, which fails if the label selects fewer than
 50 tests or loses one of its pinned members. The tier writes `ctest-pr-fast.junit.xml`, never
 `ctest.junit.xml`: it is not merge test evidence and must never satisfy a protected receipt.
+
+The drift members that fail most heads (`script-test-inputs-drift`, the consumption-census
+drift checks, `agent-capability-manifest-check`) also carry `pr-fast-configure` and run
+between `Configure` and `Build`, so a stale manifest fails before the build; the post-build
+tier excludes that label only when the pre-build step passed. Add a member there only if it
+reads nothing a build produces (codemodel, `CTestTestfile.cmake` and configure-time facts
+are fine; a built binary or a Catch2 discovery file's contents are not). A test that needs
+the build belongs under `needs-build`, never under `pr-fast-configure`; the contract check
+refuses both labels on one test.
 
 Two consequences worth knowing:
 

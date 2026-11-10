@@ -424,7 +424,7 @@ class PinFreshnessTests(unittest.TestCase):
         self.assertIsNotNone(block, "pre-push no longer runs the freshness gate")
         body = block.group(0)
         self.assertRegex(
-            body, r"\n\s*2\)\s*fail=1",
+            body, r"\n\s*2\)\s*(?:fail=1|prepush_fail)",
             "pre-push does not map the no-verdict exit to a failure")
 
         gates = (REPO / "tools/scripts/gates.sh").read_text(encoding="utf-8")

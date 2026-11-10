@@ -9,6 +9,32 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1950"></a>
+## [1.95.0] - 2026-11-09
+
+- feature/gates consumption census ([#11886](https://github.com/Generous-Corp/pulp/pull/11886))
+- release/version bump ([#11899](https://github.com/Generous-Corp/pulp/pull/11899))
+- ci/pr fast before build ([#11883](https://github.com/Generous-Corp/pulp/pull/11883))
+- agent/a9 installed qualification ([#11875](https://github.com/Generous-Corp/pulp/pull/11875))
+- feature/install pulp native ([#11882](https://github.com/Generous-Corp/pulp/pull/11882))
+- docs/crisp writing guide 20261109 ([#11887](https://github.com/Generous-Corp/pulp/pull/11887))
+- fix/macos gate debounce ([#11892](https://github.com/Generous-Corp/pulp/pull/11892))
+- feature/confirm failure keep dylibs ([#11893](https://github.com/Generous-Corp/pulp/pull/11893))
+- g11/receipt refresh 3fad 20261109 ([#11877](https://github.com/Generous-Corp/pulp/pull/11877))
+- docs/crisp writing scrub 20261109 ([#11884](https://github.com/Generous-Corp/pulp/pull/11884))
+- docs/crisp writing lint 20261109 ([#11881](https://github.com/Generous-Corp/pulp/pull/11881))
+- docs/crisp writing skill 20261109 ([#11878](https://github.com/Generous-Corp/pulp/pull/11878))
+- feature/midi learn feedback ([#11769](https://github.com/Generous-Corp/pulp/pull/11769))
+
+<a id="v1940"></a>
+## [1.94.0] - 2026-11-09
+
+- release/version bump ([#11872](https://github.com/Generous-Corp/pulp/pull/11872))
+- feature/native surface input ([#11785](https://github.com/Generous-Corp/pulp/pull/11785))
+- fix/vellum receipt repin events ([#11868](https://github.com/Generous-Corp/pulp/pull/11868))
+- feature/platform file drag ([#11773](https://github.com/Generous-Corp/pulp/pull/11773))
+- codex/g5 followup contract 20261109 ([#11860](https://github.com/Generous-Corp/pulp/pull/11860))
+
 <a id="v1930"></a>
 ## [1.93.0] - 2026-11-09
 
@@ -12570,6 +12596,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.95.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.95.0
+[1.94.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.94.0
 [1.93.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.93.0
 [1.92.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.92.0
 [1.91.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.91.0
