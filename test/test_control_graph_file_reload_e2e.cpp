@@ -462,6 +462,8 @@ static void require_watch_signal_cleanup(bool during_shellout, bool during_heart
     const auto child_ready = build_dir / "child-ready";
     const auto heartbeat_ready = build_dir / "heartbeat-ready";
     const auto heartbeat_wrapper = build_dir / "tartci-heartbeat-wrapper";
+    const auto lease_identity = build_dir / "lease-identity.json";
+    const auto lease_retired = build_dir / "lease-retired.json";
     const auto script = build_dir / "same_sleeper.py";
     const auto build_script = build_dir / "build_step.py";
     std::ofstream(project / "pulp.toml") << "[plugin]\nname = \"watch-signal-proof\"\n";
@@ -489,15 +491,34 @@ static void require_watch_signal_cleanup(bool during_shellout, bool during_heart
         // Block only after the real owner's heartbeat succeeds. Admission,
         // lease size, QoS and release still go to the real governor.
         std::ofstream(heartbeat_wrapper)
-            << "#!/usr/bin/python3\nimport os, subprocess, sys, time\n"
+            << "#!/usr/bin/python3\nimport json, os, subprocess, sys, time\n"
                "real = os.environ['PULP_WATCH_REAL_TARTCI']\n"
-               "if sys.argv[1:3] == ['leases', 'heartbeat']:\n"
-               " result = subprocess.run([real] + sys.argv[1:])\n"
+               "args = sys.argv[1:]\n"
+               "if args[:2] == ['leases', 'heartbeat']:\n"
+               " result = subprocess.run([real] + args)\n"
                " if result.returncode: sys.exit(result.returncode)\n"
                " with open(os.environ['PULP_WATCH_HEARTBEAT_READY'], 'w') as f:\n"
                "  f.write(f'{os.getpid()} {os.getppid()} {os.getpgrp()}')\n"
                " time.sleep(900)\n"
-               "else: os.execv(real, [real] + sys.argv[1:])\n";
+               "elif args[:2] in [['leases', 'acquire'], ['leases', 'release']]:\n"
+               " result = subprocess.run([real] + args, capture_output=True)\n"
+               " sys.stdout.buffer.write(result.stdout); sys.stdout.flush()\n"
+               " sys.stderr.buffer.write(result.stderr); sys.stderr.flush()\n"
+               " if result.returncode: sys.exit(result.returncode)\n"
+               " data = json.loads(result.stdout)\n"
+               " if args[1] == 'acquire':\n"
+               "  lease = data['lease']\n"
+               "  env = dict(os.environ, LC_ALL='C', LANG='C'); env.pop('TZ', None)\n"
+               "  start = subprocess.run(['ps', '-p', str(lease['pid']), '-o', 'lstart='], env=env, text=True, capture_output=True).stdout\n"
+               "  boot = subprocess.check_output(['sysctl', '-n', 'kern.boottime'], env=env, text=True)\n"
+               "  data = dict(lease=lease, observed_start=' '.join(start.split()), observed_boot=' '.join(boot.split()))\n"
+               "  path = os.environ['PULP_WATCH_LEASE_IDENTITY']\n"
+               " else:\n"
+               "  status = subprocess.check_output([real, 'leases', 'status', '--json'])\n"
+               "  data = dict(released=data, remaining=json.loads(status)['leases'])\n"
+               "  path = os.environ['PULP_WATCH_LEASE_RETIRED']\n"
+               " with open(path, 'w') as f: json.dump(data, f)\n"
+               "else: os.execv(real, [real] + args)\n";
         std::filesystem::permissions(heartbeat_wrapper, std::filesystem::perms::owner_all,
                                      std::filesystem::perm_options::replace);
     }
@@ -527,6 +548,8 @@ static void require_watch_signal_cleanup(bool during_shellout, bool during_heart
             std::filesystem::remove(build_ready);
             std::filesystem::remove(child_ready);
             std::filesystem::remove(heartbeat_ready);
+            std::filesystem::remove(lease_identity);
+            std::filesystem::remove(lease_retired);
             pulp::platform::ChildProcess watch;
             int child_pid = -1, build_pid = -1, build_group = -1;
             int heartbeat_pid = -1, heartbeat_group = -1;
@@ -570,6 +593,8 @@ static void require_watch_signal_cleanup(bool during_shellout, bool during_heart
                 arguments.push_back("PULP_TARTCI_BIN=" + heartbeat_wrapper.string());
                 arguments.push_back("PULP_WATCH_REAL_TARTCI=" + real_tartci);
                 arguments.push_back("PULP_WATCH_HEARTBEAT_READY=" + heartbeat_ready.string());
+                arguments.push_back("PULP_WATCH_LEASE_IDENTITY=" + lease_identity.string());
+                arguments.push_back("PULP_WATCH_LEASE_RETIRED=" + lease_retired.string());
             }
             for (const auto& argument : std::vector<std::string>{
                      cli.string(), command, "--target", "proof", "--no-dev-shared", "--run",
@@ -664,6 +689,22 @@ static void require_watch_signal_cleanup(bool during_shellout, bool during_heart
                 REQUIRE(heartbeat_alive);
                 REQUIRE(heartbeat_group == heartbeat_pid);
                 REQUIRE(absent(heartbeat_pid));
+                const auto read_json = [](const std::filesystem::path& path) {
+                    std::ifstream input(path);
+                    REQUIRE(input.is_open());
+                    return choc::json::parse(std::string(std::istreambuf_iterator<char>{input}, {}));
+                };
+                const auto identity = read_json(lease_identity);
+                const auto lease = identity["lease"];
+                REQUIRE(lease["pid"].getInt64() == watch_pid);
+                REQUIRE_FALSE(std::string(lease["process_start_time"].getString()).empty());
+                REQUIRE(lease["process_start_time"] == identity["observed_start"]);
+                REQUIRE_FALSE(std::string(lease["host_boot_time"].getString()).empty());
+                REQUIRE(lease["host_boot_time"] == identity["observed_boot"]);
+                const auto retired = read_json(lease_retired);
+                REQUIRE(retired["released"]["ok"].getBool());
+                for (std::uint32_t i = 0; i < retired["remaining"].size(); ++i)
+                    REQUIRE(retired["remaining"][i]["id"] != lease["id"]);
             }
         }
     }

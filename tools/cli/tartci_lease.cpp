@@ -744,6 +744,10 @@ TartciAgentBuildLease TartciAgentBuildLease::acquire(const TartciAgentLeaseReque
         + " --owner " + shell_quote(current_owner())
         + " --label " + shell_quote(lease_label(req.project_root))
         + " --json";
+    // The watch outlives the acquisition subprocess. Bind the existing lease
+    // identity to this caller so heartbeat and release validate its lifetime.
+    if (req.watch_loop)
+        cmd += " --pid " + std::to_string(getpid());
     if (class_aware) {
         int min_cores = 1;
         int wait_secs = 0;

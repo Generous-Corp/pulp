@@ -41,6 +41,8 @@ shutdown finishes. Their output streams and environment remain available to the
 invoked commands, including embedded NUL bytes in noninteractive output.
 The watch's existing build-lease heartbeat also uses owned subprocess cancellation;
 its admission, 30-second cadence, lease size and release policy stay unchanged.
+Watch acquisition records the long-lived CLI PID as the existing lease owner,
+so heartbeats validate that process identity until normal watch retirement.
 
 The operation `dev.pulp.graph/file.reload@1` uses the shared strict notation or
 saved-graph parser, validates every original edge, checks the catalog's state
