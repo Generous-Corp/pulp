@@ -76,8 +76,10 @@ if(TARGET pulp::host AND NOT TARGET sample-region-allpass-core)
     add_subdirectory(sample-region-allpass)
 endif()
 # Agent tool kit synth: vendor operations need the full macOS Standalone adapter.
+# Guard on _Core: a Standalone-only pulp_add_plugin never creates a bare
+# AgentToolkitSynth target, and test/ may already have added this directory.
 if(APPLE AND PULP_ENABLE_GPU AND NOT IOS AND NOT PULP_IOS AND
-   TARGET pulp::inspect-agent-toolkit AND NOT TARGET AgentToolkitSynth)
+   TARGET pulp::inspect-agent-toolkit AND NOT TARGET AgentToolkitSynth_Core)
     add_subdirectory(agent-toolkit-synth)
 endif()
 # Pulp Delay: stereo character delay with tempo and in-loop tone controls
