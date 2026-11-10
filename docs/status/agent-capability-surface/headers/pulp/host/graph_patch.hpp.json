@@ -1,0 +1,9 @@
+{
+  "domain": "host",
+  "source": "core/host/include/pulp/host/graph_patch.hpp",
+  "fingerprint": "sha256:3e045494483967a7edb5dd9349f9d7146c3741fc348d913e5f1924c08adfe3ec",
+  "include": "pulp/host/graph_patch.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Control-thread catalog-derived graph notation and strict diagnostics transport over existing SignalGraph and restore contracts; bounded profile, not a DSP algorithm or full G2 completion."
+}
