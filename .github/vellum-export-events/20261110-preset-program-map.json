@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "20261110-preset-program-map",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-10T04:25:38Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/state/include/pulp/state/preset_library.hpp",
+    "core/state/include/pulp/state/preset_metadata_store.hpp",
+    "core/state/include/pulp/state/preset_program_map.hpp",
+    "core/state/src/preset_library.cpp",
+    "core/state/src/preset_metadata_store.cpp",
+    "core/state/src/preset_program_map.cpp"
+  ],
+  "vellum_inherits": true,
+  "rationale": "Preset library and program map headers and sources added to core/state (PresetLibrary, PresetMetadataStore, ProgramMap, MidiSourceReservation). Additive; nothing existing changes behaviour."
+}
