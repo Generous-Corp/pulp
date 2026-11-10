@@ -3120,3 +3120,12 @@ SignalGraph control and event edge probes are serial routed diagnostics with
 fixed-capacity publication and explicit refusal in unsupported execution modes.
 Host lifecycle changes must preserve detach-on-reset and the source-edge event
 observation boundary.
+
+### Catalog-derived graph notation
+
+`pulp/host/graph_patch.hpp` projects registered Processor descriptors and actual
+named GraphNode ports into a control-thread catalog. Processor MIDI capabilities
+append named `midi` ports without changing audio counts; named connect must set
+the MIDI edge flag. Keep strict patch validation additive: the legacy serializer
+may drop bad edges, while strict validation must check every original edge.
+Opaque state and richer edge kinds need explicit contracts before formatting.

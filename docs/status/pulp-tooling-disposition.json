@@ -2196,6 +2196,10 @@
             "required": true
           },
           {
+            "name": "--notation",
+            "kind": "flag"
+          },
+          {
             "name": "--json",
             "kind": "flag"
           },

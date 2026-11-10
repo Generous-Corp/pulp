@@ -11,6 +11,7 @@
 #include <map>
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/host/graph_rt_report.hpp>
+#include <pulp/host/graph_patch.hpp>
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/offline_signal_graph_host.hpp>
 #include <pulp/host/signal_graph.hpp>
@@ -18,8 +19,8 @@
 namespace {
 void usage() {
     std::cout << "Usage: pulp graph "
-                 "<inspect|validate|explain|render|probe|report|fmt|canonicalize|save> "
-                 "<file.pulpgraph> [--json] [--output path]\n";
+                 "<catalog|inspect|validate|explain|render|probe|report|fmt|canonicalize|save> "
+                 "<file.pulpgraph|file.pat> [--json] [--notation] [--output path]\n";
     std::cout << "report: [--sample-rate 48000] [--max-block-size 512] [--block-size N] "
                  "[--measure-blocks 16] (always JSON)\n";
     std::cout << "probe: --input file.wav --source-node NAME --source-port NAME "
@@ -455,6 +456,10 @@ int cmd_graph(const std::vector<std::string>& args) {
         return 0;
     }
     const std::string op = args[0];
+    if (op == "catalog") {
+        std::cout << pulp::host::GraphPatchCatalog{}.to_json() << '\n';
+        return 0;
+    }
     if (args.size() < 2) {
         usage();
         return 2;
@@ -482,22 +487,58 @@ int cmd_graph(const std::vector<std::string>& args) {
             std::cerr << "pulp graph: unknown subcommand '" << op << "'\n";
         return 2;
     }
-    pulp::host::SignalGraph graph;
+    auto graph_ptr = std::make_unique<pulp::host::SignalGraph>();
     pulp::host::GraphLoadOptions opts;
     opts.load_plugins = false;
-    auto loaded = pulp::host::GraphSerializer::from_file(graph, path, opts);
-    if (!loaded.ok) {
-        const auto file_error = loaded.error.starts_with("graph file ");
-        if (json)
-            json_error(file_error ? "file_unreadable" : "invalid_graph", loaded.error);
-        else
-            std::cerr << "pulp graph: " << (file_error ? "cannot read: " : "invalid graph: ")
-                      << loaded.error << "\n";
-        return 1;
+    pulp::host::GraphSerializer::LoadResult loaded;
+    const bool notation = std::filesystem::path(path).extension() == ".pat";
+    if (op == "validate" || notation ||
+        (op == "fmt" && std::find(args.begin() + 2, args.end(), "--notation") != args.end())) {
+        auto strict = pulp::host::load_graph_patch_file(path);
+        if (!strict) {
+            if (json)
+                std::cout << pulp::host::graph_patch_diagnostic_json(strict.diagnostic) << '\n';
+            else
+                std::cerr << "pulp graph: " << strict.diagnostic.message() << '\n';
+            return 1;
+        }
+        graph_ptr = std::move(strict.graph);
+        loaded.ok = true;
+    } else {
+        loaded = pulp::host::GraphSerializer::from_file(*graph_ptr, path, opts);
+        if (!loaded.ok) {
+            const auto file_error = loaded.error.starts_with("graph file ");
+            if (json)
+                json_error(file_error ? "file_unreadable" : "invalid_graph", loaded.error);
+            else
+                std::cerr << "pulp graph: " << loaded.error << '\n';
+            return 1;
+        }
+    }
+    auto& graph = *graph_ptr;
+    const bool as_notation = std::find(args.begin() + 2, args.end(), "--notation") != args.end();
+    if (op == "fmt" && (notation || as_notation)) {
+        const auto formatted = pulp::host::format_graph_patch(graph);
+        if (!formatted) {
+            if (json)
+                std::cout << pulp::host::graph_patch_diagnostic_json(formatted.diagnostic) << '\n';
+            else
+                std::cerr << formatted.diagnostic.message() << '\n';
+            return 1;
+        }
+        if (json) {
+            auto result = choc::value::createObject("GraphNotation");
+            result.addMember("valid", true);
+            result.addMember("code", "Ok");
+            result.addMember("notation", formatted.text);
+            std::cout << choc::json::toString(result) << '\n';
+        } else
+            std::cout << formatted.text;
+        return 0;
     }
     if (op == "validate") {
         if (json) {
-            std::cout << "{\"valid\":true,\"code\":\"ok\",\"format_version\":"
+            std::cout << "{\"valid\":true,\"code\":\"Ok\",\"format_version\":"
                       << pulp::host::GraphSerializer::current_format_version()
                       << ",\"nodes\":" << graph.nodes().size()
                       << ",\"connections\":" << graph.connections().size() << "}\n";
