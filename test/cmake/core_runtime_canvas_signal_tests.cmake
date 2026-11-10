@@ -551,6 +551,17 @@ endif()
 pulp_add_test_suite(pulp-test-windowing
     SOURCES test_windowing.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal)
+# FftT<double> against a committed golden, bit for bit. The hosted Linux and
+# Windows lanes run it, so a difference in compiler, libm or contraction shows up
+# here as the cross-platform answer.
+pulp_add_test_suite(pulp-test-fft-double-golden
+    SOURCES test_fft_double_golden.cpp
+    LIBRARIES pulp::signal)
+# FFT parity recipe: assert_null_near between two FFT implementations, with a
+# negative control that the comparison can fail.
+pulp_add_test_suite(pulp-test-fft-parity-recipe
+    SOURCES test_fft_parity_recipe.cpp
+    LIBRARIES pulp::signal pulp-audio-analysis)
 # Fixed-capacity single-thread history and its STFT consumer contract.
 pulp_add_test_suite(pulp-test-mirrored-history-buffer
     SOURCES test_mirrored_history_buffer.cpp harness/rt_allocation_probe.cpp
