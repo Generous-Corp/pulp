@@ -1,0 +1,9 @@
+{
+  "domain": "host",
+  "source": "core/host/include/pulp/host/spectral_graph.hpp",
+  "fingerprint": "sha256:7184acce0063ba69aab4c271f79a4e65ca3e04fc01e68de2f27f84aa173b3e7a",
+  "include": "pulp/host/spectral_graph.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Runtime-only typed spectral ports; notation and complete qualification remain PARTIAL."
+}

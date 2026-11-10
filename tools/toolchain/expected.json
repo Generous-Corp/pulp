@@ -1,7 +1,7 @@
 {
   "_generated": "by tools/toolchain/generate.py from tools/toolchain/manifest.toml; do not edit",
   "schema": 1,
-  "source_sha256": "3cbe8514fd7c32c4d2bb544618182804766356a96d57110f4df82d02cb16d4a6",
+  "source_sha256": "7b695d2cbaf8c4a0eb572c673416b76cd728c23ef50c4126ffb0f621d7926959",
   "enforcement": "warn",
   "tools": {
     "python": "3.14.4",
@@ -9,15 +9,25 @@
     "ninja": "1.13.2",
     "node": "26.10.0",
     "rust": "1.97.1",
-    "clang_format": "21.1.8"
+    "clang_format": "21.1.8",
+    "ccache": "4.14.1",
+    "git_lfs": "3.8.1"
+  },
+  "xcode": {
+    "version": "27.2",
+    "build": "27B52"
   },
   "platform_overrides": {
     "linux": {
       "cmake": "system",
+      "ccache": "system",
+      "git_lfs": "system",
       "rust": "absent"
     },
     "windows": {
       "cmake": "system",
+      "ccache": "system",
+      "git_lfs": "system",
       "rust": "absent"
     }
   },

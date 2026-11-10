@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/transport_edge.hpp",
+  "fingerprint": "sha256:a469dd58ae5392702f42340e0024308d626facb0d6584090b166d0167d13c66d",
+  "include": "pulp/signal/transport_edge.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

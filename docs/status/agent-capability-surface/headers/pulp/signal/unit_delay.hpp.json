@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/unit_delay.hpp",
+  "fingerprint": "sha256:7e91b280e5a3a83b78ed1f84301990eee1b6dcaa8b7736f07287452896d22726",
+  "include": "pulp/signal/unit_delay.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.unit-delay"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

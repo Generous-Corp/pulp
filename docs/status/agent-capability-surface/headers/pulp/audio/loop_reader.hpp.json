@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/loop_reader.hpp",
+  "fingerprint": "sha256:3a2a18ad10df18195aeee96e210da9fd0799df9e73313f4289277fd9c0ab9119",
+  "include": "pulp/audio/loop_reader.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

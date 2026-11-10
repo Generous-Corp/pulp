@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/finite_stretch_builder.hpp",
+  "fingerprint": "sha256:9c78fb3f1c47b76dce491e9aeffb197b3fdc808a3976ccca39fee1039cbfcfa3",
+  "include": "pulp/signal/finite_stretch_builder.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

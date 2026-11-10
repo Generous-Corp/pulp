@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/fdn/config.hpp",
+  "fingerprint": "sha256:7c86120bda9c7619a3c92f490b4e9cf7f88dfdcc40ecf330d045b3db63eb387a",
+  "include": "pulp/signal/fdn/config.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Internal building block of the FDN reverb engine (fdn/config). It is reached only through FdnReverb and makes no installed agent capability claim of its own."
+}

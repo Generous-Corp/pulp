@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/detail/audio_range.hpp",
+  "fingerprint": "sha256:de70fcaa00f30b7a20c1f8632619635fa774e239f81ae7d6c09cf03ded64ba0b",
+  "include": "pulp/signal/detail/audio_range.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "signal.routing-primitives"
+  ],
+  "rationale": "Installed byte-range overlap predicates enforce the routing primitives' aliasing contracts; they are not an independent DSP operation."
+}

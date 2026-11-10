@@ -1,0 +1,11 @@
+{
+  "domain": "timebase",
+  "source": "core/timebase/include/pulp/timebase/ratchet.hpp",
+  "fingerprint": "sha256:93f1ae1c80b5c5ad255180067adabcc331577e63a6f77b57b06255891926718d",
+  "include": "pulp/timebase/ratchet.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "timebase.ratchet"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

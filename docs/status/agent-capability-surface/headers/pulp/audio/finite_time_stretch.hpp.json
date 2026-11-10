@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/finite_time_stretch.hpp",
+  "fingerprint": "sha256:2edcfa0f14d8adc1c8a7252aaf73ebeb5f571dce83549ed9fba400c5f468bd33",
+  "include": "pulp/audio/finite_time_stretch.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

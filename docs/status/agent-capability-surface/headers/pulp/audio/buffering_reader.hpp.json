@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/buffering_reader.hpp",
+  "fingerprint": "sha256:051b0e39daded2b42ffa26e82bb2835546bfea02bd927de687d473b16974529f",
+  "include": "pulp/audio/buffering_reader.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Background pre-buffering ring for file playback whose worker the audio thread wakes through runtime::WakeSignal; streaming infrastructure, not a generator-facing DSP capability."
+}

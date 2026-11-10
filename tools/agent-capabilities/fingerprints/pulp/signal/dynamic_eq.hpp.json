@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/dynamic_eq.hpp",
+  "fingerprint": "sha256:eb6ed3b73030b8046706e6dfb8bfe9a143134b7dea59c289ce142fdcbb12254b"
+}

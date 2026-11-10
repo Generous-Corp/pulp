@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/cross_feedback_multitap_delay.hpp",
+  "fingerprint": "sha256:14184a88f394c3da92e4d39d7c8c5f9b481f5729acfafd7a0a7e5d773ee68e98",
+  "include": "pulp/signal/cross_feedback_multitap_delay.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.cross-feedback-multitap-delay"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}
