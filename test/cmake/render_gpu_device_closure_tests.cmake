@@ -162,6 +162,7 @@ set_tests_properties(gpu-runtime-benchmark-flavour PROPERTIES LABELS "render;gpu
 add_test(NAME gpu-runtime-covers-target
     COMMAND ${CMAKE_COMMAND}
         -DMODULE=${CMAKE_SOURCE_DIR}/tools/cmake/PulpGpuRuntimeRecord.cmake
+        -DRUNTIME_MODULE=${CMAKE_SOURCE_DIR}/tools/cmake/PulpGpuRuntime.cmake
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_gpu_runtime_covers_target.cmake)
 set_tests_properties(gpu-runtime-covers-target PROPERTIES LABELS "render;gpu-device" TIMEOUT 20)
 # The installed SDK finds gpu-runtime through pulp_find_gpu_runtime_package(),
