@@ -2,7 +2,7 @@
 
 Status: **PARTIAL / HOLD**.
 
-This audit is bound to exact `origin/main` source `d8cae12b3ae3e95941dc84fd6c52fc8b621921ed`.
+This audit is bound to exact `origin/main` source `b8a8278c9b3c876370fe921ddbbf7434030335ae`.
 It deliberately adds no hosted-plugin runtime or speculative isolation API.
 
 ## Fresh hostile controls
