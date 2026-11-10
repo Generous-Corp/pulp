@@ -855,20 +855,30 @@ TEST_CASE("StateStore basic operations", "[state][store]") {
     }
 }
 
-TEST_CASE("StateStore duplicate parameter ids resolve to latest registration",
+TEST_CASE("StateStore refuses a second registration under a used parameter id",
           "[state][store]") {
     StateStore store;
-    store.add_parameter(make_param_info(7, "First", "dB", {-60.0f, 12.0f, -6.0f}));
-    store.add_parameter(make_param_info(7, "Second", "%", {0.0f, 100.0f, 25.0f}));
+    REQUIRE(store.add_parameter(make_param_info(7, "First", "dB", {-60.0f, 12.0f, -6.0f})));
+    REQUIRE_FALSE(store.add_parameter(make_param_info(7, "Second", "%", {0.0f, 100.0f, 25.0f})));
 
-    REQUIRE(store.param_count() == 2);
+    // One entry: a host listing the parameters never sees ID 7 twice.
+    REQUIRE(store.param_count() == 1);
+    REQUIRE(store.all_params().size() == 1);
     REQUIRE(store.all_params()[0].name == "First");
-    REQUIRE(store.all_params()[1].name == "Second");
-    REQUIRE(store.info(7)->name == "Second");
-    REQUIRE_THAT(store.get_value(7), WithinAbs(25.0f, 1e-6f));
+    REQUIRE(store.info(7)->name == "First");
+    REQUIRE_THAT(store.get_value(7), WithinAbs(-6.0f, 1e-6f));
+    REQUIRE(store.duplicate_registrations() == 1);
 
+    // The refused registration changed nothing: the first range still clamps.
     store.set_value(7, 150.0f);
-    REQUIRE_THAT(store.get_value(7), WithinAbs(100.0f, 1e-6f));
+    REQUIRE_THAT(store.get_value(7), WithinAbs(12.0f, 1e-6f));
+
+    // Control: distinct IDs are all accepted and nothing is counted.
+    StateStore distinct;
+    REQUIRE(distinct.add_parameter(make_param_info(1, "A", "", {0.0f, 1.0f, 0.5f})));
+    REQUIRE(distinct.add_parameter(make_param_info(2, "B", "", {0.0f, 1.0f, 0.5f})));
+    REQUIRE(distinct.param_count() == 2);
+    REQUIRE(distinct.duplicate_registrations() == 0);
 }
 
 TEST_CASE("StateStore overlays a host display name without changing its contract",
@@ -3224,35 +3234,18 @@ TEST_CASE("reset_triggers_rt is a no-op for a store with no triggers",
     REQUIRE_THAT(store.get_value(1), WithinAbs(-3.0, 0.0001));
 }
 
-TEST_CASE("reset_triggers_rt respects the duplicate-id latest-wins contract",
+TEST_CASE("a refused duplicate id cannot leave a stale trigger slot to reset",
           "[state][param-designation]") {
-    // A trigger registered under id 7, then SUPERSEDED by a non-trigger under
-    // the same id. id_to_index_ resolves 7 to the latest (non-trigger) slot, so
-    // get_value/set_value never touch the stale trigger slot. reset_triggers_rt
-    // must NOT clobber the live value via the dead trigger index.
+    // The trigger keeps id 7; the ordinary parameter that tried to take the id
+    // is refused, so the trigger still resets and its value is the only one.
     StateStore store;
-    ParamInfo trigger = make_param_info(7, "Old Trigger", "", {0.0f, 1.0f, 0.0f, 1.0f});
+    ParamInfo trigger = make_param_info(7, "Trigger", "", {0.0f, 1.0f, 0.0f, 1.0f});
     trigger.is_trigger = true;
-    store.add_parameter(trigger);
-    // Supersede id 7 with an ordinary parameter (latest registration wins).
-    store.add_parameter(make_param_info(7, "Now Ordinary", "dB", {-60.0f, 12.0f, -6.0f}));
-
-    store.set_value(7, 3.0f);  // lands in the latest (ordinary) slot
-    // The superseded trigger slot is dead, so no live trigger remains.
-    REQUIRE_FALSE(store.reset_triggers_rt());
-    // The live value is untouched — not stomped to the dead trigger's default.
-    REQUIRE_THAT(store.get_value(7), WithinAbs(3.0, 0.0001));
-
-    // Conversely, when the LATEST registration for an id is the trigger, it
-    // resets and the earlier non-trigger slot is irrelevant.
-    StateStore store2;
-    store2.add_parameter(make_param_info(9, "Old Ordinary", "", {0.0f, 1.0f, 0.5f}));
-    ParamInfo latest_trigger = make_param_info(9, "Reset", "", {0.0f, 1.0f, 0.0f, 1.0f});
-    latest_trigger.designation = ParamDesignation::Reset;
-    store2.add_parameter(latest_trigger);
-    store2.set_value(9, 1.0f);
-    REQUIRE(store2.reset_triggers_rt());
-    REQUIRE_THAT(store2.get_value(9), WithinAbs(0.0, 0.0001));
+    REQUIRE(store.add_parameter(trigger));
+    REQUIRE_FALSE(store.add_parameter(make_param_info(7, "Ordinary", "dB", {-60.0f, 12.0f, -6.0f})));
+    store.set_value(7, 1.0f);
+    REQUIRE(store.reset_triggers_rt());
+    REQUIRE_THAT(store.get_value(7), WithinAbs(0.0, 0.0001));
 }
 
 TEST_CASE("StateStore clamps an out-of-range default and round-trips it",

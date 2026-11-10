@@ -175,7 +175,20 @@ class StateStore {
 
     /// Register a parameter. Call during initialization only.
     /// @param info  Immutable metadata for this parameter.
-    void add_parameter(const ParamInfo& info);
+    ///
+    /// An ID may be registered once. A second registration under an ID that is
+    /// already in use is refused: the first registration is kept, nothing is
+    /// added (so hosts never see two parameters with one ID), an error is
+    /// logged naming both, and `duplicate_registrations()` counts it. There is
+    /// deliberately no assert: a debug abort inside a host that is only
+    /// scanning the plug-in is worse than a logged refusal, and the counter
+    /// lets a test fail loudly instead. To change a parameter's range or texts,
+    /// compute them before registering it.
+    /// @return true when the parameter was added, false when the ID was taken.
+    bool add_parameter(const ParamInfo& info);
+
+    /// Registrations refused because the ID was already in use, for this store.
+    std::size_t duplicate_registrations() const noexcept { return duplicate_registrations_; }
 
     /// Register a parameter group. Call during initialization only.
     void add_group(const ParamGroup& group);
@@ -687,6 +700,7 @@ class StateStore {
     // `this` and reads id_to_index_/values_ during drain_main_listeners;
     // destroying registry_ before that storage guarantees the getter can
     // never run after the storage it reads is gone. Do not reorder.
+    std::size_t duplicate_registrations_ = 0;
     std::vector<ParamInfo> params_;
     std::vector<ParamGroup> groups_;
     std::unordered_map<ParamID, std::size_t> id_to_index_;

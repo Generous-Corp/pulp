@@ -394,7 +394,15 @@ StateStore::~StateStore() {
     permanent_listener_tokens_.clear();
 }
 
-void StateStore::add_parameter(const ParamInfo& info) {
+bool StateStore::add_parameter(const ParamInfo& info) {
+    if (const auto taken = id_to_index_.find(info.id); taken != id_to_index_.end()) {
+        ++duplicate_registrations_;
+        runtime::log_error(
+            "StateStore: parameter id {} is already registered as '{}'; ignoring the second "
+            "registration '{}'. Every parameter needs its own ID.",
+            info.id, params_[taken->second].name, info.name);
+        return false;
+    }
     auto index = params_.size();
     // Clamp the declared default into [min, max] so the stored default is
     // consistent with set_value()/reset_to_default() (both clamp). Without this,
@@ -440,6 +448,7 @@ void StateStore::add_parameter(const ParamInfo& info) {
     if (info.auto_resets()) {
         trigger_indices_.push_back(index);
     }
+    return true;
 }
 
 void StateStore::add_group(const ParamGroup& group) {

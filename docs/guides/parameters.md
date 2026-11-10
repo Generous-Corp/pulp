@@ -111,6 +111,14 @@ void define_parameters(state::StateStore& store) override {
 }
 ```
 
+Each ID can be registered once. A second `add_parameter` under an ID already in
+use is refused: the first registration is kept, nothing is added (a host never
+sees one ID twice), an error is logged naming both parameters, and
+`add_parameter` returns false and `duplicate_registrations()` counts it. It does
+not assert, so a host that is only scanning the plug-in is not aborted; tests
+should check `duplicate_registrations() == 0`. To change a parameter's range or
+texts, compute them before registering it.
+
 ### Reading Values (Audio Thread)
 
 ```cpp

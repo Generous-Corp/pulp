@@ -57,6 +57,11 @@ pulp_add_test_suite(pulp-test-app-framework GROUP pulp-test-group-app-view
     LIBRARIES pulp::view)
 
 # Preset manager tests
+pulp_add_test_suite(pulp-test-example-param-ids
+    SOURCES test_example_param_ids.cpp example_param_ids/gain.cpp
+            example_param_ids/effect.cpp example_param_ids/drums.cpp
+    LIBRARIES pulp::format)
+
 pulp_add_test_suite(pulp-test-preset-manager GROUP pulp-test-group-app-state
     LIBRARIES pulp::state)
 
