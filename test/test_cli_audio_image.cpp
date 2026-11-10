@@ -1,12 +1,11 @@
 // test_cli_audio_image.cpp — shell-out tests for `pulp audio spectrogram` and
 // `pulp audio waveform`.
 //
-// Per CLAUDE.md ("CLI behavior changes — shell out to the built binary, assert
-// exit code + stderr content"): these write small WAV fixtures, launch the
-// built `pulp-cpp`, and assert exit codes, stderr, the PNG, and the
-// `pulp.audio.image.v1` sidecar. They cover argument validation, the sidecar
-// key set and path redaction, float input above full scale, and a synthetic
-// 70-minute WAV that `decode_wav` refuses but the ranged reader renders.
+// These write small WAV fixtures, launch the built `pulp-cpp`, and assert exit
+// codes, stderr, the PNG, and the `pulp.audio.image.v1` sidecar. They cover
+// argument validation, the sidecar key set and path redaction, float input
+// above full scale, and a synthetic 70-minute WAV that `decode_wav` refuses
+// but the ranged reader renders.
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>

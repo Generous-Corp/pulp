@@ -23,5 +23,26 @@
   "build_gate": "N/A: no production implementation was specified; typed-frame contract is missing",
   "pr": null,
   "next_action": "Assign an owner for the typed-frame adapter and specify ownership/lifetime, hop scheduling, channel-group shape, latency/tail, block chronology, back-pressure, and automation composition before runtime wiring.",
-  "head_scope": "main source head before status-only disposition commit 34c5c9fb47beb652d84c067136605c77fa213e0b"
+  "head_scope": "main source head before status-only disposition commit 34c5c9fb47beb652d84c067136605c77fa213e0b",
+  "row16_output_clock": {
+    "date": "2026-11-09",
+    "source_head": "2891a38389086e131bb91953d9bea892069e679f",
+    "receipt": "docs/validation/g10-spectral/row16-output-clock-receipt.json",
+    "receipt_sha256": "990948f0fc4752946596f45a0fb2d2d5cd83a4745b85b9868c5fe2facdcc57ae",
+    "verdict": "PASS_FOR_ROW16_BOUNDED_EVIDENCE",
+    "controls": {
+      "routed_spectral_fault": "PASS: [spectral-output-clock], 9 assertions",
+      "unchanged_output_prefix_and_sibling": "PASS: [spectral-fatal-prefix], 5176 assertions",
+      "callback_allocation": "PASS: [spectral-allocation], 12 assertions; zero allocations",
+      "zero_output_fault": "PASS: [spectral-zero], 520 assertions"
+    },
+    "mutation": {
+      "guard": "core/host/src/spectral_graph_internal.hpp output_clock bound",
+      "baseline": "PASS",
+      "planted_bound_removal": "FAIL_EXPECTED, exit 42",
+      "restored": "PASS"
+    },
+    "scope": "Bounded output-clock/fault evidence only; full G-10 and A3 remain PARTIAL."
+  },
+  "latest_source_head": "2891a38389086e131bb91953d9bea892069e679f"
 }

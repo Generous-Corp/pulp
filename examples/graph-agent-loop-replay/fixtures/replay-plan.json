@@ -1,0 +1,1 @@
+{"schema":"pulp.a9.edit-replay/v1","mode":"positive","semantic":"baseline == replay; edit changes render","resolved_plan":"baseline == replay; edit changes resolved plan"}

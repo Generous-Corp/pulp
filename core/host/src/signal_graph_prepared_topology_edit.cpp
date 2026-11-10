@@ -815,6 +815,7 @@ SignalGraph::PreparedTopologyEdit::PreparedTopologyEdit(SignalGraph& owner)
     candidate_->nodes_ = owner.nodes_;
     candidate_->processor_nodes_ = owner.processor_nodes_;
     candidate_->connections_ = owner.connections_;
+    candidate_->graph_event_edge_ = owner.graph_event_edge_;
     candidate_->connection_identities_ = owner.connection_identities_;
     candidate_->next_connection_identity_ = owner.next_connection_identity_;
     candidate_->custom_node_types_ = owner.custom_node_types_;
@@ -3346,9 +3347,14 @@ void SignalGraph::adopt_candidate_authoring_locked_(SignalGraph& candidate) {
     }
 
     this->cancel_swap_edit_locked_();
+    if (candidate.graph_event_edge_ &&
+        !candidate.has_path_locked_(candidate.graph_event_edge_->producer,
+                                    candidate.graph_event_edge_->consumer))
+        candidate.graph_event_edge_.reset();
     this->nodes_ = std::move(candidate.nodes_);
     this->processor_nodes_ = std::move(candidate.processor_nodes_);
     this->connections_ = std::move(candidate.connections_);
+    this->graph_event_edge_ = candidate.graph_event_edge_;
     this->connection_identities_ = std::move(candidate.connection_identities_);
     this->next_connection_identity_ = candidate.next_connection_identity_;
     this->custom_node_types_ = std::move(candidate.custom_node_types_);
