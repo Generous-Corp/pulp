@@ -2866,6 +2866,299 @@ TEST_CASE("Retained cleanup removes finite descendant churn",
         CHECK(count <= 9);
     }
 }
+
+#if defined(PULP_G9_JOINED_CHILD_FIXTURE)
+TEST_CASE("Joined child stays in the anchor group and only direct custody is reaped",
+          "[runtime][child-process][joined-child]") {
+    using namespace pulp::platform;
+    RetainedProcessCustody anchor_custody;
+    ChildProcess anchor;
+    REQUIRE(anchor.start_retained(anchor_custody, PULP_G9_JOINED_CHILD_FIXTURE, {"join"}));
+    auto cleanup = make_scope_guard(
+        [&] { (void)anchor_custody.cleanup_retained_process_group(custody_deadline()); });
+
+    std::string output;
+    REQUIRE(custody_eventually([&] {
+        output += anchor.read_available_output();
+        return output.find("ANCHOR_ALIVE=1\n") != std::string::npos;
+    }));
+    CHECK(output.find("READY anchor=") != std::string::npos);
+    CHECK(output.find("anchor_group=") != std::string::npos);
+    CHECK(output.find("VENDOR_PERMISSION") != std::string::npos);
+    CHECK(output.find("allowed=1") != std::string::npos);
+    CHECK(output.find("WORKER_TERM_READY=1") != std::string::npos);
+    CHECK(output.find("WORKER_GROUP_MATCH=1") != std::string::npos);
+    CHECK(output.find("HANDLE_MOVED") != std::string::npos);
+    CHECK(output.find("CUSTODY_MOVED") != std::string::npos);
+    CHECK(output.find("child_reaped=1") != std::string::npos);
+    CHECK(output.find("ANCHOR_ALIVE=1") != std::string::npos);
+    CHECK(anchor.is_running());
+    CHECK(::kill(anchor.process_id(), 0) == 0);
+    const auto anchor_observation = anchor_custody.retained_process_observation();
+    CHECK(anchor_observation.identity_retained);
+    CHECK(anchor_observation.process_group_id == anchor.process_id());
+    const auto cleaned = anchor_custody.cleanup_retained_process_group(custody_deadline());
+    CHECK(cleaned.status == RetainedCleanupStatus::Complete);
+    CHECK(cleaned.child_reaped);
+    CHECK(cleaned.descendants_gone);
+    cleanup.dismiss();
+}
+
+TEST_CASE("Joined child handshake failure leaves the anchor group untouched",
+          "[runtime][child-process][joined-child][handshake]") {
+    using namespace pulp::platform;
+    RetainedProcessCustody anchor_custody;
+    ChildProcess anchor;
+    REQUIRE(
+        anchor.start_retained(anchor_custody, PULP_G9_JOINED_CHILD_FIXTURE, {"failed-handshake"}));
+    auto cleanup = make_scope_guard(
+        [&] { (void)anchor_custody.cleanup_retained_process_group(custody_deadline()); });
+    std::string output;
+    REQUIRE(custody_eventually([&] {
+        output += anchor.read_available_output();
+        return output.find("ANCHOR_ALIVE=1\n") != std::string::npos;
+    }));
+    CHECK(output.find("started=0") != std::string::npos);
+    CHECK(output.find("child_reaped=1") != std::string::npos);
+    CHECK(output.find("ANCHOR_ALIVE=1") != std::string::npos);
+    CHECK(anchor.is_running());
+    CHECK(anchor_custody.retained_process_observation().identity_retained);
+    CHECK(anchor_custody.cleanup_retained_process_group(custody_deadline()).status ==
+          RetainedCleanupStatus::Complete);
+    cleanup.dismiss();
+}
+
+TEST_CASE("Joined child rejects a stale process-group capability before spawning",
+          "[runtime][child-process][joined-child][capability]") {
+    using namespace pulp::platform;
+    RetainedProcessCustody anchor_custody;
+    ChildProcess anchor;
+    REQUIRE(
+        anchor.start_retained(anchor_custody, PULP_G9_JOINED_CHILD_FIXTURE, {"stale-capability"}));
+    auto cleanup = make_scope_guard(
+        [&] { (void)anchor_custody.cleanup_retained_process_group(custody_deadline()); });
+    std::string output;
+    REQUIRE(custody_eventually([&] {
+        output += anchor.read_available_output();
+        return output.find("STALE_CAPABILITY") != std::string::npos;
+    }));
+    CHECK(output.find("started=0") != std::string::npos);
+    CHECK(anchor_custody.retained_process_observation().identity_retained);
+    CHECK(anchor_custody.cleanup_retained_process_group(custody_deadline()).status ==
+          RetainedCleanupStatus::Complete);
+    cleanup.dismiss();
+}
+
+TEST_CASE("Joined cleanup remains bounded and eventually reaps a TERM-resistant worker",
+          "[runtime][child-process][joined-child][deadline]") {
+    using namespace pulp::platform;
+    RetainedProcessCustody anchor_custody;
+    ChildProcess anchor;
+    REQUIRE(anchor.start_retained(anchor_custody, PULP_G9_JOINED_CHILD_FIXTURE, {"deadline"}));
+    auto cleanup = make_scope_guard(
+        [&] { (void)anchor_custody.cleanup_retained_process_group(custody_deadline()); });
+    std::string output;
+    REQUIRE(custody_eventually([&] {
+        output += anchor.read_available_output();
+        return output.find("anchor_alive=1\n") != std::string::npos;
+    }));
+    CHECK(output.find("DEADLINE ready=1 first=1") != std::string::npos);
+    CHECK(output.find("second=0") != std::string::npos);
+    CHECK(output.find("child_reaped=1") != std::string::npos);
+    CHECK(output.find("term_sent=1") != std::string::npos);
+    CHECK(output.find("kill_sent=1") != std::string::npos);
+    CHECK(output.find("elapsed_ms=") != std::string::npos);
+    CHECK(output.find("identity_reaped=1") != std::string::npos);
+    CHECK(output.find("anchor_alive=1") != std::string::npos);
+    CHECK(anchor.is_running());
+    CHECK(anchor_custody.retained_process_observation().identity_retained);
+    CHECK(anchor_custody.cleanup_retained_process_group(custody_deadline()).status ==
+          RetainedCleanupStatus::Complete);
+    cleanup.dismiss();
+}
+
+TEST_CASE("Joined handle destruction leaves direct custody for its reservation",
+          "[runtime][child-process][joined-child][destruction]") {
+    using namespace pulp::platform;
+    RetainedProcessCustody anchor_custody;
+    ChildProcess anchor;
+    REQUIRE(anchor.start_retained(anchor_custody, PULP_G9_JOINED_CHILD_FIXTURE, {"destruction"}));
+    auto cleanup = make_scope_guard(
+        [&] { (void)anchor_custody.cleanup_retained_process_group(custody_deadline()); });
+    std::string output;
+    REQUIRE(custody_eventually([&] {
+        output += anchor.read_available_output();
+        return output.find("anchor_alive=1\n") != std::string::npos;
+    }));
+    CHECK(output.find("observed=2") != std::string::npos);
+    CHECK(output.find("cleanup=0") != std::string::npos);
+    CHECK(output.find("child_reaped=1") != std::string::npos);
+    CHECK(output.find("anchor_alive=1") != std::string::npos);
+    CHECK(anchor.is_running());
+    CHECK(anchor_custody.cleanup_retained_process_group(custody_deadline()).status ==
+          RetainedCleanupStatus::Complete);
+    cleanup.dismiss();
+}
+
+TEST_CASE("Joined failed spawn consumes no child identity",
+          "[runtime][child-process][joined-child][failed-spawn]") {
+    using namespace pulp::platform;
+    RetainedProcessCustody anchor_custody;
+    ChildProcess anchor;
+    REQUIRE(anchor.start_retained(anchor_custody, PULP_G9_JOINED_CHILD_FIXTURE, {"failed-spawn"}));
+    auto cleanup = make_scope_guard(
+        [&] { (void)anchor_custody.cleanup_retained_process_group(custody_deadline()); });
+    std::string output;
+    REQUIRE(custody_eventually([&] {
+        output += anchor.read_available_output();
+        return output.find("anchor_alive=1\n") != std::string::npos;
+    }));
+    CHECK(output.find("started=0 pid=-1") != std::string::npos);
+    CHECK(output.find("cleanup=0") != std::string::npos);
+    CHECK(output.find("anchor_alive=1") != std::string::npos);
+    CHECK(anchor.is_running());
+    CHECK(anchor_custody.cleanup_retained_process_group(custody_deadline()).status ==
+          RetainedCleanupStatus::Complete);
+    cleanup.dismiss();
+}
+
+TEST_CASE("Joined custody reports external reaping without signalling the anchor group",
+          "[runtime][child-process][joined-child][external-reap]") {
+    using namespace pulp::platform;
+    RetainedProcessCustody anchor_custody;
+    ChildProcess anchor;
+    REQUIRE(anchor.start_retained(anchor_custody, PULP_G9_JOINED_CHILD_FIXTURE, {"external-reap"}));
+    auto cleanup = make_scope_guard(
+        [&] { (void)anchor_custody.cleanup_retained_process_group(custody_deadline()); });
+    std::string output;
+    REQUIRE(custody_eventually([&] {
+        output += anchor.read_available_output();
+        return output.find("anchor_alive=1\n") != std::string::npos;
+    }));
+    CHECK(output.find("reaped=1") != std::string::npos);
+    CHECK(output.find("cleanup=5") != std::string::npos);
+    CHECK(output.find("term_sent=0") != std::string::npos);
+    CHECK(output.find("kill_sent=0") != std::string::npos);
+    CHECK(output.find("anchor_alive=1") != std::string::npos);
+    CHECK(anchor.is_running());
+    CHECK(anchor_custody.retained_process_observation().identity_retained);
+    CHECK(anchor_custody.cleanup_retained_process_group(custody_deadline()).status ==
+          RetainedCleanupStatus::Complete);
+    cleanup.dismiss();
+}
+
+TEST_CASE("Joined launch refuses incompatible SIGCHLD dispositions before spawn",
+          "[runtime][child-process][joined-child][sigchld]") {
+    using namespace pulp::platform;
+    for (const auto mode : {"sigchld-ignored", "sigchld-nocldwait"}) {
+        RetainedProcessCustody anchor_custody;
+        ChildProcess anchor;
+        REQUIRE(anchor.start_retained(anchor_custody, PULP_G9_JOINED_CHILD_FIXTURE, {mode}));
+        auto cleanup = make_scope_guard(
+            [&] { (void)anchor_custody.cleanup_retained_process_group(custody_deadline()); });
+        std::string output;
+        REQUIRE(custody_eventually([&] {
+            output += anchor.read_available_output();
+            return output.find("anchor_alive=1\n") != std::string::npos;
+        }));
+        const auto label = std::string(mode) == "sigchld-ignored" ? "ignored" : "nocldwait";
+        CHECK(output.find(std::string("mode=") + label + " started=0 pid=-1") != std::string::npos);
+        CHECK(output.find("anchor_alive=1") != std::string::npos);
+        CHECK(anchor.is_running());
+        CHECK(anchor_custody.cleanup_retained_process_group(custody_deadline()).status ==
+              RetainedCleanupStatus::Complete);
+        cleanup.dismiss();
+    }
+}
+
+TEST_CASE("Joined custody is finite but supports two simultaneous workers",
+          "[runtime][child-process][joined-child][capacity]") {
+    using namespace pulp::platform;
+    SECTION("occupied reservation refuses before callback or spawn") {
+        RetainedProcessCustody anchor_custody;
+        ChildProcess anchor;
+        REQUIRE(anchor.start_retained(anchor_custody, PULP_G9_JOINED_CHILD_FIXTURE, {"occupied"}));
+        auto cleanup = make_scope_guard(
+            [&] { (void)anchor_custody.cleanup_retained_process_group(custody_deadline()); });
+        std::string output;
+        REQUIRE(custody_eventually([&] {
+            output += anchor.read_available_output();
+            return output.find("anchor_alive=1\n") != std::string::npos;
+        }));
+        CHECK(output.find("first=1 second=0 callback=0 second_pid=-1") != std::string::npos);
+        CHECK(output.find("child_reaped=1") != std::string::npos);
+        CHECK(output.find("anchor_alive=1") != std::string::npos);
+        CHECK(anchor.is_running());
+        CHECK(anchor_custody.cleanup_retained_process_group(custody_deadline()).status ==
+              RetainedCleanupStatus::Complete);
+        cleanup.dismiss();
+    }
+    SECTION("two reservations retain independent direct-child identities") {
+        RetainedProcessCustody anchor_custody;
+        ChildProcess anchor;
+        REQUIRE(anchor.start_retained(anchor_custody, PULP_G9_JOINED_CHILD_FIXTURE, {"two"}));
+        auto cleanup = make_scope_guard(
+            [&] { (void)anchor_custody.cleanup_retained_process_group(custody_deadline()); });
+        std::string output;
+        REQUIRE(custody_eventually([&] {
+            output += anchor.read_available_output();
+            return output.find("anchor_alive=1\n") != std::string::npos;
+        }));
+        CHECK(output.find("first=1 second=1 both_live=1 same_group=1") != std::string::npos);
+        CHECK(output.find("first_reaped=1 second_reaped=1") != std::string::npos);
+        CHECK(output.find("anchor_alive=1") != std::string::npos);
+        CHECK(anchor.is_running());
+        CHECK(anchor_custody.cleanup_retained_process_group(custody_deadline()).status ==
+              RetainedCleanupStatus::Complete);
+        cleanup.dismiss();
+    }
+    SECTION("occupied custody move preserves both identities") {
+        RetainedProcessCustody anchor_custody;
+        ChildProcess anchor;
+        REQUIRE(anchor.start_retained(anchor_custody, PULP_G9_JOINED_CHILD_FIXTURE, {"moves"}));
+        auto cleanup = make_scope_guard(
+            [&] { (void)anchor_custody.cleanup_retained_process_group(custody_deadline()); });
+        std::string output;
+        REQUIRE(custody_eventually([&] {
+            output += anchor.read_available_output();
+            return output.find("anchor_alive=1\n") != std::string::npos;
+        }));
+        CHECK(output.find("first_cleanup=0 second_cleanup=0") != std::string::npos);
+        CHECK(output.find("first_reaped=1 second_reaped=1") != std::string::npos);
+        CHECK(output.find("anchor_alive=1") != std::string::npos);
+        CHECK(anchor.is_running());
+        CHECK(anchor_custody.cleanup_retained_process_group(custody_deadline()).status ==
+              RetainedCleanupStatus::Complete);
+        cleanup.dismiss();
+    }
+}
+
+TEST_CASE("Joined spawn closes duplicated anchor descriptors",
+          "[runtime][child-process][joined-child][descriptors]") {
+    using namespace pulp::platform;
+    RetainedProcessCustody anchor_custody;
+    ChildProcess anchor;
+    REQUIRE(anchor.start_retained(anchor_custody, PULP_G9_JOINED_CHILD_FIXTURE, {"fd-aliases"}));
+    auto cleanup = make_scope_guard(
+        [&] { (void)anchor_custody.cleanup_retained_process_group(custody_deadline()); });
+    std::string output;
+    REQUIRE(custody_eventually([&] {
+        output += anchor.read_available_output();
+        return output.find("anchor_alive=1\n") != std::string::npos;
+    }));
+    CHECK(output.find("started=1") != std::string::npos);
+    CHECK(output.find("FD_LEAK=0") != std::string::npos);
+    CHECK(output.find("DESCENDANT_FD_LEAK=0") != std::string::npos);
+    CHECK(output.find("STDIN_NULL=1") != std::string::npos);
+    CHECK(output.find("child_reaped=1") != std::string::npos);
+    CHECK(output.find("anchor_alive=1") != std::string::npos);
+    CHECK(anchor.is_running());
+    CHECK(anchor_custody.cleanup_retained_process_group(custody_deadline()).status ==
+          RetainedCleanupStatus::Complete);
+    cleanup.dismiss();
+}
+
+#endif
 #else
 TEST_CASE("Retained process custody refuses unsupported platforms without spawning",
           "[runtime][child-process][retained-custody]") {
@@ -2884,5 +3177,6 @@ TEST_CASE("Retained process custody refuses unsupported platforms without spawni
     CHECK(process.retained_process_observation().state == RetainedProcessState::Unsupported);
     CHECK(reservation.cleanup_retained_process_group(std::chrono::steady_clock::now()).status ==
           RetainedCleanupStatus::Unsupported);
+    CHECK_FALSE(CurrentProcessGroup::capture());
 }
 #endif

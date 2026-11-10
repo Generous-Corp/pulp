@@ -244,8 +244,19 @@ pulp_add_test_suite(pulp-test-animator-set GROUP pulp-test-group-core-view
     LIBRARIES pulp::view)
 
 # Runtime utility tests (mmap, temp file, dynlib, base64, range, child process)
+set(_pulp_g9_runtime_utils_definitions)
+if(APPLE AND NOT IOS AND NOT PULP_IOS)
+    # G9 native joined-child observer: a retained anchor fixture owns the
+    # process group while a joined worker is moved, cancelled and reaped
+    # directly. This prerequisite is intentionally macOS desktop only.
+    add_executable(pulp-g9-joined-child-fixture fixtures/g9_joined_child_fixture.cpp)
+    target_link_libraries(pulp-g9-joined-child-fixture PRIVATE pulp::platform)
+    target_compile_features(pulp-g9-joined-child-fixture PRIVATE cxx_std_20)
+    set(_pulp_g9_runtime_utils_definitions
+        COMPILE_DEFINITIONS PULP_G9_JOINED_CHILD_FIXTURE="$<TARGET_FILE:pulp-g9-joined-child-fixture>")
+endif()
 pulp_add_test_suite(pulp-test-runtime-utils GROUP pulp-test-group-core-runtime-http
-    LIBRARIES pulp::runtime pulp-cpp-httplib)
+    LIBRARIES pulp::runtime pulp-cpp-httplib ${_pulp_g9_runtime_utils_definitions})
 
 # HTTP headers, incremental response delivery, cancellation, and compatibility.
 pulp_add_test_suite(pulp-test-http GROUP pulp-test-group-core-runtime-http
@@ -1528,7 +1539,12 @@ endif()
 pulp_test_spawns(pulp-test-group-core-audio NONE REASON "forks itself without exec and loads nothing the tree builds")
 pulp_test_spawns(pulp-test-group-core-events NONE REASON "constructs ChildProcessManager and starts nothing")
 pulp_test_spawns(pulp-test-group-core-platform NONE REASON "dlopens the system libdbus, nothing the tree builds")
-pulp_test_spawns(pulp-test-group-core-runtime-http NONE REASON "runs /bin/echo, /bin/sh, /bin/pwd and powershell, nothing the tree builds")
+if(APPLE AND NOT IOS AND NOT PULP_IOS)
+    pulp_test_spawns(pulp-test-group-core-runtime-http pulp-g9-joined-child-fixture)
+else()
+    pulp_test_spawns(pulp-test-group-core-runtime-http NONE
+        REASON "runs only platform-neutral command fixtures")
+endif()
 pulp_test_spawns(pulp-test-streaming-model-contract NONE REASON "forks itself without exec and loads nothing the tree builds")
 pulp_test_spawns(pulp-test-group-core-gpu-audio-private NONE REASON "forks itself without exec and loads nothing the tree builds")
 
