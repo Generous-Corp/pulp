@@ -14,12 +14,12 @@ namespace pulp::native::detail {
 struct SurfaceInput {
     InputHandler handler;
     Cursor cursor = Cursor::arrow;
-    bool text_focus = false;
+    KeyboardFocus focus = KeyboardFocus::none;
     bool pointer_inside = false;
     bool drop_accepted = false;
     std::string marked;
     NSTrackingArea* tracking = nil;
-    // The host's first responder when the client took text focus, restored
+    // The host's first responder when the client took the keyboard, restored
     // when the client gives it back.
     __weak NSResponder* prior_responder = nil;
 
