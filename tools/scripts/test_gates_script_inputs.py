@@ -18,6 +18,10 @@ What must hold:
   except that a change to a surface the families check blocks FAILS: the
   build-free prediction runs first, and the required gate would check it;
 - drift fails gates.sh and prints the exact `--write` command;
+- a public header added, deleted or renamed under an include root owes the
+  consumption census: the lane runs `consumption_census.py --check` on a
+  configured build and prints the `--write` command on drift, while an edit to
+  an existing header does not run it;
 - the same lane checks tools/ci/source_selftests.json against the registrations
   and the changed-surface script families: a selftest added without
   regenerating the manifest fails with the `write` command, family drift fails
@@ -62,6 +66,12 @@ mode = "STATIC" if "--static" in sys.argv else "FAMILIES"
 default = "changed-surface script families" + (" (static)" if mode == "STATIC" else "") + ": OK"
 print(os.environ.get(f"FAKE_{mode}_SAYS", default))
 sys.exit(int(os.environ.get(f"FAKE_{mode}_RC", "0")))
+"""
+# Stands in for consumption_census.py: its own suite covers the header listing;
+# here only the lane's handling of each exit code is under test.
+FAKE_CENSUS = """import os, sys
+print(os.environ.get("FAKE_CENSUS_SAYS", "consumption_census_verified=true"))
+sys.exit(int(os.environ.get("FAKE_CENSUS_RC", "0")))
 """
 STUBS = [
     "tools/scripts/version_bump_check.py",
@@ -136,6 +146,8 @@ class GatesScriptInputsTests(unittest.TestCase):
         self.write("tools/scripts/alpha_lib.py", "X = 1\n")
         self.write("test/CMakeLists.txt", "# registrations\n")
         self.write("README.md", "readme\n")
+        self.write("tools/scripts/consumption_census.py", FAKE_CENSUS)
+        self.write("core/foo/include/pulp/foo/existing.hpp", "#pragma once\n")
         self.write("tools/scripts/changed_surface_script_families.py", FAKE_FAMILIES)
         self.write(".github/workflows/version-skill-check.yml", LANE_WORKFLOW)
         for name, _, _ in EXCLUSIVE:
@@ -375,10 +387,11 @@ class GatesScriptInputsTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.configures(), [])
         self.assertIn("!!! PULP_GATES_NO_CONFIGURE=1", r.stderr)
+        # The CMake edit can also move the consumption census's target graph.
         for test in ("script-test-inputs-drift", "source-selftest-lane-contract",
-                     "changed-surface-script-families-drift"):
+                     "changed-surface-script-families-drift", "consumption-census-drift"):
             self.assertIn(f"[script-inputs] NOT CHECKED locally: {test}", r.stderr)
-        self.assertIn("PASSED WITH 3 NOT CHECKED", r.stderr)
+        self.assertIn("PASSED WITH 4 NOT CHECKED", r.stderr)
         self.assertNotIn("(static)", r.stderr)  # no families surface touched, no prediction
 
     def test_opt_out_on_a_families_surface_fails_instead_of_not_checked(self) -> None:
@@ -465,6 +478,66 @@ class GatesScriptInputsTests(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stderr)
         self.assertIn("FAILED, not verified (changed_surface_script_families.py --check exited 77", r.stderr)
         self.assertNotIn("NOT CHECKED locally: changed-surface-script-families-drift", r.stderr)
+
+    def test_a_new_public_header_with_a_stale_census_fails_and_prints_the_write_command(self) -> None:
+        # The planted case: the census does not list the header this diff adds.
+        self.write("core/foo/include/pulp/foo/added.hpp", "#pragma once\n")
+        self.commit("add a public header without regenerating the census")
+        r = self.gates(FAKE_CENSUS_RC="1",
+                       FAKE_CENSUS_SAYS="public header added under core/foo/include: pulp/foo/added.hpp")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("core/foo/include/pulp/foo/added.hpp", r.stderr)
+        self.assertIn("public header added under core/foo/include: pulp/foo/added.hpp", r.stderr)
+        self.assertIn("python3 tools/scripts/consumption_census.py --build-dir build-gate --write",
+                      r.stderr)
+        self.assertIn("git add docs/status/consumption-profiles.json", r.stderr)
+
+    def test_a_new_public_header_with_a_current_census_passes_after_running_the_check(self) -> None:
+        # Control for the case above: the same diff passes only because the
+        # check ran and found the census current, not because it never ran.
+        self.write("core/foo/include/pulp/foo/added.hpp", "#pragma once\n")
+        self.commit()
+        r = self.gates(FAKE_CENSUS_SAYS="census: the stub ran and is current")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("census: the stub ran and is current", r.stderr)
+        self.assertNotIn("consumption-census: DRIFT", r.stderr)
+
+    def test_a_renamed_or_deleted_public_header_owes_the_census(self) -> None:
+        git(self.root, "mv", "core/foo/include/pulp/foo/existing.hpp",
+            "core/foo/include/pulp/foo/renamed.hpp")
+        self.commit("rename a public header")
+        r = self.gates(FAKE_CENSUS_RC="1", FAKE_CENSUS_SAYS="public header renamed")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("core/foo/include/pulp/foo/renamed.hpp", r.stderr)
+
+        git(self.root, "rm", "-q", "core/foo/include/pulp/foo/renamed.hpp")
+        self.commit("delete it")
+        r = self.gates(FAKE_CENSUS_RC="1", FAKE_CENSUS_SAYS="public header removed")
+        self.assertEqual(r.returncode, 1, r.stderr)
+
+    def test_editing_an_existing_public_header_does_not_run_the_census(self) -> None:
+        self.write("core/foo/include/pulp/foo/existing.hpp", "#pragma once\n// edited\n")
+        self.commit()
+        r = self.gates(FAKE_CENSUS_RC="1", FAKE_CENSUS_SAYS="should not run")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("should not run", r.stderr)
+        self.assertEqual(self.configures(), [])
+
+    def test_census_that_cannot_run_is_not_checked_not_passed(self) -> None:
+        self.write("core/foo/include/pulp/foo/added.hpp", "#pragma once\n")
+        self.commit()
+        r = self.gates(FAKE_CENSUS_RC="2", FAKE_CENSUS_SAYS="facts file is missing")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("NOT CHECKED locally: consumption-census-drift", r.stderr)
+        self.assertIn("exited 2", r.stderr)
+
+    def test_opt_out_reports_the_census_not_checked(self) -> None:
+        self.write("core/foo/include/pulp/foo/added.hpp", "#pragma once\n")
+        self.commit()
+        r = self.gates(PULP_GATES_NO_CONFIGURE="1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("NOT CHECKED locally: consumption-census-drift", r.stderr)
+        self.assertEqual(self.configures(), [])
 
 
 class TouchReasonsTests(unittest.TestCase):

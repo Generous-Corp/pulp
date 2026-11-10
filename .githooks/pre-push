@@ -406,7 +406,7 @@ if ! git symbolic-ref -q HEAD >/dev/null 2>&1; then
     echo "✗ pre-push: HEAD is DETACHED. Your commits are on an anonymous HEAD, not a" >&2
     echo "  branch — in this shared-worktree repo that is how a push silently no-ops." >&2
     echo "  Attach to a branch first, or push via tools/scripts/git_safe_push.sh." >&2
-    fail=1
+    prepush_fail "detached HEAD" "attach to a branch first"
 fi
 # Empty diff vs base: a rebase/merge mishap can flatten a branch to zero changes
 # (happened 2026-07-15). Pushing nothing-vs-main is almost never intended.
@@ -414,7 +414,7 @@ if [ "$fail" -eq 0 ] && git rev-parse --verify -q "$BASE" >/dev/null 2>&1; then
     if git diff --quiet "$BASE"...HEAD 2>/dev/null; then
         echo "✗ pre-push: HEAD has NO changes vs $BASE. A rebase/merge likely flattened" >&2
         echo "  this branch to zero files. Nothing to push — check your branch state." >&2
-        fail=1
+        prepush_fail "empty diff vs $BASE" "check your branch state"
     fi
 fi
 # ---------------------------------------------------------------------------
@@ -446,8 +446,8 @@ fi
 run_gate_captured "$PYTHON" "$SSC" --base "$BASE" --config "$CFG" --mode=report
 gate_rc=$?; case $gate_rc in
     0) ;;
-    1) fail=1 ;;
-    *) gate_could_not_run "skill_sync_check" "$gate_rc"; fail=1 ;;
+    1) prepush_fail ;;
+    *) gate_could_not_run "skill_sync_check" "$gate_rc"; prepush_fail ;;
 esac
 
 # The map skill-sync reads is itself checkable: a pattern matching no tracked
@@ -456,16 +456,16 @@ if [ -f "$SPML" ]; then
     run_gate_captured "$PYTHON" "$SPML" --base "$BASE" --mode=report
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) fail=1 ;;
-        *) gate_could_not_run "skill_path_map_lint" "$gate_rc"; fail=1 ;;
+        1) prepush_fail ;;
+        *) gate_could_not_run "skill_path_map_lint" "$gate_rc"; prepush_fail ;;
     esac
 fi
 
 run_gate_captured "$PYTHON" "$VBC" --base "$BASE" --config "$CFG" --mode=report
 gate_rc=$?; case $gate_rc in
     0) ;;
-    1) fail=1 ;;
-    *) gate_could_not_run "version_bump_check" "$gate_rc"; fail=1 ;;
+    1) prepush_fail ;;
+    *) gate_could_not_run "version_bump_check" "$gate_rc"; prepush_fail ;;
 esac
 
 # Screenshot-sync. No-op unless this repo carries .pulp/screenshots.toml
@@ -476,8 +476,8 @@ if [ -f "$SSCS" ]; then
     run_gate_captured "$PYTHON" "$SSCS" --base "$BASE" --mode=report
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) fail=1 ;;
-        *) gate_could_not_run "screenshot_sync_check" "$gate_rc"; fail=1 ;;
+        1) prepush_fail ;;
+        *) gate_could_not_run "screenshot_sync_check" "$gate_rc"; prepush_fail ;;
     esac
 fi
 
@@ -486,8 +486,8 @@ if [ -f "$CSC" ] && [ -f "$COMPAT_MAP" ]; then
     run_gate_captured "$PYTHON" "$CSC" --base "$BASE" --mode=report --enforce
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) fail=1 ;;
-        *) gate_could_not_run "compat_sync_check" "$gate_rc"; fail=1 ;;
+        1) prepush_fail ;;
+        *) gate_could_not_run "compat_sync_check" "$gate_rc"; prepush_fail ;;
     esac
 fi
 
@@ -499,8 +499,8 @@ if [ -f "$CDC" ] && [ -f "$CDC_MAP" ]; then
     run_gate_captured "$PYTHON" "$CDC" --base "$BASE" --mode=report
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) fail=1 ;;
-        *) gate_could_not_run "config_doc_check" "$gate_rc"; fail=1 ;;
+        1) prepush_fail ;;
+        *) gate_could_not_run "config_doc_check" "$gate_rc"; prepush_fail ;;
     esac
 fi
 
@@ -509,8 +509,8 @@ if [ -f "$COMPAT_AGG" ] && [ -f "$ROOT/compat.json" ] && [ -d "$ROOT/compat" ]; 
     run_gate_captured "$PYTHON" "$COMPAT_AGG" check --rev "${_prepush_pushed_head_sha:-HEAD}"
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) fail=1 ;;
-        *) gate_could_not_run "compat_aggregate" "$gate_rc"; fail=1 ;;
+        1) prepush_fail ;;
+        *) gate_could_not_run "compat_aggregate" "$gate_rc"; prepush_fail ;;
     esac
 fi
 
@@ -534,7 +534,7 @@ if [ -f "$VELLUM_HINT" ]; then
     vellum_rc=$?
     if [ "$vellum_rc" -eq 10 ] || [ "$vellum_rc" -eq 11 ] || [ "$vellum_rc" -eq 12 ] ||
        [ "$vellum_rc" -eq 13 ] || [ "$vellum_rc" -eq 14 ] || [ "$vellum_rc" -eq 15 ]; then
-        fail=1
+        prepush_fail "vellum watch events (exit $vellum_rc)" "output above names the event or inventory owed"
     fi
 fi
 
@@ -548,8 +548,8 @@ if [ -f "$DNL" ]; then
         --commit --head "${_prepush_pushed_head_sha:-HEAD}"
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) fail=1 ;;
-        *) gate_could_not_run "docs_noise_lint" "$gate_rc"; fail=1 ;;
+        1) prepush_fail ;;
+        *) gate_could_not_run "docs_noise_lint" "$gate_rc"; prepush_fail ;;
     esac
 fi
 
@@ -574,7 +574,7 @@ if [ -f "$FMT" ]; then
                 echo "[pre-push] format_changed: touched lines are not clang-format clean (see diff above)." >&2
                 echo "[pre-push]   Fix: tools/scripts/format_changed.sh, then stage the files it rewrote (git status) and commit" >&2
                 echo "[pre-push]   Demote this push to advisory: PULP_ENFORCE_PREPUSH_FORMAT=0 git push" >&2
-                fail=1
+                prepush_fail
             else
                 echo "[pre-push] format_changed: ADVISORY (PULP_ENFORCE_PREPUSH_FORMAT=0) — touched lines are not clang-format clean (see diff above); run tools/scripts/format_changed.sh. Push allowed." >&2
             fi
@@ -590,8 +590,8 @@ if [ -f "$NAG" ]; then
     run_gate_captured "$PYTHON" "$NAG" --base "$BASE" --mode=report
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) fail=1 ;;
-        *) gate_could_not_run "node_abi_gate" "$gate_rc"; fail=1 ;;
+        1) prepush_fail ;;
+        *) gate_could_not_run "node_abi_gate" "$gate_rc"; prepush_fail ;;
     esac
 fi
 
@@ -602,8 +602,8 @@ if [ -f "$HSG" ] && [ -f "$HSG_CFG" ]; then
         --require-ceiling-reduction
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) fail=1 ;;
-        *) gate_could_not_run "hotspot_size_guard" "$gate_rc"; fail=1 ;;
+        1) prepush_fail ;;
+        *) gate_could_not_run "hotspot_size_guard" "$gate_rc"; prepush_fail ;;
     esac
 fi
 
@@ -614,8 +614,8 @@ if [ -f "$HFG" ] && [ -f "$HFG_CFG" ]; then
     run_gate_captured "$PYTHON" "$HFG" --base "$BASE" --config "$HFG_CFG" --mode=report
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) fail=1 ;;
-        *) gate_could_not_run "header_fanout_guard" "$gate_rc"; fail=1 ;;
+        1) prepush_fail ;;
+        *) gate_could_not_run "header_fanout_guard" "$gate_rc"; prepush_fail ;;
     esac
 fi
 
@@ -626,8 +626,8 @@ if [ -f "$PGL" ]; then
     run_gate_captured "$PYTHON" "$PGL" --base "$BASE" --mode=report
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) fail=1 ;;
-        *) gate_could_not_run "planning_gitlink_guard" "$gate_rc"; fail=1 ;;
+        1) prepush_fail ;;
+        *) gate_could_not_run "planning_gitlink_guard" "$gate_rc"; prepush_fail ;;
     esac
 fi
 
@@ -641,9 +641,9 @@ if [ -f "$SRG" ]; then
     run_gate_captured "$PYTHON" "$SRG" --base "$BASE" --mode=report
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) fail=1 ;;
-        2) fail=1 ;;
-        *) gate_could_not_run "silent_revert_guard" "$gate_rc"; fail=1 ;;
+        1) prepush_fail ;;
+        2) prepush_fail ;;
+        *) gate_could_not_run "silent_revert_guard" "$gate_rc"; prepush_fail ;;
     esac
 fi
 
@@ -654,16 +654,16 @@ if [ -f "$SCC" ]; then
     run_gate_captured "$PYTHON" "$SCC" --strict
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) fail=1 ;;
-        *) gate_could_not_run "check-source-contracts" "$gate_rc"; fail=1 ;;
+        1) prepush_fail ;;
+        *) gate_could_not_run "check-source-contracts" "$gate_rc"; prepush_fail ;;
     esac
 fi
 if [ -f "$SCT" ]; then
     run_gate_captured "$PYTHON" "$SCT"
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) fail=1 ;;
-        *) gate_could_not_run "test_source_contracts" "$gate_rc"; fail=1 ;;
+        1) prepush_fail ;;
+        *) gate_could_not_run "test_source_contracts" "$gate_rc"; prepush_fail ;;
     esac
 fi
 
@@ -673,7 +673,7 @@ DEPS_AUDIT="$ROOT/tools/deps/audit.py"
 if [ -f "$DEPS_AUDIT" ]; then
     if ! "$PYTHON" "$DEPS_AUDIT" --strict >/dev/null; then
         echo "[pre-push] deps-audit: attribution drift detected — run \`python3 tools/deps/audit.py --strict\` for details." >&2
-        fail=1
+        prepush_fail "deps audit" "attribution drift; run python3 tools/deps/audit.py --strict"
     fi
 fi
 
@@ -693,7 +693,7 @@ if [ -f "$CODECOV_CFG_TEST" ] && [ -f "$CODECOV_COMP_TEST" ]; then
     elif ! "$PYTHON" "$CODECOV_CFG_TEST" >/dev/null 2>&1 \
             || ! "$PYTHON" "$CODECOV_COMP_TEST" >/dev/null 2>&1; then
         echo "[pre-push] codecov-config: drift detected — codecov.yml is stale. Run \`python3 tools/scripts/test_codecov_config.py\` and \`python3 tools/scripts/test_codecov_components.py\` for details." >&2
-        fail=1
+        prepush_fail "codecov config" "codecov.yml is stale; run the two test_codecov_*.py scripts"
     fi
 fi
 
@@ -707,16 +707,16 @@ if [ -f "$TERMS_LINT" ]; then
     "$PYTHON" "$TERMS_LINT" >/dev/null
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) echo "[pre-push] terminology lint: reserved-phrase violation — run \`python3 tools/scripts/processing_model_terms_lint.py\` for details." >&2; fail=1 ;;
-        *) gate_could_not_run "processing_model_terms_lint" "$gate_rc"; fail=1 ;;
+        1) echo "[pre-push] terminology lint: reserved-phrase violation — run \`python3 tools/scripts/processing_model_terms_lint.py\` for details." >&2; prepush_fail ;;
+        *) gate_could_not_run "processing_model_terms_lint" "$gate_rc"; prepush_fail ;;
     esac
 fi
 if [ -f "$SINGLE_BACKEND_GUARD" ]; then
     run_gate_captured "$PYTHON" "$SINGLE_BACKEND_GUARD"
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) fail=1 ;;
-        *) gate_could_not_run "single_backend_guard" "$gate_rc"; fail=1 ;;
+        1) prepush_fail ;;
+        *) gate_could_not_run "single_backend_guard" "$gate_rc"; prepush_fail ;;
     esac
 fi
 # Conflict-marker guard — no tracked file may carry a committed git conflict
@@ -730,8 +730,8 @@ if [ -f "$CONFLICT_MARKER_GUARD" ]; then
         --rev "${_prepush_pushed_head_sha:-HEAD}"
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) echo "[pre-push] conflict-marker guard: committed conflict marker(s) — run \`python3 tools/scripts/conflict_marker_check.py\` for the file:line list." >&2; fail=1 ;;
-        *) gate_could_not_run "conflict_marker_check" "$gate_rc"; fail=1 ;;
+        1) echo "[pre-push] conflict-marker guard: committed conflict marker(s) — run \`python3 tools/scripts/conflict_marker_check.py\` for the file:line list." >&2; prepush_fail ;;
+        *) gate_could_not_run "conflict_marker_check" "$gate_rc"; prepush_fail ;;
     esac
 fi
 
@@ -748,10 +748,10 @@ if [ -f "$GPU_PIN_FRESHNESS" ]; then
     run_gate_captured "$PYTHON" "$GPU_PIN_FRESHNESS" --base "$BASE" --root "$ROOT" --mode=report
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) fail=1 ;;
+        1) prepush_fail ;;
         # 2 is "git could not answer, so nothing was checked" — not a pass.
-        2) fail=1 ;;
-        *) gate_could_not_run "gpu_handoff_pin_freshness" "$gate_rc"; fail=1 ;;
+        2) prepush_fail ;;
+        *) gate_could_not_run "gpu_handoff_pin_freshness" "$gate_rc"; prepush_fail ;;
     esac
 fi
 
@@ -769,8 +769,8 @@ if [ -f "$GPU_LEDGER_SENTINEL" ]; then
     run_gate_captured "$PYTHON" "$GPU_LEDGER_SENTINEL" --root "$ROOT" --rev HEAD --mode=report
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) fail=1 ;;
-        *) gate_could_not_run "gpu_ledger_sentinel_check" "$gate_rc"; fail=1 ;;
+        1) prepush_fail ;;
+        *) gate_could_not_run "gpu_ledger_sentinel_check" "$gate_rc"; prepush_fail ;;
     esac
 fi
 
@@ -787,8 +787,8 @@ if [ -f "$GPU_PROVENANCE_VERIFY" ]; then
     run_gate_captured "$PYTHON" "$GPU_PROVENANCE_VERIFY" --root "$ROOT" --verify-only
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) echo "[pre-push] gpu-provenance: a pinned commit is reachable from neither HEAD nor any remote-tracking branch; regenerate the ledger against the commit that replaced it" >&2; fail=1 ;;
-        *) gate_could_not_run "hydrate_gpu_provenance_commits" "$gate_rc"; fail=1 ;;
+        1) echo "[pre-push] gpu-provenance: a pinned commit is reachable from neither HEAD nor any remote-tracking branch; regenerate the ledger against the commit that replaced it" >&2; prepush_fail ;;
+        *) gate_could_not_run "hydrate_gpu_provenance_commits" "$gate_rc"; prepush_fail ;;
     esac
 fi
 
@@ -800,8 +800,8 @@ if [ -f "$YOGA_ORACLE_PIN" ]; then
     run_gate_captured "$PYTHON" "$YOGA_ORACLE_PIN"
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) echo "[pre-push] yoga-oracle lockstep: the compat oracle no longer describes the pinned Yoga — run \`python3 tools/scripts/check_yoga_oracle_pin.py\` for both values." >&2; fail=1 ;;
-        *) gate_could_not_run "check_yoga_oracle_pin" "$gate_rc"; fail=1 ;;
+        1) echo "[pre-push] yoga-oracle lockstep: the compat oracle no longer describes the pinned Yoga — run \`python3 tools/scripts/check_yoga_oracle_pin.py\` for both values." >&2; prepush_fail ;;
+        *) gate_could_not_run "check_yoga_oracle_pin" "$gate_rc"; prepush_fail ;;
     esac
 fi
 
@@ -816,8 +816,8 @@ if [ -f "$SEQ_EXPOSURE" ]; then
     run_gate_captured "$PYTHON" "$SEQ_EXPOSURE" --base "$BASE"
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) echo "[pre-push] sequencer-exposure ledger: the ledger is invalid or a delivery slice is unclassified — run \`python3 tools/scripts/sequencer_exposure_check.py --base $BASE\` for the offending row(s)." >&2; fail=1 ;;
-        *) gate_could_not_run "sequencer_exposure_check" "$gate_rc"; fail=1 ;;
+        1) echo "[pre-push] sequencer-exposure ledger: the ledger is invalid or a delivery slice is unclassified — run \`python3 tools/scripts/sequencer_exposure_check.py --base $BASE\` for the offending row(s)." >&2; prepush_fail ;;
+        *) gate_could_not_run "sequencer_exposure_check" "$gate_rc"; prepush_fail ;;
     esac
 fi
 
@@ -827,8 +827,8 @@ if [ -f "$MIGRATION_NOTE_GUARD" ]; then
     run_gate_captured "$PYTHON" "$MIGRATION_NOTE_GUARD" --root "$ROOT" --base "$BASE"
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) echo "[pre-push] migration notes: move the note to docs/migrations/unreleased/<topic>.md (see the message above)." >&2; fail=1 ;;
-        *) gate_could_not_run "migration_note_guard" "$gate_rc"; fail=1 ;;
+        1) echo "[pre-push] migration notes: move the note to docs/migrations/unreleased/<topic>.md (see the message above)." >&2; prepush_fail ;;
+        *) gate_could_not_run "migration_note_guard" "$gate_rc"; prepush_fail ;;
     esac
 fi
 
@@ -842,8 +842,8 @@ if [ -f "$TEXT_ENCODING_LINT" ]; then
         --head "${_prepush_pushed_head_sha:-HEAD}"
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) echo "[pre-push] text-encoding lint: pass encoding=\"utf-8\" to the calls listed above; never raise the baseline." >&2; fail=1 ;;
-        *) gate_could_not_run "text_encoding_lint" "$gate_rc"; fail=1 ;;
+        1) echo "[pre-push] text-encoding lint: pass encoding=\"utf-8\" to the calls listed above; never raise the baseline." >&2; prepush_fail ;;
+        *) gate_could_not_run "text_encoding_lint" "$gate_rc"; prepush_fail ;;
     esac
 fi
 
@@ -854,8 +854,8 @@ if [ -f "$SCRIPT_INPUTS_PRECHECK" ]; then
     run_gate_captured "$PYTHON" "$SCRIPT_INPUTS_PRECHECK" --root "$ROOT" --base "$BASE"
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) echo "[pre-push] script inputs: regenerate test/ctest_script_inputs/ (commands above)." >&2; fail=1 ;;
-        *) gate_could_not_run "script_inputs_precheck" "$gate_rc"; fail=1 ;;
+        1) echo "[pre-push] script inputs: regenerate test/ctest_script_inputs/ (commands above)." >&2; prepush_fail ;;
+        *) gate_could_not_run "script_inputs_precheck" "$gate_rc"; prepush_fail ;;
     esac
 fi
 
@@ -866,8 +866,8 @@ if [ -f "$HOTSPOT_EDIT_GUARD" ]; then
         --head "${_prepush_pushed_head_sha:-HEAD}"
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) echo "[pre-push] hotspot edit: write the named fragment instead of the aggregate (commands above)." >&2; fail=1 ;;
-        *) gate_could_not_run "hotspot_edit_guard" "$gate_rc"; fail=1 ;;
+        1) echo "[pre-push] hotspot edit: write the named fragment instead of the aggregate (commands above)." >&2; prepush_fail ;;
+        *) gate_could_not_run "hotspot_edit_guard" "$gate_rc"; prepush_fail ;;
     esac
 fi
 
@@ -888,8 +888,8 @@ if [ -f "$SURFACE_FAMILIES" ]; then
            else
                echo "[pre-push] changed-surface families: regenerate .shipyard/changed-surface-families.toml from a configured build — \`tools/scripts/gates.sh $BASE\` configures build-gate and prints the exact --write command." >&2
            fi
-           fail=1 ;;
-        *) gate_could_not_run "changed_surface_script_families_static" "$gate_rc"; fail=1 ;;
+           prepush_fail ;;
+        *) gate_could_not_run "changed_surface_script_families_static" "$gate_rc"; prepush_fail ;;
     esac
 fi
 
@@ -901,8 +901,8 @@ if [ -f "$NEG_CAPABILITY" ]; then
     run_gate_captured "$PYTHON" "$NEG_CAPABILITY" --repo-root "$ROOT"
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) echo "[pre-push] negative-capability registry: an authorable compile refusal lacks a reason, or an allowlist entry has no raise site — run \`python3 tools/scripts/negative_capability_check.py\` for details." >&2; fail=1 ;;
-        *) gate_could_not_run "negative_capability_check" "$gate_rc"; fail=1 ;;
+        1) echo "[pre-push] negative-capability registry: an authorable compile refusal lacks a reason, or an allowlist entry has no raise site — run \`python3 tools/scripts/negative_capability_check.py\` for details." >&2; prepush_fail ;;
+        *) gate_could_not_run "negative_capability_check" "$gate_rc"; prepush_fail ;;
     esac
 fi
 
@@ -916,8 +916,8 @@ if [ -f "$LABEL_EXCLUSION" ]; then
     run_gate_captured "$PYTHON" "$LABEL_EXCLUSION"
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) echo "[pre-push] ctest label-exclusion guard: a Catch2 suite reaches neither the required gate nor coverage — run \`python3 tools/scripts/ctest_label_exclusion_guard.py\` for the target list." >&2; fail=1 ;;
-        *) gate_could_not_run "ctest_label_exclusion_guard" "$gate_rc"; fail=1 ;;
+        1) echo "[pre-push] ctest label-exclusion guard: a Catch2 suite reaches neither the required gate nor coverage — run \`python3 tools/scripts/ctest_label_exclusion_guard.py\` for the target list." >&2; prepush_fail ;;
+        *) gate_could_not_run "ctest_label_exclusion_guard" "$gate_rc"; prepush_fail ;;
     esac
 fi
 
@@ -944,8 +944,8 @@ if [ -f "$CAPABILITY_CONTRACT" ]; then
             "$PYTHON" "$CAPABILITY_CONTRACT" --check
         gate_rc=$?; case $gate_rc in
             0) ;;
-            1) echo "[pre-push] agent-capability contract: the surface or its counters are stale against $BASE. Re-derive rather than picking a number — \`PULP_AGENT_CAPABILITY_BASE_REF=$capability_base python3 tools/scripts/agent_capability_rederive.py\`. Landing this unfixed costs a merge-group eviction AND locks the branch against the repair." >&2; fail=1 ;;
-            *) gate_could_not_run "agent_capability_manifest" "$gate_rc"; fail=1 ;;
+            1) echo "[pre-push] agent-capability contract: the surface or its counters are stale against $BASE. Re-derive rather than picking a number — \`PULP_AGENT_CAPABILITY_BASE_REF=$capability_base python3 tools/scripts/agent_capability_rederive.py\`. Landing this unfixed costs a merge-group eviction AND locks the branch against the repair." >&2; prepush_fail ;;
+            *) gate_could_not_run "agent_capability_manifest" "$gate_rc"; prepush_fail ;;
         esac
     fi
 fi
@@ -993,6 +993,7 @@ check_compat_status_flips() {
         echo "[pre-push]   but no test files changed (test/ or tools/harness/tests/)." >&2
         echo "[pre-push]   partial→supported flips require new/modified test coverage (pulp #1657)." >&2
         compat_flip_failed=1
+        _prepush_failed_gates+=("compat status flip|partial to supported without a changed test")
     fi
 }
 check_compat_status_flips "$BASE"
@@ -1059,6 +1060,7 @@ elif [ -f "$DIFF_COVER_SH" ] && [ "${PULP_SKIP_DIFF_COVER:-0}" != "1" ]; then
                 echo "[pre-push]   Run later: tools/scripts/local_diff_cover.sh   (CI still runs diff coverage)" >&2
             elif [ "$_diff_cover_rc" -ne 0 ]; then
                 diff_cover_failed=1
+                _prepush_failed_gates+=("local_diff_cover.sh (exit $_diff_cover_rc)|$(_prepush_gate_excerpt "$_prepush_last_gate_log")")
             fi
     fi
 fi
@@ -1105,6 +1107,7 @@ if [ "$fail" = "0" ] && [ "$diff_cover_failed" = "0" ] && [ "$compat_flip_failed
     exit 0
 fi
 
+prepush_print_failed_gates
 echo "[pre-push] gate failure(s) above; blocking push." >&2
 if [ "$_prepush_diff_cover_refused" = "1" ]; then
     echo "[pre-push] note: diff coverage is NOT CHECKED on this gate host and is not the failure; the blocking gate is named above." >&2
