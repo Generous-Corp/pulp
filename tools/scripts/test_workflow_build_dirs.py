@@ -422,6 +422,8 @@ class WorkflowBuildDirTests(unittest.TestCase):
             for token in ("merge_group_shadows", "binary_identity", "affected_tests_shadow", "flake_exoneration_shadow",
                           "test_receipts", "test-receipts"):
                 self.assertNotIn(token, body)
+            if name == "Build":
+                self.assertNotIn("flake_exoneration", body)
 
     def test_per_test_receipts_are_uploaded_only_from_merge_group_macos(self) -> None:
         """The shadow's receipts are written by the merge-group macOS job only
