@@ -176,11 +176,9 @@ TEST_CASE("Spectral asset corruption and unsupported contracts preserve the old 
     // Use valid alternative canonical bytes, rather than malformed bytes that
     // the codec would reject even if production digest validation disappeared.
     auto substituted = good;
-    const auto bytes_marker = substituted.find("\"bytes_b64\": \"");
-    REQUIRE(bytes_marker != std::string::npos);
-    const auto changed_byte = bytes_marker + std::string("\"bytes_b64\": \"").size();
-    REQUIRE(changed_byte < substituted.size());
-    substituted[changed_byte] = substituted[changed_byte] == 'A' ? 'B' : 'A';
+    replace(substituted,
+            pulp::runtime::base64_encode(inputs().aa.bytes.get(), inputs().aa.size),
+            pulp::runtime::base64_encode(inputs().bb.bytes.get(), inputs().bb.size));
     REQUIRE_FALSE(GraphSerializer::from_json(old, substituted).ok);
     REQUIRE(GraphSerializer::to_json(old) == before);
     // Both extents still fit the same canonical frame count. The asset ID,
