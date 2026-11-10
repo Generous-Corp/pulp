@@ -260,11 +260,11 @@ class ModeTest(unittest.TestCase):
             self.assertIn("lane=full", out.read_text(encoding="utf-8"))
 
 
-def _git(repo, *args):
+def _git(repo, *args, check=True):
     env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
            "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
-    return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True,
+    return subprocess.run(["git", *args], cwd=repo, check=check, capture_output=True,
                           text=True, encoding="utf-8", env=env).stdout.strip()
 
 
@@ -322,8 +322,9 @@ class RealGitTest(unittest.TestCase):
 
     def test_a_resolved_conflict_is_full(self) -> None:
         self._advance_main("a.txt", "one\ntwo\nthree\nmain\n")
-        subprocess.run(["git", "merge", "-q", "origin/main"], cwd=self.work,
-                       capture_output=True, text=True, encoding="utf-8", check=False)
+        # Conflicts by construction; run under the same identity/config as every
+        # other step so a runner without a global git identity behaves the same.
+        _git(self.work, "merge", "-q", "--no-commit", "origin/main", check=False)
         (self.work / "a.txt").write_text("one\ntwo\nthree\nfeature\nmain\n", encoding="utf-8")
         _git(self.work, "add", "a.txt")
         _git(self.work, "commit", "-q", "--no-edit")
