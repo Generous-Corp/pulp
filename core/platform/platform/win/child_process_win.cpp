@@ -209,7 +209,7 @@ ChildProcessInputChannel::operator=(ChildProcessInputChannel&& other) noexcept {
     return *this;
 }
 
-ChildProcess::ChildProcess() : impl_(std::make_unique<Impl>()) {}
+ChildProcess::ChildProcess() : impl_(std::make_shared<Impl>()) {}
 ChildProcess::~ChildProcess() {
     if (impl_ && impl_->started && !impl_->finished) {
         if (is_running())
@@ -219,6 +219,38 @@ ChildProcess::~ChildProcess() {
 }
 ChildProcess::ChildProcess(ChildProcess&&) noexcept = default;
 ChildProcess& ChildProcess::operator=(ChildProcess&&) noexcept = default;
+
+RetainedProcessCustody::~RetainedProcessCustody() = default;
+RetainedProcessCustody::RetainedProcessCustody(RetainedProcessCustody&&) noexcept = default;
+RetainedProcessCustody&
+RetainedProcessCustody::operator=(RetainedProcessCustody&&) noexcept = default;
+RetainedProcessObservation ChildProcess::retained_process_observation() const {
+    return {.state = RetainedProcessState::Unsupported};
+}
+RetainedProcessObservation RetainedProcessCustody::retained_process_observation() const {
+    return {.state = RetainedProcessState::Unsupported};
+}
+RetainedProcessCleanup
+ChildProcess::cleanup_retained_process_group(std::chrono::steady_clock::time_point) {
+    return {.status = RetainedCleanupStatus::Unsupported,
+            .observation = {.state = RetainedProcessState::Unsupported}};
+}
+RetainedProcessCleanup
+RetainedProcessCustody::cleanup_retained_process_group(std::chrono::steady_clock::time_point) {
+    return {.status = RetainedCleanupStatus::Unsupported,
+            .observation = {.state = RetainedProcessState::Unsupported}};
+}
+bool ChildProcess::start_retained(RetainedProcessCustody&, const std::string&,
+                                  const std::vector<std::string>&, const ProcessOptions&) {
+    return false;
+}
+bool ChildProcess::start_retained_with_standard_input_channel(RetainedProcessCustody&,
+                                                              const std::string&,
+                                                              const std::vector<std::string>&,
+                                                              const StandardInputChannelSession&,
+                                                              const ProcessOptions&) {
+    return false;
+}
 
 bool ChildProcess::start(const std::string& command, const std::vector<std::string>& args,
                          const ProcessOptions& options) {
@@ -249,7 +281,10 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
                               const ProcessOptions& options,
                               const std::span<const std::uint8_t>* standard_input,
                               const StandardInputByteProvider* standard_input_provider,
-                              const StandardInputChannelSession* standard_input_session) {
+                              const StandardInputChannelSession* standard_input_session,
+                              RetainedProcessCustody* custody) {
+    if (custody)
+        return false;
     if (standard_input_session)
         return false;
     std::unique_lock<std::recursive_mutex> lock(impl_->mutex);
