@@ -9,6 +9,23 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v1991"></a>
+## [1.99.1] - 2026-11-10
+
+- feature/native metal probe ([#11787](https://github.com/Generous-Corp/pulp/pull/11787))
+- release/version bump ([#11953](https://github.com/Generous-Corp/pulp/pull/11953))
+- feature/agent capability fragment layout ([#11870](https://github.com/Generous-Corp/pulp/pull/11870))
+- feature/xcode 27 2 toolchain ([#11934](https://github.com/Generous-Corp/pulp/pull/11934))
+- fix/dr mp3 trailing bytes 20261110 ([#11949](https://github.com/Generous-Corp/pulp/pull/11949))
+- feature/drop receiver order doc ([#11919](https://github.com/Generous-Corp/pulp/pull/11919))
+- fix/release reconcile abandoned tags ([#11929](https://github.com/Generous-Corp/pulp/pull/11929))
+- feature/midi learn view ([#11829](https://github.com/Generous-Corp/pulp/pull/11829))
+- feature/release configure matrix ([#11944](https://github.com/Generous-Corp/pulp/pull/11944))
+- codex/graph ledger handoff 20261110 ([#11951](https://github.com/Generous-Corp/pulp/pull/11951))
+- feature/param generated range ([#11940](https://github.com/Generous-Corp/pulp/pull/11940))
+- codex/a9 replay qualification 20261110 ([#11947](https://github.com/Generous-Corp/pulp/pull/11947))
+- fix/darwin x64 release gpu runtime ([#11924](https://github.com/Generous-Corp/pulp/pull/11924))
+
 <a id="v1990"></a>
 ## [1.99.0] - 2026-11-10
 
@@ -12642,6 +12659,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.99.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.99.1
 [1.99.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.99.0
 [1.98.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.98.0
 [1.96.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.96.0
