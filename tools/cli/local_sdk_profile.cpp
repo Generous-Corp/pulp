@@ -204,8 +204,8 @@ ArchiveSliceAction archive_slice_action(const fs::path& relative_archive,
     if (!has_arm64)
         return ArchiveSliceAction::Reject;
     auto part = relative_archive.begin();
-    if (part != relative_archive.end() && *part++ == "external" &&
-        part != relative_archive.end() && *part == "skia-build")
+    if (part != relative_archive.end() && *part++ == "external" && part != relative_archive.end() &&
+        *part == "skia-build")
         return ArchiveSliceAction::Keep;
     return count == 1 ? ArchiveSliceAction::Keep : ArchiveSliceAction::ThinToArm64;
 }

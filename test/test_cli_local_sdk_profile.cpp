@@ -138,18 +138,17 @@ TEST_CASE("development SDK preserves locked provider archives and thins owned ar
     };
     REQUIRE(action("external/skia-build/build/mac-gpu/lib/Release/libdawn_combined.a",
                    "x86_64 arm64") == Action::Keep);
-    REQUIRE(action("external/skia-build/build/mac-gpu/lib/Release/libskia.a",
-                   "arm64 x86_64") == Action::Keep);
-    REQUIRE(action("external/skia-build/build/mac-gpu/lib/Release/libdawn_combined.a",
-                   "x86_64") == Action::Reject);
-    REQUIRE(action("external/skia-build/build/mac-gpu/lib/Release/libdawn_combined.a",
-                   "") == Action::Reject);
+    REQUIRE(action("external/skia-build/build/mac-gpu/lib/Release/libskia.a", "arm64 x86_64") ==
+            Action::Keep);
+    REQUIRE(action("external/skia-build/build/mac-gpu/lib/Release/libdawn_combined.a", "x86_64") ==
+            Action::Reject);
+    REQUIRE(action("external/skia-build/build/mac-gpu/lib/Release/libdawn_combined.a", "") ==
+            Action::Reject);
     REQUIRE(action("lib/libpulp-runtime.a", "x86_64 arm64") == Action::ThinToArm64);
     REQUIRE(action("lib/libpulp-runtime.a", "arm64") == Action::Keep);
     REQUIRE(action("lib/libpulp-runtime.a", "x86_64") == Action::Reject);
     // Only this installed provider subtree is locked; similar names remain owned.
-    REQUIRE(action("external/skia-build-copy/libskia.a", "arm64 x86_64") ==
-            Action::ThinToArm64);
+    REQUIRE(action("external/skia-build-copy/libskia.a", "arm64 x86_64") == Action::ThinToArm64);
     REQUIRE(action("lib/libdawn_combined.a", "arm64 x86_64") == Action::ThinToArm64);
 }
 
