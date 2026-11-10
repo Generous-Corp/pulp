@@ -3,7 +3,7 @@
   "event_id": "20261107-preset-library-core",
   "kind": "exported-path-change",
   "created_at": "2026-11-07T19:57:18Z",
-  "receipt_export_id": "20261102-0f616a440cec",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
   "paths": [
     "core/state/include/pulp/state/preset_library.hpp",
     "core/state/include/pulp/state/preset_metadata_store.hpp",
