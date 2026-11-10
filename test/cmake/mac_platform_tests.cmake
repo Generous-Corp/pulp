@@ -245,7 +245,8 @@ endif()
 if(APPLE AND NOT PULP_IOS)
     # Asynchronous alerts, file panels and open_url, including real NSAlert and
     # NSOpenPanel sheets on an offscreen window. Own process: the cases pump
-    # the main run loop and hold sheets on a window.
+    # the main run loop and hold sheets on a window. Shares the menu suite's
+    # lock: a panel opening in a concurrent process can end a tracked menu.
     pulp_add_test_suite(pulp-test-platform-async-dialogs
         SOURCES test_platform_async_dialogs.mm
         LIBRARIES pulp::platform

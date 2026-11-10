@@ -313,9 +313,10 @@ TEST_CASE("AsyncBlockWorker: a fast pull without an offline flag waits in Auto m
         std::this_thread::sleep_for(std::chrono::microseconds(150));
         identity_job(chunk);
     };
-    auto run = [&](AsyncBlockMode mode, const std::function<void(Worker::Chunk&)>& job) {
+    auto run = [&](AsyncBlockMode mode, const std::function<void(Worker::Chunk&)>& job,
+                   bool worker_thread = true) {
         Worker worker;
-        auto config = mono_config(1, true);
+        auto config = mono_config(1, worker_thread);
         config.max_chunk = 256; // one chunk per block
         config.pull_clock = &manual_pull_clock;
         config.wait_deadline = std::chrono::seconds(30); // a loaded worker still finishes
@@ -338,13 +339,20 @@ TEST_CASE("AsyncBlockWorker: a fast pull without an offline flag waits in Auto m
     };
     const auto [realtime_misses, realtime_stats] = run(AsyncBlockMode::Realtime, gated_job);
     const auto [auto_misses, auto_stats] = run(AsyncBlockMode::Auto, slow_job);
+    // Without a worker thread nothing renders unless a call waits (a wait
+    // pumps inline, rendering everything submitted so far), so a miss-free
+    // Auto run proves the waits covered every measured call.
+    const auto [inline_misses, inline_stats] =
+        run(AsyncBlockMode::Auto, identity_job, /*worker_thread=*/false);
     constexpr std::uint64_t kMeasuredFrames =
         256u * static_cast<std::uint64_t>(kCalls - 2 * static_cast<int>(PullRateDetector::kWindow));
     REQUIRE(realtime_misses == kMeasuredFrames);
-    REQUIRE_FALSE(realtime_stats.fast_pull);
     REQUIRE(auto_stats.fast_pull);
     REQUIRE(auto_misses == 0);
     REQUIRE(auto_stats.wait_timeouts == 0);
+    REQUIRE(inline_stats.fast_pull);
+    REQUIRE(inline_misses == 0);
+    REQUIRE(inline_stats.waits > 0);
 }
 
 TEST_CASE("AsyncBlockWorker: Auto mode at real-time pull rate never waits",
