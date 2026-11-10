@@ -4,6 +4,7 @@
 // Vorbis built from one known signal.
 
 #include "audio_reader_fixtures.hpp"
+#include "support/fixture_root.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -483,8 +484,9 @@ TEST_CASE("AudioReader agrees with the registry that a zero-frame file is valid 
         }
     }
     SECTION("a data claim the file does not hold is still refused") {
-        // Same 44 bytes, but the data chunk claims 4 GiB that is not there.
-        // choc clamps that to zero frames; neither reader may call it empty.
+        // Same 44 bytes, but the data chunk claims 4 GiB that is not there:
+        // no whole frame of a non-zero declaration, so neither reader may
+        // call it empty.
         auto lying = make_zero_frame_wav(2);
         lying[40] = 0xF0;
         lying[41] = 0xFF;
@@ -892,6 +894,77 @@ TEST_CASE("AudioReader bounds an RF64 length claim by the bytes present", "[audi
     const auto data = reader->read(0, kFrames * 10);
     REQUIRE(data);
     CHECK(data->num_frames() == kFrames);
+}
+
+TEST_CASE("AudioReader and the memory-mapped reader agree with the registry on every WAV seed",
+          "[audio][audio-reader][wav]") {
+    // One WAV acceptance policy: whatever the registry's whole-file read
+    // accepts, the streaming and memory-mapped readers accept with the same
+    // facts and the same samples, truncated and RF64 seeds included; whatever
+    // it refuses, they refuse.
+    const auto corpus = pulp_test::fixture_root() / "test" / "fixtures" / "fuzz" / "audio-decoder";
+    std::vector<fs::path> seeds;
+    for (const auto& entry : fs::directory_iterator(corpus))
+        if (entry.path().extension() == ".wav")
+            seeds.push_back(entry.path());
+    std::sort(seeds.begin(), seeds.end());
+    REQUIRE(seeds.size() >= 20u);
+
+    auto& registry = pulp::audio::FormatRegistry::instance();
+    const auto limits = DecodeLimits::unbounded();
+    std::size_t compared = 0;
+    std::size_t truncated = 0;
+    for (const auto& seed : seeds) {
+        INFO(seed.filename().string());
+        const auto info = registry.read_info(seed.string());
+        const auto whole = registry.read(seed.string(), limits);
+        const auto bytes = read_bytes(seed);
+        auto from_file = AudioReader::open_file(seed.string(), limits, AudioReaderFallback::Refuse);
+        auto from_memory =
+            AudioReader::open_memory(bytes, ".wav", limits, AudioReaderFallback::Refuse);
+        pulp::audio::MemoryMappedAudioReader mapped;
+        const bool mapped_open = mapped.open(seed.string());
+
+        CHECK(info.has_value() == whole.has_value());
+        CHECK(static_cast<bool>(from_file) == whole.has_value());
+        CHECK(static_cast<bool>(from_memory) == whole.has_value());
+        CHECK(mapped_open == whole.has_value());
+        if (!whole || !info || !from_file || !from_memory || !mapped_open)
+            continue;
+        ++compared;
+        truncated += info->truncated ? 1u : 0u;
+
+        for (auto* reader : {from_file.get(), from_memory.get()}) {
+            const auto& reported = reader->info();
+            CHECK(reported.num_frames == info->num_frames);
+            CHECK(reported.num_channels == info->num_channels);
+            CHECK(reported.sample_rate == info->sample_rate);
+            CHECK(reported.truncated == info->truncated);
+            CHECK(reported.declared_frames == info->declared_frames);
+            const auto decoded = reader->read(0, reported.num_frames);
+            REQUIRE(decoded.has_value());
+            REQUIRE(decoded->num_frames() == whole->num_frames());
+            for (std::size_t ch = 0; ch < whole->channels.size(); ++ch)
+                CHECK(std::memcmp(decoded->channels[ch].data(), whole->channels[ch].data(),
+                                  whole->channels[ch].size() * sizeof(float)) == 0);
+        }
+
+        CHECK(mapped.info().num_frames == info->num_frames);
+        CHECK(mapped.info().truncated == info->truncated);
+        CHECK(mapped.supports_ranged_read());
+        const auto channels = whole->num_channels();
+        std::vector<std::vector<float>> out(channels,
+                                            std::vector<float>(whole->num_frames(), 9.0f));
+        std::vector<float*> pointers;
+        for (auto& channel : out)
+            pointers.push_back(channel.data());
+        REQUIRE(mapped.read_frames_ranged_only(pointers.data(), channels, 0, whole->num_frames()));
+        for (std::size_t ch = 0; ch < channels; ++ch)
+            CHECK(std::memcmp(out[ch].data(), whole->channels[ch].data(),
+                              out[ch].size() * sizeof(float)) == 0);
+    }
+    CHECK(compared >= 20u);
+    CHECK(truncated >= 4u);
 }
 
 TEST_CASE("AudioReader opens a zero-frame WAV and survives extreme offsets",

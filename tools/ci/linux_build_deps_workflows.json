@@ -25,21 +25,6 @@
       "owner": "docs",
       "reason": "Installs only the Doxygen documentation utility; it does not compile native Pulp targets.",
       "review_after": "2027-01-29"
-    },
-    ".github/workflows/docs-deploy.yml": {
-      "owner": "docs",
-      "reason": "Installs only the Doxygen documentation utility; it does not compile native Pulp targets.",
-      "review_after": "2027-01-29"
-    },
-    ".github/workflows/docs-material.yml": {
-      "owner": "docs",
-      "reason": "Installs only the Doxygen documentation utility; it does not compile native Pulp targets.",
-      "review_after": "2027-01-29"
-    },
-    ".github/workflows/web-plugins.yml": {
-      "owner": "web",
-      "reason": "Installs Python only for a browser capability probe; native Linux Pulp dependencies are not used.",
-      "review_after": "2027-01-29"
     }
   }
 }

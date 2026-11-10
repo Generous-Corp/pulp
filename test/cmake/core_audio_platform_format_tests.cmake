@@ -54,6 +54,13 @@ pulp_add_test_suite(pulp-test-ogg-reader GROUP pulp-test-group-cap-audio
 # decode for WAV, AIFF, FLAC, MP3 and Ogg Vorbis built from one known signal.
 pulp_add_test_suite(pulp-test-audio-reader GROUP pulp-test-group-cap-audio
     LIBRARIES pulp::audio)
+pulp_test_data(pulp-test-audio-reader PATHS test/fixtures/fuzz/audio-decoder)
+
+# CHOC's WAV reader as the configure-time patches leave it: Pulp reads WAV
+# through dr_wav, but the patched CHOC header installs with the SDK.
+pulp_add_test_suite(pulp-test-choc-wav-reader-patches
+    LIBRARIES pulp::audio)
+pulp_test_data(pulp-test-choc-wav-reader-patches PATHS test/fixtures/fuzz/audio-decoder)
 
 # System codec writer: AAC, ALAC and PCM written through ExtAudioFile (Apple)
 # or Media Foundation (Windows) read back as the source signal.

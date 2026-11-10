@@ -56,10 +56,20 @@ def cleanup_descendant(pid: int) -> dict:
             "gone_after_cleanup": gone, "state_after": process_state(pid)}
 
 
+# Signals for which Darwin's ReportCrash writes a .ips crash report. The crash
+# case must die abruptly by a signal outside this set: every run of the
+# fixture would otherwise leave a bash crash report on the host.
+CRASH_REPORTING_SIGNALS = frozenset({
+    signal.SIGABRT, signal.SIGBUS, signal.SIGFPE, signal.SIGILL,
+    signal.SIGQUIT, signal.SIGSEGV, signal.SIGSYS, signal.SIGTRAP,
+})
+CRASH_SIGNAL = signal.SIGKILL
+
+
 def run_case(name: str, timeout: float, out: Path) -> dict:
     child_code = "import time; time.sleep(30)"
     cases = {
-        "crash": ["/bin/sh", "-c", "kill -ABRT $$"],
+        "crash": ["/bin/sh", "-c", f"kill -{CRASH_SIGNAL.name[3:]} $$"],
         "hang": [sys.executable, "-c", "import time; time.sleep(30)"],
         "deadline": [sys.executable, "-c", f"import time; time.sleep({timeout * 2})"],
         "descendant": [sys.executable, "-c", "import subprocess,sys,time; "
