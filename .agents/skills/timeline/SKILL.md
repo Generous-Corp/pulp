@@ -42,6 +42,10 @@ description: Build, edit, validate, explain, render, import, or integrate Pulp t
 - Link the optional `Pulp::dawproject-import` SDK target only when ingesting
   DAWproject XML, and `Pulp::smf-interop` only when reading or writing Standard
   MIDI Files; keep the dependency-minimal model on `Pulp::timeline`.
+- DAWproject import seals media by its bytes and checks `<Audio duration>`, so
+  it refuses a WAV the reader could only recover (`inspect_wav(...)->truncated`)
+  with "truncated WAV", before the duration comparison would report a
+  misleading mismatch.
 - Use the generated schema surfaces to discover command/document shapes; do
   not hand-copy schema vocabularies into a client.
 - Use the **live control plane** when the sequencer you need to read or edit is

@@ -171,6 +171,16 @@ header-only class such as `sample_resource.hpp` has no `.cpp` to hide in, so
 its fix takes the row and the bump; say so in the commit rather than reverting
 the fix to dodge the gate.
 
+Some header fingerprints are pinned outside this registry too, which raises
+the cost of a comment-only edit further. The sequencer exposure ledger carries
+the registry's fingerprint string as an evidence needle
+(`pulp/playback/audio_renderer.hpp`), so refreshing it stales a released
+row's needle. A `legacy_unreviewed` header (`pulp/audio/wav_metadata.hpp`)
+cannot change bytes without a reviewed classification. Before keeping a
+comment edit in a public header, grep `docs/status/sequencer-exposure` and
+`tools/agent-capabilities/legacy-unreviewed-baseline.json` for its current
+fingerprint, and move a comment-only note into the `.cpp` when either holds it.
+
 ## Public-header fingerprint refresh
 
 Change the reviewed fingerprint in `agent_capability_registry.py` (a

@@ -359,9 +359,24 @@ the empty asset, and the playback pool refuses it at `create()` with
 `[zero-frames]` case is the fixture to copy. The AIFF reader and the seekable
 `AudioReader` follow the same rule (a zero-frame WAV or AIFF opens with
 `info().num_frames == 0`; only a streaming codec's zero means "no length
-claim"), so the contract is per decoder output, not per container. Only an
-envelope or format fault (RIFF size, zero channels, zero rate, a short last
-frame) is a `nullopt`; "nothing to play" is a present value with `empty()` true.
+claim"), so the contract is per decoder output, not per container. Only a
+header that contradicts itself (zero channels, zero rate, two different fmt
+chunks, a block align smaller than the frame) or one with no whole frame behind
+a non-zero data size is a `nullopt`; "nothing to play" is a present value with
+`empty()` true.
+
+**Gotcha: a truncated WAV decodes, and says so only in `AudioFileInfo`.** A
+header that declares more than the file holds (a cut-off download, a data
+size past the end, a partial last frame) decodes the whole frames present.
+`AudioFileData` carries no flag, so a caller that must have every declared
+frame sets `WavDecodeLimits::refuse_truncated`, as
+`DecodedAudioAssetPool::decode_wav` does, or checks an `inspect_wav` result
+with `wav_decode_admits`. Comparing `num_frames()` against a length declared
+elsewhere is the other place this shows up. The authoring capsule's
+canonical PCM parser (`core/authoring_capsule/src/canonical_pcm.cpp`) is the
+one deliberate exception to the shared policy: it hashes the WAV bytes it
+seals, so it parses them strictly on its own and refuses what the readers
+would recover.
 
 - The WAM adapter marks the processor dirty on a control write and services it
   **once per render turn**, right after the render call (`WamStage::service_non_realtime`
@@ -641,16 +656,16 @@ per-ABI entry point for it.** Go through the plugin's own state:
   Keep that shared manifest aligned with `core/audio/CMakeLists.txt` so native
   and browser builds cannot silently diverge.
 
-  The portable list is `wav_decoder.cpp` alone. The layout report
-  (`core/audio/src/audio_file_layout*.cpp`, behind `pulp audio inspect`) sits in
-  `pulp-audio` only and is not portable by design: it opens files with
-  positional reads and pulls in the AIFF, FLAC, Ogg, MP3 and MP4 walkers.
-  `wav_decoder.hpp` exposes `interpret_wav_format` for it, which runs dr_wav
-  over a synthetic header built from a `fmt ` payload and a data size; that
-  function IS portable (no I/O, no allocation beyond a small vector) and is the
-  only seam the report may take from the decoder. Do not make `decode_wav` or
-  `inspect_wav` call back into the report, or the wasm lane grows five
-  container parsers it has no file to run them on.
+  The portable list is `wave_layout.cpp` (the chunk walk and acceptance
+  policy, dependency-free) and `wav_decoder.cpp` (dr_wav over a canonical
+  header). The layout report (`core/audio/src/audio_file_layout*.cpp`, behind
+  `pulp audio inspect`) sits in `pulp-audio` only and is not portable by
+  design: it opens files with positional reads and pulls in the AIFF, FLAC,
+  Ogg, MP3 and MP4 walkers. It takes its WAV verdict from the decoder's own
+  probe (`wav_frame_reader.hpp`) through a `WaveByteCursor` over its bounded
+  reader, never the other way round. Do not make `decode_wav` or `inspect_wav`
+  call back into the report, or the wasm lane grows five container parsers it
+  has no file to run them on.
 
 - The timebase, timeline, and playback engines are part of both production DSP
   builds. `PulpWam.cmake` and `PulpWclap.cmake` own their curated source lists,
