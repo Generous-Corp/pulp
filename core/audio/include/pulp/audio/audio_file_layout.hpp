@@ -12,14 +12,12 @@
 /// region header, and the small payloads whose fields it parses. A multi-
 /// gigabyte file costs the same handful of reads as a 44-byte one.
 ///
-/// The WAV facts that drive decodability (rate, channels, bits, frames) come
-/// from the same dr_wav interpretation `inspect_wav` uses, through
-/// `interpret_wav_format`. The accept/reject verdict is a mirror of the
-/// decoder's chunk-walk rules, and that mirrored list (exact envelope size,
-/// chunks within the file, pad bytes present, a readable fmt before or
-/// after data, a fact chunk the decoder can step over, whole frames) is
-/// the contract: a decoder-stopping condition that is not on it is a bug
-/// in this report, and the parity test is what catches it.
+/// For WAV the verdict, the stream facts (rate, channels, bits, the frames
+/// present and the frames declared) and every warning that bears on decoding
+/// come from the decoder's own probe: the chunk walk and acceptance policy in
+/// wave_layout.hpp, which `inspect_wav` and every Pulp WAV reader apply. The
+/// report cannot disagree with the decoder; the parity test holds it to
+/// that.
 
 #include <pulp/audio/wav_decoder.hpp>
 
@@ -117,20 +115,9 @@ enum class WavProfile { pcm44, bwf, floating, extensible, rf64, w64 };
 /// codec's claim about itself, not a measurement of the whole file.
 enum class FactsConfidence { parsed, container_only };
 
-/// Specification violations the walk can prove from bytes alone. Anything
-/// not on this list is a fact or a decoder refusal, never a warning.
-enum class LayoutWarningKind {
-    envelope_size_mismatch,           ///< declared envelope end differs from the file size
-    missing_pad_byte,                 ///< odd-sized chunk ends the file without its pad byte
-    duplicate_fmt,                    ///< more than one `fmt ` chunk
-    fmt_after_data,                   ///< `fmt ` follows `data`
-    truncated_data,                   ///< `data` payload shorter than declared or not whole frames
-    sentinel_size_without_ds64,       ///< 0xFFFFFFFF size with no ds64 entry to resolve it
-    chunk_overlap,                    ///< two regions claim the same bytes
-    chunk_past_eof,                   ///< a non-data region extends past end of file
-    extensible_mask_channel_mismatch, ///< channel mask population differs from the channel count
-    valid_bits_above_container,       ///< wValidBitsPerSample exceeds wBitsPerSample
-};
+// LayoutWarningKind, the specification violations a walk can prove from
+// bytes alone, is declared in wave_layout.hpp with the WAV walk that raises
+// most of them.
 
 struct LayoutWarning {
     LayoutWarningKind kind;
@@ -172,11 +159,17 @@ struct LayoutStreamFacts {
     std::uint32_t bits_per_sample = 0u; ///< container width
     std::uint32_t valid_bits =
         0u; ///< significant bits when the container says so, else bits_per_sample
-    std::uint64_t frames = 0u;     ///< 0 when the container does not state a count
+    /// 0 when the container does not state a count. For WAV, the whole
+    /// frames present: what a decode produces.
+    std::uint64_t frames = 0u;
     double duration_seconds = 0.0; ///< 0 when frames or rate are unknown
     std::string
         encoding; ///< "pcm", "float", "adpcm", "alaw", "mulaw", "flac", "vorbis", "opus", "mp3", "aac", ...
     std::uint32_t bytes_per_frame = 0u; ///< 0 for compressed streams
+    /// WAV only: the frames the header declares, a partial last frame
+    /// counted. Larger than `frames` when the file is truncated; 0 for other
+    /// containers.
+    std::uint64_t declared_frames = 0u;
 };
 
 /// Whether the in-memory decoder would accept the file as laid out, and the
@@ -184,9 +177,13 @@ struct LayoutStreamFacts {
 struct LayoutDecodeVerdict {
     bool decodable = false;
     std::string reason; ///< empty when decodable
+    /// Decodable, but only the whole frames present: the header declares
+    /// more (see LayoutStreamFacts::declared_frames).
+    bool truncated = false;
 };
 
-/// `decode_wav`'s allocation ceilings applied to the declared stream.
+/// `decode_wav`'s allocation ceilings applied to the frames a decode
+/// produces (for WAV, the whole frames present).
 struct LayoutDecodeLimitsFact {
     bool exceeds_frames = false;
     bool exceeds_channels = false;

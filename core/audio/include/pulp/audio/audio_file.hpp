@@ -17,10 +17,18 @@ struct AudioFileInfo {
     uint32_t bits_per_sample = 0;
     std::string format;  // "WAV", "FLAC", "OGG", "MP3"
     double duration_seconds = 0;
+    // A WAV header can declare more frames than the file holds (a cut-off
+    // download, a lying size field). The reader then recovers the whole frames
+    // present: num_frames counts those, truncated is set, and declared_frames
+    // holds the header's claim. A caller that must refuse partial media checks
+    // truncated. WAV readers always fill declared_frames; readers of other
+    // formats refuse a shortfall instead and leave both fields at their defaults.
+    bool truncated = false;
+    uint64_t declared_frames = 0;
 };
 
-// Read an audio file into float buffers (uses CHOC internally)
-// Returns deinterleaved float channels
+// Read a WAV file into float buffers through Pulp's WAV reader (the policy in
+// wave_layout.hpp). Returns deinterleaved float channels.
 struct AudioFileData {
     std::vector<std::vector<float>> channels;
     uint32_t sample_rate = 0;
@@ -50,12 +58,33 @@ read_audio_file(const std::string& path, const std::function<bool(const AudioFil
 // int24 floor or about samples beyond ±1.0 (no hard clip on write).
 enum class WavBitDepth { Int16, Int24, Float32 };
 
-// Write audio data to a WAV file (int16).
+// Write audio data to a WAV file (int16). Published atomically, see below.
 bool write_wav_file(const std::string& path, const AudioFileData& data);
 
-// Write audio data to a WAV file at the given sample format.
+// Write audio data to a WAV file at the given sample format. The file is
+// published atomically and replaces an existing file at `path`.
 bool write_wav_file(const std::string& path, const AudioFileData& data,
                     WavBitDepth bit_depth);
+
+// Whether a write may replace a file that already exists at the target.
+enum class WavReplace { Replace, FailIfExists };
+
+// Write a WAV file and publish it atomically: the bytes go to a temporary file
+// in the target's directory, are flushed to disk, and only then renamed onto
+// `path`. The final path therefore either holds the complete new file or is
+// untouched (a previous file at `path` survives a failed write); a reader never
+// sees a truncated file, and no temporary file is left behind on failure.
+// With FailIfExists an existing file at `path` makes the call return false and
+// leaves it as it was.
+bool write_wav_file(const std::string& path, const AudioFileData& data, WavBitDepth bit_depth,
+                    WavReplace replace);
+
+// The publication step on its own, for writers that are not WAV: `produce`
+// writes the whole file to the stream it is given and returns false to abandon
+// the write (an error or a cancel). Nothing appears at `path` unless it returns
+// true and the flush and rename succeed.
+bool write_file_atomically(const std::string& path, WavReplace replace,
+                           const std::function<bool(std::ostream&)>& produce);
 
 // Write audio data to an already-open seekable stream. The caller retains
 // ownership and is responsible for durably syncing/closing its backing file.

@@ -112,10 +112,14 @@ void print_table(const pulp::audio::AudioFileLayoutReport& report, const std::st
                       << s.duration_seconds << " s)" << std::defaultfloat;
         else
             std::cout << ", frame count not stated";
+        if (s.declared_frames > s.frames)
+            std::cout << "; header declares " << s.declared_frames;
         std::cout << "\n";
     }
     if (report.decode) {
         std::cout << "decodable: " << (report.decode->decodable ? "yes" : "no");
+        if (report.decode->truncated)
+            std::cout << " (truncated: the whole frames present decode)";
         if (!report.decode->reason.empty())
             std::cout << " (" << report.decode->reason << ")";
         std::cout << "\n";

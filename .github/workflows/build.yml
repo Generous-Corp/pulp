@@ -126,6 +126,9 @@ permissions:
   contents: read
   pull-requests: read
   checks: read
+  # The macOS gate reads the open flake-quarantine issues
+  # (tools/ci/flake_quarantine.py) before ctest.
+  issues: read
 
 jobs:
   # Default-off, non-mergeable assignment proof for the repository-isolated M1
@@ -3235,6 +3238,44 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      # A test the merge-group gate excused as a flake 3 times in 7 days is
+      # quarantined for 14 days by an owner issue (flake-quarantine.yml). This
+      # reads the open quarantines; the ctest step excludes them and the
+      # advisory step after it runs them. A test this change touches stays in
+      # the gate, and a failed read quarantines nothing.
+      - name: Resolve flake quarantine
+        id: flake_quarantine
+        if: >-
+          runner.os == 'macOS' && matrix.key == 'macos' && matrix.lane != 'contract'
+          && (github.event_name == 'merge_group'
+              || (github.event_name == 'pull_request' && steps.pr_suite.outputs.suite == 'full'))
+        continue-on-error: true
+        shell: bash
+        env:
+          PULP_GH_CLI: gh
+          PULP_FLAKE_EXONERATION_MODE: ${{ vars.PULP_FLAKE_EXONERATION_MODE }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          TRUSTED_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/flake-quarantine"
+          trusted="$RUNNER_TEMP/flake-quarantine-trusted"
+          mkdir -p "$trusted"
+          if [ -z "${TRUSTED_BASE_SHA:-}" ] || ! git cat-file -e "$TRUSTED_BASE_SHA^{commit}"; then
+            echo "::warning title=flake-quarantine::protected base is unavailable; no quarantine applied"
+            exit 0
+          fi
+          for module in base_poison_detector.py flake_exoneration.py flake_quarantine.py; do
+            git show "$TRUSTED_BASE_SHA:tools/ci/$module" > "$trusted/$module"
+          done
+          GH_TOKEN="${{ github.token }}" PYTHONPATH="$trusted" \
+            python3 "$trusted/flake_quarantine.py" active --repo "$GITHUB_REPOSITORY" --sha "$HEAD_SHA" \
+              ${PR_NUMBER:+--pr "$PR_NUMBER"} --source-root "$GITHUB_WORKSPACE" --out-dir "$out" || true
+          count=0
+          if [ -s "$out/names.txt" ]; then count="$(wc -l < "$out/names.txt" | tr -d ' ')"; fi
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
       - name: Test (non-Windows)
         id: ctest
         # Tests run in the merge queue, not on the pull request head. The queue
@@ -3276,6 +3317,14 @@ jobs:
           # The A2T history-window guard test writes its measurement here; the
           # step after this one announces it before the guard fails.
           PULP_A2T_HEADROOM_OUT: ${{ runner.temp }}/a2t-scope-headroom.json
+          # Flake exoneration of a failed merge-group run reads other runs'
+          # artifacts and main's gate report. It acts only when the repository
+          # variable is `enforce`; unset or `shadow` annotates only
+          # (tools/ci/flake_exoneration.py, decisions contract row 34).
+          PULP_GH_CLI: gh
+          GH_TOKEN: ${{ github.token }}
+          PULP_FLAKE_EXONERATION_MODE: ${{ vars.PULP_FLAKE_EXONERATION_MODE }}
+          MATRIX_KEY: ${{ matrix.key }}
         run: |
           set -euo pipefail
           # Both event-dependent ctest decisions come from one tested module so
@@ -3360,6 +3409,13 @@ jobs:
             # offscreen GPU-replay path is stabilized. Tracking: flaky-gpu-3327.
             exclude="${exclude}|Subtree cache composites a GPU image on the replay frame"
           fi
+          # Quarantined flakes leave the gate for a bounded time (see the step
+          # above); they join the exclusion here so the recorded selection and
+          # inventory below name them.
+          quarantine_regex="$RUNNER_TEMP/flake-quarantine/exclude.regex"
+          if [ "${RUNNER_OS}" = "macOS" ] && [ -s "$quarantine_regex" ]; then
+            exclude="${exclude}|$(cat "$quarantine_regex")"
+          fi
           # --repeat until-pass:2 retries a failed test once before failing the
           # leg, so a single timing-flake (e.g. a ReDoS-guard test slowed by
           # runner load) self-heals instead of reddening the required `macos`
@@ -3410,6 +3466,26 @@ jobs:
           # it takes no stop-on-failure flag. A failed listing leaves an invalid
           # file, and the receipt issuer then refuses rather than guessing.
           ctest --show-only=json-v1 --test-dir "$PULP_BUILD_DIR" -C Release -LE "$label_exclude" --exclude-regex "$exclude" > "$evidence_dir/selected.json" || true
+          # A failed merge-group run is judged by tools/ci/flake_exoneration.py:
+          # it passes only when every failing test is a corroborated flake
+          # (failed on 2+ other pull requests in 24 h, passed on main's tip,
+          # not touched by the group, not a build failure), after running the
+          # tests --stop-on-failure skipped. Anything else keeps ctest's exit.
+          # The exit-code evidence above stays ctest's own, so no receipt ever
+          # claims an excused run passed.
+          if [ "$ctest_exit" -ne 0 ] && [ "$GITHUB_EVENT_NAME" = merge_group ] \
+            && [ "${RUNNER_OS}" = "macOS" ] && [ "${MATRIX_KEY:-}" = macos ]; then
+            gate_exit=0
+            python3 tools/ci/flake_exoneration.py gate \
+              --repo "$GITHUB_REPOSITORY" --merge-sha "$GITHUB_SHA" --ctest-exit "$ctest_exit" \
+              --build-dir "$PULP_BUILD_DIR" --source-root "$GITHUB_WORKSPACE" \
+              --junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml" \
+              --selected-json "$evidence_dir/selected.json" \
+              --label-exclude "$label_exclude" --exclude-regex "$exclude" --jobs "$ctest_jobs" \
+              --work-dir "$RUNNER_TEMP/flake-exoneration" \
+              --record-out "$RUNNER_TEMP/flake-exoneration/record/flake-excusal.json" || gate_exit=$?
+            ctest_exit="$gate_exit"
+          fi
           # Ordinary pull requests use the fast tier; armed pull requests set
           # pr_suite=full and therefore make this run the required check.
           if [ "$GITHUB_EVENT_NAME" = pull_request ] && [ "${{ steps.pr_suite.outputs.suite }}" != full ]; then
@@ -3418,6 +3494,47 @@ jobs:
             echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"full"}'
           fi
           exit "$ctest_exit"
+
+      # Every excusal is logged: this record is what flake-quarantine.yml counts
+      # toward quarantine. Not continue-on-error: an excusal that cannot be
+      # logged fails the job instead of passing unrecorded.
+      - name: Upload flake excusal record
+        if: >-
+          always() && github.event_name == 'merge_group' && runner.os == 'macOS'
+          && matrix.key == 'macos' && steps.ctest.outcome == 'success'
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: flake-excusals-macos
+          path: ${{ runner.temp }}/flake-exoneration/record/flake-excusal.json
+          if-no-files-found: ignore
+          overwrite: true
+          retention-days: 90
+
+      # The advisory lane for quarantined flakes: runs them, reports, never
+      # gates. ctest rewrites Testing/Temporary, which the log upload and the
+      # flake evidence of later runs read, so this run's copy is restored.
+      - name: Quarantined flaky tests (advisory)
+        if: >-
+          always() && steps.flake_quarantine.outputs.count != '' && steps.flake_quarantine.outputs.count != '0'
+          && steps.ctest.outcome != 'skipped'
+        continue-on-error: true
+        shell: bash
+        run: |
+          tmp="$PULP_BUILD_DIR/Testing/Temporary"
+          saved="$RUNNER_TEMP/flake-quarantine/temporary-saved"
+          rm -rf "$saved"
+          cp -Rp "$tmp" "$saved"
+          rc=0
+          ctest --test-dir "$PULP_BUILD_DIR" -C Release --output-on-failure --repeat until-pass:2 \
+            --timeout 120 -j4 --tests-from-file "$RUNNER_TEMP/flake-quarantine/names.txt" \
+            --output-junit "$RUNNER_TEMP/flake-quarantine/advisory.junit.xml" || rc=$?
+          rm -rf "$tmp"
+          mv "$saved" "$tmp"
+          if [ "$rc" -ne 0 ]; then
+            echo "::warning title=flake-quarantine::quarantined tests failed (advisory, exit $rc); see the owner issues labelled ci:flake"
+          else
+            echo "::notice title=flake-quarantine::quarantined tests passed (advisory)"
+          fi
 
       # Advance notice for a required-gate failure that is a date, not a defect:
       # the A2T scope-history window fills with ordinary traffic, and

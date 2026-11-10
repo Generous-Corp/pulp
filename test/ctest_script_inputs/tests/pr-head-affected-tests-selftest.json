@@ -24,6 +24,7 @@
    "experimental/pulp-rs/UPSTREAM_SYNC.md",
    "experimental/pulp-rs/src/main.rs",
    "experimental/pulp-rs/tests/fixtures/docs/mini_docs_tree/docs/reference/cli.md",
+   "inspect/src",
    "test/CMakeLists.txt",
    "test/cmake",
    "test/cmake/cmake_smoke_tests.cmake",

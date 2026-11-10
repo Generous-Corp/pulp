@@ -286,9 +286,10 @@ path enforces the format registry's `DecodeLimits` (2^30 frames, 64 channels,
 stderr. Run `pulp audio inspect` first on any large or suspicious file: it
 reads the header window only and tells you whether the decoder would accept
 the layout and which ceiling it would hit.
-The CHOC WAV path behind `read_audio_file` has no ceiling of its own and
-allocates whatever the header declares; a WAV declaring 2^30+1 frames crashes
-`summarize` with a bus error instead of refusing. Inspect it, do not decode it.
+For WAV the ceilings bind the frames the file holds, never a larger count its
+header declares: a cut-off WAV decodes the whole frames present and reports
+`truncated`, and `pulp audio inspect` shows both counts ("header declares N").
+A short decode of a WAV is therefore truncation, not a codec fault.
 
 ## Latency evidence lives in the analysis lib, not the scene
 

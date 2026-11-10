@@ -1,0 +1,176 @@
+"""WAV, RF64, BW64 and Sony Wave64 seeds, built byte by byte.
+"""
+
+from __future__ import annotations
+
+import struct
+
+from .common import Corpus, interleave, make_signal, pack_float, pack_pcm_le, quantize
+from .aiff import form
+
+
+# --------------------------------------------------------------------------
+# RIFF / WAVE construction
+# --------------------------------------------------------------------------
+
+WAVE_FORMAT_PCM = 0x0001
+WAVE_FORMAT_IEEE_FLOAT = 0x0003
+WAVE_FORMAT_EXTENSIBLE = 0xFFFE
+KSDATAFORMAT_SUBTYPE_PCM = bytes.fromhex("0100000000001000800000aa00389b71")
+
+
+def chunk(cid: bytes, payload: bytes, pad: bool = True, declared_size: int | None = None) -> bytes:
+    size = len(payload) if declared_size is None else declared_size
+    body = cid + struct.pack("<I", size) + payload
+    if pad and len(payload) % 2:
+        body += b"\0"
+    return body
+
+
+def riff(chunks: bytes, form: bytes = b"WAVE", declared_size: int | None = None) -> bytes:
+    size = 4 + len(chunks) if declared_size is None else declared_size
+    return b"RIFF" + struct.pack("<I", size) + form + chunks
+
+
+def fmt_payload(tag: int, channels: int, rate: int, container_bits: int, cb_size: int | None = None,
+                valid_bits: int | None = None, channel_mask: int = 0, subformat: bytes | None = None) -> bytes:
+    block_align = channels * container_bits // 8
+    payload = struct.pack("<HHIIHH", tag, channels, rate, rate * block_align, block_align, container_bits)
+    if cb_size is not None:
+        payload += struct.pack("<H", cb_size)
+    if tag == WAVE_FORMAT_EXTENSIBLE:
+        payload += struct.pack("<HI", valid_bits or container_bits, channel_mask)
+        payload += subformat or KSDATAFORMAT_SUBTYPE_PCM
+    return payload
+
+
+def wav(fmt: bytes, data: bytes, before_data: bytes = b"", after_data: bytes = b"") -> bytes:
+    return riff(chunk(b"fmt ", fmt) + before_data + chunk(b"data", data) + after_data)
+
+
+def info_list(items: list[tuple[bytes, bytes]]) -> bytes:
+    body = b"INFO"
+    for key, text in items:
+        body += chunk(key, text + b"\0")
+    return chunk(b"LIST", body)
+
+
+def bext_payload() -> bytes:
+    """A Broadcast Wave Format bext chunk with obviously synthetic text."""
+    description = b"SYNTHETIC BWF DESCRIPTION - Pulp fuzz seed".ljust(256, b"\0")
+    originator = b"SYNTHETIC ORIGINATOR".ljust(32, b"\0")
+    originator_ref = b"SYNTHREF000000000000000000000000"[:32].ljust(32, b"\0")
+    origination_date = b"2000-01-01"
+    origination_time = b"00:00:00"
+    time_ref = struct.pack("<Q", 0)
+    version = struct.pack("<H", 1)
+    umid = bytes(64)
+    loudness = struct.pack("<hhhhh", 0, 0, 0, 0, 0)
+    reserved = bytes(180)
+    coding_history = b"A=PCM,F=8000,W=16,M=mono,T=synthetic\r\n"
+    return (description + originator + originator_ref + origination_date + origination_time + time_ref
+            + version + umid + loudness + reserved + coding_history)
+
+
+def build_wav_seeds(corpus: Corpus) -> None:
+    rate = 8000
+    mono16 = quantize(make_signal(rate, 0.1, 1), 16)
+    mono16_bytes = pack_pcm_le(interleave(mono16), 16)
+    stereo = make_signal(rate, 0.1, 2)
+
+    # Canonical 44-byte header: 16-byte fmt directly followed by data.
+    base = corpus.add("wav-pcm16-mono-canonical44.wav",
+                      wav(fmt_payload(WAVE_FORMAT_PCM, 1, rate, 16), mono16_bytes))
+    assert base.index(b"data") == 36
+
+    corpus.add("wav-pcm8-stereo.wav",
+               wav(fmt_payload(WAVE_FORMAT_PCM, 2, rate, 8), pack_pcm_le(interleave(quantize(stereo, 8)), 8)))
+    corpus.add("wav-pcm24-stereo.wav",
+               wav(fmt_payload(WAVE_FORMAT_PCM, 2, rate, 24), pack_pcm_le(interleave(quantize(stereo, 24)), 24)))
+    corpus.add("wav-pcm32-stereo.wav",
+               wav(fmt_payload(WAVE_FORMAT_PCM, 2, rate, 32), pack_pcm_le(interleave(quantize(stereo, 32)), 32)))
+    mono = make_signal(rate, 0.1, 1)
+    corpus.add("wav-float32-mono-fmt18.wav",
+               wav(fmt_payload(WAVE_FORMAT_IEEE_FLOAT, 1, rate, 32, cb_size=0), pack_float(mono, "f")))
+    corpus.add("wav-float64-mono.wav",
+               wav(fmt_payload(WAVE_FORMAT_IEEE_FLOAT, 1, rate, 64), pack_float(mono, "d")))
+    corpus.add("wav-extensible-pcm24in32-stereo.wav",
+               wav(fmt_payload(WAVE_FORMAT_EXTENSIBLE, 2, rate, 32, cb_size=22, valid_bits=24, channel_mask=0x3),
+                   pack_pcm_le(interleave(quantize(stereo, 24)), 24, container_bits=32)))
+    corpus.add("wav-bwf-bext-before-data.wav",
+               wav(fmt_payload(WAVE_FORMAT_PCM, 1, rate, 16), mono16_bytes,
+                   before_data=chunk(b"bext", bext_payload())))
+    corpus.add("wav-list-info-heavy.wav",
+               wav(fmt_payload(WAVE_FORMAT_PCM, 1, rate, 16), mono16_bytes,
+                   before_data=info_list([(b"INAM", b"SYNTHETIC TITLE"), (b"IART", b"SYNTHETIC ARTIST"),
+                                          (b"IPRD", b"SYNTHETIC PRODUCT"), (b"ICMT", b"generated by Pulp"),
+                                          (b"ICRD", b"2000-01-01"), (b"IGNR", b"test signal"),
+                                          (b"ISFT", b"audio_decoder_seed_corpus.py"), (b"ICOP", b"MIT")]),
+                   after_data=info_list([(b"IKEY", b"fuzz;seed;synthetic"), (b"ISBJ", b"trailing INFO list")])))
+
+    # RF64: RIFF size and data size hold the 0xFFFFFFFF sentinel; ds64 carries the real sizes.
+    rf64_fmt = chunk(b"fmt ", fmt_payload(WAVE_FORMAT_PCM, 1, rate, 16))
+    data_chunk = chunk(b"data", mono16_bytes, declared_size=0xFFFFFFFF)
+    ds64 = struct.pack("<QQQI", 0, len(mono16_bytes), len(mono16), 0)
+    chunks = chunk(b"ds64", ds64) + rf64_fmt + data_chunk
+    ds64_body = struct.pack("<QQQI", 4 + len(chunks), len(mono16_bytes), len(mono16), 0)
+    chunks = chunk(b"ds64", ds64_body) + rf64_fmt + data_chunk
+    rf64 = corpus.add("wav-rf64-ds64.wav", b"RF64" + struct.pack("<I", 0xFFFFFFFF) + b"WAVE" + chunks)
+    # BW64 (ITU-R BS.2088) shares RF64's ds64 layout under its own tag.
+    corpus.add("wav-bw64-ds64.wav", b"BW64" + rf64[4:])
+    # The RF64 seed cut after one third of its samples; ds64 still declares the full length.
+    rf64_data_at = rf64.index(b"data") + 8
+    corpus.add("wav-rf64-ds64-data-past-eof.wav", rf64[:rf64_data_at + len(mono16_bytes) // 3])
+    # A recorder that never back-filled ds64: the data size stays 0xFFFFFFFF and ds64's is zero.
+    ds64_data_size_at = 12 + 8 + 8
+    corpus.add("wav-rf64-ds64-data-size-zero.wav",
+               rf64[:ds64_data_size_at] + struct.pack("<Q", 0) + rf64[ds64_data_size_at + 8:])
+
+    # Sony Wave64: 16-byte GUID chunk ids, 64-bit sizes that include the 24-byte chunk header.
+    def w64_guid(fourcc: bytes) -> bytes:
+        return fourcc + bytes.fromhex("f3acd3118cd100c04f8edb8a")
+
+    def w64_chunk(fourcc: bytes, payload: bytes) -> bytes:
+        body = w64_guid(fourcc) + struct.pack("<Q", 24 + len(payload)) + payload
+        if len(body) % 8:
+            body += bytes(8 - len(body) % 8)
+        return body
+
+    w64_body = w64_chunk(b"fmt ", fmt_payload(WAVE_FORMAT_PCM, 1, rate, 16)) + w64_chunk(b"data", mono16_bytes)
+    w64_wave_guid = bytes.fromhex("77617665f3acd3118cd100c04f8edb8a")
+    # Kept under .wav: the registry claims seeds by extension and has no .w64 entry.
+    corpus.add("wav-w64-pcm16-mono.wav",
+               bytes.fromhex("72696666 2e91cf11 a5d628db 04c10000".replace(" ", ""))
+               + struct.pack("<Q", 40 + len(w64_body)) + w64_wave_guid + w64_body)
+
+    # Malformed variants, each derived from a valid base above.
+    fmt16 = fmt_payload(WAVE_FORMAT_PCM, 1, rate, 16)
+    odd_data = mono16_bytes[:-1]  # 1599 bytes: odd, with one partial frame
+    corpus.add("wav-odd-chunk-eof-no-pad.wav", riff(chunk(b"fmt ", fmt16) + chunk(b"data", odd_data, pad=False)))
+    corpus.add("wav-duplicate-fmt.wav",
+               riff(chunk(b"fmt ", fmt16) + chunk(b"fmt ", fmt_payload(WAVE_FORMAT_PCM, 2, 44100, 8))
+                    + chunk(b"data", mono16_bytes)))
+    corpus.add("wav-fmt-after-data.wav", riff(chunk(b"data", mono16_bytes) + chunk(b"fmt ", fmt16)))
+    corpus.add("wav-duplicate-fmt-identical.wav",
+               riff(chunk(b"fmt ", fmt16) + chunk(b"fmt ", fmt16) + chunk(b"data", mono16_bytes)))
+    truncated = base[:44 + len(mono16_bytes) // 3]
+    corpus.add("wav-data-past-eof.wav", truncated)
+    corpus.add("wav-data-size-zero.wav", riff(chunk(b"fmt ", fmt16) + chunk(b"data", b"")))
+    corpus.add("wav-data-size-ffffffff-no-ds64.wav",
+               riff(chunk(b"fmt ", fmt16) + chunk(b"data", mono16_bytes, declared_size=0xFFFFFFFF)))
+    # fmt declares 16 bytes more than it carries, so the declared span runs into the data header.
+    corpus.add("wav-overlapping-chunks.wav",
+               riff(chunk(b"fmt ", fmt16, declared_size=len(fmt16) + 16) + chunk(b"data", mono16_bytes)))
+    declared_frames = 100_000_001
+    corpus.add("wav-declares-100000001-frames.wav",
+               riff(chunk(b"fmt ", fmt16) + chunk(b"data", mono16_bytes, declared_size=declared_frames * 2),
+                    declared_size=4 + 8 + len(fmt16) + 8 + declared_frames * 2))
+    corpus.add("wav-riff-header-only.wav", b"RIFF" + struct.pack("<I", 0))
+    corpus.add("wav-riff-size-lying-small.wav", riff(chunk(b"fmt ", fmt16) + chunk(b"data", mono16_bytes),
+                                                     declared_size=4 + 8 + len(fmt16) + 8 + 100))
+
+
+def write_temp_wav(path: str, rate: int, seconds: float, channels: int) -> None:
+    signal = quantize(make_signal(rate, seconds, channels), 16)
+    with open(path, "wb") as f:
+        f.write(wav(fmt_payload(WAVE_FORMAT_PCM, channels, rate, 16), pack_pcm_le(interleave(signal), 16)))

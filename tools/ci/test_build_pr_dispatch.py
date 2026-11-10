@@ -918,6 +918,7 @@ PR_DISPATCH_ALLOWLIST: dict[tuple[str, str], tuple[tuple[str, ...], str]] = {
     ("build", "Test (non-Windows)"): ((), "the full suite, as on any dispatch"),
     ("build", "Announce A2T scope-history headroom"): ((), "annotation only"),
     ("build", "Observe ctest non-runs (non-Windows)"): ((), "writes the job summary"),
+    ("build", "Quarantined flaky tests (advisory)"): ((), "runs only on a count from Resolve flake quarantine, which is merge_group or full-tier pull_request only: dead on this path"),
     ("build", "Observe GPU adapter contract (self-hosted macOS)"): ((), "observation, continue-on-error"),
     ("build", "Install and publish exact GPU-audio SDK (macOS ARM64)"): ((), "installs into runner.temp; its upload is skipped on this path"),
     ("build", "Wait before retrying the GPU-audio SDK upload"): ((), "runs only if the skipped upload failed: dead on this path"),
