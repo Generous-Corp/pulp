@@ -40,7 +40,7 @@ Binary SHA-256 values from the Release build:
 - `pulp-cpp`: `d1da86b31aba6a54199238734aecb8461b991cbc4ad31866c28a7a8965231512`.
 - `pulp-mcp`: `36106754c278e2cda56cfb565f57b9570819e5ffe137df0aabe675788209c99d`.
 - `pulp-test-graph-control-event-probe`:
-  `07819098aaa3d32f3c86e3e09afb2db3dabc00b58a9d0419309f99f27e7d606`.
+  `bf494f3b03e4bde53cc0e522679ea260d757b3765f26c42708bb1a0d7925bbb6`.
 - `pulp-test-group-sampler-graph-runtime`:
   `2d723d451a734601ce3621bd4d3439fd50f544e0acfc34427f3245b14a991c02`.
 
