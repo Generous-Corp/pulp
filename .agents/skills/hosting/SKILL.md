@@ -3138,3 +3138,9 @@ The C++ dev/loop delegate accepts `--graph-file` with an existing enrolled
 prepared-edit publication; no extension-only watcher or direct executor bypass.
 The serialized control request stays bounded at 512 KiB. See
 `docs/guides/graph-file-reload.md` for limitations and numeric installed proof.
+
+Retained snapshots can keep an instance alive after its node is replaced: a
+current-node scan cannot prevent A-to-B-to-A aliasing. Share its ownership token,
+reserve new ownership atomically across graphs, and keep the reservation visible
+until release returns. Custom callback compatibility cannot use `target_type` or
+shape: opaque captures are unprovable even when copied from the same catalog.

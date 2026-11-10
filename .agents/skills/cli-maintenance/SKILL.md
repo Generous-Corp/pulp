@@ -4292,3 +4292,8 @@ The C++ dev/loop delegate accepts `--graph-file` with an existing enrolled
 prepared-edit publication; no extension-only watcher or direct executor bypass.
 The serialized control request stays bounded at 512 KiB. See
 `docs/guides/graph-file-reload.md` for limitations and numeric installed proof.
+
+A bounded watch must own and join its exact launched process group on return.
+Name-based `pkill` can kill another session and leaves child ownership ambiguous.
+Test readiness-to-return time as well as PID exit: a leaked sleeper can otherwise
+exit naturally while inherited pipes keep the test waiting, producing false proof.
