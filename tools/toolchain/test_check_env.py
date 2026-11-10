@@ -29,6 +29,9 @@ VERSION_TEXT = {
     "node": "v26.10.0",
     "rustc": "rustc 1.97.1 (6b00bc388 2026-06-12)",
     "clang-format": "clang-format version 21.1.8",
+    "ccache": "ccache version 4.14.1\nFeatures: file-storage http-storage redis-storage",
+    "git-lfs": "git-lfs/3.8.1 (GitHub; darwin arm64; go 1.25.3)",
+    "xcodebuild": "Xcode 27.2\nBuild version 27B52",
     "mise": "2026.10.8 macos-arm64 (2026-10-13)",
 }
 
@@ -40,7 +43,9 @@ def expected_doc(mise_sha: str = "0" * 64) -> dict:
         "tools": {
             "python": "3.14.4", "cmake": "4.3.3", "ninja": "1.13.2",
             "node": "26.10.0", "rust": "1.97.1", "clang_format": "21.1.8",
+            "ccache": "4.14.1", "git_lfs": "3.8.1",
         },
+        "xcode": {"version": "27.2", "build": "27B52"},
         "platform_overrides": {"linux": {"cmake": "system", "rust": "absent"}},
         "mise": {"version": "2026.10.8", "path": "~/.local/opt/mise-2026.10.8/bin/mise", "sha256": {PLAT: mise_sha}},
         "npm_prefixes": [],
@@ -114,6 +119,8 @@ class CheckEnvTests(unittest.TestCase):
             "node": ("v24.21.0", "24.21.0", "26.10.0"),
             "rustc": ("rustc 1.99.0 (abc 2026-09-01)", "1.99.0", "1.97.1"),
             "clang-format": ("Homebrew clang-format version 22.1.0", "22.1.0", "21.1.8"),
+            "ccache": ("ccache version 4.14\nFeatures: file-storage", "4.14", "4.14.1"),
+            "git-lfs": ("git-lfs/3.7.1 (GitHub; darwin arm64; go 1.25.3)", "3.7.1", "3.8.1"),
         }
         for name, (text, found, want) in cases.items():
             with self.subTest(tool=name):
@@ -125,6 +132,50 @@ class CheckEnvTests(unittest.TestCase):
                 self.assertIn(f"{name}: expected {want}", line)
                 self.assertIn(f"found {found} at /fake/bin/{name}", line)
                 self.assertIn("fix: ", line)
+
+    def test_xcode_version_and_build_are_both_pinned(self) -> None:
+        cases = {
+            "older Xcode": ("Xcode 26.5\nBuild version 17F42", "26.5 (17F42)"),
+            "same version, other build": ("Xcode 27.2\nBuild version 27B40a", "27.2 (27B40a)"),
+            "Command Line Tools only": (
+                "xcode-select: error: tool 'xcodebuild' requires Xcode, but active developer directory "
+                "'/Library/Developer/CommandLineTools' is a command line tools instance",
+                "Command Line Tools only",
+            ),
+            "no answer": (None, "unknown"),
+        }
+        for name, (text, found) in cases.items():
+            with self.subTest(case=name):
+                self.host.text = dict(VERSION_TEXT)
+                self.host.text["xcodebuild"] = text
+                findings = self.collect(self.matching())
+                self.assertEqual(["xcode"], [f.tool for f in findings], [f.line() for f in findings])
+                line = findings[0].line()
+                self.assertIn("xcode: expected 27.2 (27B52)", line)
+                self.assertIn(f"found {found} at /fake/bin/xcodebuild", line)
+                self.assertIn("/Applications/Xcode.app", line)
+        self.host.text = dict(VERSION_TEXT)
+        self.host.present.discard("xcodebuild")
+        self.assertEqual(["xcode"], [f.tool for f in self.collect(self.matching())])
+
+    def test_xcode_is_asked_only_on_macos(self) -> None:
+        self.host.text["xcodebuild"] = "Xcode 26.5\nBuild version 17F42"
+        # Control: the wrong Xcode is a finding on macOS ...
+        self.assertIn("xcode", [f.tool for f in self.collect(self.matching())])
+        # ... and not asked at all on Linux or Windows, or without a pin.
+        for plat in ("linux-x64", "windows-x64"):
+            self.assertNotIn("xcode", [f.tool for f in self.collect(self.matching(), plat=plat)])
+        doc = self.matching()
+        del doc["xcode"]
+        self.assertNotIn("xcode", [f.tool for f in self.collect(doc)])
+
+    def test_an_expectation_without_a_newer_tool_skips_it(self) -> None:
+        doc = self.matching()
+        del doc["tools"]["ccache"]
+        self.host.text["ccache"] = "ccache version 4.13.6"
+        self.assertEqual([], self.collect(doc))
+        # Control: the same host against the full expectation reports it.
+        self.assertEqual(["ccache"], [f.tool for f in self.collect(self.matching())])
 
     def test_rust_is_asked_where_cargo_builds(self) -> None:
         (self.tmp / check_env.RUST_DIR).mkdir(parents=True)

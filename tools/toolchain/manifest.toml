@@ -7,8 +7,16 @@ schema = 1
 # a tool from its own package manager says so below as an override. Whether a
 # pin is already true on the required gate or is a target the gate must still
 # reach is recorded per tool in [evidence]; a target is not an observation.
-xcode = "26.5"
-xcode_build = "17F42"
+xcode = "27.2"
+xcode_build = "27B52"
+# The macOS every Pulp golden starts from, by digest, so a rebake cannot pick
+# up a different OS. Xcode 27.2 needs macOS 26.6 or later; this image is macOS
+# 27.2 (26B123), the build every fleet host runs. generate.py writes it as the
+# `base` of each macOS golden manifest, and tart-provision.sh refuses a guest
+# whose `sw_vers -buildVersion` is not macos_build.
+macos = "27.2"
+macos_build = "26B123"
+macos_base = "ghcr.io/cirruslabs/macos-golden-gate-base@sha256:4859ea9483a1f6e377301f23a5243798044266a373fc36635e9dcd045e09292f"
 cmake = "4.3.3"
 ninja = "1.13.2"
 python = "3.14.4"
@@ -18,6 +26,8 @@ rust_targets = ["x86_64-apple-darwin"]
 rust_components = ["rustfmt", "clippy"]
 tart = "2.38.0"
 clang_format = "21.1.8"
+ccache = "4.14.1"
+git_lfs = "3.8.1"
 
 [evidence]
 # observed: the required gate already runs this exact version (source named).
@@ -25,7 +35,7 @@ clang_format = "21.1.8"
 # before enforcement. The golden facts come from a read-only mount of m3's
 # pulp-build-runner:latest disk (2026-10-12): Xcode.app version.plist,
 # /opt/homebrew/Cellar, and the rustup channel manifest.
-xcode = { status = "observed", source = "golden /Applications/Xcode.app version.plist: 26.5 (17F42); gate compiler Apple clang 21.0.0 (clang-2100.1.1.101)" }
+xcode = { status = "target", source = "m3, m1, m5 and m5s run Xcode 27.2 (27B52, Apple clang clang-2100.4.1.1) at /Applications/Xcode.app, probed 2026-11-09; the gate golden still holds 26.5 (17F42, clang-2100.1.1.101) until a rebake receipt shows 27.2. Xcode 27.2 needs macOS 26.6 or later, so the golden base moves off the macOS 26.4 image" }
 cmake = { status = "observed", source = "gate setup.sh prints 'cmake 4.3.3' on m3, m5 and m5s gate VMs; golden Cellar/cmake/4.3.3" }
 ninja = { status = "observed", source = "golden Cellar/ninja/1.13.2; every host runs 1.13.2" }
 python = { status = "observed", source = "gate configure 'Found Python3 ... 3.14.4'; golden Cellar/python@3.14/3.14.4_1 is python3" }
@@ -33,6 +43,8 @@ node = { status = "target", source = "golden runs Homebrew node 26.0.0; hosts ru
 rust = { status = "observed", source = "golden rustup stable toolchain is rustc 1.97.1 with the x86_64-apple-darwin std; release-cli darwin legs print cargo 1.97.1. The golden got it from a floating 'stable' install, so a rebake can move it until rust-toolchain.toml pins it" }
 tart = { status = "target", source = "tart runs on the hosts, not in the VM: m5s runs gate VMs on 2.38.0, m3, m1 and m5 still run 2.36.0" }
 clang_format = { status = "target", source = "the hosted format check pins PyPI clang-format 21.1.8; the golden has no clang-format at all" }
+ccache = { status = "target", source = "setup.sh and the gate need it but took it unpinned from Homebrew: hosts run 4.13.6 (m3, m5), 4.14 (m1) and 4.14.1 (m5s), probed 2026-11-09; conda-forge 4.14.1 is the newest mise lists" }
+git_lfs = { status = "target", source = "a setup.sh prerequisite taken unpinned from Homebrew: hosts run 3.7.1 (m3, m1, m5) and 3.8.0 (m5s), probed 2026-11-09; 3.8.1 is the newest release" }
 
 [mise]
 # The mise binary itself is part of the pin: built from source at this tag and
@@ -48,7 +60,7 @@ enforcement = "warn"
 # sha256 of the committed mise.toolchain.lock. generate.py --lock writes it; the drift
 # test refuses a lock whose bytes do not hash to it, so a lock edit shows
 # up as a change to this reviewed file.
-lock_sha256 = "3e3d93b19c8ea8f1b8f034e5713bdae59c7c9552d1f26ab725e6309d53b39a05"
+lock_sha256 = "0ca12065684475c36f976f4103eb67a6493470f680900c4b9e1196bbb06b35b3"
 
 # The installed binary hosts run, checked by digest (tools/toolchain/check_env.py).
 # Self-update is off for it: its lib/mise-self-update-instructions.toml points
@@ -96,6 +108,17 @@ backend = "conda:clang-format"
 url_prefixes = ["https://conda.anaconda.org/conda-forge/"]
 unlocked = { windows-arm64 = "conda-forge publishes no windows-arm64 clang-format; that platform keeps its own" }
 
+[mise.tools.ccache]
+# ccache has no aqua registry entry; conda-forge publishes it for every lock
+# platform with checksums, as it does clang-format.
+backend = "conda:ccache"
+url_prefixes = ["https://conda.anaconda.org/conda-forge/"]
+unlocked = { windows-arm64 = "conda-forge publishes no windows-arm64 ccache; that platform keeps its own" }
+
+[mise.tools.git_lfs]
+backend = "aqua:git-lfs/git-lfs"
+url_prefixes = ["https://github.com/git-lfs/git-lfs/releases/download/", "https://api.github.com/repos/git-lfs/git-lfs/releases/assets/"]
+
 [shipyard]
 # Shipyard is CI and PR orchestration, never a build input: it is not in
 # .mise.toolchain.toml, check_env.py never reports it, and no build or test
@@ -130,10 +153,14 @@ rust_targets = ["x86_64-apple-darwin"]
 
 [platform.linux]
 cmake = "system" # exception: apt cmake until the tartci bake installs from mise.toolchain.lock
+ccache = "system" # exception: apt ccache, for the same reason
+git_lfs = "system" # exception: the runner image's git-lfs, for the same reason
 rust = "absent"
 
 [platform.windows]
 cmake = "system" # exception: choco cmake until the tartci bake installs from mise.toolchain.lock
+ccache = "system" # exception: the image's ccache, for the same reason
+git_lfs = "system" # exception: Git for Windows bundles git-lfs
 rust = "absent"
 
 

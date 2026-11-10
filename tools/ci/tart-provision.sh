@@ -6,15 +6,19 @@
 # Images (date-tag with the `tag` subcommand):
 #   macos-build-base   Tier 0: sshd+key, auto-login, brew(git gh rsync ccache jq
 #                              coreutils tailscale), runner agent           ~50 GB
-#   macos-apple-xcode  Tier 1: + Xcode 26.5 (17F42) + CLT, sim runtimes trimmed ~90 GB
+#   macos-apple-xcode  Tier 1: + the pinned Xcode at /Applications/Xcode.app,
+#                              sim runtimes trimmed                        ~90 GB
 #   pulp-build-base    Tier 2: + cmake ninja python@3.12(PIL,numpy) + Skia +
 #                              warm ccache/FetchContent                   ~110-130 GB
 #
 # Storage: the host's TART_HOME (Spotlight-excluded). Clones are CoW.
 #
 # Verified facts (cirruslabs macos-image-templates, tart docs — 2026-06-01):
-#   • Base image  ghcr.io/cirruslabs/macos-tahoe-base:latest is macOS 26 "Tahoe",
-#     which matches Xcode 26.5's required macOS.
+#   • The base image, Xcode version and build, and macOS build come from
+#     .shipyard/vm-image.toml, which tools/toolchain/generate.py writes from
+#     tools/toolchain/manifest.toml. The base is pinned by digest; Tier 0
+#     refuses a guest whose macOS build is not the pin, and Tier 1 refuses an
+#     Xcode whose build is not the pin.
 #   • Default creds are admin / admin.
 #   • The vanilla base ALREADY enables auto-login (kcpassword + loginwindow
 #     autoLoginUser=admin) and Remote Login (sshd). We verify/inject, not re-create.
@@ -31,14 +35,25 @@ set -euo pipefail
 
 SSH_KEY_PUB="${PULP_VM_SSH_KEY_PUB:-$HOME/.ssh/id_ed25519.pub}"
 SSH_KEY_PRIV="${SSH_KEY_PUB%.pub}"
-# Tahoe matches Xcode 26.5. Override with PULP_MACOS_BASE_IMAGE if Apple ships a
-# newer macOS for a future Xcode.
-BASE_MACOS_IMAGE="${PULP_MACOS_BASE_IMAGE:-ghcr.io/cirruslabs/macos-tahoe-base:latest}"
-XCODE_VERSION="${PULP_XCODE_VERSION:-26.5}"          # build 17F42 — goldens are toolchain-coupled
-# xcodes installs to /Applications/Xcode-<version>.app; on the host, an already
-# xcodes-installed 26.5 is typically /Applications/Xcode-26.5.0.app.
+# The pins, read from the generated image manifest with sed rather than a TOML
+# parser: list/tag/resize must still run on a host whose python3 is 3.9.
+IMAGE_PINS="${PULP_IMAGE_PINS:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/.shipyard/vm-image.toml}"
+image_pin(){ # $1=key — the first `key = "value"` in the image manifest
+  [ -f "$IMAGE_PINS" ] && sed -n "s/^$1 *= *\"\([^\"]*\)\".*/\1/p" "$IMAGE_PINS" | head -1
+}
+BASE_MACOS_IMAGE="${PULP_MACOS_BASE_IMAGE:-$(image_pin base)}"
+MACOS_BUILD="${PULP_MACOS_BUILD:-$(image_pin macos_build)}"
+XCODE_VERSION="${PULP_XCODE_VERSION:-$(image_pin xcode)}"
+XCODE_BUILD="${PULP_XCODE_BUILD:-$(image_pin xcode_build)}"
+# The guest's Xcode lives where every fleet host's does. Sharing one ccache
+# between hosts and VMs needs the same compiler (compiler_check=content) and,
+# for direct-mode hits, the same absolute SDK paths.
+GUEST_XCODE_APP="/Applications/Xcode.app"
+# xcodes installs to /Applications/Xcode-<version>.app; the fallback moves it.
 XCODE_APP="${PULP_XCODE_APP:-/Applications/Xcode-${XCODE_VERSION}.0.app}"
-HOST_XCODE_APP="${PULP_HOST_XCODE_APP:-}"            # if set, rsync this host Xcode in (no re-download)
+# Copy a host Xcode in (no re-download). Unset: the host's /Applications/Xcode.app
+# when its build is the pin, which on the fleet it is.
+HOST_XCODE_APP="${PULP_HOST_XCODE_APP:-}"
 VM_USER="${PULP_VM_USER:-admin}"; VM_PASS="${PULP_VM_PASS:-admin}"  # Cirrus base default
 DISK_GB="${PULP_VM_DISK_GB:-150}"
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10)
@@ -104,9 +119,35 @@ stop_vm(){ # graceful stop, fall back to killing the run pid
   sleep 3
 }
 
+app_build(){ # $1=Xcode.app — its ProductBuildVersion, or nothing
+  /usr/libexec/PlistBuddy -c "Print :ProductBuildVersion" "$1/Contents/version.plist" 2>/dev/null || true
+}
+require_pins(){
+  [ -n "$BASE_MACOS_IMAGE" ] && [ -n "$MACOS_BUILD" ] && [ -n "$XCODE_VERSION" ] && [ -n "$XCODE_BUILD" ] \
+    || die "cannot read base/macos_build/xcode/xcode_build from $IMAGE_PINS; fix: python3 tools/toolchain/generate.py"
+}
+# The guest must be the pinned macOS build: Xcode refuses an older macOS, and a
+# different OS is not the environment hosts and the gate share.
+require_guest_macos(){ # $1=ip
+  local got; got="$(vm_ssh "$1" 'sw_vers -buildVersion' | tr -d '[:space:]')"
+  if [ "$got" != "$MACOS_BUILD" ]; then
+    warn "guest macOS build is '$got', the manifest pins $MACOS_BUILD ($BASE_MACOS_IMAGE)"; return 1
+  fi
+  note "guest macOS build $got (matches pin)"
+}
+# The guest's selected Xcode must be the pinned version and build, licensed and
+# first-launched, or the image is not a golden.
+require_guest_xcode(){ # $1=ip
+  local got; got="$(vm_ssh "$1" 'xcode-select -p; xcodebuild -version; xcodebuild -license check >/dev/null 2>&1 && echo LICENSE-OK' | tr '\n' ' ')"
+  case "$got" in
+    "$GUEST_XCODE_APP/Contents/Developer Xcode $XCODE_VERSION Build version $XCODE_BUILD LICENSE-OK "*) note "guest Xcode $XCODE_VERSION ($XCODE_BUILD) at $GUEST_XCODE_APP, licence accepted";;
+    *) warn "guest Xcode is not the pin: got '$got', want $XCODE_VERSION ($XCODE_BUILD) selected at $GUEST_XCODE_APP with the licence accepted"; return 1;;
+  esac
+}
+
 # ── Tier 0 — universal base ────────────────────────────────────────────────
 provision_base(){ # $1=vm-name
-  need_tart; local vm="${1:-macos-build-base}"
+  need_tart; require_pins; local vm="${1:-macos-build-base}"
   [ -f "$SSH_KEY_PUB" ] || die "ssh pubkey not found: $SSH_KEY_PUB (set PULP_VM_SSH_KEY_PUB)"
   note "Tier 0: cloning $BASE_MACOS_IMAGE → $vm"
   tart clone "$BASE_MACOS_IMAGE" "$vm"
@@ -119,6 +160,7 @@ provision_base(){ # $1=vm-name
   note "injecting ssh key"
   vm_ssh "$ip" "mkdir -p ~/.ssh && chmod 700 ~/.ssh && grep -qxF '$(cat "$SSH_KEY_PUB")' ~/.ssh/authorized_keys 2>/dev/null || echo '$(cat "$SSH_KEY_PUB")' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
   vm_ssh "$ip" 'sudo systemsetup -setremotelogin on >/dev/null 2>&1 || true'   # idempotent; base already on
+  require_guest_macos "$ip" || { stop_vm "$vm" "$rpid"; die "$vm is not the pinned macOS: tart delete $vm"; }
   # Auto-login is set by the cirrus vanilla base. Verify; warn (don't silently
   # regenerate kcpassword) if a non-cirrus base lacks it — GPU/WindowServer/Metal
   # tests REQUIRE a logged-in session.
@@ -135,29 +177,40 @@ provision_base(){ # $1=vm-name
 
 # ── Tier 1 — Xcode (Apple projects) ────────────────────────────────────────
 provision_apple_xcode(){ # $1=from-base-vm  $2=new-vm
-  need_tart; local from="${1:-macos-build-base}" vm="${2:-macos-apple-xcode}"
+  need_tart; require_pins; local from="${1:-macos-build-base}" vm="${2:-macos-apple-xcode}"
+  local host_app="$HOST_XCODE_APP"
+  if [ -z "$host_app" ] && [ "$(app_build "$GUEST_XCODE_APP")" = "$XCODE_BUILD" ]; then host_app="$GUEST_XCODE_APP"; fi
+  if [ -n "$host_app" ]; then
+    # Refuse before cloning: a wrong host Xcode would bake a wrong golden.
+    [ -d "$host_app" ] || die "PULP_HOST_XCODE_APP not found: $host_app"
+    [ "$(app_build "$host_app")" = "$XCODE_BUILD" ] \
+      || die "$host_app is build '$(app_build "$host_app")', the manifest pins Xcode $XCODE_VERSION ($XCODE_BUILD)"
+  fi
   note "Tier 1: cloning $from → $vm"
   tart clone "$from" "$vm"
   local rpid; rpid="$(boot_vm "$vm")"
   local ip; ip="$(vm_ip "$vm")"; wait_ssh "$ip"
-  if [ -n "$HOST_XCODE_APP" ] && [ -d "$HOST_XCODE_APP" ]; then
-    # Fast path: copy the operator's already-downloaded Xcode (no re-auth/re-download).
-    local appname; appname="$(basename "$HOST_XCODE_APP")"
-    note "rsync host Xcode $HOST_XCODE_APP → VM:/Applications/$appname (no re-download)"
+  require_guest_macos "$ip" || { stop_vm "$vm" "$rpid"; die "$from is not the pinned macOS; rebake Tier 0: tart delete $vm"; }
+  if [ -n "$host_app" ]; then
+    # Fast path: copy the host's Xcode (no Apple ID, no re-download).
+    note "rsync host Xcode $host_app → VM:$GUEST_XCODE_APP (no re-download)"
     # Remote rsync runs as root (passwordless sudo) so it can write /Applications
     # and preserve root ownership; full path pins brew rsync on both ends so the
-    # protocol matches (macOS 26 ships openrsync at /usr/bin/rsync).
-    vm_rsync "$HOST_XCODE_APP/" "$ip:/Applications/$appname/" --rsync-path="sudo /opt/homebrew/bin/rsync"
-    vm_ssh "$ip" "sudo xcode-select -s /Applications/$appname/Contents/Developer"
+    # protocol matches (macOS ships openrsync at /usr/bin/rsync).
+    vm_rsync "$host_app/" "$ip:$GUEST_XCODE_APP/" --rsync-path="sudo /opt/homebrew/bin/rsync"
+    vm_ssh "$ip" "sudo xcode-select -s $GUEST_XCODE_APP/Contents/Developer"
   else
     warn "PULP_HOST_XCODE_APP unset — installing Xcode $XCODE_VERSION in-guest via xcodes (needs Apple-ID + interactive 2FA; multi-hour download)"
     vm_ssh "$ip" 'eval "$(/opt/homebrew/bin/brew shellenv)" && brew install --quiet xcodesorg/made/xcodes aria2'
     # XCODES_USERNAME/XCODES_PASSWORD may be exported to reduce prompts; 2FA is
     # still interactive. Run this attached if auth is needed.
     vm_ssh "$ip" "eval \"\$(/opt/homebrew/bin/brew shellenv)\" && xcodes install '$XCODE_VERSION' --experimental-unxip --no-superuser || true"
-    vm_ssh "$ip" "sudo xcode-select -s '$XCODE_APP/Contents/Developer'"
+    vm_ssh "$ip" "sudo rm -rf '$GUEST_XCODE_APP' && sudo mv '$XCODE_APP' '$GUEST_XCODE_APP' && sudo xcode-select -s '$GUEST_XCODE_APP/Contents/Developer'"
   fi
-  vm_ssh "$ip" 'sudo xcodebuild -license accept && sudo xcodebuild -runFirstLaunch' || warn "xcodebuild license/firstlaunch step needs attention"
+  # In-guest sudo is the image's passwordless admin, never the host's.
+  vm_ssh "$ip" 'sudo xcodebuild -license accept && sudo xcodebuild -runFirstLaunch' \
+    || { stop_vm "$vm" "$rpid"; die "xcodebuild licence/first-launch failed in the guest; $vm is incomplete: tart delete $vm"; }
+  require_guest_xcode "$ip" || { stop_vm "$vm" "$rpid"; die "$vm is incomplete: tart delete $vm"; }
   # Trim simulator runtimes (large; CI plugin builds don't need them).
   vm_ssh "$ip" 'for r in $(xcrun simctl runtime list -j 2>/dev/null | jq -r "keys[]" 2>/dev/null); do xcrun simctl runtime delete "$r" 2>/dev/null || true; done'
   note "Tier 1 provisioned."
@@ -351,8 +404,11 @@ cmd_verify(){
   note "TART_HOME=$TART_HOME ($( [ -d "$TART_HOME" ] && echo present || echo MISSING ))"
   [ -f "$SSH_KEY_PUB" ] && note "ssh pubkey: $SSH_KEY_PUB" || warn "ssh pubkey missing: $SSH_KEY_PUB"
   have_sshpass && note "sshpass present (first-boot password auth OK)" || warn "sshpass missing — brew install hudochenkov/sshpass/sshpass (needed for first key injection)"
-  if [ -n "$HOST_XCODE_APP" ]; then [ -d "$HOST_XCODE_APP" ] && note "host Xcode to copy: $HOST_XCODE_APP" || warn "PULP_HOST_XCODE_APP set but not found: $HOST_XCODE_APP"
-  else warn "PULP_HOST_XCODE_APP unset — Tier 1 will use xcodes (interactive 2FA). Set it to the host's Xcode-${XCODE_VERSION}.0.app to skip re-download."; fi
+  require_pins
+  note "pins: base=$BASE_MACOS_IMAGE macOS build $MACOS_BUILD, Xcode $XCODE_VERSION ($XCODE_BUILD)"
+  local app="${HOST_XCODE_APP:-$GUEST_XCODE_APP}"
+  if [ "$(app_build "$app")" = "$XCODE_BUILD" ]; then note "host Xcode to copy: $app ($XCODE_BUILD)"
+  else warn "$app is build '$(app_build "$app")', not $XCODE_BUILD — Tier 1 refuses it; without a matching host Xcode it falls back to xcodes (interactive 2FA)"; fi
   note "base image: $BASE_MACOS_IMAGE  (pull check below)"
   tart pull "$BASE_MACOS_IMAGE" --concurrency 4 >/dev/null 2>&1 && note "base image pullable/cached" || warn "could not pull $BASE_MACOS_IMAGE — check name/network"
   note "verify complete"

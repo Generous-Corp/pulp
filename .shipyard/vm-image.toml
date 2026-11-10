@@ -13,13 +13,16 @@ schema   = 1
 name     = "pulp-build-base"
 strategy = "bake"
 
-# macOS 26 "Tahoe" matches Xcode 26.5 (build 17F42). Clones are CoW.
-base       = "ghcr.io/cirruslabs/macos-tahoe-base:latest"
+# base, xcode, xcode_build, macos and macos_build are generated from
+# tools/toolchain/manifest.toml (macos_base is pinned by digest). Clones are CoW.
+base = "ghcr.io/cirruslabs/macos-golden-gate-base@sha256:4859ea9483a1f6e377301f23a5243798044266a373fc36635e9dcd045e09292f"
 disk_gb    = 150
 auto_login = true          # REQUIRED for WindowServer/Metal GPU tests
 
 [toolchain]
-xcode_build = "17F42"
+macos_build = "26B123"
+macos = "27.2"
+xcode_build = "27B52"
 # Pin Xcode in-image so font/raster goldens are reproducible. Prefer copying a
 # host-installed Xcode (tart-provision PULP_HOST_XCODE_APP) over an in-guest
 # xcodes download (interactive 2FA).
@@ -31,7 +34,7 @@ node = "26.10.0"
 python = "3.14.4"
 ninja = "1.13.2"
 cmake = "4.3.3"
-xcode = "26.5"
+xcode = "27.2"
 
 [brew]
 packages = [
@@ -55,7 +58,7 @@ packages = [
 # test otherwise hangs until its timeout on the VM golden.
 
 # BEGIN GENERATED PULP TOOLCHAIN (tools/toolchain/manifest.toml)
-# source_sha256 = 3cbe8514fd7c32c4d2bb544618182804766356a96d57110f4df82d02cb16d4a6
+# source_sha256 = e531dcc7a3c6f4c0a8a817594e7381d458a7fb4d4ce59199a99d9150688040c9
 # generated_platform = macos
 # END GENERATED PULP TOOLCHAIN
 

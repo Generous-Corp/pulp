@@ -21,7 +21,7 @@ disk_gb    = 150
 auto_login = true          # REQUIRED for WindowServer/Metal GPU tests
 
 # BEGIN GENERATED PULP TOOLCHAIN (tools/toolchain/manifest.toml)
-# source_sha256 = 3cbe8514fd7c32c4d2bb544618182804766356a96d57110f4df82d02cb16d4a6
+# source_sha256 = e531dcc7a3c6f4c0a8a817594e7381d458a7fb4d4ce59199a99d9150688040c9
 [mise]
 version = "2026.10.17"
 path = "~/.local/opt/mise-2026.10.17/bin/mise"

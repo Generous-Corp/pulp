@@ -16,7 +16,12 @@
 set -euo pipefail
 
 # ── configuration ───────────────────────────────────────────────────────────
-PINNED_XCODE_VERSION="${PULP_PINNED_XCODE:-26.5}"   # Xcode 26.5 (17F42)
+# The Xcode pin comes from tools/toolchain/manifest.toml (via the generated
+# expected.json, which the stock python3 3.9 can read).
+EXPECTED_JSON="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/tools/toolchain/expected.json"
+xcode_pin(){ /usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["xcode"][sys.argv[2]])' "$EXPECTED_JSON" "$1" 2>/dev/null || echo unknown; }
+PINNED_XCODE_VERSION="${PULP_PINNED_XCODE:-$(xcode_pin version)}"
+PINNED_XCODE_BUILD="${PULP_PINNED_XCODE_BUILD:-$(xcode_pin build)}"
 CI_ROOT="${PULP_CI_ROOT:-/Users/Shared/pulp-ci}"
 FETCHCONTENT_SOURCE_ROOT="${PULP_SHARED_FETCHCONTENT_SOURCE_DIR:-$HOME/Library/Caches/Pulp/fetchcontent-src}"
 SKIA_CACHE_ROOT="${PULP_SKIA_CACHE_ROOT:-$HOME/.cache/pulp/skia}"
@@ -62,12 +67,13 @@ preflight() {
 check_xcode() {
   step "Xcode"
   command -v xcodebuild >/dev/null || die "xcodebuild not found — install Xcode $PINNED_XCODE_VERSION"
-  local v
+  local v b
   v="$(xcodebuild -version 2>/dev/null | awk 'NR==1{print $2}')"
-  if [ "$v" = "$PINNED_XCODE_VERSION" ]; then
-    ok "Xcode $v (matches pin)"
+  b="$(xcodebuild -version 2>/dev/null | awk 'NR==2{print $3}')"
+  if [ "$v" = "$PINNED_XCODE_VERSION" ] && [ "$b" = "$PINNED_XCODE_BUILD" ]; then
+    ok "Xcode $v ($b) (matches pin)"
   else
-    warn "Xcode $v installed; plan pins $PINNED_XCODE_VERSION — reconcile the pin or the toolchain"
+    warn "Xcode $v ($b) installed; tools/toolchain/manifest.toml pins $PINNED_XCODE_VERSION ($PINNED_XCODE_BUILD) — install the pinned Xcode as /Applications/Xcode.app"
   fi
   note "developer dir: $(xcode-select -p 2>/dev/null || echo '?')"
   if xcodebuild -license check >/dev/null 2>&1; then
