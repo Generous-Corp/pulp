@@ -150,7 +150,7 @@ class Graph:
         # realpath, not normpath: the build dir and the checkout may be reached
         # through a symlink (macOS /var → /private/var), and ninja records
         # whichever spelling the compiler saw.
-        return os.path.realpath(p if os.path.isabs(p) else os.path.join(self.build_dir, p))
+        return codemodel_digest.realpath(p if os.path.isabs(p) else os.path.join(self.build_dir, p))
 
     def affected_outputs(self, changed_abs: list[str]) -> set[str]:
         seeds: set[str] = set()
@@ -171,12 +171,12 @@ def test_inputs(test: dict, build_dir: Path, source_root: Path) -> set[str]:
     props = {p["name"]: p["value"] for p in test.get("properties", [])}
     wd = props.get("WORKING_DIRECTORY") or str(build_dir)
     out: set[str] = set()
-    roots = (os.path.realpath(build_dir), os.path.realpath(source_root))
+    roots = (codemodel_digest.realpath(build_dir), codemodel_digest.realpath(source_root))
     for arg in test.get("command") or []:
         for cand in (arg, os.path.join(wd, arg)):
             if not os.path.isabs(cand):
                 continue
-            real = os.path.realpath(cand)
+            real = codemodel_digest.realpath(cand)
             if real.startswith(roots):
                 out.add(real)
     return out
@@ -186,9 +186,9 @@ def is_binary_test(test: dict, build_dir: Path) -> bool:
     cmd = test.get("command") or []
     if not cmd:
         return False
-    exe = os.path.realpath(cmd[0])
+    exe = codemodel_digest.realpath(cmd[0])
     base = os.path.basename(exe)
-    return (exe.startswith(os.path.realpath(build_dir) + os.sep) and not exe.endswith((".py", ".sh", ".mjs", ".js"))
+    return (exe.startswith(codemodel_digest.realpath(build_dir) + os.sep) and not exe.endswith((".py", ".sh", ".mjs", ".js"))
             and "python" not in base and base not in ("node", "bash", "sh", "zsh"))
 
 
@@ -261,7 +261,7 @@ def compute(build_dir: Path, source_root: Path, edges, deps, inventory: dict, ch
     # The list itself changed: every declared test's inputs may have moved.
     list_changed = bool(script_inputs_store.store_paths(changed))
     tests = inventory.get("tests", [])
-    changed_abs = [os.path.realpath(os.path.join(source_root, f)) for f in changed]
+    changed_abs = [codemodel_digest.realpath(os.path.join(source_root, f)) for f in changed]
     aff = g.affected_outputs(changed_abs) | set(changed_abs)
     flags = classify_changes(changed)
     # A changed file the graph never read and that is not a known non-input:
@@ -276,7 +276,7 @@ def compute(build_dir: Path, source_root: Path, edges, deps, inventory: dict, ch
               f"{len(unread)} changed file(s) no edge reads" if unread else
               "empty diff" if not changed else
               "no codemodel: spawn edges unknown" if spawns is None else "graph")
-    build_real = os.path.realpath(build_dir)
+    build_real = codemodel_digest.realpath(build_dir)
     spawned_selected = 0
     selected = []
     declared = undeclared = sel_declared = sel_undeclared = 0
@@ -344,9 +344,9 @@ def compute(build_dir: Path, source_root: Path, edges, deps, inventory: dict, ch
 
 def _spawned(test: dict, build_real: str, spawns: SpawnIndex) -> set[str]:
     """Absolute paths of the programs a binary test runs or loads at run time."""
-    exe = os.path.realpath(test["command"][0])
+    exe = codemodel_digest.realpath(test["command"][0])
     rel = os.path.relpath(exe, build_real)
-    return {os.path.realpath(os.path.join(build_real, a)) for a in spawns.closure(rel)}
+    return {codemodel_digest.realpath(os.path.join(build_real, a)) for a in spawns.closure(rel)}
 
 
 def main(argv: list[str]) -> int:
