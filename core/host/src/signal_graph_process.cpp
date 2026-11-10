@@ -82,6 +82,24 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
         if (*host_event_result != HostEventResult::Accepted)
             return;
     }
+    struct GraphEventBlockGuard {
+        std::shared_ptr<GraphAuthoredEventLane<>> lane;
+        bool active = false;
+        ~GraphEventBlockGuard() {
+            if (!active)
+                return;
+            if (lane->end_block() != GraphEventResult::Accepted)
+                lane->abort_block();
+        }
+    } graph_event_guard{cg->graph_event_lane};
+    if (cg->graph_event_lane) {
+        const auto result = cg->graph_event_lane->begin_block(
+            cg->graph_event_epoch, cg->graph_event_lane->counters().cursor,
+            static_cast<std::size_t>(num_samples));
+        if (result != GraphEventResult::Accepted)
+            return;
+        graph_event_guard.active = true;
+    }
     if (cg->spectral)
         cg->spectral->begin_block();
 
