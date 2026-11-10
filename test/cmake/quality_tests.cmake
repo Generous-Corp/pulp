@@ -1536,6 +1536,15 @@ if(Python3_Interpreter_FOUND)
     endif()
     add_test(NAME gpu-dpr-inconclusive-receipt-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_verify_gpu_dpr_inconclusive_receipt.py")
+    if(APPLE AND PROJECT_IS_TOP_LEVEL)
+        add_test(NAME configure-tests-and-examples-both-on
+            COMMAND bash
+                "${CMAKE_SOURCE_DIR}/test/cmake/test_tests_and_examples_configure.sh"
+                "${CMAKE_SOURCE_DIR}")
+        set_tests_properties(configure-tests-and-examples-both-on PROPERTIES
+            LABELS "cmake;configure"
+            TIMEOUT 900)
+    endif()
     if(UNIX AND PROJECT_IS_TOP_LEVEL)
         add_test(NAME gpu-health-cpu-only-configure
             COMMAND bash
