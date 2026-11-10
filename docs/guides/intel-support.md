@@ -70,9 +70,12 @@ reason. Cross-compiling sidesteps the flaky runner entirely:
   Apple `CMAKE_OSX_ARCHITECTURES` branches already exist).
 - `-DPULP_RUST_CLI_TARGET=x86_64-apple-darwin` builds the Rust `pulp` CLI for
   the x86_64 triple (`rustup target add x86_64-apple-darwin` in the leg).
-- The Apple-Silicon runner's bootstrap prefetches arm64 Skia, so the leg purges
-  `external/skia-build/build` before fetching the x86_64 Skia and asserts
-  `lipo -archs libskia.a == x86_64` (the arch-clobber hazard).
+- The leg purges `external/skia-build/build` before fetching Skia, so the fetch
+  writes its own darwin-x64 generation instead of trusting the bootstrap's
+  prefetch. darwin-x64 resolves the universal Skia archive (the one gpu-runtime's
+  renderer lock pins, so the Intel build forwards its GPU device layer to
+  gpu-runtime like arm64 does), and the leg asserts that `libskia.a` contains an
+  x86_64 slice.
 - The thin binary is smoke-tested under Rosetta on the same runner; the
   `lipo`/`file` arch asserts prove a real x86_64 slice was shipped.
 

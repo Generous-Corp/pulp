@@ -1,0 +1,9 @@
+{
+  "examples/g11-live-retune-consumer/CMakeLists.txt": "67d797f5edbe009237c5948fc62a3cd7a7229d9322cd152ca33e730325d2c366",
+  "examples/g11-live-retune-consumer/README.md": "ef43576b7a14095cc19325c7178b7c35af4941c1e224c7d1e3289eb10082d19d",
+  "examples/g11-live-retune-consumer/expect_refusal.cmake": "4e8dcc6dd43378464d8bc4620bd1ef3ad837462329ff3ad02705a7ebd5a6f1f9",
+  "examples/g11-live-retune-consumer/installed_gate.cmake": "93a0747e261b77dd4bafe7cf5b6f0e94dcaeac2beb26aa4b1aec2e9da7d47b94",
+  "examples/g11-live-retune-consumer/instrument.hpp": "6b76c052770b434a059097a30f78d032196dada696179273703286dc36a00b0d",
+  "examples/g11-live-retune-consumer/main.cpp": "a32ecc52b753ceda614ccb5e045b34b344b8f373c005f147ac27d5904acae9ed",
+  "examples/g11-live-retune-consumer/tuning_control.hpp": "f57855445d170f04d5c3864e818b22b4ec126b48b73ed8e76e2d785ded49274d"
+}

@@ -2955,6 +2955,13 @@ commit predates it; the first merge group would fail with `No such file`. Keep
 such retries inline. The macOS ccache step uses an installed ccache (the gate
 golden bakes it) and never calls `brew install` then.
 
+**apt installs in workflows go through `tools/ci/apt-install-retry.sh`.** A
+mirror publishing a security update mid-job leaves the fetched index pointing at
+a 404 `.deb`; the helper reruns `apt-get update` and retries the install, 3
+attempts (`test_apt_install_retry.py` stubs `apt-get` to prove it). Call it with
+`sudo`. A step that runs before checkout (the `release-cli.yml` container
+pre-setup) carries the same loop inline as `apt_install`.
+
 **A deleted `gh-readonly-queue/...` branch is `merge group gone`, not a red.**
 `hydrate_gpu_provenance_commits.py` prints a `::notice::` for it and falls back
 to the event commit; only other fetch errors print `bounded fetch failed`.
@@ -3490,8 +3497,47 @@ by the tip's required gate job. It is evidence, not a verdict:
 `base_poison_detector.py` records why cross-batch corroboration alone was
 measured unsafe, and this shadow inherits that by requiring the main pass and
 acting on nothing. Read exonerated-only failures ÷ failures; do not wire it
-into the job outcome without a contract decision and the shadow data as Step
-Zero.
+into the job outcome. The enforced verdict is the separate, stricter
+`tools/ci/flake_exoneration.py` (decisions contract row 34).
+
+Gotcha from its Step Zero window (2026-10-26..11-09): all 3 shadow
+would-exonerate verdicts were one deterministic source-scan test
+(`every hosted format adapter builds its editor from hosted_editor()`) failing
+in three consecutive groups behind a broken queue entry. "Other heads" counted
+merge groups that all carried the same culprit. The enforced rule therefore
+counts only other pull requests' own head runs, by pull request number,
+excluding every pull request in the group; never merge-group runs.
+
+## Merge-group flake exoneration and quarantine
+
+`tools/ci/flake_exoneration.py gate` runs inside the merge-group `macos` ctest
+step after a failure. It returns 0 only when every failing test failed on >= 2
+other pull requests in 24 h, passed by name in main's tip JUnit, is not
+pr-fast/drift-fast, is not touched by `compare/main...<sha>`, and is not a
+build failure, with ctest exit 8 and `LastTestsFailed.log` matching the
+report. It then runs the tests `--stop-on-failure` skipped and judges the
+union. Gotchas:
+- Corroboration reads only FULL-SUITE head runs (`Test (non-Windows)` ran;
+  `ctest.junit.xml`). A PR head's `LastTestsFailed.log` usually comes from the
+  pr-fast, pr-guard or affected tiers, which run that PR's own tests, so a
+  failure there is the PR breaking the test, not a flake signal. A
+  corroborating run whose head carries a group PR's head, or whose PR diff
+  touches the test, does not count either.
+- `pull_requests` is empty on App-opened PR runs; the PR comes from
+  `commits/<head_sha>/pulls`, and a commit on two PRs counts as none.
+- ctest's JUnit omits tests a stopped run never started, and an all-pass ctest
+  run leaves a stale `LastTestsFailed.log`; the gate merges the remainder's
+  JUnit into `ctest.junit.xml` and rewrites `LastTestsFailed.log` as the union,
+  because other runs' evidence reads that file from the artifact.
+- A missing test executable is `status="notrun"` with "Unable to find
+  executable", not a failure, so the old shadow parser never saw it. Any
+  notrun that is not a deliberate skip is a build failure.
+- The advisory quarantine step restores `Testing/Temporary` after its own
+  ctest run for the same reason.
+- Only `PULP_FLAKE_EXONERATION_MODE=enforce` acts; unset is shadow, and so is
+  the kill switch. Graduation to `enforce` is on evidence, not a date: at least 5 days in shadow AND at least 8 would-excuse decisions, each confirmed by a same-head retry pass, with zero false excusals. Any false excusal resets the count and keeps shadow mode. Quarantine state is
+  the open bot-authored `flake-quarantine` issues; a failed read quarantines
+  nothing.
 
 Gotcha: it used to judge "passes on main" from the latest merge group's
 whole-run conclusion (an advisory Linux red counts) and read an undownloadable

@@ -1,9 +1,9 @@
 #pragma once
 
 /// @file midi_source_reservation.hpp
-/// A claim on MIDI sources that some other feature already consumes, so MIDI
-/// Learn can refuse to bind them and say why. For example, the preset program
-/// router consumes Bank Select and Program Change.
+/// A way for a plug-in to say "these MIDI messages are already spoken for", so
+/// MIDI Learn neither binds them nor lets an existing mapping fire on them. The
+/// preset router that consumes Bank Select and Program Change is one such owner.
 
 #include <pulp/state/midi_source.hpp>
 
@@ -13,12 +13,12 @@ class MidiSourceReservation {
   public:
     virtual ~MidiSourceReservation() = default;
 
-    /// True when `source` is consumed elsewhere. `source` may use an omni
-    /// channel, which overlaps every channel. Safe from any thread, including
-    /// the audio thread: no allocation, no lock.
+    /// True when `source` is claimed. `source.channel` may be `MidiSource::kOmni`,
+    /// meaning "any channel": claim it when any channel the owner listens on
+    /// overlaps. Called on the audio thread: no allocation, locks or exceptions.
     virtual bool claims(const MidiSource& source) const noexcept = 0;
 
-    /// A static, user-readable reason for a refusal. Never null.
+    /// Why the claim exists, for a UI to show. A string with static lifetime.
     virtual const char* reason() const noexcept = 0;
 };
 

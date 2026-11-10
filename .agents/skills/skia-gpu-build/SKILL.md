@@ -633,6 +633,14 @@ wrong for a cross/Intel build on Apple Silicon).
   `darwin-universal`. Legacy `~/.cache/pulp/skia-build*` directories are not
   valid inputs unless repopulated through the current fetcher into a stamped,
   receipt-bound generation.
+- **Every manifest `mac-*` key resolves the universal archive.** `mac-arm64`
+  and `mac-x86_64` both point at `skia-build-mac-universal-gpu-release.zip`,
+  because gpu-runtime's renderer lock pins that one macOS asset's Dawn and every
+  macOS build forwards its device layer to gpu-runtime. The thin x86_64 archive's
+  objects match the universal x86_64 slice byte for byte, but its `.a` digests do
+  not, so selecting it fails every Intel configure with "libdawn_combined.a does
+  not match the lock". `audit.py --strict` refuses a `mac-*` key with another
+  digest.
 - **FindSkia fails LOUD on an arch mismatch.** If `SKIA_DIR` points at the wrong
   slice, `FindSkia.cmake` FATALs at configure time (`lipo -archs` vs
   `CMAKE_OSX_ARCHITECTURES`) with "architecture mismatch … missing: <arch>" —

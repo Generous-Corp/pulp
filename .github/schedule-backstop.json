@@ -3,6 +3,7 @@
   "ref": "main",
   "workflows": [
     {"file": "coverage-upload-watchdog.yml", "cadence_minutes": 60},
+    {"file": "flake-quarantine.yml", "cadence_minutes": 30},
     {"file": "landing-watchdog.yml", "cadence_minutes": 30},
     {"file": "main-health-detector.yml", "cadence_minutes": 30},
     {"file": "merge-stall-check.yml", "cadence_minutes": 30},
