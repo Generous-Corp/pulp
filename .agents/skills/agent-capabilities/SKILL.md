@@ -860,7 +860,7 @@ sequence rather than one checklist. Make all four edits before running it:
    umbrella's digest too. Record the new digest with `--accept-fingerprint
    <umbrella include>` when a binding names the umbrella, or update its
    `REVIEWED_HEADERS` value. The stale digest also appears in
-   `tools/agent-capabilities/history/`; **do not edit those** — history is
+   `tools/agent-capabilities/history/`; **do not edit those**, because history is
    append-only.
 4. **Both counters** — `MANIFEST_REVISION` and `SURFACE_INVENTORY_VERSION`,
    reported as two separate errors.

@@ -203,7 +203,7 @@ def exercise_reset_is_write_path_only() -> int:
     checks = 0
     # The reset covers exactly the records --write regenerates from the base.
     # If another generated artifact is ever added, this fails rather than
-    # silently leaving it merged-but-unreset — which is the defect this whole
+    # silently leaving it merged-but-unreset, which is the defect this whole
     # path exists to fix.
     names = {str(a) for a in rederive.GENERATED_ARTIFACTS}
     assert names == {
