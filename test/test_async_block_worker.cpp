@@ -3,8 +3,10 @@
 #include <pulp/audio/async_block_worker.hpp>
 #include <pulp/audio/pull_rate_detector.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <random>
 #include <thread>
 #include <vector>
@@ -274,38 +276,95 @@ TEST_CASE("AsyncBlockWorker: a worker a whole ring behind skips ahead and recove
     }
 }
 
+namespace {
+
+// A pull clock the test advances by hand, so the Auto verdict depends on the
+// calls the test makes and not on how the host scheduled the calling thread.
+std::atomic<std::int64_t> g_pull_clock_ns{0};
+
+PullRateDetector::Clock::time_point manual_pull_clock() noexcept {
+    return PullRateDetector::Clock::time_point(std::chrono::duration_cast<
+                                               PullRateDetector::Clock::duration>(
+        std::chrono::nanoseconds(g_pull_clock_ns.load(std::memory_order_relaxed))));
+}
+
+} // namespace
+
 TEST_CASE("AsyncBlockWorker: a fast pull without an offline flag waits in Auto mode",
           "[audio][async-block-worker][concurrent]") {
     // A slow job on a real worker thread, pulled back to back: Realtime
-    // misses, Auto detects the pull rate and waits instead.
+    // misses, Auto detects the pull rate and waits instead. The pull rate is
+    // the manual clock's, four times real time, and the loop stalls for real
+    // part way through: a loaded host that deschedules the audio thread must
+    // not turn a declared fast pull into misses.
+    constexpr int kCalls = 200;
+    const auto block_ns = std::chrono::nanoseconds(5'333'333); // 256 frames at 48 kHz
+    std::atomic<bool> gate_open{false};
+    const auto gated_job = [&](Worker::Chunk& chunk) {
+        // Realtime run: hold every chunk until the pull loop has finished,
+        // so each call finds its window unfinished whatever the scheduling.
+        const auto give_up = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (!gate_open.load(std::memory_order_acquire) &&
+               std::chrono::steady_clock::now() < give_up)
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+        identity_job(chunk);
+    };
     const auto slow_job = [](Worker::Chunk& chunk) {
         std::this_thread::sleep_for(std::chrono::microseconds(150));
         identity_job(chunk);
     };
-    auto run = [&](AsyncBlockMode mode) {
+    auto run = [&](AsyncBlockMode mode, const std::function<void(Worker::Chunk&)>& job) {
         Worker worker;
         auto config = mono_config(1, true);
-        config.max_chunk =
-            256; // one chunk per block: a slow sleep still leaves the pull well over 2x
-        REQUIRE(worker.prepare(config, slow_job));
+        config.max_chunk = 256; // one chunk per block
+        config.pull_clock = &manual_pull_clock;
+        config.wait_deadline = std::chrono::seconds(30); // a loaded worker still finishes
+        REQUIRE(worker.prepare(config, job));
         Driver driver{worker};
         std::uint64_t misses_after_warmup = 0;
-        for (int call = 0; call < 200; ++call) {
+        for (int call = 0; call < kCalls; ++call) {
+            g_pull_clock_ns.fetch_add((block_ns / 4).count(), std::memory_order_relaxed);
+            if (call == kCalls / 2)
+                std::this_thread::sleep_for(std::chrono::milliseconds(60)); // a descheduled caller
             const auto before = worker.stats().miss_frames;
             driver.block(256, {}, mode);
             if (call >= 2 * static_cast<int>(PullRateDetector::kWindow))
                 misses_after_warmup += worker.stats().miss_frames - before;
         }
+        gate_open.store(true, std::memory_order_release);
         const auto stats = worker.stats();
         worker.release();
         return std::pair{misses_after_warmup, stats};
     };
-    const auto [realtime_misses, realtime_stats] = run(AsyncBlockMode::Realtime);
-    const auto [auto_misses, auto_stats] = run(AsyncBlockMode::Auto);
-    REQUIRE(realtime_misses > 0);
+    const auto [realtime_misses, realtime_stats] = run(AsyncBlockMode::Realtime, gated_job);
+    const auto [auto_misses, auto_stats] = run(AsyncBlockMode::Auto, slow_job);
+    constexpr std::uint64_t kMeasuredFrames =
+        256u * static_cast<std::uint64_t>(kCalls - 2 * static_cast<int>(PullRateDetector::kWindow));
+    REQUIRE(realtime_misses == kMeasuredFrames);
+    REQUIRE_FALSE(realtime_stats.fast_pull);
     REQUIRE(auto_stats.fast_pull);
     REQUIRE(auto_misses == 0);
     REQUIRE(auto_stats.wait_timeouts == 0);
+}
+
+TEST_CASE("AsyncBlockWorker: Auto mode at real-time pull rate never waits",
+          "[audio][async-block-worker]") {
+    // The same manual clock advanced at exactly real time: the detector stays
+    // live, so Auto behaves as Realtime and plays the unfinished window as a
+    // miss instead of pumping inline.
+    Worker worker;
+    auto config = mono_config(1);
+    config.pull_clock = &manual_pull_clock;
+    REQUIRE(worker.prepare(config, identity_job));
+    Driver driver{worker};
+    for (int call = 0; call < 64; ++call) {
+        g_pull_clock_ns.fetch_add(5'333'333, std::memory_order_relaxed);
+        driver.block(256, {}, AsyncBlockMode::Auto);
+    }
+    const auto stats = worker.stats();
+    REQUIRE_FALSE(stats.fast_pull);
+    REQUIRE(stats.waits == 0);
+    REQUIRE(stats.miss_frames == 63u * 256u); // the first window precedes the stream
 }
 
 TEST_CASE("PullRateDetector: real time stays live, a fast pull is detected with hysteresis",
