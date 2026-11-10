@@ -30,6 +30,7 @@ target_sources(pulp-host PRIVATE
     src/offline_signal_graph_host.cpp
     src/plugin_slot.cpp
     src/graph_serializer.cpp
+    src/spectral_graph_persistence.cpp
     src/graph_identity.cpp
     src/voice_identity.cpp
     src/voice_template.cpp
