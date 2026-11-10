@@ -1,0 +1,11 @@
+{
+ "name": "import-validation-visual-residual-diagnostic-selftest",
+ "record": {
+  "entry": "tools/import-validation/test_visual_residual_diagnostic.py",
+  "inputs": [
+   "tools/import-validation/test_visual_residual_diagnostic.py",
+   "tools/import-validation/visual_residual_diagnostic.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -140,6 +140,100 @@ run_coverage_build() {
     "${GOVERNED_BUILD}" cmake --build "$@"
 }
 
+# CTest script fixtures can consume an archive or executable that is not a
+# dependency of the selected test target.  A focused build then reaches CTest
+# with a green compile but fails late inside `cmake --install` (usually after
+# the test has already staged several files).  Probe the configured CTest
+# commands and install scripts before launching any test.  Missing targets are
+# repaired through the same governed builder as the primary build; an unmapped
+# or still-missing path leaves a durable BLOCKED receipt and stops the gate.
+run_artifact_closure_guard() {
+    local receipt="${BUILD_DIR}/coverage/diff-cover-artifact-closure.json"
+    if [ ! -f "${DIFF_COVER_PLAN_FILE}" ]; then
+        # Explicit-target invocations do not run the planner.  Give the probe
+        # the exact target set requested by the caller instead of silently
+        # treating the closure as empty.
+        python3 - "${DIFF_COVER_PLAN_FILE}" "${BUILD_TARGETS[@]:-}" <<'PY'
+import json
+import pathlib
+import sys
+out = pathlib.Path(sys.argv[1])
+targets = [arg for arg in sys.argv[2:] if arg]
+out.parent.mkdir(parents=True, exist_ok=True)
+out.write_text(json.dumps({"schema": "pulp.diff-cover-plan/v1", "mode": "targeted",
+                           "targets": targets}) + "\n", encoding="utf-8")
+PY
+    fi
+    local args=(
+        artifacts
+        --build-dir "${BUILD_DIR}"
+        --plan "${DIFF_COVER_PLAN_FILE}"
+        --receipt "${receipt}"
+    )
+    if [ -n "${SELECTED_TESTS_FILE:-}" ]; then
+        args+=(--tests-file "${SELECTED_TESTS_FILE}")
+    elif [ -n "${PULP_DIFF_COVER_CTEST_REGEX:-}" ]; then
+        args+=(--regex "${PULP_DIFF_COVER_CTEST_REGEX}")
+    fi
+
+    local probe_rc=0
+    python3 "${DIFF_COVER_TARGETS_PY}" "${args[@]}" >/dev/null || probe_rc=$?
+    [ "${probe_rc}" -eq 0 ] && return 0
+    if [ "${probe_rc}" -ne 3 ]; then
+        echo "[local_diff_cover] artifact-closure probe failed; receipt: ${receipt}" >&2
+        return 4
+    fi
+
+    local targets=""
+    if [ -f "${receipt}" ]; then
+        targets="$(python3 - "${receipt}" <<'PY'
+import json
+import sys
+try:
+    report = json.load(open(sys.argv[1], encoding="utf-8"))
+except (OSError, ValueError):
+    report = {}
+for target in report.get("missing_targets", []):
+    if isinstance(target, str) and target:
+        print(target)
+PY
+)"
+    fi
+    if [ -n "${targets}" ]; then
+        closure_targets=()
+        while IFS= read -r target; do
+            [ -n "${target}" ] && closure_targets+=("${target}")
+        done <<<"${targets}"
+        echo "[local_diff_cover] artifact closure missing target(s); building: ${targets//$'\n'/ }" >&2
+        if ! run_coverage_build "${BUILD_DIR}" --target "${closure_targets[@]}"; then
+            echo "[local_diff_cover] BLOCKED: governed build could not repair artifact closure" >&2
+            echo "[local_diff_cover] receipt: ${receipt}" >&2
+            return 4
+        fi
+        probe_rc=0
+        python3 "${DIFF_COVER_TARGETS_PY}" "${args[@]}" >/dev/null || probe_rc=$?
+        [ "${probe_rc}" -eq 0 ] && return 0
+    fi
+
+    echo "[local_diff_cover] BLOCKED: selected CTest artifact closure is incomplete" >&2
+    echo "[local_diff_cover] receipt: ${receipt}" >&2
+    if [ -f "${receipt}" ]; then
+        python3 - "${receipt}" <<'PY' >&2
+import json
+import sys
+try:
+    report = json.load(open(sys.argv[1], encoding="utf-8"))
+except (OSError, ValueError):
+    report = {}
+for row in report.get("missing", []):
+    print("[local_diff_cover]   missing target=%s path=%s test=%s" %
+          (row.get("target") or "<unmapped>", row.get("path", ""), row.get("test", "")))
+print("[local_diff_cover]   next action: %s" % report.get("next_action", "inspect receipt"))
+PY
+    fi
+    return 4
+}
+
 # Merge every profile written by this gate in one llvm-profdata invocation.
 #
 # --input-files accepts one input per line, avoiding ARG_MAX without the
@@ -1094,6 +1188,15 @@ if [ -n "${SELECTED_TESTS_FILE}" ] && [ -z "${PULP_DIFF_COVER_CTEST_REGEX:-}" ];
     else
         echo "[local_diff_cover] test selection failed; running every built test" >&2
         SELECTED_TESTS_FILE=""
+    fi
+fi
+
+# Do this after target compilation and CTest selection, but before any test can
+# start a staging/install script.  A regex-selected run has no tests file, so
+# the guard receives the same regex and inspects those registrations directly.
+if [ -n "${SELECTED_TESTS_FILE:-}" ] || [ -n "${PULP_DIFF_COVER_CTEST_REGEX:-}" ]; then
+    if ! run_artifact_closure_guard; then
+        exit 4
     fi
 fi
 

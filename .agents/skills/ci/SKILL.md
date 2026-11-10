@@ -83,7 +83,13 @@ on a real PR. Do them in order.
      covers `Processor`, `PluginSlot`, and the experimental `GpuAudioNode`
      surface. New GPU-audio virtual hooks belong at the end of that class;
      inserting one in the middle shifts existing slots even though the SDK
-     remains source-rebuild oriented.
+     remains source-rebuild oriented. The editor-host interfaces (`Editor`,
+     `EditorContext`, `EditorFactory`, `NativeSurfaceHost`) are checked under a
+     stricter FROZEN policy: an appended virtual fails too, because a UI
+     package and a format adapter are separate prebuilt binaries. Don't "fix"
+     the failure by appending at the tail. Ship the capability as a new
+     `query_extension()` id. A `Node-ABI-Break: <Class>` trailer exists for a
+     deliberate break, but on these classes it breaks every prebuilt peer.
 
    Commit the event(s) before re-running — both checkers read the commit
    range, never the working tree. Run `python3 tools/scripts/vellum_watch_preflight.py --enforce`
@@ -139,6 +145,18 @@ stops at a failing command even when the script itself starts with
 then prints its report or picks a verdict from the exit code must capture the
 code with `set +e` ... `rc=$?` ... `set -e`, or the step ends at the checker
 with only "exit code 1" in the log. `format-changed-check.yml` hit this.
+
+### `printf "$output" | grep -q` fails under pipefail even when it matches
+
+A reader that stops early (`grep -q`, `head`, `sed q`) closes the pipe while
+the writer still has output, so the writer dies of SIGPIPE and, under
+`set -o pipefail`, the whole pipeline fails. The check then reports the very
+marker it found as missing. It is size- and timing-dependent, so it looks like
+a flake: `android-run-fixtures` failed "omitted pass marker" on a run whose
+fixtures all passed, with `printf: write error: Broken pipe` one line above.
+Search a captured variable with a here-string (`grep -Fq "$m" <<<"$output"`)
+instead of piping `printf` into it. `tools/ci/test_android_fixture_lane.py`
+reproduces the case through a fake `adb` (marker first, then 200k lines).
 
 ## Build emitters always use the governor
 
@@ -507,6 +525,38 @@ macOS.
   the `macos` job's step conclusions (`Build` skipped means `deferred`). A head with no counted
   record, or a `deferred` one, cannot be armed once `tiered_required_checks`
   is set.
+
+## A clean merge of main takes the contract lane (row 31, shadow first)
+
+Independent of `PULP_MACOS_PR_GATING`, and inert while it is `true` (every
+`synchronize` head is then the contract lane already). A `synchronize` head that is exactly a
+conflict-free merge of a base-branch commit into the previous head
+(`github.event.before`), whose tree equals `git merge-tree --write-tree` of
+those two parents, and whose previous head's newest `macos` check from this
+repository's workflows (any event; a newer red is never skipped) is a
+same-repository `build.yml` `pull_request` full-lane success (`Build`
+succeeded, tier `fast` or `full`), runs only configure, `pr-fast` (minus
+`needs-build`) and `pr-guard`, with tier `clean-merge`.
+`tools/ci/clean_merge_lane.py` decides in the step `Decide the clean-merge lane
+(pull request head)`.
+
+- **Fail closed to the full lane.** Any unreadable input (shallow history, an
+  API error, a missing check, a crash of the step) is `full`. No chaining: a
+  previous green that was a contract or clean-merge lane is `full`. Never
+  republish a previous head's conclusion; the lane runs on the head.
+- **Mode.** `PULP_CLEAN_MERGE_LANE_MODE` is `shadow` when unset (annotate
+  `would_take`, run the full lane), `enforce` takes the lane, `off` is the
+  rollback. `clean_merge_lane.py report --since <date>` gives the enforcement
+  figures; enforce only after 7 days or 50 `would_take` heads with zero
+  `would_take` heads whose Build, affected tests or SDK proof failed.
+- **A new build-fed step must read both lanes.** Every step the contract lane
+  skips is conditioned on
+  `matrix.lane != 'contract' && steps.clean_merge.outputs.lane != 'clean-merge'`,
+  and `tools/scripts/test_build_workflow.py` (`CleanMergeLaneTest`) fails a
+  step that reads `matrix.lane != 'contract'` without the second clause.
+- **After enforcement the merge group is the control.** A clean-merge-lane
+  green followed by a merge-group red in a test the full lane would have run
+  sets the mode back to `shadow` until the input is found.
 
 ## The native-build decision on merge_group uses main, not base_sha
 
@@ -883,6 +933,16 @@ while main is red. Every such call carries
 logs. Every other use needs Daniel's explicit OK first: rebasing or refreshing a
 queued PR, reordering or dequeuing any other PR, or making room ahead of the fix.
 
+## A cancelled `workflow-lint` job: read the step timings before raising the timeout
+
+The lint job's 10-minute `timeout-minutes` cancels the job (conclusion
+`cancelled`, later steps `skipped`), so the step that happened to be running
+looks guilty. It was not: the release-pipeline step needs ~75s and
+`test_generated_version_bump_check.py` needs 350-460s. Read per-step durations
+(`ghapp api repos/<o>/<r>/actions/runs/<id>/jobs`, `steps[].started_at` and
+`completed_at`) from a green run beside the cancelled one before choosing a
+fix. That suite now runs as its own `generated-version-bump-contract` job.
+
 ## Wait on a blocking waiter, not a poll loop
 
 For an unattended pull request, use `shipyard wait pr <PR> --state merged`
@@ -895,6 +955,50 @@ A wait on CI or a PR belongs in one blocking call: `shipyard wait run|job|pr|rel
 when the condition holds. A loop that reads the same state every few seconds
 costs an agent turn per read and changes nothing: in one week of agent sessions
 on one host, poll turns were a fifth of all tool calls.
+
+## One push per fix round: read the head's `macos` job before pushing
+
+`build.yml` cancels a PR's older `pull_request` run when a new head arrives
+(`cancel-in-progress` on `build-refs/pull/N/merge`). A `workflow_dispatch` run
+groups on the branch ref instead, so a push does not cancel it. What a push
+costs therefore depends on the state of the current head's `macos` job, not on
+how soon you push:
+
+| `macos` job on the current head | What a new push costs | Do |
+|---|---|---|
+| none yet (resolve-provider/classify still running, or no run will start, e.g. a conflicting PR has no merge ref) | Nothing | Push now if you have the whole fix; do not wait for a run that may never start |
+| `queued` (no runner yet) | No runner time; at most a VM tartci had started booting for it | Push now if you have the whole fix |
+| `in_progress`, head already known bad: `drift-fast` red, a HOLD at this head, or DIRTY | The minutes it has run; the rest is saved | Push the fix now |
+| `in_progress`, anything else (including a red `Enforce version & skill sync` alone) | The minutes it has run, plus the macOS failures it would have shown you | Finish the round, wait for the result, then push once |
+| `completed` (green or red) | Nothing extra | Push once, with everything |
+
+`drift-fast` counts as known bad because it runs the same drift tests as the
+macOS fast deterministic tier, so a running `macos` job on that head mostly
+repeats it. A version-skill red says nothing about the build or the tests, so
+the running job still carries signal you would otherwise wait another round for.
+
+Read the newest `macos` run in one call. A commit can carry several (re-runs,
+an older cancelled run, a `workflow_dispatch` full-lane run); on a head that
+needs no native build the alias job named `macos` is the one returned, and it
+finishes in seconds:
+
+```bash
+ghapp api "repos/Generous-Corp/pulp/commits/<head-sha>/check-runs?check_name=macos" \
+  --jq '.check_runs | sort_by(.started_at) | last | "\(.status) \(.started_at)"'
+```
+
+Fold everything for the round into that one push: the fix, its test and,
+when the PR is DIRTY, the merge of its base. Two pushes in one round pay for a
+second gate run, and the queue wait, which is often longer than the run, starts
+again. Over one week of Pulp PR heads, about two thirds of cancelled `macos`
+runs were cancelled while still queued. The runs cancelled after starting had
+been running for about 11 minutes (median), and over half of that time was on
+heads superseded by a merge of `main` pushed separately from the fix.
+
+A check-run's `startedAt` on a job cancelled while queued equals its creation
+time, so its "duration" is queue wait, not runner time. Measure the VM time a
+cancelled job held from its job record (`runner_name` set, first to last step),
+never from the check run alone.
 
 ## Reporting PR state: quote the checks, never characterize them
 
@@ -1014,7 +1118,7 @@ the refusal).
 ## Every test file must run somewhere
 
 `unregistered-tests-check` fails when a tracked `tools/**/test_*.py` is invoked by
-no configured ctest (an `entry` in `test/ctest_script_inputs.json`), no
+no configured ctest (an `entry` in `test/ctest_script_inputs/`), no
 source-selftest, and no workflow or CMake file (comments excluded; a directory
 handed whole to pytest or discover counts). A file nothing runs passes forever:
 its assertions never execute, and a local break-confirm is its only evidence.
@@ -1510,9 +1614,9 @@ boundary) → every `pulp-rust-*` test,
 because cargo, not a CMake target, builds that crate, so the projection never
 reaches it and a Rust failure otherwise surfaces only in the merge group; it is
 a required family, so a leg that stops registering those tests fails the step).
-A test is tied to a target when any path its command names is that target's artifact or a bundle directory (`.clap`, `.vst3`, `.app`, ...) holding it, including the value of `-D<VAR>=`, `--flag=` or `NAME=` assignments and `|`/`;` lists (`changed_surface_inventory.command_path_refs`): exact-argument matching alone missed every CMake-script test that takes its binary as `-DCLI=`, so they ran only in the merge group. A test that reads what CMake records about a target rather than an artifact of it (a generated link or flags file, a header boundary) declares the targets with `set_tests_properties(<t> PROPERTIES PULP_SELECT_WITH_TARGETS "a;b")`. On the PR head, a test whose command names an edited file (`-DGUARD=<file>`) or whose `cmake -P` script includes an edited `.cmake` module by name runs first as a merge-only check, because an edit under `tools/cmake/` makes the projection too wide to use. `cmake -E env ... <script>` and `python -m unittest discover -s -p` registrations are declared in `test/ctest_script_inputs.json` like any other script test. Direct edges are added even when
+A test is tied to a target when any path its command names is that target's artifact or a bundle directory (`.clap`, `.vst3`, `.app`, ...) holding it, including the value of `-D<VAR>=`, `--flag=` or `NAME=` assignments and `|`/`;` lists (`changed_surface_inventory.command_path_refs`): exact-argument matching alone missed every CMake-script test that takes its binary as `-DCLI=`, so they ran only in the merge group. A test that reads what CMake records about a target rather than an artifact of it (a generated link or flags file, a header boundary) declares the targets with `set_tests_properties(<t> PROPERTIES PULP_SELECT_WITH_TARGETS "a;b")`. On the PR head, a test whose command names an edited file (`-DGUARD=<file>`) or whose `cmake -P` script includes an edited `.cmake` module by name runs first as a merge-only check, because an edit under `tools/cmake/` makes the projection too wide to use. `cmake -E env ... <script>` and `python -m unittest discover -s -p` registrations are declared in `test/ctest_script_inputs/` like any other script test. Direct edges are added even when
 the projection is too wide or the diff is docs-only: tests whose declared inputs
-(`test/ctest_script_inputs.json`) the diff touches, script tests the gates.sh
+(`test/ctest_script_inputs/`) the diff touches, script tests the gates.sh
 rules select, the tests running a program whose own source changed, and the
 registrations a `test/` CMake hunk reaches (`cmake_registration_impact.py`: the
 touched call's test/target, a touched block, and the readers of any variable a
@@ -1534,6 +1638,41 @@ warning and does not fail the check. Compiled tests are never exempted: their
 binary is the pull request's own build, so a base run would compare it with
 itself.
 
+### An approved head runs its deferred affected tests before the queue does
+
+The ten-minute budget is why the merge group used to be the first place a large
+diff's affected tests ran: in the week to 2026-11-09, 9 of 10 "passes on the
+head, fails merged" ejections failed on the head alone, in tests its run had
+deferred (#11471's head deferred 111). `deferred-tests-admission.yml` closes
+that without a new required context or a new merge writer (contract row 32):
+on a green Review verdict run, the fleet App's APPROVE comment (a wake-up only;
+it waits up to three minutes for `review-verdict` to turn green, which stays the
+only approval), or a Build and Test completion for an approved head, it re-runs
+the head's `macos` job when the budgeted attempt's summary artifact
+(`pr-head-affected-tests-a<attempt>`, written by `--summary-json` on the macos
+leg only, because an artifact name is unique per run and the Linux leg runs the
+same step) reports `skipped_for_budget > 0`. The re-run's affected step sees a
+green `review-verdict` (`deferred_admission.py probe`), passes `--admission`
+(40-minute budget) and `--prior-summary`: it runs this attempt's plan plus the
+earlier attempt's deferred tests, minus what that attempt passed on the same
+tested commit. The union matters: a warm re-run rebuilds less, so the
+rebuilt-executable edge alone would silently drop tests the first attempt
+deferred. The queue state is read again just before the re-run request. Its result
+is the head's `macos` check, which branch protection already requires, so the
+steward cannot arm the head while it runs or after it fails. It never touches
+an armed or queued head, never re-runs a red `macos` (contract row 14), and
+re-runs a run at most once (the admission attempt's summary says
+`admission: true`; attempt 3 is the hard limit). Every unreadable fact decides
+"no re-run", which is the old behaviour. The repository variable
+`PULP_DEFERRED_ADMISSION` must be `enforce` for the re-run and the wider budget;
+unset is shadow, which logs `deferred-tests-admission` notices only. Gotchas:
+the summary file lives in the warm build dir, so the step deletes it before the
+selector runs or an earlier run's summary would be uploaded; and nothing relies
+on whether a re-run requested with `GITHUB_TOKEN` fires `workflow_run`
+consumers: if it does, the admission attempt's summary stops a second re-run,
+and if it does not, `macos-tier-record.yml` publishes no record for that
+attempt, which matters only once `[queue] tiered_required_checks` is set.
+
 ### Reuse-record readers gate on `unusable()`, and an unlisted object counts as changed
 
 The reuse record's link-members and object-deps files each have an
@@ -1552,7 +1691,7 @@ loader whose dylib changed.
 ### `pulp_test_data` is a static claim; the nightly read audit measures it
 
 A compiled test's `data: declared` / `data: none` in
-`test/ctest_script_inputs.json` comes from scanning its sources, and the
+`test/ctest_script_inputs/` comes from scanning its sources, and the
 selector trusts it to skip the test when nothing declared changed. A path
 assembled at run time, a fixture opened by a helper library, or a file a
 spawned tool reads never shows up in that scan. `read-audit-nightly.yml`
@@ -1618,7 +1757,7 @@ both.
 pre-push hook and `gates.sh` as well as in this job, and
 `script_inputs_precheck.py --base` runs there as a build-free stand-in for the
 `script-test-inputs-drift` ctest: a new script-driven `add_test()` must have a
-`test/ctest_script_inputs.json` entry. It cannot see a stale entry (a script
+`test/ctest_script_inputs/` entry. It cannot see a stale entry (a script
 that gained an import) or a computed test name; those still need the
 configured check. Three PRs on 2026-10-22
 went red here on the encoding lint after the local gates reported clean,
@@ -1674,6 +1813,15 @@ consequences worth knowing before you debug:
   `python3 tools/ci/source_selftests.py write --build-dir build`. The protected
   merge receipt pins the same label string as `ctest_gate_args.py`
   (`REQUIRED_LABEL_EXCLUDE`), so change both or receipts stop being reused.
+- A new, deleted or renamed public header under an exported include root, or a
+  CMake change, makes `gates.sh` run `consumption_census.py --check` in the
+  generated-manifest lane (`gates_script_inputs.py`), so a stale
+  `docs/status/consumption-profiles.json` fails locally instead of as
+  `consumption-census-drift` on macos, drift-fast and linux. The header list is
+  read from git's index: `git add` the new header before regenerating with
+  `python3 tools/scripts/consumption_census.py --build-dir <build> --write`. A
+  host that cannot configure reports it NOT CHECKED. The pre-push hook's own
+  merge-tree script-state check does not run it.
 - `gates.sh` now runs this lane scoped to your diff
   (`source_selftests.py run --changed-from "$BASE"`): an entry runs when its own
   script changed or its source names a changed file (full path, a distinctive
@@ -1731,7 +1879,7 @@ consequences worth knowing before you debug:
   A stale Makefiles `build/` beside a current `build-gate` once made
   `script-test-inputs-drift` print NOT CHECKED mid-log under a green summary,
   and the branch was pushed red three times.
-- When the diff can drift `test/ctest_script_inputs.json` (the list itself, a
+- When the diff can drift `test/ctest_script_inputs/` (the list itself, a
   declared entry/input, a script under a declared input directory, or CMake
   that registers tests) and no current Ninja build exists, `gates.sh`
   configures `build-gate` (configure only, no compile, ~40 s) and runs the
@@ -2304,7 +2452,7 @@ tools/import-design/jsx-runtime` step before CMake configure. Do not fold the
 integration file back into the unit aggregate or remove that install step: the
 former exhausts the aggregate deadline before later tests run, while the latter
 turns canonicalization into either `ERR_MODULE_NOT_FOUND` or missing coverage.
-Before regenerating `test/ctest_script_inputs.json` or
+Before regenerating `test/ctest_script_inputs/` or
 `.shipyard/changed-surface-families.toml`, run that same locked install and
 reconfigure from the gate profile so both materialized-runtime tests remain
 registered. `script_test_inputs.py --write` refuses (exit 2, list unchanged)
@@ -2312,6 +2460,11 @@ when it would delete a checked-in test or executable your configure does not
 produce, such as the generated-name "Pulp UI Script Fixture" executable. Fix
 the configure; pass `--allow-delete` only when the registration really was
 removed.
+After merging main, reconfigure the build tree before any `--write` of
+`consumption_census.py` or `script_test_inputs.py`: both read facts only a configure
+rewrites, and a stale tree silently reverts main's newer entries. The census
+refuses (exit 2) when its facts file predates a tracked CMake input, and
+`--check` drift output names the stale tree.
 
 Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required
 `macos` check goes red on a test unrelated to the diff, check the label:
@@ -2671,6 +2824,16 @@ The job's second configure is the control: GPU on, with
 `PULP_SKIA_AUTOFETCH=OFF` so it skips the download. It must show Skia and
 WebGPU. A forbidden-list pass without a green control proves nothing.
 
+The Pulp-only configure runs under `tools/ci/run_without_network.sh` (a fresh
+network namespace on Linux, `sandbox-exec` on macOS), so a download path that
+makes no note fails instead of passing unseen. Two controls go with it:
+`--probe` must see github.com blocked inside and reachable outside, and a GPU
+configure against an empty `PULP_SKIA_CACHE_ROOT` must fail at the Skia
+download. Be precise about what this proves. The configure downloads
+nothing, but the bootstrap step before it (`setup.sh --deps-only`) still primes
+the shared caches with the network on, so it is not proof that a dependency
+was never fetched on the runner.
+
 ### Provisioning a skipped dependency is a SEPARATE decision from reporting it
 
 Making a skip visible is safe. Removing the skip is not, and the two must not
@@ -3003,7 +3166,7 @@ Declare the reads next to the registration in `test/cmake/*_tests.cmake`:
 suite's sources (grouped members: only their own sources), so drop the
 `COMPILE_DEFINITIONS PULP_SOURCE_DIR=...` it replaces, and every path must
 match something at configure or configure fails. The generator folds the
-configure evidence into the same `test/ctest_script_inputs.json` under
+configure evidence into the same `test/ctest_script_inputs/` under
 `executables` (`kind: compiled`); regenerate it as for script tests.
 A source that names `PULP_SOURCE_DIR`, `test/fixtures`, or a definition
 pointing into the checkout, with no declaration covering it, marks its
@@ -3075,7 +3238,28 @@ configure output, and stays undeclared there; Linux and Windows build fewer
 tools than macOS, so the same test can be declared on one and undeclared on
 another.
 
-## Script tests declare inputs in `test/ctest_script_inputs.json`
+## Script tests declare inputs in `test/ctest_script_inputs/`
+
+**The list is one fragment file per entry, not one document.**
+`tests/<slug>.json` holds one script test, `executables/<slug>.json` one
+scanned test executable, `meta.json` the schema
+(`tools/scripts/script_inputs_store.py`). The single generated file was the
+most conflicted path in the repository (75 commits on main in one week);
+fragments let two PRs that add different tests merge without a conflict.
+Every reader goes through `script_inputs_store.load()` / `load_ref()`, which
+assemble the combined document and fall back to the old single file at
+revisions that predate the split. A fragment named for the wrong entry, a
+stray file or a conflict marker raises `StoreError`, and the drift check
+fails closed on it (`cause_class=INCONSISTENT_FRAGMENTS`). A conflict in a
+fragment means both PRs changed the SAME test: regenerate, never hand-merge.
+**Never re-create `test/ctest_script_inputs.json`.** `hotspot_edit_guard.py`
+(pre-push, `gates.sh`, and the pr-fast `hotspot-edit-guard` ctest that
+drift-fast runs) refuses any branch that adds or modifies a path registered
+in `tools/scripts/hotspot_edit_guard.json`, and the drift check refuses the
+single file beside the directory (`cause_class=AGGREGATE_REINTRODUCED`). A
+branch cut before the split that edited the old file: merge `origin/main`,
+take main's deletion, then `--write`. Register another aggregate in the
+guard only after its fragments exist, or every legitimate edit is refused.
 
 The build graph cannot see what a Python, Node or shell ctest reads, so the
 affected-test shadow used to count all ~400 of them affected on any script
@@ -3090,11 +3274,11 @@ treadmill. Regenerate with `--write` against a configured build dir and
 commit the file; `--check --full` shows every stale entry.
 A test the generator cannot bound (cmake-driven, no command) has no entry
 and stays fail-closed; do not hand-edit entries to make a test look narrower.
-**Never hand-edit `test/ctest_script_inputs.json`; regenerate it with
+**Never hand-edit `test/ctest_script_inputs/`; regenerate it with
 `--write` against a configured `build-gate`.**
 **Every PR that adds or changes a script-driven test must regenerate the
 list** (`python3 tools/scripts/script_test_inputs.py --build-dir <dir>
---write`, then commit `test/ctest_script_inputs.json`) as its LAST step;
+--write`, then commit `test/ctest_script_inputs/`) as its LAST step;
 the diff-scoped check fails the PR head otherwise and prints that command.
 Run it after every rebase onto main too: main's new script tests are
 advisory drift, but a rebase that touches one of yours is blocking.
@@ -3231,7 +3415,7 @@ re-keys rather than being normalised.
 
 Adding or changing a Python selftest or script drifts three generated files,
 and each one fails a different check on the PR head if it is hand-edited:
-`test/ctest_script_inputs.json` (`script-test-inputs-drift`),
+`test/ctest_script_inputs/` (`script-test-inputs-drift`),
 `tools/ci/source_selftests.json` (`source-selftest-lane-contract`, which also
 compares each entry's TIMEOUT, RESOURCE_LOCK and argv to the registration), and
 the changed-surface script families file `.shipyard/changed-surface-families.toml`
@@ -7156,6 +7340,14 @@ pre-push hook applies the same rule there (`tools/scripts/refresh_push_check.py`
 - The GitHub lookup shares one 5 s budget and fails open: `lookup: failed:*` in
   the log, never a blocked push. A failing check that could not be confirmed as
   non-required counts as justification, so the check errs toward silence.
+  That makes a broken second (required-ness) query silent too: while
+  `REQUIRED_QUERY` was missing a closing brace, every PR with any failing
+  check logged `lookup: partial:exit:1` and `allowed:failing-required-check`
+  (82 of 96 pure refreshes on m3 in one week). Before reading
+  `allowed:failing-required-check` as a real justification, check that the
+  same log also has `lookup: ok` lines; the fake `gh` in
+  `test_refresh_push_check.py` now rejects an unbalanced query the way GitHub
+  does.
 
 Read the log to measure the habit: pure refreshes with `gate_in_flight: true`
 are the avoidable cancellations; all lines are the control population.
@@ -8692,7 +8884,7 @@ and Forge Rack's `generate.py` plus its registered safety/endings contracts.
 The Rack family is deliberately exact: `patch.py` and provenance/preflight tools
 still select full validation. Top-level `tools/scripts/*.py` and
 `.agents/skills/*/SKILL.md` select through families generated from
-`test/ctest_script_inputs.json` by `changed_surface_script_families.py`, which
+`test/ctest_script_inputs/` by `changed_surface_script_families.py`, which
 also adds the whole-tree drift/lint/sync tests; a script native code, shell or
 CMake names stays full. After regenerating the script-inputs list, regenerate
 the families file with `--build-dir <dir> --write`, or `changed-surface-script-families-drift`
@@ -10494,6 +10686,7 @@ Locally:
 
 - `.githooks/pre-push` (install via `tools/scripts/install-githooks.sh`) runs the same fast scripts, including the compat-sync, compat-aggregate, node ABI, and hotspot-size gates, enforcing by default. `PULP_DISABLE_PREPUSH_GATES=1` demotes the fast gates to advisory; `PULP_SKIP_PREPUSH=1` is the single-push emergency bypass.
 - Pre-push gate subprocesses run through `.githooks/lib/gate-output.sh`: their stdout/stderr is captured to a regular temporary file, then replayed best-effort. Keep user-visible fast gates and the slow diff-cover script behind `run_gate_captured`; agent/tool callers can supply nonblocking pipes, and an uncaptured Python `print()` may otherwise raise `BlockingIOError` and turn a healthy gate into a false failure. The wrapper must snapshot and return the real child status before replay, while replay failure never changes that status. `tools/scripts/test_prepush_gate_output.py` pins success, exact nonzero propagation, replay, cleanup, and the slow-lane callsite.
+- A blocked pre-push ends with `FAILED GATE(S):`, one line per failing gate with the line that says why and its fix line, followed by the "gate failure(s) above" verdict. Every failure site in `.githooks/pre-push` calls `prepush_fail` (never a bare `fail=1`), which names the gate that ran last, or takes a label for a check that is not a captured gate; a gate that exits non-zero without failing the push (a skipped lane) is not named. `tools/scripts/test_prepush_gate_output.py` fails if a bare `fail=1` is added.
 - `tools/scripts/docs_noise_lint.py` (pre-push only, report mode) — scans changed/added lines for transient breadcrumbs across the markdown default scope (docs/reference + skills) **and source comments + test tags** under `core/examples/tools/test/apple/inspect/ship`. Source is diff-scoped only (never `--all`), so the historical backlog never blocks; it is comment-aware (only `//`, `/* */`, `#` comment text + string-literal Catch2 `[tag]`s, never code). Escape a legitimate line with an inline `docs-noise-lint: skip <reason>` comment. Full guidance on *writing* durable comments lives in the `code-comments` skill.
 - `tools/scripts/gates.sh` — on-demand runner for JUST the cheap gates (skill-sync + skill-path-map lint + version-bump + compat-sync + compat-aggregate + node-ABI + hotspot-size + deps-audit + codecov-config). Runs in ~1 second, exits non-zero on any hard failure with a one-liner pointing at the right surgical bypass. The codecov-config gate is a *global invariant* (not diff-scoped): it runs the `test_codecov_config.py` / `test_codecov_components.py` contract tests so a new `core/<sub>/` subsystem can't land without a matching `codecov.yml` flag+component (graph/scene drifted onto main exactly this way), no platform subtree gets double-counted, and `codecov.yml`'s `ignore:` stays mirrored to `coverage_config.json`'s `diff_cover_excludes`. Needs PyYAML locally; skips cleanly if absent (the CI `codecov-config-validation` job in `coverage.yml` is the authoritative gate). Use it before `git push` when you've made changes that might touch mapped paths but you don't want to wait for the pre-push hook OR the 20-minute CI roundtrip. Independent of the git hook (no install step needed). Named to align with Shipyard's planned `shipyard gates` subcommand (see `planning/2026-05-19-shipyard-preflight-upstream-proposal.md`); avoids collision with Shipyard's existing `preflight` namespace (SSH backend reachability probes).
 
@@ -12331,6 +12524,16 @@ built unconditionally and run as a `FIXTURES_SETUP` ctest only in a fuzzing buil
 toolchain probe is the one in `timeline_tests.cmake`; it fails the whole configure, so a target
 registered in a manifest included earlier needs no probe of its own.
 
+The audio container readers are one such target: `pulp-fuzz-audio-decoder`
+(`test/fuzz/audio_decoder_fuzz_target.cpp`) routes each input to exactly one of the WAV, AIFF,
+FLAC, MP3 and Ogg Vorbis readers (container magic first, else the first byte selects the
+format) and checks `test/fuzz/audio_decoder_fuzz_oracle.hpp`; its seeds live in
+`test/fixtures/fuzz/audio-decoder/` as plain container files named
+`<format>-<description>.<ext>`. The same seeds and oracle run on every platform's required
+gate as `pulp-test-audio-decoder-corpus` (labels `fuzz;audio`), which is also the only lane
+that reaches the platform CoreAudio reader, since the fuzzer never writes a CoreAudio
+extension.
+
 Then add the target to **both** lists in `timeline-fuzz.yml`'s `libfuzzer` job — the
 `--target` build list and the `Fuzz` step — and raise `timeout-minutes` if the summed
 `-max_total_time` budget would otherwise exceed it. The `Smoke every libFuzzer target` step
@@ -12989,6 +13192,15 @@ real guard is `pr-fast-tier-contract`, which fails if the label selects fewer th
 50 tests or loses one of its pinned members. The tier writes `ctest-pr-fast.junit.xml`, never
 `ctest.junit.xml`: it is not merge test evidence and must never satisfy a protected receipt.
 
+The drift members that fail most heads (`script-test-inputs-drift`, the consumption-census
+drift checks, `agent-capability-manifest-check`) also carry `pr-fast-configure` and run
+between `Configure` and `Build`, so a stale manifest fails before the build; the post-build
+tier excludes that label only when the pre-build step passed. Add a member there only if it
+reads nothing a build produces (codemodel, `CTestTestfile.cmake` and configure-time facts
+are fine; a built binary or a Catch2 discovery file's contents are not). A test that needs
+the build belongs under `needs-build`, never under `pr-fast-configure`; the contract check
+refuses both labels on one test.
+
 Two consequences worth knowing:
 
 - **A green `macos` check on a pull request does not mean the full suite passed.** It means
@@ -13258,3 +13470,12 @@ submodules cold (about 10 minutes) and a bootstrap step with a 10-minute limit
 dies. Main's Linux build leg saves both paths, and `drift-fast` and
 `read-audit-nightly` restore them. The path list is part of the cache version,
 so keep it identical across the save and every restore.
+
+**Downloads in CI go through `tools/scripts/download_retry.py`.** A GitHub or
+CDN 503/504 on a pinned-asset fetch used to fail the ~40-minute required
+`macos` gate. The helper makes 6 attempts with 5-60s jittered exponential
+backoff, retries only 5xx/408/425/429, timeouts and connection resets, and
+fails at once on other 4xx. Workflows call `python3
+tools/scripts/download_retry.py URL DEST` instead of a bare `curl -fsSL`; keep
+the sha256 check after it. A script copied into a temp tree must copy the
+helper too.

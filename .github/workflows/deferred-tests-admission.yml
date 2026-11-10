@@ -1,0 +1,78 @@
+name: Deferred tests before admission
+
+# A pull-request head's `macos` run spends at most ten minutes on the ctests
+# its diff reaches; what the budget pushes out is deferred to the merge queue,
+# where a failure ejects the whole batch. Once the head is approved, this
+# re-runs its `macos` job on the same head. That attempt is an admission run
+# (build.yml probes `review-verdict`): it runs exactly the tests the budgeted
+# attempt deferred, so they fail on the head, before the queue, instead of in
+# a merge group.
+#
+# It adds no required context and arms nothing: the re-run is the head's own
+# `macos` check, which branch protection already requires, so the steward
+# cannot arm the head while it runs or after it fails. It never touches a head
+# that is armed or in the merge queue, never re-runs a red `macos` (a terminal
+# verdict), and re-runs a run at most once (the admission attempt says so in
+# its summary). Every doubt decides "no re-run", today's behaviour.
+#
+# Triggers: a Review verdict completion and the fleet App's APPROVE comment
+# (approval after the run; the comment only wakes this up and waits, bounded,
+# for `review-verdict` to turn green, which stays the only approval), and a
+# Build and Test completion (approval before the run finished). All run this
+# definition from the default branch and check out only the decision script,
+# so no pull request code runs with the write token.
+#
+# PULP_DEFERRED_ADMISSION (repository variable): `enforce` re-runs; anything
+# else, including unset, is shadow and only reports what it would do.
+# Decision rules and tests: tools/ci/deferred_admission.py.
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_run:
+    workflows: ["Build and Test", "Review verdict"]
+    types: [completed]
+
+permissions:
+  actions: write
+  checks: read
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: deferred-tests-admission-${{ github.event.issue.number || github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  decide:
+    name: Re-run an approved head's deferred tests
+    if: >-
+      (github.event_name == 'issue_comment'
+       && github.event.issue.pull_request
+       && github.event.comment.user.login == 'shipyard-local[bot]'
+       && contains(github.event.comment.body, 'verdict: APPROVE head:'))
+      || (github.event_name == 'workflow_run'
+          && ((github.event.workflow_run.name == 'Build and Test'
+               && github.event.workflow_run.event == 'pull_request')
+              || (github.event.workflow_run.name == 'Review verdict'
+                  && github.event.workflow_run.event == 'pull_request_target'
+                  && github.event.workflow_run.conclusion == 'success'))
+          && github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Check out the decision script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: tools/ci/deferred_admission.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Decide and re-run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PULP_DEFERRED_ADMISSION: ${{ vars.PULP_DEFERRED_ADMISSION || 'shadow' }}
+        run: >-
+          python3 tools/ci/deferred_admission.py decide
+          --repo "$GITHUB_REPOSITORY"
+          --event-name "$GITHUB_EVENT_NAME"
+          --event-path "$GITHUB_EVENT_PATH"

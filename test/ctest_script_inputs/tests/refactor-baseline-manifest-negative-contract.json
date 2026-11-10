@@ -1,0 +1,12 @@
+{
+ "name": "refactor-baseline-manifest-negative-contract",
+ "record": {
+  "entry": "tools/scripts/verify_refactor_baselines_contract.py",
+  "inputs": [
+   "test/fixtures/refactor-baselines/phase0-hotspots.json",
+   "tools/scripts/verify_refactor_baselines.py",
+   "tools/scripts/verify_refactor_baselines_contract.py"
+  ],
+  "kind": "python"
+ }
+}

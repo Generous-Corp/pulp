@@ -1,0 +1,13 @@
+{
+ "name": "refactor-baseline-manifest",
+ "record": {
+  "entry": "tools/scripts/verify_refactor_baselines.py",
+  "inputs": [
+   "core/render/src/renderer3d.cpp",
+   "core/view/src/widget_bridge.cpp",
+   "test/fixtures/refactor-baselines/phase0-hotspots.json",
+   "tools/scripts/verify_refactor_baselines.py"
+  ],
+  "kind": "python"
+ }
+}

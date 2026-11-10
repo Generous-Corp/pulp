@@ -1,0 +1,10 @@
+{
+ "name": "host-quirks-catalog-parity",
+ "record": {
+  "entry": "tools/scripts/test_host_quirks_catalog_parity.py",
+  "inputs": [
+   "tools/scripts/test_host_quirks_catalog_parity.py"
+  ],
+  "kind": "python"
+ }
+}

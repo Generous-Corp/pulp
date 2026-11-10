@@ -1,4 +1,4 @@
-// test_native_metal_probe.mm — the metal-probe editor driven through the
+// test_native_metal_probe.mm: the metal-probe editor driven through the
 // editor-host contract, as every format adapter opens it: a drag edits the gain
 // as one host gesture, the captured frame matches the drawable and shows the
 // gain, and open/close cycles leave nothing behind. Skips, saying so, without a

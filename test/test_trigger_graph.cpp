@@ -39,6 +39,47 @@ struct TriggerTestAccess {
                            const audio::BufferView<const float>& input, int frames) {
         g.process_snapshot_impl(output, input, frames, nullptr, pin.get());
     }
+    static std::size_t host_projection_mpe_size(SignalGraph& g) {
+        auto pin = g.live_slot_.live();
+        if (!pin)
+            return 0;
+        return pin->host_event_projection == nullptr ? 0 : pin->host_event_projection->mpe.size();
+    }
+    static void reserve_host_projection_mpe(SignalGraph& g, std::size_t capacity) {
+        auto pin = g.live_slot_.live();
+        REQUIRE(pin);
+        REQUIRE(pin->host_event_projection != nullptr);
+        pin->host_event_projection->mpe.reserve(capacity);
+    }
+    static void reserve_host_destination_mpe(SignalGraph& g, std::size_t capacity) {
+        auto pin = g.live_slot_.live();
+        REQUIRE(pin);
+        const auto it = pin->runtime.find(pin->host_event_midi_input);
+        REQUIRE(it != pin->runtime.end());
+        REQUIRE(it->second.midi_input_mailbox);
+        it->second.midi_input_mailbox->writer_scratch.mpe.reserve(capacity);
+    }
+    static pulp::midi::MpeVoiceTracker& host_projection_tracker(SignalGraph& g) {
+        auto pin = g.live_slot_.live();
+        REQUIRE(pin);
+        REQUIRE(pin->host_event_projection != nullptr);
+        return pin->host_event_projection->host_event_tracker;
+    }
+    static std::size_t routed_mpe_size(SignalGraph& g, NodeId id) {
+        auto pin = g.live_slot_.live();
+        if (!pin)
+            return 0;
+        for (const auto& output : pin->routed.midi_outputs) {
+            if (output.id == id) {
+                const auto* mpe = pin->routed.midi.mpe_in(output.plan_index);
+                return mpe == nullptr ? 0 : mpe->size();
+            }
+        }
+        const auto runtime = pin->runtime.find(id);
+        if (runtime == pin->runtime.end() || !runtime->second.midi_output_mailbox)
+            return 0;
+        return runtime->second.midi_output_mailbox->consumer_scratch.mpe.size();
+    }
 };
 } // namespace pulp::host::detail
 namespace {
@@ -48,8 +89,14 @@ struct Fixture {
     SignalGraph graph;
     NodeId in = graph.add_input_node(1);
     NodeId out = graph.add_output_node(1);
+    NodeId midi_in = 0;
+    NodeId midi_out = 0;
     NodeId producer = 0, envelope = 0;
-    Fixture(int lanes = 2, int frames = 32) {
+    Fixture(int lanes = 2, int frames = 32, bool with_host_midi = false) {
+        if (with_host_midi) {
+            midi_in = graph.add_midi_input_node("G5 host MIDI in");
+            midi_out = graph.add_midi_output_node("G5 host MIDI out");
+        }
         TriggerProducerConfig config;
         config.lane_count = static_cast<std::uint8_t>(lanes);
         for (int i = 0; i < lanes; ++i)
@@ -58,6 +105,8 @@ struct Fixture {
         envelope = graph.add_trigger_envelope({0.5f});
         REQUIRE(graph.connect(in, 0, producer, 0));
         REQUIRE(graph.connect(envelope, 0, out, 0));
+        if (with_host_midi)
+            REQUIRE(graph.connect_midi(midi_in, midi_out));
         REQUIRE(graph.connect_trigger({producer, envelope}) == TriggerGraphResult::Accepted);
         auto candidate = graph.prepare_trigger_plan(48000, frames);
         REQUIRE(candidate.result == TriggerGraphResult::Accepted);
@@ -80,6 +129,163 @@ TriggerCounters counters(SignalGraph& g) {
     return result;
 }
 } // namespace
+
+TEST_CASE("Graph-authored Custom callbacks receive ordered writer and reader handles",
+          "[g5][events][wiring]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1);
+    const auto output = graph.add_output_node(1);
+    std::uint64_t next_sample = 0;
+    CustomNodeType type;
+    type.type_id = "test.g5.graph-event";
+    type.num_input_ports = type.num_output_ports = 1;
+    type.process_events = [&](auto& out, const auto& in, int frames,
+                              const CustomNodeEventBlock& events) {
+        for (int i = 0; i < frames; ++i)
+            out.channel_ptr(0)[i] = in.channel_ptr(0)[i];
+        if (events.graph_writer != nullptr) {
+            REQUIRE(events.graph_writer->emit_at(next_sample, 77) == GraphEventResult::Accepted);
+            next_sample += static_cast<std::uint64_t>(frames);
+        }
+        if (events.graph_reader != nullptr) {
+            for (const auto& event : events.graph_reader->events())
+                out.channel_ptr(0)[event.sample - (next_sample - frames)] =
+                    static_cast<float>(event.payload);
+        }
+    };
+    REQUIRE(graph.register_custom_node_type(type));
+    const auto producer = graph.add_custom_node(type.type_id);
+    const auto consumer = graph.add_custom_node(type.type_id);
+    REQUIRE(producer != 0);
+    REQUIRE(consumer != 0);
+    REQUIRE(graph.connect(input, 0, producer, 0));
+    REQUIRE(graph.connect(producer, 0, consumer, 0));
+    REQUIRE(graph.connect(consumer, 0, output, 0));
+    REQUIRE(graph.connect_graph_event({producer, consumer}) == GraphEventBindingResult::Accepted);
+    REQUIRE(graph.prepare(48000.0, 4));
+
+    std::array<float, 4> source{};
+    std::array<float, 4> destination{};
+    const float* source_ptr = source.data();
+    float* destination_ptr = destination.data();
+    pulp::audio::BufferView<const float> in(&source_ptr, 1, source.size());
+    pulp::audio::BufferView<float> out(&destination_ptr, 1, destination.size());
+    graph.process(out, in, 4);
+    REQUIRE(destination[0] == 77.0f);
+
+    next_sample = 0;
+    graph.set_canonical_executor_routing_enabled(false);
+    REQUIRE(graph.prepare(48000.0, 4));
+    destination.fill(0.0f);
+    graph.process(out, in, 4);
+    REQUIRE(destination[0] == 77.0f);
+}
+
+TEST_CASE("Graph-authored event edge clears when its feed-forward path is disconnected",
+          "[g5][events][wiring][negative-control]") {
+    SignalGraph graph;
+    CustomNodeType type;
+    type.type_id = "test.g5.graph-event-disconnect";
+    type.num_input_ports = type.num_output_ports = 1;
+    type.process_events = [](auto&, const auto&, int, const CustomNodeEventBlock&) {};
+    REQUIRE(graph.register_custom_node_type(type));
+    const auto input = graph.add_input_node(1);
+    const auto output = graph.add_output_node(1);
+    const auto producer = graph.add_custom_node(type.type_id);
+    const auto bridge = graph.add_custom_node(type.type_id);
+    const auto consumer = graph.add_custom_node(type.type_id);
+    REQUIRE(graph.connect(input, 0, producer, 0));
+    REQUIRE(graph.connect(producer, 0, bridge, 0));
+    REQUIRE(graph.connect(bridge, 0, consumer, 0));
+    REQUIRE(graph.connect(consumer, 0, output, 0));
+    REQUIRE(graph.connect_graph_event({producer, consumer}) == GraphEventBindingResult::Accepted);
+    REQUIRE(graph.graph_event_edge().has_value());
+
+    auto edit = graph.begin_prepared_topology_edit();
+    REQUIRE(edit != nullptr);
+    REQUIRE(edit->prepare(48000.0, 4) == SignalGraph::PreparedTopologyEdit::Result::Prepared);
+    REQUIRE(edit->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
+    REQUIRE(graph.graph_event_edge().has_value());
+
+    REQUIRE(graph.disconnect(producer, 0, bridge, 0));
+    REQUIRE_FALSE(graph.graph_event_edge().has_value());
+}
+
+TEST_CASE("Graph-authored event admission refuses unsupported roles and fanout",
+          "[g5][events][wiring][negative-control]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1);
+    const auto output = graph.add_output_node(1);
+    CustomNodeType type;
+    type.type_id = "test.g5.graph-event-negative";
+    type.num_input_ports = type.num_output_ports = 1;
+    type.process = [](auto& out, const auto& in, int frames) {
+        for (int i = 0; i < frames; ++i)
+            out.channel_ptr(0)[i] = in.channel_ptr(0)[i];
+    };
+    REQUIRE(graph.register_custom_node_type(type));
+    const auto producer = graph.add_custom_node(type.type_id);
+    const auto consumer = graph.add_custom_node(type.type_id);
+    REQUIRE(graph.connect(input, 0, producer, 0));
+    REQUIRE(graph.connect(producer, 0, consumer, 0));
+    REQUIRE(graph.connect(consumer, 0, output, 0));
+    REQUIRE(graph.connect_graph_event({producer, consumer}) == GraphEventBindingResult::Binding);
+    REQUIRE(graph.connect_graph_event({producer, producer}) == GraphEventBindingResult::Feedback);
+}
+
+TEST_CASE("Graph-authored event admission requires a connected forward path",
+          "[g5][events][wiring][negative-control]") {
+    auto make_type = [] {
+        CustomNodeType type;
+        type.type_id = "test.g5.graph-event-path";
+        type.num_input_ports = type.num_output_ports = 1;
+        type.process_events = [](auto& out, const auto& in, int frames,
+                                 const CustomNodeEventBlock&) {
+            for (int i = 0; i < frames; ++i)
+                out.channel_ptr(0)[i] = in.channel_ptr(0)[i];
+        };
+        return type;
+    };
+
+    SECTION("disconnected") {
+        SignalGraph graph;
+        REQUIRE(graph.register_custom_node_type(make_type()));
+        const auto producer = graph.add_custom_node("test.g5.graph-event-path");
+        const auto consumer = graph.add_custom_node("test.g5.graph-event-path");
+        REQUIRE(graph.connect_graph_event({producer, consumer}) ==
+                GraphEventBindingResult::Binding);
+    }
+    SECTION("reverse path") {
+        SignalGraph graph;
+        REQUIRE(graph.register_custom_node_type(make_type()));
+        const auto producer = graph.add_custom_node("test.g5.graph-event-path");
+        const auto consumer = graph.add_custom_node("test.g5.graph-event-path");
+        REQUIRE(graph.connect(consumer, 0, producer, 0));
+        REQUIRE(graph.connect_graph_event({producer, consumer}) ==
+                GraphEventBindingResult::Binding);
+    }
+    SECTION("forward path") {
+        SignalGraph graph;
+        REQUIRE(graph.register_custom_node_type(make_type()));
+        const auto producer = graph.add_custom_node("test.g5.graph-event-path");
+        const auto consumer = graph.add_custom_node("test.g5.graph-event-path");
+        REQUIRE(graph.connect(producer, 0, consumer, 0));
+        REQUIRE(graph.connect_graph_event({producer, consumer}) ==
+                GraphEventBindingResult::Accepted);
+        graph.set_parallel_routing_enabled(true);
+        REQUIRE_FALSE(graph.parallel_routing_enabled());
+        REQUIRE(graph.remove_node(producer));
+        REQUIRE_FALSE(graph.graph_event_edge().has_value());
+        CustomNodeType replacement = make_type();
+        replacement.process_events = {};
+        replacement.process = [](auto& out, const auto& in, int frames) {
+            for (int i = 0; i < frames; ++i)
+                out.channel_ptr(0)[i] = in.channel_ptr(0)[i];
+        };
+        REQUIRE(graph.register_custom_node_type(std::move(replacement)));
+        REQUIRE_FALSE(graph.graph_event_edge().has_value());
+    }
+}
 
 TEST_CASE("Typed trigger pair preserves sample and tie order across partitions", "[trigger]") {
     std::vector<float> expected;
@@ -114,6 +320,168 @@ TEST_CASE("Typed trigger pair preserves sample and tie order across partitions",
         }
         CHECK(counters(fixture.graph).cursor == 16);
     }
+}
+
+TEST_CASE("Host ingress binds to the checked trigger epoch and block cursor",
+          "[trigger][g5][host-ingress]") {
+    Fixture fixture{2, 32, true};
+    Block block;
+    HostEventRecord event;
+    event.epoch = 1;
+    event.absolute_sample = 2;
+    event.producer_sequence = 7;
+    event.producer = fixture.producer;
+    event.midi = pulp::midi::MidiEvent::note_on(1, 60, 100);
+    event.has_ump = true;
+    event.ump.word_count = 2;
+    event.ump.words[0] = 0x4091'3C00u;
+    event.ump.words[1] = 0xFFFF'0000u;
+
+    CHECK(fixture.graph.begin_host_event_block(1, 0, 4) == HostEventResult::Accepted);
+    CHECK(fixture.graph.publish_host_event(event) == HostEventResult::Accepted);
+    auto stale = event;
+    stale.epoch = 2;
+    CHECK(fixture.graph.publish_host_event(stale) == HostEventResult::StaleEpoch);
+    CHECK(fixture.graph.process_checked(block.out, block.in, 4) == TriggerGraphResult::Accepted);
+    CHECK(fixture.graph.host_event_trace().size() == 1);
+
+    pulp::midi::MidiBuffer delivered;
+    delivered.reserve(4);
+    delivered.set_realtime_capacity_limit(true);
+    pulp::midi::UmpBuffer delivered_ump;
+    delivered_ump.reserve(4);
+    delivered_ump.set_realtime_capacity_limit(true);
+    delivered.attach_ump(&delivered_ump);
+    REQUIRE(fixture.graph.extract_midi(fixture.midi_out, delivered));
+    REQUIRE(delivered.size() == 1);
+    CHECK(delivered[0].sample_offset == 2);
+    CHECK(delivered[0].is_note_on());
+    REQUIRE(delivered_ump.size() == 1);
+    CHECK(delivered_ump[0].sample_offset == 2);
+    CHECK(Access::host_projection_mpe_size(fixture.graph) == 1);
+    CHECK(Access::routed_mpe_size(fixture.graph, fixture.midi_out) == 1);
+
+    SignalGraph::HostEventIngressCounters host_counters;
+    REQUIRE(fixture.graph.host_event_counters(host_counters) == HostEventResult::Accepted);
+    CHECK(host_counters.epoch == 1);
+    CHECK(host_counters.accepted == 1);
+    CHECK(host_counters.refused == 1);
+
+    CHECK(fixture.graph.begin_host_event_block(1, 0, 1) == HostEventResult::Late);
+    CHECK(fixture.graph.begin_host_event_block(1, 5, 1) == HostEventResult::OutOfRange);
+    CHECK(fixture.graph.reset_host_event_ingress(1) == HostEventResult::Accepted);
+    CHECK(fixture.graph.host_event_trace().empty());
+}
+
+TEST_CASE("Host ingress refuses a block whose frames differ from the ingress window",
+          "[trigger][g5][host-ingress][negative-control]") {
+    // The ingress window is fixed by begin_host_event_block(). Processing a
+    // shorter block must not project records past that block's end: they would
+    // carry sample_offset >= frames and be delivered early while the cursor
+    // advances by fewer frames. The block is refused and the record stays
+    // staged for a retry with matching frames.
+    Fixture fixture{2, 32, true};
+    Block block;
+    HostEventRecord event;
+    event.epoch = 1;
+    event.absolute_sample = 6;
+    event.producer_sequence = 1;
+    event.producer = fixture.producer;
+    event.midi = pulp::midi::MidiEvent::note_on(1, 60, 100);
+
+    REQUIRE(fixture.graph.begin_host_event_block(1, 0, 8) == HostEventResult::Accepted);
+    REQUIRE(fixture.graph.publish_host_event(event) == HostEventResult::Accepted);
+    CHECK(fixture.graph.process_checked(block.out, block.in, 4) ==
+          TriggerGraphResult::ProcessingFailure);
+    SignalGraph::HostEventIngressCounters refused;
+    REQUIRE(fixture.graph.host_event_counters(refused) == HostEventResult::Accepted);
+    CHECK(refused.refused == 1);
+    CHECK(counters(fixture.graph).cursor == 0);
+
+    pulp::midi::MidiBuffer delivered;
+    delivered.reserve(4);
+    delivered.set_realtime_capacity_limit(true);
+    REQUIRE(fixture.graph.extract_midi(fixture.midi_out, delivered));
+    CHECK(delivered.size() == 0);
+
+    // The refused record is still staged: re-publishing its sequence is a
+    // duplicate, and a matching 8-frame block delivers it at offset 6.
+    REQUIRE(fixture.graph.begin_host_event_block(1, 0, 8) == HostEventResult::Accepted);
+    CHECK(fixture.graph.publish_host_event(event) == HostEventResult::InvalidSequence);
+    REQUIRE(fixture.graph.process_checked(block.out, block.in, 8) == TriggerGraphResult::Accepted);
+    CHECK(counters(fixture.graph).cursor == 8);
+    delivered.clear();
+    REQUIRE(fixture.graph.extract_midi(fixture.midi_out, delivered));
+    REQUIRE(delivered.size() == 1);
+    CHECK(delivered[0].sample_offset == 6);
+    CHECK(delivered[0].is_note_on());
+}
+
+TEST_CASE("Host ingress projection refusal seals the active block",
+          "[trigger][g5][host-ingress][negative-control]") {
+    // This generation deliberately has no admitted MidiInput destination. A
+    // published host block must refuse as Unbound, then seal the ingress so a
+    // later block is not wedged behind Busy.
+    Fixture fixture;
+    Block block;
+    HostEventRecord event;
+    event.epoch = 1;
+    event.absolute_sample = 0;
+    event.producer_sequence = 1;
+    event.producer = fixture.producer;
+    event.midi = pulp::midi::MidiEvent::note_on(1, 60, 100);
+
+    REQUIRE(fixture.graph.begin_host_event_block(1, 0, 1) == HostEventResult::Accepted);
+    REQUIRE(fixture.graph.publish_host_event(event) == HostEventResult::Accepted);
+    CHECK(fixture.graph.process_checked(block.out, block.in, 1) ==
+          TriggerGraphResult::ProcessingFailure);
+    // The refusal seals the active block, but the staged record remains for a
+    // retry. Re-publishing its producer sequence is therefore rejected as a
+    // duplicate, while begin_host_event_block() is no longer wedged.
+    CHECK(fixture.graph.begin_host_event_block(1, 0, 1) == HostEventResult::Accepted);
+    CHECK(fixture.graph.publish_host_event(event) == HostEventResult::InvalidSequence);
+    CHECK(fixture.graph.process_checked(block.out, block.in, 1) ==
+          TriggerGraphResult::ProcessingFailure);
+    CHECK(fixture.graph.reset_host_event_ingress(1) == HostEventResult::Accepted);
+    CHECK(fixture.graph.process_checked(block.out, block.in, 1) == TriggerGraphResult::Accepted);
+}
+
+TEST_CASE("Host ingress preflights MPE fanout and retries without tracker mutation",
+          "[trigger][g5][host-ingress][mpe][negative-control]") {
+    Fixture fixture{2, 8, true};
+    Block block;
+    auto& tracker = Access::host_projection_tracker(fixture.graph);
+    for (std::uint8_t note = 0; note < pulp::midi::MpeVoiceTracker::kMaxNotes; ++note)
+        REQUIRE(tracker.process(pulp::midi::MidiEvent::note_on(1, note, 100)));
+
+    HostEventRecord event;
+    event.epoch = 1;
+    event.absolute_sample = 0;
+    event.producer = fixture.producer;
+    event.midi = pulp::midi::MidiEvent::pitch_bend(1, 10'000);
+    const auto before_bend = tracker.find(1, 0)->pitch_bend_semitones;
+    REQUIRE(fixture.graph.begin_host_event_block(1, 0, 1) == HostEventResult::Accepted);
+    for (std::uint64_t sequence = 1; sequence <= 8; ++sequence) {
+        event.producer_sequence = sequence;
+        REQUIRE(fixture.graph.publish_host_event(event) == HostEventResult::Accepted);
+    }
+    // Reserve the projection sidecar before the first attempt. The graph-owned
+    // destination remains at its smaller default reservation so this refusal
+    // exercises the destination-capacity preflight specifically.
+    Access::reserve_host_projection_mpe(fixture.graph, 2048);
+    REQUIRE(fixture.graph.process_checked(block.out, block.in, 1) ==
+            TriggerGraphResult::ProcessingFailure);
+
+    CHECK(tracker.active_count() == pulp::midi::MpeVoiceTracker::kMaxNotes);
+    CHECK(tracker.find(1, 0)->pitch_bend_semitones == before_bend);
+    CHECK(Access::host_projection_mpe_size(fixture.graph) == 0);
+
+    // Expanding the graph-owned destination lets the same staged records retry
+    // without a second publication, proving the destination refusal did not
+    // consume them or mutate tracker state.
+    Access::reserve_host_destination_mpe(fixture.graph, 2048);
+    REQUIRE(fixture.graph.begin_host_event_block(1, 0, 1) == HostEventResult::Accepted);
+    REQUIRE(fixture.graph.process_checked(block.out, block.in, 1) == TriggerGraphResult::Accepted);
 }
 
 TEST_CASE("Typed render preflight preserves output and clock", "[trigger]") {

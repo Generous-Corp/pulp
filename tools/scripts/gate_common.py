@@ -33,6 +33,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
@@ -41,10 +42,48 @@ from typing import Iterable, Literal
 
 _USES_DIFF_LINE_RE = re.compile(r"^\s*(?:-\s*)?uses:\s*\S+(?:\s+#.*)?\s*$")
 
+_GIT_PROBE_TIMEOUT_SECONDS = 10.0
+_GIT_PROBE_DEADLINE: float | None = None
+
+
+def set_git_probe_deadline(deadline: float | None) -> None:
+    """Bound all shared Git probes participating in one checker run."""
+    global _GIT_PROBE_DEADLINE
+    _GIT_PROBE_DEADLINE = deadline
+
+
+def _run_git(*args, **kwargs):
+    timeout = kwargs.pop("timeout", _GIT_PROBE_TIMEOUT_SECONDS)
+    check = kwargs.get("check", False)
+    if _GIT_PROBE_DEADLINE is not None:
+        remaining = _GIT_PROBE_DEADLINE - time.monotonic()
+        if remaining <= 0:
+            if check:
+                raise subprocess.CalledProcessError(
+                    124, args[0], output="", stderr="git validation timed out"
+                )
+            return subprocess.CompletedProcess(
+                args[0], 124, stdout="", stderr="git validation timed out"
+            )
+        timeout = min(timeout, remaining)
+    try:
+        return subprocess.run(*args, timeout=timeout, **kwargs)
+    except subprocess.TimeoutExpired as expired:
+        if check:
+            raise subprocess.CalledProcessError(
+                124,
+                expired.cmd,
+                output=expired.output or expired.stdout or "",
+                stderr=expired.stderr or "git command timed out",
+            ) from expired
+        return subprocess.CompletedProcess(
+            args[0], 124, stdout=expired.stdout or "", stderr="git command timed out"
+        )
+
 
 def workflow_uses_only_diff(base: str, head: str = "HEAD") -> bool:
     """Return true for a workflow-only patch whose changed lines are ``uses:``."""
-    names = subprocess.run(
+    names = _run_git(
         ["git", "diff", "--no-ext-diff", "--name-only", f"{base}...{head}"],
         capture_output=True, text=True, encoding="utf-8",
     )
@@ -55,7 +94,7 @@ def workflow_uses_only_diff(base: str, head: str = "HEAD") -> bool:
         not path.startswith(".github/workflows/") for path in changed_paths
     ):
         return False
-    result = subprocess.run(
+    result = _run_git(
         ["git", "diff", "--no-ext-diff", "--unified=0", f"{base}...{head}"],
         capture_output=True, text=True, encoding="utf-8",
     )
@@ -90,7 +129,7 @@ def dependabot_uses_only_diff(base: str, head: str = "HEAD", *, actor: str | Non
     """
     if not workflow_uses_only_diff(base, head):
         return False
-    commits = subprocess.run(
+    commits = _run_git(
         ["git", "rev-list", "--parents", f"{base}..{head}"],
         capture_output=True, text=True, encoding="utf-8",
     )
@@ -105,11 +144,11 @@ def dependabot_uses_only_diff(base: str, head: str = "HEAD", *, actor: str | Non
         if len(record) > 2:
             if len(record) != 3:
                 return False
-            expected = subprocess.run(
+            expected = _run_git(
                 ["git", "merge-tree", "--write-tree", record[1], record[2]],
                 capture_output=True, text=True, encoding="utf-8",
             )
-            actual = subprocess.run(
+            actual = _run_git(
                 ["git", "show", "-s", "--format=%T", commit],
                 capture_output=True, text=True, encoding="utf-8",
             )
@@ -120,7 +159,7 @@ def dependabot_uses_only_diff(base: str, head: str = "HEAD", *, actor: str | Non
             if expected_tree != actual.stdout.strip():
                 return False
             continue
-        author = subprocess.run(
+        author = _run_git(
             ["git", "show", "-s", "--format=%an%x00%ae", commit],
             capture_output=True, text=True, encoding="utf-8",
         )
@@ -226,7 +265,7 @@ def git_comparison_authority_unavailable(
 
 def _git_probe(root: "str | Path", arguments: list[str]) -> subprocess.CompletedProcess[str] | None:
     try:
-        return subprocess.run(
+        return _run_git(
             ["git", *arguments], cwd=str(root), text=True, capture_output=True
         )
     except OSError:
@@ -325,7 +364,7 @@ def commit_blobs(root: "str | Path", rev: str, paths: Iterable[str]) -> dict[str
     if not names:
         return {}
     request = "".join(f"{rev}:{name}\n" for name in names).encode("utf-8")
-    out = subprocess.run(["git", "cat-file", "--batch"], cwd=str(root), input=request,
+    out = _run_git(["git", "cat-file", "--batch"], cwd=str(root), input=request,
                          capture_output=True, check=True).stdout
     texts: dict[str, str] = {}
     at = 0
@@ -342,7 +381,7 @@ def commit_blobs(root: "str | Path", rev: str, paths: Iterable[str]) -> dict[str
 
 
 def repo_root() -> Path:
-    out = subprocess.run(
+    out = _run_git(
         ["git", "rev-parse", "--show-toplevel"],
         check=True, capture_output=True, text=True,
     )
@@ -359,7 +398,7 @@ def git_diff_names(base: str, head: str) -> list[str]:
     diffs from ``merge-base(base, head)`` to ``head``, i.e. only what this branch added
     since it diverged. That is what every gate means by "what did this PR touch".
     """
-    out = subprocess.run(
+    out = _run_git(
         ["git", "diff", "--name-only", f"{base}...{head}"],
         check=True, capture_output=True, text=True,
     )
@@ -424,7 +463,7 @@ def _fenced_line_indices(lines: list[str]) -> set[int]:
 
 
 def _parse_trailer_block(body: str) -> dict[str, list[str]]:
-    trailers = subprocess.run(
+    trailers = _run_git(
         ["git", "interpret-trailers", "--parse"],
         input=body, capture_output=True, text=True,
     )
@@ -487,7 +526,7 @@ def git_range_trailers(
         cmd.append("--no-merges")
     cmd.append(f"{base}..{head}")
     try:
-        body = subprocess.run(
+        body = _run_git(
             cmd, check=True, capture_output=True, text=True,
             cwd=str(cwd) if cwd is not None else None,
         ).stdout
@@ -508,7 +547,7 @@ def git_commit_trailers(ref: str) -> dict[str, list[str]]:
     deliberately want only the tip (rare; most gates should use
     ``git_range_trailers`` instead)."""
     try:
-        body = subprocess.run(
+        body = _run_git(
             ["git", "log", "-1", "--format=%B", ref],
             check=True, capture_output=True, text=True,
         ).stdout

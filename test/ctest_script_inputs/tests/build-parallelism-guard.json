@@ -1,0 +1,17 @@
+{
+ "name": "build-parallelism-guard",
+ "record": {
+  "entry": "tools/scripts/build_parallelism_guard.py",
+  "inputs": [
+   ".github/workflows",
+   "test/cmake",
+   "tools/cli",
+   "tools/import-validation",
+   "tools/mcp",
+   "tools/scripts",
+   "tools/scripts/build_parallelism_guard.py",
+   "tools/validation"
+  ],
+  "kind": "python"
+ }
+}

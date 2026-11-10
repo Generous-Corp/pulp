@@ -1,0 +1,25 @@
+{
+ "name": "design-unit-boundary-selftest",
+ "record": {
+  "entry": "tools/scripts/test_design_unit_boundary_check.py",
+  "inputs": [
+   "core/platform",
+   "core/platform/include",
+   "core/runtime",
+   "core/runtime/include",
+   "core/simd",
+   "core/simd/include",
+   "core/view",
+   "core/view/audio",
+   "core/view/include",
+   "core/view/include/pulp/view/widgets.hpp",
+   "core/view/src/reload_exports.cpp",
+   "tools/scripts/design_unit_boundary_check.py",
+   "tools/scripts/include_boundary.py",
+   "tools/scripts/test_design_unit_boundary_check.py",
+   "tools/scripts/vellum_policy.json",
+   "tools/scripts/vellum_policy.py"
+  ],
+  "kind": "python"
+ }
+}

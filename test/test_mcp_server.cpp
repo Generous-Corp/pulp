@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <array>
 #include <cstdlib>
 #include <filesystem>
@@ -663,9 +664,9 @@ TEST_CASE("MCP graph exposes read-only operations and refuses edits", "[mcp][too
 
     const auto tools = handle_request(R"JSON({"jsonrpc":"2.0","id":70,"method":"tools/list"})JSON");
     require_contains(tools, R"JSON("name":"pulp_graph")JSON");
-    require_contains(tools, R"JSON("inspect","validate","explain","render","probe")JSON");
+    require_contains(tools, R"JSON("inspect","validate","explain","render","probe","report")JSON");
 
-    for (const auto& operation : {"explain", "render"}) {
+    for (const auto& operation : {"explain", "render", "report"}) {
         const auto response = handle_request(
             tool_call("71", "pulp_graph",
                       std::string(R"JSON({"path":"graph.pulpgraph","operation":")JSON") +
@@ -779,6 +780,8 @@ TEST_CASE("MCP tool listing and unknown dispatch stay stable", "[mcp][tools]") {
     require_contains(tools, R"JSON("name":"pulp_audio_excerpt_find")JSON");
     require_contains(tools, R"JSON("name":"pulp_audio_probe_json")JSON");
     require_contains(tools, R"JSON("name":"pulp_audio_scope")JSON");
+    require_contains(tools, R"JSON("name":"pulp_audio_spectrogram")JSON");
+    require_contains(tools, R"JSON("name":"pulp_audio_waveform")JSON");
     require_contains(tools, R"JSON("name":"pulp_audio_plugin_inspect")JSON");
     require_contains(tools, R"JSON("name":"pulp_audio_render")JSON");
     require_contains(tools, R"JSON("name":"pulp_audio_compare")JSON");
@@ -1538,6 +1541,8 @@ TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
         "pulp_audio_read_bundle",
         "pulp_audio_render",
         "pulp_audio_scope",
+        "pulp_audio_spectrogram",
+        "pulp_audio_waveform",
         "pulp_build",
         "pulp_compat",
         "pulp_content",

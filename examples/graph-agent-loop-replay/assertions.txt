@@ -1,0 +1,3 @@
+positive: semantic fingerprint baseline == replay; resolved-plan hash baseline == replay; edit changes both render and resolved plan
+wrong-edit: graph-agent-loop-replay FAIL rule=wrong-edit-oracle
+wrong-replay: graph-agent-loop-replay FAIL rule=wrong-replay-input

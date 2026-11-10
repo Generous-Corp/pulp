@@ -1,0 +1,10 @@
+{
+ "name": "native-intel-runner-group-selftest",
+ "record": {
+  "entry": "tools/ci/test_verify_native_intel_runner_group.py",
+  "inputs": [
+   "tools/ci/test_verify_native_intel_runner_group.py"
+  ],
+  "kind": "python"
+ }
+}

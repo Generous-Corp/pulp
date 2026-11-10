@@ -57,7 +57,10 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
 void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                                         const audio::BufferView<const float>& input,
                                         int num_samples, const format::ProcessContext* transport,
-                                        CompiledGraph* cg, bool trigger_admitted) {
+                                        CompiledGraph* cg, bool trigger_admitted,
+                                        HostEventResult* host_event_result) {
+    if (host_event_result != nullptr)
+        *host_event_result = HostEventResult::Accepted;
     // Only the controller entry may advance a typed clock. In particular a
     // copied ExecutionSnapshot cannot render even the current generation.
     if (cg && cg->trigger_state && !trigger_admitted)
@@ -73,6 +76,30 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
             routed_only_execution_failures_.fetch_add(1, std::memory_order_relaxed);
         return;
     }
+    if (host_event_result != nullptr && cg->trigger_state) {
+        *host_event_result = project_host_events_(*cg, cg->host_event_sample_start,
+                                                  static_cast<std::size_t>(num_samples));
+        if (*host_event_result != HostEventResult::Accepted)
+            return;
+    }
+    struct GraphEventBlockGuard {
+        std::shared_ptr<GraphAuthoredEventLane<>> lane;
+        bool active = false;
+        ~GraphEventBlockGuard() {
+            if (!active)
+                return;
+            if (lane->end_block() != GraphEventResult::Accepted)
+                lane->abort_block();
+        }
+    } graph_event_guard{cg->graph_event_lane};
+    if (cg->graph_event_lane) {
+        const auto result = cg->graph_event_lane->begin_block(
+            cg->graph_event_epoch, cg->graph_event_lane->counters().cursor,
+            static_cast<std::size_t>(num_samples));
+        if (result != GraphEventResult::Accepted)
+            return;
+        graph_event_guard.active = true;
+    }
     if (cg->spectral)
         cg->spectral->begin_block();
 
@@ -83,6 +110,14 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
         ((transport && transport->reset_requested) || !canonical_executor_routing_enabled() ||
          parallel_routing_enabled() || anticipation_enabled()))
         cg->audio_edge_probe->samples.detach();
+    if (cg->control_edge_probe &&
+        ((transport && transport->reset_requested) || !canonical_executor_routing_enabled() ||
+         parallel_routing_enabled() || anticipation_enabled()))
+        cg->control_edge_probe->samples.detach();
+    if (cg->event_edge_probe &&
+        ((transport && transport->reset_requested) || !canonical_executor_routing_enabled() ||
+         parallel_routing_enabled() || anticipation_enabled()))
+        cg->event_edge_probe->samples.detach();
     if (cg->sample_region_bank) {
         sample_region_admission = cg->sample_region_bank->domain().try_admit(
             cg->sample_region_bank->binding_generation());
@@ -440,12 +475,17 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
 
             if (use_serial && cg->routed.serial.valid &&
                 cg->routed.serial.pool.fits(cg->routed.serial.snapshot, frames32)) {
+                format::GraphRuntimeEdgeProbeSet edge_probes{
+                    cg->audio_edge_probe.get(),
+                    cg->control_edge_probe.get(),
+                    cg->event_edge_probe.get(),
+                };
                 const auto dispatch = dispatch_routed([&] {
                     return executor_.process_routed(
                         block, cg->routed.serial.snapshot, cg->routed.serial.pool,
                         has_midi ? &cg->routed.midi : nullptr,
                         has_automation ? &cg->routed.automation : nullptr, {}, {}, {}, {}, {},
-                        cg->audio_edge_probe.get());
+                        cg->audio_edge_probe.get(), &edge_probes);
                 });
                 if (dispatch == RoutedDispatchResult::success) {
                     return;

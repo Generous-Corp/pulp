@@ -282,10 +282,10 @@ can still be wrong. `test/test_store_lifetime.cpp` pins the ordering.
 
 `validate summarize` decodes through `read_audio_file`; for FLAC/MP3/Ogg that
 path enforces the format registry's `DecodeLimits` (2^30 frames, 64 channels,
-4 GiB of float output) and refuses a header past them. Since the layout report
-landed, that refusal names the limit on stderr. Run `pulp audio inspect` first
-on any large or suspicious file: it reads the header window only and tells you
-whether the decoder would accept the layout and which ceiling it would hit.
+4 GiB of float output) and refuses a header past them, naming the limit on
+stderr. Run `pulp audio inspect` first on any large or suspicious file: it
+reads the header window only and tells you whether the decoder would accept
+the layout and which ceiling it would hit.
 The CHOC WAV path behind `read_audio_file` has no ceiling of its own and
 allocates whatever the header declares; a WAV declaring 2^30+1 frames crashes
 `summarize` with a bus error instead of refusing. Inspect it, do not decode it.
@@ -375,3 +375,25 @@ AU v2, AU v3 and standalone adapters service requests too, but LV2, AAX and the
 web adapters do not (`panic_capabilities().serviced` is false there), and a
 headless result says nothing about how a DAW routes the MIDI that comes out. Test:
 `test/test_midi_panic_processor.cpp`.
+
+## Look at the capture: `pulp audio spectrogram` / `pulp audio waveform`
+
+Once a scene or probe has written a WAV, an agent can see it instead of
+reading summaries: `pulp audio spectrogram out.wav --png out.png --scale log`
+and `pulp audio waveform out.wav --png wave.png` draw a PNG with axes and a
+burned-in footer (basename, SHA-256 prefix, settings, tool version) and write
+a `pulp.audio.image.v1` sidecar beside it. The rasterizers are in
+`tools/audio/analysis` (`spectrogram_raster.hpp`, `waveform_raster.hpp`) and
+every stage is a pure function, so a test can assert on a grid or a column
+without rendering a file.
+
+Two rules:
+
+- **Display only, never a gate.** The sidecar says `display_only: true` and
+  nothing in it is read by an analyzer, a detector or a verdict. A bright
+  pixel is a peak-hold over bins and frames through the window's leakage
+  skirt; for a number, use the spectral analyzers above.
+- **Nothing is normalized.** Float above 0 dBFS draws clamped with a red
+  marker and the sidecar's `true_peak` carries the unclamped sample peak, so a
+  hot capture is visible as hot rather than quietly rescaled.
+

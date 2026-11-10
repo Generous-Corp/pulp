@@ -1,0 +1,10 @@
+{
+ "name": "pulp_bundle_threejs_for_jsc_offline",
+ "record": {
+  "entry": "tools/scripts/test_bundle_threejs_offline.mjs",
+  "inputs": [
+   "tools/scripts/test_bundle_threejs_offline.mjs"
+  ],
+  "kind": "node"
+ }
+}

@@ -72,7 +72,7 @@
 # because a selector working from the build graph cannot see that spawn.
 #
 # tools/scripts/script_test_inputs.py folds both into
-# test/ctest_script_inputs.json as `kind: compiled` entries. A source that
+# test/ctest_script_inputs/ as `kind: compiled` entries. A source that
 # reads the checkout (it names PULP_SOURCE_DIR, test/fixtures, or one of its
 # executable's checkout definitions) without a declaration marks its
 # executable `data: undeclared`, which a selector must never skip.

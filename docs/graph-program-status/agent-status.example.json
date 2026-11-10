@@ -1,0 +1,12 @@
+{
+  "schema": "pulp.graph_agent_status.v1",
+  "generated_at": "2026-11-08T10:00:00Z",
+  "lanes": [
+    {
+      "lane": "A10",
+      "status": "BLOCKED",
+      "blocker": "exact-head installed SDK is unavailable",
+      "next_action": "run the SDK installer from a clean current-main checkout, then rerun the public consumer"
+    }
+  ]
+}

@@ -42,6 +42,9 @@ ctest --test-dir build --output-on-failure    # test
 | `PULP_JS_ENGINE` | auto | JS engine: `auto`/`quickjs` compile QuickJS only; `jsc` adds JavaScriptCore on Apple and makes it the default; `v8` adds the sealed V8 backend and makes it the default (only when `PULP_ENABLE_JS=ON`) |
 | `PULP_DEV_SHARED_UI` | OFF | macOS development only: link plug-in modules against one shared Pulp runtime dylib for fast relinks. Never distributable; see [Fast plug-in relinks](#fast-plug-in-relinks-pulp_dev_shared_ui). |
 | `PULP_ENABLE_AAX` | OFF | Enable optional AAX format |
+| `PULP_ENABLE_FUZZING` | OFF | Build the libFuzzer targets and their `<target>-smoke` ctests (see [Test lanes](test-lanes.md), "The fuzz lanes"). The whole tree is then compiled with the library-side sanitizer list (`fuzzer` becomes `fuzzer-no-link`), so coverage counters and ASan reach the decoders and parsers behind each entry point, not only the entry file. |
+| `PULP_FUZZ_SANITIZERS` | `fuzzer,address` | Comma-separated `-fsanitize=` list the fuzz targets build with. A host whose ASan runtime cannot start sets it to `fuzzer`. |
+| `PULP_FUZZ_RUNTIME_ARCHIVE` | empty | Path to a libFuzzer static archive for a compiler that ships no `-fsanitize=fuzzer` runtime. Apple clang accepts `fuzzer-no-link`, so on macOS point this at Homebrew's `llvm@<N>/lib/clang/<N>/lib/darwin/libclang_rt.fuzzer_osx.a` (same LLVM major as the Xcode clang) and the fuzz targets link it instead of asking the driver. |
 | `PULP_ENABLE_ABLETON_LINK` | OFF | Enable the source-build-only desktop Link adapter. Requires a developer-supplied, out-of-tree checkout at `PULP_ABLETON_LINK_SDK_DIR`; its adapter header and target are build-interface-only and never installed or exported. |
 
 ### Native-only builds (`-DPULP_ENABLE_JS=OFF`)

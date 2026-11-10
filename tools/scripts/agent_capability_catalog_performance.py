@@ -44,7 +44,7 @@ EXPORTS = [
                 include="pulp/format/processor.hpp",
                 qualified_name="pulp::format::Processor::process_block",
                 target="Pulp::format",
-                header_fingerprint="sha256:c343477eeaca3cd7b64f16bf98adafa902ef5cd09df962562f5d89f189ad65d3",
+                header_fingerprint="sha256:f4cf94d6a54e59076dc204d29a472ec492be2b8f5dc2c5309ab068e0e58476f4",
                 address_expression=(
                     "static_cast<bool (pulp::format::Processor::*)("
                     "pulp::format::ProcessBlock&)>(&pulp::format::Processor::process_block)"
@@ -417,7 +417,7 @@ EXPORTS = [
             include="pulp/audio/onset_detector.hpp",
             qualified_name="pulp::audio::OnsetDetector",
             target="Pulp::audio",
-            header_fingerprint="sha256:d0cac999018c626de8cbd2165150788c1d3be62777cc639d550d7f80f9f56560",
+            header_fingerprint="sha256:9fc9b55fef9c42057386588c738ecf7fb70908e900ad9698c7e2ff89f753c11c",
         )],
         _link_probes=[{
             "role": "entrypoint",

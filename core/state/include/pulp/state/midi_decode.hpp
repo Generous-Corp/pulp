@@ -33,6 +33,8 @@ struct RawMidi {
     constexpr uint8_t channel() const {
         return status & 0x0F;
     }
+
+    friend constexpr bool operator==(const RawMidi&, const RawMidi&) = default;
 };
 
 /// A decoded controller value. `kind == step` carries a signed increment
@@ -317,6 +319,8 @@ constexpr int decode_relative(RelativeMode mode, uint8_t raw) {
 struct RelativeConfig {
     float step = 1.0f / 128.0f; ///< Normalized change per tick.
     float acceleration = 0.0f;  ///< 0 = linear; larger values amplify fast bursts.
+
+    friend constexpr bool operator==(const RelativeConfig&, const RelativeConfig&) = default;
 };
 
 /// Move `current` (normalized) by `ticks`, clamped to [0, 1]. Acceleration

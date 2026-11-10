@@ -1,0 +1,10 @@
+{
+ "name": "cmake-clap-bundle-plist",
+ "record": {
+  "entry": "test/cmake/test_clap_bundle_plist.sh",
+  "inputs": [
+   "test/cmake/test_clap_bundle_plist.sh"
+  ],
+  "kind": "shell"
+ }
+}

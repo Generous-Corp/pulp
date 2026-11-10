@@ -278,6 +278,13 @@ selftest asserts the subject is gone after an INCONCLUSIVE run. An
 INCONCLUSIVE without `--subject` now says which file it fingerprinted and points
 here; it is not a coverage gap in the test and rerunning it will not change the
 answer. Interpreted tests (`python3 …`, `bash …`) take `--no-build` instead.
+Whether the driver also links the edited source is read from the build's link
+graph (`ninja -t query`, or the Makefile generator's `link.txt`), never from
+shared symbol names. Every word of `--test` that is a file in the build dir
+is checked as a driver, so `--test` must name the test binary itself: a script,
+a custom-command output, or `ctest` in front of it is INCONCLUSIVE. A header
+edit is checked against ninja's dependency log and is INCONCLUSIVE in a
+Makefile build, as is any build dir whose graph cannot be read.
 
 ### `pulp status` reads `.shipyard/config.toml` line by line, not as TOML
 
@@ -649,6 +656,11 @@ and cannot select a different CLI through PATH. It preserves CLI refusal
 status in `isError` and uses bounded child execution. Keep the public consumer,
 actual installed CLI/MCP parity test, and source-before-PDC/mixing semantics
 together when changing the probe report.
+
+The graph `report` operation prints the `pulp.graph.rt-report` JSON from
+`pulp/host/graph_rt_report.hpp`. It prepares the graph with plugins unloaded,
+so it never runs hosted plugin code, and it is read-only through MCP. Keep the
+schema version, verdict names, and the shellout test in sync when changing it.
 
 `pulp bake <input.pulpgraph> -o <output.pulpbake> --sign-key <file>` loads and
 prepares the graph, lowers it to the bounded baked-plan format, and writes the
@@ -1446,18 +1458,11 @@ mode fails the build without it. A capability row alone no longer satisfies the
 gate, because a second operation on an already-documented capability used to
 ship undescribed.
 
-`confirm_failure.sh` cannot give a verdict on a CLI shell-out test, and it says
-so rather than guessing. It fingerprints the *test* binary to prove the edit
-reached what it runs, but a shell-out test's subject is `pulp-cpp`, which the
-test binary does not contain -- so the fingerprint never moves and the harness
-reports INCONCLUSIVE. `pulp_bind_cli_shellout_target` compiles the CLI path in
-as a define and adds no `add_dependencies`, so `--target pulp-test-cli-*` does
-not rebuild the CLI either. Run that negative control against the CLI binary
-instead: break the source, delete `cmd_control.cpp.o`, rebuild `pulp-cli`,
-confirm the compile line appears in the build log, and compare `pulp-cpp`'s
-hash across the break -- restoring through `git restore`, never a `.bak` copy.
-An aborted harness run leaves `pulp-cpp` built from the broken source, so
-re-establish the baseline before reading the next run's result.
+Negative-control a CLI shell-out test with `confirm_failure.sh --subject
+build/tools/cli/pulp-cpp --target pulp-cli` and `--test` naming the test binary
+itself (see "`confirm_failure.sh` needs `--subject` for a shell-out CLI test"
+above). The subject is what it fingerprints and rebuilds; the test binary only
+drives it.
 
 For `control call` and `control watch`, `--timeout-ms`, and for their typed MCP
 operation counterparts, `timeout_ms`, are each one absolute operation deadline,
@@ -3876,6 +3881,42 @@ asserting only "nonzero exit and the message is present" passes on the crash and
 proves nothing. Assert the exact code, and that stderr carries no termination
 banner.
 
+## `audio spectrogram` / `audio waveform` are display-only image verbs
+
+`pulp audio spectrogram <file> --png <out>` and `pulp audio waveform <file>
+--png <out>` draw a PNG and write a `pulp.audio.image.v1` sidecar beside it.
+They exist so an agent can *look* at a render; nothing they emit may feed a
+verdict, and the MCP tools (`pulp_audio_spectrogram`, `pulp_audio_waveform`)
+and the Quality Lab's `advisory.artifacts` block inherit that contract. The
+rasterizers live in `tools/audio/analysis` (`spectrogram_raster.hpp`,
+`waveform_raster.hpp`, `raster_image.hpp`); the verbs in `tools/cli/` only
+parse flags, stream the input and write files, through the shared
+`cmd_audio_image_common.{hpp,cpp}`.
+
+Gotchas:
+
+- **Input streams through `MemoryMappedAudioReader::read_frames` in windows.**
+  Never route these verbs through `read_audio_file` / `decode_wav`: the WAV
+  decoder caps at 100,000,000 frames, and the shell-out suite renders a
+  sparse 70-minute WAV that it refuses. `read_frames` fills the first N
+  channels, so reaching channel k means passing k+1 buffers.
+- **Exit 2 means nothing to render** (zero frames, or a range shorter than one
+  FFT), distinct from exit 1 (usage or I/O). Keep the mapping the other audio
+  verbs use; see "Exit 2 means could not measure".
+- **Sidecar paths are basenames by default.** `--absolute-paths` is the only
+  way a full path reaches the JSON, and the footer burned into the pixels is
+  always the basename. A test asserts the temp directory never appears.
+- **Float above 0 dBFS is reported, not normalized.** `true_peak` is the
+  unclamped sample peak over the rendered range (`method: sample_peak`, not an
+  oversampled inter-sample peak); the image clamps and marks the column.
+- **Goldens live in `test/fixtures/audio/images/`** and are compared through
+  ImageIO on macOS only (the required gate); regenerate with
+  `PULP_AUDIO_IMAGE_WRITE_GOLDENS=1 ./build/test/pulp-test-audio-image-raster "[golden]"`.
+- **`confirm_failure.sh --subject build/tools/cli/pulp-cpp` covers
+  `cmd_audio_image_common.cpp`.** `pulp-test-cli-audio-image` shares libc++ and
+  header-inline definitions with the CLI source but does not link it. Run the
+  loop with `--target pulp-cli`.
+
 ## `audio heritage` owns sampler-profile interchange and evidence renders
 
 `pulp audio heritage <validate|canonicalize|inspect|render>` is the neutral,
@@ -4229,3 +4270,8 @@ rules when touching it:
   selected, after product filtering, never the whole build dir (test binaries
   legitimately carry every marker).
 
+# G-7 graph probe parity
+
+The `pulp graph probe` command and MCP `pulp_graph` tool expose bounded audio,
+control, and event edge observations. Keep their `edge_kind` and
+`destination_param` schemas aligned when changing graph probe diagnostics.

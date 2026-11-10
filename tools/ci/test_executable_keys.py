@@ -97,8 +97,7 @@ class Fixture:
             p = self.root / path
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(body, encoding="utf-8")
-        (self.root / ek.SCRIPT_INPUTS_PATH).parent.mkdir(parents=True, exist_ok=True)
-        (self.root / ek.SCRIPT_INPUTS_PATH).write_text(json.dumps(self.scan), encoding="utf-8")
+        ek.script_inputs_store.write_path(self.root / ek.SCRIPT_INPUTS_PATH, self.scan)
         git = ["git", "-C", str(self.root), "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
         subprocess.run(git + ["add", "-A"], check=True)
         subprocess.run(git + ["commit", "-q", "--allow-empty", "-m", "c"], check=True)

@@ -185,6 +185,16 @@
       "timeout": 300.0
     },
     {
+      "name": "confirm-failure-driver-link-selftest",
+      "argv": [
+        "-m",
+        "unittest",
+        "test_confirm_failure_driver_link"
+      ],
+      "cwd": "{repo}/tools/scripts",
+      "timeout": 60.0
+    },
+    {
       "name": "clean-worktrees-selftest",
       "argv": [
         "-m",
@@ -255,6 +265,13 @@
       "argv": [
         "{repo}/tools/scripts/test_decisions_contract.py"
       ]
+    },
+    {
+      "name": "deferred-admission-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_deferred_admission.py"
+      ],
+      "timeout": 60.0
     },
     {
       "name": "deps-patches-selftest",
@@ -587,6 +604,13 @@
         "{repo}/tools/scripts/test_verify_gpu_trace_overhead_acceptance.py"
       ],
       "timeout": 300.0
+    },
+    {
+      "name": "graph-stall-guard-selftest",
+      "argv": [
+        "{repo}/tools/graph/test_graph_stall_guard.py"
+      ],
+      "timeout": 120.0
     },
     {
       "name": "embed-wgsl-selftest",
@@ -1250,6 +1274,13 @@
       "argv": [
         "{repo}/tools/scripts/test_check_yoga_oracle_pin.py"
       ]
+    },
+    {
+      "name": "android-fixture-lane-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_android_fixture_lane.py"
+      ],
+      "timeout": 120.0
     }
   ]
 }

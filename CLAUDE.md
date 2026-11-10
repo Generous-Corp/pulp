@@ -1091,7 +1091,9 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - Decide whether a DSP change made a sound WORSE — and at which timestamp. *(needs install)* → `python -m quality_lab.cli compare`
 - Render a plugin bundle offline — no DAW, no audio device — to a WAV + metrics. → `pulp audio render`
 - Look at a sample window of a WAV — waveform/spectrum — as JSON or PNG. → `pulp audio scope`
+- Look at a file's spectrum over time as a PNG an agent can read — never to measure or gate. → `pulp audio spectrogram`
 - Prove what a plugin actually emitted — summarize, diagnose, compare, or gate a WAV. → `pulp audio validate summarize`
+- Look at a file's envelope and where it clips, as a PNG — never to measure or gate. → `pulp audio waveform`
 - Validate complete matched GPU-audio trial captures and summarize their declared CPU, latency, transfer, and disposition evidence. → `tools/scripts/gpu_audio_p4_evidence.py`
   - ⚠ **Cannot see:** Validates recorded evidence only; does not run the product benchmark, authenticate provider/build attestations, or assign a physical program verdict.
 - Build and verify blinded capture packs for a sampler heritage profile without recording machine identity. → `tools/audio/heritage-calibration/heritage_calibration.py`
@@ -1984,7 +1986,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `clap` | CLAP format adapter for Pulp — how Processor bridges to clap_plugin_t, how parameters / modulation / sidechain / MPE / UMP / sysex flow, and the pitfalls discovered while wiring the adapter. |
 | `cli-maintenance` | Checklist and decision tree for adding, modifying, or removing CLI commands. |
 | `cmajor-external` | Use Pulp's MIT-safe Cmajor support lane via source-owned patches, an external `cmaj` toolchain, and explicit generated-artifact workflows. |
-| `code-comments` | How to write source comments, doc comments, and test names/tags that have lasting value — and what to never write. |
+| `code-comments` | How to write source comments, doc comments, and test names/tags that have lasting value, and what never to write. |
 | `content` | Validate, install, update, list, rescan, remove, and reveal data-only Pulp content packs for installed plugins. |
 | `contrib-intake` | Maintainer side of an outside contribution — find what has arrived (fork PR, issue, or patches sent out-of-band), adopt it into an in-repo branch with authorship intact, review it against the repo's bar, and ship it through the normal merge path. |
 | `contribute` | Prepare an outside contribution to Pulp or Forge that a maintainer can land with minimal rework — routing (Core vs Forge), local build and test on a plain Mac, the checks that are worth running without Shipyard/Tart/VMs, and the handoff format. |

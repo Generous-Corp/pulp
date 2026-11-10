@@ -62,7 +62,7 @@ if(APPLE AND PULP_HAS_CLAP AND TARGET PulpGain_CLAP AND TARGET PulpEffect_CLAP)
     set(_pulp_coload_classes
         PulpView PulpWindowDelegate PulpAppDelegate PulpMenuCommandTarget
         PulpPluginView PulpAccessibilityElement PulpWindowAccessibilityElement
-        PulpAccessibilityHostLifetime PulpTextAccessibilityElement PulpFileDragSource)
+        PulpAccessibilityHostLifetime PulpTextAccessibilityElement)
     add_test(NAME mac-objc-coload-PulpGain-PulpEffect
         COMMAND pulp-mac-objc-coload-probe
             $<TARGET_FILE:PulpGain_CLAP> PulpGain_CLAP
@@ -74,6 +74,11 @@ if(APPLE AND PULP_HAS_CLAP AND TARGET PulpGain_CLAP AND TARGET PulpEffect_CLAP)
 endif()
 if(TARGET pulp::host AND NOT TARGET sample-region-allpass-core)
     add_subdirectory(sample-region-allpass)
+endif()
+# Agent tool kit synth: vendor operations need the full macOS Standalone adapter.
+if(APPLE AND PULP_ENABLE_GPU AND NOT IOS AND NOT PULP_IOS AND
+   TARGET pulp::inspect-agent-toolkit AND NOT TARGET AgentToolkitSynth)
+    add_subdirectory(agent-toolkit-synth)
 endif()
 # Pulp Delay: stereo character delay with tempo and in-loop tone controls
 add_subdirectory(pulp-delay)
@@ -195,6 +200,7 @@ add_subdirectory(faust-tremolo)
 # Dense AudioRate ProcessorNode: a public, headless example of a native
 # Processor consuming a per-sample parameter lane produced by the graph.
 add_subdirectory(audio-rate-processor-node)
+add_subdirectory(graph-control-event-probe)
 
 # ViewBridge demo: custom create_view() + secondary-view attach
 add_subdirectory(view-bridge-demo)

@@ -3058,6 +3058,9 @@ void inverse_mdct_naive(float *buffer, int n)
 
 static float *get_window(vorb *f, int len)
 {
+   // Pulp: a damaged stream can hand a negative block length here; left-shifting
+   // it is undefined, and no window has that size anyway.
+   if (len <= 0) return NULL;
    len <<= 1;
    if (len == f->blocksize_0) return f->window[0];
    if (len == f->blocksize_1) return f->window[1];
@@ -3577,6 +3580,12 @@ static int is_whole_packet_present(stb_vorbis *f)
 }
 #endif // !STB_VORBIS_NO_PUSHDATA_API
 
+// Pulp: ceilings for the comment header's 32-bit length and count fields
+// (see start_decoder). 1 MiB per string and 65536 comments are far beyond
+// any real tag block and well inside the int range the allocator multiplies in.
+#define PULP_VORBIS_MAX_COMMENT_LENGTH (1 << 20)
+#define PULP_VORBIS_MAX_COMMENT_COUNT  (1 << 16)
+
 static int start_decoder(vorb *f)
 {
    uint8 header[6], x,y;
@@ -3649,7 +3658,12 @@ static int start_decoder(vorb *f)
    for (i=0; i < 6; ++i) header[i] = get8_packet(f);
    if (!vorbis_validate(header))                    return error(f, VORBIS_invalid_setup);
    //file vendor
+   // Pulp: the comment header's lengths and count are untrusted 32-bit fields.
+   // A negative value, or one large enough that (len+1) or count*sizeof(char*)
+   // overflows int, turns setup_malloc's size negative and defeats its arena
+   // check, so each is held to a ceiling no real stream approaches.
    len = get32_packet(f);
+   if (len < 0 || len > PULP_VORBIS_MAX_COMMENT_LENGTH) return error(f, VORBIS_invalid_setup);
    f->vendor = (char*)setup_malloc(f, sizeof(char) * (len+1));
    if (f->vendor == NULL)                           return error(f, VORBIS_outofmem);
    for(i=0; i < len; ++i) {
@@ -3657,16 +3671,25 @@ static int start_decoder(vorb *f)
    }
    f->vendor[len] = (char)'\0';
    //user comments
-   f->comment_list_length = get32_packet(f);
-   f->comment_list = NULL;
-   if (f->comment_list_length > 0)
+   // Pulp: the count is stored only once its list exists and is zeroed, so a
+   // refusal on any path leaves vorbis_deinit nothing to walk off the end of.
    {
-      f->comment_list = (char**) setup_malloc(f, sizeof(char*) * (f->comment_list_length));
-      if (f->comment_list == NULL)                  return error(f, VORBIS_outofmem);
+      int comment_count = get32_packet(f);
+      if (comment_count < 0 || comment_count > PULP_VORBIS_MAX_COMMENT_COUNT)
+                                                    return error(f, VORBIS_invalid_setup);
+      f->comment_list = NULL;
+      if (comment_count > 0)
+      {
+         f->comment_list = (char**) setup_malloc(f, sizeof(char*) * (comment_count));
+         if (f->comment_list == NULL)               return error(f, VORBIS_outofmem);
+         memset(f->comment_list, 0, sizeof(char*) * (comment_count));
+      }
+      f->comment_list_length = comment_count;
    }
 
    for(i=0; i < f->comment_list_length; ++i) {
       len = get32_packet(f);
+      if (len < 0 || len > PULP_VORBIS_MAX_COMMENT_LENGTH) return error(f, VORBIS_invalid_setup);
       f->comment_list[i] = (char*)setup_malloc(f, sizeof(char) * (len+1));
       if (f->comment_list[i] == NULL)               return error(f, VORBIS_outofmem);
 
@@ -4210,8 +4233,10 @@ static void vorbis_deinit(stb_vorbis *p)
    int i,j;
 
    setup_free(p, p->vendor);
-   for (i=0; i < p->comment_list_length; ++i) {
-      setup_free(p, p->comment_list[i]);
+   if (p->comment_list) {  // Pulp: a refused comment header can leave the count set with no list
+      for (i=0; i < p->comment_list_length; ++i) {
+         setup_free(p, p->comment_list[i]);
+      }
    }
    setup_free(p, p->comment_list);
 

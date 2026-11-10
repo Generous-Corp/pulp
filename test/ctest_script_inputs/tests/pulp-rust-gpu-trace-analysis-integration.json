@@ -1,0 +1,11 @@
+{
+ "name": "pulp-rust-gpu-trace-analysis-integration",
+ "record": {
+  "entry": "experimental/pulp-rs/tests/run_trace_gpu_analysis_integration.py",
+  "inputs": [
+   "experimental/pulp-rs/Cargo.toml",
+   "experimental/pulp-rs/tests/run_trace_gpu_analysis_integration.py"
+  ],
+  "kind": "python"
+ }
+}

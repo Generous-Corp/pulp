@@ -1,0 +1,10 @@
+{
+ "name": "gpu-audio-provider-conformance-fake-receipt-verify",
+ "record": {
+  "entry": "tools/validation/verify_gpu_audio_provider_conformance.py",
+  "inputs": [
+   "tools/validation/verify_gpu_audio_provider_conformance.py"
+  ],
+  "kind": "python"
+ }
+}

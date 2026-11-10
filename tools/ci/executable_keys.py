@@ -100,6 +100,8 @@ from typing import Iterable
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import dependency_pins  # noqa: E402
+sys.path.insert(0, str(HERE.parent / "scripts"))
+import script_inputs_store  # noqa: E402
 import link_members  # noqa: E402
 import object_deps  # noqa: E402
 from spawn_closure import SpawnIndex  # noqa: E402
@@ -112,13 +114,14 @@ KEY_BLIND_SCHEMA = "pulp-key-blind/v1"
 KEY_CODE_PATHS = ("tools/ci/executable_keys.py", "tools/ci/link_members.py", "tools/ci/object_deps.py",
                   "tools/ci/reuse_record.py", "tools/ci/spawn_closure.py", "tools/ci/always_run_names.py",
                   "tools/ci/executable_selection.py", "tools/ci/key_blind_executables.json",
-                  "tools/ci/dependency_pins.py", "tools/ci/dependency_pin_map.json")
+                  "tools/ci/dependency_pins.py", "tools/ci/dependency_pin_map.json",
+                  "tools/scripts/script_inputs_store.py")
 # Executables whose recorded bytes changed while their content-keyed source
 # key did not, as the reuse replay measured them (reuse_policy_replay.py
 # key-blind). The list only grows: an entry always runs until the mechanism
 # behind it is keyed and the entry is removed by hand.
 KEY_BLIND_LIST = HERE / "key_blind_executables.json"
-SCRIPT_INPUTS_PATH = "test/ctest_script_inputs.json"
+SCRIPT_INPUTS_PATH = script_inputs_store.FRAGMENT_DIR.as_posix()
 CONTENT_KEYED_SCHEMA = "pulp-codemodel-digest/v2"
 # Files that pin third-party dependencies. A bump can change a dependency's
 # content without changing any path the codemodel digests or any archive a
@@ -529,8 +532,10 @@ def compute(source_root: Path, base_sha: str, head_sha: str, record: dict | None
             and object_deps.unusable(record.get("deps")) is None:
         sets = InputSets(record["links"], record["deps"])
         shared_loaders = link_members.shared_scope(record["links"])
-    script_list = show(source_root, head_sha, SCRIPT_INPUTS_PATH)
-    script_doc = json.loads(script_list) if script_list else None
+    try:
+        script_doc = script_inputs_store.load_ref(source_root, head_sha)
+    except script_inputs_store.StoreError:
+        script_doc = None
     data_scan, spawn_scan = spawn_scan_of(script_doc, "data"), spawn_scan_of(script_doc)
     spawns = SpawnIndex(head_targets)
     regs = registrations(ctest, build_dir)

@@ -1,0 +1,12 @@
+{
+ "name": "test-shared-objects-selftest",
+ "record": {
+  "entry": "tools/scripts/test_shared_test_objects_check.py",
+  "inputs": [
+   "test/harness/rt_allocation_probe.cpp",
+   "tools/scripts/shared_test_objects_check.py",
+   "tools/scripts/test_shared_test_objects_check.py"
+  ],
+  "kind": "python"
+ }
+}

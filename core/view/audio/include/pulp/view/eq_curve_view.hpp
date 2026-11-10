@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <pulp/signal/biquad.hpp>
+#include <pulp/signal/spectrum_bin_mapping.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/animation.hpp>
 #include <pulp/view/graph_scale.hpp>
@@ -343,6 +344,7 @@ class EqCurveView : public View {
     // allocation across frames instead of allocating on every repaint.
     mutable std::vector<float> curve_db_;
     mutable std::vector<float> spectrum_db_;
+    mutable signal::SpectrumBinMapping spectrum_mapping_;
     mutable std::vector<float> band_db_;
     mutable std::vector<canvas::Canvas::Point2D> fill_poly_;
 

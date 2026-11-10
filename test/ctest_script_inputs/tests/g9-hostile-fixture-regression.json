@@ -1,0 +1,11 @@
+{
+ "name": "g9-hostile-fixture-regression",
+ "record": {
+  "entry": "tools/validation/test_g9_hostile_fixture.py",
+  "inputs": [
+   "tools/validation/g9_hostile_fixture.py",
+   "tools/validation/test_g9_hostile_fixture.py"
+  ],
+  "kind": "python"
+ }
+}

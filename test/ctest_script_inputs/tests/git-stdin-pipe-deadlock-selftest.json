@@ -1,0 +1,10 @@
+{
+ "name": "git-stdin-pipe-deadlock-selftest",
+ "record": {
+  "entry": "tools/scripts/test_git_stdin_pipe_deadlock.py",
+  "inputs": [
+   "tools/scripts/test_git_stdin_pipe_deadlock.py"
+  ],
+  "kind": "python"
+ }
+}

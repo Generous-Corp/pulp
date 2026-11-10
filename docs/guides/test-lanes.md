@@ -115,7 +115,18 @@ Routing is driven entirely by CTest `LABELS`, set in each test's
   non-native tier's manifest, classifier or any `test/` CMake registration adds
   `wide-non-native-selftest`. Extra time is capped at ten minutes (batches stop
   starting; the rest are listed as skipped), and the merge group still runs
+  everything. Once the head is approved, `deferred-tests-admission.yml` re-runs
+  its `macos` job to run the skipped tests on the head before admission
+  (`PULP_DEFERRED_ADMISSION=enforce`; shadow when unset).
   everything.
+- **The clean-merge lane** — a pull-request head that is exactly a clean
+  merge of `main` into a head whose full macOS lane passed runs only configure,
+  `pr-fast` (minus `needs-build`) and `pr-guard`: no build, no tests the pull
+  request reaches. Its tier notice says `clean-merge`. The merge group still
+  builds and runs the full suite on the commit that lands. It ships in shadow
+  (`PULP_CLEAN_MERGE_LANE_MODE`); the trigger, the fail-closed rule and the
+  enforcement window are in the local CI guide, "A clean merge of main takes
+  the contract lane", and decisions contract row 31.
 - **`pr-fast`** — additive, never exclusive: a static repository contract
   (lint, drift, registry-completeness, generated-manifest check) that also runs
   on the pull request head, where the rest of the suite does not. Members are
@@ -132,6 +143,15 @@ Routing is driven entirely by CTest `LABELS`, set in each test's
   current `main`): it also runs the full suite, non-gating, to issue the
   receipt a merge group of that one pull request can reuse (see the local CI
   guide, "Exact PR receipts on an unchanged merge-group candidate").
+- **`pr-fast-configure`** — a subset of `pr-fast`: the generated-manifest
+  drift checks that fail most pull-request heads (`script-test-inputs-drift`,
+  the consumption-census drift checks, `agent-capability-manifest-check`).
+  They read only the checkout and the configure, so the PR-head macOS leg runs
+  them between `Configure` and `Build` and a stale manifest fails before the
+  build, about nine minutes sooner at the median; the post-build `pr-fast` run
+  leaves them out when that step passed. A member must read nothing a build
+  produces and must never also carry `needs-build`; `pr-fast-tier-contract`
+  enforces both. It changes nothing on `merge_group` or push.
 - **`source-selftest`** — applied from `tools/ci/source_selftests.json`, never by
   hand: a Python registration that reads only the checkout. **Excluded from the
   required `macos` gate on gate events** and run instead by the build-free
@@ -152,7 +172,7 @@ Routing is driven entirely by CTest `LABELS`, set in each test's
   `commit-bound-labels-selftest` fails such a registration of a literally
   named bound executable that lacks the label.
 - **`gate-inventory`** — a check that compares a manifest generated from the
-  gate configure (`test/ctest_script_inputs.json`, the changed-surface
+  gate configure (`test/ctest_script_inputs/`, the changed-surface
   families, the consumption census, `tools/ci/source_selftests.json`) against
   the configured build's own ctest inventory. It runs on the required gate as
   normal. The sanitizer lanes exclude it, because a sanitizer configure
@@ -243,7 +263,13 @@ that read bytes a host, a downloaded pack or a dropped file hands the SDK:
 - **Deterministic replay** (ctest label `fuzz`, plain Catch2, every platform):
   `pulp-test-timeline-document-fuzz` and `pulp-test-control-protocol-fuzz`
   replay a seeded mutation corpus through oracles shared with the libFuzzer
-  targets. Runs on every PR that touches its parse surface and on the nightly.
+  targets, and `pulp-test-audio-decoder-corpus` replays the committed
+  audio-decoder seeds (CoreAudio extensions included on Apple) through the
+  oracle `pulp-fuzz-audio-decoder` shares: info and decode agree on rate,
+  channels and frames, where a declared frame count that the stream does not
+  deliver is a refusal and an undeclared length (info reports 0) is decoded
+  under the limits. Runs on every PR that touches its parse surface and on
+  the nightly.
 - **Coverage-guided** (libFuzzer + ASan, `PULP_ENABLE_FUZZING=ON`, Linux,
   nightly and `workflow_dispatch` only): one target per parser, each with a
   seed corpus and a bounded `<target>-smoke` ctest (labels `fuzz;libfuzzer`)
@@ -258,11 +284,15 @@ that read bytes a host, a downloaded pack or a dropped file hands the SDK:
 | `pulp-fuzz-svg` | `VectorScene::from_svg_string` (nanosvg plus scene lowering) | `test/fixtures/fuzz/svg/` | `core_runtime_canvas_signal_tests.cmake` |
 | `pulp-fuzz-smf` | Standard MIDI File import, strict and lenient policies | `test/fixtures/fuzz/smf/` | `timeline_tests.cmake` |
 | `pulp-fuzz-content-manifest` | Content-pack manifest via the install preview, sample-bank manifest, plugin capability manifest | `test/fixtures/fuzz/content-manifest/` | `content_workflow_tests.cmake` |
-| `pulp-fuzz-format-registry` | Every registered audio container reader under `DecodeLimits` | none (the input is the file) | `core_audio_platform_format_tests.cmake` |
+| `pulp-fuzz-audio-decoder` | WAV, AIFF, FLAC, MP3 and Ogg Vorbis readers under `DecodeLimits`; CoreAudio covered by the deterministic replay | `test/fixtures/fuzz/audio-decoder/` | `core_audio_platform_format_tests.cmake` |
 
-None of the coverage-guided targets runs on the required `macos` gate: Apple's
-clang ships no libFuzzer runtime, so the gate never configures with
-`PULP_ENABLE_FUZZING`, and the libfuzzer job skips `pull_request`.
+None of the coverage-guided targets runs on the required `macos` gate: the
+gate never configures with `PULP_ENABLE_FUZZING`, and the libfuzzer job skips
+`pull_request`. A macOS host can still build and run the lane by pointing
+`-DPULP_FUZZ_RUNTIME_ARCHIVE` at Homebrew LLVM's `libclang_rt.fuzzer_osx.a`
+(see `docs/guides/build.md`). Under `PULP_ENABLE_FUZZING` the whole tree is
+instrumented, not only the entry file, which is what lets a target's coverage
+and ASan reach the parser behind it.
 `PULP_FUZZ_SANITIZERS` (default `fuzzer,address`) is the `-fsanitize` list the
 targets build with; a host whose ASan runtime cannot start sets it to `fuzzer`. The ctest
 smokes exist so a fuzzing build has a cheap, named proof that every target
@@ -270,6 +300,10 @@ links and loads its seeds. Adding a target: `pulp_add_libfuzzer_target()` in
 the owning manifest, then both lists in the workflow's `libfuzzer` job. The
 `ci` skill carries the crash-plant recipe that proves a new target reaches its
 parser.
+`pulp-fuzz-audio-decoder` writes each input to a scratch file under
+`$TMPDIR/pulp-audio-decoder-fuzz-<pid>/`; the oracle path removes that directory
+before it aborts, but a sanitizer abort inside a third-party reader cannot, so
+one may be left behind after such a finding.
 
 ## The source-selftest lane
 

@@ -893,6 +893,11 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME pr-head-affected-tests-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_pr_head_affected_tests.py")
         set_tests_properties(pr-head-affected-tests-selftest PROPERTIES TIMEOUT 120)
+        # An approved head's deferred affected tests run on the head before
+        # the merge queue: the re-run decision and both workflows' wiring.
+        add_test(NAME deferred-admission-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_deferred_admission.py")
+        set_tests_properties(deferred-admission-selftest PROPERTIES TIMEOUT 60)
         # The diff-scoped drift checks must carry PULP_DIFF_SCOPED in this
         # configure's inventory, or their base re-run is believed again.
         add_test(NAME pr-head-diff-scoped-registrations COMMAND ${Python3_EXECUTABLE}
@@ -1010,6 +1015,11 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_SOURCE_DIR}/tools/ci/test_build_dir_lock.py")
         set_tests_properties(checkout-location-guard-selftest build-dir-lock-selftest
             PROPERTIES TIMEOUT 120)
+        # Pass-marker detection in the Android fixture lane must survive large
+        # runner output under pipefail.
+        add_test(NAME android-fixture-marker-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_android_fixture_marker.py")
+        set_tests_properties(android-fixture-marker-selftest PROPERTIES TIMEOUT 120)
         add_test(NAME pulp-worktree-creation-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_pulp_worktree_creation.py")
         set_tests_properties(pulp-worktree-creation-selftest PROPERTIES TIMEOUT 120)
@@ -1038,6 +1048,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME dependency-pins-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_dependency_pins.py")
     set_tests_properties(dependency-pins-selftest PROPERTIES TIMEOUT 60)
+
+    # external/lilv is the unmodified upstream release: tree digests against
+    # external/lilv/vendored.json, and the checker's own failure cases.
+    add_test(NAME vendored-lilv-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/deps/test_verify_vendored_lilv.py")
+    set_tests_properties(vendored-lilv-selftest PROPERTIES TIMEOUT 60)
 
     # The selection over a key manifest: would-skip set, seeded sample, and
     # the tests and build targets left to run, as canonical bytes.
@@ -1592,7 +1608,7 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME unregistered-tests-check-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_unregistered_tests_check.py")
         # The generated script families in .shipyard/config.toml must match
-        # test/ctest_script_inputs.json and the tree. The selector is declared
+        # test/ctest_script_inputs/ and the tree. The selector is declared
         # for the macOS target only, and the script-inputs list is written
         # from the macOS configuration.
         if(APPLE)
@@ -1680,7 +1696,7 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_migration_note_guard.py")
 
     # The build-free pre-push stand-in for script-test-inputs-drift: a new
-    # script-driven add_test needs a ctest_script_inputs.json entry.
+    # script-driven add_test needs a test/ctest_script_inputs/ entry.
     add_test(NAME script-inputs-precheck-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_script_inputs_precheck.py")
 
@@ -1805,6 +1821,12 @@ if(Python3_Interpreter_FOUND)
         set_tests_properties(clean-worktree-builds-selftest PROPERTIES TIMEOUT 600)
         # Stages live processes and worktrees on the host it runs on.
         set_property(TEST clean-worktree-builds-selftest APPEND PROPERTY LABELS environment-bound)
+        # The driver-link parsers over captured ninja and CMake output; the
+        # cases that need a real generator are in confirm-failure-harness.
+        add_test(NAME confirm-failure-driver-link-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_confirm_failure_driver_link
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(confirm-failure-driver-link-selftest PROPERTIES TIMEOUT 60)
         add_test(NAME clean-worktree-planning-selftest
             COMMAND ${Python3_EXECUTABLE} -m unittest test_clean_worktree_planning
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
