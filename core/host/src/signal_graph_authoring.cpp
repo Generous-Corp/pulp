@@ -944,7 +944,7 @@ GraphResult SignalGraph::connect(const PortHandle& source, const PortHandle& des
     c.spectral = sp->kind == PortKind::Spectral;
     c.midi = sp->kind == PortKind::Midi;
     for (const auto& existing : connections_)
-        if (existing == c && existing.midi == c.midi && existing.feedback == c.feedback)
+        if (existing == c && existing.midi == c.midi)
             return {GraphResult::Code::Duplicate, dest.node, dp->index, "duplicate connection",
                     "remove the existing connection"};
     append_connection_locked_(c);

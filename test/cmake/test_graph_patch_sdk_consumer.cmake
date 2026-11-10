@@ -74,4 +74,6 @@ if(EXISTS "${PULP_BUILD_DIR}/tools/cli/pulp-cpp" AND EXISTS "${PULP_BUILD_DIR}/t
         --consumer "${_build}/graph-patch-consumer"
         --cli "${PULP_BUILD_DIR}/tools/cli/pulp-cpp"
         --mcp "${PULP_BUILD_DIR}/tools/mcp/pulp-mcp" --root "${PULP_SOURCE_DIR}")
+else()
+    message(STATUS "Graph patch API/CLI/MCP parity unavailable: build pulp-cli and pulp-mcp to run it")
 endif()

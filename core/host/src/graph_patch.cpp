@@ -310,7 +310,17 @@ std::string GraphPatchCatalog::to_json() const {
             auto list = choc::value::createEmptyArray();
             for (const auto& p : ports(g, id, output)) {
                 auto v = choc::value::createObject("Port"); v.addMember("name", p.name);
-                v.addMember("kind", p.kind == PortKind::Midi ? "midi" : "audio");
+                const char* kind = "audio";
+                switch (p.kind) {
+                case PortKind::Audio: break;
+                case PortKind::Sidechain: kind = "sidechain"; break;
+                case PortKind::Midi: kind = "midi"; break;
+                case PortKind::Event: kind = "event"; break;
+                case PortKind::Control: kind = "control"; break;
+                case PortKind::Param: kind = "parameter"; break;
+                case PortKind::Spectral: kind = "spectral"; break;
+                }
+                v.addMember("kind", kind);
                 list.addArrayElement(v);
             }
             row.addMember(output ? "outputs" : "inputs", list);
@@ -320,7 +330,15 @@ std::string GraphPatchCatalog::to_json() const {
             for (const auto& info : p->parameter_catalog()) {
                 auto v = choc::value::createObject("Parameter"); v.addMember("name", info.name);
                 v.addMember("min", double(info.range.min)); v.addMember("max", double(info.range.max));
-                v.addMember("default", double(info.range.default_value)); parameters.addArrayElement(v);
+                v.addMember("default", double(info.range.default_value));
+                v.addMember("id", static_cast<std::int64_t>(info.id));
+                v.addMember("step", double(info.range.step)); v.addMember("unit", info.unit);
+                v.addMember("read_only", state::is_read_only_param(info));
+                v.addMember("automatable", state::is_automatable_param(info));
+                v.addMember("rate", info.rate == state::ParamRate::ControlRate ? "control" : "audio");
+                auto labels = choc::value::createEmptyArray();
+                for (const auto& label : info.value_labels) labels.addArrayElement(label);
+                v.addMember("value_labels", labels); parameters.addArrayElement(v);
             }
         } else if (g.node(id)->type == NodeType::Gain) {
             auto v = choc::value::createObject("Parameter"); v.addMember("name", "gain");
