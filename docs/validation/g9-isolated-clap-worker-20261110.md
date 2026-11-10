@@ -104,3 +104,12 @@ The test-input generator also currently refuses unchanged existing
 `python3 tools/scripts/script_test_inputs.py --build-dir build --write` after
 fresh Release configure and JSX runtime npm dependencies. No inventory filtering,
 handwritten generated rows or unrelated scanner/control rewrite was used.
+
+A clean-head rerun at `53b882576306d5bfbe98bf9ab3b5d1afba86ae6c`
+passed the installed consumer (`source_git_dirty=false`) but hit the correct
+terminal deadline response at publication 974/1024 in the changing-audio
+stress with 5ms functional pacing. The other 19 cases passed. The shared m3
+host's measured load was 80.61/40.86/38.23. This failed timing observation is
+retained; the data-publication functional control now uses explicit 20ms
+slack. Neither functional pass nor that slack establishes paced realtime
+admission or a guarantee on an oversubscribed host.

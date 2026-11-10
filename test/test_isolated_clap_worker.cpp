@@ -502,8 +502,11 @@ TEST_CASE("Isolated CLAP cross-process publication wraps slots with changing aud
     std::array<float, 128> previous{};
     for (int block = 0; block < 1024; ++block) {
         buffers.fill(static_cast<float>(1 + block % 31) / 32);
+        // This checks ownership and sample identity, not a scheduling budget.
+        // Keep explicit functional slack on shared CI hosts; paced RT admission
+        // requires a separate quiet-host qualification lane.
         if (block)
-            std::this_thread::sleep_for(5ms);
+            std::this_thread::sleep_for(20ms);
         buffers.process(*result.slot);
         INFO("publication=" << block);
         REQUIRE(result.control->status().reason == IsolationReason::none);
