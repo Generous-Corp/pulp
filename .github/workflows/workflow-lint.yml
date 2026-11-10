@@ -44,6 +44,8 @@ on:
       - 'tools/scripts/test_resolve_linux_route.py'
       - 'tools/ci/macos_pr_lane.py'
       - 'tools/ci/test_macos_pr_lane.py'
+      - 'tools/ci/clean_merge_lane.py'
+      - 'tools/ci/test_clean_merge_lane.py'
       - 'tools/ci/test_macos_tier_record.py'
       - 'tools/ci/test_build_pr_dispatch.py'
       - 'tools/scripts/workflow_runner_selector_audit.py'
@@ -195,6 +197,8 @@ on:
       - 'tools/scripts/test_resolve_linux_route.py'
       - 'tools/ci/macos_pr_lane.py'
       - 'tools/ci/test_macos_pr_lane.py'
+      - 'tools/ci/clean_merge_lane.py'
+      - 'tools/ci/test_clean_merge_lane.py'
       - 'tools/ci/test_macos_tier_record.py'
       - 'tools/ci/test_build_pr_dispatch.py'
       - 'tools/scripts/workflow_runner_selector_audit.py'
@@ -557,6 +561,8 @@ jobs:
           python3 tools/scripts/test_resolve_linux_route.py
           # Which macOS lane a pull request takes, and who may approve it.
           python3 tools/ci/test_macos_pr_lane.py
+          # A clean merge of main into a full-lane-green head takes the contract lane.
+          python3 tools/ci/test_clean_merge_lane.py
           # The macos tier record Shipyard's arm guard reads, decided from job steps.
           python3 tools/ci/test_macos_tier_record.py
           # A pr_number dispatch tests the merge ref and routes Linux like a PR run.

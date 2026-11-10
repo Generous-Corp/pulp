@@ -588,7 +588,7 @@ def build_wav_seeds(corpus: Corpus) -> None:
                bytes.fromhex("72696666 2e91cf11 a5d628db 04c10000".replace(" ", ""))
                + struct.pack("<Q", 40 + len(w64_body)) + w64_wave_guid + w64_body)
 
-    # Malformed variants, each a deliberate departure from a valid base above.
+    # Malformed variants, each derived from a valid base above.
     fmt16 = fmt_payload(WAVE_FORMAT_PCM, 1, rate, 16)
     odd_data = mono16_bytes[:-1]  # 1599 bytes: odd, with one partial frame
     corpus.add("wav-odd-chunk-eof-no-pad.wav", riff(chunk(b"fmt ", fmt16) + chunk(b"data", odd_data, pad=False)))
