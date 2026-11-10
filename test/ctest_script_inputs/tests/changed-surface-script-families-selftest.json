@@ -20,6 +20,7 @@
    "tools/ci/source_selftests.json",
    "tools/ci/spawn_none_build_path_reviews.json",
    "tools/ci/wide_non_native_checks.json",
+   "tools/ci/workflow_lint_paths.txt",
    "tools/cli/cmd_run.cpp",
    "tools/cmake",
    "tools/cmake/PulpTestData.cmake",
