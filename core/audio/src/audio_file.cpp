@@ -7,6 +7,16 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <random>
+#include <string>
+#include <system_error>
+#if defined(_WIN32)
+#include <io.h>
+#include <windows.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 #include <limits>
 #include <memory>
 #include <optional>
@@ -170,16 +180,111 @@ bool write_wav_stream(std::ostream& output, const AudioFileData& data, WavBitDep
     }
 }
 
-bool write_wav_file(const std::string& path, const AudioFileData& data, WavBitDepth bit_depth) {
+namespace {
+
+// Flush a closed file's contents to stable storage. False when it cannot be
+// opened or the flush fails: a file that may not survive a power loss is not
+// published.
+bool sync_file_to_disk(const std::filesystem::path& file) {
+#if defined(_WIN32)
+    HANDLE handle = CreateFileW(file.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (handle == INVALID_HANDLE_VALUE)
+        return false;
+    const bool ok = FlushFileBuffers(handle) != 0;
+    CloseHandle(handle);
+    return ok;
+#else
+    const int fd = ::open(file.c_str(), O_RDONLY);
+    if (fd < 0)
+        return false;
+    const bool ok = ::fsync(fd) == 0;
+    ::close(fd);
+    return ok;
+#endif
+}
+
+std::filesystem::path temporary_sibling(const std::filesystem::path& target) {
+    static thread_local std::mt19937_64 rng{std::random_device{}()};
+    std::string suffix;
+    for (int i = 0; i < 12; ++i)
+        suffix.push_back("0123456789abcdef"[rng() & 0xF]);
+    auto directory = target.parent_path();
+    if (directory.empty())
+        directory = ".";
+    return directory / ("." + target.filename().string() + "." + suffix + ".tmp");
+}
+
+// Rename without replacing: link() fails if the target exists and is atomic;
+// elsewhere an existence check is the best the platform offers.
+bool publish_new(const std::filesystem::path& from, const std::filesystem::path& to) {
+    std::error_code ec;
+#if defined(_WIN32)
+    if (std::filesystem::exists(to, ec))
+        return false;
+    std::filesystem::rename(from, to, ec);
+    return !ec;
+#else
+    if (::link(from.c_str(), to.c_str()) != 0)
+        return false;
+    std::filesystem::remove(from, ec);
+    return true;
+#endif
+}
+
+} // namespace
+
+bool write_file_atomically(const std::string& path, WavReplace replace,
+                           const std::function<bool(std::ostream&)>& produce) {
+    const std::filesystem::path target(path);
+    std::error_code ec;
+    if (replace == WavReplace::FailIfExists && std::filesystem::exists(target, ec))
+        return false;
+
+    const auto temp = temporary_sibling(target);
+    bool published = false;
+    try {
+        {
+            std::ofstream output(temp, std::ios::binary | std::ios::out | std::ios::trunc);
+            if (!output)
+                return false;
+            const bool produced = produce(output);
+            output.flush();
+            const bool good = produced && output.good();
+            output.close();
+            if (!good || output.fail()) {
+                std::filesystem::remove(temp, ec);
+                return false;
+            }
+        }
+        if (!sync_file_to_disk(temp)) {
+            std::filesystem::remove(temp, ec);
+            return false;
+        }
+        if (replace == WavReplace::FailIfExists) {
+            published = publish_new(temp, target);
+        } else {
+            std::filesystem::rename(temp, target, ec);
+            published = !ec;
+        }
+    } catch (...) {
+        published = false;
+    }
+    if (!published)
+        std::filesystem::remove(temp, ec);
+    return published;
+}
+
+bool write_wav_file(const std::string& path, const AudioFileData& data, WavBitDepth bit_depth,
+                    WavReplace replace) {
     if (!can_write_wav(data))
         return false;
-    std::ofstream output(std::filesystem::path(path),
-                         std::ios::binary | std::ios::out | std::ios::trunc);
-    if (!output)
-        return false;
-    const bool written = write_wav_stream(output, data, bit_depth);
-    output.close();
-    return written && !output.fail();
+    return write_file_atomically(
+        path, replace, [&](std::ostream& out) { return write_wav_stream(out, data, bit_depth); });
+}
+
+bool write_wav_file(const std::string& path, const AudioFileData& data, WavBitDepth bit_depth) {
+    return write_wav_file(path, data, bit_depth, WavReplace::Replace);
 }
 
 bool write_wav_file(const std::string& path, const AudioFileData& data) {
