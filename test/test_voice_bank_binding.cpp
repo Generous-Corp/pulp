@@ -389,7 +389,7 @@ TEST_CASE("G6 tracker capacity refuses 129th distinct start atomically and recov
     CHECK(owner(*bank).allocator().voice(0).note_id() == 129);
     CHECK(owner(*bank).allocator().voice(0).channel() == 2);
     CHECK(owner(*bank).allocator().voice(0).note_number() == 0);
-    CHECK(resumed.channel(0)[0] == -0.125f);
+    CHECK(resumed.channel(0)[0] == -kBankGain);
 }
 
 TEST_CASE("G6 capacity preview respects retrigger and equal-sample event order",
