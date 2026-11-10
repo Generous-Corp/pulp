@@ -38,6 +38,16 @@ test it fails also fails there, main was already red and the failure is
 reported as PRE-EXISTING ON BASE instead of failing this pull request.
 Compiled tests are never exempted (their binary is this pull request's).
 
+An approved head is the exception to the budget. `--admission` (build.yml
+passes it when the head's `review-verdict` check is green) raises the budget
+to `--admission-budget-secs` and, with `--prior-summary`, drops the tests an
+earlier attempt of the same run already passed on the same tested commit, so
+the run executes exactly what that attempt deferred. The workflow
+deferred-tests-admission.yml re-runs an approved head's `macos` job when its
+budgeted attempt deferred tests, so those tests run on the head before the
+merge queue does instead of first in a merge group (tools/ci/deferred_admission.py).
+`--summary-json` writes the summary with the test lists for that workflow.
+
 Output: one `::notice title=pr-head-affected-tests::` JSON line
 (`pulp-pr-head-affected-tests/v1`) with the counts and minutes, then any
 failures. Exit 1 when a selected test failed because of this pull request, a
@@ -72,6 +82,9 @@ import cmake_registration_impact as registration_impact  # noqa: E402
 
 SCHEMA = "pulp-pr-head-affected-tests/v1"
 DEFAULT_BUDGET_SECS = 600
+# An approved head's attempt runs what the budgeted attempt deferred. Past this
+# it defers the rest to the merge queue as before, never fails for time.
+ADMISSION_BUDGET_SECS = 2400
 PR_FAST_LABEL = "pr-fast"
 
 # A diff made only of these selects nothing extra: none of them is an input to
@@ -854,6 +867,75 @@ def diff_scoped_registration_problems(tests: list[dict]) -> list[str]:
     return problems
 
 
+def resolve_sha(rev: str) -> str:
+    """The commit ``rev`` names, or "" when git cannot say."""
+    out = subprocess.run(["git", "rev-parse", "--verify", f"{rev}^{{commit}}"],
+                         cwd=REPO_ROOT, capture_output=True, text=True, encoding="utf-8",
+                         check=False)
+    return out.stdout.strip() if out.returncode == 0 else ""
+
+
+def prior_lists(path: Path, tested_sha: str) -> tuple[list[str], list[str]]:
+    """(passed, deferred) from an earlier attempt's summary on ``tested_sha``.
+
+    Only a summary of this schema that tested the same commit counts;
+    anything else (unreadable, another commit, no tested commit on either
+    side) gives nothing, so the whole selection runs.
+    """
+    try:
+        prior = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return [], []
+    if not isinstance(prior, dict) or prior.get("schema") != SCHEMA:
+        return [], []
+    if not tested_sha or prior.get("tested_sha") != tested_sha:
+        return [], []
+
+    def names(key: str) -> list[str]:
+        value = prior.get(key)
+        return [t for t in value if isinstance(t, str)] if isinstance(value, list) else []
+
+    return names("passed_tests"), names("deferred_tests") + names("merge_only_skipped_tests")
+
+
+def prior_passed(path: Path, tested_sha: str) -> list[str]:
+    """Tests an earlier attempt's summary says passed on ``tested_sha``."""
+    return prior_lists(path, tested_sha)[0]
+
+
+def admission_tests(planned: list[str], passed: list[str], deferred: list[str],
+                    names: dict[str, set[str]]) -> list[str]:
+    """What an admission attempt runs: the plan plus what was deferred, minus what passed.
+
+    The earlier attempt's deferred tests are added back even when this
+    attempt's plan lost them (a warm re-run rebuilds less, so the
+    rebuilt-executable edge selects less), as long as ctest still knows them.
+    """
+    done = set(passed)
+    out = [t for t in planned if t not in done]
+    have = set(out)
+    for test in deferred:
+        if test not in done and test not in have and (not names or test in names):
+            out.append(test)
+            have.add(test)
+    return out
+
+
+def write_summary(path: Path, summary: dict, tested_sha: str, results: dict,
+                  deferred: list[str], blocking: list[str]) -> None:
+    """The summary plus the lists deferred-tests-admission.yml reads."""
+    record = dict(summary)
+    record.update({
+        "tested_sha": tested_sha,
+        "passed_tests": sorted(results["passed"]),
+        "failed_tests": sorted(results["failed"]),
+        "deferred_tests": deferred,
+        "merge_only_skipped_tests": blocking,
+    })
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(record, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--build-dir", type=Path, required=True)
@@ -866,6 +948,15 @@ def main(argv: list[str] | None = None) -> int:
                         help="tests per batch (default: 8 per job)")
     parser.add_argument("--label-exclude", default="")
     parser.add_argument("--junit-dir", type=Path)
+    parser.add_argument("--admission", action="store_true",
+                        help="the head is approved: use --admission-budget-secs and run "
+                             "what an earlier attempt deferred")
+    parser.add_argument("--admission-budget-secs", type=float, default=ADMISSION_BUDGET_SECS)
+    parser.add_argument("--prior-summary", type=Path,
+                        help="an earlier attempt's --summary-json; with --admission, the "
+                             "tests it passed on the same tested commit are not run again")
+    parser.add_argument("--summary-json", type=Path,
+                        help="write the summary and the test lists here")
     parser.add_argument("--dry-run", action="store_true", help="print the selection only")
     parser.add_argument("--check-diff-scoped", action="store_true",
                         help="only check that the diff-scoped checks carry PULP_DIFF_SCOPED")
@@ -911,6 +1002,17 @@ def main(argv: list[str] | None = None) -> int:
         # merge queue; an unknown script must not discard known coverage.
         print("::warning title=pr-head-affected-tests::selection unknown, deferred to merge queue")
 
+    budget = args.admission_budget_secs if args.admission else args.budget_secs
+    tested_sha = resolve_sha(args.head)
+    dropped: list[str] = []
+    if args.admission and args.prior_summary:
+        dropped, earlier_deferred = prior_lists(args.prior_summary, tested_sha)
+        if dropped or earlier_deferred:
+            plan["tests"] = admission_tests(plan["tests"], dropped, earlier_deferred, names)
+            print(f"pr-head-affected-tests: admission run: {len(plan['tests'])} test(s), "
+                  f"including {len(earlier_deferred)} an earlier attempt deferred; "
+                  f"{len(dropped)} it passed on {tested_sha[:12]} are not run again", flush=True)
+
     results = {"passed": [], "failed": [], "skipped": [], "notrun": [],
                "excluded_or_absent": [],
                "seconds": 0.0}
@@ -918,7 +1020,7 @@ def main(argv: list[str] | None = None) -> int:
         junit_dir = args.junit_dir or Path(tempfile.mkdtemp(prefix="pr-head-affected-"))
         junit_dir.mkdir(parents=True, exist_ok=True)
         chunk = args.chunk or max(8 * args.jobs, 16)
-        results = run_budgeted(build, plan["tests"], args.budget_secs, args.jobs,
+        results = run_budgeted(build, plan["tests"], budget, args.jobs,
                                args.label_exclude, junit_dir, chunk)
     pre_existing: list[str] = []
     if results["failed"]:
@@ -959,9 +1061,12 @@ def main(argv: list[str] | None = None) -> int:
         "excluded_or_absent": len(results["excluded_or_absent"]),
         "required_family_excluded": len(excluded_required),
         "empty_required_families": plan.get("empty_required_families", []),
-        "minutes": round(results["seconds"] / 60, 2), "budget_minutes": args.budget_secs / 60,
+        "minutes": round(results["seconds"] / 60, 2), "budget_minutes": budget / 60,
+        "admission": bool(args.admission), "prior_passed_not_rerun": len(dropped),
     }
     print(f"::notice title=pr-head-affected-tests::{json.dumps(summary, sort_keys=True)}")
+    if args.summary_json:
+        write_summary(args.summary_json, summary, tested_sha, results, deferred, blocking)
     if blocking:
         shown = ", ".join(blocking[:40])
         more = len(blocking) - 40
