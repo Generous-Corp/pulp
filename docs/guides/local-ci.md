@@ -4544,20 +4544,15 @@ Two more `[auto_merge]` keys cut merge-queue ejections (Shipyard
 generated files that two batch-mates tend to regenerate; the steward defers a
 head that changes one while a queued entry changes the same path, so they never
 share a merge group. `known_flaky_tests` names tests whose failure alone earns
-the one same-head retry after an ejection: WaveNet GPU path (#11862),
-AsyncBlockWorker Auto mode (#11863), WakeSignal race (#11864), staged
-GpuConvolver bounded wait (#11865) and `inject-worktree-lineage-hook` (#11866).
-`ui-script-plugin-editor-au` (#11861) is deliberately absent: the evidence says
-it is a real crash. Both keys are read from the base branch only.
+the one same-head retry after an ejection. Both keys are read from the base
+branch only. The introducing change defines these keys with empty arrays so the
+trusted lane can validate the configuration surface; a follow-up populates the
+path and test data after the keys are on the trusted base.
 The steward matches each name Shipyard reads from ctest's `The following tests
 FAILED:` block, with the number and the trailing `(Failed)` or `(Timeout)`
 removed, so an entry is the registered ctest name, not a Catch2 section title.
-For example, merge-group job 127556318184 printed
-`8679 - a public WaveNet node runs its GPU path when the provider is available (Failed)`,
-which the first entry matches exactly. All five entries were checked against the
-FAILED block of a real merge-group log linked from their issues. The failure is
-excused only when every failed test in the step is listed and the same check
-passed on the head.
+The failure is excused only when every failed test in the step is listed and the
+same check passed on the head.
 
 The preamble can run from a checkout below `/Volumes/Workshop`. Inline Python
 started with `python3 -` resolves the current directory before executing its

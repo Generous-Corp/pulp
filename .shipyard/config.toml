@@ -851,32 +851,11 @@ carry_excluded_paths = [
     "**/*notariz*",
     "**/*signing*",
 ]
-# Generated files that two batch-mates regenerate. The steward defers a head
-# that changes one of these while a queued entry changes the same path, so the
-# two never share a merge group (`**` matches whole segments, `*` within one).
-# The `**` entries cover both the single-file layout and the one-file-per-entry
-# layout.
-generated_paths = [
-    "test/ctest_script_inputs.json",
-    "test/ctest_script_inputs/**",
-    "docs/status/agent-capability-surface.json",
-    "docs/status/agent-capability-surface/**",
-    "tools/scripts/agent_capability_manifest.py",
-    "tools/scripts/agent_capability_catalog_*.py",
-    "tools/agent-capabilities/contract-history.json",
-    "tools/agent-capabilities/history/**",
-    "tools/agent-capabilities/fingerprints/**",
-    "docs/status/consumption-profiles.json",
-]
-# Tests whose failure alone earns the one same-head retry after an ejection.
-# Only tests with a recorded pass-on-retry history belong here.
-known_flaky_tests = [
-    "a public WaveNet node runs its GPU path when the provider is available",
-    "AsyncBlockWorker: a fast pull without an offline flag waits in Auto mode",
-    "WakeSignal: racing publish and park never lose a wakeup",
-    "Staged GpuConvolver with a one-block lead decides each block with a bounded wait",
-    "inject-worktree-lineage-hook",
-]
+# Generated paths and known-flaky test names are populated only after this
+# configuration surface has landed on the trusted base branch. Keeping the
+# introducing change empty lets the trusted lane validate the keys first.
+generated_paths = []
+known_flaky_tests = []
 
 [base_health]
 # `shipyard base-health --act` records "would jump PR #n" once per poisoned
