@@ -1349,20 +1349,10 @@ bool SignalGraph::PreparedTopologyEdit::reject_baseline_processor_aliases_locked
     for (auto& [id, processor] : candidate_->processor_nodes_) {
         if (!processor || !processor->instance)
             continue;
-        const auto aliases = [&](const auto& baseline) {
-            return std::any_of(baseline.begin(), baseline.end(), [&](const auto& entry) {
-                return entry.second && entry.second->instance == processor->instance &&
-                       entry.second.get() != processor.get();
-            });
-        };
-        if (aliases(owner_->processor_nodes_) ||
-            (base_live_ && aliases(base_live_->processors))) {
-            // Re-adding a removed instance creates a second release-owning token.
-            // Disarm that token before refusal (or abandoned-edit destruction):
-            // the baseline snapshot still owns the processor's live lifecycle.
-            processor->instance.reset();
+        // Token construction reserves ownership atomically across all graphs,
+        // including generations pinned beyond this edit's captured baseline.
+        if (!processor->owns_lifecycle())
             rejected = true;
-        }
     }
     return rejected;
 }

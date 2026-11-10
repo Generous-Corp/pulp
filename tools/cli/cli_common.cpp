@@ -1005,7 +1005,9 @@ int watch_loop(const WatchOptions& opts) {
 
     auto previous = snapshot_timestamps(opts.root);
 
-    // Launch the target process if requested
+    // Own the exact launched process group. Destruction cancels and joins it
+    // on bounded return or an exception, as well as during an explicit relaunch.
+    pulp::platform::ChildProcess launched_child;
     auto launch_child = [&]() {
         if (opts.launch_target.empty()) return;
         auto binary = fs::path(opts.launch_target);
@@ -1015,23 +1017,17 @@ int watch_loop(const WatchOptions& opts) {
                       << binary.string() << color::reset() << "\n";
             return;
         }
-        std::string cmd = shell_quote(binary);
-        for (auto& arg : opts.launch_args) cmd += " " + shell_quote(arg);
-        cmd += " &";
         std::cout << "  " << color::dim() << "Launching "
                   << binary.filename().string() << "..." << color::reset() << "\n";
-        run(cmd);
+        pulp::platform::ProcessOptions options;
+        options.capture_stdout = false;
+        options.capture_stderr = false;
+        options.working_directory = opts.root.string();
+        if (!launched_child.start(binary.string(), opts.launch_args, options))
+            std::cerr << "  Could not launch " << binary.string() << "\n";
     };
 
-    auto kill_child = [&]() {
-        if (opts.launch_target.empty()) return;
-        auto binary_name = fs::path(opts.launch_target).filename().string();
-#ifdef _WIN32
-        run("taskkill /F /IM " + shell_quote(binary_name) + " 2>nul");
-#else
-        run("pkill -f " + shell_quote(binary_name) + " 2>/dev/null");
-#endif
-    };
+    auto kill_child = [&]() { launched_child.cancel(); };
 
     launch_child();
     unsigned graph_polls = 0;

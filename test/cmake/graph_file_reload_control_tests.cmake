@@ -38,6 +38,11 @@ if(PULP_ENABLE_INSPECTOR AND APPLE AND NOT IOS AND NOT PULP_IOS AND
         pulp-control-graph_file_reload-graph-product-fixture pulp-cli pulp-mcp)
     set_target_properties(pulp-test-control-graph_file_reload-graph-product-e2e PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test/graph_file_reload-control")
+    # Refresh relocatable copies whenever any production subject changes, even
+    # when the driver's own object files remain current.
+    set_property(TARGET pulp-test-control-graph_file_reload-graph-product-e2e APPEND PROPERTY
+        LINK_DEPENDS "$<TARGET_FILE:pulp-cli>" "$<TARGET_FILE:pulp-mcp>"
+                     "$<TARGET_FILE:pulp-control-graph_file_reload-graph-product-fixture>")
     add_custom_command(TARGET pulp-test-control-graph_file_reload-graph-product-e2e POST_BUILD
         COMMAND "${_pulp_graph_file_reload_codesign}" --force --sign -
                 "$<TARGET_FILE:pulp-test-control-graph_file_reload-graph-product-e2e>"

@@ -5,6 +5,8 @@
 #include <pulp/runtime/crypto.hpp>
 
 #include <array>
+#include <csignal>
+#include <cerrno>
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
@@ -179,6 +181,10 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
     const std::string patch = "# flow 1\nin : pulp/audio_in\ngain : pulp/gain\nout : pulp/audio_out\n"
                               "in.audio >> gain.audio\ngain.audio >> out.audio\ngain.gain = 0.75\n";
     { std::ofstream save(file); save << patch; }
+    const auto child_script = project / "build" / "owned_child.py";
+    const auto child_pid_file = project / "build" / "owned_child.pid";
+    { std::ofstream script(child_script);
+      script << "import os, sys, time\nwith open(sys.argv[1], 'w') as f: f.write(str(os.getpid()))\ntime.sleep(120)\n"; }
     std::string state_before_revocation;
     const auto watch = [&](const char* command, std::uint64_t generation,
                            bool acquire = true, std::string watch_grant = {},
@@ -190,6 +196,18 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
         options.timeout_ms = 210000;
         bool ready = false, lease_acquired = !acquire;
         bool publication_seen = false, owner_revoked = false;
+        std::filesystem::remove(child_pid_file);
+        int child_pid = -1;
+        bool child_observed_alive = false;
+        const auto observe_child = [&] {
+            std::ifstream pid_stream(child_pid_file);
+            int observed = -1;
+            if (pid_stream >> observed && observed > 0) {
+                child_pid = observed;
+                child_observed_alive |= ::kill(child_pid, 0) == 0;
+            }
+        };
+        options.on_stderr_line = [&](std::string_view) { observe_child(); };
         options.on_stdout_line = [&](std::string_view line) {
             if (line.starts_with("Dev loop active")) {
                 ready = true;
@@ -200,6 +218,7 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
                     lease_acquired = acquired.exit_code == 0;
                 }
             }
+            observe_child();
             if (revoke_after_publication && !publication_seen &&
                 line.find("committed") != std::string_view::npos) {
                 publication_seen = true;
@@ -233,12 +252,19 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
             {"PULP_BUILD_JOBS=2", "TMPDIR=" + root.runtime.string(), "PULP_HOME=" + (project / "pulp-home").string(), cli.string(), command, "--target", "proof",
              "--no-dev-shared", "--graph-file", file.string(), "--graph-instance", instance,
              "--graph-grant", watch_grant, "--graph-generation", std::to_string(generation),
-             "--graph-watch-polls", "12"}, options);
+             "--graph-watch-polls", "12", "--run", "/usr/bin/python3", "--",
+             child_script.string(), child_pid_file.string()}, options);
+        observe_child();
+        const bool child_terminated = child_pid > 0 && ::kill(child_pid, 0) != 0 && errno == ESRCH;
+        // Keep a planted cleanup failure from leaving a test-owned sleeper.
+        if (child_pid > 0 && !child_terminated) (void)::kill(child_pid, SIGTERM);
         INFO(result.stdout_output);
         INFO(result.stderr_output);
         INFO("watch exit=" << result.exit_code << " timed_out=" << result.timed_out);
         REQUIRE(ready);
         REQUIRE(lease_acquired);
+        REQUIRE(child_observed_alive);
+        REQUIRE(child_terminated);
         if (revoke_after_publication) {
             REQUIRE(publication_seen);
             REQUIRE(owner_revoked);

@@ -181,7 +181,7 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
     {'include': 'pulp/host/signal_graph_control.hpp', 'fingerprint': 'sha256:0627710156baec552e79fd4b3ac8d374938201ea6959444a76c12b9e6372b708', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Product graph authority over existing typed edits and strict graph-file reload; no independent executor or DSP capability.'},
-    {'include': 'pulp/host/graph_file_reload.hpp', 'fingerprint': 'sha256:70e9f97f9004dd9ff0a0a6ee18ef0f5609b88d0e19922b360e25fd5752ae3a8e', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Strict catalog-derived graph-file preparation and existing transactional publication; bounded profile with explicit refusals, no alternate executor.'},
+    {'include': 'pulp/host/graph_file_reload.hpp', 'fingerprint': 'sha256:36db07b3da36b4c0c0ce70a7491b979dc5b7ab4d0b8ec0479aad3455cbc90d37', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Strict catalog-derived graph-file preparation and existing transactional publication; bounded profile with explicit refusals, no alternate executor.'},
     {'include': 'pulp/host/graph_patch.hpp', 'fingerprint': 'sha256:017cd6e433918b371a9d37b48698bf392fc3d8879fff19eff7f0572bff82f368', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Control-thread catalog-derived graph notation and strict diagnostics transport over existing SignalGraph and restore contracts; bounded profile, not a DSP algorithm or full G2 completion.'},
     {
         "include": "pulp/signal/spectrum_analyzer.hpp",

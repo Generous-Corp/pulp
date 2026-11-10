@@ -1276,8 +1276,19 @@ class SignalGraph : public format::AudioWorkgroupClient {
             std::shared_ptr<format::ProcessorNodeInstance> value) noexcept;
 
         ~ProcessorNodeLifetime();
+        ProcessorNodeLifetime(const ProcessorNodeLifetime&) = delete;
+        ProcessorNodeLifetime& operator=(const ProcessorNodeLifetime&) = delete;
+        ProcessorNodeLifetime(ProcessorNodeLifetime&&) = delete;
+        ProcessorNodeLifetime& operator=(ProcessorNodeLifetime&&) = delete;
 
         std::shared_ptr<format::ProcessorNodeInstance> instance;
+        bool owns_lifecycle() const noexcept { return owns_lifecycle_; }
+
+      private:
+        struct Registry;
+        static Registry& registry_();
+        ProcessorNodeLifetime* next_ = nullptr;
+        bool owns_lifecycle_ = false;
     };
 
     struct CompiledGraph {

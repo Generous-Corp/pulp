@@ -17,11 +17,15 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <new>
+#include <type_traits>
+#include <cstddef>
 #include <pulp/format/processor.hpp>
 #include <pulp/host/anticipation_eligibility.hpp>
 #include <pulp/host/anticipation_partition.hpp>
 #include <pulp/host/anticipation_subgraph.hpp>
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 #include <pulp/host/signal_graph_execution_snapshot.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
 #include <pulp/runtime/log.hpp>
@@ -33,13 +37,50 @@
 
 namespace pulp::host {
 
+struct SignalGraph::ProcessorNodeLifetime::Registry {
+    std::mutex mutex;
+    ProcessorNodeLifetime* head = nullptr;
+};
+
+SignalGraph::ProcessorNodeLifetime::Registry& SignalGraph::ProcessorNodeLifetime::registry_() {
+    static_assert(!std::is_copy_constructible_v<ProcessorNodeLifetime>);
+    static_assert(!std::is_copy_assignable_v<ProcessorNodeLifetime>);
+    static_assert(!std::is_move_constructible_v<ProcessorNodeLifetime>);
+    static_assert(!std::is_move_assignable_v<ProcessorNodeLifetime>);
+    // Process lifetime: tokens may retire during another static's destruction.
+    // In-place storage has no teardown and never allocates a registry entry.
+    alignas(Registry) static std::byte storage[sizeof(Registry)];
+    static auto* registry = ::new (static_cast<void*>(storage)) Registry;
+    return *registry;
+}
+
 SignalGraph::ProcessorNodeLifetime::ProcessorNodeLifetime(
     std::shared_ptr<format::ProcessorNodeInstance> value) noexcept
-    : instance(std::move(value)) {}
+    : instance(std::move(value)) {
+    auto& registry = registry_();
+    std::lock_guard lock(registry.mutex);
+    for (auto* token = registry.head; token; token = token->next_)
+        if (token->instance == instance)
+            return;
+    owns_lifecycle_ = bool(instance);
+    if (owns_lifecycle_) {
+        next_ = registry.head;
+        registry.head = this;
+    }
+}
 
 SignalGraph::ProcessorNodeLifetime::~ProcessorNodeLifetime() {
-    if (instance)
-        (void)instance->release();
+    if (!owns_lifecycle_)
+        return;
+    // Keep the reservation visible while user release runs, without holding a
+    // framework mutex across user code. Another graph cannot prepare it yet.
+    (void)instance->release();
+    auto& registry = registry_();
+    std::lock_guard lock(registry.mutex);
+    auto** token = &registry.head;
+    while (*token != this)
+        token = &(*token)->next_;
+    *token = next_;
 }
 
 bool SampleKernelDescriptor::is_valid_registration() const noexcept {
@@ -497,6 +538,29 @@ bool SignalGraph::ParameterBlockSnapshot::append_to(
         copied_all = dst.push(events[i]) && copied_all;
     }
     return copied_all;
+}
+
+bool SignalGraph::PreparedTopologyEdit::reuse_or_register_custom_node_type_(
+    const CustomNodeType& type) {
+    if (mutation_failed_ || committed_ || prepare_attempted_)
+        return false;
+    GraphMutationLock lock(*candidate_);
+    const auto* existing = candidate_->custom_node_type(type.type_id, type.version);
+    if (existing) {
+        const bool compatible = custom_types_equal_for_idempotency(*existing, type) &&
+            same_function(existing->intentional_delay_samples, type.intentional_delay_samples) &&
+            same_function(existing->output_port_latency_samples, type.output_port_latency_samples) &&
+            existing->rt_contract.declared == type.rt_contract.declared &&
+            existing->rt_contract.safety_class == type.rt_contract.safety_class &&
+            existing->rt_contract.allocation_free == type.rt_contract.allocation_free &&
+            existing->rt_contract.loop_bound == type.rt_contract.loop_bound &&
+            same_function(existing->rt_contract.worst_case_work, type.rt_contract.worst_case_work);
+        if (!compatible)
+            mutation_failed_ = true;
+        return compatible;
+    }
+    lock.unlock();
+    return register_custom_node_type(type);
 }
 
 bool SignalGraph::register_custom_node_type(CustomNodeType type) {

@@ -46,6 +46,7 @@ struct GraphFileReloadResult {
 
 /// Control-thread whole-file replacement through the existing prepared edit.
 /// Parsing, state restoration and preparation cannot change the live graph.
+/// Both formats refuse input larger than 1 MiB before candidate construction.
 /// Commit uses the graph's existing publication boundary and stale-base guard.
 /// Authored values replace prior values; opaque/unrepresentable contracts are
 /// refused. This does not migrate unsaved DSP history between new instances.

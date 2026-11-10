@@ -29,7 +29,8 @@ Each 500 ms poll reads bounded bytes. Two consecutive identical reads coalesce a
 save; content changes are detected even with unchanged size and modification
 time. An unchanged document is attempted once. Correcting a rejected document
 with different contents retries it. `--graph-watch-polls N` exits after 1..120
-polls for bounded automation. Source changes continue through the normal governed
+polls for bounded automation and terminates and joins its own `--run` child process
+group before returning. Source changes continue through the normal governed
 build/test/relaunch path; graph file changes use the control request path.
 
 The operation `dev.pulp.graph/file.reload@1` uses the shared strict notation or
@@ -38,8 +39,9 @@ representation, builds an off-side candidate with named typed mutations, prepare
 it, and publishes with `PreparedTopologyEdit::commit`. The next audio block uses
 the new snapshot. Preparation and failure leave the previous live graph intact.
 The broker retains its 512 KiB serialized request bound, including JSON escaping;
-local file reads and parser input are separately bounded at 1 MiB. Oversize
-requests are refused before submission. Admission, grants, leases, deadlines and
+local file reads and the public transaction input are separately bounded at
+1 MiB for both formats. Oversize public input is refused before a candidate edit
+is constructed; oversize broker requests are refused before submission. Admission, grants, leases, deadlines and
 main-thread fencing remain enforced by the existing control client and host.
 The watch renews the existing controller lease every four polls using the supplied
 grant; it never acquires a lease automatically. If initial building outlasts the
@@ -57,7 +59,13 @@ states which the catalog cannot represent are refused explicitly. Authored
 parameters replace prior values; unsaved DSP history is not migrated into fresh
 Processor instances. Pinned old execution snapshots retain their old Processor
 lifetimes until control-thread retirement. Readding a baseline instance is refused
-before creating a second lifecycle token. This profile does not qualify arbitrary
+before creating a second lifecycle token, including instances in older retained
+generations or another graph. Reservations last through completion of release.
+Stateless Custom reload can reuse an existing registration when all callbacks are
+empty or identical raw function pointers and the existing compatibility check
+accepts its metadata. Same-key changed callbacks, shapes and opaque captured
+callbacks refuse explicitly, including captured callbacks from the same catalog.
+This profile does not qualify arbitrary
 node/state contracts or constitute full G2 completion.
 
 The public consumer under `examples/graph-file-reload-consumer` uses only installed

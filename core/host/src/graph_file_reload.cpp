@@ -64,6 +64,11 @@ GraphFileReloadResult GraphFileReloadTransaction::prepare(
     if (attempted_)
         return {.code = Code::InvalidMutation};
     attempted_ = true;
+    if (text.size() > 1024u * 1024u)
+        return {.code = Code::InvalidDocument,
+                .diagnostic = {.code = GraphPatchDiagnostic::Code::ResourceLimit,
+                               .rule = "graph file exceeds 1 MiB",
+                               .suggested_fix = "reduce the graph file to 1 MiB or less"}};
     edit_ = graph_.begin_prepared_topology_edit();
     if (!edit_)
         return {.code = Code::PrepareFailed};
@@ -115,8 +120,13 @@ GraphFileReloadResult GraphFileReloadTransaction::prepare(
                 if (!type)
                     return {.code = Code::UnsupportedContract};
                 const auto key = type->type_id + "@" + std::to_string(type->version);
-                if (registered.insert(key).second && !edit_->register_custom_node_type(*type))
-                    return {.code = Code::InvalidMutation};
+                if (registered.insert(key).second &&
+                    !edit_->reuse_or_register_custom_node_type_(*type))
+                    return {.code = Code::UnsupportedContract,
+                            .diagnostic = {.code = GraphPatchDiagnostic::Code::UnsupportedContract,
+                                .node = node.name,
+                                .rule = "Custom registration differs or callback identity is opaque",
+                                .suggested_fix = "use the same raw callbacks or a new type/version"}};
                 id = edit_->add_custom_node(node.custom_type_id, node.custom_type_version, node.name);
                 break;
             }
