@@ -206,6 +206,18 @@ void run_hosted_format(const char* path, PluginFormat format) {
     const auto restored = render_hosted(*fixture, input);
     require_equal_buffer(baseline, restored);
 
+    // Host-side bypass is a reversible live edit.  The PluginSlot contract
+    // guarantees an unchanged input while bypassed, independent of whether
+    // the format exposes a native bypass parameter/property.
+    live_slot->set_bypass(true);
+    REQUIRE(live_slot->is_bypassed());
+    const auto bypassed = render_hosted(*fixture, input);
+    require_equal_buffer(input, bypassed);
+    live_slot->set_bypass(false);
+    REQUIRE_FALSE(live_slot->is_bypassed());
+    const auto unbypassed = render_hosted(*fixture, input);
+    require_equal_buffer(baseline, unbypassed);
+
     auto offline_fixture = make_hosted_instrument(info);
     pulp::host::OfflineSignalGraphHost offline(offline_fixture->graph);
     pulp::host::OfflineSignalGraphConfig config;
@@ -225,6 +237,16 @@ void run_hosted_format(const char* path, PluginFormat format) {
 pulp::midi::MidiBuffer chord() {
     pulp::midi::MidiBuffer events;
     for (const auto note : {uint8_t{60}, uint8_t{64}, uint8_t{67}}) {
+        auto event = pulp::midi::MidiEvent::note_on(0, note, 110);
+        event.sample_offset = 0;
+        events.add(event);
+    }
+    return events;
+}
+
+pulp::midi::MidiBuffer four_voice_chord() {
+    pulp::midi::MidiBuffer events;
+    for (const auto note : {uint8_t{60}, uint8_t{64}, uint8_t{67}, uint8_t{72}}) {
         auto event = pulp::midi::MidiEvent::note_on(0, note, 110);
         event.sample_offset = 0;
         events.add(event);
@@ -391,6 +413,7 @@ TEST_CASE("X9 public APIs compose a modular instrument through a live graph",
     auto rejected = fixture.graph.begin_prepared_topology_edit();
     REQUIRE(rejected);
     REQUIRE_FALSE(rejected->connect(fixture.synth_node, 0, 999'999, 0));
+    REQUIRE_FALSE(rejected->remove_node(999'999));
     REQUIRE(rejected->prepare(kSampleRate, kBlockSize) ==
             SignalGraph::PreparedTopologyEdit::Result::InvalidMutation);
     REQUIRE(rejected->commit() == SignalGraph::PreparedTopologyEdit::Result::NotPrepared);
@@ -400,6 +423,27 @@ TEST_CASE("X9 public APIs compose a modular instrument through a live graph",
     auto edited_output_view = edited_output.view();
     fixture.graph.process(edited_output_view, input_view, kBlockSize);
     REQUIRE(rms(edited_output) > 1.0e-5f);
+
+    // Removal is the inverse live topology operation.  Remove both inserted
+    // effect stages, reconnect the original synth outputs, and require a
+    // prepared commit plus a finite, audible result from the restored route.
+    const auto pre_removal_snapshot = fixture.graph.live_snapshot_handle();
+    auto removal = fixture.graph.begin_prepared_topology_edit();
+    REQUIRE(removal);
+    REQUIRE(removal->remove_node(left_gain));
+    REQUIRE(removal->remove_node(right_gain));
+    REQUIRE(removal->connect(fixture.synth_node, 0, fixture.output, 0));
+    REQUIRE(removal->connect(fixture.synth_node, 1, fixture.output, 1));
+    REQUIRE(removal->prepare(kSampleRate, kBlockSize) ==
+            SignalGraph::PreparedTopologyEdit::Result::Prepared);
+    REQUIRE(removal->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
+    REQUIRE(fixture.graph.live_snapshot_handle() != pre_removal_snapshot);
+    REQUIRE(fixture.graph.nodes().size() == 4);
+    Buffer<float> removed_output(2, kBlockSize);
+    auto removed_output_view = removed_output.view();
+    fixture.graph.process(removed_output_view, input_view, kBlockSize);
+    REQUIRE(rms(removed_output) > 1.0e-5f);
+    require_finite_and_different(edited_output, removed_output);
 
     // OfflineSignalGraphHost exercises the same authored graph and receives a
     // MIDI publication before its first deterministic render block.
@@ -425,7 +469,7 @@ TEST_CASE("X9 public APIs compose a modular instrument through a live graph",
 }
 
 TEST_CASE("X9 bounded MIDI voices and modulation respond through public graph APIs",
-          "[host][graph][x9][midi][polyphony][modulation][partial]") {
+          "[host][graph][x9][midi][polyphony][modulation]") {
     // The PulpSynth Processor owns a fixed eight-voice bank. This fixture does
     // not claim G-6 graph/MPE delivery; it proves the public graph MIDI lane
     // reaches more than one note and that the authored modulation lane changes
@@ -435,10 +479,12 @@ TEST_CASE("X9 bounded MIDI voices and modulation respond through public graph AP
     configure_modular_instrument(single);
     configure_modular_instrument(chord_fixture);
     const auto one_voice = render_live_events(single, note_on(), 0.5f);
-    const auto three_voices = render_live_events(chord_fixture, chord(), 0.5f);
+    const auto four_voices_events = four_voice_chord();
+    REQUIRE(four_voices_events.size() == 4);
+    const auto four_voices = render_live_events(chord_fixture, four_voices_events, 0.5f);
     REQUIRE(rms(one_voice) > 1.0e-5f);
-    REQUIRE(rms(three_voices) > 1.0e-5f);
-    require_finite_and_different(one_voice, three_voices);
+    REQUIRE(rms(four_voices) > 1.0e-5f);
+    require_finite_and_different(one_voice, four_voices);
 
     ModularInstrument low_modulation;
     ModularInstrument high_modulation;
@@ -454,6 +500,94 @@ TEST_CASE("X9 bounded MIDI voices and modulation respond through public graph AP
     configure_modular_instrument(invalid);
     REQUIRE(invalid.graph.prepare(kSampleRate, kBlockSize));
     REQUIRE_FALSE(invalid.graph.inject_midi(invalid.output, note_on()));
+}
+
+class SidechainProbe final : public pulp::host::PluginSlot {
+public:
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override { return true; }
+    void release() override {}
+    void process(pulp::audio::BufferView<float>& output,
+                 const pulp::audio::BufferView<const float>& input,
+                 const pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::host::ParameterEventQueue&, int frames) override {
+        for (std::size_t channel = 0; channel < output.num_channels(); ++channel) {
+            const auto* main = channel < input.num_channels() ? input.channel_ptr(channel) : nullptr;
+            const auto* side = channel + 2 < input.num_channels() ?
+                input.channel_ptr(channel + 2) : nullptr;
+            for (int frame = 0; frame < frames; ++frame)
+                output.channel_ptr(channel)[frame] =
+                    (main ? main[frame] : 0.0f) + (side ? side[frame] : 0.0f);
+        }
+    }
+    std::vector<pulp::host::HostParamInfo> parameters() const override { return {}; }
+    float get_parameter(uint32_t) const override { return 0.0f; }
+    void set_parameter(uint32_t, float) override {}
+    void set_bypass(bool bypassed) override { bypassed_ = bypassed; }
+    bool is_bypassed() const override { return bypassed_; }
+    std::vector<uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<uint8_t>&) override { return false; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+    int latency_samples() const override { return 0; }
+    int tail_samples() const override { return 0; }
+
+private:
+    PluginInfo info_ = [] {
+        PluginInfo info{};
+        info.name = "X9 Sidechain Probe";
+        info.format = PluginFormat::CLAP;
+        info.num_inputs = 4;
+        info.num_outputs = 2;
+        return info;
+    }();
+    bool bypassed_ = false;
+};
+
+TEST_CASE("X9 composes parallel effects with a real sidechain edge",
+          "[host][graph][x9][sidechain][parallel][refusal]") {
+    SignalGraph graph;
+    const auto source = graph.add_input_node(4, "Main + Sidechain");
+    const auto dry = graph.add_gain_node("Parallel Dry");
+    auto probe_slot = std::make_unique<SidechainProbe>();
+    const auto probe = graph.add_plugin_node(std::move(probe_slot), 4, 2, "Sidechain Effect");
+    const auto output = graph.add_output_node(2, "Output");
+    REQUIRE(source != 0);
+    REQUIRE(dry != 0);
+    REQUIRE(probe != 0);
+    REQUIRE(output != 0);
+    REQUIRE(graph.connect(source, 0, dry, 0));
+    REQUIRE(graph.connect(source, 1, dry, 1));
+    REQUIRE(graph.connect(dry, 0, output, 0));
+    REQUIRE(graph.connect(dry, 1, output, 1));
+    REQUIRE(graph.connect(source, 0, probe, 0));
+    REQUIRE(graph.connect(source, 1, probe, 1));
+    REQUIRE(graph.connect_sidechain(source, 2, probe, 2));
+    REQUIRE(graph.connect_sidechain(source, 3, probe, 3));
+    REQUIRE(graph.connect(probe, 0, output, 0));
+    REQUIRE(graph.connect(probe, 1, output, 1));
+    REQUIRE(graph.set_node_gain(dry, 0.5f));
+    graph.set_parallel_routing_enabled(true);
+    graph.set_parallel_min_work_units(0);
+    REQUIRE(graph.prepare(kSampleRate, kBlockSize));
+
+    Buffer<float> input(4, kBlockSize);
+    for (auto& sample : input.channel(0)) sample = 0.2f;
+    for (auto& sample : input.channel(1)) sample = -0.2f;
+    for (auto& sample : input.channel(2)) sample = 0.8f;
+    for (auto& sample : input.channel(3)) sample = -0.8f;
+    Buffer<float> output_buffer(2, kBlockSize);
+    auto output_view = output_buffer.view();
+    auto input_view = std::as_const(input).view();
+    graph.process(output_view, input_view, kBlockSize);
+    for (std::size_t frame = 0; frame < kBlockSize; ++frame) {
+        REQUIRE(output_buffer.channel(0)[frame] == 1.1f);
+        REQUIRE(output_buffer.channel(1)[frame] == -1.1f);
+    }
+    REQUIRE_FALSE(graph.connect_sidechain(source, 0, dry, 0));
+    REQUIRE_FALSE(graph.connect_sidechain(source, 99, probe, 2));
 }
 
 TEST_CASE("X9 records the runtime ProcessorNode persistence boundary",
