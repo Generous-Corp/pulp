@@ -1,0 +1,87 @@
+{
+  "scope": "G11 pinned callback-boundary live retuning; full G11 PARTIAL",
+  "source_sha": "d325da30ecb79c95a915940e565203a0eee2aae4",
+  "planning_sha": "17eef26c48b4d5479db37b15973cbbfe10532d89",
+  "sdk_provenance": {
+    "schema": "pulp.sdk-provenance.v1",
+    "kind": "source-install",
+    "distribution_eligible": false,
+    "source_git_sha": "d325da30ecb79c95a915940e565203a0eee2aae4",
+    "source_git_dirty": false,
+    "bridge_exec": false,
+    "platform": "darwin-arm64",
+    "build_profile": "release"
+  },
+  "sdk_gpu": false,
+  "rates": [
+    44100,
+    48000,
+    96000
+  ],
+  "frames": 40960,
+  "boundaries": [
+    8191,
+    24577
+  ],
+  "frequencies_hz": [
+    440,
+    660,
+    442
+  ],
+  "partitions": [
+    [
+      1
+    ],
+    [
+      32
+    ],
+    [
+      64
+    ],
+    [
+      128
+    ],
+    [
+      256
+    ],
+    [
+      17,
+      127,
+      3,
+      251
+    ]
+  ],
+  "renders": 18,
+  "scala_extra_render": true,
+  "refusals_per_render": 28,
+  "partition_comparison": "bit exact per rate",
+  "max_audio_error": 1.4899876221718955e-08,
+  "audio_tolerance": 1e-06,
+  "max_phase_error_cycles": 1.02784447619797e-12,
+  "phase_tolerance_cycles": 1e-09,
+  "pitch_tolerance_hz": 0.01,
+  "ctest": {
+    "passed": 5,
+    "total": 5
+  },
+  "production_write_mutation": "CONFIRMED baseline pass / broken fail / restored pass with recompile receipts",
+  "binaries": {
+    "pulp-g11-live-retune": {
+      "size": 3433848,
+      "sha256": "8a456fe73dd36761818f63298b23f189c24fe732c2168041f51fdddb85143ad3"
+    },
+    "pulp-g11-live-retune-mutation": {
+      "size": 3434080,
+      "sha256": "ff3dbdf526efbc4d60b90826fe263442b453bc732f43c1ddd5d36b484c87ee6f"
+    }
+  },
+  "not_checked": [
+    "MTS external session master",
+    "realtime callback allocations locks I/O deadlines",
+    "concurrent control/audio racing",
+    "device capture",
+    "baked and notation serialization parity",
+    "non-Darwin consumer parity",
+    "other G11 spatial and live sampling obligations"
+  ]
+}

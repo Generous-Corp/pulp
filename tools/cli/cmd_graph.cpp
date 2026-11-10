@@ -10,8 +10,8 @@
 #include <iostream>
 #include <map>
 #include <pulp/audio/audio_file.hpp>
-#include <pulp/host/graph_rt_report.hpp>
 #include <pulp/host/graph_patch.hpp>
+#include <pulp/host/graph_rt_report.hpp>
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/offline_signal_graph_host.hpp>
 #include <pulp/host/signal_graph.hpp>
@@ -496,9 +496,17 @@ int cmd_graph(const std::vector<std::string>& args) {
         (op == "fmt" && std::find(args.begin() + 2, args.end(), "--notation") != args.end())) {
         auto strict = pulp::host::load_graph_patch_file(path);
         if (!strict) {
-            if (json)
-                std::cout << pulp::host::graph_patch_diagnostic_json(strict.diagnostic) << '\n';
-            else
+            if (json) {
+                // Keep the saved-graph JSON envelope stable.  The notation
+                // loader exposes its typed diagnostic contract, while the
+                // long-standing .pulpgraph CLI surface reports invalid input
+                // with the generic invalid_graph code.
+                if (!notation && strict.diagnostic.code ==
+                                     pulp::host::GraphPatchDiagnostic::Code::InvalidDocument)
+                    json_error("invalid_graph", strict.diagnostic.message());
+                else
+                    std::cout << pulp::host::graph_patch_diagnostic_json(strict.diagnostic) << '\n';
+            } else
                 std::cerr << "pulp graph: " << strict.diagnostic.message() << '\n';
             return 1;
         }
@@ -538,7 +546,8 @@ int cmd_graph(const std::vector<std::string>& args) {
     }
     if (op == "validate") {
         if (json) {
-            std::cout << "{\"valid\":true,\"code\":\"Ok\",\"format_version\":"
+            std::cout << "{\"valid\":true,\"code\":\"" << (notation ? "Ok" : "ok")
+                      << "\",\"format_version\":"
                       << pulp::host::GraphSerializer::current_format_version()
                       << ",\"nodes\":" << graph.nodes().size()
                       << ",\"connections\":" << graph.connections().size() << "}\n";

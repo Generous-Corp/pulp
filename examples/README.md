@@ -111,6 +111,7 @@ cmake -S examples/<dir> -B build/<dir> -DPulp_DIR=<sdk>/lib/cmake/Pulp
 | `graph-spatial-cookbook` | Fixed left and right placement of a mono signal (**SDK project**) | Configure as an SDK project, then run `pulp-graph-spatial-cookbook` |
 | `g11-tuning-cookbook` | Asking the public tuning provider for a note's frequency (**SDK project**) | Configure as an SDK project, then run `pulp-graph-tuning-cookbook` |
 | `g11-recording-publication` | Capturing graph input and atomically publishing an immutable sample (**SDK project**) | Configure as an SDK project, then run `pulp-g11-recording-publication` |
+| `g11-live-retune-consumer` | Retuning a sounding graph instrument at pinned callback boundaries (**SDK project**) | Configure as an SDK project, then run `pulp-g11-live-retune` |
 | `timeline-phase1` | Three arrangements: decoded audio, a step pattern, multitrack with automation | `pulp build --examples --target pulp-timeline-audio-player` |
 | `timeline-session` | Launch session, DAW-style project and project session, all headless | `pulp build --examples --target pulp-timeline-daw-project` |
 | `timeline-plugin-proof` | Loadable plugin that owns a timeline document and a piano roll editor | `pulp build --examples --target TimelinePluginProof_CLAP` |
