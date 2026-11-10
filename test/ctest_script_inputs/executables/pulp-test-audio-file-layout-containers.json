@@ -6,7 +6,8 @@
    "test/test_audio_file_layout_containers.cpp"
   ],
   "inputs": [
-   "test/fixtures/audio/inspect"
+   "test/fixtures/audio/inspect",
+   "test/fixtures/fuzz/audio-decoder"
   ],
   "kind": "compiled",
   "sources": [

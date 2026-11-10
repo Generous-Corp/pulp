@@ -1,0 +1,70 @@
+{
+  "id": "truncated-wav-media-refusal",
+  "title": "The playback asset pool and DAWproject import refuse a WAV whose header declares more frames than it holds",
+  "classification": "engine_internal",
+  "delivery_state": "pending",
+  "claim_id": "31bfa351-c9e2-49e9-96bf-df4d99dd4c4a",
+  "owned_paths": [
+    "core/playback/src/audio_renderer.cpp",
+    "test/test_playback_audio_renderer.cpp",
+    "test/test_timeline_dawproject_import.cpp",
+    ".agents/skills/playback/SKILL.md",
+    ".agents/skills/timeline/SKILL.md",
+    "docs/status/sequencer-exposure/rows/truncated-wav-media-refusal.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/playback/src/audio_renderer.cpp",
+      "needles": [
+        "decode_limits.refuse_truncated = true;"
+      ]
+    },
+    {
+      "path": "test/test_playback_audio_renderer.cpp",
+      "needles": [
+        "audio renderer refuses a truncated WAV asset the reader could recover"
+      ]
+    },
+    {
+      "path": "test/test_timeline_dawproject_import.cpp",
+      "needles": [
+        "SECTION(\"truncated media\")",
+        "truncated WAV"
+      ]
+    },
+    {
+      "path": ".agents/skills/playback/SKILL.md",
+      "needles": [
+        "A truncated WAV is the opposite case: the asset pool refuses it, not `audio::decode_wav`."
+      ]
+    },
+    {
+      "path": ".agents/skills/timeline/SKILL.md",
+      "needles": [
+        "it refuses a WAV the reader could only recover (`inspect_wav(...)->truncated`)"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "No header, symbol, struct layout or serialized form of the playback or timeline modules changes. DecodedAudioAssetPool::decode_wav and DAWproject import keep their signatures and error codes; they refuse one more class of input (a truncated WAV) with the InvalidAsset and InvalidValue codes they already return. The AudioFileInfo fields they read belong to the audio module."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No CLI verb, flag, handler or document shape changes; a project referencing a truncated WAV fails to load through the existing asset error path."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool definition, schema entry or handler changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No capability, operation, executor binding, grant or profile policy changes."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "docs/status/agent-capabilities.json gains no capability for this; the refusal is an input-validation rule inside existing engine entry points."
+    }
+  }
+}
