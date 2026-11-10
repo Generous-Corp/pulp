@@ -8,7 +8,8 @@ The product must expose its existing `SignalGraphControlAuthority` through
 only its existing built-in graph types. Registered Processors need the product's
 registry; the CLI cannot manufacture product implementations.
 
-Obtain an operation grant and the session control lease using the existing
+Obtain a develop grant covering file reload and session renewal, and acquire the
+session control lease using the existing
 `pulp control` consent flow. Supply the exact instance, grant and current graph
 authority generation:
 
@@ -40,6 +41,10 @@ The broker retains its 512 KiB serialized request bound, including JSON escaping
 local file reads and parser input are separately bounded at 1 MiB. Oversize
 requests are refused before submission. Admission, grants, leases, deadlines and
 main-thread fencing remain enforced by the existing control client and host.
+The watch renews the existing controller lease every four polls using the supplied
+grant; it never acquires a lease automatically. If initial building outlasts the
+lease, reacquire it through the existing control flow. Refused renewal retains
+the live graph and reports the missing authority.
 
 Malformed ports/kinds, cycles, invalid parameter controls, unsupported contracts,
 failed prepare, cancellation and stale candidates retain old state/audio.

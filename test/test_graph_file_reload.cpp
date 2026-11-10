@@ -9,6 +9,7 @@
 #include <fstream>
 #include <utility>
 #include <thread>
+#include <algorithm>
 
 using namespace pulp::host;
 namespace {
@@ -276,7 +277,18 @@ TEST_CASE("Replacement retains old processor audio until last snapshot retires o
         audio_is(graph, 0.125f);
         REQUIRE(replacement->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
     }
+    bool pinned_audio = false;
+    std::thread reader([&] {
+        pulp::audio::Buffer<float> input(2, 64), output(2, 64);
+        for (auto& sample : input.channel(0)) sample = 0.5f;
+        auto destination = output.view();
+        retained.process(destination, std::as_const(input).view(), 64);
+        pinned_audio = std::all_of(output.channel(0).begin(), output.channel(0).end(),
+                                   [](float value) { return value == 0.125f; });
+    });
     audio_is(graph, 0.375f);
+    reader.join();
+    REQUIRE(pinned_audio);
     audio_is(retained, 0.125f);
     REQUIRE(old_counts.releases == 0);
     retained = {};
@@ -335,6 +347,20 @@ TEST_CASE("Graph file executor shares typed refusal and numeric publication with
         context.checkpoint = [&] {
             return ++checkpoints == 1 ? pulp::inspect::ControlExecutionCheckpoint::Continue
                                       : pulp::inspect::ControlExecutionCheckpoint::Cancelled;
+        };
+        REQUIRE(executor(plan, request(patch(0.75f), 0), context).terminal_state ==
+                pulp::inspect::ControlReceiptState::Failed);
+        REQUIRE(authority.generation() == 0);
+        REQUIRE(GraphSerializer::to_json(*graph) == before);
+        audio_is(*graph, 0.125f);
+    }
+    SECTION("deadline and revocation before publication preserve numeric state") {
+        auto refusal = pulp::inspect::ControlExecutionCheckpoint::DeadlineExceeded;
+        SECTION("deadline") {}
+        SECTION("revoked") { refusal = pulp::inspect::ControlExecutionCheckpoint::AuthorityRevoked; }
+        int checkpoints = 0;
+        context.checkpoint = [&] {
+            return ++checkpoints == 1 ? pulp::inspect::ControlExecutionCheckpoint::Continue : refusal;
         };
         REQUIRE(executor(plan, request(patch(0.75f), 0), context).terminal_state ==
                 pulp::inspect::ControlReceiptState::Failed);

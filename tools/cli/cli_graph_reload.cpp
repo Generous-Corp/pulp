@@ -49,6 +49,28 @@ GraphReloadWatch::GraphReloadWatch(GraphReloadOptions options)
     : options_(std::move(options)), watch_(std::make_unique<pulp::host::GraphFileWatch>(options_.file)) {}
 GraphReloadWatch::~GraphReloadWatch() = default;
 void GraphReloadWatch::poll() {
+    if ((polls_++ % 4) == 0) {
+        lease_ready_ = false;
+        std::ostringstream renewal;
+        auto* previous = std::cout.rdbuf(renewal.rdbuf());
+        int renewed = 1;
+        try {
+            renewed = cmd_control({"call", "dev.pulp.session/control@1", "--instance", options_.instance,
+                                   "--grant", options_.grant, "--params", R"({"action":"renew"})",
+                                   "--json", "--timeout-ms", "3000"});
+        } catch (...) {
+            std::cout.rdbuf(previous);
+            std::cerr << "graph reload: lease renewal failed; live graph retained\n";
+            return;
+        }
+        std::cout.rdbuf(previous);
+        if (renewed != 0) {
+            std::cerr << "graph reload: existing controller lease renewal refused: " << renewal.str();
+            return;
+        }
+        lease_ready_ = true;
+    }
+    if (!lease_ready_) return;
     const auto change = watch_->poll();
     using Code = pulp::host::GraphFileChange::Code;
     if (change.code == Code::Unchanged || change.code == Code::Pending) return;

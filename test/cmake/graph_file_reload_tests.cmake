@@ -19,3 +19,5 @@ if(UNIX AND NOT CMAKE_CROSSCOMPILING AND TARGET pulp-host)
         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_graph_file_reload_sdk_consumer.cmake")
     set_tests_properties(cmake-graph-file-reload-sdk-consumer PROPERTIES LABELS "cmake;sdk;graph;g2" TIMEOUT 600)
 endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/graph_file_reload_control_tests.cmake")

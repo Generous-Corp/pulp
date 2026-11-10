@@ -24,6 +24,8 @@ class GraphReloadWatch {
     ~GraphReloadWatch();
     void poll();
   private:
+    unsigned polls_ = 0;
+    bool lease_ready_ = false;
     GraphReloadOptions options_;
     std::unique_ptr<pulp::host::GraphFileWatch> watch_;
 };

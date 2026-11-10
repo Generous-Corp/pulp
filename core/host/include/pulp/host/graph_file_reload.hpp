@@ -2,7 +2,12 @@
 
 #include <pulp/host/graph_patch.hpp>
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
+#include <filesystem>
+#include <memory>
 #include <optional>
+#include <string>
+#include <string_view>
+#include <utility>
 
 namespace pulp::host {
 
