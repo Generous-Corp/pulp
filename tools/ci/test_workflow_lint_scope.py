@@ -201,12 +201,12 @@ class ScopeTests(unittest.TestCase):
             changed.write_text("core/a.cpp\n", encoding="utf-8")
             out = subprocess.run([sys.executable, str(REPO / "tools/ci/workflow_lint_scope.py"),
                                   "scope", "--files", str(changed)],
-                                 capture_output=True, text=True, check=True)
+                                 capture_output=True, text=True, encoding="utf-8", check=True)
             self.assertEqual(out.stdout.strip(), "false")
             changed.write_text("core/a.cpp\n.github/workflows/build.yml\n", encoding="utf-8")
             out = subprocess.run([sys.executable, str(REPO / "tools/ci/workflow_lint_scope.py"),
                                   "scope", "--files", str(changed)],
-                                 capture_output=True, text=True, check=True)
+                                 capture_output=True, text=True, encoding="utf-8", check=True)
             self.assertEqual(out.stdout.strip(), "true")
 
 

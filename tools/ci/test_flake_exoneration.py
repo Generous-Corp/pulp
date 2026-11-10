@@ -435,7 +435,7 @@ class TrustedGateWorkflowTests(unittest.TestCase):
                         f"sys.exit({code})\n")
 
             run = lambda *a: subprocess.run([git, "-C", str(root), *a], check=True,  # noqa: E731
-                                            capture_output=True, text=True)
+                                            capture_output=True, text=True, encoding="utf-8")
             run("init", "-q")
             run("config", "user.email", "t@example.invalid")
             run("config", "user.name", "t")
@@ -453,9 +453,9 @@ class TrustedGateWorkflowTests(unittest.TestCase):
             script = ("set -euo pipefail\nctest_exit=8\nevidence_dir=e\nlabel_exclude=x\n"
                       "exclude=x\nctest_jobs=1\n" + self.snippet + 'echo "exit=$ctest_exit"\n')
             out = subprocess.run([bash, "-c", script], cwd=root, env=env,
-                                 capture_output=True, text=True)
+                                 capture_output=True, text=True, encoding="utf-8")
             self.assertEqual(out.returncode, 0, out.stderr)
-            return out.stdout.strip().splitlines()[-1], marker.read_text() if marker.exists() else ""
+            return out.stdout.strip().splitlines()[-1], marker.read_text(encoding="utf-8") if marker.exists() else ""
 
     def test_gate_runs_from_the_base_commit(self) -> None:
         self.assertEqual(self._run(), ("exit=0", "base"))

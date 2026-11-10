@@ -67,7 +67,7 @@ def compare_files(repo: str, base: str, head: str) -> list[str]:
     """Changed paths base...head, both sides of a rename."""
     out = subprocess.run(
         ["gh", "api", f"repos/{repo}/compare/{base}...{head}"],
-        check=True, capture_output=True, text=True, timeout=120,
+        check=True, capture_output=True, text=True, encoding="utf-8", timeout=120,
     ).stdout
     files: list[str] = []
     for entry in json.loads(out).get("files") or []:
