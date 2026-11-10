@@ -279,6 +279,76 @@
       "path": "CLAUDE.md",
       "max_loc": 2051,
       "note": "Always-resident agent context read on every turn; every line costs every session, so growth is a residency decision — declare it with a Hotspot-Grow: CLAUDE.md trailer"
+    },
+    {
+      "path": "test/test_audio_decoder_corpus.cpp",
+      "max_loc": 106,
+      "note": "audio decoder corpus replay, cross-format cases; format-specific cases belong in test_audio_decoder_corpus_{wav,mp3,flac_ogg}.cpp"
+    },
+    {
+      "path": "test/test_audio_decoder_corpus_wav.cpp",
+      "max_loc": 252,
+      "note": "audio decoder corpus WAV cases"
+    },
+    {
+      "path": "test/test_audio_decoder_corpus_mp3.cpp",
+      "max_loc": 259,
+      "note": "audio decoder corpus MP3 cases"
+    },
+    {
+      "path": "test/test_audio_decoder_corpus_flac_ogg.cpp",
+      "max_loc": 99,
+      "note": "audio decoder corpus FLAC and Ogg cases; a format that outgrows this file gets its own"
+    },
+    {
+      "path": "test/support/audio_decoder_corpus.hpp",
+      "max_loc": 119,
+      "note": "audio decoder corpus helpers shared by the per-format files"
+    },
+    {
+      "path": "test/support/audio_decoder_corpus_expectations.hpp",
+      "max_loc": 129,
+      "note": "one expectation row per committed audio decoder seed"
+    },
+    {
+      "path": "test/fuzz/audio_decoder_seed_corpus.py",
+      "max_loc": 73,
+      "note": "seed corpus driver only; builders belong in test/fuzz/audio_decoder_seeds/<format>.py"
+    },
+    {
+      "path": "test/fuzz/audio_decoder_seeds/common.py",
+      "max_loc": 125,
+      "note": "seed corpus signal, packers, encoder lookup and Corpus shared by every format"
+    },
+    {
+      "path": "test/fuzz/audio_decoder_seeds/wav.py",
+      "max_loc": 176,
+      "note": "WAV, RF64, BW64 and Wave64 seed builders"
+    },
+    {
+      "path": "test/fuzz/audio_decoder_seeds/aiff.py",
+      "max_loc": 71,
+      "note": "AIFF and AIFF-C seed builders"
+    },
+    {
+      "path": "test/fuzz/audio_decoder_seeds/flac.py",
+      "max_loc": 133,
+      "note": "FLAC seed builders"
+    },
+    {
+      "path": "test/fuzz/audio_decoder_seeds/ogg.py",
+      "max_loc": 94,
+      "note": "Ogg Vorbis seed builders"
+    },
+    {
+      "path": "test/fuzz/audio_decoder_seeds/mp3.py",
+      "max_loc": 141,
+      "note": "MP3 seed builders"
+    },
+    {
+      "path": "test/fuzz/audio_decoder_seeds/mp4.py",
+      "max_loc": 153,
+      "note": "MP4/M4A and CAF seed builders"
     }
   ]
 }
