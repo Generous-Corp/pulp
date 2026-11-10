@@ -62,6 +62,7 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/signal/delay_line.hpp>
+#include <pulp/signal/rt_work_counter.hpp> // defines PULP_RT_WORK_COUNTERS (0 when unset)
 #include <pulp/state/parameter_event_queue.hpp>
 #include <pulp/state/store.hpp>
 
