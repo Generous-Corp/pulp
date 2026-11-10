@@ -13,7 +13,8 @@ using namespace pulp::examples::g6;
 
 namespace {
 void check(bool value, const char* rule) {
-    if (!value) throw std::runtime_error(rule);
+    if (!value)
+        throw std::runtime_error(rule);
 }
 
 std::vector<float> render(std::size_t partition) {
@@ -25,13 +26,13 @@ std::vector<float> render(std::size_t partition) {
         const auto frames = std::min(partition, std::size_t{800} - start);
         check(bank->begin_block(start, frames) == HostEventResult::Accepted, "begin-block");
         if (start <= 3 && 3 < start + frames)
-            check(bank->publish(event(bank->epoch(), 3, 1,
-                                      midi::MidiEvent::note_on(1, 69, 127))) ==
-                      HostEventResult::Accepted, "note-on");
+            check(bank->publish(event(bank->epoch(), 3, 1, midi::MidiEvent::note_on(1, 69, 127))) ==
+                      HostEventResult::Accepted,
+                  "note-on");
         if (start <= 6 && 6 < start + frames)
-            check(bank->publish(event(bank->epoch(), 6, 2,
-                                      midi::MidiEvent::note_off(1, 69))) ==
-                      HostEventResult::Accepted, "note-off");
+            check(bank->publish(event(bank->epoch(), 6, 2, midi::MidiEvent::note_off(1, 69))) ==
+                      HostEventResult::Accepted,
+                  "note-off");
         audio::Buffer<float> buffer(2, frames);
         auto view = buffer.view();
         const auto render_code = bank->render(view, start, frames);
@@ -49,8 +50,7 @@ std::vector<float> render(std::size_t partition) {
 }
 
 void check_steal_policies() {
-    const std::array modes{midi::MpeVoiceStealMode::Oldest,
-                           midi::MpeVoiceStealMode::LowestVelocity,
+    const std::array modes{midi::MpeVoiceStealMode::Oldest, midi::MpeVoiceStealMode::LowestVelocity,
                            midi::MpeVoiceStealMode::LowestPitch,
                            midi::MpeVoiceStealMode::HighestPitch};
     const std::array victims{0u, 7u, 0u, 7u};
@@ -61,18 +61,18 @@ void check_steal_policies() {
         bank->set_steal_mode(modes[policy]);
         check(bank->begin_block(0, 2) == HostEventResult::Accepted, "steal-begin");
         for (std::uint8_t slot = 0; slot < 8; ++slot)
-            check(bank->publish(event(bank->epoch(), 0, slot + 1,
-                                      midi::MidiEvent::note_on(slot + 1, 60 + slot,
-                                                               100 - slot * 10))) ==
-                      HostEventResult::Accepted, "fill-bank");
-        check(bank->publish(event(bank->epoch(), 1, 9,
-                                  midi::MidiEvent::note_on(9, 90, 127))) ==
-                  HostEventResult::Accepted, "ninth-note");
+            check(bank->publish(
+                      event(bank->epoch(), 0, slot + 1,
+                            midi::MidiEvent::note_on(slot + 1, 60 + slot, 100 - slot * 10))) ==
+                      HostEventResult::Accepted,
+                  "fill-bank");
+        check(bank->publish(event(bank->epoch(), 1, 9, midi::MidiEvent::note_on(9, 90, 127))) ==
+                  HostEventResult::Accepted,
+              "ninth-note");
         audio::Buffer<float> buffer(2, 2);
         auto view = buffer.view();
         check(bank->render(view, 0, 2) == VoiceBankBindingCode::Ok, "steal-render");
-        check(owner(*bank).allocator().voice(victims[policy]).note_number() == 90,
-              "steal-victim");
+        check(owner(*bank).allocator().voice(victims[policy]).note_number() == 90, "steal-victim");
         check(owner(*bank).allocator().steal_count() == 1, "steal-count");
     }
 }
@@ -84,9 +84,9 @@ void check_state_and_generation() {
     check(bank->set_slot_parameter(0, "level", 2.0f), "named-parameter-bind");
     check(!bank->set_slot_parameter(0, "missing", 1.0f), "unknown-parameter-refusal");
     check(bank->begin_block(0, 1) == HostEventResult::Accepted, "state-begin");
-    check(bank->publish(event(bank->epoch(), 0, 1,
-                              midi::MidiEvent::note_on(1, 69, 127))) ==
-              HostEventResult::Accepted, "state-note-on");
+    check(bank->publish(event(bank->epoch(), 0, 1, midi::MidiEvent::note_on(1, 69, 127))) ==
+              HostEventResult::Accepted,
+          "state-note-on");
     audio::Buffer<float> buffer(2, 1);
     auto view = buffer.view();
     check(bank->render(view, 0, 1) == VoiceBankBindingCode::Ok, "state-render");
@@ -98,27 +98,31 @@ void check_state_and_generation() {
     note.note = 69;
     note.velocity = 127;
     check(bank->dispatch_deferred(bank->epoch(), 0, generation + 1,
-                                  midi::MpeExpressionEvent::Kind::NoteOff, note) ==
-              VoiceBankBindingCode::StaleGeneration, "stale-generation-refusal");
+                                  midi::MpeExpressionEvent::Kind::NoteOff,
+                                  note) == VoiceBankBindingCode::StaleGeneration,
+          "stale-generation-refusal");
     auto forged = note;
     forged.channel = 2;
     check(bank->dispatch_deferred(bank->epoch(), 0, generation,
-                                  midi::MpeExpressionEvent::Kind::NoteOff, forged) ==
-              VoiceBankBindingCode::StaleGeneration, "forged-channel-refusal");
+                                  midi::MpeExpressionEvent::Kind::NoteOff,
+                                  forged) == VoiceBankBindingCode::StaleGeneration,
+          "forged-channel-refusal");
     check(bank->activate(status), "state-activate");
     check(bank->dispatch_deferred(bank->epoch() - 1, 0, generation,
-                                  midi::MpeExpressionEvent::Kind::NoteOff, note) ==
-              VoiceBankBindingCode::StaleEpoch, "stale-epoch-refusal");
+                                  midi::MpeExpressionEvent::Kind::NoteOff,
+                                  note) == VoiceBankBindingCode::StaleEpoch,
+          "stale-epoch-refusal");
 }
 
 class AliasedOwner final : public VoiceBankOwner {
   public:
     AliasedOwner()
-        : backing_([](ProbeVoice& voice, std::uint32_t)
-                       -> std::unique_ptr<format::Processor> {
-              return std::make_unique<ProbeProcessor>(voice);
-          }, std::array<VoiceBankInputEndpoint, 4>{{{"note_in", 0}, {"pitch", 1},
-                                                    {"pressure", 2}, {"timbre", 3}}}) {}
+        : backing_(
+              [](ProbeVoice& voice, std::uint32_t) -> std::unique_ptr<format::Processor> {
+                  return std::make_unique<ProbeProcessor>(voice);
+              },
+              std::array<VoiceBankInputEndpoint, 4>{
+                  {{"note_in", 0}, {"pitch", 1}, {"pressure", 2}, {"timbre", 3}}}) {}
     std::unique_ptr<format::Processor> make_processor(std::uint32_t slot) override {
         return backing_.make_processor(slot);
     }
@@ -130,7 +134,9 @@ class AliasedOwner final : public VoiceBankOwner {
               const midi::MpeNoteState& state) const noexcept override {
         return backing_.live(slot, generation, kind, state);
     }
-    void reset() noexcept override { backing_.reset(); }
+    void reset() noexcept override {
+        backing_.reset();
+    }
     void set_steal_mode(midi::MpeVoiceStealMode mode) noexcept override {
         backing_.set_steal_mode(mode);
     }
@@ -140,6 +146,7 @@ class AliasedOwner final : public VoiceBankOwner {
     InputSemantic resolve_input(const VoiceBindingSpec& binding) const noexcept override {
         return backing_.resolve_input(binding);
     }
+
   private:
     MpeVoiceBankOwner<ProbeVoice> backing_;
 };
@@ -153,10 +160,9 @@ int main() {
         for (std::size_t i = 0; i < scalar.size(); ++i) {
             float expected = 0.0f;
             if (i >= 3 && i < 10) {
-                const float triangle = phase < 0.5 ? static_cast<float>(4.0 * phase - 1.0) :
-                                                     static_cast<float>(3.0 - 4.0 * phase);
-                const float release = i < 6 ? 1.0f :
-                    (4.0f - static_cast<float>(i - 6)) * 0.25f;
+                const float triangle = phase < 0.5 ? static_cast<float>(4.0 * phase - 1.0)
+                                                   : static_cast<float>(3.0 - 4.0 * phase);
+                const float release = i < 6 ? 1.0f : (4.0f - static_cast<float>(i - 6)) * 0.25f;
                 expected = triangle * release * 0.125f;
                 phase += 440.0 / 48000.0;
             }
@@ -187,12 +193,12 @@ int main() {
         auto wrong_path = schema();
         wrong_path.bindings[0].path = {"other"};
         check(!make_bank(wrong_path, status), "wrong-path-refusal");
-        check(!VoiceBankBinding::prepare(schema(), definition(),
-                                         std::make_unique<AliasedOwner>(), "audio_out",
-                                         48000, 256, status), "aliased-state-refusal");
+        check(!VoiceBankBinding::prepare(schema(), definition(), std::make_unique<AliasedOwner>(),
+                                         "audio_out", 48000, 256, status),
+              "aliased-state-refusal");
         std::cout << "g6-voice-bank-public-consumer PASS partitions=1,32,64,127,256"
-                     " samples=800 sample3=" << scalar[3] << " sample6=" << scalar[6]
-                  << " sample10=" << scalar[10] << '\n';
+                     " samples=800 sample3="
+                  << scalar[3] << " sample6=" << scalar[6] << " sample10=" << scalar[10] << '\n';
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "g6-voice-bank-public-consumer FAIL rule=" << error.what() << '\n';

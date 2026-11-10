@@ -74,21 +74,21 @@ bool validate_template(const SubgraphTemplate& definition, std::size_t depth,
                          [&](const SubgraphNodeSpec& spec) { return spec.key == parameter.node; });
         if (target == definition.nodes.end() ||
             (target->type != NodeType::Gain && target->type != NodeType::Plugin) ||
-            (target->type == NodeType::Plugin &&
-             (parameter.processor_parameter_id == 0 || parameter.processor_parameter_name.empty())) ||
-            (target->type == NodeType::Gain &&
-             (parameter.processor_parameter_id != 0 || !parameter.processor_parameter_name.empty())) ||
+            (target->type == NodeType::Plugin && (parameter.processor_parameter_id == 0 ||
+                                                  parameter.processor_parameter_name.empty())) ||
+            (target->type == NodeType::Gain && (parameter.processor_parameter_id != 0 ||
+                                                !parameter.processor_parameter_name.empty())) ||
             parameter.path.empty() || !std::isfinite(parameter.minimum) ||
             !std::isfinite(parameter.maximum) || parameter.minimum > parameter.maximum ||
             !std::isfinite(parameter.default_value) ||
             parameter.default_value < parameter.minimum ||
             parameter.default_value > parameter.maximum ||
             !parameter_paths.insert(parameter.path).second ||
-            (target->type == NodeType::Gain &&
-             !parameter_nodes.insert(parameter.node).second) ||
+            (target->type == NodeType::Gain && !parameter_nodes.insert(parameter.node).second) ||
             (target->type == NodeType::Plugin &&
-             !processor_targets.insert(parameter.node + ":" +
-                                       std::to_string(parameter.processor_parameter_id)).second)) {
+             !processor_targets
+                  .insert(parameter.node + ":" + std::to_string(parameter.processor_parameter_id))
+                  .second)) {
             active.erase(&definition);
             return false;
         }
@@ -125,7 +125,8 @@ bool preflight_processors(ExpansionContext& context, const SubgraphTemplate& def
             continue;
         std::shared_ptr<format::ProcessorNodeInstance> instance;
         try {
-            instance = format::ProcessorNodeInstance::create(spec.processor_factory(instance_index));
+            instance =
+                format::ProcessorNodeInstance::create(spec.processor_factory(instance_index));
         } catch (...) {
             return false;
         }
@@ -189,8 +190,9 @@ bool expand_template(ExpansionContext& context, const SubgraphTemplate& definiti
     for (const auto& spec : definition.nodes) {
         const auto key = scoped(prefix, spec.key);
         const auto processor = context.processors.find(key);
-        const auto id = add_node(context.graph, spec, context.instance.instance_identity + "." + key,
-                                 processor == context.processors.end() ? nullptr : processor->second);
+        const auto id =
+            add_node(context.graph, spec, context.instance.instance_identity + "." + key,
+                     processor == context.processors.end() ? nullptr : processor->second);
         if (id == 0)
             return false;
         context.instance.nodes.push_back(id);
@@ -269,13 +271,12 @@ bool bind_parameters(ExpansionContext& context, const SubgraphTemplate& definiti
                 return false;
             const auto* info = processor->second->parameter(parameter.processor_parameter_id);
             if (!info || info->name != parameter.processor_parameter_name ||
-                info->range.min != parameter.minimum ||
-                info->range.max != parameter.maximum ||
+                info->range.min != parameter.minimum || info->range.max != parameter.maximum ||
                 info->range.default_value != parameter.default_value ||
                 state::is_discrete_param(*info))
                 return false;
             context.instance.processor_parameter_ids.emplace(path,
-                                                              parameter.processor_parameter_id);
+                                                             parameter.processor_parameter_id);
             processor->second->state_store().set_value(parameter.processor_parameter_id,
                                                        parameter.default_value);
             if (processor->second->state_store().get_value(parameter.processor_parameter_id) !=

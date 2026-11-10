@@ -10,7 +10,9 @@
 #include <unordered_map>
 #include <vector>
 
-namespace pulp::format { class Processor; }
+namespace pulp::format {
+class Processor;
+}
 
 namespace pulp::host {
 

@@ -2,17 +2,17 @@
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/host/graph_event_contract.hpp>
-#include <pulp/host/voice_template.hpp>
 #include <pulp/host/signal_graph_subgraph.hpp>
+#include <pulp/host/voice_template.hpp>
 #include <pulp/midi/mpe_synth_voice.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
-#include <array>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
-#include <functional>
 #include <type_traits>
 
 namespace pulp::host {
@@ -43,6 +43,7 @@ struct VoiceBankInputEndpoint {
 // This adapter retains exactly one existing MPE allocator for all eight slots.
 template <class Voice> class MpeVoiceBankOwner final : public VoiceBankOwner {
     static_assert(std::is_base_of_v<midi::MpeSynthVoice, Voice>);
+
   public:
     using ProcessorFactory =
         std::function<std::unique_ptr<format::Processor>(Voice&, std::uint32_t)>;
@@ -59,8 +60,7 @@ template <class Voice> class MpeVoiceBankOwner final : public VoiceBankOwner {
               midi::MpeExpressionEvent::Kind kind,
               const midi::MpeNoteState& state) const noexcept override {
         return slot < 8 && generation != 0 && allocator_.voice(slot).active() &&
-               allocator_.voice(slot).note_id() == generation &&
-               state.note_id == generation &&
+               allocator_.voice(slot).note_id() == generation && state.note_id == generation &&
                state.channel == allocator_.voice(slot).channel() &&
                state.note == allocator_.voice(slot).note_number() &&
                state.velocity == allocator_.voice(slot).velocity() &&
@@ -68,7 +68,9 @@ template <class Voice> class MpeVoiceBankOwner final : public VoiceBankOwner {
                (kind != midi::MpeExpressionEvent::Kind::NoteOff ||
                 !allocator_.voice(slot).releasing());
     }
-    void reset() noexcept override { allocator_.reset_all(); }
+    void reset() noexcept override {
+        allocator_.reset_all();
+    }
     void set_steal_mode(midi::MpeVoiceStealMode mode) noexcept override {
         allocator_.set_steal_mode(mode);
     }
@@ -80,8 +82,7 @@ template <class Voice> class MpeVoiceBankOwner final : public VoiceBankOwner {
             binding.direction != VoiceBindingDirection::Input)
             return InputSemantic::Unknown;
         for (std::size_t i = 0; i < endpoints_.size(); ++i) {
-            if (endpoints_[i].target != binding.target ||
-                endpoints_[i].ordinal != binding.ordinal)
+            if (endpoints_[i].target != binding.target || endpoints_[i].ordinal != binding.ordinal)
                 continue;
             const bool note = i == 0;
             if (binding.type != (note ? VoiceBindingType::Event : VoiceBindingType::Control) ||
@@ -92,8 +93,13 @@ template <class Voice> class MpeVoiceBankOwner final : public VoiceBankOwner {
         }
         return InputSemantic::Unknown;
     }
-    midi::MpeVoiceAllocator<Voice>& allocator() noexcept { return allocator_; }
-    const midi::MpeVoiceAllocator<Voice>& allocator() const noexcept { return allocator_; }
+    midi::MpeVoiceAllocator<Voice>& allocator() noexcept {
+        return allocator_;
+    }
+    const midi::MpeVoiceAllocator<Voice>& allocator() const noexcept {
+        return allocator_;
+    }
+
   private:
     midi::MpeVoiceAllocator<Voice> allocator_;
     ProcessorFactory factory_;
@@ -101,8 +107,16 @@ template <class Voice> class MpeVoiceBankOwner final : public VoiceBankOwner {
 };
 
 enum class VoiceBankBindingCode : std::uint8_t {
-    Ok, InvalidManifest, FactoryFailure, GraphPrepareFailure, InvalidBlock,
-    IngressFailure, GraphExecutionFailure, StaleEpoch, StaleGeneration, EpochExhausted,
+    Ok,
+    InvalidManifest,
+    FactoryFailure,
+    GraphPrepareFailure,
+    InvalidBlock,
+    IngressFailure,
+    GraphExecutionFailure,
+    StaleEpoch,
+    StaleGeneration,
+    EpochExhausted,
 };
 
 struct VoiceBankBindingResult {
@@ -110,7 +124,9 @@ struct VoiceBankBindingResult {
     std::uint32_t failing_slot = 0;
     std::string failing_path;
     std::string detail;
-    explicit operator bool() const noexcept { return code == VoiceBankBindingCode::Ok; }
+    explicit operator bool() const noexcept {
+        return code == VoiceBankBindingCode::Ok;
+    }
 };
 
 // One prepared graph and one eight-voice allocator. Construction, activation,
@@ -118,12 +134,10 @@ struct VoiceBankBindingResult {
 // begin_block/publish/render and deferred dispatch belong to one audio owner.
 class VoiceBankBinding final {
   public:
-    static std::unique_ptr<VoiceBankBinding> prepare(const VoiceTemplateSchema& schema,
-                                                     SubgraphTemplate definition,
-                                                     std::unique_ptr<VoiceBankOwner> owner,
-                                                     std::string stereo_port,
-                                                     double sample_rate, int max_frames,
-                                                     VoiceBankBindingResult& result);
+    static std::unique_ptr<VoiceBankBinding>
+    prepare(const VoiceTemplateSchema& schema, SubgraphTemplate definition,
+            std::unique_ptr<VoiceBankOwner> owner, std::string stereo_port, double sample_rate,
+            int max_frames, VoiceBankBindingResult& result);
     ~VoiceBankBinding();
     VoiceBankBinding(const VoiceBankBinding&) = delete;
     VoiceBankBinding& operator=(const VoiceBankBinding&) = delete;

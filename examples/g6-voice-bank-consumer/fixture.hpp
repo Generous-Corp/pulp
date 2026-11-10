@@ -1,7 +1,7 @@
 #pragma once
 
-#include <pulp/host/voice_bank_binding.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/host/voice_bank_binding.hpp>
 #include <pulp/state/store.hpp>
 
 #include <array>
@@ -16,7 +16,9 @@ using namespace pulp::host;
 
 class ProbeVoice final : public midi::MpeSynthVoice {
   public:
-    void set_sample_rate(double rate) noexcept { rate_ = rate; }
+    void set_sample_rate(double rate) noexcept {
+        rate_ = rate;
+    }
     void on_note_on(const midi::MpeNoteState& note) override {
         midi::MpeSynthVoice::on_note_on(note);
         phase_ = 0.0;
@@ -37,20 +39,24 @@ class ProbeVoice final : public midi::MpeSynthVoice {
             float sample = 0.0f;
             if (active()) {
                 advance_smoothers();
-                const double frequency = 440.0 * std::exp2(
-                    (static_cast<double>(note_number()) - 69.0 + pitch_bend()) / 12.0);
-                const float triangle = phase_ < 0.5 ? static_cast<float>(4.0 * phase_ - 1.0) :
-                                                      static_cast<float>(3.0 - 4.0 * phase_);
-                const float factor = releasing() ?
-                    (4.0f - static_cast<float>(release_frame_)) * 0.25f : 1.0f;
+                const double frequency =
+                    440.0 *
+                    std::exp2((static_cast<double>(note_number()) - 69.0 + pitch_bend()) / 12.0);
+                const float triangle = phase_ < 0.5 ? static_cast<float>(4.0 * phase_ - 1.0)
+                                                    : static_cast<float>(3.0 - 4.0 * phase_);
+                const float factor =
+                    releasing() ? (4.0f - static_cast<float>(release_frame_)) * 0.25f : 1.0f;
                 sample = triangle * (static_cast<float>(velocity()) / 127.0f) * factor;
                 phase_ += frequency / rate_;
-                if (phase_ >= 1.0) phase_ -= 1.0;
-                if (releasing() && ++release_frame_ == 4) finish_release();
+                if (phase_ >= 1.0)
+                    phase_ -= 1.0;
+                if (releasing() && ++release_frame_ == 4)
+                    finish_release();
             }
             out[i] = sample;
         }
     }
+
   private:
     double rate_ = 48000.0;
     double phase_ = 0.0;
@@ -71,8 +77,8 @@ class ProbeProcessor final : public format::Processor {
         return d;
     }
     void define_parameters(state::StateStore& store) override {
-        store.add_parameter({.id = 1, .name = "level",
-                             .range = state::ParamRange::linear(0.0f, 2.0f, 1.0f)});
+        store.add_parameter(
+            {.id = 1, .name = "level", .range = state::ParamRange::linear(0.0f, 2.0f, 1.0f)});
     }
     void prepare(const format::PrepareContext& context) override {
         voice_.set_sample_rate(context.sample_rate);
@@ -86,6 +92,7 @@ class ProbeProcessor final : public format::Processor {
         for (std::size_t i = 0; i < output.num_samples(); ++i)
             right[i] = left[i] = left[i] * gain;
     }
+
   private:
     ProbeVoice& voice_;
 };
@@ -109,15 +116,16 @@ SubgraphTemplate definition() {
 }
 
 std::unique_ptr<VoiceBankBinding> make_bank(const VoiceTemplateSchema& authored,
-                                             VoiceBankBindingResult& status,
-                                             SubgraphTemplate declared = definition()) {
+                                            VoiceBankBindingResult& status,
+                                            SubgraphTemplate declared = definition()) {
     auto owner = std::make_unique<MpeVoiceBankOwner<ProbeVoice>>(
         [](ProbeVoice& voice, std::uint32_t) -> std::unique_ptr<format::Processor> {
             return std::make_unique<ProbeProcessor>(voice);
-        }, std::array<VoiceBankInputEndpoint, 4>{{{"note_in", 0}, {"pitch", 1},
-                                                  {"pressure", 2}, {"timbre", 3}}});
-    return VoiceBankBinding::prepare(authored, std::move(declared), std::move(owner),
-                                     "audio_out", 48000, 256, status);
+        },
+        std::array<VoiceBankInputEndpoint, 4>{
+            {{"note_in", 0}, {"pitch", 1}, {"pressure", 2}, {"timbre", 3}}});
+    return VoiceBankBinding::prepare(authored, std::move(declared), std::move(owner), "audio_out",
+                                     48000, 256, status);
 }
 
 const auto& owner(const VoiceBankBinding& bank) {

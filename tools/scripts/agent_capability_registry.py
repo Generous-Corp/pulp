@@ -232,14 +232,14 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         'include': 'pulp/host/signal_graph_subgraph.hpp',
-        'fingerprint': 'sha256:0ed5157fe28e5b22aa93c0ef0297ae6f02d7b4ea66211e9faab2465793533e3b',
+        'fingerprint': 'sha256:81103ef7f256181918a1e4b60c254451192f492be5959e10a88e63858b6063c0',
         'disposition': 'infrastructure',
         'capability_keys': [],
         'rationale': 'Control-thread authored subgraph expansion and exact Processor parameter binding; the bounded G6 runtime is still partial.',
     },
     {
         'include': 'pulp/host/voice_bank_binding.hpp',
-        'fingerprint': 'sha256:c504f0b7c54d588455e82409beef50c2bae3afce2d7f9346be91ecb020c1b208',
+        'fingerprint': 'sha256:36167a8a39b3133cbe9f25113223c6c28a721d2580e9a98abc781cc6935732b7',
         'disposition': 'infrastructure',
         'capability_keys': [],
         'rationale': 'Bounded eight-slot graph voice-bank runtime; sustain, saved activation, and paced realtime qualification remain open.',

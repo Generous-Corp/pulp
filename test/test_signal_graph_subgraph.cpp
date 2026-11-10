@@ -26,15 +26,15 @@ class TwoParamProcessor final : public pulp::format::Processor {
         return value;
     }
     void define_parameters(pulp::state::StateStore& store) override {
-        store.add_parameter({.id = 1, .name = "one",
-                             .range = pulp::state::ParamRange::linear(0.0f, 2.0f, 1.0f)});
-        store.add_parameter({.id = 2, .name = "two",
-                             .range = pulp::state::ParamRange::linear(0.0f, 2.0f, 0.5f)});
+        store.add_parameter(
+            {.id = 1, .name = "one", .range = pulp::state::ParamRange::linear(0.0f, 2.0f, 1.0f)});
+        store.add_parameter(
+            {.id = 2, .name = "two", .range = pulp::state::ParamRange::linear(0.0f, 2.0f, 0.5f)});
     }
     void prepare(const pulp::format::PrepareContext&) override {}
-    void process(pulp::audio::BufferView<float>& out,
-                 const pulp::audio::BufferView<const float>&, pulp::midi::MidiBuffer&,
-                 pulp::midi::MidiBuffer&, const pulp::format::ProcessContext&) override {
+    void process(pulp::audio::BufferView<float>& out, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
         out.clear();
     }
 };

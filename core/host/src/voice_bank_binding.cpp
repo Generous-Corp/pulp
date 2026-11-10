@@ -22,7 +22,9 @@ bool valid_schema(const VoiceBankManifest& manifest, const SubgraphTemplate& def
     if (stereo_port.empty() || definition.identity.empty() || definition.nodes.size() != 1 ||
         definition.nodes[0].type != NodeType::Plugin || !definition.children.empty() ||
         definition.binding_path.empty()) {
-        result = {VoiceBankBindingCode::InvalidManifest, 0, {},
+        result = {VoiceBankBindingCode::InvalidManifest,
+                  0,
+                  {},
                   "bounded bank requires one authored Processor template"};
         return false;
     }
@@ -30,7 +32,8 @@ bool valid_schema(const VoiceBankManifest& manifest, const SubgraphTemplate& def
         return std::any_of(definition.exposed_ports.begin(), definition.exposed_ports.end(),
                            [&](const SubgraphPortSpec& port) {
                                return port.name == name && port.node == definition.nodes[0].key &&
-                                      port.port == index && port.output && port.kind == PortKind::Audio;
+                                      port.port == index && port.output &&
+                                      port.kind == PortKind::Audio;
                            });
     };
     if (!has_exposed(std::string(stereo_port) + ".left", 0) ||
@@ -49,24 +52,24 @@ bool valid_schema(const VoiceBankManifest& manifest, const SubgraphTemplate& def
             return false;
         }
         if (spec.target_kind == VoiceBindingTarget::Parameter) {
-            const auto found = std::find_if(definition.parameters.begin(), definition.parameters.end(),
-                                            [&](const SubgraphParameterSpec& parameter) {
-                                                return parameter.path == spec.target &&
-                                                       parameter.node == definition.nodes[0].key &&
-                                                       parameter.processor_parameter_id != 0 &&
-                                                       !parameter.processor_parameter_name.empty();
-                                            });
-            if (found != definition.parameters.end() &&
-                spec.type == VoiceBindingType::Control &&
+            const auto found =
+                std::find_if(definition.parameters.begin(), definition.parameters.end(),
+                             [&](const SubgraphParameterSpec& parameter) {
+                                 return parameter.path == spec.target &&
+                                        parameter.node == definition.nodes[0].key &&
+                                        parameter.processor_parameter_id != 0 &&
+                                        !parameter.processor_parameter_name.empty();
+                             });
+            if (found != definition.parameters.end() && spec.type == VoiceBindingType::Control &&
                 spec.direction == VoiceBindingDirection::Input &&
-                spec.shape == VoiceBindingShape::Scalar &&
-                spec.rate == VoiceBindingRate::Block) {
+                spec.shape == VoiceBindingShape::Scalar && spec.rate == VoiceBindingRate::Block) {
                 ++parameters;
                 continue;
             }
         } else if (spec.target == stereo_port && spec.type == VoiceBindingType::Audio &&
                    spec.direction == VoiceBindingDirection::Output &&
-                   spec.shape == VoiceBindingShape::Stereo && spec.rate == VoiceBindingRate::Sample) {
+                   spec.shape == VoiceBindingShape::Stereo &&
+                   spec.rate == VoiceBindingRate::Sample) {
             audio = true;
             continue;
         } else {
@@ -128,12 +131,10 @@ struct VoiceBankBinding::Impl {
 VoiceBankBinding::VoiceBankBinding() : impl_(std::make_unique<Impl>()) {}
 VoiceBankBinding::~VoiceBankBinding() = default;
 
-std::unique_ptr<VoiceBankBinding> VoiceBankBinding::prepare(const VoiceTemplateSchema& schema,
-                                                            SubgraphTemplate definition,
-                                                            std::unique_ptr<VoiceBankOwner> owner,
-                                                            std::string stereo_port,
-                                                            double sample_rate, int max_frames,
-                                                            VoiceBankBindingResult& result) {
+std::unique_ptr<VoiceBankBinding>
+VoiceBankBinding::prepare(const VoiceTemplateSchema& schema, SubgraphTemplate definition,
+                          std::unique_ptr<VoiceBankOwner> owner, std::string stereo_port,
+                          double sample_rate, int max_frames, VoiceBankBindingResult& result) {
     result = {};
     auto prepared = prepare_voice_bank(schema);
     if (!owner) {
@@ -170,8 +171,7 @@ std::unique_ptr<VoiceBankBinding> VoiceBankBinding::prepare(const VoiceTemplateS
     bank->impl_->manifest = std::move(prepared.manifest);
     bank->impl_->max_frames = static_cast<std::size_t>(max_frames);
     bank->impl_->stereo_port = std::move(stereo_port);
-    definition.nodes[0].processor_factory = [owner = bank->impl_->owner.get()](
-                                                    std::uint32_t slot) {
+    definition.nodes[0].processor_factory = [owner = bank->impl_->owner.get()](std::uint32_t slot) {
         return owner->make_processor(slot);
     };
     const auto midi_input = bank->impl_->graph.add_midi_input_node("Bank MIDI ingress");
@@ -205,12 +205,12 @@ std::unique_ptr<VoiceBankBinding> VoiceBankBinding::prepare(const VoiceTemplateS
                       "authored stereo endpoint is unavailable"};
             return {};
         }
-        const auto left = bank->impl_->graph.connect(
-            left_node->output_ports[left_exposed.index],
-            bank->impl_->graph.node(output)->input_ports[0]);
-        const auto right = bank->impl_->graph.connect(
-            right_node->output_ports[right_exposed.index],
-            bank->impl_->graph.node(output)->input_ports[1]);
+        const auto left =
+            bank->impl_->graph.connect(left_node->output_ports[left_exposed.index],
+                                       bank->impl_->graph.node(output)->input_ports[0]);
+        const auto right =
+            bank->impl_->graph.connect(right_node->output_ports[right_exposed.index],
+                                       bank->impl_->graph.node(output)->input_ports[1]);
         if (!left || !right) {
             result = {VoiceBankBindingCode::FactoryFailure, slot, bank->impl_->stereo_port,
                       !left ? left.message() : right.message()};
@@ -226,9 +226,15 @@ std::unique_ptr<VoiceBankBinding> VoiceBankBinding::prepare(const VoiceTemplateS
     return bank;
 }
 
-const VoiceBankManifest& VoiceBankBinding::manifest() const noexcept { return impl_->manifest; }
-std::uint64_t VoiceBankBinding::epoch() const noexcept { return impl_->epoch; }
-const VoiceBankOwner& VoiceBankBinding::owner() const noexcept { return *impl_->owner; }
+const VoiceBankManifest& VoiceBankBinding::manifest() const noexcept {
+    return impl_->manifest;
+}
+std::uint64_t VoiceBankBinding::epoch() const noexcept {
+    return impl_->epoch;
+}
+const VoiceBankOwner& VoiceBankBinding::owner() const noexcept {
+    return *impl_->owner;
+}
 void VoiceBankBinding::set_steal_mode(midi::MpeVoiceStealMode mode) noexcept {
     impl_->owner->set_steal_mode(mode);
 }
@@ -249,7 +255,7 @@ bool VoiceBankBinding::activate(VoiceBankBindingResult& result) noexcept {
     return true;
 }
 HostEventResult VoiceBankBinding::begin_block(std::uint64_t first_sample,
-                                               std::size_t frames) noexcept {
+                                              std::size_t frames) noexcept {
     if (impl_->block_open || frames == 0 || frames > impl_->max_frames)
         return HostEventResult::OutOfRange;
     const auto status = impl_->ingress.begin_block(impl_->epoch, first_sample, frames);
@@ -270,9 +276,9 @@ HostEventResult VoiceBankBinding::publish(const HostEventRecord& event) noexcept
 VoiceBankBindingCode VoiceBankBinding::render(audio::BufferView<float>& stereo,
                                               std::uint64_t first_sample,
                                               std::size_t frames) noexcept {
-    if (!impl_->block_open || first_sample != impl_->block_start ||
-        frames != impl_->block_frames || stereo.num_channels() != 2 ||
-        stereo.num_samples() != frames || !stereo.has_valid_channels())
+    if (!impl_->block_open || first_sample != impl_->block_start || frames != impl_->block_frames ||
+        stereo.num_channels() != 2 || stereo.num_samples() != frames ||
+        !stereo.has_valid_channels())
         return VoiceBankBindingCode::InvalidBlock;
     std::size_t count = 0;
     if (impl_->ingress.project(impl_->projected, count) != HostEventResult::Accepted)
@@ -291,12 +297,10 @@ VoiceBankBindingCode VoiceBankBinding::render(audio::BufferView<float>& stereo,
         const bool in_zone = config.zone_for_channel(channel) ||
                              (channel == 0 && config.lower_zone.member_channels != 0) ||
                              (channel == 15 && config.upper_zone.member_channels != 0);
-        const bool supported = kind == 0x80 || kind == 0x90 || kind == 0xa0 ||
-                               kind == 0xd0 || kind == 0xe0 ||
-                               (kind == 0xb0 && size == 3 && bytes[1] == 74);
+        const bool supported = kind == 0x80 || kind == 0x90 || kind == 0xa0 || kind == 0xd0 ||
+                               kind == 0xe0 || (kind == 0xb0 && size == 3 && bytes[1] == 74);
         const std::size_t expected_size = kind == 0xd0 ? 2 : 3;
-        const bool valid_bytes = size == expected_size &&
-                                 (bytes[1] & 0x80) == 0 &&
+        const bool valid_bytes = size == expected_size && (bytes[1] & 0x80) == 0 &&
                                  (size == 2 || (bytes[2] & 0x80) == 0);
         if (record.has_ump || !in_zone || !supported || !valid_bytes) {
             impl_->ingress.rollback_projection();
@@ -348,9 +352,10 @@ VoiceBankBindingCode VoiceBankBinding::render(audio::BufferView<float>& stereo,
     impl_->block_open = false;
     return VoiceBankBindingCode::Ok;
 }
-VoiceBankBindingCode VoiceBankBinding::dispatch_deferred(
-    std::uint64_t epoch, std::uint32_t slot, midi::MpeNoteGeneration generation,
-    midi::MpeExpressionEvent::Kind kind, const midi::MpeNoteState& state) noexcept {
+VoiceBankBindingCode VoiceBankBinding::dispatch_deferred(std::uint64_t epoch, std::uint32_t slot,
+                                                         midi::MpeNoteGeneration generation,
+                                                         midi::MpeExpressionEvent::Kind kind,
+                                                         const midi::MpeNoteState& state) noexcept {
     if (epoch != impl_->epoch)
         return VoiceBankBindingCode::StaleEpoch;
     if (slot >= kSlots || generation == 0 || !impl_->owner->live(slot, generation, kind, state) ||
@@ -359,8 +364,7 @@ VoiceBankBindingCode VoiceBankBinding::dispatch_deferred(
     impl_->owner->dispatch({0, kind, state});
     return VoiceBankBindingCode::Ok;
 }
-bool VoiceBankBinding::set_slot_parameter(std::uint32_t slot, std::string_view path,
-                                           float value) {
+bool VoiceBankBinding::set_slot_parameter(std::uint32_t slot, std::string_view path, float value) {
     if (slot >= kSlots || !std::isfinite(value) || impl_->block_open)
         return false;
     const auto key = std::string(path);
@@ -369,8 +373,8 @@ bool VoiceBankBinding::set_slot_parameter(std::uint32_t slot, std::string_view p
     const auto id = impl_->slots[slot].processor_parameter_ids.find(key);
     if (target == impl_->slots[slot].parameter_nodes.end() ||
         bounds == impl_->slots[slot].parameter_bounds.end() ||
-        id == impl_->slots[slot].processor_parameter_ids.end() ||
-        value < bounds->second.minimum || value > bounds->second.maximum)
+        id == impl_->slots[slot].processor_parameter_ids.end() || value < bounds->second.minimum ||
+        value > bounds->second.maximum)
         return false;
     const auto node = target->second;
     const auto processor = impl_->graph.processor_node_instance(node);
