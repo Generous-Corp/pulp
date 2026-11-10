@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/noise_tilt.hpp",
+  "fingerprint": "sha256:016c8e7e818ad23543da6e37c1e96e41557ed53f898afe80f8d9d65666912adb"
+}

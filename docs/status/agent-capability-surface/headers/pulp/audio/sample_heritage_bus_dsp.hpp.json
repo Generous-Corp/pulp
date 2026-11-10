@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/sample_heritage_bus_dsp.hpp",
+  "fingerprint": "sha256:86c1ee48941055e66e202900e0a4a881fc2beed714f529a2bbe4e8100e65345e",
+  "include": "pulp/audio/sample_heritage_bus_dsp.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

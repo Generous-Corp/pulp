@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/audio_io_timing.hpp",
+  "fingerprint": "sha256:a1f193729a091848a61dfc912c128d080395469acdd2988cb43bea5e0e980d86",
+  "include": "pulp/audio/audio_io_timing.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/rungler.hpp",
+  "fingerprint": "sha256:c45a151c41449b0a7823ff148f1ed8cc0174f9c369a9bb95c07213ef97b19b1b",
+  "include": "pulp/signal/rungler.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "signal.stochastic-sources"
+  ],
+  "rationale": "The established Rungler now composes the configurable LFSR while preserving its existing DAC and event behavior."
+}

@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/waveguide_reflection_filter.hpp",
+  "fingerprint": "sha256:4584a07804fabc91d7651938e057f9118db29c15dc725be6b9dba5611630d74e"
+}

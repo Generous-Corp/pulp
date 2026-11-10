@@ -1,0 +1,19 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/ump_buffer.hpp",
+  "fingerprint": "sha256:bfa4083ebc64f5ca30675facbb1b4ebf8a6a203b0aa24d15662dcced33697b3e",
+  "include": "pulp/midi/ump_buffer.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "midi.arpeggiator",
+    "midi.channel-routing",
+    "midi.controller-mapping",
+    "midi.keyboard-split",
+    "midi.monophonic-note-selection",
+    "midi.mpe-voice-tracker",
+    "midi.note-length-shaping",
+    "midi.note-range-filtering",
+    "midi.scale-aware-mpe-pitch"
+  ],
+  "rationale": "Prepared UMP sidecar storage and overflow accounting support the complete-block contracts; semantic routing remains in the bound utility kernels."
+}

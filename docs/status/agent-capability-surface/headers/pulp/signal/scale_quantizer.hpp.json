@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/scale_quantizer.hpp",
+  "fingerprint": "sha256:55edf27ef1d76118d4751fa193ef917f897129eb5f54cfe680e72a2ba6a79629",
+  "include": "pulp/signal/scale_quantizer.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

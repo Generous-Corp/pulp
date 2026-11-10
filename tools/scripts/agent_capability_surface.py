@@ -12,10 +12,16 @@ import json
 import pathlib
 from typing import Any, Iterable
 
+import agent_capability_store as store
+
 
 SURFACE_SCHEMA = "pulp.agent-capability-surface.v1"
 BASELINE_SCHEMA = "pulp.agent-capability-legacy-baseline.v1"
-SURFACE_SNAPSHOT = pathlib.Path("docs/status/agent-capability-surface.json")
+# The ledger is committed as one record file per header under SURFACE_DIR
+# (agent_capability_store.py). SURFACE_SNAPSHOT is the single file it used to
+# be: the name of the combined document, and what an older revision holds.
+SURFACE_SNAPSHOT = store.SURFACE_LEGACY
+SURFACE_DIR = store.SURFACE_DIR
 LEGACY_BASELINE = pathlib.Path(
     "tools/agent-capabilities/legacy-unreviewed-baseline.json"
 )

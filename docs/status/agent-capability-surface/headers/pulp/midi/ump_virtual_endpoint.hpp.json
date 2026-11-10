@@ -1,0 +1,9 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/ump_virtual_endpoint.hpp",
+  "fingerprint": "sha256:f6945562e87c7a56d143808ec0c8fbba787afd08a3bd707b46c3d97128cab646",
+  "include": "pulp/midi/ump_virtual_endpoint.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

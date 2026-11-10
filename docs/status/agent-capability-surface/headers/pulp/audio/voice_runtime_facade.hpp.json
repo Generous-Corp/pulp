@@ -1,0 +1,12 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/voice_runtime_facade.hpp",
+  "fingerprint": "sha256:4237f8cdf64ed1a28330822f41ea8d3fc5a42d955a5b964a54ba24106a7ceab6",
+  "include": "pulp/audio/voice_runtime_facade.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "audio.voice-note-modulation",
+    "audio.voice-runtime-facade"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

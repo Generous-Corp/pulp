@@ -636,9 +636,14 @@ unsupported. A live row's `status` is the positive support claim; an
 `legacy_unreviewed` means only that the public header has not yet received a
 machine-readable capability review.
 
-`docs/status/agent-capability-surface.json` is the maintenance ledger for all
-public headers in the covered audio, MIDI, signal, timebase, and sequence roots.
-It records SHA-256 file fingerprints and reviewed dispositions. The original
+`docs/status/agent-capability-surface/` is the maintenance ledger for all
+public headers in the covered audio, MIDI, signal, timebase, and sequence roots,
+one record file per header (`headers/<include>.json`) plus `meta.json`, which
+holds the schema, roots and `inventory_version`. It records SHA-256 file
+fingerprints and reviewed dispositions. A capability binding's reviewed header
+fingerprint is recorded once per header in
+`tools/agent-capabilities/fingerprints/<include>.json` and refreshed only by
+`agent_capability_manifest.py --accept-fingerprint <include>`. The original
 unreviewed surface is frozen in
 `tools/agent-capabilities/legacy-unreviewed-baseline.json`: that set may shrink
 as headers are reviewed but may never grow. Consequently, CI fails closed when
@@ -676,8 +681,10 @@ ordered within its last contract version. Only a later manifest revision may
 replace it with a `status: removed` tombstone. Replacement keys must name live
 capabilities and may not form self-references or cycles.
 
-`tools/agent-capabilities/contract-history.json` is the append-only maintenance
-history. Normal `--check` validates every recorded transition and compares its
+`tools/agent-capabilities/history/` is the append-only maintenance history, one
+file per recorded state. Each entry names its `parent` entry's digest, so the
+order is a chain rather than positions in an array, and recording a state adds
+one file without modifying any other. Normal `--check` validates every recorded transition and compares its
 prefix plus the current manifest and ledger directly with the protected Git tip
 (fetching the immutable GitHub base SHA in shallow CI checkouts).
 
@@ -689,12 +696,22 @@ objects are split into chunks, so a change to one row stores one new chunk
 instead of the whole array again. `entries` lists each entry's digest, which is
 the digest of its complete material. `--check` expands every entry and
 re-verifies its digest, re-runs every recorded transition, re-encodes the
-expanded entries and requires the result to equal the stored file exactly (so a
-hand edit to any stored object is caught), and compares the expanded entries
-with the protected base's, whichever layout that base uses. It also fails if the
+expanded entries and requires every entry file to equal its rendering exactly
+(so a hand edit to any stored object is caught), and compares the expanded
+entries with the protected base's, whichever layout that base uses. It also fails if the
 file would exceed 25 MB, far below GitHub's 100 MB per-file limit. The earlier
 layout, which repeated every entry in full and reached 104 MB, is still accepted
 as a protected base and as `--write` input, and `--write` converts it.
+Each entry file stores only the objects no earlier entry stores.
+
+Each of these records is one file per entry so that two pull requests changing
+different headers touch different files and merge without a conflict. The
+combined documents are assembled on read by `tools/scripts/agent_capability_store.py`
+(`show-surface [REV]`, `show-history [REV]`), which also reads a revision that
+still holds the earlier single files `docs/status/agent-capability-surface.json`
+and `tools/agent-capabilities/contract-history.json`; re-adding either single
+file is refused by `tools/scripts/hotspot_edit_guard.py`.
+
 Editing generator source, current snapshots, and local history together cannot
 bypass a published tombstone, key-reuse prohibition, version increase, or
 deprecation-window rule.

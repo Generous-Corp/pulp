@@ -1,0 +1,11 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/track_mixer_program.hpp",
+  "fingerprint": "sha256:88c89096272bdd2c56b6b756fd426a7c7e09861286032a3e29ed7df47f966396",
+  "include": "pulp/playback/track_mixer_program.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "sequence.controller-playback"
+  ],
+  "rationale": "The compiled form of a track's own level and stereo placement, where a non-null automation lane supersedes the authored constant entirely so a lane and a constant never both apply. A static_assert ties kMaximumTrackMixerGain to timeline::kMaximumTrackGainLinear, which is what keeps the render path from honouring an automated gain the document would refuse to store, and transparent() is what keeps an untouched track bit- identical to its pre-mixer render. pulp/playback/program.hpp includes it directly, so it is compile-time support for the sequence.controller- playback bindings."
+}
