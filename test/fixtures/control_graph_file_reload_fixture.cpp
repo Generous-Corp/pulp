@@ -36,7 +36,6 @@ class RouteNodeProcessor final : public pulp::format::Processor {
         d.version = "1";
         d.input_buses = {{"In", 1, false}};
         d.output_buses = {{"Out", 1, false}};
-        d.node_capabilities.consumes_audio_rate_modulations = true;
         return d;
     }
     void define_parameters(pulp::state::StateStore& store) override {
@@ -44,8 +43,6 @@ class RouteNodeProcessor final : public pulp::format::Processor {
         p.id = kParameter;
         p.name = "Route";
         p.range = {0.0f, 1.0f, 0.5f};
-        p.rate = pulp::state::ParamRate::AudioRate;
-        p.modulatable = true;
         store.add_parameter(p);
     }
     void prepare(const pulp::format::PrepareContext&) override {}
@@ -65,16 +62,16 @@ class GraphProductProcessor final : public pulp::format::Processor {
         d.manufacturer = "Pulp";
         d.bundle_id = "dev.pulp.test.graph-file-reload";
         d.version = "1.0.0";
-        d.input_buses = {{"In", 1, false}};
-        d.output_buses = {{"Out", 1, false}};
+        d.input_buses = {{"In", 2, false}};
+        d.output_buses = {{"Out", 2, false}};
         return d;
     }
     void define_parameters(pulp::state::StateStore&) override {}
     void prepare(const pulp::format::PrepareContext& context) override {
         stimulus_.fill(0.5f);
-        source_ = graph_.add_input_node(1, "source");
+        source_ = graph_.add_input_node(2, "source");
         destination_ = graph_.add_processor_node(std::make_unique<RouteNodeProcessor>());
-        output_ = graph_.add_output_node(1, "output");
+        output_ = graph_.add_output_node(2, "output");
         if (source_ == 0 || destination_ == 0 || output_ == 0 ||
             !graph_.connect(source_, 0, destination_, 0) ||
             !graph_.connect(destination_, 0, output_, 0))
@@ -88,8 +85,8 @@ class GraphProductProcessor final : public pulp::format::Processor {
     void process(pulp::audio::BufferView<float>& output,
                  const pulp::audio::BufferView<const float>&, pulp::midi::MidiBuffer&,
                  pulp::midi::MidiBuffer&, const pulp::format::ProcessContext&) override {
-        float* source = stimulus_.data();
-        const pulp::audio::BufferView<const float> input(&source, 1, stimulus_.size());
+        const float* sources[] = {stimulus_.data(), stimulus_.data()};
+        const pulp::audio::BufferView<const float> input(sources, 2, stimulus_.size());
         for (std::size_t start = 0; start < output.num_samples(); start += stimulus_.size()) {
             auto block = output.slice(start, stimulus_.size());
             graph_.process(block, input.slice(0, block.num_samples()),
@@ -157,7 +154,7 @@ int main() {
         return 64;
     pulp::format::StandaloneConfig config;
     config.input_channels = 0;
-    config.output_channels = 1;
+    config.output_channels = 2;
     config.persist_settings = false;
     config.show_settings_tab = false;
     pulp::format::StandaloneApp app(&create_processor);

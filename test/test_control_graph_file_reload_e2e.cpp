@@ -259,6 +259,7 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
         std::ifstream captured(host_dir / "graph-audio.json");
         const std::string bytes(std::istreambuf_iterator<char>{captured}, {});
         REQUIRE_FALSE(bytes.empty());
+        INFO(bytes);
         const auto evidence = choc::json::parse(bytes);
         REQUIRE(evidence["process_count"].getInt64() > 0);
         REQUIRE(evidence["sample"].getFloat64() == expected_sample);
