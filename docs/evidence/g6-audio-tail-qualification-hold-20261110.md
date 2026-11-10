@@ -1,9 +1,12 @@
 # G-6 voice lifecycle and audio-tail qualification HOLD (2026-11-10)
 
-## Exact base and disposition
+## Audit source snapshot (historical)
 
-This bounded audit starts from `origin/main` at
-`d8cae12b3ae3e95941dc84fd6c52fc8b621921ed` in a fresh classified worktree.
+This bounded audit reads the published seams from `origin/main` at the
+historical source snapshot `d8cae12b3ae3e95941dc84fd6c52fc8b621921ed` in a
+fresh classified worktree. The PR base is
+`12e3dd9087e4c971ac67e8d413ddd99c904b8529`; the historical source snapshot is
+not the PR base or exact-current evidence.
 Disposition: **HOLD; no runtime/API change and no duplicate G-5 work**.
 
 The existing G-6 allocator consumer is a useful control probe, but it is
