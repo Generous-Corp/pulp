@@ -424,6 +424,56 @@ class VersionBumpSurfacesTests(GateFixtureTestCase):
                 "patch",
             )
 
+    def test_vendored_sources_are_an_sdk_release_surface(self) -> None:
+        # Vendored sources compiled into the SDK libraries, and the patches
+        # carried on them, ship in the SDK even though they sit outside
+        # core/. A fix to one of them must reach an SDK release on the patch
+        # lane, as must a build module that pins or compiles SDK code. Skia's
+        # include/ and modules/ headers are installed and included by public
+        # Pulp headers, so a change there is on the minor lane; a VERSION.md
+        # re-cut is patch. Fonts that are not embedded, test helpers and the
+        # web-module helpers stay outside the surface.
+        vbc = self._import_gate_module("version_bump_check")
+        cfg_path = VBC.parents[2] / "tools/scripts/versioning.json"
+        surface = next(s for s in vbc.load_config(cfg_path).surfaces
+                       if s.name == "sdk")
+        with mock.patch.object(
+            vbc, "git_diff_ignore_whitespace_nonempty", return_value=True
+        ):
+            expected_levels = {
+                "external/dr_libs/dr_mp3.h": "patch",
+                "external/dr_libs/stb_vorbis.c": "patch",
+                "external/miniz/miniz.c": "patch",
+                "external/pugixml/pugixml.cpp": "patch",
+                "external/nanosvg/nanosvgrast.h": "patch",
+                "external/tweetnacl/tweetnacl.c": "patch",
+                "external/cpp-httplib/httplib.h": "patch",
+                "external/lilv/lilv/src/world.c": "patch",
+                "external/fonts/Inter-Regular.ttf": "patch",
+                "external/fonts/NotoColorEmoji.ttf": "patch",
+                "tools/deps/patches/dr_libs/0001-dr_mp3-64-bit-xing-frame-count.patch": "patch",
+                "tools/cmake/PulpPatchChoc.cmake": "patch",
+                "external/skia-build/include/core/SkCanvas.h": "minor",
+                "external/skia-build/modules/skcms/skcms.h": "minor",
+                "external/skia-build/VERSION.md": "patch",
+                "tools/cmake/PulpDependencies.cmake": "patch",
+                "core/view/cmake/PulpViewJsEngines.cmake": "patch",
+                "tools/cmake/PulpWgpuNative.cmake": "patch",
+                "tools/cmake/PulpTestSuite.cmake": "none",
+                "tools/cmake/PulpWam.cmake": "none",
+                "external/fonts/FunnelDisplay-VariableFont_wght.ttf": "none",
+                "external/fonts/README.md": "none",
+                "external/vst3sdk/CMakeLists.txt": "none",
+            }
+            for path, expected in expected_levels.items():
+                with self.subTest(path=path):
+                    self.assertEqual(
+                        vbc.heuristic_for_surface(
+                            surface, [path], "base", "head"
+                        ),
+                        expected,
+                    )
+
     def test_version_bump_missing_config_returns_usage_error(self) -> None:
         code, out = _run(
             [
@@ -439,6 +489,7 @@ class VersionBumpSurfacesTests(GateFixtureTestCase):
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALL_RULES = "tools/cmake/PulpInstallRules.cmake"
+PATCH_MANIFEST = "tools/deps/patches.json"
 _INSTALL_CALL = re.compile(r"install\s*\((.*?)\n\s*\)", re.S)
 _SHIPPED_MODULE = re.compile(r'/tools/cmake/(Pulp[A-Za-z0-9_]*\.cmake)"')
 
@@ -457,14 +508,129 @@ def installed_pulp_modules(install_rules_text: str) -> set[str]:
     return shipped
 
 
+# Every build module in MODULE_GLOBS is classified exactly once: installed
+# (read from PulpInstallRules.cmake), the install rules themselves, a
+# configure-time source patch (read from tools/deps/patches.json), or one of
+# the two maps below. A module nobody classified fails
+# test_every_build_module_is_classified_exactly_once.
+MODULE_GLOBS = ("tools/cmake/Pulp*.cmake", "core/view/cmake/*.cmake")
+
+# sdk trigger paths that are not installed: each pins a dependency the SDK
+# links or changes the code its libraries compile.
+COMPILED_SDK_MODULES = {
+    "core/view/cmake/PulpDesignUnits.cmake": "defines the DesignIR and importer libraries the view umbrella links",
+    "core/view/cmake/PulpViewJsEngines.cmake": "selects the JS engine compiled into pulp-view",
+    "core/view/cmake/PulpViewJsPreludes.cmake": "embeds the JS preludes compiled into pulp-view",
+    "core/view/cmake/PulpViewPlatform.cmake": "defines the pulp-view-platform library",
+    "core/view/cmake/PulpViewSources.cmake": "lists the native view sources compiled into pulp-view",
+    "tools/cmake/PulpAndroid.cmake": "adds the Android platform sources and Oboe audio to the SDK libraries",
+    "tools/cmake/PulpDependencies.cmake": "pins the CHOC fork, WebGPU, wgpu and resolves the Skia archive",
+    "tools/cmake/PulpFloatingPointContraction.cmake": "sets the FP contraction flags every SDK library compiles with",
+    "tools/cmake/PulpForgeCatalogInstall.cmake": "installs the Forge catalog export into the SDK",
+    "tools/cmake/PulpGitState.cmake": "compiles the checkout's dirty state into pulp-runtime build info",
+    "tools/cmake/PulpGpuAudioProviderIdentity.cmake": "pins the GPU-audio provider identity pulp-gpu-audio is built against",
+    "tools/cmake/PulpGpuRuntime.cmake": "wires the gpu-runtime device layer pulp-render links",
+    "tools/cmake/PulpLiteEditorObjects.cmake": "builds the lite editor replacement objects plug-ins link",
+    "tools/cmake/PulpMacOsArch.cmake": "selects the macOS architectures the SDK is built for",
+    "tools/cmake/PulpPortableWav.cmake": "sets the dr_libs include and defines pulp-audio compiles with",
+    "tools/cmake/PulpProfiles.cmake": "holds the option set a release SDK configure uses",
+    "tools/cmake/PulpRack.cmake": "builds the Rack plug-ins whose tools/rack sources are already sdk triggers",
+    "tools/cmake/PulpReleaseMatrix.cmake": "compiles the release floors into the CLI",
+    "tools/cmake/PulpRuntimePins.cmake": "writes and installs runtime-pins.json",
+    "tools/cmake/PulpSdl3Linux.cmake": "sets the SDL3 options the Linux SDK links",
+    "tools/cmake/PulpSimdSupport.cmake": "selects the SIMD target pulp-runtime compiles for",
+    "tools/cmake/PulpSkiaCache.cmake": "selects the Skia cache generation the SDK links",
+    "tools/cmake/PulpTracing.cmake": "defines pulp-tracing, which pulp-runtime links publicly and the SDK exports",
+    "tools/cmake/PulpV8ConsumerDefines.cmake": "applies the V8 consumer defines the V8 engine compiles with",
+    "tools/cmake/PulpV8Windows.cmake": "applies the Windows V8 consumer ABI contract",
+    "tools/cmake/PulpWgpuNative.cmake": "pins the wgpu-native archives by digest",
+    "tools/cmake/PulpWgpuUniversal.cmake": "builds the universal libwgpu_native the macOS SDK ships",
+    "tools/cmake/PulpWindowsSkiaProvider.cmake": "selects the Windows ARM64EC/ARM64X Skia and Dawn provider",
+}
+
+# Build modules outside the sdk surface.
+NON_SDK_MODULES = {
+    "tools/cmake/PulpAbletonLink.cmake": "optional developer-supplied Link SDK boundary; never bundled",
+    "tools/cmake/PulpCargoStaticlib.cmake": "opt-in Rust native-component test lane",
+    "tools/cmake/PulpCatch.cmake": "Catch2 test discovery",
+    "tools/cmake/PulpCatchAddTests.cmake": "Catch2 test discovery",
+    "tools/cmake/PulpCheckForgeCatalog.cmake": "packaging guard comparing the installed Forge catalog",
+    "tools/cmake/PulpCheckoutLocation.cmake": "refuses checkouts under a temporary directory",
+    "tools/cmake/PulpCollectTargets.cmake": "lists configured targets for build tooling",
+    "tools/cmake/PulpConfigureCheckCache.cmake": "caches configure-check results",
+    "tools/cmake/PulpConsumerClosure.cmake": "measures what an installed SDK costs a consumer",
+    "tools/cmake/PulpCppStringChunks.cmake": "string chunking for tools/mcp, which is not on the sdk surface",
+    "tools/cmake/PulpDefaultBuildType.cmake": "defaults an empty build type for the top-level project only",
+    "tools/cmake/PulpEmbed.cmake": "nothing in the tree includes it",
+    "tools/cmake/PulpFaust.cmake": "nothing in the tree includes it; optional external Faust codegen",
+    "tools/cmake/PulpFetchContent.cmake": "keeps shared FetchContent caches immutable",
+    "tools/cmake/PulpGenerateForgeCatalog.cmake": "packaging guard on the Forge catalog exporter",
+    "tools/cmake/PulpGpuWasm.cmake": "WebAssembly DSP module helper, outside the native SDK",
+    "tools/cmake/PulpInstrumentation.cmake": "coverage flags, applied only when PULP_ENABLE_COVERAGE is ON",
+    "tools/cmake/PulpLinkFloor.cmake": "link-closure measurement",
+    "tools/cmake/PulpLinkMaps.cmake": "records link maps for the macOS gate",
+    "tools/cmake/PulpLinkPool.cmake": "caps concurrent Ninja link jobs",
+    "tools/cmake/PulpLiveKernel.cmake": "experimental live-kernel helper; nothing in the tree includes it",
+    "tools/cmake/PulpSampleRegionWebSources.cmake": "web build sources for WAM and WebCLAP",
+    "tools/cmake/PulpTestData.cmake": "declares compiled-test data inputs",
+    "tools/cmake/PulpTestSharedObjects.cmake": "shares test-support objects",
+    "tools/cmake/PulpTestSuite.cmake": "declares Catch2 test binaries",
+    "tools/cmake/PulpTestTimeout.cmake": "scales test timeouts by build config",
+    "tools/cmake/PulpToolchainCheck.cmake": "reports host tool version drift",
+    "tools/cmake/PulpWam.cmake": "WAM WebAssembly helper, outside the native SDK",
+    "tools/cmake/PulpWclap.cmake": "WebCLAP WebAssembly helper, outside the native SDK",
+    "tools/cmake/PulpWebUi.cmake": "browser UI WebAssembly helper, outside the native SDK",
+}
+
+
+def build_modules() -> set[str]:
+    return {str(path.relative_to(REPO_ROOT)) for pattern in MODULE_GLOBS
+            for path in REPO_ROOT.glob(pattern)}
+
+
+def classify_modules(modules: set[str], shipped: set[str]) -> dict[str, list[str]]:
+    """Map each module to every bucket that claims it."""
+    buckets = {
+        "shipped": shipped,
+        "install rules": {INSTALL_RULES},
+        "source patch": source_patch_modules(),
+        "compiled SDK": set(COMPILED_SDK_MODULES),
+        "non-SDK": set(NON_SDK_MODULES),
+    }
+    return {module: [name for name, members in buckets.items() if module in members]
+            for module in modules}
+
+
+EMBEDDED_FONT = re.compile(r"\$\{PULP_ROOT_DIR\}/(external/fonts/[^\s)]+\.ttf)")
+
+
+def embedded_fonts(canvas_cmake_text: str) -> set[str]:
+    """Every external/fonts/*.ttf core/canvas/CMakeLists.txt compiles in."""
+    return set(EMBEDDED_FONT.findall(canvas_cmake_text))
+
+
+def source_patch_modules() -> set[str]:
+    """CMake modules that rewrite fetched dependency source at configure time.
+
+    tools/deps/patches.json names them under configure_time_patches. They are
+    not installed, but the source they rewrite is compiled into the SDK, so
+    they are sdk trigger paths without shipping.
+    """
+    manifest = json.loads((REPO_ROOT / PATCH_MANIFEST).read_text(encoding="utf-8"))
+    return {dep["configure_time_patches"]["file"] for dep in manifest["dependencies"]
+            if "configure_time_patches" in dep}
+
+
 def sdk_module_drift(install_rules_text: str, sdk_trigger_paths: list[str]) -> tuple[set[str], set[str]]:
     """(shipped modules the sdk surface does not trigger on,
     listed tools/cmake/Pulp*.cmake modules that do not ship)."""
     shipped = installed_pulp_modules(install_rules_text)
     listed = {p for p in sdk_trigger_paths
               if re.fullmatch(r"tools/cmake/Pulp[A-Za-z0-9_]*\.cmake", p)}
-    # The install rules file defines what ships rather than shipping itself.
-    return shipped - listed, listed - shipped - {INSTALL_RULES}
+    # The install rules file defines what ships rather than shipping itself,
+    # and source-patch and compiled-SDK modules change SDK code without shipping.
+    return shipped - listed, (listed - shipped - {INSTALL_RULES} - source_patch_modules()
+                              - set(COMPILED_SDK_MODULES))
 
 
 class SdkShippedCmakeModulesTests(unittest.TestCase):
@@ -483,6 +649,45 @@ class SdkShippedCmakeModulesTests(unittest.TestCase):
         self.assertEqual(unshipped, set(), "an sdk trigger path for a module the SDK does not install")
         self.assertGreater(len(installed_pulp_modules(self.rules)), 30,
                            "the install-list parser found almost nothing; it is broken")
+
+    def test_compiled_sdk_modules_are_unshipped_triggers(self) -> None:
+        shipped = installed_pulp_modules(self.rules)
+        for module in sorted(COMPILED_SDK_MODULES):
+            with self.subTest(module=module):
+                self.assertTrue((REPO_ROOT / module).is_file(), "listed module does not exist")
+                self.assertIn(module, self.triggers, "classified as compiled SDK code but not a trigger path")
+                self.assertNotIn(module, shipped, "installed, so the shipped-module check already covers it")
+
+    def test_every_build_module_is_classified_exactly_once(self) -> None:
+        modules = build_modules()
+        self.assertGreater(len(modules), 100, "the module globs found almost nothing; they are broken")
+        claims = classify_modules(modules, installed_pulp_modules(self.rules))
+        unclassified = sorted(m for m, owners in claims.items() if not owners)
+        ambiguous = {m: owners for m, owners in claims.items() if len(owners) > 1}
+        self.assertEqual(unclassified, [], "build module in no bucket; add it to COMPILED_SDK_MODULES "
+                         "(and the sdk trigger paths) or NON_SDK_MODULES with a reason")
+        self.assertEqual(ambiguous, {}, "build module in more than one bucket")
+        for name, table in (("COMPILED_SDK_MODULES", COMPILED_SDK_MODULES), ("NON_SDK_MODULES", NON_SDK_MODULES)):
+            for module, reason in table.items():
+                with self.subTest(table=name, module=module):
+                    self.assertIn(module, modules, "classified module does not exist")
+                    self.assertTrue(reason.strip(), "classification needs a reason")
+        self.assertEqual(sorted(set(NON_SDK_MODULES) & set(self.triggers)), [],
+                         "a non-SDK module is an sdk trigger path")
+
+    def test_the_sdk_font_triggers_are_the_embedded_fonts(self) -> None:
+        embedded = embedded_fonts((REPO_ROOT / "core/canvas/CMakeLists.txt").read_text(encoding="utf-8"))
+        self.assertGreater(len(embedded), 3, "the font parser found almost nothing; it is broken")
+        listed = {p for p in self.triggers if p.startswith("external/fonts/")}
+        self.assertEqual(listed, embedded,
+                         "sdk font triggers must be exactly the fonts core/canvas embeds")
+
+    def test_every_source_patch_module_is_an_sdk_trigger(self) -> None:
+        patchers = source_patch_modules()
+        self.assertIn("tools/cmake/PulpPatchChoc.cmake", patchers,
+                      "patches.json lists no configure-time patch module; the reader is broken")
+        self.assertEqual(patchers - set(self.triggers), set(),
+                         "rewrites SDK source at configure time but is not an sdk trigger path")
 
     def test_a_planted_install_or_a_dropped_trigger_is_reported(self) -> None:
         planted = self.rules + (

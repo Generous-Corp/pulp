@@ -58,6 +58,16 @@ it and its tests, and both look like bugs until you know them:
   for "other" buttons. A translator that trusts `buttonNumber` passes against
   real input and fails every synthetic table test, or the other way round.
 
+- **`mouseEventWithType:` throws for enter and exit events.** Build them with
+  `+[NSEvent enterExitEventWithType:...trackingNumber:userData:]`. Catch2 only
+  reports "Unknown exception" at the test case, with no hint of which call
+  threw.
+- **Giving text focus back means restoring the host's own responder.**
+  `MetalSurface::set_text_focus(false)` hands first responder back to whatever
+  held it when the client took it, falling back to nil. Handing it to nil
+  leaves a host's key routing (Musical Typing) dead, as the plug-in host's
+  key-focus etiquette below describes.
+
 The view's Objective-C class is registered at run time through
 `pulp/platform/objc_unique_class.hpp`, so two plug-ins never share it. Every
 override calls super through `super_implementation(<registered class>, sel)`,
