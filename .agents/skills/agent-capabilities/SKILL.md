@@ -98,9 +98,9 @@ shrinks by one.
 The fingerprint is over the header's bytes, so a comment-only edit to a covered
 header costs the same row and inventory bump as a signature change; when a
 contract note or a behavior fix can live in the `.cpp`, put it there. A
-header-only class (`sample_resource.hpp`, 2026-11-08: a zero-frame decode
-became a load failure) has no `.cpp` to hide in, so its fix takes the row and
-the bump; say so in the commit rather than reverting the fix to dodge the gate.
+header-only class such as `sample_resource.hpp` has no `.cpp` to hide in, so
+its fix takes the row and the bump; say so in the commit rather than reverting
+the fix to dodge the gate.
 
 ## Public-header fingerprint refresh
 
@@ -270,7 +270,7 @@ For a new public header or symbol:
 4. Leave `SURFACE_INVENTORY_VERSION` and `MANIFEST_REVISION` at the base
    value; the version-at-land bump assigns them (see the top of this skill).
 
-Worked example (2026-11-07): extending `pulp/signal/spectrogram.hpp`
+Worked example: extending `pulp/signal/spectrogram.hpp`
 (FrequencyAxis double overloads) changed the bytes of a header the ledger held
 as frozen `legacy_unreviewed`. The fix was step 3, not a fingerprint refresh:
 add an `infrastructure` row for it in `agent_capability_registry.py` with the
@@ -1234,7 +1234,10 @@ and only some of them run in `gates.sh`:
 
 Keep one include root per module. The Doxygen parity check accepts a second
 public install root only by name, so a module that installs `audio/include`
-beside `include` fails it.
+beside `include` fails it. The same holds for a package outside `core/`
+(`integrations/pulp-native/include`): name its root in
+`doxygen_installed_header_check.py` and add it to the Doxyfile `INPUT`, or the
+check reports "unsupported independent public-header install authority".
 
 ## `gates.sh` does NOT run the capability check — adding a public header passes pre-push and fails in CI
 

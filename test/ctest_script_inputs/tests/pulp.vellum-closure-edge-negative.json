@@ -5,6 +5,7 @@
   "inputs": [
    "tools/ci/governed-build.sh",
    "tools/scripts/confirm_failure.sh",
+   "tools/scripts/confirm_failure_driver_link.py",
    "tools/scripts/vellum_closure_edge_fixture.json"
   ],
   "kind": "shell"

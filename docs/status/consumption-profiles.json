@@ -664,6 +664,7 @@
       "pulp/platform/dialog_session.hpp",
       "pulp/platform/environment.hpp",
       "pulp/platform/file_dialog.hpp",
+      "pulp/platform/file_drag.hpp",
       "pulp/platform/gpu_fwd.hpp",
       "pulp/platform/main_thread.hpp",
       "pulp/platform/native_handle.hpp",
@@ -672,6 +673,7 @@
       "pulp/platform/permissions.hpp",
       "pulp/platform/platform.hpp",
       "pulp/platform/popup_menu.hpp",
+      "pulp/platform/popup_window.hpp",
       "pulp/platform/progress_parser.hpp",
       "pulp/platform/reveal_in_file_manager.hpp",
       "pulp/platform/special_dir.hpp",
@@ -1259,7 +1261,9 @@
       "pulp/state/parameter.hpp",
       "pulp/state/parameter_edit.hpp",
       "pulp/state/parameter_event_queue.hpp",
+      "pulp/state/preset_library.hpp",
       "pulp/state/preset_manager.hpp",
+      "pulp/state/preset_metadata_store.hpp",
       "pulp/state/properties_file.hpp",
       "pulp/state/sequencer_state_channel.hpp",
       "pulp/state/stable_sort.hpp",
@@ -1670,6 +1674,11 @@
       "pulp/inspect/tweak_store.hpp",
       "pulp/inspect/value_channel_telemetry_broker.hpp"
     ],
+    "integrations/pulp-native/include": [
+      "pulp/native/frame_pump.hpp",
+      "pulp/native/input.hpp",
+      "pulp/native/metal_surface.hpp"
+    ],
     "tools/audio/analysis/include": [
       "pulp/audio/analysis/audio_artifacts.hpp",
       "pulp/audio/analysis/audio_assertions.hpp",
@@ -1711,7 +1720,7 @@
         "PULP_BUILD_EXAMPLES": "OFF"
       },
       "summary": {
-        "installed_target_count": 88,
+        "installed_target_count": 89,
         "ranked_by_closure": [
           {
             "exported_as": "Pulp::inspect-standalone-runtime",
@@ -1960,6 +1969,10 @@
           {
             "exported_as": "Pulp::sdl3-static",
             "closure_node_count": 18
+          },
+          {
+            "exported_as": "Pulp::native",
+            "closure_node_count": 10
           },
           {
             "exported_as": "Pulp::signal-fft-backend",
@@ -6500,6 +6513,54 @@
           },
           "direct_dependencies": [
             "pulp-timebase"
+          ]
+        },
+        "native": {
+          "target": "pulp-native",
+          "exported_as": "Pulp::native",
+          "type": "STATIC_LIBRARY",
+          "source_dir": "integrations/pulp-native",
+          "closure": {
+            "node_count": 10,
+            "pulp_targets": [
+              "pulp-platform"
+            ],
+            "third_party_targets": [
+              "gpu-runtime-device-api",
+              "pulp-native"
+            ]
+          },
+          "external_dependencies": {
+            "count": 9,
+            "third_party_targets": [
+              "gpu-runtime-device-api",
+              "pulp-native"
+            ],
+            "prebuilt_archives": [],
+            "imported_targets": [],
+            "frameworks": [
+              "AppKit",
+              "Cocoa",
+              "CoreFoundation",
+              "CoreVideo",
+              "Metal",
+              "QuartzCore",
+              "UniformTypeIdentifiers"
+            ],
+            "system_libraries": []
+          },
+          "public_headers": {
+            "roots": [
+              "integrations/pulp-native/include"
+            ],
+            "generated_include_roots": 0
+          },
+          "direct_dependencies": [
+            "framework:AppKit",
+            "framework:CoreVideo",
+            "framework:Metal",
+            "framework:QuartzCore",
+            "pulp-platform"
           ]
         },
         "native-components": {

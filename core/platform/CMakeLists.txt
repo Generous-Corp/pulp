@@ -10,10 +10,13 @@ target_include_directories(pulp-platform
 target_sources(pulp-platform PRIVATE
     src/platform.cpp
     src/main_thread.cpp
+    src/popup_window.cpp
+    src/file_drag.cpp
     src/alert.cpp
     src/dialog_session.cpp
     src/file_dialog_async.cpp
     src/open_url.cpp
+    src/popup_menu_async.cpp
     src/file_dialog_stub.cpp
     src/reveal_in_file_manager.cpp
     src/popup_menu_stub.cpp
@@ -35,6 +38,8 @@ if(APPLE AND NOT IOS)
         platform/mac/popup_menu_mac.mm
         platform/mac/reveal_mac.mm
         platform/mac/environment_mac.mm
+        platform/mac/popup_window_mac.mm
+        platform/mac/file_drag_mac.mm
         platform/mac/objc_unique_class_mac.mm
         platform/posix/child_process_posix.cpp
     )
@@ -100,7 +105,14 @@ elseif(UNIX AND NOT APPLE)
 endif()
 
 if(NOT (APPLE AND NOT IOS))
-    target_sources(pulp-platform PRIVATE src/platform_dialogs_stub.cpp)
+    target_sources(pulp-platform PRIVATE
+        src/file_drag_stub.cpp
+        src/platform_dialogs_stub.cpp
+    )
+endif()
+
+if(NOT (APPLE AND NOT IOS))
+    target_sources(pulp-platform PRIVATE src/popup_window_stub.cpp)
 endif()
 
 # Public-header manifest: every header this target ships, relative to this
@@ -118,6 +130,7 @@ set(PULP_PLATFORM_UNIT_HEADERS
     include/pulp/platform/dialog_session.hpp
     include/pulp/platform/environment.hpp
     include/pulp/platform/file_dialog.hpp
+    include/pulp/platform/file_drag.hpp
     include/pulp/platform/gpu_fwd.hpp
     include/pulp/platform/main_thread.hpp
     include/pulp/platform/native_handle.hpp
@@ -126,6 +139,7 @@ set(PULP_PLATFORM_UNIT_HEADERS
     include/pulp/platform/permissions.hpp
     include/pulp/platform/platform.hpp
     include/pulp/platform/popup_menu.hpp
+    include/pulp/platform/popup_window.hpp
     include/pulp/platform/progress_parser.hpp
     include/pulp/platform/reveal_in_file_manager.hpp
     include/pulp/platform/special_dir.hpp

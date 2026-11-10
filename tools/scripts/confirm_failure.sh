@@ -30,6 +30,11 @@
 #
 # --keep-logs keeps the per-phase test logs after a CONFIRMED run too.
 #
+# The purge touches only archives and libraries the build graph produces (read
+# from `ninja -t targets all`), so a third-party library a project copies into
+# its build directory at configure time survives. With another generator the
+# graph cannot be listed and every archive and library is purged.
+#
 # --subject names the compiled binary the edit must reach when it is not the
 # test's own executable: a CLI shell-out suite fingerprints as
 # pulp-test-cli-shellout while the edited code is compiled into pulp-cpp.
@@ -39,7 +44,10 @@
 # --subject the test executable is left in place (it only drives the subject),
 # so --target may name the subject's target alone, unless the driver links the
 # edited source too: then the run stops INCONCLUSIVE and asks for a --target
-# that rebuilds the driver as well.
+# that rebuilds the driver as well. The link is read from the build graph, and
+# the run is also INCONCLUSIVE when the graph cannot answer: no word of --test
+# is a binary in the build dir (a script or ctest wrapping the driver), or a
+# header is edited in a Makefile build, which records no header dependencies.
 #
 # A Catch2 test spec splits on commas, so a --test naming a test case whose
 # name contains a comma matches nothing and the baseline comes back
@@ -90,7 +98,10 @@
 # source the compiler never sees directly. A JS prelude under core/view/js is
 # embedded into web_compat_preludes_gen.cpp at build time, so there is no
 # web-compat-foo.js.o to watch for and the recompile evidence must be
-# `--object web_compat_preludes_gen.cpp` instead.
+# `--object web_compat_preludes_gen.cpp` instead. With --subject, an --object
+# that names an existing source path identifies that one source exactly; a bare
+# name matches any object of that name, which can refuse a driver that compiles
+# an unrelated source of the same name.
 #
 # The break command is run with the file path appended, e.g.
 #   --break "perl -0pi -e 's/policy.priority/0/'"
@@ -238,7 +249,8 @@ PY
     say "build dir: $2 removed artifact(s) rebuilt by --target, $1 outside it put back as they were"
 }
 
-trap 'rm -f "$BUILD_LOG" "$PRISTINE"; put_back_stash' EXIT
+REBUILDABLE_LIST=""
+trap 'rm -f "$BUILD_LOG" "$PRISTINE" "$REBUILDABLE_LIST"; put_back_stash' EXIT
 
 # Delete the objects built from this source so the rebuild cannot be skipped on
 # a timestamp comparison. Header-only edits have no object of their own, so the
@@ -250,7 +262,7 @@ case "$BASE" in *.h|*.hpp|*.hh|*.hxx|*.inc) IS_HEADER=1 ;; esac
 # The object to delete and to watch for in the build log. Normally that is the
 # edited file's own object; --object redirects it when the edited source is
 # embedded into a generated translation unit and has no object of its own.
-OBJ_BASE="${OBJECT:-$BASE}"
+OBJ_BASE="$(basename "${OBJECT:-$BASE}")"
 
 # The binary the test runs. Verifying an OBJECT recompiled is not enough: the
 # archive can relink while the executable's link is skipped, because make
@@ -327,23 +339,66 @@ invalidate() {
     if [ "$STASHED" -eq 0 ]; then
         # First pass: these were built from the committed source; keep them.
         STASHED=1
-        find "$BUILD_DIR" -path "$STASH" -prune -o \
-            \( -name '*.a' -o -name '*.dylib' -o -name '*.so' -o -name "$objects" \) \
-            -type f -print0 2>/dev/null |
-            python3 -c '
-import os, sys
-build, stash = sys.argv[1], sys.argv[2]
-for p in filter(None, sys.stdin.buffer.read().split(b"\0")):
-    p = p.decode()
-    dst = os.path.join(stash, os.path.relpath(p, build))
-    os.makedirs(os.path.dirname(dst), exist_ok=True)
-    os.rename(p, dst)
-' "$BUILD_DIR" "$STASH" || true
+        record_rebuildable_outputs
+        purge_artifacts stash "$objects"
         return 0
     fi
+    purge_artifacts delete "$objects"
+}
+
+# The archives, libraries and objects the build graph produces, one build-dir
+# relative path per line, so the purge touches only what a rebuild can recreate.
+# A downstream project can copy third-party libraries into its build directory
+# at configure time (FreeType, libpng); no build rule makes them, so purging
+# one leaves the baseline build with nothing to recreate it from and the whole
+# verdict INCONCLUSIVE. Ninja can list its outputs; for another generator the
+# list is unknown and every archive and library is purged, as before.
+record_rebuildable_outputs() {
+    [ -f "$BUILD_DIR/build.ninja" ] && command -v ninja >/dev/null 2>&1 || return 0
+    local list
+    list="$(mktemp "${TMPDIR:-/tmp}/confirm-failure-outputs.XXXXXX")" || return 0
+    if ( cd "$BUILD_DIR" && ninja -t targets all 2>/dev/null ) | sed 's/: .*$//' > "$list" &&
+        [ -s "$list" ]; then
+        REBUILDABLE_LIST="$list"
+    else
+        rm -f "$list"
+    fi
+}
+
+# Stash (first pass) or delete (second pass) the artifacts between the edited
+# source and the test binary. An archive or library the build graph does not
+# produce stays where it is.
+purge_artifacts() {
+    local mode="$1" objects="$2"
     find "$BUILD_DIR" -path "$STASH" -prune -o \
         \( -name '*.a' -o -name '*.dylib' -o -name '*.so' -o -name "$objects" \) \
-        -type f -exec rm -f {} + 2>/dev/null || true
+        -type f -print0 2>/dev/null |
+        python3 -c '
+import os, sys
+mode, build, stash, listing = sys.argv[1:5]
+known = None
+if listing:
+    with open(listing) as f:
+        known = {line.strip() for line in f if line.strip()}
+kept = 0
+for p in filter(None, sys.stdin.buffer.read().split(b"\0")):
+    p = p.decode()
+    rel = os.path.relpath(p, build)
+    if known is not None and rel.endswith((".a", ".dylib", ".so")) and rel not in known:
+        kept += 1
+        continue
+    if mode == "stash":
+        dst = os.path.join(stash, rel)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        os.rename(p, dst)
+    else:
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+if kept and mode == "stash":
+    print(f"confirm-failure: left {kept} archive/library file(s) in place that the build graph does not produce", file=sys.stderr)
+' "$mode" "$BUILD_DIR" "$STASH" "$REBUILDABLE_LIST" || true
 }
 
 # Build, and require evidence that the edited file was actually compiled. This
@@ -511,48 +566,37 @@ fi
 
 # With --subject the driver is left in place, so it must not carry the edited
 # code itself: --target rebuilds the subject only, and a driver that also links
-# the edited object would run the stale copy and could pass with the fix
-# broken (a false NOT CONFIRMED). Compare the strong global symbols the edited
-# object defines with the strong symbols the driver defines; any overlap means
-# the driver links it. A header edit has no object of its own, so it cannot be checked
-# this way and is left to the caller.
-driver_links_edited_object() {
-    [ -n "$SUBJECT" ] && [ "$NO_BUILD" -eq 0 ] && [ "$IS_HEADER" -eq 0 ] || return 1
-    [ -f "$TEST_BINARY" ] || return 1
-    command -v nm >/dev/null 2>&1 || return 1
-    python3 - "$BUILD_DIR" "${OBJ_BASE}.o" "$TEST_BINARY" "$STASH" <<'PY'
-import os, subprocess, sys
-build, obj_name, driver, stash = sys.argv[1:5]
-# Strong text/data definitions only: weak (W/w, V/v) and inline template
-# instantiations appear in every user and prove nothing.
-def defined(path, kinds):
-    out = subprocess.run(["nm", path], capture_output=True, text=True).stdout
-    syms = set()
-    for line in out.splitlines():
-        parts = line.split()
-        if len(parts) >= 3 and parts[-2] in kinds:
-            syms.add(parts[-1])
-    return syms
-# The object contributes its global definitions only. Its locals (statics as
-# _ZL<name>, anonymous namespaces as _GLOBAL__N_1) recur in unrelated objects
-# and would match a driver that never linked it. The driver side keeps locals
-# too: a hidden-visibility global is local once linked into an executable.
-edited = set()
-for root, dirs, files in os.walk(build):
-    if stash and os.path.abspath(root).startswith(os.path.abspath(stash)):
-        continue
-    if obj_name in files:
-        edited |= defined(os.path.join(root, obj_name), ("T", "D", "S", "B"))
-linked = defined(driver, ("T", "t", "D", "d", "S", "s", "B", "b"))
-sys.exit(0 if edited and edited & linked else 1)
-PY
+# the edited object (or includes the edited header) would run the stale copy
+# and could pass with the fix broken (a false NOT CONFIRMED).
+#
+# confirm_failure_driver_link.py answers that from the build's own graph, not
+# from symbol names, and documents the graph rules and the CMake layout they
+# rely on. It treats every word of --test that is a file under --build-dir as a
+# driver; a --test with no such word (a script, ctest), a driver no object is
+# linked into, a header edit in a Makefile build, and any build dir whose graph
+# cannot be read are INCONCLUSIVE. Exit status: 0 a driver carries the edited
+# code, 1 none does ("rebuilt-by-target" when --target rebuilds the one that
+# does), 2 the graph cannot answer. Any other status is treated as 2.
+driver_link_status() {
+    [ -n "$SUBJECT" ] && [ "$NO_BUILD" -eq 0 ] || return 1
+    python3 "$SCRIPT_DIR/confirm_failure_driver_link.py" \
+        --build-dir "$BUILD_DIR" --file "$FILE" --obj-name "${OBJ_BASE}.o" \
+        --object "$OBJECT" --test "$TEST_CMD" --target "$TARGET" \
+        --subject "$SUBJECT" --stash "$STASH" --header "$IS_HEADER"
 }
-if driver_links_edited_object; then
-    die_inconclusive "the test driver '$TEST_BINARY' also links $BASE, and with
-    --subject the driver is not rebuilt, so it would run the unbroken copy.
-    Pass a --target that builds the driver as well as the subject (the driver's
-    own target usually does)"
-fi
+DRIVER_LINK="$(driver_link_status)"
+DRIVER_LINK_STATUS=$?
+case "$DRIVER_LINK_STATUS" in
+    0) die_inconclusive "the test driver also carries $BASE (through
+    $DRIVER_LINK), and with --subject the driver is not rebuilt, so it would
+    run the unbroken copy. Pass a --target that builds the driver as well as
+    the subject (the driver's own target usually does)" ;;
+    1) [ "$DRIVER_LINK" != "rebuilt-by-target" ] ||
+           say "the test driver carries $BASE, and --target '$TARGET' rebuilds it too" ;;
+    *) die_inconclusive "cannot tell whether the test driver carries $BASE:
+    ${DRIVER_LINK:-the check exited $DRIVER_LINK_STATUS}. A driver that does
+    would run the unbroken copy, so no verdict is possible without that answer" ;;
+esac
 
 # ── 2. Break the fix ─────────────────────────────────────────────────────────
 say "breaking the fix in $FILE"

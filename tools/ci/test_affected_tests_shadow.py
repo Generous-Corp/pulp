@@ -31,12 +31,14 @@ Run:
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -361,6 +363,49 @@ def write_reply(build: Path, src: Path) -> None:
         "configurations": [{"targets": refs}], "paths": {"build": str(build), "source": str(src)}}), encoding="utf-8")
     (reply / "index-1.json").write_text(json.dumps(
         {"reply": {"codemodel-v2": {"jsonFile": "codemodel-v2.json"}}}), encoding="utf-8")
+
+
+class RealpathMemoTests(unittest.TestCase):
+    """The graph resolves every spelling Ninja recorded through the shared
+    memo (`codemodel_digest.realpath`), once per distinct spelling. On the
+    gate that is ~4 million calls over ~20 thousand paths; resolving each
+    call afresh made this instrument minutes long. The result must not move.
+
+    The once-per-spelling assertion counts every os.path.realpath call made
+    during compute(), including any from Path.resolve(). That is deliberate:
+    a new uncached resolution in the graph's hot path is exactly the
+    regression this guards, so route it through the memo instead."""
+
+    def setUp(self) -> None:
+        import codemodel_digest
+        self.cd = codemodel_digest
+        codemodel_digest.realpath_cache_clear()
+        self.addCleanup(codemodel_digest.realpath_cache_clear)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.fx = Fixture(Path(tmp.name))
+
+    def test_each_spelling_is_resolved_once_and_the_answer_is_unchanged(self) -> None:
+        calls: list[str] = []
+        real = os.path.realpath
+
+        def counting(path, *args, **kwargs):
+            calls.append(os.fspath(path))
+            return real(path, *args, **kwargs)
+
+        with mock.patch.object(os.path, "realpath", counting):
+            first = self.fx.compute(["core/a.cpp"])
+            second = self.fx.compute(["core/a.cpp"])
+        self.assertEqual(first, second)
+        self.assertEqual(first["selected"], 2, first)
+        self.assertTrue(calls)
+        self.assertEqual(len(calls), len(set(calls)), sorted(calls))
+        # The same verdict as resolving every spelling uncached.
+        self.cd.realpath_cache_clear()
+        with mock.patch.object(self.cd, "realpath", os.path.realpath):
+            uncached = self.fx.compute(["core/a.cpp"])
+        self.assertEqual(first, uncached)
+
 
 if __name__ == "__main__":
     unittest.main()
