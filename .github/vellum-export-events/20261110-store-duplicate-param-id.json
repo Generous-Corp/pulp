@@ -8,6 +8,6 @@
     "core/state/include/pulp/state/store.hpp",
     "core/state/src/store.cpp"
   ],
-  "vellum_inherits": true,
-  "rationale": "StateStore::add_parameter now returns bool and refuses a second registration under a used id (first kept, error logged, duplicate_registrations() counts it). Call sites that ignore the return value are unchanged; the next Vellum re-export should carry it."
+  "vellum_inherits": false,
+  "rationale": "StateStore::add_parameter now returns bool and refuses a second registration under a used id (first kept, error logged, duplicate_registrations() counts it). Call sites that ignore the return value are unchanged; the next Vellum re-export should carry it. Pulp-owned after the framework transfer; Vellum does not inherit these paths."
 }
