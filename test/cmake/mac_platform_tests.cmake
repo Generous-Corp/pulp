@@ -315,6 +315,15 @@ if(TARGET pulp-native)
     catch_discover_tests(pulp-test-native-input)
 endif()
 if(TARGET pulp-native)
+    # integrations/pulp-native: GlSurface on its offscreen backend (CGL):
+    # request fall-through, client-thread context binding, draw and read back,
+    # independent surfaces, and two-phase teardown.
+    add_executable(pulp-test-native-gl-surface-offscreen test_native_gl_surface_offscreen.cpp)
+    target_link_libraries(pulp-test-native-gl-surface-offscreen PRIVATE
+        pulp::native Catch2::Catch2WithMain "-framework OpenGL")
+    catch_discover_tests(pulp-test-native-gl-surface-offscreen)
+endif()
+if(TARGET pulp-native)
     # integrations/pulp-native: input reaching the surface's view (pointer,
     # wheel, host-first keys, text and marked text, focus, cursors, drops).
     add_executable(pulp-test-native-surface-input test_native_surface_input.mm)
