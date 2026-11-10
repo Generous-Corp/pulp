@@ -83,7 +83,11 @@ pulp_add_test_suite(pulp-test-format-registry-limits GROUP pulp-test-group-cap-a
 # the required gate; it is the one lane that reaches the platform CoreAudio
 # reader, which the fuzzer excludes, and it holds the CHOC-vs-dr_wav WAV
 # differential.
+# One executable, split by format; the shared helpers and the per-seed
+# expectation table live in test/support/audio_decoder_corpus*.hpp.
 pulp_add_test_suite(pulp-test-audio-decoder-corpus LIBRARIES pulp::audio
+    SOURCES test_audio_decoder_corpus.cpp test_audio_decoder_corpus_wav.cpp
+        test_audio_decoder_corpus_mp3.cpp test_audio_decoder_corpus_flac_ogg.cpp
     LABELS fuzz audio)
 pulp_test_data(pulp-test-audio-decoder-corpus PATHS test/fixtures/fuzz/audio-decoder)
 
