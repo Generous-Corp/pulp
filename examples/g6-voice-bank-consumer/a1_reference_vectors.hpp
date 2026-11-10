@@ -19,6 +19,7 @@ struct Case {
     std::size_t note_off_sample;
     std::size_t steal_sample;
 };
+// clang-format off
 inline constexpr Case kCases[] = {
     Case{
         .id = "all_eight_active_fixed_rms",
@@ -231,4 +232,5 @@ inline constexpr Case kCases[] = {
         .steal_sample = 2,
     },
 };
+// clang-format on
 } // namespace pulp::examples::g6::a1

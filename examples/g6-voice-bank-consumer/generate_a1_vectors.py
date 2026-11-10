@@ -48,6 +48,7 @@ def document(data, digest):
         "    std::size_t note_off_sample;",
         "    std::size_t steal_sample;",
         "};",
+        "// clang-format off",
         "inline constexpr Case kCases[] = {",
     ]
     for case in data["cases"]:
@@ -89,7 +90,7 @@ def document(data, digest):
             f'        .steal_sample = {case.get("steal_sample", 0)},',
             "    },",
         ])
-    output.extend(["};", "} // namespace pulp::examples::g6::a1", ""])
+    output.extend(["};", "// clang-format on", "} // namespace pulp::examples::g6::a1", ""])
     return "\n".join(output)
 
 
