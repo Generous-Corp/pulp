@@ -87,7 +87,7 @@ struct OffscreenCgl final : GlSurface::Impl {
         GLint max_texture = 0;
         glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture);
         report.max_texture_size = max_texture;
-        report.npot_textures = report.major >= 2;  // core in 2.0 and later
+        report.npot_textures = report.major >= 2; // core in 2.0 and later
         report.software = is_software_renderer(report.renderer);
 
         // The context must honour this request itself; anything less falls

@@ -51,7 +51,7 @@ TEST_CASE("the first request a context honours is chosen", "[native][gl-surface]
         {2, 1, GlProfile::any, 0},
     };
     REQUIRE(first_honoured_request(list, 4, 6, GlProfile::core) == 0u);
-    REQUIRE(first_honoured_request(list, 4, 5, GlProfile::core) == 1u);  // never "4.6"
+    REQUIRE(first_honoured_request(list, 4, 5, GlProfile::core) == 1u); // never "4.6"
     REQUIRE(first_honoured_request(list, 4, 1, GlProfile::core) == 1u);
     REQUIRE(first_honoured_request(list, 4, 5, GlProfile::compatibility) == 2u);
     REQUIRE(first_honoured_request(list, 2, 1, GlProfile::any) == 3u);
@@ -70,7 +70,7 @@ TEST_CASE("a windowed GL surface is not offered on macOS", "[native][gl-surface]
 TEST_CASE("a request above the driver falls through to the next entry",
           "[native][gl-surface][offscreen]") {
     GlSurfaceOptions options;
-    options.requests = {{4, 6, GlProfile::core, 0},  // macOS stops at 4.1
+    options.requests = {{4, 6, GlProfile::core, 0}, // macOS stops at 4.1
                         {4, 1, GlProfile::core, 0},
                         {2, 1, GlProfile::any, 0}};
     auto surface = GlSurface::create_offscreen(64, 32, options);
@@ -122,8 +122,7 @@ TEST_CASE("the context is created and bound only on the client's thread",
     REQUIRE(CGLGetCurrentContext() == nullptr);
 }
 
-TEST_CASE("a client thread draws and reads back its own frame",
-          "[native][gl-surface][offscreen]") {
+TEST_CASE("a client thread draws and reads back its own frame", "[native][gl-surface][offscreen]") {
     auto surface = GlSurface::create_offscreen(8, 8);
     REQUIRE(surface != nullptr);
     std::array<std::uint8_t, 4> pixel{};
@@ -135,8 +134,7 @@ TEST_CASE("a client thread draws and reads back its own frame",
     REQUIRE(pixel[3] == 255);
 }
 
-TEST_CASE("two surfaces on two threads keep their own frames",
-          "[native][gl-surface][offscreen]") {
+TEST_CASE("two surfaces on two threads keep their own frames", "[native][gl-surface][offscreen]") {
     auto a = GlSurface::create_offscreen(8, 8);
     auto b = GlSurface::create_offscreen(8, 8);
     REQUIRE(a != nullptr);
@@ -156,7 +154,7 @@ TEST_CASE("destruction runs the release handler once, with the context refused",
           "[native][gl-surface][offscreen]") {
     auto surface = GlSurface::create_offscreen(8, 8);
     REQUIRE(surface != nullptr);
-    GlSurface* s = surface.get();  // `surface` is null while it is destroyed
+    GlSurface* s = surface.get(); // `surface` is null while it is destroyed
     std::atomic<bool> stop{false};
     std::atomic<int> frames{0};
     std::thread render([s, &stop, &frames] {
@@ -179,7 +177,7 @@ TEST_CASE("destruction runs the release handler once, with the context refused",
         // Teardown has started: the context is refused from here on.
         refused_during_release = !s->context().make_current();
     });
-    surface.reset();  // destruction is a teardown
+    surface.reset(); // destruction is a teardown
     REQUIRE(releases == 1);
     REQUIRE(refused_during_release);
 }

@@ -36,9 +36,12 @@ bool is_software_renderer(const std::string& renderer) {
 
 const char* to_string(GlProfile profile) noexcept {
     switch (profile) {
-        case GlProfile::core: return "core";
-        case GlProfile::compatibility: return "compatibility";
-        case GlProfile::any: return "any";
+    case GlProfile::core:
+        return "core";
+    case GlProfile::compatibility:
+        return "compatibility";
+    case GlProfile::any:
+        return "any";
     }
     return "unknown";
 }
@@ -53,7 +56,7 @@ bool GlContext::make_current() {
         if (!impl.create_context(impl.options, impl.report))
             return false;
         impl.created = true;
-        return true;  // a backend leaves a new context current
+        return true; // a backend leaves a new context current
     }
     return impl.make_current();
 }
