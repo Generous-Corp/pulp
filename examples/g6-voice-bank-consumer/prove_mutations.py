@@ -50,8 +50,8 @@ MUTATIONS = {
         "finite-release-reclaimed",
     ),
     "skip_tracker_capacity_refusal": (
-        "if (free == membership.end()) return refuse(VoiceBankBindingCode::TrackerCapacity);",
-        "if (free == membership.end()) continue;",
+        "if (free == membership.end())\n                return refuse(VoiceBankBindingCode::TrackerCapacity);",
+        "if (free == membership.end())\n                continue;",
         "capacity-typed-refusal",
     ),
     "silently_accept_poly_pressure": (
