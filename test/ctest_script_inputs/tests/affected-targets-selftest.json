@@ -12,6 +12,7 @@
    "core/view/include/pulp/view/widgets.hpp",
    "core/view/src/widgets.cpp",
    "docs/status",
+   "inspect/src",
    "test/ctest_script_inputs",
    "test/fixtures",
    "test/harness/rt_allocation_probe.cpp",

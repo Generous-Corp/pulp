@@ -13,6 +13,7 @@
    "core/host/include",
    "core/view/src/widgets.cpp",
    "docs/status",
+   "inspect/src",
    "test/ctest_script_inputs",
    "test/fixtures",
    "test/support",
