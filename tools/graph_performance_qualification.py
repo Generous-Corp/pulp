@@ -793,7 +793,8 @@ def validate_activation_cell(cell: dict[str, Any]) -> dict[str, Any]:
     _require(meta["latency_samples"] == meta["snapshot_latency"] == 0 and
              meta["snapshot_nodes"] == meta["nodes"] == 3 and
              meta["snapshot_edges"] == meta["edges"] == 2 and
-             meta["node_latencies"] == [0, 0, 0] and meta["edge_delays"] == [0, 0],
+             meta["node_latencies"] == [0, 0, 0] and meta["edge_delays"] == [0, 0] and
+             all(type(v) is int for v in meta["node_latencies"] + meta["edge_delays"]),
              "zero-PDC snapshot contract mismatch")
     _require(meta["voices"] == meta["grains"] == meta["probes"] == 0,
              "activation fixture resource scope mismatch")
@@ -877,6 +878,12 @@ def validate_activation_receipt(path: Path, receipt: dict[str, Any], source_root
     artifacts = receipt["artifacts"]
     source = _activation_artifact(path, artifacts["source_fixture"])
     executable = _activation_artifact(path, artifacts["executable"])
+    commands = _activation_artifact(path, artifacts["compile_commands"])
+    fixture_commands = [entry["command"] for entry in json.loads(commands.read_text())
+                        if entry["file"].endswith("/test/test_trigger_graph.cpp")]
+    _require(len(fixture_commands) == 1 and "-O3" in fixture_commands[0].split() and
+             "-DNDEBUG" in fixture_commands[0].split() and "-fsanitize=" not in fixture_commands[0],
+             "activation fixture compile flags are not ordinary Release")
     _require(receipt.get("source_fixture") == {"path": ACTIVATION_SOURCE.as_posix(), "sha256": sha256_file(source)},
              "activation source fixture binding mismatch")
     _require(receipt.get("executable_sha256") == sha256_file(executable), "activation executable binding mismatch")
@@ -902,7 +909,9 @@ def validate_activation_receipt(path: Path, receipt: dict[str, Any], source_root
         stderr = _activation_artifact(path, cell["raw_stderr"])
         _require(not stderr.read_bytes(), "activation run wrote stderr")
         parsed = parse_activation_output(raw.read_text(encoding="utf-8"))
-        metrics = parsed["metrics"]
+        metrics = validate_activation_cell({"metadata": meta, "callbacks": parsed["callbacks"]})
+        _require(all(type(cell["metrics"].get(key)) is type(value) for key, value in metrics.items()),
+                 "activation summary field types mismatch")
         _require(cell["metrics"] == metrics, "activation raw percentile/miss/transition summary mismatch")
         _require(all(cell[field] == parsed[field] for field in ("metadata", "metrics")),
                  "activation receipt differs from raw callbacks/audio")
@@ -987,6 +996,8 @@ def record_activation(args: argparse.Namespace) -> int:
     binary_copy, source_copy = output / "activation-executable", output / "source-fixture.inc"
     shutil.copy2(executable, binary_copy)
     shutil.copy2(source, source_copy)
+    commands_copy = output / "compile_commands.json"
+    shutil.copy2(build / "compile_commands.json", commands_copy)
     def artifact(p: Path) -> dict[str, str]:
         return {"path": p.name, "sha256": sha256_file(p)}
     receipt = {"schema": ACTIVATION_SCHEMA, "fixture": ACTIVATION_FIXTURE, "status": "PARTIAL",
@@ -997,7 +1008,8 @@ def record_activation(args: argparse.Namespace) -> int:
                "build_profile": {key: values.get(key, "") for key in ("CMAKE_BUILD_TYPE", "PULP_SANITIZER")},
                "matrix": {"rates": list(ACTIVATION_RATES), "frames": list(ACTIVATION_BLOCKS),
                           "backends": list(ACTIVATION_BACKENDS), "expected_cell_count": 24},
-               "artifacts": {"source_fixture": artifact(source_copy), "executable": artifact(binary_copy)}, "cells": []}
+               "artifacts": {"source_fixture": artifact(source_copy), "executable": artifact(binary_copy),
+                             "compile_commands": artifact(commands_copy)}, "cells": []}
     for rate, frames, backend in sorted(ACTIVATION_KEYS):
         env = dict(os.environ)
         for key in tuple(env):
@@ -1058,7 +1070,8 @@ def main(argv: Iterable[str] | None = None) -> int:
             return record(args)
         if args.command == "validate":
             validate_receipt(args.receipt, args.source_root)
-            print("r2_receipt=pass")
+            label = "activation_receipt" if json.loads(args.receipt.read_text()).get("schema") == ACTIVATION_SCHEMA else "r2_receipt"
+            print(f"{label}=pass")
             return 0
         run_controls(args.receipt, args.source_root)
         return 0

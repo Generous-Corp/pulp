@@ -220,6 +220,9 @@ def fake_activation_receipt(directory: Path) -> Path:
     def artifact(p):
         return {"path": p.name, "sha256": gq.sha256_file(p)}
     source_sha = gq._source_sha(directory)
+    commands = directory / "compile_commands.json"
+    commands.write_text(json.dumps([{"file": str(directory / "test/test_trigger_graph.cpp"),
+                                     "command": "clang++ -O3 -DNDEBUG -c test_trigger_graph.cpp"}]))
     cells = []
     # Literal dimensions and float words are independent of validator constants.
     for rate in (44100, 48000, 96000):
@@ -259,7 +262,8 @@ def fake_activation_receipt(directory: Path) -> Path:
                "build_profile": {"CMAKE_BUILD_TYPE": "Release", "PULP_SANITIZER": ""},
                "matrix": {"rates": [44100, 48000, 96000], "frames": [32, 64, 128, 256],
                           "backends": ["direct", "routed"], "expected_cell_count": 24},
-               "artifacts": {"source_fixture": artifact(source), "executable": artifact(binary)}, "cells": cells}
+               "artifacts": {"source_fixture": artifact(source), "executable": artifact(binary),
+                             "compile_commands": artifact(commands)}, "cells": cells}
     path = directory / "activation.json"
     write_receipt(path, receipt)
     return path
@@ -288,6 +292,8 @@ class PacedActivationQualification(unittest.TestCase):
                 ("qualify pilot", lambda r: r.__setitem__("timing_qualified", True)),
                 ("short qualify", lambda r: r.update(mode="qualification", timing_qualified=True)),
                 ("raw percentile", lambda r: r["cells"][0]["metrics"].__setitem__("p99_duration_ns", 999)),
+                ("boolean count", lambda r: r["cells"][0]["metadata"].__setitem__("voices", False)),
+                ("float summary", lambda r: r["cells"][0]["metrics"].__setitem__("p99_duration_ns", 1000.0)),
                 ("raw miss", lambda r: r["cells"][0]["metrics"].__setitem__("deadline_misses", 1)),
                 ("stale executable", lambda r: r["cells"][0]["metadata"].__setitem__("compiled_source", "0" * 40)),
                 ("raw PDC", lambda r: r["cells"][0]["metadata"].__setitem__("snapshot_latency", 1)),
