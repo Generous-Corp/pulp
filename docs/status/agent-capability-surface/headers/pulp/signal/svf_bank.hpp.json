@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/svf_bank.hpp",
+  "fingerprint": "sha256:feedf8dd0862d2fe70a0640b2f3c4cccb684ff045052f713d11fc31f527ea5d2",
+  "include": "pulp/signal/svf_bank.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Runs N state-variable-filter voices in lockstep structure-of-arrays lanes with a per-voice mode, each voice bit-identical to Svf. A voice-processing primitive for polyphonic processors; it makes no installed agent capability claim of its own."
+}

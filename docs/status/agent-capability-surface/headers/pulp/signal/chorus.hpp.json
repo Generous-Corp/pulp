@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/chorus.hpp",
+  "fingerprint": "sha256:eab232dd7dc5bedfef38b0fe68d2c382e2e6984f76c64f28b2b919c09d2bf97a",
+  "include": "pulp/signal/chorus.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/additive_spectral_envelope.hpp",
+  "fingerprint": "sha256:4e1bd0d14ccfdb4c88c004bf72cf84afcbd782ee89119f4ac0b41a6b573e15e3",
+  "include": "pulp/signal/additive_spectral_envelope.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

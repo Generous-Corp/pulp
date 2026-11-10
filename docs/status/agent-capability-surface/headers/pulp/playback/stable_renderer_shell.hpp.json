@@ -1,0 +1,9 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/stable_renderer_shell.hpp",
+  "fingerprint": "sha256:d44b66f80099a3e80044fed6f7a21fdf752957a6879edcd8d76846bec9a87bc0",
+  "include": "pulp/playback/stable_renderer_shell.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "RendererCarryState — what survives a program swap — and PlaybackProgramBlock, the move-only non-owning block view whose documentation requires an enclosing immutable audio-thread publication to keep the program alive for its whole lifetime. It is the realtime borrow and latch side of the program surface, composed by the renderer rather than advertised on its own."
+}

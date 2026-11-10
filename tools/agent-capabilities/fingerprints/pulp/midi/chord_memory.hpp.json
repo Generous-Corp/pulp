@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/midi/chord_memory.hpp",
+  "fingerprint": "sha256:3bce0cc159d68496cf145ad1fb8cd26415f0c7ba18446d5d3618d6cd7bede81b"
+}

@@ -1,0 +1,11 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/automation_limits.hpp",
+  "fingerprint": "sha256:c4a7cb9dd6f07fed1c34a5f5d590de305ac2a32039528a7d2d3bfe930dd0cc05",
+  "include": "pulp/playback/automation_limits.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "sequence.controller-playback"
+  ],
+  "rationale": "AutomationPlaybackLimits and its kMaximum* hard ceilings, with web_defaults() and platform_defaults() presets that bound a compiled automation program before it reaches the audio thread. pulp/playback/program.hpp includes it directly, so it is part of the compile-time surface the sequence.controller-playback bindings are declared over."
+}

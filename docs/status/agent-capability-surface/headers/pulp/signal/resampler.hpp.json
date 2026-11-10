@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/resampler.hpp",
+  "fingerprint": "sha256:1bd78bf7111b9bfe5b1fd923ba0304390956ddf92337ed788b06a0b865a196e8",
+  "include": "pulp/signal/resampler.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "signal.bounded-sample-history"
+  ],
+  "rationale": "The resampler adopts the bounded history primitive for its delay storage; this slice does not introduce a new resampler contract."
+}

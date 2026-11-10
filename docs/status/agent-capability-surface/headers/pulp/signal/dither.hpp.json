@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/dither.hpp",
+  "fingerprint": "sha256:72536ca7644208062b3769cceddfc8aa935d4b441db999b5a61171947446a9af",
+  "include": "pulp/signal/dither.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.dither-quantizer"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

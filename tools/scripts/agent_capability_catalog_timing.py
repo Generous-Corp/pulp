@@ -39,9 +39,6 @@ EXPORTS = [
                 include="pulp/timebase/tick.hpp",
                 qualified_name="pulp::timebase::TickPosition",
                 target="Pulp::timebase",
-                header_fingerprint=(
-                    "sha256:e648c10386afc397349a341787aa4773326b551fb8f8f33e08bc9925aea42452"
-                ),
             )
         ],
         _link_probes=[{
@@ -92,9 +89,6 @@ EXPORTS = [
                 include="pulp/timebase/compiled_tempo_map.hpp",
                 qualified_name="pulp::timebase::CompiledTempoMap",
                 target="Pulp::timebase",
-                header_fingerprint=(
-                    "sha256:2e1451402b8e6301ac0773d5e4bb8bc6ed757ff9889ce61b978e188a8758f47c"
-                ),
             ),
             binding(
                 role="validated-factory",
@@ -102,9 +96,6 @@ EXPORTS = [
                 include="pulp/timebase/compiled_tempo_map.hpp",
                 qualified_name="pulp::timebase::CompiledTempoMap::compile",
                 target="Pulp::timebase",
-                header_fingerprint=(
-                    "sha256:2e1451402b8e6301ac0773d5e4bb8bc6ed757ff9889ce61b978e188a8758f47c"
-                ),
                 address_expression=(
                     "static_cast<pulp::runtime::Result<pulp::timebase::CompiledTempoMap, "
                     "pulp::timebase::TempoMapError> (*)(std::span<const "
@@ -118,9 +109,6 @@ EXPORTS = [
                 include="pulp/timebase/compiled_tempo_map.hpp",
                 qualified_name="pulp::timebase::CompiledTempoMap::ticks_to_samples",
                 target="Pulp::timebase",
-                header_fingerprint=(
-                    "sha256:2e1451402b8e6301ac0773d5e4bb8bc6ed757ff9889ce61b978e188a8758f47c"
-                ),
                 address_expression=(
                     "static_cast<pulp::timebase::SamplePosition "
                     "(pulp::timebase::CompiledTempoMap::*)(pulp::timebase::TickPosition) "
@@ -133,9 +121,6 @@ EXPORTS = [
                 include="pulp/timebase/compiled_tempo_map.hpp",
                 qualified_name="pulp::timebase::CompiledTempoMap::resolve_sample",
                 target="Pulp::timebase",
-                header_fingerprint=(
-                    "sha256:2e1451402b8e6301ac0773d5e4bb8bc6ed757ff9889ce61b978e188a8758f47c"
-                ),
                 address_expression=(
                     "static_cast<pulp::timebase::SampleToTickResult "
                     "(pulp::timebase::CompiledTempoMap::*)(pulp::timebase::SamplePosition) "
@@ -227,9 +212,6 @@ EXPORTS = [
                 include="pulp/timebase/quantize.hpp",
                 qualified_name="pulp::timebase::SwingRatio",
                 target="Pulp::timebase",
-                header_fingerprint=(
-                    "sha256:ca242cb57d4963cf48ce6bb41a4b9d90d0959b7a6aff28cdbdb76013ba39ac84"
-                ),
             ),
             binding(
                 role="forward-operation",
@@ -237,9 +219,6 @@ EXPORTS = [
                 include="pulp/timebase/quantize.hpp",
                 qualified_name="pulp::timebase::swing_position",
                 target="Pulp::timebase",
-                header_fingerprint=(
-                    "sha256:ca242cb57d4963cf48ce6bb41a4b9d90d0959b7a6aff28cdbdb76013ba39ac84"
-                ),
             ),
             binding(
                 role="inverse-operation",
@@ -247,9 +226,6 @@ EXPORTS = [
                 include="pulp/timebase/quantize.hpp",
                 qualified_name="pulp::timebase::unswing_position",
                 target="Pulp::timebase",
-                header_fingerprint=(
-                    "sha256:ca242cb57d4963cf48ce6bb41a4b9d90d0959b7a6aff28cdbdb76013ba39ac84"
-                ),
             ),
         ],
         _link_probes=[
@@ -312,9 +288,6 @@ EXPORTS = [
                 include="pulp/timebase/beat_division.hpp",
                 qualified_name="pulp::timebase::BeatDivision",
                 target="Pulp::timebase",
-                header_fingerprint=(
-                    "sha256:a6f8a5abd5184d33e08c38ed24565b8ed18df756ce63688594a7a3b4ca6ed570"
-                ),
             ),
             binding(
                 role="tick-conversion",
@@ -322,9 +295,6 @@ EXPORTS = [
                 include="pulp/timebase/beat_division.hpp",
                 qualified_name="pulp::timebase::division_ticks",
                 target="Pulp::timebase",
-                header_fingerprint=(
-                    "sha256:a6f8a5abd5184d33e08c38ed24565b8ed18df756ce63688594a7a3b4ca6ed570"
-                ),
             ),
         ],
         _link_probes=[
@@ -375,9 +345,6 @@ EXPORTS = [
                 include="pulp/timebase/coordinate_random.hpp",
                 qualified_name="pulp::timebase::RandomCoordinate",
                 target="Pulp::timebase",
-                header_fingerprint=(
-                    "sha256:327487f1a49eb2f8729a6db7ba493ad220f634fec2cb4c7295a300f0a68ddae5"
-                ),
             ),
             binding(
                 role="probability-operation",
@@ -385,9 +352,6 @@ EXPORTS = [
                 include="pulp/timebase/coordinate_random.hpp",
                 qualified_name="pulp::timebase::coordinate_chance",
                 target="Pulp::timebase",
-                header_fingerprint=(
-                    "sha256:327487f1a49eb2f8729a6db7ba493ad220f634fec2cb4c7295a300f0a68ddae5"
-                ),
             ),
         ],
         _link_probes=[
@@ -441,9 +405,6 @@ EXPORTS = [
                 include="pulp/timebase/grid_projection.hpp",
                 qualified_name="pulp::timebase::project_grid",
                 target="Pulp::timebase",
-                header_fingerprint=(
-                    "sha256:1bd2b91ed7be26bbf4c8f34798af5d673fd557e2235c31f540fc987b8deb189f"
-                ),
             )
         ],
         _link_probes=[{
@@ -493,9 +454,6 @@ EXPORTS = [
                 include="pulp/timebase/groove_kernel.hpp",
                 qualified_name="pulp::timebase::OrderPreservingGrooveKernel::create",
                 target="Pulp::timebase",
-                header_fingerprint=(
-                    "sha256:169e0104d2ea6164d6924de224ac636eaf11d617f5b844b4a2facaf0cbaa0286"
-                ),
             )
         ],
         _link_probes=[{
@@ -549,9 +507,6 @@ EXPORTS = [
                 include="pulp/timebase/inline_groove_projector.hpp",
                 qualified_name="pulp::timebase::InlineGrooveProjector::create",
                 target="Pulp::timebase",
-                header_fingerprint=(
-                    "sha256:1008649e2c45404205bb6f525a32b6c91dd7c881e97bb768c4037fbf0253c4cb"
-                ),
             )
         ],
         _link_probes=[{
@@ -598,9 +553,6 @@ EXPORTS = [
                 qualified_name="pulp::timebase::groove_timing_reach",
                 target="Pulp::timebase",
                 address_expression="&pulp::timebase::groove_timing_reach<pulp::timebase::InlineGrooveProjector>",
-                header_fingerprint=(
-                    "sha256:08cc72d0d66e1798551780cc195f3c4ebc824d7e403196b0a7e0303ba4aac72c"
-                ),
             )
         ],
         _link_probes=[{
@@ -643,9 +595,6 @@ EXPORTS = [
                 include="pulp/timebase/trigger_grid.hpp",
                 qualified_name="pulp::timebase::TriggerGrid<>",
                 target="Pulp::timebase",
-                header_fingerprint=(
-                    "sha256:6a5b7dd7f2b1185ed3a3f5c8ae1ffcf506415fe6083ec772f984010476b337ca"
-                ),
             )
         ],
         _link_probes=[{
@@ -689,9 +638,6 @@ EXPORTS = [
                 include="pulp/timebase/ratchet.hpp",
                 qualified_name="pulp::timebase::project_ratchet_interval<>",
                 target="Pulp::timebase",
-                header_fingerprint=(
-                    "sha256:93f1ae1c80b5c5ad255180067adabcc331577e63a6f77b57b06255891926718d"
-                ),
             )
         ],
         _link_probes=[{
@@ -745,9 +691,6 @@ EXPORTS = [
                 include="pulp/sequence/host_transport_projector.hpp",
                 qualified_name="pulp::sequence::HostTransportProjector",
                 target="Pulp::sequence",
-                header_fingerprint=(
-                    "sha256:3c0a31d541635c9339fadb13b584e9bdec7a4e9e274afd595450f707c8344051"
-                ),
             )
         ],
         _link_probes=[{
@@ -802,9 +745,6 @@ EXPORTS = [
                 include="pulp/playback/program.hpp",
                 qualified_name="pulp::playback::ControllerProgramEvent",
                 target="Pulp::playback",
-                header_fingerprint=(
-                    "sha256:8475c93fcc8b219d1f1ec4774f1739e9ab08ffb51051f7a2bac680dc21036c42"
-                ),
             ),
             binding(
                 role="block-order",
@@ -812,9 +752,6 @@ EXPORTS = [
                 include="pulp/playback/program.hpp",
                 qualified_name="pulp::playback::controller_program_event_less",
                 target="Pulp::playback",
-                header_fingerprint=(
-                    "sha256:8475c93fcc8b219d1f1ec4774f1739e9ab08ffb51051f7a2bac680dc21036c42"
-                ),
             ),
         ],
         _link_probes=[
@@ -886,9 +823,6 @@ EXPORTS = [
                 include="pulp/timeline/model.hpp",
                 qualified_name="pulp::timeline::GrooveTemplate::create",
                 target="Pulp::timeline",
-                header_fingerprint=(
-                    "sha256:3f632b1b36057228373fbc62f7abb27151b689b026e9a5e457c923e48def66a6"
-                ),
                 address_expression=(
                     "static_cast<pulp::runtime::Result<pulp::timeline::GrooveTemplate, "
                     "pulp::timeline::ModelError> (*)(pulp::timeline::GrooveTemplateInput)>("
@@ -901,9 +835,6 @@ EXPORTS = [
                 include="pulp/timeline/model.hpp",
                 qualified_name="pulp::timeline::GrooveTemplate::apply_timing",
                 target="Pulp::timeline",
-                header_fingerprint=(
-                    "sha256:3f632b1b36057228373fbc62f7abb27151b689b026e9a5e457c923e48def66a6"
-                ),
                 address_expression=(
                     "static_cast<pulp::timebase::TickPosition "
                     "(pulp::timeline::GrooveTemplate::*)(pulp::timebase::TickPosition) "
@@ -916,9 +847,6 @@ EXPORTS = [
                 include="pulp/timeline/model.hpp",
                 qualified_name="pulp::timeline::GrooveTemplate::velocity_scale_at",
                 target="Pulp::timeline",
-                header_fingerprint=(
-                    "sha256:3f632b1b36057228373fbc62f7abb27151b689b026e9a5e457c923e48def66a6"
-                ),
                 address_expression=(
                     "static_cast<std::int32_t "
                     "(pulp::timeline::GrooveTemplate::*)(pulp::timebase::TickPosition) "
@@ -999,9 +927,6 @@ EXPORTS = [
                 include="pulp/timeline/compile_context.hpp",
                 qualified_name="pulp::timeline::CompileContextSubscriptions",
                 target="Pulp::timeline",
-                header_fingerprint=(
-                    "sha256:a081fae4f53800166cd07d644408aa85922c817d3b4c6fe6d3f10558e6d25713"
-                ),
             ),
             binding(
                 role="context-kind",
@@ -1009,9 +934,6 @@ EXPORTS = [
                 include="pulp/timeline/compile_context.hpp",
                 qualified_name="pulp::timeline::CompileContextKind",
                 target="Pulp::timeline",
-                header_fingerprint=(
-                    "sha256:a081fae4f53800166cd07d644408aa85922c817d3b4c6fe6d3f10558e6d25713"
-                ),
             ),
         ],
         _link_probes=[
@@ -1073,9 +995,6 @@ EXPORTS = [
                 include="pulp/timeline/model.hpp",
                 qualified_name="pulp::timeline::ChordScaleLane::create",
                 target="Pulp::timeline",
-                header_fingerprint=(
-                    "sha256:3f632b1b36057228373fbc62f7abb27151b689b026e9a5e457c923e48def66a6"
-                ),
                 address_expression=(
                     "static_cast<pulp::runtime::Result<pulp::timeline::ChordScaleLane, "
                     "pulp::timeline::ModelError> (*)("
@@ -1089,9 +1008,6 @@ EXPORTS = [
                 include="pulp/timeline/model.hpp",
                 qualified_name="pulp::timeline::ChordScaleLane::at",
                 target="Pulp::timeline",
-                header_fingerprint=(
-                    "sha256:3f632b1b36057228373fbc62f7abb27151b689b026e9a5e457c923e48def66a6"
-                ),
                 address_expression=(
                     "static_cast<const pulp::timeline::ChordScaleEvent* "
                     "(pulp::timeline::ChordScaleLane::*)(pulp::timebase::TickPosition) "
@@ -1164,9 +1080,6 @@ EXPORTS = [
                 include="pulp/timeline/model.hpp",
                 qualified_name="pulp::timeline::DynamicsLane::create",
                 target="Pulp::timeline",
-                header_fingerprint=(
-                    "sha256:3f632b1b36057228373fbc62f7abb27151b689b026e9a5e457c923e48def66a6"
-                ),
                 address_expression=(
                     "static_cast<pulp::runtime::Result<pulp::timeline::DynamicsLane, "
                     "pulp::timeline::ModelError> (*)("
@@ -1180,9 +1093,6 @@ EXPORTS = [
                 include="pulp/timeline/model.hpp",
                 qualified_name="pulp::timeline::DynamicsLane::value_at",
                 target="Pulp::timeline",
-                header_fingerprint=(
-                    "sha256:3f632b1b36057228373fbc62f7abb27151b689b026e9a5e457c923e48def66a6"
-                ),
                 address_expression=(
                     "static_cast<std::optional<float> "
                     "(pulp::timeline::DynamicsLane::*)(pulp::timebase::TickPosition) "
@@ -1259,9 +1169,6 @@ EXPORTS = [
                 include="pulp/timeline/note_modifier.hpp",
                 qualified_name="pulp::timeline::NoteModifier",
                 target="Pulp::timeline",
-                header_fingerprint=(
-                    "sha256:59c03e00e6e8609d64386afeb49e1bb986d420b94d31c3769d176e2d666be3fd"
-                ),
             ),
             binding(
                 role="draw-key",
@@ -1269,9 +1176,6 @@ EXPORTS = [
                 include="pulp/timeline/note_modifier.hpp",
                 qualified_name="pulp::timeline::note_modifier_draw_key",
                 target="Pulp::timeline",
-                header_fingerprint=(
-                    "sha256:59c03e00e6e8609d64386afeb49e1bb986d420b94d31c3769d176e2d666be3fd"
-                ),
                 address_expression=(
                     "static_cast<std::uint64_t (*)(std::uint64_t, pulp::timeline::ItemId) "
                     "noexcept>(&pulp::timeline::note_modifier_draw_key)"
@@ -1283,9 +1187,6 @@ EXPORTS = [
                 include="pulp/timeline/note_modifier.hpp",
                 qualified_name="pulp::timeline::note_modifier_sounds",
                 target="Pulp::timeline",
-                header_fingerprint=(
-                    "sha256:59c03e00e6e8609d64386afeb49e1bb986d420b94d31c3769d176e2d666be3fd"
-                ),
                 address_expression=(
                     "static_cast<bool (*)(const pulp::timeline::NoteModifier&, "
                     "std::uint64_t, std::uint64_t) noexcept>("
@@ -1298,9 +1199,6 @@ EXPORTS = [
                 include="pulp/timeline/note_modifier.hpp",
                 qualified_name="pulp::timeline::note_modifier_well_formed",
                 target="Pulp::timeline",
-                header_fingerprint=(
-                    "sha256:59c03e00e6e8609d64386afeb49e1bb986d420b94d31c3769d176e2d666be3fd"
-                ),
                 address_expression=(
                     "static_cast<bool (*)(const pulp::timeline::NoteModifier&) noexcept>("
                     "&pulp::timeline::note_modifier_well_formed)"

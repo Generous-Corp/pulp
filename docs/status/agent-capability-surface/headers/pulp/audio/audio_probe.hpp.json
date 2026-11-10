@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/audio_probe.hpp",
+  "fingerprint": "sha256:dfc218a6cd7bee7048c8c543be697165f127ee3d8cb5db99fbc0f23297232a5b",
+  "include": "pulp/audio/audio_probe.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Optional prepared output-boundary diagnostics and capture plumbing; it is a reusable observability surface rather than a generator DSP claim."
+}

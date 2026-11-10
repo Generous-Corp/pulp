@@ -23,7 +23,7 @@ class GenerateTests(unittest.TestCase):
         )
         (root / ".shipyard").mkdir()
         body = (
-            "header\n[toolchain]\n"
+            "header\nbase = \"old:latest\"\n[toolchain]\n"
             "# handwritten sentinel survives generation\n"
             "handwritten = true\n\n"
             "[brew]\npackages = [\n  \"old\",\n]\n\n"
@@ -66,7 +66,7 @@ class GenerateTests(unittest.TestCase):
             tart = root / "tartci"
             (tart / "manifests").mkdir(parents=True)
             (tart / "manifests/pulp.macos.toml").write_text(
-                f"[toolchain]\n\n[brew]\npackages = [\n  \"old\",\n]\n\n{generate.BEGIN}\nold\n{generate.END}\n",
+                f"base = \"old:latest\"\n[toolchain]\n\n[brew]\npackages = [\n  \"old\",\n]\n\n{generate.BEGIN}\nold\n{generate.END}\n",
                 encoding="utf-8",
             )
             for platform, manager, extra in (("linux", "apt", "ninja = \"system\"\n"), ("windows", "choco", "msvc = \"14.44\"\nninja = \"system\"\n")):
@@ -82,6 +82,45 @@ class GenerateTests(unittest.TestCase):
             self.assertIn('msvc = "14.44"', windows)
             self.assertNotIn("rust_targets", linux)
             self.assertNotIn("rust_targets", windows)
+
+    def test_macos_goldens_get_the_digest_pinned_base_and_xcode(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.fixture(root)
+            generate.generate(root, None, False)
+            pins = tomllib.loads(generate.SOURCE.read_text(encoding="utf-8"))["toolchain"]
+            image = (root / ".shipyard/vm-image.toml").read_text(encoding="utf-8")
+            self.assertIn(f'\nbase = "{pins["macos_base"]}"\n[toolchain]', image)
+            self.assertIn("@sha256:", pins["macos_base"])
+            for key in ("xcode", "xcode_build", "macos", "macos_build"):
+                self.assertIn(f'\n{key} = "{pins[key]}"\n', image)
+            # Control: the Intel layer derives from the runner golden, so its
+            # base is not the OS image and stays as written.
+            intel = (root / ".shipyard/vm-image.intel.toml").read_text(encoding="utf-8")
+            self.assertIn('\nbase = "old:latest"\n', intel)
+            expected = json.loads((root / generate.EXPECTED).read_text(encoding="utf-8"))
+            self.assertEqual({"version": pins["xcode"], "build": pins["xcode_build"]}, expected["xcode"])
+            for tool in ("ccache", "git_lfs"):
+                self.assertEqual(pins[tool], expected["tools"][tool])
+
+    def test_a_floating_macos_base_or_unpinned_tool_refuses(self) -> None:
+        source = generate.SOURCE.read_text(encoding="utf-8")
+        cases = {
+            "tag instead of digest": re.sub(r'(?m)^macos_base = .*$', 'macos_base = "ghcr.io/cirruslabs/macos-golden-gate-base:latest"', source),
+            "floating ccache": re.sub(r'(?m)^ccache = "[^"]*"$', 'ccache = "4.14"', source),
+            "missing git_lfs": re.sub(r'(?m)^git_lfs = "[^"]*"\n', "", source),
+            "missing macos_build": re.sub(r'(?m)^macos_build = "[^"]*"\n', "", source),
+        }
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "manifest.toml"
+            path.write_text(source, encoding="utf-8")
+            generate.load(path)  # control: the checkout's authority loads
+            for name, text in cases.items():
+                with self.subTest(case=name):
+                    self.assertNotEqual(source, text)
+                    path.write_text(text, encoding="utf-8")
+                    with self.assertRaises(ValueError):
+                        generate.load(path)
 
     def test_missing_authority_field_refuses(self) -> None:
         with tempfile.TemporaryDirectory() as td:

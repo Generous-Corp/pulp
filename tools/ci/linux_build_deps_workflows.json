@@ -12,6 +12,7 @@
     ".github/workflows/install-consumer-smoke.yml": 1,
     ".github/workflows/iwyu.yml": 1,
     ".github/workflows/release-cli.yml": 1,
+    ".github/workflows/release-configure.yml": 1,
     ".github/workflows/release-path-pr-gate.yml": 1,
     ".github/workflows/sandbox-e2e.yml": 1,
     ".github/workflows/sanitizers.yml": 1,

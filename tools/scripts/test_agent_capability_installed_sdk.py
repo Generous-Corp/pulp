@@ -38,10 +38,13 @@ SUPPORTED_REQUIRED_FEATURES = {
     "typed-bindings-v1",
 }
 MAINTENANCE_ONLY = {
+    "agent-capability-surface",
     "agent-capability-surface.json",
     "agent-capability-surface.schema.json",
     "legacy-unreviewed-baseline.json",
     "contract-history.json",
+    "history",
+    "fingerprints",
 }
 IMPLICIT_BUILD_PATH_VARIABLES = {
     "C_INCLUDE_PATH",

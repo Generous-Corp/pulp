@@ -1,0 +1,32 @@
+{
+ "name": "agent-capability-store-selftest",
+ "record": {
+  "entry": "tools/scripts/test_agent_capability_store.py",
+  "inputs": [
+   ".github/workflows",
+   "core/audio/include/pulp/audio",
+   "core/host/include",
+   "core/midi/include/pulp/midi",
+   "core/music/include/pulp/music",
+   "core/playback/include/pulp/playback",
+   "core/sequence/include/pulp/sequence",
+   "core/signal/include/pulp/signal",
+   "core/timebase/include/pulp/timebase",
+   "docs/status/agent-capabilities.json",
+   "docs/status/agent-capability-surface",
+   "docs/status/agent-capability-surface.schema.json",
+   "tools/agent-capabilities/fingerprints",
+   "tools/agent-capabilities/history",
+   "tools/agent-capabilities/legacy-unreviewed-baseline.json",
+   "tools/scripts/agent_capability_evolution.py",
+   "tools/scripts/agent_capability_fingerprints.py",
+   "tools/scripts/agent_capability_history.py",
+   "tools/scripts/agent_capability_store.py",
+   "tools/scripts/agent_capability_surface.py",
+   "tools/scripts/agent_capability_transaction.py",
+   "tools/scripts/gate_common.py",
+   "tools/scripts/test_agent_capability_store.py"
+  ],
+  "kind": "python"
+ }
+}

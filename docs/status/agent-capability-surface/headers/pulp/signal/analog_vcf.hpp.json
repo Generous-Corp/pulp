@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/analog_vcf.hpp",
+  "fingerprint": "sha256:8d4fc8071426df0f61027d1324e3253363edd4903a43443b709d3b7b686a6725",
+  "include": "pulp/signal/analog_vcf.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}
