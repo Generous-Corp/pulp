@@ -1,0 +1,23 @@
+{
+ "name": "pulp-test-graph-patch",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_graph_patch.cpp"
+  ],
+  "inputs": [
+   "examples/graph-patch-consumer/hello.pat"
+  ],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [
+   "test/test_graph_patch.cpp"
+  ],
+  "spawning_sources": [
+   "test/test_graph_patch.cpp"
+  ],
+  "spawns": "none",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}
