@@ -57,7 +57,9 @@ if(PULP_BUILD_TESTS AND APPLE AND PULP_HAS_CLAP AND CMAKE_SYSTEM_PROCESSOR MATCH
         "${PULP_ROOT_DIR}/test/fixtures/isolated_clap/callback_syscall_traps.cpp")
     target_compile_definitions(pulp-test-isolated-clap-worker PRIVATE
         PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1)
-    catch_discover_tests(pulp-test-isolated-clap-worker PROPERTIES TIMEOUT 60)
+    catch_discover_tests(pulp-test-isolated-clap-worker PROPERTIES
+        TIMEOUT 60
+        RESOURCE_LOCK pulp_realtime_worker_pool)
     add_test(NAME isolated-clap-construction-recovery
         COMMAND pulp-test-isolated-clap-construction
             "$<TARGET_FILE:pulp-test-clap-worker-mismatched>"
