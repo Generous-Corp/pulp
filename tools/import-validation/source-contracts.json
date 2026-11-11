@@ -170,8 +170,7 @@
       "display_name": "Google Stitch",
       "kind": "screen-export",
       "trust": "observed",
-      "last_verified": "2026-11-11",
-      "verification_note": "2026-11-11: parse_stitch* (4 cases) and react-runtime [phase-6.6.4] (4 cases) passed offline from an existing build whose parser and test sources match origin/main. Not re-run: stitch-roundtrip.sh, widget-bridge dispatch tests (not built), upstream docs URLs (no network), reference screenshot (planning submodule absent).",
+      "last_verified": "2026-08-12",
       "recheck_interval_days": 90,
       "compat": {
         "mode": "foreign-key",
@@ -268,8 +267,7 @@
       "display_name": "DESIGN.md",
       "kind": "system-tokens",
       "trust": "official",
-      "last_verified": "2026-11-11",
-      "verification_note": "2026-11-11: pulp-test-design-import-designmd [view][import][designmd] (52 cases) and pulp-test-cli-designmd-subcommands passed offline from an existing build whose parser and test sources match origin/main. Not re-run: designmd-roundtrip.sh, upstream docs URLs (no network).",
+      "last_verified": "2026-08-12",
       "recheck_interval_days": 90,
       "compat": {
         "mode": "foreign-key",
@@ -357,8 +355,7 @@
       "display_name": "Pencil / OpenPencil",
       "kind": "screen-export",
       "trust": "official",
-      "last_verified": "2026-11-11",
-      "verification_note": "2026-11-11: parse_pencil* (2 cases) and react-runtime [phase-6.6.6] (4 cases) passed offline from an existing build whose parser and test sources match origin/main. Not re-run: pencil-roundtrip.sh, widget-bridge dispatch tests (not built), upstream docs URLs (no network), reference screenshot (planning submodule absent).",
+      "last_verified": "2026-08-12",
       "recheck_interval_days": 90,
       "compat": {
         "mode": "foreign-key",
@@ -443,8 +440,7 @@
       "display_name": "Figma Make",
       "kind": "screen-export",
       "trust": "official",
-      "last_verified": "2026-11-11",
-      "verification_note": "2026-11-11: parse_figma* (12 cases) and react-runtime [phase-6.6.3] (4 cases) passed offline from an existing build whose parser and test sources match origin/main. Not re-run: figma-roundtrip.sh, widget-bridge dispatch tests (not built), upstream docs URLs (no network), reference screenshot (planning submodule absent).",
+      "last_verified": "2026-08-12",
       "recheck_interval_days": 90,
       "compat": {
         "mode": "foreign-key",
@@ -691,8 +687,7 @@
       "display_name": "v0.dev",
       "kind": "screen-export",
       "trust": "official",
-      "last_verified": "2026-11-11",
-      "verification_note": "2026-11-11: parse_v0_tsx* (6 cases) and react-runtime [phase-6.6.2] (3 cases) passed offline from an existing build whose parser and test sources match origin/main. Not re-run: v0-roundtrip.sh, widget-bridge dispatch tests (not built), upstream docs URLs (no network); reference screenshot is still pending.",
+      "last_verified": "2026-08-12",
       "recheck_interval_days": 90,
       "compat": {
         "mode": "foreign-key",
@@ -858,8 +853,7 @@
       "display_name": "React Native",
       "kind": "screen-export",
       "trust": "official",
-      "last_verified": "2026-11-11",
-      "verification_note": "2026-11-11: react-runtime [phase-6.6.5] (4 cases) passed offline from an existing build whose parser and test sources match origin/main. Not re-run: rn-roundtrip.sh, widget-bridge dispatch tests (not built), upstream docs URLs (no network), reference screenshot (planning submodule absent).",
+      "last_verified": "2026-05-14",
       "recheck_interval_days": 180,
       "compat": {
         "mode": "not-applicable",
