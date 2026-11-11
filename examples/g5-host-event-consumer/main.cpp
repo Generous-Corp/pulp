@@ -162,9 +162,6 @@ void projection_queue_lifecycle_controls() {
                     check(lane.emit_at(1, 7, 100, 0) == GraphEventResult::Overflow,
                           "queue-lane-overflow-negative");
                 }
-                if (cursor + offset == 1)
-                    check(lane.emit_at(1, 7, 99, 0) == GraphEventResult::Late,
-                          "queue-lane-late-negative");
                 check(lane.begin_consumer() == GraphEventResult::Accepted, "queue-lane-consumer");
                 for (const auto& event : lane.received())
                     events.push_back(event);
@@ -173,6 +170,17 @@ void projection_queue_lifecycle_controls() {
             check(lane.end_block() == GraphEventResult::Accepted, "queue-lane-end-block");
             cursor += frames;
         }
+        // Advance the consumed frontier before exercising the late refusal.
+        // A target equal to the current sample is valid look-ahead until the
+        // sample is consumed; only the following block makes sample one
+        // unambiguously late.
+        check(lane.begin_block(1, cursor, 1) == GraphEventResult::Accepted,
+              "queue-lane-late-block");
+        check(lane.begin_sample(0) == GraphEventResult::Accepted, "queue-lane-late-sample");
+        check(lane.emit_at(1, 1, 99, 1) == GraphEventResult::Late, "queue-lane-late-negative");
+        check(lane.begin_consumer() == GraphEventResult::Accepted, "queue-lane-late-consumer");
+        check(lane.end_sample() == GraphEventResult::Accepted, "queue-lane-late-end-sample");
+        check(lane.end_block() == GraphEventResult::Accepted, "queue-lane-late-end-block");
         check(lane.reset(2) == GraphEventResult::Accepted, "queue-lane-reset-next");
         check(lane.begin_block(1, 0, 1) == GraphEventResult::OutOfRange,
               "queue-lane-retired-epoch-negative");
