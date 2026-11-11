@@ -3476,7 +3476,7 @@ required check equally; see the `contrib-intake` skill.
 Live enforcement is classic branch protection, not a ruleset; the checked-in
 `.github/rulesets/main-protection.json` and `.shipyard/config.toml`
 `[governance]` mirror it, and `base-poison-detector-selftest` fails when those
-two disagree (and the detector judges all six on main's tip). `[governance]` is the full six-context contract, because
+two disagree (and the detector judges all seven on main's tip). `[governance]` is the full seven-context contract, because
 `shipyard governance apply` pushes exactly that list to branch protection.
 Removing it again is the reverse `required_status_checks` edit.
 
@@ -8539,10 +8539,10 @@ plus a local `git show` of the workflow file.
 #### `[landability] workflows` in `.shipyard/config.toml`
 
 The check can only resolve a required context to a lane if it has read the
-workflow that produces it. Branch protection on `main` requires **six**
+workflow that produces it. Branch protection on `main` requires **seven**
 contexts, and the tool's built-in default reads only `build.yml` — which left
 the others `no_producer`: not checked, and reported as a warning that reads
-identically to a clean result. `.shipyard/config.toml` therefore names all six
+identically to a clean result. `.shipyard/config.toml` therefore names all seven
 producers explicitly:
 
 | required context | producing workflow |
@@ -8553,8 +8553,9 @@ producers explicitly:
 | `Vellum freeze` | `vellum-freeze-check.yml` |
 | `Vellum trusted freeze` | `vellum-trusted-gate.yml` |
 | `drift-fast` | `drift-fast.yml` |
+| `workflow-lint` | `workflow-lint.yml` |
 
-None of the six is path-filtered under `pull_request` — `wclap-cloudflare.yml`
+None of the seven is path-filtered under `pull_request` — `wclap-cloudflare.yml`
 keeps its `paths:` under `push` on purpose, because a path-filtered **required**
 check leaves unrelated pull requests stuck on "Expected — Waiting for status"
 forever. Add a row here whenever a workflow starts producing a required context,
@@ -8646,7 +8647,7 @@ A required context counts as present when the head carries it as a check run
 **or** a commit status: `Vellum trusted freeze` reaches a pull request's head
 as a status posted by a `pull_request_target` run, so a check-run-only reader
 would call it absent on every pull request. The required set is
-`[governance] required_status_checks`, all six contexts.
+`[governance] required_status_checks`, all seven contexts.
 
 Every tick first replays `tools/scripts/fixtures/landing_watchdog_wedge.json`
 against that set as a negative control; it must fire (`absent`, `unassigned`,

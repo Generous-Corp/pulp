@@ -750,7 +750,7 @@ required_status_checks = [
 # None of the seven is path-filtered under `pull_request`
 # (`wclap-cloudflare.yml`'s `paths:` sits under `push`, deliberately: a
 # path-filtered REQUIRED check stays Pending forever and blocks the PR), so all
-# six fire on every pull request to `main`. `shipyard landability` re-derives
+# seven fire on every pull request to `main`. `shipyard landability` re-derives
 # that on each run rather than trusting this comment.
 [landability]
 workflows = [
