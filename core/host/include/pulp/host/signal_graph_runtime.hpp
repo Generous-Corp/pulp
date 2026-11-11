@@ -639,11 +639,9 @@ class SignalGraph : public format::AudioWorkgroupClient {
         PortIndex destination_port = 0;
         std::uint32_t parameter_id = 0;
     };
-    // One ordinary/sidechain audio edge, observed at its source before PDC/mixing,
-    // or feedback edge, observed from its retained input before current capture.
-    // Feedback timestamps mark the receiving block. Attach
-    // and detach are control-thread lifecycle operations: stop process() and
-    // any pinned-snapshot rendering first, as for prepare(). Reattachment starts
+    // Ordinary/sidechain audio: source before PDC/mixing; feedback: retained input before
+    // current capture, timestamped at receiving block. Attach/detach: stop process() and
+    // pinned-snapshot rendering on the control thread, as for prepare(). Reattachment starts
     // a fresh 256-record ring and a zero-based sample clock. Reprepare/topology
     // publication retires the attachment; transport reset detaches it. Serial
     // routing only; execution-mode changes detach at the next process call.
