@@ -5,8 +5,11 @@ roadmap and does not authorize runtime or API implementation.
 
 **Review date:** 2026-11-11
 
-**Verified source head:** `3633377fdd47c086850a22ef8d87130cd17f4e6d`
-(`origin/main` in the clean worktree used for this review).
+**Verified source head:** `670bd0900407970a03cea8bf8106c7b3a3bce834`
+(`origin/main` in the clean worktree used for this review). This is a
+same-day refresh of the document originally published at `3633377f`; the
+delta below records the resolved-identity and spectral-consumer merges that
+landed after that snapshot.
 
 **Prior context:** `docs/reference/2026-11-10-post-roadmap-audio-graph-opportunities.md`
 is the broader proposal. This refresh records what changed on current `main`
@@ -40,14 +43,22 @@ wording:
 | PR [#12000](https://github.com/Generous-Corp/pulp/pull/12000), merged `67ec6593452a4f94e813f44f9b533edb9e2c4e9e`, source head `1e7d8e0c431038d9049bcb2d19f1e20cdbb4e273` | A bounded eight-voice graph binding and SDK audio oracle now exist. | `G-6` remains in progress: voice scheduling, tails, graph state migration, and independent graph audio qualification are not promoted by the merge. |
 | PR [#11998](https://github.com/Generous-Corp/pulp/pull/11998), merged `aea67edf573c2b0d310b4e69434cab8c99942afd`, source head `0673ffadd14b7f0f6909c117adde1a991e4969a8` | Finite two-asset spectral morph with live hop control is present. | A complete graph-authored spectral/frame workflow, frame-to-audio tail policy, and broad cross-platform evidence remain partial. |
 | PR [#11999](https://github.com/Generous-Corp/pulp/pull/11999), merged `fa5a9f0205b38d255820505ae185d01ab9b4a47c`, source head `77a9777d50a9b8a46bff293efd9118f31c47ca9d` | Catalog-derived notation and strict graph diagnostics are available. | A single receipt that correlates authored graph, resolved resources, prepared plan, event replay, and output is still missing. |
-| PR [#12008](https://github.com/Generous-Corp/pulp/pull/12008), **open**, head `245d55910dc1f847d14d3b214ea741eac357627d` | Candidate bounded resolved-graph identity bridge. | It is not merged or a public contract; do not treat it as shipped. |
+| PR [#12008](https://github.com/Generous-Corp/pulp/pull/12008), merged `bb01aab010ad9ba88c70ee08007707f5907bd15b`, source head `29d9627c9a81a8b2d0b042b5c95ad295e062d2b6` | The bounded `pulp.graph.resolved-plan.v1` / `pulp.graph.resolved.io-gain.v1` identity bridge and detached receipt are now in `main`. | G-3 remains **PARTIAL/HOLD**: the installed public-only consumer is partial, upper-half unsigned-64 JSON values are refused, and whole-graph, realtime/resource, portability, and undo evidence remain open. |
+| PR [#12058](https://github.com/Generous-Corp/pulp/pull/12058), merged `59e50747c59ebfd6f1f8238bce6915e991795535`, source head `1c919f4206e580fb200613b988c4d0ca37791c36` | The bounded analyzed spectral-frame consumer now runs from the installed `Pulp::signal` target and exercises positive, unknown-profile, and chronology controls. | G-10/A3 remains **PARTIAL/HOLD**: this does not qualify runtime resynthesis, morphing, granular modulation, EOF/tail audio, realtime behavior, or cross-platform parity. |
 | PR [#12017](https://github.com/Generous-Corp/pulp/pull/12017), **open**, head `1ea1eabbdb411f277bf989f25e67796df0a85642` | Candidate G6 pedal/A1 voice evidence. | It is not merged; the graph voice lifecycle remains an evidence question. |
 | PR [#11733](https://github.com/Generous-Corp/pulp/pull/11733), closed without merge, head `d90324a2749fa6c6ab6acd90943fab6330be8425` | Earlier bounded control/event probe proposal. | Its candidate code is not current `main` and must not be copied as an implementation dependency. |
 
-The source status files preserve the limits: `G-5` is **PARTIAL**, `G-6` is
-**IN PROGRESS**, `G-10` remains **PARTIAL**, and the capability matrix labels
-inspection/fingerprints and the unified control workflow **PARTIAL/AWKWARD**.
-Those labels outrank an attractive example or a green check.
+The source status files preserve the limits: `G-3` remains **PARTIAL/HOLD**,
+`G-5` is **PARTIAL**, `G-6` is **IN PROGRESS/HOLD**, and `G-10` remains
+**PARTIAL/HOLD**. The capability matrix still labels inspection/fingerprints
+and the unified control workflow **PARTIAL/AWKWARD**. Those labels outrank an
+attractive example or a green check.
+
+The new merges narrow, but do not remove, the inspection seam. Resolved
+identity now captures bounded prepared-plan and storage facts, while the
+spectral consumer proves only analyzed-frame metadata. Neither receipt joins
+authored bytes, resolved resources, prepared generation, event replay, and
+rendered output into one replay/diff artifact. That remains the P0 experiment.
 
 ## Verified baseline and the remaining boundary
 
@@ -107,9 +118,11 @@ execution boundary; the missing value is a small, durable binding around it.
 ### P0: layered inspection and replay receipt
 
 **Reasoned priority.** This is the lowest-risk path because it can reuse current
-serializer, prepared stats, notation, probes, traces, and audio-quality tools
-without changing callback behavior. The open resolved-identity candidate is
-useful evidence, but it is neither approval nor a dependency.
+serializer, prepared stats, notation, probes, traces, audio-quality tools, and
+the now-merged bounded resolved-identity receipt without changing callback
+behavior. The resolved bridge is useful evidence and a source seam, but its
+partial installed-consumer and portability status means it is not a complete
+replay contract or a qualification dependency.
 
 Define a compact versioned envelope with separate IDs for:
 
@@ -167,9 +180,12 @@ not promote a capability.
 
 ### P3: explicit spectral/frame conversion (conditional)
 
-The finite spectral morph is a useful bounded consumer, not a universal spectral
-graph. Add conversion nodes only for a named workflow and make FFT size, hop,
-window, channel layout, latency, EOF/tail, and host-rate event mapping explicit.
+The finite spectral morph and the newly merged analyzed-frame consumer are useful
+bounded consumers, not a universal spectral graph. Add conversion nodes only for
+a named workflow and make FFT size, hop, window, channel layout, latency,
+EOF/tail, and host-rate event mapping explicit. The installed consumer's 3/3
+controls prove metadata decode and rejection behavior; they do not prove
+resynthesis or frame-to-audio scheduling.
 Keep graph scheduling at one host rate until conversion plus PDC evidence proves
 that a second scheduler is necessary.
 
