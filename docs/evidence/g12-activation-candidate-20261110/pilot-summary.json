@@ -1,9 +1,0 @@
-{
-  "source": "faf8d69a181a102455a70a40aa77e0da18838c76",
-  "cells": 24,
-  "callbacks_per_cell": 64,
-  "samples": 184320,
-  "deadline_misses": 44,
-  "timing_qualified": false,
-  "receipt_digest": "ec541d04edde20c8081471a9fa795fcb3fe520f3963f61939d1e04e5da5e012c"
-}
