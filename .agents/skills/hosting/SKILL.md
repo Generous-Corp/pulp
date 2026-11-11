@@ -1904,6 +1904,12 @@ Apple's units and the host probe:
   `PULP_TEST_AUV3_PROBE_OUT_OF_PROCESS=1` with the component installed; remove
   it afterwards. Confirm the process boundary by finding the component mapped
   in the `AUHostingService` process with `lsof`.
+  Getting this wrong does not fail the load: the system hands back an
+  `AUAudioUnit_RemoteV2` with zero input and zero output buses, and the error
+  only surfaces at `prepare()` as -10875 from `allocateRenderResources`.
+  `AuV3LoadOptions::out_of_process` defaults to true, so a test that registers
+  in process must set it false. The slot logs `kRemoteUnitWithoutBuses` at
+  load when an instrument, effect or generator arrives this way.
 - **A unit republishes its parameter tree after a bus format change.** About
   2 ms after `setFormat:` (AUDelay, AUPeakLimiter; not DLSMusicDevice or the
   mixer), and only if the host has already read `parameterTree`. A warm
