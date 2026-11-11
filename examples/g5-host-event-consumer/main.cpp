@@ -154,8 +154,8 @@ void projection_queue_lifecycle_controls() {
             for (std::size_t offset = 0; offset < frames; ++offset) {
                 check(lane.begin_sample(offset) == GraphEventResult::Accepted, "queue-lane-sample");
                 if (cursor + offset == 0) {
-                    check(lane.emit_at(1, 7, 42, 1) == GraphEventResult::Accepted,
-                          "queue-lane-future");
+                    check(lane.emit_at(1, 1, 42, 1) == GraphEventResult::Accepted,
+                          "queue-lane-lookahead");
                     check(lane.emit_at(1, 7, 99, 0) == GraphEventResult::Late,
                           "queue-lane-late-negative");
                     for (std::uint16_t payload = 0; payload < 4; ++payload)
