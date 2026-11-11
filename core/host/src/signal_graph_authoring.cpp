@@ -246,6 +246,13 @@ NodeId SignalGraph::add_processor_node(std::shared_ptr<format::ProcessorNodeInst
     try {
         processor_nodes_.emplace(id, std::make_shared<ProcessorNodeLifetime>(std::move(instance)));
         populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
+        // MIDI is node-scoped; these handles do not consume or renumber audio buses.
+        if (descriptor.accepts_midi)
+            node.input_ports.push_back({id, 0, false, "midi", PortKind::Midi,
+                                        diagnostic_graph_identity_, authoring_generation_ + 1});
+        if (descriptor.produces_midi)
+            node.output_ports.push_back({id, 0, true, "midi", PortKind::Midi,
+                                         diagnostic_graph_identity_, authoring_generation_ + 1});
         nodes_.push_back(std::move(node));
     } catch (...) {
         processor_nodes_.erase(id);
@@ -992,8 +999,9 @@ GraphResult SignalGraph::connect(const PortHandle& source, const PortHandle& des
                 "illegal instantaneous cycle", "insert a feedback delay"};
     Connection c{source.node, sp->index, dest.node, dp->index};
     c.spectral = sp->kind == PortKind::Spectral;
+    c.midi = sp->kind == PortKind::Midi;
     for (const auto& existing : connections_)
-        if (existing == c)
+        if (existing == c && existing.midi == c.midi)
             return {GraphResult::Code::Duplicate, dest.node, dp->index, "duplicate connection",
                     "remove the existing connection"};
     append_connection_locked_(c);

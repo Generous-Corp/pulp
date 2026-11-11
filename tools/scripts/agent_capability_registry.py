@@ -180,6 +180,7 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # Public headers can leave the frozen legacy bucket only through one of these
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
+    {'include': 'pulp/host/graph_patch.hpp', 'fingerprint': 'sha256:017cd6e433918b371a9d37b48698bf392fc3d8879fff19eff7f0572bff82f368', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Control-thread catalog-derived graph notation and strict diagnostics transport over existing SignalGraph and restore contracts; bounded profile, not a DSP algorithm or full G2 completion.'},
     {
         'include': 'pulp/host/signal_graph_execution_snapshot.hpp',
         'fingerprint': 'sha256:fb2d9b56aadf50517075a3d915de0685cb9e08ec0be44b1af10d6288b774fbec',

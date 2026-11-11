@@ -350,6 +350,98 @@ class SourceContractsTest(unittest.TestCase):
             ],
         )
 
+    def test_recheck_requires_a_verification_note_naming_the_date(self) -> None:
+        today = dt.date(2026, 11, 12)
+        base = {"recheck_interval_days": 90, "last_verified": "2026-11-11"}
+        cases = {
+            "no-note": {},
+            "empty-note": {"verification_note": "  "},
+            "other-date": {"verification_note": "2026-11-09: parse_x (3 cases) passed offline"},
+            "bare-date": {"verification_note": "2026-11-11"},
+            "evidenced": {"verification_note": "2026-11-11: parse_x (3 cases) passed offline"},
+        }
+        findings: list = []
+        for name, extra in cases.items():
+            checker._check_cadence(findings, {"source": name, **base, **extra}, today)
+        # Before the rule's start date a note is not required: older rechecks stay as they were.
+        checker._check_cadence(findings, {"source": "pre-rule", "recheck_interval_days": 90, "last_verified": "2026-11-01"}, today)
+        self.assertEqual(
+            [(finding.source, finding.code) for finding in findings],
+            [
+                ("no-note", "unevidenced-verification"),
+                ("empty-note", "unevidenced-verification"),
+                ("other-date", "unevidenced-verification"),
+                ("bare-date", "unevidenced-verification"),
+            ],
+        )
+    def test_cadence_warns_within_the_window_before_the_due_date(self) -> None:
+        today = dt.date(2026, 11, 3)
+        entry = {"source": "figma", "last_verified": "2026-08-12", "recheck_interval_days": 90}
+        findings: list = []
+        checker._check_cadence(findings, entry, today)
+        self.assertEqual([f.code for f in findings], ["source-contract-recheck-due"])
+        self.assertEqual(findings[0].severity, "info")
+        self.assertIn("due in 7 days", findings[0].message)
+        self.assertIn("due 2026-11-10", findings[0].message)
+        # Negative control: one day earlier is outside the 7-day window.
+        early: list = []
+        checker._check_cadence(early, entry, dt.date(2026, 11, 2))
+        self.assertEqual(early, [])
+        # The due date itself still warns; the day after is overdue.
+        on_day: list = []
+        checker._check_cadence(on_day, entry, dt.date(2026, 11, 10))
+        self.assertIn("due today", on_day[0].message)
+        after: list = []
+        checker._check_cadence(after, entry, dt.date(2026, 11, 11))
+        self.assertEqual([f.code for f in after], ["stale-source-contract"])
+        # The window is configurable.
+        wide: list = []
+        checker._check_cadence(wide, entry, dt.date(2026, 10, 27), warn_days=14)
+        self.assertEqual([f.code for f in wide], ["source-contract-recheck-due"])
+
+    def test_due_or_overdue_rechecks_never_fail_strict_and_annotate_on_actions(self) -> None:
+        registry = _load_registry()
+        for source, verified in (("stitch", "2020-01-01"), ("figma", "2026-11-09")):
+            entry = _contract(registry, source)
+            entry["recheck_interval_days"] = 3
+            entry["last_verified"] = verified
+        with tempfile.TemporaryDirectory() as td:
+            registry_path = _write_registry(Path(td), registry)
+            cmd = [
+                sys.executable,
+                str(CHECKER_PATH),
+                "--root",
+                str(ROOT),
+                "--registry",
+                str(registry_path),
+                "--strict",
+            ]
+            env = dict(__import__("os").environ, GITHUB_ACTIONS="true")
+            on_actions = subprocess.run(
+                cmd, check=False, capture_output=True, text=True, encoding="utf-8", env=env
+            )
+            env.pop("GITHUB_ACTIONS")
+            local = subprocess.run(
+                cmd, check=False, capture_output=True, text=True, encoding="utf-8", env=env
+            )
+        self.assertEqual(on_actions.returncode, 0, on_actions.stdout + on_actions.stderr)
+        self.assertIn("[info] stale-source-contract stitch", on_actions.stdout)
+        self.assertIn("[info] source-contract-recheck-due figma", on_actions.stdout)
+        self.assertIn("::warning title=stale-source-contract stitch::", on_actions.stdout)
+        self.assertIn("::warning title=source-contract-recheck-due figma::", on_actions.stdout)
+        # Negative control: no annotations outside GitHub Actions.
+        self.assertEqual(local.returncode, 0)
+        self.assertNotIn("::warning", local.stdout)
+
+    def test_annotations_cover_only_cadence_findings(self) -> None:
+        findings = [
+            checker.Finding("info", "stale-source-contract", "v0", "overdue: due 2026-11-10"),
+            checker.Finding("warning", "missing-test-file", "v0", "gone"),
+        ]
+        text = checker.github_annotations(findings)
+        self.assertEqual(text.count("::warning"), 1)
+        self.assertIn("::overdue: due 2026-11-10", text)
+
     def test_report_rendering_escapes_markdown_and_handles_empty(self) -> None:
         finding = checker.Finding(
             "warning",
