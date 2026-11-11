@@ -1324,11 +1324,13 @@ class CompiledDataTests(unittest.TestCase):
             repo = Repo(Path(tmp))
             write(repo.root, "test/test_gen.cpp", 'auto p = fs::path(PULP_SOURCE_DIR) / "test/fixtures/a";\n')
             seen = []
-            for name in ("build-gate", "build-linux"):
+            for name, with_file in (("build-gate", True), ("build-linux", False)):
                 build = repo.root / name
                 ev = build / "test" / "test-data"
                 ev.mkdir(parents=True)
                 gen = f"{name}/tools/cli/generated/index.cpp"
+                if with_file:
+                    write(repo.root, gen, 'auto p = fs::path(PULP_SOURCE_DIR);\n')
                 (ev / "executables.json").write_text(json.dumps({"schema": "pulp-test-executables/v1", "executables": {
                     "pulp-gen": {"sources": ["test/test_gen.cpp", gen], "tree_defines": ["PULP_SOURCE_DIR"]}}}),
                     encoding="utf-8")
@@ -1338,7 +1340,43 @@ class CompiledDataTests(unittest.TestCase):
                 seen.append(sti.compiled_entries(repo.root, build)["pulp-gen"])
             self.assertEqual(seen[0], seen[1])
             self.assertIn("${CMAKE_BINARY_DIR}/tools/cli/generated/index.cpp", seen[0]["sources"])
+            self.assertEqual(seen[0]["detected_sources"], ["test/test_gen.cpp"])
             self.assertFalse(any(s.startswith("build-") for s in seen[0]["sources"]))
+
+    def test_an_undeclared_generated_reader_remains_detected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            build = repo.root / "build-gate"
+            gen = "build-gate/tools/cli/generated/index.cpp"
+            write(repo.root, gen, 'auto p = fs::path(PULP_SOURCE_DIR);\n')
+            ev = build / "test" / "test-data"
+            ev.mkdir(parents=True)
+            (ev / "executables.json").write_text(json.dumps({
+                "schema": "pulp-test-executables/v1", "executables": {
+                    "pulp-gen": {"sources": [gen], "tree_defines": ["PULP_SOURCE_DIR"]}}}),
+                encoding="utf-8")
+            entry = sti.compiled_entries(repo.root, build)["pulp-gen"]
+            token = "${CMAKE_BINARY_DIR}/tools/cli/generated/index.cpp"
+            self.assertEqual(entry["data"], "undeclared")
+            self.assertEqual(entry["detected_sources"], [token])
+            self.assertEqual(entry["undeclared_sources"], [token])
+
+    def test_a_declared_reader_is_detected_when_build_dir_is_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            source = "test/test_gen.cpp"
+            write(repo.root, source, 'auto p = fs::path(PULP_SOURCE_DIR);\n')
+            ev = repo.root / "test" / "test-data"
+            ev.mkdir(parents=True)
+            (ev / "executables.json").write_text(json.dumps({
+                "schema": "pulp-test-executables/v1", "executables": {
+                    "pulp-gen": {"sources": [source], "tree_defines": ["PULP_SOURCE_DIR"]}}}),
+                encoding="utf-8")
+            (ev / "pulp-gen.inputs.json").write_text(json.dumps({
+                "schema": "pulp-test-data-inputs/v1", "executable": "pulp-gen", "kind": "compiled",
+                "sources": [source], "inputs": []}), encoding="utf-8")
+            entry = sti.compiled_entries(repo.root, repo.root)["pulp-gen"]
+            self.assertEqual(entry["detected_sources"], [source])
 
     def test_a_generated_source_in_the_build_dir_never_counts_as_a_spawner(self) -> None:
         # The generated index quotes API names in prose; its presence or its
