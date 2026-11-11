@@ -1529,6 +1529,17 @@ public probe identity, sequence, sample-relative timestamps, frame counts,
 peak/RMS and loss count. Measurements precede downstream mixing and PDC.
 See [edge probe limits and lifecycle](../guides/graph-edge-probes.md).
 
+### SignalGraph notation
+
+`pulp graph catalog --json` projects the default runtime node catalog.
+`pulp graph validate FILE.pat --json` uses shared typed strict diagnostics;
+`.pulpgraph` validation checks every original connection. `pulp graph fmt
+FILE.pat` prints canonical notation, and `pulp graph fmt FILE.pulpgraph
+--notation` converts supported saved graphs without discarding unsupported
+state. `pulp graph save FILE.pat --output FILE.pulpgraph` persists the graph.
+Application Processor registrations use the public C++ catalog. See
+[notation profile and limitations](../guides/graph-patch-notation.md).
+
 ### Sample-region graph inspection
 
 Sample-region graph and capability reports are read-only views of the declared

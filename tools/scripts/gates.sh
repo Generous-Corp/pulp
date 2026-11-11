@@ -691,7 +691,8 @@ if [ "$gate_host_builds_skipped" -eq 0 ] && [ -f "$ROOT/tools/ci/source_selftest
         esac
         src_selftest_log="$(mktemp "${TMPDIR:-/tmp}/pulp-gates-source-selftests.XXXXXX")"
         if "$PYTHON" "$ROOT/tools/ci/source_selftests.py" run ${src_lane_args[@]+"${src_lane_args[@]}"} \
-                --changed-from "$BASE" --label-base-failures >"$src_selftest_log" 2>&1; then
+                --changed-from "$BASE" --label-base-failures \
+                ${PULP_BUILD_JOBS:+--jobs "$PULP_BUILD_JOBS"} >"$src_selftest_log" 2>&1; then
             sed -n 's/^source-selftests: /  source-selftests: /p' "$src_selftest_log" >&2
         else
             tail -n 40 "$src_selftest_log" >&2
