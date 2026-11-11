@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/noise_tilt.hpp",
+  "fingerprint": "sha256:016c8e7e818ad23543da6e37c1e96e41557ed53f898afe80f8d9d65666912adb",
+  "include": "pulp/signal/noise_tilt.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.stochastic-sources"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

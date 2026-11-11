@@ -94,6 +94,11 @@ docs:
     kind: guide
     summary: State and parameter system — ParamValue, StateStore, Binding, serialization
 
+  - slug: wav-writing
+    path: guides/wav-writing.md
+    kind: guide
+    summary: WAV writing at 16/24-bit integer and 32-bit float with atomic publication and a replace policy
+
   - slug: presets
     path: guides/presets.md
     kind: guide
@@ -418,6 +423,11 @@ docs:
     path: examples/pulp-gain.md
     kind: guide
     summary: PulpGain — stereo gain effect (reference example)
+
+  - slug: example-midi-learn-demo
+    path: examples/midi-learn-demo.md
+    kind: guide
+    summary: MidiLearnDemo, a level and pan effect that shows MIDI Learn with menu, overlay, feedback, undo and saved mappings
 
   - slug: example-pulp-tone
     path: examples/pulp-tone.md

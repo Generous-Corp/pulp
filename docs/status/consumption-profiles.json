@@ -134,6 +134,7 @@
       "pulp/audio/voice_sum_mixer.hpp",
       "pulp/audio/wav_decoder.hpp",
       "pulp/audio/wav_metadata.hpp",
+      "pulp/audio/wave_layout.hpp",
       "pulp/audio/waveform_overview.hpp",
       "pulp/audio/wavetable_authoring.hpp",
       "pulp/audio/window_enumerator.hpp",
@@ -558,6 +559,7 @@
       "pulp/host/timeline_offline_graph.hpp",
       "pulp/host/timeline_offline_renderer.hpp",
       "pulp/host/trigger_graph.hpp",
+      "pulp/host/voice_bank_binding.hpp",
       "pulp/host/voice_identity.hpp",
       "pulp/host/voice_template.hpp"
     ],
@@ -673,6 +675,7 @@
       "pulp/platform/permissions.hpp",
       "pulp/platform/platform.hpp",
       "pulp/platform/popup_menu.hpp",
+      "pulp/platform/popup_window.hpp",
       "pulp/platform/progress_parser.hpp",
       "pulp/platform/reveal_in_file_manager.hpp",
       "pulp/platform/special_dir.hpp",
@@ -930,6 +933,7 @@
       "pulp/audio/voice_sum_mixer.hpp",
       "pulp/audio/wav_decoder.hpp",
       "pulp/audio/wav_metadata.hpp",
+      "pulp/audio/wave_layout.hpp",
       "pulp/audio/waveform_overview.hpp",
       "pulp/audio/wavetable_authoring.hpp",
       "pulp/audio/window_enumerator.hpp",
@@ -1253,6 +1257,7 @@
       "pulp/state/midi_mapping.hpp",
       "pulp/state/midi_parameter_map.hpp",
       "pulp/state/midi_source.hpp",
+      "pulp/state/midi_source_reservation.hpp",
       "pulp/state/modulation_lane.hpp",
       "pulp/state/param_cursor.hpp",
       "pulp/state/param_json.hpp",
@@ -1260,7 +1265,9 @@
       "pulp/state/parameter.hpp",
       "pulp/state/parameter_edit.hpp",
       "pulp/state/parameter_event_queue.hpp",
+      "pulp/state/preset_library.hpp",
       "pulp/state/preset_manager.hpp",
+      "pulp/state/preset_metadata_store.hpp",
       "pulp/state/properties_file.hpp",
       "pulp/state/sequencer_state_channel.hpp",
       "pulp/state/stable_sort.hpp",
@@ -1470,6 +1477,8 @@
       "pulp/view/live_constant_editor.hpp",
       "pulp/view/lock_to_source.hpp",
       "pulp/view/lottie_view.hpp",
+      "pulp/view/midi_learn_menu.hpp",
+      "pulp/view/midi_learn_target.hpp",
       "pulp/view/modal.hpp",
       "pulp/view/model_manager_view.hpp",
       "pulp/view/modulation_matrix.hpp",
@@ -1669,6 +1678,11 @@
       "pulp/inspect/tweak_store.hpp",
       "pulp/inspect/value_channel_telemetry_broker.hpp"
     ],
+    "integrations/pulp-native/include": [
+      "pulp/native/frame_pump.hpp",
+      "pulp/native/input.hpp",
+      "pulp/native/metal_surface.hpp"
+    ],
     "tools/audio/analysis/include": [
       "pulp/audio/analysis/audio_artifacts.hpp",
       "pulp/audio/analysis/audio_assertions.hpp",
@@ -1710,7 +1724,7 @@
         "PULP_BUILD_EXAMPLES": "OFF"
       },
       "summary": {
-        "installed_target_count": 88,
+        "installed_target_count": 89,
         "ranked_by_closure": [
           {
             "exported_as": "Pulp::inspect-standalone-runtime",
@@ -1959,6 +1973,10 @@
           {
             "exported_as": "Pulp::sdl3-static",
             "closure_node_count": 18
+          },
+          {
+            "exported_as": "Pulp::native",
+            "closure_node_count": 10
           },
           {
             "exported_as": "Pulp::signal-fft-backend",
@@ -6499,6 +6517,54 @@
           },
           "direct_dependencies": [
             "pulp-timebase"
+          ]
+        },
+        "native": {
+          "target": "pulp-native",
+          "exported_as": "Pulp::native",
+          "type": "STATIC_LIBRARY",
+          "source_dir": "integrations/pulp-native",
+          "closure": {
+            "node_count": 10,
+            "pulp_targets": [
+              "pulp-platform"
+            ],
+            "third_party_targets": [
+              "gpu-runtime-device-api",
+              "pulp-native"
+            ]
+          },
+          "external_dependencies": {
+            "count": 9,
+            "third_party_targets": [
+              "gpu-runtime-device-api",
+              "pulp-native"
+            ],
+            "prebuilt_archives": [],
+            "imported_targets": [],
+            "frameworks": [
+              "AppKit",
+              "Cocoa",
+              "CoreFoundation",
+              "CoreVideo",
+              "Metal",
+              "QuartzCore",
+              "UniformTypeIdentifiers"
+            ],
+            "system_libraries": []
+          },
+          "public_headers": {
+            "roots": [
+              "integrations/pulp-native/include"
+            ],
+            "generated_include_roots": 0
+          },
+          "direct_dependencies": [
+            "framework:AppKit",
+            "framework:CoreVideo",
+            "framework:Metal",
+            "framework:QuartzCore",
+            "pulp-platform"
           ]
         },
         "native-components": {

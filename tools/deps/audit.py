@@ -1169,6 +1169,18 @@ def vellum_renderer_drift(manifest: list[dict], read_source=None) -> tuple[str, 
         problems.append(
             f"archive digest differs: Vellum {vellum_sha} ({where}) vs Pulp {pulp_sha} "
             f"(manifest Skia release_assets.{asset_key})")
+    # Every macOS build forwards its device layer to gpu-runtime, whose lock
+    # pins one macOS asset, so each mac-* selector must resolve that asset: an
+    # x86_64-only build that fetched a thin archive fails the lock's Dawn check.
+    for key in sorted(assets):
+        if not key.startswith("mac-") or key == asset_key:
+            continue
+        other = assets[key].get("sha256") if isinstance(assets[key], dict) else None
+        if not isinstance(other, str) or other.lower() != vellum_sha:
+            problems.append(
+                f"manifest Skia release_assets.{key} is {other}, but gpu-runtime's lock "
+                f"pins one macOS asset, {vellum_sha} ({where}); a macOS build that "
+                f"resolves {key} would fail its Dawn digest check")
     if vellum_tag != pulp_tag:
         problems.append(
             f"Skia release differs: Vellum {vellum_tag} ({where}) vs Pulp {pulp_tag} "

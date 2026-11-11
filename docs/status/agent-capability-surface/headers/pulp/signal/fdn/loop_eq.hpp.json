@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/fdn/loop_eq.hpp",
+  "fingerprint": "sha256:791f7d56e50ffd8143ae7c4bb339536b4febed45c298aca2792a3fcd4c6915e2",
+  "include": "pulp/signal/fdn/loop_eq.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Internal building block of the FDN reverb engine (fdn/loop_eq). It is reached only through FdnReverb and makes no installed agent capability claim of its own."
+}

@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/format_registry.hpp",
+  "fingerprint": "sha256:82a04fe0dd2b00f685616f766a47f81ef6c284402ea628df4347b0b43920cf3d",
+  "include": "pulp/audio/format_registry.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Audio file decoding (FormatRegistry::read with DecodeLimits) is host infrastructure that sample, impulse-response and offline-render capabilities consume; it is not an independently selected generator-facing capability in the installed contract."
+}

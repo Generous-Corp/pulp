@@ -1,0 +1,9 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/event_compensation.hpp",
+  "fingerprint": "sha256:cf9986a4cd145275093e73311281ec8eb6abc52bf4de97eec4da6e8304849db8",
+  "include": "pulp/playback/event_compensation.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "EventCompensationShift, expressed in samples rather than ticks by deliberate design, with the documented invariant that compensation shifts the scheduling window and never rewrites event data. It is a bounded scheduling adjustment composed inside the renderer, not an advertised capability."
+}

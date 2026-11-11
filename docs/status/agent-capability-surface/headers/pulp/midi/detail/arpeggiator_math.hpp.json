@@ -1,0 +1,11 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/detail/arpeggiator_math.hpp",
+  "fingerprint": "sha256:63f62d6a1272a3cfb360f6caf94b4ae4acf73e6c9a1942d7d8ea530eb595e050",
+  "include": "pulp/midi/detail/arpeggiator_math.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "midi.arpeggiator"
+  ],
+  "rationale": "Shared saturating clock and projection arithmetic supports the arpeggiator implementation without defining a separate capability."
+}

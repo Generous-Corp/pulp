@@ -12,10 +12,16 @@ import json
 import pathlib
 from typing import Any, Iterable
 
+import agent_capability_store as store
+
 
 SURFACE_SCHEMA = "pulp.agent-capability-surface.v1"
 BASELINE_SCHEMA = "pulp.agent-capability-legacy-baseline.v1"
-SURFACE_SNAPSHOT = pathlib.Path("docs/status/agent-capability-surface.json")
+# The ledger is committed as one record file per header under SURFACE_DIR
+# (agent_capability_store.py). SURFACE_SNAPSHOT is the single file it used to
+# be: the name of the combined document, and what an older revision holds.
+SURFACE_SNAPSHOT = store.SURFACE_LEGACY
+SURFACE_DIR = store.SURFACE_DIR
 LEGACY_BASELINE = pathlib.Path(
     "tools/agent-capabilities/legacy-unreviewed-baseline.json"
 )
@@ -89,6 +95,8 @@ REVIEWED_HOST_HEADERS = (
     'pulp/host/sample_region_proof.hpp',
     'pulp/host/sample_region_parameters.hpp',
     'pulp/host/catalog_descriptor.hpp',
+    'pulp/host/signal_graph_subgraph.hpp',
+    'pulp/host/voice_bank_binding.hpp',
 )
 # The reviewed-host table is its own domain. It was previously recorded as
 # `signal`, which mislabeled anything here that is not sample-region work.

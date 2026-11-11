@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/frequency_shifter_ssb.hpp",
+  "fingerprint": "sha256:f4c3316c9c4e8ea4325b798d154799dfef4b0eb7f7105c97930bb220b0b22f58",
+  "include": "pulp/signal/frequency_shifter_ssb.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

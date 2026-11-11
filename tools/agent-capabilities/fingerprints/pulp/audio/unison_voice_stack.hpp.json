@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/audio/unison_voice_stack.hpp",
+  "fingerprint": "sha256:e5cef314c00880c58fc33618a6657b27811c1afcf003220b9e3176435d8c737d"
+}

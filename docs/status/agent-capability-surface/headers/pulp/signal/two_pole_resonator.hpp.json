@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/two_pole_resonator.hpp",
+  "fingerprint": "sha256:46c762aca702becc33f51ad1a0db963ee84a3b397e6202a859944c619d9bc2ec",
+  "include": "pulp/signal/two_pole_resonator.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Two-pole resonance is composable realtime signal infrastructure, not an independently advertised generator capability."
+}

@@ -278,6 +278,13 @@ selftest asserts the subject is gone after an INCONCLUSIVE run. An
 INCONCLUSIVE without `--subject` now says which file it fingerprinted and points
 here; it is not a coverage gap in the test and rerunning it will not change the
 answer. Interpreted tests (`python3 …`, `bash …`) take `--no-build` instead.
+Whether the driver also links the edited source is read from the build's link
+graph (`ninja -t query`, or the Makefile generator's `link.txt`), never from
+shared symbol names. Every word of `--test` that is a file in the build dir
+is checked as a driver, so `--test` must name the test binary itself: a script,
+a custom-command output, or `ctest` in front of it is INCONCLUSIVE. A header
+edit is checked against ninja's dependency log and is INCONCLUSIVE in a
+Makefile build, as is any build dir whose graph cannot be read.
 
 ### `pulp status` reads `.shipyard/config.toml` line by line, not as TOML
 
@@ -1451,18 +1458,11 @@ mode fails the build without it. A capability row alone no longer satisfies the
 gate, because a second operation on an already-documented capability used to
 ship undescribed.
 
-`confirm_failure.sh` cannot give a verdict on a CLI shell-out test, and it says
-so rather than guessing. It fingerprints the *test* binary to prove the edit
-reached what it runs, but a shell-out test's subject is `pulp-cpp`, which the
-test binary does not contain -- so the fingerprint never moves and the harness
-reports INCONCLUSIVE. `pulp_bind_cli_shellout_target` compiles the CLI path in
-as a define and adds no `add_dependencies`, so `--target pulp-test-cli-*` does
-not rebuild the CLI either. Run that negative control against the CLI binary
-instead: break the source, delete `cmd_control.cpp.o`, rebuild `pulp-cli`,
-confirm the compile line appears in the build log, and compare `pulp-cpp`'s
-hash across the break -- restoring through `git restore`, never a `.bak` copy.
-An aborted harness run leaves `pulp-cpp` built from the broken source, so
-re-establish the baseline before reading the next run's result.
+Negative-control a CLI shell-out test with `confirm_failure.sh --subject
+build/tools/cli/pulp-cpp --target pulp-cli` and `--test` naming the test binary
+itself (see "`confirm_failure.sh` needs `--subject` for a shell-out CLI test"
+above). The subject is what it fingerprints and rebuilds; the test binary only
+drives it.
 
 For `control call` and `control watch`, `--timeout-ms`, and for their typed MCP
 operation counterparts, `timeout_ms`, are each one absolute operation deadline,
@@ -3457,8 +3457,9 @@ Gotchas:
   `--print-path` keeps stdout to the final prefix
   and sends build progress to stderr so command substitution is reliable.
   The installed prefix is an arm64 contract all the way down: after installation,
-  every static archive is inspected with `lipo`; an archive containing arm64 plus
-  other slices is atomically replaced by its arm64 slice, while an archive with no
+  every static archive is inspected with `lipo`; Pulp-owned universal archives
+  are replaced by their arm64 slice, while the copied, lock-bound
+  `external/skia-build` archives retain their exact bytes. Any archive with no
   arm64 slice fails the publish. The profile also enables and validates WebView,
   and records `features.webview=true` in `sdk-provenance.json`, so imported
   WebView-backed designs can be built by downstream forge consumers without
@@ -3893,7 +3894,7 @@ rasterizers live in `tools/audio/analysis` (`spectrogram_raster.hpp`,
 parse flags, stream the input and write files, through the shared
 `cmd_audio_image_common.{hpp,cpp}`.
 
-Things that are easy to get wrong when touching them:
+Gotchas:
 
 - **Input streams through `MemoryMappedAudioReader::read_frames` in windows.**
   Never route these verbs through `read_audio_file` / `decode_wav`: the WAV
@@ -3912,14 +3913,10 @@ Things that are easy to get wrong when touching them:
 - **Goldens live in `test/fixtures/audio/images/`** and are compared through
   ImageIO on macOS only (the required gate); regenerate with
   `PULP_AUDIO_IMAGE_WRITE_GOLDENS=1 ./build/test/pulp-test-audio-image-raster "[golden]"`.
-- **`confirm_failure.sh --subject build/tools/cli/pulp-cpp` is INCONCLUSIVE for
-  `cmd_audio_image_common.cpp`.** Its driver-links-the-edited-object check
-  compares strong `nm` symbols, and on this toolchain libc++ template
-  instantiations (`__ZNSt3__1...B9nqe220106...`) show up as strong `T` in the
-  object and in `pulp-test-cli-audio-image`, so it reports the driver as
-  linking the CLI source. Confirm the clamp behaviour at the unit level
-  (`waveform_raster.cpp`, no `--subject`) and confirm the lab's byte-identity
-  test with `--python`; the CLI-level loop needs the instrument fixed first.
+- **`confirm_failure.sh --subject build/tools/cli/pulp-cpp` covers
+  `cmd_audio_image_common.cpp`.** `pulp-test-cli-audio-image` shares libc++ and
+  header-inline definitions with the CLI source but does not link it. Run the
+  loop with `--target pulp-cli`.
 
 ## `audio heritage` owns sampler-profile interchange and evidence renders
 

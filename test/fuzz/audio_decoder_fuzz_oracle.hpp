@@ -10,11 +10,15 @@
 //     and channel count, and on frame count unless info reports 0 (an
 //     undeclared length, decoded under the limits); the decoded planar
 //     buffers are num_channels long with num_frames samples each;
-//   - decoded output never exceeds the limits (bytes = frames x channels x 4).
+//   - decoded output never exceeds the limits (bytes = frames x channels x 4);
+//   - info's truncation report is consistent: a truncated file declares more
+//     frames than it holds, and a file that is not truncated and states a
+//     declaration declares exactly what it holds. This holds whenever
+//     read_info succeeds, decoded or not.
 // A format whose info is an estimate is not special-cased here: a
 // disagreement is reported, and whoever owns the reader decides.
 //
-// This header deliberately shares nothing with core/audio/src's
+// This header shares nothing with core/audio/src's
 // decode_limits_detail.hpp: an oracle that reused the code under test would
 // agree with its bugs.
 
@@ -124,6 +128,20 @@ inline bool check_decoded_shape(const std::string& path, const pulp::audio::Audi
     return ok;
 }
 
+inline void check_truncation_report(const std::string& path, const pulp::audio::AudioFileInfo& info,
+                                    const FailureSink& fail) {
+    if (info.truncated && info.declared_frames <= info.num_frames) {
+        report(fail, path, "truncated",
+               "truncated, but declares " + std::to_string(info.declared_frames) +
+                   " frames for the " + std::to_string(info.num_frames) + " it holds");
+    }
+    if (!info.truncated && info.declared_frames != 0 && info.declared_frames != info.num_frames) {
+        report(fail, path, "declared_frames",
+               "not truncated, but declares " + std::to_string(info.declared_frames) +
+                   " frames and holds " + std::to_string(info.num_frames));
+    }
+}
+
 inline void check_agreement(const std::string& path, const pulp::audio::AudioFileInfo& info,
                             const pulp::audio::AudioFileData& data, const FailureSink& fail) {
     if (info.sample_rate != data.sample_rate) {
@@ -136,9 +154,12 @@ inline void check_agreement(const std::string& path, const pulp::audio::AudioFil
                "info " + std::to_string(info.num_channels) + ", decoded " +
                    std::to_string(data.num_channels()));
     }
-    // Zero is the documented "length not declared" value; a declared count
-    // the decode does not deliver is the reader's refusal to make, not ours.
-    if (info.num_frames != 0 && info.num_frames != data.num_frames()) {
+    // Zero is the documented "length not declared" value, unless the reader
+    // also states a declaration (a WAV reports what its header declares
+    // beside the frames it holds). A declared count the decode does not
+    // deliver is the reader's refusal to make, not ours.
+    const bool states_length = info.num_frames != 0 || info.declared_frames != 0;
+    if (states_length && info.num_frames != data.num_frames()) {
         report(fail, path, "num_frames",
                "info " + std::to_string(info.num_frames) + ", decoded " +
                    std::to_string(data.num_frames()));
@@ -150,8 +171,8 @@ inline void check_agreement(const std::string& path, const pulp::audio::AudioFil
 // Runs read_info and read(limits) on `path`, dispatching on the extension
 // through the global registry, and applies every property above, reporting
 // each failure through `fail`. Never throws; the caller decides whether a
-// failure traps (fuzzer) or fails a test case. A path no reader claims simply
-// fails both reads, so the caller that needs "a reader exists" checks
+// failure traps (fuzzer) or fails a test case. A path no reader claims fails
+// both reads, so the caller that needs "a reader exists" checks
 // find_reader itself.
 inline OracleOutcome check_registry(const std::string& path,
                                     const pulp::audio::DecodeLimits& limits,
@@ -163,6 +184,8 @@ inline OracleOutcome check_registry(const std::string& path,
     outcome.data = registry.read(path, limits);
     outcome.decode_ok = outcome.data.has_value();
 
+    if (outcome.info_ok)
+        detail::check_truncation_report(path, *outcome.info, fail);
     if (outcome.decode_ok) {
         const bool shape_ok = detail::check_decoded_shape(path, *outcome.data, limits, fail);
         if (shape_ok && outcome.info_ok)

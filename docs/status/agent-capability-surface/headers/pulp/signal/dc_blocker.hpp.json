@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/dc_blocker.hpp",
+  "fingerprint": "sha256:ac4362c67c262ca48625cb2eb3e07cbd3fd5a40579f18a97845b9787d1449b89",
+  "include": "pulp/signal/dc_blocker.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

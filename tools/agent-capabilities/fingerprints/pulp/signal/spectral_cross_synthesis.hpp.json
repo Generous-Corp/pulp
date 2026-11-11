@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/signal/spectral_cross_synthesis.hpp",
+  "fingerprint": "sha256:15a38e26fae4a62c1069e4ce35e96b2e1c19c25b4d66719543bedd48d8822d6a"
+}

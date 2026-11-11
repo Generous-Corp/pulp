@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "event_id": "20261109-view-file-drag-recorder",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-09T20:26:00Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/view/include/pulp/view/drag_drop.hpp",
+    "core/view/platform/mac/drag_drop_mac.mm",
+    "core/view/platform/mac/pulp_mac_objc_names.h"
+  ],
+  "vellum_inherits": true,
+  "rationale": "Vellum's mirrored view layer should start outbound file drags through the same platform seam, so its tests and automation can record them too."
+}

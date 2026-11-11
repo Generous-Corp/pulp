@@ -14,7 +14,12 @@
 #      lock;
 #   3. rustup never self-updates, and the manifest's Rust is installed BY NAME,
 #      with its components and targets;
-#   4. the guest's own report of what it now holds is written to <receipt.json>.
+#   4. tools/toolchain/check_env.py runs in the guest against this checkout's
+#      expected.json, with the pinned tools active, and the bake is refused on
+#      any difference (Xcode included): the golden holds the manifest's set or
+#      it is not a golden;
+#   5. the guest's own report of what it now holds, the check's included, is
+#      written to <receipt.json>.
 # It changes no PATH and no runner setting: a lane uses these tools only when it
 # opts in (MISE_ENV=toolchain, mise exec).
 #
@@ -76,7 +81,7 @@ eval "$MISE_VARS"
 
 # 0. A recorded commit: the bake must come from committed toolchain files.
 COMMIT="$(git -C "$ROOT" rev-parse HEAD)"
-if [ -n "$(git -C "$ROOT" status --porcelain -- .mise.toml .mise.toolchain.toml mise.toolchain.lock)" ]; then
+if [ -n "$(git -C "$ROOT" status --porcelain -- .mise.toml .mise.toolchain.toml mise.toolchain.lock tools/toolchain/expected.json tools/toolchain/check_env.py)" ]; then
   die "the toolchain files differ from $COMMIT; bake from a clean checkout"
 fi
 
@@ -110,9 +115,37 @@ guest "R=\"\$HOME/.cargo/bin/rustup\"; [ -x \"\$R\" ] || { echo 'no rustup in th
 guest "\"\$HOME/.cargo/bin/rustup\" toolchain list | grep -q '^$ML_RUST-'" \
   || die "rustup lists no toolchain named $ML_RUST after installing it"
 
-# 4. The guest's own report.
+# 4. The same check a host runs, in the guest, with the pinned tools active.
+# RUSTUP_TOOLCHAIN names the pinned Rust: the golden's rustup default may be
+# another, and cargo selects by rust-toolchain.toml, not by the default.
+CHECK_ENV="${MISE_LAYER_CHECK_ENV:-$ROOT/tools/toolchain/check_env.py}"
+[ -f "$CHECK_ENV" ] || die "no toolchain check at $CHECK_ENV"
+to_guest "$CHECK_ENV" ".pulp-toolchain/check_env.py"
+to_guest "$ROOT/tools/toolchain/expected.json" ".pulp-toolchain/expected.json"
+set +e
+check_json="$(guest "cd \"\$HOME/.pulp-toolchain\" && RUSTUP_TOOLCHAIN='$ML_RUST' MISE_TRUSTED_CONFIG_PATHS=\"\$PWD\" MISE_LOCKED=1 MISE_AUTO_INSTALL=0 MISE_ENV=toolchain MISE_DISABLE_UPDATE_WARNING=1 \"\$HOME/$ML_PATH\" exec -- python3 check_env.py --root \"\$PWD\" --expected expected.json --fleet-path --require-tools --format json")"
+check_rc=$?
+set -e
+printf '%s\n' "$check_json" | python3 -c "import json,sys; json.load(sys.stdin)" 2>/dev/null \
+  || die "the guest toolchain check printed no JSON (exit $check_rc)"
+if [ "$check_rc" -ne 0 ]; then
+  printf '%s\n' "$check_json" >&2
+  die "the guest differs from tools/toolchain/manifest.toml (check_env exit $check_rc); this golden is not the pinned set"
+fi
+note "the guest matches tools/toolchain/manifest.toml"
+
+# 5. The guest's own report.
 lock_sha="$(sha256_of "$ROOT/mise.toolchain.lock")"
+check_tmp="$(mktemp)"; trap 'rm -f "$check_tmp"' EXIT
+printf '%s\n' "$check_json" > "$check_tmp"
 guest "cd \"\$HOME/.pulp-toolchain\" && { printf '{\"commit\": \"%s\", \"lock_sha256\": \"%s\", \"mise_sha256\": \"%s\", \"mise_version\": \"%s\", \"rust\": \"%s\",\n' '$COMMIT' '$lock_sha' '$ML_SHA' '$ML_VERSION' '$ML_RUST'; printf ' \"mise_ls\": '; MISE_TRUSTED_CONFIG_PATHS=\"\$PWD\" MISE_LOCKED=1 MISE_AUTO_INSTALL=0 MISE_ENV=toolchain MISE_DISABLE_UPDATE_WARNING=1 \"\$HOME/$ML_PATH\" ls --current --json; printf ',\n \"rustup_toolchains\": \"%s\",\n' \"\$(\"\$HOME/.cargo/bin/rustup\" toolchain list | tr '\n' ';')\"; printf ' \"xcode\": \"%s\"}\n' \"\$(xcodebuild -version 2>/dev/null | tr '\n' ' ')\"; }" > "$RECEIPT" \
   || die "could not write the receipt"
-python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$RECEIPT" || die "the receipt is not valid JSON: $RECEIPT"
+python3 - "$RECEIPT" "$check_tmp" <<'PY' || die "the receipt is not valid JSON: $RECEIPT"
+import json, sys
+receipt = json.load(open(sys.argv[1]))
+receipt["toolchain_check"] = json.load(open(sys.argv[2]))
+with open(sys.argv[1], "w") as handle:
+    json.dump(receipt, handle, indent=1)
+    handle.write("\n")
+PY
 note "receipt: $RECEIPT"

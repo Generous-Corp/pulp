@@ -225,6 +225,14 @@ pulp_add_test_suite(pulp-test-modal GROUP pulp-test-group-design-import-widgets
     LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-context-menu GROUP pulp-test-group-design-import-widgets
     LIBRARIES pulp::view)
+# MIDI Learn menu rows, overlay and the engine-backed session.
+pulp_add_test_suite(pulp-test-midi-learn-menu GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view pulp::state)
+# MidiLearnDemo end to end: processor, editor pieces, learn, feedback, undo, saved state.
+pulp_add_test_suite(pulp-test-midi-learn-example
+    SOURCES test_midi_learn_example.cpp
+    LIBRARIES pulp::view pulp::state pulp::format
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/examples/midi-learn-demo)
 
 # Black-box characterization harness — recovers a stock widget's implicit
 # sizing law by headless measurement + a least-squares fit, and pins each

@@ -28,7 +28,8 @@ DEFAULT_PATH = "$HOME/.local/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/b
 # Row order and the check_env tool name for each manifest key.
 ROWS: Tuple[Tuple[str, str], ...] = (
     ("python3", "python"), ("cmake", "cmake"), ("ninja", "ninja"), ("node", "node"),
-    ("rustc", "rust"), ("clang-format", "clang_format"), ("mise", "mise"),
+    ("rustc", "rust"), ("clang-format", "clang_format"), ("ccache", "ccache"),
+    ("git-lfs", "git_lfs"), ("xcode", "xcode"), ("mise", "mise"),
 )
 
 # Runs on the host: write the two files to a temp dir, run, clean up.
@@ -115,6 +116,8 @@ def main(argv: Optional[List[str]] = None, run: Runner = run_on) -> int:
     specs = args.host or list(DEFAULT_HOSTS)
     expected = json.loads((HERE / "expected.json").read_text(encoding="utf-8"))
     pins = dict(expected["tools"], mise=expected["mise"]["version"])
+    if "xcode" in expected:
+        pins["xcode"] = f"{expected['xcode']['version']} ({expected['xcode']['build']})"
     script = payload()
     names, columns = [], {}
     for spec in specs:

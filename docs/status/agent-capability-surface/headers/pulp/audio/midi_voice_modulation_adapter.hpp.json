@@ -1,0 +1,11 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/midi_voice_modulation_adapter.hpp",
+  "fingerprint": "sha256:8fb955d00ce0ed708d96c397d5bd9cc7f2926c1414ce9ac9976ad6abdae9ef7a",
+  "include": "pulp/audio/midi_voice_modulation_adapter.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "audio.midi-voice-modulation-adapter"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

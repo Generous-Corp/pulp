@@ -1,0 +1,9 @@
+{
+  "domain": "host",
+  "source": "core/host/include/pulp/host/signal_graph_subgraph.hpp",
+  "fingerprint": "sha256:81103ef7f256181918a1e4b60c254451192f492be5959e10a88e63858b6063c0",
+  "include": "pulp/host/signal_graph_subgraph.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Control-thread authored subgraph expansion and exact Processor parameter binding; the bounded G6 runtime is still partial."
+}

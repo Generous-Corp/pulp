@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/flanger.hpp",
+  "fingerprint": "sha256:69d78cebfeb3186f3dffe3f4d600d18e1fc461e10725a3d20909497ac186a218",
+  "include": "pulp/signal/flanger.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

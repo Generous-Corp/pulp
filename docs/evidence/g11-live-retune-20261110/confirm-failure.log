@@ -1,0 +1,9 @@
+confirm-failure: checking the test passes before the edit
+confirm-failure: baseline: recompiled -- [1/2] Building CXX object CMakeFiles/pulp-g11-live-retune.dir/main.cpp.o
+confirm-failure: breaking the fix in examples/g11-live-retune-consumer/tuning_control.hpp
+confirm-failure: broken: recompiled -- [1/2] Building CXX object CMakeFiles/pulp-g11-live-retune.dir/main.cpp.o
+confirm-failure: restoring examples/g11-live-retune-consumer/tuning_control.hpp
+confirm-failure: restored: recompiled -- [1/2] Building CXX object CMakeFiles/pulp-g11-live-retune.dir/main.cpp.o
+confirm-failure: CONFIRMED — the test passes with the fix and fails without it.
+confirm-failure: test output: /var/folders/13/h9mz2d49113d43hqz2cff2z00000gn/T//confirm-failure.ngBRIA
+confirm-failure: build dir: 1 removed artifact(s) rebuilt by --target, 1 outside it put back as they were

@@ -1,6 +1,6 @@
 {
   "id": "g10-routed-spectral-runtime",
-  "title": "Runtime-only named routed spectral stages share the SignalGraph serial plan",
+  "title": "Runtime-only routed spectral stages and finite live-controlled two-asset source share the serial plan",
   "classification": "public_sdk",
   "delivery_state": "pending",
   "claim_id": "g10-routed-ports-20261104",
@@ -10,7 +10,10 @@
     "core/host/src/signal_graph_authoring.cpp",
     "core/host/src/signal_graph_live_swap.cpp",
     "core/host/src/signal_graph_live_swap_catalog.cpp",
-    "docs/status/sequencer-exposure/rows/g10-routed-spectral-runtime.json"
+    "docs/status/sequencer-exposure/rows/g10-routed-spectral-runtime.json",
+    "core/host/src/spectral_asset_morph_internal.hpp",
+    "core/host/src/spectral_graph.cpp",
+    "core/host/src/graph_rt_report.cpp"
   ],
   "evidence": [
     {
@@ -26,12 +29,36 @@
         "Named spectral stages execute independently",
         "Independent audio feedback survives"
       ]
+    },
+    {
+      "path": "test/test_routed_spectral_faults.cpp",
+      "needles": [
+        "Output clock exhaustion stops publication before arithmetic overflows",
+        "Routed late synthesis failure preserves prefix and independent sibling",
+        "Spectral render reset and activation allocate no callback storage"
+      ]
+    },
+    {
+      "path": "docs/validation/g10-spectral/row16-output-clock-receipt.json",
+      "needles": [
+        "g10-row16-output-clock",
+        "PASS_FOR_ROW16_BOUNDED_EVIDENCE",
+        "FAIL_EXPECTED"
+      ]
+    },
+    {
+      "path": "examples/g10-routed-consumer/asset_morph.cpp",
+      "needles": [
+        "add_spectral_asset_morph_v1",
+        "source.value->morph",
+        "compare(audio, wanted)"
+      ]
     }
   ],
   "surfaces": {
     "installed_sdk": {
       "disposition": "exposed",
-      "rationale": "Named runtime-only spectral factories and typed handles are installed with Pulp::host. The standalone installed consumer executes independent built-in stages; full G-10 qualification remains PARTIAL.",
+      "rationale": "Named runtime-only spectral stages and the finite mono FFT256/hop64 asset source use Pulp::host. Direct host Audio control is averaged per absolute hop; notation, saved-graph replay and paced qualification remain PARTIAL.",
       "evidence": [
         {
           "kind": "sdk_header",

@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/detail/leslie_common.hpp",
+  "fingerprint": "sha256:7aa012d8416d5a904122d533d4cb1b8fcbaab62de6fbbb1441b2beb43ff87743",
+  "include": "pulp/signal/detail/leslie_common.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

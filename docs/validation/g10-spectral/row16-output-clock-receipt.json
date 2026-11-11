@@ -1,0 +1,88 @@
+{
+  "id": "g10-row16-output-clock",
+  "goal": "Bounded G-10 row-16 output-clock evidence",
+  "date": "2026-11-09",
+  "source": {
+    "head": "2891a38389086e131bb91953d9bea892069e679f",
+    "head_scope": "origin/main",
+    "worktree": "evidence/g10-row16-output-clock",
+    "platform": "macOS arm64",
+    "production_guard": {
+      "path": "core/host/src/spectral_graph_internal.hpp",
+      "sha256_restored": "6ec0afad22ad52c3a6f70ef976bea379326e8f082b7e451a48466c9891774dab",
+      "guard": "output_clock > INT64_MAX - count - fft_size - hop"
+    },
+    "fixture": {
+      "path": "test/test_routed_spectral_faults.cpp",
+      "sha256": "c772bc36b6404df1c2b4de5e4dc380b4e732c761df11930eafb0857ae2b47374"
+    }
+  },
+  "build": {
+    "command": "pulp build --target pulp-test-routed-spectral-ports",
+    "build_type": "Release",
+    "release_flags_verified": ["-O3", "-DNDEBUG"],
+    "cmake_cache_sha256": "2ceac07f36d3965a59f17556d5396dbaa5be9dce0269435d939d0f1bb3c62db5",
+    "target": "build/test/pulp-test-routed-spectral-ports",
+    "restored_binary_sha256": "79c874222aa023ccb11161b392bc0ab1c44075b81ff1c5395c0e9341355bad36"
+  },
+  "controls": {
+    "positive_routed_spectral_fault": {
+      "test_filter": "[spectral-output-clock]",
+      "result": "PASS",
+      "assertions": 9,
+      "cases": 1,
+      "claim": "ChronologyExhausted is recorded before output-clock arithmetic can overflow; sequence and payload publication remain unchanged."
+    },
+    "unchanged_output_prefix_and_sibling": {
+      "test_filter": "[spectral-fatal-prefix]",
+      "result": "PASS",
+      "assertions": 5176,
+      "cases": 1,
+      "claim": "A late synthesis fault preserves the valid prefix and leaves the independent sibling output unchanged."
+    },
+    "bounded_callback_allocation": {
+      "test_filter": "[spectral-allocation]",
+      "result": "PASS",
+      "assertions": 12,
+      "cases": 1,
+      "claim": "Reset and activation perform zero callback-path allocations under RtAllocationProbe."
+    },
+    "zero_output_fault_control": {
+      "test_filter": "[spectral-zero]",
+      "result": "PASS",
+      "assertions": 520,
+      "cases": 1,
+      "claim": "A faulted spectral stage emits the bounded zero output required after the fatal boundary."
+    }
+  },
+  "mutation_control": {
+    "mutation": "Replace the output-clock guard predicate with false in core/host/src/spectral_graph_internal.hpp; no production mutation was retained.",
+    "mutated_header_sha256": "c94ab18d6d4f73ab3d77b01fedb257e8595941cc88146b230b13646abba7631c",
+    "mutated_binary_sha256": "c836d51ec5095942533b946bf537559f45d1c3da4803e2c9b56745b046e06368",
+    "command": "build/test/pulp-test-routed-spectral-ports '[spectral-output-clock]' --reporter compact",
+    "result": "FAIL_EXPECTED",
+    "exit_code": 42,
+    "failure": "node->first_error == SpectralError::ChronologyExhausted (observed None); 6 assertions, 5 passed, 1 failed",
+    "restored": {
+      "header_sha256": "6ec0afad22ad52c3a6f70ef976bea379326e8f082b7e451a48466c9891774dab",
+      "binary_sha256": "79c874222aa023ccb11161b392bc0ab1c44075b81ff1c5395c0e9341355bad36",
+      "controls": "PASS"
+    }
+  },
+  "verdict": "PASS_FOR_ROW16_BOUNDED_EVIDENCE",
+  "scope_limit": "This packet qualifies the named output-clock/fault boundary and existing allocation/output controls only. It does not qualify the full G-10 phase or A3.",
+  "gate_status": {
+    "dedicated_builder_build_and_source_selftest": {
+      "status": "NOT CHECKED",
+      "reason": "The dedicated-builder build and source-selftest lanes were unavailable for this evidence run; the focused target build is not substituted for those gates."
+    },
+    "diff_coverage": {
+      "status": "NOT CHECKED",
+      "reason": "The dedicated-builder diff-coverage lane was unavailable for this evidence run; no coverage percentage is claimed."
+    }
+  },
+  "binary_artifact_boundary": {
+    "status": "UNAVAILABLE",
+    "detail": "The focused test executable was used locally and its SHA-256 is recorded above, but the binary artifact is not retained or published in this repository receipt."
+  }
+}
