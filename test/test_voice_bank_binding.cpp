@@ -310,6 +310,13 @@ TEST_CASE("G6 deferred expression rejects non-finite and out-of-range state befo
     };
     const auto cases = std::array{
         Case{midi::MpeExpressionEvent::Kind::PitchBend, 1.0f, true},
+        // The default MPE member range is finite and inclusive: both edges
+        // must reach the deferred voice dispatch, while the adjacent values
+        // must be rejected before they can mutate voice state.
+        Case{midi::MpeExpressionEvent::Kind::PitchBend, 48.0f, true},
+        Case{midi::MpeExpressionEvent::Kind::PitchBend, -48.0f, true},
+        Case{midi::MpeExpressionEvent::Kind::PitchBend, 48.001f, false},
+        Case{midi::MpeExpressionEvent::Kind::PitchBend, -48.001f, false},
         Case{midi::MpeExpressionEvent::Kind::Pressure, 0.5f, true},
         Case{midi::MpeExpressionEvent::Kind::Timbre, 0.5f, true},
         Case{midi::MpeExpressionEvent::Kind::PitchBend, std::numeric_limits<float>::quiet_NaN(),
