@@ -727,6 +727,11 @@ TEST_CASE("G12 prepared gain activation has one exact audio transition under pac
 #endif
         const auto observed = run(routed);
         INFO("routed=" << routed);
+        CHECK(observed.executor_stats.blocks_processed == (routed ? kCallbacks : 0));
+        CHECK(observed.executor_stats.parallel_levels_dispatched == 0);
+        CHECK_FALSE(observed.parallel_enabled);
+        CHECK(observed.walk_fallbacks == 0);
+        CHECK(observed.execution_failures == 0);
         REQUIRE(observed.commit_result == SignalGraph::PreparedTopologyEdit::Result::Committed);
         REQUIRE(observed.first_new < kCallbacks);
         CHECK(exact_transition(observed, observed.first_new));
