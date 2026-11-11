@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
-"""Warn-only checks for Pulp import source contracts.
+"""Checks for Pulp import source contracts.
 
 The registry is intentionally additive. This checker reports drift, but
-does not fail unless --strict is passed by a focused self-test or a human.
+structural drift can fail under ``--strict``; scheduled-recheck cadence
+remains advisory because it requires an out-of-band upstream or human
+verification pass. A recheck that falls due within ``--warn-days`` (default
+7) is reported ahead of time, and under GitHub Actions every cadence finding
+is also printed as a workflow warning annotation, so the recheck is visible on
+pull requests before and after its date without ever failing a check on the
+date alone.
 """
 
 from __future__ import annotations
@@ -11,6 +17,7 @@ import argparse
 import dataclasses
 import datetime as _dt
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -19,6 +26,8 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_REGISTRY = REPO_ROOT / "tools/import-validation/source-contracts.json"
+DEFAULT_WARN_DAYS = 7
+CADENCE_CODES = {"source-contract-recheck-due", "stale-source-contract"}
 ROUNDTRIP_EXEMPT = {"spectr-roundtrip.sh"}
 KINDS = {"screen-export", "system-tokens", "static-only"}
 TRUST_LEVELS = {"official", "observed", "absent"}
@@ -448,7 +457,12 @@ def _check_surface_refs(findings: list[Finding], entry: dict[str, Any]) -> None:
             _add(findings, "invalid-surface-ref", source, f"unknown surface ref owner: {ref!r}")
 
 
-def _check_cadence(findings: list[Finding], entry: dict[str, Any], today: _dt.date) -> None:
+def _check_cadence(
+    findings: list[Finding],
+    entry: dict[str, Any],
+    today: _dt.date,
+    warn_days: int = DEFAULT_WARN_DAYS,
+) -> None:
     source = _source(entry)
     last_verified = entry.get("last_verified")
     if last_verified == "unverified":
@@ -474,6 +488,17 @@ def _check_cadence(findings: list[Finding], entry: dict[str, Any], today: _dt.da
             "stale-source-contract",
             source,
             f"source contract recheck is overdue: last verified {verified_date}, due {due}",
+            severity="info",
+        )
+    elif (due - today).days <= warn_days:
+        left = (due - today).days
+        when = "today" if left == 0 else f"in {left} day{'s' if left != 1 else ''}"
+        _add(
+            findings,
+            "source-contract-recheck-due",
+            source,
+            f"source contract recheck is due {when}: last verified {verified_date}, due {due}",
+            severity="info",
         )
 
 
@@ -549,6 +574,7 @@ def compute_findings(
     registry_path: Path = DEFAULT_REGISTRY,
     *,
     today: _dt.date | None = None,
+    warn_days: int = DEFAULT_WARN_DAYS,
 ) -> list[Finding]:
     root = root.resolve()
     registry = load_registry(registry_path)
@@ -572,7 +598,7 @@ def compute_findings(
         _check_test_tags(findings, root, entry)
         _check_compat(findings, imports, entry)
         _check_surface_refs(findings, entry)
-        _check_cadence(findings, entry, today)
+        _check_cadence(findings, entry, today, warn_days)
         _check_roundtrip_literals(findings, root, entry)
 
     _check_coverage_symmetry(findings, root, entries, design_source_labels)
@@ -606,17 +632,50 @@ def render_report(findings: list[Finding], *, fmt: str = "text") -> str:
     return "\n".join(lines) + "\n"
 
 
+def github_annotations(findings: list[Finding]) -> str:
+    """Workflow commands that surface every cadence finding as a warning.
+
+    Cadence findings stay informational for the exit code; the annotation is
+    what makes an upcoming or overdue recheck visible on the pull request.
+    """
+
+    def escape(text: str) -> str:
+        return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+    lines = []
+    for finding in findings:
+        if finding.code not in CADENCE_CODES:
+            continue
+        title = escape(f"{finding.code} {finding.source}").replace(",", "%2C").replace(":", "%3A")
+        lines.append(f"::warning title={title}::{escape(finding.message)}")
+    return "".join(f"{line}\n" for line in lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--registry", type=Path, default=DEFAULT_REGISTRY)
     parser.add_argument("--root", type=Path, default=REPO_ROOT)
-    parser.add_argument("--strict", action="store_true", help="exit 1 on warning/error findings")
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="exit 1 on structural warning/error findings; recheck cadence remains advisory",
+    )
     parser.add_argument("--check-upstream", action="store_true", help="accepted for future network rechecks")
+    parser.add_argument(
+        "--warn-days",
+        type=int,
+        default=DEFAULT_WARN_DAYS,
+        help="report a recheck this many days before it falls due (default: %(default)s)",
+    )
     parser.add_argument("--format", choices=("text", "markdown"), default="text")
     args = parser.parse_args(argv)
 
-    findings = compute_findings(root=args.root, registry_path=args.registry)
+    findings = compute_findings(
+        root=args.root, registry_path=args.registry, warn_days=max(args.warn_days, 0)
+    )
     sys.stdout.write(render_report(findings, fmt=args.format))
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        sys.stdout.write(github_annotations(findings))
     if args.strict and any(f.severity in {"warning", "error"} for f in findings):
         return 1
     return 0
