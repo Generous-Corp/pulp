@@ -1364,5 +1364,15 @@ class CensusProfileTests(unittest.TestCase):
         self.assertIn("matches the census profile", why)
 
 
+class DefaultWorkersTests(unittest.TestCase):
+    def test_governor_share_wins(self):
+        self.assertEqual(lane.default_workers({"PULP_BUILD_JOBS": "2"}, cpus=10), 2)
+
+    def test_unset_is_bounded_not_whole_machine(self):
+        self.assertEqual(lane.default_workers({}, cpus=10), 2)
+        self.assertEqual(lane.default_workers({}, cpus=64), 16)
+        self.assertEqual(lane.default_workers({"PULP_BUILD_JOBS": "x"}, cpus=64), 16)
+
+
 if __name__ == "__main__":
     unittest.main()

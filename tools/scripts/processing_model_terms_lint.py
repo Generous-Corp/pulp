@@ -31,6 +31,12 @@ ALLOW_MARKER = "terms-lint: allow"
 
 # (compiled pattern, human message). Patterns are case-insensitive.
 FORBIDDEN = [
+    (re.compile(r"\bMIDI\s+is\s+an?\s+audio\s+port\b", re.IGNORECASE),
+     "MIDI ports have event kind; port spelling does not determine kind"),
+    (re.compile(r"\bmodulation\s+depth\s+is\s+(?:the\s+)?parameter\s+value\b", re.IGNORECASE),
+     "depth maps a source range; it is not the destination parameter value"),
+    (re.compile(r"\bSignalGraph\s+defines\s+DSP\b", re.IGNORECASE),
+     "Processor defines DSP; SignalGraph composes nodes and typed edges"),
     (
         re.compile(r"\bgraph[\s\-]plugin\b", re.IGNORECASE),
         'a plugin is a Processor, never a "graph plugin"',
@@ -46,8 +52,8 @@ FORBIDDEN = [
     ),
 ]
 
-SCAN_DIRS = ("docs", "core")
-SCAN_SUFFIXES = (".md", ".hpp", ".cpp", ".h", ".mm", ".cc")
+SCAN_DIRS = ("docs", "core", "examples")
+SCAN_SUFFIXES = (".md", ".hpp", ".cpp", ".h", ".mm", ".cc", ".pat")
 
 
 def scan_text(text: str):
@@ -86,6 +92,10 @@ def lint(paths) -> int:
 
 def selftest() -> int:
     cases = [
+        ("MIDI is an audio port", 1),
+        ("modulation depth is the parameter value", 1),
+        ("SignalGraph defines DSP", 1),
+        ("MIDI ports carry events and modulation depth maps parameter ranges", 0),
         ("we ship a graph plugin", 1),
         ("build a graph-plugin for the rack", 1),
         ("route through the SignalGraph backend layer", 1),
