@@ -230,10 +230,17 @@ TEST_CASE("each dismissal path reports its reason once", "[platform][popup-windo
          },
          PopupDismissReason::escape},
     };
+    // These paths do not depend on the popup holding key, and a test process
+    // is not the active application, so whether it can hold key varies from
+    // run to run. A popup that never takes key cannot see a stray resign-key
+    // arrive before the path under test; the resign-key rule has its own
+    // cases above.
+    PopupWindowOptions options = options_for(editor);
+    options.takes_key_focus = false;
     for (const auto& c : cases) {
         INFO(c.name);
         std::vector<PopupDismissReason> reports;
-        auto popup = PopupWindow::open(scope, options_for(editor),
+        auto popup = PopupWindow::open(scope, options,
                                        [&](PopupDismissReason r) { reports.push_back(r); });
         REQUIRE(popup != nullptr);
         c.trigger(*popup, editor);
