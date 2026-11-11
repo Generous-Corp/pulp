@@ -12,6 +12,7 @@ import tempfile
 import unittest
 
 MODULE_PATH = pathlib.Path(__file__).with_name("vellum_ui_drift_report.py")
+WORKFLOW_PATH = pathlib.Path(__file__).parents[2] / ".github/workflows/vellum-freeze-check.yml"
 SPEC = importlib.util.spec_from_file_location("vellum_ui_drift_report", MODULE_PATH)
 assert SPEC and SPEC.loader
 drift = importlib.util.module_from_spec(SPEC)
@@ -131,6 +132,13 @@ class DriftReportTest(unittest.TestCase):
         result = self.run_cli()
         self.assertEqual(result.returncode, 2)
         self.assertIn("cannot read", result.stderr)
+
+    def test_workflow_waits_for_the_later_unit_map(self):
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        self.assertIn(
+            "if: hashFiles('.github/vellum-export-receipt/unit-of.json') != ''",
+            workflow,
+        )
 
 
 if __name__ == "__main__":

@@ -158,6 +158,7 @@ jobs:
         run: tools/ci/net-retry.sh python3 -m pip install --quiet 'pyyaml==6.0.2'
 
       - name: Report UI drift from the export (advisory)
+        if: hashFiles('.github/vellum-export-receipt/unit-of.json') != ''
         continue-on-error: true
         run: |
           python3 tools/scripts/vellum_ui_drift_report.py --head HEAD
