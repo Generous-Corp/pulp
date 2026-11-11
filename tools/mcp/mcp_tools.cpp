@@ -153,13 +153,13 @@ std::string handle_minos(const std::string& params_json) {
 
 std::string handle_graph(const std::string& params_json) {
     auto path = extract_string(params_json, "path");
-    if (path.empty())
-        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: path is required\"}]}";
     auto op = extract_string(params_json, "operation");
+    if (path.empty() && op != "catalog")
+        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: path is required\"}]}";
     if (op.empty())
         op = "inspect";
     if (op != "inspect" && op != "validate" && op != "explain" && op != "render" && op != "probe" &&
-        op != "report")
+        op != "report" && op != "fmt" && op != "catalog")
         return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: operation is not available "
                "through the read-only MCP surface\"}]}";
     if (op != "probe" &&
@@ -225,6 +225,8 @@ std::string handle_graph(const std::string& params_json) {
         return "{\"isError\":" + std::string(failed ? "true" : "false") +
                ",\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
     }
+    if (op == "fmt")
+        command += " --notation";
     const auto result = exec_with_status(command + " 2>&1");
     return "{\"isError\":" + std::string(result.failed() ? "true" : "false") +
            ",\"content\":[{\"type\":\"text\",\"text\":" + json_string(result.output) + "}]}";
