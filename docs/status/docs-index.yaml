@@ -19,6 +19,11 @@ docs:
     summary: Subsystem dependencies, thread model, build system, GPU stack
 
   # Guides
+  - slug: isolated-clap-worker
+    path: guides/isolated-clap-worker.md
+    kind: guide
+    summary: MacClapStereo64V1 worker lifecycle, callback contract and qualification limits
+
   - slug: gpu-audio-macos-reliability
     path: guides/gpu-audio-macos-reliability.md
     kind: guide

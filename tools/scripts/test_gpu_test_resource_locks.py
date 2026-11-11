@@ -76,6 +76,10 @@ LOCK_VIA_VARIABLE = "PULP_GPU_TEST_DISCOVERY_ARGS"
 def manifests() -> list[Path]:
     paths = list(MANIFEST_DIR.glob("*.cmake"))
     paths.extend((REPO_ROOT / "tools" / "cli").glob("**/CMakeLists.txt"))
+    # The isolated CLAP worker test is registered beside its worker target,
+    # outside test/cmake. Keep that registration in the policy scan so a new
+    # pool-starting source cannot evade the lock check by living in a tool.
+    paths.extend((REPO_ROOT / "tools" / "clap-worker").glob("CMakeLists.txt"))
     return sorted(paths)
 
 

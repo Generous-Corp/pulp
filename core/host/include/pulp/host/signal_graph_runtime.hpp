@@ -807,10 +807,8 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // mid-stream switch resets feedback history to whatever the destination path
     // last wrote — a one-block transient, not a crash or a permanent divergence.
     // Pick a path before starting a feedback graph and keep it for the stream.
-    void set_canonical_executor_routing_enabled(bool enabled) noexcept {
-        canonical_executor_routing_enabled_.store(enabled, std::memory_order_relaxed);
-        detail::advance_execution_selection_generation(execution_selection_generation_);
-    }
+    // Unsupported changes with an isolated slot are refused and logged off RT.
+    void set_canonical_executor_routing_enabled(bool enabled) noexcept;
     // Returns the requested opt-in flag, not a promise that the current block
     // is taking the executor path. Actual dispatch also requires an eligible
     // prepared snapshot and a scratch pool sized for the block.
@@ -915,10 +913,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // exclusion replaces the former blanket transport suppression under
     // anticipation; transport_suppressed_for_anticipation() now counts the
     // transport-sensitive nodes that anticipation forced exterior.
-    void set_anticipation_enabled(bool enabled) noexcept {
-        anticipation_enabled_.store(enabled, std::memory_order_relaxed);
-        detail::advance_execution_selection_generation(execution_selection_generation_);
-    }
+    void set_anticipation_enabled(bool enabled) noexcept;
     bool anticipation_enabled() const noexcept {
         return anticipation_enabled_.load(std::memory_order_relaxed);
     }
@@ -2025,6 +2020,10 @@ class SignalGraph : public format::AudioWorkgroupClient {
     enum class CompileMode { Normal, SwapNoAnticipation };
     std::shared_ptr<CompiledGraph> compile_(double sample_rate, int max_block_size,
                                             CompileMode mode = CompileMode::Normal);
+    // Caller holds GraphMutationLock. Includes the live generation after source edits.
+    static bool snapshot_has_isolated_plugins_(const CompiledGraph&) noexcept;
+    bool has_isolated_plugins_locked_() const noexcept;
+    bool refuse_isolated_mode_locked_(const char* operation) const noexcept;
     bool prepare_impl_(double sample_rate, int max_block_size,
                        const PrepareLifecycleObserver* lifecycle_observer);
     // Build one routed-executor snapshot for compile_, defining the live-value

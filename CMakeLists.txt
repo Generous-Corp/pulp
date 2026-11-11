@@ -1124,6 +1124,7 @@ endif()
 # ── Out-of-process plugin scan worker ─────────────────────────────────────
 if(NOT IOS AND NOT ANDROID AND PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/scan-worker)
+    add_subdirectory(tools/clap-worker)
 endif()
 
 # ── Design Tool ───────────────────────────────────────────────────────────
