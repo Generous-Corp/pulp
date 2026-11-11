@@ -146,6 +146,7 @@ These directories prove a contract and are exercised by CI. Do not copy them as 
 | `faust-rt-sdk-consumer` | Faust runtime builds against the installed SDK (**SDK project**) | `ctest -R cmake-faust-rt-sdk-consumer` | `test/consumers/faust-rt-sdk-consumer` |
 | `g10-routed-consumer` | Routed spectral ports work from an installed SDK (**SDK project**) | Configure as an SDK project | `test/consumers/g10-routed-consumer` |
 | `a10-routing-hosting-consumer` | Installed SDK host route-registration and preparation acceptance checks, prepared latency, and planted refusal controls (**SDK project**) | `ctest -R a10-routing-hosting-public-consumer` | `test/consumers/a10-routing-hosting-consumer` |
+| `graph-patch-consumer` | Catalog-derived notation, typed diagnostics and numeric MIDI/modulation from an installed SDK (**SDK project**) | `ctest -R cmake-graph-patch-sdk-consumer` | `test/consumers/graph-patch-consumer` |
 | `g2-processor-restore-consumer` | A registered processor restores its state from an installed SDK (**SDK project**) | `ctest -R cmake-g2-processor-restore-sdk-consumer` | `test/consumers/g2-processor-restore-consumer` |
 | `g3-d4-prepared-export-consumer` | Prepared serial I/O + Gain export and provenance from an installed SDK (**SDK project**) | Configure as an SDK project, then run `ctest` | `test/consumers/g3-d4-prepared-export-consumer` |
 | `g3-io-gain-consumer` | Identity of an input and output gain graph, checked by a Python script | `python3 test/test_g3_io_gain_identity.py` | `test/consumers/g3-io-gain-consumer` |
@@ -155,6 +156,7 @@ These directories prove a contract and are exercised by CI. Do not copy them as 
 | `g5-trigger-runtime-consumer` | Graph-produced onsets render through a typed trigger edge (**SDK project**) | `ctest -R trigger-runtime-public-consumer` | `test/consumers/g5-trigger-runtime-consumer` |
 | `g4-voice-bank-consumer` | Voice-bank persistence save/load/edit/undo/redo and binding refusal from an installed SDK (**SDK project**) | `ctest -R cmake-g4-voice-bank-sdk-consumer` | `test/consumers/g4-voice-bank-consumer` |
 | `g6-voice-contract-consumer` | Existing MIDI voice allocation state (**SDK project**) | `ctest -R cmake-g6-voice-contract-sdk-consumer` | `test/consumers/g6-voice-contract-consumer` |
+| `g6-voice-bank-consumer` | Eight authored graph voices, scalar audio oracle, binding and stale refusals (**SDK project**) | `ctest -R cmake-g6-voice-bank-sdk-consumer` | `test/consumers/g6-voice-bank-consumer` |
 | `g7-latency-pdc-consumer` | Public latency reporting on a graph (**SDK project**) | Configure as an SDK project | `test/consumers/g7-latency-pdc-consumer` |
 | `spectral-frame-codec-consumer` | Spectral frame codec from an installed SDK (**SDK project**) | `ctest -R cmake-spectral-frame-codec-consumer` | `test/consumers/spectral-frame-codec-consumer` |
 | `timeline-sdk-consumer` | Timeline SDK closure, cookbook and chord renderer from an installed SDK (**SDK project**) | `ctest -R cmake-timeline-sdk-consumer` | `test/consumers/timeline-sdk-consumer` |

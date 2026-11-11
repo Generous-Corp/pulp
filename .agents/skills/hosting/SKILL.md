@@ -47,6 +47,16 @@ consumers.
 
 ## Mental model
 
+The bounded G6 in-process voice bank is `voice_bank_binding.hpp` plus one
+authored `SubgraphTemplate` Processor per slot. Its owner retains the existing
+MPE allocator; factories and named parameter binding run during control-thread
+preparation. When rendering a graph interval for an instrument, pass a
+zero-channel input `BufferView` with that interval's exact frame count. A
+default-constructed empty view has zero frames and makes routed execution fail
+closed. Keep both the between-event and final-tail branches covered by the
+installed SDK consumer and its independent planted mutations. This surface
+does not add CC64/120/121/123 sustain or saved-bank activation.
+
 `PluginSlot` is the uniform interface. Each format backend is a single
 free function — `load_<format>_plugin(info)` — that returns a
 `std::unique_ptr<PluginSlot>` or `nullptr`. `PluginSlot::load()` in
@@ -3141,3 +3151,12 @@ SignalGraph control and event edge probes are serial routed diagnostics with
 fixed-capacity publication and explicit refusal in unsupported execution modes.
 Host lifecycle changes must preserve detach-on-reset and the source-edge event
 observation boundary.
+
+### Catalog-derived graph notation
+
+`pulp/host/graph_patch.hpp` projects registered Processor descriptors and actual
+named GraphNode ports into a control-thread catalog. Processor MIDI capabilities
+append named `midi` ports without changing audio counts; named connect must set
+the MIDI edge flag. Keep strict patch validation additive: the legacy serializer
+may drop bad edges, while strict validation must check every original edge.
+Opaque state and richer edge kinds need explicit contracts before formatting.

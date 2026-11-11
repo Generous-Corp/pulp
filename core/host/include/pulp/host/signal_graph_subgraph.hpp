@@ -3,11 +3,16 @@
 #include <pulp/host/signal_graph_node.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
+
+namespace pulp::format {
+class Processor;
+}
 
 namespace pulp::host {
 
@@ -21,6 +26,12 @@ struct SubgraphNodeSpec {
     NodeType type = NodeType::Gain;
     int channels = 1;
     float gain = 1.0f;
+    // A Processor is constructed on the control thread for each instance.
+    // The declared version must match the frozen descriptor exactly.
+    std::function<std::unique_ptr<format::Processor>(std::uint32_t)> processor_factory;
+    std::string processor_type_id;
+    std::string processor_descriptor_version;
+    int processor_type_version = 0;
 };
 
 struct SubgraphEdgeSpec {
@@ -44,6 +55,10 @@ struct SubgraphParameterSpec {
     float default_value = 0.0f;
     float minimum = 0.0f;
     float maximum = 1.0f;
+    // Zero targets a Gain node. A nonzero ID targets a named Processor
+    // parameter in its frozen public catalog.
+    std::uint32_t processor_parameter_id = 0;
+    std::string processor_parameter_name;
 };
 
 struct SubgraphTemplate;
@@ -66,6 +81,9 @@ struct SubgraphTemplate {
     std::vector<SubgraphPortSpec> exposed_ports;
     std::vector<SubgraphParameterSpec> parameters;
     std::vector<SubgraphChildSpec> children;
+    // Optional canonical G-4 path used when this template is bound as one
+    // authored voice slot. Runtime NodeIds never enter this path.
+    std::vector<std::string> binding_path;
 };
 
 struct SubgraphState {
@@ -90,6 +108,7 @@ struct SubgraphInstance {
     std::unordered_map<std::string, PortHandle> ports;
     std::unordered_map<std::string, float> parameters;
     std::unordered_map<std::string, NodeId> parameter_nodes;
+    std::unordered_map<std::string, std::uint32_t> processor_parameter_ids;
     std::unordered_map<std::string, SubgraphParameterBounds> parameter_bounds;
     std::unordered_map<std::string, std::string> child_template_identities;
     std::unordered_map<std::string, std::uint32_t> child_instance_indices;
@@ -113,7 +132,8 @@ struct SubgraphExpansionResult {
 // port, child, or parameter declaration) rolls back every node and clears
 // every instance entry created by this call, so a failed result holds no
 // NodeIds. Exposed port names and parameter paths must be unique, parameter
-// bounds must be finite, and each parameter must target a distinct gain node.
+// bounds must be finite. Gain targets are one-to-one; Processor targets may
+// share a node only when they name distinct exact catalog IDs.
 // Diagnostics name the subgraph boundary.
 SubgraphExpansionResult instantiate_subgraph(SignalGraph& graph, const SubgraphTemplate& definition,
                                              std::string instance_identity,

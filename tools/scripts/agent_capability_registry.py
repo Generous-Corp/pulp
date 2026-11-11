@@ -180,6 +180,7 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # Public headers can leave the frozen legacy bucket only through one of these
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
+    {'include': 'pulp/host/graph_patch.hpp', 'fingerprint': 'sha256:017cd6e433918b371a9d37b48698bf392fc3d8879fff19eff7f0572bff82f368', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Control-thread catalog-derived graph notation and strict diagnostics transport over existing SignalGraph and restore contracts; bounded profile, not a DSP algorithm or full G2 completion.'},
     {
         "include": "pulp/signal/spectrum_analyzer.hpp",
         "fingerprint": "sha256:f9b372d037fc8a698cd4e7d36805422a3bf2037aeaeb2e600ceb6892e6350f58",
@@ -229,6 +230,20 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         'disposition': 'infrastructure',
         'capability_keys': [],
         'rationale': 'Bounded host and graph-authored event lane used by SignalGraph Custom-node callbacks; it is an infrastructure contract, not an independently advertised generator capability.',
+    },
+    {
+        'include': 'pulp/host/signal_graph_subgraph.hpp',
+        'fingerprint': 'sha256:81103ef7f256181918a1e4b60c254451192f492be5959e10a88e63858b6063c0',
+        'disposition': 'infrastructure',
+        'capability_keys': [],
+        'rationale': 'Control-thread authored subgraph expansion and exact Processor parameter binding; the bounded G6 runtime is still partial.',
+    },
+    {
+        'include': 'pulp/host/voice_bank_binding.hpp',
+        'fingerprint': 'sha256:421676961c308c12521087267a79fbc5d063dabbd1ed36aae1c931678191685c',
+        'disposition': 'infrastructure',
+        'capability_keys': [],
+        'rationale': 'Bounded eight-slot graph voice-bank runtime; sustain, saved activation, and paced realtime qualification remain open.',
     },
     {
         'include': 'pulp/audio/buffer.hpp',
