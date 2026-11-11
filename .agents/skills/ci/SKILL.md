@@ -3937,37 +3937,19 @@ title. If you see either, check `shipyard --version` before editing the PR.
 ## A PR you opened with `shipyard pr` is not automatically code-reviewed
 
 Codex's automatic review fires on PR open only for PRs whose author is a GitHub
-*User*. `shipyard pr` opens PRs as `shipyard-local[bot]`, an App — so the path
-this skill tells you to use is exactly the path Codex skips. Human-opened PRs
-get reviewed; yours do not, unless something asks.
+*User*. `shipyard pr` opens PRs as `shipyard-local[bot]`, an App, so Codex skips
+them. Its summary comment states the trigger in a "Review trigger" cell:
+`PR opened` on a User-authored PR, `Manual request` on one reviewed on request.
 
-Codex states the trigger in its own summary comment: the "Review trigger" cell
-reads `PR opened` on a User-authored PR and `Manual request` on an App-authored
-one. That cell is the fastest way to tell which kind of review a PR received.
-
-**Asking works, including from a bot.** A `@codex review` comment gets a real
-review on an App-authored PR whatever identity posts it. Codex answers a bot
-commenter with "create a Codex account", which reads like a refusal and is not —
-the review still runs. `.github/workflows/codex-review-request.yml` automates
-that ask with `GITHUB_TOKEN` (never a user PAT: a same-repo `pull_request`
-evaluates the workflow from the PR's own revision, so a secret there is readable
-by the unreviewed PR it runs on) and verifies a review completed for the head
-commit. If a PR slipped past it, comment `@codex review` yourself.
+**A `@codex review` comment from a bot does not help.** Codex answers a bot
+commenter with "create a Codex account and connect to github" (or a usage-limit
+notice) and starts no review. A workflow that posted it on every App-authored PR
+was removed after hundreds of such replies and no review; do not re-add it.
 
 **Do not read a summary comment as "reviewed", and do not read "no comment" as
-"no findings".** The summary comment and an EYES reaction appear the moment a
-review is requested, so they prove only that something was asked; a clean review
-leaves a THUMBS_UP and no prose at all. `tools/scripts/codex_review_signal.sh`
-requires `**Completed**` bound to the current head, separates completed from
-requested-but-unfinished from never-asked, and exits 2 (not 1) when the API is
-unreachable, so an outage cannot masquerade as an unreviewed PR.
-
-**A completed review is per-commit.** A review of an earlier push says nothing
-about the code now on the branch, which is why the check binds to the head SHA
-rather than accepting any historical signal on the PR — and why the workflow
-runs on `synchronize` too. On `opened` alone, the commit reviewed and the commit
-merged are different ones on any PR that gets rebased, which under up-to-date
-branch protection is most of them.
+"no findings".** `tools/scripts/codex_review_signal.sh` requires `**Completed**`
+bound to the current head, separates completed from requested-but-unfinished
+from never-asked, and exits 2 (not 1) when the API is unreachable.
 
 ## Pre-flight: plugin ↔ CLI skew check
 
@@ -13574,8 +13556,9 @@ helper too.
 
 ## `[base_health]` holds the queue when the base is poisoned
 
-`.shipyard/config.toml` sets `merge_group_hold = "on"` and `auto_jump = "on"`.
-When one required context fails in consecutive merge groups with different
+`.shipyard/config.toml` sets `merge_group_hold = "dry-run"` and
+`auto_jump = "dry-run"` (recorded, nothing held or jumped, until a replay shows
+the rule is precise). With `"on"`, when one required context fails in consecutive merge groups with different
 pull requests, the steward enqueues only a named fix (label `shipyard:unblock`
 or a title naming the context beside a fix word) and reports other approved
 heads as `held_base_poisoned:<context>`. A held head is not broken: do not
