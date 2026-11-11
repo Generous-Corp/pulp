@@ -48,7 +48,7 @@ def _git(root: pathlib.Path, *args: str) -> bytes:
 
 def _load(root: pathlib.Path, path: str) -> Any:
     try:
-        return json.loads((root / path).read_text())
+        return json.loads((root / path).read_text(encoding="utf-8"))
     except OSError as exc:
         raise ReportError(f"cannot read {path}: {exc}") from exc
     except json.JSONDecodeError as exc:

@@ -27,7 +27,7 @@ UNITS = {UI_A: "view-core", UI_B: "canvas", UI_FROZEN: "view-core", NON_UI: "fou
 
 def git(root, *args):
     return subprocess.run(
-        ["git", "-C", str(root), *args], check=True, capture_output=True, text=True
+        ["git", "-C", str(root), *args], check=True, capture_output=True, text=True, encoding="utf-8"
     ).stdout.strip()
 
 
@@ -62,7 +62,7 @@ class DriftReportTest(unittest.TestCase):
     def write(self, path, text):
         target = self.root / path
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text)
+        target.write_text(text, encoding="utf-8")
 
     def write_json(self, name, data):
         self.write(f"{drift.RECEIPT_DIR}/{name}", json.dumps(data))
@@ -113,6 +113,7 @@ class DriftReportTest(unittest.TestCase):
             [sys.executable, str(MODULE_PATH), "--root", str(self.root), *extra],
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
 
     def test_exit_zero_with_drift_in_both_formats(self):
