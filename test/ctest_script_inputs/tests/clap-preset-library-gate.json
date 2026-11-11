@@ -1,0 +1,13 @@
+{
+ "name": "clap-preset-library-gate",
+ "record": {
+  "entry": "tools/scripts/test_clap_preset_library_gate.py",
+  "inputs": [
+   "core/format/include/pulp/format/clap_adapter.hpp",
+   "core/format/include/pulp/format/detail/clap_preset_library_gate.hpp",
+   "core/format/src/clap_adapter.cpp",
+   "tools/scripts/test_clap_preset_library_gate.py"
+  ],
+  "kind": "python"
+ }
+}

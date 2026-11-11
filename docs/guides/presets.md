@@ -163,6 +163,25 @@ if (auto request = router.take_request())
   handles Program Change itself still sees it. `claims_controller()` tells a
   controller-mapping feature which controller numbers the router is using.
 - `process()` and `on_message()` allocate nothing and take no lock.
+- The router implements `state::MidiSourceReservation`: while enabled it claims
+  Bank Select (CC 0 and CC 32, and the 14-bit pair on CC 0, in the modes that
+  read them) and every Program Change, on the channels it listens to. A feature
+  that maps controllers, such as MIDI Learn, asks `claims()` to decline those
+  sources and shows `reason()` instead.
 
 A Program Change applied from the message thread takes effect after the block
 that carried it, so a note in the same block plays with the old preset.
+
+### Opting in from a plug-in (CLAP)
+
+Set `supports_program_change = true` in the `PluginDescriptor`. The CLAP
+adapter then creates a `PresetLibrary` for the instance (edits stored under the
+per-user application data folder), pins the program map, scans incoming MIDI
+for Bank Select + Program Change on the audio thread, and loads the matching
+preset from `on_main_thread` after asking the host for a callback. Bank
+Select is 14-bit and every channel is listened to. A plug-in that does not set
+the flag is unchanged: no library, no scan, no callback request.
+
+The adapter also answers `clap.preset-load` at the plug-in location
+(`CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN`) with a library key as the load key,
+for example `factory:Pads/Warm`. Other formats do not use the flag yet.
