@@ -1,0 +1,26 @@
+{
+  "source_head": "16cff8260d6c2b97f9c56d2c97deaf916c845e1e",
+  "source_tree": "f017b39a794c1019e7f8bd4bf1b8ac3ec0c4ce46",
+  "original_worktrees": [
+    {
+      "path": "/Volumes/Workshop/Code/agent-worktrees/g12-graph-rtsan-20261110",
+      "head": "8f3e3b06e38be208afed9dc03a7778aa5f36861d",
+      "status": ""
+    },
+    {
+      "path": "/Volumes/Workshop/Code/agent-worktrees/g12-activation-receipt-20261110",
+      "head": "e8f5ec890de483fc8882a198d7941d3078ac56ec",
+      "status": ""
+    }
+  ],
+  "old_receipt_evidence_diff": "",
+  "changed_source_paths": [
+    "test/fixtures/g5_graph_event_rt_cases.inc",
+    "tools/graph_performance_qualification.py",
+    "tools/test_graph_performance_qualification.py"
+  ],
+  "review": {
+    "path": "/Volumes/Workshop/Code/agent-worktrees/planning-graph-recovery-sync-20261110/graph-program-status/g12-e8f5-independent-claude-review-20261110.md",
+    "sha256": "f6de2fd4373ebb5812c8bc03c92fd98c709996efa04a6fc586c0c9ceb53528ae"
+  }
+}

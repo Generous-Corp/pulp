@@ -1,0 +1,3 @@
+text-encoding-lint: tools/graph_performance_qualification.py: 9 call(s) fixed
+text-encoding-lint: tools/test_graph_performance_qualification.py: 13 call(s) fixed
+text-encoding-lint: 22 call(s) fixed; run --write to record the lower counts

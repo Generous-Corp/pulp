@@ -1,0 +1,98 @@
+[
+  {
+    "backend": "direct",
+    "fault": "",
+    "label": "direct-positive",
+    "command": [
+      "/Volumes/Workshop/Code/agent-worktrees/g12-activation-review-repair-20261110/build/test/pulp-test-group-trigger-graph",
+      "G12 paced activation receipt cell"
+    ],
+    "returncode": 0,
+    "independent_validator_rejection": null,
+    "raw_sha256": "4d70960a410d8a760cdf425b6888d93bb64ea81d30c0c8bcaf469b9596da9bfa"
+  },
+  {
+    "backend": "direct",
+    "fault": "omit_commit",
+    "label": "direct-omit_commit",
+    "command": [
+      "/Volumes/Workshop/Code/agent-worktrees/g12-activation-review-repair-20261110/build/test/pulp-test-group-trigger-graph",
+      "G12 paced activation receipt cell"
+    ],
+    "returncode": 42,
+    "independent_validator_rejection": "missing commit or audio activation",
+    "raw_sha256": "91dac33866d6b37ab78ad1dd2be0fbe92be758a31ebdc5c910e82d7de539d6d7"
+  },
+  {
+    "backend": "direct",
+    "fault": "wrong_gain",
+    "label": "direct-wrong_gain",
+    "command": [
+      "/Volumes/Workshop/Code/agent-worktrees/g12-activation-review-repair-20261110/build/test/pulp-test-group-trigger-graph",
+      "G12 paced activation receipt cell"
+    ],
+    "returncode": 42,
+    "independent_validator_rejection": "missing commit or audio activation",
+    "raw_sha256": "d6d9edcfde0e488d405b44e76f5c12b4f9f7369b79ef168017b107ed55aa7bca"
+  },
+  {
+    "backend": "direct",
+    "fault": "",
+    "label": "direct-restored",
+    "command": [
+      "/Volumes/Workshop/Code/agent-worktrees/g12-activation-review-repair-20261110/build/test/pulp-test-group-trigger-graph",
+      "G12 paced activation receipt cell"
+    ],
+    "returncode": 0,
+    "independent_validator_rejection": null,
+    "raw_sha256": "c32c274b0057fe5fd78fbdbd78852536309bd3628e4987ea4343959b1f52e082"
+  },
+  {
+    "backend": "routed",
+    "fault": "",
+    "label": "routed-positive",
+    "command": [
+      "/Volumes/Workshop/Code/agent-worktrees/g12-activation-review-repair-20261110/build/test/pulp-test-group-trigger-graph",
+      "G12 paced activation receipt cell"
+    ],
+    "returncode": 0,
+    "independent_validator_rejection": null,
+    "raw_sha256": "d9805a4b71ca2574214b00af2eef8b1a1cc52465f0b771a17d7fdcd253097c71"
+  },
+  {
+    "backend": "routed",
+    "fault": "omit_commit",
+    "label": "routed-omit_commit",
+    "command": [
+      "/Volumes/Workshop/Code/agent-worktrees/g12-activation-review-repair-20261110/build/test/pulp-test-group-trigger-graph",
+      "G12 paced activation receipt cell"
+    ],
+    "returncode": 42,
+    "independent_validator_rejection": "missing commit or audio activation",
+    "raw_sha256": "0eafb5978cd100531f49c985e84ffd8359f0f708ca0d06e2337efa9440db3383"
+  },
+  {
+    "backend": "routed",
+    "fault": "wrong_gain",
+    "label": "routed-wrong_gain",
+    "command": [
+      "/Volumes/Workshop/Code/agent-worktrees/g12-activation-review-repair-20261110/build/test/pulp-test-group-trigger-graph",
+      "G12 paced activation receipt cell"
+    ],
+    "returncode": 42,
+    "independent_validator_rejection": "missing commit or audio activation",
+    "raw_sha256": "7e138b20df5675c9e4bcdefc6e45e25a48ec730eadda635e41a3fd074b3413be"
+  },
+  {
+    "backend": "routed",
+    "fault": "",
+    "label": "routed-restored",
+    "command": [
+      "/Volumes/Workshop/Code/agent-worktrees/g12-activation-review-repair-20261110/build/test/pulp-test-group-trigger-graph",
+      "G12 paced activation receipt cell"
+    ],
+    "returncode": 0,
+    "independent_validator_rejection": null,
+    "raw_sha256": "a506af49ccc4d23886b2241aab391ba7d17ccb1d35c46ba18889b3b4ae2c80b2"
+  }
+]

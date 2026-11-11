@@ -1,0 +1,283 @@
+Filters: "G12 prepared gain activation has one exact audio transition under paced callbacks"
+Randomness seeded to: 3360818154
+G12 activation routed=0 callbacks=128 frames=128 prepare_duration_ns=370500 commit_duration_ns=28708 request_to_first_changed_output_ns=3819792 first_new_index=8 first_new_sample=1024 latency_samples=0 prepared_buffer_bytes=3072 harness_payload_bytes=75776 missed_deadlines=1
+G12 raw routed=0 index=0 sample=0 target_ns=791949628682375 start_ns=791949633690750 end_ns=791949633714416 audio_class=0 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=1 sample=128 target_ns=791949631349041 start_ns=791949633714833 end_ns=791949633715166 audio_class=0 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=2 sample=256 target_ns=791949634015708 start_ns=791949634085458 end_ns=791949634088625 audio_class=0 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=3 sample=384 target_ns=791949636682375 start_ns=791949636924541 end_ns=791949636926416 audio_class=0 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=4 sample=512 target_ns=791949639349041 start_ns=791949640570750 end_ns=791949640573208 audio_class=0 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=5 sample=640 target_ns=791949642015708 start_ns=791949642743750 end_ns=791949642746500 audio_class=0 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=6 sample=768 target_ns=791949644682375 start_ns=791949645656250 end_ns=791949645658958 audio_class=0 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=7 sample=896 target_ns=791949647349041 start_ns=791949647378291 end_ns=791949647381166 audio_class=0 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=8 sample=1024 target_ns=791949650015708 start_ns=791949651347208 end_ns=791949651350250 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=9 sample=1152 target_ns=791949652682375 start_ns=791949653365541 end_ns=791949653368625 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=10 sample=1280 target_ns=791949655349041 start_ns=791949656350791 end_ns=791949656354750 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=11 sample=1408 target_ns=791949658015708 start_ns=791949658853625 end_ns=791949658855708 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=12 sample=1536 target_ns=791949660682375 start_ns=791949661608791 end_ns=791949661611375 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=13 sample=1664 target_ns=791949663349041 start_ns=791949664237166 end_ns=791949664239166 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=14 sample=1792 target_ns=791949666015708 start_ns=791949666918541 end_ns=791949666920791 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=15 sample=1920 target_ns=791949668682375 start_ns=791949669374250 end_ns=791949669376708 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=16 sample=2048 target_ns=791949671349041 start_ns=791949672347416 end_ns=791949672349458 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=17 sample=2176 target_ns=791949674015708 start_ns=791949674861041 end_ns=791949674863208 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=18 sample=2304 target_ns=791949676682375 start_ns=791949677606125 end_ns=791949677608083 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=19 sample=2432 target_ns=791949679349041 start_ns=791949680232458 end_ns=791949680234666 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=20 sample=2560 target_ns=791949682015708 start_ns=791949682921083 end_ns=791949682923666 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=21 sample=2688 target_ns=791949684682375 start_ns=791949685575583 end_ns=791949685577958 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=22 sample=2816 target_ns=791949687349041 start_ns=791949688256375 end_ns=791949688259000 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=23 sample=2944 target_ns=791949690015708 start_ns=791949690909291 end_ns=791949690911291 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=24 sample=3072 target_ns=791949692682375 start_ns=791949693577416 end_ns=791949693579833 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=25 sample=3200 target_ns=791949695349041 start_ns=791949696247166 end_ns=791949696249291 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=26 sample=3328 target_ns=791949698015708 start_ns=791949698451208 end_ns=791949698453791 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=27 sample=3456 target_ns=791949700682375 start_ns=791949701790750 end_ns=791949701793166 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=28 sample=3584 target_ns=791949703349041 start_ns=791949704146250 end_ns=791949704148583 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=29 sample=3712 target_ns=791949706015708 start_ns=791949706963500 end_ns=791949706965416 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=30 sample=3840 target_ns=791949708682375 start_ns=791949709550166 end_ns=791949709552125 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=31 sample=3968 target_ns=791949711349041 start_ns=791949712257250 end_ns=791949712259125 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=32 sample=4096 target_ns=791949714015708 start_ns=791949714901416 end_ns=791949714903333 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=33 sample=4224 target_ns=791949716682375 start_ns=791949717584708 end_ns=791949717587083 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=34 sample=4352 target_ns=791949719349041 start_ns=791949720244708 end_ns=791949720246583 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=35 sample=4480 target_ns=791949722015708 start_ns=791949722922250 end_ns=791949722924291 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=36 sample=4608 target_ns=791949724682375 start_ns=791949725574375 end_ns=791949725576625 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=37 sample=4736 target_ns=791949727349041 start_ns=791949728263166 end_ns=791949728265833 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=38 sample=4864 target_ns=791949730015708 start_ns=791949730792833 end_ns=791949730795208 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=39 sample=4992 target_ns=791949732682375 start_ns=791949732732916 end_ns=791949732735291 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=40 sample=5120 target_ns=791949735349041 start_ns=791949735669375 end_ns=791949735671125 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=41 sample=5248 target_ns=791949738015708 start_ns=791949739203666 end_ns=791949739205583 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=42 sample=5376 target_ns=791949740682375 start_ns=791949741430750 end_ns=791949741432333 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=43 sample=5504 target_ns=791949743349041 start_ns=791949743680333 end_ns=791949743682458 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=44 sample=5632 target_ns=791949746015708 start_ns=791949747200583 end_ns=791949747203125 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=45 sample=5760 target_ns=791949748682375 start_ns=791949749436625 end_ns=791949749438666 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=46 sample=5888 target_ns=791949751349041 start_ns=791949752317000 end_ns=791949752319125 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=47 sample=6016 target_ns=791949754015708 start_ns=791949754249625 end_ns=791949754252750 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=48 sample=6144 target_ns=791949756682375 start_ns=791949757909291 end_ns=791949757911208 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=49 sample=6272 target_ns=791949759349041 start_ns=791949760087833 end_ns=791949760090666 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=50 sample=6400 target_ns=791949762015708 start_ns=791949762991125 end_ns=791949762993500 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=51 sample=6528 target_ns=791949764682374 start_ns=791949765542166 end_ns=791949765544583 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=52 sample=6656 target_ns=791949767349041 start_ns=791949767427958 end_ns=791949767429583 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=53 sample=6784 target_ns=791949770015708 start_ns=791949771322625 end_ns=791949771324916 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=54 sample=6912 target_ns=791949772682375 start_ns=791949773167583 end_ns=791949773168416 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=55 sample=7040 target_ns=791949775349041 start_ns=791949776130208 end_ns=791949776132541 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=56 sample=7168 target_ns=791949778015708 start_ns=791949778986791 end_ns=791949778990000 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=57 sample=7296 target_ns=791949780682375 start_ns=791949781542750 end_ns=791949781544583 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=58 sample=7424 target_ns=791949783349041 start_ns=791949784260750 end_ns=791949784263041 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=59 sample=7552 target_ns=791949786015708 start_ns=791949786905083 end_ns=791949786907291 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=60 sample=7680 target_ns=791949788682375 start_ns=791949789583125 end_ns=791949789584833 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=61 sample=7808 target_ns=791949791349041 start_ns=791949792266541 end_ns=791949792268250 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=62 sample=7936 target_ns=791949794015708 start_ns=791949794898375 end_ns=791949794900458 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=63 sample=8064 target_ns=791949796682374 start_ns=791949797585416 end_ns=791949797587625 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=64 sample=8192 target_ns=791949799349041 start_ns=791949800266000 end_ns=791949800268208 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=65 sample=8320 target_ns=791949802015708 start_ns=791949802900958 end_ns=791949802902666 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=66 sample=8448 target_ns=791949804682375 start_ns=791949805594958 end_ns=791949805597250 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=67 sample=8576 target_ns=791949807349041 start_ns=791949808238833 end_ns=791949808240708 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=68 sample=8704 target_ns=791949810015708 start_ns=791949810257583 end_ns=791949810259166 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=69 sample=8832 target_ns=791949812682375 start_ns=791949813905541 end_ns=791949813907458 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=70 sample=8960 target_ns=791949815349041 start_ns=791949816085708 end_ns=791949816088583 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=71 sample=9088 target_ns=791949818015708 start_ns=791949818998541 end_ns=791949819001958 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=72 sample=9216 target_ns=791949820682375 start_ns=791949821540750 end_ns=791949821543375 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=73 sample=9344 target_ns=791949823349041 start_ns=791949824267250 end_ns=791949824269583 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=74 sample=9472 target_ns=791949826015708 start_ns=791949826901958 end_ns=791949826904583 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=75 sample=9600 target_ns=791949828682374 start_ns=791949829583750 end_ns=791949829585958 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=76 sample=9728 target_ns=791949831349041 start_ns=791949832243750 end_ns=791949832245833 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=77 sample=9856 target_ns=791949834015708 start_ns=791949834907833 end_ns=791949834909416 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=78 sample=9984 target_ns=791949836682375 start_ns=791949837576500 end_ns=791949837578291 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=79 sample=10112 target_ns=791949839349041 start_ns=791949840244583 end_ns=791949840246333 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=80 sample=10240 target_ns=791949842015708 start_ns=791949842912583 end_ns=791949842914250 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=81 sample=10368 target_ns=791949844682375 start_ns=791949845576416 end_ns=791949845578958 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=82 sample=10496 target_ns=791949847349041 start_ns=791949847464125 end_ns=791949847466583 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=83 sample=10624 target_ns=791949850015708 start_ns=791949851082041 end_ns=791949851084833 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=84 sample=10752 target_ns=791949852682375 start_ns=791949853492416 end_ns=791949853494041 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=85 sample=10880 target_ns=791949855349041 start_ns=791949855972833 end_ns=791949855975375 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=86 sample=11008 target_ns=791949858015708 start_ns=791949858466666 end_ns=791949858468458 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=87 sample=11136 target_ns=791949860682374 start_ns=791949861798750 end_ns=791949861800333 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=88 sample=11264 target_ns=791949863349041 start_ns=791949863929916 end_ns=791949863932000 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=89 sample=11392 target_ns=791949866015708 start_ns=791949866049833 end_ns=791949866051791 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=90 sample=11520 target_ns=791949868682375 start_ns=791949869005208 end_ns=791949869006583 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=91 sample=11648 target_ns=791949871349041 start_ns=791949871395958 end_ns=791949871398333 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=92 sample=11776 target_ns=791949874015708 start_ns=791949875300125 end_ns=791949875303125 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=93 sample=11904 target_ns=791949876682375 start_ns=791949877382583 end_ns=791949877384916 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=94 sample=12032 target_ns=791949879349041 start_ns=791949880334625 end_ns=791949880336791 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=95 sample=12160 target_ns=791949882015708 start_ns=791949882399333 end_ns=791949882401500 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=96 sample=12288 target_ns=791949884682375 start_ns=791949885833041 end_ns=791949885834791 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=97 sample=12416 target_ns=791949887349041 start_ns=791949888113250 end_ns=791949888114875 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=98 sample=12544 target_ns=791949890015708 start_ns=791949890040375 end_ns=791949890042708 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=99 sample=12672 target_ns=791949892682375 start_ns=791949894016708 end_ns=791949894019416 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=100 sample=12800 target_ns=791949895349041 start_ns=791949896079791 end_ns=791949896081791 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=101 sample=12928 target_ns=791949898015708 start_ns=791949898761416 end_ns=791949898763875 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=102 sample=13056 target_ns=791949900682374 start_ns=791949900764083 end_ns=791949900767000 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=103 sample=13184 target_ns=791949903349041 start_ns=791949904652833 end_ns=791949904655458 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=104 sample=13312 target_ns=791949906015708 start_ns=791949906710916 end_ns=791949906712750 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=105 sample=13440 target_ns=791949908682375 start_ns=791949909681791 end_ns=791949909684250 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=106 sample=13568 target_ns=791949911349041 start_ns=791949912222791 end_ns=791949912225250 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=107 sample=13696 target_ns=791949914015708 start_ns=791949914926250 end_ns=791949914929208 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=108 sample=13824 target_ns=791949916682375 start_ns=791949917333666 end_ns=791949917336166 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=109 sample=13952 target_ns=791949919349041 start_ns=791949919682958 end_ns=791949919686125 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=110 sample=14080 target_ns=791949922015708 start_ns=791949923196708 end_ns=791949923199500 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=111 sample=14208 target_ns=791949924682375 start_ns=791949925437958 end_ns=791949925440291 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=112 sample=14336 target_ns=791949927349041 start_ns=791949928317375 end_ns=791949928319458 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=113 sample=14464 target_ns=791949930015708 start_ns=791949930872833 end_ns=791949930874958 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=114 sample=14592 target_ns=791949932682375 start_ns=791949933600708 end_ns=791949933602458 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=115 sample=14720 target_ns=791949935349041 start_ns=791949936232708 end_ns=791949936234875 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=116 sample=14848 target_ns=791949938015708 start_ns=791949938440166 end_ns=791949938442458 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=117 sample=14976 target_ns=791949940682375 start_ns=791949941818875 end_ns=791949941822083 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=118 sample=15104 target_ns=791949943349041 start_ns=791949944134666 end_ns=791949944136416 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=119 sample=15232 target_ns=791949946015708 start_ns=791949946966791 end_ns=791949946969208 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=120 sample=15360 target_ns=791949948682375 start_ns=791949949357333 end_ns=791949949360041 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=121 sample=15488 target_ns=791949951349041 start_ns=791949952358666 end_ns=791949952362208 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=122 sample=15616 target_ns=791949954015708 start_ns=791949954853458 end_ns=791949954855500 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=123 sample=15744 target_ns=791949956682375 start_ns=791949957607041 end_ns=791949957609125 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=124 sample=15872 target_ns=791949959349041 start_ns=791949960236708 end_ns=791949960239125 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=125 sample=16000 target_ns=791949962015708 start_ns=791949962920583 end_ns=791949962922708 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=126 sample=16128 target_ns=791949964682374 start_ns=791949965600500 end_ns=791949965602500 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=0 index=127 sample=16256 target_ns=791949967349041 start_ns=791949967618125 end_ns=791949967620250 audio_class=1 allocations=0 locks=0 blocking=0
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+pulp-test-group-trigger-graph is a Catch2 v3.16.1 host application.
+Run with -? for options
+
+-------------------------------------------------------------------------------
+G12 prepared gain activation has one exact audio transition under paced
+callbacks
+-------------------------------------------------------------------------------
+../test/fixtures/g5_graph_event_rt_cases.inc:715
+...............................................................................
+
+../test/fixtures/g5_graph_event_rt_cases.inc:730: FAILED:
+  CHECK( observed.executor_stats.blocks_processed == (routed ? kCallbacks : 0) )
+with expansion:
+  0 == 128
+with message:
+  routed=1
+
+G12 activation routed=1 callbacks=128 frames=128 prepare_duration_ns=63167 commit_duration_ns=8000 request_to_first_changed_output_ns=1491666 first_new_index=8 first_new_sample=1024 latency_samples=0 prepared_buffer_bytes=3072 harness_payload_bytes=75776 missed_deadlines=0
+G12 raw routed=1 index=0 sample=0 target_ns=791949978278750 start_ns=791949978403791 end_ns=791949978410833 audio_class=0 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=1 sample=128 target_ns=791949980945416 start_ns=791949982225541 end_ns=791949982229000 audio_class=0 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=2 sample=256 target_ns=791949983612083 start_ns=791949984312916 end_ns=791949984315916 audio_class=0 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=3 sample=384 target_ns=791949986278750 start_ns=791949986493250 end_ns=791949986496416 audio_class=0 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=4 sample=512 target_ns=791949988945416 start_ns=791949990177041 end_ns=791949990179500 audio_class=0 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=5 sample=640 target_ns=791949991612083 start_ns=791949992150875 end_ns=791949992152875 audio_class=0 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=6 sample=768 target_ns=791949994278750 start_ns=791949994548041 end_ns=791949994550250 audio_class=0 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=7 sample=896 target_ns=791949996945416 start_ns=791949998154833 end_ns=791949998157583 audio_class=0 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=8 sample=1024 target_ns=791949999612083 start_ns=791949999718708 end_ns=791949999720041 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=9 sample=1152 target_ns=791950002278750 start_ns=791950002597666 end_ns=791950002599791 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=10 sample=1280 target_ns=791950004945416 start_ns=791950005751375 end_ns=791950005753791 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=11 sample=1408 target_ns=791950007612083 start_ns=791950008596125 end_ns=791950008597833 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=12 sample=1536 target_ns=791950010278750 start_ns=791950010596291 end_ns=791950010598583 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=13 sample=1664 target_ns=791950012945416 start_ns=791950013708125 end_ns=791950013710916 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=14 sample=1792 target_ns=791950015612083 start_ns=791950016575666 end_ns=791950016578416 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=15 sample=1920 target_ns=791950018278750 start_ns=791950019148458 end_ns=791950019151000 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=16 sample=2048 target_ns=791950020945416 start_ns=791950021858291 end_ns=791950021860916 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=17 sample=2176 target_ns=791950023612083 start_ns=791950024502833 end_ns=791950024504500 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=18 sample=2304 target_ns=791950026278750 start_ns=791950026791541 end_ns=791950026794500 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=19 sample=2432 target_ns=791950028945416 start_ns=791950030035916 end_ns=791950030038208 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=20 sample=2560 target_ns=791950031612083 start_ns=791950032413291 end_ns=791950032415583 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=21 sample=2688 target_ns=791950034278750 start_ns=791950034742333 end_ns=791950034744125 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=22 sample=2816 target_ns=791950036945416 start_ns=791950038059291 end_ns=791950038062041 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=23 sample=2944 target_ns=791950039612083 start_ns=791950040399833 end_ns=791950040402208 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=24 sample=3072 target_ns=791950042278750 start_ns=791950042830208 end_ns=791950042832583 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=25 sample=3200 target_ns=791950044945416 start_ns=791950046013208 end_ns=791950046015583 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=26 sample=3328 target_ns=791950047612083 start_ns=791950048425166 end_ns=791950048427250 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=27 sample=3456 target_ns=791950050278750 start_ns=791950050876500 end_ns=791950050879125 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=28 sample=3584 target_ns=791950052945416 start_ns=791950053391500 end_ns=791950053393208 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=29 sample=3712 target_ns=791950055612083 start_ns=791950056100000 end_ns=791950056101916 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=30 sample=3840 target_ns=791950058278750 start_ns=791950059377625 end_ns=791950059379833 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=31 sample=3968 target_ns=791950060945416 start_ns=791950061739000 end_ns=791950061741083 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=32 sample=4096 target_ns=791950063612083 start_ns=791950064560250 end_ns=791950064563291 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=33 sample=4224 target_ns=791950066278750 start_ns=791950067146125 end_ns=791950067148208 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=34 sample=4352 target_ns=791950068945416 start_ns=791950069176208 end_ns=791950069178875 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=35 sample=4480 target_ns=791950071612083 start_ns=791950072839041 end_ns=791950072841625 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=36 sample=4608 target_ns=791950074278750 start_ns=791950075007875 end_ns=791950075010291 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=37 sample=4736 target_ns=791950076945416 start_ns=791950077393625 end_ns=791950077396416 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=38 sample=4864 target_ns=791950079612083 start_ns=791950080309583 end_ns=791950080312125 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=39 sample=4992 target_ns=791950082278750 start_ns=791950083270833 end_ns=791950083272083 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=40 sample=5120 target_ns=791950084945416 start_ns=791950085795750 end_ns=791950085798583 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=41 sample=5248 target_ns=791950087612083 start_ns=791950088534500 end_ns=791950088536666 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=42 sample=5376 target_ns=791950090278750 start_ns=791950090600041 end_ns=791950090601458 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=43 sample=5504 target_ns=791950092945416 start_ns=791950094126625 end_ns=791950094128458 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=44 sample=5632 target_ns=791950095612083 start_ns=791950095625541 end_ns=791950095628000 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=45 sample=5760 target_ns=791950098278750 start_ns=791950099138708 end_ns=791950099140833 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=46 sample=5888 target_ns=791950100945416 start_ns=791950101547166 end_ns=791950101549291 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=47 sample=6016 target_ns=791950103612083 start_ns=791950104475958 end_ns=791950104477750 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=48 sample=6144 target_ns=791950106278750 start_ns=791950107193916 end_ns=791950107196250 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=49 sample=6272 target_ns=791950108945416 start_ns=791950109835791 end_ns=791950109838291 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=50 sample=6400 target_ns=791950111612083 start_ns=791950112508958 end_ns=791950112510250 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=51 sample=6528 target_ns=791950114278749 start_ns=791950114363875 end_ns=791950114365125 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=52 sample=6656 target_ns=791950116945416 start_ns=791950118253458 end_ns=791950118255833 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=53 sample=6784 target_ns=791950119612083 start_ns=791950120305083 end_ns=791950120307125 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=54 sample=6912 target_ns=791950122278750 start_ns=791950123301833 end_ns=791950123303791 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=55 sample=7040 target_ns=791950124945416 start_ns=791950125139375 end_ns=791950125141958 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=56 sample=7168 target_ns=791950127612083 start_ns=791950128863166 end_ns=791950128865291 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=57 sample=7296 target_ns=791950130278750 start_ns=791950130313125 end_ns=791950130314458 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=58 sample=7424 target_ns=791950132945416 start_ns=791950134053041 end_ns=791950134055666 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=59 sample=7552 target_ns=791950135612083 start_ns=791950136406541 end_ns=791950136408750 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=60 sample=7680 target_ns=791950138278750 start_ns=791950139223750 end_ns=791950139225583 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=61 sample=7808 target_ns=791950140945416 start_ns=791950141432583 end_ns=791950141434416 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=62 sample=7936 target_ns=791950143612083 start_ns=791950144716083 end_ns=791950144718583 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=63 sample=8064 target_ns=791950146278749 start_ns=791950147070958 end_ns=791950147072541 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=64 sample=8192 target_ns=791950148945416 start_ns=791950149325166 end_ns=791950149327541 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=65 sample=8320 target_ns=791950151612083 start_ns=791950152765750 end_ns=791950152768500 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=66 sample=8448 target_ns=791950154278750 start_ns=791950155044458 end_ns=791950155046125 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=67 sample=8576 target_ns=791950156945416 start_ns=791950157909291 end_ns=791950157912125 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=68 sample=8704 target_ns=791950159612083 start_ns=791950160474541 end_ns=791950160475875 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=69 sample=8832 target_ns=791950162278750 start_ns=791950163192791 end_ns=791950163195166 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=70 sample=8960 target_ns=791950164945416 start_ns=791950165836000 end_ns=791950165838166 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=71 sample=9088 target_ns=791950167612083 start_ns=791950168511375 end_ns=791950168513791 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=72 sample=9216 target_ns=791950170278750 start_ns=791950171182083 end_ns=791950171184291 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=73 sample=9344 target_ns=791950172945416 start_ns=791950173838875 end_ns=791950173840750 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=74 sample=9472 target_ns=791950175612083 start_ns=791950176529375 end_ns=791950176533458 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=75 sample=9600 target_ns=791950178278749 start_ns=791950179169166 end_ns=791950179172125 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=76 sample=9728 target_ns=791950180945416 start_ns=791950181872291 end_ns=791950181874833 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=77 sample=9856 target_ns=791950183612083 start_ns=791950183845500 end_ns=791950183847083 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=78 sample=9984 target_ns=791950186278750 start_ns=791950186379666 end_ns=791950186382291 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=79 sample=10112 target_ns=791950188945416 start_ns=791950190244333 end_ns=791950190247041 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=80 sample=10240 target_ns=791950191612083 start_ns=791950192307791 end_ns=791950192309750 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=81 sample=10368 target_ns=791950194278750 start_ns=791950195204625 end_ns=791950195207208 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=82 sample=10496 target_ns=791950196945416 start_ns=791950197830000 end_ns=791950197832875 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=83 sample=10624 target_ns=791950199612083 start_ns=791950200144541 end_ns=791950200146916 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=84 sample=10752 target_ns=791950202278750 start_ns=791950203358833 end_ns=791950203361333 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=85 sample=10880 target_ns=791950204945416 start_ns=791950204975708 end_ns=791950204979000 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=86 sample=11008 target_ns=791950207612083 start_ns=791950208943916 end_ns=791950208946166 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=87 sample=11136 target_ns=791950210278749 start_ns=791950210349000 end_ns=791950210352000 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=88 sample=11264 target_ns=791950212945416 start_ns=791950214260333 end_ns=791950214262916 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=89 sample=11392 target_ns=791950215612083 start_ns=791950216328458 end_ns=791950216330666 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=90 sample=11520 target_ns=791950218278750 start_ns=791950219267041 end_ns=791950219270000 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=91 sample=11648 target_ns=791950220945416 start_ns=791950221796916 end_ns=791950221799708 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=92 sample=11776 target_ns=791950223612083 start_ns=791950224534000 end_ns=791950224535916 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=93 sample=11904 target_ns=791950226278750 start_ns=791950227162875 end_ns=791950227165375 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=94 sample=12032 target_ns=791950228945416 start_ns=791950229853500 end_ns=791950229855500 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=95 sample=12160 target_ns=791950231612083 start_ns=791950232504000 end_ns=791950232506666 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=96 sample=12288 target_ns=791950234278750 start_ns=791950235178500 end_ns=791950235180375 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=97 sample=12416 target_ns=791950236945416 start_ns=791950237846708 end_ns=791950237848833 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=98 sample=12544 target_ns=791950239612083 start_ns=791950239973833 end_ns=791950239976375 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=99 sample=12672 target_ns=791950242278750 start_ns=791950242685166 end_ns=791950242687291 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=100 sample=12800 target_ns=791950244945416 start_ns=791950246085000 end_ns=791950246086750 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=101 sample=12928 target_ns=791950247612083 start_ns=791950248387791 end_ns=791950248390083 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=102 sample=13056 target_ns=791950250278749 start_ns=791950250911583 end_ns=791950250913291 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=103 sample=13184 target_ns=791950252945416 start_ns=791950253970333 end_ns=791950253972250 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=104 sample=13312 target_ns=791950255612083 start_ns=791950256439791 end_ns=791950256442000 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=105 sample=13440 target_ns=791950258278750 start_ns=791950259210500 end_ns=791950259212416 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=106 sample=13568 target_ns=791950260945416 start_ns=791950261826708 end_ns=791950261829625 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=107 sample=13696 target_ns=791950263612083 start_ns=791950263698791 end_ns=791950263700458 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=108 sample=13824 target_ns=791950266278750 start_ns=791950267584791 end_ns=791950267587541 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=109 sample=13952 target_ns=791950268945416 start_ns=791950269173791 end_ns=791950269175958 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=110 sample=14080 target_ns=791950271612083 start_ns=791950271635625 end_ns=791950271638375 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=111 sample=14208 target_ns=791950274278750 start_ns=791950275611625 end_ns=791950275615458 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=112 sample=14336 target_ns=791950276945416 start_ns=791950277616291 end_ns=791950277618000 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=113 sample=14464 target_ns=791950279612083 start_ns=791950280649833 end_ns=791950280651541 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=114 sample=14592 target_ns=791950282278750 start_ns=791950283083166 end_ns=791950283085458 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=115 sample=14720 target_ns=791950284945416 start_ns=791950285653250 end_ns=791950285655291 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=116 sample=14848 target_ns=791950287612083 start_ns=791950288604625 end_ns=791950288607083 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=117 sample=14976 target_ns=791950290278750 start_ns=791950291125541 end_ns=791950291127750 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=118 sample=15104 target_ns=791950292945416 start_ns=791950293869916 end_ns=791950293872083 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=119 sample=15232 target_ns=791950295612083 start_ns=791950295931833 end_ns=791950295933625 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=120 sample=15360 target_ns=791950298278750 start_ns=791950298324041 end_ns=791950298326000 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=121 sample=15488 target_ns=791950300945416 start_ns=791950302267666 end_ns=791950302270375 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=122 sample=15616 target_ns=791950303612083 start_ns=791950304303041 end_ns=791950304306125 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=123 sample=15744 target_ns=791950306278750 start_ns=791950307280625 end_ns=791950307283458 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=124 sample=15872 target_ns=791950308945416 start_ns=791950309564375 end_ns=791950309566166 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=125 sample=16000 target_ns=791950311612083 start_ns=791950312647583 end_ns=791950312650083 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=126 sample=16128 target_ns=791950314278749 start_ns=791950314930166 end_ns=791950314932500 audio_class=1 allocations=0 locks=0 blocking=0
+G12 raw routed=1 index=127 sample=16256 target_ns=791950316945416 start_ns=791950317966833 end_ns=791950317969333 audio_class=1 allocations=0 locks=0 blocking=0
+===============================================================================
+test cases:   1 |   0 passed | 1 failed
+assertions: 838 | 837 passed | 1 failed
+

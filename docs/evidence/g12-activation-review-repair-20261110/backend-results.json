@@ -1,0 +1,35 @@
+[
+  {
+    "label": "backend-positive",
+    "command": [
+      "/Volumes/Workshop/Code/agent-worktrees/g12-activation-review-repair-20261110/build/test/pulp-test-group-trigger-graph",
+      "G12 prepared gain activation has one exact audio transition under paced callbacks"
+    ],
+    "exit": 0,
+    "source_sha256": "887e633e954a84ed0289bc9f0583be46ea83943021754a5eed7c6b16374a286d",
+    "binary_sha256": "fbe3a6f37248be8b6184a5b767f8fb93ce65ce4649c70f8114775000c3e38237",
+    "binary_bytes": 32238464
+  },
+  {
+    "label": "backend-broken",
+    "command": [
+      "/Volumes/Workshop/Code/agent-worktrees/g12-activation-review-repair-20261110/build/test/pulp-test-group-trigger-graph",
+      "G12 prepared gain activation has one exact audio transition under paced callbacks"
+    ],
+    "exit": 42,
+    "source_sha256": "96427e985baaa9a71bd44aadfe251b7d60091e069e7d117d6cc0ac7333dba1e1",
+    "binary_sha256": "956d590c031a9283603f98c4bf10e267aaacd08b4cb61481a5833244b3b0467d",
+    "binary_bytes": 32238464
+  },
+  {
+    "label": "backend-restored",
+    "command": [
+      "/Volumes/Workshop/Code/agent-worktrees/g12-activation-review-repair-20261110/build/test/pulp-test-group-trigger-graph",
+      "G12 prepared gain activation has one exact audio transition under paced callbacks"
+    ],
+    "exit": 0,
+    "source_sha256": "887e633e954a84ed0289bc9f0583be46ea83943021754a5eed7c6b16374a286d",
+    "binary_sha256": "fbe3a6f37248be8b6184a5b767f8fb93ce65ce4649c70f8114775000c3e38237",
+    "binary_bytes": 32238464
+  }
+]
