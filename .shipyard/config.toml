@@ -664,6 +664,17 @@ refresh_branch = "only-if-conflicting"
 [merge_steward]
 auto_handoff = false
 
+# ── Base-poison hold ───────────────────────────────────────────────────────
+# When a required context fails in consecutive merge groups that carry
+# different pull requests, the base itself is poisoned. With the hold on, the
+# steward enqueues only a named fix (label `shipyard:unblock`, or a title that
+# names the context beside a fix word) and reports other approved heads as
+# held. `auto_jump` lets that fix enter the queue at the front. The fix-review
+# kick and priority file are machine-global and are not set here.
+[base_health]
+merge_group_hold = "on"
+auto_jump = "on"
+
 # ── Batch attribution (queue-arm-guard escape) ─────────────────────────────
 # `queue-arm-guard` refuses a same-head re-enqueue after a `failed_checks`
 # ejection, and `branch-refresh-guard` refuses the `update-branch` that would
