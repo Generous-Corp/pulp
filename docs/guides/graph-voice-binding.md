@@ -29,7 +29,9 @@ implementation. That formed a circular dependency for a production graph
 render: the independent scalar oracle could be frozen first, but no installed
 graph consumer could verify it until a binding existed. The lead authorized
 implementing the binding and its independent audio oracle together. This
-changes the work order, not the acceptance requirements.
+changes the work order, not the acceptance requirements. The data-only follow-
+up carries only the generated vectors and in-process comparisons; the
+independent verifier is a separate prerequisite.
 
 This slice is **PARTIAL**. In its bounded MIDI 1.0 MPE profile, host ingress
 accepts member and manager CC64 sustain, scoped CC120 all-sound-off, CC121
@@ -38,8 +40,9 @@ current note generation and change graph audio. Manager pitch, pressure, and
 CC74 remain typed refusals because their zone expression composition is not
 defined. The public consumer covers audible pedal/tail and expression traces
 across multiple block partitions; its frozen A1 fixture covers seven stereo
-sum, release, and steal cases against an independent scalar reference and ten
-planted negatives. The production-source mutation script requires positive,
+sum, release, and steal cases in the installed consumer. The independent
+scalar verifier and planted-negative checks are supplied separately. The
+production-source mutation script requires positive,
 broken, and restored outcomes for ingress, identity, pedal, and release
 faults.
 

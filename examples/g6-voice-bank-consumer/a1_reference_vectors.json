@@ -406,57 +406,5 @@
         0.13258251547813416
       ]
     }
-  ],
-  "negative_controls": [
-    {
-      "id": "wrong_sum_order_high_dynamic",
-      "catches": "high-dynamic slot ordinal/reassociation (right channel)",
-      "mutation": "reverse slot order in sum_order_stress"
-    },
-    {
-      "id": "wrong_sum_order_low_magnitude",
-      "catches": "bounded low-magnitude order error above tolerance on both channels",
-      "mutation": "reverse slot order in sum_order_bounded_low_magnitude"
-    },
-    {
-      "id": "wrong_gain_law",
-      "catches": "dynamic active-count normalization",
-      "mutation": "use 1/active_count instead of fixed 1/sqrt(8)"
-    },
-    {
-      "id": "wrong_channel_swap",
-      "catches": "left/right swap against both expected channels",
-      "mutation": "swap the stereo pair and compare each channel independently"
-    },
-    {
-      "id": "wrong_mono_duplication",
-      "catches": "mono duplication right=left against both expected channels",
-      "mutation": "copy left into right and compare each channel independently"
-    },
-    {
-      "id": "wrong_release_policy",
-      "catches": "direct note-off hard reset or non-linear release",
-      "mutation": "replace derived release factors with hard zero after note_off"
-    },
-    {
-      "id": "release_note_off_shift",
-      "catches": "changed NoteOff timing cannot reuse old expected vectors",
-      "mutation": "change note_off_sample from 2 to 3 and derive factors"
-    },
-    {
-      "id": "release_length_change",
-      "catches": "changed release length cannot reuse old expected vectors",
-      "mutation": "change profile.release_frames from 4 to 3 and derive factors"
-    },
-    {
-      "id": "invalid_release_range",
-      "catches": "invalid timing/length is refused before rendering",
-      "mutation": "try note_off_sample=5 with eight frames or release_frames=0"
-    },
-    {
-      "id": "unbounded_or_steal_tail",
-      "catches": "allocator metadata treated as audio tail",
-      "mutation": "retain old voice after steal or emit frames after bounded release"
-    }
   ]
 }
