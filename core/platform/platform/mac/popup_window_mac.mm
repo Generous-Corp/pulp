@@ -151,7 +151,6 @@ struct PopupWindow::Impl : std::enable_shared_from_this<PopupWindow::Impl> {
     // through the local monitor. So decide one pass later, once AppKit has
     // settled the key window: back on the editor means take key again, up to
     // a few times; anywhere else means focus_lost.
-    static constexpr int kMaxKeyReclaims = 3;
     int key_reclaims = 0;
 
     void observe_resign_key() {
@@ -173,15 +172,18 @@ struct PopupWindow::Impl : std::enable_shared_from_this<PopupWindow::Impl> {
             auto self = weak.lock();
             if (!self || !self->open)
                 return;
-            NSWindow* key = NSApp.keyWindow;
-            if (key == self->panel)
-                return;
-            if (key == self->parent && self->key_reclaims < kMaxKeyReclaims) {
-                ++self->key_reclaims;
-                [self->panel makeKeyWindow];
-                return;
+            switch (popup_resign_action(self->panel.isKeyWindow == YES,
+                                        self->parent.isKeyWindow == YES, self->key_reclaims)) {
+                case PopupResignAction::stay_open:
+                    return;
+                case PopupResignAction::take_key_back:
+                    ++self->key_reclaims;
+                    [self->panel makeKeyWindow];
+                    return;
+                case PopupResignAction::close_focus_lost:
+                    self->dismiss(PopupDismissReason::focus_lost);
+                    return;
             }
-            self->dismiss(PopupDismissReason::focus_lost);
         });
         if (!posted)
             dismiss(PopupDismissReason::focus_lost);

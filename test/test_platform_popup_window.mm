@@ -246,6 +246,17 @@ TEST_CASE("each dismissal path reports its reason once", "[platform][popup-windo
     }
 }
 
+TEST_CASE("losing key decides between staying open and taking key back and focus_lost",
+          "[platform][popup-window][activation]") {
+    using A = PopupResignAction;
+    REQUIRE(popup_resign_action(true, false, 0) == A::stay_open);
+    REQUIRE(popup_resign_action(true, true, 9) == A::stay_open);
+    REQUIRE(popup_resign_action(false, true, 0) == A::take_key_back);  // activation hand-back
+    REQUIRE(popup_resign_action(false, true, 2) == A::take_key_back);
+    REQUIRE(popup_resign_action(false, true, 3) == A::close_focus_lost);  // bounded
+    REQUIRE(popup_resign_action(false, false, 0) == A::close_focus_lost);  // key went elsewhere
+}
+
 // Activation can hand the key window back to the editor after the popup has
 // taken it: AppKit finishes activating the application asynchronously and
 // restores key to the window that had it. No click happened, so this is not
@@ -260,13 +271,14 @@ TEST_CASE("key handed back to the editor without a click keeps the popup open",
     REQUIRE(popup != nullptr);
     NSWindow* panel = (__bridge NSWindow*)popup->native_window();
     dispatch_events(30ms);
-    REQUIRE(NSApp.keyWindow == panel);
+    if (!panel.isKeyWindow)
+        SKIP("this test session cannot hold a key window (the application is not active)");
 
     [editor.window makeKeyWindow];  // what activation does, with no click
     dispatch_events(100ms);
     REQUIRE(reports.empty());
     REQUIRE(popup->is_open());
-    REQUIRE(NSApp.keyWindow == panel);  // the popup took key back
+    REQUIRE(panel.isKeyWindow);  // the popup took key back
 }
 
 // Control for the case above: key moving anywhere other than the popup's own
@@ -281,6 +293,8 @@ TEST_CASE("key moving to an unrelated window closes the popup as focus_lost",
                                    [&](PopupDismissReason r) { reports.push_back(r); });
     REQUIRE(popup != nullptr);
     dispatch_events(30ms);
+    if (!static_cast<NSWindow*>((__bridge NSWindow*)popup->native_window()).isKeyWindow)
+        SKIP("this test session cannot hold a key window (the application is not active)");
     [other.window makeKeyWindow];
     REQUIRE(pump_until([&] { return !reports.empty(); }));
     REQUIRE(reports.size() == 1);

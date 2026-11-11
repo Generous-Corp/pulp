@@ -68,6 +68,23 @@ struct PopupWindowOptions {
 PopupRect place_popup(const PopupRect& anchor, float width, float height, const PopupRect& visible,
                       PopupPlacement placement);
 
+/// What a popup does once it has stopped being key and the key window has
+/// settled.
+enum class PopupResignAction {
+    /// It is key again; nothing to do.
+    stay_open,
+    /// Key went back to the popup's own editor window with no click (which
+    /// activating the application can do): take key again.
+    take_key_back,
+    /// Key went elsewhere, or the popup has already taken key back too many
+    /// times: close with PopupDismissReason::focus_lost.
+    close_focus_lost,
+};
+
+/// The decision behind focus_lost, as a pure function: `reclaims` is how many
+/// times this popup has already taken key back.
+PopupResignAction popup_resign_action(bool popup_is_key, bool parent_is_key, int reclaims);
+
 class PopupWindow {
   public:
     /// Open a popup for `options.view`. Returns nullptr when the view is not
