@@ -233,6 +233,16 @@ voices sound, and state save/restore. A stale-generation mutation must fail.
 The open G6 evidence candidate can inform the experiment, but its state does
 not promote a capability.
 
+**Traceable fixture:** the G-6 owner/status authority is
+`docs/graph-program-status/G-6.md`; the current bounded voice-bank consumer is
+`examples/g6-voice-bank-consumer` and its CMake driver is
+`test/cmake/test_g6_voice_bank_sdk_consumer.cmake`. Run the registered
+`cmake-g6-voice-bank-sdk-consumer` test from the Release build, then add the
+independent audio/tail oracle named by
+`docs/evidence/g6-audio-tail-qualification-hold-20261110.md`. The existing
+consumer proves binding/allocator controls only; it does not close graph voice
+audio, swap, persistence, or realtime qualification.
+
 ### P3: explicit spectral/frame conversion (conditional)
 
 The finite spectral morph and the newly merged analyzed-frame consumer are useful
@@ -248,6 +258,16 @@ that a second scheduler is necessary.
 latency receipt, EOF/tail, CPU fallback, and a planted geometry mutation. Without
 that consumer, keep this research-only.
 
+**Traceable fixture:** the analyzed-frame metadata receipt is
+`docs/evidence/g10-spectral-frame-consumer-receipt-20261111.md`, exercised by
+`examples/spectral-frame-codec-consumer` and
+`test/cmake/test_spectral_frame_codec_consumer.cmake`. The GPU boundary is
+captured separately in
+`docs/evidence/advanced-graph-gpu-resident-spectral-chain-2026-11-06.md`; its
+provider/device and fallback controls are evidence for a kernel, not graph-wide
+admission. A P3 promotion requires one named resynthesis consumer and a receipt
+that covers geometry, PDC, EOF/tail, fallback, and partition invariance.
+
 ### P4: shared model/resource admission (speculative)
 
 GPU and neural primitives should remain independent until two graph consumers
@@ -258,6 +278,11 @@ transition, and CPU fallback. Training and device discovery remain external.
 **Gate:** two independent consumers and a measured 64/128-frame workload with
 device-loss, fallback, allocation, and output-tolerance controls. No gate means
 no graph-wide GPU or neural scheduler.
+
+**Disposition:** **BLOCKED / SPECULATIVE.** Current GPU/neural examples are
+kernel- or processor-level consumers; no two independent graph consumers share
+the proposed model/resource admission contract. Keep P4 research-only until
+those consumers and a measured device-loss/fallback receipt exist.
 
 ## Ambitious examples as architecture tests
 
@@ -442,8 +467,10 @@ that reuses existing graph, MIDI, trigger, and voice primitives.
 * `docs/graph-program-status/G-11.md`
 * `docs/graph-program-status/G-9.md`
 * `docs/graph-program-status/A10-routing-hosting.md`
-* `docs/evidence/g9-production-isolation-followup-20261110.md`
-* `docs/evidence/g11-remainder-audit-20261110.md`
+* `docs/evidence/g9-production-isolation-followup-20261110.md` (historical
+  snapshot bound to an older origin; refresh before a commitment)
+* `docs/evidence/g11-remainder-audit-20261110.md` (historical snapshot bound to
+  an older origin; refresh before a commitment)
 * `examples/g3-resolved-identity-consumer/main.cpp`
 * `examples/g5-event-consumer/check_trace.py`
 * `examples/spectral-frame-codec-consumer/main.cpp`
