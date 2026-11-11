@@ -32,7 +32,7 @@ if(NOT _sdk_head STREQUAL _head OR _sdk_dirty)
     message(FATAL_ERROR "G6 installed SDK provenance mismatch: head=${_head} provenance=${_provenance}")
 endif()
 
-foreach(_file CMakeLists.txt main.cpp fixture.hpp README.md)
+foreach(_file CMakeLists.txt main.cpp fixture.hpp README.md verify_a1_reference.py)
     configure_file("${PULP_SOURCE_DIR}/examples/g6-voice-bank-consumer/${_file}"
         "${_source}/${_file}" COPYONLY)
 endforeach()
@@ -43,7 +43,8 @@ foreach(_relative
         examples/g6-voice-bank-consumer/CMakeLists.txt
         examples/g6-voice-bank-consumer/main.cpp
         examples/g6-voice-bank-consumer/fixture.hpp
-        examples/g6-voice-bank-consumer/README.md)
+        examples/g6-voice-bank-consumer/README.md
+        examples/g6-voice-bank-consumer/verify_a1_reference.py)
     file(SHA256 "${PULP_SOURCE_DIR}/${_relative}" _expected)
     if(_relative MATCHES "^examples/g6-voice-bank-consumer/")
         get_filename_component(_name "${_relative}" NAME)
@@ -57,6 +58,7 @@ foreach(_relative
         message(FATAL_ERROR "G6 committed-head hash mismatch: ${_relative}")
     endif()
 endforeach()
+run_step(a1-reference python3 "${_source}/verify_a1_reference.py")
 
 set(_config Release)
 if(PULP_PARENT_BUILD_TYPE)
