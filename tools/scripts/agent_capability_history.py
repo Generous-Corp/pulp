@@ -730,6 +730,49 @@ def _use_exact_base_authority(
     )
 
 
+# A merge queue holds at most a handful of entries, each one merge commit on
+# the group's first-parent chain, so the protected branch tip is always within
+# this many commits of the group head while the group is still valid.
+MERGE_GROUP_CHAIN_DEPTH = 16
+
+
+def _merge_group_protected_base(
+    root: pathlib.Path, base_ref: Any, base_sha: str
+) -> str:
+    """The protected branch tip a merge group builds on, else `base_sha`.
+
+    A merge group's `base_sha` is its parent in the queue: the previous
+    entry's group commit, which the protected branch has not accepted. Judging
+    a group against it validates only that entry's increment, so a group
+    queued behind a doomed entry inherits the entry's invalid capability
+    history as authority, passes, and lands both entries when the queue
+    merges on a green head. Every entry ahead must be checked as part of this
+    group's result, so the authority is the protected branch tip itself
+    (`base_ref`), provided it is on the group's history and `base_sha`
+    descends from it. Anything unproven keeps `base_sha`, the behaviour
+    before this resolution existed."""
+    if not isinstance(base_ref, str) or not base_ref.startswith("refs/heads/"):
+        return base_sha
+    listed = _git_output(root, ["ls-remote", "--refs", "origin", base_ref])
+    fields = (listed or "").split()
+    tip = fields[0].lower() if fields else ""
+    if not re.fullmatch(r"[0-9a-f]{40}", tip) or tip == base_sha:
+        return base_sha
+    # A CI checkout is shallow; bring the group's own chain in reach so the
+    # ancestry questions below are answerable. Deepening only adds history.
+    head = _git_output(root, ["rev-parse", "--verify", "HEAD^{commit}"])
+    if head is None:
+        return base_sha
+    if _git_output(root, ["rev-parse", "--is-shallow-repository"]) == "true":
+        _git_output(root, ["fetch", "--no-tags", "--quiet",
+                           f"--deepen={MERGE_GROUP_CHAIN_DEPTH}", "origin",
+                           head])
+    for descendant in (base_sha, head):
+        if _git_output(root, ["merge-base", "--is-ancestor", tip, descendant]) is None:
+            return base_sha
+    return tip
+
+
 def _resolve_protected_comparison(
     root: pathlib.Path, base_ref: str
 ) -> GitComparisonProvenance:
@@ -764,6 +807,9 @@ def _resolve_protected_comparison(
             candidate = candidate or (
                 merge_group.get("base_sha") if merge_group else None
             )
+            if candidate is not None and merge_group and not pull_base:
+                candidate = _merge_group_protected_base(
+                    root, merge_group.get("base_ref"), candidate)
             before = event.get("before")
             if (
                 candidate is None
