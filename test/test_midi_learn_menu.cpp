@@ -270,3 +270,88 @@ TEST_CASE("midi learn session: without an editor a clear still works",
     target.clear(kRes);
     CHECK(target.state(kRes).phase == Phase::idle);
 }
+
+// ── Refusal reason ──
+
+namespace {
+
+struct ClaimCc0 : state::MidiSourceReservation {
+    bool claims(const state::MidiSource& s) const noexcept override {
+        return s.kind == state::MidiSourceKind::cc7 && s.number == 0;
+    }
+    const char* reason() const noexcept override {
+        return "Bank Select / Program Change selects presets";
+    }
+};
+
+} // namespace
+
+TEST_CASE("midi learn menu: a refusal reason shows as a disabled row", "[view][midi-learn][menu]") {
+    Scripted s;
+    auto t = s.target();
+    s.st.refused_reason = "Bank Select / Program Change selects presets";
+    auto items = view::midi_learn_menu_items(t, kCut);
+    REQUIRE(items.size() == 2);
+    CHECK(items[0].label == "Cannot learn: Bank Select / Program Change selects presets");
+    CHECK_FALSE(items[0].enabled);
+    CHECK(items[1].label == "MIDI Learn");
+    CHECK(items[1].enabled);
+
+    // While listening there is nothing to explain.
+    s.st.phase = Phase::listening;
+    items = view::midi_learn_menu_items(t, kCut);
+    REQUIRE(items.size() == 1);
+    CHECK(items[0].label == "Cancel MIDI Learn");
+
+    // An existing mapping stays visible next to the reason.
+    s.st.phase = Phase::mapped;
+    s.st.mapping_label = "CC 74 ch 1";
+    items = view::midi_learn_menu_items(t, kCut);
+    CHECK(labels(items) ==
+          std::vector<std::string>{"Cannot learn: Bank Select / Program Change selects presets",
+                                   "MIDI Learn", "Mapped to CC 74 ch 1", "Clear MIDI Mapping"});
+}
+
+TEST_CASE("midi learn session: learning a reserved controller reports why, then it fades",
+          "[view][midi-learn][session]") {
+    state::StateStore store;
+    populate(store);
+    state::MidiLearnEngine engine;
+    ClaimCc0 claim;
+    engine.set_reservation(&claim);
+    std::uint64_t now = 1000;
+    view::MidiLearnSession session(engine, [&] { return now; });
+    auto target = session.target();
+
+    REQUIRE(view::run_midi_learn_menu_command(target, kCut, view::kMidiLearnCommandBegin));
+    engine.begin_block();
+    engine.route(store, state::RawMidi{0xB0, 0, 20});
+    engine.route(store, state::RawMidi{0xB0, 0, 90});
+    now += 10;
+    CHECK_FALSE(session.tick());
+    now += 400;
+    CHECK_FALSE(session.tick()); // refused, not bound
+
+    auto st = target.state(kCut);
+    CHECK(st.phase == Phase::idle);
+    CHECK(st.refused_reason == "Bank Select / Program Change selects presets");
+    // Only the parameter that was being learned reports it.
+    CHECK(target.state(kRes).refused_reason.empty());
+    auto items = view::midi_learn_menu_items(target, kCut);
+    REQUIRE(items.size() == 2);
+    CHECK(items[0].label.rfind("Cannot learn: ", 0) == 0);
+
+    now += view::MidiLearnSession::kRefusalShowMs + 1;
+    CHECK(target.state(kCut).refused_reason.empty());
+
+    // A successful learn afterwards carries no reason.
+    REQUIRE(view::run_midi_learn_menu_command(target, kCut, view::kMidiLearnCommandBegin));
+    engine.begin_block();
+    engine.route(store, state::RawMidi{0xB0, 74, 20});
+    engine.route(store, state::RawMidi{0xB0, 74, 70});
+    now += 10;
+    session.tick();
+    now += 400;
+    CHECK(session.tick());
+    CHECK(target.state(kCut).refused_reason.empty());
+}

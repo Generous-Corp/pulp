@@ -45,6 +45,10 @@ struct MidiLearnParamState {
     std::string mapping_label;
     /// True for a short time after a learn binds, so the overlay can confirm it.
     bool just_bound = false;
+    /// Why the last learn for this parameter was refused (for example the
+    /// controller is reserved by the plug-in), for a short time afterwards.
+    /// Empty otherwise. The menu shows it as a disabled row.
+    std::string refused_reason;
 };
 
 /// The calls the menu and overlay need. Any member may be empty; an empty
@@ -68,7 +72,8 @@ enum MidiLearnMenuCommand : int {
     kMidiLearnCommandClear = 0x4D4C03,
 };
 
-/// The menu rows for `param`: "MIDI Learn" (or "Cancel MIDI Learn" while this
+/// The menu rows for `param`: a disabled "Cannot learn: <reason>" row while a
+/// refusal is being reported, "MIDI Learn" (or "Cancel MIDI Learn" while this
 /// parameter is listening), a disabled "Mapped to CC 74 ch 1" label and
 /// "Clear MIDI Mapping" when it is mapped. Empty when MIDI Learn is not
 /// available, so a parameter menu can append the result unconditionally.
