@@ -1441,6 +1441,16 @@ Parameters, state trees, presets, and settings.
 
 **Link:** `pulp::state` · **Include prefix:** `<pulp/state/...>`
 
+### MIDI Learn
+
+`<pulp/state/midi_learn_engine.hpp>` maps hardware controllers (7-bit and 14-bit
+CC, NRPN/RPN, pitch bend, pressure) to parameters, learns a mapping from a burst
+of messages, saves it with the plug-in state, records edits for undo, and sends
+parameter values back to the controller. The pure decoders and the learn
+classifier are in `midi_decode.hpp` and `midi_learn.hpp`. See the
+[MIDI Learn guide](../guides/midi-learn.md); `MidiParameterMap` is superseded
+but still available.
+
 ### Plugin parameters — the core state system
 
 ```cpp
