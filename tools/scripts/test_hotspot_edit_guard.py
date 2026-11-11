@@ -183,10 +183,37 @@ class GuardTests(unittest.TestCase):
     def test_the_checked_in_registry_is_valid_and_its_fragments_exist(self) -> None:
         root = HERE.parents[1]
         for spot in guard.load_registry(root):
+            if spot.get("mode") == "serialized":
+                self.assertTrue((root / spot["path"]).is_file())
+                continue
             self.assertTrue((root / spot["fragments"]).is_dir(),
                             f"{spot['path']} is registered but {spot['fragments']} does not exist: "
                             "register a hotspot only once its fragments exist")
             self.assertFalse((root / spot["path"]).exists(), f"{spot['path']} is back beside its fragments")
+
+    def test_serialized_hotspot_requires_an_explicit_owner_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            serialized = "docs/status/consumption-profiles.json"
+            repo.write(serialized, "{}\n")
+            repo.commit("base", ".")
+            repo.git("branch", "base-ref")
+            repo.write(serialized, "{\"changed\": true}\n")
+            repo.commit("regenerate", serialized)
+            registry = Path(tmp) / "registry.json"
+            registry.write_text(json.dumps({
+                "schema": guard.SCHEMA,
+                "hotspots": [{
+                    "mode": "serialized", "path": serialized,
+                    "writer": "single owner",
+                }],
+            }), encoding="utf-8")
+            blocked = repo.run("--base", "base-ref", "--registry", str(registry))
+            self.assertEqual(blocked.returncode, 1, blocked.stdout + blocked.stderr)
+            self.assertIn("SERIALIZED_HOTSPOT_EDIT", blocked.stdout)
+            allowed = repo.run("--base", "base-ref", "--registry", str(registry),
+                               env={"PULP_ALLOW_SERIALIZED_HOTSPOT": "1"})
+            self.assertEqual(allowed.returncode, 0, allowed.stdout + allowed.stderr)
 
 
 if __name__ == "__main__":
