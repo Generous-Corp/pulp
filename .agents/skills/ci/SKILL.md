@@ -13576,3 +13576,21 @@ or a title naming the context beside a fix word) and reports other approved
 heads as `held_base_poisoned:<context>`. A held head is not broken: do not
 re-push it, the hold lifts once a merge group passes the context. The reviewer
 kick and priority file are machine-only keys and must stay out of this file.
+
+## Downloading another repository's Actions artifact
+
+`vellum-sdk-consumer.yml` reads Vellum's SDK artifact from Pulp's CI. Three things
+about that path are not obvious:
+
+- **A public repository's artifacts still need a token.** The artifact zip
+  endpoint refuses anonymous requests even when the repository is public;
+  `github.token` from any repository is enough.
+- **The token must not follow the redirect.** `actions/artifacts/<id>/zip`
+  answers with a redirect to signed blob storage, and that host rejects a
+  forwarded GitHub `Authorization` header with HTTP 401. Python's `urllib`
+  forwards it by default; `tools/ci/vellum_sdk_consumer.py` drops it on any
+  cross-host redirect. `curl -L` without `--location-trusted` already drops it.
+- **Skip by head, but only from a green run.** The nightly lane stops early when
+  Vellum main's head equals the head recorded in the last *successful* run's
+  receipt artifact, and it uploads that receipt only when the whole run is
+  green, so a red night is retried on the next one rather than forgotten.
