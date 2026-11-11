@@ -3040,9 +3040,9 @@ reported on.
 head sha is main's tip (`main_evidence_source: head-sha`). Under the MERGE
 method its runs tested exactly the commit on main. It is judged on **every
 required status context** — `.shipyard/config.toml` `[governance]
-required_status_checks` (six contexts: `macos`, `Enforce version & skill sync`,
+required_status_checks` (seven contexts: `macos`, `Enforce version & skill sync`,
 `Build + prove + (owner-gated) deploy`, `Vellum freeze`, `Vellum trusted
-freeze`, `drift-fast`) — gathered from the merge_group runs of every workflow in
+freeze`, `drift-fast`, `workflow-lint`) — gathered from the merge_group runs of every workflow in
 `[landability] workflows`: build.yml's jobs through the jobs API (their steps
 tell an executed `macos` suite from a reused receipt), the other workflows'
 jobs through one `commits/<sha>/check-runs` read kept to those runs' check
