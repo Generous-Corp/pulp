@@ -3521,8 +3521,12 @@ push reopens it while the count stays high.
 
 ## The flake-exoneration shadow annotation exonerates nothing
 
-A failed merge-group `macos` job carries `pulp-flake-exoneration-shadow/v1`
-(`tools/ci/flake_exoneration_shadow.py`): per failing test, `would_exonerate`
+A failed merge group carries `pulp-flake-exoneration-shadow/v1`
+(`tools/ci/flake_exoneration_shadow.py`) on its advisory
+`flake-exoneration-shadow (advisory)` job, not on `macos`: the job needs
+`build` and reads the macOS leg's `ctest-logs-macos` JUnit, so the red
+`macos` verdict (and the queue's ejection of the group) no longer waits
+~95 s for the shadow's API reads. Look for the annotation there. Per failing test, `would_exonerate`
 when it failed on >= 2 other heads in 24 h AND passes on main's tip, judged
 by the tip's required gate job. It is evidence, not a verdict:
 `base_poison_detector.py` records why cross-batch corroboration alone was
