@@ -92,6 +92,7 @@ def assess(data, baseline, final, mode, action, hygiene_at, deadline):
         "no_h_signal_to_worker_or_group": bool(w and all(e["a"] not in (w["a"], -w["b"])
             for e in selected(data, "H", "signal"))),
         "no_signal_after_reap": not selected(data, "A", "signal_after_reap"),
+        "no_nonretained_wait": not any(e["event"] == "nonretained_wait" for e in data),
         "no_fuse_before_verdict": not any(e["event"] == "fuse_expired" for e in data),
     }
     containment = bool(cleanup and cleanup["a"] == 0 and cleanup["b"] == 1 and
@@ -109,6 +110,8 @@ def assess(data, baseline, final, mode, action, hygiene_at, deadline):
             live_worker_at_refusal=bool(w and alive(w["a"])))
     elif mode == "census_error":
         common.update(actual_census_failure=bool(selected(data, "A", "census_error")),
+            independent_zombie_reservation=bool(w and len(group_rows) == 1 and
+                group_rows[0]["pid"] == w["a"] and group_rows[0]["state"].startswith("Z")),
             incomplete_unreaped=bool(cleanup and (cleanup["a"],cleanup["b"],cleanup["c"]) == (1,0,0)),
             post_cleanup_identity_retained=bool(obs and cleanup and obs["t_ns"] > cleanup["t_ns"] and
                                                 obs["a"] == 3 and obs["b"] == 1),

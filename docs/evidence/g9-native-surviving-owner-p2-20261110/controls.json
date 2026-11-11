@@ -1,0 +1,1076 @@
+[
+  {
+    "case": "host_eof",
+    "copy_sha256": "be8b2a56ec025ddfd55d07bb372698be12eacfc9fe538450abb0f3e31d3bde1a",
+    "name": "nonretained_wait",
+    "restored_context_sha256": "8a91ef05a74152bdee46d2bd2858dd411e8cb14e26293bf38be4b50ed75a9c7c",
+    "results": {
+      "broken": {
+        "new": {
+          "assertions": {
+            "actual_host_loss": true,
+            "actual_parent_separate_group": true,
+            "aliases_closed": true,
+            "baseline_precedes_loss": true,
+            "containment": true,
+            "final_reap_after_signals": true,
+            "final_reaped_state": true,
+            "live_descendant_before_loss": true,
+            "live_worker_and_owner_before_loss": true,
+            "native_census_observed": true,
+            "native_cloexec_observed": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_nonretained_wait": false,
+            "no_signal_after_reap": true,
+            "outer_census_positive_control": true,
+            "pre_hygiene_observation": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "successful_nonreaping_observation": true,
+            "term_and_kill_observed": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": true,
+          "failed": [
+            "no_nonretained_wait"
+          ],
+          "passed": false
+        },
+        "old": {
+          "assertions": {
+            "actual_host_loss": true,
+            "actual_parent_separate_group": true,
+            "aliases_closed": true,
+            "baseline_precedes_loss": true,
+            "containment": true,
+            "final_reap_after_signals": true,
+            "final_reaped_state": true,
+            "live_descendant_before_loss": true,
+            "live_worker_and_owner_before_loss": true,
+            "native_census_observed": true,
+            "native_cloexec_observed": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_signal_after_reap": true,
+            "outer_census_positive_control": true,
+            "pre_hygiene_observation": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "successful_nonreaping_observation": true,
+            "term_and_kill_observed": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": true,
+          "failed": [],
+          "passed": true
+        }
+      },
+      "positive": {
+        "new": {
+          "assertions": {
+            "actual_host_loss": true,
+            "actual_parent_separate_group": true,
+            "aliases_closed": true,
+            "baseline_precedes_loss": true,
+            "containment": true,
+            "final_reap_after_signals": true,
+            "final_reaped_state": true,
+            "live_descendant_before_loss": true,
+            "live_worker_and_owner_before_loss": true,
+            "native_census_observed": true,
+            "native_cloexec_observed": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_nonretained_wait": true,
+            "no_signal_after_reap": true,
+            "outer_census_positive_control": true,
+            "pre_hygiene_observation": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "successful_nonreaping_observation": true,
+            "term_and_kill_observed": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": true,
+          "failed": [],
+          "passed": true
+        },
+        "old": {
+          "assertions": {
+            "actual_host_loss": true,
+            "actual_parent_separate_group": true,
+            "aliases_closed": true,
+            "baseline_precedes_loss": true,
+            "containment": true,
+            "final_reap_after_signals": true,
+            "final_reaped_state": true,
+            "live_descendant_before_loss": true,
+            "live_worker_and_owner_before_loss": true,
+            "native_census_observed": true,
+            "native_cloexec_observed": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_signal_after_reap": true,
+            "outer_census_positive_control": true,
+            "pre_hygiene_observation": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "successful_nonreaping_observation": true,
+            "term_and_kill_observed": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": true,
+          "failed": [],
+          "passed": true
+        }
+      },
+      "restored": {
+        "new": {
+          "assertions": {
+            "actual_host_loss": true,
+            "actual_parent_separate_group": true,
+            "aliases_closed": true,
+            "baseline_precedes_loss": true,
+            "containment": true,
+            "final_reap_after_signals": true,
+            "final_reaped_state": true,
+            "live_descendant_before_loss": true,
+            "live_worker_and_owner_before_loss": true,
+            "native_census_observed": true,
+            "native_cloexec_observed": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_nonretained_wait": true,
+            "no_signal_after_reap": true,
+            "outer_census_positive_control": true,
+            "pre_hygiene_observation": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "successful_nonreaping_observation": true,
+            "term_and_kill_observed": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": true,
+          "failed": [],
+          "passed": true
+        },
+        "old": {
+          "assertions": {
+            "actual_host_loss": true,
+            "actual_parent_separate_group": true,
+            "aliases_closed": true,
+            "baseline_precedes_loss": true,
+            "containment": true,
+            "final_reap_after_signals": true,
+            "final_reaped_state": true,
+            "live_descendant_before_loss": true,
+            "live_worker_and_owner_before_loss": true,
+            "native_census_observed": true,
+            "native_cloexec_observed": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_signal_after_reap": true,
+            "outer_census_positive_control": true,
+            "pre_hygiene_observation": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "successful_nonreaping_observation": true,
+            "term_and_kill_observed": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": true,
+          "failed": [],
+          "passed": true
+        }
+      }
+    }
+  },
+  {
+    "case": "host_eof",
+    "copy_sha256": "e43d95a748a30f96033bd30acd8ebe5b50748a567ddd6bfde7e9adf6bf92edaa",
+    "name": "nonretained_wait_other_role",
+    "restored_context_sha256": "8a91ef05a74152bdee46d2bd2858dd411e8cb14e26293bf38be4b50ed75a9c7c",
+    "results": {
+      "broken": {
+        "new": {
+          "assertions": {
+            "actual_host_loss": true,
+            "actual_parent_separate_group": true,
+            "aliases_closed": true,
+            "baseline_precedes_loss": true,
+            "containment": true,
+            "final_reap_after_signals": true,
+            "final_reaped_state": true,
+            "live_descendant_before_loss": true,
+            "live_worker_and_owner_before_loss": true,
+            "native_census_observed": true,
+            "native_cloexec_observed": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_nonretained_wait": false,
+            "no_signal_after_reap": true,
+            "outer_census_positive_control": true,
+            "pre_hygiene_observation": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "successful_nonreaping_observation": true,
+            "term_and_kill_observed": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": true,
+          "failed": [
+            "no_nonretained_wait"
+          ],
+          "passed": false
+        },
+        "old": {
+          "assertions": {
+            "actual_host_loss": true,
+            "actual_parent_separate_group": true,
+            "aliases_closed": true,
+            "baseline_precedes_loss": true,
+            "containment": true,
+            "final_reap_after_signals": true,
+            "final_reaped_state": true,
+            "live_descendant_before_loss": true,
+            "live_worker_and_owner_before_loss": true,
+            "native_census_observed": true,
+            "native_cloexec_observed": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_signal_after_reap": true,
+            "outer_census_positive_control": true,
+            "pre_hygiene_observation": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "successful_nonreaping_observation": true,
+            "term_and_kill_observed": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": true,
+          "failed": [],
+          "passed": true
+        }
+      },
+      "positive": {
+        "new": {
+          "assertions": {
+            "actual_host_loss": true,
+            "actual_parent_separate_group": true,
+            "aliases_closed": true,
+            "baseline_precedes_loss": true,
+            "containment": true,
+            "final_reap_after_signals": true,
+            "final_reaped_state": true,
+            "live_descendant_before_loss": true,
+            "live_worker_and_owner_before_loss": true,
+            "native_census_observed": true,
+            "native_cloexec_observed": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_nonretained_wait": true,
+            "no_signal_after_reap": true,
+            "outer_census_positive_control": true,
+            "pre_hygiene_observation": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "successful_nonreaping_observation": true,
+            "term_and_kill_observed": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": true,
+          "failed": [],
+          "passed": true
+        },
+        "old": {
+          "assertions": {
+            "actual_host_loss": true,
+            "actual_parent_separate_group": true,
+            "aliases_closed": true,
+            "baseline_precedes_loss": true,
+            "containment": true,
+            "final_reap_after_signals": true,
+            "final_reaped_state": true,
+            "live_descendant_before_loss": true,
+            "live_worker_and_owner_before_loss": true,
+            "native_census_observed": true,
+            "native_cloexec_observed": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_signal_after_reap": true,
+            "outer_census_positive_control": true,
+            "pre_hygiene_observation": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "successful_nonreaping_observation": true,
+            "term_and_kill_observed": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": true,
+          "failed": [],
+          "passed": true
+        }
+      },
+      "restored": {
+        "new": {
+          "assertions": {
+            "actual_host_loss": true,
+            "actual_parent_separate_group": true,
+            "aliases_closed": true,
+            "baseline_precedes_loss": true,
+            "containment": true,
+            "final_reap_after_signals": true,
+            "final_reaped_state": true,
+            "live_descendant_before_loss": true,
+            "live_worker_and_owner_before_loss": true,
+            "native_census_observed": true,
+            "native_cloexec_observed": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_nonretained_wait": true,
+            "no_signal_after_reap": true,
+            "outer_census_positive_control": true,
+            "pre_hygiene_observation": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "successful_nonreaping_observation": true,
+            "term_and_kill_observed": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": true,
+          "failed": [],
+          "passed": true
+        },
+        "old": {
+          "assertions": {
+            "actual_host_loss": true,
+            "actual_parent_separate_group": true,
+            "aliases_closed": true,
+            "baseline_precedes_loss": true,
+            "containment": true,
+            "final_reap_after_signals": true,
+            "final_reaped_state": true,
+            "live_descendant_before_loss": true,
+            "live_worker_and_owner_before_loss": true,
+            "native_census_observed": true,
+            "native_cloexec_observed": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_signal_after_reap": true,
+            "outer_census_positive_control": true,
+            "pre_hygiene_observation": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "successful_nonreaping_observation": true,
+            "term_and_kill_observed": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": true,
+          "failed": [],
+          "passed": true
+        }
+      }
+    }
+  },
+  {
+    "case": "census_error",
+    "copy_sha256": "5bc892511477e296672016d212a7c485d7936f3be8c06f6f7ba7c6b7257a7a83",
+    "name": "census_missing_worker",
+    "restored_context_sha256": "b0266f129e56bca5aef5bc50b021826848aa4bfcacbd5573f08a3b820bec56bc",
+    "results": {
+      "broken": {
+        "new": {
+          "assertions": {
+            "actual_census_failure": true,
+            "actual_parent_separate_group": true,
+            "baseline_precedes_loss": true,
+            "incomplete_unreaped": true,
+            "independent_zombie_reservation": false,
+            "live_worker_and_owner_before_loss": true,
+            "no_custody_success": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_nonretained_wait": true,
+            "no_signal_after_reap": true,
+            "no_successful_reap": true,
+            "outer_census_positive_control": true,
+            "post_cleanup_identity_retained": true,
+            "pre_hygiene_observation": true,
+            "quarantine_alive": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": false,
+          "failed": [
+            "independent_zombie_reservation"
+          ],
+          "passed": false
+        },
+        "old": {
+          "assertions": {
+            "actual_census_failure": true,
+            "actual_parent_separate_group": true,
+            "baseline_precedes_loss": true,
+            "incomplete_unreaped": true,
+            "live_worker_and_owner_before_loss": true,
+            "no_custody_success": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_signal_after_reap": true,
+            "no_successful_reap": true,
+            "outer_census_positive_control": true,
+            "post_cleanup_identity_retained": true,
+            "pre_hygiene_observation": true,
+            "quarantine_alive": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": false,
+          "failed": [],
+          "passed": true
+        }
+      },
+      "positive": {
+        "new": {
+          "assertions": {
+            "actual_census_failure": true,
+            "actual_parent_separate_group": true,
+            "baseline_precedes_loss": true,
+            "incomplete_unreaped": true,
+            "independent_zombie_reservation": true,
+            "live_worker_and_owner_before_loss": true,
+            "no_custody_success": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_nonretained_wait": true,
+            "no_signal_after_reap": true,
+            "no_successful_reap": true,
+            "outer_census_positive_control": true,
+            "post_cleanup_identity_retained": true,
+            "pre_hygiene_observation": true,
+            "quarantine_alive": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": false,
+          "failed": [],
+          "passed": true
+        },
+        "old": {
+          "assertions": {
+            "actual_census_failure": true,
+            "actual_parent_separate_group": true,
+            "baseline_precedes_loss": true,
+            "incomplete_unreaped": true,
+            "live_worker_and_owner_before_loss": true,
+            "no_custody_success": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_signal_after_reap": true,
+            "no_successful_reap": true,
+            "outer_census_positive_control": true,
+            "post_cleanup_identity_retained": true,
+            "pre_hygiene_observation": true,
+            "quarantine_alive": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": false,
+          "failed": [],
+          "passed": true
+        }
+      },
+      "restored": {
+        "new": {
+          "assertions": {
+            "actual_census_failure": true,
+            "actual_parent_separate_group": true,
+            "baseline_precedes_loss": true,
+            "incomplete_unreaped": true,
+            "independent_zombie_reservation": true,
+            "live_worker_and_owner_before_loss": true,
+            "no_custody_success": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_nonretained_wait": true,
+            "no_signal_after_reap": true,
+            "no_successful_reap": true,
+            "outer_census_positive_control": true,
+            "post_cleanup_identity_retained": true,
+            "pre_hygiene_observation": true,
+            "quarantine_alive": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": false,
+          "failed": [],
+          "passed": true
+        },
+        "old": {
+          "assertions": {
+            "actual_census_failure": true,
+            "actual_parent_separate_group": true,
+            "baseline_precedes_loss": true,
+            "incomplete_unreaped": true,
+            "live_worker_and_owner_before_loss": true,
+            "no_custody_success": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_signal_after_reap": true,
+            "no_successful_reap": true,
+            "outer_census_positive_control": true,
+            "post_cleanup_identity_retained": true,
+            "pre_hygiene_observation": true,
+            "quarantine_alive": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": false,
+          "failed": [],
+          "passed": true
+        }
+      }
+    }
+  },
+  {
+    "case": "census_error",
+    "copy_sha256": "8f35276988738561df40123cddcec460d18774413c58c6a371dd52067b090d0b",
+    "name": "census_live_worker",
+    "restored_context_sha256": "b0266f129e56bca5aef5bc50b021826848aa4bfcacbd5573f08a3b820bec56bc",
+    "results": {
+      "broken": {
+        "new": {
+          "assertions": {
+            "actual_census_failure": true,
+            "actual_parent_separate_group": true,
+            "baseline_precedes_loss": true,
+            "incomplete_unreaped": true,
+            "independent_zombie_reservation": false,
+            "live_worker_and_owner_before_loss": true,
+            "no_custody_success": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_nonretained_wait": true,
+            "no_signal_after_reap": true,
+            "no_successful_reap": true,
+            "outer_census_positive_control": true,
+            "post_cleanup_identity_retained": true,
+            "pre_hygiene_observation": true,
+            "quarantine_alive": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": false,
+          "failed": [
+            "independent_zombie_reservation"
+          ],
+          "passed": false
+        },
+        "old": {
+          "assertions": {
+            "actual_census_failure": true,
+            "actual_parent_separate_group": true,
+            "baseline_precedes_loss": true,
+            "incomplete_unreaped": true,
+            "live_worker_and_owner_before_loss": true,
+            "no_custody_success": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_signal_after_reap": true,
+            "no_successful_reap": true,
+            "outer_census_positive_control": true,
+            "post_cleanup_identity_retained": true,
+            "pre_hygiene_observation": true,
+            "quarantine_alive": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": false,
+          "failed": [],
+          "passed": true
+        }
+      },
+      "positive": {
+        "new": {
+          "assertions": {
+            "actual_census_failure": true,
+            "actual_parent_separate_group": true,
+            "baseline_precedes_loss": true,
+            "incomplete_unreaped": true,
+            "independent_zombie_reservation": true,
+            "live_worker_and_owner_before_loss": true,
+            "no_custody_success": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_nonretained_wait": true,
+            "no_signal_after_reap": true,
+            "no_successful_reap": true,
+            "outer_census_positive_control": true,
+            "post_cleanup_identity_retained": true,
+            "pre_hygiene_observation": true,
+            "quarantine_alive": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": false,
+          "failed": [],
+          "passed": true
+        },
+        "old": {
+          "assertions": {
+            "actual_census_failure": true,
+            "actual_parent_separate_group": true,
+            "baseline_precedes_loss": true,
+            "incomplete_unreaped": true,
+            "live_worker_and_owner_before_loss": true,
+            "no_custody_success": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_signal_after_reap": true,
+            "no_successful_reap": true,
+            "outer_census_positive_control": true,
+            "post_cleanup_identity_retained": true,
+            "pre_hygiene_observation": true,
+            "quarantine_alive": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": false,
+          "failed": [],
+          "passed": true
+        }
+      },
+      "restored": {
+        "new": {
+          "assertions": {
+            "actual_census_failure": true,
+            "actual_parent_separate_group": true,
+            "baseline_precedes_loss": true,
+            "incomplete_unreaped": true,
+            "independent_zombie_reservation": true,
+            "live_worker_and_owner_before_loss": true,
+            "no_custody_success": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_nonretained_wait": true,
+            "no_signal_after_reap": true,
+            "no_successful_reap": true,
+            "outer_census_positive_control": true,
+            "post_cleanup_identity_retained": true,
+            "pre_hygiene_observation": true,
+            "quarantine_alive": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": false,
+          "failed": [],
+          "passed": true
+        },
+        "old": {
+          "assertions": {
+            "actual_census_failure": true,
+            "actual_parent_separate_group": true,
+            "baseline_precedes_loss": true,
+            "incomplete_unreaped": true,
+            "live_worker_and_owner_before_loss": true,
+            "no_custody_success": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_signal_after_reap": true,
+            "no_successful_reap": true,
+            "outer_census_positive_control": true,
+            "post_cleanup_identity_retained": true,
+            "pre_hygiene_observation": true,
+            "quarantine_alive": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": false,
+          "failed": [],
+          "passed": true
+        }
+      }
+    }
+  },
+  {
+    "case": "census_error",
+    "copy_sha256": "593097452df711df775f08a82fec1534bf6083607496b17d2f1b08a03a97a509",
+    "name": "census_extra_member_live",
+    "restored_context_sha256": "b0266f129e56bca5aef5bc50b021826848aa4bfcacbd5573f08a3b820bec56bc",
+    "results": {
+      "broken": {
+        "new": {
+          "assertions": {
+            "actual_census_failure": true,
+            "actual_parent_separate_group": true,
+            "baseline_precedes_loss": true,
+            "incomplete_unreaped": true,
+            "independent_zombie_reservation": false,
+            "live_worker_and_owner_before_loss": true,
+            "no_custody_success": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_nonretained_wait": true,
+            "no_signal_after_reap": true,
+            "no_successful_reap": true,
+            "outer_census_positive_control": true,
+            "post_cleanup_identity_retained": true,
+            "pre_hygiene_observation": true,
+            "quarantine_alive": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": false,
+          "failed": [
+            "independent_zombie_reservation"
+          ],
+          "passed": false
+        },
+        "old": {
+          "assertions": {
+            "actual_census_failure": true,
+            "actual_parent_separate_group": true,
+            "baseline_precedes_loss": true,
+            "incomplete_unreaped": true,
+            "live_worker_and_owner_before_loss": true,
+            "no_custody_success": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_signal_after_reap": true,
+            "no_successful_reap": true,
+            "outer_census_positive_control": true,
+            "post_cleanup_identity_retained": true,
+            "pre_hygiene_observation": true,
+            "quarantine_alive": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": false,
+          "failed": [],
+          "passed": true
+        }
+      },
+      "positive": {
+        "new": {
+          "assertions": {
+            "actual_census_failure": true,
+            "actual_parent_separate_group": true,
+            "baseline_precedes_loss": true,
+            "incomplete_unreaped": true,
+            "independent_zombie_reservation": true,
+            "live_worker_and_owner_before_loss": true,
+            "no_custody_success": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_nonretained_wait": true,
+            "no_signal_after_reap": true,
+            "no_successful_reap": true,
+            "outer_census_positive_control": true,
+            "post_cleanup_identity_retained": true,
+            "pre_hygiene_observation": true,
+            "quarantine_alive": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": false,
+          "failed": [],
+          "passed": true
+        },
+        "old": {
+          "assertions": {
+            "actual_census_failure": true,
+            "actual_parent_separate_group": true,
+            "baseline_precedes_loss": true,
+            "incomplete_unreaped": true,
+            "live_worker_and_owner_before_loss": true,
+            "no_custody_success": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_signal_after_reap": true,
+            "no_successful_reap": true,
+            "outer_census_positive_control": true,
+            "post_cleanup_identity_retained": true,
+            "pre_hygiene_observation": true,
+            "quarantine_alive": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": false,
+          "failed": [],
+          "passed": true
+        }
+      },
+      "restored": {
+        "new": {
+          "assertions": {
+            "actual_census_failure": true,
+            "actual_parent_separate_group": true,
+            "baseline_precedes_loss": true,
+            "incomplete_unreaped": true,
+            "independent_zombie_reservation": true,
+            "live_worker_and_owner_before_loss": true,
+            "no_custody_success": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_nonretained_wait": true,
+            "no_signal_after_reap": true,
+            "no_successful_reap": true,
+            "outer_census_positive_control": true,
+            "post_cleanup_identity_retained": true,
+            "pre_hygiene_observation": true,
+            "quarantine_alive": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": false,
+          "failed": [],
+          "passed": true
+        },
+        "old": {
+          "assertions": {
+            "actual_census_failure": true,
+            "actual_parent_separate_group": true,
+            "baseline_precedes_loss": true,
+            "incomplete_unreaped": true,
+            "live_worker_and_owner_before_loss": true,
+            "no_custody_success": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_signal_after_reap": true,
+            "no_successful_reap": true,
+            "outer_census_positive_control": true,
+            "post_cleanup_identity_retained": true,
+            "pre_hygiene_observation": true,
+            "quarantine_alive": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": false,
+          "failed": [],
+          "passed": true
+        }
+      }
+    }
+  },
+  {
+    "case": "census_error",
+    "copy_sha256": "56570cde4ee79bc40c4dc0b6a74fe180a6e6902fb63de5c7bb5ad1a206fc0b18",
+    "name": "census_extra_member_zombie",
+    "restored_context_sha256": "b0266f129e56bca5aef5bc50b021826848aa4bfcacbd5573f08a3b820bec56bc",
+    "results": {
+      "broken": {
+        "new": {
+          "assertions": {
+            "actual_census_failure": true,
+            "actual_parent_separate_group": true,
+            "baseline_precedes_loss": true,
+            "incomplete_unreaped": true,
+            "independent_zombie_reservation": false,
+            "live_worker_and_owner_before_loss": true,
+            "no_custody_success": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_nonretained_wait": true,
+            "no_signal_after_reap": true,
+            "no_successful_reap": true,
+            "outer_census_positive_control": true,
+            "post_cleanup_identity_retained": true,
+            "pre_hygiene_observation": true,
+            "quarantine_alive": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": false,
+          "failed": [
+            "independent_zombie_reservation"
+          ],
+          "passed": false
+        },
+        "old": {
+          "assertions": {
+            "actual_census_failure": true,
+            "actual_parent_separate_group": true,
+            "baseline_precedes_loss": true,
+            "incomplete_unreaped": true,
+            "live_worker_and_owner_before_loss": true,
+            "no_custody_success": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_signal_after_reap": true,
+            "no_successful_reap": true,
+            "outer_census_positive_control": true,
+            "post_cleanup_identity_retained": true,
+            "pre_hygiene_observation": true,
+            "quarantine_alive": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": false,
+          "failed": [],
+          "passed": true
+        }
+      },
+      "positive": {
+        "new": {
+          "assertions": {
+            "actual_census_failure": true,
+            "actual_parent_separate_group": true,
+            "baseline_precedes_loss": true,
+            "incomplete_unreaped": true,
+            "independent_zombie_reservation": true,
+            "live_worker_and_owner_before_loss": true,
+            "no_custody_success": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_nonretained_wait": true,
+            "no_signal_after_reap": true,
+            "no_successful_reap": true,
+            "outer_census_positive_control": true,
+            "post_cleanup_identity_retained": true,
+            "pre_hygiene_observation": true,
+            "quarantine_alive": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": false,
+          "failed": [],
+          "passed": true
+        },
+        "old": {
+          "assertions": {
+            "actual_census_failure": true,
+            "actual_parent_separate_group": true,
+            "baseline_precedes_loss": true,
+            "incomplete_unreaped": true,
+            "live_worker_and_owner_before_loss": true,
+            "no_custody_success": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_signal_after_reap": true,
+            "no_successful_reap": true,
+            "outer_census_positive_control": true,
+            "post_cleanup_identity_retained": true,
+            "pre_hygiene_observation": true,
+            "quarantine_alive": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": false,
+          "failed": [],
+          "passed": true
+        }
+      },
+      "restored": {
+        "new": {
+          "assertions": {
+            "actual_census_failure": true,
+            "actual_parent_separate_group": true,
+            "baseline_precedes_loss": true,
+            "incomplete_unreaped": true,
+            "independent_zombie_reservation": true,
+            "live_worker_and_owner_before_loss": true,
+            "no_custody_success": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_nonretained_wait": true,
+            "no_signal_after_reap": true,
+            "no_successful_reap": true,
+            "outer_census_positive_control": true,
+            "post_cleanup_identity_retained": true,
+            "pre_hygiene_observation": true,
+            "quarantine_alive": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": false,
+          "failed": [],
+          "passed": true
+        },
+        "old": {
+          "assertions": {
+            "actual_census_failure": true,
+            "actual_parent_separate_group": true,
+            "baseline_precedes_loss": true,
+            "incomplete_unreaped": true,
+            "live_worker_and_owner_before_loss": true,
+            "no_custody_success": true,
+            "no_fuse_before_verdict": true,
+            "no_h_signal_to_worker_or_group": true,
+            "no_signal_after_reap": true,
+            "no_successful_reap": true,
+            "outer_census_positive_control": true,
+            "post_cleanup_identity_retained": true,
+            "pre_hygiene_observation": true,
+            "quarantine_alive": true,
+            "ready_before_trigger": true,
+            "reservation_retained_before_trigger": true,
+            "vendor_only_in_worker": true,
+            "within_fixed_deadline": true
+          },
+          "containment_oracle": false,
+          "failed": [],
+          "passed": true
+        }
+      }
+    }
+  }
+]

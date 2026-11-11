@@ -1,0 +1,82 @@
+{
+  "all_assets_byte_identical": true,
+  "assets": [
+    {
+      "actual": {
+        "sha256": "d1cdaa7e3d20461eb216cde32befc61b73d47c2ef158b49277ddf95e5b8ed9aa",
+        "size": 117432
+      },
+      "bound_path": "build/g9-native-surviving-owner/g9-native-surviving-owner",
+      "byte_identical_hash": true,
+      "expected": {
+        "sha256": "d1cdaa7e3d20461eb216cde32befc61b73d47c2ef158b49277ddf95e5b8ed9aa",
+        "size": 117432
+      },
+      "fresh_path": "build/g9-native-p2-fresh/g9-native-surviving-owner"
+    },
+    {
+      "actual": {
+        "sha256": "de297beadf6dad063f2ef8c464762e775869d4a291735d33f918ec558377a996",
+        "size": 35688
+      },
+      "bound_path": "build/g9-native-surviving-owner/libg9-native-hung-vendor.so",
+      "byte_identical_hash": true,
+      "expected": {
+        "sha256": "de297beadf6dad063f2ef8c464762e775869d4a291735d33f918ec558377a996",
+        "size": 35688
+      },
+      "fresh_path": "build/g9-native-p2-fresh/libg9-native-hung-vendor.so"
+    }
+  ],
+  "base_commit": "2c1e6201feb2d26d980c71457f5865825848511b",
+  "build_log_sha256": "5b4080d9e2c758af9251d5ccc0c7714382bc0b5e3b7e55547888a5c6a677a099",
+  "configure_log_sha256": "e42759b070829524404afbb4d84b583c07d2c49f2d40cf2882a5598a027c00a0",
+  "fixture_runs": 0,
+  "fresh_compile_commands": [
+    {
+      "command": "/usr/bin/c++ -I/Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-p2-20261110/core/platform/include -O3 -DNDEBUG -std=gnu++20 -arch arm64 -mmacosx-version-min=13.4 -o CMakeFiles/g9-native-surviving-owner.dir/fixture.cpp.o -c /Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-p2-20261110/test/fixtures/g9_native_surviving_owner/fixture.cpp",
+      "directory": "/Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-p2-20261110/build/g9-native-p2-fresh",
+      "file": "/Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-p2-20261110/test/fixtures/g9_native_surviving_owner/fixture.cpp",
+      "output": "/Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-p2-20261110/build/g9-native-p2-fresh/CMakeFiles/g9-native-surviving-owner.dir/fixture.cpp.o"
+    },
+    {
+      "command": "/usr/bin/c++ -I/Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-p2-20261110/core/platform/include -O3 -DNDEBUG -std=gnu++20 -arch arm64 -mmacosx-version-min=13.4 -o CMakeFiles/g9-native-surviving-owner.dir/Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-p2-20261110/core/platform/platform/posix/child_process_posix.cpp.o -c /Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-p2-20261110/core/platform/platform/posix/child_process_posix.cpp",
+      "directory": "/Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-p2-20261110/build/g9-native-p2-fresh",
+      "file": "/Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-p2-20261110/core/platform/platform/posix/child_process_posix.cpp",
+      "output": "/Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-p2-20261110/build/g9-native-p2-fresh/CMakeFiles/g9-native-surviving-owner.dir/Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-p2-20261110/core/platform/platform/posix/child_process_posix.cpp.o"
+    },
+    {
+      "command": "/usr/bin/c++ -Dg9_native_hung_vendor_EXPORTS -O3 -DNDEBUG -std=gnu++20 -arch arm64 -mmacosx-version-min=13.4 -fPIC -o CMakeFiles/g9-native-hung-vendor.dir/vendor.cpp.o -c /Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-p2-20261110/test/fixtures/g9_native_surviving_owner/vendor.cpp",
+      "directory": "/Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-p2-20261110/build/g9-native-p2-fresh",
+      "file": "/Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-p2-20261110/test/fixtures/g9_native_surviving_owner/vendor.cpp",
+      "output": "/Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-p2-20261110/build/g9-native-p2-fresh/CMakeFiles/g9-native-hung-vendor.dir/vendor.cpp.o"
+    }
+  ],
+  "log_normalization": "Only terminal blank lines removed.",
+  "same_committed_compiled_inputs": {
+    "core/platform/include/pulp/platform/child_process.hpp": {
+      "actual": "df6c01029210d4d6a56551dacca7f66ae6bc9454b76e3a377e2a11d6e8f757d0",
+      "expected": "df6c01029210d4d6a56551dacca7f66ae6bc9454b76e3a377e2a11d6e8f757d0"
+    },
+    "core/platform/platform/posix/child_process_posix.cpp": {
+      "actual": "6930374a7a825f36abac7ae325af9726c702abfc6769c2ef0af4b39fba83a951",
+      "expected": "6930374a7a825f36abac7ae325af9726c702abfc6769c2ef0af4b39fba83a951"
+    },
+    "test/fixtures/g9_native_surviving_owner/CMakeLists.txt": {
+      "actual": "fc9e1ede1719f23055003a5c784cee416f12635b12f1299da0209ba3a4918bcb",
+      "expected": "fc9e1ede1719f23055003a5c784cee416f12635b12f1299da0209ba3a4918bcb"
+    },
+    "test/fixtures/g9_native_surviving_owner/fixture.cpp": {
+      "actual": "f8c9518585e15702434a3d80afa9835f5df2bf132c182788bbb749528743f129",
+      "expected": "f8c9518585e15702434a3d80afa9835f5df2bf132c182788bbb749528743f129"
+    },
+    "test/fixtures/g9_native_surviving_owner/record.hpp": {
+      "actual": "9aedc06a82dc01966a300b3349c3bc0ab0ca6e899031f88dfb153735626333d1",
+      "expected": "9aedc06a82dc01966a300b3349c3bc0ab0ca6e899031f88dfb153735626333d1"
+    },
+    "test/fixtures/g9_native_surviving_owner/vendor.cpp": {
+      "actual": "f2999d8d89051ac60046263dffb835422438cddff4665e76d6a0e33d6b392880",
+      "expected": "f2999d8d89051ac60046263dffb835422438cddff4665e76d6a0e33d6b392880"
+    }
+  }
+}
