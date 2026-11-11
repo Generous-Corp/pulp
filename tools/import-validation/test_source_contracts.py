@@ -350,6 +350,30 @@ class SourceContractsTest(unittest.TestCase):
             ],
         )
 
+    def test_recheck_requires_a_verification_note_naming_the_date(self) -> None:
+        today = dt.date(2026, 11, 12)
+        base = {"recheck_interval_days": 90, "last_verified": "2026-11-11"}
+        cases = {
+            "no-note": {},
+            "empty-note": {"verification_note": "  "},
+            "other-date": {"verification_note": "2026-11-09: parse_x (3 cases) passed offline"},
+            "bare-date": {"verification_note": "2026-11-11"},
+            "evidenced": {"verification_note": "2026-11-11: parse_x (3 cases) passed offline"},
+        }
+        findings: list = []
+        for name, extra in cases.items():
+            checker._check_cadence(findings, {"source": name, **base, **extra}, today)
+        # Before the rule's start date a note is not required: older rechecks stay as they were.
+        checker._check_cadence(findings, {"source": "pre-rule", "recheck_interval_days": 90, "last_verified": "2026-11-01"}, today)
+        self.assertEqual(
+            [(finding.source, finding.code) for finding in findings],
+            [
+                ("no-note", "unevidenced-verification"),
+                ("empty-note", "unevidenced-verification"),
+                ("other-date", "unevidenced-verification"),
+                ("bare-date", "unevidenced-verification"),
+            ],
+        )
     def test_cadence_warns_within_the_window_before_the_due_date(self) -> None:
         today = dt.date(2026, 11, 3)
         entry = {"source": "figma", "last_verified": "2026-08-12", "recheck_interval_days": 90}
@@ -377,10 +401,10 @@ class SourceContractsTest(unittest.TestCase):
 
     def test_due_or_overdue_rechecks_never_fail_strict_and_annotate_on_actions(self) -> None:
         registry = _load_registry()
-        for source, verified in (("stitch", "2020-01-01"), ("figma", None)):
+        for source, verified in (("stitch", "2020-01-01"), ("figma", "2026-11-09")):
             entry = _contract(registry, source)
             entry["recheck_interval_days"] = 3
-            entry["last_verified"] = verified or dt.date.today().isoformat()
+            entry["last_verified"] = verified
         with tempfile.TemporaryDirectory() as td:
             registry_path = _write_registry(Path(td), registry)
             cmd = [

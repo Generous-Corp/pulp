@@ -12,6 +12,7 @@
   ],
   "sources": [],
   "spawning_sources": [
+   "test/support/au_component_registration.hpp",
    "test/test_host_probe_bundles.cpp"
   ],
   "spawns": "declared",
