@@ -500,13 +500,17 @@ TEST_CASE("Isolated CLAP cross-process publication wraps slots with changing aud
     REQUIRE(result.slot->prepare(48000, 64));
     Buffers buffers;
     std::array<float, 128> previous{};
-    for (int block = 0; block < 1024; ++block) {
+    // 96 publications wrap the kSlots=3 ring 32 times and cover every one of
+    // the 31 audio scales three times. Each publication is one more chance for
+    // a shared CI host to stall the polling worker past the slack below, which
+    // ends the stream as deadline_missed (1024 x 20ms failed at 565 and 796).
+    for (int block = 0; block < 96; ++block) {
         buffers.fill(static_cast<float>(1 + block % 31) / 32);
         // This checks ownership and sample identity, not a scheduling budget.
         // Keep explicit functional slack on shared CI hosts; paced RT admission
         // requires a separate quiet-host qualification lane.
         if (block)
-            std::this_thread::sleep_for(20ms);
+            std::this_thread::sleep_for(100ms);
         buffers.process(*result.slot);
         INFO("publication=" << block);
         REQUIRE(result.control->status().reason == IsolationReason::none);

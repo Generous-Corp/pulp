@@ -111,3 +111,9 @@ host's measured load was 80.61/40.86/38.23. This failed timing observation is
 retained; the data-publication functional control now uses explicit 20ms
 slack. Neither functional pass nor that slack establishes paced realtime
 admission or a guarantee on an oversubscribed host.
+
+The required macOS gate at `4cb9181db20244c723f6a85e0beb4599366d701f` then hit
+the same terminal deadline response with 20ms slack, at publications 796/1024
+and 565/1024 on its two attempts. The control now runs 96 publications (32
+wraps of the three-slot ring, every audio scale three times) with 100ms slack.
+That lowers exposure to host stalls; it is still not a realtime guarantee.
