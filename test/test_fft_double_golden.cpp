@@ -27,6 +27,7 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <limits>
 #include <sstream>
 #include <vector>
 
@@ -192,13 +193,16 @@ std::vector<std::complex<double>> input() {
 }
 
 // Empty when every value matches; otherwise a one-line summary of the drift.
-std::string compare(const std::vector<std::complex<double>>& got, const std::uint64_t* want) {
+std::string compare(const std::vector<std::complex<double>>& got, const std::uint64_t* want,
+                    bool bit_exact = kBitExact) {
     std::size_t differing = 0;
     std::uint64_t max_ulp = 0;
     double max_abs = 0.0;
+    bool non_finite = false;
     for (std::size_t k = 0; k < got.size(); ++k) {
         const double parts[2] = {got[k].real(), got[k].imag()};
         for (int p = 0; p < 2; ++p) {
+            non_finite |= !std::isfinite(parts[p]);
             const std::uint64_t a = std::bit_cast<std::uint64_t>(parts[p]);
             const std::uint64_t b = want[2 * k + static_cast<std::size_t>(p)];
             if (a == b)
@@ -211,9 +215,11 @@ std::string compare(const std::vector<std::complex<double>>& got, const std::uin
             max_abs = std::max(max_abs, std::abs(parts[p] - std::bit_cast<double>(b)));
         }
     }
+    if (non_finite)
+        return "non-finite transform result";
     if (differing == 0)
         return {};
-    if (!kBitExact) {
+    if (!bit_exact) {
         double peak = 0.0;
         for (std::size_t k = 0; k < got.size(); ++k)
             peak = std::max({peak, std::abs(std::bit_cast<double>(want[2 * k])),
@@ -249,6 +255,17 @@ TEST_CASE("FftT<double> inverse of the golden forward matches the committed roun
     const auto drift = compare(f, kRoundTrip);
     INFO(drift);
     CHECK(drift.empty());
+}
+
+TEST_CASE("the tolerant golden comparison rejects non-finite transform results",
+          "[signal][fft][golden][negative-control]") {
+    std::vector<std::complex<double>> values(kN);
+    for (std::size_t k = 0; k < values.size(); ++k)
+        values[k] = {std::bit_cast<double>(kForward[2 * k]),
+                     std::bit_cast<double>(kForward[2 * k + 1])};
+    values.front().real(std::numeric_limits<double>::quiet_NaN());
+
+    CHECK_FALSE(compare(values, kForward, false).empty());
 }
 
 TEST_CASE("the golden inputs are exact, so only the transform rounds", "[signal][fft][golden]") {
