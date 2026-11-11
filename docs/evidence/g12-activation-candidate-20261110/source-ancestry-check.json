@@ -1,0 +1,7 @@
+{
+  "tested_source_commit": "e893f20d0048dfc11536c4b688d11be97ba9e167",
+  "origin_main": "00b32b2722d3ecf2a498a55c7a063d80678803ea",
+  "source_is_ancestor_of_origin_main": true,
+  "source_is_ancestor_of_checked_out_head": true,
+  "source_files_match": true
+}

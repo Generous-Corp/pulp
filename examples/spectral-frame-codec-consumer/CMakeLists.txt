@@ -18,3 +18,7 @@ add_test(NAME spectral-frame-codec-consumer-planted-unknown-profile
          COMMAND spectral-frame-codec-consumer --planted-unknown-profile)
 set_tests_properties(spectral-frame-codec-consumer-planted-unknown-profile
                      PROPERTIES WILL_FAIL TRUE)
+add_test(NAME spectral-frame-codec-consumer-planted-frame-chronology
+         COMMAND spectral-frame-codec-consumer --planted-frame-chronology)
+set_tests_properties(spectral-frame-codec-consumer-planted-frame-chronology
+                     PROPERTIES WILL_FAIL TRUE)

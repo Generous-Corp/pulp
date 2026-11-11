@@ -374,6 +374,45 @@ def case_hook_wiring(fx: Fixture) -> None:
     assert decisions == ["warned", "refused", "refused"], decisions
 
 
+STUB_SKILL_SYNC = """import os, sys
+from pathlib import Path
+Path(os.environ["STUB_SSC_MARKER"]).write_text(" ".join(sys.argv[1:]))
+print("[playback] stub skill-sync verdict")
+raise SystemExit(int(os.environ.get("STUB_SSC_RC", "0")))
+"""
+
+
+def case_agent_skip_still_runs_skill_sync(fx: Fixture) -> None:
+    """PULP_SKIP_PREPUSH skips skill-sync for a human, never for an agent push."""
+    feat = fx.setup()
+    marker = fx.tmp / "skill-sync-ran"
+    (fx.repo / "tools/scripts").mkdir(parents=True, exist_ok=True)
+    (fx.repo / "tools/scripts/skill_sync_check.py").write_text(STUB_SKILL_SYNC, encoding="utf-8")
+    (fx.repo / "tools/scripts/versioning.json").write_text("{}\n", encoding="utf-8")
+
+    def push(**extra: str) -> subprocess.CompletedProcess:
+        marker.unlink(missing_ok=True)
+        return fx.run_hook(feat, PULP_SKIP_PREPUSH="1", STUB_SSC_MARKER=str(marker), **extra)
+
+    res = push(SHIPYARD_AGENT_ID="repair-lane", STUB_SSC_RC="1")
+    assert res.returncode == 1, (res.returncode, res.stderr)
+    assert "does not skip skill-sync for an agent push" in res.stderr, res.stderr
+    recorded = marker.read_text(encoding="utf-8")
+    assert "--base origin/main" in recorded, recorded
+
+    res = push(SHIPYARD_AGENT_ID="repair-lane", STUB_SSC_RC="0")
+    assert res.returncode == 0 and "skipping gates" in res.stderr, res.stderr
+    assert marker.exists()
+
+    res = push(SHIPYARD_AGENT_ID="repair-lane", STUB_SSC_RC="2")
+    assert res.returncode == 0 and "skill-sync could not run" in res.stderr, res.stderr
+
+    # A human skip is unchanged: the check does not run at all.
+    res = push(STUB_SSC_RC="1")
+    assert res.returncode == 0 and "skipping gates" in res.stderr, res.stderr
+    assert not marker.exists(), "skill-sync ran for a non-agent skip"
+
+
 def case_script_failure_is_not_masked_by_not_checked(fx: Fixture) -> None:
     script = fx.tmp / "failing.py"
     script.write_text("print('NOT CHECKED locally: compiled inventory'); raise SystemExit(1)\n", encoding="utf-8")

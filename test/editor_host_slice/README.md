@@ -66,11 +66,17 @@ is configured.
 
 ## Temporary shims
 
-- Vellum's mirrored units still use `pulp::` namespaces, so the Vellum-side
-  code lives in its own shared library behind a std-only boundary
-  (`vellum_ui/knob_panel.hpp`), and macOS two-level namespaces keep its
-  references bound to Vellum's libraries. The `pulp::` → `vellum::` rename
-  removes the need for that separation.
+- Vellum SDK 0.1.10 and older spell the mirrored units `pulp::` (`<pulp/...>`
+  headers); later SDKs spell them `vellum::`. `vellum_ui/mirror_spelling.hpp`
+  picks the installed spelling, so the Vellum-side code builds against either,
+  and a compile check (`editor-host-slice-mirror-spelling-*`) covers both
+  layouts. `check_symbols.py` reads the spelling from the SDK's headers and
+  holds the Vellum-side library to it (`editor-host-check-symbols-selftest`).
+  With a `pulp::` SDK the mirrored units define the same names as Pulp's own
+  view and canvas, so the Vellum-side code lives in its own shared library
+  behind a std-only boundary (`vellum_ui/knob_panel.hpp`), and macOS two-level
+  namespaces keep its references bound to Vellum's libraries. Both go once the
+  pinned Vellum SDK is 0.2.0 or later (renamed mirror only).
 - The installed SDK packages no foreign-window host for a mirrored view tree
   (`PluginViewHost::create` is in the unpackaged view-tooling unit). The Vellum
   editor therefore takes frames from `render_to_rgba` and shows them in a
