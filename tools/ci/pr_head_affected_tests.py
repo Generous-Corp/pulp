@@ -23,8 +23,10 @@ with the Shipyard changed-surface families), plus these rules:
     and `experimental/pulp-rs/**` or a file the crate embeds reaches the
     `pulp-rust-*` tests;
   * `pr-fast` members already ran and are left out;
-  * the extra time is capped: tests run in batches, no batch starts once the
-    budget is spent, and every test that did not run is listed as skipped;
+  * the extra time is capped: head-critical tests run together in the first
+    concurrent batch, ordinary tests follow in bounded batches, no batch starts
+    once the budget is spent, and every test that did not run is listed as
+    skipped;
   * merge-only checks (selected because the diff changes their declared
     inputs, adds or edits their registration, or by a path family) run first,
     then the Catch2 cases whose lines the diff adds or edits, then the tests
@@ -698,7 +700,8 @@ def select(build: Path, paths: list[str], names: dict[str, set[str]],
     first |= set(cases_first)
     own_first = [t for t in tests if t in set(own) and t not in first]
     first |= set(own_first)
-    plan["tests"] = plan["merge_only"] + cases_first + own_first + [
+    plan["priority_tests"] = plan["merge_only"] + cases_first + own_first
+    plan["tests"] = plan["priority_tests"] + [
         t for t in tests if t not in first]
     return plan
 
@@ -743,19 +746,25 @@ def annotation_escape(value: str) -> str:
 
 
 def run_budgeted(build: Path, tests: list[str], budget: float, jobs: int,
-                 label_exclude: str, junit_dir: Path, chunk: int) -> dict:
-    """Run ``tests`` in batches until the budget is spent."""
+                 label_exclude: str, junit_dir: Path, chunk: int,
+                 priority_count: int = 0) -> dict:
+    """Run one priority batch, then fixed-size ordinary batches."""
     start = time.monotonic()
     results = {"passed": [], "failed": [], "skipped": [], "notrun": [],
                "excluded_or_absent": [], "failure_evidence": {}}
-    for index in range(0, len(tests), chunk):
-        batch = tests[index:index + chunk]
+    index = min(priority_count, len(tests)) if priority_count > 0 else 0
+    batches = []
+    if priority_count > 0:
+        batches.append((0, tests[:priority_count]))
+    batches.extend((index, tests[index:index + chunk])
+                   for index in range(index, len(tests), chunk))
+    for batch_index, (index, batch) in enumerate(batches):
         if time.monotonic() - start >= budget:
             results["skipped"].extend(batch)
             continue
-        listing = junit_dir / f"batch-{index // chunk}.txt"
+        listing = junit_dir / f"batch-{batch_index}.txt"
         listing.write_text("".join(f"{t}\n" for t in batch), encoding="utf-8")
-        junit = junit_dir / f"batch-{index // chunk}.xml"
+        junit = junit_dir / f"batch-{batch_index}.xml"
         command = ["ctest", "--test-dir", str(build), "--tests-from-file", str(listing),
                    "--output-on-failure", "-C", "Release", "--timeout", "120",
                    "--repeat", "until-pass:2", "-j", str(jobs), "--output-junit", str(junit)]
@@ -779,6 +788,17 @@ def run_budgeted(build: Path, tests: list[str], budget: float, jobs: int,
                 results["excluded_or_absent"].append(test)
     results["seconds"] = round(time.monotonic() - start, 1)
     return results
+
+
+def priority_count(plan: dict, tests: list[str]) -> int:
+    """Return the contiguous head-critical prefix, refusing reordered plans."""
+    priority = plan.get("priority_tests")
+    if not isinstance(priority, list):
+        priority = plan.get("merge_only", [])
+    remaining = set(tests)
+    expected = [name for name in priority if isinstance(name, str) and name in remaining]
+    prefix = tests[:len(expected)]
+    return len(expected) if prefix == expected else 0
 
 
 # Checks that block only drift the change reaches; each must carry
@@ -904,7 +924,7 @@ def prior_passed(path: Path, tested_sha: str) -> list[str]:
 
 
 def admission_tests(planned: list[str], passed: list[str], deferred: list[str],
-                    names: dict[str, set[str]]) -> list[str]:
+                    names: dict[str, set[str]], priority: list[str] | None = None) -> list[str]:
     """What an admission attempt runs: the plan plus what was deferred, minus what passed.
 
     The earlier attempt's deferred tests are added back even when this
@@ -918,6 +938,10 @@ def admission_tests(planned: list[str], passed: list[str], deferred: list[str],
         if test not in done and test not in have and (not names or test in names):
             out.append(test)
             have.add(test)
+    if priority:
+        priority_set = set(priority)
+        out = [test for test in priority if test in out] + [
+            test for test in out if test not in priority_set]
     return out
 
 
@@ -1008,7 +1032,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.admission and args.prior_summary:
         dropped, earlier_deferred = prior_lists(args.prior_summary, tested_sha)
         if dropped or earlier_deferred:
-            plan["tests"] = admission_tests(plan["tests"], dropped, earlier_deferred, names)
+            plan["tests"] = admission_tests(plan["tests"], dropped, earlier_deferred, names,
+                                             plan.get("priority_tests"))
             print(f"pr-head-affected-tests: admission run: {len(plan['tests'])} test(s), "
                   f"including {len(earlier_deferred)} an earlier attempt deferred; "
                   f"{len(dropped)} it passed on {tested_sha[:12]} are not run again", flush=True)
@@ -1020,8 +1045,9 @@ def main(argv: list[str] | None = None) -> int:
         junit_dir = args.junit_dir or Path(tempfile.mkdtemp(prefix="pr-head-affected-"))
         junit_dir.mkdir(parents=True, exist_ok=True)
         chunk = args.chunk or max(8 * args.jobs, 16)
+        critical = priority_count(plan, plan["tests"])
         results = run_budgeted(build, plan["tests"], budget, args.jobs,
-                               args.label_exclude, junit_dir, chunk)
+                               args.label_exclude, junit_dir, chunk, critical)
     pre_existing: list[str] = []
     if results["failed"]:
         try:
