@@ -812,6 +812,10 @@ SignalGraph::PreparedTopologyEdit::PreparedTopologyEdit(SignalGraph& owner)
     : owner_(&owner), candidate_(std::make_unique<SignalGraph>()) {
     GraphMutationLock owner_lock(owner);
 
+    if (owner.refuse_isolated_mode_locked_("prepared topology edit")) {
+        mutation_failed_ = true;
+        return;
+    }
     candidate_->nodes_ = owner.nodes_;
     candidate_->processor_nodes_ = owner.processor_nodes_;
     candidate_->connections_ = owner.connections_;

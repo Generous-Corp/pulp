@@ -102,6 +102,15 @@ What the layout does not change: a capability row still lives in a shared
 still commits the installed `counts`, so two branches adding capabilities can
 still meet there.
 
+## Probe-contract comments still change binding fingerprints
+
+Clarifying consumed-edge probe semantics in a public binding header changes its
+fingerprint even when the record layout and declarations stay unchanged. Review
+the final header bytes, run `agent_capability_manifest.py --accept-fingerprint`
+for that named include, then `--write` and `--check`. Inspect the diff to retain
+only the corresponding fingerprint and surface-header records; preserve unrelated
+records and leave capability counters at their base values.
+
 ## Why open PRs no longer conflict on these files
 
 Before 2026-11-08 nearly every capability PR went DIRTY against `main` on the
@@ -2065,3 +2074,12 @@ the section above describes for other headers, was not needed here.
 notation and diagnostics, not a new DSP capability inventory. Keep it in
 `REVIEWED_HOST_HEADERS` and refresh its registry fingerprint after header edits.
 The bounded notation profile does not qualify every node or complete live reload.
+
+## Isolated host headers require the same refresh
+
+Changes to the isolated CLAP host headers, including
+`isolated_plugin_slot.hpp`, `signal_graph_execution_snapshot.hpp`, and
+`signal_graph_runtime.hpp`, update their surface fragments and fingerprints.
+Run rederive, fingerprint acceptance, manifest write, and installed-consumer
+checks together; do not hand-edit generated fragments or treat a passing worker
+test as sufficient provenance evidence.

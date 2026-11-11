@@ -2701,6 +2701,7 @@ void PulpVst3Processor::process_publish_output_params(
             output_param_has_event_[idx] = 1;
         }
         // (2) Snapshot-diff fallback, skipping params already reported in (1).
+        boundary::count_param_compares(all_params.size());
         for (std::size_t i = 0; i < all_params.size(); ++i) {
             if (output_param_has_event_[i]) {
                 // Keep the VST3 parameter system synced to the final value even
