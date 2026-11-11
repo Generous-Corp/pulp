@@ -774,7 +774,7 @@ def validate_activation_cell(cell: dict[str, Any]) -> dict[str, Any]:
     for key in ACTIVATION_META - {"backend", "compiled_source", "build_type", "node_latencies", "edge_delays"}:
         _require(type(meta[key]) is int and meta[key] >= 0, f"invalid activation integer {key}")
     _require(isinstance(meta["compiled_source"], str) and re.fullmatch(r"[0-9a-f]{40}", meta["compiled_source"]) and
-             meta["build_type"] == "Release" and meta["build_dirty"] == 0, "compiled source/build stamp mismatch")
+             meta["build_type"] == "Release" and meta["build_dirty"] == 0, "configure-time source/build stamp mismatch")
     rate, frames, backend = meta["rate"], meta["frames"], meta["backend"]
     _require((rate, frames, backend) in ACTIVATION_KEYS, "unexpected activation matrix cell")
     count = meta["callbacks"]
@@ -922,6 +922,15 @@ def validate_activation_receipt(path: Path, receipt: dict[str, Any], source_root
 
 def run_activation_controls(path: Path, source_root: Path | None = None) -> None:
     validate_receipt(path, source_root)
+    # Never expose the retained receipt or raw artifacts to planted mutations.
+    with tempfile.TemporaryDirectory(prefix="g12-activation-controls-") as temporary:
+        copied = Path(temporary) / "packet"
+        shutil.copytree(path.parent, copied)
+        _run_activation_controls_on_copy(copied / path.name, source_root)
+    validate_receipt(path, source_root)
+
+
+def _run_activation_controls_on_copy(path: Path, source_root: Path | None) -> None:
     original_text = path.read_text(encoding="utf-8")
     original = json.loads(original_text)
     # Each mutation is re-signed; restoration is checked after each rejection.
@@ -930,7 +939,9 @@ def run_activation_controls(path: Path, source_root: Path | None = None) -> None
         ("duplicate_cell", lambda r: r["cells"].__setitem__(1, r["cells"][0])),
         ("short_count", lambda r: r.__setitem__("callback_count", r["callback_count"] - 1)),
         ("false_percentile", lambda r: r["cells"][0]["metrics"].__setitem__("p99_duration_ns", 0)),
-        ("false_misses", lambda r: r["cells"][0]["metrics"].__setitem__("deadline_misses", -1)),
+        ("false_misses", lambda r: r["cells"][0]["metrics"].__setitem__(
+            "deadline_misses", (r["cells"][0]["metrics"]["deadline_misses"] + 1) %
+            (r["callback_count"] + 1))),
         ("false_pdc", lambda r: r["cells"][0]["metadata"].__setitem__("latency_samples", 1)),
         ("false_memory", lambda r: r["cells"][0]["metadata"].__setitem__("prepared_bytes", 0)),
         ("false_source", lambda r: r["source_fixture"].__setitem__("sha256", "0" * 64)),

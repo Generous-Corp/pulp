@@ -8,6 +8,7 @@ import json
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -365,6 +366,25 @@ class PacedActivationQualification(unittest.TestCase):
             gq.run_controls(path, path.parent)
             for artifact, raw in files.items():
                 self.assertEqual(artifact.read_bytes(), raw)
+
+    def test_paced_controls_isolate_mutation_failure_from_retained_packet(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = fake_activation_receipt(Path(tmp))
+            files = {p: p.read_bytes() for p in path.parent.iterdir() if p.is_file()}
+
+            def interrupted_copy(copied, source_root):
+                self.assertNotEqual(copied.parent, path.parent)
+                copied.write_text("interrupted planted control")
+                for artifact, raw in files.items():
+                    self.assertEqual(artifact.read_bytes(), raw)
+                raise RuntimeError("planted interruption")
+
+            with mock.patch.object(gq, "_run_activation_controls_on_copy", interrupted_copy):
+                with self.assertRaisesRegex(RuntimeError, "planted interruption"):
+                    gq.run_controls(path, path.parent)
+            for artifact, raw in files.items():
+                self.assertEqual(artifact.read_bytes(), raw)
+            gq.validate_receipt(path, path.parent)
 
     def test_exact_strict_timing_boundaries_and_nearest_rank(self):
         # 48 kHz x128: callback budget 8,000,000/3 ns; strict .7 budget,
