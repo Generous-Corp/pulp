@@ -13574,8 +13574,9 @@ helper too.
 
 ## `[base_health]` holds the queue when the base is poisoned
 
-`.shipyard/config.toml` sets `merge_group_hold = "on"` and `auto_jump = "on"`.
-When one required context fails in consecutive merge groups with different
+`.shipyard/config.toml` sets `merge_group_hold = "dry-run"` and
+`auto_jump = "dry-run"` (recorded, nothing held or jumped, until a replay shows
+the rule is precise). With `"on"`, when one required context fails in consecutive merge groups with different
 pull requests, the steward enqueues only a named fix (label `shipyard:unblock`
 or a title naming the context beside a fix word) and reports other approved
 heads as `held_base_poisoned:<context>`. A held head is not broken: do not
