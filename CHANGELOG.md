@@ -9,6 +9,20 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11120"></a>
+## [1.112.0] - 2026-11-11
+
+- release/version bump ([#12062](https://github.com/Generous-Corp/pulp/pull/12062))
+- feature/editor host slice mirror spelling ([#12059](https://github.com/Generous-Corp/pulp/pull/12059))
+- codex/a3 spectral consumer 20261111 ([#12058](https://github.com/Generous-Corp/pulp/pull/12058))
+- codex/g12 r2 receipt refresh 20261111 ([#12056](https://github.com/Generous-Corp/pulp/pull/12056))
+- feature/review verdict pin v0407 ([#12052](https://github.com/Generous-Corp/pulp/pull/12052))
+- fix/mq repeat failures ([#12051](https://github.com/Generous-Corp/pulp/pull/12051))
+- feature/midi learn refusal reason ([#12037](https://github.com/Generous-Corp/pulp/pull/12037))
+- fix/macos gate fail fast ([#12050](https://github.com/Generous-Corp/pulp/pull/12050))
+- chore/contract allgreen why ([#12057](https://github.com/Generous-Corp/pulp/pull/12057))
+- codex/g3 resolved bridge 20261110 ([#12008](https://github.com/Generous-Corp/pulp/pull/12008))
+
 <a id="v11110"></a>
 ## [1.111.0] - 2026-11-11
 
@@ -12782,6 +12796,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.112.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.112.0
 [1.111.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.111.0
 [1.110.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.110.0
 [1.108.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.108.0
