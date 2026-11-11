@@ -758,10 +758,10 @@ jobs:
           echo "PULP_CONTROL_STANDALONE_HOST_FLOOR=$control_standalone_host_floor" >> "$GITHUB_ENV"
 
       # The Intel leg cross-compiles on an Apple-Silicon runner, whose
-      # bootstrap (setup.sh --ci) prefetched the darwin-ARM64 Skia and flattened
-      # a thin arm64 `libskia.a` into external/skia-build/build. The x86_64 fetch
-      # below refuses to clobber that flat file, so without this purge the
-      # x86_64 link silently pulls arm64 Skia. Proven by intel-vm-cross-build.sh.
+      # bootstrap (setup.sh --ci) prefetched Skia into external/skia-build/build.
+      # darwin-x64 resolves the same universal archive as darwin-arm64 (the one
+      # gpu-runtime's renderer lock pins), and the purge keeps the fetch below
+      # writing its own darwin-x64 generation instead of trusting a prefetch.
       - name: Purge host-arch Skia before Intel cross-fetch (darwin-x64)
         if: matrix.platform == 'darwin-x64'
         run: rm -rf external/skia-build/build external/skia-build/.skia-asset-sha256
@@ -771,10 +771,10 @@ jobs:
         run: python3 tools/scripts/fetch_skia_for_release.py ${{ matrix.platform }}
         shell: bash
 
-      # Defense-in-depth for the Skia arch-clobber hazard: prove the flat
-      # libskia.a we just fetched is actually x86_64 before we link it. Catches
-      # a stale arm64 Skia surviving the purge above (a wrong-arch link would
-      # otherwise fail much later in the build with cryptic symbol errors).
+      # Defense-in-depth: prove the libskia.a we just fetched contains an x86_64
+      # slice before we link it (the universal archive carries x86_64 and
+      # arm64). A thin arm64 Skia would otherwise fail much later in the build
+      # with cryptic symbol errors.
       - name: Verify fetched Skia is x86_64 (darwin-x64)
         if: matrix.platform == 'darwin-x64'
         run: |
@@ -2027,7 +2027,7 @@ jobs:
 
       - name: Create release
         if: steps.existing.outputs.published != 'true'
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           # Bare tag name (owner: drop the "Pulp CLI" prefix — one product, one

@@ -924,6 +924,15 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME flake-exoneration-shadow-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_flake_exoneration_shadow.py")
         set_tests_properties(flake-exoneration-shadow-selftest PROPERTIES TIMEOUT 120)
+        # The merge-group flake-exoneration verdict (excuses a failed run only
+        # when every failing test is a corroborated, untouched, non-build flake)
+        # and the quarantine of tests it keeps excusing.
+        add_test(NAME flake-exoneration-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_flake_exoneration.py")
+        set_tests_properties(flake-exoneration-selftest PROPERTIES TIMEOUT 120)
+        add_test(NAME flake-quarantine-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_flake_quarantine.py")
+        set_tests_properties(flake-quarantine-selftest PROPERTIES TIMEOUT 120)
         # Advance notice on the gate before the A2T history-window guard fails.
         add_test(NAME a2t-headroom-annotation-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_a2t_headroom_annotation.py")
@@ -1527,6 +1536,15 @@ if(Python3_Interpreter_FOUND)
     endif()
     add_test(NAME gpu-dpr-inconclusive-receipt-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_verify_gpu_dpr_inconclusive_receipt.py")
+    if(APPLE AND PROJECT_IS_TOP_LEVEL)
+        add_test(NAME configure-tests-and-examples-both-on
+            COMMAND bash
+                "${CMAKE_SOURCE_DIR}/test/cmake/test_tests_and_examples_configure.sh"
+                "${CMAKE_SOURCE_DIR}")
+        set_tests_properties(configure-tests-and-examples-both-on PROPERTIES
+            LABELS "cmake;configure"
+            TIMEOUT 900)
+    endif()
     if(UNIX AND PROJECT_IS_TOP_LEVEL)
         add_test(NAME gpu-health-cpu-only-configure
             COMMAND bash

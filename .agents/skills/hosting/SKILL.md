@@ -9,6 +9,27 @@ description: |
 
 # hosting
 
+## Live retuning at a callback boundary
+
+For a graph-owned in-process instrument, retain its public
+`ProcessorNodeInstance` and resolve the frequency parameter by its frozen
+catalog name. Query `TuningProvider` on the control thread, validate the note,
+filter flag, finite frequency, Nyquist and product range, then update the
+instance's `StateStore`. A prepared `ParamReader` can adopt it once per block
+without resetting the existing oscillator or envelope. This does not require
+`set_node_parameter`, whose Plugin-slot contract is different.
+
+Boundary timing must come from the host. An offline test can split callback
+partitions at a pinned absolute sample and join its control writer before the
+next callback; that does not prove an arbitrary UI write's sample timestamp,
+intra-block scheduling or raced realtime control. Give input views the actual
+block frame extent even when rendering an instrument with silence: a
+zero-frame default view can fail the routed `ProcessBlock` validation and
+produce silence. Require a positive sounding render before trusting planted
+timing/reset failures. The installed public-header recipe and its independent
+phase/audio/sibling oracle live in `examples/g11-live-retune-consumer` and
+`docs/guides/g11-live-retune-cookbook.md`.
+
 ## When this skill applies
 
 - Adding or modifying a format backend under `core/host/src/plugin_slot_<format>.cpp`.
@@ -25,6 +46,16 @@ target so the dependency reduction does not silently break existing umbrella
 consumers.
 
 ## Mental model
+
+The bounded G6 in-process voice bank is `voice_bank_binding.hpp` plus one
+authored `SubgraphTemplate` Processor per slot. Its owner retains the existing
+MPE allocator; factories and named parameter binding run during control-thread
+preparation. When rendering a graph interval for an instrument, pass a
+zero-channel input `BufferView` with that interval's exact frame count. A
+default-constructed empty view has zero frames and makes routed execution fail
+closed. Keep both the between-event and final-tail branches covered by the
+installed SDK consumer and its independent planted mutations. This surface
+does not add CC64/120/121/123 sustain or saved-bank activation.
 
 `PluginSlot` is the uniform interface. Each format backend is a single
 free function — `load_<format>_plugin(info)` — that returns a
@@ -3074,6 +3105,17 @@ processor-provider mutation must refuse in spectral mode even when the legacy
 `live_slot_` is empty. Query prepared geometry from the active snapshot.
 Keep graph persistence and arbitrary stage registration refused; PARTIAL status
 does not establish notation coverage or realtime timing qualification.
+
+For the finite two-asset source, use `add_spectral_asset_morph_v1` and a direct
+host `AudioInput` connection to its named `morph` input. A persistent 64-sample
+mean is part of stream history: never substitute a callback mean or reset it at
+host partition boundaries. Finite extent propagates at preparation through
+existing stages and synthesis; four zero frames contribute normalization, then
+rendering stops at the returned exclusive `render_frames` cutoff. EOF must not
+look like missing frames. Reset restarts assets independently of host playhead
+position. Keep codec decode/copy/hash and shared ownership operations off the
+callback, and test through the installed public consumer's independent DFT
+oracle as well as the callback allocation probe.
 
 ## Bounded typed trigger runtime
 

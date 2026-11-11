@@ -911,6 +911,23 @@ class ExportEventTests(unittest.TestCase):
         self.assertEqual(code, 0, msg=output)
         self.assertEqual(output, "")
 
+    def test_a_receipt_failure_blocks_even_without_a_stderr_diagnostic(self) -> None:
+        self.pf.export_verdict = lambda *a, **k: (
+            subprocess.CompletedProcess([], 1, "", ""), {"missing": [], "status": "fail"})
+        code, output = self._run()
+        self.assertEqual(code, self.pf.EXPORT_OWED, msg=output)
+        self.assertIn("vellum export receipt (BLOCKING)", output)
+        self.assertIn("status: fail", output)
+
+    def test_no_receipt_verdict_does_not_manufacture_a_failure(self) -> None:
+        for result in ((None, None),
+                       (subprocess.CompletedProcess([], 1, "", "internal error"), {})):
+            with self.subTest(result=result):
+                self.pf.export_verdict = lambda *a, **k: result
+                code, output = self._run()
+                self.assertEqual(code, 0, msg=output)
+                self.assertEqual(output, "")
+
 
 class ExportEventRealCheckerTests(unittest.TestCase):
     """The same flow against the real receipt-mode checker, in a shared clone.
@@ -981,6 +998,39 @@ class ExportEventRealCheckerTests(unittest.TestCase):
                       .read_text(encoding="utf-8")}, "add the export event")
         code, output = self._run()
         self.assertEqual(code, 0, msg=output)
+
+    def test_inheritance_after_transfer_is_refused_and_pulp_only_restores_success(self) -> None:
+        import json
+        self.assertTrue((self.clone / ".github/vellum-export-receipt/framework-transfer.json").is_file())
+        original = (self.clone / self.EXPORTED_PATH).read_text(encoding="utf-8")
+        self._commit({self.EXPORTED_PATH: original + "// receipt preflight probe\n"},
+                     "edit an exported path after transfer")
+        code, output = self._run(
+            fix=True, inherits="false", event_id="20261110-preflight-transfer-probe",
+            rationale="Pulp-only probe of local receipt failure propagation after transfer.")
+        self.assertEqual(code, 0, msg=output)
+        event_path = ".github/vellum-export-events/20261110-preflight-transfer-probe.json"
+        event = json.loads((self.clone / event_path).read_text(encoding="utf-8"))
+
+        for phase, inherits in (("positive", False), ("planted inherited", True),
+                                ("restored", False)):
+            event["vellum_inherits"] = inherits
+            self._commit({event_path: json.dumps(event) + "\n"}, phase)
+            with self.subTest(phase=phase):
+                done, report = self.pf.export_verdict(self.clone, self.base, "HEAD")
+                self.assertIsNotNone(done)
+                self.assertEqual(done.returncode, 1 if inherits else 0, msg=done.stderr)
+                self.assertEqual(report["status"], "fail" if inherits else "pass")
+                self.assertEqual(report["missing"], [])
+                self.assertEqual(report["frozen"], [])
+                self.assertEqual(report["conflicting"], [])
+                self.assertEqual(report["inherited_after_transfer"],
+                                 [self.EXPORTED_PATH] if inherits else [])
+                code, output = self._run()
+                self.assertEqual(code, self.pf.EXPORT_OWED if inherits else 0, msg=output)
+                if inherits:
+                    self.assertIn("vellum export receipt (BLOCKING)", output)
+                    self.assertIn(self.EXPORTED_PATH, output)
 
 
 if __name__ == "__main__":

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Regression for the Darwin G-9 descendant-survival observation."""
+import signal
 import unittest
 from pathlib import Path
 from subprocess import TimeoutExpired
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
-from g9_hostile_fixture import is_live_process_state, run_case
+from g9_hostile_fixture import CRASH_REPORTING_SIGNALS, is_live_process_state, run_case
 
 
 class ProcessStateTest(unittest.TestCase):
@@ -32,6 +33,18 @@ class ProcessStateTest(unittest.TestCase):
         self.assertTrue(record["parent_gone"])
         self.assertEqual(record["descendant_state_after_parent"], "Z+")
         self.assertFalse(record["descendant_alive_after_parent"])
+
+
+class CrashCaseTest(unittest.TestCase):
+    def test_crash_case_dies_by_signal_without_crash_report(self) -> None:
+        with TemporaryDirectory() as directory:
+            record = run_case("crash", 2.0, Path(directory))
+        self.assertTrue(record["detected"])
+        self.assertFalse(record["timed_out"])
+        self.assertLess(record["returncode"], 0, "crash case must die by a signal")
+        died_by = signal.Signals(-record["returncode"])
+        self.assertNotIn(died_by, CRASH_REPORTING_SIGNALS,
+                         f"{died_by.name} makes ReportCrash write a bash .ips report")
 
 
 if __name__ == "__main__":

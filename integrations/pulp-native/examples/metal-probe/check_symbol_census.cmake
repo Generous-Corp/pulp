@@ -5,7 +5,10 @@
 #
 # Families: skia (Sk* classes), dawn (dawn::native, wgpu*), vellum, rmlui
 # (Rml::) and pulp_view (pulp::view). Only definitions count, never undefined
-# references.
+# references, and never the standard library's own: a std::function or other
+# std template instantiated over a family's type (std::function<void(const
+# pulp::view::X*)>) names that type without being its code, and an unoptimized
+# or sanitizer build keeps such instantiations that a Release build strips.
 #
 # EXPECT=absent fails if any family has a definition, and REQUIRED names a
 # symbol the binary must define, the control that the listing is not empty.
@@ -25,6 +28,9 @@ set(_pattern_dawn "(4dawn6native|^_?wgpu[A-Z])")
 set(_pattern_vellum "6vellum")
 set(_pattern_rmlui "3Rml[0-9]")
 set(_pattern_pulp_view "4pulp4view")
+# A symbol whose outermost name is in std: a function (_ZN[K]St, _ZNSt...), or
+# its vtable, typeinfo, typeinfo name or thunk.
+set(_pattern_std_owned "^_?_Z(T[VIS]|Th[n0-9]*_|Tv[n0-9]*_)?(N[KVr]*(St|Sa|Ss)|St)")
 foreach(_f IN LISTS _families)
     set(_count_${_f} 0)
     set(_sample_${_f} "")
@@ -45,6 +51,9 @@ foreach(_line IN LISTS _lines)
     math(EXPR _defined "${_defined} + 1")
     if(REQUIRED AND _name MATCHES "^_?${REQUIRED}$")
         set(_has_required TRUE)
+    endif()
+    if(_name MATCHES "${_pattern_std_owned}")
+        continue()
     endif()
     foreach(_f IN LISTS _families)
         if(_name MATCHES "${_pattern_${_f}}")

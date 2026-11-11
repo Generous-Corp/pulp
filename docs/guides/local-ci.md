@@ -1711,6 +1711,56 @@ failures ÷ merge-group failures, and `main_evidence_read` ÷ exonerations,
 which must be 1, with `unique_cause` > 0 and the base-red streak count
 unchanged as controls.
 
+The **enforced** verdict is a stricter rule in `tools/ci/flake_exoneration.py`,
+run inside the ctest step of the merge-group `macos` leg. A failed run passes
+only when every failing test failed on 2 or more OTHER pull requests in the
+last 24 hours, counted by pull request number from their own FULL-SUITE head
+runs (`pull_request` runs whose base is main and whose `Test (non-Windows)`
+step ran, read from `ctest.junit.xml`; the pr-fast, pr-guard and affected-test
+tiers run a pull request's own tests, so their failures are not independent;
+the run's commit resolves the pull request when GitHub leaves `pull_requests`
+empty, and a commit shared by two pull requests counts as none), never a pull
+request in this group, never a run whose head already carries a group pull
+request's head, never a pull request whose own diff touches the test, and
+never a merge-group run (a broken entry fails every group it joins under a
+different tip); passed in main's tip gate run by name (its `ctest.junit.xml`, so a test
+new in the group never qualifies); is not `pr-fast` or drift-fast; is not
+touched by the group (its name in a changed file, or a changed declared input
+or command path, from `compare/main...<sha>`, unread when truncated); and is
+not a build failure (a "not run" test other than a deliberate skip, or
+compiler, linker or CMake errors in the output). ctest must have exited 8 and
+`LastTestsFailed.log` must name nothing the JUnit report does not. An excused
+run first runs the tests `--stop-on-failure` skipped (`--tests-from-file`) and
+judges the union. Known residual: a corroborating failure from a window in
+which main itself was briefly red still counts; the next group after a bad
+landing then fails on main's tip, which stops further excusals. Two narrower residuals: the "touched" check of
+a corroborating pull request reads this group's checkout, so a file that pull
+request adds and that names the test is missed (its input-path check still
+applies), and a pull request branched from an earlier commit of a group pull
+request, without its head, is not recognised as carrying it. The exit-code evidence keeps ctest's own status, so no
+receipt claims an excused run passed. Every excusal is a
+`::warning title=flake-exoneration::` annotation, a job-summary table, and a
+`flake-excusals-macos` artifact (`pulp-flake-excusal/v1`, kept 90 days); a
+record that cannot be uploaded fails the job.
+
+`flake-quarantine.yml` (every 30 minutes) counts those records from trusted
+merge-group runs. A test excused 3 or more times in 7 days gets an owner issue
+labelled `ci:flake` and `flake-quarantine`, carrying a
+`pulp-flake-quarantine/v1` marker with a 14-day expiry. The `macos` gate
+(`Resolve flake quarantine`, merge groups and full-suite pull-request runs)
+excludes active quarantines from ctest, keeping a test the change touches, and
+`Quarantined flaky tests (advisory)` runs them without gating. At expiry the
+sweep removes the label and the test is back in the required lane; closing the
+issue or removing the label ends a quarantine early. Only excusals after a
+test's latest quarantine began count toward the next one.
+
+The mode is the repository variable `PULP_FLAKE_EXONERATION_MODE`. Only
+`enforce` acts; unset, `shadow` or anything else leaves the gate failing as
+before (the verdict is still annotated), quarantines nothing, and makes the
+sweep report only. Shadow is the default, and setting it back is the kill
+switch. Graduation to `enforce` is on evidence, not a date: at least 5 days in shadow AND at least 8 would-excuse decisions, each confirmed by a same-head retry pass, with zero false excusals. Any false excusal resets the count and keeps shadow mode. (decisions contract row 34). The 14-day quarantine
+expiry is a separate rule.
+
 Receipt reuse in a merge group downloads the PR head's exact-tree receipt and
 verifies the run it came from. GitHub leaves `pull_requests` empty on runs of
 App-opened pull requests (most of this repository's), so the verifier binds
@@ -3502,6 +3552,56 @@ under `if: always()` and fails unless the scope job succeeded and, when in
 scope, every leg did, so registering it changes no workflow. After it is
 registered, push to or re-run any open pull request that should land, because a
 pull request's checks only start on a push.
+
+## `workflow-lint` in the merge queue
+
+`.github/workflows/workflow-lint.yml` runs the workflow linters (yamllint,
+structural parse, actionlint) and the CI-policy contract suites. A queue batch
+is the only run that sees several pull requests' workflow changes together, and
+two that each pass on their own head can land a combined tree that fails. A
+`paths:` filter never applies to `merge_group`, so the workflow carries none on
+any trigger and runs on `pull_request`, `merge_group` and pushes to `main`:
+
+- **`scope`** reads the change through the compare API (both sides of a
+  rename) and matches it against `tools/ci/workflow_lint_paths.txt`, the one
+  list for every event. An unreadable diff, a new branch, or 300+ changed files
+  runs every suite.
+- **`lint`** and **`generated-version-bump-contract`** run only in scope.
+- **`workflow-lint`** (the aggregate, `if: always()`) passes when the scope job
+  succeeded and either nothing was in scope or every suite passed. It reports
+  on every run, so it can be required without holding a pull request on
+  "Expected". `tools/ci/test_workflow_lint_scope.py` holds that shape and its
+  verdict table, with negative controls.
+
+Out-of-scope changes finish in well under a minute on a hosted runner.
+
+The scope list and script run from the change's own tree, as the workflow file
+itself does, so a pull request that edits `workflow_lint_paths.txt` or the
+scope script can narrow its own scope; that edit is itself in scope and is a
+review concern. A workflow file GitHub cannot parse produces no run at all, so
+once `workflow-lint` is required such a change waits on "Expected" rather than
+failing; the pull request's own run of the linters is what names it.
+
+**It is not required yet.** As with `release-configure` (decision 33), the
+workflow lands and is judged from `main` first; registering `workflow-lint`
+means adding it to `.github/rulesets/main-protection.json`, `[governance]` and
+`[landability]` in `.shipyard/config.toml` and the required-check maps, then
+`shipyard governance apply`.
+
+### The merge-group flake gate runs from the queue base
+
+A failed merge-group `macos` run is judged by `tools/ci/flake_exoneration.py
+gate` (decision 34). The Test step extracts `tools/ci`, `tools/scripts` and
+`.shipyard/config.toml` from `github.event.merge_group.base_sha` into
+`$RUNNER_TEMP` and runs the gate from there, so the gate's code and the files
+it reads beside itself (`drift_fast.json`, `gate_suite_executed.py`, and the
+required contexts main's tip is judged on) are the base's, not those of the
+pull requests it is judging; the test sources it inspects are still the
+group's. A base that cannot be read, or that does not carry the gate, excuses
+nothing and keeps ctest's exit. The step text itself is still the group's
+`build.yml`, so a change to that step is a review concern.
+`tools/ci/test_flake_exoneration.py` runs the extracted snippet against a
+scratch repository whose base and tree carry different stub gates.
 
 ## Every failed run names its cause: the advisory `ci-cause` job
 
