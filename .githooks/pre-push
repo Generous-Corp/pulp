@@ -14,7 +14,7 @@
 # Bypass knobs (use sparingly — CI runs the same gates):
 #   PULP_DISABLE_PREPUSH_GATES=1   # demote ALL gates to advisory (skill/version/compat/compat-aggregate/node-ABI/docs-noise/source-contract/hotspot-size/deps/vellum-watch)
 #   PULP_DISABLE_PREPUSH_DIFF_COVER=1  # demote diff-cover gate only
-#   PULP_SKIP_PREPUSH=1            # skip ALL gates entirely (true emergencies)
+#   PULP_SKIP_PREPUSH=1            # skip ALL gates entirely (true emergencies); an agent push (SHIPYARD_AGENT_ID) still runs skill-sync
 #
 # Migration note (pulp #1144): the old `PULP_ENFORCE_PREPUSH=1` and
 # `PULP_ENFORCE_PREPUSH_DIFF_COVER=1` env vars used to *promote* advisory
@@ -152,6 +152,32 @@ QUEUE_REBASE_HINT="$ROOT/tools/scripts/prepush_queue_rebase_hint.py"
 if [ -f "$QUEUE_REBASE_HINT" ]; then
     printf '%s\n' "$PREPUSH_UPDATE_RECORDS" | \
         "$PULP_PYTHON" "$QUEUE_REBASE_HINT" --root "$ROOT" --remote-url "${2:-}" || true
+fi
+
+# ── Agent skip floor (blocking) ────────────────────────────────────────────
+# PULP_SKIP_PREPUSH skips every gate below. For an agent push (every fleet lane
+# exports SHIPYARD_AGENT_ID) it does not skip skill-sync: the check takes under
+# a second, CI fails on it first, and its fix is one SKILL.md note or one
+# Skill-Update trailer. Skipping it trades that line for a red PR that waits for
+# a repair pass. It runs directly, not through the gate supervisor, so a sandbox
+# that breaks process supervision cannot take it down too.
+if [ "${PULP_SKIP_PREPUSH:-0}" = "1" ] && [ -n "${SHIPYARD_AGENT_ID:-}" ] \
+    && [ -f "$ROOT/tools/scripts/skill_sync_check.py" ] \
+    && [ -f "$ROOT/tools/scripts/versioning.json" ]; then
+    "$PULP_PYTHON" "$ROOT/tools/scripts/skill_sync_check.py" \
+        --base "${PULP_PREPUSH_BASE:-origin/main}" \
+        --config "$ROOT/tools/scripts/versioning.json" --mode=report
+    _agent_ssc_rc=$?
+    case $_agent_ssc_rc in
+        0) ;;
+        1)
+            echo "✗ pre-push: PULP_SKIP_PREPUSH does not skip skill-sync for an agent push (SHIPYARD_AGENT_ID=${SHIPYARD_AGENT_ID})." >&2
+            echo "  Add the SKILL.md note or the Skill-Update trailer named above, then push again." >&2
+            exit 1
+            ;;
+        *) echo "[pre-push] WARNING: skill-sync could not run under PULP_SKIP_PREPUSH (exit $_agent_ssc_rc); CI will run it." >&2 ;;
+    esac
+    unset _agent_ssc_rc
 fi
 
 if [ "${PULP_SKIP_PREPUSH:-0}" = "1" ]; then

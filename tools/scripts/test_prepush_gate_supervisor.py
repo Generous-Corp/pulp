@@ -260,6 +260,63 @@ run_gate_captured "$3" -c 'raise SystemExit(0)'
             self.assertEqual(result.returncode, 0)
             self.assertEqual(marker.read_text(encoding="utf-8"), "selected")
 
+    def test_gate_runs_when_ps_cannot_be_spawned(self) -> None:
+        # A sandbox that refuses to exec `ps` must not turn every gate into a
+        # failure: the gate's own status and output are what the hook reads.
+        with tempfile.TemporaryDirectory(prefix="prepush-supervisor-nops-") as raw:
+            temp = Path(raw)
+            for expected in (0, 7):
+                log = temp / f"gate-{expected}.log"
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        str(SUPERVISOR),
+                        "--log",
+                        str(log),
+                        "--",
+                        sys.executable,
+                        "-c",
+                        f"print('gate ran'); raise SystemExit({expected})",
+                    ],
+                    # No directory on PATH holds `ps`, so the probe cannot spawn.
+                    env={"PATH": str(temp)},
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    check=False,
+                    timeout=10,
+                )
+                self.assertEqual(result.returncode, expected, result.stderr)
+                self.assertEqual(log.read_text(encoding="utf-8"), "gate ran\n")
+                self.assertIn("supervised by the hook only", result.stderr)
+
+    def test_gate_runs_when_ps_spawn_is_denied(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="prepush-supervisor-denied-") as raw:
+            temp = Path(raw)
+            module = load_supervisor_module()
+            original_parent_pid = module.parent_pid
+
+            def denied_parent_pid(pid: int) -> int | None:
+                raise PermissionError(1, "Operation not permitted", "ps")
+
+            module.parent_pid = denied_parent_pid
+            try:
+                result = module.main(
+                    [
+                        str(SUPERVISOR),
+                        "--log",
+                        str(temp / "gate.log"),
+                        "--",
+                        sys.executable,
+                        "-c",
+                        "print('gate ran'); raise SystemExit(5)",
+                    ]
+                )
+            finally:
+                module.parent_pid = original_parent_pid
+            self.assertEqual(result, 5)
+            self.assertEqual((temp / "gate.log").read_text(encoding="utf-8"), "gate ran\n")
+
     def test_ownership_probe_error_reaps_live_gate_group(self) -> None:
         with tempfile.TemporaryDirectory(prefix="prepush-supervisor-probe-") as raw:
             temp = Path(raw)

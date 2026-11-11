@@ -1,0 +1,301 @@
+merge-tree script-state: script-test-inputs-drift (no build-free variant; a build configured outside the merge-tree root cannot be checked here; skipped)
+merge-tree script-state: changed-surface-script-families-drift
+changed-surface script families (static): OK, 0 affected script(s) predicted against ebded6b0a98e7353a13c4e74d1e9bc138dd6b342
+merge-tree script-state: agent-capability-manifest
+agent-capabilities: fresh; 115 keys and 543 public headers checked
+agent-capabilities: comparison receipt={"comparison_anchor":"ebded6b0a98e7353a13c4e74d1e9bc138dd6b342","comparison_mode":"base_tip","requested_base":"origin/main","requested_head":"HEAD","resolved_base_tip":"ebded6b0a98e7353a13c4e74d1e9bc138dd6b342","resolved_head":"7abb369566b403b83cbed560dbbc42073f069edd","source":"local_ref","status":"available","stderr":""}
+merge-tree script-state: unregistered-tests
+test-registration: 541 invoked, 801 not invoked (801 baselined)
+merge-tree script-state: vellum-inheritance-ledger
+vellum-inheritance-ledger: OK
+[gate-host] REFUSED the build-gate configure and the source-selftest suites (source-only, workflow-lint, pr-fast ctest, ctest-registered Python): tartci host-profile says this host serves the required gate (TARTCI_ROLE=dev-overflow), and a local suite here starves its gate VMs. Run tools/scripts/gates.sh origin/main from a Pulp worktree on a TARTCI_ROLE=light host (m1) or a disposable VM; CI runs these suites on the PR either way.
+gates: base = origin/main
+
+▸ shipyard PR stall-watchdog self-tests
+.....shipyard-watchdog: stalled for 0s with no descendants or output; capturing diagnostics and stopping
+......
+----------------------------------------------------------------------
+Ran 11 tests in 1.993s
+
+OK
+
+▸ host-vitals (advisory)
+  host_vitals: GREEN — healthy (host=Daniels-M5-Studio load1=10.51 cores=30 pressure=1 fseventsd=7390MB/100.1%cpu WARN(>1024MB, needs sudo killall fseventsd))
+
+▸ shipyard-local mac routing (advisory)
+  mac → local self-hosted runners (required 'macos' check will post).
+
+▸ vellum watch-event coverage (merge-base origin/main..HEAD)
+
+▸ Vellum extractable-package boundary
+vellum_boundary_verified=3 packages
+  pulp-import-design: deps=3 tests=3
+  pulp-ui-build: deps=2 tests=1
+  @pulp/react: deps=3 tests=1
+
+▸ clean-output source root: <recovery-worktree>/tools/ui-build/lint/fixtures/clean
+pulp-clean-output-v1: PASS (0 findings)
+
+▸ clean-output source root: <recovery-worktree>/tools/ui-build/lint/fixtures/generated
+pulp-clean-output-v1: PASS (0 findings)
+
+▸ skill-sync check
+[agent-capabilities] ✓ SKILL.md updated
+[hosting] ✓ bypassed (Existing diagnostic APIs and serial execution lifecycle are unchanged; per-edge semantics are documented with the probe receipt.)
+    core/host/include/pulp/host/signal_graph_runtime.hpp
+    core/host/src/signal_graph_diagnostics.cpp
+
+▸ skill-path-map lint (patterns match real files; map matches its schema)
+skill-path-map lint: ok
+
+▸ version-bump check (fix:/feat: titles require a chore: bump versions commit)
+[sdk] Pulp SDK / CLI: heuristic=patch final=minor current=1.105.0 ✓ assigned post-merge (version-at-land infers this level)
+[plugin] Claude Code plugin: heuristic=patch final=patch current=0.518.2 ✓ assigned post-merge (version-at-land infers this level)
+
+── fix/feat-touches-a-surface check (post-merge assignment) ──
+✓ the touched surface(s) will be assigned post-merge by version-at-land (or this is not a release-worthy change).
+
+▸ yoga-oracle lockstep check (compat oracle matches the Yoga pin)
+check_yoga_oracle_pin: OK — yoga-supported.json describes the pinned Yoga (v3.2.1).
+
+▸ compat-sync check
+compat-sync: no mapped paths touched — nothing to verify.
+
+▸ config→doc drift check
+config-doc: no mapped config paths touched — nothing to verify.
+
+▸ compat aggregate check
+compat_aggregate: compat.json is byte-identical to the compat/ parts.
+
+▸ node-ABI virtual-order check
+node_abi_gate: Processor, PluginSlot, and GpuAudioNode virtual order is additive-only; the editor-host interfaces are unchanged
+
+▸ hotspot-size guard
+hotspot_size_guard: note: core/host/include/pulp/host/custom_node_type.hpp: 501 LOC over reference 267, but this PR did not grow it (merge-base 501); not a violation
+hotspot_size_guard: note: core/host/include/pulp/host/signal_graph_node.hpp: 195 LOC over reference 130, but this PR did not grow it (merge-base 195); not a violation
+hotspot_size_guard: note: core/host/include/pulp/host/signal_graph_runtime.hpp: 2134 LOC over reference 1555, but this PR did not grow it (merge-base 2134); not a violation
+hotspot_size_guard: note: core/host/src/timeline_graph_binding.cpp: 433 LOC over reference 424, but this PR did not grow it (merge-base 433); not a violation
+hotspot_size_guard: note: core/host/src/timeline_graph_binding_candidate.cpp: 410 LOC over reference 400, but this PR did not grow it (merge-base 410); not a violation
+hotspot_size_guard: note: core/playback/src/program_compiler.cpp: 1329 LOC over reference 1268, but this PR did not grow it (merge-base 1329); not a violation
+hotspot_size_guard: note: core/view/include/pulp/view/widget_bridge.hpp: 1016 LOC over reference 509, but this PR did not grow it (merge-base 1016); not a violation
+hotspot_size_guard: note: core/view/src/widget_bridge.cpp: 1289 LOC over reference 930, but this PR did not grow it (merge-base 1289); not a violation
+hotspot_size_guard: note: core/view/src/widget_bridge/canvas2d_api.cpp: 1446 LOC over reference 1294, but this PR did not grow it (merge-base 1446); not a violation
+hotspot_size_guard: note: core/view/CMakeLists.txt: 593 LOC over reference 434, but this PR did not grow it (merge-base 593); not a violation
+hotspot_size_guard: note: test/CMakeLists.txt: 71 LOC over reference 38, but this PR did not grow it (merge-base 71); not a violation
+hotspot_size_guard: note: test/test_signal_mod_events.cpp: 760 LOC over reference 669, but this PR did not grow it (merge-base 760); not a violation
+hotspot_size_guard: note: test/test_design_import_codegen.cpp: 2096 LOC over reference 2095, but this PR did not grow it (merge-base 2096); not a violation
+hotspot_size_guard: note: test/test_design_import_fidelity.cpp: 1926 LOC over reference 1226, but this PR did not grow it (merge-base 1926); not a violation
+hotspot_size_guard: note: test/test_design_import_ir.cpp: 2361 LOC over reference 1292, but this PR did not grow it (merge-base 2361); not a violation
+hotspot_size_guard: note: test/test_design_import_sources.cpp: 1728 LOC over reference 1370, but this PR did not grow it (merge-base 1728); not a violation
+hotspot_size_guard: note: test/test_renderer3d_scene.cpp: 749 LOC over reference 717, but this PR did not grow it (merge-base 749); not a violation
+hotspot_size_guard: note: test/test_renderer3d_loading.cpp: 590 LOC over reference 564, but this PR did not grow it (merge-base 590); not a violation
+hotspot_size_guard: note: tools/import-design/pulp_import_design.cpp: 4133 LOC over reference 3579, but this PR did not grow it (merge-base 4133); not a violation
+hotspot_size_guard: note: core/view/platform/mac/window_host_mac.mm: 3107 LOC over reference 2459, but this PR did not grow it (merge-base 3107); not a violation
+hotspot_size_guard: note: core/view/src/design_frame_view.cpp: 1633 LOC over reference 1623, but this PR did not grow it (merge-base 1633); not a violation
+hotspot_size_guard: note: core/view/src/design_import.cpp: 2407 LOC over reference 2189, but this PR did not grow it (merge-base 2407); not a violation
+hotspot_size_guard: note: core/view/src/design_ir_json.cpp: 2447 LOC over reference 2265, but this PR did not grow it (merge-base 2447); not a violation
+hotspot_size_guard: note: core/view/src/design_cpp_codegen.cpp: 126 LOC over reference 122, but this PR did not grow it (merge-base 126); not a violation
+hotspot_size_guard: note: core/view/src/design_import_native_common.cpp: 3166 LOC over reference 1991, but this PR did not grow it (merge-base 3166); not a violation
+hotspot_size_guard: note: core/view/src/design_codegen.cpp: 3317 LOC over reference 1961, but this PR did not grow it (merge-base 3317); not a violation
+hotspot_size_guard: note: core/view/include/pulp/view/view.hpp: 3464 LOC over reference 1742, but this PR did not grow it (merge-base 3464); not a violation
+hotspot_size_guard: note: core/canvas/include/pulp/canvas/canvas.hpp: 2048 LOC over reference 1534, but this PR did not grow it (merge-base 2048); not a violation
+hotspot_size_guard: note: tools/cli/cli_common.cpp: 1169 LOC over reference 1160, but this PR did not grow it (merge-base 1169); not a violation
+hotspot_size_guard: note: inspect/src/inspector_overlay.cpp: 2788 LOC over reference 2645, but this PR did not grow it (merge-base 2788); not a violation
+hotspot_size_guard: note: inspect/src/inspector_overlay_paint.cpp: 1553 LOC over reference 1541, but this PR did not grow it (merge-base 1553); not a violation
+hotspot_size_guard: note: inspect/include/pulp/inspect/inspector_overlay.hpp: 1663 LOC over reference 1584, but this PR did not grow it (merge-base 1663); not a violation
+hotspot_size_guard: note: inspect/src/inspector_window.cpp: 1308 LOC over reference 1301, but this PR did not grow it (merge-base 1308); not a violation
+hotspot_size_guard: note: inspect/src/domain_handler.cpp: 534 LOC over reference 507, but this PR did not grow it (merge-base 534); not a violation
+hotspot_size_guard: note: core/canvas/src/skia_canvas.cpp: 1390 LOC over reference 1136, but this PR did not grow it (merge-base 1390); not a violation
+hotspot_size_guard: note: core/view/src/widgets.cpp: 2251 LOC over reference 1884, but this PR did not grow it (merge-base 2251); not a violation
+hotspot_size_guard: note: core/view/src/ui_components.cpp: 1725 LOC over reference 1500, but this PR did not grow it (merge-base 1725); not a violation
+hotspot_size_guard: note: CLAUDE.md: 2302 LOC over reference 2051, but this PR did not grow it (merge-base 2302); not a violation
+hotspot_size_guard: ok
+
+▸ header fan-out guard (no new umbrella include of a tracked header)
+header_fanout_guard: note: core/canvas/include/pulp/canvas/rectangle_list.hpp: 1074 TUs is over its ceiling 1055 but this range did not grow it (merge-base 1074); not a violation
+header_fanout_guard: note: core/canvas/include/pulp/canvas/affine_transform.hpp: 1073 TUs is over its ceiling 1054 but this range did not grow it (merge-base 1073); not a violation
+header_fanout_guard: note: core/canvas/include/pulp/canvas/path.hpp: 1035 TUs is over its ceiling 1016 but this range did not grow it (merge-base 1035); not a violation
+header_fanout_guard: note: core/canvas/include/pulp/canvas/text_utf8.hpp: 1034 TUs is over its ceiling 1014 but this range did not grow it (merge-base 1034); not a violation
+header_fanout_guard: note: core/canvas/include/pulp/canvas/scene_recording.hpp: 1031 TUs is over its ceiling 1011 but this range did not grow it (merge-base 1031); not a violation
+header_fanout_guard: note: core/canvas/include/pulp/canvas/recording_canvas.hpp: 1031 TUs is over its ceiling 1011 but this range did not grow it (merge-base 1031); not a violation
+header_fanout_guard: note: core/canvas/include/pulp/canvas/canvas_capability.hpp: 1031 TUs is over its ceiling 1011 but this range did not grow it (merge-base 1031); not a violation
+header_fanout_guard: note: core/canvas/include/pulp/canvas/canvas.hpp: 1031 TUs is over its ceiling 1011 but this range did not grow it (merge-base 1031); not a violation
+header_fanout_guard: note: core/audio/include/pulp/audio/buffer.hpp: 1128 TUs is over its ceiling 974 but this range did not grow it (merge-base 1128); not a violation
+header_fanout_guard: note: core/state/include/pulp/state/parameter.hpp: 1096 TUs is over its ceiling 952 but this range did not grow it (merge-base 1096); not a violation
+header_fanout_guard: note: core/view/include/pulp/view/theme.hpp: 938 TUs is over its ceiling 933 but this range did not grow it (merge-base 938); not a violation
+header_fanout_guard: note: core/state/include/pulp/state/state_migration.hpp: 1019 TUs is over its ceiling 907 but this range did not grow it (merge-base 1019); not a violation
+header_fanout_guard: note: core/state/include/pulp/state/store.hpp: 1018 TUs is over its ceiling 906 but this range did not grow it (merge-base 1018); not a violation
+header_fanout_guard: note: core/state/include/pulp/state/listener_token.hpp: 1018 TUs is over its ceiling 906 but this range did not grow it (merge-base 1018); not a violation
+header_fanout_guard: note: core/view/include/pulp/view/geometry.hpp: 924 TUs is over its ceiling 901 but this range did not grow it (merge-base 924); not a violation
+header_fanout_guard: note: core/view/include/pulp/view/input_events.hpp: 901 TUs is over its ceiling 876 but this range did not grow it (merge-base 901); not a violation
+header_fanout_guard: note: core/view/include/pulp/view/motion.hpp: 897 TUs is over its ceiling 875 but this range did not grow it (merge-base 897); not a violation
+header_fanout_guard: note: core/view/include/pulp/view/motion_preferences.hpp: 892 TUs is over its ceiling 869 but this range did not grow it (merge-base 892); not a violation
+header_fanout_guard: note: core/view/include/pulp/view/view.hpp: 881 TUs is over its ceiling 857 but this range did not grow it (merge-base 881); not a violation
+header_fanout_guard: note: core/runtime/include/pulp/runtime/triple_buffer.hpp: 861 TUs is over its ceiling 788 but this range did not grow it (merge-base 861); not a violation
+header_fanout_guard: note: core/format/include/pulp/format/processor.hpp: 715 TUs is over its ceiling 640 but this range did not grow it (merge-base 715); not a violation
+header_fanout_guard: note: core/view/include/pulp/view/value_source.hpp: 540 TUs is over its ceiling 536 but this range did not grow it (merge-base 540); not a violation
+header_fanout_guard: note: core/view/include/pulp/view/widgets.hpp: 309 TUs is over its ceiling 308 but this range did not grow it (merge-base 309); not a violation
+header_fanout_guard: note: core/view/include/pulp/view/widget_bridge.hpp: 310 TUs is over its ceiling 301 but this range did not grow it (merge-base 310); not a violation
+header_fanout_guard: note: core/audio/include/pulp/audio/load_measurer.hpp: 224 TUs is over its ceiling 181 but this range did not grow it (merge-base 224); not a violation
+header_fanout_guard: 28 tracked header(s) within their fan-out ceilings
+
+▸ planning-gitlink guard (no accidental submodule pointer bump)
+
+▸ diff-scoped clang-format check (touched lines only)
+format_changed: using clang-format (Homebrew clang-format version 21.1.8)
+format_changed: base origin/main (merge-base 6c3ff80830797c201931a63b893c512686329e3e)
+format_changed: 8 changed file(s) clean on touched lines.
+
+▸ gpu-handoff pin freshness (no in-PR re-pin; no orphaned pinned path)
+gpu-handoff-pin: checked, clean — no in-PR re-pin, no orphaned pinned path
+
+▸ gpu-ledger sentinel (no unregenerated ledger from a merge)
+
+▸ gpu-provenance reachability (no pin that will not exist on the remote)
+gpu-provenance-verify: PASS skipped=0 cap=128
+
+▸ silent-revert guard (no byte-exact undo of a recent landing)
+  silent-revert guard: ok (no byte-exact revert of a recent landing)
+    comparison receipt={"comparison_anchor":"6c3ff80830797c201931a63b893c512686329e3e","comparison_mode":"merge_base","requested_base":"origin/main","requested_head":"HEAD","resolved_base_tip":"ebded6b0a98e7353a13c4e74d1e9bc138dd6b342","resolved_head":"f4b78c63b0da1300315ced95d0e8ea29d308524a","source":"silent_revert_guard","status":"available","stderr":""}
+
+▸ forge-descriptor coverage (indexed packs carry semantic descriptors)
+  forge-descriptor-coverage: ok
+▸ deps-audit (attribution drift + license truthfulness)
+  deps-audit: ok
+
+▸ deps-audit self-tests
+  deps-audit self-tests: ok
+
+▸ vendored-patch verifier
+  vendored-patch verifier: ok
+
+▸ dead-test guard
+  dead-test guard: ok
+
+▸ examples index guard
+  examples index guard: ok
+
+▸ generated test manifests: script inputs, source-selftest manifest, changed-surface families (gate host: build-free checks only, never configures)
+  script-test-inputs: the diff can drift test/ctest_script_inputs/ (4 path(s)):
+    core/format/include/pulp/format/graph_runtime_executor.hpp (declared input of sample-region-compat-baseline)
+    core/format/src/graph_runtime_executor.cpp (declared input of sample-region-compat-baseline)
+    core/host/include/pulp/host/signal_graph_runtime.hpp (declared input of sample-region-compat-baseline)
+    core/host/src/signal_graph_diagnostics.cpp (declared input of sample-region-compat-baseline)
+  generated manifests: the diff can drift tools/ci/source_selftests.json and the changed-surface families (1 path(s)):
+    .agents/skills/agent-capabilities/SKILL.md
+  changed-surface script families (static): OK, 0 affected script(s) predicted against origin/main
+  script-test-inputs: build dir <recovery-worktree>/build-gate (from PULP_GATES_BUILD_DIR)
+  script-test-inputs: note: 1 entry drifted from scripts this change does not touch (diff-scoped against origin/main); not blocking. Refresh when convenient with
+    python3 tools/scripts/script_test_inputs.py --build-dir <recovery-worktree>/build-gate --write
+    file=test/ctest_script_inputs; test=Pulp UI Script Fixture; cause_class=ADVISORY_DRIFT; evidence=stale compiled entry: Pulp UI Script Fixture; fix=`python3 tools/scripts/script_test_inputs.py --build-dir <recovery-worktree>/build-gate --write`; safe_to_auto_apply=no; verify=`python3 tools/scripts/script_test_inputs.py --check`
+  script-test-inputs: OK, 622 declared tests in sync for this change (diff-scoped against origin/main; 619 interpreter-driven entries)
+  source-selftests: ok (190 entries, both lanes wired)
+  changed-surface script families: OK, 217 generated families checked against <recovery-worktree>/build-gate
+
+▸ setup.sh source-cache tests
+  setup.sh source-cache tests: ok
+
+▸ worktree-lineage tests
+  worktree-lineage tests: ok
+
+▸ immutable shared-cache tests
+  immutable shared-cache tests: ok
+
+▸ manifest-mirror drift (VERSION.md digests + DEPENDENCIES.md versions)
+  manifest-mirrors: ok
+
+▸ codecov-config drift (flags/components mirror core/*; ignore mirrors diff_cover_excludes)
+  codecov-config: ok
+
+▸ SignalGraph governance (single-backend + reserved terminology)
+
+▸ designated-initializer lint (MSVC C7560)
+designated_initializer_lint: ok (55 path(s) considered)
+
+▸ win32 include lint (MSVC C2589 min/max leak)
+win32-include-lint: ok
+
+▸ foundation include lint (no upper-layer includes in core/platform|runtime|simd)
+foundation-include-boundary: ok (200 files, 0 allowlisted edge(s))
+
+▸ core -> Vellum direction (no vellum/ include or Vellum link under core/)
+core-vellum-include-boundary: ok (2751 files, 0 allowlisted edge(s))
+core-vellum-link-boundary: ok (172 CMake files, 11 allowlisted reference(s))
+gpu-device-forward-declarations: ok (6002 sources)
+
+▸ safe-path guard lint (untrusted paths screened by the shared helper)
+safe-path-lint: ok (2971 source(s) scanned)
+
+▸ text-encoding lint (Python text I/O names its encoding; per-file ratchet)
+text-encoding-lint: ok (4165 baselined call(s) in 880 file(s); 2875 source(s) scanned)
+
+▸ Python floor syntax (every tracked *.py parses on Python 3.11)
+python-floor-syntax: ok (2910 file(s) parse on Python 3.11)
+
+▸ scheduled-workflow fork-guard check
+scheduled-workflow-fork-guard: ok
+
+▸ fork-runner guard check
+fork-runner-guard: 104 workflows checked; no fork pull request can reach a variable-selected runner
+
+▸ schedule-backstop manifest check
+schedule-backstop: manifest consistent
+
+▸ conflict-marker guard (no committed <<<<<<< / ======= / >>>>>>>)
+
+▸ thread-safe-assertions guard (no Catch2 assert in a worker thread)
+
+▸ unbounded-wait lint (a test wait must be able to time out)
+unbounded-wait-lint: ok
+
+▸ raw pid-probe lint (no os.kill(pid, 0); Ctrl+C on Windows)
+raw-pid-probe-lint: ok (2875 source(s) scanned)
+
+▸ framework-neutrality guard (no foreign-framework vocabulary in Pulp source)
+framework-neutrality: clean (core, inspect, ship, packages, experimental, test, apple, tools, docs/reports)
+
+▸ forced-restore lint (a forced worktree restore declares what it repairs)
+forced_restore_lint: ok
+
+▸ sequencer-exposure ledger (schema, evidence, append-only tombstones)
+sequencer exposure check: comparison receipt={"comparison_anchor":"6c3ff80830797c201931a63b893c512686329e3e","comparison_mode":"merge_base","path":"docs/status/sequencer-exposure","requested_base":"origin/main","requested_head":"HEAD","resolved_base_tip":"ebded6b0a98e7353a13c4e74d1e9bc138dd6b342","resolved_head":"f4b78c63b0da1300315ced95d0e8ea29d308524a","source":"sequencer_cli_base","status":"available","stderr":""}
+sequencer exposure check: OK (183 rows, 0 tombstones)
+
+▸ negative-capability registry (an authorable refusal carries a reason)
+negative_capability_verified=true
+
+▸ ctest label-exclusion guard (a suite must reach the gate or coverage)
+ctest_label_exclusion_guard: OK — 1492 Catch2 suite registration(s) across 203 manifest(s); 13 label-blind, all 13 accounted for in tools/scripts/ctest_label_exclusion_guard.json.
+
+▸ agent-capability contract (counters re-derived against the current base)
+agent-capabilities: fresh; 115 keys and 543 public headers checked
+agent-capabilities: comparison receipt={"comparison_anchor":"ebded6b0a98e7353a13c4e74d1e9bc138dd6b342","comparison_mode":"exact_base","requested_base":"ebded6b0a98e7353a13c4e74d1e9bc138dd6b342","requested_head":"HEAD","resolved_base_tip":"ebded6b0a98e7353a13c4e74d1e9bc138dd6b342","resolved_head":"f4b78c63b0da1300315ced95d0e8ea29d308524a","source":"environment_base_ref","status":"available","stderr":""}
+
+▸ pre-queue guard: catch_discover_timeout_guard
+
+▸ pre-queue guard: catch_test_name_guard
+
+▸ pre-queue guard: clock_only_temp_key_guard
+
+▸ pre-queue guard: check_skip_not_pass
+
+▸ migration_note_guard
+migration-note-guard: ok (no hand-written vX.Y.Z.md added)
+
+▸ text_encoding_lint
+text-encoding-lint: ok (4165 baselined call(s) in 880 file(s); 2875 source(s) scanned)
+
+▸ script_inputs_precheck
+script-inputs-precheck: ok (every new script-driven ctest has an entry)
+
+▸ hotspot_edit_guard
+hotspot-edit-guard: OK, no registered hotspot edited (4 registered; 52 path(s) changed since origin/main)
+
+▸ NOT CHECKED here (1): these did not run, so the verdict below does not cover them
+  [gate-host] NOT CHECKED: the build-gate configure and the source-selftest suites (source-only, workflow-lint, pr-fast ctest, ctest-registered Python) — refused on this gate host (TARTCI_ROLE=dev-overflow); run tools/scripts/gates.sh origin/main on a TARTCI_ROLE=light host (m1) or a disposable VM
+
+gates: ✓ PASSED WITH 1 NOT CHECKED (listed above) — not a full pass.
+
+  Diff-coverage NOT run, and refused on this gate host. Run it on a
+  TARTCI_ROLE=light host (m1) or a disposable VM:
+    tools/scripts/local_diff_cover.sh [test_target ...]

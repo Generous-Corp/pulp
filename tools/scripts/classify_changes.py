@@ -214,6 +214,11 @@ IOS_COMPILE_REQUIRED_PATTERNS = (
     "test/cmake/check_plugin_module_editor_stack.cmake",
     "test/cmake/check_plugin_module_no_script_runtime.cmake",
     "test/cmake/x9_hosted_format_receipt.cmake",
+    # The isolated CLAP consumer and its worker/protocol tests are compiled
+    # by the hosted-worker CMake registration reached by the iOS configure.
+    "test/cmake/test_g9_isolated_clap_sdk_consumer.cmake",
+    "test/test_isolated_clap_protocol.cpp",
+    "test/test_isolated_clap_worker.cpp",
     "test/cmake/pulp_state_link_closure.cmake.in",
     "docs/contracts/**",
     "docs/status/*.schema.json",

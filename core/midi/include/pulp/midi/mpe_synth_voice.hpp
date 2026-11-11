@@ -310,6 +310,24 @@ public:
 
     bool last_was_glide() const { return last_was_glide_; }
 
+    /// Hard-silence one exact slot generation without disturbing other voices.
+    /// A held voice still owns a glide reference; a releasing voice already
+    /// relinquished it on NoteOff. A stale generation cannot retire a reuse.
+    bool retire_slot(std::size_t slot, MpeNoteGeneration generation) {
+        if (slot >= voices_.size() || generation == 0)
+            return false;
+        auto& voice = voices_[slot];
+        if (!voice.active() || voice.note_id() != generation)
+            return false;
+        if (!voice.releasing()) {
+            MpeNoteState released{};
+            released.channel = voice.channel();
+            glide_detector_.observe_note_off(released);
+        }
+        voice.reset();
+        return true;
+    }
+
     void reset_all() {
         for (auto& v : voices_) v.reset();
         glide_detector_.reset();

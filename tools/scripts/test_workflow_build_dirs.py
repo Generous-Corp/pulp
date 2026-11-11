@@ -424,6 +424,9 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertIn("merge_group_shadows.py run", run)
         self.assertIn('--ctest-outcome "${{ steps.ctest.outcome }}"', run)
         self.assertIn("ctest-evidence/selected.json", run)
+        # A red gate job does not wait on the exoneration shadow's API reads:
+        # the required job defers it to the advisory job below.
+        self.assertIn("--exoneration deferred", run)
         for name in ("Build", "Test (non-Windows)"):
             body = str(workflow_named_step(BUILD_WORKFLOW, "build", name)["run"])
             for token in ("merge_group_shadows", "merge-group-shadows", "binary_identity",
@@ -432,6 +435,46 @@ class WorkflowBuildDirTests(unittest.TestCase):
                 self.assertNotIn(token, body)
             if name == "Build":
                 self.assertNotIn("flake_exoneration", body)
+
+    def test_flake_exoneration_shadow_runs_in_an_advisory_job_after_build(self) -> None:
+        """The flake-exoneration shadow runs off the required `macos` job: in
+        its own job that needs `build`, only for a failed merge group, never
+        named like a required context, continue-on-error, reading the macOS
+        leg's uploaded JUnit with a checkout that carries every module the
+        shadow imports. Holding a red verdict for it cost about 95 s of gate
+        VM per failed merge-group job."""
+        try:
+            import yaml
+        except ImportError:  # pragma: no cover - workflow-lint installs PyYAML
+            raise unittest.SkipTest("PyYAML not installed")
+        jobs = yaml.safe_load(BUILD_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+        job = jobs["flake-exoneration-shadow"]
+        self.assertEqual(job["name"], "flake-exoneration-shadow (advisory)")
+        self.assertEqual(job["needs"], ["build"])
+        self.assertTrue(job.get("continue-on-error"))
+        self.assertLessEqual(int(job["timeout-minutes"]), 15)
+        self.assertEqual(job["runs-on"], "ubuntu-latest")
+        cond = " ".join(str(job["if"]).split())
+        for needle in ("!cancelled()", "github.event_name == 'merge_group'",
+                       "needs.build.result == 'failure'"):
+            self.assertIn(needle, cond)
+        steps = job["steps"]
+        sparse = str(steps[0]["with"]["sparse-checkout"]).split()
+        for path in ("tools/ci", "tools/scripts", ".shipyard"):
+            self.assertIn(path, sparse)
+        download = next(s for s in steps if str(s.get("uses", "")).startswith("actions/download-artifact"))
+        self.assertEqual(download["with"]["name"], "ctest-logs-macos")
+        shadow = next(s for s in steps if s.get("name") == "Flake exoneration (shadow)")
+        self.assertTrue(shadow.get("continue-on-error"))
+        self.assertIn("flake_exoneration_shadow.py", str(shadow["run"]))
+        self.assertIn("ctest.junit.xml", str(shadow["run"]))
+        # The shadow cannot gate anything: it is the only step that runs it,
+        # and the required build job no longer runs it in-job.
+        for name, other in jobs.items():
+            if name == "flake-exoneration-shadow":
+                continue
+            for step in other.get("steps", []):
+                self.assertNotIn("flake_exoneration_shadow.py", str(step.get("run", "")), name)
 
     def test_flake_exoneration_gate_is_scoped_to_merge_group_macos(self) -> None:
         """Only a failed merge-group run of the required macos leg may consult
