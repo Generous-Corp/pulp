@@ -491,7 +491,7 @@ def _copy_receipt_directory(receipt_path: Path, destination: Path) -> Path:
 
 
 def run_controls(receipt_path: Path, source_root: Path | None = None) -> None:
-    if json.loads(receipt_path.read_text()).get("schema") == ACTIVATION_SCHEMA:
+    if json.loads(receipt_path.read_text(encoding="utf-8")).get("schema") == ACTIVATION_SCHEMA:
         run_activation_controls(receipt_path, source_root)
         return
     validate_receipt(receipt_path)
@@ -879,7 +879,7 @@ def validate_activation_receipt(path: Path, receipt: dict[str, Any], source_root
     source = _activation_artifact(path, artifacts["source_fixture"])
     executable = _activation_artifact(path, artifacts["executable"])
     commands = _activation_artifact(path, artifacts["compile_commands"])
-    fixture_commands = [entry["command"] for entry in json.loads(commands.read_text())
+    fixture_commands = [entry["command"] for entry in json.loads(commands.read_text(encoding="utf-8"))
                         if entry["file"].endswith("/test/test_trigger_graph.cpp")]
     _require(len(fixture_commands) == 1 and "-O3" in fixture_commands[0].split() and
              "-DNDEBUG" in fixture_commands[0].split() and "-fsanitize=" not in fixture_commands[0],
@@ -952,7 +952,7 @@ def _run_activation_controls_on_copy(path: Path, source_root: Path | None) -> No
         mutate(changed)
         changed["receipt_sha256"] = receipt_digest(changed)
         try:
-            path.write_text(json.dumps(changed, indent=2, sort_keys=True) + "\n")
+            path.write_text(json.dumps(changed, indent=2, sort_keys=True) + "\n", encoding="utf-8")
             try:
                 validate_receipt(path, source_root)
             except ReceiptError:
@@ -960,7 +960,7 @@ def _run_activation_controls_on_copy(path: Path, source_root: Path | None) -> No
             else:
                 raise ReceiptError(f"planted activation negative passed: {name}")
         finally:
-            path.write_text(original_text)
+            path.write_text(original_text, encoding="utf-8")
         validate_receipt(path, source_root)
     # Also re-sign a raw every-sample audio lie. This is distinct from an
     # unbound receipt summary and does not rely on stale file hashes.
@@ -972,7 +972,7 @@ def _run_activation_controls_on_copy(path: Path, source_root: Path | None) -> No
         changed = json.loads(original_text)
         changed["cells"][0]["raw_stdout"]["sha256"] = sha256_file(raw)
         changed["receipt_sha256"] = receipt_digest(changed)
-        path.write_text(json.dumps(changed, indent=2, sort_keys=True) + "\n")
+        path.write_text(json.dumps(changed, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         try:
             validate_receipt(path, source_root)
         except ReceiptError:
@@ -981,7 +981,7 @@ def _run_activation_controls_on_copy(path: Path, source_root: Path | None) -> No
             raise ReceiptError("planted raw audio negative passed")
     finally:
         raw.write_bytes(saved)
-        path.write_text(original_text)
+        path.write_text(original_text, encoding="utf-8")
     validate_receipt(path, source_root)
     print("activation_controls=pass positive=pass broken=10_rejected restored=pass")
 
@@ -1030,7 +1030,7 @@ def record_activation(args: argparse.Namespace) -> int:
                    G12_ACTIVATION_CALLBACKS=str(args.callbacks), G12_ACTIVATION_BACKEND=backend)
         stem = f"{rate}-{frames}-{backend}"
         stdout_path, stderr_path = output / (stem + ".txt"), output / (stem + ".stderr")
-        with stdout_path.open("w") as out, stderr_path.open("w") as err:
+        with stdout_path.open("w", encoding="utf-8") as out, stderr_path.open("w", encoding="utf-8") as err:
             result = subprocess.run([str(binary_copy), "G12 paced activation receipt cell"], env=env,
                                     stdout=out, stderr=err, timeout=args.timeout_seconds)
         cell = parse_activation_output(stdout_path.read_text(encoding="utf-8"))
@@ -1081,7 +1081,7 @@ def main(argv: Iterable[str] | None = None) -> int:
             return record(args)
         if args.command == "validate":
             validate_receipt(args.receipt, args.source_root)
-            label = "activation_receipt" if json.loads(args.receipt.read_text()).get("schema") == ACTIVATION_SCHEMA else "r2_receipt"
+            label = "activation_receipt" if json.loads(args.receipt.read_text(encoding="utf-8")).get("schema") == ACTIVATION_SCHEMA else "r2_receipt"
             print(f"{label}=pass")
             return 0
         run_controls(args.receipt, args.source_root)

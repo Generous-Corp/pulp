@@ -208,7 +208,7 @@ class GraphPerformanceQualification(unittest.TestCase):
 def fake_activation_receipt(directory: Path) -> Path:
     """Literal synthetic pilot: never evidence of actual timing qualification."""
     source = directory / "source-fixture.inc"
-    source.write_text("synthetic activation source\n")
+    source.write_text("synthetic activation source\n", encoding="utf-8")
     committed_source = directory / "test/fixtures/g5_graph_event_rt_cases.inc"
     committed_source.parent.mkdir(parents=True)
     committed_source.write_bytes(source.read_bytes())
@@ -223,7 +223,7 @@ def fake_activation_receipt(directory: Path) -> Path:
     source_sha = gq._source_sha(directory)
     commands = directory / "compile_commands.json"
     commands.write_text(json.dumps([{"file": str(directory / "test/test_trigger_graph.cpp"),
-                                     "command": "clang++ -O3 -DNDEBUG -c test_trigger_graph.cpp"}]))
+                                     "command": "clang++ -O3 -DNDEBUG -c test_trigger_graph.cpp"}]), encoding="utf-8")
     cells = []
     # Literal dimensions and float words are independent of validator constants.
     for rate in (44100, 48000, 96000):
@@ -247,10 +247,10 @@ def fake_activation_receipt(directory: Path) -> Path:
                         f"prepared_bytes={24 * frames} row_stride=72 row_bytes=1152 audio_bytes={64 * frames} "
                         f"io_bytes={8 * frames} harness_payload_bytes={1152 + 72 * frames} misses=0")
                 raw = directory / f"{rate}-{frames}-{backend}.txt"
-                raw.write_text("\n".join(["g12_paced_activation_v1", meta, *rows]) + "\n")
+                raw.write_text("\n".join(["g12_paced_activation_v1", meta, *rows]) + "\n", encoding="utf-8")
                 err = raw.with_suffix(".stderr")
-                err.write_text("")
-                cell = gq.parse_activation_output(raw.read_text())
+                err.write_text("", encoding="utf-8")
+                cell = gq.parse_activation_output(raw.read_text(encoding="utf-8"))
                 cell.pop("callbacks")
                 cell.update(returncode=0, raw_stdout=artifact(raw), raw_stderr=artifact(err))
                 cells.append(cell)
@@ -275,7 +275,7 @@ class PacedActivationQualification(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = fake_activation_receipt(Path(tmp))
             gq.validate_receipt(path, path.parent)
-            value = json.loads(path.read_text())
+            value = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(len(value["cells"]), 24)
             self.assertFalse(value["timing_qualified"])
             self.assertEqual(value["cells"][0]["metrics"]["p99_duration_ns"], 1000)
@@ -285,7 +285,7 @@ class PacedActivationQualification(unittest.TestCase):
     def test_resigned_metadata_summary_matrix_and_provenance_negatives_restore(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = fake_activation_receipt(Path(tmp))
-            original = json.loads(path.read_text())
+            original = json.loads(path.read_text(encoding="utf-8"))
             mutations = [
                 ("missing cell", lambda r: r["cells"].pop()),
                 ("duplicate cell", lambda r: r["cells"].__setitem__(1, copy.deepcopy(r["cells"][0]))),
@@ -316,9 +316,9 @@ class PacedActivationQualification(unittest.TestCase):
     def test_resigned_raw_audio_index_schedule_pdc_and_resource_controls(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = fake_activation_receipt(Path(tmp))
-            original = json.loads(path.read_text())
+            original = json.loads(path.read_text(encoding="utf-8"))
             raw_path = path.parent / original["cells"][0]["raw_stdout"]["path"]
-            raw = raw_path.read_text()
+            raw = raw_path.read_text(encoding="utf-8")
             mutations = (
                 ("wrong gain", "3f000000:32", "3ec00000:32"),
                 ("mixed", "3f000000:32", "3e800000:1,3f000000:31"),
@@ -341,7 +341,7 @@ class PacedActivationQualification(unittest.TestCase):
                 with self.subTest(name=name):
                     self.assertIn(old, raw)
                     broken = raw.replace(old, new, 1)
-                    raw_path.write_text(broken)
+                    raw_path.write_text(broken, encoding="utf-8")
                     changed = copy.deepcopy(original)
                     changed["cells"][0]["raw_stdout"]["sha256"] = gq.sha256_file(raw_path)
                     # Recompute typed summaries too when possible: semantic
@@ -351,7 +351,7 @@ class PacedActivationQualification(unittest.TestCase):
                     write_receipt(path, changed)
                     with self.assertRaises(gq.ReceiptError):
                         gq.validate_receipt(path, path.parent)
-                    raw_path.write_text(raw)
+                    raw_path.write_text(raw, encoding="utf-8")
                     write_receipt(path, original)
                     gq.validate_receipt(path, path.parent)
             lines = raw.splitlines()
@@ -374,7 +374,7 @@ class PacedActivationQualification(unittest.TestCase):
 
             def interrupted_copy(copied, source_root):
                 self.assertNotEqual(copied.parent, path.parent)
-                copied.write_text("interrupted planted control")
+                copied.write_text("interrupted planted control", encoding="utf-8")
                 for artifact, raw in files.items():
                     self.assertEqual(artifact.read_bytes(), raw)
                 raise RuntimeError("planted interruption")
@@ -401,7 +401,7 @@ class PacedActivationQualification(unittest.TestCase):
     def test_fully_resigned_source_and_binary_artifact_controls(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = fake_activation_receipt(Path(tmp))
-            original = json.loads(path.read_text())
+            original = json.loads(path.read_text(encoding="utf-8"))
             for name in ("source_fixture", "executable"):
                 artifact_path = path.parent / original["artifacts"][name]["path"]
                 saved = artifact_path.read_bytes()
