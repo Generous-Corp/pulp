@@ -1,0 +1,10 @@
+{
+ "name": "vellum-ui-drift-report-selftest",
+ "record": {
+  "entry": "tools/scripts/test_vellum_ui_drift_report.py",
+  "inputs": [
+   "tools/scripts/test_vellum_ui_drift_report.py"
+  ],
+  "kind": "python"
+ }
+}
