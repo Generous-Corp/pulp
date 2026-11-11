@@ -4285,3 +4285,9 @@ render callback only latches a request; `service_program_changes()` loads it on
 the main thread. Both built-in editors call it beside `service_state_persistence`
 from their idle hook. A standalone built without an editor must call it itself,
 or a Program Change is latched and never applied.
+### SignalGraph notation tools
+
+`graph catalog` needs no file. `.pat` inputs use the public graph-patch parser;
+`validate` and `fmt --notation` use strict saved-edge validation. Keep diagnostic
+fields and codes identical across the public C++ API, CLI and MCP. Application
+Processor registrations belong to the C++ catalog, not the default tool catalog.
