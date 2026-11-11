@@ -62,6 +62,14 @@ def tree_bytes(path: Path) -> dict[str, bytes]:
     return {rel: text.encode("utf-8") for rel, text in store._read_dir(path).items()}
 
 
+def restore_tree(path: Path, snapshot: dict[str, bytes]) -> None:
+    """Write a `tree_bytes` snapshot back as the list at `path`."""
+    for rel, data in snapshot.items():
+        target = path / rel if not path.is_file() and path.suffix != ".json" else path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+
+
 def as_doc(snapshot: dict[str, bytes]) -> dict:
     """The combined document a `tree_bytes` snapshot of a fragment directory holds."""
     return store.join({rel: data.decode("utf-8") for rel, data in snapshot.items()})
@@ -883,6 +891,117 @@ class NamedProgramTests(unittest.TestCase):
             ex = sti.compiled_entries(repo.root, repo.build)
             self.assertEqual({k: v["spawns"] for k, v in ex.items()},
                              dict.fromkeys(("direct", "missing", "through", "fake", "plugin", "absent"), "undeclared"))
+
+
+class UnbuiltGeneratedSourceTests(unittest.TestCase):
+    """A committed entry that records a read-scanned generated source cannot be
+    checked in a tree that has not built it: NOT CHECKED, never drift. Every
+    other difference still drifts."""
+
+    GEN = "build-in/gen/fixture_Standalone.cpp"
+    READ = 'auto p = fs::path(PULP_SOURCE_DIR) / "test/fixtures/data.txt";\n'
+
+    def make(self, tmp: Path, *, built: bool, listed: bool | None = None, body: str | None = None) -> "Repo":
+        """`built`: the generated file exists. `listed`: this configure's source
+        list contains it (CMake does that only for a file that existed when it
+        configured); defaults to `built`."""
+        listed = built if listed is None else listed
+        repo = Repo(tmp)
+        repo.build = repo.root / "build-in"
+        repo.build.mkdir()
+        write(repo.root, "test/fixtures/main.cpp", "int main() { return 0; }\n")
+        if built:
+            write(repo.root, self.GEN, self.READ if body is None else body)
+        ev = repo.build / "test" / "test-data"
+        ev.mkdir(parents=True)
+        (ev / "executables.json").write_text(json.dumps({"schema": "pulp-test-executables/v1", "executables": {
+            "pulp-test-gen": {"sources": ["test/fixtures/main.cpp"] + ([self.GEN] if listed else []),
+                              "tree_defines": ["PULP_SOURCE_DIR"],
+                              "runtime_targets": [], "spawns_none": False, "spawns_none_reason": None}}}),
+            encoding="utf-8")
+        (ev / "runtime-targets.json").write_text(
+            json.dumps({"schema": "pulp-runtime-targets/v1", "artifacts": {}}), encoding="utf-8")
+        (ev / "pulp-test-gen.inputs.json").write_text(json.dumps({
+            "schema": "pulp-test-data-inputs/v1", "executable": "pulp-test-gen", "kind": "compiled",
+            "inputs": ["test/fixtures/data.txt"], "sources": [self.GEN]}), encoding="utf-8")
+        return repo
+
+    def run_tool(self, repo: "Repo", *args: str) -> subprocess.CompletedProcess[str]:
+        inv = repo.build / "inv.json"
+        inv.write_text(json.dumps(repo.inventory()), encoding="utf-8")
+        cmd = [sys.executable, str(SCRIPT), "--repo-root", str(repo.root), "--build-dir", str(repo.build),
+               "--inventory-json", str(inv), *args]
+        if args[0] == "--check":
+            cmd.append("--full")
+        return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=60,
+                              env=tool_env(event="pull_request", strict=False))
+
+    def commit_from_built_tree(self, tmp: Path) -> bytes:
+        """The list as a built tree writes it; returns the repo's list bytes."""
+        repo = self.make(tmp, built=True)
+        self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+        return tree_bytes(repo.root / sti.DEFAULT_LIST)
+
+    def test_configure_only_tree_reports_not_checked_not_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
+            committed = self.commit_from_built_tree(Path(a))
+            repo = self.make(Path(b), built=False)
+            restore_tree(repo.root / sti.DEFAULT_LIST, committed)
+            proc = self.run_tool(repo, "--check")
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn("NOT CHECKED: pulp-test-gen", proc.stdout)
+            self.assertIn("--target", proc.stdout)
+            self.assertNotIn("drift", proc.stdout)
+
+    def test_built_tree_is_checked_and_a_changed_generated_source_drifts(self) -> None:
+        with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
+            committed = self.commit_from_built_tree(Path(a))
+            repo = self.make(Path(b), built=True)
+            restore_tree(repo.root / sti.DEFAULT_LIST, committed)
+            clean = self.run_tool(repo, "--check")
+            self.assertEqual(clean.returncode, 0, clean.stdout + clean.stderr)
+            self.assertNotIn("NOT CHECKED", clean.stdout)
+            # The file exists but no longer reads the checkout: that is real drift.
+            (repo.root / self.GEN).write_text("int x = 1;\n", encoding="utf-8")
+            drifted = self.run_tool(repo, "--check")
+            self.assertNotEqual(drifted.returncode, 0, drifted.stdout)
+            self.assertNotIn("NOT CHECKED", drifted.stdout)
+
+    def test_built_but_not_reconfigured_is_also_not_checked(self) -> None:
+        with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
+            committed = self.commit_from_built_tree(Path(a))
+            repo = self.make(Path(b), built=True, listed=False)
+            restore_tree(repo.root / sti.DEFAULT_LIST, committed)
+            proc = self.run_tool(repo, "--check")
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn("NOT CHECKED", proc.stdout)
+            self.assertIn("reconfigure", proc.stdout)
+
+    def test_a_newly_detected_source_still_drifts_next_to_an_unbuilt_one(self) -> None:
+        with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
+            committed = self.commit_from_built_tree(Path(a))
+            repo = self.make(Path(b), built=False)
+            restore_tree(repo.root / sti.DEFAULT_LIST, committed)
+            # A checked-in source starts reading the checkout: something the
+            # list does not record, so it cannot be waved through as unbuilt.
+            write(repo.root, "test/fixtures/main.cpp", self.READ)
+            proc = self.run_tool(repo, "--check")
+            self.assertNotEqual(proc.returncode, 0, proc.stdout)
+            self.assertNotIn("NOT CHECKED", proc.stdout)
+
+    def test_other_differences_still_drift_when_nothing_is_built(self) -> None:
+        with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
+            committed = self.commit_from_built_tree(Path(a))
+            repo = self.make(Path(b), built=False)
+            restore_tree(repo.root / sti.DEFAULT_LIST, committed)
+            # Change something else about the entry: its declared input list.
+            (repo.build / "test" / "test-data" / "pulp-test-gen.inputs.json").write_text(json.dumps({
+                "schema": "pulp-test-data-inputs/v1", "executable": "pulp-test-gen", "kind": "compiled",
+                "inputs": ["test/fixtures/data.txt", "test/fixtures/main.cpp"], "sources": [self.GEN]}),
+                encoding="utf-8")
+            proc = self.run_tool(repo, "--check")
+            self.assertNotEqual(proc.returncode, 0, proc.stdout)
+            self.assertNotIn("NOT CHECKED", proc.stdout)
 
 
 class SpawnScanTests(unittest.TestCase):

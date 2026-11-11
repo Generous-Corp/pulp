@@ -1415,6 +1415,46 @@ def load_inventory(build_dir: str | None, inventory_json: str | None) -> dict | 
         return None
 
 
+def unbuilt_generated_entries(current: dict, checked_in: dict, build_dir: Path | None,
+                              root: Path) -> list[tuple[str, str, list[str]]]:
+    """Compiled entries whose only difference from the list is a generated
+    source that this configure has not seen.
+
+    `detected_sources` names the sources of a target whose text carries a
+    data-read signal. CMake lists a generated source in the target's sources
+    only once it exists at configure time, so a tree that is only configured
+    (or built but not reconfigured) cannot say whether the committed entry is
+    right. For those entries `current` is rewritten to the committed
+    `detected_sources` and the entry is returned as (name, target, paths) to be
+    reported as NOT CHECKED. A generated source the configure did list but whose
+    text no longer matches, and every other difference, still drift."""
+    if build_dir is None:
+        return []
+    index = test_executables(build_dir) or {}
+    build_rel = _rel(build_dir, root)
+    if not build_rel or build_rel == ".":
+        return []
+    out = []
+    ce = checked_in.get("executables") or {}
+    prefix = BINARY_DIR_TOKEN + "/"
+    for name, rec in (current.get("executables") or {}).items():
+        old = ce.get(name)
+        if not old or old == rec:
+            continue
+        keys = set(old) | set(rec)
+        if any(old.get(k) != rec.get(k) for k in keys - {"detected_sources"}):
+            continue
+        gone = sorted(set(old.get("detected_sources") or []) - set(rec.get("detected_sources") or []))
+        if not gone:
+            continue
+        listed = set((index.get(name) or {}).get("sources") or [])
+        if not all(g.startswith(prefix) and f"{build_rel}/{g[len(prefix):]}" not in listed for g in gone):
+            continue
+        rec["detected_sources"] = list(old.get("detected_sources") or [])
+        out.append((name, rec.get("target", name), gone))
+    return out
+
+
 def drift(current: dict, checked_in: dict) -> list[tuple[str, str, set[str]]]:
     """(kind, test, paths involved) for tests present in the current configuration
     whose entry is missing or stale. `paths` is the entry script plus the old and
@@ -1675,6 +1715,12 @@ def main(argv: list[str]) -> int:
         # compare; this build's compiled entries cannot, so they are left out
         # and the result says so.
         current = {k: v for k, v in current.items() if k != "executables"}
+    not_checked = unbuilt_generated_entries(current, checked_in, Path(build_dir) if build_dir else None, root)
+    for name, target, gone in not_checked:
+        print(f"script-test-inputs: NOT CHECKED: {name}: its entry records scanned generated source(s) "
+              f"{', '.join(gone)}, which this configure has not seen (CMake lists a generated source once it "
+              f"exists at configure time). To check it, build the generating target, then reconfigure: "
+              f"cmake --build {build_dir} --target {target} && cmake -S . -B {build_dir}")
     problems = drift(current, checked_in)
     if "executables" in current:
         problems += unscanned_executables(current, checked_in, test_executables(build_dir) or {})
