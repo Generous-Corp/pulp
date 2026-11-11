@@ -77,7 +77,7 @@ class MidiLearnSession {
             return false;
         // A successful learn supersedes any earlier refusal still on display.
         has_refused_ = false;
-        refused_reason_ = nullptr;
+        refused_reason_.clear();
         if (editor_)
             editor_->record_learn(*outcome);
         bound_param_ = outcome->mapping.id;
