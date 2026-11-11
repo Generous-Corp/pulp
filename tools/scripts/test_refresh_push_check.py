@@ -397,7 +397,8 @@ def case_agent_skip_still_runs_skill_sync(fx: Fixture) -> None:
     res = push(SHIPYARD_AGENT_ID="repair-lane", STUB_SSC_RC="1")
     assert res.returncode == 1, (res.returncode, res.stderr)
     assert "does not skip skill-sync for an agent push" in res.stderr, res.stderr
-    assert "--base origin/main" in marker.read_text(), marker.read_text()
+    recorded = marker.read_text(encoding="utf-8")
+    assert "--base origin/main" in recorded, recorded
 
     res = push(SHIPYARD_AGENT_ID="repair-lane", STUB_SSC_RC="0")
     assert res.returncode == 0 and "skipping gates" in res.stderr, res.stderr

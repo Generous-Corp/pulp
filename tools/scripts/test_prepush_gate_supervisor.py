@@ -282,6 +282,7 @@ run_gate_captured "$3" -c 'raise SystemExit(0)'
                     env={"PATH": str(temp)},
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
                     check=False,
                     timeout=10,
                 )
