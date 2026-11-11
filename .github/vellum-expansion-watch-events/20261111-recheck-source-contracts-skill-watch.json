@@ -6,10 +6,14 @@
   "acceptance_id": "full-design-import-render-v1-pulp-watch",
   "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
   "capability_families": [
-    "design-source-ingest"
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "visual-proof-harness"
   ],
-  "rationale": "Adds a documentation paragraph to the import-design skill describing the verification_note registry field. No design-import, Chromium, rendering or packaging authority moves.",
+  "rationale": "Adds the verification_note documentation and validator/test contract for source-contract rechecks. No registry data is advanced in this PR, and no design-import, Chromium, rendering, packaging or visual-proof authority moves.",
   "tests": [
+    "python3 tools/import-validation/test_source_contracts.py",
+    "python3 tools/import-validation/check-source-contracts.py --strict",
     "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
     "vellum-expansion-watch"
   ],
