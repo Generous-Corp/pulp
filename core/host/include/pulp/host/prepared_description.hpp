@@ -94,6 +94,59 @@ struct PreparedDescriptionEdge {
     std::string final_input_mode;
 };
 
+// Structured actual-plan facts. Physical class IDs are provenance until the
+// resolved encoder renumbers them by canonical logical access order.
+struct ResolvedEndpoint {
+    std::string node;
+    bool output = false;
+    bool operator==(const ResolvedEndpoint&) const = default;
+};
+
+struct ResolvedBufferAccess {
+    ResolvedEndpoint endpoint;
+    std::string channel;
+    std::string role;
+    std::string phase;
+    std::uint32_t ordinal = 0;
+    std::string mode;
+    bool operator==(const ResolvedBufferAccess&) const = default;
+};
+
+struct ResolvedBufferValue {
+    ResolvedEndpoint producer;
+    std::string channel;
+    std::string production_phase;
+    std::uint32_t production_ordinal = 0;
+    std::uint32_t class_id = 0;
+    std::vector<ResolvedBufferAccess> accesses;
+    std::uint32_t lifetime_begin = 0;
+    std::uint32_t lifetime_end = 0;
+    std::optional<std::string> last_read_phase;
+};
+
+struct ResolvedBufferClass {
+    std::uint32_t id = 0;
+    std::string storage_kind = "scratch";
+    std::uint64_t capacity_frames = 0;
+    std::string sample_format = "f32";
+    std::string initialization = "overwrite_before_read";
+    std::vector<ResolvedBufferAccess> members;
+};
+
+struct ResolvedNodeBinding {
+    std::string node;
+    bool required = false;
+    bool preserve_parameter_events = false;
+    std::string audio_rate_delivery;
+};
+
+struct ResolvedEdgeBinding {
+    ResolvedEndpoint source;
+    ResolvedEndpoint destination;
+    std::string channel_source;
+    std::string channel_destination;
+};
+
 // Detached, value-owned capture of one admitted prepared serial path. No
 // pointer, NodeId, allocator state, or mutable runtime storage is retained.
 struct PreparedDescriptionData {
@@ -177,6 +230,14 @@ struct PreparedDescriptionData {
     std::uint64_t effective_max_ports_per_node = 0;
     std::uint64_t effective_max_ports = 0;
     std::uint64_t effective_max_block_frames = 0;
+
+    // Populated from the exact plan/pool before legacy diagnostic formatting.
+    bool typed_resolved_capture = false;
+    std::vector<ResolvedNodeBinding> resolved_node_bindings;
+    std::vector<ResolvedEdgeBinding> resolved_edge_bindings;
+    std::vector<ResolvedBufferClass> resolved_buffer_classes;
+    std::vector<ResolvedBufferValue> resolved_buffer_values;
+    std::optional<ResolvedEndpoint> resolved_alias_endpoint;
 
     std::string canonical_bytes() const;
     std::string content_hash() const;

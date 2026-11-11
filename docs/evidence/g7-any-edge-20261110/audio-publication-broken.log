@@ -1,0 +1,55 @@
+Filters: [edge-probe]
+Randomness seeded to: 67068757
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+pulp-test-signal-graph-executor-parity is a Catch2 v3.16.1 host application.
+Run with -? for options
+
+-------------------------------------------------------------------------------
+SignalGraph named audio edge probe observes its source without changing audio
+-------------------------------------------------------------------------------
+../test/test_signal_graph_executor_parity.cpp:3641
+...............................................................................
+
+../test/test_signal_graph_executor_parity.cpp:3678: FAILED:
+  REQUIRE( graph.read_audio_edge_probe(sample) )
+with expansion:
+  false
+
+-------------------------------------------------------------------------------
+SignalGraph edge probe has one concurrent reader and bounded loss accounting
+-------------------------------------------------------------------------------
+../test/test_signal_graph_executor_parity.cpp:3874
+...............................................................................
+
+../test/test_signal_graph_executor_parity.cpp:3921: FAILED:
+  REQUIRE( count > 0 )
+with expansion:
+  0 > 0
+
+-------------------------------------------------------------------------------
+G7 sidechain probe selects the source channel before destination mixing
+-------------------------------------------------------------------------------
+../test/test_signal_graph_executor_parity.cpp:3779
+...............................................................................
+
+../test/test_signal_graph_executor_parity.cpp:3808: FAILED:
+  REQUIRE( graph.read_audio_edge_probe(sample) )
+with expansion:
+  false
+
+-------------------------------------------------------------------------------
+G7 feedback probe observes retained input before current source capture
+-------------------------------------------------------------------------------
+../test/test_signal_graph_executor_parity.cpp:3726
+...............................................................................
+
+../test/test_signal_graph_executor_parity.cpp:3755: FAILED:
+  REQUIRE( graph.read_audio_edge_probe(sample) )
+with expansion:
+  false
+
+===============================================================================
+test cases:  6 |  2 passed | 4 failed
+assertions: 63 | 59 passed | 4 failed
+
