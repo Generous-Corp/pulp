@@ -460,11 +460,10 @@ inline constexpr std::size_t kParamIndexNotFound = static_cast<std::size_t>(-1);
 /// per-parameter host queue cache), so a publication path holding an id has to
 /// resolve it back to an index.
 ///
-/// First match wins. `StateStore` permits an id to be registered more than once
-/// and resolves reads/writes to the *latest* such slot (see the duplicate-
-/// ParamID contract in `StateStore::reset_triggers_rt`), so under a duplicate id
-/// this returns a slot the store itself no longer reads. Preserved as-is because
-/// it is what every adapter's publication path has always done. RT-safe.
+/// `StateStore::add_parameter` refuses a repeated id, so an id appears at most
+/// once in `all_params` and the first match is the only match. The loop still
+/// returns on the first hit, so a hand-built list with a repeated id resolves to
+/// its first entry. RT-safe.
 inline std::size_t find_param_index(std::span<const state::ParamInfo> all_params,
                                     state::ParamID id) noexcept {
     for (std::size_t i = 0; i < all_params.size(); ++i) {
