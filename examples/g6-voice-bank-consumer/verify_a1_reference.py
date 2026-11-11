@@ -250,7 +250,13 @@ def main():
         "invalid_release_range": "note_off_linear_release_and_bounded_tail",
         "unbounded_or_steal_tail": "steal_hard_reset_no_tail",
     }
-    if {item["id"] for item in data["negative_controls"]} != set(controls):
+    # The vector fixture intentionally carries only positive data. Older
+    # snapshots listed these verifier-owned controls in JSON, so validate that
+    # optional list when present while keeping the planted negatives in this
+    # independent verifier.
+    if "negative_controls" in data and {
+        item["id"] for item in data["negative_controls"]
+    } != set(controls):
         raise SystemExit("A1 negative control list differs from the reference checks")
     for mutation, case_id in controls.items():
         case = cases[case_id]
