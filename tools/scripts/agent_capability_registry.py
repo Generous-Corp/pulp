@@ -180,6 +180,21 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # Public headers can leave the frozen legacy bucket only through one of these
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
+    {'include': 'pulp/host/graph_patch.hpp', 'fingerprint': 'sha256:017cd6e433918b371a9d37b48698bf392fc3d8879fff19eff7f0572bff82f368', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Control-thread catalog-derived graph notation and strict diagnostics transport over existing SignalGraph and restore contracts; bounded profile, not a DSP algorithm or full G2 completion.'},
+    {
+        'include': 'pulp/host/signal_graph_execution_snapshot.hpp',
+        'fingerprint': 'sha256:fb2d9b56aadf50517075a3d915de0685cb9e08ec0be44b1af10d6288b774fbec',
+        'disposition': 'infrastructure',
+        'capability_keys': [],
+        'rationale': 'Pinned graph execution handle; refuses isolated proxies before capture. No additional generator capability.',
+    },
+    {
+        'include': 'pulp/host/isolated_plugin_slot.hpp',
+        'fingerprint': 'sha256:89e0eae24caedce120023b6fa6ec23766d8af54f0d2b01051fa0538b0907afa9',
+        'disposition': 'infrastructure',
+        'capability_keys': [],
+        'rationale': 'Opt-in MacClapStereo64V1 hosted worker and bounded lifecycle control; no generator capability or full realtime qualification claim.',
+    },
     {
         "include": "pulp/signal/spectrum_analyzer.hpp",
         "fingerprint": "sha256:f9b372d037fc8a698cd4e7d36805422a3bf2037aeaeb2e600ceb6892e6350f58",
@@ -231,6 +246,20 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         'rationale': 'Bounded host and graph-authored event lane used by SignalGraph Custom-node callbacks; it is an infrastructure contract, not an independently advertised generator capability.',
     },
     {
+        'include': 'pulp/host/signal_graph_subgraph.hpp',
+        'fingerprint': 'sha256:81103ef7f256181918a1e4b60c254451192f492be5959e10a88e63858b6063c0',
+        'disposition': 'infrastructure',
+        'capability_keys': [],
+        'rationale': 'Control-thread authored subgraph expansion and exact Processor parameter binding; the bounded G6 runtime is still partial.',
+    },
+    {
+        'include': 'pulp/host/voice_bank_binding.hpp',
+        'fingerprint': 'sha256:d622f444c145ccced476407b97bc62f59912601d4804dc557e4d022882d503a4',
+        'disposition': 'infrastructure',
+        'capability_keys': [],
+        'rationale': 'Bounded eight-slot graph voice-bank runtime with sustain; saved activation and paced realtime qualification remain open.',
+    },
+    {
         'include': 'pulp/audio/buffer.hpp',
         'fingerprint': 'sha256:d783b077cccb2137232cfcf34924a2fada3e356467f7768fce862785fdda977d',
         'disposition': 'infrastructure',
@@ -251,7 +280,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         'capability_keys': [],
         'rationale': 'Existing executor lowering infrastructure with graph-owned opaque spectral resolver; no public native spectral-stage registration or notation capability.',
     },
-    {'include': 'pulp/host/spectral_graph.hpp', 'fingerprint': 'sha256:7184acce0063ba69aab4c271f79a4e65ca3e04fc01e68de2f27f84aa173b3e7a', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Runtime-only typed spectral ports; notation and complete qualification remain PARTIAL.'},
+    {'include': 'pulp/host/spectral_graph.hpp', 'fingerprint': 'sha256:406622267d96cad1fbc3777793c56031a601acafa2a852e3af68a0069109ec26', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Runtime-only typed spectral ports; notation and complete qualification remain PARTIAL.'},
 
     {'include': 'pulp/midi/synthesiser.hpp', 'fingerprint': 'sha256:2611124e14f31cf1481b9605e99d6bdff7c46fe751073ff1922b01e73e97522c', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Polyphonic voice allocator used by instrument processors; reviewed when panic() was added. Not a generator-facing capability.'},
     {'include': 'pulp/midi/panic.hpp', 'fingerprint': 'sha256:5de1b463081d7a2bb4c01c83886bc2b341d54b492c43259dace4a944b67e5495', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Pure MIDI 1.0 panic message generation and held-note offs used by processors and adapters; not a generator-facing capability.'},
@@ -736,7 +765,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     ],
     {
         "include": "pulp/signal/fft.hpp",
-        "fingerprint": "sha256:d83eda9b7cf1281260c902d4e69ebc79cfc4424f6e06da743fb86c494382971a",
+        "fingerprint": "sha256:57e78a39081ec72cb53cbf6518f7e95180be864621fd1f2cf4382d0d368a323d",
         "disposition": "capability_support",
         "capability_keys": ["signal.source-filter-analysis", "signal.streaming-analysis-frontends"],
         "rationale": (
@@ -868,7 +897,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/midi/mpe_synth_voice.hpp",
-        "fingerprint": "sha256:2426bb49591fb4510aaab4a70931899c4928793f34b23935f14b6af19c918db4",
+        "fingerprint": "sha256:d1f0721725aece5c13976d039d131baea39436f4191df8c0de1ec5606c31be5a",
         "disposition": "capability_support",
         "capability_keys": ["midi.mpe-voice-tracker"],
         "rationale": (

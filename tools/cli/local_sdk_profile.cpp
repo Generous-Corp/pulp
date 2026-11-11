@@ -191,7 +191,8 @@ InstallRequest parse_install_arguments(const std::vector<std::string>& args,
     return out;
 }
 
-ArchiveSliceAction archive_slice_action(const std::string& lipo_architectures) {
+ArchiveSliceAction archive_slice_action(const fs::path& relative_archive,
+                                        const std::string& lipo_architectures) {
     std::istringstream input(lipo_architectures);
     std::string architecture;
     bool has_arm64 = false;
@@ -202,6 +203,10 @@ ArchiveSliceAction archive_slice_action(const std::string& lipo_architectures) {
     }
     if (!has_arm64)
         return ArchiveSliceAction::Reject;
+    auto part = relative_archive.begin();
+    if (part != relative_archive.end() && *part++ == "external" && part != relative_archive.end() &&
+        *part == "skia-build")
+        return ArchiveSliceAction::Keep;
     return count == 1 ? ArchiveSliceAction::Keep : ArchiveSliceAction::ThinToArm64;
 }
 

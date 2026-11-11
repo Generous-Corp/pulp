@@ -1,0 +1,22 @@
+Test project /Volumes/Workshop/Code/agent-worktrees/g11-live-retune-20261110/build-g11-clean-consumer
+    Start 1: g11-live-retune-positive
+1/5 Test #1: g11-live-retune-positive .........   Passed    0.24 sec
+    Start 2: g11-live-retune-late
+2/5 Test #2: g11-live-retune-late .............   Passed    0.02 sec
+    Start 3: g11-live-retune-reset
+3/5 Test #3: g11-live-retune-reset ............   Passed    0.03 sec
+    Start 4: g11-live-retune-sibling
+4/5 Test #4: g11-live-retune-sibling ..........   Passed    0.04 sec
+    Start 5: g11-live-retune-mutation
+5/5 Test #5: g11-live-retune-mutation .........   Passed    0.09 sec
+
+100% tests passed, 0 tests failed out of 5
+
+Label Time Summary:
+examples         =   0.42 sec*proc (5 tests)
+g11              =   0.42 sec*proc (5 tests)
+graph            =   0.42 sec*proc (5 tests)
+installed-sdk    =   0.42 sec*proc (5 tests)
+tuning           =   0.42 sec*proc (5 tests)
+
+Total Test time (real) =   0.43 sec

@@ -1437,6 +1437,31 @@ true. Through the CLI a refusal is exit 2, distinct from a failed check.
 Every one of those paths previously returned a confident number that passed a
 gate. If a refusal surprises you, the input is usually wrong — not the tool.
 
+## Comparing two FFT implementations
+
+To prove a new or ported FFT against another, compare the same frames under
+`assert_null_near` and prove the comparison can fail. The worked example is
+`test/test_fft_parity_recipe.cpp`.
+
+1. An FFT output is complex and `assert_null_near` compares audio buffers, so
+   build a two-channel `Buffer<float>` per frame (channel 0 real, channel 1
+   imaginary) divided by the reference's peak. The dBFS tolerance then reads as a
+   relative error; -110 dBFS holds float transforms at every size tested.
+2. The reference must not be derived from the implementation under test: a
+   double-precision radix-2 with long-double twiddles, or recorded frames from
+   the other implementation.
+3. Prove the floor with negative controls. Run the identical assertion on a
+   candidate with a known defect, a conjugated output (the sign-convention slip)
+   and the same data scaled by 1/N, and require both to FAIL. A comparison that
+   also passes for them measures nothing.
+
+Two limits to state in any report. The two implementations agree to rounding, not
+bit for bit: the float backends differ from each other in the last bits, so never
+`memcmp` across backends. For a fixed arithmetic use `FftT<double>` (always the
+built-in transform) and a committed golden, as `test_fft_double_golden.cpp` does.
+That test passing on one host does not prove other platforms match; the hosted
+Linux and Windows lanes are the check.
+
 ## Measuring an oscillator's pitch — `estimate_pitch`, not `estimate_frequency`
 
 `estimate_frequency` (audio_metrics.hpp) is a zero-crossing detector and its own

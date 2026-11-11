@@ -24,7 +24,9 @@ struct GraphRuntimeProbeSample {
     float peak = 0.0f;
     float rms = 0.0f;
     // Control lane: selected edge's mapped/slewed contribution at block
-    // start/end, before destination mixing and bounds. Event lane: number of
+    // start/end, before destination mixing and bounds. Dense control also uses
+    // peak/rms over every mapped/slewed sample and payload_count == frames;
+    // sparse control leaves those summary fields zero. Event lane: number of
     // events delivered on this edge and first event metadata.
     float value = 0.0f;
     float value_end = 0.0f;

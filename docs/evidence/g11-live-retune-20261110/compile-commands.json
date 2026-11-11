@@ -1,0 +1,14 @@
+[
+  {
+    "directory": "/Volumes/Workshop/Code/agent-worktrees/g11-live-retune-20261110/build-g11-clean-consumer",
+    "command": "/usr/bin/c++ -DPULP_ENABLE_AUDIO_PROBES=0 -DPULP_ENABLE_JS=1 -DPULP_HAS_DESIGN_IMPORT=0 -DPULP_HAS_SCALA_TUNING=1 -DPULP_HOST_HAS_AU=1 -DPULP_HOST_HAS_EDITOR_CONTAINER=1 -DPULP_HOST_HAS_LV2=1 -DPULP_HOST_QUIRKS_DEFAULT_POLICY_VALIDATED_ONLY=1 -DPULP_SIMD_DEFAULT_BACKEND_ACCELERATE=1 -DPULP_SIMD_HAS_ACCELERATE=1 -DPULP_SIMD_HAS_HIGHWAY=1 -DPULP_VIEW_HAS_AUDIO_WIDGETS=1 -isystem /Volumes/Workshop/Code/agent-worktrees/g11-live-retune-20261110/build-g11-release/clean-d325-prefix/include -isystem /Volumes/Workshop/Code/agent-worktrees/g11-live-retune-20261110/build-g11-release/clean-d325-prefix/external/lv2/include -isystem /Volumes/Workshop/Code/agent-worktrees/g11-live-retune-20261110/build-g11-release/clean-d325-prefix/external/clap/include -O3 -DNDEBUG -std=gnu++20 -arch arm64 -mmacosx-version-min=13.4 -o CMakeFiles/pulp-g11-live-retune.dir/main.cpp.o -c /Volumes/Workshop/Code/agent-worktrees/g11-live-retune-20261110/examples/g11-live-retune-consumer/main.cpp",
+    "file": "/Volumes/Workshop/Code/agent-worktrees/g11-live-retune-20261110/examples/g11-live-retune-consumer/main.cpp",
+    "output": "/Volumes/Workshop/Code/agent-worktrees/g11-live-retune-20261110/build-g11-clean-consumer/CMakeFiles/pulp-g11-live-retune.dir/main.cpp.o"
+  },
+  {
+    "directory": "/Volumes/Workshop/Code/agent-worktrees/g11-live-retune-20261110/build-g11-clean-consumer",
+    "command": "/usr/bin/c++ -DG11_MUTATE_IGNORE_WRITE=1 -DPULP_ENABLE_AUDIO_PROBES=0 -DPULP_ENABLE_JS=1 -DPULP_HAS_DESIGN_IMPORT=0 -DPULP_HAS_SCALA_TUNING=1 -DPULP_HOST_HAS_AU=1 -DPULP_HOST_HAS_EDITOR_CONTAINER=1 -DPULP_HOST_HAS_LV2=1 -DPULP_HOST_QUIRKS_DEFAULT_POLICY_VALIDATED_ONLY=1 -DPULP_SIMD_DEFAULT_BACKEND_ACCELERATE=1 -DPULP_SIMD_HAS_ACCELERATE=1 -DPULP_SIMD_HAS_HIGHWAY=1 -DPULP_VIEW_HAS_AUDIO_WIDGETS=1 -isystem /Volumes/Workshop/Code/agent-worktrees/g11-live-retune-20261110/build-g11-release/clean-d325-prefix/include -isystem /Volumes/Workshop/Code/agent-worktrees/g11-live-retune-20261110/build-g11-release/clean-d325-prefix/external/lv2/include -isystem /Volumes/Workshop/Code/agent-worktrees/g11-live-retune-20261110/build-g11-release/clean-d325-prefix/external/clap/include -O3 -DNDEBUG -std=gnu++20 -arch arm64 -mmacosx-version-min=13.4 -o CMakeFiles/pulp-g11-live-retune-mutation.dir/main.cpp.o -c /Volumes/Workshop/Code/agent-worktrees/g11-live-retune-20261110/examples/g11-live-retune-consumer/main.cpp",
+    "file": "/Volumes/Workshop/Code/agent-worktrees/g11-live-retune-20261110/examples/g11-live-retune-consumer/main.cpp",
+    "output": "/Volumes/Workshop/Code/agent-worktrees/g11-live-retune-20261110/build-g11-clean-consumer/CMakeFiles/pulp-g11-live-retune-mutation.dir/main.cpp.o"
+  }
+]

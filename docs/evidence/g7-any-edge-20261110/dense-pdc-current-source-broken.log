@@ -1,0 +1,22 @@
+Filters: "G7 dense control probe observes PDC*"
+Randomness seeded to: 3559600696
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+pulp-test-graph-control-event-probe is a Catch2 v3.16.1 host application.
+Run with -? for options
+
+-------------------------------------------------------------------------------
+G7 dense control probe observes PDC history rather than current source
+-------------------------------------------------------------------------------
+../test/test_graph_control_event_probe.cpp:365
+...............................................................................
+
+../test/test_graph_control_event_probe.cpp:404: FAILED:
+  REQUIRE( sample.value == expected[0] )
+with expansion:
+  0.125f == 0.0f
+
+===============================================================================
+test cases: 1 | 1 failed
+assertions: 9 | 8 passed | 1 failed
+

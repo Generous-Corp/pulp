@@ -102,6 +102,15 @@ What the layout does not change: a capability row still lives in a shared
 still commits the installed `counts`, so two branches adding capabilities can
 still meet there.
 
+## Probe-contract comments still change binding fingerprints
+
+Clarifying consumed-edge probe semantics in a public binding header changes its
+fingerprint even when the record layout and declarations stay unchanged. Review
+the final header bytes, run `agent_capability_manifest.py --accept-fingerprint`
+for that named include, then `--write` and `--check`. Inspect the diff to retain
+only the corresponding fingerprint and surface-header records; preserve unrelated
+records and leave capability counters at their base values.
+
 ## Why open PRs no longer conflict on these files
 
 Before 2026-11-08 nearly every capability PR went DIRTY against `main` on the
@@ -163,6 +172,15 @@ headers). A legacy header whose bytes change (`wav_decoder.hpp` gaining
 `interpret_wav_format`) leaves the frozen baseline alone and gets the same
 kind of row; `--write` then reports it as reviewed and the baseline count
 shrinks by one.
+
+The bounded G6 `pulp/host/voice_bank_binding.hpp` and its amended
+`signal_graph_subgraph.hpp` are reviewed host infrastructure, not advertised
+generator capabilities while sustain, saved-bank activation, and paced
+realtime proof remain open. Register both in `REVIEWED_HOST_HEADERS`, classify
+both with measured fingerprints, regenerate the surface, and update the
+current checkout's consumption census after staging the new header. The
+installed consumer and production-source mutation proof exercise the public
+`Pulp::host` target.
 
 The fingerprint is over the header's bytes, so a comment-only edit to a covered
 header costs the same row and inventory bump as a signature change; when a
@@ -2049,3 +2067,19 @@ Edit only that hash, then run `agent_capability_rederive.py` against the base: i
 confirms the counters stay at the base value (no manual `SURFACE_INVENTORY_VERSION`
 bump) and rewrites `agent-capability-surface.json`. Hand-bumping the version, as
 the section above describes for other headers, was not needed here.
+
+### Graph notation transport
+
+`pulp/host/graph_patch.hpp` is reviewed host infrastructure for catalog-derived
+notation and diagnostics, not a new DSP capability inventory. Keep it in
+`REVIEWED_HOST_HEADERS` and refresh its registry fingerprint after header edits.
+The bounded notation profile does not qualify every node or complete live reload.
+
+## Isolated host headers require the same refresh
+
+Changes to the isolated CLAP host headers, including
+`isolated_plugin_slot.hpp`, `signal_graph_execution_snapshot.hpp`, and
+`signal_graph_runtime.hpp`, update their surface fragments and fingerprints.
+Run rederive, fingerprint acceptance, manifest write, and installed-consumer
+checks together; do not hand-edit generated fragments or treat a passing worker
+test as sufficient provenance evidence.

@@ -19,6 +19,11 @@ docs:
     summary: Subsystem dependencies, thread model, build system, GPU stack
 
   # Guides
+  - slug: isolated-clap-worker
+    path: guides/isolated-clap-worker.md
+    kind: guide
+    summary: MacClapStereo64V1 worker lifecycle, callback contract and qualification limits
+
   - slug: gpu-audio-macos-reliability
     path: guides/gpu-audio-macos-reliability.md
     kind: guide
@@ -423,6 +428,11 @@ docs:
     path: examples/pulp-gain.md
     kind: guide
     summary: PulpGain — stereo gain effect (reference example)
+
+  - slug: example-midi-learn-demo
+    path: examples/midi-learn-demo.md
+    kind: guide
+    summary: MidiLearnDemo, a level and pan effect that shows MIDI Learn with menu, overlay, feedback, undo and saved mappings
 
   - slug: example-pulp-tone
     path: examples/pulp-tone.md

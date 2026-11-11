@@ -85,6 +85,40 @@ using StandardInputChannelSession =
     std::function<bool(int child_process_id, ChildProcessInputChannel channel,
                        std::chrono::steady_clock::time_point deadline)>;
 
+/// Observation of a child whose exit has not released its process-group identity.
+enum class RetainedProcessState { Unsupported, NotStarted, Running, Exited, Reaped, CustodyLost };
+
+struct RetainedProcessObservation {
+    RetainedProcessState state = RetainedProcessState::NotStarted;
+    int process_id = -1;
+    int process_group_id = -1;
+    int exit_code = -1;
+    int termination_signal = 0;
+    bool identity_retained = false;
+};
+
+/// Incomplete and Busy require the caller to retain its custody reservation.
+enum class RetainedCleanupStatus {
+    Complete,
+    Incomplete,
+    Busy,
+    NotRetained,
+    Unsupported,
+    CustodyLost
+};
+
+struct RetainedProcessCleanup {
+    RetainedCleanupStatus status = RetainedCleanupStatus::NotRetained;
+    RetainedProcessObservation observation;
+    bool descendants_gone = false;
+    bool child_reaped = false;
+    /// At least one corresponding signal call succeeded; errors stay pending.
+    bool term_sent = false;
+    bool kill_sent = false;
+};
+
+class RetainedProcessCustody;
+
 /// Cross-platform child process with timeout, cancellation, and line-by-line
 /// output callbacks. Uses posix_spawn on POSIX (sandbox-compatible for AU
 /// plugins on macOS) and CreateProcess on Windows.
@@ -130,6 +164,27 @@ public:
                                            const StandardInputChannelSession& session,
                                            const ProcessOptions& options = {});
 
+    /// macOS desktop only. Reserve custody before spawning; all unsupported
+    /// platforms refuse without launching. The reservation outlives this handle
+    /// until cleanup completes, including a failed post-spawn handshake.
+    /// A retained handle and reservation are single-use. No caller may reap the
+    /// child independently or install SIGCHLD auto-reaping while it is retained.
+    bool start_retained(RetainedProcessCustody& custody, const std::string& command,
+                        const std::vector<std::string>& args, const ProcessOptions& options = {});
+    bool start_retained_with_standard_input_channel(RetainedProcessCustody& custody,
+                                                    const std::string& command,
+                                                    const std::vector<std::string>& args,
+                                                    const StandardInputChannelSession& session,
+                                                    const ProcessOptions& options = {});
+
+    /// Non-reaping observation. CustodyLost prohibits any further group signal.
+    RetainedProcessObservation retained_process_observation() const;
+    /// Control-thread cleanup, limited to the supplied deadline and two seconds.
+    /// TERM gets at most 100 ms before KILL, retried every 10 ms while retained.
+    /// No blocking waitpid is used.
+    RetainedProcessCleanup
+    cleanup_retained_process_group(std::chrono::steady_clock::time_point deadline);
+
     /// Check if the started process is still running.
     bool is_running() const;
 
@@ -144,20 +199,49 @@ public:
     void cancel();
 
     /// Wait for the process to complete and return the result.
+    /// For retained launches, return the current snapshot immediately without
+    /// draining output, applying timeout_ms, or reaping. Use retained cleanup
+    /// to release custody and its observation for signal termination details.
     ProcessResult wait();
 
     /// Read any available output without blocking (for non-blocking mode).
     std::string read_available_output();
 
-private:
+  private:
+    friend class RetainedProcessCustody;
     bool start_impl(const std::string& command, const std::vector<std::string>& args,
                     const ProcessOptions& options,
                     const std::span<const std::uint8_t>* standard_input,
                     const StandardInputByteProvider* standard_input_provider,
-                    const StandardInputChannelSession* standard_input_session);
+                    const StandardInputChannelSession* standard_input_session,
+                    RetainedProcessCustody* custody = nullptr);
 
     struct Impl;
-    std::unique_ptr<Impl> impl_;
+    std::shared_ptr<Impl> impl_;
+};
+
+/// Caller-owned reservation for one retained child. Keep it in a finite owner
+/// quarantine until cleanup returns Complete; destroying or moving ChildProcess
+/// never removes this reservation. Destruction with unresolved custody is a
+/// contract violation: the record is preserved until host exit and diagnosed,
+/// rather than reaping an identity still needed for cleanup or aborting the host.
+/// It is not cleanup success. All operations are control-thread operations.
+class RetainedProcessCustody {
+  public:
+    RetainedProcessCustody() = default;
+    ~RetainedProcessCustody();
+    RetainedProcessCustody(RetainedProcessCustody&&) noexcept;
+    RetainedProcessCustody& operator=(RetainedProcessCustody&&) noexcept;
+    RetainedProcessCustody(const RetainedProcessCustody&) = delete;
+    RetainedProcessCustody& operator=(const RetainedProcessCustody&) = delete;
+
+    RetainedProcessObservation retained_process_observation() const;
+    RetainedProcessCleanup
+    cleanup_retained_process_group(std::chrono::steady_clock::time_point deadline);
+
+  private:
+    friend class ChildProcess;
+    std::shared_ptr<ChildProcess::Impl> impl_;
 };
 
 /// Convenience: run a command and capture output (blocking).
