@@ -245,6 +245,20 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         'rationale': 'Bounded host and graph-authored event lane used by SignalGraph Custom-node callbacks; it is an infrastructure contract, not an independently advertised generator capability.',
     },
     {
+        'include': 'pulp/host/signal_graph_subgraph.hpp',
+        'fingerprint': 'sha256:81103ef7f256181918a1e4b60c254451192f492be5959e10a88e63858b6063c0',
+        'disposition': 'infrastructure',
+        'capability_keys': [],
+        'rationale': 'Control-thread authored subgraph expansion and exact Processor parameter binding; the bounded G6 runtime is still partial.',
+    },
+    {
+        'include': 'pulp/host/voice_bank_binding.hpp',
+        'fingerprint': 'sha256:421676961c308c12521087267a79fbc5d063dabbd1ed36aae1c931678191685c',
+        'disposition': 'infrastructure',
+        'capability_keys': [],
+        'rationale': 'Bounded eight-slot graph voice-bank runtime; sustain, saved activation, and paced realtime qualification remain open.',
+    },
+    {
         'include': 'pulp/audio/buffer.hpp',
         'fingerprint': 'sha256:d783b077cccb2137232cfcf34924a2fada3e356467f7768fce862785fdda977d',
         'disposition': 'infrastructure',
