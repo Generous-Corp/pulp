@@ -164,6 +164,15 @@ headers). A legacy header whose bytes change (`wav_decoder.hpp` gaining
 kind of row; `--write` then reports it as reviewed and the baseline count
 shrinks by one.
 
+The bounded G6 `pulp/host/voice_bank_binding.hpp` and its amended
+`signal_graph_subgraph.hpp` are reviewed host infrastructure, not advertised
+generator capabilities while sustain, saved-bank activation, and paced
+realtime proof remain open. Register both in `REVIEWED_HOST_HEADERS`, classify
+both with measured fingerprints, regenerate the surface, and update the
+current checkout's consumption census after staging the new header. The
+installed consumer and production-source mutation proof exercise the public
+`Pulp::host` target.
+
 The fingerprint is over the header's bytes, so a comment-only edit to a covered
 header costs the same row and inventory bump as a signature change; when a
 contract note or a behavior fix can live in the `.cpp`, put it there. A
@@ -2049,3 +2058,10 @@ Edit only that hash, then run `agent_capability_rederive.py` against the base: i
 confirms the counters stay at the base value (no manual `SURFACE_INVENTORY_VERSION`
 bump) and rewrites `agent-capability-surface.json`. Hand-bumping the version, as
 the section above describes for other headers, was not needed here.
+
+### Graph notation transport
+
+`pulp/host/graph_patch.hpp` is reviewed host infrastructure for catalog-derived
+notation and diagnostics, not a new DSP capability inventory. Keep it in
+`REVIEWED_HOST_HEADERS` and refresh its registry fingerprint after header edits.
+The bounded notation profile does not qualify every node or complete live reload.

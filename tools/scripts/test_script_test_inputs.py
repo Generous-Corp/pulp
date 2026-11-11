@@ -930,7 +930,7 @@ class SpawnScanTests(unittest.TestCase):
         root = HERE.parents[1]
         host = "\n".join((root / "core/host/include/pulp/host" / name).read_text(encoding="utf-8")
                          for name in ("plugin_slot.hpp", "scanner.hpp", "dl_shim.hpp", "node_pack.hpp",
-                                      "signal_graph_runtime.hpp", "graph_serializer.hpp"))
+                                      "signal_graph_runtime.hpp", "graph_serializer.hpp", "graph_patch.hpp"))
         host += "\n" + "\n".join((root / "core/host/src" / name).read_text(encoding="utf-8")
                                   for name in ("plugin_slot.cpp", "plugin_slot_clap.cpp", "scanner_clap.cpp"))
         for api in sti.LOAD_APIS:
@@ -1011,6 +1011,25 @@ class LoaderCoverageTests(unittest.TestCase):
         with mock.patch.object(sti, "LOAD_APIS", tuple(live)):
             missing = sti.loader_coverage(HERE.parents[1])
         self.assertEqual([m.split(" ")[0] for m in missing], ["load_node_pack"])
+
+    def test_graph_patch_loaders_are_spawn_signals(self) -> None:
+        # Both public entry points transitively reach GraphSerializer. Calls
+        # must participate in compiled-test spawn review even when qualified.
+        for name in ("load_graph_patch_json", "load_graph_patch_file"):
+            with self.subTest(loader=name):
+                self.assertIsNotNone(sti.SPAWN_SIGNAL.search(f"{name}(input, catalog)"))
+                self.assertIsNotNone(sti.SPAWN_SIGNAL.search(f"pulp::host::{name}(input)"))
+
+    def test_each_deleted_graph_patch_loader_is_reported(self) -> None:
+        # Planted negatives use the live implementation, so renaming/removing
+        # a real wrapper cannot be hidden by a synthetic fixture's call graph.
+        for name in ("load_graph_patch_json", "load_graph_patch_file"):
+            with self.subTest(loader=name):
+                remaining = tuple(api for api in sti.LOAD_APIS if not api.startswith(name))
+                self.assertEqual(len(remaining), len(sti.LOAD_APIS) - 1)
+                with mock.patch.object(sti, "LOAD_APIS", remaining):
+                    missing = sti.loader_coverage(HERE.parents[1])
+                self.assertEqual([item.split(" ")[0] for item in missing], [name])
 
     def test_a_public_loader_outside_load_apis_is_reported(self) -> None:
         missing = self.host({"core/host/src/a.cpp": "int public_load(const char* p) { return dlopen(p, 0) != 0; }\n"})
@@ -1324,11 +1343,13 @@ class CompiledDataTests(unittest.TestCase):
             repo = Repo(Path(tmp))
             write(repo.root, "test/test_gen.cpp", 'auto p = fs::path(PULP_SOURCE_DIR) / "test/fixtures/a";\n')
             seen = []
-            for name in ("build-gate", "build-linux"):
+            for name, with_file in (("build-gate", True), ("build-linux", False)):
                 build = repo.root / name
                 ev = build / "test" / "test-data"
                 ev.mkdir(parents=True)
                 gen = f"{name}/tools/cli/generated/index.cpp"
+                if with_file:
+                    write(repo.root, gen, 'auto p = fs::path(PULP_SOURCE_DIR);\n')
                 (ev / "executables.json").write_text(json.dumps({"schema": "pulp-test-executables/v1", "executables": {
                     "pulp-gen": {"sources": ["test/test_gen.cpp", gen], "tree_defines": ["PULP_SOURCE_DIR"]}}}),
                     encoding="utf-8")
@@ -1338,7 +1359,43 @@ class CompiledDataTests(unittest.TestCase):
                 seen.append(sti.compiled_entries(repo.root, build)["pulp-gen"])
             self.assertEqual(seen[0], seen[1])
             self.assertIn("${CMAKE_BINARY_DIR}/tools/cli/generated/index.cpp", seen[0]["sources"])
+            self.assertEqual(seen[0]["detected_sources"], ["test/test_gen.cpp"])
             self.assertFalse(any(s.startswith("build-") for s in seen[0]["sources"]))
+
+    def test_an_undeclared_generated_reader_remains_detected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            build = repo.root / "build-gate"
+            gen = "build-gate/tools/cli/generated/index.cpp"
+            write(repo.root, gen, 'auto p = fs::path(PULP_SOURCE_DIR);\n')
+            ev = build / "test" / "test-data"
+            ev.mkdir(parents=True)
+            (ev / "executables.json").write_text(json.dumps({
+                "schema": "pulp-test-executables/v1", "executables": {
+                    "pulp-gen": {"sources": [gen], "tree_defines": ["PULP_SOURCE_DIR"]}}}),
+                encoding="utf-8")
+            entry = sti.compiled_entries(repo.root, build)["pulp-gen"]
+            token = "${CMAKE_BINARY_DIR}/tools/cli/generated/index.cpp"
+            self.assertEqual(entry["data"], "undeclared")
+            self.assertEqual(entry["detected_sources"], [token])
+            self.assertEqual(entry["undeclared_sources"], [token])
+
+    def test_a_declared_reader_is_detected_when_build_dir_is_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            source = "test/test_gen.cpp"
+            write(repo.root, source, 'auto p = fs::path(PULP_SOURCE_DIR);\n')
+            ev = repo.root / "test" / "test-data"
+            ev.mkdir(parents=True)
+            (ev / "executables.json").write_text(json.dumps({
+                "schema": "pulp-test-executables/v1", "executables": {
+                    "pulp-gen": {"sources": [source], "tree_defines": ["PULP_SOURCE_DIR"]}}}),
+                encoding="utf-8")
+            (ev / "pulp-gen.inputs.json").write_text(json.dumps({
+                "schema": "pulp-test-data-inputs/v1", "executable": "pulp-gen", "kind": "compiled",
+                "sources": [source], "inputs": []}), encoding="utf-8")
+            entry = sti.compiled_entries(repo.root, repo.root)["pulp-gen"]
+            self.assertEqual(entry["detected_sources"], [source])
 
     def test_a_generated_source_in_the_build_dir_never_counts_as_a_spawner(self) -> None:
         # The generated index quotes API names in prose; its presence or its
