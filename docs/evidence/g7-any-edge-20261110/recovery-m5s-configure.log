@@ -1,0 +1,15 @@
+
+added 15 packages, and audited 16 packages in 605ms
+
+1 high severity vulnerability
+
+To address all issues, run:
+  npm audit fix
+
+Run `npm audit` for details.
+npm warn install-scripts 1 package has install scripts not yet covered by allowScripts:
+npm warn install-scripts   esbuild@0.25.12 (postinstall: node install.js)
+npm warn install-scripts
+npm warn install-scripts Run `npm install-scripts ls` to review, or `npm install-scripts approve <pkg>` to allow.
+  script-test-inputs: running bash /Volumes/Atelier/Code/agent-worktrees/g7-any-edge-configure-recovery-20261110/setup.sh
+  script-test-inputs: running cmake -S /Volumes/Atelier/Code/agent-worktrees/g7-any-edge-configure-recovery-20261110 -B /Volumes/Atelier/Code/agent-worktrees/g7-any-edge-configure-recovery-20261110/build-gate -G Ninja -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=OFF
