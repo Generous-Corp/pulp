@@ -9,6 +9,20 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11060"></a>
+## [1.106.0] - 2026-11-11
+
+- release/version bump ([#12012](https://github.com/Generous-Corp/pulp/pull/12012))
+- fix/source contract recheck warn ahead 20261111 ([#12030](https://github.com/Generous-Corp/pulp/pull/12030))
+- codex/g5 qualification followup 20261110 ([#12028](https://github.com/Generous-Corp/pulp/pull/12028))
+- fix/source selftests governed jobs ([#12022](https://github.com/Generous-Corp/pulp/pull/12022))
+- codex/generated test inventory helper 20261110 ([#12016](https://github.com/Generous-Corp/pulp/pull/12016))
+- g12 measurement phases 20261110 ([#12009](https://github.com/Generous-Corp/pulp/pull/12009))
+- dependabot/github_actions/github actions 6d69e638c7 ([#11978](https://github.com/Generous-Corp/pulp/pull/11978))
+- codex/g6 voice binding runtime 20261110 ([#12000](https://github.com/Generous-Corp/pulp/pull/12000))
+- fix/agent toolkit synth double add ([#11945](https://github.com/Generous-Corp/pulp/pull/11945))
+- release/version bump ([#12007](https://github.com/Generous-Corp/pulp/pull/12007))
+
 <a id="v11050"></a>
 ## [1.105.0] - 2026-11-10
 
@@ -12722,6 +12736,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.106.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.106.0
 [1.105.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.105.0
 [1.104.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.104.0
 [1.100.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.100.0
