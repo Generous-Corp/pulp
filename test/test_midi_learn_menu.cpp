@@ -355,3 +355,37 @@ TEST_CASE("midi learn session: learning a reserved controller reports why, then 
     CHECK(session.tick());
     CHECK(target.state(kCut).refused_reason.empty());
 }
+
+TEST_CASE("midi learn session: a successful learn clears an earlier refusal at once",
+          "[view][midi-learn][session]") {
+    state::StateStore store;
+    populate(store);
+    state::MidiLearnEngine engine;
+    ClaimCc0 claim;
+    engine.set_reservation(&claim);
+    std::uint64_t now = 1000;
+    view::MidiLearnSession session(engine, [&] { return now; });
+    auto target = session.target();
+
+    REQUIRE(view::run_midi_learn_menu_command(target, kCut, view::kMidiLearnCommandBegin));
+    engine.begin_block();
+    engine.route(store, state::RawMidi{0xB0, 0, 20});
+    engine.route(store, state::RawMidi{0xB0, 0, 90});
+    now += 10;
+    session.tick();
+    now += 400;
+    session.tick();
+    REQUIRE_FALSE(target.state(kCut).refused_reason.empty());
+
+    // Retry inside the refusal window and succeed.
+    REQUIRE(view::run_midi_learn_menu_command(target, kCut, view::kMidiLearnCommandBegin));
+    engine.begin_block();
+    engine.route(store, state::RawMidi{0xB0, 74, 20});
+    engine.route(store, state::RawMidi{0xB0, 74, 70});
+    now += 10;
+    session.tick();
+    now += 400;
+    REQUIRE(session.tick());
+    CHECK(now - 1000 < view::MidiLearnSession::kRefusalShowMs);
+    CHECK(target.state(kCut).refused_reason.empty());
+}
