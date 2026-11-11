@@ -305,6 +305,24 @@ def _run_one(
     return result
 
 
+def default_workers(env=None, cpus: int | None = None) -> int:
+    """Worker count drawn from the host build share, never the whole machine.
+
+    PULP_BUILD_JOBS (exported by the tartci lease / host profile and honoured
+    by the pulp CLI and governed-build.sh) wins; otherwise a quarter of the
+    cores, at least 2, so concurrent agent builds on a shared host divide it.
+    """
+    env = os.environ if env is None else env
+    try:
+        share = int(env.get("PULP_BUILD_JOBS", "") or 0)
+    except ValueError:
+        share = 0
+    if share > 0:
+        return share
+    cores = cpus if cpus is not None else (os.cpu_count() or 2)
+    return max(2, cores // 4)
+
+
 def run(
     entries: list[dict[str, Any]],
     *,
@@ -318,7 +336,7 @@ def run(
         for entry in entries
         for name in (entry.get("resource_lock") or [])
     }
-    workers = jobs or max(2, (os.cpu_count() or 2))
+    workers = jobs or default_workers()
     slots = _Slots(workers)
     # Longest first, so a heavy selftest does not start last and set the wall;
     # entries that need every slot go after the rest, as ctest defers them, so

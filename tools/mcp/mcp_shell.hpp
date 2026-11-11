@@ -9,6 +9,7 @@
 
 #include <array>
 #include <charconv>
+#include <cstdlib>
 #include <cstdio>
 #include <optional>
 #include <filesystem>
@@ -128,8 +129,22 @@ inline std::filesystem::path find_project_root() {
     return {};
 }
 
+// CI and governed local builds may use a named build directory (for example
+// `build-linux`). Keep MCP's source-tree lookup aligned with the build that
+// supplied the running server instead of silently falling back to `<root>/build`.
+inline std::filesystem::path resolve_build_dir(const std::filesystem::path& root) {
+    if (const auto* configured = std::getenv("PULP_BUILD_DIR"); configured && *configured) {
+        std::filesystem::path candidate{configured};
+        if (candidate.is_relative())
+            candidate = root / candidate;
+        if (std::filesystem::is_directory(candidate))
+            return candidate;
+    }
+    return root / "build";
+}
+
 inline std::filesystem::path resolve_cli_binary(const std::filesystem::path& root) {
-    const auto build_dir = root / "build";
+    const auto build_dir = resolve_build_dir(root);
     const auto cli_dir = build_dir / "tools" / "cli";
     std::vector<std::filesystem::path> candidates;
 

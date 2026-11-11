@@ -4,9 +4,10 @@ A text notation for signal-flow graphs: what nodes exist, what is connected to
 what, and how each node is set.
 
 **Status:** working for VCV Rack patches (`tools/rack/patch_lang.py`), 138/138
-real patches round-trip. Generalisation to Pulp plugins, standalone apps and
-core DSP graphs is designed and unbuilt — see the plan in the private planning
-repo.
+real patches round-trip. A bounded catalog-derived SignalGraph profile is implemented; see
+[SignalGraph notation](../guides/graph-patch-notation.md) for the public API,
+typed diagnostics, version/depth extensions and explicit unsupported contracts.
+Graph-file live reload remains a required successor; this is not full G2 completion.
 
 This is a sibling of [`pulp-dsl-v1.md`](pulp-dsl-v1.md), not a replacement.
 `pulp-dsl` is how a *behaviour* language (FAUST, Cmajor, JSFX) plugs into
