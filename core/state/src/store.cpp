@@ -846,11 +846,10 @@ void StateStore::reset_all_to_defaults() {
 bool StateStore::reset_triggers_rt() {
     bool any = false;
     for (auto index : trigger_indices_) {
-        // Duplicate-ParamID contract: add_parameter keeps every registration in
-        // params_/values_ but id_to_index_ resolves an ID to its LATEST slot, so
-        // get_value/set_value only ever touch that slot. Skip a cached trigger
-        // index that a later same-ID registration has superseded — resetting a
-        // dead slot would be a hidden write to a value no reader sees.
+        // add_parameter refuses a repeated ID (see duplicate_registrations()), so
+        // every cached trigger index is the one live slot for its ID. The lookup
+        // below is purely defensive: it keeps a stale index from writing to a
+        // slot no reader resolves if that invariant is ever broken.
         const auto live = id_to_index_.find(params_[index].id);
         if (live == id_to_index_.end() || live->second != index) continue;
         // Write straight to the lock-free atomic: RT-safe, no allocation, no
