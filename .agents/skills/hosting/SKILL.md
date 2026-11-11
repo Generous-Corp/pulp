@@ -9,6 +9,18 @@ description: |
 
 # hosting
 
+## Opt-in isolated CLAP processing
+
+`pulp/host/isolated_plugin_slot.hpp` supplies experimental MacClapStereo64V1
+and a separate retained lifecycle handle. Use the ordinary `add_plugin_node`
+ownership path. Never load the vendor in the parent or replace the fixed shared
+mapping callback with synchronous RPC. Read `docs/guides/isolated-clap-worker.md`
+for mode, refusal, custody, checkpoint and terminal-silence contracts. Keep real
+hostile-fixture, endpoint, sibling/PDC and production-mutation controls together.
+Functional callback traps do not establish full realtime or A10 qualification;
+host death and deliberate group escape are outside first-mode custody.
+
+
 ## Live retuning at a callback boundary
 
 For a graph-owned in-process instrument, retain its public
@@ -3111,17 +3123,6 @@ processor-provider mutation must refuse in spectral mode even when the legacy
 `live_slot_` is empty. Query prepared geometry from the active snapshot.
 Keep graph persistence and arbitrary stage registration refused; PARTIAL status
 does not establish notation coverage or realtime timing qualification.
-
-For the finite two-asset source, use `add_spectral_asset_morph_v1` and a direct
-host `AudioInput` connection to its named `morph` input. A persistent 64-sample
-mean is part of stream history: never substitute a callback mean or reset it at
-host partition boundaries. Finite extent propagates at preparation through
-existing stages and synthesis; four zero frames contribute normalization, then
-rendering stops at the returned exclusive `render_frames` cutoff. EOF must not
-look like missing frames. Reset restarts assets independently of host playhead
-position. Keep codec decode/copy/hash and shared ownership operations off the
-callback, and test through the installed public consumer's independent DFT
-oracle as well as the callback allocation probe.
 
 ## Bounded typed trigger runtime
 

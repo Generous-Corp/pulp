@@ -1543,8 +1543,10 @@ static void clap_phase_emit_output(
         // ascending-time contract. Skipped entirely while no store write landed
         // across process(): every value still equals its snapshot.
         const bool store_moved = self->store.state_generation() != self->pre_process_generation;
-        if (store_moved)
+        if (store_moved) {
             self->snapshot_state.valid = false;
+            boundary::count_param_compares(all_params.size());
+        }
         for (std::size_t i = 0; store_moved && i < all_params.size(); ++i) {
             if (self->output_param_has_event[i]) continue;
             float current = self->store.get_value(all_params[i].id);

@@ -5141,6 +5141,11 @@ python3 tools/import-validation/check-source-contracts.py --format markdown
 python3 -m pytest tools/import-validation/test_source_contracts.py -v
 ```
 
+Each entry's `verification_note` records what a recheck actually ran: the
+tests that passed, which roundtrip scripts, upstream URL rechecks and reference
+screenshots were not run, and the date. Move `last_verified` only together with
+a note that names its evidence; an entry you cannot evidence stays stale.
+
 When cleaning Catch2 tags in source-contract test files, update the matching
 `validation.test_tags` entry in `source-contracts.json` in the same change.
 Scheduled provider recheck dates are advisory: an overdue
