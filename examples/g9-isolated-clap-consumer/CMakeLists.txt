@@ -1,0 +1,10 @@
+cmake_minimum_required(VERSION 3.24)
+project(PulpIsolatedClapConsumer LANGUAGES CXX)
+find_package(Pulp CONFIG REQUIRED COMPONENTS host)
+add_executable(pulp-isolated-clap-consumer main.cpp)
+target_compile_features(pulp-isolated-clap-consumer PRIVATE cxx_std_20)
+target_link_libraries(pulp-isolated-clap-consumer PRIVATE Pulp::host)
+enable_testing()
+add_test(NAME isolated-clap-consumer COMMAND pulp-isolated-clap-consumer
+    "${PULP_WORKER}" "${PULP_FIXTURE}")
+set_tests_properties(isolated-clap-consumer PROPERTIES TIMEOUT 30)
