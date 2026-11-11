@@ -1,0 +1,12 @@
+/Users/danielraffel/Code/pulp
+831565af307c0136f70175c23724fd1466c4d53a
+https://github.com/Generous-Corp/pulp.git
+/usr/bin/python3
+Python 3.9.6
+cmake version 4.4.2
+/usr/local/bin/ninja
+/Applications/Xcode.app/Contents/Developer
+ls: /Users/danielraffel/Code/pulp/external/AudioUnitSDK: No such file or directory
+ls: /Users/danielraffel/Code/pulp/external/vst3sdk: No such file or directory
+drwxr-xr-x  5 danielraffel  staff  160 Oct 30 00:07 /Users/danielraffel/Code/pulp/external/skia-build
+commit

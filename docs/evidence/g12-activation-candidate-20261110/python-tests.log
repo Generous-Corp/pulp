@@ -1,0 +1,17 @@
+..............
+----------------------------------------------------------------------
+Ran 14 tests in 3.552s
+
+OK
+r2_controls=pass positive=pass planted_expected_output_cell=fail planted_allocation_count=fail planted_timed_allocation_count=fail planted_timing_order=fail planted_raw_output_binding=fail planted_memory_false_omitted=fail planted_reuse_false_omitted=fail planted_phase_timing_false_omitted=fail planted_batch_timing_false_omitted=fail planted_pool_bytes=fail planted_cell_omitted_duplicate=fail
+activation_control=missing_cell rejected=semantic restored=pending
+activation_control=duplicate_cell rejected=semantic restored=pending
+activation_control=short_count rejected=semantic restored=pending
+activation_control=false_percentile rejected=semantic restored=pending
+activation_control=false_misses rejected=semantic restored=pending
+activation_control=false_pdc rejected=semantic restored=pending
+activation_control=false_memory rejected=semantic restored=pending
+activation_control=false_source rejected=semantic restored=pending
+activation_control=false_binary rejected=semantic restored=pending
+activation_control=resigned_raw_audio rejected=semantic restored=pending
+activation_controls=pass positive=pass broken=10_rejected restored=pass
