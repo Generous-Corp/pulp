@@ -1,0 +1,39 @@
+retune sample=8191 old_hz=440 new_hz=660 phase_before=0.8612630385487402 phase_after=0.8612630385487402 phase_oracle=0.8612630385487563
+retune sample=24577 old_hz=660 new_hz=442 phase_before=0.093916099773170753 phase_after=0.093916099773170753 phase_oracle=0.093916099773252881
+pitch sample=4096 hz=440.00007909849114 confidence=1
+pitch sample=12288 hz=659.99978423841117 confidence=1
+pitch sample=28672 hz=441.99985849790062 confidence=1
+render rate=44100 partition=0 max_audio_error=1.4899876221718955e-08 max_phase_error=1.0278444761979699e-12 refusals=28
+render rate=44100 partition=1 max_audio_error=1.4899876221718955e-08 max_phase_error=1.0259570970561072e-12 refusals=28
+render rate=44100 partition=2 max_audio_error=1.4899876221718955e-08 max_phase_error=1.0167977571029496e-12 refusals=28
+render rate=44100 partition=3 max_audio_error=1.4899876221718955e-08 max_phase_error=1.0156320229270932e-12 refusals=28
+render rate=44100 partition=4 max_audio_error=1.4899876221718955e-08 max_phase_error=1.0156320229270932e-12 refusals=28
+render rate=44100 partition=5 max_audio_error=1.4899876221718955e-08 max_phase_error=1.0152156892928588e-12 refusals=28
+retune sample=8191 old_hz=440 new_hz=660 phase_before=0.22116666666660606 phase_after=0.22116666666660606 phase_oracle=0.22116666666666163
+retune sample=24577 old_hz=660 new_hz=442 phase_before=0.52866666666689199 phase_after=0.52866666666689199 phase_oracle=0.52866666666665196
+pitch sample=4096 hz=440.00002063584907 confidence=1
+pitch sample=12288 hz=659.99969886681913 confidence=0.99999097552560556
+pitch sample=28672 hz=442.00023105071773 confidence=1
+render rate=48000 partition=0 max_audio_error=1.4888270005730675e-08 max_phase_error=5.5966342671354141e-13 refusals=28
+render rate=48000 partition=1 max_audio_error=1.4888270005730675e-08 max_phase_error=5.5522253461504079e-13 refusals=28
+render rate=48000 partition=2 max_audio_error=1.4888270005730675e-08 max_phase_error=5.5522253461504079e-13 refusals=28
+render rate=48000 partition=3 max_audio_error=1.4888270005730675e-08 max_phase_error=5.5522253461504079e-13 refusals=28
+render rate=48000 partition=4 max_audio_error=1.4888270005730675e-08 max_phase_error=5.5522253461504079e-13 refusals=28
+render rate=48000 partition=5 max_audio_error=1.4888270005730675e-08 max_phase_error=5.5522253461504079e-13 refusals=28
+retune sample=8191 old_hz=440 new_hz=660 phase_before=0.67908333333351945 phase_after=0.67908333333351945 phase_oracle=0.67908333333333104
+retune sample=24577 old_hz=660 new_hz=442 phase_before=0.33283333333331233 phase_after=0.33283333333331233 phase_oracle=0.33283333333332621
+pitch sample=4096 hz=440.00584871578212 confidence=1
+pitch sample=12288 hz=659.99948006549039 confidence=1
+pitch sample=28672 hz=442.00215992250077 confidence=1
+render rate=96000 partition=0 max_audio_error=1.4897331757079968e-08 max_phase_error=4.7862408480980889e-13 refusals=28
+render rate=96000 partition=1 max_audio_error=1.4897331757079968e-08 max_phase_error=4.7635506650323123e-13 refusals=28
+render rate=96000 partition=2 max_audio_error=1.4897331757079968e-08 max_phase_error=4.7635506650323123e-13 refusals=28
+render rate=96000 partition=3 max_audio_error=1.4897331757079968e-08 max_phase_error=4.7635506650323123e-13 refusals=28
+render rate=96000 partition=4 max_audio_error=1.4897331757079968e-08 max_phase_error=4.7635506650323123e-13 refusals=28
+render rate=96000 partition=5 max_audio_error=1.4897331757079968e-08 max_phase_error=4.7635506650323123e-13 refusals=28
+pitch sample=4096 hz=440.00002063584907 confidence=1
+pitch sample=12288 hz=659.99969886681913 confidence=0.99999097552560556
+pitch sample=28672 hz=442.00023105071773 confidence=1
+Scala live boundary render PASS
+MTS external master NOT CHECKED; provider interface reused, no session master fixture
+G11 live-retune PASS boundaries=8191,24577 frequencies=440,660,442 frames=40960 renders=18

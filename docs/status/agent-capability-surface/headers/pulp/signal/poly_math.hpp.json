@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/poly_math.hpp",
+  "fingerprint": "sha256:77419df140347c77029681f3f02a62231ca822a7d878d3b55b74fd56b803d394",
+  "include": "pulp/signal/poly_math.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

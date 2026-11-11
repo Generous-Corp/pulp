@@ -1,0 +1,9 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/automation_recording.hpp",
+  "fingerprint": "sha256:06ebed4aa0f2135a325a97048c91646841357d4967e610985c64c3ba3f5df697",
+  "include": "pulp/playback/automation_recording.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Automation capture vocabulary — AutomationRecordMode Touch/Latch/Write, RecordedAutomationPoint, and the record and curve-materialization error enums. It describes how captured gestures become lane data inside the playback module and makes no installed agent capability claim."
+}

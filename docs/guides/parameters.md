@@ -111,6 +111,14 @@ void define_parameters(state::StateStore& store) override {
 }
 ```
 
+Each ID can be registered once. A second `add_parameter` under an ID already in
+use is refused: the first registration is kept, nothing is added (a host never
+sees one ID twice), an error is logged naming both parameters, and
+`add_parameter` returns false and `duplicate_registrations()` counts it. It does
+not assert, so a host that is only scanning the plug-in is not aborted; tests
+should check `duplicate_registrations() == 0`. To change a parameter's range or
+texts, compute them before registering it.
+
 ### Reading Values (Audio Thread)
 
 ```cpp
@@ -457,3 +465,36 @@ Host/project save-load uses both layers:
 
 - **Automatable state**: `StateStore::serialize()` / `deserialize()`
 - **Opaque plugin-owned state**: `Processor::serialize_plugin_state()` / `deserialize_plugin_state()`
+
+## Ranges and texts generated in code
+
+A parameter's range, default and value texts may be computed in code instead of
+listed: `define_parameters()` builds the `ParamInfo` however it likes (a loop, a
+formula, a table read at start-up) before calling `StateStore::add_parameter()`.
+Pulp has no separate parameter-description file to snapshot, so the
+`StateStore` registration is the one source every adapter reads; whatever
+`define_parameters()` registered is what each host sees.
+
+- **AU v2:** `GetParameterInfo` reports the registered minimum, maximum and
+  default, and sets `ValuesHaveStrings` when `to_string` is set;
+  `ParameterStringFromValue` and `ParameterValueFromString` call `to_string` and
+  `from_string`.
+- **VST3:** `normalizedParamToPlain` and `plainParamToNormalized` use the
+  registered range, `getParamStringByValue` and `getParamValueByString` use the
+  converters, and `ParameterInfo::defaultNormalizedValue` comes from the
+  registered default.
+- **CLAP:** `clap.params` `get_info` reports the registered minimum, maximum and
+  default; `value_to_text` and `text_to_value` call the converters.
+
+Two things to keep in mind. Everything a host reads about a parameter's shape
+must be final when `define_parameters()` returns: the adapters read it at
+initialisation and again on each query, and registering the same ID twice does
+not replace the first registration. And the texts must be a pure function of
+the value, because hosts call them from the main thread at any time.
+
+`test/support/generated_range_processor.hpp` is a processor that widens a base
+0 to 127 range to 0 to 2400 by a formula and generates its texts ("12.0 st" at
+1200); the VST3, AU v2 and CLAP tests read the range, default and texts back
+through each adapter's host-facing API, and a second build of the same
+processor with the base range is the control that shows the tests can tell the
+two apart.

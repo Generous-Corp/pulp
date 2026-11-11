@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/sample_heritage_voice_dsp.hpp",
+  "fingerprint": "sha256:2ca48616c271f21676d214054dfe5c3b7258b53859c9fb057b1c0dfdd5e71906",
+  "include": "pulp/audio/sample_heritage_voice_dsp.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

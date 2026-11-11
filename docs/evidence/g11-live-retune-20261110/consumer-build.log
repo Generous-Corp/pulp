@@ -1,0 +1,8 @@
+[governed-build] interactive lease acquired id=pulp-shipyard-local-7243-1794339522 cores=7 (asked 26, normal QoS)
+[governed-build] heartbeat every 60s for lease id=pulp-shipyard-local-7243-1794339522
+[1/4] Building CXX object CMakeFiles/pulp-g11-live-retune-mutation.dir/main.cpp.o
+[2/4] Building CXX object CMakeFiles/pulp-g11-live-retune.dir/main.cpp.o
+[3/4] Linking CXX executable pulp-g11-live-retune-mutation
+ld: warning: ignoring duplicate libraries: '/Volumes/Workshop/Code/agent-worktrees/g11-live-retune-20261110/build-g11-release/clean-d325-prefix/lib/libpulp-midi.a'
+[4/4] Linking CXX executable pulp-g11-live-retune
+ld: warning: ignoring duplicate libraries: '/Volumes/Workshop/Code/agent-worktrees/g11-live-retune-20261110/build-g11-release/clean-d325-prefix/lib/libpulp-midi.a'

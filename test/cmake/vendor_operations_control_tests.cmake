@@ -1,7 +1,7 @@
 # The agent tool kit example is built here too, so its declaration helper,
 # CONTROL_VENDOR_SOURCES, and controlled host are validated without examples.
 if(PULP_ENABLE_INSPECTOR AND APPLE AND PULP_ENABLE_GPU AND NOT IOS AND NOT PULP_IOS AND
-   TARGET pulp::inspect-agent-toolkit AND NOT TARGET AgentToolkitSynth)
+   TARGET pulp::inspect-agent-toolkit AND NOT TARGET AgentToolkitSynth_Core)
     # This fixture is built as part of the test tree, but its controlled host
     # must not add a product install script to the producer SDK install. SDK
     # consumer tests stage that install under an unprivileged prefix; leaving

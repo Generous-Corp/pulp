@@ -6,6 +6,8 @@
 // part of this identity surface.
 
 #include <pulp/host/signal_graph_node.hpp>
+#include <pulp/host/prepared_description.hpp>
+#include <pulp/runtime/result.hpp>
 
 #include <cstdint>
 #include <span>
@@ -76,5 +78,56 @@ PortIdentityUndo capture_port_identity_undo(std::span<const PortHandle> before,
                                             std::span<const PortIdentityAlias> aliases = {});
 
 std::vector<PortHandle> undo_port_identity(const PortIdentityUndo& undo);
+
+enum class GraphIdentityError : std::uint8_t {
+    UnsupportedPreparedProfile,
+    ReceiptBindingInvalid,
+    DigestPayloadMismatch,
+    IncompatibleProfile,
+    AllocationFailed,
+};
+
+// Only validated constructors below can mint an identity value.
+class GraphIdentityValue {
+  public:
+    std::string_view domain() const noexcept {
+        return domain_;
+    }
+    std::string_view profile() const noexcept {
+        return profile_;
+    }
+    std::string_view canonical_bytes() const noexcept {
+        return payload_;
+    }
+    std::string_view digest() const noexcept {
+        return digest_;
+    }
+
+  private:
+    std::string domain_, profile_, payload_, digest_;
+    friend struct ResolvedIdentityAccess;
+    friend struct GraphIdentityReceipt;
+    friend runtime::Result<bool, GraphIdentityError>
+    compare_graph_identities(const GraphIdentityValue&, const GraphIdentityValue&);
+};
+
+using GraphIdentityResult = runtime::Result<GraphIdentityValue, GraphIdentityError>;
+
+// Detached historical receipt; provenance is a claim, never live authority.
+struct GraphIdentityReceipt {
+    GraphIdentityValue authored;
+    GraphIdentityValue resolved;
+    std::string capture_provenance;
+    std::string artifact_provenance;
+    std::string canonical_bytes() const;
+};
+using GraphReceiptResult = runtime::Result<GraphIdentityReceipt, GraphIdentityError>;
+
+GraphIdentityResult resolved_fingerprint(const PreparedDescriptionData&);
+GraphReceiptResult capture_graph_identity_receipt(const PreparedDescriptionData&);
+GraphReceiptResult decode_graph_identity_receipt(std::span<const std::byte>);
+runtime::Result<bool, GraphIdentityError> compare_graph_identities(const GraphIdentityValue&,
+                                                                   const GraphIdentityValue&);
+const char* graph_identity_error_name(GraphIdentityError) noexcept;
 
 } // namespace pulp::host

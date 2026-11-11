@@ -1,0 +1,5 @@
+{
+  "schema": "pulp.agent-capability-fingerprint.v1",
+  "include": "pulp/music/spelling.hpp",
+  "fingerprint": "sha256:2a0f8acc58dd5525631d694ae6b989ec7d50a2bf305d176414ee51a542673c13"
+}

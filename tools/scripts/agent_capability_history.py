@@ -8,10 +8,12 @@ import os
 import pathlib
 import re
 import subprocess
+import sys
 from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
+import agent_capability_store as store
 import agent_capability_surface as surface
 from gate_common import (
     GitComparisonProvenance,
@@ -30,7 +32,11 @@ HISTORY_SCHEMA = "pulp.agent-capability-history.v2"
 # The original layout repeated every entry's whole material inline. It is still
 # read (a protected base may hold it, and --write converts it), never written.
 LEGACY_HISTORY_SCHEMA = "pulp.agent-capability-history.v1"
-HISTORY_FILE = pathlib.Path("tools/agent-capabilities/contract-history.json")
+# The single file the history used to be. It is now the directory
+# store.HISTORY_DIR, one file per recorded state; this path is still how the
+# combined document is named in messages and read from an older revision.
+HISTORY_FILE = store.HISTORY_LEGACY
+HISTORY_DIR = store.HISTORY_DIR
 SNAPSHOT = pathlib.Path("docs/status/agent-capabilities.json")
 # GitHub refuses any pushed file over 100 MB. The guard sits far below that so
 # growth is noticed years before a push can fail.
@@ -278,19 +284,12 @@ def _entries_or_none(history: Any) -> list[dict[str, Any]] | None:
 
 
 def rendered_history(history: dict[str, Any]) -> str:
-    """The checked-in text: one entry digest and one stored object per line."""
-    lines = ["{", f'  "schema": {json.dumps(history["schema"])},', '  "entries": [']
-    digests = history["entries"]
-    lines += [f"    {json.dumps(d)}{',' if i + 1 < len(digests) else ''}"
-              for i, d in enumerate(digests)]
-    lines += ["  ],", '  "objects": {']
-    keys = sorted(history["objects"])
-    for index, key in enumerate(keys):
-        body = json.dumps(history["objects"][key], ensure_ascii=False,
-                          separators=(",", ":"), sort_keys=True)
-        lines.append(f"    {json.dumps(key)}: {body}{',' if index + 1 < len(keys) else ''}")
-    lines += ["  }", "}"]
-    return "\n".join(lines) + "\n"
+    """The combined text: one entry digest and one stored object per line.
+
+    This is the single file the history used to be; it is no longer committed
+    (store.split_history gives the committed entry files) but stays the
+    measure of size and of a lossless split."""
+    return store.render_history(history)
 
 
 def history_entry(
@@ -572,8 +571,8 @@ def protected_base_problems(
         ]
     reads = [
         read_git_path(root, comparison, SNAPSHOT),
-        read_git_path(root, comparison, surface.SURFACE_SNAPSHOT),
-        read_git_path(root, comparison, HISTORY_FILE),
+        store.read_at(root, comparison, surface.SURFACE_SNAPSHOT),
+        store.read_at(root, comparison, HISTORY_FILE),
     ]
     unavailable = [item for item in reads if item.status not in {"available", "path_absent"}]
     if unavailable:
@@ -732,6 +731,58 @@ def _use_exact_base_authority(
     )
 
 
+# A merge queue holds at most a handful of entries, each one merge commit on
+# the group's first-parent chain, so the protected branch tip is always within
+# this many commits of the group head while the group is still valid.
+MERGE_GROUP_CHAIN_DEPTH = 16
+
+
+def _merge_group_protected_base(
+    root: pathlib.Path, base_ref: Any, base_sha: str
+) -> str:
+    """The protected branch tip a merge group builds on, else `base_sha`.
+
+    A merge group's `base_sha` is its parent in the queue: the previous
+    entry's group commit, which the protected branch has not accepted. Judging
+    a group against it validates only that entry's increment, so a group
+    queued behind a doomed entry inherits the entry's invalid capability
+    history as authority, passes, and lands both entries when the queue
+    merges on a green head. Every entry ahead must be checked as part of this
+    group's result, so the authority is the protected branch tip itself
+    (`base_ref`), provided it is on the group's history and `base_sha`
+    descends from it. Anything unproven keeps `base_sha`, the behaviour
+    before this resolution existed."""
+    def keep(reason: str) -> str:
+        print(f"agent-capabilities: merge group judged against its queue parent "
+              f"{base_sha[:12]}, not the protected tip: {reason}", file=sys.stderr)
+        return base_sha
+
+    if not isinstance(base_ref, str) or not base_ref.startswith("refs/heads/"):
+        return keep(f"base_ref {base_ref!r} names no branch")
+    listed = _git_output(root, ["ls-remote", "--refs", "origin", base_ref])
+    fields = (listed or "").split()
+    tip = fields[0].lower() if fields else ""
+    if tip == base_sha:
+        return base_sha
+    if not re.fullmatch(r"[0-9a-f]{40}", tip):
+        return keep(f"could not read {base_ref} from origin")
+    # A CI checkout is shallow; bring the group's own chain in reach so the
+    # ancestry questions below are answerable. Deepening only adds history.
+    head = _git_output(root, ["rev-parse", "--verify", "HEAD^{commit}"])
+    if head is None:
+        return keep("HEAD does not resolve")
+    if _git_output(root, ["rev-parse", "--is-shallow-repository"]) == "true":
+        _git_output(root, ["fetch", "--no-tags", "--quiet",
+                           f"--deepen={MERGE_GROUP_CHAIN_DEPTH}", "origin",
+                           head])
+    for descendant in (base_sha, head):
+        if _git_output(root, ["merge-base", "--is-ancestor", tip, descendant]) is None:
+            return keep(f"{base_ref} tip {tip[:12]} is not an ancestor of {descendant[:12]}")
+    print(f"agent-capabilities: merge group judged against the protected tip "
+          f"{tip[:12]} of {base_ref} (queue parent {base_sha[:12]})", file=sys.stderr)
+    return tip
+
+
 def _resolve_protected_comparison(
     root: pathlib.Path, base_ref: str
 ) -> GitComparisonProvenance:
@@ -766,6 +817,9 @@ def _resolve_protected_comparison(
             candidate = candidate or (
                 merge_group.get("base_sha") if merge_group else None
             )
+            if candidate is not None and merge_group and not pull_base:
+                candidate = _merge_group_protected_base(
+                    root, merge_group.get("base_ref"), candidate)
             before = event.get("before")
             if (
                 candidate is None

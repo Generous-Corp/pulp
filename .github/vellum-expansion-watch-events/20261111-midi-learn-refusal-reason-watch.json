@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261111-midi-learn-refusal-reason-watch",
+  "created_at": "2026-11-11T06:39:30Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Adds a refusal reason to the MIDI Learn parameter state and a disabled menu row in the view-layer learn menu and session. The change is callback and string plumbing in headers and one source under core/view; no design-import, Chromium, rendering, asset or packaging behaviour changes, so no authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-midi-learn-menu",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

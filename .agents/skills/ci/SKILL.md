@@ -104,8 +104,21 @@ on a real PR. Do them in order.
 
    As of 2026-10-02: `macos`, `Enforce version & skill sync`, `Vellum freeze`,
    `Vellum trusted freeze`, `Build + prove + (owner-gated) deploy`,
-   `drift-fast`. Everything else (Workflow lint, CodeQL, Linux, Windows,
+   `drift-fast`. `release-configure` reports on every pull request but is
+   not required until a follow-up registers it (decision 33). Everything else (Workflow lint, CodeQL, Linux, Windows,
    coverage) is advisory — red there does not stop auto-merge.
+
+   **A red `release-configure` means a tag cut from this change would publish
+   nothing.** It replays `release-cli.yml`'s own configure for every release
+   leg (darwin-x64 cross-configured on hosted Apple Silicon, Linux, Windows) on
+   hosted runners. Read the `Release <platform> configure fails` annotation for
+   the CMake error, and reproduce with
+   `python3 tools/ci/release_configure_matrix.py run --platform <platform>` on
+   a matching host. Never "fix" it by renaming or skipping a `release-cli.yml`
+   step: renaming a `build-cli` step, or adding an unclassified one, fails the
+   gate's self-test until `tools/ci/release_configure_matrix.py` classifies it
+   (replayed, mirrored or skipped with a reason). See `docs/guides/local-ci.md`
+   § `release-configure`.
 3. **Open with `shipyard pr` and leave auto-merge armed.** Before you start,
    `shipyard ship-state list` shows whether someone is already landing it.
 4. **Read `mergeStateStatus` correctly:**
@@ -642,6 +655,14 @@ prefix) to match a glob, so only the scheduled standing pass approves; a HOLD
 from any session still counts. A reviewer tab outside that pass needs its
 session listed. The key only takes effect through the Shipyard commit pinned in
 `.github/workflows/review-verdict.yml`, so keep that pin at a version that reads it.
+The pin is Shipyard v0.407.0 (`44721a9f`): since v0.386.0 the commit status
+is `pending` (`awaiting reviewer verdict for head <sha>`), not `failure`, while
+a head only awaits its reviewer; `failure` means a counted HOLD or an
+unreadable review. The check run itself stays red in both cases, so a pending
+status is never a defect to fix and never something a push clears. Moving the
+pin edits a workflow file (owner subset): open the PR unarmed with the
+`scripts/review_verdict_status.py` + `scripts/ghapp_queue_arm_guard.py` diff
+summarised against exact-head, stamp-session and self-approval behaviour.
 
 **`carry_excluded_paths` replaces Shipyard's default; it does not add to it.**
 The same `[auto_merge]` table lists the paths whose change stops an APPROVE
@@ -932,6 +953,37 @@ while main is red. Every such call carries
 `GHAPP_QUEUE_REMOVAL_REASON=reorder-main-red-fix`, which the queue-removal guard
 logs. Every other use needs Daniel's explicit OK first: rebasing or refreshing a
 queued PR, reordering or dequeuing any other PR, or making room ahead of the fix.
+
+## `workflow-lint` runs in the merge queue; its scope is a list, not a `paths:` filter
+
+`workflow-lint.yml` has no `paths:` filter on any trigger and runs on
+`merge_group`. A `paths:` filter never applies to `merge_group`, and a required
+check whose workflow is filtered out never reports, so the old shape could not
+run in the queue (two PRs that each passed lint on their own heads landed a
+combined tree that failed it on 2026-11-10) and could not be made required. The
+`scope` job matches the change against `tools/ci/workflow_lint_paths.txt`
+(compare API; unreadable diff or 300+ files runs everything) and the
+`workflow-lint` aggregate job (`if: always()`) is the context to require.
+
+- **Adding a suite input:** add its path to `tools/ci/workflow_lint_paths.txt`,
+  not to the workflow. Tests that pinned paths in the workflow text now read
+  that file. The native-build classifier treats this exact scope list as
+  inert, just like the workflow's former path filter; naming a script in a
+  lint filter does not execute it in the native gate. Keep actual native
+  workflow and action references blocking.
+- **Adding a suite job:** give it `needs: scope` plus
+  `if: needs.scope.outputs.run == 'true'`, add it to the aggregate's `needs`,
+  and pass its result as a `--job name=result` to `workflow_lint_scope.py
+  verdict`. `tools/ci/test_workflow_lint_scope.py` fails otherwise.
+- **The merge-group flake gate runs from the queue base.** build.yml extracts
+  `tools/ci`, `tools/scripts` and `.shipyard/config.toml` from
+  `merge_group.base_sha` and runs
+  `flake_exoneration.py gate` from that copy, so a queued PR cannot loosen the
+  rule that judges its own group. Anything the gate reads relative to its own
+  file must be in that pathspec: without `.shipyard/config.toml`,
+  `base_poison_detector.required_contexts()` silently falls back to `macos`
+  alone. The step text itself still comes from the group's build.yml, which
+  review has to catch.
 
 ## A cancelled `workflow-lint` job: read the step timings before raising the timeout
 
@@ -2942,6 +2994,13 @@ commit predates it; the first merge group would fail with `No such file`. Keep
 such retries inline. The macOS ccache step uses an installed ccache (the gate
 golden bakes it) and never calls `brew install` then.
 
+**apt installs in workflows go through `tools/ci/apt-install-retry.sh`.** A
+mirror publishing a security update mid-job leaves the fetched index pointing at
+a 404 `.deb`; the helper reruns `apt-get update` and retries the install, 3
+attempts (`test_apt_install_retry.py` stubs `apt-get` to prove it). Call it with
+`sudo`. A step that runs before checkout (the `release-cli.yml` container
+pre-setup) carries the same loop inline as `apt_install`.
+
 **A deleted `gh-readonly-queue/...` branch is `merge group gone`, not a red.**
 `hydrate_gpu_provenance_commits.py` prints a `::notice::` for it and falls back
 to the event commit; only other fetch errors print `bounded fetch failed`.
@@ -3470,15 +3529,58 @@ push reopens it while the count stays high.
 
 ## The flake-exoneration shadow annotation exonerates nothing
 
-A failed merge-group `macos` job carries `pulp-flake-exoneration-shadow/v1`
-(`tools/ci/flake_exoneration_shadow.py`): per failing test, `would_exonerate`
+A failed merge group carries `pulp-flake-exoneration-shadow/v1`
+(`tools/ci/flake_exoneration_shadow.py`) on its advisory
+`flake-exoneration-shadow (advisory)` job, not on `macos`: the job needs
+`build` and reads the macOS leg's `ctest-logs-macos` JUnit, so the red
+`macos` verdict (and the queue's ejection of the group) no longer waits
+~95 s for the shadow's API reads. Look for the annotation there. Per failing test, `would_exonerate`
 when it failed on >= 2 other heads in 24 h AND passes on main's tip, judged
 by the tip's required gate job. It is evidence, not a verdict:
 `base_poison_detector.py` records why cross-batch corroboration alone was
 measured unsafe, and this shadow inherits that by requiring the main pass and
 acting on nothing. Read exonerated-only failures ÷ failures; do not wire it
-into the job outcome without a contract decision and the shadow data as Step
-Zero.
+into the job outcome. The enforced verdict is the separate, stricter
+`tools/ci/flake_exoneration.py` (decisions contract row 34).
+
+Gotcha from its Step Zero window (2026-10-26..11-09): all 3 shadow
+would-exonerate verdicts were one deterministic source-scan test
+(`every hosted format adapter builds its editor from hosted_editor()`) failing
+in three consecutive groups behind a broken queue entry. "Other heads" counted
+merge groups that all carried the same culprit. The enforced rule therefore
+counts only other pull requests' own head runs, by pull request number,
+excluding every pull request in the group; never merge-group runs.
+
+## Merge-group flake exoneration and quarantine
+
+`tools/ci/flake_exoneration.py gate` runs inside the merge-group `macos` ctest
+step after a failure. It returns 0 only when every failing test failed on >= 2
+other pull requests in 24 h, passed by name in main's tip JUnit, is not
+pr-fast/drift-fast, is not touched by `compare/main...<sha>`, and is not a
+build failure, with ctest exit 8 and `LastTestsFailed.log` matching the
+report. It then runs the tests `--stop-on-failure` skipped and judges the
+union. Gotchas:
+- Corroboration reads only FULL-SUITE head runs (`Test (non-Windows)` ran;
+  `ctest.junit.xml`). A PR head's `LastTestsFailed.log` usually comes from the
+  pr-fast, pr-guard or affected tiers, which run that PR's own tests, so a
+  failure there is the PR breaking the test, not a flake signal. A
+  corroborating run whose head carries a group PR's head, or whose PR diff
+  touches the test, does not count either.
+- `pull_requests` is empty on App-opened PR runs; the PR comes from
+  `commits/<head_sha>/pulls`, and a commit on two PRs counts as none.
+- ctest's JUnit omits tests a stopped run never started, and an all-pass ctest
+  run leaves a stale `LastTestsFailed.log`; the gate merges the remainder's
+  JUnit into `ctest.junit.xml` and rewrites `LastTestsFailed.log` as the union,
+  because other runs' evidence reads that file from the artifact.
+- A missing test executable is `status="notrun"` with "Unable to find
+  executable", not a failure, so the old shadow parser never saw it. Any
+  notrun that is not a deliberate skip is a build failure.
+- The advisory quarantine step restores `Testing/Temporary` after its own
+  ctest run for the same reason.
+- Only `PULP_FLAKE_EXONERATION_MODE=enforce` acts; unset is shadow, and so is
+  the kill switch. Graduation to `enforce` is on evidence, not a date: at least 5 days in shadow AND at least 8 would-excuse decisions, each confirmed by a same-head retry pass, with zero false excusals. Any false excusal resets the count and keeps shadow mode. Quarantine state is
+  the open bot-authored `flake-quarantine` issues; a failed read quarantines
+  nothing.
 
 Gotcha: it used to judge "passes on main" from the latest merge group's
 whole-run conclusion (an advisory Linux red counts) and read an undownloadable
@@ -3847,37 +3949,19 @@ title. If you see either, check `shipyard --version` before editing the PR.
 ## A PR you opened with `shipyard pr` is not automatically code-reviewed
 
 Codex's automatic review fires on PR open only for PRs whose author is a GitHub
-*User*. `shipyard pr` opens PRs as `shipyard-local[bot]`, an App — so the path
-this skill tells you to use is exactly the path Codex skips. Human-opened PRs
-get reviewed; yours do not, unless something asks.
+*User*. `shipyard pr` opens PRs as `shipyard-local[bot]`, an App, so Codex skips
+them. Its summary comment states the trigger in a "Review trigger" cell:
+`PR opened` on a User-authored PR, `Manual request` on one reviewed on request.
 
-Codex states the trigger in its own summary comment: the "Review trigger" cell
-reads `PR opened` on a User-authored PR and `Manual request` on an App-authored
-one. That cell is the fastest way to tell which kind of review a PR received.
-
-**Asking works, including from a bot.** A `@codex review` comment gets a real
-review on an App-authored PR whatever identity posts it. Codex answers a bot
-commenter with "create a Codex account", which reads like a refusal and is not —
-the review still runs. `.github/workflows/codex-review-request.yml` automates
-that ask with `GITHUB_TOKEN` (never a user PAT: a same-repo `pull_request`
-evaluates the workflow from the PR's own revision, so a secret there is readable
-by the unreviewed PR it runs on) and verifies a review completed for the head
-commit. If a PR slipped past it, comment `@codex review` yourself.
+**A `@codex review` comment from a bot does not help.** Codex answers a bot
+commenter with "create a Codex account and connect to github" (or a usage-limit
+notice) and starts no review. A workflow that posted it on every App-authored PR
+was removed after hundreds of such replies and no review; do not re-add it.
 
 **Do not read a summary comment as "reviewed", and do not read "no comment" as
-"no findings".** The summary comment and an EYES reaction appear the moment a
-review is requested, so they prove only that something was asked; a clean review
-leaves a THUMBS_UP and no prose at all. `tools/scripts/codex_review_signal.sh`
-requires `**Completed**` bound to the current head, separates completed from
-requested-but-unfinished from never-asked, and exits 2 (not 1) when the API is
-unreachable, so an outage cannot masquerade as an unreviewed PR.
-
-**A completed review is per-commit.** A review of an earlier push says nothing
-about the code now on the branch, which is why the check binds to the head SHA
-rather than accepting any historical signal on the PR — and why the workflow
-runs on `synchronize` too. On `opened` alone, the commit reviewed and the commit
-merged are different ones on any PR that gets rebased, which under up-to-date
-branch protection is most of them.
+"no findings".** `tools/scripts/codex_review_signal.sh` requires `**Completed**`
+bound to the current head, separates completed from requested-but-unfinished
+from never-asked, and exits 2 (not 1) when the API is unreachable.
 
 ## Pre-flight: plugin ↔ CLI skew check
 
@@ -5989,7 +6073,7 @@ bisectable.
   `test_release_artifact_contents.py` derives the installed target set from
   `tools/cmake/PulpInstallRules.cmake`, removes interface-only libraries, and
   requires exact equality with `release_product_matrix.json`. The
-  `workflow-lint.yml` path filter deliberately covers every `CMakeLists.txt`
+  `workflow-lint.yml` scope list (`tools/ci/workflow_lint_paths.txt`) deliberately covers every `CMakeLists.txt`
   plus `tools/cmake/**`, because target definitions also live in the repo root,
   `inspect/`, and CMake helpers—not only under `core/`. When adding an installed
   library, update the matrix in the same PR; when changing how
@@ -8374,7 +8458,7 @@ above every other test, so they run alone at the START while every slot is
 free), `browser`-locked Chrome tests, and long tests that carry a `COST` and at
 most four slots are listed there. Two checks import
 it: `test_ci_throughput_workflows.py` reads the manifests' source (runs in
-`workflow-lint`, which is NOT a required check, so a PR can merge with it red),
+`workflow-lint`, which is not yet a required check, so a PR can merge with it red),
 and `ctest-scheduling-contract` reads a configured build on the gate. Change a
 test's `PROCESSORS` / `RUN_SERIAL` / lock / `COST` by moving its name between
 classes in that module, never by editing only one check's expectations. Before
@@ -10685,6 +10769,8 @@ HEAD reporting.
 Locally:
 
 - `.githooks/pre-push` (install via `tools/scripts/install-githooks.sh`) runs the same fast scripts, including the compat-sync, compat-aggregate, node ABI, and hotspot-size gates, enforcing by default. `PULP_DISABLE_PREPUSH_GATES=1` demotes the fast gates to advisory; `PULP_SKIP_PREPUSH=1` is the single-push emergency bypass.
+- `PULP_SKIP_PREPUSH=1` does not skip skill-sync when `SHIPYARD_AGENT_ID` is set (every fleet lane exports it). The check runs directly, outside the gate supervisor, and blocks on a miss; the fix is the SKILL.md note or the `Skill-Update: skip` trailer it names. A human skip is unchanged. `tools/scripts/test_refresh_push_check.py` (`case_agent_skip_still_runs_skill_sync`) pins all four outcomes.
+- Gotcha: agent sandboxes can forbid spawning `ps`. `.githooks/lib/gate-supervisor.py` then cannot read the hook's caller, so it runs the gate supervised by the hook only and prints a `supervised by the hook only` note; the gate's verdict is still authoritative. If every gate in a push reads as failed with a Python traceback from the supervisor, the hook is broken, not the gates: fix the supervisor rather than skipping the hook.
 - Pre-push gate subprocesses run through `.githooks/lib/gate-output.sh`: their stdout/stderr is captured to a regular temporary file, then replayed best-effort. Keep user-visible fast gates and the slow diff-cover script behind `run_gate_captured`; agent/tool callers can supply nonblocking pipes, and an uncaptured Python `print()` may otherwise raise `BlockingIOError` and turn a healthy gate into a false failure. The wrapper must snapshot and return the real child status before replay, while replay failure never changes that status. `tools/scripts/test_prepush_gate_output.py` pins success, exact nonzero propagation, replay, cleanup, and the slow-lane callsite.
 - A blocked pre-push ends with `FAILED GATE(S):`, one line per failing gate with the line that says why and its fix line, followed by the "gate failure(s) above" verdict. Every failure site in `.githooks/pre-push` calls `prepush_fail` (never a bare `fail=1`), which names the gate that ran last, or takes a label for a check that is not a captured gate; a gate that exits non-zero without failing the push (a skipped lane) is not named. `tools/scripts/test_prepush_gate_output.py` fails if a bare `fail=1` is added.
 - `tools/scripts/docs_noise_lint.py` (pre-push only, report mode) — scans changed/added lines for transient breadcrumbs across the markdown default scope (docs/reference + skills) **and source comments + test tags** under `core/examples/tools/test/apple/inspect/ship`. Source is diff-scoped only (never `--all`), so the historical backlog never blocks; it is comment-aware (only `//`, `/* */`, `#` comment text + string-literal Catch2 `[tag]`s, never code). Escape a legitimate line with an inline `docs-noise-lint: skip <reason>` comment. Full guidance on *writing* durable comments lives in the `code-comments` skill.
@@ -13479,3 +13565,14 @@ fails at once on other 4xx. Workflows call `python3
 tools/scripts/download_retry.py URL DEST` instead of a bare `curl -fsSL`; keep
 the sha256 check after it. A script copied into a temp tree must copy the
 helper too.
+
+## `[base_health]` holds the queue when the base is poisoned
+
+`.shipyard/config.toml` sets `merge_group_hold = "dry-run"` and
+`auto_jump = "dry-run"` (recorded, nothing held or jumped, until a replay shows
+the rule is precise). With `"on"`, when one required context fails in consecutive merge groups with different
+pull requests, the steward enqueues only a named fix (label `shipyard:unblock`
+or a title naming the context beside a fix word) and reports other approved
+heads as `held_base_poisoned:<context>`. A held head is not broken: do not
+re-push it, the hold lifts once a merge group passes the context. The reviewer
+kick and priority file are machine-only keys and must stay out of this file.

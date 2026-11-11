@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/audio_focus.hpp",
+  "fingerprint": "sha256:50180461d91f1e615d6a3390ddb865a5858a658b1e5022dee7ebe042406b0874",
+  "include": "pulp/audio/audio_focus.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

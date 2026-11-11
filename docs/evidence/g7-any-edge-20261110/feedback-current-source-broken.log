@@ -1,0 +1,22 @@
+Filters: "G7 feedback probe*"
+Randomness seeded to: 1681543264
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+pulp-test-signal-graph-executor-parity is a Catch2 v3.16.1 host application.
+Run with -? for options
+
+-------------------------------------------------------------------------------
+G7 feedback probe observes retained input before current source capture
+-------------------------------------------------------------------------------
+../test/test_signal_graph_executor_parity.cpp:3726
+...............................................................................
+
+../test/test_signal_graph_executor_parity.cpp:3760: FAILED:
+  REQUIRE( sample.peak == peak )
+with expansion:
+  0.125f == 0.0f
+
+===============================================================================
+test cases:  1 |  0 passed | 1 failed
+assertions: 11 | 10 passed | 1 failed
+

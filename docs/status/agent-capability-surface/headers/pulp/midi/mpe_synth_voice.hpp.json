@@ -1,0 +1,11 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/mpe_synth_voice.hpp",
+  "fingerprint": "sha256:d1f0721725aece5c13976d039d131baea39436f4191df8c0de1ec5606c31be5a",
+  "include": "pulp/midi/mpe_synth_voice.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "midi.mpe-voice-tracker"
+  ],
+  "rationale": "The allocator adapter is parameterized by a consumer-defined abstract Voice; the concrete tracker remains the honest typed entrypoint."
+}

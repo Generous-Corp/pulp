@@ -501,6 +501,7 @@ CONTEXT_WORKFLOW = {
     "Vellum freeze": ".github/workflows/vellum-freeze-check.yml",
     "Vellum trusted freeze": ".github/workflows/vellum-trusted-gate.yml",
     "drift-fast": ".github/workflows/drift-fast.yml",
+    "workflow-lint": ".github/workflows/workflow-lint.yml",
 }
 WORKFLOWS = tuple(dict.fromkeys(CONTEXT_WORKFLOW.values()))
 ALL_GREEN = {name: "success" for name in FULL_CONTRACT}

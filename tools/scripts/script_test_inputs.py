@@ -750,7 +750,8 @@ LOAD_APIS = (r"PluginSlot::load\s*\(", r"PluginSlot::load_exact\s*\(", r"load_cl
              r"scan_lv2_bundle\s*\(", r"scan_directory\s*\(", r"scan_audio_units\s*\(", r"dl_open\s*\(",
              r"load_node_pack\s*\(", r"load_verified_node_pack\s*\(",
              r"add_plugin_node\s*\(", r"add_plugin_node_from_drop\s*\(",
-             r"GraphSerializer::from_json\s*\(")
+             r"GraphSerializer::from_json\s*\(",
+             r"load_graph_patch_json\s*\(", r"load_graph_patch_file\s*\(")
 # Public core/host functions that reach a loader but are not in LOAD_APIS,
 # each with the mechanism that covers a test calling it (loader_coverage).
 LOAD_API_EXEMPTIONS = Path("tools/ci/load_api_exemptions.json")
@@ -893,7 +894,10 @@ def _test_include_closure(root: Path, rel: str, *, unreadable: set[str] | None =
         seen.append(cur)
         include_text = strip_c_comments(text, keep_strings=True) if unreadable is not None else text
         for name in INCLUDE.findall(include_text):
-            for base in (os.path.dirname(cur), "test", "test/support"):
+            # Control product tests also compile with inspect/src on their
+            # include path. A readable private broker header must not make a
+            # clean dependency scan look incomplete.
+            for base in (os.path.dirname(cur), "test", "test/support", "inspect/src"):
                 cand = os.path.normpath(os.path.join(base, name))
                 if unreadable is not None:
                     resolved = (root / cand).resolve()
@@ -1167,6 +1171,11 @@ def compiled_entries(root: Path, build_dir: Path | None) -> dict | None:
         whole = bool(decl.get("whole_checkout"))
         # WHOLE_CHECKOUT covers every read, so nothing it reads is undeclared.
         undeclared = [] if whole else sorted(reading - declared_sources)
+        # Declared build-root sources are already carried by `sources`. Their
+        # configure-generated text may exist on one host but not another, so
+        # its incidental signals cannot be evidence in detected_sources.
+        generated_declared = (set() if not build_rel or build_rel == "." else
+                              {src for src in declared_sources if src.startswith(build_rel + "/")})
         entry = {"kind": "compiled",
                  "data": ("whole_checkout" if whole else
                           ("undeclared" if undeclared else "declared") if data_sources else "none"),
@@ -1176,7 +1185,7 @@ def compiled_entries(root: Path, build_dir: Path | None) -> dict | None:
             # Only the sources a signal matched, so a reader can tell a scan
             # that saw the declared readers from one that only echoes
             # pulp_test_data's SOURCES.
-            entry["detected_sources"] = tokenized(reading)
+            entry["detected_sources"] = tokenized(reading - generated_declared)
         if spawns is not None:
             entry["spawns"] = spawns
             entry["spawning_sources"] = spawning

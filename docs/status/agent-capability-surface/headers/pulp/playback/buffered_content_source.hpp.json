@@ -1,0 +1,9 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/buffered_content_source.hpp",
+  "fingerprint": "sha256:67d7fbf99fa998a65c6204c7e246f1ffa8ab448953179f3e05d24eae4b143a39",
+  "include": "pulp/playback/buffered_content_source.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Ring-backed source for content produced ahead of the playhead — the buffering half of timeline::ProductionMode::Buffered, with its thread model documented in the header. Its own documentation states that Pulp ships no inference runtime, no model weights, and no producer that performs inference, so this is a bounded buffering primitive for a host- supplied producer rather than an advertised capability."
+}

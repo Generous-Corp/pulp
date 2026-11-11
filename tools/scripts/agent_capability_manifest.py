@@ -18,6 +18,8 @@ import subprocess
 import sys
 from typing import Any
 
+import agent_capability_fingerprints as fingerprint_store
+import agent_capability_store as store
 import agent_capability_surface as surface
 import json_schema_lite
 from gate_common import git_comparison_receipt as history_receipt
@@ -58,7 +60,7 @@ from agent_capability_transaction import recover_transaction, write_transaction
 SCHEMA = "pulp.agent-capabilities.v1"
 SCHEMA_MINOR = 1
 MANIFEST_REVISION = 92
-SURFACE_INVENTORY_VERSION = 213
+SURFACE_INVENTORY_VERSION = 222
 WRITE_TRANSACTION_FILE = pathlib.Path(
     "tools/agent-capabilities/.capability-write-transaction.json"
 )
@@ -140,18 +142,18 @@ def public_rows() -> list[dict[str, Any]]:
     return rows
 
 
-def binding_claims() -> list[dict[str, Any]]:
-    claims: list[dict[str, Any]] = []
-    for row in EXPORTS:
-        for item in row["bindings"]:
-            claims.append(
-                {
-                    "include": item["include"],
-                    "fingerprint": item["_header_fingerprint"],
-                    "capability_key": row["key"],
-                }
-            )
-    return claims
+def reviewed_fingerprints(root: pathlib.Path) -> dict[str, str]:
+    """{include: reviewed digest} from tools/agent-capabilities/fingerprints/.
+
+    Raises RuntimeError for a fragment directory that does not read."""
+    try:
+        return store.load_fingerprints(root)
+    except store.StoreError as error:
+        raise RuntimeError(str(error)) from error
+
+
+def binding_claims(root: pathlib.Path | None = None) -> list[dict[str, Any]]:
+    return fingerprint_store.claims(EXPORTS, reviewed_fingerprints(root or repo_root()))
 
 
 def legacy_signal_projection(root: pathlib.Path) -> dict[str, Any]:
@@ -165,13 +167,14 @@ def legacy_signal_projection(root: pathlib.Path) -> dict[str, Any]:
 
 
 def build_surface(root: pathlib.Path) -> tuple[dict[str, Any], list[str]]:
-    claims = binding_claims()
+    reviewed = reviewed_fingerprints(root)
+    claims = fingerprint_store.claims(EXPORTS, reviewed)
     discovered = surface.discover_headers(root)
     inventoried_claims = [item for item in claims if item["include"] in discovered]
-    external_problems: list[str] = []
+    external_problems: list[str] = fingerprint_store.problems(EXPORTS, reviewed)
     for item in claims:
         include = item["include"]
-        if include in discovered:
+        if include in discovered or item["fingerprint"] is None:
             continue
         matches = list((root / "core").glob(f"*/include/{include}"))
         if len(matches) != 1:
@@ -804,7 +807,7 @@ COUNTER_CONSTANTS = (("MANIFEST_REVISION", "manifest_revision"),
 
 
 def counter_status(root: pathlib.Path, doc: dict[str, Any],
-                   surface_document: dict[str, Any], history_path: pathlib.Path,
+                   surface_document: dict[str, Any], history: Any,
                    args: argparse.Namespace) -> int:
     """--status, --require-assigned and --assign-pending.
 
@@ -812,7 +815,6 @@ def counter_status(root: pathlib.Path, doc: dict[str, Any],
     counter was last assigned; the next version-at-land SDK bump assigns it.
     A pending revision names no published contract, so nothing may be tagged
     from such a tree."""
-    history = _load_optional_json(history_path)
     pending = pending_counters(history, doc, surface_document)
     values = (doc["manifest_revision"], surface_document["inventory_version"])
     report = {
@@ -884,6 +886,12 @@ def main() -> int:
         "--assign-pending", action="store_true",
         help="advance each pending counter by one and --write (the version-at-land bump)")
     mode.add_argument(
+        "--accept-fingerprint", nargs="+", metavar="INCLUDE",
+        help="record the current digest of each named binding header as reviewed")
+    mode.add_argument(
+        "--migrate-fingerprints", action="store_true",
+        help="move catalog header_fingerprint= literals into their fragments")
+    mode.add_argument(
         "--bootstrap-surface",
         action="store_true",
         help=argparse.SUPPRESS,
@@ -895,10 +903,9 @@ def main() -> int:
     args = parser.parse_args()
     root = repo_root()
     snapshot = args.snapshot or root / SNAPSHOT
-    surface_snapshot = root / surface.SURFACE_SNAPSHOT
-    history_path = root / HISTORY_FILE
     fixture = root / COMPILE_FIXTURE
     transaction_path = root / WRITE_TRANSACTION_FILE
+    legacy_files, fragment_dirs = store.generated_roots(root)
 
     # A prior --write may have stopped after replacing only some members of the
     # coupled generated set. Finish that exact journal before reading any member
@@ -906,9 +913,15 @@ def main() -> int:
     if args.write:
         recover_transaction(
             transaction_path,
-            (snapshot, surface_snapshot, history_path, fixture),
+            (snapshot, fixture, *legacy_files),
             root=root,
+            allowed_directories=fragment_dirs,
         )
+
+    if args.migrate_fingerprints:
+        return migrate_fingerprints(root)
+    if args.accept_fingerprint:
+        return accept_fingerprints(root, args.accept_fingerprint)
 
     if args.bootstrap_surface:
         path = root / surface.LEGACY_BASELINE
@@ -919,7 +932,7 @@ def main() -> int:
             )
             return 1
         baseline = surface.baseline_document(
-            root, {claim["include"] for claim in binding_claims()}
+            root, set(fingerprint_store.binding_includes(EXPORTS))
         )
         problems = surface.validate_baseline(baseline)
         if problems:
@@ -952,15 +965,14 @@ def main() -> int:
         return _print_problems(problems)
 
     output = json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
-    surface_output = surface.rendered(surface_document)
     if args.json:
         sys.stdout.write(output)
         return 0
     if args.status or args.require_assigned or args.assign_pending:
-        return counter_status(root, doc, surface_document, history_path, args)
+        return counter_status(root, doc, surface_document, store.load_history(root), args)
     if args.write:
         previous = _load_optional_json(snapshot)
-        previous_surface = _load_optional_json(surface_snapshot)
+        previous_surface = store.load_surface(root)
         base_ref = os.environ.get("PULP_AGENT_CAPABILITY_BASE_REF", "origin/main")
         comparison = (
             _resolve_protected_comparison(root, base_ref)
@@ -980,7 +992,7 @@ def main() -> int:
                         previous_surface, surface_document, surface.SURFACE_SCHEMA))
             if problems:
                 return _print_problems(problems)
-        history = _load_optional_json(history_path)
+        history = store.load_history(root)
         # A bootstrap or unpublished migration replaces the history outright;
         # any other write must be able to read the history it appends to.
         if not (initial_bootstrap or args.migrate_unpublished_v1):
@@ -1013,20 +1025,23 @@ def main() -> int:
         )
         if problems:
             return _print_problems(problems)
+        try:
+            fragment_writes, fragment_removals = store.outputs(
+                root, surface_document, history, current_fingerprints(root))
+        except store.StoreError as error:
+            return _print_problems([str(error)])
         write_transaction(
-            {
-                snapshot: output,
-                surface_snapshot: surface_output,
-                history_path: rendered_history(history),
-                fixture: compile_fixture(),
-            },
+            {snapshot: output, fixture: compile_fixture(), **fragment_writes},
             transaction_path,
             root=root,
+            removals=fragment_removals,
+            allowed_directories=fragment_dirs,
         )
         print(
-            f"agent-capabilities: wrote {SNAPSHOT}, {surface.SURFACE_SNAPSHOT}, "
-            f"{HISTORY_FILE}, and {COMPILE_FIXTURE} "
-            f"({len(doc['capabilities'])} capabilities)"
+            f"agent-capabilities: wrote {SNAPSHOT}, {COMPILE_FIXTURE}, and "
+            f"{len(fragment_writes)} fragment(s) under {store.SURFACE_DIR}/, "
+            f"{store.HISTORY_DIR}/ and {store.FINGERPRINT_DIR}/; removed "
+            f"{len(fragment_removals)} ({len(doc['capabilities'])} capabilities)"
         )
         if comparison is not None:
             print("agent-capabilities: comparison receipt=" +
@@ -1041,19 +1056,17 @@ def main() -> int:
             )
         if not snapshot.exists() or snapshot.read_text() != output:
             stale.append(f"{snapshot} differs from curated exports")
-        if not surface_snapshot.exists() or surface_snapshot.read_text() != surface_output:
-            stale.append(f"{surface.SURFACE_SNAPSHOT} differs from public headers")
         if not fixture.exists() or fixture.read_text() != compile_fixture():
             stale.append(f"{COMPILE_FIXTURE} differs from typed bindings")
-        history = _load_optional_json(history_path)
+        history = store.load_history(root)
         base_ref = os.environ.get("PULP_AGENT_CAPABILITY_BASE_REF", "origin/main")
         comparison = (
             _resolve_protected_comparison(root, base_ref)
             if (root / ".git").exists() else None
         )
         history_issues = history_problems(history, doc, surface_document)
-        if not history_issues:
-            history_issues.extend(history_text_problems(history_path, history))
+        history_issues.extend(store.layout_problems(
+            root, surface_document, history, current_fingerprints(root)))
         if isinstance(history, dict):
             history_issues.extend(
                 protected_base_problems(
@@ -1173,20 +1186,78 @@ def _load_optional_json(path: pathlib.Path) -> Any:
         return {"_invalid": str(error) or type(error).__name__}
 
 
-def history_text_problems(path: pathlib.Path, history: Any) -> list[str]:
-    """The history file must be byte-for-byte its own rendering.
+def current_fingerprints(root: pathlib.Path) -> dict[str, str]:
+    """The reviewed fingerprints a write keeps: one per header a binding names."""
+    named = set(fingerprint_store.binding_includes(EXPORTS))
+    return {include: value for include, value in reviewed_fingerprints(root).items()
+            if include in named}
 
-    Parsing alone cannot see a duplicated key or reformatted whitespace that
-    reads back as the honest document; only the text comparison does."""
-    if not path.exists() or not isinstance(history, dict):
-        return []
+
+def _binding_header(root: pathlib.Path, include: str) -> pathlib.Path | None:
+    matches = list((root / "core").glob(f"*/include/{include}"))
+    return matches[0] if len(matches) == 1 else None
+
+
+def accept_fingerprints(root: pathlib.Path, includes: list[str]) -> int:
+    """--accept-fingerprint: record each named header's current digest as reviewed.
+
+    This is the one writer of a fingerprint fragment, and it only acts on the
+    headers named on its command line, so every recorded digest is a decision
+    someone made about one header."""
+    named = set(fingerprint_store.binding_includes(EXPORTS))
+    problems: list[str] = []
     try:
-        expected = rendered_history(history)
-    except (KeyError, TypeError) as error:
-        return [f"{HISTORY_FILE} cannot be rendered: {error}"]
-    if path.read_text(encoding="utf-8") != expected:
-        return [f"{HISTORY_FILE} is not in its rendered form; rerun --write"]
-    return []
+        reviewed = reviewed_fingerprints(root)
+    except RuntimeError as error:
+        return _print_problems([str(error)])
+    headers: dict[str, pathlib.Path] = {}
+    for include in includes:
+        if include not in named:
+            problems.append(f"no capability binding names {include}; add the binding first")
+            continue
+        header = _binding_header(root, include)
+        if header is None:
+            problems.append(f"binding header {include} must resolve exactly once under core/*/include")
+            continue
+        headers[include] = header
+    if problems:
+        # Nothing is recorded unless every named header can be.
+        return _print_problems(problems)
+    for include, header in headers.items():
+        value = surface.file_fingerprint(header)
+        path = root / store.fingerprint_path(include)
+        previous = reviewed.get(include)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(store.fingerprint_text(include, value), encoding="utf-8")
+        state = "unchanged" if previous == value else f"was {previous}" if previous else "new"
+        print(f"agent-capabilities: {store.fingerprint_path(include)} = {value} ({state})")
+    print("agent-capabilities: rerun --write to refresh the generated records")
+    return 0
+
+
+def migrate_fingerprints(root: pathlib.Path) -> int:
+    """--migrate-fingerprints: move catalog literals into their fragments.
+
+    A catalog row written for the old layout passes `header_fingerprint=` to
+    `binding()`. This rewrites the catalog without those arguments and writes
+    each value to its header's fragment, refusing any disagreement."""
+    try:
+        reviewed = reviewed_fingerprints(root)
+    except RuntimeError as error:
+        return _print_problems([str(error)])
+    rewritten, merged, problems = fingerprint_store.migrate_catalog_literals(root, reviewed)
+    if problems:
+        return _print_problems(problems)
+    added = {include: value for include, value in merged.items() if include not in reviewed}
+    for path, text in rewritten.items():
+        path.write_text(text, encoding="utf-8")
+    for include, value in sorted(added.items()):
+        target = root / store.fingerprint_path(include)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(store.fingerprint_text(include, value), encoding="utf-8")
+    print(f"agent-capabilities: moved literals out of {len(rewritten)} catalog module(s); "
+          f"wrote {len(added)} fingerprint fragment(s) under {store.FINGERPRINT_DIR}/")
+    return 0
 
 
 

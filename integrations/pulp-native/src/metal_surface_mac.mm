@@ -27,6 +27,8 @@ namespace {
 
 constexpr const char* kViewClassBase = "PulpNativeSurfaceView";
 
+std::atomic<std::size_t> g_live_surfaces{0};
+
 bool supported_pixel_format(std::uint32_t format) {
     switch (static_cast<MTLPixelFormat>(format)) {
     case MTLPixelFormatBGRA8Unorm:
@@ -370,7 +372,8 @@ std::unique_ptr<MetalSurface> MetalSurface::create(const MetalSurfaceOptions& op
     Class cls = view_class();
     if (!cls)
         return nullptr;
-    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+    id<MTLDevice> device =
+        options.device ? (__bridge id<MTLDevice>)options.device : MTLCreateSystemDefaultDevice();
     if (!device)
         return nullptr;
 
@@ -403,9 +406,16 @@ std::unique_ptr<MetalSurface> MetalSurface::create(const MetalSurfaceOptions& op
     return std::unique_ptr<MetalSurface>(new MetalSurface(std::move(impl)));
 }
 
-MetalSurface::MetalSurface(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
+MetalSurface::MetalSurface(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {
+    g_live_surfaces.fetch_add(1);
+}
+
+std::size_t MetalSurface::live_surfaces() noexcept {
+    return g_live_surfaces.load();
+}
 
 MetalSurface::~MetalSurface() {
+    g_live_surfaces.fetch_sub(1);
     if (impl_->attached)
         detach();
     impl_->stop_observing();

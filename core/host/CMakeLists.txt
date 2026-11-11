@@ -27,16 +27,20 @@ target_sources(pulp-host PRIVATE
     src/signal_graph_live_swap_catalog.cpp
     src/signal_graph_prepared_topology_edit.cpp
     src/prepared_description.cpp
+    src/resolved_identity_validation.cpp
     src/offline_signal_graph_host.cpp
     src/plugin_slot.cpp
     src/graph_serializer.cpp
+    src/graph_patch.cpp
     src/graph_identity.cpp
     src/voice_identity.cpp
     src/voice_template.cpp
+    src/voice_bank_binding.cpp
     src/scan_blacklist.cpp
     src/scan_cache.cpp
     src/background_scanner.cpp
     src/isolated_scanner.cpp
+    src/isolated_plugin_slot.cpp
     src/node_pack.cpp
     src/forge_descriptor_audit.cpp
     src/forge_catalog_export.cpp
@@ -281,3 +285,30 @@ install(FILES
     "${PULP_ROOT_DIR}/docs/status/dsp-capabilities.schema.json"
     "${PULP_ROOT_DIR}/docs/status/forge-catalog.schema.json"
     DESTINATION share/pulp)
+
+# Bind the proxy even when Pulp is consumed as a subproject without tools.
+set(_clap_worker_inputs
+    "${PULP_ROOT_DIR}/tools/clap-worker/clap_worker_main.cpp"
+    "${PULP_ROOT_DIR}/core/host/src/isolated_plugin_slot.cpp"
+    "${PULP_ROOT_DIR}/core/host/src/isolated_clap_protocol.hpp"
+    "${PULP_ROOT_DIR}/core/host/src/isolated_clap_channel.hpp"
+    "${PULP_ROOT_DIR}/core/host/src/isolated_clap_endpoint.hpp")
+execute_process(COMMAND git -C "${PULP_ROOT_DIR}" rev-parse HEAD
+    OUTPUT_VARIABLE _clap_worker_source_head OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+set(_clap_worker_fingerprint "MacClapStereo64V1${_clap_worker_source_head}")
+foreach(_input IN LISTS _clap_worker_inputs)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_input}")
+    file(SHA256 "${_input}" _digest)
+    string(APPEND _clap_worker_fingerprint "${_digest}")
+endforeach()
+string(SHA256 _clap_worker_fingerprint "${_clap_worker_fingerprint}")
+set_property(SOURCE src/isolated_plugin_slot.cpp APPEND PROPERTY COMPILE_DEFINITIONS
+    PULP_CLAP_WORKER_BUILD="${_clap_worker_fingerprint}")
+
+set_property(TARGET pulp-host PROPERTY PULP_CLAP_WORKER_FINGERPRINT "${_clap_worker_fingerprint}")
+
+if(APPLE AND NOT IOS AND PULP_HAS_CLAP AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+    set_property(SOURCE src/isolated_plugin_slot.cpp APPEND PROPERTY COMPILE_DEFINITIONS
+        PULP_ISOLATED_CLAP_SUPPORTED=1)
+endif()

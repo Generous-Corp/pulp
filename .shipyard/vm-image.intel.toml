@@ -30,9 +30,9 @@ auto_login = true          # REQUIRED for WindowServer/Metal GPU tests
 # (`arch -x86_64 build-x64/pulp help`).
 
 # NOTE on Skia: the base golden bakes ARM64 Skia. The cross-build recipe
-# (intel-vm-cross-build.sh) fetches the x86_64 Skia slice per build AND clears
-# external/skia-build/build first — setup.sh --ci prefetches arm64 Skia and the
-# flatten step won't clobber it, so an un-cleared tree fails x86_64 FindSkia.
+# (intel-vm-cross-build.sh) clears external/skia-build/build and fetches the
+# darwin-x64 Skia per build; that resolves the universal archive (the one
+# gpu-runtime's renderer lock pins), whose x86_64 slice the link uses.
 # We deliberately do NOT bake x86_64 Skia into the golden (keeps it lean; the
 # per-build fetch is fast and always matches the pinned manifest).
 
@@ -41,7 +41,7 @@ rust_targets = ["x86_64-apple-darwin"]
 rust = true
 
 # BEGIN GENERATED PULP TOOLCHAIN (tools/toolchain/manifest.toml)
-# source_sha256 = 3cbe8514fd7c32c4d2bb544618182804766356a96d57110f4df82d02cb16d4a6
+# source_sha256 = 7b695d2cbaf8c4a0eb572c673416b76cd728c23ef50c4126ffb0f621d7926959
 # generated_platform = intel
 # END GENERATED PULP TOOLCHAIN
 

@@ -1,0 +1,11 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/instrument_voice_allocator.hpp",
+  "fingerprint": "sha256:f500f22c9e5ce4a1a26a03245b68e645ef6752dd2f4d0f59cf122681e0a2327f",
+  "include": "pulp/audio/instrument_voice_allocator.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "audio.instrument-voice-allocator"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}
