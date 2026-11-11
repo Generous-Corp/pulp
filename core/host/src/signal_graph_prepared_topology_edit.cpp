@@ -812,6 +812,10 @@ SignalGraph::PreparedTopologyEdit::PreparedTopologyEdit(SignalGraph& owner)
     : owner_(&owner), candidate_(std::make_unique<SignalGraph>()) {
     GraphMutationLock owner_lock(owner);
 
+    if (owner.refuse_isolated_mode_locked_("prepared topology edit")) {
+        mutation_failed_ = true;
+        return;
+    }
     candidate_->nodes_ = owner.nodes_;
     candidate_->processor_nodes_ = owner.processor_nodes_;
     candidate_->connections_ = owner.connections_;
@@ -865,6 +869,15 @@ SignalGraph::PreparedTopologyEdit::PreparedTopologyEdit(SignalGraph& owner)
     base_anticipation_ = owner.anticipation_enabled_.load(std::memory_order_relaxed);
     base_execution_selection_generation_ =
         owner.execution_selection_generation_.load(std::memory_order_relaxed);
+}
+
+// Shared by the new receipt decoder; the original D1/D2 validator remains
+// the single authority and its canonical bytes are unchanged.
+bool validate_resolved_semantic_payload(std::string_view payload) {
+    choc::value::Value root;
+    std::vector<std::string> channels;
+    return payload.size() <= 4 * 1024 * 1024 && strict_semantic_payload(payload, root, channels) &&
+           (root["nodes"].size() == 0 || channels.size() == 2);
 }
 
 PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_identity(
@@ -2785,6 +2798,154 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
                         capture->host_input_alias_view + ":channel=" + channel);
             }
 
+            // Capture typed values before touching the legacy delimiter records.
+            // A view refers to its producer's value; it is never a new write.
+            capture->resolved_node_bindings.clear();
+            capture->resolved_edge_bindings.clear();
+            capture->resolved_buffer_classes.clear();
+            capture->resolved_buffer_values.clear();
+            capture->resolved_alias_endpoint.reset();
+            const auto endpoint = [&](std::uint32_t dense, bool output) {
+                return ResolvedEndpoint{capture->nodes[authored_positions[dense]].authored_key,
+                                        output};
+            };
+            for (std::uint32_t dense = 0; dense < plan.nodes.size(); ++dense) {
+                const auto& binding = bindings[dense];
+                if (binding.audio_rate_modulation_delivery !=
+                    format::AudioRateModulationDelivery::LegacyParameterEvents)
+                    return last_result_ = Result::PreflightFailed;
+                capture->resolved_node_bindings.push_back(
+                    {endpoint(dense, true).node, binding.required,
+                     binding.preserve_parameter_events, "none"});
+            }
+            for (const auto& connection : plan.connections)
+                capture->resolved_edge_bindings.push_back(
+                    {endpoint(connection.source_index, true),
+                     endpoint(connection.dest_index, false),
+                     capture->channels[connection.source_port],
+                     capture->channels[connection.dest_port]});
+            if (capture->host_input_alias_eligible)
+                capture->resolved_alias_endpoint = endpoint(input_dense, true);
+            const auto add_typed_class = [&](std::uint32_t id, std::string kind) {
+                auto& classes = capture->resolved_buffer_classes;
+                if (std::none_of(classes.begin(), classes.end(),
+                                 [&](const auto& value) { return value.id == id; }))
+                    classes.push_back({id,
+                                       std::move(kind),
+                                       capture->max_block_frames,
+                                       "f32",
+                                       "prepare_zero",
+                                       {}});
+            };
+            std::vector<std::vector<std::size_t>> produced(plan.nodes.size());
+            for (const auto dense : plan.processing_order_indices) {
+                const auto& pnode = plan.nodes[dense];
+                const auto& slots = assignment.nodes[dense];
+                const auto position = static_cast<std::uint32_t>(processing_positions[dense]);
+                const auto sources = next->routed.serial.snapshot.input_port_sources(dense);
+                for (std::uint32_t port = 0; port < pnode.input_ports; ++port) {
+                    const auto mode = sources[port].mode;
+                    std::optional<std::size_t> incoming;
+                    for (const auto& edge : plan.connections)
+                        if (edge.dest_index == dense && edge.dest_port == port) {
+                            if (incoming || edge.source_index >= produced.size() ||
+                                edge.source_port >= produced[edge.source_index].size())
+                                return last_result_ = Result::PreflightFailed;
+                            incoming = produced[edge.source_index][edge.source_port];
+                        }
+                    std::size_t value_index;
+                    if (mode == format::GraphRuntimeSnapshot::InputPortSource::Mode::InPlace) {
+                        if (!incoming)
+                            return last_result_ = Result::PreflightFailed;
+                        value_index = *incoming;
+                        auto& value = capture->resolved_buffer_values[value_index];
+                        if (value.class_id != sources[port].slot)
+                            return last_result_ = Result::PreflightFailed;
+                        value.accesses.push_back({endpoint(dense, false), capture->channels[port],
+                                                  "input_view", "execute", port, "in_place_read"});
+                        value.last_read_phase = "execute";
+                        value.lifetime_end = std::max(value.lifetime_end, position + 1);
+                    } else {
+                        if (incoming) {
+                            auto& value = capture->resolved_buffer_values[*incoming];
+                            value.accesses.push_back({endpoint(dense, false),
+                                                      capture->channels[port], "input_view",
+                                                      "gather", port, "read"});
+                            value.last_read_phase = "gather";
+                            value.lifetime_end = std::max(value.lifetime_end, position + 1);
+                        }
+                        const auto slot = slots.input_base + port;
+                        add_typed_class(slot, "scratch");
+                        value_index = capture->resolved_buffer_values.size();
+                        capture->resolved_buffer_values.push_back(
+                            {endpoint(dense, false),
+                             capture->channels[port],
+                             "gather",
+                             port,
+                             slot,
+                             {{endpoint(dense, false), capture->channels[port], "input_scratch",
+                               "gather", port, incoming ? "copy" : "zero"},
+                              {endpoint(dense, false), capture->channels[port], "input_scratch",
+                               "execute", port, "read"}},
+                             position,
+                             position + 1,
+                             "execute"});
+                    }
+                    if (pnode.kind == graph::GraphRuntimeNodeKind::AudioOutput) {
+                        auto& value = capture->resolved_buffer_values[value_index];
+                        value.accesses.push_back({endpoint(dense, false), capture->channels[port],
+                                                  "external_output", "output_copy", port, "read"});
+                        value.last_read_phase = "output_copy";
+                        const auto external = assignment.slot_count + port;
+                        add_typed_class(external, "external_output");
+                        auto& klass = capture->resolved_buffer_classes.back();
+                        klass.initialization = "external_contract";
+                        capture->resolved_buffer_values.push_back(
+                            {endpoint(dense, false),
+                             capture->channels[port],
+                             "output_copy",
+                             port,
+                             external,
+                             {{endpoint(dense, false), capture->channels[port], "external_output",
+                               "output_copy", port, "write"}},
+                             position,
+                             position + 1,
+                             {}});
+                    }
+                }
+                for (std::uint32_t port = 0; port < pnode.output_ports; ++port) {
+                    const auto slot = slots.output_base + port;
+                    add_typed_class(slot, "scratch");
+                    produced[dense].push_back(capture->resolved_buffer_values.size());
+                    capture->resolved_buffer_values.push_back(
+                        {endpoint(dense, true),
+                         capture->channels[port],
+                         "execute",
+                         port,
+                         slot,
+                         {{endpoint(dense, true), capture->channels[port],
+                           pnode.kind == graph::GraphRuntimeNodeKind::AudioInput ? "external_input"
+                                                                                 : "node_output",
+                           "execute", port,
+                           pnode.kind == graph::GraphRuntimeNodeKind::AudioInput ? "copy"
+                                                                                 : "write"}},
+                         position,
+                         position + 1,
+                         {}});
+                }
+            }
+            for (const auto& value : capture->resolved_buffer_values) {
+                auto found =
+                    std::find_if(capture->resolved_buffer_classes.begin(),
+                                 capture->resolved_buffer_classes.end(),
+                                 [&](const auto& klass) { return klass.id == value.class_id; });
+                if (found == capture->resolved_buffer_classes.end())
+                    return last_result_ = Result::PreflightFailed;
+                found->members.insert(found->members.end(), value.accesses.begin(),
+                                      value.accesses.end());
+            }
+            capture->typed_resolved_capture = true;
+
             // Normalize the actual slot classes and per-value processing lifetimes.
             capture->buffer_classes.clear();
             capture->buffer_values.clear();
@@ -2884,7 +3045,7 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
             // every value record to that normalized ordinal.
             std::unordered_map<std::uint32_t, std::uint32_t> normalized_classes;
             const auto normalize_class = [&](std::string& record) {
-                const auto marker = record.find(",class=");
+                const auto marker = record.rfind(",class=");
                 if (marker == std::string::npos)
                     return false;
                 const auto begin = marker + 7;
@@ -2910,7 +3071,7 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
                     return last_result_ = Result::PreflightFailed;
             std::sort(capture->buffer_values.begin(), capture->buffer_values.end());
             const auto class_ordinal = [](const std::string& record) {
-                const auto marker = record.find(",class=");
+                const auto marker = record.rfind(",class=");
                 std::uint32_t ordinal = std::numeric_limits<std::uint32_t>::max();
                 if (marker != std::string::npos) {
                     const auto begin = marker + 7;

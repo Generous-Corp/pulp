@@ -19,7 +19,8 @@ target_link_libraries(my_spectral_tool PRIVATE Pulp::signal)
 ```
 
 The standalone example in `examples/spectral-frame-codec-consumer` exercises this
-installed-target path and includes a strict unknown-profile negative control.
+installed-target path, reports the decoded analyzed-frame sequence/origin
+metadata, and includes strict unknown-profile and chronology negative controls.
 
 ## Values and conventions
 

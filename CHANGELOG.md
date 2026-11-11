@@ -9,6 +9,52 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11110"></a>
+## [1.111.0] - 2026-11-11
+
+- release/version bump ([#12049](https://github.com/Generous-Corp/pulp/pull/12049))
+- codex/graph post roadmap research 20261111 ([#12053](https://github.com/Generous-Corp/pulp/pull/12053))
+- chore/remove dead codex review request ([#12048](https://github.com/Generous-Corp/pulp/pull/12048))
+- feature/base health hold shadow ([#12047](https://github.com/Generous-Corp/pulp/pull/12047))
+- codex/g7 any edge probes 20261110 ([#12020](https://github.com/Generous-Corp/pulp/pull/12020))
+
+<a id="v11100"></a>
+## [1.110.0] - 2026-11-11
+
+- release/version bump ([#12046](https://github.com/Generous-Corp/pulp/pull/12046))
+- fix/fft golden platform ([#12036](https://github.com/Generous-Corp/pulp/pull/12036))
+- codex/ci pr head budget 20261110 ([#12018](https://github.com/Generous-Corp/pulp/pull/12018))
+- fix/prepush supervisor no ps ([#12038](https://github.com/Generous-Corp/pulp/pull/12038))
+- release/version bump ([#12043](https://github.com/Generous-Corp/pulp/pull/12043))
+- feature/base health merge group hold ([#12044](https://github.com/Generous-Corp/pulp/pull/12044))
+- codex/g6 a1 verifier first 20261110 ([#12035](https://github.com/Generous-Corp/pulp/pull/12035))
+- codex/g12 evidence followup 20261110 ([#12039](https://github.com/Generous-Corp/pulp/pull/12039))
+- docs/audio image ranged comment 20261110 ([#12021](https://github.com/Generous-Corp/pulp/pull/12021))
+- codex/g12 activation candidate 20261110 ([#12023](https://github.com/Generous-Corp/pulp/pull/12023))
+- codex/g9 clap worker 20261110 ([#12010](https://github.com/Generous-Corp/pulp/pull/12010))
+
+<a id="v11080"></a>
+## [1.108.0] - 2026-11-11
+
+- release/version bump ([#12042](https://github.com/Generous-Corp/pulp/pull/12042))
+- feature/require workflow lint ([#12024](https://github.com/Generous-Corp/pulp/pull/12024))
+- feature/rmlui native metal ([#11921](https://github.com/Generous-Corp/pulp/pull/11921))
+- fix/store duplicate param id ([#11946](https://github.com/Generous-Corp/pulp/pull/11946))
+- codex/x9 final gates 20261110 ([#12014](https://github.com/Generous-Corp/pulp/pull/12014))
+- feature/format scale proof ([#11981](https://github.com/Generous-Corp/pulp/pull/11981))
+- codex/x9 f5 acceptance 20261110 ([#12013](https://github.com/Generous-Corp/pulp/pull/12013))
+- feature/midi learn clap feedback ([#11890](https://github.com/Generous-Corp/pulp/pull/11890))
+- feature/midi learn skill main ([#12026](https://github.com/Generous-Corp/pulp/pull/12026))
+- codex/g12 activation validator 20261110 r2 ([#12034](https://github.com/Generous-Corp/pulp/pull/12034))
+
+<a id="v11070"></a>
+## [1.107.0] - 2026-11-11
+
+- release/version bump ([#12033](https://github.com/Generous-Corp/pulp/pull/12033))
+- chore/recheck source contracts ([#12025](https://github.com/Generous-Corp/pulp/pull/12025))
+- release/version bump ([#12031](https://github.com/Generous-Corp/pulp/pull/12031))
+- codex/g2 signalgraph notation 20261110 ([#11999](https://github.com/Generous-Corp/pulp/pull/11999))
+
 <a id="v11060"></a>
 ## [1.106.0] - 2026-11-11
 
@@ -12736,6 +12782,10 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.111.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.111.0
+[1.110.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.110.0
+[1.108.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.108.0
+[1.107.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.107.0
 [1.106.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.106.0
 [1.105.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.105.0
 [1.104.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.104.0

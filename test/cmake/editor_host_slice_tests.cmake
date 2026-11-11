@@ -19,6 +19,35 @@ if(Python3_EXECUTABLE)
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_dawn_binding_census.py")
     set_tests_properties(dawn-binding-census-selftest PROPERTIES LABELS "editor-host")
+    # The Vellum-side symbol checks of the slice's census, on planted symbols in
+    # both mirror spellings.
+    add_test(NAME editor-host-check-symbols-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_CURRENT_SOURCE_DIR}/editor_host_slice/test_check_symbols.py")
+    set_tests_properties(editor-host-check-symbols-selftest PROPERTIES LABELS "editor-host")
+endif()
+
+# The Vellum-side UI reaches the SDK's mirrored units through
+# vellum_ui/mirror_spelling.hpp, which picks the <vellum/...> or <pulp/...>
+# spelling the installed SDK carries. Compile it against a stand-in tree of
+# each layout and check it chose that layout; this needs no Vellum SDK.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    set(_mirror_spelling_dir "${CMAKE_CURRENT_SOURCE_DIR}/editor_host_slice/mirror_spelling")
+    foreach(_spelling vellum pulp)
+        if(_spelling STREQUAL "vellum")
+            set(_expect_vellum 1)
+        else()
+            set(_expect_vellum 0)
+        endif()
+        add_test(NAME editor-host-slice-mirror-spelling-${_spelling}
+            COMMAND ${CMAKE_CXX_COMPILER} -std=c++20 -fsyntax-only
+                -DSLICE_EXPECT_VELLUM=${_expect_vellum}
+                -I${CMAKE_CURRENT_SOURCE_DIR}/editor_host_slice/vellum_ui
+                -I${_mirror_spelling_dir}/${_spelling}
+                ${_mirror_spelling_dir}/check.cpp)
+        set_tests_properties(editor-host-slice-mirror-spelling-${_spelling} PROPERTIES
+            LABELS "editor-host")
+    endforeach()
 endif()
 
 set(PULP_EDITOR_HOST_SLICE_VELLUM_PREFIX "" CACHE PATH

@@ -103,8 +103,27 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
     owner_pid = os.getppid()
-    caller_pid = parent_pid(owner_pid)
-    if caller_pid is None or caller_pid < 2:
+    # The caller watch is a cleanup aid, not a gate. Agent sandboxes can
+    # forbid spawning `ps`; failing every gate there makes the hook look
+    # broken, and an agent that sees a broken hook skips it, so none of the
+    # gates run. Without the probe the gate still runs, still reports its
+    # exact status, and is still torn down when the hook itself exits.
+    watch_caller = True
+    try:
+        caller_pid = parent_pid(owner_pid)
+    except OSError as exc:
+        caller_pid = None
+        probe_failure = f"{type(exc).__name__}: {exc}"
+    else:
+        probe_failure = "ps returned no parent"
+    if caller_pid is None:
+        print(
+            "[pre-push] note: cannot read the hook's parent process "
+            f"({probe_failure}); the gate still runs, supervised by the hook only",
+            file=sys.stderr,
+        )
+        watch_caller = False
+    elif caller_pid < 2:
         print("[pre-push] gate supervisor could not identify its caller", file=sys.stderr)
         return 2
     pending_signal: int | None = None
@@ -167,7 +186,7 @@ def main(argv: list[str]) -> int:
                 # shape: Git died, the hook survived under PID 1, and its
                 # foreground build otherwise continued for many minutes.
                 owner_lost = os.getppid() != owner_pid
-                caller_lost = (
+                caller_lost = watch_caller and (
                     parent_pid(owner_pid) != caller_pid
                 )
                 if owner_lost or caller_lost:

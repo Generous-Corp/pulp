@@ -3585,11 +3585,15 @@ jobs:
 
       # SHADOW instruments for the merge group, one step (tools/ci/
       # merge_group_shadows.py): binary identity vs the PR head's receipt,
-      # the graph's affected-test set, flake exoneration of a failed ctest,
-      # and per-test content-hash receipts. Each annotates and changes no
-      # outcome; the runner isolates every instrument and always exits 0. What each measures, and the
-      # proxies read from its annotation, are documented in
-      # docs/guides/local-ci.md and the `ci` skill.
+      # the graph's affected-test set, and per-test content-hash receipts.
+      # Each annotates and changes no outcome; the runner isolates every
+      # instrument and always exits 0. What each measures, and the proxies
+      # read from its annotation, are documented in docs/guides/local-ci.md
+      # and the `ci` skill. The flake-exoneration shadow is deferred to the
+      # advisory flake-exoneration-shadow job: it runs only on a red ctest,
+      # needs nothing but the uploaded JUnit and the GitHub API, and took
+      # about 95 s of every failed gate job while the verdict was already
+      # known. The instruments that stay read the build tree.
       - name: Merge-group shadow instruments
         if: >-
           always() && github.event_name == 'merge_group' && runner.os == 'macOS'
@@ -3605,7 +3609,7 @@ jobs:
             --repository "$GITHUB_REPOSITORY" --merge-sha "$GITHUB_SHA" --token "$GH_TOKEN" \
             --junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml" \
             --selected-json "$RUNNER_TEMP/ctest-evidence/selected.json" \
-            --ctest-outcome "${{ steps.ctest.outcome }}" --hours 24 \
+            --ctest-outcome "${{ steps.ctest.outcome }}" --hours 24 --exoneration deferred \
             --work-dir "$RUNNER_TEMP/merge-group-shadows" || true
 
       # The per-test receipts the shadow step above wrote (keys of the tests
@@ -4798,6 +4802,60 @@ jobs:
         run: >-
           python3 tools/ci/a2t_headroom_annotation.py --reconcile-issue
           --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/a2t/a2t-scope-headroom.json"
+
+  # The flake-exoneration SHADOW (tools/ci/flake_exoneration_shadow.py) for a
+  # failed merge group, off the required job's critical path. It reads only
+  # the macOS leg's uploaded JUnit and other runs' artifacts through the API,
+  # so it runs here after `build` finishes instead of holding the red `macos`
+  # verdict (and the queue's ejection of the group) for its API reads. It
+  # annotates and changes no outcome; the enforced rule is the gate inside
+  # the ctest step (decisions contract row 34), which is unaffected.
+  flake-exoneration-shadow:
+    name: flake-exoneration-shadow (advisory)
+    needs: [build]
+    if: >-
+      (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true'))
+      && !cancelled()
+      && github.event_name == 'merge_group'
+      && needs.build.result == 'failure'
+    # GitHub-hosted: the shadow shells out to the gh CLI, which hosted images
+    # carry, and it must never take a self-hosted gate slot.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 1
+          lfs: false
+          persist-credentials: false
+          # The shadow imports tools/scripts helpers and reads the required
+          # contexts main's tip is judged on from .shipyard/config.toml.
+          sparse-checkout: |
+            tools/ci
+            tools/scripts
+            .shipyard
+          sparse-checkout-cone-mode: true
+      - name: Download the macOS ctest JUnit report
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: ctest-logs-macos
+          path: ${{ runner.temp }}/ctest-logs-macos
+      - name: Flake exoneration (shadow)
+        continue-on-error: true
+        shell: bash
+        env:
+          PULP_GH_CLI: gh
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          junit="$RUNNER_TEMP/ctest-logs-macos/ctest.junit.xml"
+          if [ ! -s "$junit" ]; then
+            echo "::notice title=flake-exoneration-shadow::no macOS full-suite JUnit in this run; nothing to decide"
+            exit 0
+          fi
+          python3 tools/ci/flake_exoneration_shadow.py --repo "$GITHUB_REPOSITORY" \
+            --junit "$junit" --head "$GITHUB_SHA" --hours 24 || true
 
   # Names the cause of each failed job in this run as a `ci.cause/v1` record,
   # printed as a `::notice title=ci-cause::` annotation. A job's own log can be

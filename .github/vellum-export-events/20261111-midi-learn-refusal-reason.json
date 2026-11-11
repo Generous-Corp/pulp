@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "event_id": "20261111-midi-learn-refusal-reason",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-11T07:10:00Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/view/include/pulp/view/midi_learn_menu.hpp",
+    "core/view/include/pulp/view/midi_learn_target.hpp",
+    "core/view/src/midi_learn_menu.cpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "A Pulp-only edit: Vellum's framework transfer is in effect, so no re-export carries it. The refusal reason adds a string to the MIDI Learn menu state and one disabled menu row. The Vellum RmlUi editor surface for MIDI Learn is a separate change in Vellum's own tree."
+}
