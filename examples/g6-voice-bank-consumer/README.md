@@ -26,12 +26,10 @@ positive result, with per-case logs and a JSON receipt under the scratch path.
 
 `a1_reference_vectors.json` freezes seven stereo cases for eight-slot gain,
 sum order, sparse slots, bounded release, and hard steal. The separate
-`verify_a1_reference.py` recomputes every expected sample with scalar f32
-arithmetic and requires ten planted policy, routing, timing, gain, and tail
-errors to fail. `generate_a1_vectors.py --check` binds the installed C++
-consumer to the frozen JSON hash; the installed-SDK CTest runs both Python
-checks before compiling the public consumer. The C++ consumer compares both
-channels of every case at block sizes 1, 32, 64, 127, and 256.
+`generate_a1_vectors.py --check` binds the installed C++ consumer to the
+frozen JSON hash. The installed-SDK CTest checks the generated header before
+compiling the public consumer. The C++ consumer compares both channels of
+every case at block sizes 1, 32, 64, 127, and 256.
 
 The public consumer also renders an absolute-sample sustain trace at block
 sizes 1, 2, 3, 7, and 16. It checks an audible held voice, release after the

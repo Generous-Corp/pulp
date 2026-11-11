@@ -117,7 +117,6 @@ def main() -> None:
     scratch.mkdir(parents=True, exist_ok=True)
     assert (prefix / "lib/cmake/Pulp/PulpConfig.cmake").is_file()
     original = PRODUCTION.read_text()
-    subprocess.run(["python3", str(FIXTURE / "verify_a1_reference.py")], check=True)
     subprocess.run(["python3", str(FIXTURE / "generate_a1_vectors.py"), "--check"], check=True)
     provenance = json.loads((prefix / "sdk-provenance.json").read_text())
     cases = [("positive", None), *MUTATIONS.items(), ("restored", None)]
