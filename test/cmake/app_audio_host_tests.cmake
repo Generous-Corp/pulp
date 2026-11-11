@@ -105,6 +105,9 @@ pulp_add_test_suite(pulp-test-poly-math GROUP pulp-test-group-app-signal
 pulp_add_test_suite(pulp-test-preset-browser GROUP pulp-test-group-app-view
     LIBRARIES pulp::view)
 
+pulp_add_test_suite(pulp-test-preset-program-editor GROUP pulp-test-group-app-view
+    LIBRARIES pulp::view)
+
 # Plugin manager panel UI tests
 add_executable(pulp-test-plugin-manager-panel test_plugin_manager_panel.cpp)
 target_link_libraries(pulp-test-plugin-manager-panel PRIVATE

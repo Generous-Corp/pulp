@@ -40,6 +40,11 @@ constexpr std::uint16_t make_bank(std::uint8_t msb, std::uint8_t lsb) {
     return static_cast<std::uint16_t>(((msb & 0x7F) << 7) | (lsb & 0x7F));
 }
 
+/// "bank:program" as shown to the user ("3:12"); a bare "12" means bank 0.
+/// Nullopt when the text is not two in-range numbers.
+std::optional<BankProgram> parse_bank_program(std::string_view text);
+std::string format_bank_program(BankProgram position);
+
 struct ProgramBank {
     std::uint16_t number = 0;
     std::string name;
