@@ -73,6 +73,16 @@ The view's Objective-C class is registered at run time through
 override calls super through `super_implementation(<registered class>, sel)`,
 never through `object_getClass(self)`, which may be a KVO subclass.
 
+## Standalone idle loop also services Program Change
+
+The view editor's per-tick callback in `StandaloneApp::run_view_editor`
+(`standalone_view_layer.cpp`) runs `service_state_persistence()` and
+`service_program_changes()`. The second drains the latched Bank Select +
+Program Change request and loads the preset on the main thread, throttled to
+about 30 Hz; it does no work for a plug-in that has not opted in. A new editor
+host that replaces that callback must call it too, or hardware program changes
+are latched and never applied.
+
 ## Standalone window factory ownership
 
 On Windows/Linux, standalone startup calls
