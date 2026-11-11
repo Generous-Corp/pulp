@@ -1,9 +1,0 @@
-==> Downloading Homebrew API data
-✔︎ JSON API packages.sequoia.jws.json
-cmake 4.4.2
-ninja 1.13.2
-ls: /usr/local/opt/llvm/bin/clang-format: No such file or directory
-ls: /usr/local/opt/llvm@21/bin/clang-format: No such file or directory
-ls: /usr/local/opt/python@3.12/bin/python3.12: No such file or directory
-ls: /usr/local/opt/python@3.13/bin/python3.13: No such file or directory
-ls: /usr/local/opt/python@3.14/bin/python3.14: No such file or directory

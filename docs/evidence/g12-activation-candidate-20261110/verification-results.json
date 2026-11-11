@@ -1,5 +1,5 @@
 {
-  "source": "faf8d69a181a102455a70a40aa77e0da18838c76",
+  "source": "e893f20d0048dfc11536c4b688d11be97ba9e167",
   "python_tests": 14,
   "g12_assertions": 914,
   "g12_cases": 3,
@@ -9,7 +9,7 @@
     0
   ],
   "pilot": {
-    "source": "faf8d69a181a102455a70a40aa77e0da18838c76",
+    "source": "e893f20d0048dfc11536c4b688d11be97ba9e167",
     "cells": 24,
     "callbacks_per_cell": 64,
     "samples": 184320,
@@ -32,5 +32,7 @@
     "diff_coverage": "NOT CHECKED"
   },
   "archive_replay": "pass",
-  "originals_preserved": true
+  "originals_preserved": true,
+  "source_ancestry_check": "source-ancestry-check.py",
+  "private_host_evidence_removed": true
 }

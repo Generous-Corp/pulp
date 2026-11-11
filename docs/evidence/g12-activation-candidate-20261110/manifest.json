@@ -1,234 +1,32 @@
 {
   "evidence_files": {
     "README.md": {
-      "bytes": 4765,
-      "sha256": "7cc163a3faec72c9acf8d259892f510539519e44c69be7cf173b134d67f8fa0d"
-    },
-    "archive-replay.log": {
-      "bytes": 171,
-      "sha256": "57d161bf3c267df6eb256e484c7ddbc5bc1abd9e6c4b9354c22b005e6fa07ddf"
-    },
-    "backend-broken-build.log": {
-      "bytes": 15117,
-      "sha256": "ccbd720c85f01a17c951501a75a1d99bca21b7a8aef259a736e625ffe2fb5040"
-    },
-    "backend-broken.log": {
-      "bytes": 42393,
-      "sha256": "27f16c0f86c4f3592b0a9309cf7a916bf546512c2ee4f96b0576e3f77e903ddb"
-    },
-    "backend-positive.log": {
-      "bytes": 41623,
-      "sha256": "efe02c708412231ac1de10cdd63b29e6773868d7499b2d35b046a24c999b78a0"
-    },
-    "backend-proof.log": {
-      "bytes": 68,
-      "sha256": "89d37a64548eac7c656a3a597ed9cc14d6fa534d0089e94fe575e094323dcdb8"
-    },
-    "backend-proof.py": {
-      "bytes": 2388,
-      "sha256": "e2e07471df1e6441907891eab5529cf5dd0e11a423916976c6372b93bded08b7"
-    },
-    "backend-restored-build.log": {
-      "bytes": 15117,
-      "sha256": "ccbd720c85f01a17c951501a75a1d99bca21b7a8aef259a736e625ffe2fb5040"
-    },
-    "backend-restored.log": {
-      "bytes": 41624,
-      "sha256": "f33d70b159d803660ac5e2df45e4c4c217f24e4f54ea8ebfe0795cb36348b48a"
+      "bytes": 1969,
+      "sha256": "6eb8c859957e9023d48666c890484ef216abdcee514b78c31b7d4ad649f32013"
     },
     "backend-results.json": {
-      "bytes": 1505,
-      "sha256": "683536f41f153077c4bca29787d91a2c65a5b36ba55dfc3ae3f1a614e5a331bb"
-    },
-    "bounded-proof.log": {
-      "bytes": 830,
-      "sha256": "1a40104c2f293c58ece90f551edb027f363c573b6685fe7eb9b88b8c0f2313e6"
-    },
-    "bounded-proof.py": {
-      "bytes": 2178,
-      "sha256": "bf8965bb48c2e230d1fbdcc62f551d931e4e8760ba075429077024b065d826d5"
-    },
-    "build.log": {
-      "bytes": 3796532,
-      "sha256": "4b4b5216bd74166c3dce906052fa9f3b457210f2018374ddd53c5359a5d38853"
-    },
-    "compiled-build-info.txt": {
-      "bytes": 1734,
-      "sha256": "469157bfcb41ee39623c073b1dbf91dd65374bcef73c7e16317f7e5b43184710"
-    },
-    "configure.log": {
-      "bytes": 19229,
-      "sha256": "45ec986d6274b5f85acafd8278b78ce9040ce64bfbdac189341b3625c4e5ccfb"
-    },
-    "direct-omit_commit.log": {
-      "bytes": 10273,
-      "sha256": "df75e40eca96c46834a25a11571e4b981ad6746605256636e41cd4559143924d"
-    },
-    "direct-positive.log": {
-      "bytes": 9597,
-      "sha256": "a254b9d76886248b731cf2342727231cdc44700322087809e719b250cccada31"
-    },
-    "direct-restored.log": {
-      "bytes": 9597,
-      "sha256": "3b8a50f067c875c0052acfdb9f178f4c52109d81fd781f48eb68ffb8373bf9f4"
-    },
-    "direct-wrong_gain.log": {
-      "bytes": 10265,
-      "sha256": "3635548674026ca56756c5bcc532750299754fca290fa33434b1f272b17b8953"
-    },
-    "existing-pr-check.json": {
-      "bytes": 3,
-      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
-    },
-    "format-check.log": {
-      "bytes": 266,
-      "sha256": "91c23d331d3d37ed30523c541719f7d0299f93ab70992f905c997acd49255ca0"
-    },
-    "g12-tests.log": {
-      "bytes": 41550,
-      "sha256": "7e2d105bb295abab92e30e5322ea3103cc5546f841229902f06f56251a3b12da"
-    },
-    "gates.log": {
-      "bytes": 21780,
-      "sha256": "e60afbccd53874143b645acedc4311d01f2ec7600af4fc47d7d79205c2a2bb2e"
-    },
-    "m5-capacity.log": {
-      "bytes": 5452,
-      "sha256": "b9ff15e7259264073c51cc974300f3087223df03d88fb4d8a1b7307826e45c74"
-    },
-    "macmini-base-fetch.log": {
-      "bytes": 119,
-      "sha256": "b4c58fb3c2692c585b11c13c598328637496fa5fbee38b96d0a64292a2bd4e8f"
-    },
-    "macmini-brew-tools.log": {
-      "bytes": 459,
-      "sha256": "d6f4353840fca63d854e07ed4e547ddce49032559bad50d5c78dc98e5ac59635"
-    },
-    "macmini-capacity.log": {
-      "bytes": 131,
-      "sha256": "8b7bf9dd28020bef6393dfa049ad442014a05665a560add86091e51d2e89ae9f"
-    },
-    "macmini-checkout.log": {
-      "bytes": 153,
-      "sha256": "27d73e236150b4a34c02a1e9ebe1a95646851fb3d2102c57971a9601e87c44ae"
-    },
-    "macmini-cleanup-state.log": {
-      "bytes": 603,
-      "sha256": "a94952a951a9943b950362317ae0296086ca79e152468d68c4102663d27fac3c"
-    },
-    "macmini-fresh-checkout.log": {
-      "bytes": 4287,
-      "sha256": "3958bd8562bd56f0d390862591e52067b5471b5529f845f875a1ec9b1b9b79ab"
-    },
-    "macmini-lineage.log": {
-      "bytes": 1050,
-      "sha256": "0c05cf8a2f20ee2503f391a02acd703ec84dc858d2cc0f276da4ef1caeb6d1ec"
-    },
-    "macmini-owned-setup-pid.log": {
-      "bytes": 185,
-      "sha256": "3e35370395a78eb61b1e73ec9efd11f46b3a645c7947c6f6ab4236e45b0f0162"
-    },
-    "macmini-python-setup.log": {
-      "bytes": 7338,
-      "sha256": "aaa19252d0fc2b989f855ef636ba15c0390b3ec521c2f5a4011c6dd29726845d"
-    },
-    "macmini-readiness.log": {
-      "bytes": 584,
-      "sha256": "a885c781e3dbe6e4748c20cef383012dbc48f5e08d958f56619008797a2b34f8"
-    },
-    "macmini-setup-process.log": {
-      "bytes": 550,
-      "sha256": "4ff9dff8e23574dfde062e2e2c2865fc088a0e1b51d93a5e7db17561d1484bc5"
-    },
-    "macmini-setup-stop.log": {
-      "bytes": 748,
-      "sha256": "05062ae98cf2adefe67816f45ed907259ac4cba257500cbd78bdeafa70983f2e"
-    },
-    "macmini-toolchain.log": {
-      "bytes": 497,
-      "sha256": "fa480fc8d27cbaf4cab5a1956b64607d9a278edfb750952860df0a5cfddc6b36"
-    },
-    "macmini-tools-extra.log": {
-      "bytes": 310,
-      "sha256": "23aec650011488e5786bd74c01b90fee07343bfa68472f2989cf449c3c71f2fe"
-    },
-    "pilot-bundle.tar.gz": {
-      "bytes": 12672038,
-      "sha256": "de2556b3571f0df6121d18ba6d9a8a1eb7d4db4311f4488f8d8e0aed382945df"
-    },
-    "pilot-record.log": {
-      "bytes": 165,
-      "sha256": "3867d94d0e70fe33d4690ad89d10769fd5167ffe666701965ad4d8ce937c9a46"
+      "bytes": 794,
+      "sha256": "77188615b2ef8f5bc70f348863e9eeb51223caa94b661f96f36c1850211bff83"
     },
     "pilot-summary.json": {
       "bytes": 265,
-      "sha256": "a973bc5269106c7d38c5a91a946bbdd643e4351466feb4034b8927b269828df8"
-    },
-    "pre-push.log": {
-      "bytes": 19108,
-      "sha256": "4248c37c3f2407760af74914f8429401429908b1c904cd986e7cae3d8092ab0e"
-    },
-    "python-tests.log": {
-      "bytes": 1259,
-      "sha256": "5a3e4c17a031fdaa6b5e2905691e46e95fe0b06685cdaeb3ad9b5b571648f65a"
+      "sha256": "7950ded85a6da25e28bf830895e88af5002838d44b3db38668bdc6a94e62481e"
     },
     "real-fixture-controls.json": {
-      "bytes": 3571,
-      "sha256": "9f09c7b6e1079f844f1fb42841d0f410b168c2cb286f7cab120cccc067d82882"
+      "bytes": 2059,
+      "sha256": "ce75cd01057194849fd2cebd40604ac38b9b8c4da033145138e9f0da7ccbbeb4"
     },
-    "routed-omit_commit.log": {
-      "bytes": 10274,
-      "sha256": "eaf136eae5a4f58c8fa961ba7fdf33da3e838d92aca2b844d6963b8627145029"
+    "source-ancestry-check.py": {
+      "bytes": 2072,
+      "sha256": "92901672f20c3ab31b7778451b4f82c7489dcb968fbf002c79a93c1b0c3112c8"
     },
-    "routed-positive.log": {
-      "bytes": 9598,
-      "sha256": "f6913bc91e58d7a332278f616897fefa03b0498afb2e5bdc281453975d1d3011"
-    },
-    "routed-restored.log": {
-      "bytes": 9598,
-      "sha256": "383ad2928149136bf58e4d08bad3d2bfa7d6765eec5091f0b50432e0d72ed130"
-    },
-    "routed-wrong_gain.log": {
-      "bytes": 10266,
-      "sha256": "f75e956ae714f62b941aad2366d0f699ee2ed74a8d86af82d1cf6535024e3a61"
-    },
-    "scope-check.json": {
-      "bytes": 827,
-      "sha256": "ba41a85fc2aa3b83553b91bb999eef93bcccbb281964ccaf43654df7e03d95f3"
+    "source-ancestry-check.json": {
+      "bytes": 259,
+      "sha256": "62513f629851918ad4e91314cde731118ba24803bb42eaf8dbb6fabe41772ac1"
     },
     "verification-results.json": {
-      "bytes": 759,
-      "sha256": "3b47c37db12f575556967c04d30beead8a013ca74f825bffbed45fc43698d2f3"
-    },
-    "wrong-backend.patch": {
-      "bytes": 646,
-      "sha256": "4698af19af9868920e2894a19cb21bd6025bf94ee4a64768ef5a9acf66908b0f"
-    }
-  },
-  "local_build_products": {
-    "build/CMakeCache.txt": {
-      "bytes": 128603,
-      "sha256": "f005d9c499d1ddc839bcdc94888cb0505e110a4da8efbe82dabd912f412709af"
-    },
-    "build/compile_commands.json": {
-      "bytes": 14314589,
-      "sha256": "84430748a023309981c53292c2e5c078ae576eac87b7835d130830803a42b8e1"
-    },
-    "build/core/graph/libpulp-graph.a": {
-      "bytes": 54664,
-      "sha256": "20123787adff51903aa6fe5ac759638086b4e1fd4e8e86b95551f7420a097a45"
-    },
-    "build/core/host/libpulp-host.a": {
-      "bytes": 11446088,
-      "sha256": "59cdea4fc021713e3be49d695a90c51e76d2dc08c435450abbc83bb483b47613"
-    },
-    "build/core/runtime/libpulp-runtime.a": {
-      "bytes": 3110888,
-      "sha256": "272e0748968f32f32170e706b367921bda68b6f3a42fa3c134bbd85b70ff6d87"
-    },
-    "build/test/pulp-test-group-trigger-graph": {
-      "bytes": 32238464,
-      "sha256": "68a68a47ede5144eb03a307c1717ca8e278f0b56ac71e32ea03a9799236c8703"
+      "bytes": 855,
+      "sha256": "0a187815d0c22a53cdaceb246cc4f35714b8cd80c9de8a08cb8e9515f51b4c2d"
     }
   },
   "source_files": {
@@ -245,6 +43,6 @@
       "sha256": "70c5f3ee82d3b66ffd4ddc8d25c74947f6c827848bbf1d61c42ecf027ce180b2"
     }
   },
-  "source_tree": "cc0fc9f4457502d67cdfef2dcbaf77aaf509d46a",
-  "tested_source_commit": "faf8d69a181a102455a70a40aa77e0da18838c76"
+  "source_tree": "a9a0cfc1a2a02844f6bfb69be249812ee15d8e1e",
+  "tested_source_commit": "e893f20d0048dfc11536c4b688d11be97ba9e167"
 }

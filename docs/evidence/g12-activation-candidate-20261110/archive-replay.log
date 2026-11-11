@@ -1,2 +1,0 @@
-command=["python3", "tools/graph_performance_qualification.py", "validate", "build/g12-candidate-replay/pilot/receipt.json", "--source-root", "."]
-activation_receipt=pass
