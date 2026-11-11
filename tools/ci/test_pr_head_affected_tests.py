@@ -988,7 +988,7 @@ class BudgetTests(unittest.TestCase):
             "names = open(a[a.index('--tests-from-file') + 1]).read().split()\n"
             "time.sleep(float(__import__('os').environ.get('FAKE_CTEST_SLEEP', '0')))\n"
             "cases = ''.join(f'<testcase name=\"{n}\" status=\"{\"fail\" if n.startswith(\"bad\") else \"notrun\" if n.startswith(\"skip\") else \"run\"}\">'\n"
-            "                + ('<failure/>' if n.startswith('bad') else '<skipped/>' if n.startswith('skip') else '') + '</testcase>' for n in names)\n"
+            "                + ('<failure message=\"Timeout\"/>' if n.startswith('timeout') else '<failure/>' if n.startswith('bad') else '<skipped/>' if n.startswith('skip') else '') + '</testcase>' for n in names)\n"
             "open(a[a.index('--output-junit') + 1], 'w').write(f'<testsuite>{cases}</testsuite>')\n")
         (self.bin / "ctest").chmod(0o755)
         self.env = mock.patch.dict(os.environ, {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"})
@@ -1036,6 +1036,12 @@ class BudgetTests(unittest.TestCase):
             results = step.run_budgeted(self.tmp, plan["tests"], 0.2, 1, "", self.tmp, len(family))
         self.assertEqual(sorted(results["passed"]), family)
         self.assertEqual(results["skipped"], ["unit-a", "unit-b"])
+
+    def test_ctest_deadline_timeout_is_budget_skipped(self) -> None:
+        with mock.patch.dict(os.environ, {"FAKE_CTEST_SLEEP": "0.1"}):
+            results = step.run_budgeted(self.tmp, ["timeout-self"], 0.05, 1, "", self.tmp, 1)
+        self.assertEqual(results["failed"], [])
+        self.assertEqual(results["skipped"], ["timeout-self"])
 
     def test_ctest_self_skips_are_reported_notrun_not_budget_skipped(self) -> None:
         results = step.run_budgeted(self.tmp, ["skip-self"], 60, 1, "", self.tmp, 1)

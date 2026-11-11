@@ -723,6 +723,18 @@ def junit_outcomes(path: Path) -> dict[str, str]:
     return outcomes
 
 
+def junit_timeout_tests(path: Path) -> set[str]:
+    """Return tests CTest killed by its stop-time deadline."""
+    if not path.is_file():
+        return set()
+    timed_out: set[str] = set()
+    for case in ET.parse(path).getroot().iter("testcase"):
+        failure = case.find("failure")
+        if failure is not None and failure.get("message", "").strip().lower() == "timeout":
+            timed_out.add(case.get("name", ""))
+    return timed_out
+
+
 def junit_failure_evidence(path: Path) -> dict[str, str]:
     """Return the first useful failure line for each failed testcase."""
     evidence: dict[str, str] = {}
@@ -750,6 +762,8 @@ def run_budgeted(build: Path, tests: list[str], budget: float, jobs: int,
                  priority_count: int = 0) -> dict:
     """Run one priority batch, then fixed-size ordinary batches."""
     start = time.monotonic()
+    deadline = start + budget
+    deadline_wall = time.time() + budget
     results = {"passed": [], "failed": [], "skipped": [], "notrun": [],
                "excluded_or_absent": [], "failure_evidence": {}}
     index = min(priority_count, len(tests)) if priority_count > 0 else 0
@@ -765,17 +779,23 @@ def run_budgeted(build: Path, tests: list[str], budget: float, jobs: int,
         listing = junit_dir / f"batch-{batch_index}.txt"
         listing.write_text("".join(f"{t}\n" for t in batch), encoding="utf-8")
         junit = junit_dir / f"batch-{batch_index}.xml"
+        stop_time = time.strftime("%H:%M:%S", time.localtime(deadline_wall + 0.999))
         command = ["ctest", "--test-dir", str(build), "--tests-from-file", str(listing),
                    "--output-on-failure", "-C", "Release", "--timeout", "120",
+                   "--stop-time", stop_time,
                    "--repeat", "until-pass:2", "-j", str(jobs), "--output-junit", str(junit)]
         if label_exclude:
             command += ["-LE", label_exclude]
         subprocess.run(command, check=False)
         outcomes = junit_outcomes(junit)
+        timeout_tests = junit_timeout_tests(junit)
+        budget_timeout = time.monotonic() >= deadline
         results["failure_evidence"].update(junit_failure_evidence(junit))
         for test in batch:
             state = outcomes.get(test)
-            if state == "fail":
+            if state == "fail" and budget_timeout and test in timeout_tests:
+                results["skipped"].append(test)
+            elif state == "fail":
                 results["failed"].append(test)
             elif state == "run":
                 results["passed"].append(test)
@@ -784,6 +804,9 @@ def run_budgeted(build: Path, tests: list[str], budget: float, jobs: int,
                 # budget omission.  It is useful evidence but must not make
                 # the PR-head step red.
                 results["notrun"].append(test)
+            elif budget_timeout:
+                # CTest may omit tests it never started after --stop-time.
+                results["skipped"].append(test)
             else:
                 results["excluded_or_absent"].append(test)
     results["seconds"] = round(time.monotonic() - start, 1)
