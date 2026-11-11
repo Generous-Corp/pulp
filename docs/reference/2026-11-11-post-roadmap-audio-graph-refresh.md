@@ -5,11 +5,11 @@ roadmap and does not authorize runtime or API implementation.
 
 **Review date:** 2026-11-11
 
-**Verified source head:** `670bd0900407970a03cea8bf8106c7b3a3bce834`
-(`origin/main` in the clean worktree used for this review). This is a
-same-day refresh of the document originally published at `3633377f`; the
-delta below records the resolved-identity and spectral-consumer merges that
-landed after that snapshot.
+**Verified source head:** `374d3482ab0a1520afaf2c42035e89c67cfbe2e1`
+(`origin/main` in the clean worktree used for this review). This refresh
+rebinds the document after PR #12071 (A1 verifier) and PR #12073 landed;
+older source-head claims below are historical provenance, not current-main
+state.
 
 **Prior context:** `docs/reference/2026-11-10-post-roadmap-audio-graph-opportunities.md`
 is the broader proposal. This refresh records what changed on current `main`
@@ -45,7 +45,7 @@ wording:
 | PR [#11999](https://github.com/Generous-Corp/pulp/pull/11999), merged `fa5a9f0205b38d255820505ae185d01ab9b4a47c`, source head `77a9777d50a9b8a46bff293efd9118f31c47ca9d` | Catalog-derived notation and strict graph diagnostics are available. | A single receipt that correlates authored graph, resolved resources, prepared plan, event replay, and output is still missing. |
 | PR [#12008](https://github.com/Generous-Corp/pulp/pull/12008), merged `bb01aab010ad9ba88c70ee08007707f5907bd15b`, source head `29d9627c9a81a8b2d0b042b5c95ad295e062d2b6` | The bounded `pulp.graph.resolved-plan.v1` / `pulp.graph.resolved.io-gain.v1` identity bridge and detached receipt are now in `main`. | G-3 remains **PARTIAL/HOLD**: the installed public-only consumer is partial, upper-half unsigned-64 JSON values are refused, and whole-graph, realtime/resource, portability, and undo evidence remain open. |
 | PR [#12058](https://github.com/Generous-Corp/pulp/pull/12058), merged `59e50747c59ebfd6f1f8238bce6915e991795535`, source head `1c919f4206e580fb200613b988c4d0ca37791c36` | The bounded analyzed spectral-frame consumer now runs from the installed `Pulp::signal` target and exercises positive, unknown-profile, and chronology controls. | G-10/A3 remains **PARTIAL/HOLD**: this does not qualify runtime resynthesis, morphing, granular modulation, EOF/tail audio, realtime behavior, or cross-platform parity. |
-| PR [#12017](https://github.com/Generous-Corp/pulp/pull/12017), **open**, head `43f6daf4862c6389f0eae0cc4145cbe4b746a479` | Candidate G6 pedal/A1 voice evidence. | It is not merged; the graph voice lifecycle remains an evidence question. |
+| PR [#12017](https://github.com/Generous-Corp/pulp/pull/12017), **open**, head `489b542244baa586643038adaaa92e5db4268d98` | Candidate G6 pedal/A1 voice evidence. | It is not merged; the graph voice lifecycle remains an evidence question. |
 | PR [#11733](https://github.com/Generous-Corp/pulp/pull/11733), closed without merge, head `d90324a2749fa6c6ab6acd90943fab6330be8425` | Earlier bounded control/event probe proposal. | Its candidate code is not current `main` and must not be copied as an implementation dependency. |
 
 The source status files preserve the limits: `G-3` remains **PARTIAL/HOLD**,
@@ -92,7 +92,7 @@ Adding another DSP node does not remove that glue.
 
 | Domain | Verified primitive | Missing product contract |
 | --- | --- | --- |
-| Event/control | `graph_event_contract.hpp` fixed-capacity pending/one-block look-ahead primitive and `received_block()`, trigger runtime, MIDI/UMP/MPE mailbox, sparse/dense parameter edges | A qualified graph-wired projection with absolute sample origin, tie order, late/overflow policy, reset epoch, and partition-invariant replay. The implementation seam exists; G-5 installed/runtime qualification remains HOLD. |
+| Event/control | `graph_event_contract.hpp` fixed-capacity pending/one-block look-ahead primitive and `received_block()`, trigger runtime, MIDI/UMP/MPE mailbox, sparse/dense parameter edges | A qualified graph-wired projection with absolute sample origin, tie order, late/overflow policy, reset epoch, and partition-invariant replay. Current main has installed host-event and typed-runtime evidence; graph-wired queued cross-block/plugin/realtime qualification remains HOLD. |
 | Voice | `voice_template.hpp`, `Synthesiser`, `MpeVoiceAllocator`, merged bounded eight-voice binding | A graph-owned lifecycle for allocation/steal, generation-safe tails, per-voice events, graph swaps, and declared state migration. |
 | Inspection | Graph notation/diagnostics, serializer, prepared stats, probes, traces, audio-quality tools | Layered IDs and a replay/diff receipt that says whether a difference is authored topology, resource resolution, plan, event stream, or output. |
 | Spectral | Canonical frames, routed spectral ports, finite two-asset morph, hop control | A frame-domain conversion contract with geometry, clock, latency, EOF/tail, and host-rate event policy. |
@@ -164,10 +164,12 @@ Define a compact versioned envelope with separate IDs for:
 2. resolved node/type/resource identities;
 3. prepared execution-plan facts and generation;
 4. event/control input stream plus clock epoch; and
-5. rendered output digest or declared audio-quality artifact.
+5. rendered output digest or declared audio-quality artifact. Any audio comparison must use canonical PCM encoding and explicit peak/RMS tolerances; a raw floating-point digest alone is not portable across partitions or providers.
 
 The receipt must include capacities, latency/fallback decisions, source/SDK
-provenance, and positive plus planted-negative controls. A single canonical
+provenance, and positive plus planted-negative controls. For audio, record
+canonical PCM format, channel order, sample rate, partition geometry, and
+peak/RMS tolerances; classify provider/device nondeterminism explicitly. A single canonical
 graph hash is insufficient: equal authored graphs can resolve different assets,
 and equal output hashes do not explain a scheduling change.
 
@@ -177,19 +179,25 @@ corresponding layer must fail while the others remain explainable.
 
 **Traceable fixture:** the G-3 owner/status authority is
 `docs/graph-program-status/G-3.md`; the installed consumer is
-`examples/g3-resolved-identity-consumer`. Run its CTest entry
-`g3-resolved-identity-consumer` from the installed consumer build, then add the
-spectral metadata controls from `examples/spectral-frame-codec-consumer`
-(`ctest --test-dir <installed-build> -R 'g3-resolved-identity-consumer|spectral-frame-codec-consumer' --output-on-failure`).
+`examples/g3-resolved-identity-consumer`. Run the G3 CTest entry
+`g3-resolved-identity-consumer` from its installed-consumer build. Run the
+spectral metadata controls separately using the build configured by
+`test/cmake/test_spectral_frame_codec_consumer.cmake`; these are separate
+CMake projects and must not be represented as one shared `<installed-build>`
+regex. The current G3 installed public-only consumer remains PARTIAL because
+the generated SDK lacks relocatable support modules and it prepares/exports
+identity without rendering, event, or output-mutation proof.
 The experiment must write one layered receipt and mutate authored bytes,
 resolved identity, prepared generation, event stream, and output independently.
 
 ### P1: bounded cross-block event projection
 
 **Reasoned priority.** G-5 now has hardened bounded transport, but its status
-still leaves queued cross-block scheduling and broad adapter parity open. Adapt
-the existing MIDI/UMP/MPE, trigger, and parameter queues rather than introducing
-an untyped universal queue.
+still leaves queued cross-block scheduling and broad adapter parity open. Adapt the existing MIDI/UMP/MPE, trigger, and parameter queues rather than
+introducing an untyped universal queue. A single consumer may coordinate typed
+sidecars, but each family keeps its own capacity, ordering, and refusal policy;
+there is currently no public voice-intent record to assume into a universal
+envelope.
 
 The contract should own an epoch and absolute sample origin, fixed-capacity
 block projection, deterministic `(absolute_sample, producer_order, sequence)`
@@ -228,7 +236,8 @@ and declared state migration. A voice template expands at prepare time or into
 a fixed preallocated slot runtime. Retired generations must reject stale events.
 
 **Gate before implementation:** an installed eight-slot consumer covers note
-on/off, sustain policy, MPE pressure, steal order, tails, slot reuse, swap while
+on/off, sustain policy, MPE member expression (with manager/zone expression explicitly refused),
+steal order, tails, slot reuse, swap while
 voices sound, and state save/restore. A stale-generation mutation must fail.
 The open G6 evidence candidate can inform the experiment, but its state does
 not promote a capability.
@@ -239,9 +248,10 @@ not promote a capability.
 `test/cmake/test_g6_voice_bank_sdk_consumer.cmake`. Run the registered
 `cmake-g6-voice-bank-sdk-consumer` test from the Release build, then add the
 independent audio/tail oracle named by
-`docs/evidence/g6-audio-tail-qualification-hold-20261110.md`. The existing
-consumer proves binding/allocator controls only; it does not close graph voice
-audio, swap, persistence, or realtime qualification.
+`docs/evidence/g6-audio-tail-audit-20261110-live.md` and
+`docs/evidence/a1-audio-oracle-gap-20261110.md`. The verifier is now an
+independent scalar A1 oracle with copied/hashed vectors; it does not close the
+graph-owned tail/swap/persistence/realtime qualification boundary.
 
 ### P3: explicit spectral/frame conversion (conditional)
 
@@ -275,8 +285,9 @@ need the same resource policy. A future signed manifest could name model/kernel
 identity, residency, warm-up, provider, memory/latency budget, device-loss
 transition, and CPU fallback. Training and device discovery remain external.
 
-**Gate:** two independent consumers and a measured 64/128-frame workload with
-device-loss, fallback, allocation, and output-tolerance controls. No gate means
+**Gate:** two independent consumers and a workload whose frame geometry and
+latency are measured from each fixture (rather than an arbitrary 64/128-frame
+claim), with device-loss, fallback, allocation, and output-tolerance controls. No gate means
 no graph-wide GPU or neural scheduler.
 
 **Disposition:** **BLOCKED / SPECULATIVE.** Current GPU/neural examples are
@@ -343,7 +354,7 @@ yet present.
 4. Should event streams live in `.pulpgraph`, a timeline document, or a replay
    sidecar; which choice preserves provenance and bounded loading?
 5. Which spectral geometry and EOF/tail policy cover the first real resynthesis
-   consumer, and what is the measured 64/128-frame latency budget?
+   consumer, and what is the measured fixture-specific latency budget and geometry?
 6. Does one spatial renderer need a layout/order/orientation identity portable
    across AU, VST3, CLAP, and standalone hosts?
 7. Do physical-model consumers share enough state/resource accounting to justify
