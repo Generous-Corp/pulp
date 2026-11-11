@@ -1543,7 +1543,7 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS)
     pulp_test_spawns(pulp-test-group-core-runtime-http pulp-g9-joined-child-fixture)
 else()
     pulp_test_spawns(pulp-test-group-core-runtime-http NONE
-        REASON "runs only platform-neutral command fixtures")
+        REASON "runs /bin/echo, /bin/sh, /bin/pwd and powershell, nothing the tree builds")
 endif()
 pulp_test_spawns(pulp-test-streaming-model-contract NONE REASON "forks itself without exec and loads nothing the tree builds")
 pulp_test_spawns(pulp-test-group-core-gpu-audio-private NONE REASON "forks itself without exec and loads nothing the tree builds")
