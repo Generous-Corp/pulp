@@ -4917,6 +4917,10 @@
         "disposition": "excluded"
       },
       {
+        "name": "midi-learn",
+        "disposition": "excluded"
+      },
+      {
         "name": "mise",
         "disposition": "pulp-owned"
       },

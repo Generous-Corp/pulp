@@ -1,0 +1,22 @@
+{
+ "name": "pulp-test-host-scale-probe-bundles",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [
+   "PulpScaleProbe_AU",
+   "PulpScaleProbe_CLAP",
+   "PulpScaleProbe_VST3"
+  ],
+  "sources": [],
+  "spawning_sources": [
+   "test/scale_probe_hosting.hpp",
+   "test/support/au_component_registration.hpp",
+   "test/test_host_scale_probe_bundles.cpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}
