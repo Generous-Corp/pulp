@@ -41,6 +41,12 @@ worked example is `examples/midi-learn-demo/`.
   (`poll_learn()`). Anything that can arrive from another thread, such as a host's
   live-controller report, goes through `host_reported_controller()`, an atomic
   slot, never the queue.
+- A plug-in that uses some MIDI messages itself (a preset router consuming Bank
+  Select and Program Change) claims them with a `state::MidiSourceReservation` and
+  `engine.set_reservation()`. Claimed sources cannot be mapped or learned (the
+  outcome carries `refused_reason`), are dropped on load, and are skipped by
+  `route()` even for an older saved mapping. `claims()` runs on the audio thread:
+  no allocation or locks, and an omni source overlaps any channel the owner uses.
 - Feedback never echoes a value the controller just wrote, and the first call
   after a mapping appears sends the current value so the controller can sync.
 - `midi_feedback_capabilities()` says what the adapter writes to the host's MIDI
