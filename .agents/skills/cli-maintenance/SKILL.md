@@ -4276,3 +4276,10 @@ rules when touching it:
 The `pulp graph probe` command and MCP `pulp_graph` tool expose bounded audio,
 control, and event edge observations. Keep their `edge_kind` and
 `destination_param` schemas aligned when changing graph probe diagnostics.
+
+### SignalGraph notation tools
+
+`graph catalog` needs no file. `.pat` inputs use the public graph-patch parser;
+`validate` and `fmt --notation` use strict saved-edge validation. Keep diagnostic
+fields and codes identical across the public C++ API, CLI and MCP. Application
+Processor registrations belong to the C++ catalog, not the default tool catalog.
