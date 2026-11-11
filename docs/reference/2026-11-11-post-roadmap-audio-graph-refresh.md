@@ -45,7 +45,7 @@ wording:
 | PR [#11999](https://github.com/Generous-Corp/pulp/pull/11999), merged `fa5a9f0205b38d255820505ae185d01ab9b4a47c`, source head `77a9777d50a9b8a46bff293efd9118f31c47ca9d` | Catalog-derived notation and strict graph diagnostics are available. | A single receipt that correlates authored graph, resolved resources, prepared plan, event replay, and output is still missing. |
 | PR [#12008](https://github.com/Generous-Corp/pulp/pull/12008), merged `bb01aab010ad9ba88c70ee08007707f5907bd15b`, source head `29d9627c9a81a8b2d0b042b5c95ad295e062d2b6` | The bounded `pulp.graph.resolved-plan.v1` / `pulp.graph.resolved.io-gain.v1` identity bridge and detached receipt are now in `main`. | G-3 remains **PARTIAL/HOLD**: the installed public-only consumer is partial, upper-half unsigned-64 JSON values are refused, and whole-graph, realtime/resource, portability, and undo evidence remain open. |
 | PR [#12058](https://github.com/Generous-Corp/pulp/pull/12058), merged `59e50747c59ebfd6f1f8238bce6915e991795535`, source head `1c919f4206e580fb200613b988c4d0ca37791c36` | The bounded analyzed spectral-frame consumer now runs from the installed `Pulp::signal` target and exercises positive, unknown-profile, and chronology controls. | G-10/A3 remains **PARTIAL/HOLD**: this does not qualify runtime resynthesis, morphing, granular modulation, EOF/tail audio, realtime behavior, or cross-platform parity. |
-| PR [#12017](https://github.com/Generous-Corp/pulp/pull/12017), **open**, head `1ea1eabbdb411f277bf989f25e67796df0a85642` | Candidate G6 pedal/A1 voice evidence. | It is not merged; the graph voice lifecycle remains an evidence question. |
+| PR [#12017](https://github.com/Generous-Corp/pulp/pull/12017), **open**, head `43f6daf4862c6389f0eae0cc4145cbe4b746a479` | Candidate G6 pedal/A1 voice evidence. | It is not merged; the graph voice lifecycle remains an evidence question. |
 | PR [#11733](https://github.com/Generous-Corp/pulp/pull/11733), closed without merge, head `d90324a2749fa6c6ab6acd90943fab6330be8425` | Earlier bounded control/event probe proposal. | Its candidate code is not current `main` and must not be copied as an implementation dependency. |
 
 The source status files preserve the limits: `G-3` remains **PARTIAL/HOLD**,
@@ -93,6 +93,30 @@ Adding another DSP node does not remove that glue.
 These are **post-roadmap boundaries**, not claims that every row should become
 core graph API. The current roadmap's partial/hold status remains the gate for
 any implementation decision.
+
+## Opportunity inventory: ambitious examples and baseline limits
+
+The following inventory keeps the request broad without turning a feature list
+into a roadmap. Each row is **verified** where the adjacent Pulp primitive is
+present, **reasoned** where a binding experiment is needed, and **speculative**
+where no named consumer justifies graph ownership.
+
+| Opportunity | Current baseline | Smallest defensible next question |
+| --- | --- | --- |
+| Spatial audio and ambisonics | **Verified:** multi-channel buses, sidechains, delay/feedback and spatial DSP helpers exist. **Reasoned gap:** no graph-owned layout/order/normalization/coordinate contract. | Can one object or ambisonic renderer consume a typed layout, orientation, latency, and CPU fallback receipt? Until then, keep spatial processing in custom nodes. |
+| Physical modeling and waveguides | **Verified:** delay, feedback, reed/string, resonator, and circuit primitives are public. **Reasoned gap:** no common graph state/resource schema for physical models. | Does two independent physical-model consumers need shared state migration or resource accounting? A new node family is **speculative** without that failure. |
+| Microtonal and expressive pitch | **Verified:** MIDI/MPE, tuning/scale helpers, pitch mapping, and voice primitives exist. **Reasoned gap:** graph events lack a portable pitch/frequency identity that survives voice allocation and replay. | Can one graph instrument replay per-note pitch, bend, and tuning under P1 ordering without adding a second MIDI stack? |
+| Generative and sensor-driven instruments | **Verified:** MIDI, analysis, timeline, seeded DSP, and capture APIs are adjacent. **Reasoned gap:** no shared clock/epoch, deterministic event receipt, or sensor adapter contract. | Can a bounded state-machine consumer replay MIDI plus sensor events with fixed capacity and a seed? A general control language is **speculative**. |
+| Sequencing and transport | **Verified:** immutable playback programs, timeline sequences, step players, and transport exist. **Reasoned gap:** graph event lanes do not yet unify transport, voice intent, and host block projection. | Can P1 consume a single partition-invariant event sidecar without duplicating the playback scheduler? |
+| Multirate and oversampling | **Verified:** Processor-local resampling/oversampling and `AudioStreamHandoff` exist; G-8 deliberately parks graph-owned rate domains. | Reopen only for a named workflow with ratio, conversion, PDC, aliasing negative, tail, and offline-parity evidence. A graph-wide second scheduler is **speculative**. |
+| Neural and hybrid CPU/GPU DSP | **Verified:** GPU spectral/convolution/neural kernels, provider checks, shadows, and fallbacks exist. **Reasoned gap:** graph admission lacks model/resource identity, warm-up, deadline, and device-loss policy. | Do two independent consumers require one signed resource/fallback receipt? Until then, universal GPU/neural scheduling is **speculative**. |
+| Agent-generated graphs | **Verified:** serialization, limits, bake verification, diagnostics, and quality tools can validate bounded artifacts. **Reasoned gap:** no one receipt binds authored graph, resources, events, plan, and output. | Can an installed consumer reject a node-version, resource-hash, event-sequence, or output mutation at the corresponding layer? |
+
+These examples are stress tests for the binding seams, not commitments to ship
+spatial, physical-model, microtonal, sensor, sequencing, multirate, neural, or
+agent-specific graph APIs. The baseline favors reusing `Processor`, `SignalGraph`,
+timeline, MIDI/MPE, and existing DSP/GPU primitives until a measured consumer
+shows that a shared contract is the smaller system.
 
 ## Competitive architecture lessons
 
@@ -203,6 +227,81 @@ transition, and CPU fallback. Training and device discovery remain external.
 **Gate:** two independent consumers and a measured 64/128-frame workload with
 device-loss, fallback, allocation, and output-tolerance controls. No gate means
 no graph-wide GPU or neural scheduler.
+
+## Ambitious examples as architecture tests
+
+These are **reasoned stress scenarios**, not feature commitments. They make the
+missing contracts concrete and state what evidence would falsify the proposal.
+
+### Graph-defined polyphonic modular synthesizer
+
+An eight-voice template contains oscillator, envelope, filter, modulation, and
+output subgraphs. MIDI 2.0 per-note events allocate a voice, route pitch and
+pressure, and release a tail. Existing custom nodes, MPE, voice identity,
+prepared edits, and audio mixing cover the pieces; the missing seam is
+event-to-voice scheduling with generation-safe tails and state migration. P1
+plus P2 should be enough without inserting nodes on the audio thread.
+
+### Live spectral/granular instrument
+
+A bounded recorder publishes sample pages; a granular voice bank schedules grains;
+a spectral stage applies a frame mask and resynthesizes with an EOF tail. Current
+sample, timeline, spectral, and granular primitives cover each component, while
+asset publication, frame-clock alignment, voice scheduling, and frame-to-audio
+latency/tail remain separate. P1 plus a named P3 consumer is the smallest test;
+graph-wide multirate is not a prerequisite.
+
+### Generative instrument with MIDI, audio, and sensors
+
+MIDI notes, envelope features, and a sensor stream drive a deterministic pattern
+state machine. Offline replay must reproduce the same events and output. Existing
+MIDI, parameter, analysis, timeline, and seeded DSP APIs are adjacent but do not
+share a graph clock/epoch or random-seed receipt. A bounded P1 consumer should
+precede any general control language.
+
+### Hybrid CPU/GPU/neural graph
+
+A CPU preprocessor feeds a conditioned neural/GPU node with a CPU fallback, then
+an audio limiter. Device loss must transition without stale output, and offline
+rendering must match within a declared tolerance. Existing kernels demonstrate
+the algorithms but not graph admission, model identity, deadline behavior, or
+cross-provider parity; this scenario is the two-consumer gate for P4.
+
+### Agent-generated instrument
+
+An agent emits a `.pulpgraph`, event stream, and resource manifest. Pulp validates
+limits, prepares, renders a fixed partition schedule, and emits a layered receipt.
+A planted mutation to a node version, resource hash, event sequence, or output
+sample must fail at its corresponding layer. The serializer, limits, bake, and
+quality tools make this near-term, but the unified receipt/diff workflow is not
+yet present.
+
+## Open questions and experiments before commitment
+
+1. Which one installed-SDK consumer fails without P1 while remaining small enough
+   for a deterministic receipt?
+2. Can MIDI, parameter, trigger, voice-intent, and sensor records share one
+   bounded projection without family-specific ordering bugs?
+3. What minimum voice-bank state migrates across a graph swap without copying
+   opaque DSP state, and how are stale generations rejected?
+4. Should event streams live in `.pulpgraph`, a timeline document, or a replay
+   sidecar; which choice preserves provenance and bounded loading?
+5. Which spectral geometry and EOF/tail policy cover the first real resynthesis
+   consumer, and what is the measured 64/128-frame latency budget?
+6. Does one spatial renderer need a layout/order/orientation identity portable
+   across AU, VST3, CLAP, and standalone hosts?
+7. Do physical-model consumers share enough state/resource accounting to justify
+   a contract, or do custom nodes remain the smaller boundary?
+8. Can microtonal pitch, MPE, and voice intent replay with one absolute-sample
+   event identity rather than a second MIDI stack?
+9. What sensor and generative inputs can be bounded, seeded, and replayed without
+   turning the graph into a general-purpose control language?
+10. Can a signed model/resource manifest cover provider, residency, warm-up,
+    device loss, deadline, fallback, and output tolerance for two consumers?
+11. How much preparation time is acceptable before optimizing snapshot
+    compilation, and which multirate ratio would justify reopening G-8?
+12. Can a bounded state-machine or agent-authored graph be serialized with static
+    work and memory limits while preserving the layered receipt?
 
 ## Assumptions challenged
 
