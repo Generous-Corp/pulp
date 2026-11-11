@@ -14,7 +14,11 @@ neighbouring change conflicted with. This runner is the one step: it calls
 each instrument in isolation, names any that could not run (an exception or
 a non-zero exit is reported, never propagated), and always exits 0. Gating
 per instrument: identity and affected tests need a successful build and the
-ctest inventory; exoneration runs only when ctest's outcome was failure;
+ctest inventory; exoneration runs only when ctest's outcome was failure,
+and only with `--exoneration in-job` (the default); `--exoneration deferred`
+leaves it to the advisory `flake-exoneration-shadow` job, which reads the
+uploaded JUnit after the required job has finished, so a red run's verdict
+is not held back by GitHub API reads that cannot change it;
 receipts run whenever ctest ran (passed or failed) and write
 `<work-dir>/test-receipts.json`, which the workflow uploads as the
 `test-receipts-macos` artifact, and every entry's key to
@@ -32,6 +36,7 @@ instrument worth moving off it from one that is cheap.
     merge_group_shadows.py run --build-dir B --source-root S --repository O/R \\
         --merge-sha SHA --token T --junit J --selected-json I \\
         --ctest-outcome success|failure|skipped [--hours 24] [--work-dir W] [--run-id N]
+        [--exoneration in-job|deferred]
 """
 from __future__ import annotations
 
@@ -73,7 +78,9 @@ def run_one(label: str, module_name: str, argv: list[str]) -> str:
 
 
 def plan(a: argparse.Namespace) -> list[tuple[str, str, list[str]] | tuple[str, str, None]]:
-    """The instruments to run and their argv; None means skipped, with the reason as argv."""
+    """The instruments to run and their argv.
+
+    None means skipped; the string "deferred" means another job runs it."""
     steps: list = []
     steps.append(("binary-identity", "binary_identity_shadow",
                   ["measure", "--build-dir", a.build_dir, "--source-root", a.source_root,
@@ -89,7 +96,9 @@ def plan(a: argparse.Namespace) -> list[tuple[str, str, list[str]] | tuple[str, 
                       ["--build-dir", a.build_dir, "--source-root", a.source_root, "--base", base,
                        "--head", a.merge_sha, "--selected-json", a.selected_json, "--junit", a.junit,
                        "--event", "merge_group"]))
-    if a.ctest_outcome == "failure":
+    if a.ctest_outcome == "failure" and getattr(a, "exoneration", "in-job") == "deferred":
+        steps.append(("flake-exoneration", "flake_exoneration_shadow", "deferred"))
+    elif a.ctest_outcome == "failure":
         steps.append(("flake-exoneration", "flake_exoneration_shadow",
                       ["--repo", a.repository, "--junit", a.junit, "--head", a.merge_sha,
                        "--hours", str(a.hours)]))
@@ -123,12 +132,13 @@ def main(argv: list[str]) -> int:
     r.add_argument("--hours", type=int, default=24)
     r.add_argument("--work-dir", default=os.environ.get("RUNNER_TEMP", "/tmp"))
     r.add_argument("--run-id", default=os.environ.get("GITHUB_RUN_ID", ""))
+    r.add_argument("--exoneration", choices=("in-job", "deferred"), default="in-job")
     a = ap.parse_args(argv[1:])
     results = []
     timings = []
     for label, module_name, args in plan(a):
-        if args is None:
-            results.append(f"{label}=skipped")
+        if args is None or args == "deferred":
+            results.append(f"{label}={'skipped' if args is None else 'deferred'}")
             continue
         started = time.monotonic()
         results.append(f"{label}={run_one(label, module_name, args)}")

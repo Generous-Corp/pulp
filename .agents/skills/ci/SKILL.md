@@ -655,6 +655,14 @@ prefix) to match a glob, so only the scheduled standing pass approves; a HOLD
 from any session still counts. A reviewer tab outside that pass needs its
 session listed. The key only takes effect through the Shipyard commit pinned in
 `.github/workflows/review-verdict.yml`, so keep that pin at a version that reads it.
+The pin is Shipyard v0.407.0 (`44721a9f`): since v0.386.0 the commit status
+is `pending` (`awaiting reviewer verdict for head <sha>`), not `failure`, while
+a head only awaits its reviewer; `failure` means a counted HOLD or an
+unreadable review. The check run itself stays red in both cases, so a pending
+status is never a defect to fix and never something a push clears. Moving the
+pin edits a workflow file (owner subset): open the PR unarmed with the
+`scripts/review_verdict_status.py` + `scripts/ghapp_queue_arm_guard.py` diff
+summarised against exact-head, stamp-session and self-approval behaviour.
 
 **`carry_excluded_paths` replaces Shipyard's default; it does not add to it.**
 The same `[auto_merge]` table lists the paths whose change stops an APPROVE
@@ -3521,8 +3529,12 @@ push reopens it while the count stays high.
 
 ## The flake-exoneration shadow annotation exonerates nothing
 
-A failed merge-group `macos` job carries `pulp-flake-exoneration-shadow/v1`
-(`tools/ci/flake_exoneration_shadow.py`): per failing test, `would_exonerate`
+A failed merge group carries `pulp-flake-exoneration-shadow/v1`
+(`tools/ci/flake_exoneration_shadow.py`) on its advisory
+`flake-exoneration-shadow (advisory)` job, not on `macos`: the job needs
+`build` and reads the macOS leg's `ctest-logs-macos` JUnit, so the red
+`macos` verdict (and the queue's ejection of the group) no longer waits
+~95 s for the shadow's API reads. Look for the annotation there. Per failing test, `would_exonerate`
 when it failed on >= 2 other heads in 24 h AND passes on main's tip, judged
 by the tip's required gate job. It is evidence, not a verdict:
 `base_poison_detector.py` records why cross-batch corroboration alone was
