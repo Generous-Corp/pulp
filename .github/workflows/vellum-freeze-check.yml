@@ -7,6 +7,12 @@ on:
 permissions:
   contents: read
 
+# Keep only the newest run for each PR. Merge-group refs and any future
+# non-PR trigger retain their own run identity and are never cancelled here.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
+
 jobs:
   freeze-check:
     name: Vellum freeze

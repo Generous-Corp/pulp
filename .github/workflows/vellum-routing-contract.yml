@@ -15,6 +15,12 @@ on:
 permissions:
   contents: read
 
+# Keep only the newest run for each PR. Main pushes, manual dispatches, and
+# other non-PR events retain their own run identity and are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
+
 jobs:
   routing-contract:
     name: vellum-routing-contract
