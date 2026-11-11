@@ -1,0 +1,11 @@
+{
+ "name": "editor-host-check-symbols-selftest",
+ "record": {
+  "entry": "test/editor_host_slice/test_check_symbols.py",
+  "inputs": [
+   "test/editor_host_slice/check_symbols.py",
+   "test/editor_host_slice/test_check_symbols.py"
+  ],
+  "kind": "python"
+ }
+}

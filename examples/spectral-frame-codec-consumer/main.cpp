@@ -16,9 +16,10 @@ int main(int argc, char** argv) {
     if (!encoded || encoded.value->size != 4224)
         return 2;
     auto decoded = decode_spectral_stream(encoded.value->view());
-    if (!decoded || decoded.value->frames[1].origin != -128 ||
-        decoded.value->components[2] != 0.5f || decoded.value->components[3] != -0.25f ||
-        decoded.value->components[782] != -1.25f)
+    if (!decoded || decoded.value->frame_count != 2 || decoded.value->frames[0].sequence != 0 ||
+        decoded.value->frames[0].origin != -192 || decoded.value->frames[1].sequence != 1 ||
+        decoded.value->frames[1].origin != -128 || decoded.value->components[2] != 0.5f ||
+        decoded.value->components[3] != -0.25f || decoded.value->components[782] != -1.25f)
         return 3;
     auto again = encode_spectral_stream(*decoded.value);
     if (!again || !std::ranges::equal(encoded.value->view(), again.value->view()))
@@ -30,5 +31,15 @@ int main(int argc, char** argv) {
         encoded.value->bytes[12] = 0x02;
         return decode_spectral_stream(encoded.value->view()) ? 0 : 1;
     }
-    std::cout << "owned spectral codec: exact roundtrip and strict rejection passed\n";
+    if (argc > 1 && std::string_view(argv[1]) == "--planted-frame-chronology") {
+        // A consumer must reject metadata that no longer names the canonical
+        // analyzed-frame sequence.
+        encoded.value->bytes[64] = 0x01;
+        return decode_spectral_stream(encoded.value->view()).error ==
+                       SpectralCodecError::InvalidChronology
+                   ? 1
+                   : 0;
+    }
+    std::cout << "owned spectral codec: analyzed frames=2 origins=[-192,-128] "
+                 "exact roundtrip and strict rejection passed\n";
 }
