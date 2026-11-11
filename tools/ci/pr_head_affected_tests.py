@@ -723,8 +723,8 @@ def junit_outcomes(path: Path) -> dict[str, str]:
     return outcomes
 
 
-def junit_timeout_tests(path: Path, minimum_seconds: float) -> set[str]:
-    """Return timeout tests whose own duration reached the stop-time deadline."""
+def junit_timeout_tests(path: Path, batch_started: float, batch_ended: float) -> set[str]:
+    """Return timeout tests that were running when the batch hit stop-time."""
     if not path.is_file():
         return set()
     timed_out: set[str] = set()
@@ -734,8 +734,9 @@ def junit_timeout_tests(path: Path, minimum_seconds: float) -> set[str]:
             duration = float(case.get("time", "0"))
         except (TypeError, ValueError):
             duration = 0.0
+        estimated_start = batch_ended - duration
         if (failure is not None and failure.get("message", "").strip().lower() == "timeout"
-                and duration + 1.0 >= minimum_seconds):
+                and estimated_start + 1.0 >= batch_started):
             timed_out.add(case.get("name", ""))
     return timed_out
 
@@ -793,9 +794,10 @@ def run_budgeted(build: Path, tests: list[str], budget: float, jobs: int,
             command += ["-LE", label_exclude]
         batch_started = time.monotonic()
         subprocess.run(command, check=False)
+        batch_ended = time.monotonic()
         outcomes = junit_outcomes(junit)
-        timeout_tests = junit_timeout_tests(junit, max(0.0, deadline - batch_started))
-        budget_timeout = time.monotonic() >= deadline
+        timeout_tests = junit_timeout_tests(junit, batch_started, batch_ended)
+        budget_timeout = batch_ended >= deadline
         results["failure_evidence"].update(junit_failure_evidence(junit))
         for test in batch:
             state = outcomes.get(test)

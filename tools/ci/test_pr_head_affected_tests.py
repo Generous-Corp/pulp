@@ -1056,6 +1056,24 @@ class BudgetTests(unittest.TestCase):
         self.assertEqual(results["failed"], ["early"])
         self.assertEqual(results["passed"], ["late"])
 
+    def test_late_started_timeout_at_batch_end_is_budget_skipped(self) -> None:
+        def fake_ctest(command, check=False):
+            junit = Path(command[command.index("--output-junit") + 1])
+            junit.write_text(
+                "<testsuite><testcase name=\"late-timeout\" time=\"3.96\" "
+                "status=\"fail\"><failure message=\"Timeout\"/></testcase></testsuite>",
+                encoding="utf-8",
+            )
+
+        # The test started about four seconds before the batch stopped at its
+        # eight-second deadline, so it was queued behind earlier work rather
+        # than reaching its own 120-second ctest timeout.
+        with mock.patch.object(step.subprocess, "run", side_effect=fake_ctest), \
+                mock.patch.object(step.time, "monotonic", side_effect=[0.0, 0.0, 0.0, 8.0, 8.0]):
+            results = step.run_budgeted(self.tmp, ["late-timeout"], 8.0, 1, "", self.tmp, 1)
+        self.assertEqual(results["failed"], [])
+        self.assertEqual(results["skipped"], ["late-timeout"])
+
     def test_missing_junit_is_not_budget_skipped(self) -> None:
         def no_junit(*args, **kwargs):
             time.sleep(0.1)
