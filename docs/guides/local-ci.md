@@ -2376,11 +2376,17 @@ Ruby and the Homebrew API data on every gate job. A runner missing either tool
 
 ## Base-poison hold and fix fast-track
 
-`[base_health]` in `.shipyard/config.toml` sets `merge_group_hold = "on"` and
-`auto_jump = "on"`. Each steward pass reads the newest merge groups; a required
+`[base_health]` in `.shipyard/config.toml` sets `merge_group_hold = "dry-run"` and
+`auto_jump = "dry-run"`, so the rule below is evaluated and recorded but holds
+and jumps nothing. A 7-day replay over Pulp's merge-group history found 12
+episodes, only 2 of them true base breakage (a `ui-script-plugin-editor-au`
+cluster and a version-date check); in the other 10 the next unrelated group
+passed, so a live hold would have stalled healthy heads for 6 to 99 minutes
+(median about 23). The keys stay in dry-run until a precision gate is met, then
+move to `"on"`. Each steward pass reads the newest merge groups; a required
 context that failed in two or more consecutive groups carrying different pull
-requests, with none common to all, marks the base poisoned. While it is
-poisoned the steward enqueues only a named fix (label `shipyard:unblock`, or a
+requests, with none common to all, marks the base poisoned. With `"on"`,
+while it is poisoned the steward enqueues only a named fix (label `shipyard:unblock`, or a
 title or description naming the context beside a fix word) and reports every
 other approved green head as `held_base_poisoned:<context>`. `auto_jump` enqueues
 that fix at the front of the queue. The hold lifts when a merge group passes the
