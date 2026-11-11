@@ -1,0 +1,10 @@
+merge-tree script-state: script-test-inputs-drift (no build-free variant; a build configured outside the merge-tree root cannot be checked here; skipped)
+merge-tree script-state: changed-surface-script-families-drift
+changed-surface script families (static): OK, 0 affected script(s) predicted against ebded6b0a98e7353a13c4e74d1e9bc138dd6b342
+merge-tree script-state: agent-capability-manifest
+agent-capabilities: INVALID: public header fingerprint changed: pulp/host/signal_graph_runtime.hpp; expected sha256:f019944597428bafd78e528df1de843977e8d2c120e52a3a90f61f308eef7c34, got sha256:2b14aa19fc2f6038a53eb8c3e75536327b76b6a2ba874f51ba6aedffacadfd6d
+merge-tree script-state: unregistered-tests
+test-registration: 541 invoked, 801 not invoked (801 baselined)
+merge-tree script-state: vellum-inheritance-ledger
+vellum-inheritance-ledger: OK
+merge-tree script-state: your branch is stale against main; merge origin/main and regenerate
