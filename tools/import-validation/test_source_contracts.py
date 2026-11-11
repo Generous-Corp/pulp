@@ -346,6 +346,31 @@ class SourceContractsTest(unittest.TestCase):
             ],
         )
 
+    def test_recheck_requires_a_verification_note_naming_the_date(self) -> None:
+        today = dt.date(2026, 11, 12)
+        base = {"recheck_interval_days": 90, "last_verified": "2026-11-11"}
+        cases = {
+            "no-note": {},
+            "empty-note": {"verification_note": "  "},
+            "other-date": {"verification_note": "2026-11-09: parse_x (3 cases) passed offline"},
+            "bare-date": {"verification_note": "2026-11-11"},
+            "evidenced": {"verification_note": "2026-11-11: parse_x (3 cases) passed offline"},
+        }
+        findings: list = []
+        for name, extra in cases.items():
+            checker._check_cadence(findings, {"source": name, **base, **extra}, today)
+        # Before the rule's start date a note is not required: older rechecks stay as they were.
+        checker._check_cadence(findings, {"source": "pre-rule", "recheck_interval_days": 90, "last_verified": "2026-11-01"}, today)
+        self.assertEqual(
+            [(finding.source, finding.code) for finding in findings],
+            [
+                ("no-note", "unevidenced-verification"),
+                ("empty-note", "unevidenced-verification"),
+                ("other-date", "unevidenced-verification"),
+                ("bare-date", "unevidenced-verification"),
+            ],
+        )
+
     def test_report_rendering_escapes_markdown_and_handles_empty(self) -> None:
         finding = checker.Finding(
             "warning",

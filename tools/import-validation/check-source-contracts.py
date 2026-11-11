@@ -448,6 +448,15 @@ def _check_surface_refs(findings: list[Finding], entry: dict[str, Any]) -> None:
             _add(findings, "invalid-surface-ref", source, f"unknown surface ref owner: {ref!r}")
 
 
+# Rechecks from this date on must record their evidence in verification_note.
+EVIDENCE_REQUIRED_FROM = _dt.date(2026, 11, 10)
+
+
+def _note_evidences(entry: dict[str, Any], last_verified: str) -> bool:
+    note = entry.get("verification_note")
+    return isinstance(note, str) and last_verified in note and len(note.strip()) > len(last_verified) + 10
+
+
 def _check_cadence(findings: list[Finding], entry: dict[str, Any], today: _dt.date) -> None:
     source = _source(entry)
     last_verified = entry.get("last_verified")
@@ -466,6 +475,17 @@ def _check_cadence(findings: list[Finding], entry: dict[str, Any], today: _dt.da
         verified_date = _dt.date.fromisoformat(last_verified)
     except ValueError:
         _add(findings, "invalid-last-verified", source, f"invalid ISO date: {last_verified!r}")
+        return
+    if verified_date >= EVIDENCE_REQUIRED_FROM and not _note_evidences(entry, last_verified):
+        # A recheck moves last_verified only together with its evidence: an entry verified on
+        # or after the rule's start must carry a verification_note naming that same date, or
+        # it is still unverified (and so still stale), whatever its date claims.
+        _add(
+            findings,
+            "unevidenced-verification",
+            source,
+            f"last_verified {last_verified} has no verification_note naming that date",
+        )
         return
     due = verified_date + _dt.timedelta(days=days)
     if due < today:
