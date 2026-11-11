@@ -793,6 +793,19 @@ the end is what the adapter emits as `PARAM_VALUE` out-events. If you
 optimise this into a persisted snapshot you will drop plugin-side
 param edits that happen at block boundaries.
 
+### The per-block sync is counted, and a quiet block must count nothing
+
+The snapshot refresh and the post-process diff run only when the store
+generation moved, so a block with no write costs nothing per parameter and a
+block after a write costs one pass. `adapter_boundary.hpp` counts that work
+(`param_sync_counts()`: values read, values compared, `find_param_index`
+steps) when `PULP_RT_WORK_COUNTERS` is on, and
+`test_scale_param_sync_ops.cpp` holds it at 2,000 parameters: zero for a quiet
+block, at most one pass plus a little for an automated one. A change that
+makes every block re-scan, or scans inside a per-parameter loop, fails there
+without any timing. Counting is per binary, so the gate drives the adapter in
+process, not a loaded bundle.
+
 ### Secondary output buses must be zero-filled
 
 Multi-out instruments that don't route to bus ≥ 1 leave those output
