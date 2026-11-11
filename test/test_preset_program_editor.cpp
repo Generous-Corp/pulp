@@ -317,3 +317,47 @@ TEST_CASE("program editor with an empty map shows nothing to edit",
     editor.paint(canvas);
     REQUIRE(has_text(canvas, "(no banks)"));
 }
+
+TEST_CASE("program editor scrolls so every slot can be reached",
+          "[view][preset_browser][program][editor]") {
+    Rig rig;
+    PresetProgramEditor editor(*rig.library);
+    editor.set_bounds({0, 0, 300, 400}); // 364 px of list: about 15 of 128 rows
+    const float list_h = 400.0f - 32.0f - 4.0f;
+    REQUIRE(editor.max_scroll_offset() == 128.0f * editor.row_height() - list_h);
+
+    // Keyboard selection keeps the selected row on screen.
+    KeyEvent down;
+    down.key = KeyCode::down;
+    for (int i = 0; i < 40; ++i)
+        editor.on_key_event(down);
+    REQUIRE(editor.selected_program() == 40);
+    const float top = 40.0f * editor.row_height();
+    REQUIRE(editor.scroll_offset() <= top);
+    REQUIRE(top + editor.row_height() <= editor.scroll_offset() + list_h);
+    RecordingCanvas canvas;
+    editor.paint(canvas);
+    REQUIRE(has_text(canvas, "40"));
+    REQUIRE_FALSE(has_text(canvas, "0"));
+
+    // A click after scrolling selects the row under the pointer.
+    editor.on_mouse_event(click(60, 32 + 4 + 12));
+    REQUIRE(editor.selected_program() ==
+            static_cast<int>((12 + editor.scroll_offset()) / editor.row_height()));
+
+    // Selecting upwards scrolls back.
+    editor.select_program(0);
+    REQUIRE(editor.scroll_offset() == 0.0f);
+
+    // The wheel scrolls, clamped at both ends; the last slot is reachable.
+    MouseEvent wheel;
+    wheel.is_wheel = true;
+    wheel.scroll_delta_y = 100000.0f;
+    editor.on_mouse_event(wheel);
+    REQUIRE(editor.scroll_offset() == editor.max_scroll_offset());
+    editor.on_mouse_event(click(60, 399));
+    REQUIRE(editor.selected_program() == 127);
+    wheel.scroll_delta_y = -100000.0f;
+    editor.on_mouse_event(wheel);
+    REQUIRE(editor.scroll_offset() == 0.0f);
+}

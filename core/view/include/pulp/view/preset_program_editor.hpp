@@ -65,8 +65,10 @@ class PresetProgramEditor : public View {
     int selected_program() const {
         return selected_program_;
     }
+    /// Select a program and scroll the list so its row is visible.
     void select_program(int program) {
         selected_program_ = std::clamp(program, 0, 127);
+        scroll_to_selected();
     }
 
     void next_bank() {
@@ -148,6 +150,20 @@ class PresetProgramEditor : public View {
         return row_height_;
     }
 
+    /// How far the 128-slot list is scrolled, in pixels.
+    float scroll_offset() const {
+        return scroll_offset_;
+    }
+    /// The furthest the list can scroll: the last slot's row at the bottom.
+    float max_scroll_offset() const {
+        const float list_h = local_bounds().height - kHeaderHeight - 4;
+        return std::max(0.0f, 128.0f * row_height_ - list_h);
+    }
+    /// Scroll to an absolute offset, clamped to [0, max_scroll_offset()].
+    void set_scroll_offset(float offset) {
+        scroll_offset_ = std::clamp(offset, 0.0f, max_scroll_offset());
+    }
+
     void paint(canvas::Canvas& canvas) override {
         auto b = local_bounds();
         canvas.set_fill_color(resolve_color("preset_browser_bg", canvas::Color::hex(0x16213e)));
@@ -206,6 +222,11 @@ class PresetProgramEditor : public View {
     }
 
     void on_mouse_event(const MouseEvent& event) override {
+        if (event.is_wheel) {
+            set_scroll_offset(scroll_offset_ + event.scroll_delta_y);
+            request_repaint();
+            return;
+        }
         if (!event.is_down)
             return;
         const auto b = local_bounds();
@@ -269,6 +290,17 @@ class PresetProgramEditor : public View {
     int selected_program_ = 0;
     float row_height_ = 24.0f;
     float scroll_offset_ = 0.0f;
+
+    /// Keep the selected row inside the visible part of the list.
+    void scroll_to_selected() {
+        const float list_h = local_bounds().height - kHeaderHeight - 4;
+        const float top = static_cast<float>(selected_program_) * row_height_;
+        if (top < scroll_offset_)
+            set_scroll_offset(top);
+        else if (top + row_height_ > scroll_offset_ + list_h)
+            set_scroll_offset(top + row_height_ - list_h);
+        request_repaint();
+    }
 
     bool request_assign() {
         const auto slot = selected_slot();
