@@ -1,0 +1,16 @@
+Test project <g7-worktree>/build-g7/final-sdk-consumer
+    Start 1: graph-control-event-probe-consumer
+1/3 Test #1: graph-control-event-probe-consumer .................   Passed    0.04 sec
+    Start 2: graph-control-event-probe-planted-negative
+2/3 Test #2: graph-control-event-probe-planted-negative .........   Passed    0.01 sec
+    Start 3: graph-control-event-probe-event-planted-negative
+3/3 Test #3: graph-control-event-probe-event-planted-negative ...   Passed    0.01 sec
+
+100% tests passed, 0 tests failed out of 3
+
+Label Time Summary:
+graph       =   0.01 sec*proc (2 tests)
+mutation    =   0.01 sec*proc (2 tests)
+negative    =   0.01 sec*proc (2 tests)
+
+Total Test time (real) =   0.05 sec

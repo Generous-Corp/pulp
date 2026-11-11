@@ -130,6 +130,15 @@ What the layout does not change: a capability row still lives in a shared
 still commits the installed `counts`, so two branches adding capabilities can
 still meet there.
 
+## Probe-contract comments still change binding fingerprints
+
+Clarifying consumed-edge probe semantics in a public binding header changes its
+fingerprint even when the record layout and declarations stay unchanged. Review
+the final header bytes, run `agent_capability_manifest.py --accept-fingerprint`
+for that named include, then `--write` and `--check`. Inspect the diff to retain
+only the corresponding fingerprint and surface-header records; preserve unrelated
+records and leave capability counters at their base values.
+
 ## Why open PRs no longer conflict on these files
 
 Before 2026-11-08 nearly every capability PR went DIRTY against `main` on the

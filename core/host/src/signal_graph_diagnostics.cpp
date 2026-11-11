@@ -54,8 +54,7 @@ SignalGraph::EdgeProbeStatus SignalGraph::attach_audio_edge_probe(const PortHand
         if (edge.source_node != source.node || edge.source_port != source.index ||
             edge.dest_node != destination.node || edge.dest_port != destination.index)
             continue;
-        if (edge.feedback || edge.midi || edge.automation || edge.audio_rate_modulation ||
-            edge.sidechain)
+        if (edge.midi || edge.automation || edge.audio_rate_modulation)
             return EdgeProbeStatus::UnsupportedKind;
         for (std::uint32_t j = 0; j < plan.connections.size(); ++j) {
             const auto& resolved = plan.connections[j];
@@ -155,12 +154,6 @@ SignalGraph::EdgeProbeStatus SignalGraph::attach_control_edge_probe(const PortHa
                 resolved.source_port != source.index ||
                 resolved.automation.param_id != parameter_id)
                 continue;
-            // Dense audio-rate modulation is delivered through the borrowed
-            // per-sample lane below the sparse automation gather. There is no
-            // bounded control-edge record for that path, so fail closed rather
-            // than reporting an attached probe that can never publish.
-            if (resolved.automation.audio_rate)
-                return EdgeProbeStatus::UnsupportedExecution;
             auto probe = std::make_unique<format::GraphRuntimeControlEdgeProbe>();
             probe->source_index = resolved.source_index;
             probe->source_port = resolved.source_port;

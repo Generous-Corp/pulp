@@ -410,6 +410,22 @@ void gather_node_automation(const graph::GraphRuntimePlan& plan,
             automation.slew_last(conn_index) = value;
             return value;
         };
+        const bool observe_edge = control_probe != nullptr && control_probe->samples.attached() &&
+                                  conn.source_index == control_probe->source_index &&
+                                  node_index == control_probe->destination_index &&
+                                  conn_index == control_probe->edge_index &&
+                                  a.param_id == control_probe->parameter_id;
+        graph::GraphRuntimeProbeSample edge_sample;
+        double edge_sum_squares = 0.0;
+        const auto observe_value = [&](float value, std::uint32_t frame) noexcept {
+            if (!observe_edge)
+                return;
+            if (frame == 0)
+                edge_sample.value = value;
+            edge_sample.value_end = value;
+            edge_sample.peak = std::max(edge_sample.peak, std::abs(value));
+            edge_sum_squares += static_cast<double>(value) * value;
+        };
         float* dst = touch_dense(pi);
         dense_lo[pi] = a.bounds_lo;
         dense_hi[pi] = a.bounds_hi;
@@ -417,6 +433,7 @@ void gather_node_automation(const graph::GraphRuntimePlan& plan,
         if (ring.data == nullptr || ring.delay == 0) {
             for (std::uint32_t f = 0; f < frames; ++f) {
                 const float v = map_and_slew(src[f]);
+                observe_value(v, f);
                 if (a.mix_add) { dst[f] += v; dense_add[pi] = true; }
                 else { dst[f] = v; dense_replace[pi] = true; }
             }
@@ -429,12 +446,23 @@ void gather_node_automation(const graph::GraphRuntimePlan& plan,
             for (std::uint32_t f = 0; f < frames; ++f) {
                 ring.data[wp] = src[f];
                 const float v = map_and_slew(ring.data[rp]);
+                observe_value(v, f);
                 if (a.mix_add) { dst[f] += v; dense_add[pi] = true; }
                 else { dst[f] = v; dense_replace[pi] = true; }
                 if (++wp == ring_size) wp = 0;
                 if (++rp == ring_size) rp = 0;
             }
             *ring.write_pos = wp;
+        }
+        if (observe_edge) {
+            edge_sample.kind = graph::GraphRuntimeProbeKind::Control;
+            edge_sample.timestamp_samples = control_probe->timestamp_samples;
+            edge_sample.edge_index = conn_index;
+            edge_sample.frames = frames;
+            edge_sample.payload_id = a.param_id;
+            edge_sample.payload_count = frames;
+            edge_sample.rms = static_cast<float>(std::sqrt(edge_sum_squares / frames));
+            control_probe->samples.try_push(edge_sample);
         }
     }
     for (std::uint32_t touched = 0; touched < dense_touched_count; ++touched) {
@@ -1625,6 +1653,8 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
             return result;
         }
         if (audio_probe != nullptr && audio_probe->samples.attached() &&
+            audio_probe->edge_index < plan.connections.size() &&
+            !plan.connections[audio_probe->edge_index].feedback &&
             node_index == audio_probe->source_index &&
             audio_probe->source_port < plan.nodes[node_index].output_ports) {
             const auto slot = assignment.nodes[node_index].output_base + audio_probe->source_port;
@@ -1654,6 +1684,26 @@ GraphRuntimeExecutorResult GraphRuntimeExecutor::process_routed(
     // One shared-counter update per block rather than one per node.
     nodes_processed_.fetch_add(result.nodes_processed, std::memory_order_relaxed);
 
+    // Feedback consumers read the persistent previous-block slot. Observe it
+    // before capture overwrites it, even when the source ran earlier this block.
+    if (audio_probe != nullptr && audio_probe->samples.attached() &&
+        audio_probe->edge_index < plan.connections.size() &&
+        plan.connections[audio_probe->edge_index].feedback) {
+        const float* samples =
+            pool.slot_data(assignment.feedback_prev_slot[audio_probe->edge_index]);
+        if (samples != nullptr) {
+            probe_sample.timestamp_samples = audio_probe->timestamp_samples;
+            probe_sample.edge_index = audio_probe->edge_index;
+            probe_sample.frames = frames;
+            double sum_squares = 0.0;
+            for (std::uint32_t frame = 0; frame < frames; ++frame) {
+                probe_sample.peak = std::max(probe_sample.peak, std::abs(samples[frame]));
+                sum_squares += static_cast<double>(samples[frame]) * samples[frame];
+            }
+            probe_sample.rms = static_cast<float>(std::sqrt(sum_squares / frames));
+            have_probe_sample = true;
+        }
+    }
     capture_feedback(plan, assignment, pool, frames);
 
     if (have_probe_sample)
