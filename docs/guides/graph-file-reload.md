@@ -44,6 +44,13 @@ its admission, 30-second cadence, lease size and release policy stay unchanged.
 Watch acquisition records the long-lived CLI PID as the existing lease owner,
 so heartbeats validate that process identity until normal watch retirement.
 
+Watch shutdown and shellout cleanup are qualified on macOS. Windows remains
+unqualified: an absolute `COMSPEC` can misquote watch shellouts, and the existing
+Windows launcher cancels only the direct process, allowing descendants to survive.
+The launcher owner must repair these contracts and prove actual Windows shellout
+quoting and descendant retirement before Windows qualification; tracked in
+[the Windows watch successor](https://github.com/Generous-Corp/pulp/issues/12015).
+
 The operation `dev.pulp.graph/file.reload@1` uses the shared strict notation or
 saved-graph parser, validates every original edge, checks the catalog's state
 representation, builds an off-side candidate with named typed mutations, prepares
