@@ -12,6 +12,6 @@
     "core/state/src/preset_metadata_store.cpp",
     "core/state/src/preset_program_map.cpp"
   ],
-  "vellum_inherits": true,
-  "rationale": "Preset library and program map headers and sources added to core/state (PresetLibrary, PresetMetadataStore, ProgramMap, MidiSourceReservation). Additive; nothing existing changes behaviour."
+  "vellum_inherits": false,
+  "rationale": "Preset library and program map headers and sources added to core/state (PresetLibrary, PresetMetadataStore, ProgramMap, MidiSourceReservation). Additive; nothing existing changes behaviour. Pulp-owned after the framework transfer; Vellum does not inherit these paths."
 }
