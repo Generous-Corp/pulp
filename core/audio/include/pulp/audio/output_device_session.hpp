@@ -33,15 +33,15 @@ namespace pulp::audio {
 
 struct OutputChoice {
     bool follow_default = true;
-    std::string device_id;  ///< Used when `follow_default` is false.
+    std::string device_id; ///< Used when `follow_default` is false.
 };
 
 class OutputDeviceSession {
   public:
     enum class State {
-        closed,   ///< No choice made, or close() was called.
-        running,  ///< The chosen device is open with the callback running.
-        missing   ///< The chosen device is absent or failed to open; retried on reconcile().
+        closed,  ///< No choice made, or close() was called.
+        running, ///< The chosen device is open with the callback running.
+        missing  ///< The chosen device is absent or failed to open; retried on reconcile().
     };
 
     /// `base` supplies sample rate, buffer size and channel counts; its

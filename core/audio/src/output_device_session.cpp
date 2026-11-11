@@ -38,8 +38,8 @@ void OutputDeviceSession::release_device() {
 }
 
 std::string OutputDeviceSession::target_id(bool& present) const {
-    std::string id = choice_.follow_default ? system_.default_output_device().id
-                                            : choice_.device_id;
+    std::string id =
+        choice_.follow_default ? system_.default_output_device().id : choice_.device_id;
     present = false;
     if (id.empty())
         return id;

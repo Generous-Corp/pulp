@@ -2058,3 +2058,13 @@ Edit only that hash, then run `agent_capability_rederive.py` against the base: i
 confirms the counters stay at the base value (no manual `SURFACE_INVENTORY_VERSION`
 bump) and rewrites `agent-capability-surface.json`. Hand-bumping the version, as
 the section above describes for other headers, was not needed here.
+
+## A new host-side header with no generator-facing capability
+
+Application plumbing (for example a device session class under `pulp/audio/`)
+still trips `unclassified public header`. Add an `infrastructure` entry to
+`REVIEWED_HEADERS` in `agent_capability_registry.py` with a placeholder
+fingerprint, run `agent_capability_manifest.py --check`, copy the digest it
+prints as `got sha256:...` into the entry, then run `--write`. Stage the new
+`docs/status/agent-capability-surface/headers/...json` fragment, which `--write`
+creates untracked.

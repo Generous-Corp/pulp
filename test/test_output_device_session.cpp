@@ -71,7 +71,7 @@ class FakeDevice : public AudioDevice {
     FakeBackend& backend_;
     std::string id_;
     mutable std::mutex m_;
-    std::mutex run_;  // held for the duration of one callback block
+    std::mutex run_; // held for the duration of one callback block
     AudioCallback cb_;
     bool opened_ = false;
     bool running_ = false;
@@ -82,8 +82,8 @@ struct FakeBackend : AudioSystem {
     std::mutex m;
     std::vector<DeviceInfo> devices;
     std::string default_id;
-    std::map<std::string, FakeDevice*> live;  // handles that exist
-    std::atomic<int> started{0};              // callbacks currently live
+    std::map<std::string, FakeDevice*> live; // handles that exist
+    std::atomic<int> started{0};             // callbacks currently live
     std::atomic<int> max_started{0};
     std::atomic<int> after_stop_calls{0};
 
@@ -130,7 +130,8 @@ struct FakeBackend : AudioSystem {
     void note_started() {
         const int n = ++started;
         int prev = max_started.load();
-        while (n > prev && !max_started.compare_exchange_weak(prev, n)) {}
+        while (n > prev && !max_started.compare_exchange_weak(prev, n)) {
+        }
     }
 };
 
@@ -159,7 +160,7 @@ void FakeDevice::stop() {
             return;
         running_ = false;
     }
-    std::lock_guard<std::mutex> wait(run_);  // waits for an in-flight block
+    std::lock_guard<std::mutex> wait(run_); // waits for an in-flight block
     --backend_.started;
 }
 
@@ -167,7 +168,7 @@ void FakeDevice::yank() {
     std::lock_guard<std::mutex> lk(m_);
     opened_ = false;
     if (running_)
-        --backend_.started;  // the dead stream no longer delivers callbacks
+        --backend_.started; // the dead stream no longer delivers callbacks
     running_ = false;
 }
 
@@ -219,7 +220,7 @@ TEST_CASE("follow-default moves to the new default; a named choice stays",
     REQUIRE(follow.reconcile());
     REQUIRE(named.reconcile());
     REQUIRE(follow.open_device_id() == "B");
-    REQUIRE(named.open_device_id() == "A");  // control: a named choice does not move
+    REQUIRE(named.open_device_id() == "A"); // control: a named choice does not move
     REQUIRE(named.open_count() == 1);
     REQUIRE(follow.open_count() == 2);
 }
@@ -247,8 +248,8 @@ TEST_CASE("a named device that is unplugged is reported missing and reopens on r
     sys.remove("A");
     REQUIRE_FALSE(s.reconcile());
     REQUIRE(s.state() == OutputDeviceSession::State::missing);
-    REQUIRE(sys.started == 0);  // the old callback is gone
-    REQUIRE(s.choice().device_id == "A");  // the choice is kept
+    REQUIRE(sys.started == 0);            // the old callback is gone
+    REQUIRE(s.choice().device_id == "A"); // the choice is kept
 
     sys.add("A");
     REQUIRE(s.reconcile());
@@ -267,12 +268,12 @@ TEST_CASE("a replug the device list never showed is caught by the dead handle",
     FakeDevice* old_handle = sys.handle("A");
     REQUIRE(old_handle != nullptr);
 
-    old_handle->yank();  // same id still listed, but the handle is dead
+    old_handle->yank(); // same id still listed, but the handle is dead
     REQUIRE(s.reconcile());
     REQUIRE(s.open_count() == 2);
     REQUIRE(sys.started == 1);
     REQUIRE(sys.handle("A") != nullptr);
-    REQUIRE(sys.handle("A")->pump());  // the new handle is the live one
+    REQUIRE(sys.handle("A")->pump()); // the new handle is the live one
 }
 
 TEST_CASE("unplug mid-block: the old callback finishes, then exactly one new one runs",
@@ -326,11 +327,11 @@ TEST_CASE("unplug mid-block: the old callback finishes, then exactly one new one
     sys.add("A");
     REQUIRE(s.reconcile());
     REQUIRE(sys.started == 1);
-    REQUIRE(sys.max_started.load() == 1);  // never two live callbacks
+    REQUIRE(sys.max_started.load() == 1); // never two live callbacks
     FakeDevice* fresh = sys.handle("A");
     REQUIRE(fresh != nullptr);
     REQUIRE(fresh->pump());
-    REQUIRE(callbacks.load() == 2);  // one block on the old handle, one on the new
+    REQUIRE(callbacks.load() == 2); // one block on the old handle, one on the new
 }
 
 TEST_CASE("close releases the device and forgets the choice", "[audio][output_session]") {
@@ -342,7 +343,7 @@ TEST_CASE("close releases the device and forgets the choice", "[audio][output_se
     s.close();
     REQUIRE(s.state() == OutputDeviceSession::State::closed);
     REQUIRE(sys.started == 0);
-    REQUIRE_FALSE(s.reconcile());  // no choice: nothing to restore
+    REQUIRE_FALSE(s.reconcile()); // no choice: nothing to restore
     REQUIRE(sys.started == 0);
 }
 
@@ -367,7 +368,7 @@ TEST_CASE("a dead device that never reports stopped is still stopped and closed 
     FakeDevice* dead = sys.handle("A");
     REQUIRE(dead != nullptr);
     REQUIRE(dead->is_open());
-    REQUIRE(dead->is_running());  // the dead handle still claims to be healthy
+    REQUIRE(dead->is_running()); // the dead handle still claims to be healthy
     std::atomic<int>& stops = dead->stop_calls;
     std::atomic<int>& closes = dead->close_calls;
     // The counters live in the handle; read them before the session destroys it.
@@ -377,11 +378,11 @@ TEST_CASE("a dead device that never reports stopped is still stopped and closed 
         closes_seen = closes.load();
     };
 
-    sys.remove("A");  // unplugged: gone from the list, handle still "running"
+    sys.remove("A"); // unplugged: gone from the list, handle still "running"
     REQUIRE_FALSE(s.reconcile());
-    REQUIRE(stops_seen == 1);   // the session stopped it itself
-    REQUIRE(closes_seen == 1);  // and closed it
-    REQUIRE(sys.started == 0);  // no callback left live
+    REQUIRE(stops_seen == 1);  // the session stopped it itself
+    REQUIRE(closes_seen == 1); // and closed it
+    REQUIRE(sys.started == 0); // no callback left live
 
     sys.add("A");
     REQUIRE(s.reconcile());
