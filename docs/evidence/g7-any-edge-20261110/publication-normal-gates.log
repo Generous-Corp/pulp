@@ -33,10 +33,10 @@ vellum_boundary_verified=3 packages
   pulp-ui-build: deps=2 tests=1
   @pulp/react: deps=3 tests=1
 
-▸ clean-output source root: /Volumes/Workshop/Code/agent-worktrees/g7-any-edge-probes-20261110/tools/ui-build/lint/fixtures/clean
+▸ clean-output source root: <g7-worktree>/tools/ui-build/lint/fixtures/clean
 pulp-clean-output-v1: PASS (0 findings)
 
-▸ clean-output source root: /Volumes/Workshop/Code/agent-worktrees/g7-any-edge-probes-20261110/tools/ui-build/lint/fixtures/generated
+▸ clean-output source root: <g7-worktree>/tools/ui-build/lint/fixtures/generated
 pulp-clean-output-v1: PASS (0 findings)
 
 ▸ skill-sync check
@@ -150,7 +150,7 @@ header_fanout_guard: 28 tracked header(s) within their fan-out ceilings
 ▸ planning-gitlink guard (no accidental submodule pointer bump)
 
 ▸ diff-scoped clang-format check (touched lines only)
-format_changed: using /opt/homebrew/opt/llvm@21/bin/clang-format (Homebrew clang-format version 21.1.8)
+format_changed: using clang-format (Homebrew clang-format version 21.1.8)
 format_changed: base origin/main (merge-base 6c3ff80830797c201931a63b893c512686329e3e)
 format_changed: 8 changed file(s) clean on touched lines.
 
@@ -189,7 +189,7 @@ gpu-provenance-verify: PASS skipped=0 cap=128
     core/format/src/graph_runtime_executor.cpp (declared input of sample-region-compat-baseline)
     core/host/include/pulp/host/signal_graph_runtime.hpp (declared input of sample-region-compat-baseline)
     core/host/src/signal_graph_diagnostics.cpp (declared input of sample-region-compat-baseline)
-  script-test-inputs: build dir /Volumes/Workshop/Code/agent-worktrees/g7-any-edge-probes-20261110/build-g7 (most recently configured of 1 usable)
+  script-test-inputs: build dir <g7-worktree>/build-g7 (most recently configured of 1 usable)
   script-test-inputs: OK, 589 declared tests in sync for this change (diff-scoped against origin/main; 591 interpreter-driven entries)
   script-test-inputs: SKIPPED the compiled entries: this build is not the gate's (PULP_HAS_VST3=FALSE (the gate configures with external/vst3sdk checked out); PULP_HAS_AUSDK=FALSE (the gate configures with external/AudioUnitSDK checked out); jsx-runtime npm dependencies are missing from this configure; registered Node tests omit pulp-materialized-runtime-conformance, pulp-materialized-runtime-node-dependencies; file=test/ctest_script_inputs/; test=pulp-materialized-runtime-conformance,pulp-materialized-runtime-node-dependencies; evidence=CTest inventory has Node configured but these registrations are absent; cause_class=INCOMPLETE_CONFIGURE; fix=`npm ci --prefix tools/import-design/jsx-runtime && pulp build`; safe_to_auto_apply=no; verify=`ctest --test-dir <build-dir> -N -R 'pulp-materialized-runtime-(conformance|node-dependencies)'` must list both tests), and the list holds the gate's. They are checked on a gate-profile build.
 

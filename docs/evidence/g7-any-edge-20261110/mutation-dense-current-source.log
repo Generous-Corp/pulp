@@ -6,5 +6,5 @@ confirm-failure: broken: recompiled -- [36/42] Building CXX object core/format/C
 confirm-failure: restoring core/format/src/graph_runtime_executor.cpp
 confirm-failure: restored: recompiled -- [1/42] Building CXX object core/format/CMakeFiles/pulp-format-core.dir/src/graph_runtime_executor.cpp.o
 confirm-failure: CONFIRMED — the test passes with the fix and fails without it.
-confirm-failure: test output: /var/folders/13/h9mz2d49113d43hqz2cff2z00000gn/T//confirm-failure.SsjDAO
+confirm-failure: test output: <temp-output>//confirm-failure.SsjDAO
 confirm-failure: build dir: 40 removed artifact(s) rebuilt by --target, 77 outside it put back as they were

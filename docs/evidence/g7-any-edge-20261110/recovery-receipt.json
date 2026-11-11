@@ -44,23 +44,23 @@
   "logs": [
     {
       "path": "docs/evidence/g7-any-edge-20261110/publication-normal-gates.log",
-      "bytes": 24015,
-      "sha256": "2e917ccdc078d08a76ef0ff6d4e717c296a594e872e7784dd409ff42d75f2434"
+      "bytes": 23826,
+      "sha256": "aa9cfe45d34ee6e03532b5f3eb1cd7bdb36b66b3accb51bd194c709247c71c1d"
     },
     {
       "path": "docs/evidence/g7-any-edge-20261110/publication-repaired-gates.log",
-      "bytes": 25791,
-      "sha256": "e28003dc89ca9ffe557cbd6d7357764b3e63d2ca650d63cfababee7f762c39f8"
+      "bytes": 25549,
+      "sha256": "39ab9fc7aa49bdcf1c7c7f54a2bb05febeb4bc788653604addf4a5c9e9e6e0c6"
     },
     {
       "path": "docs/evidence/g7-any-edge-20261110/publication-shipyard-pr.log",
-      "bytes": 20995,
-      "sha256": "78ac4868104464ba30352d0488373994fcc9aff324cccae6f1dbebb2ccd8ea11"
+      "bytes": 20965,
+      "sha256": "9f86aa83256d6abcb8960c05428bb979ba25f34a636922f4738cca0addbfe038"
     },
     {
       "path": "docs/evidence/g7-any-edge-20261110/publication-stop-receipt.json",
-      "bytes": 2389,
-      "sha256": "0f9aa57c251e60d6bc94441319315fe45972e13770e8927f2715b174e1d65889"
+      "bytes": 2522,
+      "sha256": "78256f4585147f12b698f29188462c1eba9ca5ace168c00bbee3750fc94151b1"
     },
     {
       "path": "docs/evidence/g7-any-edge-20261110/recovery-fingerprint.log",
@@ -74,18 +74,18 @@
     },
     {
       "path": "docs/evidence/g7-any-edge-20261110/recovery-m5s-gates.log",
-      "bytes": 23429,
-      "sha256": "4120414688d7fcce7ddb6101f4dc0808ca13a2d6d42ac838c61ab1024dca126f"
+      "bytes": 23051,
+      "sha256": "4f3bbef046319b51922326359fc40975bc75946179eb5aa4c10709ccebed0359"
     },
     {
       "path": "docs/evidence/g7-any-edge-20261110/recovery-m5s-configure.log",
-      "bytes": 875,
-      "sha256": "76adcabaf42dccb2c59373fb671094fc9793c15a82fd77cdf3d836c132671cf1"
+      "bytes": 701,
+      "sha256": "2dbaa4af0217bd8ad4ef268e44f114c6e9cf7645fc6c97ef4182ded78926688e"
     },
     {
       "path": "docs/evidence/g7-any-edge-20261110/recovery-consumer-tests.log",
-      "bytes": 760,
-      "sha256": "1a37898d7c9ec9b205ac062f244c1e363716812418adc30f6ec1c087bc5c2d54"
+      "bytes": 707,
+      "sha256": "cd350a961cb114b2a906bcbca7075d725e022d2ba5eafab1da2f0fcd5574ce3b"
     },
     {
       "path": "docs/evidence/g7-any-edge-20261110/recovery-control-tests.log",

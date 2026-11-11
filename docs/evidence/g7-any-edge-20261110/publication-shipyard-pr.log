@@ -49,7 +49,7 @@ screenshot-sync: no .pulp/screenshots.toml — repo not opted in; skipping.
 compat-sync: no mapped paths touched — nothing to verify.
 config-doc: no mapped config paths touched — nothing to verify.
 compat_aggregate: compat.json is byte-identical to the compat/ parts.
-format_changed: using /opt/homebrew/opt/llvm@21/bin/clang-format (Homebrew clang-format version 21.1.8)
+format_changed: using clang-format (Homebrew clang-format version 21.1.8)
 format_changed: base origin/main (merge-base 6c3ff80830797c201931a63b893c512686329e3e)
 format_changed: 8 changed file(s) clean on touched lines.
 node_abi_gate: Processor, PluginSlot, and GpuAudioNode virtual order is additive-only; the editor-host interfaces are unchanged

@@ -19,32 +19,32 @@
   },
   "artifacts": [
     {
-      "path": "/Volumes/Workshop/Code/agent-worktrees/g7-any-edge-probes-20261110/build-g7/test/pulp-test-graph-control-event-probe",
+      "path": "<g7-worktree>/build-g7/test/pulp-test-graph-control-event-probe",
       "size": 7399264,
       "sha256": "2c7fff3626ea1100db26ab5644ec72c8ea0469bc4b2436552609f01510cac8f2"
     },
     {
-      "path": "/Volumes/Workshop/Code/agent-worktrees/g7-any-edge-probes-20261110/build-g7/test/pulp-test-signal-graph-executor-parity",
+      "path": "<g7-worktree>/build-g7/test/pulp-test-signal-graph-executor-parity",
       "size": 7947976,
       "sha256": "3f89b369bf8ef693953756681a95a960cdf75e3e13d69dfb8a4563649bbbe9fd"
     },
     {
-      "path": "/Volumes/Workshop/Code/agent-worktrees/g7-any-edge-probes-20261110/build-g7/final-sdk-consumer/pulp-graph-control-event-probe",
+      "path": "<g7-worktree>/build-g7/final-sdk-consumer/pulp-graph-control-event-probe",
       "size": 219040,
       "sha256": "b31515dddcc6a8d2bc8cc81e226b62603a9dee5caeb19c2d36b3d9c19f8f1795"
     },
     {
-      "path": "/Volumes/Workshop/Code/agent-worktrees/g7-any-edge-probes-20261110/build-g7/sdk-2e299b27/lib/libpulp-format-core.a",
+      "path": "<g7-worktree>/build-g7/sdk-2e299b27/lib/libpulp-format-core.a",
       "size": 1520200,
       "sha256": "c587468f1f54fa1b5b8c3a34c53da0f4bee6f61e0966394dd94c8dcfd3f1dceb"
     },
     {
-      "path": "/Volumes/Workshop/Code/agent-worktrees/g7-any-edge-probes-20261110/build-g7/sdk-2e299b27/lib/libpulp-graph.a",
+      "path": "<g7-worktree>/build-g7/sdk-2e299b27/lib/libpulp-graph.a",
       "size": 54664,
       "sha256": "d6ca69c8b4c84192dfebe944d35794235f817961421a30b1839cd2cf8b97f4fa"
     },
     {
-      "path": "/Volumes/Workshop/Code/agent-worktrees/g7-any-edge-probes-20261110/build-g7/full-build.log",
+      "path": "<g7-worktree>/build-g7/full-build.log",
       "size": 1541339,
       "sha256": "8130e32909ecf1e3b1f0c315e4de57699de8449ea9aff5b1427807e456c52d53"
     }
@@ -94,6 +94,6 @@
     "source_head": "2e299b27b3b854ef5d4f8228fb32668e7e2ba6e8",
     "result": "patch is correct; no accepted/actionable findings",
     "counted_approval": false,
-    "command": "/Users/danielraffel/.codex/skills/autoreview/scripts/autoreview --mode branch --base 6c3ff80830797c201931a63b893c512686329e3e --codex-bin /Volumes/Workshop/Code/agent-worktrees/g7-any-edge-probes-20261110/build-g7/review-codex --prompt-file build-g7/review-context.md --output build-g7/final-autoreview.md --json-output build-g7/final-autoreview.json"
+    "command": "autoreview --mode branch --base 6c3ff80830797c201931a63b893c512686329e3e --codex-bin <g7-worktree>/build-g7/review-codex --prompt-file build-g7/review-context.md --output build-g7/final-autoreview.md --json-output build-g7/final-autoreview.json"
   }
 }

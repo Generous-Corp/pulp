@@ -33,10 +33,10 @@ vellum_boundary_verified=3 packages
   pulp-ui-build: deps=2 tests=1
   @pulp/react: deps=3 tests=1
 
-▸ clean-output source root: /Volumes/Atelier/Code/agent-worktrees/g7-any-edge-configure-recovery-20261110/tools/ui-build/lint/fixtures/clean
+▸ clean-output source root: <recovery-worktree>/tools/ui-build/lint/fixtures/clean
 pulp-clean-output-v1: PASS (0 findings)
 
-▸ clean-output source root: /Volumes/Atelier/Code/agent-worktrees/g7-any-edge-configure-recovery-20261110/tools/ui-build/lint/fixtures/generated
+▸ clean-output source root: <recovery-worktree>/tools/ui-build/lint/fixtures/generated
 pulp-clean-output-v1: PASS (0 findings)
 
 ▸ skill-sync check
@@ -142,7 +142,7 @@ header_fanout_guard: 28 tracked header(s) within their fan-out ceilings
 ▸ planning-gitlink guard (no accidental submodule pointer bump)
 
 ▸ diff-scoped clang-format check (touched lines only)
-format_changed: using /opt/homebrew/opt/llvm@21/bin/clang-format (Homebrew clang-format version 21.1.8)
+format_changed: using clang-format (Homebrew clang-format version 21.1.8)
 format_changed: base origin/main (merge-base 6c3ff80830797c201931a63b893c512686329e3e)
 format_changed: 8 changed file(s) clean on touched lines.
 
@@ -184,13 +184,13 @@ gpu-provenance-verify: PASS skipped=0 cap=128
   generated manifests: the diff can drift tools/ci/source_selftests.json and the changed-surface families (1 path(s)):
     .agents/skills/agent-capabilities/SKILL.md
   changed-surface script families (static): OK, 0 affected script(s) predicted against origin/main
-  script-test-inputs: build dir /Volumes/Atelier/Code/agent-worktrees/g7-any-edge-configure-recovery-20261110/build-gate (from PULP_GATES_BUILD_DIR)
+  script-test-inputs: build dir <recovery-worktree>/build-gate (from PULP_GATES_BUILD_DIR)
   script-test-inputs: note: 1 entry drifted from scripts this change does not touch (diff-scoped against origin/main); not blocking. Refresh when convenient with
-    python3 tools/scripts/script_test_inputs.py --build-dir /Volumes/Atelier/Code/agent-worktrees/g7-any-edge-configure-recovery-20261110/build-gate --write
-    file=test/ctest_script_inputs; test=Pulp UI Script Fixture; cause_class=ADVISORY_DRIFT; evidence=stale compiled entry: Pulp UI Script Fixture; fix=`python3 tools/scripts/script_test_inputs.py --build-dir /Volumes/Atelier/Code/agent-worktrees/g7-any-edge-configure-recovery-20261110/build-gate --write`; safe_to_auto_apply=no; verify=`python3 tools/scripts/script_test_inputs.py --check`
+    python3 tools/scripts/script_test_inputs.py --build-dir <recovery-worktree>/build-gate --write
+    file=test/ctest_script_inputs; test=Pulp UI Script Fixture; cause_class=ADVISORY_DRIFT; evidence=stale compiled entry: Pulp UI Script Fixture; fix=`python3 tools/scripts/script_test_inputs.py --build-dir <recovery-worktree>/build-gate --write`; safe_to_auto_apply=no; verify=`python3 tools/scripts/script_test_inputs.py --check`
   script-test-inputs: OK, 622 declared tests in sync for this change (diff-scoped against origin/main; 619 interpreter-driven entries)
   source-selftests: ok (190 entries, both lanes wired)
-  changed-surface script families: OK, 217 generated families checked against /Volumes/Atelier/Code/agent-worktrees/g7-any-edge-configure-recovery-20261110/build-gate
+  changed-surface script families: OK, 217 generated families checked against <recovery-worktree>/build-gate
 
 ▸ setup.sh source-cache tests
   setup.sh source-cache tests: ok
