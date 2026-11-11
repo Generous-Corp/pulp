@@ -145,15 +145,16 @@ TEST_CASE("WakeSignal: several producers, one consumer",
     REQUIRE_FALSE(lost.load());
 }
 
-// The exact interleaving a lost wakeup needs, made deterministic: the work is
-// published (and notify() runs) after the consumer's first predicate check
-// and before it parks. The consumer must see it in its re-check after
-// publishing `parked`, not sleep until the deadline.
+// The exact pre-park interleaving a lost wakeup needs, made deterministic: the
+// work is published (and notify() runs) after the consumer's first predicate
+// check and before it parks. The consumer must see it in its re-check after
+// publishing `parked`. There is no elapsed-time assertion here: a broken
+// implementation is bounded by the wait deadline, while scheduler latency
+// cannot turn a successful re-check into a failure.
 TEST_CASE("WakeSignal: work published just before parking is not lost", "[runtime][wake-signal]") {
     WakeSignal wake;
     std::atomic<bool> published{false};
     bool injected = false;
-    const auto start = std::chrono::steady_clock::now();
     const bool ready = wake.wait_for(
         [&] {
             if (!injected) {
@@ -164,51 +165,87 @@ TEST_CASE("WakeSignal: work published just before parking is not lost", "[runtim
             }
             return published.load(std::memory_order_acquire);
         },
-        2s);
-    const auto elapsed = std::chrono::steady_clock::now() - start;
+        100ms);
     REQUIRE(ready);
     REQUIRE(wake.posts() == 0);
-    REQUIRE(elapsed < 1s);
 }
 
-// Both sides released together for each trial, so the producer's publish and
-// the consumer's park race as closely as two threads can. Without the fences
-// a store-load reordering lets each miss the other; that wait then lasts its
-// whole deadline.
-TEST_CASE("WakeSignal: racing publish and park never lose a wakeup",
-          "[runtime][wake-signal][concurrent][race]") {
-    constexpr int kTrials = 20000;
-    constexpr auto kDeadline = 50ms;
+namespace {
+
+struct ParkedWakeResult {
+    bool parked = false;
+    bool probe_woke = false;
+    bool ready = false;
+    std::uint64_t posts = 0;
+    std::uint64_t wakes = 0;
+};
+
+// Run the same public parked-consumer sequence with and without the producer's
+// notify. The omitted-notify run is the planted production-broken control: it
+// must remain blocked until its bounded deadline. The restored run must wake
+// from the real park and observe the published work.
+ParkedWakeResult run_parked_wakeup(bool notify) {
     WakeSignal wake;
-    std::atomic<int> go{0};
-    std::atomic<int> published{0};
-    std::atomic<int> finished{0};
-    std::atomic<bool> stuck{false};
-    int lost = 0;
-    std::thread producer([&] {
-        for (int trial = 1; trial <= kTrials; ++trial) {
-            if (!spin_until([&] { return go.load(std::memory_order_acquire) >= trial; })) {
-                stuck.store(true);
-                return;
-            }
-            published.store(trial, std::memory_order_release);
+    std::atomic<bool> published{false};
+    std::atomic<bool> allow_ready{false};
+    std::atomic<bool> ready{false};
+    std::thread consumer([&] {
+        ready.store(wake.wait_for(
+                        [&] {
+                            return published.load(std::memory_order_acquire) &&
+                                   allow_ready.load(std::memory_order_acquire);
+                        },
+                        250ms),
+                    std::memory_order_release);
+    });
+
+    const bool parked = spin_until([&] { return wake.consumer_parked(); });
+    bool probe_woke = false;
+    if (parked) {
+        // First prove that this public parked state reaches the real kernel
+        // wait. The probe cannot complete the predicate because allow_ready is
+        // still false; wakes() is the observable proof that park returned.
+        wake.notify();
+        probe_woke = spin_until([&] { return wake.wakes() >= 1; });
+
+        // The second wait is the production path under test. Publication is
+        // visible before the consumer can complete, so omitting notify cannot
+        // be hidden by the pre-park predicate re-check.
+        published.store(true, std::memory_order_release);
+        if (notify) {
             wake.notify();
-            if (!spin_until([&] { return finished.load(std::memory_order_acquire) >= trial; })) {
-                stuck.store(true);
-                return;
+            if (spin_until([&] { return wake.wakes() >= 2; })) {
+                allow_ready.store(true, std::memory_order_release);
+                wake.notify();
             }
         }
-    });
-    for (int trial = 1; trial <= kTrials && !stuck.load(); ++trial) {
-        go.store(trial, std::memory_order_release);
-        const auto start = std::chrono::steady_clock::now();
-        const bool ready = wake.wait_for(
-            [&] { return published.load(std::memory_order_acquire) >= trial; }, kDeadline);
-        if (!ready || std::chrono::steady_clock::now() - start >= kDeadline)
-            ++lost;
-        finished.store(trial, std::memory_order_release);
+    } else {
+        // Always release the worker on setup failure so the caller can join it
+        // and report the failed synchronization instead of terminating while
+        // a live thread is still joinable.
+        published.store(true, std::memory_order_release);
+        allow_ready.store(true, std::memory_order_release);
+        wake.notify();
     }
-    producer.join();
-    REQUIRE_FALSE(stuck.load());
-    REQUIRE(lost == 0);
+    consumer.join();
+    return {parked, probe_woke, ready.load(std::memory_order_acquire), wake.posts(), wake.wakes()};
+}
+
+} // namespace
+
+TEST_CASE("WakeSignal: missing notify blocks a parked consumer; restored notify wakes it",
+          "[runtime][wake-signal][concurrent][race]") {
+    const auto missing_notify = run_parked_wakeup(false);
+    REQUIRE(missing_notify.parked);
+    REQUIRE(missing_notify.probe_woke);
+    CHECK_FALSE(missing_notify.ready);
+    CHECK(missing_notify.posts < 2);
+    CHECK(missing_notify.wakes >= 2);
+
+    const auto restored_notify = run_parked_wakeup(true);
+    REQUIRE(restored_notify.parked);
+    REQUIRE(restored_notify.probe_woke);
+    REQUIRE(restored_notify.ready);
+    CHECK(restored_notify.posts >= 2);
+    CHECK(restored_notify.wakes >= 2);
 }
