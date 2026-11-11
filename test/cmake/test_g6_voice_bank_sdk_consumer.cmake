@@ -33,7 +33,7 @@ if(NOT _sdk_head STREQUAL _head OR _sdk_dirty)
 endif()
 
 foreach(_file CMakeLists.txt main.cpp fixture.hpp README.md a1_reference_vectors.json
-        a1_reference_vectors.hpp generate_a1_vectors.py)
+        a1_reference_vectors.hpp generate_a1_vectors.py verify_a1_reference.py)
     configure_file("${PULP_SOURCE_DIR}/examples/g6-voice-bank-consumer/${_file}"
         "${_source}/${_file}" COPYONLY)
 endforeach()
@@ -47,7 +47,8 @@ foreach(_relative
         examples/g6-voice-bank-consumer/a1_reference_vectors.json
         examples/g6-voice-bank-consumer/a1_reference_vectors.hpp
         examples/g6-voice-bank-consumer/generate_a1_vectors.py
-        examples/g6-voice-bank-consumer/README.md)
+        examples/g6-voice-bank-consumer/README.md
+        examples/g6-voice-bank-consumer/verify_a1_reference.py)
     file(SHA256 "${PULP_SOURCE_DIR}/${_relative}" _expected)
     if(_relative MATCHES "^examples/g6-voice-bank-consumer/")
         get_filename_component(_name "${_relative}" NAME)
@@ -62,6 +63,7 @@ foreach(_relative
     endif()
 endforeach()
 run_step(a1-vectors-check python3 "${_source}/generate_a1_vectors.py" --check)
+run_step(a1-reference python3 "${_source}/verify_a1_reference.py")
 
 set(_config Release)
 if(PULP_PARENT_BUILD_TYPE)
