@@ -179,6 +179,8 @@ void projection_queue_lifecycle_controls() {
         check(lane.begin_sample(0) == GraphEventResult::Accepted, "queue-lane-late-sample");
         check(lane.emit_at(1, 1, 99, 1) == GraphEventResult::Late, "queue-lane-late-negative");
         check(lane.begin_consumer() == GraphEventResult::Accepted, "queue-lane-late-consumer");
+        for (const auto& event : lane.received())
+            events.push_back(event);
         check(lane.end_sample() == GraphEventResult::Accepted, "queue-lane-late-end-sample");
         check(lane.end_block() == GraphEventResult::Accepted, "queue-lane-late-end-block");
         check(lane.reset(2) == GraphEventResult::Accepted, "queue-lane-reset-next");
