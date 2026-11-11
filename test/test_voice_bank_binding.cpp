@@ -512,13 +512,12 @@ TEST_CASE("G6 capacity preview respects retrigger and equal-sample event order",
     for (const auto control : {120, 123}) {
         auto channel_mode = filled();
         REQUIRE(channel_mode->begin_block(128, 1) == HostEventResult::Accepted);
+        REQUIRE(channel_mode->publish(event(channel_mode->epoch(), 128, 1,
+                                            midi::MidiEvent::cc(control == 120 ? 1 : 0, control,
+                                                                0))) == HostEventResult::Accepted);
         REQUIRE(channel_mode->publish(
-                    event(channel_mode->epoch(), 128, 1,
-                          midi::MidiEvent::cc(control == 120 ? 1 : 0, control, 0))) ==
+                    event(channel_mode->epoch(), 128, 2, midi::MidiEvent::note_on(2, 0, 127))) ==
                 HostEventResult::Accepted);
-        REQUIRE(channel_mode->publish(
-                    event(channel_mode->epoch(), 128, 2,
-                          midi::MidiEvent::note_on(2, 0, 127))) == HostEventResult::Accepted);
         audio::Buffer<float> mode_audio(2, 1);
         auto mode_view = mode_audio.view();
         CHECK(channel_mode->render(mode_view, 128, 1) == VoiceBankBindingCode::Ok);
