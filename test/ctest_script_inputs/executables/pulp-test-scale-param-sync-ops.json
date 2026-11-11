@@ -1,0 +1,17 @@
+{
+ "name": "pulp-test-scale-param-sync-ops",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [],
+  "spawning_sources": [
+   "test/scale_probe_hosting.hpp",
+   "test/support/au_component_registration.hpp"
+  ],
+  "spawns": "undeclared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

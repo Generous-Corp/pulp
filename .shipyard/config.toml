@@ -699,7 +699,7 @@ enabled = true
 # The GitHub checks that must be green before `main` accepts a merge. This
 # mirrors the LIVE branch-protection ruleset, NOT the full ship platform set:
 # the macOS build+test leg, the version/skill-sync gate, the WebCLAP
-# build-and-prove job, the two Vellum freeze gates and `drift-fast` are
+# build-and-prove job, the two Vellum freeze gates, `drift-fast` and `workflow-lint` are
 # blocking. Linux and Windows validate as advisory GitHub-hosted lanes (see [project]
 # platforms) and deliberately do NOT gate merge — making them blocking would
 # crater throughput without adding signal. `drift-fast` is the exception to
@@ -707,7 +707,7 @@ enabled = true
 # tree-reading drift checks, so it reports in minutes and cannot be starved by
 # the shared Macs.
 #
-# This is the FULL contract, all six contexts: `shipyard governance apply`
+# This is the FULL contract, all seven contexts: `shipyard governance apply`
 # pushes exactly this list to branch protection, so a partial list would drop
 # required checks. It must equal the contexts in
 # .github/rulesets/main-protection.json; `base-poison-detector-selftest`
@@ -727,13 +727,14 @@ required_status_checks = [
     "Vellum freeze",
     "Vellum trusted freeze",
     "drift-fast",
+    "workflow-lint",
 ]
 
 # Every workflow that PRODUCES a required status context, so Shipyard's
 # landability preflight can answer "will this gate be requested, and can it be
-# scheduled" for all six rather than for one.
+# scheduled" for all seven rather than for one.
 #
-# Branch protection on `main` requires six contexts. Reading only `build.yml`
+# Branch protection on `main` requires seven contexts. Reading only `build.yml`
 # — the previous default — left four of them `no_producer`: not checked, and
 # reported as a warning that reads identically to a clean result. The list is
 # the map from context to file:
@@ -744,11 +745,12 @@ required_status_checks = [
 #   Vellum freeze                          vellum-freeze-check.yml
 #   Vellum trusted freeze                  vellum-trusted-gate.yml
 #   drift-fast                             drift-fast.yml
+#   workflow-lint                          workflow-lint.yml
 #
-# None of the six is path-filtered under `pull_request`
+# None of the seven is path-filtered under `pull_request`
 # (`wclap-cloudflare.yml`'s `paths:` sits under `push`, deliberately: a
 # path-filtered REQUIRED check stays Pending forever and blocks the PR), so all
-# six fire on every pull request to `main`. `shipyard landability` re-derives
+# seven fire on every pull request to `main`. `shipyard landability` re-derives
 # that on each run rather than trusting this comment.
 [landability]
 workflows = [
@@ -758,6 +760,7 @@ workflows = [
     ".github/workflows/vellum-freeze-check.yml",
     ".github/workflows/vellum-trusted-gate.yml",
     ".github/workflows/drift-fast.yml",
+    ".github/workflows/workflow-lint.yml",
 ]
 
 # Per-branch protection knobs. `require_strict_status = true` means a PR must

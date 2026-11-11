@@ -2074,3 +2074,12 @@ the section above describes for other headers, was not needed here.
 notation and diagnostics, not a new DSP capability inventory. Keep it in
 `REVIEWED_HOST_HEADERS` and refresh its registry fingerprint after header edits.
 The bounded notation profile does not qualify every node or complete live reload.
+
+## Isolated host headers require the same refresh
+
+Changes to the isolated CLAP host headers, including
+`isolated_plugin_slot.hpp`, `signal_graph_execution_snapshot.hpp`, and
+`signal_graph_runtime.hpp`, update their surface fragments and fingerprints.
+Run rederive, fingerprint acceptance, manifest write, and installed-consumer
+checks together; do not hand-edit generated fragments or treat a passing worker
+test as sufficient provenance evidence.
