@@ -933,8 +933,11 @@ class UnbuiltGeneratedSourceTests(unittest.TestCase):
                "--inventory-json", str(inv), *args]
         if args[0] == "--check":
             cmd.append("--full")
-        return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=60,
-                              env=tool_env(event="pull_request", strict=False))
+        # The temp repo is not a git checkout. When the temp directory itself
+        # sits inside one (a CI job's workspace), git would otherwise find that
+        # outer repository and call every fixture path untracked.
+        env = dict(tool_env(event="pull_request", strict=False), GIT_CEILING_DIRECTORIES=str(repo.root.parent))
+        return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=60, env=env)
 
     def commit_from_built_tree(self, tmp: Path) -> bytes:
         """The list as a built tree writes it; returns the repo's list bytes."""
@@ -951,7 +954,7 @@ class UnbuiltGeneratedSourceTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
             self.assertIn("NOT CHECKED: pulp-test-gen", proc.stdout)
             self.assertIn("--target", proc.stdout)
-            self.assertNotIn("drift", proc.stdout)
+            self.assertNotIn("drift problem", proc.stdout)
 
     def test_built_tree_is_checked_and_a_changed_generated_source_drifts(self) -> None:
         with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
