@@ -2059,7 +2059,13 @@ confirms the counters stay at the base value (no manual `SURFACE_INVENTORY_VERSI
 bump) and rewrites `agent-capability-surface.json`. Hand-bumping the version, as
 the section above describes for other headers, was not needed here.
 
-<<<<<<< HEAD
+### Graph notation transport
+
+`pulp/host/graph_patch.hpp` is reviewed host infrastructure for catalog-derived
+notation and diagnostics, not a new DSP capability inventory. Keep it in
+`REVIEWED_HOST_HEADERS` and refresh its registry fingerprint after header edits.
+The bounded notation profile does not qualify every node or complete live reload.
+
 ## A new host-side header with no generator-facing capability
 
 Application plumbing (for example a device session class under `pulp/audio/`)
@@ -2069,11 +2075,3 @@ fingerprint, run `agent_capability_manifest.py --check`, copy the digest it
 prints as `got sha256:...` into the entry, then run `--write`. Stage the new
 `docs/status/agent-capability-surface/headers/...json` fragment, which `--write`
 creates untracked.
-=======
-### Graph notation transport
-
-`pulp/host/graph_patch.hpp` is reviewed host infrastructure for catalog-derived
-notation and diagnostics, not a new DSP capability inventory. Keep it in
-`REVIEWED_HOST_HEADERS` and refresh its registry fingerprint after header edits.
-The bounded notation profile does not qualify every node or complete live reload.
->>>>>>> origin/main
