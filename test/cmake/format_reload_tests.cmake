@@ -31,6 +31,10 @@ pulp_add_test_group(pulp-test-group-fmt-format-view
 # AudioFocusRegistry — cross-platform observer for OS audio-focus
 # signals (Android AudioManager.OnAudioFocusChangeListener,
 # AVAudioSession interruptions). Pure C++ unit tests — no platform deps.
+pulp_add_test_suite(pulp-test-preset-program-router GROUP pulp-test-group-fmt-audio
+    SOURCES test_preset_program_router.cpp harness/rt_allocation_probe.cpp
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/format/include)
+
 pulp_add_test_suite(pulp-test-audio-focus GROUP pulp-test-group-fmt-audio
     LIBRARIES pulp::audio)
 # `pulp audio render` arg grammar + the device-free block stepper (no PluginSlot).
