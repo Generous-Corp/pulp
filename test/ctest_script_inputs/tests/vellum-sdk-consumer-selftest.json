@@ -1,0 +1,11 @@
+{
+ "name": "vellum-sdk-consumer-selftest",
+ "record": {
+  "entry": "tools/ci/test_vellum_sdk_consumer.py",
+  "inputs": [
+   "tools/ci/test_vellum_sdk_consumer.py",
+   "tools/ci/vellum_sdk_consumer.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -13,6 +13,13 @@ if(Python3_EXECUTABLE)
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_editor_host_acceptance.py")
     set_tests_properties(editor-host-acceptance-selftest PROPERTIES LABELS "editor-host")
+    # The Vellum SDK consumer lane's resolver and negative control: run
+    # selection, digest and extraction refusals, the compile-command rewrite,
+    # and the control's verdicts on a stand-in SDK.
+    add_test(NAME vellum-sdk-consumer-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_vellum_sdk_consumer.py")
+    set_tests_properties(vellum-sdk-consumer-selftest PROPERTIES LABELS "editor-host")
     # The Dawn binding census (acceptance item 6a): its rules on synthetic
     # symbol tables everywhere, and on Mach-O fixtures it compiles on macOS.
     add_test(NAME dawn-binding-census-selftest
