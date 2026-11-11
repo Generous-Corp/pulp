@@ -49,10 +49,12 @@ wording:
 | PR [#11733](https://github.com/Generous-Corp/pulp/pull/11733), closed without merge, head `d90324a2749fa6c6ab6acd90943fab6330be8425` | Earlier bounded control/event probe proposal. | Its candidate code is not current `main` and must not be copied as an implementation dependency. |
 
 The source status files preserve the limits: `G-3` remains **PARTIAL/HOLD**,
-`G-5` is **PARTIAL**, `G-6` is **IN PROGRESS/HOLD**, and `G-10` remains
-**PARTIAL/HOLD**. The capability matrix still labels inspection/fingerprints
-and the unified control workflow **PARTIAL/AWKWARD**. Those labels outrank an
-attractive example or a green check.
+`G-5` is **PARTIAL**, `G-6` is **IN PROGRESS/HOLD**, `G-9` is
+**PARTIAL/HOLD** (containment is still unimplemented), `G-10` is
+**PARTIAL/HOLD**, and `G-11` is **PARTIAL/HOLD/NOT CHECKED**. The capability
+matrix still labels inspection/fingerprints and the unified control workflow
+**PARTIAL/AWKWARD**. Those labels outrank an attractive example or a green
+check.
 
 The new merges narrow, but do not remove, the inspection seam. Resolved
 identity now captures bounded prepared-plan and storage facts, while the
@@ -165,6 +167,15 @@ and equal output hashes do not explain a scheduling change.
 consumer must replay two block partitions and mutate one layer at a time. The
 corresponding layer must fail while the others remain explainable.
 
+**Traceable fixture:** the G-3 owner/status authority is
+`docs/graph-program-status/G-3.md`; the installed consumer is
+`examples/g3-resolved-identity-consumer`. Run its CTest entry
+`g3-resolved-identity-consumer` from the installed consumer build, then add the
+spectral metadata controls from `examples/spectral-frame-codec-consumer`
+(`ctest --test-dir <installed-build> -R 'g3-resolved-identity-consumer|spectral-frame-codec-consumer' --output-on-failure`).
+The experiment must write one layered receipt and mutate authored bytes,
+resolved identity, prepared generation, event stream, and output independently.
+
 ### P1: bounded cross-block event projection
 
 **Reasoned priority.** G-5 now has hardened bounded transport, but its status
@@ -183,6 +194,16 @@ a trigger, and a voice-intent record across two block boundaries. It proves
 ordering, reset, overflow, late policy, partition invariance, and a sequence
 mutation that fails the receipt. If this cannot be kept small, stop rather than
 create a second scheduler.
+
+**Traceable fixture:** the G-5 owner/status authority is
+`docs/graph-program-status/G-5.md`; the pre-runtime oracle is
+`examples/g5-event-consumer`. Run
+`python3 -m unittest discover -s examples/g5-event-consumer -p 'test_*.py' -v`
+and then `python3 examples/g5-event-consumer/check_trace.py observations.json`
+with the installed consumer's observation file. The fixture's
+`expected.json` and planted timing/tie/counter mutations define the acceptance
+boundary; a future runtime owner must add feed-forward audio, reset, refusal,
+and capacity controls before this becomes graph transport evidence.
 
 ### P2: graph-owned voice lifecycle binding
 
@@ -390,7 +411,14 @@ that reuses existing graph, MIDI, trigger, and voice primitives.
 * `core/midi/include/pulp/midi/synthesiser.hpp`
 * `core/midi/include/pulp/midi/mpe_synth_voice.hpp`
 * `core/audio/include/pulp/audio/audio_stream_handoff.hpp`
+* `core/audio/include/pulp/audio/realtime_sample_recorder.hpp`
+* `core/audio/include/pulp/audio/sample_slot_bank.hpp`
+* `core/audio/include/pulp/audio/sample_slot_materializer.hpp`
+* `core/audio/include/pulp/audio/loop_playback_cursor.hpp`
 * `core/gpu_audio/include/pulp/gpu_audio/gpu_neural_realtime_node.hpp`
+* `core/gpu_audio/include/pulp/gpu_audio/gpu_spectral_morph.hpp`
+* `core/gpu_audio/include/pulp/gpu_audio/gpu_convolver.hpp`
+* `core/gpu_audio/include/pulp/gpu_audio/gpu_convolution_reverb.hpp`
 * `docs/reference/signal-graph.md`
 * `docs/reference/signal-graph-capabilities.md`
 * `docs/reference/node-abi.md`
@@ -399,7 +427,13 @@ that reuses existing graph, MIDI, trigger, and voice primitives.
 * `docs/graph-program-status/G-7.md`
 * `docs/graph-program-status/G-10.md`
 * `docs/graph-program-status/G-11.md`
+* `docs/graph-program-status/G-9.md`
 * `docs/graph-program-status/A10-routing-hosting.md`
+* `docs/evidence/g9-production-isolation-followup-20261110.md`
+* `docs/evidence/g11-remainder-audit-20261110.md`
+* `examples/g3-resolved-identity-consumer/main.cpp`
+* `examples/g5-event-consumer/check_trace.py`
+* `examples/spectral-frame-codec-consumer/main.cpp`
 * `docs/reference/2026-11-10-post-roadmap-audio-graph-opportunities.md`
 
 ### External architecture references
