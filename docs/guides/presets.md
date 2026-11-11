@@ -114,3 +114,55 @@ for (const auto& item : library.query(query).items)
 
 `PULP_PRESET_LIBRARY_API_VERSION` identifies the surface for code that must
 compile against both older and newer SDKs.
+
+## Program numbers: Bank Select and Program Change
+
+A plug-in can let a DAW, a controller or a sequencer choose presets by MIDI
+number. This is opt-in: `PresetLibrary::enable_program_map()` gives every
+preset a slot and saves the assignments with the other edits; a library that
+never calls it writes no map.
+
+- **Numbers.** A bank is a 14-bit number (Bank Select MSB * 128 + LSB) of up to
+  128 program slots. Factory presets fill bank 0, user presets bank 1 and each
+  content pack the next free bank. A source with more than 128 presets spills
+  into a further bank.
+- **Stable.** Assignments are keyed by preset key and are made once. An update
+  that adds presets gives the newcomers free slots and moves none of the
+  others; a preset that goes missing leaves its slot empty (a Program Change to
+  it does nothing) and it answers to the same number when it returns. A slot you
+  clear stays empty. Edit the map with `assign_program`, `clear_program`,
+  `set_bank_name` and `renumber_bank`; look a number up with `preset_at()`, or a
+  preset's number with `program_of()`. `PresetQuery::bank` and
+  `PresetSort::program` list a bank in program order.
+- **Renames.** A renamed preset keeps its slot only when the library can
+  re-link it (it has an edit with a recorded content digest, see above).
+  Otherwise its old slot is empty and the renamed file gets a new one.
+
+`format::PresetProgramRouter` turns incoming MIDI into load requests without
+loading anything on the audio thread:
+
+```cpp
+// audio thread, each block
+router.process(input_midi);
+
+// message thread
+if (auto request = router.take_request())
+    if (auto preset = library.preset_at(request->position))
+        presets.load(preset->path);
+```
+
+- Bank Select (CC 0, CC 32) is latched per channel and applies to the next
+  Program Change. `BankSelectMode` chooses 14-bit, MSB-only (the bank is CC 0
+  alone) or ignored (always bank 0). `channel` is 0 for every channel or 1 to 16
+  for one.
+- A burst of Program Changes leaves only the newest request. `take_request()`
+  empties the slot, and `sequence` counts every Program Change seen.
+- Reset All Controllers (CC 121) does not clear the latched bank, as General
+  MIDI specifies; `reset()` does.
+- The router only observes: the MIDI buffer is untouched, so a processor that
+  handles Program Change itself still sees it. `claims_controller()` tells a
+  controller-mapping feature which controller numbers the router is using.
+- `process()` and `on_message()` allocate nothing and take no lock.
+
+A Program Change applied from the message thread takes effect after the block
+that carried it, so a note in the same block plays with the old preset.
