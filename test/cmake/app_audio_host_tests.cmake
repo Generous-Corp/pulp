@@ -57,6 +57,11 @@ pulp_add_test_suite(pulp-test-app-framework GROUP pulp-test-group-app-view
     LIBRARIES pulp::view)
 
 # Preset manager tests
+pulp_add_test_suite(pulp-test-example-param-ids
+    SOURCES test_example_param_ids.cpp example_param_ids/gain.cpp
+            example_param_ids/effect.cpp example_param_ids/drums.cpp
+    LIBRARIES pulp::format)
+
 pulp_add_test_suite(pulp-test-preset-manager GROUP pulp-test-group-app-state
     LIBRARIES pulp::state)
 
@@ -1116,6 +1121,77 @@ if((PULP_HAS_VST3 OR PULP_HAS_CLAP) AND NOT (PULP_IOS OR ANDROID OR EMSCRIPTEN O
             "-framework AudioToolbox" "-framework CoreFoundation")
     endif()
     catch_discover_tests(pulp-test-host-probe-bundles)
+endif()
+
+# The format adapters at product scale: the Pulp Scale Probe fixture
+# (test/fixtures/scale_probe, 2,000 parameters, six stereo outputs and a stereo
+# input) loaded as each format's real bundle through PluginSlot. The bundles
+# test checks IDs, state, the format's own bus reports, per-bus tones and a
+# zero-allocation audio callback; its [performance] case times the per-block
+# parameter sync and is registered under that label (outside the required gate).
+if((PULP_HAS_VST3 OR PULP_HAS_CLAP) AND NOT (PULP_IOS OR ANDROID OR EMSCRIPTEN OR WIN32))
+    add_executable(pulp-test-host-scale-probe-bundles
+        test_host_scale_probe_bundles.cpp test_host_scale_probe_sync_cost.cpp
+        harness/rt_allocation_probe.cpp)
+    target_link_libraries(pulp-test-host-scale-probe-bundles PRIVATE pulp::audio-analysis)
+    foreach(_scale_test pulp-test-host-scale-probe-bundles)
+        target_link_libraries(${_scale_test}
+            PRIVATE pulp::host pulp::format Catch2::Catch2WithMain)
+        target_include_directories(${_scale_test} PRIVATE ${PULP_ROOT_DIR}/test)
+        if(PULP_HAS_VST3)
+            add_dependencies(${_scale_test} PulpScaleProbe_VST3)
+            if(APPLE)
+                set(_pulp_scale_probe_vst3 "${CMAKE_BINARY_DIR}/VST3/Pulp Scale Probe.vst3")
+            else()
+                set(_pulp_scale_probe_vst3 "$<TARGET_FILE:PulpScaleProbe_VST3>")
+            endif()
+            target_compile_definitions(${_scale_test} PRIVATE
+                PULP_TEST_SCALE_PROBE_VST3="${_pulp_scale_probe_vst3}")
+        endif()
+        if(PULP_HAS_CLAP)
+            add_dependencies(${_scale_test} PulpScaleProbe_CLAP)
+            target_compile_definitions(${_scale_test} PRIVATE
+                PULP_TEST_SCALE_PROBE_CLAP="$<IF:$<BOOL:${APPLE}>,${CMAKE_BINARY_DIR}/CLAP/Pulp Scale Probe.clap,$<TARGET_FILE:PulpScaleProbe_CLAP>>")
+        endif()
+        if(APPLE AND PULP_HAS_AUSDK)
+            add_dependencies(${_scale_test} PulpScaleProbe_AU)
+            target_compile_definitions(${_scale_test} PRIVATE
+                PULP_TEST_SCALE_PROBE_AU="${CMAKE_BINARY_DIR}/AU/Pulp Scale Probe.component")
+            target_link_libraries(${_scale_test} PRIVATE
+                "-framework AudioToolbox" "-framework CoreFoundation")
+        endif()
+    endforeach()
+    # The native VST3 bus query reaches the SDK interfaces and the host
+    # application the slots initialize plug-ins with.
+    if(PULP_HAS_VST3)
+        target_link_libraries(pulp-test-host-scale-probe-bundles PRIVATE vst3-sdk)
+        target_include_directories(pulp-test-host-scale-probe-bundles
+            PRIVATE ${PULP_ROOT_DIR}/core/host/src)
+    endif()
+    # The timing case is tagged [performance]: it gets its own registration
+    # under that label, and every other case stays on the required lane.
+    catch_discover_tests(pulp-test-host-scale-probe-bundles TEST_SPEC "~[performance]")
+    catch_discover_tests(pulp-test-host-scale-probe-bundles
+        TEST_SPEC "[performance]"
+        TEST_PREFIX "performance::"
+        PROPERTIES LABELS performance)
+endif()
+
+# The same per-block parameter sync, counted instead of timed: the CLAP and
+# VST3 adapters run in this process around the scale probe processor, so the
+# counters in adapter_boundary.hpp are theirs. Required lane: counts cannot
+# flake.
+if(PULP_HAS_CLAP AND PULP_HAS_VST3 AND TARGET pulp-format-clap-core
+   AND NOT (PULP_IOS OR ANDROID OR EMSCRIPTEN OR WIN32))
+    add_executable(pulp-test-scale-param-sync-ops
+        test_scale_param_sync_ops.cpp
+        ${CMAKE_SOURCE_DIR}/core/format/src/vst3_plug_view.cpp)
+    target_link_libraries(pulp-test-scale-param-sync-ops PRIVATE
+        pulp::host pulp::format pulp::format-clap-core clap vst3-sdk Catch2::Catch2WithMain)
+    target_include_directories(pulp-test-scale-param-sync-ops PRIVATE
+        ${PULP_ROOT_DIR}/test ${PULP_ROOT_DIR}/core/host/src)
+    target_compile_definitions(pulp-test-scale-param-sync-ops PRIVATE PULP_VST3=1 PULP_VST3_GUI=1)
+    catch_discover_tests(pulp-test-scale-param-sync-ops)
 endif()
 
 # NetworkServiceDiscovery backend-dispatch tests

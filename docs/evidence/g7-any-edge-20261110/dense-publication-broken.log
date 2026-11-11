@@ -1,0 +1,23 @@
+Filters: [dense-probe]
+Randomness seeded to: 2087324975
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+pulp-test-graph-control-event-probe is a Catch2 v3.16.1 host application.
+Run with -? for options
+
+-------------------------------------------------------------------------------
+G7 dense control probe summarizes the selected slewed contribution before
+mixing
+-------------------------------------------------------------------------------
+../test/test_graph_control_event_probe.cpp:259
+...............................................................................
+
+../test/test_graph_control_event_probe.cpp:315: FAILED:
+  REQUIRE( graph.read_control_edge_probe(sample) )
+with expansion:
+  false
+
+===============================================================================
+test cases: 1 | 1 failed
+assertions: 7 | 6 passed | 1 failed
+

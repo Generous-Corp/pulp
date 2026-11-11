@@ -179,6 +179,35 @@ TEST_CASE("MpeVoiceAllocator routes events to voices by note_id", "[midi][mpe]")
     REQUIRE(releasing);
 }
 
+TEST_CASE("MpeVoiceAllocator scoped retire checks generation and balances glide",
+          "[midi][mpe][lifecycle]") {
+    MpeVoiceAllocator<TestVoice> alloc{2};
+    alloc.dispatch(note_on_event(1, 60, 100, 11));
+    alloc.dispatch(note_on_event(1, 62, 100, 12));
+    REQUIRE(alloc.last_was_glide());
+    REQUIRE(alloc.retire_slot(0, 11));
+    REQUIRE_FALSE(alloc.voice(0).active());
+    REQUIRE(alloc.voice(1).active());
+    REQUIRE(alloc.voice(1).note_id() == 12);
+
+    alloc.dispatch(note_on_event(1, 64, 100, 13));
+    REQUIRE(alloc.last_was_glide());
+    REQUIRE_FALSE(alloc.retire_slot(0, 11));
+    REQUIRE_FALSE(alloc.retire_slot(1, 13));
+    REQUIRE(alloc.voice(0).note_id() == 13);
+    REQUIRE(alloc.voice(1).note_id() == 12);
+
+    REQUIRE(alloc.retire_slot(1, 12));
+    REQUIRE(alloc.retire_slot(0, 13));
+    alloc.dispatch(note_on_event(1, 65, 100, 14));
+    REQUIRE_FALSE(alloc.last_was_glide());
+    alloc.dispatch(note_off_event(14, 1));
+    REQUIRE(alloc.voice(0).releasing());
+    REQUIRE(alloc.retire_slot(0, 14));
+    alloc.dispatch(note_on_event(1, 67, 100, 15));
+    REQUIRE_FALSE(alloc.last_was_glide());
+}
+
 TEST_CASE("MPE retrigger pipeline retires every generation without orphaning a voice",
           "[midi][mpe][lifecycle][integration]") {
     MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};

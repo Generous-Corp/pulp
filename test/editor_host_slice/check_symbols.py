@@ -9,8 +9,9 @@ Proves, from the built binaries rather than from CMake's description of them:
 * the headless executable carries no Vellum, RmlUi, Skia or Dawn symbol and
   loads no such library;
 * the Vellum UI library is built from the installed Vellum SDK alone: its link
-  map loads nothing from Pulp's tree, and it reaches the mirrored `pulp::view`
-  names only through Vellum's shared libraries;
+  map loads nothing from Pulp's tree, and it reaches the mirrored view names
+  (`pulp::view` or `vellum::view`, as the SDK spells them) only through
+  Vellum's shared libraries;
 * no Objective-C class is defined both in an executable and in a library it
   loads.
 
@@ -34,6 +35,46 @@ IN_TREE_UI = re.compile(
     r"(?:non-)?virtual thunk to )?pulp::(view|canvas|render)::")
 # Any mention at all, for the control that the pattern can match.
 MENTIONS_UI = re.compile(r"\bpulp::(view|canvas|render)::")
+# The Vellum SDK's mirrored units are spelled pulp:: (SDK 0.1.10 and older) or
+# vellum:: (later SDKs). A name in them, in one spelling or in either, has the
+# same shape as IN_TREE_UI.
+_QUALIFIED = (r"^(?:(?:vtable|typeinfo|typeinfo name|VTT|construction vtable|guard variable) for |"
+              r"(?:non-)?virtual thunk to )?")
+MIRROR_SPELLINGS = ("pulp", "vellum")
+MIRROR_UI_ANY = re.compile(_QUALIFIED + r"(?:pulp|vellum)::(view|canvas|render)::")
+
+
+def mirror_ui(spelling: str) -> re.Pattern:
+    return re.compile(_QUALIFIED + re.escape(spelling) + r"::(view|canvas|render)::")
+
+
+def mirror_spelling(prefix: Path) -> str:
+    """The spelling of the SDK's mirror, read from the headers it installs."""
+    found = [s for s in MIRROR_SPELLINGS
+             if (prefix / "mirror/include" / s / "canvas/canvas.hpp").is_file()]
+    if len(found) != 1:
+        raise ValueError(f"{prefix}: expected one mirror spelling, found {found or 'none'}")
+    return found[0]
+
+
+def vellum_ui_checks(spelling: str, undefined: list[str], exported: list[str]) -> list[tuple[bool, str]]:
+    """The Vellum-side library's symbol checks, for an SDK of `spelling`.
+
+    It must reference the mirror in the SDK's own spelling, so the control
+    cannot pass on a library that reached Pulp's view instead. With a vellum::
+    SDK any pulp:: UI reference is Pulp's own and fails. It must export no
+    mirrored UI symbol in either spelling.
+    """
+    checks = [(any(mirror_ui(spelling).search(s) for s in undefined),
+               f"vellum-ui: control - it references mirrored {spelling}::view names")]
+    if spelling != "pulp":
+        pulp_refs = [s for s in undefined if IN_TREE_UI.search(s)]
+        checks.append((not pulp_refs, "vellum-ui: references no pulp::view/canvas/render name"
+                       + (f" (first: {pulp_refs[0]})" if pulp_refs else "")))
+    leaked = [s for s in exported if MIRROR_UI_ANY.search(s)]
+    checks.append((not leaked, "vellum-ui: exports no mirrored UI symbol in either spelling"
+                   + (f" (first: {leaked[0]})" if leaked else "")))
+    return checks
 UI_STACK = re.compile(r"vellum|\bRml::|\bSk[A-Z]\w*|\bsk_|\bwgpu|\bdawn", re.IGNORECASE)
 IN_TREE_UI_OBJECTS = re.compile(
     r"/(libpulp-(view|canvas|render)[\w-]*\.a|core/(view|canvas|render)/)"
@@ -148,18 +189,22 @@ def main() -> int:
     check(any("vellum-rmlui-core" in lib for lib in rmlui_libs), "rmlui: loads VellumRmlUi::Core")
 
     # The Vellum-side library is built from the installed SDK alone.
+    try:
+        spelling = mirror_spelling(args.vellum_prefix)
+    except ValueError as error:
+        check(False, f"vellum-ui: the SDK's mirror spelling is known ({error})")
+        spelling = ""
+    else:
+        check(True, f"vellum-ui: the SDK's mirror is spelled {spelling}::")
     ui_undefined = symbols(args.vellum_ui, defined=False)
-    check(any(IN_TREE_UI.search(s) for s in ui_undefined),
-          "vellum-ui: control - it references mirrored pulp::view names")
+    ui_exported = symbols(args.vellum_ui, defined=True, exported_only=True)
+    check(any(s.startswith("slice_vellum_ui::") for s in ui_exported),
+          "vellum-ui: control - it exports its own boundary")
     # Inline mirror functions it instantiates are local (hidden) copies; what
     # must not happen is exporting one, which another image could bind to.
-    exported = [s for s in symbols(args.vellum_ui, defined=True, exported_only=True)
-                if IN_TREE_UI.search(s)]
-    check(any(s.startswith("slice_vellum_ui::") for s in
-              symbols(args.vellum_ui, defined=True, exported_only=True)),
-          "vellum-ui: control - it exports its own boundary")
-    check(not exported, "vellum-ui: exports no mirrored pulp:: UI symbol"
-          + (f" (first: {exported[0]})" if exported else ""))
+    if spelling:
+        for ok, what in vellum_ui_checks(spelling, ui_undefined, ui_exported):
+            check(ok, what)
     ui_libs = linked_libraries(args.vellum_ui)
     check(any("vellum-mirror-view-core" in lib for lib in ui_libs),
           "vellum-ui: resolves them from Vellum's view-core library")

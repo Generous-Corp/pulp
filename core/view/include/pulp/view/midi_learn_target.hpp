@@ -28,6 +28,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <string>
 #include <utility>
 
 namespace pulp::view {
@@ -36,6 +37,8 @@ class MidiLearnSession {
   public:
     /// How long a freshly bound mapping reports `just_bound`.
     static constexpr std::uint64_t kBoundConfirmMs = 2000;
+    /// How long a refused learn keeps reporting its reason.
+    static constexpr std::uint64_t kRefusalShowMs = 6000;
 
     MidiLearnSession(state::MidiLearnEngine& engine, std::function<std::uint64_t()> now_ms,
                      state::MidiLearnEditor* editor = nullptr)
@@ -60,9 +63,21 @@ class MidiLearnSession {
     /// Poll the engine. Call once per UI tick. Returns true when a learn bound
     /// on this call.
     bool tick() {
+        // A refused outcome does not name the parameter, so note it before the
+        // poll ends the listen.
+        const auto listening = engine_.learn_state();
         auto outcome = engine_.poll_learn(now());
+        if (outcome && !outcome->bound && outcome->refused_reason != nullptr) {
+            refused_param_ = listening.param;
+            refused_reason_ = outcome->refused_reason;
+            refused_at_ms_ = now();
+            has_refused_ = true;
+        }
         if (!outcome || !outcome->bound)
             return false;
+        // A successful learn supersedes any earlier refusal still on display.
+        has_refused_ = false;
+        refused_reason_.clear();
         if (editor_)
             editor_->record_learn(*outcome);
         bound_param_ = outcome->mapping.id;
@@ -87,6 +102,8 @@ class MidiLearnSession {
 
     MidiLearnParamState state_of(state::ParamID id) const {
         MidiLearnParamState s;
+        if (has_refused_ && refused_param_ == id && now() - refused_at_ms_ < kRefusalShowMs)
+            s.refused_reason = refused_reason_;
         const auto ls = engine_.learn_state();
         if (ls.phase == state::MidiLearnState::Phase::listening && ls.param == id) {
             s.phase = MidiLearnParamState::Phase::listening;
@@ -107,6 +124,10 @@ class MidiLearnSession {
     state::ParamID bound_param_ = 0;
     std::uint64_t bound_at_ms_ = 0;
     bool has_bound_ = false;
+    state::ParamID refused_param_ = 0;
+    std::string refused_reason_;
+    std::uint64_t refused_at_ms_ = 0;
+    bool has_refused_ = false;
 };
 
 } // namespace pulp::view
