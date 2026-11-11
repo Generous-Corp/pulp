@@ -7,6 +7,7 @@
    "core/host",
    "core/host/include",
    "docs/status",
+   "inspect/src",
    "test/cmake/cmake_smoke_tests.cmake",
    "test/cmake/test_pulp_add_sparkle.cmake",
    "test/cmake/test_wgpu_native_pin.cmake",

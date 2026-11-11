@@ -36,6 +36,8 @@ std::string_view node_kind_name(NodeType type) noexcept {
         return "spectral_stage";
     case NodeType::SpectralSynthesis:
         return "spectral_synthesis";
+    case NodeType::SpectralAssetMorph:
+        return "spectral_asset_morph";
     }
     return "unknown";
 }
@@ -67,6 +69,7 @@ void fill_contract(const SignalGraph& graph, const GraphNode& node, int block_si
         return;
     case NodeType::SpectralAnalysis:
     case NodeType::SpectralStage:
+    case NodeType::SpectralAssetMorph:
     case NodeType::SpectralSynthesis:
         // Prepared FFT framing; the counted transform cost depends on the
         // hop and is visible in the measured pass, not declared here.

@@ -35,16 +35,6 @@ if(NOT PULP_USE_GPU_RUNTIME OR NOT (APPLE AND NOT PULP_IOS) OR NOT PULP_SKIA_PRO
    OR NOT SKIA_DIR)
     return()
 endif()
-pulp_gpu_runtime_covers_target("${CMAKE_OSX_ARCHITECTURES}" "${CMAKE_SYSTEM_PROCESSOR}"
-    _pulp_gpu_runtime_covers_target)
-if(NOT _pulp_gpu_runtime_covers_target)
-    message(STATUS "Pulp: gpu-runtime locks Dawn for macos-arm64 only "
-        "(CMAKE_OSX_ARCHITECTURES='${CMAKE_OSX_ARCHITECTURES}', "
-        "CMAKE_SYSTEM_PROCESSOR='${CMAKE_SYSTEM_PROCESSOR}'); keeping Pulp's own device sources")
-    unset(_pulp_gpu_runtime_covers_target)
-    return()
-endif()
-unset(_pulp_gpu_runtime_covers_target)
 
 if(PULP_GPU_RUNTIME_PREFIX)
     pulp_check_gpu_runtime_record("${PULP_GPU_RUNTIME_PREFIX}" "${PULP_GPU_RUNTIME_COMMIT}")

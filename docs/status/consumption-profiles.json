@@ -559,6 +559,7 @@
       "pulp/host/timeline_offline_graph.hpp",
       "pulp/host/timeline_offline_renderer.hpp",
       "pulp/host/trigger_graph.hpp",
+      "pulp/host/voice_bank_binding.hpp",
       "pulp/host/voice_identity.hpp",
       "pulp/host/voice_template.hpp"
     ],
@@ -1256,6 +1257,7 @@
       "pulp/state/midi_mapping.hpp",
       "pulp/state/midi_parameter_map.hpp",
       "pulp/state/midi_source.hpp",
+      "pulp/state/midi_source_reservation.hpp",
       "pulp/state/modulation_lane.hpp",
       "pulp/state/param_cursor.hpp",
       "pulp/state/param_json.hpp",

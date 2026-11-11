@@ -147,6 +147,21 @@ class ReferenceGraphTests(unittest.TestCase):
         self.assertFalse(d.admitted)
         self.assertIn(".shipyard/config.toml", d.reason)
 
+    def test_workflow_lint_scope_list_is_not_a_native_referrer(self) -> None:
+        # These paths previously lived in the non-native lint workflow. Moving
+        # its filter to a data file must not turn it into a native-gate caller.
+        for native_reference in (False, True):
+            with self.subTest(native_reference=native_reference):
+                files = {
+                    "tools/scripts/lane_thing.py": "X = 1\n",
+                    "tools/ci/workflow_lint_paths.txt": "tools/scripts/lane_thing.py\n",
+                }
+                if native_reference:
+                    files[".github/workflows/build.yml"] = "run: python3 tools/scripts/lane_thing.py\n"
+                repo = self._repo(files)
+                decision = repo.decide("tools/scripts/lane_thing.py")["tools/scripts/lane_thing.py"]
+                self.assertEqual(decision.admitted, not native_reference, decision.reason)
+
     def test_gate_side_cmake_registration_keeps_native(self) -> None:
         repo = self._repo({
             "tools/scripts/gate_thing.py": "X = 1\n",

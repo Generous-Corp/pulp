@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 1.101.0
+    VERSION 1.105.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -1022,6 +1022,9 @@ endif()
 # symbol census run, or on request with the examples.
 if(TARGET pulp-native AND (PULP_BUILD_TESTS OR PULP_BUILD_EXAMPLES))
     add_subdirectory(integrations/pulp-native/examples/metal-probe)
+endif()
+if(TARGET pulp-rmlui-native AND PULP_BUILD_TESTS)
+    add_subdirectory(integrations/rmlui-native/tests)
 endif()
 
 # ── CPU-only GPU-probe contract model (desktop tooling) ───────────────────

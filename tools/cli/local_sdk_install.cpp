@@ -220,39 +220,37 @@ bool normalize_installed_archives_for_arm64(const fs::path& prefix, std::string&
         ++checked;
         const auto archs =
             capture_command_text("xcrun lipo -archs " + shell_quote(entry.path()) + " 2>/dev/null");
-        switch (local_sdk::archive_slice_action(archs)) {
-            case local_sdk::ArchiveSliceAction::Keep:
-                break;
-            case local_sdk::ArchiveSliceAction::Reject:
-                error = entry.path().filename().string() + " has architectures `" +
-                        (archs.empty() ? "unknown" : archs) + "` with no arm64 slice";
+        switch (local_sdk::archive_slice_action(entry.path().lexically_relative(prefix), archs)) {
+        case local_sdk::ArchiveSliceAction::Keep:
+            break;
+        case local_sdk::ArchiveSliceAction::Reject:
+            error = entry.path().filename().string() + " has architectures `" +
+                    (archs.empty() ? "unknown" : archs) + "` with no arm64 slice";
+            return false;
+        case local_sdk::ArchiveSliceAction::ThinToArm64: {
+            auto thin = entry.path();
+            thin += ".pulp-arm64-thin";
+            std::error_code ec;
+            fs::remove(thin, ec);
+            const auto command = "xcrun lipo " + shell_quote(entry.path()) +
+                                 " -thin arm64 -output " + shell_quote(thin);
+            if (capture_command_text(command + " && printf arm64") != "arm64" ||
+                capture_command_text("xcrun lipo -archs " + shell_quote(thin) + " 2>/dev/null") !=
+                    "arm64") {
+                fs::remove(thin, ec);
+                error = "could not thin " + entry.path().filename().string() + " to arm64";
                 return false;
-            case local_sdk::ArchiveSliceAction::ThinToArm64: {
-                auto thin = entry.path();
-                thin += ".pulp-arm64-thin";
-                std::error_code ec;
-                fs::remove(thin, ec);
-                const auto command = "xcrun lipo " + shell_quote(entry.path()) +
-                                     " -thin arm64 -output " + shell_quote(thin);
-                if (capture_command_text(command + " && printf arm64") != "arm64" ||
-                    capture_command_text("xcrun lipo -archs " + shell_quote(thin) +
-                                         " 2>/dev/null") != "arm64") {
-                    fs::remove(thin, ec);
-                    error = "could not thin " + entry.path().filename().string() +
-                            " to arm64";
-                    return false;
-                }
-                std::error_code copy_error;
-                fs::copy_file(thin, entry.path(), fs::copy_options::overwrite_existing,
-                              copy_error);
-                fs::remove(thin, ec);
-                if (copy_error) {
-                    error = "could not publish thinned " + entry.path().filename().string() +
-                            ": " + copy_error.message();
-                    return false;
-                }
-                break;
             }
+            std::error_code copy_error;
+            fs::copy_file(thin, entry.path(), fs::copy_options::overwrite_existing, copy_error);
+            fs::remove(thin, ec);
+            if (copy_error) {
+                error = "could not publish thinned " + entry.path().filename().string() + ": " +
+                        copy_error.message();
+                return false;
+            }
+            break;
+        }
         }
     }
     if (checked == 0) {

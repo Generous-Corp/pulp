@@ -164,6 +164,15 @@ headers). A legacy header whose bytes change (`wav_decoder.hpp` gaining
 kind of row; `--write` then reports it as reviewed and the baseline count
 shrinks by one.
 
+The bounded G6 `pulp/host/voice_bank_binding.hpp` and its amended
+`signal_graph_subgraph.hpp` are reviewed host infrastructure, not advertised
+generator capabilities while sustain, saved-bank activation, and paced
+realtime proof remain open. Register both in `REVIEWED_HOST_HEADERS`, classify
+both with measured fingerprints, regenerate the surface, and update the
+current checkout's consumption census after staging the new header. The
+installed consumer and production-source mutation proof exercise the public
+`Pulp::host` target.
+
 The fingerprint is over the header's bytes, so a comment-only edit to a covered
 header costs the same row and inventory bump as a signature change; when a
 contract note or a behavior fix can live in the `.cpp`, put it there. A
@@ -2039,3 +2048,13 @@ run `--write` and `--check`. Never keep the branch's history blob: it shows up
 as millions of deleted lines and replaces main's format. Worked example
 (2026-11-08, the G5 host-ingress adapter): after the merge, the diff against
 main shrank from -2,530,508 lines to the PR's own 15 files.
+
+## A new overload in `audio_file.hpp` costs a fingerprint refresh, not a bump
+
+`audio_file.hpp` is a reviewed infrastructure header. Adding a declaration to it
+(for example the atomic WAV writer's `WavReplace` overload) changes its bytes, so
+`--check` fails until the fingerprint in `agent_capability_registry.py` is updated.
+Edit only that hash, then run `agent_capability_rederive.py` against the base: it
+confirms the counters stay at the base value (no manual `SURFACE_INVENTORY_VERSION`
+bump) and rewrites `agent-capability-surface.json`. Hand-bumping the version, as
+the section above describes for other headers, was not needed here.
