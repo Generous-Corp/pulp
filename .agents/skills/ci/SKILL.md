@@ -946,6 +946,37 @@ while main is red. Every such call carries
 logs. Every other use needs Daniel's explicit OK first: rebasing or refreshing a
 queued PR, reordering or dequeuing any other PR, or making room ahead of the fix.
 
+## `workflow-lint` runs in the merge queue; its scope is a list, not a `paths:` filter
+
+`workflow-lint.yml` has no `paths:` filter on any trigger and runs on
+`merge_group`. A `paths:` filter never applies to `merge_group`, and a required
+check whose workflow is filtered out never reports, so the old shape could not
+run in the queue (two PRs that each passed lint on their own heads landed a
+combined tree that failed it on 2026-11-10) and could not be made required. The
+`scope` job matches the change against `tools/ci/workflow_lint_paths.txt`
+(compare API; unreadable diff or 300+ files runs everything) and the
+`workflow-lint` aggregate job (`if: always()`) is the context to require.
+
+- **Adding a suite input:** add its path to `tools/ci/workflow_lint_paths.txt`,
+  not to the workflow. Tests that pinned paths in the workflow text now read
+  that file. The native-build classifier treats this exact scope list as
+  inert, just like the workflow's former path filter; naming a script in a
+  lint filter does not execute it in the native gate. Keep actual native
+  workflow and action references blocking.
+- **Adding a suite job:** give it `needs: scope` plus
+  `if: needs.scope.outputs.run == 'true'`, add it to the aggregate's `needs`,
+  and pass its result as a `--job name=result` to `workflow_lint_scope.py
+  verdict`. `tools/ci/test_workflow_lint_scope.py` fails otherwise.
+- **The merge-group flake gate runs from the queue base.** build.yml extracts
+  `tools/ci`, `tools/scripts` and `.shipyard/config.toml` from
+  `merge_group.base_sha` and runs
+  `flake_exoneration.py gate` from that copy, so a queued PR cannot loosen the
+  rule that judges its own group. Anything the gate reads relative to its own
+  file must be in that pathspec: without `.shipyard/config.toml`,
+  `base_poison_detector.required_contexts()` silently falls back to `macos`
+  alone. The step text itself still comes from the group's build.yml, which
+  review has to catch.
+
 ## A cancelled `workflow-lint` job: read the step timings before raising the timeout
 
 The lint job's 10-minute `timeout-minutes` cancels the job (conclusion
@@ -6048,7 +6079,7 @@ bisectable.
   `test_release_artifact_contents.py` derives the installed target set from
   `tools/cmake/PulpInstallRules.cmake`, removes interface-only libraries, and
   requires exact equality with `release_product_matrix.json`. The
-  `workflow-lint.yml` path filter deliberately covers every `CMakeLists.txt`
+  `workflow-lint.yml` scope list (`tools/ci/workflow_lint_paths.txt`) deliberately covers every `CMakeLists.txt`
   plus `tools/cmake/**`, because target definitions also live in the repo root,
   `inspect/`, and CMake helpers—not only under `core/`. When adding an installed
   library, update the matrix in the same PR; when changing how
@@ -8433,7 +8464,7 @@ above every other test, so they run alone at the START while every slot is
 free), `browser`-locked Chrome tests, and long tests that carry a `COST` and at
 most four slots are listed there. Two checks import
 it: `test_ci_throughput_workflows.py` reads the manifests' source (runs in
-`workflow-lint`, which is NOT a required check, so a PR can merge with it red),
+`workflow-lint`, which is not yet a required check, so a PR can merge with it red),
 and `ctest-scheduling-contract` reads a configured build on the gate. Change a
 test's `PROCESSORS` / `RUN_SERIAL` / lock / `COST` by moving its name between
 classes in that module, never by editing only one check's expectations. Before
