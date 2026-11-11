@@ -1,0 +1,48 @@
+{
+  "evidence_files": {
+    "README.md": {
+      "bytes": 1969,
+      "sha256": "6eb8c859957e9023d48666c890484ef216abdcee514b78c31b7d4ad649f32013"
+    },
+    "backend-results.json": {
+      "bytes": 794,
+      "sha256": "77188615b2ef8f5bc70f348863e9eeb51223caa94b661f96f36c1850211bff83"
+    },
+    "pilot-summary.json": {
+      "bytes": 265,
+      "sha256": "7950ded85a6da25e28bf830895e88af5002838d44b3db38668bdc6a94e62481e"
+    },
+    "real-fixture-controls.json": {
+      "bytes": 2059,
+      "sha256": "ce75cd01057194849fd2cebd40604ac38b9b8c4da033145138e9f0da7ccbbeb4"
+    },
+    "source-ancestry-check.py": {
+      "bytes": 2072,
+      "sha256": "92901672f20c3ab31b7778451b4f82c7489dcb968fbf002c79a93c1b0c3112c8"
+    },
+    "source-ancestry-check.json": {
+      "bytes": 259,
+      "sha256": "62513f629851918ad4e91314cde731118ba24803bb42eaf8dbb6fabe41772ac1"
+    },
+    "verification-results.json": {
+      "bytes": 855,
+      "sha256": "0a187815d0c22a53cdaceb246cc4f35714b8cd80c9de8a08cb8e9515f51b4c2d"
+    }
+  },
+  "source_files": {
+    "test/fixtures/g5_graph_event_rt_cases.inc": {
+      "bytes": 44239,
+      "sha256": "887e633e954a84ed0289bc9f0583be46ea83943021754a5eed7c6b16374a286d"
+    },
+    "tools/graph_performance_qualification.py": {
+      "bytes": 61821,
+      "sha256": "90e9406682281bef3508f2033d81968802963cce67bf451c9a37b5aaceae1de1"
+    },
+    "tools/test_graph_performance_qualification.py": {
+      "bytes": 26071,
+      "sha256": "70c5f3ee82d3b66ffd4ddc8d25c74947f6c827848bbf1d61c42ecf027ce180b2"
+    }
+  },
+  "source_tree": "a9a0cfc1a2a02844f6bfb69be249812ee15d8e1e",
+  "tested_source_commit": "e893f20d0048dfc11536c4b688d11be97ba9e167"
+}

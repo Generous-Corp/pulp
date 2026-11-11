@@ -1,7 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
+#include <choc/text/choc_JSON.h>
 
 #include <pulp/format/graph_runtime_executor.hpp>
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/host/graph_identity.hpp>
+#include <pulp/runtime/crypto.hpp>
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 
 #include <algorithm>
@@ -13,6 +16,10 @@
 #include <unordered_map>
 
 using namespace pulp::host;
+
+static std::span<const std::byte> receipt_input(std::string_view text) {
+    return {reinterpret_cast<const std::byte*>(text.data()), text.size()};
+}
 
 static std::string stereo_payload() {
     return R"G3({"assets":{},"edges":{"[\"audio\",{\"direction\":\"out\",\"kind\":\"audio\",\"node\":\"gain_a\",\"port\":\"audio\"},{\"direction\":\"in\",\"kind\":\"audio\",\"node\":\"gain_b\",\"port\":\"audio\"},null]":{"channel_map":[["L","L"],["R","R"]],"destination":{"direction":"in","kind":"audio","node":"gain_b","port":"audio"},"feedback":false,"lane":"audio","semantic_order":null,"source":{"direction":"out","kind":"audio","node":"gain_a","port":"audio"}},"[\"audio\",{\"direction\":\"out\",\"kind\":\"audio\",\"node\":\"gain_b\",\"port\":\"audio\"},{\"direction\":\"in\",\"kind\":\"audio\",\"node\":\"output\",\"port\":\"audio\"},null]":{"channel_map":[["L","L"],["R","R"]],"destination":{"direction":"in","kind":"audio","node":"output","port":"audio"},"feedback":false,"lane":"audio","semantic_order":null,"source":{"direction":"out","kind":"audio","node":"gain_b","port":"audio"}},"[\"audio\",{\"direction\":\"out\",\"kind\":\"audio\",\"node\":\"input\",\"port\":\"audio\"},{\"direction\":\"in\",\"kind\":\"audio\",\"node\":\"gain_a\",\"port\":\"audio\"},null]":{"channel_map":[["L","L"],["R","R"]],"destination":{"direction":"in","kind":"audio","node":"gain_a","port":"audio"},"feedback":false,"lane":"audio","semantic_order":null,"source":{"direction":"out","kind":"audio","node":"input","port":"audio"}}},"interfaces":[{"channels":["L","R"],"endpoint":{"direction":"out","kind":"audio","node":"input","port":"audio"},"key":"main-in","kind":"audio","role":"input"},{"channels":["L","R"],"endpoint":{"direction":"in","kind":"audio","node":"output","port":"audio"},"key":"main-out","kind":"audio","role":"output"}],"nodes":{"gain_a":{"config":{"gain":"f32:3f800000"},"implementation":"pulp.builtin.gain.v1","initial_state":{"mode":"default","revision":"gain.v1"},"kind":"gain","kind_contract":"gain.v1","parameter_bindings":{},"policies":{},"ports":{"in":{"audio":{"channels":["L","R"],"contract":"audio-port.v1","kind":"audio"}},"out":{"audio":{"channels":["L","R"],"contract":"audio-port.v1","kind":"audio"}}}},"gain_b":{"config":{"gain":"f32:3f800000"},"implementation":"pulp.builtin.gain.v1","initial_state":{"mode":"default","revision":"gain.v1"},"kind":"gain","kind_contract":"gain.v1","parameter_bindings":{},"policies":{},"ports":{"in":{"audio":{"channels":["L","R"],"contract":"audio-port.v1","kind":"audio"}},"out":{"audio":{"channels":["L","R"],"contract":"audio-port.v1","kind":"audio"}}}},"input":{"config":{},"implementation":"pulp.builtin.audio-input.v1","initial_state":{"mode":"default","revision":"io.v1"},"kind":"audio_input","kind_contract":"io.v1","parameter_bindings":{},"policies":{},"ports":{"in":{},"out":{"audio":{"channels":["L","R"],"contract":"audio-port.v1","kind":"audio"}}}},"output":{"config":{},"implementation":"pulp.builtin.audio-output.v1","initial_state":{"mode":"default","revision":"io.v1"},"kind":"audio_output","kind_contract":"io.v1","parameter_bindings":{},"policies":{},"ports":{"in":{"audio":{"channels":["L","R"],"contract":"audio-port.v1","kind":"audio"}},"out":{}}}},"policies":{"event_order":"none","fault":"fail","feedback":"forbid","rate_conversion":"none","seed":null,"state_retention":"none"},"profile":"pulp.graph.identity.v1"})G3";
@@ -101,6 +108,147 @@ TEST_CASE("D4 export rejects a retired owner generation") {
             PreparedDescriptionRefusal::SnapshotChanged);
 }
 
+static PreparedDescriptionData unsigned_limit_capture() {
+    SignalGraph graph;
+    graph.set_limits({.max_nodes = std::numeric_limits<std::size_t>::max(),
+                      .max_connections = std::numeric_limits<std::size_t>::max(),
+                      .max_ports = std::numeric_limits<std::size_t>::max(),
+                      .max_block_size = 16384,
+                      .max_estimated_work_units = std::numeric_limits<std::size_t>::max()});
+    auto edit = graph.begin_prepared_topology_edit();
+    REQUIRE(edit);
+    const auto input = edit->add_input_node(2, "Input");
+    const auto first = edit->add_gain_node("Gain A");
+    const auto second = edit->add_gain_node("Gain B");
+    const auto output = edit->add_output_node(2, "Output");
+    AuthoredRuntimeBinding binding;
+    binding.nodes = {{input, "input"}, {first, "gain_a"}, {second, "gain_b"}, {output, "output"}};
+    for (std::uint32_t channel = 0; channel < 2; ++channel) {
+        REQUIRE(edit->connect(input, channel, first, channel));
+        REQUIRE(edit->connect(first, channel, second, channel));
+        REQUIRE(edit->connect(second, channel, output, channel));
+        const auto key = channel == 0 ? "L" : "R";
+        for (const auto node : {input, first, second})
+            binding.channels.push_back({node, "audio", true, key, channel, channel});
+        for (const auto node : {first, second, output})
+            binding.channels.push_back({node, "audio", false, key, channel, channel});
+    }
+    binding.interfaces = {{"main-in", false, input, "audio", "L", 0, 0, 0},
+                          {"main-in", false, input, "audio", "R", 1, 0, 1},
+                          {"main-out", true, output, "audio", "L", 0, 0, 0},
+                          {"main-out", true, output, "audio", "R", 1, 0, 1}};
+    REQUIRE(edit->bind_authored_identity(stereo_payload(), binding));
+    REQUIRE(edit->prepare(48000, 128) == SignalGraph::PreparedTopologyEdit::Result::Prepared);
+    REQUIRE(edit->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
+    const auto capture = edit->committed_execution_snapshot().export_prepared_description();
+    REQUIRE(capture);
+    REQUIRE(capture.value->host_max_nodes == std::numeric_limits<std::size_t>::max());
+    REQUIRE(capture.value->host_max_connections == std::numeric_limits<std::size_t>::max());
+    REQUIRE(capture.value->host_max_ports == std::numeric_limits<std::size_t>::max());
+    REQUIRE(capture.value->host_max_estimated_work_units ==
+            std::numeric_limits<std::size_t>::max());
+    REQUIRE(capture.value->effective_max_nodes <= 512);
+    return *capture.value;
+}
+
+static std::string replace_once(std::string source, std::string_view from, std::string_view to) {
+    const auto at = source.find(from);
+    REQUIRE(at != std::string::npos);
+    REQUIRE(source.find(from, at + from.size()) == std::string::npos);
+    source.replace(at, from.size(), to);
+    return source;
+}
+
+TEST_CASE("Resolved identity round trips exact unsigned limits", "[resolved-unsigned]") {
+    auto capture = unsigned_limit_capture();
+    const auto actual = capture_graph_identity_receipt(capture);
+    REQUIRE(actual);
+    REQUIRE(decode_graph_identity_receipt(receipt_input(actual.value().canonical_bytes())));
+    capture.host_max_estimated_work_units = 0;
+    const auto baseline = resolved_fingerprint(capture);
+    REQUIRE(baseline);
+    const std::array<std::pair<std::uint64_t, std::string_view>, 8> boundaries{{
+        {9007199254740991ull, "9007199254740991"},
+        {9007199254740992ull, "9007199254740992"},
+        {9007199254740993ull, "9007199254740993"},
+        {9223372036854775806ull, "9223372036854775806"},
+        {9223372036854775807ull, "9223372036854775807"},
+        {9223372036854775808ull, "9223372036854775808"},
+        {9223372036854775809ull, "9223372036854775809"},
+        {18446744073709551615ull, "18446744073709551615"},
+    }};
+    std::set<std::string> digests;
+    for (const auto& [value, decimal] : boundaries) {
+        INFO(decimal);
+        capture.host_max_estimated_work_units = value;
+        const auto receipt = capture_graph_identity_receipt(capture);
+        REQUIRE(receipt);
+        const auto& resolved = receipt.value().resolved;
+        const auto expected = replace_once(std::string(baseline.value().canonical_bytes()),
+                                           "\"max_estimated_work_units\":0",
+                                           "\"max_estimated_work_units\":" + std::string(decimal));
+        REQUIRE(resolved.canonical_bytes() == expected);
+        REQUIRE(resolved.digest() ==
+                "sha256:" + pulp::runtime::sha256_hex(std::string("pulp.graph.resolved-plan.v1") +
+                                                      std::string(1, '\0') + expected));
+        REQUIRE(digests.emplace(resolved.digest()).second);
+        const auto bytes = receipt.value().canonical_bytes();
+        const auto decoded = decode_graph_identity_receipt(receipt_input(bytes));
+        REQUIRE(decoded);
+        REQUIRE(decoded.value().resolved.canonical_bytes() == expected);
+        REQUIRE(decoded.value().canonical_bytes() == bytes);
+    }
+}
+
+TEST_CASE("Resolved numeric fields reject wire substitutes and overflow", "[resolved-unsigned]") {
+    auto capture = unsigned_limit_capture();
+    capture.host_max_estimated_work_units = 0;
+    const auto receipt = capture_graph_identity_receipt(capture);
+    REQUIRE(receipt);
+    const auto payload = std::string(receipt.value().resolved.canonical_bytes());
+    const auto bytes = receipt.value().canonical_bytes();
+    const auto rewrite = [&](std::string_view from, std::string_view to) {
+        const auto replacement = replace_once(payload, from, to);
+        auto modified = replace_once(bytes, payload, replacement);
+        const auto digest =
+            "sha256:" + pulp::runtime::sha256_hex(std::string("pulp.graph.resolved-plan.v1") +
+                                                  std::string(1, '\0') + replacement);
+        return replace_once(modified, receipt.value().resolved.digest(), digest);
+    };
+    for (std::string_view invalid :
+         {"18446744073709551616", "-1", "-0", "00", "01", "+1", "1.0", "1e3",
+          "\"9223372036854775808\"", "true", "{\"high\":2147483648,\"low\":0}",
+          "{\"$class\":\"pulp.identity.unsigned64\",\"high\":2147483648,\"low\":0}"}) {
+        INFO(invalid);
+        const auto modified = rewrite("\"max_estimated_work_units\":0",
+                                      "\"max_estimated_work_units\":" + std::string(invalid));
+        REQUIRE_FALSE(decode_graph_identity_receipt(receipt_input(modified)));
+    }
+    const auto narrow = rewrite("\"input_ports\":0", "\"input_ports\":4294967296");
+    REQUIRE_FALSE(decode_graph_identity_receipt(receipt_input(narrow)));
+    const auto wrong_minimum = rewrite("\"effective\":{\"block_frames\":128",
+                                       "\"effective\":{\"block_frames\":18446744073709551615");
+    REQUIRE_FALSE(decode_graph_identity_receipt(receipt_input(wrong_minimum)));
+}
+
+TEST_CASE("Exact numeric token opt in preserves the default JSON parser", "[resolved-unsigned]") {
+    const auto defaults = choc::json::parse("[0,-42,1.25,1e+3,9223372036854775807]");
+    REQUIRE(defaults[0].isInt());
+    REQUIRE(defaults[1].getInt64() == -42);
+    REQUIRE(defaults[2].getFloat64() == 1.25);
+    REQUIRE(defaults[3].getFloat64() == 1000);
+    REQUIRE(defaults[4].isFloat64());
+    const auto token = +[](std::string_view number, bool negative) {
+        return choc::value::Value(std::string(negative ? "-" : "") + std::string(number));
+    };
+    const std::string surrounded = "[18446744073709551615,-42,1e+3]trailing";
+    const auto exact = choc::json::parseWithNumberTokenParser(
+        std::string_view(surrounded.data(), surrounded.find(']') + 1), token);
+    REQUIRE(exact[0].getString() == "18446744073709551615");
+    REQUIRE(exact[1].getString() == "-42");
+    REQUIRE(exact[2].getString() == "1e+3");
+}
+
 TEST_CASE("D4 refuses an unbound prepared snapshot") {
     SignalGraph graph;
     auto edit = graph.begin_prepared_topology_edit();
@@ -157,6 +305,72 @@ TEST_CASE("D4 binds and exports a closed stereo Gain chain") {
     const auto exported = snapshot.export_prepared_description();
     REQUIRE(exported);
     REQUIRE(exported.value->nodes.size() == 4);
+    const auto resolved = resolved_fingerprint(*exported.value);
+    REQUIRE(resolved);
+    REQUIRE(resolved.value().domain() == "pulp.graph.resolved-plan.v1");
+    REQUIRE(resolved.value().profile() == "pulp.graph.resolved.io-gain.v1");
+    REQUIRE(resolved.value().canonical_bytes().find("\"buffers\"") != std::string_view::npos);
+    const auto receipt = capture_graph_identity_receipt(*exported.value);
+    REQUIRE(receipt);
+    REQUIRE(receipt.value().canonical_bytes().find("pulp.graph.identity.receipt.v1") !=
+            std::string::npos);
+    const auto resolved_bytes = std::string(resolved.value().canonical_bytes());
+    REQUIRE(resolved_bytes.size() == 13606);
+    REQUIRE(resolved.value().digest() ==
+            "sha256:83f5e4e38d2b9610962fcf8c04a11cc11b511ec52d88bdbbb8db61110d7da48e");
+    REQUIRE(resolved.value().digest() ==
+            "sha256:" + pulp::runtime::sha256_hex(std::string("pulp.graph.resolved-plan.v1") +
+                                                  std::string(1, '\0') + resolved_bytes));
+    const auto receipt_bytes = receipt.value().canonical_bytes();
+    REQUIRE(receipt_bytes.find("\"state_blobs\":{}") != std::string::npos);
+    std::vector<std::byte> receipt_input(receipt_bytes.size());
+    std::transform(receipt_bytes.begin(), receipt_bytes.end(), receipt_input.begin(),
+                   [](char c) { return static_cast<std::byte>(static_cast<unsigned char>(c)); });
+    REQUIRE(decode_graph_identity_receipt(receipt_input));
+    auto malformed_state = receipt_bytes;
+    const auto state_marker = malformed_state.find("\"state_blobs\":{}");
+    REQUIRE(state_marker != std::string::npos);
+    malformed_state.replace(state_marker, std::string("\"state_blobs\":{}").size(),
+                            "\"state_blobs\":[]");
+    std::vector<std::byte> malformed_state_input(malformed_state.size());
+    std::transform(malformed_state.begin(), malformed_state.end(), malformed_state_input.begin(),
+                   [](char c) { return static_cast<std::byte>(static_cast<unsigned char>(c)); });
+    REQUIRE_FALSE(decode_graph_identity_receipt(malformed_state_input));
+    receipt_input[receipt_input.size() / 2] ^= std::byte{1};
+    REQUIRE_FALSE(decode_graph_identity_receipt(receipt_input));
+    auto provenance_variant = *exported.value;
+    provenance_variant.snapshot_id += 101;
+    provenance_variant.pool_snapshot_id += 101;
+    provenance_variant.pool_binding_identity ^= 0x55;
+    provenance_variant.execution_generation += 3;
+    provenance_variant.owner_generation += 7;
+    provenance_variant.execution_selection_generation += 11;
+    REQUIRE(resolved_fingerprint(provenance_variant));
+    REQUIRE(resolved_fingerprint(provenance_variant).value().canonical_bytes() == resolved_bytes);
+    REQUIRE(resolved_fingerprint(provenance_variant).value().digest() == resolved.value().digest());
+    auto zero_host_limit = *exported.value;
+    zero_host_limit.host_max_nodes = 0;
+    REQUIRE_FALSE(resolved_fingerprint(zero_host_limit));
+    auto forged_alias = *exported.value;
+    forged_alias.resolved_alias_endpoint->node = "forged";
+    REQUIRE_FALSE(resolved_fingerprint(forged_alias));
+    auto overlapping_storage = *exported.value;
+    REQUIRE(overlapping_storage.resolved_buffer_values.size() > 1);
+    bool overlapped = false;
+    for (std::size_t i = 0; i < overlapping_storage.resolved_buffer_values.size() && !overlapped;
+         ++i)
+        for (std::size_t j = i + 1; j < overlapping_storage.resolved_buffer_values.size(); ++j)
+            if (overlapping_storage.resolved_buffer_values[i].class_id ==
+                overlapping_storage.resolved_buffer_values[j].class_id) {
+                overlapping_storage.resolved_buffer_values[j].lifetime_begin =
+                    overlapping_storage.resolved_buffer_values[i].lifetime_begin;
+                overlapping_storage.resolved_buffer_values[j].lifetime_end =
+                    overlapping_storage.resolved_buffer_values[i].lifetime_end;
+                overlapped = true;
+                break;
+            }
+    REQUIRE(overlapped);
+    REQUIRE_FALSE(resolved_fingerprint(overlapping_storage));
     REQUIRE(exported.value->edges.size() == 6);
     REQUIRE(exported.value->channels == std::vector<std::string>{"L", "R"});
     REQUIRE(exported.value->interfaces.size() == 2);

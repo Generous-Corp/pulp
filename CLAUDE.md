@@ -2060,7 +2060,7 @@ Pulp ships as a Claude Code plugin with slash commands (`/build`, `/test`, `/cre
 
 - **Open the PR and stop.** `shipyard pr --base main --no-arm`. Never arm, enqueue, auto-merge or merge: admission has exactly one writer.
 - **Review:** a standing reviewer posts an exact-head APPROVE or a HOLD once required checks are green. Never approve your own team's work.
-- **Admission:** the m3 steward tick (every 5 minutes) enqueues approved green heads into GitHub's native merge queue, which batches up to 5.
+- **Admission:** the m3 steward tick (every 5 minutes) enqueues approved green heads into GitHub's native merge queue, which batches up to 5 (grouping ALLGREEN; see decisions contract row 11).
 - **On a HOLD:** fix what it names, with a test. Merge `origin/main` (never rebase or force-push). Push once and comment `repaired: ... at <sha>`; the PR re-enters review on its own.
 - **macOS first.** A Windows- or Linux-only failure gets a `PARKED/<platform>` issue with evidence and never blocks a macOS landing.
 - **Labels the pipeline skips:** `superseded`, `owner-decision`, `PARKED/<platform>`.

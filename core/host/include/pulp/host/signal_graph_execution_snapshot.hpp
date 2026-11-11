@@ -61,6 +61,10 @@ class SignalGraph::ExecutionSnapshot {
                       std::shared_ptr<SignalGraph::CompiledGraph> snapshot) noexcept
         : owner_(&owner), snapshot_(std::move(snapshot)),
           processing_lease_(owner.processing_handle_lifetime_) {
+        if (snapshot_ && SignalGraph::snapshot_has_isolated_plugins_(*snapshot_)) {
+            snapshot_.reset();
+            processing_lease_.reset();
+        }
         if (owner.spectral_mode_.load(std::memory_order_acquire) ||
             (snapshot_ && snapshot_->spectral)) {
             owner.spectral_error_.store(SpectralError::SpectralPinnedExecutionUnsupported,

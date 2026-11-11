@@ -1,0 +1,10 @@
+{
+  "schema": "pulp.sdk-provenance.v1",
+  "kind": "source-install",
+  "distribution_eligible": false,
+  "source_git_sha": "2e299b27b3b854ef5d4f8228fb32668e7e2ba6e8",
+  "source_git_dirty": false,
+  "bridge_exec": true,
+  "platform": "darwin-arm64",
+  "build_profile": "dev"
+}
