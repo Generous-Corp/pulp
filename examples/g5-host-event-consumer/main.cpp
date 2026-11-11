@@ -157,9 +157,9 @@ void projection_queue_lifecycle_controls() {
                     check(lane.emit_at(1, 1, 42, 1) == GraphEventResult::Accepted,
                           "queue-lane-lookahead");
                     for (std::uint16_t payload = 0; payload < 4; ++payload)
-                        check(lane.emit_at(1, 7, payload, 2) == GraphEventResult::Accepted,
+                        check(lane.emit_at(1, 2, payload, 2) == GraphEventResult::Accepted,
                               "queue-lane-accepted");
-                    check(lane.emit_at(1, 7, 100, 2) == GraphEventResult::Overflow,
+                    check(lane.emit_at(1, 2, 100, 2) == GraphEventResult::Overflow,
                           "queue-lane-overflow-negative");
                 }
                 check(lane.begin_consumer() == GraphEventResult::Accepted, "queue-lane-consumer");
