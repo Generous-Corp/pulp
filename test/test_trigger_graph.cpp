@@ -1045,3 +1045,6 @@ TEST_CASE("Typed and spectral preparation remain separate admission lanes", "[tr
     CHECK(refused_plan.result == TriggerGraphResult::Mode);
     CHECK_FALSE(generic_prepared);
 }
+
+// Keep the graph-event callback probe in this existing trigger-graph test unit.
+#include "fixtures/g5_graph_event_rt_cases.inc"

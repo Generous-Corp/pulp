@@ -1,0 +1,6 @@
+{
+  "findings": [],
+  "overall_correctness": "patch is correct",
+  "overall_explanation": "No actionable defects found in the changed consumer, public API usage, callback boundary synchronization, or independent phase/audio/sibling oracles. The planted controls require specific oracle failures. Review was read-only; builds and tests were not run.",
+  "overall_confidence": 0.88
+}
