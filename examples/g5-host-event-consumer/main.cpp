@@ -144,7 +144,7 @@ void projection_queue_lifecycle_controls() {
     // A queued look-ahead event is delivered exactly once under either legal
     // partition, then a reset refuses the retired epoch.
     auto render_lane = [](std::span<const std::size_t> partitions) {
-        GraphAuthoredEventLane<4> lane;
+        GraphAuthoredEventLane<4, 4> lane;
         std::vector<GraphAuthoredEvent> events;
         check(lane.reset(1) == GraphEventResult::Accepted, "queue-lane-reset");
         std::uint64_t cursor = 0;
@@ -156,14 +156,15 @@ void projection_queue_lifecycle_controls() {
                 if (cursor + offset == 0) {
                     check(lane.emit_at(1, 1, 42, 1) == GraphEventResult::Accepted,
                           "queue-lane-lookahead");
-                    check(lane.emit_at(1, 7, 99, 0) == GraphEventResult::Late,
-                          "queue-lane-late-negative");
                     for (std::uint16_t payload = 0; payload < 4; ++payload)
                         check(lane.emit_at(1, 7, payload, 0) == GraphEventResult::Accepted,
                               "queue-lane-accepted");
                     check(lane.emit_at(1, 7, 100, 0) == GraphEventResult::Overflow,
                           "queue-lane-overflow-negative");
                 }
+                if (cursor + offset == 1)
+                    check(lane.emit_at(1, 7, 99, 0) == GraphEventResult::Late,
+                          "queue-lane-late-negative");
                 check(lane.begin_consumer() == GraphEventResult::Accepted, "queue-lane-consumer");
                 for (const auto& event : lane.received())
                     events.push_back(event);
