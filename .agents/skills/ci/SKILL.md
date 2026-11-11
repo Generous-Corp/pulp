@@ -10775,6 +10775,8 @@ HEAD reporting.
 Locally:
 
 - `.githooks/pre-push` (install via `tools/scripts/install-githooks.sh`) runs the same fast scripts, including the compat-sync, compat-aggregate, node ABI, and hotspot-size gates, enforcing by default. `PULP_DISABLE_PREPUSH_GATES=1` demotes the fast gates to advisory; `PULP_SKIP_PREPUSH=1` is the single-push emergency bypass.
+- `PULP_SKIP_PREPUSH=1` does not skip skill-sync when `SHIPYARD_AGENT_ID` is set (every fleet lane exports it). The check runs directly, outside the gate supervisor, and blocks on a miss; the fix is the SKILL.md note or the `Skill-Update: skip` trailer it names. A human skip is unchanged. `tools/scripts/test_refresh_push_check.py` (`case_agent_skip_still_runs_skill_sync`) pins all four outcomes.
+- Gotcha: agent sandboxes can forbid spawning `ps`. `.githooks/lib/gate-supervisor.py` then cannot read the hook's caller, so it runs the gate supervised by the hook only and prints a `supervised by the hook only` note; the gate's verdict is still authoritative. If every gate in a push reads as failed with a Python traceback from the supervisor, the hook is broken, not the gates: fix the supervisor rather than skipping the hook.
 - Pre-push gate subprocesses run through `.githooks/lib/gate-output.sh`: their stdout/stderr is captured to a regular temporary file, then replayed best-effort. Keep user-visible fast gates and the slow diff-cover script behind `run_gate_captured`; agent/tool callers can supply nonblocking pipes, and an uncaptured Python `print()` may otherwise raise `BlockingIOError` and turn a healthy gate into a false failure. The wrapper must snapshot and return the real child status before replay, while replay failure never changes that status. `tools/scripts/test_prepush_gate_output.py` pins success, exact nonzero propagation, replay, cleanup, and the slow-lane callsite.
 - A blocked pre-push ends with `FAILED GATE(S):`, one line per failing gate with the line that says why and its fix line, followed by the "gate failure(s) above" verdict. Every failure site in `.githooks/pre-push` calls `prepush_fail` (never a bare `fail=1`), which names the gate that ran last, or takes a label for a check that is not a captured gate; a gate that exits non-zero without failing the push (a skipped lane) is not named. `tools/scripts/test_prepush_gate_output.py` fails if a bare `fail=1` is added.
 - `tools/scripts/docs_noise_lint.py` (pre-push only, report mode) — scans changed/added lines for transient breadcrumbs across the markdown default scope (docs/reference + skills) **and source comments + test tags** under `core/examples/tools/test/apple/inspect/ship`. Source is diff-scoped only (never `--all`), so the historical backlog never blocks; it is comment-aware (only `//`, `/* */`, `#` comment text + string-literal Catch2 `[tag]`s, never code). Escape a legitimate line with an inline `docs-noise-lint: skip <reason>` comment. Full guidance on *writing* durable comments lives in the `code-comments` skill.
@@ -13569,3 +13571,13 @@ fails at once on other 4xx. Workflows call `python3
 tools/scripts/download_retry.py URL DEST` instead of a bare `curl -fsSL`; keep
 the sha256 check after it. A script copied into a temp tree must copy the
 helper too.
+
+## `[base_health]` holds the queue when the base is poisoned
+
+`.shipyard/config.toml` sets `merge_group_hold = "on"` and `auto_jump = "on"`.
+When one required context fails in consecutive merge groups with different
+pull requests, the steward enqueues only a named fix (label `shipyard:unblock`
+or a title naming the context beside a fix word) and reports other approved
+heads as `held_base_poisoned:<context>`. A held head is not broken: do not
+re-push it, the hold lifts once a merge group passes the context. The reviewer
+kick and priority file are machine-only keys and must stay out of this file.
