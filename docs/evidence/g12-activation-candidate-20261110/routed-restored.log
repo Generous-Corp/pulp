@@ -1,0 +1,71 @@
+Filters: "G12 paced activation receipt cell"
+Randomness seeded to: 2981205812
+g12_paced_activation_v1
+G12_CELL rate=48000 frames=128 backend=routed callbacks=64 compiled_source=faf8d69a181a102455a70a40aa77e0da18838c76 build_type=Release build_dirty=0 prepare_start_ns=793504582269833 prepare_end_ns=793504582549125 request_ns=793504611522541 return_ns=793504611536333 committed=1 first_new=8 first_new_sample=1024 latency_samples=0 snapshot_latency=0 snapshot_nodes=3 snapshot_edges=2 node_latencies=0,0,0 edge_delays=0,0 nodes=3 edges=2 executor_blocks=64 parallel_levels=0 parallel_enabled=0 walk_fallbacks=0 execution_failures=0 voices=0 grains=0 probes=0 node_audio_bytes=3072 automation_bytes=0 delay_bytes=0 spectral_bytes=0 prepared_bytes=3072 row_stride=72 row_bytes=4608 audio_bytes=32768 io_bytes=1024 harness_payload_bytes=38400 misses=0
+G12_ROW index=0 sample=0 target_ns=793504592586875 start_ns=793504594165166 end_ns=793504594170541 audio_class=0 bits=3e800000:128
+G12_ROW index=1 sample=128 target_ns=793504595253541 start_ns=793504595537416 end_ns=793504595540916 audio_class=0 bits=3e800000:128
+G12_ROW index=2 sample=256 target_ns=793504597920208 start_ns=793504598524500 end_ns=793504598527958 audio_class=0 bits=3e800000:128
+G12_ROW index=3 sample=384 target_ns=793504600586875 start_ns=793504601109666 end_ns=793504601111375 audio_class=0 bits=3e800000:128
+G12_ROW index=4 sample=512 target_ns=793504603253541 start_ns=793504603818166 end_ns=793504603821125 audio_class=0 bits=3e800000:128
+G12_ROW index=5 sample=640 target_ns=793504605920208 start_ns=793504605981666 end_ns=793504605984250 audio_class=0 bits=3e800000:128
+G12_ROW index=6 sample=768 target_ns=793504608586875 start_ns=793504609842916 end_ns=793504609846708 audio_class=0 bits=3e800000:128
+G12_ROW index=7 sample=896 target_ns=793504611253541 start_ns=793504611513000 end_ns=793504611515875 audio_class=0 bits=3e800000:128
+G12_ROW index=8 sample=1024 target_ns=793504613920208 start_ns=793504614538208 end_ns=793504614541375 audio_class=1 bits=3f000000:128
+G12_ROW index=9 sample=1152 target_ns=793504616586875 start_ns=793504617114208 end_ns=793504617117250 audio_class=1 bits=3f000000:128
+G12_ROW index=10 sample=1280 target_ns=793504619253541 start_ns=793504619803250 end_ns=793504619806250 audio_class=1 bits=3f000000:128
+G12_ROW index=11 sample=1408 target_ns=793504621920208 start_ns=793504622113666 end_ns=793504622115916 audio_class=1 bits=3f000000:128
+G12_ROW index=12 sample=1536 target_ns=793504624586875 start_ns=793504625215583 end_ns=793504625218416 audio_class=1 bits=3f000000:128
+G12_ROW index=13 sample=1664 target_ns=793504627253541 start_ns=793504627770625 end_ns=793504627772666 audio_class=1 bits=3f000000:128
+G12_ROW index=14 sample=1792 target_ns=793504629920208 start_ns=793504630512083 end_ns=793504630515208 audio_class=1 bits=3f000000:128
+G12_ROW index=15 sample=1920 target_ns=793504632586875 start_ns=793504633114791 end_ns=793504633117500 audio_class=1 bits=3f000000:128
+G12_ROW index=16 sample=2048 target_ns=793504635253541 start_ns=793504635797083 end_ns=793504635799791 audio_class=1 bits=3f000000:128
+G12_ROW index=17 sample=2176 target_ns=793504637920208 start_ns=793504638466541 end_ns=793504638469833 audio_class=1 bits=3f000000:128
+G12_ROW index=18 sample=2304 target_ns=793504640586875 start_ns=793504641138166 end_ns=793504641140375 audio_class=1 bits=3f000000:128
+G12_ROW index=19 sample=2432 target_ns=793504643253541 start_ns=793504643797916 end_ns=793504643800916 audio_class=1 bits=3f000000:128
+G12_ROW index=20 sample=2560 target_ns=793504645920208 start_ns=793504646465666 end_ns=793504646468083 audio_class=1 bits=3f000000:128
+G12_ROW index=21 sample=2688 target_ns=793504648586875 start_ns=793504648995833 end_ns=793504648998041 audio_class=1 bits=3f000000:128
+G12_ROW index=22 sample=2816 target_ns=793504651253541 start_ns=793504651830500 end_ns=793504651833291 audio_class=1 bits=3f000000:128
+G12_ROW index=23 sample=2944 target_ns=793504653920208 start_ns=793504654212416 end_ns=793504654215166 audio_class=1 bits=3f000000:128
+G12_ROW index=24 sample=3072 target_ns=793504656586875 start_ns=793504657189291 end_ns=793504657192250 audio_class=1 bits=3f000000:128
+G12_ROW index=25 sample=3200 target_ns=793504659253541 start_ns=793504659781833 end_ns=793504659784750 audio_class=1 bits=3f000000:128
+G12_ROW index=26 sample=3328 target_ns=793504661920208 start_ns=793504662472458 end_ns=793504662474666 audio_class=1 bits=3f000000:128
+G12_ROW index=27 sample=3456 target_ns=793504664586875 start_ns=793504665128208 end_ns=793504665131541 audio_class=1 bits=3f000000:128
+G12_ROW index=28 sample=3584 target_ns=793504667253541 start_ns=793504667799166 end_ns=793504667801458 audio_class=1 bits=3f000000:128
+G12_ROW index=29 sample=3712 target_ns=793504669920208 start_ns=793504670458041 end_ns=793504670459875 audio_class=1 bits=3f000000:128
+G12_ROW index=30 sample=3840 target_ns=793504672586875 start_ns=793504673080833 end_ns=793504673082500 audio_class=1 bits=3f000000:128
+G12_ROW index=31 sample=3968 target_ns=793504675253541 start_ns=793504675563875 end_ns=793504675566458 audio_class=1 bits=3f000000:128
+G12_ROW index=32 sample=4096 target_ns=793504677920208 start_ns=793504678517333 end_ns=793504678520250 audio_class=1 bits=3f000000:128
+G12_ROW index=33 sample=4224 target_ns=793504680586875 start_ns=793504681122083 end_ns=793504681124500 audio_class=1 bits=3f000000:128
+G12_ROW index=34 sample=4352 target_ns=793504683253541 start_ns=793504683799916 end_ns=793504683802791 audio_class=1 bits=3f000000:128
+G12_ROW index=35 sample=4480 target_ns=793504685920208 start_ns=793504686464041 end_ns=793504686467166 audio_class=1 bits=3f000000:128
+G12_ROW index=36 sample=4608 target_ns=793504688586875 start_ns=793504689125666 end_ns=793504689128208 audio_class=1 bits=3f000000:128
+G12_ROW index=37 sample=4736 target_ns=793504691253541 start_ns=793504691801208 end_ns=793504691803875 audio_class=1 bits=3f000000:128
+G12_ROW index=38 sample=4864 target_ns=793504693920208 start_ns=793504694461541 end_ns=793504694464041 audio_class=1 bits=3f000000:128
+G12_ROW index=39 sample=4992 target_ns=793504696586875 start_ns=793504696828208 end_ns=793504696831333 audio_class=1 bits=3f000000:128
+G12_ROW index=40 sample=5120 target_ns=793504699253541 start_ns=793504699873916 end_ns=793504699876958 audio_class=1 bits=3f000000:128
+G12_ROW index=41 sample=5248 target_ns=793504701920208 start_ns=793504702442708 end_ns=793504702444875 audio_class=1 bits=3f000000:128
+G12_ROW index=42 sample=5376 target_ns=793504704586875 start_ns=793504705154958 end_ns=793504705158250 audio_class=1 bits=3f000000:128
+G12_ROW index=43 sample=5504 target_ns=793504707253541 start_ns=793504707302250 end_ns=793504707304333 audio_class=1 bits=3f000000:128
+G12_ROW index=44 sample=5632 target_ns=793504709920208 start_ns=793504710583125 end_ns=793504710585750 audio_class=1 bits=3f000000:128
+G12_ROW index=45 sample=5760 target_ns=793504712586875 start_ns=793504713093833 end_ns=793504713095791 audio_class=1 bits=3f000000:128
+G12_ROW index=46 sample=5888 target_ns=793504715253541 start_ns=793504715667166 end_ns=793504715670458 audio_class=1 bits=3f000000:128
+G12_ROW index=47 sample=6016 target_ns=793504717920208 start_ns=793504718420958 end_ns=793504718423875 audio_class=1 bits=3f000000:128
+G12_ROW index=48 sample=6144 target_ns=793504720586875 start_ns=793504721141166 end_ns=793504721142916 audio_class=1 bits=3f000000:128
+G12_ROW index=49 sample=6272 target_ns=793504723253541 start_ns=793504723790250 end_ns=793504723793500 audio_class=1 bits=3f000000:128
+G12_ROW index=50 sample=6400 target_ns=793504725920208 start_ns=793504726460958 end_ns=793504726463041 audio_class=1 bits=3f000000:128
+G12_ROW index=51 sample=6528 target_ns=793504728586874 start_ns=793504729126375 end_ns=793504729128708 audio_class=1 bits=3f000000:128
+G12_ROW index=52 sample=6656 target_ns=793504731253541 start_ns=793504731807541 end_ns=793504731810333 audio_class=1 bits=3f000000:128
+G12_ROW index=53 sample=6784 target_ns=793504733920208 start_ns=793504734465458 end_ns=793504734467833 audio_class=1 bits=3f000000:128
+G12_ROW index=54 sample=6912 target_ns=793504736586875 start_ns=793504737134000 end_ns=793504737137166 audio_class=1 bits=3f000000:128
+G12_ROW index=55 sample=7040 target_ns=793504739253541 start_ns=793504739812666 end_ns=793504739815166 audio_class=1 bits=3f000000:128
+G12_ROW index=56 sample=7168 target_ns=793504741920208 start_ns=793504742464875 end_ns=793504742467708 audio_class=1 bits=3f000000:128
+G12_ROW index=57 sample=7296 target_ns=793504744586875 start_ns=793504745136583 end_ns=793504745140000 audio_class=1 bits=3f000000:128
+G12_ROW index=58 sample=7424 target_ns=793504747253541 start_ns=793504747795291 end_ns=793504747797583 audio_class=1 bits=3f000000:128
+G12_ROW index=59 sample=7552 target_ns=793504749920208 start_ns=793504750239333 end_ns=793504750242375 audio_class=1 bits=3f000000:128
+G12_ROW index=60 sample=7680 target_ns=793504752586875 start_ns=793504753188083 end_ns=793504753191333 audio_class=1 bits=3f000000:128
+G12_ROW index=61 sample=7808 target_ns=793504755253541 start_ns=793504755782375 end_ns=793504755784583 audio_class=1 bits=3f000000:128
+G12_ROW index=62 sample=7936 target_ns=793504757920208 start_ns=793504758465041 end_ns=793504758467875 audio_class=1 bits=3f000000:128
+G12_ROW index=63 sample=8064 target_ns=793504760586874 start_ns=793504761130166 end_ns=793504761132541 audio_class=1 bits=3f000000:128
+===============================================================================
+All tests passed (21 assertions in 1 test case)
+

@@ -1,0 +1,3 @@
+format_changed: using /opt/homebrew/opt/llvm@21/bin/clang-format (Homebrew clang-format version 21.1.8)
+format_changed: base origin/main (merge-base ebded6b0a98e7353a13c4e74d1e9bc138dd6b342)
+format_changed: no changed C++ lines vs origin/main — nothing to format.

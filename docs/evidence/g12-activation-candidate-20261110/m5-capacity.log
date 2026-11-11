@@ -1,0 +1,162 @@
+TARTCI_ROLE=dev-overflow
+TARTCI_HOST_CORES=18
+TARTCI_HEADROOM_CORES=4
+TARTCI_LEASE_CAPACITY_CORES=14
+TARTCI_GATE_RESERVED_CORES=8
+TARTCI_NON_GATE_CAPACITY_CORES=6
+TARTCI_VM_POOL_CORES=6
+TARTCI_RUNNER_JOB_CORES=6
+TARTCI_AGENT_BUILD_CAP_CORES=6
+TARTCI_WATCH_LOCK_LIMIT=1
+TARTCI_MACOS_VM_CAP=2
+TARTCI_AGENT_QOS=background
+PULP_BUILD_JOBS=6
+TARTCI_AGENT_FLOOR_CORES=6
+TARTCI_AGENT_FLOOR_POOL_CORES=6
+TARTCI_AGENT_FLOOR_QOS=background
+TARTCI_HOST_MEM_MB=131072
+TARTCI_LEASE_CAPACITY_MEM_MB=118784
+TARTCI_GATE_RESERVED_MEM_MB=67876
+TARTCI_NON_GATE_CAPACITY_MEM_MB=50908
+TARTCI_LINK_LTO_RESERVE_MEM_MB=6144
+TARTCI_PER_JOB_MEM_MB=1536
+PULP_BUILD_MEM_BUDGET_MB=118784
+TARTCI_GOVERNOR_SCHEMA=1
+TARTCI_DYNAMIC_LENDING=1
+TARTCI_SERVES_GATE=1
+TARTCI_GATE_PROMPT_RESERVE_CORES=6
+TARTCI_INTERACTIVE_SHARE_CORES=14
+TARTCI_INTERACTIVE_BUILD_JOBS=14
+TARTCI_INTERACTIVE_MIN_CORES=2
+TARTCI_INTERACTIVE_WAIT_SECS=90
+TARTCI_INTERACTIVE_QOS=normal
+TARTCI_BACKGROUND_SHARE_CORES=4
+TARTCI_BACKGROUND_QOS=background
+[
+
+]
+{
+  "capacity": {
+    "agent_floor_cores": 6,
+    "agent_floor_pool_cores": 6,
+    "available_cores": 4,
+    "available_mem_mb": 100352,
+    "background_available_cores": 0,
+    "background_share_cores": 4,
+    "background_used_cores": 0,
+    "dynamic_lending": true,
+    "floor_available_cores": 6,
+    "floor_used_cores": 0,
+    "gate_priority": 100,
+    "gate_prompt_reserve_cores": 4,
+    "gate_used_cores": 4,
+    "interactive_available_cores": 0,
+    "interactive_share_cores": 14,
+    "interactive_used_cores": 0,
+    "lent_cores": 0,
+    "memory_accounting": "explicit",
+    "non_gate_available_cores": 0,
+    "non_gate_available_mem_mb": 40668,
+    "non_gate_limit_cores": 6,
+    "non_gate_limit_mem_mb": 50908,
+    "non_gate_used_cores": 6,
+    "non_gate_used_mem_mb": 10240,
+    "per_job_mem_mb": 1536,
+    "preempted_lease_ids": [],
+    "reserved_gate_cores": 8,
+    "reserved_gate_mem_mb": 67876,
+    "total_cores": 14,
+    "total_mem_mb": 118784,
+    "used_cores": 10,
+    "used_mem_mb": 18432
+  },
+  "disk_volumes": [
+    {
+      "available_after_reservations_bytes": 1106050101248,
+      "device_id": "16777231",
+      "floor_bytes": 26843545600,
+      "free_bytes": 1157589708800,
+      "mount_path": "/",
+      "requested_bytes": 0,
+      "required_bytes": 78383153152,
+      "reservation_count": 2,
+      "reservation_path": "/Users/danielraffel/VMs",
+      "reserved_bytes": 51539607552
+    }
+  ],
+  "leases": [
+    {
+      "command_kind": "tart-macos-vm",
+      "created_at": "2026-11-11T00:13:46Z",
+      "disk_device_id": "16777231",
+      "disk_expected_device_id": "",
+      "disk_expected_mount_path": "",
+      "disk_floor_bytes": 26843545600,
+      "disk_growth_bytes": 25769803776,
+      "disk_logical_path": "/Users/danielraffel/VMs",
+      "disk_mount_path": "/",
+      "disk_reservation_path": "/Users/danielraffel/VMs",
+      "guardian_host_boot_time": "{ sec = 1794072344, usec = 981109 } Sat Nov 7 09:25:44 2026",
+      "guardian_mode": "exec",
+      "guardian_pid": 42923,
+      "guardian_process_group_id": 76927,
+      "guardian_process_start_time": "Tue Nov 10 16:13:53 2026",
+      "guardian_session_id": 1,
+      "heartbeat_at": "2026-11-11T00:34:01Z",
+      "host_boot_time": "{ sec = 1794072344, usec = 981109 } Sat Nov 7 09:25:44 2026",
+      "id": "vm-tart-macos-vm-m5-pulp-gate-01-76927-21",
+      "job_id": "",
+      "label": "self-hosted,macOS,ARM64,pulp-build,pulp-build-vm,pulp-build-pr-head",
+      "lease_size_cores": 4,
+      "lease_size_mem_mb": 8192,
+      "owner": "danielraffel@BlackBook-Pro-5",
+      "pid": 76927,
+      "priority": 100,
+      "priority_class": "100",
+      "process_group_id": 76927,
+      "process_start_time": "Tue Nov 10 14:03:19 2026",
+      "session_id": 1,
+      "vm_name": "m5-pulp-gate-01-76927-21"
+    },
+    {
+      "command_kind": "tart-macos-vm",
+      "created_at": "2026-11-10T23:50:09Z",
+      "disk_device_id": "16777231",
+      "disk_expected_device_id": "",
+      "disk_expected_mount_path": "",
+      "disk_floor_bytes": 26843545600,
+      "disk_growth_bytes": 25769803776,
+      "disk_logical_path": "/Users/danielraffel/VMs",
+      "disk_mount_path": "/",
+      "disk_reservation_path": "/Users/danielraffel/VMs",
+      "guardian_host_boot_time": "{ sec = 1794072344, usec = 981109 } Sat Nov 7 09:25:44 2026",
+      "guardian_mode": "exec",
+      "guardian_pid": 89177,
+      "guardian_process_group_id": 77040,
+      "guardian_process_start_time": "Tue Nov 10 15:50:19 2026",
+      "guardian_session_id": 1,
+      "heartbeat_at": "2026-11-11T00:34:06Z",
+      "host_boot_time": "{ sec = 1794072344, usec = 981109 } Sat Nov 7 09:25:44 2026",
+      "id": "vm-tart-macos-vm-m5-vellum-gate-01-77040-10",
+      "job_id": "",
+      "label": "self-hosted,macOS,ARM64,vellum-build-macos,vellum-host-m5",
+      "lease_size_cores": 6,
+      "lease_size_mem_mb": 10240,
+      "owner": "danielraffel@BlackBook-Pro-5",
+      "pid": 77040,
+      "priority": 60,
+      "priority_class": "vm",
+      "process_group_id": 77040,
+      "process_start_time": "Tue Nov 10 14:03:20 2026",
+      "session_id": 1,
+      "vm_name": "m5-vellum-gate-01-77040-10"
+    }
+  ],
+  "mode": "provider VM runners atomically acquire host core, memory, and per-volume disk-growth leases when enabled",
+  "problems": [],
+  "reaped": [],
+  "schema": 3,
+  "store_dir": "/Users/danielraffel/.tartci/state/leases",
+  "waiters": []
+}
+16:34  up 3 days,  7:08, 40 users, load averages: 14.75 17.74 16.72
