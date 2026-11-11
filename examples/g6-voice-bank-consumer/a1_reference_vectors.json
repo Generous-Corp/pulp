@@ -33,6 +33,18 @@
     "release_curve": "linear",
     "tail_policy": "hard_termination_v1"
   },
+  "negative_controls": [
+    {"id": "wrong_sum_order_high_dynamic"},
+    {"id": "wrong_sum_order_low_magnitude"},
+    {"id": "wrong_gain_law"},
+    {"id": "wrong_channel_swap"},
+    {"id": "wrong_mono_duplication"},
+    {"id": "wrong_release_policy"},
+    {"id": "release_note_off_shift"},
+    {"id": "release_length_change"},
+    {"id": "invalid_release_range"},
+    {"id": "unbounded_or_steal_tail"}
+  ],
   "voice_vectors": [
     {
       "slot": 0,

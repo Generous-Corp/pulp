@@ -1,7 +1,7 @@
 #pragma once
 #include <cstddef>
 namespace pulp::examples::g6::a1 {
-// Generated from frozen A1 JSON SHA-256 c077653d57f2708b4d7f8b2354dc5bb1d55111a832ee5d6983bdb0b25c3c6aa0. Do not edit by hand.
+// Generated from frozen A1 JSON SHA-256 fdd1f0e85e6dab59bf41b0fa572a84a314efc327a867bc042808e24d4bbd3a1b. Do not edit by hand.
 enum class Kind { Sum, Release, Steal };
 struct Case {
     const char* id;
