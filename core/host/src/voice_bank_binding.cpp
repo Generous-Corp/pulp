@@ -514,8 +514,7 @@ VoiceBankBindingCode VoiceBankBinding::render(audio::BufferView<float>& stereo,
     }
     for (std::size_t index = 0; index < count; ++index) {
         const auto& message = impl_->projected[index].midi;
-        if (message.is_cc() &&
-            (message.cc_number() == 120 || message.cc_number() == 123)) {
+        if (message.is_cc() && (message.cc_number() == 120 || message.cc_number() == 123)) {
             const auto scope = impl_->scope_for(message.channel());
             for (auto& key : membership)
                 if (key != 0 && impl_->covers(scope, static_cast<std::uint8_t>((key - 1) >> 7)))

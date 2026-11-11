@@ -263,8 +263,7 @@ void check_capacity_and_poly_pressure() {
           "capacity-cc120-restart");
     audio::Buffer<float> cc120_audio(2, 1);
     auto cc120_view = cc120_audio.view();
-    check(bank->render(cc120_view, 131, 1) == VoiceBankBindingCode::Ok,
-          "capacity-cc120-reuse");
+    check(bank->render(cc120_view, 131, 1) == VoiceBankBindingCode::Ok, "capacity-cc120-reuse");
     check(bank->begin_block(132, 1) == HostEventResult::Accepted, "capacity-cc123-begin");
     check(bank->publish(event(bank->epoch(), 132, 1, midi::MidiEvent::cc(0, 123, 0))) ==
               HostEventResult::Accepted,
@@ -274,8 +273,7 @@ void check_capacity_and_poly_pressure() {
           "capacity-cc123-restart");
     audio::Buffer<float> cc123_audio(2, 1);
     auto cc123_view = cc123_audio.view();
-    check(bank->render(cc123_view, 132, 1) == VoiceBankBindingCode::Ok,
-          "capacity-cc123-reuse");
+    check(bank->render(cc123_view, 132, 1) == VoiceBankBindingCode::Ok, "capacity-cc123-reuse");
 
     auto pressure = make_bank(schema(), status);
     check(static_cast<bool>(pressure), "pressure-prepare");
