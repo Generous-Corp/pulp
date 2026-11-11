@@ -1,0 +1,15 @@
+from pathlib import Path
+import sys
+p = Path('core/format/src/graph_runtime_executor.cpp')
+s = p.read_text()
+rules = {
+    'audio-publication': ('audio_probe->samples.try_push(probe_sample);', '(void)probe_sample;'),
+    'feedback-current-source': (
+        'pool.slot_data(assignment.feedback_prev_slot[audio_probe->edge_index])',
+        'pool.slot_data(assignment.nodes[audio_probe->source_index].output_base + audio_probe->source_port)'),
+    'dense-publication': ('control_probe->samples.try_push(edge_sample);', '(void)edge_sample;'),
+    'dense-current-source': ('observe_value(v, f);', 'observe_value(src[f], f);'),
+}
+a,b=rules[sys.argv[1]]
+assert s.count(a) == (2 if sys.argv[1] == 'dense-current-source' else 1)
+p.write_text(s.replace(a,b))
