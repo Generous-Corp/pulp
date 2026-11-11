@@ -5143,6 +5143,12 @@ python3 -m pytest tools/import-validation/test_source_contracts.py -v
 
 When cleaning Catch2 tags in source-contract test files, update the matching
 `validation.test_tags` entry in `source-contracts.json` in the same change.
+Scheduled provider recheck dates are advisory: an overdue
+`stale-source-contract` finding is reported as informational and does not make
+the strict registry check fail. Keep strict failures for an `unverified` or
+malformed contract and for schema, parser, path, referential, or roundtrip
+drift. Never rewrite `last_verified` dates to silence cadence reminders;
+verify the behavior with the focused source-contract self-tests.
 Prefer broad stable tags such as `[view][import][designmd]` when the registry row
 represents a full validation surface; do not narrow it to one subarea tag if the
 roundtrip/contract expects parser, lint, diff, export, and recovery coverage.
