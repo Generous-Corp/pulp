@@ -27,6 +27,11 @@ class VoiceBankOwner {
                       const midi::MpeNoteState& state) const noexcept = 0;
     virtual void reset() noexcept = 0;
     virtual void set_steal_mode(midi::MpeVoiceStealMode mode) noexcept = 0;
+    // The audio owner can inspect and retire one exact generation without
+    // changing another slot. This is needed for scoped All Sound Off.
+    virtual bool slot_note(std::uint32_t slot, midi::MpeNoteState& note,
+                           bool& releasing) const noexcept = 0;
+    virtual bool retire_slot(std::uint32_t slot, midi::MpeNoteGeneration generation) noexcept = 0;
     // Opaque identity of the mutable voice state borrowed by the Processor
     // factory. Preparation refuses null or repeated identities across slots.
     virtual const void* slot_state_identity(std::uint32_t slot) const noexcept = 0;
@@ -74,6 +79,23 @@ template <class Voice> class MpeVoiceBankOwner final : public VoiceBankOwner {
     void set_steal_mode(midi::MpeVoiceStealMode mode) noexcept override {
         allocator_.set_steal_mode(mode);
     }
+    bool slot_note(std::uint32_t slot, midi::MpeNoteState& note,
+                   bool& releasing) const noexcept override {
+        if (slot >= 8 || !allocator_.voice(slot).active())
+            return false;
+        const auto& voice = allocator_.voice(slot);
+        note = {};
+        note.active = true;
+        note.note_id = voice.note_id();
+        note.channel = voice.channel();
+        note.note = voice.note_number();
+        note.velocity = voice.velocity();
+        releasing = voice.releasing();
+        return true;
+    }
+    bool retire_slot(std::uint32_t slot, midi::MpeNoteGeneration generation) noexcept override {
+        return allocator_.retire_slot(slot, generation);
+    }
     const void* slot_state_identity(std::uint32_t slot) const noexcept override {
         return slot < 8 ? static_cast<const void*>(&allocator_.voice(slot)) : nullptr;
     }
@@ -118,6 +140,9 @@ enum class VoiceBankBindingCode : std::uint8_t {
     StaleGeneration,
     EpochExhausted,
     TrackerCapacity,
+    OutOfZone,
+    UnsupportedControl,
+    UnsupportedExpression,
 };
 
 struct VoiceBankBindingResult {
@@ -138,7 +163,8 @@ class VoiceBankBinding final {
     static std::unique_ptr<VoiceBankBinding>
     prepare(const VoiceTemplateSchema& schema, SubgraphTemplate definition,
             std::unique_ptr<VoiceBankOwner> owner, std::string stereo_port, double sample_rate,
-            int max_frames, VoiceBankBindingResult& result);
+            int max_frames, VoiceBankBindingResult& result,
+            midi::MpeConfig mpe_config = midi::MpeConfig::standard_lower());
     ~VoiceBankBinding();
     VoiceBankBinding(const VoiceBankBinding&) = delete;
     VoiceBankBinding& operator=(const VoiceBankBinding&) = delete;

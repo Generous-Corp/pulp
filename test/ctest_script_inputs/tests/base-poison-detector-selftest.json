@@ -12,6 +12,7 @@
    ".github/workflows/vellum-trusted-gate.yml",
    ".github/workflows/version-skill-check.yml",
    ".github/workflows/wclap-cloudflare.yml",
+   ".github/workflows/workflow-lint.yml",
    "docs/status/consumption-profiles.json",
    "docs/status/consumption-profiles.schema.json",
    "test/cmake/consumption_census_tests.cmake",
