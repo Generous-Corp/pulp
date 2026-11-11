@@ -157,9 +157,9 @@ void projection_queue_lifecycle_controls() {
                     check(lane.emit_at(1, 1, 42, 1) == GraphEventResult::Accepted,
                           "queue-lane-lookahead");
                     for (std::uint16_t payload = 0; payload < 4; ++payload)
-                        check(lane.emit_at(1, 7, payload, 0) == GraphEventResult::Accepted,
+                        check(lane.emit_at(1, 7, payload, 2) == GraphEventResult::Accepted,
                               "queue-lane-accepted");
-                    check(lane.emit_at(1, 7, 100, 0) == GraphEventResult::Overflow,
+                    check(lane.emit_at(1, 7, 100, 2) == GraphEventResult::Overflow,
                           "queue-lane-overflow-negative");
                 }
                 check(lane.begin_consumer() == GraphEventResult::Accepted, "queue-lane-consumer");
@@ -190,8 +190,9 @@ void projection_queue_lifecycle_controls() {
     constexpr std::array<std::size_t, 2> split{1, 1};
     const auto one_block = render_lane(one);
     const auto two_blocks = render_lane(split);
-    check(one_block == two_blocks && one_block.size() == 5 && one_block.front().sample == 0 &&
-              one_block.back().sample == 1 && one_block.back().payload == 42,
+    check(one_block == two_blocks && one_block.size() == 5 && one_block.front().sample == 1 &&
+              one_block.front().payload == 42 && one_block.back().sample == 2 &&
+              one_block.back().payload == 3,
           "queue-lane-partition-invariance");
 }
 

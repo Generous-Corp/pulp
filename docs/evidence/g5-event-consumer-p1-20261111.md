@@ -19,7 +19,7 @@ fixture. It uses the existing `HostEventIngress` and
 ## Validation
 
 - Source parent: `7aa7d247e3fd188417c0ecce1338d8fa286f4ac6`; the corrected fixture is checked in on the repair head.
-- Source file SHA-256: `examples/g5-host-event-consumer/main.cpp` `fae8ba2b1904f458184e312879de3415a3ecabd20f61925d843c427073f02fb6`; included public headers `graph_event_contract.hpp` `1364609e77aee4e39fa3c1692e36c715ec9385856515dc3076d1de7ef0b0350a`, `signal_graph_runtime.hpp` `9527c8e535cf0a2f7eaa4e7eff0249784c8a02ec891a998a458422687e0d1748`, `trigger_graph.hpp` `f26b6613f55461f4f0d36fe4b2d027b45246b9220f18213b271d17831fbac68a`, and `process_context.hpp` `4ced24c83b665720d97d1a0a2f43a113e8b8f5afbacb82374aa70c0be4b50fb9`.
+- Source file SHA-256: `examples/g5-host-event-consumer/main.cpp` `f9c1150a62ba11b9c35f03060cb8e4370d142de0c93d7e6adf37340bd5f1440b`; included public headers `graph_event_contract.hpp` `1364609e77aee4e39fa3c1692e36c715ec9385856515dc3076d1de7ef0b0350a`, `signal_graph_runtime.hpp` `9527c8e535cf0a2f7eaa4e7eff0249784c8a02ec891a998a458422687e0d1748`, `trigger_graph.hpp` `f26b6613f55461f4f0d36fe4b2d027b45246b9220f18213b271d17831fbac68a`, and `process_context.hpp` `4ced24c83b665720d97d1a0a2f43a113e8b8f5afbacb82374aa70c0be4b50fb9`.
 - Python probe status: `python3 -m unittest discover -s examples/g5-event-consumer -p 'test_*.py'` — **0 tests collected; exits 5 (`NO TESTS RAN`)**. This directory has no Python tests, so that command is not a validation oracle.
 - Validated oracle: source-level inspection only. The current control set implies 373 runtime checks (including the lifecycle controls); no executable PASS receipt was produced.
 - Current-head governed SDK configure/build: **NOT CHECKED**. Configure was
