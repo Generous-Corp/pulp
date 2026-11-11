@@ -5152,8 +5152,14 @@ Scheduled provider recheck dates are advisory: an overdue
 `stale-source-contract` finding is reported as informational and does not make
 the strict registry check fail. Keep strict failures for an `unverified` or
 malformed contract and for schema, parser, path, referential, or roundtrip
-drift. Never rewrite `last_verified` dates to silence cadence reminders;
-verify the behavior with the focused source-contract self-tests.
+drift. A recheck due within `--warn-days` (default 7) is reported ahead of
+time as `source-contract-recheck-due`, and under GitHub Actions both cadence
+findings are also printed as `::warning` annotations, so an upcoming or
+overdue recheck shows on every pull request without failing any check on a
+date alone. The warning is the prompt to do the recheck (re-run the parser and
+runtime-import tests for that source, then record the result); never rewrite
+`last_verified` dates to silence cadence reminders; verify the behavior with
+the focused source-contract self-tests.
 Prefer broad stable tags such as `[view][import][designmd]` when the registry row
 represents a full validation surface; do not narrow it to one subarea tag if the
 roundtrip/contract expects parser, lint, diff, export, and recovery coverage.
