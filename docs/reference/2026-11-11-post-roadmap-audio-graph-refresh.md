@@ -62,6 +62,14 @@ spectral consumer proves only analyzed-frame metadata. Neither receipt joins
 authored bytes, resolved resources, prepared generation, event replay, and
 rendered output into one replay/diff artifact. That remains the P0 experiment.
 
+One provenance caveat matters when reconciling the status text: the live source
+and merged PR #12000 include `core/host/include/pulp/host/voice_bank_binding.hpp`
+and `core/host/src/voice_bank_binding.cpp`, while older G-6 paragraphs still
+say that a voice binding or A1 audio oracle is absent. The source/API merge is
+the current fact; the qualification boundary remains open because scheduling,
+tails, state migration, and independent graph audio evidence are still not
+closed.
+
 ## Verified baseline and the remaining boundary
 
 Current `SignalGraph` is a prepared, bounded audio topology. The public
@@ -84,7 +92,7 @@ Adding another DSP node does not remove that glue.
 
 | Domain | Verified primitive | Missing product contract |
 | --- | --- | --- |
-| Event/control | `graph_event_contract.hpp`, trigger runtime, MIDI/UMP/MPE mailbox, sparse/dense parameter edges | One bounded cross-block event projection with absolute sample origin, tie order, late/overflow policy, reset epoch, and partition-invariant replay. |
+| Event/control | `graph_event_contract.hpp` fixed-capacity pending/one-block look-ahead primitive and `received_block()`, trigger runtime, MIDI/UMP/MPE mailbox, sparse/dense parameter edges | A qualified graph-wired projection with absolute sample origin, tie order, late/overflow policy, reset epoch, and partition-invariant replay. The implementation seam exists; G-5 installed/runtime qualification remains HOLD. |
 | Voice | `voice_template.hpp`, `Synthesiser`, `MpeVoiceAllocator`, merged bounded eight-voice binding | A graph-owned lifecycle for allocation/steal, generation-safe tails, per-voice events, graph swaps, and declared state migration. |
 | Inspection | Graph notation/diagnostics, serializer, prepared stats, probes, traces, audio-quality tools | Layered IDs and a replay/diff receipt that says whether a difference is authored topology, resource resolution, plan, event stream, or output. |
 | Spectral | Canonical frames, routed spectral ports, finite two-asset morph, hop control | A frame-domain conversion contract with geometry, clock, latency, EOF/tail, and host-rate event policy. |
@@ -202,8 +210,10 @@ create a second scheduler.
 and then `python3 examples/g5-event-consumer/check_trace.py observations.json`
 with the installed consumer's observation file. The fixture's
 `expected.json` and planted timing/tie/counter mutations define the acceptance
-boundary; a future runtime owner must add feed-forward audio, reset, refusal,
-and capacity controls before this becomes graph transport evidence.
+boundary. It is only one trigger-stream, pre-runtime oracle: it does not prove
+MIDI, parameter, voice-intent, or sensor projection; feed-forward audio; reset
+through a live graph; or runtime refusal/capacity behavior. A future runtime
+owner must add those controls before this becomes graph transport evidence.
 
 ### P2: graph-owned voice lifecycle binding
 
@@ -405,6 +415,8 @@ that reuses existing graph, MIDI, trigger, and voice primitives.
 * `core/host/include/pulp/host/signal_graph_runtime.hpp`
 * `core/host/include/pulp/host/graph_event_contract.hpp`
 * `core/host/include/pulp/host/voice_template.hpp`
+* `core/host/include/pulp/host/voice_bank_binding.hpp`
+* `core/host/src/voice_bank_binding.cpp`
 * `core/host/src/signal_graph_prepare.cpp`
 * `core/host/src/signal_graph_subgraph.cpp`
 * `core/host/src/spectral_graph.cpp`
@@ -425,6 +437,7 @@ that reuses existing graph, MIDI, trigger, and voice primitives.
 * `docs/graph-program-status/G-5.md`
 * `docs/graph-program-status/G-6.md`
 * `docs/graph-program-status/G-7.md`
+* `docs/graph-program-status/G-8.md`
 * `docs/graph-program-status/G-10.md`
 * `docs/graph-program-status/G-11.md`
 * `docs/graph-program-status/G-9.md`
@@ -434,6 +447,12 @@ that reuses existing graph, MIDI, trigger, and voice primitives.
 * `examples/g3-resolved-identity-consumer/main.cpp`
 * `examples/g5-event-consumer/check_trace.py`
 * `examples/spectral-frame-codec-consumer/main.cpp`
+* `docs/reference/advanced-dsp-api.md`
+* `docs/reference/modules.md`
+* `docs/reference/percussion-synthesis.md`
+* `core/signal/include/pulp/signal/scale_quantizer.hpp`
+* `core/midi/include/pulp/midi/step_player.hpp`
+* `core/playback/include/pulp/playback/program.hpp`
 * `docs/reference/2026-11-10-post-roadmap-audio-graph-opportunities.md`
 
 ### External architecture references
