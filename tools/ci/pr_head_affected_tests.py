@@ -723,14 +723,19 @@ def junit_outcomes(path: Path) -> dict[str, str]:
     return outcomes
 
 
-def junit_timeout_tests(path: Path) -> set[str]:
-    """Return tests CTest killed by its stop-time deadline."""
+def junit_timeout_tests(path: Path, minimum_seconds: float) -> set[str]:
+    """Return timeout tests whose own duration reached the stop-time deadline."""
     if not path.is_file():
         return set()
     timed_out: set[str] = set()
     for case in ET.parse(path).getroot().iter("testcase"):
         failure = case.find("failure")
-        if failure is not None and failure.get("message", "").strip().lower() == "timeout":
+        try:
+            duration = float(case.get("time", "0"))
+        except (TypeError, ValueError):
+            duration = 0.0
+        if (failure is not None and failure.get("message", "").strip().lower() == "timeout"
+                and duration + 1.0 >= minimum_seconds):
             timed_out.add(case.get("name", ""))
     return timed_out
 
@@ -786,9 +791,10 @@ def run_budgeted(build: Path, tests: list[str], budget: float, jobs: int,
                    "--repeat", "until-pass:2", "-j", str(jobs), "--output-junit", str(junit)]
         if label_exclude:
             command += ["-LE", label_exclude]
+        batch_started = time.monotonic()
         subprocess.run(command, check=False)
         outcomes = junit_outcomes(junit)
-        timeout_tests = junit_timeout_tests(junit)
+        timeout_tests = junit_timeout_tests(junit, max(0.0, deadline - batch_started))
         budget_timeout = time.monotonic() >= deadline
         results["failure_evidence"].update(junit_failure_evidence(junit))
         for test in batch:
@@ -804,7 +810,7 @@ def run_budgeted(build: Path, tests: list[str], budget: float, jobs: int,
                 # budget omission.  It is useful evidence but must not make
                 # the PR-head step red.
                 results["notrun"].append(test)
-            elif budget_timeout:
+            elif budget_timeout and junit.is_file():
                 # CTest may omit tests it never started after --stop-time.
                 results["skipped"].append(test)
             else:

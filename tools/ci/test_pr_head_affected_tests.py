@@ -11,6 +11,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -987,7 +988,7 @@ class BudgetTests(unittest.TestCase):
             "a = sys.argv\n"
             "names = open(a[a.index('--tests-from-file') + 1]).read().split()\n"
             "time.sleep(float(__import__('os').environ.get('FAKE_CTEST_SLEEP', '0')))\n"
-            "cases = ''.join(f'<testcase name=\"{n}\" status=\"{\"fail\" if n.startswith(\"bad\") else \"notrun\" if n.startswith(\"skip\") else \"run\"}\">'\n"
+            "cases = ''.join(f'<testcase name=\"{n}\" time=\"{__import__(\"os\").environ.get(\"FAKE_CTEST_SLEEP\", \"0\")}\" status=\"{\"fail\" if n.startswith(\"bad\") else \"notrun\" if n.startswith(\"skip\") else \"run\"}\">'\n"
             "                + ('<failure message=\"Timeout\"/>' if n.startswith('timeout') else '<failure/>' if n.startswith('bad') else '<skipped/>' if n.startswith('skip') else '') + '</testcase>' for n in names)\n"
             "open(a[a.index('--output-junit') + 1], 'w').write(f'<testsuite>{cases}</testsuite>')\n")
         (self.bin / "ctest").chmod(0o755)
@@ -1036,6 +1037,32 @@ class BudgetTests(unittest.TestCase):
             results = step.run_budgeted(self.tmp, plan["tests"], 0.2, 1, "", self.tmp, len(family))
         self.assertEqual(sorted(results["passed"]), family)
         self.assertEqual(results["skipped"], ["unit-a", "unit-b"])
+
+    def test_early_timeout_is_not_erased_by_later_budget_expiry(self) -> None:
+        calls = 0
+        def fake_ctest(command, check=False):
+            nonlocal calls
+            calls += 1
+            junit = Path(command[command.index("--output-junit") + 1])
+            if calls == 1:
+                time.sleep(0.01)
+                junit.write_text("<testsuite><testcase name=\"early\" time=\"120\" status=\"fail\"><failure message=\"Timeout\"/></testcase></testsuite>", encoding="utf-8")
+            else:
+                time.sleep(0.16)
+                junit.write_text("<testsuite><testcase name=\"late\" time=\"0.16\" status=\"run\"/></testsuite>", encoding="utf-8")
+        with mock.patch.object(step.subprocess, "run", side_effect=fake_ctest):
+            results = step.run_budgeted(self.tmp, ["early", "late"], 0.15, 1, "", self.tmp, 1,
+                                        priority_count=1)
+        self.assertEqual(results["failed"], ["early"])
+        self.assertEqual(results["passed"], ["late"])
+
+    def test_missing_junit_is_not_budget_skipped(self) -> None:
+        def no_junit(*args, **kwargs):
+            time.sleep(0.1)
+        with mock.patch.object(step.subprocess, "run", side_effect=no_junit):
+            results = step.run_budgeted(self.tmp, ["missing-junit"], 0.05, 1, "", self.tmp, 1)
+        self.assertEqual(results["skipped"], [])
+        self.assertEqual(results["excluded_or_absent"], ["missing-junit"])
 
     def test_ctest_deadline_timeout_is_budget_skipped(self) -> None:
         with mock.patch.dict(os.environ, {"FAKE_CTEST_SLEEP": "0.1"}):
