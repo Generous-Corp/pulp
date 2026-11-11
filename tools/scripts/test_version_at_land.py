@@ -1452,6 +1452,26 @@ class StandingBumpPrTest(unittest.TestCase):
         self.assertNotEqual(self._tip(), carried)
         self.assertTrue(fake.did("pr", "edit"))
 
+    def test_a_doomed_ejected_head_is_repaired_without_the_heal_opt_in(self) -> None:
+        """An ejected bump whose capability assignment main has outgrown can
+        never land; it is rebuilt even with the heal off, while an ejected
+        head that could still land keeps waiting for its owner."""
+        self.assertEqual(self._drain(_FakeGh(open_prs=0))[0], "pr-opened")
+        self._carry_capability_assignment()
+        carried = self._tip()
+        dead = dict(open_prs=1, covers=False, ejected=True, armed=False)
+
+        self._land("docs", "docs/note.md", "docs: unrelated note")
+        status, _ = self._drain(_FakeGh(**dead), coalesce_window=0)
+        self.assertEqual(status, "stale-defer")
+        self.assertEqual(self._tip(), carried)
+
+        self._land("header", "docs/status/agent-capability-surface/headers/pulp/a.hpp.json",
+                   "feat(signal): a public header")
+        status, _ = self._drain(_FakeGh(**dead), coalesce_window=0)
+        self.assertEqual(status, "pr-updated")
+        self.assertNotEqual(self._tip(), carried)
+
     def test_a_capability_landing_leaves_a_head_without_an_assignment_held(self) -> None:
         """Control: the same landing cannot doom a bump that assigns no
         capability counter, so the window still spaces its updates."""

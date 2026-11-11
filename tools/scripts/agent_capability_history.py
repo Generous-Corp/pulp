@@ -8,6 +8,7 @@ import os
 import pathlib
 import re
 import subprocess
+import sys
 from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
@@ -751,25 +752,34 @@ def _merge_group_protected_base(
     (`base_ref`), provided it is on the group's history and `base_sha`
     descends from it. Anything unproven keeps `base_sha`, the behaviour
     before this resolution existed."""
-    if not isinstance(base_ref, str) or not base_ref.startswith("refs/heads/"):
+    def keep(reason: str) -> str:
+        print(f"agent-capabilities: merge group judged against its queue parent "
+              f"{base_sha[:12]}, not the protected tip: {reason}", file=sys.stderr)
         return base_sha
+
+    if not isinstance(base_ref, str) or not base_ref.startswith("refs/heads/"):
+        return keep(f"base_ref {base_ref!r} names no branch")
     listed = _git_output(root, ["ls-remote", "--refs", "origin", base_ref])
     fields = (listed or "").split()
     tip = fields[0].lower() if fields else ""
-    if not re.fullmatch(r"[0-9a-f]{40}", tip) or tip == base_sha:
+    if tip == base_sha:
         return base_sha
+    if not re.fullmatch(r"[0-9a-f]{40}", tip):
+        return keep(f"could not read {base_ref} from origin")
     # A CI checkout is shallow; bring the group's own chain in reach so the
     # ancestry questions below are answerable. Deepening only adds history.
     head = _git_output(root, ["rev-parse", "--verify", "HEAD^{commit}"])
     if head is None:
-        return base_sha
+        return keep("HEAD does not resolve")
     if _git_output(root, ["rev-parse", "--is-shallow-repository"]) == "true":
         _git_output(root, ["fetch", "--no-tags", "--quiet",
                            f"--deepen={MERGE_GROUP_CHAIN_DEPTH}", "origin",
                            head])
     for descendant in (base_sha, head):
         if _git_output(root, ["merge-base", "--is-ancestor", tip, descendant]) is None:
-            return base_sha
+            return keep(f"{base_ref} tip {tip[:12]} is not an ancestor of {descendant[:12]}")
+    print(f"agent-capabilities: merge group judged against the protected tip "
+          f"{tip[:12]} of {base_ref} (queue parent {base_sha[:12]})", file=sys.stderr)
     return tip
 
 

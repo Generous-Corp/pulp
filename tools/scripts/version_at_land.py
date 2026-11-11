@@ -1455,7 +1455,10 @@ def apply_via_pr(
             return "stale-defer", plan
         if state == "queued":
             return "stale-wait", plan
-        if state in ("red", "dead") and not heal_stale:
+        if state in ("red", "dead") and not heal_stale and not (
+                tip is not None and _capability_assignment_is_stale(repo, tip, head)):
+            # A head whose capability assignment main has outgrown can never
+            # land, so repairing it needs no opt-in.
             return "stale-defer", plan
         if tip is None:
             # The branch could not be read, so there is nothing to compare
