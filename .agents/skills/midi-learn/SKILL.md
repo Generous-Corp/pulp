@@ -47,6 +47,8 @@ worked example is `examples/midi-learn-demo/`.
   outcome carries `refused_reason`), are dropped on load, and are skipped by
   `route()` even for an older saved mapping. `claims()` runs on the audio thread:
   no allocation or locks, and an omni source overlaps any channel the owner uses.
+- `MidiLearnSession` shows a refusal reason for `kRefusalShowMs`, but a learn that
+  binds clears it at once, so a retry that succeeds never shows the old reason.
 - Feedback never echoes a value the controller just wrote, and the first call
   after a mapping appears sends the current value so the controller can sync.
 - `midi_feedback_capabilities()` says what the adapter writes to the host's MIDI
