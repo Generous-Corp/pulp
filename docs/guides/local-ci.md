@@ -2374,6 +2374,20 @@ the job runs `brew install` there, so the update only downloaded a portable
 Ruby and the Homebrew API data on every gate job. A runner missing either tool
 (Namespace, GitHub-hosted) still updates before installing.
 
+## Base-poison hold and fix fast-track
+
+`[base_health]` in `.shipyard/config.toml` sets `merge_group_hold = "on"` and
+`auto_jump = "on"`. Each steward pass reads the newest merge groups; a required
+context that failed in two or more consecutive groups carrying different pull
+requests, with none common to all, marks the base poisoned. While it is
+poisoned the steward enqueues only a named fix (label `shipyard:unblock`, or a
+title or description naming the context beside a fix word) and reports every
+other approved green head as `held_base_poisoned:<context>`. `auto_jump` enqueues
+that fix at the front of the queue. The hold lifts when a merge group passes the
+context, and an unreadable merge-group history never holds anything. The
+reviewer kick and priority file are machine-only keys set in the machine-global
+Shipyard config, never in this file.
+
 ## Repository history and pinned archives from the tartci host cache
 
 A gate VM is fresh for every job, so without help each job re-downloads the

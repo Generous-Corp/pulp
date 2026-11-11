@@ -863,9 +863,15 @@ known_flaky_tests = []
 [base_health]
 # `shipyard base-health --act` records "would jump PR #n" once per poisoned
 # episode (tools/ci/base_poison_detector.py names the fix) and changes nothing.
-# `on` re-enqueues the fix with `jump: true`; it stays off until Shipyard checks
-# a trusted approval on the head it enqueues and survives a failed re-enqueue.
-auto_jump = "dry-run"
+# `on` re-enqueues the fix with `jump: true` (Shipyard checks a trusted approval
+# on the head it enqueues and falls back to a plain enqueue when a jump is
+# refused).
+auto_jump = "on"
+# With the hold on, a poisoned base (one required context failing in
+# consecutive merge groups with different PRs) enqueues only a named fix and
+# reports every other approved head as held. The reviewer kick and priority
+# file are machine-global keys and are not set here.
+merge_group_hold = "on"
 
 [train]
 # Shipyard's merge train, read-only (phase 1): `shipyard train status

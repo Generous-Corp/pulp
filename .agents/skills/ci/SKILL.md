@@ -13569,3 +13569,13 @@ fails at once on other 4xx. Workflows call `python3
 tools/scripts/download_retry.py URL DEST` instead of a bare `curl -fsSL`; keep
 the sha256 check after it. A script copied into a temp tree must copy the
 helper too.
+
+## `[base_health]` holds the queue when the base is poisoned
+
+`.shipyard/config.toml` sets `merge_group_hold = "on"` and `auto_jump = "on"`.
+When one required context fails in consecutive merge groups with different
+pull requests, the steward enqueues only a named fix (label `shipyard:unblock`
+or a title naming the context beside a fix word) and reports other approved
+heads as `held_base_poisoned:<context>`. A held head is not broken: do not
+re-push it, the hold lifts once a merge group passes the context. The reviewer
+kick and priority file are machine-only keys and must stay out of this file.
