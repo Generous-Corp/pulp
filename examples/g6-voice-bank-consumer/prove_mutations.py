@@ -89,6 +89,11 @@ MUTATIONS = {
         "if (!scope.manager)\n            return true;",
         "member-panic-preserves-other",
     ),
+    "accept_invalid_deferred_expression": (
+        "if (!valid_deferred_expression(kind, state, impl_->tracker.member_bend_range(state.channel)))",
+        "if (false)",
+        "deferred-expression-refusal",
+    ),
 }
 
 

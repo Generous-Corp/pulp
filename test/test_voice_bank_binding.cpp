@@ -301,6 +301,65 @@ TEST_CASE("G6 binding refuses wrong shape and stale deferred generations",
                                   state) == VoiceBankBindingCode::StaleEpoch);
 }
 
+TEST_CASE("G6 deferred expression rejects non-finite and out-of-range state before dispatch",
+          "[host][graph][g6][expression][validation]") {
+    struct Case {
+        midi::MpeExpressionEvent::Kind kind;
+        float value;
+        bool valid;
+    };
+    const auto cases = std::array{
+        Case{midi::MpeExpressionEvent::Kind::PitchBend, 1.0f, true},
+        Case{midi::MpeExpressionEvent::Kind::Pressure, 0.5f, true},
+        Case{midi::MpeExpressionEvent::Kind::Timbre, 0.5f, true},
+        Case{midi::MpeExpressionEvent::Kind::PitchBend, std::numeric_limits<float>::quiet_NaN(),
+             false},
+        Case{midi::MpeExpressionEvent::Kind::PitchBend, std::numeric_limits<float>::infinity(),
+             false},
+        Case{midi::MpeExpressionEvent::Kind::Pressure, std::numeric_limits<float>::quiet_NaN(),
+             false},
+        Case{midi::MpeExpressionEvent::Kind::Pressure, -std::numeric_limits<float>::infinity(),
+             false},
+        Case{midi::MpeExpressionEvent::Kind::Timbre, std::numeric_limits<float>::quiet_NaN(),
+             false},
+        Case{midi::MpeExpressionEvent::Kind::Timbre, std::numeric_limits<float>::infinity(), false},
+        Case{midi::MpeExpressionEvent::Kind::Pressure, -0.01f, false},
+        Case{midi::MpeExpressionEvent::Kind::Timbre, 1.01f, false},
+    };
+    for (const auto& test : cases) {
+        VoiceBankBindingResult status;
+        auto bank = make_bank(schema(), status);
+        REQUIRE(bank);
+        REQUIRE(step(*bank, 0, {midi::MidiEvent::note_on(1, 69, 127)}) == VoiceBankBindingCode::Ok);
+        const auto generation = owner(*bank).allocator().voice(0).note_id();
+        midi::MpeNoteState state{};
+        state.note_id = generation;
+        state.channel = 1;
+        state.note = 69;
+        state.velocity = 127;
+        if (test.kind == midi::MpeExpressionEvent::Kind::PitchBend)
+            state.pitch_bend_semitones = test.value;
+        else if (test.kind == midi::MpeExpressionEvent::Kind::Pressure)
+            state.pressure = test.value;
+        else
+            state.timbre = test.value;
+        const auto result = bank->dispatch_deferred(bank->epoch(), 0, generation, test.kind, state);
+        CHECK(result ==
+              (test.valid ? VoiceBankBindingCode::Ok : VoiceBankBindingCode::IngressFailure));
+        REQUIRE(step(*bank, 1, {}) == VoiceBankBindingCode::Ok);
+        const auto& voice = owner(*bank).allocator().voice(0);
+        if (test.valid) {
+            CHECK(std::isfinite(voice.pitch_bend()));
+            CHECK(std::isfinite(voice.pressure()));
+            CHECK(std::isfinite(voice.timbre()));
+        } else {
+            CHECK(voice.pitch_bend() == 0.0f);
+            CHECK(voice.pressure() == 0.0f);
+            CHECK(voice.timbre() == 0.0f);
+        }
+    }
+}
+
 TEST_CASE("G6 malformed supported-kind MIDI refuses before rendering or voice dispatch",
           "[host][graph][g6][ingress]") {
     VoiceBankBindingResult status;

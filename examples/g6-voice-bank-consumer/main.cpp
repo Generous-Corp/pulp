@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <vector>
@@ -27,6 +28,9 @@ struct Stereo {
     std::vector<float> left;
     std::vector<float> right;
 };
+
+VoiceBankBindingCode step(VoiceBankBinding& bank, std::uint64_t sample,
+                          std::initializer_list<midi::MidiEvent> messages);
 
 Stereo render(std::size_t partition) {
     VoiceBankBindingResult status;
@@ -139,6 +143,65 @@ void check_state_and_generation() {
                                   midi::MpeExpressionEvent::Kind::NoteOff,
                                   note) == VoiceBankBindingCode::StaleEpoch,
           "stale-epoch-refusal");
+}
+
+void check_deferred_expression_validation() {
+    struct Case {
+        midi::MpeExpressionEvent::Kind kind;
+        float value;
+        bool valid;
+    };
+    const auto cases = std::array{
+        Case{midi::MpeExpressionEvent::Kind::PitchBend, 1.0f, true},
+        Case{midi::MpeExpressionEvent::Kind::Pressure, 0.5f, true},
+        Case{midi::MpeExpressionEvent::Kind::Timbre, 0.5f, true},
+        Case{midi::MpeExpressionEvent::Kind::PitchBend, std::numeric_limits<float>::quiet_NaN(),
+             false},
+        Case{midi::MpeExpressionEvent::Kind::PitchBend, std::numeric_limits<float>::infinity(),
+             false},
+        Case{midi::MpeExpressionEvent::Kind::Pressure, std::numeric_limits<float>::quiet_NaN(),
+             false},
+        Case{midi::MpeExpressionEvent::Kind::Pressure, -std::numeric_limits<float>::infinity(),
+             false},
+        Case{midi::MpeExpressionEvent::Kind::Timbre, std::numeric_limits<float>::quiet_NaN(),
+             false},
+        Case{midi::MpeExpressionEvent::Kind::Timbre, std::numeric_limits<float>::infinity(), false},
+        Case{midi::MpeExpressionEvent::Kind::Pressure, -0.01f, false},
+        Case{midi::MpeExpressionEvent::Kind::Timbre, 1.01f, false},
+    };
+    for (const auto& test : cases) {
+        VoiceBankBindingResult status;
+        auto bank = make_bank(schema(), status);
+        check(static_cast<bool>(bank), "deferred-expression-prepare");
+        check(step(*bank, 0, {midi::MidiEvent::note_on(1, 69, 127)}) == VoiceBankBindingCode::Ok,
+              "deferred-expression-note");
+        const auto generation = owner(*bank).allocator().voice(0).note_id();
+        midi::MpeNoteState state{};
+        state.note_id = generation;
+        state.channel = 1;
+        state.note = 69;
+        state.velocity = 127;
+        if (test.kind == midi::MpeExpressionEvent::Kind::PitchBend)
+            state.pitch_bend_semitones = test.value;
+        else if (test.kind == midi::MpeExpressionEvent::Kind::Pressure)
+            state.pressure = test.value;
+        else
+            state.timbre = test.value;
+        const auto result = bank->dispatch_deferred(bank->epoch(), 0, generation, test.kind, state);
+        check(result ==
+                  (test.valid ? VoiceBankBindingCode::Ok : VoiceBankBindingCode::IngressFailure),
+              test.valid ? "deferred-expression-accepted" : "deferred-expression-refusal");
+        check(step(*bank, 1, {}) == VoiceBankBindingCode::Ok, "deferred-expression-render");
+        const auto& voice = owner(*bank).allocator().voice(0);
+        if (test.valid) {
+            check(std::isfinite(voice.pitch_bend()) && std::isfinite(voice.pressure()) &&
+                      std::isfinite(voice.timbre()),
+                  "deferred-expression-finite");
+        } else {
+            check(voice.pitch_bend() == 0.0f && voice.pressure() == 0.0f && voice.timbre() == 0.0f,
+                  "deferred-expression-atomic-refusal");
+        }
+    }
 }
 
 void check_capacity_and_poly_pressure() {
@@ -638,6 +701,7 @@ int main() {
         }
         check_steal_policies();
         check_state_and_generation();
+        check_deferred_expression_validation();
         check_capacity_and_poly_pressure();
         check_eight_voice_sum();
         check_expression_audio();

@@ -16,6 +16,23 @@ namespace {
 
 constexpr std::uint32_t kSlots = 8;
 
+bool valid_deferred_expression(midi::MpeExpressionEvent::Kind kind, const midi::MpeNoteState& state,
+                               float member_bend_range) noexcept {
+    switch (kind) {
+    case midi::MpeExpressionEvent::Kind::PitchBend:
+        return std::isfinite(state.pitch_bend_semitones) && std::isfinite(member_bend_range) &&
+               std::abs(state.pitch_bend_semitones) <= member_bend_range;
+    case midi::MpeExpressionEvent::Kind::Pressure:
+        return std::isfinite(state.pressure) && state.pressure >= 0.0f && state.pressure <= 1.0f;
+    case midi::MpeExpressionEvent::Kind::Timbre:
+        return std::isfinite(state.timbre) && state.timbre >= 0.0f && state.timbre <= 1.0f;
+    case midi::MpeExpressionEvent::Kind::NoteOn:
+    case midi::MpeExpressionEvent::Kind::NoteOff:
+        return true;
+    }
+    return false;
+}
+
 bool valid_schema(const VoiceBankManifest& manifest, const SubgraphTemplate& definition,
                   const VoiceBankOwner& owner, std::string_view stereo_port,
                   VoiceBankBindingResult& result) {
@@ -572,6 +589,8 @@ VoiceBankBindingCode VoiceBankBinding::dispatch_deferred(std::uint64_t epoch, st
     if (slot >= kSlots || generation == 0 || !impl_->owner->live(slot, generation, kind, state) ||
         state.note_id != generation)
         return VoiceBankBindingCode::StaleGeneration;
+    if (!valid_deferred_expression(kind, state, impl_->tracker.member_bend_range(state.channel)))
+        return VoiceBankBindingCode::IngressFailure;
     if (kind == midi::MpeExpressionEvent::Kind::NoteOff && impl_->pedal_down(state.channel)) {
         if (!impl_->held[slot].active || impl_->held[slot].state.note_id != generation)
             impl_->held[slot] = {epoch, state, true};
