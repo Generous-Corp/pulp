@@ -13,6 +13,7 @@
 namespace pulp::examples::g6 {
 using namespace pulp;
 using namespace pulp::host;
+inline constexpr float kBankGain = 0.3535533905932738f;
 
 class ProbeVoice final : public midi::MpeSynthVoice {
   public:
@@ -35,8 +36,12 @@ class ProbeVoice final : public midi::MpeSynthVoice {
         release_frame_ = 0;
     }
     void render(float* out, int frames) override {
+        render_stereo(out, nullptr, frames);
+    }
+    void render_stereo(float* left, float* right, int frames) {
         for (int i = 0; i < frames; ++i) {
-            float sample = 0.0f;
+            float left_sample = 0.0f;
+            float right_sample = 0.0f;
             if (active()) {
                 advance_smoothers();
                 const double frequency =
@@ -46,14 +51,19 @@ class ProbeVoice final : public midi::MpeSynthVoice {
                                                     : static_cast<float>(3.0 - 4.0 * phase_);
                 const float factor =
                     releasing() ? (4.0f - static_cast<float>(release_frame_)) * 0.25f : 1.0f;
-                sample = triangle * (static_cast<float>(velocity()) / 127.0f) * factor;
+                const float source = triangle * (static_cast<float>(velocity()) / 127.0f);
+                const float shaped = source * factor;
+                left_sample = shaped * (1.0f + 0.25f * pressure());
+                right_sample = shaped * (0.5f + 0.25f * timbre());
                 phase_ += frequency / rate_;
                 if (phase_ >= 1.0)
                     phase_ -= 1.0;
                 if (releasing() && ++release_frame_ == 4)
                     finish_release();
             }
-            out[i] = sample;
+            left[i] = left_sample;
+            if (right)
+                right[i] = right_sample;
         }
     }
 
@@ -87,10 +97,12 @@ class ProbeProcessor final : public format::Processor {
                  midi::MidiBuffer&, midi::MidiBuffer&, const format::ProcessContext&) override {
         auto* left = output.channel_ptr(0);
         auto* right = output.channel_ptr(1);
-        voice_.render(left, static_cast<int>(output.num_samples()));
-        const float gain = state().get_value(1) * 0.125f;
-        for (std::size_t i = 0; i < output.num_samples(); ++i)
-            right[i] = left[i] = left[i] * gain;
+        voice_.render_stereo(left, right, static_cast<int>(output.num_samples()));
+        const float gain = state().get_value(1) * kBankGain;
+        for (std::size_t i = 0; i < output.num_samples(); ++i) {
+            left[i] *= gain;
+            right[i] *= gain;
+        }
     }
 
   private:
@@ -115,9 +127,10 @@ SubgraphTemplate definition() {
     return t;
 }
 
-std::unique_ptr<VoiceBankBinding> make_bank(const VoiceTemplateSchema& authored,
-                                            VoiceBankBindingResult& status,
-                                            SubgraphTemplate declared = definition()) {
+std::unique_ptr<VoiceBankBinding>
+make_bank(const VoiceTemplateSchema& authored, VoiceBankBindingResult& status,
+          SubgraphTemplate declared = definition(),
+          midi::MpeConfig config = midi::MpeConfig::standard_lower()) {
     auto owner = std::make_unique<MpeVoiceBankOwner<ProbeVoice>>(
         [](ProbeVoice& voice, std::uint32_t) -> std::unique_ptr<format::Processor> {
             return std::make_unique<ProbeProcessor>(voice);
@@ -125,7 +138,7 @@ std::unique_ptr<VoiceBankBinding> make_bank(const VoiceTemplateSchema& authored,
         std::array<VoiceBankInputEndpoint, 4>{
             {{"note_in", 0}, {"pitch", 1}, {"pressure", 2}, {"timbre", 3}}});
     return VoiceBankBinding::prepare(authored, std::move(declared), std::move(owner), "audio_out",
-                                     48000, 256, status);
+                                     48000, 256, status, config);
 }
 
 const auto& owner(const VoiceBankBinding& bank) {

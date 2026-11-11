@@ -254,10 +254,10 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         'include': 'pulp/host/voice_bank_binding.hpp',
-        'fingerprint': 'sha256:421676961c308c12521087267a79fbc5d063dabbd1ed36aae1c931678191685c',
+        'fingerprint': 'sha256:d622f444c145ccced476407b97bc62f59912601d4804dc557e4d022882d503a4',
         'disposition': 'infrastructure',
         'capability_keys': [],
-        'rationale': 'Bounded eight-slot graph voice-bank runtime; sustain, saved activation, and paced realtime qualification remain open.',
+        'rationale': 'Bounded eight-slot graph voice-bank runtime with sustain; saved activation and paced realtime qualification remain open.',
     },
     {
         'include': 'pulp/audio/buffer.hpp',
@@ -897,7 +897,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/midi/mpe_synth_voice.hpp",
-        "fingerprint": "sha256:2426bb49591fb4510aaab4a70931899c4928793f34b23935f14b6af19c918db4",
+        "fingerprint": "sha256:d1f0721725aece5c13976d039d131baea39436f4191df8c0de1ec5606c31be5a",
         "disposition": "capability_support",
         "capability_keys": ["midi.mpe-voice-tracker"],
         "rationale": (

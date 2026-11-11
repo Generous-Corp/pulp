@@ -1,7 +1,7 @@
 {
   "domain": "midi",
   "source": "core/midi/include/pulp/midi/mpe_synth_voice.hpp",
-  "fingerprint": "sha256:2426bb49591fb4510aaab4a70931899c4928793f34b23935f14b6af19c918db4",
+  "fingerprint": "sha256:d1f0721725aece5c13976d039d131baea39436f4191df8c0de1ec5606c31be5a",
   "include": "pulp/midi/mpe_synth_voice.hpp",
   "disposition": "capability_support",
   "capability_keys": [
