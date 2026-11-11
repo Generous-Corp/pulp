@@ -897,6 +897,37 @@ if [ -f "$HOTSPOT_EDIT_GUARD" ]; then
     esac
 fi
 
+# Run the same bounded PR-head affected-test selector that CI uses while a
+# configured build is available locally.  This moves deterministic PR-owned
+# failures ahead of the merge group, where one red test would otherwise eject
+# every batch entry.  Gate hosts deliberately report NOT CHECKED: their local
+# build capacity is reserved for CI VMs, and the required macOS job remains the
+# authority there.
+PREPUSH_AFFECTED_TESTS="$ROOT/tools/scripts/prepush_affected_tests.py"
+if [ -f "$PREPUSH_AFFECTED_TESTS" ]; then
+    if [ "$_prepush_gate_host" -eq 1 ]; then
+        echo "[pre-push] affected tests: NOT CHECKED on a gate host; CI runs the PR-head lane." >&2
+    elif [ "${PULP_SKIP_PREPUSH_AFFECTED:-0}" = "1" ]; then
+        echo "[pre-push] affected tests: NOT CHECKED via PULP_SKIP_PREPUSH_AFFECTED=1; CI remains authoritative." >&2
+    else
+        run_gate_captured "$PYTHON" "$PREPUSH_AFFECTED_TESTS" --root "$ROOT" --base "$BASE"
+        gate_rc=$?
+        case $gate_rc in
+            0) ;;
+            77)
+                if [ "${PULP_ALLOW_PREPUSH_AFFECTED_NOT_CHECKED:-0}" = "1" ]; then
+                    echo "[pre-push] affected tests: NOT CHECKED; explicit override allows this push." >&2
+                else
+                    echo "[pre-push] affected tests: NOT CHECKED. Configure a build or set PULP_ALLOW_PREPUSH_AFFECTED_NOT_CHECKED=1 with a reason." >&2
+                    prepush_fail
+                fi
+                ;;
+            1) echo "[pre-push] affected tests: a PR-head test failed; repair it before pushing." >&2; prepush_fail ;;
+            *) gate_could_not_run "prepush_affected_tests" "$gate_rc"; prepush_fail ;;
+        esac
+    fi
+fi
+
 # Changed-surface script families, build-free half. Adding, removing or
 # re-reading a tools/scripts/*.py changes the generated
 # .shipyard/changed-surface-families.toml, and the required macos gate's
