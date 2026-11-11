@@ -1696,9 +1696,14 @@ identity re-keys on every configure, by declaration rather than by learning it
 from history. Without a Ninja log the record warns that generated headers are
 not keyed.
 
-When a merge-group `macos` ctest fails, the job also annotates a **flake
+When a merge-group `macos` ctest fails, the run also annotates a **flake
 exoneration verdict in shadow mode** (`pulp-flake-exoneration-shadow/v1`,
-from `tools/ci/flake_exoneration_shadow.py`): for each failing test, whether
+from `tools/ci/flake_exoneration_shadow.py`). It runs in the advisory
+`flake-exoneration-shadow (advisory)` job after `build`, reading the macOS
+leg's uploaded `ctest-logs-macos` JUnit, not inside `macos`: the shadow
+changes no outcome and needs only the JUnit and the GitHub API, so the red
+gate job finishes (and the queue ejects the group) without waiting about 95 s
+for it. The instrument reports, for each failing test, whether
 it failed on at least two other heads in the last 24 hours (other runs'
 `ctest-logs-macos` artifacts) and passes on main's tip, judged by the tip's
 required gate job, Chromium's `OCCURS_ON_OTHER_CLS`. It exonerates nothing;

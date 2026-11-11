@@ -123,3 +123,11 @@ TEST_CASE("G3 identity undo is value-owned") {
     CHECK(restored.front().name == "drive");
     CHECK(restored.front().index == 3);
 }
+
+TEST_CASE("G3 resolved identity refuses forged empty capture") {
+    pulp::host::PreparedDescriptionData forged;
+    forged.typed_resolved_capture = true;
+    const auto result = pulp::host::resolved_fingerprint(forged);
+    REQUIRE_FALSE(result);
+    REQUIRE(result.error() == pulp::host::GraphIdentityError::UnsupportedPreparedProfile);
+}

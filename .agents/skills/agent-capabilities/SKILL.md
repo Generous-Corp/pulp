@@ -32,6 +32,34 @@ was a single integer every open branch raced for; one merge staled the rest.
   later bump moves the version, it is skipped. See
   `docs/guides/release-watchdog.md`.
 
+### A bump's assignment is only valid on the main it was cut from
+
+`--assign-pending` assigns the material of the commit the bump PR was cut
+from. Any later landing that changes capability material (a public header, a
+capability record) leaves the bump naming a state `main` no longer has, and
+every merge group that carries it fails `--check` with `records a state that
+is neither the protected base's own state nor its version-at-land assignment`
+and `surface inventory_version changed without a surface change`. Merging
+`main` into the bump does not help; it has to be rebuilt. Two consequences
+are wired in:
+
+- `version_at_land.py` rebuilds a standing bump PR that carries a capability
+  assignment as soon as a capability landing outgrows it, without waiting out
+  `PULP_BUMP_COALESCE_MINUTES` (`_capability_assignment_is_stale`), and
+  repairs such a head after an ejection or a red check even when
+  `PULP_BUMP_HEAL_STALE_PR` is off, since it can never land. It still never
+  pushes to a bump PR that is in the merge queue.
+- A `merge_group` run judges the group against the protected branch tip
+  (`merge_group.base_ref`), not `merge_group.base_sha`, which is the previous
+  queue entry. Judged against its queue parent, a group behind a doomed bump
+  validated only its own increment, went green, and the HEADGREEN queue
+  landed the doomed bump with it. `main` then failed `--check` against its own
+  parent and every capability-touching PR that merged `main` inherited the red
+  until the next bump. The tip is used only when it is on the group's history
+  and `base_sha` descends from it; otherwise `base_sha` is kept. Either way the
+  run's stderr names the base it used (`merge group judged against ...`), so
+  read that line first when a bump lands red.
+
 The sections below that say "increase the counter" describe the hand-bump
 flow that branches no longer need; leave the constants alone instead.
 
