@@ -117,15 +117,33 @@ def matches(actual, case, tolerance):
                for sample, expected in zip(channel, expected_channel))
 
 
-def main():
-    data = json.loads(FIXTURE.read_text(encoding="utf-8"))
-    profile = data["reference_profile"]
+def check_profile(profile):
     if (profile["slot_count"] != 8 or profile["sample_rate_hz"] != 48000 or
             profile["gain_law"] != "fixed_rms_bank_v1" or
             profile["channel_shape"] != "stereo_identity" or
             profile["release_curve"] != "linear" or
             profile["tail_policy"] != "hard_termination_v1"):
-        raise SystemExit("unsupported A1 reference profile")
+        raise ValueError("unsupported A1 reference profile")
+    # The gain law is defined here, not by the fixture: fixed_rms_bank_v1 is
+    # 1/sqrt(slot_count). A fixture that rescales bank_gain together with its
+    # expected samples must not pass on its own say-so.
+    if f32(profile["bank_gain"]) != f32(1 / math.sqrt(profile["slot_count"])):
+        raise ValueError("A1 bank_gain differs from the fixed_rms_bank_v1 law")
+
+
+def main():
+    data = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    profile = data["reference_profile"]
+    try:
+        check_profile(profile)
+    except ValueError as error:
+        raise SystemExit(str(error))
+    try:
+        check_profile(dict(profile, bank_gain=profile["bank_gain"] * 2))
+    except ValueError:
+        pass
+    else:
+        raise SystemExit("A1 planted negative escaped the gain-law check: rescaled_bank_gain")
     tolerance = profile["numeric_tolerance"]
     if any(not math.isfinite(tolerance[key]) or tolerance[key] <= 0
            for key in ("absolute", "relative")):
