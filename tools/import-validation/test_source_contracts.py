@@ -149,7 +149,11 @@ class SourceContractsTest(unittest.TestCase):
         registry, entry = self.mutate("stitch")
         entry["last_verified"] = "2020-01-01"
         entry["recheck_interval_days"] = 1
-        self.assert_has_code(registry, "stale-source-contract")
+        with tempfile.TemporaryDirectory() as td:
+            findings = _findings(registry, Path(td))
+        stale = [finding for finding in findings if finding.code == "stale-source-contract"]
+        self.assertEqual(len(stale), 1, [str(f) for f in findings])
+        self.assertEqual(stale[0].severity, "info")
 
     def test_unverified_source_contract_warns(self) -> None:
         registry, entry = self.mutate("figma")
@@ -368,7 +372,7 @@ class SourceContractsTest(unittest.TestCase):
         self.assertIn("message with \\| pipe", markdown)
         self.assertIn("`pipe-code`", markdown)
 
-    def test_strict_flips_exit_code_only_on_warnings(self) -> None:
+    def test_strict_rejects_unverified_contract(self) -> None:
         registry = _load_registry()
         _contract(registry, "figma")["last_verified"] = "unverified"
         with tempfile.TemporaryDirectory() as td:
@@ -385,6 +389,48 @@ class SourceContractsTest(unittest.TestCase):
             strict = subprocess.run(base_cmd + ["--strict"], check=False, capture_output=True, text=True)
         self.assertEqual(non_strict.returncode, 0, non_strict.stdout + non_strict.stderr)
         self.assertEqual(strict.returncode, 1, strict.stdout + strict.stderr)
+
+    def test_strict_reports_overdue_contract_but_exits_zero(self) -> None:
+        registry = _load_registry()
+        entry = _contract(registry, "stitch")
+        entry["last_verified"] = "2020-01-01"
+        entry["recheck_interval_days"] = 1
+        with tempfile.TemporaryDirectory() as td:
+            registry_path = _write_registry(Path(td), registry)
+            cmd = [
+                sys.executable,
+                str(CHECKER_PATH),
+                "--root",
+                str(ROOT),
+                "--registry",
+                str(registry_path),
+                "--strict",
+            ]
+            result = subprocess.run(
+                cmd, check=False, capture_output=True, text=True, encoding="utf-8"
+            )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("[info] stale-source-contract stitch", result.stdout)
+
+    def test_strict_rejects_malformed_contract_date(self) -> None:
+        registry = _load_registry()
+        _contract(registry, "stitch")["last_verified"] = "not-a-date"
+        with tempfile.TemporaryDirectory() as td:
+            registry_path = _write_registry(Path(td), registry)
+            cmd = [
+                sys.executable,
+                str(CHECKER_PATH),
+                "--root",
+                str(ROOT),
+                "--registry",
+                str(registry_path),
+                "--strict",
+            ]
+            result = subprocess.run(
+                cmd, check=False, capture_output=True, text=True, encoding="utf-8"
+            )
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("invalid-last-verified", result.stdout)
 
     def test_strict_real_registry_has_clean_exit(self) -> None:
         cmd = [
