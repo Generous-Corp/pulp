@@ -539,10 +539,25 @@ if(PULP_ENABLE_PROJECT_PACKAGE)
         TIMEOUT 180)
 endif()
 
+if(TARGET pulp-host)
+    add_test(NAME cmake-spectral-asset-morph-consumer
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            "-DPULP_PARENT_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+            "-DPULP_PARENT_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
+            "-DPULP_PARENT_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
+            "-DPULP_PARENT_INSTRUMENTATION_CXX_FLAGS=${_sdk_consumer_instrumentation_compile_flags}"
+            "-DPULP_PARENT_INSTRUMENTATION_LINKER_FLAGS=${_sdk_consumer_instrumentation_link_flags}"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_spectral_asset_morph_consumer.cmake)
+    set_tests_properties(cmake-spectral-asset-morph-consumer PROPERTIES
+        LABELS "cmake;sdk;host;spectral;slow" TIMEOUT 300)
+endif()
+
 # Installed-SDK consumer of the offline canonical spectral-frame codec. This
 # stages the producer's export, configures the external example through
-# find_package(Pulp COMPONENTS signal), and runs both its exact roundtrip and
-# planted unknown-profile rejection controls.
+# find_package(Pulp COMPONENTS signal), and runs its exact roundtrip plus
+# planted profile and analyzed-frame chronology rejection controls.
 if(TARGET pulp-signal)
     add_test(NAME cmake-spectral-frame-codec-consumer
         COMMAND ${CMAKE_COMMAND}

@@ -830,11 +830,12 @@ a `schema` string next to the older `schema_version` integer, and its
 `--absolute-paths` to get the path back), so match `scenario` on the basename.
 The same document shape is what `pulp audio render --manifest` and the
 failing-scenario artifacts write, so all three share the
-one schema id. When `summarize` refuses a file because its header declares
-more than the format registry's decode ceiling (2^30 frames, 4 GiB of float
-output), stderr names the limit and points at `pulp audio inspect`, which
-reads the header without decoding; "could not decode" on a big file is a
-limit, not corruption.
+one schema id. When `summarize` refuses a file past the format registry's
+decode ceiling (2^30 frames, 4 GiB of float output), stderr names the limit
+and points at `pulp audio inspect`, which reads the header without decoding.
+For a WAV the ceiling binds the frames the file holds. A WAV whose header
+claims frames it does not hold is refused with the decoder's own reason, such
+as "holds no whole frame", not as a limit.
 
 `pulp audio inspect <file>` is the header-only companion: regions with
 offsets, parsed fields, spec-violation warnings, the in-memory decoder's
@@ -968,6 +969,11 @@ harness or `ctest`.
   with its reason (a Pulp contract or a tracked issue); an unlisted split, or a listed
   one that stops happening, fails the test, and the sample comparison is never relaxed. Lossy
   seeds stay out because libsndfile's Ogg/MP3 paths are different codecs from Pulp's.
+  Truncated WAV seeds (data past EOF, a lying size) are compared, not split: Pulp and
+  libsndfile both decode the whole frames present, bit for bit. The WAV splits are files
+  libsndfile refuses and Pulp accepts on purpose (BW64, a byte-identical repeated fmt, fmt
+  after data) plus the block-align contradiction Pulp refuses; a new WAV split means the two
+  acceptance policies diverged, so check `wave_layout.hpp` before adding a row.
 - **Synth-guidance experiment:** `tools/rack/fidelity.py patch.vcv --wav render.wav`
   writes only the speaker-bound audio taps, using one shared peak-normalization gain while
   refusing a silent source and content-binding original Rack voltage levels in the adjacent
@@ -1430,6 +1436,31 @@ true. Through the CLI a refusal is exit 2, distinct from a failed check.
 
 Every one of those paths previously returned a confident number that passed a
 gate. If a refusal surprises you, the input is usually wrong — not the tool.
+
+## Comparing two FFT implementations
+
+To prove a new or ported FFT against another, compare the same frames under
+`assert_null_near` and prove the comparison can fail. The worked example is
+`test/test_fft_parity_recipe.cpp`.
+
+1. An FFT output is complex and `assert_null_near` compares audio buffers, so
+   build a two-channel `Buffer<float>` per frame (channel 0 real, channel 1
+   imaginary) divided by the reference's peak. The dBFS tolerance then reads as a
+   relative error; -110 dBFS holds float transforms at every size tested.
+2. The reference must not be derived from the implementation under test: a
+   double-precision radix-2 with long-double twiddles, or recorded frames from
+   the other implementation.
+3. Prove the floor with negative controls. Run the identical assertion on a
+   candidate with a known defect, a conjugated output (the sign-convention slip)
+   and the same data scaled by 1/N, and require both to FAIL. A comparison that
+   also passes for them measures nothing.
+
+Two limits to state in any report. The two implementations agree to rounding, not
+bit for bit: the float backends differ from each other in the last bits, so never
+`memcmp` across backends. For a fixed arithmetic use `FftT<double>` (always the
+built-in transform) and a committed golden, as `test_fft_double_golden.cpp` does.
+That test passing on one host does not prove other platforms match; the hosted
+Linux and Windows lanes are the check.
 
 ## Measuring an oscillator's pitch — `estimate_pitch`, not `estimate_frequency`
 

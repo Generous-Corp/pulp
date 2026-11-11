@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/sample_mip_sidecar.hpp",
+  "fingerprint": "sha256:06b3ea7ec7b79c6090a81aeec970a5985cc5d50c79f98fa8edf3b7c265dc4583",
+  "include": "pulp/audio/sample_mip_sidecar.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

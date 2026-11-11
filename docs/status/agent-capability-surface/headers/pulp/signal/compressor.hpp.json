@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/compressor.hpp",
+  "fingerprint": "sha256:f75d915e4d7f6ac4fc70bcef81454146163aa5f647c80b185c563846e84fd8b3",
+  "include": "pulp/signal/compressor.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "signal.dynamics-envelope-contract"
+  ],
+  "rationale": "Existing dynamics processor adopting the shared exact envelope or canonical non-negative gain-reduction telemetry contract; its topology is not a new capability claim in this slice."
+}

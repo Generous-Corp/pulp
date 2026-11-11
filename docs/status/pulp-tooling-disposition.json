@@ -2196,6 +2196,10 @@
             "required": true
           },
           {
+            "name": "--notation",
+            "kind": "flag"
+          },
+          {
             "name": "--json",
             "kind": "flag"
           },
@@ -4913,6 +4917,10 @@
         "disposition": "excluded"
       },
       {
+        "name": "midi-learn",
+        "disposition": "excluded"
+      },
+      {
         "name": "mise",
         "disposition": "pulp-owned"
       },
@@ -5287,7 +5295,7 @@
       {
         "name": "claude-marketplace:pulp",
         "disposition": "pulp-owned",
-        "version": "0.515.4",
+        "version": "0.520.3",
         "source": "./",
         "min_cli_version": "0.31.0",
         "registration_keys": [
@@ -5302,13 +5310,13 @@
           "version"
         ],
         "catalog_name": "pulp",
-        "catalog_version": "0.515.4",
+        "catalog_version": "0.520.3",
         "catalog_metadata_version": "1.0.0"
       },
       {
         "name": "claude-plugin:pulp",
         "disposition": "pulp-owned",
-        "version": "0.515.4",
+        "version": "0.520.3",
         "commands": "./.claude/commands",
         "skills": "./.agents/skills",
         "registration_keys": [

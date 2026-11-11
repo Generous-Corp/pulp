@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/gain.hpp",
+  "fingerprint": "sha256:26ea4471471e1af735f3d3e10d795212e9a351c89c50f39d45783802107a557c",
+  "include": "pulp/signal/gain.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "GainT is a composable signal processor used by plugins and graph nodes; its optional smoothing API is implementation infrastructure rather than an independently advertised generator-facing capability."
+}

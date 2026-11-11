@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/fft_backend.hpp",
+  "fingerprint": "sha256:ce81fc902e0aa8fa25c0d414a943a0189fd85f7755aba433052600e3167c5cc1",
+  "include": "pulp/signal/fft_backend.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

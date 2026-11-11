@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/lfo_sampling.hpp",
+  "fingerprint": "sha256:214e987fd3a805efa820889090dfd2bbb662fc58052f49ca959d7606306c3837",
+  "include": "pulp/signal/lfo_sampling.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "signal.unison-voice-primitives"
+  ],
+  "rationale": "Pure sampling of an LFO waveform without aliasing: the interval mean a block-rate consumer takes and the polyBLEP / polyBLAMP waveform an audio-rate consumer takes. DSP support used by LfoT and by plugins; not a generator-facing capability contract in this slice."
+}

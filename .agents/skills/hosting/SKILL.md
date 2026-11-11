@@ -9,6 +9,39 @@ description: |
 
 # hosting
 
+## Opt-in isolated CLAP processing
+
+`pulp/host/isolated_plugin_slot.hpp` supplies experimental MacClapStereo64V1
+and a separate retained lifecycle handle. Use the ordinary `add_plugin_node`
+ownership path. Never load the vendor in the parent or replace the fixed shared
+mapping callback with synchronous RPC. Read `docs/guides/isolated-clap-worker.md`
+for mode, refusal, custody, checkpoint and terminal-silence contracts. Keep real
+hostile-fixture, endpoint, sibling/PDC and production-mutation controls together.
+Functional callback traps do not establish full realtime or A10 qualification;
+host death and deliberate group escape are outside first-mode custody.
+
+
+## Live retuning at a callback boundary
+
+For a graph-owned in-process instrument, retain its public
+`ProcessorNodeInstance` and resolve the frequency parameter by its frozen
+catalog name. Query `TuningProvider` on the control thread, validate the note,
+filter flag, finite frequency, Nyquist and product range, then update the
+instance's `StateStore`. A prepared `ParamReader` can adopt it once per block
+without resetting the existing oscillator or envelope. This does not require
+`set_node_parameter`, whose Plugin-slot contract is different.
+
+Boundary timing must come from the host. An offline test can split callback
+partitions at a pinned absolute sample and join its control writer before the
+next callback; that does not prove an arbitrary UI write's sample timestamp,
+intra-block scheduling or raced realtime control. Give input views the actual
+block frame extent even when rendering an instrument with silence: a
+zero-frame default view can fail the routed `ProcessBlock` validation and
+produce silence. Require a positive sounding render before trusting planted
+timing/reset failures. The installed public-header recipe and its independent
+phase/audio/sibling oracle live in `examples/g11-live-retune-consumer` and
+`docs/guides/g11-live-retune-cookbook.md`.
+
 ## When this skill applies
 
 - Adding or modifying a format backend under `core/host/src/plugin_slot_<format>.cpp`.
@@ -25,6 +58,16 @@ target so the dependency reduction does not silently break existing umbrella
 consumers.
 
 ## Mental model
+
+The bounded G6 in-process voice bank is `voice_bank_binding.hpp` plus one
+authored `SubgraphTemplate` Processor per slot. Its owner retains the existing
+MPE allocator; factories and named parameter binding run during control-thread
+preparation. When rendering a graph interval for an instrument, pass a
+zero-channel input `BufferView` with that interval's exact frame count. A
+default-constructed empty view has zero frames and makes routed execution fail
+closed. Keep both the between-event and final-tail branches covered by the
+installed SDK consumer and its independent planted mutations. This surface
+does not add CC64/120/121/123 sustain or saved-bank activation.
 
 `PluginSlot` is the uniform interface. Each format backend is a single
 free function — `load_<format>_plugin(info)` — that returns a
@@ -3109,3 +3152,12 @@ SignalGraph control and event edge probes are serial routed diagnostics with
 fixed-capacity publication and explicit refusal in unsupported execution modes.
 Host lifecycle changes must preserve detach-on-reset and the source-edge event
 observation boundary.
+
+### Catalog-derived graph notation
+
+`pulp/host/graph_patch.hpp` projects registered Processor descriptors and actual
+named GraphNode ports into a control-thread catalog. Processor MIDI capabilities
+append named `midi` ports without changing audio counts; named connect must set
+the MIDI edge flag. Keep strict patch validation additive: the legacy serializer
+may drop bad edges, while strict validation must check every original edge.
+Opaque state and richer edge kinds need explicit contracts before formatting.

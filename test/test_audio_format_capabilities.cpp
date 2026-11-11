@@ -6,6 +6,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/audio/format_registry.hpp>
+#include <pulp/audio/wav_decoder.hpp>
+
+#include "support/wav_fixture_builders.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -165,7 +168,13 @@ TEST_CASE("Built-in readers report their codec limits", "[audio][format-capabili
 
     const auto wav = find_caps(readers, "WAV");
     REQUIRE(wav);
-    REQUIRE(wav->bit_depths == std::vector<std::uint32_t>{8, 16, 24, 32});
+    // The shared WAV decoder reads integer PCM of any width in a 1- to
+    // 4-byte container and dr_wav's 256 channels; the case below holds the
+    // reader to both ends.
+    REQUIRE(wav->bit_depths.size() == 32);
+    REQUIRE(wav->bit_depths.front() == 1);
+    REQUIRE(wav->bit_depths.back() == 32);
+    REQUIRE(wav->max_channels == 256);
     REQUIRE(wav->float_samples);
     REQUIRE_FALSE(wav->compressed);
     REQUIRE(wav->sample_rates.empty());
@@ -287,4 +296,49 @@ TEST_CASE("A reader without a capabilities override reports only its name",
     REQUIRE(caps.max_channels == 0);
     REQUIRE_FALSE(caps.compressed);
     REQUIRE(caps.lossless);
+}
+
+TEST_CASE("the WAV reader's capabilities are what its decoder reads",
+          "[audio][format-capabilities][wav]") {
+    const auto readers = FormatRegistry::instance().reader_capabilities();
+    const auto wav = find_caps(readers, "WAV");
+    REQUIRE(wav);
+    using namespace pulp_test::wav;
+
+    // max_channels is a real edge: the limit decodes, one more is refused
+    // with its own reason.
+    auto channels_wav = [](std::uint32_t channels) {
+        auto format = make_format(1u, static_cast<std::uint16_t>(channels), 48'000u, 16u);
+        return make_wav(format, Bytes(static_cast<std::size_t>(channels) * 2u, 0u));
+    };
+    const auto at_limit = decode_wav(channels_wav(wav->max_channels), {.max_channels = 1024u});
+    REQUIRE(at_limit);
+    CHECK(at_limit->num_channels() == wav->max_channels);
+    CHECK_FALSE(decode_wav(channels_wav(wav->max_channels + 1u), {.max_channels = 1024u}));
+
+    // Depths off the byte grid decode from their container: 12-bit in two
+    // bytes and 20-bit in three, left-justified.
+    for (const std::uint16_t bits : {std::uint16_t{12}, std::uint16_t{20}}) {
+        INFO(bits << "-bit");
+        REQUIRE(std::find(wav->bit_depths.begin(), wav->bit_depths.end(), bits) !=
+                wav->bit_depths.end());
+        const std::uint16_t container = (bits + 7u) / 8u;
+        Bytes format;
+        append_u16(format, 1u);
+        append_u16(format, 1u);
+        append_u32(format, 48'000u);
+        append_u32(format, 48'000u * container);
+        append_u16(format, container);
+        append_u16(format, bits);
+        // Full-scale negative, left-justified in the container.
+        Bytes data(container, 0u);
+        data.back() = 0x80u;
+        const auto decoded = decode_wav(make_wav(format, data));
+        REQUIRE(decoded);
+        REQUIRE(decoded->num_frames() == 1u);
+        CHECK(decoded->channels[0][0] == -1.0f);
+        const auto info = inspect_wav(make_wav(format, data));
+        REQUIRE(info);
+        CHECK(info->bits_per_sample == bits);
+    }
 }

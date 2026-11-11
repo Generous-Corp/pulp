@@ -39,10 +39,21 @@ enum class FrameThread : std::uint8_t {
     render = 1,
 };
 
+/// Where the pump's vsyncs come from.
+enum class TickSource : std::uint8_t {
+    /// The display link, or the fallback timer on a host with no display.
+    display = 0,
+    /// The client's own vsync, passed in through `FramePump::tick()` (a display
+    /// callback it already has, or a test's clock). The pump creates no display
+    /// link and no timer.
+    manual = 1,
+};
+
 struct FramePumpOptions {
     double rate_cap_hz = 60.0;
     bool continuous = false;
     FrameThread thread = FrameThread::main;
+    TickSource source = TickSource::display;
 };
 
 struct FrameTick {
@@ -71,6 +82,14 @@ class FramePump {
     /// True when the running tick source is a display link rather than the
     /// fallback timer.
     bool follows_display() const noexcept;
+
+    /// With `TickSource::manual`, one vsync: `target_seconds` is when the frame
+    /// is due on screen and `vsync_seconds` the refresh period, on the host
+    /// clock. The same pacing as the display link applies (rate cap, one-shot,
+    /// on-screen, at most one frame in flight). True when it delivered a frame.
+    /// Call from one thread at a time; false when the pump is not running or
+    /// follows the display.
+    bool tick(double target_seconds, double vsync_seconds);
 
     /// Deliver one frame at the next due vsync. Any thread.
     void request_frame();

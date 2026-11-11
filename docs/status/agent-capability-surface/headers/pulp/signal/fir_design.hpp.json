@@ -1,0 +1,13 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/fir_design.hpp",
+  "fingerprint": "sha256:c2cece53531b491e436b8a358d06b54bb5f4babe432e82ad4938f0ab8edd1744",
+  "include": "pulp/signal/fir_design.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.fir-design",
+    "signal.fir-equiripple-design",
+    "signal.minimum-phase-fir"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

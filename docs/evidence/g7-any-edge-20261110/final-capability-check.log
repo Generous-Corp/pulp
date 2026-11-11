@@ -1,0 +1,2 @@
+agent-capabilities: fresh; 115 keys and 543 public headers checked
+agent-capabilities: comparison receipt={"comparison_anchor":"6c3ff80830797c201931a63b893c512686329e3e","comparison_mode":"merge_base","requested_base":"origin/main","requested_head":"HEAD","resolved_base_tip":"ebded6b0a98e7353a13c4e74d1e9bc138dd6b342","resolved_head":"2e299b27b3b854ef5d4f8228fb32668e7e2ba6e8","source":"local_ref","status":"available","stderr":""}

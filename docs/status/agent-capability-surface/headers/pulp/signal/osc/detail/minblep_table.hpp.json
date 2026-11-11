@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/osc/detail/minblep_table.hpp",
+  "fingerprint": "sha256:9354ed2187ec030386544ccffe90b85f1ed35f539a861983ee994c04dde05b31",
+  "include": "pulp/signal/osc/detail/minblep_table.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "signal.minblep"
+  ],
+  "rationale": "Generated residual coefficients are an installed implementation dependency of signal.minblep, not an independent authoring surface."
+}

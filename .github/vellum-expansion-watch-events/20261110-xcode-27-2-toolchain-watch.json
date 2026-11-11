@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261110-xcode-27-2-toolchain-watch",
+  "created_at": "2026-11-10T04:18:59Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "Build toolchain pins only. tools/toolchain/manifest.toml moves Xcode to 27.2 (27B52), pins the golden's macOS base by digest and pins ccache and git-lfs in the mise lock; check_env.py gains an Xcode version+build check and ccache/git-lfs checks (warn mode on CI legs); tart-provision.sh and mise-golden-layer.sh read and enforce the same pins at bake time. No golden is rebaked by this change, and no design-import, Chromium, rendering or packaging authority moves.",
+  "tests": [
+    "python3 tools/ci/test_mise_golden_layer.py",
+    "python3 tools/toolchain/test_check_env.py",
+    "python3 tools/toolchain/test_generate.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

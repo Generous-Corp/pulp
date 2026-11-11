@@ -1,0 +1,9 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/mts_esp_tuning.hpp",
+  "fingerprint": "sha256:360dc9fa8ccbdfea24210bdeb0b6edb2d3f4731378cffbf707bc3ae8375cd156",
+  "include": "pulp/midi/mts_esp_tuning.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

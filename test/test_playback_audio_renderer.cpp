@@ -28,6 +28,23 @@ TEST_CASE("audio renderer refuses a zero-frame WAV asset at pool creation") {
     REQUIRE(assets.error().item == timeline::ItemId{3});
 }
 
+TEST_CASE("audio renderer refuses a truncated WAV asset the reader could recover") {
+    // The last frame is cut off: the WAV reader would decode the three
+    // frames present and report the file truncated; an asset rendered
+    // against a timeline must hold all it declares.
+    const std::array<std::int16_t, 4> samples{0, 16'384, -16'384, 32'767};
+    auto bytes = mono_pcm16_wav(samples);
+    bytes.resize(bytes.size() - 2u);
+    const auto info = audio::inspect_wav(bytes);
+    REQUIRE(info);
+    REQUIRE(info->truncated);
+    REQUIRE(info->num_frames == 3u);
+    auto decoded = DecodedAudioAssetPool::decode_wav({3}, bytes);
+    REQUIRE_FALSE(decoded);
+    REQUIRE(decoded.error().code == AudioRendererErrorCode::InvalidAsset);
+    REQUIRE(decoded.error().item == timeline::ItemId{3});
+}
+
 TEST_CASE("audio renderer honors source range gain fades and varied block boundaries") {
     std::vector<float> source(2'050, 1.0f);
     source[0] = 99.0f;

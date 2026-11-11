@@ -32,8 +32,112 @@ was a single integer every open branch raced for; one merge staled the rest.
   later bump moves the version, it is skipped. See
   `docs/guides/release-watchdog.md`.
 
+### A bump's assignment is only valid on the main it was cut from
+
+`--assign-pending` assigns the material of the commit the bump PR was cut
+from. Any later landing that changes capability material (a public header, a
+capability record) leaves the bump naming a state `main` no longer has, and
+every merge group that carries it fails `--check` with `records a state that
+is neither the protected base's own state nor its version-at-land assignment`
+and `surface inventory_version changed without a surface change`. Merging
+`main` into the bump does not help; it has to be rebuilt. Two consequences
+are wired in:
+
+- `version_at_land.py` rebuilds a standing bump PR that carries a capability
+  assignment as soon as a capability landing outgrows it, without waiting out
+  `PULP_BUMP_COALESCE_MINUTES` (`_capability_assignment_is_stale`), and
+  repairs such a head after an ejection or a red check even when
+  `PULP_BUMP_HEAL_STALE_PR` is off, since it can never land. It still never
+  pushes to a bump PR that is in the merge queue.
+- A `merge_group` run judges the group against the protected branch tip
+  (`merge_group.base_ref`), not `merge_group.base_sha`, which is the previous
+  queue entry. Judged against its queue parent, a group behind a doomed bump
+  validated only its own increment, went green, and the HEADGREEN queue
+  landed the doomed bump with it. `main` then failed `--check` against its own
+  parent and every capability-touching PR that merged `main` inherited the red
+  until the next bump. The tip is used only when it is on the group's history
+  and `base_sha` descends from it; otherwise `base_sha` is kept. Either way the
+  run's stderr names the base it used (`merge group judged against ...`), so
+  read that line first when a bump lands red.
+
 The sections below that say "increase the counter" describe the hand-bump
 flow that branches no longer need; leave the constants alone instead.
+
+## The records are one file per entry
+
+Three records that nearly every capability change touched are directories of
+small files, each named after its own entry (`agent_capability_store.py`):
+
+| Record | Layout | Written by |
+|---|---|---|
+| Surface ledger | `docs/status/agent-capability-surface/meta.json` (schema, roots, `inventory_version`), `headers/<include>.json`, `tombstones/<include>.json` | `--write` |
+| Contract history | `tools/agent-capabilities/history/<entry digest>.json`, each naming its `parent` digest | `--write` / `--assign-pending` |
+| Binding header fingerprints | `tools/agent-capabilities/fingerprints/<include>.json` | `--accept-fingerprint <include>` |
+
+Two branches that touch different headers therefore touch different files and
+git merges them; only two changes to the same header meet in one file, which is
+the review signal. The single files they replaced
+(`docs/status/agent-capability-surface.json`,
+`tools/agent-capabilities/contract-history.json`) are refused by
+`hotspot_edit_guard.py` and by `--check`, and a `header_fingerprint=` argument
+added to a catalog row is refused the same way. Older paragraphs below that
+name the single files describe the same records; the commands they give are
+updated to the directories.
+
+- **Readers see the same documents.** `store.load_surface(root)` /
+  `store.load_history(root)` assemble the combined documents; at a revision use
+  `store.text_at(root, rev, <single-file path>)` or `store.read_at(...)`, which
+  read either layout, so a base older than the split still compares. Print one:
+  `python3 tools/scripts/agent_capability_store.py show-history origin/main`.
+- **A binding no longer carries its digest.** `binding(...)` takes no
+  `header_fingerprint`; the reviewed SHA-256 lives once per header in its
+  fingerprint fragment. After reviewing a changed header, record its digest
+  with `python3 tools/scripts/agent_capability_manifest.py --accept-fingerprint
+  pulp/<domain>/<header>.hpp`, then `--write`. A new binding header needs the
+  same command once. `--write` never restamps a fingerprint, and drops the
+  fragment of a header no binding names. `REVIEWED_HEADERS` rows in
+  `agent_capability_registry.py` still carry their own `fingerprint` literal.
+- **The history is a chain.** Order comes from each entry's `parent`, not from
+  file names. An entry holds only the objects no earlier entry stores, so the
+  directory holds the same bytes the single file did. A state is recorded by
+  adding one file; no file is ever modified. Two states recorded after the
+  same tip (a fork) merge without a conflict; `--check` reports
+  `capability history forks after <digest>`. On a branch, keep the base's
+  entries and drop your own (`agent_capability_store.py reset origin/main`,
+  then `agent_capability_rederive.py`); a bare `--write` orders the two sides by
+  digest, not by which is the base, and the append-only check then refuses it.
+- **Reset to a base with the store, not a checkout.** `git checkout origin/main
+  -- docs/status/agent-capability-surface` keeps any record the base lacks.
+  `python3 tools/scripts/agent_capability_store.py reset origin/main` makes both
+  directories hold exactly the base's records (it reads a base in either
+  layout). `agent_capability_rederive.py` does this itself before its `--write`.
+- **A branch cut before the split** merges `main` as a modify/delete on the
+  single files and, if it added a catalog row, a `header_fingerprint=` literal
+  that `--check` refuses. Repair: `git -c rerere.enabled=false merge
+  origin/main`, take the deletion (`git rm` both single files), run
+  `python3 tools/scripts/agent_capability_manifest.py --migrate-fingerprints`
+  (moves each literal into its fragment and refuses a disagreement), then
+  `agent_capability_rederive.py` and `--check`.
+- **Lossless, and proven so.** `test_agent_capability_store.py` regenerates the
+  replaced files from the commit that split them and compares them byte for
+  byte, checks that every removed catalog literal became its header's
+  fragment, and shows two branches adding different capability headers touch
+  disjoint files and `git merge-tree` merges them while the single-file layout
+  conflicts (the negative control).
+
+What the layout does not change: a capability row still lives in a shared
+`agent_capability_catalog_*.py` module, and `docs/status/agent-capabilities.json`
+still commits the installed `counts`, so two branches adding capabilities can
+still meet there.
+
+## Probe-contract comments still change binding fingerprints
+
+Clarifying consumed-edge probe semantics in a public binding header changes its
+fingerprint even when the record layout and declarations stay unchanged. Review
+the final header bytes, run `agent_capability_manifest.py --accept-fingerprint`
+for that named include, then `--write` and `--check`. Inspect the diff to retain
+only the corresponding fingerprint and surface-header records; preserve unrelated
+records and leave capability counters at their base values.
 
 ## Why open PRs no longer conflict on these files
 
@@ -58,10 +162,12 @@ another full macOS gate. Two rules remove the shared lines:
   `agent_capability_rederive.py` reads the base's history and leaves a moved
   counter at the base value whenever it can be pending.
 
-What still conflicts, correctly: two PRs that edit the same header's row, or
-that insert headers at the same sorted position, and two PRs that add
-capabilities (`agent-capabilities.json` keeps its installed `counts`, which
-consumers read). The capability counter lines themselves never move on a branch.
+What still conflicts, correctly: two PRs that edit the same header's record or
+fingerprint, and two PRs that add capabilities (`agent-capabilities.json` keeps
+its installed `counts`, which consumers read, and the rows share a catalog
+module). Two PRs that add headers at neighbouring sorted positions no longer
+meet: each record is its own file. The capability counter lines themselves
+never move on a branch.
 
 One case still needs a hand bump: a **mixed** base, where one counter is
 pending and the other is an assigned state the history never recorded
@@ -95,6 +201,15 @@ headers). A legacy header whose bytes change (`wav_decoder.hpp` gaining
 kind of row; `--write` then reports it as reviewed and the baseline count
 shrinks by one.
 
+The bounded G6 `pulp/host/voice_bank_binding.hpp` and its amended
+`signal_graph_subgraph.hpp` are reviewed host infrastructure, not advertised
+generator capabilities while sustain, saved-bank activation, and paced
+realtime proof remain open. Register both in `REVIEWED_HOST_HEADERS`, classify
+both with measured fingerprints, regenerate the surface, and update the
+current checkout's consumption census after staging the new header. The
+installed consumer and production-source mutation proof exercise the public
+`Pulp::host` target.
+
 The fingerprint is over the header's bytes, so a comment-only edit to a covered
 header costs the same row and inventory bump as a signature change; when a
 contract note or a behavior fix can live in the `.cpp`, put it there. A
@@ -102,12 +217,23 @@ header-only class such as `sample_resource.hpp` has no `.cpp` to hide in, so
 its fix takes the row and the bump; say so in the commit rather than reverting
 the fix to dodge the gate.
 
+Some header fingerprints are pinned outside this registry too, which raises
+the cost of a comment-only edit further. The sequencer exposure ledger carries
+the registry's fingerprint string as an evidence needle
+(`pulp/playback/audio_renderer.hpp`), so refreshing it stales a released
+row's needle. A `legacy_unreviewed` header (`pulp/audio/wav_metadata.hpp`)
+cannot change bytes without a reviewed classification. Before keeping a
+comment edit in a public header, grep `docs/status/sequencer-exposure` and
+`tools/agent-capabilities/legacy-unreviewed-baseline.json` for its current
+fingerprint, and move a comment-only note into the `.cpp` when either holds it.
+
 ## Public-header fingerprint refresh
 
-Change the reviewed fingerprint in `agent_capability_registry.py` only, bump
-`SURFACE_INVENTORY_VERSION`, and let `--write` regenerate
-`docs/status/agent-capability-surface.json`. Hand-editing the hash in the
-surface file as well makes `--write` see no surface change and refuse with
+Change the reviewed fingerprint in `agent_capability_registry.py` (a
+`REVIEWED_HEADERS` row) or, for a binding header, with `--accept-fingerprint
+<include>`, and let `--write` regenerate the header's record under
+`docs/status/agent-capability-surface/headers/`. Hand-editing the hash in the
+surface record as well makes `--write` see no surface change and refuse with
 "surface inventory_version changed without a surface change". Host headers are
 covered only when they appear in `REVIEWED_HOST_HEADERS`. A new `pulp/host/`
 header outside that list is untracked: `--check` stays green while it is, and
@@ -134,22 +260,24 @@ Maintain three related artifacts:
 - `agent-capabilities.json` is the installed consumer contract: curated keys,
   versions, digests, status, evolution, typed C++ bindings, and partial-coverage
   semantics.
-- `agent-capability-surface.json` is the maintenance ledger: every public header
-  in the covered roots, its byte fingerprint, and its reviewed disposition.
-- `tools/agent-capabilities/contract-history.json` is the repository-only,
-  append-only evolution history checked against the protected Git tip. Shallow
-  GitHub Actions checkouts fetch the immutable event base SHA when necessary.
-  It stores each repeated object once, keyed by its SHA-256 digest; `entries`
-  lists entry digests, not material. Read entries with
-  `agent_capability_history.history_entries(document)`, which expands them in
-  full. Never edit the file by hand: `--check` re-encodes it and refuses any
-  difference.
+- `docs/status/agent-capability-surface/` is the maintenance ledger, one record
+  per public header in the covered roots: its byte fingerprint and its reviewed
+  disposition.
+- `tools/agent-capabilities/history/` is the repository-only, append-only
+  evolution history checked against the protected Git tip, one file per
+  recorded state. Shallow GitHub Actions checkouts fetch the immutable event
+  base SHA when necessary. It stores each repeated object once, keyed by its
+  SHA-256 digest; the combined document's `entries` lists entry digests, not
+  material. Read entries with
+  `agent_capability_history.history_entries(store.load_history(root))`, which
+  expands them in full. Never edit an entry file by hand: `--check` re-encodes
+  the history and refuses any difference.
 
 The append-only history is generated as compact JSON. Keep every parsed entry
 and its provenance, but avoid repeating indentation across the full snapshots:
 the artifact must stay below GitHub's 100 MiB blob limit. After a regeneration,
 verify the parsed entries are unchanged and check the byte count with
-`wc -c tools/agent-capabilities/contract-history.json`.
+`du -sk tools/agent-capabilities/history`.
 
 The consumer manifest, its schema, and the handoff schema install into the SDK.
 Official release packaging stamps `agent-capability-handoff.json` only after
@@ -335,10 +463,10 @@ For an existing capability change:
   fingerprint would silently launder every unreviewed header edit. Paste the
   measured digest over the declared one in `agent_capability_registry.py`, bump
   `SURFACE_INVENTORY_VERSION` in `agent_capability_manifest.py`, then `--write`.
-- Exception: when the only stale fingerprint is a catalog binding's
-  `header_fingerprint` (e.g. `agent_capability_catalog_performance.py`, which
-  pins `processor.hpp` for `process_block`) and no capability's surface moved,
-  paste the measured digest there and `--write` WITHOUT bumping
+- Exception: when the only stale fingerprint is a binding header's fragment
+  (e.g. `tools/agent-capabilities/fingerprints/pulp/format/processor.hpp.json`,
+  which pins `processor.hpp` for `process_block`) and no capability's surface
+  moved, run `--accept-fingerprint <include>` and `--write` WITHOUT bumping
   `SURFACE_INVENTORY_VERSION`: the bump is refused with "surface
   inventory_version changed without a surface change". A Processor virtual
   that no capability exposes (an editor hook, say) is exactly this case.
@@ -647,7 +775,7 @@ on-disk artifact, which already carries your fingerprint at the taken counter,
 so raising the counter alone fails the opposite rule instead:
 
 ```bash
-git checkout origin/main -- docs/status/agent-capability-surface.json
+python3 tools/scripts/agent_capability_store.py reset origin/main
 python3 tools/scripts/agent_capability_rederive.py
 ```
 
@@ -669,7 +797,9 @@ down to what its material justifies.
 
 A reviewed public header's fingerprint can be declared in **either**
 `agent_capability_registry.py` (as a `REVIEWED_HEADERS` entry) or a
-`agent_capability_catalog_*.py` module (as a binding's `header_fingerprint`).
+binding header's fragment, `tools/agent-capabilities/fingerprints/<include>.json`
+(it used to be a binding's `header_fingerprint` literal in an
+`agent_capability_catalog_*.py` module).
 `--check` names the header and both digests but not the file, and grepping the
 registry for a header that is declared in a catalog finds nothing — which reads
 as "not tracked" rather than "declared elsewhere". Find the declaration by the
@@ -679,10 +809,10 @@ as "not tracked" rather than "declared elsewhere". Find the declaration by the
 grep -rn "<the expected sha256 from --check>" tools/
 ```
 
-`tools/agent-capabilities/contract-history.json` will also match; it is the
-appended snapshot, never the declaration. Measured on
-`pulp/timebase/grid_projection.hpp`, whose digest lives in
-`agent_capability_catalog_timing.py` as the `project_grid` binding.
+`tools/agent-capabilities/history/` and `docs/status/agent-capability-surface/`
+will also match; they are the recorded snapshot and the generated ledger, never
+the declaration. For a binding header the declaration is the fingerprint
+fragment; refresh it with `--accept-fingerprint <include>`.
 
 ### The push gate runs `--check` for you — but only against a resolved base
 
@@ -720,7 +850,11 @@ stale while looking entirely plausible. Observed live: it read base 28/45 while
 answering the wrong question, so the sequence when resolving a conflict is:
 resolve → commit the merge → refresh fingerprints → re-derive → `--write`.
 
-**Take the base's side of a `contract-history.json` conflict.** Merging a base
+**Take the base's side of a history conflict** (in the directory layout the
+only textual conflict is two branches writing the same entry file, which is the
+same state, so it is rare; a branch cut before the split meets the single
+file as a modify/delete: take the deletion and
+`agent_capability_store.py reset origin/main` for the history). Merging a base
 that landed its own transaction conflicts here as a both-append: your side holds
 the entry your `--write` appended, the base holds every entry up to its own tip,
 and the two are not reconcilable line by line. `git checkout --theirs` is right,
@@ -755,9 +889,9 @@ deletion-free. Compare entry counts:
 python3 -c "
 import json,subprocess
 import sys; sys.path.insert(0,'tools/scripts'); from agent_capability_history import history_entries
-c=history_entries(json.load(open('tools/agent-capabilities/contract-history.json')))
-b=history_entries(json.loads(subprocess.run(['git','show','origin/main:tools/agent-capabilities/contract-history.json'],
-                            capture_output=True,text=True,check=True).stdout))
+import agent_capability_store as store
+c=history_entries(store.load_history('.'))
+b=history_entries(json.loads(store.text_at('.','origin/main',store.HISTORY_LEGACY)))
 print('delta', len(c)-len(b), 'prefix-identical', c[:len(b)]==b)"
 ```
 
@@ -779,9 +913,11 @@ sequence rather than one checklist. Make all four edits before running it:
    *binding* rather than the missing map entry — the message points away from
    the fix.
 3. **Umbrella fingerprint** — adding the include to `<domain>.hpp` changes that
-   umbrella's digest too. Update the declared value to the `got sha256:` the
-   error reports. The stale digest also appears in `contract-history.json`;
-   **do not edit those** — history is append-only.
+   umbrella's digest too. Record the new digest with `--accept-fingerprint
+   <umbrella include>` when a binding names the umbrella, or update its
+   `REVIEWED_HEADERS` value. The stale digest also appears in
+   `tools/agent-capabilities/history/`; **do not edit those**, because history is
+   append-only.
 4. **Both counters** — `MANIFEST_REVISION` and `SURFACE_INVENTORY_VERSION`,
    reported as two separate errors.
 
@@ -803,9 +939,8 @@ version number. The fix is to make `previous` the base again and write once:
 
 ```sh
 git checkout origin/main -- docs/status/agent-capabilities.json \
-    docs/status/agent-capability-surface.json \
-    tools/agent-capabilities/contract-history.json \
     test/test_agent_capability_compile.cpp
+python3 tools/scripts/agent_capability_store.py reset origin/main
 python3 tools/scripts/agent_capability_manifest.py --write
 ```
 
@@ -910,7 +1045,8 @@ with the file on disk:
 
 ```python
 import json, hashlib, pathlib
-d = json.load(open('docs/status/agent-capability-surface.json'))
+import sys; sys.path.insert(0, 'tools/scripts'); import agent_capability_store as store
+d = store.load_surface('.')
 differ = [r['source'] for r in d['headers']
           if 'sha256:' + hashlib.sha256(pathlib.Path(r['source']).read_bytes()).hexdigest()
           != r['fingerprint']]
@@ -929,17 +1065,16 @@ mismatch, when a mismatch means the header moved and the surface did not.
 
 ### `--write` cannot fix a fingerprint — it is authored, not generated
 
-The fingerprint is declared in two places that must be edited by hand and kept
-equal: the `header_fingerprint=` literal in the capability's `EXPORTS` row in
-`tools/scripts/agent_capability_catalog_performance.py`, and the `fingerprint`
-field for that `source` in `docs/status/agent-capability-surface.json`.
-Regeneration checks them; it does not author them. So after changing a public
-capability header:
+A binding header's fingerprint is declared once, in
+`tools/agent-capabilities/fingerprints/<include>.json`; `--write` copies it into
+the header's surface record. Regeneration checks it; it does not author it. So
+after reviewing a changed public capability header:
 
-1. `shasum -a 256 <header>` and prefix the digest with `sha256:`,
-2. write that value into both places above,
-3. bump `SURFACE_INVENTORY_VERSION` in `tools/scripts/agent_capability_manifest.py`
-   (surface axis — see the next section: this costs no contract bump),
+1. `python3 tools/scripts/agent_capability_manifest.py --accept-fingerprint <include>`
+   (it measures the header and writes the fragment, naming the old digest),
+2. `--write` to refresh the surface record and snapshot,
+3. leave `SURFACE_INVENTORY_VERSION` alone; the change is pending until the
+   version-at-land bump assigns it,
 4. re-run `--check` and confirm it reports `fresh`.
 
 ### The fingerprint lives in THREE places, and `--write` adds a fourth file
@@ -979,8 +1114,9 @@ the two counters.
 
 ## Two capabilities can pin the SAME header fingerprint
 
-`--write` / `--check` verify each binding's `header_fingerprint` against the
-file's real bytes, and several capabilities may bind into one header. Adding a
+`--write` / `--check` verify each binding header's reviewed fingerprint
+(`tools/agent-capabilities/fingerprints/<include>.json`) against the file's real
+bytes, and several capabilities may bind into one header. Adding a
 second entry point to an existing header therefore breaks the FIRST capability's
 fingerprint too, and the failure names the header rather than the capability, so
 it is easy to scope the fix too narrowly:
@@ -1421,7 +1557,7 @@ already bumped. Bumping again burns a second published identity for one change.
 Reset the snapshot to the base and write once instead:
 
 ```sh
-git checkout origin/main -- docs/status/agent-capability-surface.json
+python3 tools/scripts/agent_capability_store.py reset origin/main
 python3 tools/scripts/agent_capability_manifest.py --write
 ```
 
@@ -1814,8 +1950,9 @@ merely to force runtime diagnostics into the design-time catalog.
 Adding a member to a fingerprinted public header (here `Processor::editor_prewarm()`
 in `pulp/format/processor.hpp`) makes the pre-push agent-capability gate report
 `public header fingerprint mismatch`, and `agent_capability_rederive.py` refuses
-to derive counters until it is fixed. The hash lives in the owning catalog
-(`tools/scripts/agent_capability_catalog_*.py`, `header_fingerprint=`) and, when a
+to derive counters until it is fixed. The hash lives in the header's fingerprint
+fragment (`tools/agent-capabilities/fingerprints/<include>.json`, written by
+`--accept-fingerprint <include>`) and, when a
 pending sequencer-exposure row pins that catalog, in that row's evidence needles
 too (`git grep` the old hash). Replace both with `shasum -a 256` of the header,
 then re-run the rederive with `PULP_AGENT_CAPABILITY_BASE_REF=$(git rev-parse
@@ -1948,3 +2085,29 @@ run `--write` and `--check`. Never keep the branch's history blob: it shows up
 as millions of deleted lines and replaces main's format. Worked example
 (2026-11-08, the G5 host-ingress adapter): after the merge, the diff against
 main shrank from -2,530,508 lines to the PR's own 15 files.
+
+## A new overload in `audio_file.hpp` costs a fingerprint refresh, not a bump
+
+`audio_file.hpp` is a reviewed infrastructure header. Adding a declaration to it
+(for example the atomic WAV writer's `WavReplace` overload) changes its bytes, so
+`--check` fails until the fingerprint in `agent_capability_registry.py` is updated.
+Edit only that hash, then run `agent_capability_rederive.py` against the base: it
+confirms the counters stay at the base value (no manual `SURFACE_INVENTORY_VERSION`
+bump) and rewrites `agent-capability-surface.json`. Hand-bumping the version, as
+the section above describes for other headers, was not needed here.
+
+### Graph notation transport
+
+`pulp/host/graph_patch.hpp` is reviewed host infrastructure for catalog-derived
+notation and diagnostics, not a new DSP capability inventory. Keep it in
+`REVIEWED_HOST_HEADERS` and refresh its registry fingerprint after header edits.
+The bounded notation profile does not qualify every node or complete live reload.
+
+## Isolated host headers require the same refresh
+
+Changes to the isolated CLAP host headers, including
+`isolated_plugin_slot.hpp`, `signal_graph_execution_snapshot.hpp`, and
+`signal_graph_runtime.hpp`, update their surface fragments and fingerprints.
+Run rederive, fingerprint acceptance, manifest write, and installed-consumer
+checks together; do not hand-edit generated fragments or treat a passing worker
+test as sufficient provenance evidence.

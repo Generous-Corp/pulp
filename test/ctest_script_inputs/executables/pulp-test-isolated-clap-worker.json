@@ -1,0 +1,20 @@
+{
+ "name": "pulp-test-isolated-clap-worker",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [
+   "pulp-clap-worker",
+   "pulp-isolated-clap-fixture",
+   "pulp-test-clap-worker-mismatched"
+  ],
+  "sources": [],
+  "spawning_sources": [
+   "test/test_isolated_clap_worker.cpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

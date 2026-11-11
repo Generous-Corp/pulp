@@ -56,6 +56,7 @@ double host_seconds(std::uint64_t host_time) {
 struct FramePump::State {
     std::function<void(const FrameTick&)> on_frame;
     FrameThread thread = FrameThread::main;
+    TickSource source = TickSource::display;
 
     std::atomic<bool> continuous{false};
     std::atomic<bool> one_shot{false};
@@ -126,22 +127,24 @@ struct FramePump::State {
 
     // Tick-source thread: `t` is when the frame is due on screen and `vsync`
     // the refresh period, both in seconds.
-    void on_vsync(double t, double vsync) {
+    // Returns whether it delivered a frame.
+    bool on_vsync(double t, double vsync) {
         if (!on_screen.load())
-            return;
+            return false;
         const bool shot = one_shot.load();
         if (!shot && !continuous.load())
-            return;
+            return false;
         const double period = 1.0 / rate_cap.load();
         // A quarter vsync of slack lets a cap that divides the refresh rate
         // land on every Nth vsync despite jitter in the reported times.
         if (!shot && t + 0.25 * vsync < next_due)
-            return;
+            return false;
         if (in_flight.exchange(true))
-            return;
+            return false;
         next_due = (t - next_due > period) ? t + period : next_due + period;
         one_shot.store(false);
         deliver(FrameTick{index++, t});
+        return true;
     }
 };
 
@@ -169,6 +172,7 @@ FramePump::FramePump(std::function<void(const FrameTick&)> on_frame, FramePumpOp
     state_->self = state_;
     state_->on_frame = std::move(on_frame);
     state_->thread = options.thread;
+    state_->source = options.source;
     state_->continuous.store(options.continuous);
     state_->rate_cap.store(clamp_rate(options.rate_cap_hz));
 }
@@ -183,8 +187,9 @@ bool FramePump::start() {
         return true;
     if (!s.on_frame)
         return false;
+    const bool manual = s.source == TickSource::manual;
     CVDisplayLinkRef link = nullptr;
-    if (CVDisplayLinkCreateWithActiveCGDisplays(&link) != kCVReturnSuccess)
+    if (!manual && CVDisplayLinkCreateWithActiveCGDisplays(&link) != kCVReturnSuccess)
         link = nullptr;
     if (link)
         CVDisplayLinkSetOutputCallback(link, &display_link_callback, &s);
@@ -200,6 +205,8 @@ bool FramePump::start() {
     s.link = link;
     s.started = true;
     s.live.store(true);
+    if (manual)
+        return true; // the client's tick() is the only source
     g_live_sources.fetch_add(1);
     if (link) {
         g_live_links.fetch_add(1);
@@ -243,7 +250,8 @@ void FramePump::stop() {
     if (s.fallback.joinable())
         s.fallback.join();
     s.started = false;
-    g_live_sources.fetch_sub(1);
+    if (s.source != TickSource::manual)
+        g_live_sources.fetch_sub(1);
     if (s.render.joinable()) {
         {
             std::lock_guard lock(s.render_mutex);
@@ -263,6 +271,13 @@ bool FramePump::running() const noexcept {
 
 bool FramePump::follows_display() const noexcept {
     return state_->link != nullptr;
+}
+
+bool FramePump::tick(double target_seconds, double vsync_seconds) {
+    auto& s = *state_;
+    if (s.source != TickSource::manual || !s.live.load())
+        return false;
+    return s.on_vsync(target_seconds, vsync_seconds);
 }
 
 void FramePump::request_frame() {

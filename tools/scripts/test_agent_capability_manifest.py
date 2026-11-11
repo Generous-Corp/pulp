@@ -15,6 +15,7 @@ from typing import Any
 
 import agent_capability_manifest as manifest
 import agent_capability_history as capability_history
+import agent_capability_store as capability_store
 import agent_capability_surface as surface
 import agent_capability_transaction as transaction
 import json_schema_lite
@@ -1047,7 +1048,7 @@ def exercise_evolution(canonical: dict) -> int:
     history = capability_history.history_document([
         capability_history.history_entry(
             canonical,
-            json.loads((ROOT / surface.SURFACE_SNAPSHOT).read_text()),
+            capability_store.load_surface(ROOT),
         )
     ])
     bypass = copy.deepcopy(canonical)
@@ -1057,7 +1058,7 @@ def exercise_evolution(canonical: dict) -> int:
         manifest.history_problems(
             history,
             bypass,
-            json.loads((ROOT / surface.SURFACE_SNAPSHOT).read_text()),
+            capability_store.load_surface(ROOT),
         ),
         "changed without a contract_version increase",
     )
@@ -1597,13 +1598,10 @@ def exercise_counters_assigned_at_land(canonical: dict) -> int:
     checks += 1
 
     # The release guard and the status report read the same rule.
-    with tempfile.TemporaryDirectory(prefix="pulp-agent-counters-") as temp:
-        path = pathlib.Path(temp) / "history.json"
-        path.write_text(json.dumps(history), encoding="utf-8")
-        flags = argparse.Namespace(status=False, require_assigned=True, assign_pending=False)
-        assert manifest.counter_status(ROOT, changed, surface_doc, path, flags) == 1
-        assert manifest.counter_status(ROOT, assigned, surface_doc, path, flags) == 0
-        assert manifest.counter_status(ROOT, published, surface_doc, path, flags) == 0
+    flags = argparse.Namespace(status=False, require_assigned=True, assign_pending=False)
+    assert manifest.counter_status(ROOT, changed, surface_doc, history, flags) == 1
+    assert manifest.counter_status(ROOT, assigned, surface_doc, history, flags) == 0
+    assert manifest.counter_status(ROOT, published, surface_doc, history, flags) == 0
     result = run("--status")
     assert result.returncode == 0, result.stderr
     status = json.loads(result.stdout)
@@ -2013,9 +2011,8 @@ def exercise_history_storage() -> int:
     inline layout, refusal of hand edits, and the size guard that keeps the
     file far below GitHub's 100 MB push limit."""
     checks = 0
-    history_path = ROOT / capability_history.HISTORY_FILE
-    text = history_path.read_text(encoding="utf-8")
-    stored = json.loads(text)
+    stored = capability_store.load_history(ROOT)
+    text = capability_history.rendered_history(stored)
     assert stored["schema"] == capability_history.HISTORY_SCHEMA, stored["schema"]
 
     # The checked-in file is the exact rendering of the exact encoding of its
@@ -2186,22 +2183,26 @@ def exercise_history_storage() -> int:
                    "is not valid JSON: bad")
     checks += 1
 
-    # --check compares the file text with its rendering, which catches an edit
-    # that parses back to the honest document (a duplicated object line).
+    # --check compares every entry file's text with its rendering, which
+    # catches an edit that parses back to the honest document (a duplicated
+    # object line).
     with tempfile.TemporaryDirectory(prefix="pulp-agent-history-text-") as temp:
-        copy_path = pathlib.Path(temp) / "contract-history.json"
-        copy_path.write_text(text, encoding="utf-8")
-        assert manifest.history_text_problems(copy_path, stored) == []
-        lines = text.splitlines(keepends=True)
+        copy_root = pathlib.Path(temp)
+        capability_store.replace_directory(
+            copy_root, capability_store.HISTORY_DIR, capability_store.split_history(stored))
+        assert capability_store.load_history(copy_root) == stored
+        assert capability_store.layout_problems(copy_root, None, stored, None) == []
+        entry_path = sorted((copy_root / capability_store.HISTORY_DIR).iterdir())[0]
+        lines = entry_path.read_text(encoding="utf-8").splitlines(keepends=True)
         index = next(i for i, line in enumerate(lines)
                      if line.startswith('    "sha256:') and '": ' in line
                      and line.endswith(",\n"))
         duplicated = lines[:index + 1] + [lines[index]] + lines[index + 1:]
-        copy_path.write_text("".join(duplicated), encoding="utf-8")
-        assert json.loads(copy_path.read_text(encoding="utf-8")) == stored
+        entry_path.write_text("".join(duplicated), encoding="utf-8")
+        assert capability_store.load_history(copy_root) == stored
         assert not [problem for problem in problems(stored)
                     if "canonical" in problem or "object" in problem]
-        expect_problem(manifest.history_text_problems(copy_path, stored),
+        expect_problem(capability_store.layout_problems(copy_root, None, stored, None),
                        "is not in its rendered form")
     checks += 1
 
@@ -2214,6 +2215,96 @@ def exercise_history_storage() -> int:
     else:
         raise AssertionError("material with a '$' key was encoded")
     checks += 1
+    return checks
+
+
+def exercise_merge_group_protected_base() -> int:
+    """A merge group is judged against the protected branch tip, not its queue
+    parent, so a group queued behind an entry the branch never accepted cannot
+    inherit that entry as authority."""
+    checks = 0
+
+    def git(cwd: pathlib.Path, *args: str) -> str:
+        return subprocess.run(
+            ["git", "-c", "commit.gpgsign=false", "-c", "user.email=t@example.com",
+             "-c", "user.name=t", *args],
+            cwd=cwd, text=True, encoding="utf-8", capture_output=True,
+            check=True).stdout.strip()
+
+    with tempfile.TemporaryDirectory(prefix="pulp-agent-merge-group-") as temp:
+        base = pathlib.Path(temp)
+        seed = base / "seed"
+        seed.mkdir()
+        git(seed, "init", "-q", "-b", "main")
+        (seed / "a.txt").write_text("main\n", encoding="utf-8")
+        git(seed, "add", "a.txt")
+        git(seed, "commit", "-q", "-m", "main tip")
+        main_tip = git(seed, "rev-parse", "HEAD")
+        chain = []
+        for entry in ("doomed entry", "entry behind it"):
+            git(seed, "commit", "-q", "--allow-empty", "-m", entry)
+            chain.append(git(seed, "rev-parse", "HEAD"))
+        queue_parent, group_head = chain
+        git(seed, "checkout", "-q", "--detach", main_tip)
+        git(seed, "branch", "-q", "-f", "main", main_tip)
+        git(seed, "branch", "-q", "queue", group_head)
+        origin = base / "origin.git"
+        subprocess.run(["git", "clone", "-q", "--bare", str(seed), str(origin)], check=True)
+
+        # A shallow CI-style checkout of the group head, one commit deep, so
+        # the protected tip starts out of reach.
+        work = base / "work"
+        subprocess.run(["git", "clone", "-q", "--depth=1", "--no-single-branch",
+                        f"file://{origin}", str(work)], check=True)
+        git(work, "fetch", "-q", "--depth=1", "origin", group_head)
+        git(work, "checkout", "-q", "--detach", group_head)
+        resolve = capability_history._merge_group_protected_base
+
+        assert resolve(work, "refs/heads/main", queue_parent) == main_tip
+        checks += 1
+        # The event wiring: a merge_group event anchors at the protected tip,
+        # and a pull_request event keeps its own base.sha.
+        event_path = base / "event.json"
+        held = {name: os.environ.get(name) for name in (
+            "GITHUB_ACTIONS", "GITHUB_EVENT_PATH", "PULP_AGENT_CAPABILITY_BASE_REF")}
+        os.environ.pop("PULP_AGENT_CAPABILITY_BASE_REF", None)
+        os.environ["GITHUB_ACTIONS"] = "true"
+        os.environ["GITHUB_EVENT_PATH"] = str(event_path)
+        try:
+            event_path.write_text(json.dumps({"merge_group": {
+                "base_sha": queue_parent, "base_ref": "refs/heads/main"}}),
+                encoding="utf-8")
+            anchor = capability_history._resolve_protected_comparison(
+                work, "origin/main").comparison_anchor
+            assert anchor == main_tip, anchor
+            event_path.write_text(json.dumps(
+                {"pull_request": {"base": {"sha": queue_parent}}}), encoding="utf-8")
+            anchor = capability_history._resolve_protected_comparison(
+                work, "origin/main").comparison_anchor
+            assert anchor == queue_parent, anchor
+        finally:
+            for name, value in held.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+        checks += 2
+        # Controls: no protected ref named, or one outside refs/heads, keeps
+        # the queue parent, exactly as before.
+        assert resolve(work, None, queue_parent) == queue_parent
+        assert resolve(work, "main", queue_parent) == queue_parent
+        checks += 2
+        # Once the entry ahead has landed, its commit is the protected tip.
+        git(origin, "update-ref", "refs/heads/main", queue_parent)
+        assert resolve(work, "refs/heads/main", queue_parent) == queue_parent
+        checks += 1
+        # A protected tip the group does not build on is never adopted.
+        git(seed, "checkout", "-q", "--detach", main_tip)
+        git(seed, "commit", "-q", "--allow-empty", "-m", "unrelated tip")
+        stray = git(seed, "rev-parse", "HEAD")
+        git(seed, "push", "-q", str(origin), f"{stray}:refs/heads/main", "--force")
+        assert resolve(work, "refs/heads/main", queue_parent) == queue_parent
+        checks += 1
     return checks
 
 
@@ -2240,6 +2331,7 @@ def main() -> int:
     checks += exercise_history_storage()
     checks += exercise_release_guard_wiring()
     checks += exercise_authority_navigation()
+    checks += exercise_merge_group_protected_base()
     print(f"agent-capabilities: {checks} negative/evolution/surface/compatibility checks passed")
     return 0
 

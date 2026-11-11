@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/parametric_eq.hpp",
+  "fingerprint": "sha256:7fac0742c304d74e201ece2799ee172c81805e3f7bf1ba5dcc7a8fab70d5fbb6",
+  "include": "pulp/signal/parametric_eq.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.parametric-eq"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

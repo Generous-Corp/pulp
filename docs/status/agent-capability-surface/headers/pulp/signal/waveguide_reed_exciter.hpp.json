@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/waveguide_reed_exciter.hpp",
+  "fingerprint": "sha256:50fd8027a329b2a8c1c4dd983349e0c9ccf3b958ff3374adaa19dd00e7e8604a",
+  "include": "pulp/signal/waveguide_reed_exciter.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.reed-waveguide-loop"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

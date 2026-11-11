@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/checked_allocation.hpp",
+  "fingerprint": "sha256:c76d64d6fd358fe243c7c374ed4b3611dfdd07bd2370be1eae6feeaf0f195d08",
+  "include": "pulp/signal/checked_allocation.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

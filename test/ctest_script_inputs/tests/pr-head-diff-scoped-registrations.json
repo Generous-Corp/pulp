@@ -10,6 +10,7 @@
    "docs/status",
    "docs/status/consumption-profiles.json",
    "docs/status/consumption-profiles.schema.json",
+   "inspect/src",
    "test/cmake/pr_fast_tests.cmake",
    "test/ctest_script_inputs",
    "test/fixtures",

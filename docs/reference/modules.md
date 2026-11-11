@@ -512,10 +512,16 @@ for (const auto& caps : FormatRegistry::instance().writer_capabilities()) {
 `pulp audio formats --json` emits it as JSON with `readers` and `writers`
 arrays; the CLI reference lists every field.
 
-For an already-resident RIFF/WAVE byte span, `inspect_wav()` and `decode_wav()`
-in `wav_decoder.hpp` provide a no-file-I/O, no-exceptions path with caller-set
-frame, channel, and decoded-byte ceilings. RF64, W64, and RIFX containers are
-outside this byte-span API. Keep parsing and allocation off the audio callback.
+For an already-resident RIFF/WAVE, RF64 or BW64 byte span, `inspect_wav()` and
+`decode_wav()` in `wav_decoder.hpp` provide a no-file-I/O, no-exceptions path
+with caller-set frame, channel, and decoded-byte ceilings. Sony Wave64 and RIFX
+are not read. Keep parsing and allocation off the audio callback.
+
+Every WAV reader (this byte-span API, the format registry, `AudioReader` and
+the memory-mapped reader) applies one acceptance policy, defined in
+`wave_layout.hpp`. A header that contradicts itself is refused. A header that
+declares more than the file holds decodes the whole frames present and reports
+`AudioFileInfo::truncated`, with the claim in `declared_frames`.
 
 ### Streaming write — large files without loading into memory
 
@@ -591,8 +597,12 @@ therefore counts it twice.
 | FLAC | ✓ | ✓* | dr_flac / libflac (`pulp add libflac`) |
 | MP3 | ✓ | ✓* | dr_mp3 / LAME (`pulp add lame --accept-license LGPL-2.0`) |
 | OGG Vorbis | ✓ | — | stb_vorbis |
-| WAV | ✓ | ✓ | CHOC + bounded in-memory decoder + StreamingWriter |
+| WAV | ✓ | ✓ | dr_wav behind one chunk walk (RIFF, RF64, BW64); written by CHOC and StreamingWriter |
 | WMA | Windows | — | Read through Media Foundation on Windows |
+
+The WAV reader decodes integer PCM of any width in a 1- to 4-byte container,
+32- and 64-bit float, A-law, mu-law, and MS and IMA ADPCM, up to 256
+channels.
 
 *\*Write via optional `pulp add` packages. Those packages do not add portable
 AAC/ALAC readers. Permissive (libflac, ALAC) packages install freely; copyleft
@@ -1430,6 +1440,16 @@ in `pulp::format-core`), the default `VisualPort` over a processor's
 Parameters, state trees, presets, and settings.
 
 **Link:** `pulp::state` · **Include prefix:** `<pulp/state/...>`
+
+### MIDI Learn
+
+`<pulp/state/midi_learn_engine.hpp>` maps hardware controllers (7-bit and 14-bit
+CC, NRPN/RPN, pitch bend, pressure) to parameters, learns a mapping from a burst
+of messages, saves it with the plug-in state, records edits for undo, and sends
+parameter values back to the controller. The pure decoders and the learn
+classifier are in `midi_decode.hpp` and `midi_learn.hpp`. See the
+[MIDI Learn guide](../guides/midi-learn.md); `MidiParameterMap` is superseded
+but still available.
 
 ### Plugin parameters — the core state system
 
@@ -2487,7 +2507,8 @@ host binding must aggregate all lanes for a device, apply one global queue
 budget, and inject one batch.
 
 MediaRef clips use an immutable `DecodedAudioAssetPool`. Complete WAV bytes can
-be decoded into this pool through the bounded no-file-I/O decoder, then the
+be decoded into this pool through the bounded no-file-I/O decoder (a truncated
+WAV is refused here, since the timeline assumes its declared length), then the
 ordinary incremental compiler lowers source ranges, musical or absolute clip
 placement, gain, and fades into each `TrackProgram`. The renderer uses bounded
 64-tap, 512-phase Kaiser-windowed sinc sample-rate conversion so media retains

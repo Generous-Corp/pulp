@@ -1529,6 +1529,17 @@ public probe identity, sequence, sample-relative timestamps, frame counts,
 peak/RMS and loss count. Measurements precede downstream mixing and PDC.
 See [edge probe limits and lifecycle](../guides/graph-edge-probes.md).
 
+### SignalGraph notation
+
+`pulp graph catalog --json` projects the default runtime node catalog.
+`pulp graph validate FILE.pat --json` uses shared typed strict diagnostics;
+`.pulpgraph` validation checks every original connection. `pulp graph fmt
+FILE.pat` prints canonical notation, and `pulp graph fmt FILE.pulpgraph
+--notation` converts supported saved graphs without discarding unsupported
+state. `pulp graph save FILE.pat --output FILE.pulpgraph` persists the graph.
+Application Processor registrations use the public C++ catalog. See
+[notation profile and limitations](../guides/graph-patch-notation.md).
+
 ### Sample-region graph inspection
 
 Sample-region graph and capability reports are read-only views of the declared
@@ -2306,6 +2317,15 @@ header and the small payloads whose fields it parses, then seeks past
 everything else, so the cost is a handful of reads regardless of file size.
 Default output is a compact table; `--json` emits a versioned document.
 
+A WAV whose header declares more than the file holds, such as a cut-off
+download or a lying size field, is reported the way every Pulp WAV reader
+decodes it. `stream.frames` counts the whole frames present,
+`stream.declared_frames` holds the header's claim, `decode.truncated` is true,
+and a `truncated_data` warning names the data chunk. The table shows the same
+facts as "header declares N" and "truncated". A header that contradicts
+itself, such as a second fmt chunk that disagrees with the first, reports
+`decodable: false` with the reason.
+
 Containers: WAV in RIFF, RF64/BW64 and Sony Wave64 envelopes (fully walked);
 AIFF and AIFF-C (fully walked, facts from the same parser the AIFF reader
 uses); FLAC (STREAMINFO plus the metadata-block list and the first frame
@@ -2341,12 +2361,12 @@ JSON fields:
 | `conformance` | `standard` when `warnings` is empty, else `violations`. Valid BWF, float and RF64 files are standard |
 | `facts_confidence` | `parsed` (the structure was walked) or `container_only` (identity plus the codec's own first-page or first-frame claims) |
 | `bytes_read` | Bytes the inspector requested from the file |
-| `stream` | `sample_rate`, `channels`, `bits_per_sample` (container width), `valid_bits`, `frames` (0 when not stated), `duration_seconds`, `encoding`, `bytes_per_frame`; `null` when the header gives no stream |
-| `decode` | `decodable` and `reason`: whether Pulp's in-memory decoder would accept the layout, by the same rules it applies; `null` for containers without one |
+| `stream` | `sample_rate`, `channels`, `bits_per_sample` (container width), `valid_bits`, `frames` (0 when not stated; for WAV, the whole frames present), `declared_frames` (WAV only, see above), `duration_seconds` (of `frames`), `encoding`, `bytes_per_frame`; `null` when the header gives no stream |
+| `decode` | `decodable`, `reason` and `truncated` (see above): Pulp's WAV reader's verdict; `null` for containers without one |
 | `exceeds_decode_limits` | `exceeded`, `exceeded_by[]` (`max_frames`, `max_channels`, `max_output_bytes`), the `limits` in force and the `output_bytes` the declared stream would need. A fact, not an error |
 | `regions[]` | In file order: `offset`, `declared_size` (payload the header claims), `actual_size` (payload present), `id`, `kind` (`envelope`, `fmt`, `data`, `metadata`, `padding`, `unknown`), `fields` (what the specification defines for that region) and an optional `note` |
 | `regions_truncated` | The walk stopped at its region cap |
-| `warnings[]` | `kind`, `offset`, `detail`. Kinds are specification violations only: `envelope_size_mismatch`, `missing_pad_byte`, `duplicate_fmt`, `fmt_after_data`, `truncated_data`, `sentinel_size_without_ds64`, `chunk_overlap`, `chunk_past_eof`, `extensible_mask_channel_mismatch`, `valid_bits_above_container` |
+| `warnings[]` | `kind`, `offset`, `detail`. Kinds are specification violations only: `envelope_size_mismatch`, `missing_pad_byte`, `duplicate_fmt`, `fmt_after_data`, `truncated_data`, `sentinel_size_without_ds64`, `chunk_overlap`, `chunk_past_eof`, `extensible_mask_channel_mismatch`, `valid_bits_above_container`, `ds64_size_mismatch` (an RF64 data size field and its ds64 entry disagree) |
 | `metadata.present[]` | `id`, `offset`, `size` of every metadata region, always |
 | `metadata.text[]` | `region`, `key`, `text`; present only with `--include-metadata-text` |
 | `truncated_tail_bytes` | Raw mode only: bytes after the last whole frame |
@@ -2376,12 +2396,13 @@ pulp audio waveform take.wav --png take-wave.png --select 12,18
 ```
 
 Input is read through `MemoryMappedAudioReader` in fixed windows, so a
-multi-hour WAV or AIFF renders with memory bounded by the window and never
-goes through the whole-file WAV decoder (which caps at 100,000,000 frames).
-Formats the ranged reader cannot seek (FLAC, MP3, Ogg, and the platform
-decoders) are decoded **whole-file once**: memory is then bounded by the
-decoded file, not the window, and the verb prints a one-line `note:` on stderr
-saying so. Lossy decoders on Apple platforms are CoreAudio and the sidecar says
+multi-hour WAV, AIFF, FLAC, MP3 or Ogg file renders with memory bounded by the
+window and never goes through the whole-file WAV decoder (which caps at
+100,000,000 frames). A FLAC or Ogg stream whose header gives no length, and
+the platform decoders, are decoded **whole-file once**: memory is then bounded
+by the decoded file, not the window, and the verb prints a one-line `note:` on
+stderr saying so. MP3 seeks backward by decoding forward from the start, so a
+late `--start` costs time, not memory. Lossy decoders on Apple platforms are CoreAudio and the sidecar says
 so. Float input above 0 dBFS is drawn clamped and reported unclamped; nothing
 is normalized.
 

@@ -81,7 +81,7 @@ A new repo adds one `.shipyard/vm-image.toml` and the same `tart-provision.sh ma
 
 Fields: `base`, `disk_gb`, `auto_login`, `[toolchain].xcode` (omit → no Xcode tier), `[toolchain].rust` + `.rust_targets` + `.rosetta` (Intel cross-build layer — omit → not installed), `[brew].packages`, `[pip].packages`, `[caches].ccache_max`, `[[mounts]]`. See `.shipyard/vm-image.toml` (Pulp: Xcode+Skia), `.shipyard/vm-image.intel.toml` (Intel cross-build layer), and `tools/ci/examples/vm-image.rust-repo.toml` (a light Rust profile, no Xcode — proves generalization).
 
-**Pulp's `[toolchain]` fields and `[brew].packages` are generated, not hand-edited.** `tools/toolchain/manifest.toml` is the authority; `python3 tools/toolchain/generate.py` rewrites the owned keys in both vm-image files plus `.mise.toml`, `.mise.toolchain.toml` and `mise.toolchain.lock`, and the `toolchain-test_generate-selftest` drift test fails on any hand edit. The manifest's `[evidence]` table says per tool whether a pin is `observed` on the gate or a `target`: `tart-provision.sh` still installs the unversioned Homebrew `[brew].packages` and `rustup ... stable`, so a fresh bake does NOT necessarily produce the pinned versions. To learn what a golden really holds without booting it (gate hosts have no spare VM slot), attach its `disk.img` read-only and mount the Data volume with `/sbin/mount_apfs -o rdonly,nobrowse` (`diskutil mount readOnly` hangs on these images): read `Applications/Xcode.app/Contents/version.plist`, `opt/homebrew/Cellar/<formula>/`, and `Users/admin/.rustup/toolchains/*/lib/rustlib/multirust-channel-manifest.toml`, then unmount and `hdiutil detach`. The m3 golden of 2026-08-03 holds Xcode 26.5 (17F42), cmake 4.3.3, python 3.14.4, rustc 1.97.1, Homebrew node 26.0.0, Homebrew mise 2026.4.28, and no clang-format.
+**Pulp's `[toolchain]` fields and `[brew].packages` are generated, not hand-edited.** `tools/toolchain/manifest.toml` is the authority; `python3 tools/toolchain/generate.py` rewrites the owned keys in both vm-image files plus `.mise.toml`, `.mise.toolchain.toml` and `mise.toolchain.lock`, and the `toolchain-test_generate-selftest` drift test fails on any hand edit. The manifest's `[evidence]` table says per tool whether a pin is `observed` on the gate or a `target`: `tart-provision.sh` still installs the unversioned Homebrew `[brew].packages` and `rustup ... stable`, so the tiers alone do NOT produce the pinned versions; the pinned set is the mise layer below, which now refuses the golden unless `check_env.py --require-tools` passes inside it. The OS and Xcode are pinned at the tiers: `base` is the manifest's `macos_base` (by digest), Tier 0 and Tier 1 refuse a guest whose `sw_vers -buildVersion` is not `macos_build`, and Tier 1 copies the host's `/Applications/Xcode.app` (the default when its build is the pin) to the SAME path in the guest and refuses any other build, path or an unaccepted licence. Same Xcode at the same path is what lets hosts and VMs share one ccache. To learn what a golden really holds without booting it (gate hosts have no spare VM slot), attach its `disk.img` read-only and mount the Data volume with `/sbin/mount_apfs -o rdonly,nobrowse` (`diskutil mount readOnly` hangs on these images): read `Applications/Xcode.app/Contents/version.plist`, `opt/homebrew/Cellar/<formula>/`, and `Users/admin/.rustup/toolchains/*/lib/rustlib/multirust-channel-manifest.toml`, then unmount and `hdiutil detach`. The m3 golden of 2026-08-03 holds Xcode 26.5 (17F42), cmake 4.3.3, python 3.14.4, rustc 1.97.1, Homebrew node 26.0.0, Homebrew mise 2026.4.28, and no clang-format.
 
 ## Intel (x86_64) cross-build lane — no native Intel hardware needed
 Pulp's required `darwin-x64` release leg **cross-compiles on Apple Silicon and
@@ -96,8 +96,8 @@ is available interactively when you need an exact local proof.
   tools/ci/tart-provision.sh manifest .shipyard/vm-image.intel.toml
   tools/ci/tart-provision.sh tag pulp-intel-build pulp-intel-build
   ```
-- **Use it:** `tools/ci/intel-vm-cross-build.sh [--ref <branch|tag|sha>] [--keep] [--full-build]` clones the golden → runs the cross-build recipe on a ref → asserts exact-thin x86_64 (`lipo -archs`) + a Rosetta `pulp help` run → discards the VM.
-- **THE cross-build gotcha (baked into the recipe):** `setup.sh --ci` prefetches the **host-arch (arm64)** Skia and `fetch_skia_for_release.py`'s flatten step **won't clobber** it, so the x86_64 `cmake` fails `FindSkia`. The recipe does `rm -rf external/skia-build/build` BETWEEN setup.sh and the `darwin-x64` fetch. Native Intel runners never hit this (host==target).
+- **Use it:** `tools/ci/intel-vm-cross-build.sh [--ref <branch|tag|sha>] [--keep] [--full-build]` clones the golden → runs the cross-build recipe on a ref → asserts the fetched universal `libskia.a` has an x86_64 slice and the built binary is exact-thin x86_64 (`lipo -archs`) + a Rosetta `pulp help` run → discards the VM.
+- **Cross-build Skia (baked into the recipe):** `setup.sh --ci` prefetches Skia and `fetch_skia_for_release.py`'s flatten step **won't clobber** it, so the recipe does `rm -rf external/skia-build/build` BETWEEN setup.sh and the `darwin-x64` fetch to get a fresh, receipt-bound generation. `darwin-x64` resolves the universal archive (gpu-runtime's renderer lock pins its Dawn), so the fetched `libskia.a` is fat and the check is for an x86_64 slice, not a thin file.
 - **Replicate to another Mac host:** either copy the baked `pulp-intel-build` image (tart export/clone over the network) OR run the manifest on that host — it needs `pulp-build-runner:latest` present there first (it's the base). Same 2-VM/host kernel cap applies; route Intel builds off the required-gate runners.
 
 ## Pinned-toolchain layer (mise) — a candidate golden, never `:latest` by itself
@@ -113,8 +113,9 @@ BY NAME with rustup self-update off. Its `[mise]` table is generated by
   differ from `HEAD`, because the receipt records that commit.
 - The receipt is the guest's own report
   (`~/.cache/pulp-ci/golden-receipts/<vm>-mise.json`): commit, lock and mise
-  digests, `mise ls`, `rustup toolchain list`, Xcode. Judge a candidate by it
-  and by running `check_env.py --fleet-path --require-tools` inside a clone.
+  digests, `mise ls`, `rustup toolchain list`, Xcode, and the in-guest
+  `check_env.py --fleet-path --require-tools` result (`toolchain_check`). The
+  layer refuses the bake when that check finds any difference, Xcode included.
 - The layer changes no PATH or runner setting. A lane uses these tools only
   when it opts in (`MISE_ENV=toolchain`, `mise exec`), so a candidate can sit
   next to `:latest` on a host without changing any job.
@@ -122,7 +123,7 @@ BY NAME with rustup self-update off. Its `[mise]` table is generated by
   which includes the candidate once this manifest is on `main`.
 
 ## Verified base/runtime specifics (cirruslabs + Tart, 2026-06-01)
-- Base image `ghcr.io/cirruslabs/macos-tahoe-base:latest` = macOS 26 "Tahoe" (matches Xcode 26.5 / build 17F42). Default creds `admin`/`admin`.
+- Base image: `tools/toolchain/manifest.toml` `macos_base`, pinned by digest (never `:latest`). Xcode 27.2 needs macOS 26.6 or later (its `LSMinimumSystemVersion`); the pin is `cirruslabs/macos-golden-gate-base`, macOS 27.2 (26B123), the build every fleet host runs. The production golden of 2026-10-27 was still macOS 26.4, which cannot run Xcode 27.2, so moving Xcode means a full Tier 0 rebake, not a Tier 1 swap. Default creds `admin`/`admin`.
 - The vanilla base **already** enables auto-login (kcpassword + `loginwindow autoLoginUser`) and Remote Login (sshd) — *verify*, don't recreate. Auto-login is REQUIRED for WindowServer/Metal.
 - `tart set <vm> --disk-size N` only grows, only on a **stopped** VM; the bundled tart-guest-agent grows APFS on next boot.
 - Prefer rsync'ing a **host-installed Xcode** into the golden over an in-guest `xcodes install` (interactive 2FA + multi-hour re-download). Remote rsync to `/Applications` needs `--rsync-path="sudo /opt/homebrew/bin/rsync"`.
