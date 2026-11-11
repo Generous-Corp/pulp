@@ -274,7 +274,8 @@ pulp_add_test_suite(pulp-test-signal-graph-offline-parity
 # modulation, state, prepared topology replacement, and offline rendering.
 pulp_add_test_suite(pulp-test-signal-graph-x9-modular-instrument
     SOURCES test_signal_graph_x9_modular_instrument.cpp
-    LIBRARIES pulp::host pulp::format pulp::graph)
+    LIBRARIES pulp::host pulp::format pulp::graph
+    PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
 # PulpSynth consumes graph-delivered parameter events through ParamCursor;
 # keep this focused regression independent of the larger X9 workflow fixture.
 pulp_add_test_suite(pulp-test-signal-graph-pulpsynth-automation
