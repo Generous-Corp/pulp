@@ -11,6 +11,8 @@ ROOT = Path(__file__).resolve().parents[2]
 RELEASE = (ROOT / ".github/workflows/release-cli.yml").read_text(encoding="utf-8")
 LIVENESS = (ROOT / ".github/workflows/required-gate-liveness.yml").read_text(encoding="utf-8")
 WORKFLOW_LINT = (ROOT / ".github/workflows/workflow-lint.yml").read_text(encoding="utf-8")
+# workflow-lint.yml runs on every event and decides scope from this list.
+WORKFLOW_LINT_SCOPE = (ROOT / "tools/ci/workflow_lint_paths.txt").read_text(encoding="utf-8").splitlines()
 
 
 class ReleaseContentWiring(unittest.TestCase):
@@ -71,18 +73,13 @@ class RequiredGateLivenessWiring(unittest.TestCase):
             self.assertIn(test, WORKFLOW_LINT)
 
     def test_sdk_definition_inputs_trigger_release_matrix_parity(self) -> None:
-        for path in (
-            "'CMakeLists.txt'",
-            "'**/CMakeLists.txt'",
-            "'tools/cmake/**'",
-        ):
-            self.assertEqual(
-                WORKFLOW_LINT.count(path),
-                2,
-                "both pull_request and main push must run release matrix parity "
-                f"when {path} changes",
+        for path in ("CMakeLists.txt", "**/CMakeLists.txt", "tools/cmake/**"):
+            self.assertIn(
+                path,
+                WORKFLOW_LINT_SCOPE,
+                "pull requests, queue batches and main pushes must run release "
+                f"matrix parity when {path} changes",
             )
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -55,6 +55,7 @@
    "tools/ci/spawn_none_build_path_reviews.json",
    "tools/ci/test_receipts_shadow.py",
    "tools/ci/wide_non_native_checks.json",
+   "tools/ci/workflow_lint_paths.txt",
    "tools/cmake",
    "tools/cmake/PulpDependencies.cmake",
    "tools/cmake/PulpFetchContent.cmake",
