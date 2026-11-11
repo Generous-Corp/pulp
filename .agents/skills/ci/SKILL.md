@@ -655,6 +655,14 @@ prefix) to match a glob, so only the scheduled standing pass approves; a HOLD
 from any session still counts. A reviewer tab outside that pass needs its
 session listed. The key only takes effect through the Shipyard commit pinned in
 `.github/workflows/review-verdict.yml`, so keep that pin at a version that reads it.
+The pin is Shipyard v0.407.0 (`44721a9f`): since v0.386.0 the commit status
+is `pending` (`awaiting reviewer verdict for head <sha>`), not `failure`, while
+a head only awaits its reviewer; `failure` means a counted HOLD or an
+unreadable review. The check run itself stays red in both cases, so a pending
+status is never a defect to fix and never something a push clears. Moving the
+pin edits a workflow file (owner subset): open the PR unarmed with the
+`scripts/review_verdict_status.py` + `scripts/ghapp_queue_arm_guard.py` diff
+summarised against exact-head, stamp-session and self-approval behaviour.
 
 **`carry_excluded_paths` replaces Shipyard's default; it does not add to it.**
 The same `[auto_merge]` table lists the paths whose change stops an APPROVE
