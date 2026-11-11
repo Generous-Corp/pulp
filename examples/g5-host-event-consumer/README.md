@@ -15,6 +15,10 @@ partition schedules containing 1, 32, 64, 127, and 256 frame blocks. The graph
 lane includes missing-edge, one-sample boundary, reversed-tie, and payload
 mismatch negatives. Hosted plugin voice delivery remains outside this slice.
 
+The lifecycle controls additionally exercise staging overflow, transactional
+output-capacity refusal, late publication, epoch reset, queued look-ahead
+delivery, and refusal of a retired graph epoch.
+
 Build against a freshly installed SDK from the same source revision:
 
 ```sh
