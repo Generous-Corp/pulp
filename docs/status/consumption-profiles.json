@@ -1513,6 +1513,7 @@
       "pulp/view/pointer_dispatch.hpp",
       "pulp/view/preferences_panel.hpp",
       "pulp/view/preset_browser.hpp",
+      "pulp/view/preset_program_editor.hpp",
       "pulp/view/press_reach.hpp",
       "pulp/view/property_list.hpp",
       "pulp/view/property_panel.hpp",
