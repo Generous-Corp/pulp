@@ -13,13 +13,15 @@ import p0_layered_replay_receipt as receipt
 
 
 class LayeredReceiptTests(unittest.TestCase):
-    def test_partition_control_is_explicitly_unqualified(self) -> None:
+    def test_partition_control_records_canonical_pcm_for_both_partitions(self) -> None:
         layers = {layer.name: layer.value for layer in receipt.base_layers()}
         outputs = [receipt.output_for(partition, layers["event"], layers["plan"])
                    for partition in receipt.PARTITIONS]
         self.assertEqual(outputs[0]["pcm_sha256"], outputs[1]["pcm_sha256"])
         result = receipt.receipt(receipt.base_layers(), [], "test-head")
-        self.assertEqual(result["partition_controls"]["status"], "NOT_CHECKED")
+        self.assertEqual(result["partition_controls"]["status"], "PASS")
+        self.assertEqual(result["partition_controls"]["partitions"], [64, 128])
+        self.assertEqual(len(result["partition_controls"]["output_sha256"]), 2)
 
     def test_each_mutation_is_attributed_to_one_layer(self) -> None:
         result = receipt.receipt(receipt.base_layers(), [], "test-head")
@@ -27,6 +29,10 @@ class LayeredReceiptTests(unittest.TestCase):
         self.assertEqual([control["status"] for control in controls], ["PASS"] * 5)
         self.assertEqual([control["changed_layers"] for control in controls],
                          [[name] for name in ("authored", "resolved", "plan", "event", "output")])
+        self.assertEqual([control["rejected_at_layer"] for control in controls],
+                         [control["expected_failure_layer"] for control in controls])
+        self.assertEqual([control["status"] for control in result["positive_controls"]],
+                         ["PASS"] * 5)
 
     def test_cli_keeps_missing_consumers_unqualified(self) -> None:
         script = Path(__file__).with_name("p0_layered_replay_receipt.py")
@@ -57,6 +63,34 @@ class LayeredReceiptTests(unittest.TestCase):
                 "g3-installed-public-consumer", [str(executable)],
                 "wrong", "pulp.graph.g3-resolved-identity-consumer.v1", "g3")
             self.assertEqual(bad["status"], "UNAVAILABLE")
+
+    def test_partitioned_consumer_requires_each_partition_attestation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / "pulp-g3-resolved-identity-consumer"
+            executable.write_text(
+                "#!/bin/sh\n"
+                "printf '%s partition_frames=%s\\n' "
+                "pulp.graph.g3-resolved-identity-consumer.v1 \"$2\"\n",
+                encoding="utf-8")
+            executable.chmod(0o755)
+            record = receipt.run_consumer(
+                "g3-installed-public-consumer", [str(executable)],
+                "pulp-g3-resolved-identity-consumer",
+                "pulp.graph.g3-resolved-identity-consumer.v1", "g3", receipt.PARTITIONS)
+            self.assertEqual(record["status"], "PASS")
+            self.assertEqual([run["status"] for run in record["runs"]], ["PASS", "PASS"])
+
+    def test_receipt_keeps_layer_bytes_and_quality_metadata_separate(self) -> None:
+        result = receipt.receipt(receipt.base_layers(), [], "test-head")
+        self.assertEqual([layer["name"] for layer in result["layers"]],
+                         ["authored", "resolved", "plan", "event", "output"])
+        for layer in result["layers"]:
+            self.assertTrue(layer["canonical_bytes_sha256"].startswith("sha256:"))
+            self.assertGreater(layer["canonical_bytes_length"], 0)
+        output = next(layer["value"] for layer in result["layers"] if layer["name"] == "output")
+        self.assertEqual(output["partitions"][0]["canonical_pcm"]["encoding"], "s32le")
+        self.assertIn("quality", output["partitions"][0])
+        self.assertEqual(result["provenance"]["source_head"], "test-head")
 
     def test_public_consumer_fixtures_emit_protocol_attestations(self) -> None:
         fixtures = {
