@@ -23,6 +23,17 @@ const char* to_string(PopupDismissReason reason) noexcept {
     return "unknown";
 }
 
+PopupResignAction popup_resign_action(bool popup_is_key, bool parent_is_key, int reclaims) {
+    // A bound, so two windows that keep handing key to each other cannot keep
+    // the popup alive forever.
+    constexpr int kMaxReclaims = 3;
+    if (popup_is_key)
+        return PopupResignAction::stay_open;
+    if (parent_is_key && reclaims < kMaxReclaims)
+        return PopupResignAction::take_key_back;
+    return PopupResignAction::close_focus_lost;
+}
+
 PopupRect place_popup(const PopupRect& anchor, float width, float height, const PopupRect& visible,
                       PopupPlacement placement) {
     PopupRect frame;
