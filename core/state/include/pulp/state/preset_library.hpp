@@ -16,6 +16,7 @@
 
 #include <pulp/state/preset_manager.hpp>
 #include <pulp/state/preset_metadata_store.hpp>
+#include <pulp/state/preset_program_map.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -59,9 +60,11 @@ struct PresetSummary {
     std::string author;
     bool is_factory = false;
     std::filesystem::path path;
+    /// Where the preset sits in the program map, when it has a slot.
+    std::optional<BankProgram> program;
 };
 
-enum class PresetSort { name, favourites_first, source };
+enum class PresetSort { name, favourites_first, source, program };
 
 struct PresetQuery {
     /// Whitespace-separated words; every word must match the name, folder,
@@ -70,6 +73,7 @@ struct PresetQuery {
     std::vector<std::string> tags_all; ///< Every listed tag must be present
     std::optional<bool> favourite;
     std::optional<PresetSource> source;
+    std::optional<std::uint16_t> bank; ///< Only presets in this program bank
     PresetSort sort = PresetSort::name;
     std::size_t offset = 0;
     std::size_t limit = 0; ///< 0 = no limit
@@ -119,6 +123,27 @@ class PresetLibrary {
     bool add_tag(const std::string& key, const std::string& tag);
     bool remove_tag(const std::string& key, const std::string& tag);
 
+    // ── Program map (Bank Select + Program Change numbers) ───────────────────
+
+    /// Opt in to MIDI program numbers: every preset without a slot is given one
+    /// (factory presets in bank 0, user presets in bank 1, each content pack in
+    /// the next free bank) and the assignments are saved with the edits. They
+    /// never move afterwards, so a number keeps meaning the same preset when an
+    /// update adds or removes presets. Without this call the library writes no
+    /// program map.
+    void enable_program_map();
+    bool program_map_enabled() const;
+    ProgramMap program_map() const;
+    /// The preset a position resolves to, or nothing when the slot is empty or
+    /// its preset is not installed.
+    std::optional<PresetSummary> preset_at(BankProgram position) const;
+    std::optional<BankProgram> program_of(const std::string& key) const;
+    /// Place an installed preset at a position, moving it from any other slot.
+    bool assign_program(BankProgram position, const std::string& key);
+    bool clear_program(BankProgram position);
+    bool set_bank_name(std::uint16_t bank, const std::string& name);
+    bool renumber_bank(std::uint16_t from, std::uint16_t to);
+
     /// Edits whose preset is no longer present and could not be re-linked.
     /// They are kept so the edits return with the preset.
     std::size_t orphan_count() const;
@@ -141,6 +166,9 @@ class PresetLibrary {
 
     void rebuild_locked();
     void relink_locked();
+    void load_program_map_locked();
+    bool pin_program_defaults_locked();
+    bool save_program_map_locked();
     PresetSummary summarize_locked(const Entry& entry) const;
     const Entry* find_entry_locked(const std::string& key) const;
     std::string digest_of_locked(const Entry& entry) const;
@@ -154,6 +182,8 @@ class PresetLibrary {
     std::unordered_map<std::string, std::size_t> by_key_;
     std::uint64_t generation_ = 1;
     bool persist_ok_ = true;
+    ProgramMap program_map_;
+    bool program_map_enabled_ = false;
 };
 
 } // namespace pulp::state

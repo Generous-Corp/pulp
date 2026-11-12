@@ -10012,6 +10012,16 @@ while debugging runner routing.
 
 ### Verifying your branch isn't burning macOS runner time
 
+### PR workflow concurrency is per-PR and event-gated
+
+Every workflow triggered by `pull_request` or `pull_request_target` needs a
+workflow-level concurrency group keyed by the PR number (falling back to
+`github.ref`) and must set `cancel-in-progress` only for those PR events. This
+lets a newer head release queued runner capacity without cancelling pushes to
+`main`, merge-group entries, tags, releases, schedules, or manual dispatches.
+Existing workflows with deliberate concurrency comments retain their documented
+policy; audit new PR-triggered workflows for this block before adding them.
+
 Each failed macOS leg consumes one of the scarce self-hosted runners and
 queues every other PR behind your run. Before broadcasting "my CI is stuck",
 inspect the exact job state and queue age, then the eligible hosts'
@@ -10609,6 +10619,11 @@ red together is the normal shape of a *single* freeze-check failure:
 So `Vellum trusted freeze` legitimately shows up twice in `gh pr checks` — once
 as the posted status, once as the `merge_group` job skipped on a `pull_request`
 event. Fix the underlying freeze-check failure and all three clear together.
+
+The `Vellum freeze` job also runs `vellum_ui_drift_report.py` as a
+`continue-on-error` step. It lists transferred UI paths that are not frozen and
+differ from the export receipt blobs. A listed path never turns the job red;
+only an unreadable input (exit 2) shows as a failed step.
 
 The usual cause is a change to a `framework-authoritative-transferred` slice
 with no matching change event under `.github/vellum-change-events/`. The

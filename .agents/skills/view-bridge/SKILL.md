@@ -4001,3 +4001,11 @@ link follows the reference. A bundle whose scripts come only from keyed
 missing builder, reports it in `last_error()` and opens AutoUi. Reaching the runtime only by name (`dlsym`) cannot
 work: nothing links it. `docs/reference/cmake.md` "Shipped Module Size" is the
 user-facing version.
+
+## The CLAP plugin struct carries the preset library
+
+`PulpClapPlugin` (`clap_adapter.hpp`) now holds an optional `PresetLibrary` and a
+`PresetProgramRouter` for plug-ins that set `supports_program_change`. An editor
+that wants a preset browser reads the library from the adapter's instance rather
+than building a second one: two libraries over one overlay file merge on write
+but each keeps its own in-memory index until `refresh()`.

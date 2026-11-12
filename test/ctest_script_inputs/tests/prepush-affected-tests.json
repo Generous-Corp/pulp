@@ -1,0 +1,11 @@
+{
+ "name": "prepush-affected-tests",
+ "record": {
+  "entry": "tools/scripts/test_prepush_affected_tests.py",
+  "inputs": [
+   "tools/scripts/prepush_affected_tests.py",
+   "tools/scripts/test_prepush_affected_tests.py"
+  ],
+  "kind": "python"
+ }
+}

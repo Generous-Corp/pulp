@@ -1,0 +1,36 @@
+{
+  "evidence_files": {
+    "README.md": {
+      "bytes": 2412,
+      "sha256": "9714b2e5268bb2b9bd5e930f1ec0bc764f3d504d808042399f230c9c55a80d62"
+    },
+    "pilot-summary.json": {
+      "bytes": 891,
+      "sha256": "f9c4ee7b8aeab948dfe19a2a8d69aba0022d811370e6db2b11d8366935e5c44a"
+    },
+    "real-fixture-controls.json": {
+      "bytes": 2059,
+      "sha256": "dba88f107daf2be5657c218730ed237a377a675d8dfb15db09669da23642282b"
+    },
+    "verification-results.json": {
+      "bytes": 1505,
+      "sha256": "5bf37d6827a38408ea996a4095dea393bb5b394238ae050f0daef8dc5b9ef1de"
+    }
+  },
+  "source_files": {
+    "test/fixtures/g5_graph_event_rt_cases.inc": {
+      "bytes": 44239,
+      "sha256": "887e633e954a84ed0289bc9f0583be46ea83943021754a5eed7c6b16374a286d"
+    },
+    "tools/graph_performance_qualification.py": {
+      "bytes": 61821,
+      "sha256": "90e9406682281bef3508f2033d81968802963cce67bf451c9a37b5aaceae1de1"
+    },
+    "tools/test_graph_performance_qualification.py": {
+      "bytes": 26071,
+      "sha256": "70c5f3ee82d3b66ffd4ddc8d25c74947f6c827848bbf1d61c42ecf027ce180b2"
+    }
+  },
+  "source_tree": "2bb9be58f8ed9b4bdb8564690cc9ed6e0374252be7519f0f620306f5a2b65e75",
+  "tested_source_commit": "0c1fc0d9ff0f0d2aa10e79a0a84179d0a1cc1e44"
+}
