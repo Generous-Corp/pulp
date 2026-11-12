@@ -31,6 +31,9 @@ function(pulp_sample_region_web_sources ROOT OUT)
         "${ROOT}/core/host/src/anticipation_subgraph.cpp"
         "${ROOT}/core/host/src/anticipation_lane.cpp"
         "${ROOT}/core/host/src/plugin_slot.cpp"
+        # Worker isolation needs a child process, so the web profile links the
+        # always-false query instead of isolated_plugin_slot.cpp.
+        "${ROOT}/core/host/src/isolated_plugin_slot_web.cpp"
         "${ROOT}/core/host/src/timeline_device_resolver.cpp"
         "${ROOT}/core/format/src/graph_runtime_executor.cpp"
         "${ROOT}/core/format/src/graph_runtime_worker_pool.cpp"

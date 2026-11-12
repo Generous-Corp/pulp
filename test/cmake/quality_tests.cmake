@@ -256,6 +256,14 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME doxygen-installed-header-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_doxygen_installed_header_check.py")
+    # docs/status/modules.yaml entries resolve to a source directory: core/<name>
+    # or the entry's path under integrations/ (tools/check-docs.sh runs the check).
+    add_test(NAME modules-yaml-dirs-check
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/modules_yaml_dirs_check.py")
+    add_test(NAME modules-yaml-dirs-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_modules_yaml_dirs_check.py")
     add_test(NAME transient-interaction-trace-budget-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_transient_interaction_trace.py")

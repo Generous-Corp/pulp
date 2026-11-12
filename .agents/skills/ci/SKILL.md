@@ -3484,6 +3484,12 @@ a configured build: `script_test_inputs.py --build-dir B --write`,
 `source_selftests.py write --build-dir B` (`--add <name>` for a new entry), and
 `changed_surface_script_families.py --build-dir B --write` (the build needs a
 codemodel reply: touch `B/.cmake/api/v1/query/codemodel-v2` and reconfigure).
+No configure available (a gate host at its ceiling)? When `script-test-inputs`
+fails in `drift-fast`, the run uploads the `script-inputs-expected` artifact:
+the exact fragments `--write` would produce for the drifted entries
+(`--emit-expected DIR`, default `$RUNNER_TEMP/script-inputs-expected`). Download
+it and `cp -R <artifact-dir>/. test/ctest_script_inputs/`, then commit; the
+failure log prints this recipe.
 `gates.sh` runs all three checks in one lane (`gates_script_inputs.py`) whenever
 the diff touches a Python file under `tools/`, `test/cmake/`, a skill doc or one
 of the generated files, configuring `build-gate` without compiling if no current
@@ -13591,3 +13597,21 @@ or a title naming the context beside a fix word) and reports other approved
 heads as `held_base_poisoned:<context>`. A held head is not broken: do not
 re-push it, the hold lifts once a merge group passes the context. The reviewer
 kick and priority file are machine-only keys and must stay out of this file.
+
+## Downloading another repository's Actions artifact
+
+`vellum-sdk-consumer.yml` reads Vellum's SDK artifact from Pulp's CI. Three things
+about that path are not obvious:
+
+- **A public repository's artifacts still need a token.** The artifact zip
+  endpoint refuses anonymous requests even when the repository is public;
+  `github.token` from any repository is enough.
+- **The token must not follow the redirect.** `actions/artifacts/<id>/zip`
+  answers with a redirect to signed blob storage, and that host rejects a
+  forwarded GitHub `Authorization` header with HTTP 401. Python's `urllib`
+  forwards it by default; `tools/ci/vellum_sdk_consumer.py` drops it on any
+  cross-host redirect. `curl -L` without `--location-trusted` already drops it.
+- **Skip by head, but only from a green run.** The nightly lane stops early when
+  Vellum main's head equals the head recorded in the last *successful* run's
+  receipt artifact, and it uploads that receipt only when the whole run is
+  green, so a red night is retried on the next one rather than forgotten.

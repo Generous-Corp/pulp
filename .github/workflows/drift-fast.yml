@@ -112,3 +112,15 @@ jobs:
       - name: Run drift checks
         run: |
           python3 tools/ci/drift_fast.py run --build-dir "$PULP_BUILD_DIR"
+
+      # script-test-inputs --check writes the expected fragment of each drifted
+      # entry to $RUNNER_TEMP/script-inputs-expected; a repair copies them into
+      # test/ctest_script_inputs/ with no configure. Never blocks the check.
+      - name: Upload expected script-inputs fragments
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: script-inputs-expected
+          path: ${{ runner.temp }}/script-inputs-expected
+          if-no-files-found: ignore

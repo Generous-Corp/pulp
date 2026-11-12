@@ -519,7 +519,8 @@ def tool_env(*, event: str | None, strict: bool) -> dict[str, str]:
     gives the same verdict inside a pull-request job, a merge-group job (where
     the runner exports GITHUB_EVENT_NAME=merge_group and the script would
     otherwise go advisory under a case that expects a block), and a shell."""
-    env = {k: v for k, v in os.environ.items() if k not in ("GITHUB_EVENT_NAME", "PULP_SCRIPT_INPUTS_STRICT")}
+    env = {k: v for k, v in os.environ.items() if k not in ("GITHUB_EVENT_NAME", "PULP_SCRIPT_INPUTS_STRICT", "RUNNER_TEMP",
+                                                         "PULP_SCRIPT_INPUTS_EMIT_DIR")}
     if event is not None:
         env["GITHUB_EVENT_NAME"] = event
     if strict:
@@ -549,6 +550,32 @@ class CheckModeTests(unittest.TestCase):
             stale = self.run_tool(repo, "--check")
             self.assertEqual(stale.returncode, 1, stale.stdout)
             self.assertIn("stale entry: alpha", stale.stdout)
+
+    def test_emit_expected_matches_what_write_produces_for_a_stale_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            write(repo.root, "tools/scripts/extra.py", "z = 1\n")
+            write(repo.root, "tools/scripts/alpha_lib.py", "import extra\nDATA = 'docs/status/alpha.yaml'\n")
+            out = Path(tmp) / "expected"
+            stale = self.run_tool(repo, "--check", "--emit-expected", str(out))
+            self.assertEqual(stale.returncode, 1, stale.stdout)
+            self.assertIn("script-inputs-expected", stale.stdout)
+            emitted = sorted(p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file())
+            self.assertIn(f"tests/{store.slug('alpha')}.json", emitted)
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            for rel in emitted:
+                frag = repo.root / sti.DEFAULT_LIST / rel
+                self.assertEqual((out / rel).read_text(encoding="utf-8"), frag.read_text(encoding="utf-8"))
+
+    def test_emit_expected_writes_nothing_without_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            out = Path(tmp) / "expected"
+            clean = self.run_tool(repo, "--check", "--emit-expected", str(out))
+            self.assertEqual(clean.returncode, 0, clean.stdout + clean.stderr)
+            self.assertFalse(out.exists())
 
     def test_check_reports_a_new_test_and_ignores_tests_absent_here(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

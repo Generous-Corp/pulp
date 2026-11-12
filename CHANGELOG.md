@@ -9,6 +9,45 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11190"></a>
+## [1.119.0] - 2026-11-12
+
+- release/version bump ([#12127](https://github.com/Generous-Corp/pulp/pull/12127))
+- docs/p1 admission design 20261112 ([#12123](https://github.com/Generous-Corp/pulp/pull/12123))
+- ci/script inputs emit expected ([#12121](https://github.com/Generous-Corp/pulp/pull/12121))
+- graph/p0 layered receipt 20261112 ([#12120](https://github.com/Generous-Corp/pulp/pull/12120))
+- fix/contract editor pump listeners ([#12108](https://github.com/Generous-Corp/pulp/pull/12108))
+
+<a id="v11180"></a>
+## [1.118.0] - 2026-11-12
+
+- release/version bump ([#12119](https://github.com/Generous-Corp/pulp/pull/12119))
+- codex/g6 receipt refresh 20261112 ([#12117](https://github.com/Generous-Corp/pulp/pull/12117))
+
+<a id="v11170"></a>
+## [1.117.0] - 2026-11-12
+
+- release/version bump ([#12115](https://github.com/Generous-Corp/pulp/pull/12115))
+- fix/wasm isolated plugin slot link ([#12104](https://github.com/Generous-Corp/pulp/pull/12104))
+- feature/popup key handback ([#12102](https://github.com/Generous-Corp/pulp/pull/12102))
+- codex/preset editor clean 20261111 ([#12066](https://github.com/Generous-Corp/pulp/pull/12066))
+- feature/rt allocation probe self check ([#12103](https://github.com/Generous-Corp/pulp/pull/12103))
+- codex/post roadmap graph capability gap correction 20261112 ([#12106](https://github.com/Generous-Corp/pulp/pull/12106))
+- codex/g4 processor binding contract 20261112 ([#12109](https://github.com/Generous-Corp/pulp/pull/12109))
+
+<a id="v11160"></a>
+## [1.116.0] - 2026-11-12
+
+- release/version bump ([#12111](https://github.com/Generous-Corp/pulp/pull/12111))
+- feature/native gl surface interface ([#12101](https://github.com/Generous-Corp/pulp/pull/12101))
+- g5/event runtime 20261111 ([#12091](https://github.com/Generous-Corp/pulp/pull/12091))
+- codex/g3 d5 saved identity 20261111 ([#12095](https://github.com/Generous-Corp/pulp/pull/12095))
+- codex/post roadmap graph capability gap 20261111 ([#12105](https://github.com/Generous-Corp/pulp/pull/12105))
+- fix/android lilv copy file range 20261112 ([#12100](https://github.com/Generous-Corp/pulp/pull/12100))
+- fix/scale probe au in process ([#12097](https://github.com/Generous-Corp/pulp/pull/12097))
+- feature/vellum sdk consumer lane ([#12089](https://github.com/Generous-Corp/pulp/pull/12089))
+- release/version bump ([#12096](https://github.com/Generous-Corp/pulp/pull/12096))
+
 <a id="v11150"></a>
 ## [1.115.0] - 2026-11-12
 
@@ -12830,6 +12869,10 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.119.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.119.0
+[1.118.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.118.0
+[1.117.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.117.0
+[1.116.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.116.0
 [1.115.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.115.0
 [1.114.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.114.0
 [1.113.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.113.0

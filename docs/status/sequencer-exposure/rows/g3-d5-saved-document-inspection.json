@@ -1,0 +1,73 @@
+{
+  "id": "g3-d5-saved-document-inspection",
+  "title": "Bounded saved-document identity inspection is ledgered",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "g3-d5-saved-document-inspection-20261111",
+  "owned_paths": [
+    "core/host/include/pulp/host/graph_serializer.hpp",
+    "core/host/src/graph_serializer.cpp",
+    "test/test_graph_serializer.cpp",
+    "examples/g3-resolved-identity-consumer/main.cpp",
+    "docs/evidence/g3-d5-saved-identity-20261111.md",
+    "docs/status/sequencer-exposure/rows/g3-d5-saved-document-inspection.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/host/include/pulp/host/graph_serializer.hpp",
+      "needles": ["GraphDocumentInspection", "inspect_document(std::string_view json)"]
+    },
+    {
+      "path": "core/host/src/graph_serializer.cpp",
+      "needles": ["GraphSerializer::inspect_document", "GraphDocumentRefusal::NestingLimitExceeded", "pulp.graph.semantic.v6"]
+    },
+    {
+      "path": "test/test_graph_serializer.cpp",
+      "needles": ["[g3][d5]", "DuplicateJsonKey", "pulp.graph.saved-identity.v6"]
+    },
+    {
+      "path": "examples/g3-resolved-identity-consumer/main.cpp",
+      "needles": ["inspect_document", "semantic_digest"]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "GraphDocumentInspection and GraphSerializer::inspect_document are public, read-only, bounded host APIs. Inspection owns canonical bytes and a domain-separated digest and refuses malformed, unsupported, or over-depth documents without loading plugins or mutating a graph.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/graph_serializer.hpp",
+          "needles": ["GraphDocumentInspection", "inspect_document"]
+        },
+        {
+          "kind": "test",
+          "path": "examples/g3-resolved-identity-consumer/main.cpp",
+          "needles": ["inspect_document", "semantic_digest"]
+        }
+      ],
+      "authority": {
+        "admission": "read_only",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "The slice adds no CLI command, flag, or offline writer; it only exposes a library inspection API."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation, schema, or handler is added."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "Inspection is data-only and read-only; it adds no runtime operation or executor authority."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No design-time capability or agent manifest entry is added."
+    }
+  }
+}
