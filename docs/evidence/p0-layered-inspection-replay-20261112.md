@@ -4,9 +4,9 @@ Status: **PARTIAL / tooling experiment**.
 
 The checked-in fixture receipt is
 `p0-layered-inspection-replay-20261112/receipt.json` (raw-file SHA-256
-`9c449409c89f219a8edad829ec2f1fb89308d69c312c70a2483c68af111812c7`; the
+`0b6965f5987c9823dee12466b06c671892c5473ff3018258d0cac4f68909e253`; the
 canonical JSON digest is
-`b66229e3d6986d4015fae89939a8ab6f63bdf1c4bbaf7e67b6577d1c0c91c9a6`). Its
+`2c4cc34fa164eaa09ab17bb04bf5c7cff715af39730b97a19eb624f552a2fb72`). Its
 consumer gate is **NOT_QUALIFIED** because this checkout could not supply the
 installed public binaries: the source build's generated package refers to
 relocatable support modules that are materialized only by a completed SDK
@@ -22,10 +22,14 @@ This evidence-only slice keeps the five inspection layers independent:
 5. canonical PCM output metadata and digest.
 
 `tools/scripts/p0_layered_replay_receipt.py` composes the existing G3 resolved
-identity consumer and the separate spectral frame consumer. The receipt is
+identity consumer and the separate spectral frame consumer when supplied. The
+checked-in envelope and layer values are synthetic tooling fixtures; they do
+not invoke the production serializer, resolver, prepared-plan compiler,
+notation, or probe paths. The receipt is
 versioned as `pulp.graph.layered-replay-receipt.v1` and records each consumer's
 command, executable digest, output digest, and return code. The consumer gate
-is fail-closed: absent commands exit 2 unless `--allow-unavailable` is used;
+is fail-closed: absent or invalid consumer commands exit 1 unless
+`--allow-unavailable` is used;
 that mode writes `NOT_QUALIFIED` and never reports a completed experiment.
 
 The fixture oracle renders sample-level canonical signed 32-bit PCM and records

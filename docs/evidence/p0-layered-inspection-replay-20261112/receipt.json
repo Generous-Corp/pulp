@@ -218,7 +218,7 @@
     "tool": "tools/scripts/p0_layered_replay_receipt.py"
   },
   "schema": "pulp.graph.layered-replay-receipt.v1",
-  "source_head": "23fd30ff066925076d26f4c7da6153e4c3163a3c",
+  "source_head": "420ee73ec1af38df64f0eb9ff3cdde4b374acae3",
   "unavailable_lanes": [
     "runtime",
     "realtime",
