@@ -286,6 +286,10 @@ TEST_CASE("key handed back to the editor without a click keeps the popup open",
 
     [editor.window makeKeyWindow]; // what activation does, with no click
     dispatch_events(100ms);
+    // The application lost activation meanwhile (another app took focus):
+    // neither window is key, and focus_lost is the right report.
+    if (!NSApp.isActive)
+        SKIP("the application was deactivated during the test");
     INFO("reports: " << reports.size() << ", first: "
                      << (reports.empty() ? "none" : to_string(reports.front())));
     REQUIRE(reports.empty());
