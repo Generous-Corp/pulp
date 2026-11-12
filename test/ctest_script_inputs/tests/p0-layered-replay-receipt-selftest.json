@@ -1,0 +1,11 @@
+{
+ "name": "p0-layered-replay-receipt-selftest",
+ "record": {
+  "entry": "tools/scripts/test_p0_layered_replay_receipt.py",
+  "inputs": [
+   "tools/scripts/p0_layered_replay_receipt.py",
+   "tools/scripts/test_p0_layered_replay_receipt.py"
+  ],
+  "kind": "python"
+ }
+}
