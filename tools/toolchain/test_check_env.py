@@ -551,7 +551,14 @@ class WorkflowStepTests(unittest.TestCase):
         self.assertIn("no python3 or python on PATH", out.stdout)
 
     def test_missing_tools_and_an_unreadable_expectation_still_exit_0(self) -> None:
-        python_dir = str(Path(sys.executable).parent)
+        # The step looks for `python3` by name, and a versioned interpreter
+        # (Homebrew's python3.11, say) sits in a directory with no `python3`,
+        # so the PATH holds a `python3` link to the running interpreter.
+        with tempfile.TemporaryDirectory() as bin_td:
+            (Path(bin_td) / "python3").symlink_to(sys.executable)
+            self.check_missing_tools(bin_td)
+
+    def check_missing_tools(self, python_dir: str) -> None:
         out = self.run_step(REPO_ROOT, python_dir)
         self.assertEqual(0, out.returncode, out.stderr)
         self.assertIn("difference(s) from the manifest", out.stdout)

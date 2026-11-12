@@ -6,6 +6,7 @@
    ".githooks/pre-push",
    ".github/rulesets/main-protection.json",
    ".github/workflows/build.yml",
+   "core/view/src/widgets.cpp",
    "docs/status/consumption-profiles.json",
    "docs/status/consumption-profiles.schema.json",
    "test/cmake/design_import_tool_cli_tests.cmake",
