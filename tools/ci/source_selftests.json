@@ -1231,6 +1231,12 @@
       ]
     },
     {
+      "name": "patched-os-name-path-lint-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_patched_os_name_path_lint.py"
+      ]
+    },
+    {
       "name": "vellum-trusted-merge-selftest",
       "argv": [
         "{repo}/tools/scripts/test_vellum_trusted_merge.py"
