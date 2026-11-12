@@ -11,7 +11,7 @@ head `e777deef` (an ancestor of this documentation repair):
 - executed SDK/source head: `e777deef9dea919aa00ddafdea86e75e32f2a8dc`
 - historical documentation commit: `38354ddd1abae273b94d34091d43e3609bb78d1c`
 - historical reviewed documentation head (not current): `ebd86425f62e544d91bdfad2e342ad1de7140ee8`
-- current PR head (documentation only): `6d91c837942d2c24057030278dd5d91d69ed5453`
+- current reviewed PR head (documentation only): `975f95f78b723cb75c9eff34a9339a7134768a2c`
 - branch: `codex/g6-voice-fixture-audit-20261112`
 - worktree: `/Users/danielraffel/agent-worktrees/pulp-g6-voice-fixture-audit-20261112`
 - lineage: active, owner `g6-voice-fixture-audit`
@@ -50,23 +50,15 @@ The source-tree wrapper CTest (`test/cmake/test_g6_voice_bank_sdk_consumer.cmake
 and a planted mutation control are **NOT_CHECKED** in this run. The wrapper's
 hash/provenance checks are source text, not a receipt for an executed wrapper.
 
-## Existing fixture coverage (source inspection)
+## Existing fixture source (not enforcement evidence)
 
-The executed consumer's source contains checks for the following behaviors;
-these line references describe the code path, while the receipt above is the
-only execution evidence:
-
-- note-on/note-off, rendering, finite release reclamation, and partition loop
-  (`examples/g6-voice-bank-consumer/main.cpp:35-66,675-701`);
-- four steal policies and ordered victim selection (`main.cpp:68-109`);
-- stale generation and stale epoch refusal (`main.cpp:111-146`);
-- expression validation, capacity, and slot reuse (`main.cpp:148-379`);
-- sustain/channel-mode and expression refusal paths (`main.cpp:478-540`);
-- A1 frozen vectors for bounded tail and hard-steal cases (`main.cpp:545-628`).
-
-These checks exercise the public `VoiceBankBinding` consumer and its authored
-`ProbeProcessor` fixture (`fixture.hpp:20-112,202-231`); they do not prove graph
-ownership or lifecycle semantics.
+The consumer source contains call sites and assertions covering note rendering,
+stealing, stale generations, expression, capacity, pedals, and A1 vectors
+(`examples/g6-voice-bank-consumer/main.cpp:35-379,478-628,675-701`). The authored
+`ProbeProcessor` and `VoiceBankBinding` setup is in `fixture.hpp:20-112,202-231`.
+These references identify source scope only. They are not a separate
+source-wrapper or mutation receipt, and they do not prove graph ownership,
+lifecycle, or runtime enforcement.
 
 The fixture does **not** establish graph save/restore or a graph swap while a
 voice is sounding. Those remain **NOT_CHECKED**; the A1 replacement vectors are
