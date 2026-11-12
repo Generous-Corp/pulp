@@ -290,8 +290,8 @@ TEST_CASE("key handed back to the editor without a click keeps the popup open",
     // neither window is key, and focus_lost is the right report.
     if (!NSApp.isActive)
         SKIP("the application was deactivated during the test");
-    INFO("reports: " << reports.size() << ", first: "
-                     << (reports.empty() ? "none" : to_string(reports.front())));
+    INFO("reports: " << reports.size()
+                     << ", first: " << (reports.empty() ? "none" : to_string(reports.front())));
     REQUIRE(reports.empty());
     REQUIRE(popup->is_open());
     REQUIRE(panel.isKeyWindow); // the popup took key back
