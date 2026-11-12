@@ -20,15 +20,14 @@ void check(bool ok, const char* rule) {
         throw std::runtime_error(rule);
 }
 
-using pulp::host::GraphEventResult;
 using pulp::host::GraphAuthoredEventLane;
+using pulp::host::GraphEventResult;
 using pulp::host::HostEventIngress;
 using pulp::host::HostEventRecord;
 using pulp::host::HostEventResult;
 
-HostEventRecord midi_record(std::uint64_t epoch, std::int64_t sample,
-                            std::uint64_t sequence, std::uint32_t producer,
-                            pulp::midi::MidiEvent midi) {
+HostEventRecord midi_record(std::uint64_t epoch, std::int64_t sample, std::uint64_t sequence,
+                            std::uint32_t producer, pulp::midi::MidiEvent midi) {
     HostEventRecord record;
     record.epoch = epoch;
     record.absolute_sample = sample;
@@ -40,24 +39,23 @@ HostEventRecord midi_record(std::uint64_t epoch, std::int64_t sample,
 
 void host_and_parameter_controls(std::size_t partition) {
     HostEventIngress<8> ingress;
-    check(ingress.begin_block(7, 0, partition) == HostEventResult::Accepted,
-          "midi-block-begin");
+    check(ingress.begin_block(7, 0, partition) == HostEventResult::Accepted, "midi-block-begin");
     auto note = midi_record(7, 2, 1, 4, pulp::midi::MidiEvent::note_on(1, 60, 100));
     auto tie = midi_record(7, 2, 1, 3, pulp::midi::MidiEvent::note_on(1, 61, 100));
     check(ingress.publish(note) == HostEventResult::Accepted &&
-              ingress.publish(tie) == HostEventResult::Accepted, "midi-publish");
+              ingress.publish(tie) == HostEventResult::Accepted,
+          "midi-publish");
     std::array<HostEventRecord, 8> projected{};
     std::size_t count = 0;
     check(ingress.project(projected, count) == HostEventResult::Accepted && count == 2,
           "midi-project");
-    check(projected[0].producer == 3 && projected[1].producer == 4,
-          "midi-stable-producer-order");
-    check(ingress.publish(midi_record(6, 2, 3, 1,
-                                      pulp::midi::MidiEvent::note_on(1, 62, 100))) ==
-              HostEventResult::StaleEpoch, "midi-stale-epoch-refusal");
-    check(ingress.publish(midi_record(7, -1, 4, 1,
-                                      pulp::midi::MidiEvent::note_off(1, 60))) ==
-              HostEventResult::Late, "midi-late-refusal");
+    check(projected[0].producer == 3 && projected[1].producer == 4, "midi-stable-producer-order");
+    check(ingress.publish(midi_record(6, 2, 3, 1, pulp::midi::MidiEvent::note_on(1, 62, 100))) ==
+              HostEventResult::StaleEpoch,
+          "midi-stale-epoch-refusal");
+    check(ingress.publish(midi_record(7, -1, 4, 1, pulp::midi::MidiEvent::note_off(1, 60))) ==
+              HostEventResult::Late,
+          "midi-late-refusal");
     check(ingress.end_block() == HostEventResult::Accepted, "midi-block-end");
 
     pulp::state::ParameterEventQueue parameters;
@@ -88,7 +86,8 @@ void trigger_two_block_controls() {
           "trigger-edge-admission");
     auto prepared = graph.prepare_trigger_plan(48'000.0, 4);
     check(prepared.result == TriggerGraphResult::Accepted &&
-              graph.try_install_prepared_trigger_plan(prepared.plan) == TriggerGraphResult::Accepted,
+              graph.try_install_prepared_trigger_plan(prepared.plan) ==
+                  TriggerGraphResult::Accepted,
           "trigger-plan-install");
     std::array<float, 4> source{0.0f, 1.0f, 0.0f, 0.0f};
     std::array<float, 4> output_samples{};
@@ -126,7 +125,8 @@ void voice_intent_adapter_controls() {
     intent.identity.path = {"voice", "note"};
     intent.identity.has_port = true;
     intent.identity.port = {.direction = pulp::host::VoicePortDirection::Input,
-                             .kind = pulp::host::VoicePortKind::Event, .ordinal = 0};
+                            .kind = pulp::host::VoicePortKind::Event,
+                            .ordinal = 0};
     const auto encoded = pulp::host::canonical_voice_identity(intent.identity);
     check(encoded.valid && !encoded.encoding.empty() && !encoded.sha256.empty(),
           "voice-intent-authored-identity");
