@@ -1514,6 +1514,7 @@
       "pulp/view/pointer_dispatch.hpp",
       "pulp/view/preferences_panel.hpp",
       "pulp/view/preset_browser.hpp",
+      "pulp/view/preset_program_editor.hpp",
       "pulp/view/press_reach.hpp",
       "pulp/view/property_list.hpp",
       "pulp/view/property_panel.hpp",
@@ -1685,8 +1686,10 @@
     ],
     "integrations/pulp-native/include": [
       "pulp/native/frame_pump.hpp",
+      "pulp/native/gl_surface.hpp",
       "pulp/native/input.hpp",
-      "pulp/native/metal_surface.hpp"
+      "pulp/native/metal_surface.hpp",
+      "pulp/native/surface.hpp"
     ],
     "tools/audio/analysis/include": [
       "pulp/audio/analysis/audio_artifacts.hpp",
@@ -1981,7 +1984,7 @@
           },
           {
             "exported_as": "Pulp::native",
-            "closure_node_count": 10
+            "closure_node_count": 11
           },
           {
             "exported_as": "Pulp::signal-fft-backend",
@@ -6530,7 +6533,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "integrations/pulp-native",
           "closure": {
-            "node_count": 10,
+            "node_count": 11,
             "pulp_targets": [
               "pulp-platform"
             ],
@@ -6540,7 +6543,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 9,
+            "count": 10,
             "third_party_targets": [
               "gpu-runtime-device-api",
               "pulp-native"
@@ -6553,6 +6556,7 @@
               "CoreFoundation",
               "CoreVideo",
               "Metal",
+              "OpenGL",
               "QuartzCore",
               "UniformTypeIdentifiers"
             ],
@@ -6568,6 +6572,7 @@
             "framework:AppKit",
             "framework:CoreVideo",
             "framework:Metal",
+            "framework:OpenGL",
             "framework:QuartzCore",
             "pulp-platform"
           ]

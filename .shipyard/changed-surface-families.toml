@@ -5060,6 +5060,42 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-a950b6c1ff71"
+paths = ["tools/scripts/test_p0_layered_replay_receipt.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "flake-exoneration-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "p0-layered-replay-receipt-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-8431e0197060"
 paths = ["tools/scripts/test_param_designator_order.py"]
 tests = [
@@ -8586,6 +8622,7 @@ paths = [
   "tools/scripts/test_nm_symbols.py",
   "tools/scripts/test_node_abi_gate.py",
   "tools/scripts/test_node_build_deps_step.py",
+  "tools/scripts/test_p0_layered_replay_receipt.py",
   "tools/scripts/test_package_cli_extra.py",
   "tools/scripts/test_param_designator_order.py",
   "tools/scripts/test_pch_wiring_check.py",
@@ -9196,6 +9233,7 @@ paths = [
   "tools/scripts/test_nm_symbols.py",
   "tools/scripts/test_node_abi_gate.py",
   "tools/scripts/test_node_build_deps_step.py",
+  "tools/scripts/test_p0_layered_replay_receipt.py",
   "tools/scripts/test_package_cli_extra.py",
   "tools/scripts/test_param_designator_order.py",
   "tools/scripts/test_pch_wiring_check.py",

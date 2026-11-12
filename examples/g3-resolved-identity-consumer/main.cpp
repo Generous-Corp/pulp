@@ -1,6 +1,7 @@
 #include <array>
 #include <iostream>
 #include <pulp/host/graph_identity.hpp>
+#include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/prepared_description.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
@@ -56,6 +57,13 @@ int run_stereo() {
 }
 
 int main() {
+    const auto inspected = pulp::host::GraphSerializer::inspect_document(
+        R"({"nodes":{"b":2,"a":1},"document_schema":"pulp.graph.authored-io-gain.v1"})");
+    if (!inspected.ok() || inspected.document.profile() != "pulp.graph.authored-io-gain.v1" ||
+        inspected.document.semantic_digest().size() != 71)
+        return 5;
+    std::cout << "document " << inspected.document.canonical_bytes().size() << " "
+              << inspected.document.semantic_digest() << '\n';
     pulp::host::PreparedDescriptionData unprepared;
     const auto result = pulp::host::resolved_fingerprint(unprepared);
     if (result || result.error() != pulp::host::GraphIdentityError::UnsupportedPreparedProfile)

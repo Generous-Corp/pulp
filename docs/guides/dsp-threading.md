@@ -661,6 +661,21 @@ by a soft assertion. A Rust `#[global_allocator]` routes the checking
 core's allocations through the same trap. On non-UNIX builds the
 fallback `RtAllocationProbe` *counts* allocations instead.
 
+A count of zero proves nothing unless the probe can see allocations at all:
+if `harness/rt_allocation_probe.cpp` is not linked, or another replacement of
+`operator new` wins, every absence assertion passes without looking. Call
+`RtAllocationProbe::self_check()` first. It allocates through
+`::operator new` and through a new-expression whose pointer escapes, so
+neither can be optimised away, and returns true only if both were counted
+with their sizes:
+
+```cpp
+REQUIRE(pulp::test::RtAllocationProbe::self_check());
+pulp::test::RtAllocationProbe probe;
+processor.process(buffer);
+REQUIRE_FALSE(probe.saw_allocation());
+```
+
 `test/harness/scoped_rt_process_probe.hpp` exposes the shared
 `pulp::test::ScopedRtProcessProbe`, which enters an always-on
 `RtNoAllocScope` (independent of `NDEBUG`, so the check is live even in

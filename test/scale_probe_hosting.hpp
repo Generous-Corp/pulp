@@ -47,24 +47,6 @@ inline std::vector<Target> targets() {
     return out;
 }
 
-/// Why the AU target is left out of the slot-hosted checks: the six-output,
-/// one-input instrument fails `allocateRenderResources` (-10875) when hosted
-/// through the AUv3 slot, while the same unit initializes when driven through
-/// the AU v2 API. The slot cases come back once that is fixed.
-inline constexpr const char* kAuSlotKnownFailure =
-    "known failure: the 6-output, 1-input AU instrument fails allocateRenderResources "
-    "(-10875) in the AUv3 slot; the AU six-output fix re-enables these cases";
-
-/// The targets the slot-hosted checks run on: every target except, for now,
-/// the AU (see kAuSlotKnownFailure).
-inline std::vector<Target> slot_targets() {
-    std::vector<Target> out;
-    for (const auto& target : targets())
-        if (target.format != ::pulp::host::PluginFormat::AudioUnitV3)
-            out.push_back(target);
-    return out;
-}
-
 #ifdef PULP_TEST_SCALE_PROBE_AU
 /// "TYPE:SUBT:MANU" of the probe component, registered with this process once.
 inline const std::string& au_component_id() {
@@ -98,7 +80,13 @@ inline std::unique_ptr<::pulp::host::PluginSlot> load(const Target& target, std:
             why = "the AU component did not register";
             return nullptr;
         }
-        slot = ::pulp::host::load_auv3_plugin(info, ::pulp::host::AuV3LoadOptions{});
+        // The component is registered with this process only, so it must
+        // load in process: the out-of-process host cannot see a process-local
+        // registration and hands back a unit with no buses, which then fails
+        // allocateRenderResources (-10875).
+        ::pulp::host::AuV3LoadOptions options;
+        options.out_of_process = false;
+        slot = ::pulp::host::load_auv3_plugin(info, options);
     }
 #endif
     if (!slot && target.format != ::pulp::host::PluginFormat::AudioUnitV3)
