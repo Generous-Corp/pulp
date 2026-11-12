@@ -15,6 +15,14 @@ partition schedules containing 1, 32, 64, 127, and 256 frame blocks. The graph
 lane includes missing-edge, one-sample boundary, reversed-tie, and payload
 mismatch negatives. Hosted plugin voice delivery remains outside this slice.
 
+The processor projection control builds one public `Processor` node through the
+graph's processor binding. It checks the canonical MIDI note/offset trace,
+the UMP packet words and offset, the MPE sidecar kinds and offsets, producer tie
+ordering, future/late/stale refusal, fixed-capacity overflow, and a one-event-
+short destination refusal. It does not compare a second Processor backend;
+Processor nodes use the serial binding in this graph. The private-header compile
+control below is intentionally expected to fail.
+
 The lifecycle controls additionally exercise staging overflow, transactional
 output-capacity refusal, late publication, epoch reset, queued look-ahead
 delivery, and refusal of a retired graph epoch.
@@ -27,14 +35,21 @@ cmake -S examples/g5-host-event-consumer -B build-g5-host-event-consumer -G Ninj
 CMAKE_BUILD_PARALLEL_LEVEL=1 tools/ci/governed-build.sh cmake --build build-g5-host-event-consumer \
   --target pulp-g5-host-event-consumer
 ctest --test-dir build-g5-host-event-consumer --output-on-failure
+
+c++ -std=c++20 -I"$PULP_SDK_PREFIX/include" -c \
+  examples/g5-host-event-consumer/private-header-negative.cpp \
+  -o /tmp/g5-private-header-negative.o
+# The command above must exit nonzero: private runtime headers are not shipped.
 ```
 
-Expected receipt:
+Source-derived expected output (the installed SDK run is NOT CHECKED for this PR):
 
 ```text
-g5-host-event-contract PASS checks=378 host_mpe_events=3 graph_events=9 graph_ingress_events=5 partitions=1,32,64,127,256 planted_negative=5
+g5-host-event-contract PASS checks=400 host_mpe_events=3 graph_events=9 graph_ingress_events=5 partitions=1,32,64,127,256 planted_negative=5
 ```
 
-The `checks=378` count is the expected count from the current fixture source;
-it is not a receipt until the executable is built and run against a freshly
-installed SDK from the same source revision.
+The `checks=400` line is derived from the current fixture source, not a receipt.
+The prior `checks=378` receipt in `docs/evidence/g5-event-consumer-p1-20261111.md`
+covers the earlier fixture and does not validate this Processor extension. A
+fresh installed-SDK build and CTest run are still required before this line can
+be treated as a receipt.
