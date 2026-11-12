@@ -285,6 +285,7 @@
       "pulp/format/detail/appkit_contract_key.hpp",
       "pulp/format/detail/au_v2_editor_resize.hpp",
       "pulp/format/detail/audio_buffer_list_validation.hpp",
+      "pulp/format/detail/clap_preset_library_gate.hpp",
       "pulp/format/detail/delayed_action.hpp",
       "pulp/format/detail/editor_environment.hpp",
       "pulp/format/detail/frame_time_summary.hpp",
