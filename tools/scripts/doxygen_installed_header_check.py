@@ -18,6 +18,7 @@ INSTALL_RULES = Path("tools/cmake/PulpInstallRules.cmake")
 # root so view-core stays audio-free, and install under the same pulp/ prefix.
 VIEW_AUDIO_ROOT = "core/view/audio/include"
 NATIVE_SURFACE_ROOT = "integrations/pulp-native/include"
+RT_ALLOCATION_PROBE_ROOT = "tools/testing/rt_allocation_probe/include"
 GPU_HEALTH_TOOLING_ROOT = "tools/cli/gpu_health/include"
 GPU_TOOLING_DOCUMENTATION_CONTRACTS = {
     Path("tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_result.hpp"): (
@@ -252,6 +253,8 @@ def _install_roots(root: Path) -> tuple[list[str], set[str], set[str]]:
             continue
         if sources == [f"${{CMAKE_CURRENT_SOURCE_DIR}}/{NATIVE_SURFACE_ROOT}/pulp/"]:
             continue
+        if sources == [f"${{CMAKE_CURRENT_SOURCE_DIR}}/{RT_ALLOCATION_PROBE_ROOT}/pulp/"]:
+            continue
         if sources and all(
             source.startswith("${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/")
             for source in sources
@@ -267,6 +270,7 @@ def _install_roots(root: Path) -> tuple[list[str], set[str], set[str]]:
                 source == "tools/audio/analysis/include/pulp/" or
                 source == f"{VIEW_AUDIO_ROOT}/pulp/" or
                 source == f"{NATIVE_SURFACE_ROOT}/pulp/" or
+                source == f"{RT_ALLOCATION_PROBE_ROOT}/pulp/" or
                 source == "tools/cli/gpu_health/include/pulp_tooling/"):
             raise ValueError(f"unsupported independent public-header install authority: {source}")
     roots = [f"core/{name}/include" for name in subsystems]
@@ -276,6 +280,8 @@ def _install_roots(root: Path) -> tuple[list[str], set[str], set[str]]:
         roots.append(VIEW_AUDIO_ROOT)
     if f"{NATIVE_SURFACE_ROOT}/pulp/" in text:
         roots.append(NATIVE_SURFACE_ROOT)
+    if f"{RT_ALLOCATION_PROBE_ROOT}/pulp/" in text:
+        roots.append(RT_ALLOCATION_PROBE_ROOT)
     if 'tools/cli/gpu_health/include/pulp_tooling/' in text:
         roots.append(GPU_HEALTH_TOOLING_ROOT)
     roots.append("inspect/include")
