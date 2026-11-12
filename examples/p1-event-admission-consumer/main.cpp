@@ -56,14 +56,14 @@ std::array<int, 4> host_and_parameter_controls(std::size_t partition) {
     check(ingress.publish(midi_record(6, 2, 3, 1, pulp::midi::MidiEvent::note_on(1, 62, 100))) ==
               HostEventResult::StaleEpoch,
           "midi-stale-epoch-refusal");
-    check(ingress.publish(midi_record(7, static_cast<std::int64_t>(partition) - 1, 4, 1,
-                                      pulp::midi::MidiEvent::note_off(1, 60))) ==
-              HostEventResult::Late,
-          "midi-late-refusal");
     check(ingress.end_block() == HostEventResult::Accepted, "midi-block-end");
 
     check(ingress.begin_block(7, partition, partition) == HostEventResult::Accepted,
           "midi-second-block-begin");
+    check(ingress.publish(midi_record(7, static_cast<std::int64_t>(partition) - 1, 4, 1,
+                                      pulp::midi::MidiEvent::note_off(1, 60))) ==
+              HostEventResult::Late,
+          "midi-late-refusal");
     check(ingress.publish(midi_record(7, static_cast<std::int64_t>(partition) + 1, 2, 5,
                                       pulp::midi::MidiEvent::note_on(1, 64, 100))) ==
               HostEventResult::Accepted,
