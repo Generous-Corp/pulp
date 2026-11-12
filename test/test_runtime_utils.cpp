@@ -2477,9 +2477,8 @@ TEST_CASE("Joined child uses the captured group and direct custody",
     ChildProcess process;
     REQUIRE(process.start_joined_to_current_group(*group, custody, "/bin/sh", {"-c", "exit 23"}));
     const int worker = process.process_id();
-    REQUIRE(custody_eventually([&] {
-        return custody.joined_child_observation().state == JoinedChildState::Exited;
-    }));
+    REQUIRE(custody_eventually(
+        [&] { return custody.joined_child_observation().state == JoinedChildState::Exited; }));
     const auto observed = custody.joined_child_observation();
     CHECK(observed.process_id == worker);
     CHECK(observed.process_group_id == ::getpgrp());
