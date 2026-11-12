@@ -1,5 +1,7 @@
 #pragma once
 
+#include "a1_reference_vectors.hpp"
+
 #include <pulp/format/processor.hpp>
 #include <pulp/host/voice_bank_binding.hpp>
 #include <pulp/state/store.hpp>
@@ -109,6 +111,94 @@ class ProbeProcessor final : public format::Processor {
     ProbeVoice& voice_;
 };
 
+class A1ScriptedVoice final : public midi::MpeSynthVoice {
+  public:
+    void bind(const a1::Case& fixture, std::uint32_t slot) noexcept {
+        fixture_ = &fixture;
+        slot_ = slot;
+    }
+    void on_note_on(const midi::MpeNoteState& note) override {
+        midi::MpeSynthVoice::on_note_on(note);
+        release_frame_ = 0;
+    }
+    void on_note_off() override {
+        midi::MpeSynthVoice::on_note_off();
+        release_frame_ = 0;
+    }
+    void render(float* out, int frames) override {
+        render_stereo(out, nullptr, frames);
+    }
+    void render_stereo(float* left, float* right, int frames) noexcept {
+        for (int i = 0; i < frames; ++i) {
+            float l = 0.0f;
+            float r = 0.0f;
+            if (active() && fixture_) {
+                const bool replacement = fixture_->kind == a1::Kind::Steal && note_number() == 70;
+                const bool in_capture = frame_ >= fixture_->capture_start &&
+                                        frame_ - fixture_->capture_start < fixture_->frames;
+                const auto index = in_capture ? frame_ - fixture_->capture_start : 0;
+                const auto replacement_index = index - fixture_->steal_sample;
+                const float source_l = !in_capture   ? 0.0f
+                                       : replacement ? fixture_->new_left[replacement_index]
+                                                     : fixture_->left[slot_][index];
+                const float source_r = !in_capture   ? 0.0f
+                                       : replacement ? fixture_->new_right[replacement_index]
+                                                     : fixture_->right[slot_][index];
+                const float factor =
+                    releasing() ? (4.0f - static_cast<float>(release_frame_)) * 0.25f : 1.0f;
+                l = source_l * factor;
+                r = source_r * factor;
+                if (releasing() && ++release_frame_ == 4)
+                    finish_release();
+            }
+            left[i] = l;
+            if (right)
+                right[i] = r;
+            ++frame_;
+        }
+    }
+
+  private:
+    const a1::Case* fixture_ = nullptr;
+    std::uint32_t slot_ = 0;
+    std::size_t frame_ = 0;
+    unsigned release_frame_ = 0;
+};
+
+class A1ScriptedProcessor final : public format::Processor {
+  public:
+    explicit A1ScriptedProcessor(A1ScriptedVoice& voice) : voice_(voice) {}
+    format::PluginDescriptor descriptor() const override {
+        format::PluginDescriptor result;
+        result.name = "A1 Scripted Voice";
+        result.manufacturer = "Pulp Test";
+        result.bundle_id = "com.pulp.test.a1-scripted-voice";
+        result.version = "1.0.0";
+        result.category = format::PluginCategory::Instrument;
+        result.output_buses = {{"Stereo", 2, false}};
+        return result;
+    }
+    void define_parameters(state::StateStore& store) override {
+        store.add_parameter(
+            {.id = 1, .name = "level", .range = state::ParamRange::linear(0.0f, 2.0f, 1.0f)});
+    }
+    void prepare(const format::PrepareContext&) override {}
+    void process(audio::BufferView<float>& output, const audio::BufferView<const float>&,
+                 midi::MidiBuffer&, midi::MidiBuffer&, const format::ProcessContext&) override {
+        auto* left = output.channel_ptr(0);
+        auto* right = output.channel_ptr(1);
+        voice_.render_stereo(left, right, static_cast<int>(output.num_samples()));
+        const float effective = state().get_value(1) * kBankGain;
+        for (std::size_t i = 0; i < output.num_samples(); ++i) {
+            left[i] *= effective;
+            right[i] *= effective;
+        }
+    }
+
+  private:
+    A1ScriptedVoice& voice_;
+};
+
 SubgraphTemplate definition() {
     SubgraphTemplate t;
     t.identity = "test.authored.voice.v1";
@@ -185,6 +275,20 @@ VoiceTemplateSchema schema() {
     level.rate = VoiceBindingRate::Block;
     result.bindings.push_back(level);
     return result;
+}
+
+std::unique_ptr<VoiceBankBinding> make_a1_bank(const a1::Case& fixture,
+                                               VoiceBankBindingResult& status) {
+    auto voice_owner = std::make_unique<MpeVoiceBankOwner<A1ScriptedVoice>>(
+        [&fixture](A1ScriptedVoice& voice,
+                   std::uint32_t slot) -> std::unique_ptr<format::Processor> {
+            voice.bind(fixture, slot);
+            return std::make_unique<A1ScriptedProcessor>(voice);
+        },
+        std::array<VoiceBankInputEndpoint, 4>{
+            {{"note_in", 0}, {"pitch", 1}, {"pressure", 2}, {"timbre", 3}}});
+    return VoiceBankBinding::prepare(schema(), definition(), std::move(voice_owner), "audio_out",
+                                     48000, 256, status);
 }
 
 HostEventRecord event(std::uint64_t epoch, std::uint64_t sample, std::uint64_t sequence,
