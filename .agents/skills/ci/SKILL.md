@@ -655,6 +655,14 @@ prefix) to match a glob, so only the scheduled standing pass approves; a HOLD
 from any session still counts. A reviewer tab outside that pass needs its
 session listed. The key only takes effect through the Shipyard commit pinned in
 `.github/workflows/review-verdict.yml`, so keep that pin at a version that reads it.
+The pin is Shipyard v0.407.0 (`44721a9f`): since v0.386.0 the commit status
+is `pending` (`awaiting reviewer verdict for head <sha>`), not `failure`, while
+a head only awaits its reviewer; `failure` means a counted HOLD or an
+unreadable review. The check run itself stays red in both cases, so a pending
+status is never a defect to fix and never something a push clears. Moving the
+pin edits a workflow file (owner subset): open the PR unarmed with the
+`scripts/review_verdict_status.py` + `scripts/ghapp_queue_arm_guard.py` diff
+summarised against exact-head, stamp-session and self-approval behaviour.
 
 **`carry_excluded_paths` replaces Shipyard's default; it does not add to it.**
 The same `[auto_merge]` table lists the paths whose change stops an APPROVE
@@ -3521,8 +3529,12 @@ push reopens it while the count stays high.
 
 ## The flake-exoneration shadow annotation exonerates nothing
 
-A failed merge-group `macos` job carries `pulp-flake-exoneration-shadow/v1`
-(`tools/ci/flake_exoneration_shadow.py`): per failing test, `would_exonerate`
+A failed merge group carries `pulp-flake-exoneration-shadow/v1`
+(`tools/ci/flake_exoneration_shadow.py`) on its advisory
+`flake-exoneration-shadow (advisory)` job, not on `macos`: the job needs
+`build` and reads the macOS leg's `ctest-logs-macos` JUnit, so the red
+`macos` verdict (and the queue's ejection of the group) no longer waits
+~95 s for the shadow's API reads. Look for the annotation there. Per failing test, `would_exonerate`
 when it failed on >= 2 other heads in 24 h AND passes on main's tip, judged
 by the tip's required gate job. It is evidence, not a verdict:
 `base_poison_detector.py` records why cross-batch corroboration alone was
@@ -3937,37 +3949,19 @@ title. If you see either, check `shipyard --version` before editing the PR.
 ## A PR you opened with `shipyard pr` is not automatically code-reviewed
 
 Codex's automatic review fires on PR open only for PRs whose author is a GitHub
-*User*. `shipyard pr` opens PRs as `shipyard-local[bot]`, an App — so the path
-this skill tells you to use is exactly the path Codex skips. Human-opened PRs
-get reviewed; yours do not, unless something asks.
+*User*. `shipyard pr` opens PRs as `shipyard-local[bot]`, an App, so Codex skips
+them. Its summary comment states the trigger in a "Review trigger" cell:
+`PR opened` on a User-authored PR, `Manual request` on one reviewed on request.
 
-Codex states the trigger in its own summary comment: the "Review trigger" cell
-reads `PR opened` on a User-authored PR and `Manual request` on an App-authored
-one. That cell is the fastest way to tell which kind of review a PR received.
-
-**Asking works, including from a bot.** A `@codex review` comment gets a real
-review on an App-authored PR whatever identity posts it. Codex answers a bot
-commenter with "create a Codex account", which reads like a refusal and is not —
-the review still runs. `.github/workflows/codex-review-request.yml` automates
-that ask with `GITHUB_TOKEN` (never a user PAT: a same-repo `pull_request`
-evaluates the workflow from the PR's own revision, so a secret there is readable
-by the unreviewed PR it runs on) and verifies a review completed for the head
-commit. If a PR slipped past it, comment `@codex review` yourself.
+**A `@codex review` comment from a bot does not help.** Codex answers a bot
+commenter with "create a Codex account and connect to github" (or a usage-limit
+notice) and starts no review. A workflow that posted it on every App-authored PR
+was removed after hundreds of such replies and no review; do not re-add it.
 
 **Do not read a summary comment as "reviewed", and do not read "no comment" as
-"no findings".** The summary comment and an EYES reaction appear the moment a
-review is requested, so they prove only that something was asked; a clean review
-leaves a THUMBS_UP and no prose at all. `tools/scripts/codex_review_signal.sh`
-requires `**Completed**` bound to the current head, separates completed from
-requested-but-unfinished from never-asked, and exits 2 (not 1) when the API is
-unreachable, so an outage cannot masquerade as an unreviewed PR.
-
-**A completed review is per-commit.** A review of an earlier push says nothing
-about the code now on the branch, which is why the check binds to the head SHA
-rather than accepting any historical signal on the PR — and why the workflow
-runs on `synchronize` too. On `opened` alone, the commit reviewed and the commit
-merged are different ones on any PR that gets rebased, which under up-to-date
-branch protection is most of them.
+"no findings".** `tools/scripts/codex_review_signal.sh` requires `**Completed**`
+bound to the current head, separates completed from requested-but-unfinished
+from never-asked, and exits 2 (not 1) when the API is unreachable.
 
 ## Pre-flight: plugin ↔ CLI skew check
 
@@ -10018,6 +10012,16 @@ while debugging runner routing.
 
 ### Verifying your branch isn't burning macOS runner time
 
+### PR workflow concurrency is per-PR and event-gated
+
+Every workflow triggered by `pull_request` or `pull_request_target` needs a
+workflow-level concurrency group keyed by the PR number (falling back to
+`github.ref`) and must set `cancel-in-progress` only for those PR events. This
+lets a newer head release queued runner capacity without cancelling pushes to
+`main`, merge-group entries, tags, releases, schedules, or manual dispatches.
+Existing workflows with deliberate concurrency comments retain their documented
+policy; audit new PR-triggered workflows for this block before adding them.
+
 Each failed macOS leg consumes one of the scarce self-hosted runners and
 queues every other PR behind your run. Before broadcasting "my CI is stuck",
 inspect the exact job state and queue age, then the eligible hosts'
@@ -10775,6 +10779,8 @@ HEAD reporting.
 Locally:
 
 - `.githooks/pre-push` (install via `tools/scripts/install-githooks.sh`) runs the same fast scripts, including the compat-sync, compat-aggregate, node ABI, and hotspot-size gates, enforcing by default. `PULP_DISABLE_PREPUSH_GATES=1` demotes the fast gates to advisory; `PULP_SKIP_PREPUSH=1` is the single-push emergency bypass.
+- `PULP_SKIP_PREPUSH=1` does not skip skill-sync when `SHIPYARD_AGENT_ID` is set (every fleet lane exports it). The check runs directly, outside the gate supervisor, and blocks on a miss; the fix is the SKILL.md note or the `Skill-Update: skip` trailer it names. A human skip is unchanged. `tools/scripts/test_refresh_push_check.py` (`case_agent_skip_still_runs_skill_sync`) pins all four outcomes.
+- Gotcha: agent sandboxes can forbid spawning `ps`. `.githooks/lib/gate-supervisor.py` then cannot read the hook's caller, so it runs the gate supervised by the hook only and prints a `supervised by the hook only` note; the gate's verdict is still authoritative. If every gate in a push reads as failed with a Python traceback from the supervisor, the hook is broken, not the gates: fix the supervisor rather than skipping the hook.
 - Pre-push gate subprocesses run through `.githooks/lib/gate-output.sh`: their stdout/stderr is captured to a regular temporary file, then replayed best-effort. Keep user-visible fast gates and the slow diff-cover script behind `run_gate_captured`; agent/tool callers can supply nonblocking pipes, and an uncaptured Python `print()` may otherwise raise `BlockingIOError` and turn a healthy gate into a false failure. The wrapper must snapshot and return the real child status before replay, while replay failure never changes that status. `tools/scripts/test_prepush_gate_output.py` pins success, exact nonzero propagation, replay, cleanup, and the slow-lane callsite.
 - A blocked pre-push ends with `FAILED GATE(S):`, one line per failing gate with the line that says why and its fix line, followed by the "gate failure(s) above" verdict. Every failure site in `.githooks/pre-push` calls `prepush_fail` (never a bare `fail=1`), which names the gate that ran last, or takes a label for a check that is not a captured gate; a gate that exits non-zero without failing the push (a skipped lane) is not named. `tools/scripts/test_prepush_gate_output.py` fails if a bare `fail=1` is added.
 - `tools/scripts/docs_noise_lint.py` (pre-push only, report mode) — scans changed/added lines for transient breadcrumbs across the markdown default scope (docs/reference + skills) **and source comments + test tags** under `core/examples/tools/test/apple/inspect/ship`. Source is diff-scoped only (never `--all`), so the historical backlog never blocks; it is comment-aware (only `//`, `/* */`, `#` comment text + string-literal Catch2 `[tag]`s, never code). Escape a legitimate line with an inline `docs-noise-lint: skip <reason>` comment. Full guidance on *writing* durable comments lives in the `code-comments` skill.
@@ -13569,3 +13575,14 @@ fails at once on other 4xx. Workflows call `python3
 tools/scripts/download_retry.py URL DEST` instead of a bare `curl -fsSL`; keep
 the sha256 check after it. A script copied into a temp tree must copy the
 helper too.
+
+## `[base_health]` holds the queue when the base is poisoned
+
+`.shipyard/config.toml` sets `merge_group_hold = "dry-run"` and
+`auto_jump = "dry-run"` (recorded, nothing held or jumped, until a replay shows
+the rule is precise). With `"on"`, when one required context fails in consecutive merge groups with different
+pull requests, the steward enqueues only a named fix (label `shipyard:unblock`
+or a title naming the context beside a fix word) and reports other approved
+heads as `held_base_poisoned:<context>`. A held head is not broken: do not
+re-push it, the hold lifts once a merge group passes the context. The reviewer
+kick and priority file are machine-only keys and must stay out of this file.

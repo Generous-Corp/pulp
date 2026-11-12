@@ -100,6 +100,104 @@ void host_ingress_controls() {
     check(ingress.end_block() == HostEventResult::Accepted, "host-future-end");
 }
 
+void projection_queue_lifecycle_controls() {
+    using pulp::midi::MidiEvent;
+
+    // The staging queue is transactional: overflow and a too-small projection
+    // do not consume records, while reset retires the old epoch completely.
+    HostEventIngress<2> ingress;
+    check(ingress.begin_block(3, 10, 2) == HostEventResult::Accepted, "queue-begin");
+    check(ingress.publish(record(3, 10, 1, 1, MidiEvent::note_on(1, 60, 100))) ==
+              HostEventResult::Accepted,
+          "queue-first");
+    check(ingress.publish(record(3, 11, 2, 1, MidiEvent::note_off(1, 60))) ==
+              HostEventResult::Accepted,
+          "queue-second");
+    check(ingress.publish(record(3, 11, 3, 1, MidiEvent::note_on(1, 61, 100))) ==
+              HostEventResult::Overflow,
+          "queue-overflow-negative");
+    std::array<HostEventRecord, 1> too_small{};
+    std::size_t count = 0;
+    check(ingress.project(too_small, count) == HostEventResult::OutputCapacity && count == 0 &&
+              ingress.pending() == 2,
+          "queue-capacity-transaction");
+    std::array<HostEventRecord, 2> projected{};
+    check(ingress.project(projected, count) == HostEventResult::Accepted && count == 2,
+          "queue-project");
+    check(projected[0].absolute_sample == 10 && projected[1].absolute_sample == 11, "queue-order");
+    check(ingress.end_block() == HostEventResult::Accepted, "queue-end");
+
+    check(ingress.begin_block(3, 12, 1) == HostEventResult::Accepted, "queue-next-block");
+    check(ingress.publish(record(3, 11, 4, 1, MidiEvent::note_on(1, 62, 100))) ==
+              HostEventResult::Late,
+          "queue-late-negative");
+    check(ingress.end_block() == HostEventResult::Accepted, "queue-next-end");
+    ingress.reset(4);
+    check(ingress.epoch() == 4 && ingress.pending() == 0 && !ingress.active(),
+          "queue-reset-clears");
+    check(ingress.begin_block(4, 0, 1) == HostEventResult::Accepted, "queue-reset-epoch");
+    check(ingress.publish(record(3, 0, 5, 1, MidiEvent::note_on(1, 63, 100))) ==
+              HostEventResult::StaleEpoch,
+          "queue-stale-epoch-negative");
+    check(ingress.end_block() == HostEventResult::Accepted, "queue-reset-end");
+
+    // A queued look-ahead event is delivered exactly once under either legal
+    // partition, then a reset refuses the retired epoch.
+    auto render_lane = [](std::span<const std::size_t> partitions) {
+        GraphAuthoredEventLane<4, 4> lane;
+        std::vector<GraphAuthoredEvent> events;
+        check(lane.reset(1) == GraphEventResult::Accepted, "queue-lane-reset");
+        std::uint64_t cursor = 0;
+        for (const auto frames : partitions) {
+            check(lane.begin_block(1, cursor, frames) == GraphEventResult::Accepted,
+                  "queue-lane-begin");
+            for (std::size_t offset = 0; offset < frames; ++offset) {
+                check(lane.begin_sample(offset) == GraphEventResult::Accepted, "queue-lane-sample");
+                if (cursor + offset == 0) {
+                    check(lane.emit_at(1, 1, 42, 1) == GraphEventResult::Accepted,
+                          "queue-lane-lookahead");
+                    for (std::uint16_t payload = 0; payload < 4; ++payload)
+                        check(lane.emit_at(1, 2, payload, 2) == GraphEventResult::Accepted,
+                              "queue-lane-accepted");
+                    check(lane.emit_at(1, 2, 100, 2) == GraphEventResult::Overflow,
+                          "queue-lane-overflow-negative");
+                }
+                check(lane.begin_consumer() == GraphEventResult::Accepted, "queue-lane-consumer");
+                for (const auto& event : lane.received())
+                    events.push_back(event);
+                check(lane.end_sample() == GraphEventResult::Accepted, "queue-lane-end-sample");
+            }
+            check(lane.end_block() == GraphEventResult::Accepted, "queue-lane-end-block");
+            cursor += frames;
+        }
+        // Advance the consumed frontier before exercising the late refusal.
+        // A target equal to the current sample is valid look-ahead until the
+        // sample is consumed; only the following block makes sample one
+        // unambiguously late.
+        check(lane.begin_block(1, cursor, 1) == GraphEventResult::Accepted,
+              "queue-lane-late-block");
+        check(lane.begin_sample(0) == GraphEventResult::Accepted, "queue-lane-late-sample");
+        check(lane.emit_at(1, 1, 99, 1) == GraphEventResult::Late, "queue-lane-late-negative");
+        check(lane.begin_consumer() == GraphEventResult::Accepted, "queue-lane-late-consumer");
+        for (const auto& event : lane.received())
+            events.push_back(event);
+        check(lane.end_sample() == GraphEventResult::Accepted, "queue-lane-late-end-sample");
+        check(lane.end_block() == GraphEventResult::Accepted, "queue-lane-late-end-block");
+        check(lane.reset(2) == GraphEventResult::Accepted, "queue-lane-reset-next");
+        check(lane.begin_block(1, 0, 1) == GraphEventResult::OutOfRange,
+              "queue-lane-retired-epoch-negative");
+        return events;
+    };
+    constexpr std::array<std::size_t, 1> one{2};
+    constexpr std::array<std::size_t, 2> split{1, 1};
+    const auto one_block = render_lane(one);
+    const auto two_blocks = render_lane(split);
+    check(one_block == two_blocks && one_block.size() == 5 && one_block.front().sample == 1 &&
+              one_block.front().payload == 42 && one_block.back().sample == 2 &&
+              one_block.back().payload == 3,
+          "queue-lane-partition-invariance");
+}
+
 struct Observation {
     std::vector<GraphAuthoredEvent> events;
     std::array<std::uint8_t, 2> attempts{};
@@ -492,6 +590,7 @@ void graph_callback_wiring_controls() {
 int main() {
     try {
         host_ingress_controls();
+        projection_queue_lifecycle_controls();
         graph_partition_controls();
         graph_authored_runtime_controls();
         graph_authored_reset_controls();

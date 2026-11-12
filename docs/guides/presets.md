@@ -206,6 +206,7 @@ file), the tags and the MIDI program number when a program map is enabled.
 
 Without a library the browser is unchanged.
 
+<<<<<<< ours
 ### Context menu and program editor
 
 In library mode a right-click on a browser row selects it and calls
@@ -229,3 +230,15 @@ answer with `complete_assign(key)`. A double click on the title asks for a bank
 name through `on_bank_text_request`, and `complete_bank_text` renames or
 renumbers it. A slot whose preset is not installed is shown with its key and
 "(not installed)". With no program map enabled the editor shows "(no banks)".
+=======
+### Opting in from a plug-in (standalone)
+
+The standalone host honours `supports_program_change` the same way. It creates
+the library and router when the processor is created, scans hardware MIDI for
+Bank Select + Program Change inside the audio callback (latch only), and loads
+the preset from `StandaloneApp::service_program_changes()`, which the built-in
+editors call from their idle loop and which throttles itself to about 30 Hz. A
+host that runs its own loop calls it a few times a second. The factory folder is
+`Presets` inside the app bundle's resource directory when it exists.
+
+>>>>>>> theirs

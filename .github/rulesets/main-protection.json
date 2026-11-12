@@ -108,6 +108,10 @@
           {
             "context": "drift-fast",
             "integration_id": null
+          },
+          {
+            "context": "workflow-lint",
+            "integration_id": null
           }
         ]
       }

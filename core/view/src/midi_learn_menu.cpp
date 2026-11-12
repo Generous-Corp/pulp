@@ -14,6 +14,13 @@ std::vector<ContextMenu::Item> midi_learn_menu_items(const MidiLearnTarget& targ
     const bool listening = state.phase == MidiLearnParamState::Phase::listening;
     const bool mapped = state.phase == MidiLearnParamState::Phase::mapped;
 
+    if (!state.refused_reason.empty() && !listening) {
+        ContextMenu::Item refused;
+        refused.label = "Cannot learn: " + state.refused_reason;
+        refused.enabled = false;
+        items.push_back(std::move(refused));
+    }
+
     ContextMenu::Item learn;
     learn.id = listening ? kMidiLearnCommandCancel : kMidiLearnCommandBegin;
     learn.label = listening ? "Cancel MIDI Learn" : "MIDI Learn";
@@ -107,7 +114,7 @@ void MidiLearnOverlay::refresh() {
     if (target_.is_available() && target_.state)
         next = target_.state(param_);
     if (next.phase == state_.phase && next.mapping_label == state_.mapping_label &&
-        next.just_bound == state_.just_bound)
+        next.just_bound == state_.just_bound && next.refused_reason == state_.refused_reason)
         return;
     state_ = std::move(next);
     request_repaint();

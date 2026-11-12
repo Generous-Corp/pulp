@@ -32,6 +32,34 @@ was a single integer every open branch raced for; one merge staled the rest.
   later bump moves the version, it is skipped. See
   `docs/guides/release-watchdog.md`.
 
+### A bump's assignment is only valid on the main it was cut from
+
+`--assign-pending` assigns the material of the commit the bump PR was cut
+from. Any later landing that changes capability material (a public header, a
+capability record) leaves the bump naming a state `main` no longer has, and
+every merge group that carries it fails `--check` with `records a state that
+is neither the protected base's own state nor its version-at-land assignment`
+and `surface inventory_version changed without a surface change`. Merging
+`main` into the bump does not help; it has to be rebuilt. Two consequences
+are wired in:
+
+- `version_at_land.py` rebuilds a standing bump PR that carries a capability
+  assignment as soon as a capability landing outgrows it, without waiting out
+  `PULP_BUMP_COALESCE_MINUTES` (`_capability_assignment_is_stale`), and
+  repairs such a head after an ejection or a red check even when
+  `PULP_BUMP_HEAL_STALE_PR` is off, since it can never land. It still never
+  pushes to a bump PR that is in the merge queue.
+- A `merge_group` run judges the group against the protected branch tip
+  (`merge_group.base_ref`), not `merge_group.base_sha`, which is the previous
+  queue entry. Judged against its queue parent, a group behind a doomed bump
+  validated only its own increment, went green, and the HEADGREEN queue
+  landed the doomed bump with it. `main` then failed `--check` against its own
+  parent and every capability-touching PR that merged `main` inherited the red
+  until the next bump. The tip is used only when it is on the group's history
+  and `base_sha` descends from it; otherwise `base_sha` is kept. Either way the
+  run's stderr names the base it used (`merge group judged against ...`), so
+  read that line first when a bump lands red.
+
 The sections below that say "increase the counter" describe the hand-bump
 flow that branches no longer need; leave the constants alone instead.
 
@@ -102,6 +130,15 @@ What the layout does not change: a capability row still lives in a shared
 still commits the installed `counts`, so two branches adding capabilities can
 still meet there.
 
+## Probe-contract comments still change binding fingerprints
+
+Clarifying consumed-edge probe semantics in a public binding header changes its
+fingerprint even when the record layout and declarations stay unchanged. Review
+the final header bytes, run `agent_capability_manifest.py --accept-fingerprint`
+for that named include, then `--write` and `--check`. Inspect the diff to retain
+only the corresponding fingerprint and surface-header records; preserve unrelated
+records and leave capability counters at their base values.
+
 ## Why open PRs no longer conflict on these files
 
 Before 2026-11-08 nearly every capability PR went DIRTY against `main` on the
@@ -166,8 +203,10 @@ shrinks by one.
 
 The bounded G6 `pulp/host/voice_bank_binding.hpp` and its amended
 `signal_graph_subgraph.hpp` are reviewed host infrastructure, not advertised
-generator capabilities while sustain, saved-bank activation, and paced
-realtime proof remain open. Register both in `REVIEWED_HOST_HEADERS`, classify
+generator capabilities while saved-bank activation and paced realtime proof
+remain open. The bounded sustain and channel-mode behavior is exercised by the
+installed consumer, but does not establish those remaining lanes. Register both
+in `REVIEWED_HOST_HEADERS`, classify
 both with measured fingerprints, regenerate the surface, and update the
 current checkout's consumption census after staging the new header. The
 installed consumer and production-source mutation proof exercise the public
@@ -2065,3 +2104,12 @@ the section above describes for other headers, was not needed here.
 notation and diagnostics, not a new DSP capability inventory. Keep it in
 `REVIEWED_HOST_HEADERS` and refresh its registry fingerprint after header edits.
 The bounded notation profile does not qualify every node or complete live reload.
+
+## Isolated host headers require the same refresh
+
+Changes to the isolated CLAP host headers, including
+`isolated_plugin_slot.hpp`, `signal_graph_execution_snapshot.hpp`, and
+`signal_graph_runtime.hpp`, update their surface fragments and fingerprints.
+Run rederive, fingerprint acceptance, manifest write, and installed-consumer
+checks together; do not hand-edit generated fragments or treat a passing worker
+test as sufficient provenance evidence.
