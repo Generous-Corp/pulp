@@ -870,5 +870,126 @@ class CliTests(unittest.TestCase):
         self.assertIn("invalid choice", r.stderr)
 
 
+def _github_glob(pattern: str) -> re.Pattern[str]:
+    """GitHub's filter glob: ``**`` crosses ``/``, ``*`` and ``?`` do not."""
+    out, i = "", 0
+    while i < len(pattern):
+        if pattern.startswith("**", i):
+            out, i = out + ".*", i + 2
+        elif pattern[i] == "*":
+            out, i = out + "[^/]*", i + 1
+        elif pattern[i] == "?":
+            out, i = out + "[^/]", i + 1
+        else:
+            out, i = out + re.escape(pattern[i]), i + 1
+    return re.compile(out + r"\Z")
+
+
+def _workflow_paths_ignore(name: str) -> list[str]:
+    import yaml  # PyYAML: present wherever the workflow lint runs
+
+    doc = yaml.safe_load((THIS_DIR.parents[1] / ".github" / "workflows" / name)
+                         .read_text(encoding="utf-8"))
+    on = doc.get(True, doc.get("on"))
+    return list((on.get("pull_request") or {}).get("paths-ignore") or [])
+
+
+def _skipped_by(patterns: list[str], files: list[str]) -> bool:
+    """GitHub skips a paths-ignore workflow when every file matches a pattern."""
+    compiled = [_github_glob(p) for p in patterns]
+    return bool(files) and all(any(c.match(f) for c in compiled) for f in files)
+
+
+# Path sets from real pull requests and the edges of each class.
+IMPACT_TABLE = (
+    (["docs/reports/a9-edit-replay-evidence-20261112.md"], "docs-only"),
+    (["docs/evidence/g12/README.md", "docs/evidence/g12/manifest.json"], "docs-only"),
+    (["README.md", "VISION.md"], "docs-only"),
+    (["CLAUDE.md", ".agents/skills/code-comments/SKILL.md"], "docs-only"),
+    (["planning"], "docs-only"),
+    (["docs/migrations/2026-11-01-x.md"], "code:docs"),
+    (["docs/status/consumption-profiles.json"], "code:docs"),
+    (["docs/status/agent-capabilities.json"], "code:docs"),
+    ([".github/workflows/build.yml"], "ci-only"),
+    ([".github/workflows/build.yml", "docs/guides/local-ci.md"], "ci-only"),
+    (["core/view/src/widgets.cpp"], "code:core"),
+    (["core/view/src/widgets.cpp", "docs/guides/x.md"], "code:core"),
+    (["tools/scripts/classify_changes.py", ".github/workflows/x.yml"], "code:.github,tools"),
+    (["CMakeLists.txt"], "code:root"),
+    ([], "code:unknown"),
+    (None, "code:unknown"),
+)
+
+
+class ImpactClassTests(unittest.TestCase):
+    def test_table(self) -> None:
+        for files, expected in IMPACT_TABLE:
+            self.assertEqual(classify.impact_class(files), expected, files)
+
+    def test_docs_only_never_skips_a_required_native_build_input(self) -> None:
+        # docs-only is a strict subset of "native build not required".
+        for files, expected in IMPACT_TABLE:
+            if expected == "docs-only":
+                self.assertFalse(classify.native_build_required(files), files)
+                self.assertFalse(
+                    classify.agent_capability_installed_sdk_required(files), files)
+
+    def test_planning_gitlink_is_skip_safe(self) -> None:
+        self.assertTrue(classify.is_skip_safe("planning"))
+        self.assertFalse(classify.is_skip_safe("planning-notes.txt"))
+
+    def test_impact_class_is_written_to_github_output_and_json(self) -> None:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()), \
+                mock.patch.dict(os.environ, {"GITHUB_OUTPUT": ""}):
+            classify.main(["--mode=files", "--json", "docs/a.md"])
+        self.assertEqual(json.loads(out.getvalue())["impact_class"], "docs-only")
+
+
+class CodeqlDocsSkipTests(unittest.TestCase):
+    """CodeQL's paths-ignore is the classifier's, and skips only docs."""
+
+    def test_workflow_uses_the_classifier_list(self) -> None:
+        self.assertEqual(_workflow_paths_ignore("codeql-advanced.yml"),
+                         list(classify.DOCS_PATHS_IGNORE))
+
+    def test_every_docs_only_diff_is_skipped(self) -> None:
+        for files, expected in IMPACT_TABLE:
+            if expected == "docs-only":
+                self.assertTrue(_skipped_by(list(classify.DOCS_PATHS_IGNORE), files), files)
+
+    def test_any_code_file_runs_it(self) -> None:
+        # Positive control: every diff touching a non-docs file still runs CodeQL.
+        for files, expected in IMPACT_TABLE:
+            if files and any(not classify.is_docs_only_path(f) and not f.endswith(".md")
+                             and not f.startswith("docs/") for f in files):
+                self.assertFalse(_skipped_by(list(classify.DOCS_PATHS_IGNORE), files), files)
+
+    def test_glob_agrees_with_the_classifier_on_every_tracked_path(self) -> None:
+        proc = subprocess.run(["git", "ls-files"], cwd=THIS_DIR.parents[1],
+                              capture_output=True, text=True, check=True)
+        tracked = proc.stdout.split()
+        self.assertGreater(len(tracked), 1000)  # control: the instrument read the tree
+        patterns = list(classify.DOCS_PATHS_IGNORE)
+        for path in tracked + ["planning"]:
+            ignored = _skipped_by(patterns, [path])
+            if classify.impact_class([path]) == "docs-only":
+                self.assertTrue(ignored, path)
+            if ignored:
+                # Wider than docs-only only for build-input documents, never code.
+                self.assertTrue(path.endswith(".md") or path.startswith("docs/")
+                                or path == "planning", path)
+
+    def test_codeql_still_runs_on_main_and_schedule(self) -> None:
+        import yaml
+
+        doc = yaml.safe_load((THIS_DIR.parents[1] / ".github" / "workflows" /
+                              "codeql-advanced.yml").read_text(encoding="utf-8"))
+        on = doc.get(True, doc.get("on"))
+        self.assertNotIn("paths-ignore", on["push"] or {})
+        self.assertNotIn("paths", on["push"] or {})
+        self.assertIn("schedule", on)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

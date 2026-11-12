@@ -21,6 +21,15 @@ configure) and a test that skipped. It fails, rather than passing vacuously,
 when a label selects nothing or when ctest ran a different number of tests
 than were selected.
 
+``scope`` decides how much of the lane a diff needs. For a diff
+``tools/scripts/classify_changes.py`` calls docs-only it resolves the selection
+from the CMake manifests without a configure and keeps only the tests that can
+read a changed file (``source_selftests.select_for_docs_only``). When every
+kept test runs from source on this lane (no configured build, nothing
+platform-gated, no optional import) the mode is ``source`` and ``run-source``
+runs just those; anything else, including every other impact class and any
+error, is ``full``: bootstrap, configure and ``run`` exactly as before.
+
 ``check`` is the static contract: the manifest parses, names no test twice,
 the workflow still calls ``run`` on both pull_request and merge_group, and it
 runs every ``workflow_preconditions`` step before that call.
@@ -74,6 +83,12 @@ def manifest_problems(data: dict[str, Any]) -> list[str]:
     if not isinstance(tests, list) or not tests:
         problems.append("tests must be a non-empty list")
         return problems
+    docs_only = data.get("docs_only", {})
+    readers = docs_only.get("prose_not_readers", []) if isinstance(docs_only, dict) else None
+    if not isinstance(readers, list) or not all(
+        isinstance(x, dict) and x.get("name") and x.get("why") for x in readers
+    ):
+        problems.append("docs_only.prose_not_readers entries need a 'name' and a 'why'")
     seen: set[str] = set()
     for entry in tests:
         name = entry.get("name") if isinstance(entry, dict) else None
@@ -224,6 +239,142 @@ def verdict(returncode: int, output: str, expected: int) -> int:
     return 0
 
 
+def _source_selftests():
+    sys.path.insert(0, str(REPO_ROOT / "tools" / "ci"))
+    try:
+        import source_selftests
+    finally:
+        sys.path.pop(0)
+    return source_selftests
+
+
+def _fragment_entry(name: str, repo: pathlib.Path) -> dict[str, Any] | None:
+    """A test's sources from its committed script-inputs fragment, if any."""
+    path = repo / "test" / "ctest_script_inputs" / "tests" / f"{name}.json"
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))["record"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    sources = [record.get("entry"), *record.get("inputs", [])]
+    files = ["{repo}/" + s for s in sources if isinstance(s, str) and s]
+    if not files:
+        return None
+    return {"name": name, "raw": True, "argv": ["python3", *files]}
+
+
+def is_prose(path: str) -> bool:
+    """Documentation under docs/ that no manifest reads (docs/status/ is data)."""
+    return path.startswith("docs/") and not path.startswith("docs/status/")
+
+
+# Optional imports the source path does not install. PyYAML it does install.
+_UNINSTALLED_IMPORT = re.compile(
+    r"^\s*(?:import|from)\s+(?:numpy|PIL|skimage|scipy)\b", re.MULTILINE
+)
+
+
+def docs_only_plan(
+    files: list[str] | None,
+    data: dict[str, Any] | None = None,
+    repo: pathlib.Path = REPO_ROOT,
+) -> tuple[str, list[dict[str, Any]], str]:
+    """Return (mode, entries to run in ``source`` mode, why).
+
+    ``mode`` is ``full`` unless the diff is docs-only and every listed test
+    that can read it runs from source here. Fail-closed throughout: anything
+    this cannot resolve keeps the full lane.
+    """
+    try:
+        ss = _source_selftests()
+        change_class = ss._load_classifier(repo).impact_class(files)
+        if change_class != "docs-only":
+            return "full", [], f"impact class {change_class}"
+        data = data if data is not None else load_manifest()
+        labels = data.get("ctest_labels", [])
+        if any(label != "pr-fast" for label in labels):
+            return "full", [], f"labels {labels} have no source-side member list"
+        names = sorted(set(ss.pr_fast_names(repo)) | {t["name"] for t in data["tests"]})
+        entries, not_checked = ss.static_ctest_entries(names, repo)
+        resolved = {e["name"] for e in entries} | set(not_checked)
+        if set(names) - resolved:
+            return "full", [], f"unresolved: {sorted(set(names) - resolved)}"
+        exempt = set()
+        if all(is_prose(f) for f in files):
+            exempt = {e["name"] for e in data.get("docs_only", {}).get("prose_not_readers", [])}
+        # A test that needs a configure runs only in the full lane, so if it can
+        # read the change the full lane runs. Its sources come from the committed
+        # script-inputs fragment; a test with none fails closed. One that needs a
+        # built target is never run by this lane at all.
+        needs_build = []
+        for name in sorted(not_checked):
+            if "$<TARGET_FILE" in not_checked[name] or name in exempt:
+                continue
+            pseudo = _fragment_entry(name, repo)
+            if pseudo is None or ss.select_for_docs_only([pseudo], files, repo):
+                needs_build.append(name)
+        if needs_build:
+            return "full", [], f"needs a configured build and can read the change: {needs_build}"
+        selected = ss.select_for_docs_only(entries, files, repo)
+        blocked = []
+        for entry in selected:
+            for src in ss.entry_sources(entry, repo):
+                try:
+                    text = src.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    blocked.append(f"{entry['name']}: cannot read {src}")
+                    continue
+                if _UNINSTALLED_IMPORT.search(text):
+                    blocked.append(f"{entry['name']}: {src.name} needs an uninstalled import")
+        if blocked:
+            return "full", [], "not runnable from source here: " + "; ".join(blocked[:3])
+        return "source", selected, f"docs-only: {len(selected)} of {len(names)} test(s) can read it"
+    except Exception as exc:  # noqa: BLE001 - any doubt runs the full lane
+        return "full", [], f"scope unavailable ({exc})"
+
+
+def scope(args: argparse.Namespace) -> int:
+    ss = _source_selftests()
+    files = ss.diff_names(args.base)
+    mode, entries, why = docs_only_plan(files)
+    print(f"drift-fast: scope {mode} against {args.base}: {why}")
+    for entry in entries:
+        print(f"drift-fast:   runs from source: {entry['name']}")
+    github_output = os.environ.get("GITHUB_OUTPUT")
+    if github_output:
+        with open(github_output, "a", encoding="utf-8") as fh:
+            fh.write(f"mode={mode}\n")
+    return 0
+
+
+def run_source(args: argparse.Namespace) -> int:
+    ss = _source_selftests()
+    files = ss.diff_names(args.base)
+    mode, entries, why = docs_only_plan(files)
+    if mode != "source":
+        # The scope changed under us (or failed): never report a partial pass.
+        print(f"drift-fast: run-source refused: {why}; the full lane must run",
+              file=sys.stderr)
+        return 2
+    print(f"drift-fast: {why}", flush=True)
+    if not entries:
+        print("drift-fast: OK (no drift test can read this docs-only change; "
+              "main pushes and the nightly run every test)")
+        return 0
+    results = ss.run(entries, jobs=args.jobs)
+    failed = [r for r in results if r["returncode"] != 0]
+    for res in failed:
+        print(f"\n===== {res['name']} (exit {res['returncode']}) =====")
+        print(res.get("output", "")[-6000:])
+    for res in results:
+        if res["returncode"] == 0 and res.get("skipped"):
+            print(f"drift-fast: NOT CHECKED (skipped): {res['name']}")
+    if failed or len(results) != len(entries):
+        print("drift-fast: FAILED — see the tests above")
+        return 1
+    print(f"drift-fast: OK ({len(results)} test(s) from source)")
+    return 0
+
+
 def precondition_problems(data: dict[str, Any], text: str, name: str) -> list[str]:
     """A step the selection needs must run before the driver, or the lane goes red on the runner.
 
@@ -243,6 +394,31 @@ def precondition_problems(data: dict[str, Any], text: str, name: str) -> list[st
             problems.append(f"{name}: never runs precondition {step}")
         elif run_at >= 0 and at > run_at:
             problems.append(f"{name}: runs precondition {step} after tools/ci/drift_fast.py run")
+    return problems
+
+
+def scope_problems(text: str, name: str) -> list[str]:
+    """The docs fast path may replace the full lane only on mode=source.
+
+    The full run must be gated ``!= 'source'`` so an empty or failed scope
+    output still runs it, and the source run gated ``== 'source'``.
+    """
+    problems: list[str] = []
+    lines = text.splitlines()
+    for needle, gate in (
+        ("tools/ci/drift_fast.py run --build-dir", "if: steps.scope.outputs.mode != 'source'"),
+        ("tools/ci/drift_fast.py run-source", "if: steps.scope.outputs.mode == 'source'"),
+    ):
+        at = next((i for i, line in enumerate(lines)
+                   if needle in line and not line.lstrip().startswith("#")), None)
+        if at is None:
+            problems.append(f"{name}: never calls {needle}")
+            continue
+        start = max(i for i in range(at + 1) if lines[i].lstrip().startswith("- "))
+        if not any(line.strip() == gate for line in lines[start:at]):
+            problems.append(f"{name}: the step calling {needle} is not gated `{gate}`")
+    if "tools/ci/drift_fast.py scope" not in text:
+        problems.append(f"{name}: never calls tools/ci/drift_fast.py scope")
     return problems
 
 
@@ -273,6 +449,7 @@ def check(args: argparse.Namespace) -> int:
         if not re.search(r"^\s+name:\s*drift-fast\s*$", text, re.MULTILINE):
             problems.append(f"{workflow.name}: no job named drift-fast")
         problems.extend(precondition_problems(data, text, workflow.name))
+        problems.extend(scope_problems(text, workflow.name))
     for p in problems:
         print(f"drift-fast: {p}", file=sys.stderr)
     if problems:
@@ -291,6 +468,13 @@ def main(argv: list[str] | None = None) -> int:
     p_run.add_argument("--jobs", type=int, default=default_jobs())
     p_run.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT)
     p_run.set_defaults(func=run)
+    p_scope = sub.add_parser("scope", help="full lane, or the docs-only source subset")
+    p_scope.add_argument("--base", required=True, help="exact base commit of the diff")
+    p_scope.set_defaults(func=scope)
+    p_src = sub.add_parser("run-source", help="run the docs-only source subset")
+    p_src.add_argument("--base", required=True, help="exact base commit of the diff")
+    p_src.add_argument("--jobs", type=int, default=default_jobs())
+    p_src.set_defaults(func=run_source)
     p_check = sub.add_parser("check", help="static manifest/workflow contract")
     p_check.add_argument("--manifest", default=str(MANIFEST))
     p_check.add_argument("--workflow", default=str(WORKFLOW))

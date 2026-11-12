@@ -381,9 +381,19 @@ jobs:
         # label, the manifest, the split and these steps drift apart.
         # --min-count catches a manifest that shrank without anyone deciding
         # to shrink it.
+        #
+        # --impact-scope: when the event's own diff is docs-only
+        # (tools/scripts/classify_changes.py impact_class), only the entries
+        # that can read a changed file run; any other class runs every entry.
+        # The base is the merge ref's first parent on a pull request and the
+        # group's base_sha on a merge group, so the diff is exactly this
+        # change. Pushes to main run every entry on the Linux build leg and the
+        # nightly, which is the backstop. See docs/guides/test-lanes.md.
         timeout-minutes: 45
+        env:
+          IMPACT_BASE: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.event_name == 'pull_request' && 'HEAD^1' || '' }}
         run: |
-          python3 tools/ci/source_selftests.py run --min-count 130 --part shared
+          python3 tools/ci/source_selftests.py run --min-count 130 --part shared ${IMPACT_BASE:+--impact-scope "$IMPACT_BASE"}
 
       - name: Wide non-native tier (tooling checks for a skipped macOS gate)
         # With PULP_CLASSIFY_WIDE_NON_NATIVE=1, build.yml's classify job lets a
@@ -443,8 +453,11 @@ jobs:
 
       - name: Exclusive source selftests
         timeout-minutes: 45
+        # Same docs-only impact scope as the shared part above.
+        env:
+          IMPACT_BASE: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.event_name == 'pull_request' && 'HEAD^1' || '' }}
         run: |
-          python3 tools/ci/source_selftests.py run --min-count 130 --part exclusive --shard ${{ matrix.shard }}/2
+          python3 tools/ci/source_selftests.py run --min-count 130 --part exclusive --shard ${{ matrix.shard }}/2 ${IMPACT_BASE:+--impact-scope "$IMPACT_BASE"}
 
   enforce:
     # The required context. It runs after both jobs whatever they concluded,

@@ -11,6 +11,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import drift_fast  # noqa: E402
@@ -227,6 +228,88 @@ class ContractTests(unittest.TestCase):
         sources += (drift_fast.REPO_ROOT / "test" / "CMakeLists.txt").read_text(encoding="utf-8")
         for entry in json.loads(drift_fast.MANIFEST.read_text(encoding="utf-8"))["tests"]:
             self.assertIn(f"NAME {entry['name']}", sources, entry["name"])
+
+
+class DocsOnlyScopeTests(unittest.TestCase):
+    """drift_fast.py scope: source mode only for docs-only diffs."""
+
+    PROSE = ["docs/reports/a9-edit-replay-evidence-20261112.md"]
+
+    def test_code_diff_takes_the_full_lane(self):
+        # Positive control: every code-touching diff keeps today's full lane.
+        for files in (["core/view/src/widgets.cpp"],
+                      ["test/cmake/pr_fast_tests.cmake"],
+                      ["tools/ci/drift_fast.json"],
+                      ["docs/reports/x.md", "tools/scripts/gates.sh"],
+                      ["docs/status/consumption-profiles.json"],
+                      ["docs/migrations/2026-11-01-x.md"]):
+            mode, entries, why = drift_fast.docs_only_plan(files)
+            self.assertEqual(mode, "full", (files, why))
+            self.assertEqual(entries, [])
+
+    def test_unreadable_diff_takes_the_full_lane(self):
+        self.assertEqual(drift_fast.docs_only_plan(None)[0], "full")
+        self.assertEqual(drift_fast.docs_only_plan([])[0], "full")
+
+    def test_prose_diff_runs_its_readers_from_source(self):
+        mode, entries, why = drift_fast.docs_only_plan(self.PROSE)
+        self.assertEqual(mode, "source", why)
+        names = {e["name"] for e in entries}
+        for reader in ("skills-doc-sync", "tools-registry-check"):
+            self.assertIn(reader, names)
+        # Nothing it runs needs a configure.
+        for entry in entries:
+            self.assertFalse(any("${" in a or "$<" in a for a in entry["argv"]), entry)
+
+    def test_without_the_reviewed_exemptions_prose_takes_the_full_lane(self):
+        # Negative control: the exemption list is what admits source mode.
+        data = drift_fast.load_manifest()
+        data = {**data, "docs_only": {"prose_not_readers": []}}
+        mode, _, why = drift_fast.docs_only_plan(self.PROSE, data=data)
+        self.assertEqual(mode, "full")
+        self.assertIn("script-test-inputs-drift", why)
+
+    def test_exemptions_do_not_cover_docs_outside_prose(self):
+        # CLAUDE.md, a SKILL.md or docs/status/ data are read by configured
+        # tests the exemptions do not speak for.
+        for files in (["CLAUDE.md"], [".agents/skills/ci/SKILL.md"],
+                      ["docs/status/tools.yaml"]):
+            self.assertEqual(drift_fast.docs_only_plan(files)[0], "full", files)
+
+    def test_scope_error_takes_the_full_lane(self):
+        with unittest.mock.patch.object(drift_fast, "_source_selftests",
+                                        side_effect=RuntimeError("boom")):
+            mode, _, why = drift_fast.docs_only_plan(self.PROSE)
+        self.assertEqual(mode, "full")
+        self.assertIn("boom", why)
+
+    def test_exempt_names_are_real_drift_tests(self):
+        ss = drift_fast._source_selftests()
+        data = drift_fast.load_manifest()
+        known = set(ss.pr_fast_names()) | {t["name"] for t in data["tests"]}
+        for entry in data["docs_only"]["prose_not_readers"]:
+            self.assertIn(entry["name"], known)
+
+    def test_ungated_full_run_breaks_the_contract(self):
+        text = drift_fast.WORKFLOW.read_text(encoding="utf-8")
+        self.assertEqual(drift_fast.scope_problems(text, "w"), [])
+        broken = text.replace("        if: steps.scope.outputs.mode != 'source'\n"
+                              "        run: |\n"
+                              "          python3 tools/ci/drift_fast.py run --build-dir",
+                              "        run: |\n"
+                              "          python3 tools/ci/drift_fast.py run --build-dir")
+        self.assertNotEqual(broken, text)
+        self.assertTrue(drift_fast.scope_problems(broken, "w"))
+
+    def test_run_source_refuses_a_full_diff(self):
+        with unittest.mock.patch.object(drift_fast, "docs_only_plan",
+                                        return_value=("full", [], "code:core")), \
+                unittest.mock.patch.object(drift_fast._source_selftests(), "diff_names",
+                                           return_value=["core/x.cpp"]):
+            rc, out = quietly(drift_fast.run_source,
+                              type("A", (), {"base": "HEAD^1", "jobs": 1})())
+        self.assertEqual(rc, 2)
+        self.assertIn("refused", out)
 
 
 if __name__ == "__main__":

@@ -22,7 +22,25 @@ WHAT IS SKIP-SAFE
 - Any `*.md` file, anywhere (README, CHANGELOG, CONTRIBUTING, SKILL.md, ...).
 - Files under `docs/`, `planning/`, `.githooks/`, `.shipyard/`,
   `.shipyard.local/` — none are CMake/build inputs.
-- A short exact-name list (`.gitignore`, `.gitattributes`, `CODEOWNERS`).
+- A short exact-name list (`.gitignore`, `.gitattributes`, `CODEOWNERS`,
+  and the `planning` submodule gitlink).
+
+IMPACT CLASS
+------------
+`impact_class()` names what a change touches, so jobs other than the native
+build can scale with it: `docs-only`, `ci-only`, or `code:<surfaces>` (the
+sorted top-level directories of the non-docs files; `code:unknown` when the
+diff could not be read). `docs-only` is a strict subset of "native build not
+required": every file is Markdown, under `docs/`, or the `planning` gitlink, no
+file is a FORCE_BUILD_PREFIXES input, and the installed-SDK capability proof is
+not selected. Consumers:
+  - `codeql-advanced.yml` skips docs-only pull requests through
+    `paths-ignore` (DOCS_PATHS_IGNORE; test_classify_changes.py proves every
+    docs-only diff is skipped and nothing outside those paths is);
+  - `tools/ci/source_selftests.py run --impact-scope` and
+    `tools/ci/drift_fast.py scope` run, for a docs-only diff, only the checks
+    that can read a changed file. Every other class runs everything.
+main pushes and the nightly schedules never scope.
 
 EVERYTHING ELSE forces the native build — including `core/**`,
 `apple/**`, `examples/**`, `test/**`, every `CMakeLists.txt`,
@@ -92,6 +110,11 @@ SKIP_SAFE_EXACT = {
     # Pure-Python regression coverage for the skip-safe .githooks supervisor.
     # Keep this exact: neighboring tools/scripts files can affect native builds.
     "tools/scripts/test_prepush_gate_supervisor.py",
+    # The private planning submodule's gitlink. The `planning/` prefix already
+    # covers its contents; a pointer bump changes no build input either, and
+    # the planning-gitlink guard on the required version/skill-sync context
+    # still checks it.
+    "planning",
 }
 
 # Paths that LOOK skip-safe (e.g. a `.md` file under `docs/`) but are in
@@ -167,6 +190,53 @@ def native_build_required(files: list[str]) -> bool:
     if not files:
         return True
     return not all(is_skip_safe(f) for f in files)
+
+
+# The impact classes. DOCS_ONLY is the docs fast path; CI_ONLY is reported but
+# not yet used to scope anything.
+DOCS_ONLY = "docs-only"
+CI_ONLY = "ci-only"
+CODE_PREFIX = "code:"
+CI_ONLY_PREFIXES = (".github/", ".githooks/", ".shipyard/", ".shipyard.local/")
+
+# GitHub `paths-ignore` patterns for a non-required workflow that has nothing
+# to do for documentation (CodeQL). A workflow using them is skipped when every
+# changed file matches one, which every docs-only diff does. They are wider than
+# DOCS_ONLY: the FORCE_BUILD_PREFIXES documents and the capability JSON feed
+# the native build but are not source CodeQL analyzes. Only a workflow that is
+# NOT a required status check may use them: a required check that never
+# reports holds the pull request on "Expected".
+DOCS_PATHS_IGNORE = ("**.md", "docs/**", "planning")
+
+
+def is_docs_only_path(path: str) -> bool:
+    """True if this file is documentation that feeds no build input."""
+    if not path or any(path.startswith(prefix) for prefix in FORCE_BUILD_PREFIXES):
+        return False
+    return (
+        path.endswith(".md")
+        or path.startswith(("docs/", "planning/"))
+        or path == "planning"
+    )
+
+
+def impact_class(files: list[str] | None) -> str:
+    """Name what a change touches: DOCS_ONLY, CI_ONLY or ``code:<surfaces>``.
+
+    Fail-closed: an unreadable (None) or empty diff is ``code:unknown``, which
+    every consumer treats as "run everything".
+    """
+    if not files:
+        return CODE_PREFIX + "unknown"
+    if all(is_docs_only_path(f) for f in files):
+        if agent_capability_installed_sdk_required(files):
+            return CODE_PREFIX + "docs"
+        return DOCS_ONLY
+    rest = [f for f in files if not is_docs_only_path(f)]
+    if all(f.startswith(CI_ONLY_PREFIXES) for f in rest):
+        return CI_ONLY
+    surfaces = sorted({f.split("/", 1)[0] if "/" in f else "root" for f in rest})
+    return CODE_PREFIX + ",".join(surfaces)
 
 
 def agent_capability_installed_sdk_required(files: list[str]) -> bool:
@@ -455,6 +525,7 @@ def main(argv: list[str]) -> int:
 
     # Fail-closed: a None (git error) is treated as "unknown" -> build.
     resolved_files = files or []
+    change_class = impact_class(files)
     mobile_required = ios_compile_required(resolved_files)
     capability_installed_required = (
         True
@@ -511,11 +582,13 @@ def main(argv: list[str]) -> int:
     sys.stderr.write(
         f"[classify] native_build_required={str(required).lower()} — {reason}\n"
     )
+    sys.stderr.write(f"[classify] impact_class={change_class}\n")
 
     github_output = os.environ.get("GITHUB_OUTPUT")
     if github_output:
         with open(github_output, "a", encoding="utf-8") as fh:
             fh.write(f"native_build_required={str(required).lower()}\n")
+            fh.write(f"impact_class={change_class}\n")
             fh.write(f"ios_compile_required={str(mobile_required).lower()}\n")
             fh.write(
                 "agent_capability_installed_sdk_required="
@@ -527,6 +600,7 @@ def main(argv: list[str]) -> int:
             json.dumps(
                 {
                     "native_build_required": required,
+                    "impact_class": change_class,
                     "ios_compile_required": mobile_required,
                     "agent_capability_installed_sdk_required": (
                         capability_installed_required

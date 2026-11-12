@@ -19,6 +19,14 @@ historical GPU-probe acceptance test from a depth-2 checkout. Keep its bounded
 removing it produces a deterministic shallow-history failure unrelated to the
 source change.
 
+Docs-only pull requests take a fast path that still reports every required
+context: CodeQL does not run (`paths-ignore`), `drift-fast` runs only its
+readers from source, and the source selftests run only the entries that can
+read the change. The class comes from `classify_changes.impact_class`; never
+add `paths`/`paths-ignore` or a job-level `if:` to a required workflow to get
+the same effect, and never extend `drift_fast.json`'s `prose_not_readers`
+without a reviewed reason. See `docs/guides/local-ci.md` "Impact-scoped jobs".
+
 ## Landing a Pulp PR fast — the checklist
 
 Every step below exists because skipping it cost a CI round trip (20-40 min)
