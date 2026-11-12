@@ -232,9 +232,11 @@ create a second scheduler.
 **Traceable fixture:** the G-5 owner/status authority is
 `docs/graph-program-status/G-5.md`; the pre-runtime oracle is
 `examples/g5-event-consumer`. Run
-`python3 -m unittest discover -s examples/g5-event-consumer -p 'test_*.py' -v`
+`cd examples/g5-event-consumer && python3 -m unittest test_check_trace.py -v`
 and then `python3 examples/g5-event-consumer/check_trace.py observations.json`
-with the installed consumer's observation file. The fixture's
+with the installed consumer's observation file. The broad `unittest discover`
+variant is a known-invalid negative: it collects zero tests and exits 5, so it
+must not be treated as an oracle. The fixture's
 `expected.json` and planted timing/tie/counter mutations define the acceptance
 boundary. It is only one trigger-stream, pre-runtime oracle: it does not prove
 MIDI, parameter, voice-intent, or sensor projection; feed-forward audio; reset
