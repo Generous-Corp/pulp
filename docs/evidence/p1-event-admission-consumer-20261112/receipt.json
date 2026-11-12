@@ -8,18 +8,20 @@
   "consumer": "examples/p1-event-admission-consumer",
   "controls": {
     "midi": "implemented: two-block absolute ingress, stale epoch, late, duplicate sequence, stable producer ordering",
-    "parameter": "implemented: two-block stable sort and fixed-capacity overflow",
+    "parameter": "NOT_CHECKED: standalone stable sort and fixed-capacity overflow only; graph/mailbox projection planned",
     "partitions": [
       4,
       8
     ],
     "planted_negative_count": 5,
     "trigger": "implemented: two blocks, absolute sample, sequence, epoch, reset",
-    "voice_intent": "implemented: test-owned G-4 identity plus existing MPE allocator and stale generation refusal"
+    "voice_intent": "NOT_CHECKED: standalone test-owned identity/MPE adapter only; graph voice projection planned",
+    "cross_block_verified": "MIDI ingress and trigger graph only; parameter/voice projection not checked"
   },
   "schema": "pulp.graph.p1-event-admission-consumer.v1",
   "source_head": "37d5d32932af8c32d17727cab8d8b98cc8323986",
   "status": "NOT_QUALIFIED",
+  "qualification_scope": "PARTIAL: MIDI/trigger cross-block controls implemented; parameter/voice graph projection NOT_CHECKED",
   "unavailable_lanes": [
     "installed_sdk",
     "runtime",
