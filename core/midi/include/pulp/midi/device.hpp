@@ -77,6 +77,11 @@ public:
     /// port is not open, or the backend has no SysEx output, which is the
     /// default so existing backends compile unchanged.
     ///
+    /// CoreMIDI delivers a message at MIDI wire speed, about 3 KB/s even to an
+    /// in-process destination (3000 bytes took 0.93 s when measured on macOS),
+    /// so a large dump takes seconds to finish. At most 16 messages may be
+    /// waiting at once; the next send returns false until one completes.
+    ///
     /// Not real-time safe: it validates, copies the message and may take a
     /// lock. Call it from a UI, control or worker thread, never from an audio
     /// callback. The bytes are copied before this returns, so the caller may
