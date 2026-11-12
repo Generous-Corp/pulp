@@ -5,6 +5,7 @@
   "inputs": [
    ".github/workflows/build.yml",
    "tools/ci/find_python311.py",
+   "tools/ci/test_build_yml_docs_entry_delta.py",
    "tools/scripts/classify_changes.py"
   ],
   "kind": "python"
