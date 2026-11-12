@@ -1427,9 +1427,9 @@ class ImpactScopeTests(unittest.TestCase):
 
     def test_whole_tree_scan_that_mentions_docs_is_selected(self):
         script = REPO / "tools" / "scripts" / "test_scan_docs.py"
-        script.write_text("import pathlib\nfor p in pathlib.Path('.').rglob('*.md'):\n    pass\n")
+        script.write_text("import pathlib\nfor p in pathlib.Path('.').rglob('*.md'):\n    pass\n", encoding="utf-8")
         other = REPO / "tools" / "scripts" / "test_scan_code.py"
-        other.write_text("import pathlib\nfor p in pathlib.Path('.').rglob('*.cpp'):\n    pass\n")
+        other.write_text("import pathlib\nfor p in pathlib.Path('.').rglob('*.cpp'):\n    pass\n", encoding="utf-8")
         entries = [{"name": "scan-docs", "argv": ["{repo}/tools/scripts/test_scan_docs.py"]},
                    {"name": "scan-code", "argv": ["{repo}/tools/scripts/test_scan_code.py"]}]
         kept = lane.select_for_docs_only(entries, ["docs/new.md"], REPO)

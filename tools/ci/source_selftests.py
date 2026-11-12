@@ -852,7 +852,7 @@ def diff_names(base: str, repo: pathlib.Path = REPO_ROOT) -> list[str] | None:
     """Files changed between the exact ``base`` commit and HEAD; None on error."""
     proc = subprocess.run(
         ["git", "diff", "--no-renames", "--name-only", base, "HEAD"],
-        cwd=repo, capture_output=True, text=True, check=False,
+        cwd=repo, capture_output=True, text=True, encoding="utf-8", check=False,
     )
     if proc.returncode != 0:
         return None

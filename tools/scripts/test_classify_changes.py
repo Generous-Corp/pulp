@@ -967,7 +967,8 @@ class CodeqlDocsSkipTests(unittest.TestCase):
 
     def test_glob_agrees_with_the_classifier_on_every_tracked_path(self) -> None:
         proc = subprocess.run(["git", "ls-files"], cwd=THIS_DIR.parents[1],
-                              capture_output=True, text=True, check=True)
+                              capture_output=True, text=True, encoding="utf-8",
+                              check=True)
         tracked = proc.stdout.split()
         self.assertGreater(len(tracked), 1000)  # control: the instrument read the tree
         patterns = list(classify.DOCS_PATHS_IGNORE)
