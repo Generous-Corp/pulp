@@ -41,7 +41,8 @@ firehose.
 | 1. Workflow lint | PR review | bad YAML / bad `uses:` / bad shell | seconds (pre-merge) |
 | 2. Auto-release watchdog | `workflow_run` completion | auto-release.yml runtime failure (any cause) | 1-2 minutes |
 | 3. Cadence check | `schedule` every 30 min | version bumped on main but no tag created | ≤45 min |
-| 4. **Release reconciler** | `schedule` every 30 min | **tag exists but never published — and REPAIRS it**; reports a compile error at once and any tag unpublished after 2 h, naming the failing leg | ≤30 min |
+| 4. **Release reconciler** | `schedule` every 30 min + each Release CLI completion | **tag exists but never published — and REPAIRS it**; re-runs a leg that hit its timeout once; reports a compile error at once and any tag unpublished after 2 h, naming the failing leg | ≤30 min |
+| 4a. Release step timeouts | every release job and long step (`timeout-minutes`) | a leg that HANGS instead of failing — it would otherwise hold the release for GitHub's 6-hour default | at the step's timeout (4 x its p95) |
 | 5. Release content gate | each native release leg + release finalizer | correctly named archives containing missing, stale, wrong-version, non-executable, or invalidly signed products | pre-publish |
 | 6. Deletion tripwire | `release: [deleted]` | a human/agent deleted a release or draft — burned tag name, destroyed assets | ~1 minute |
 
@@ -242,6 +243,61 @@ the build provenance would otherwise name a commit consumers do not pin. A
 dispatch from `main` fails that step in seconds without building anything. If a
 tag's own workflow is broken, the fix is a new tag cut from the fixed `main`.
 Re-dispatch is idempotent: the finalizer no-ops on an already-published tag.
+
+### A hung leg fails at its own timeout and is re-run once
+
+A leg that hangs does not fail, so none of the rules above can see it: its run
+stays `in_progress`, and a live run outranks everything. v1.119.0's
+`CLI darwin-x64` leg sat in `Prepare SDK build dir (macOS)` for more than 105
+minutes, a step whose recent successful runs took 3 to 7 minutes, while the
+release waited for the drought alarm.
+
+**Every release job and every long release step carries `timeout-minutes`.**
+The values come from history, not judgement:
+`timeout = max(floor, ceil(4 x p95))`, where p95 is the slowest matrix leg's
+over the last 30 successful `Release CLI` runs (one step timeout bounds every
+leg, so pooling legs would let five fast platforms hide one slow one). Steps
+use a 15-minute floor, jobs a 30-minute floor, and a step is "long" when its
+p95 is at least 2 minutes; shorter steps are bounded by their job.
+`tools/ci/release_step_timeouts.json` records n, each p95 and each derived
+value, and `tools/scripts/release_step_timeouts.py check` (workflow-lint)
+fails when a job of `release-cli.yml`, `sign-and-release.yml` or
+`auto-release.yml` has no timeout, or a long step lacks its recorded value.
+Re-derive rather than hand-editing one number:
+
+```bash
+# The tool shells to $RELEASE_TIMEOUTS_GH (default ghread) for read-only API calls.
+python3 tools/scripts/release_step_timeouts.py derive --runs 30 > /tmp/release-cli.json
+```
+
+`sign-and-release.yml`'s `build-and-sign-macos` job was skipped in every run of
+the window, so it has no history; its 240-minute value is recorded as manual,
+bounded by `build-cli`'s derived job timeout.
+
+**A timed-out leg is re-run once, in place.** The reconciler reads each failed
+or cancelled job's check-run annotations (and, for a failed job, its log) for
+GitHub's timeout message (`has timed out`, `has exceeded the maximum execution
+time`). When the tag's newest completed run is on its first attempt and every
+non-cancelled failure in it is a timeout, the reconciler calls
+`rerun-failed-jobs` on that run (`RERUN_TIMED_OUT`). That re-runs the hung leg
+and the jobs waiting on it (the smoke matrix and the `release` finalizer) on
+the same tag commit and event, so the dispatch-ref guard and provenance are
+unchanged, and it does not rebuild the five green legs. Their artifacts belong
+to the run and the new attempt downloads them. The reconciler also runs on
+every `Release CLI` completion, so the retry starts within minutes.
+
+Why this cannot double-publish: the `release` job is the only writer and it
+no-ops on an already-published tag ("Is this tag already published?"); the
+`release-publish` concurrency group serialises it repo-wide; and a draft left
+by an interrupted finalizer is re-driven, never duplicated. A rerun shares the
+per-sweep repair budget and does not spend the re-dispatch budget. The
+`run_attempt` check makes it happen once: if the re-run times out or fails
+again, the tag takes the ordinary path (bounded re-dispatch, then the drought
+incident, which names the timed-out leg). A timeout is never product-validation
+evidence, so a hung `Smoke CLI` or product-matrix step does not open the
+circuit. One edge: if a job uploads one artifact and then times out before the
+next, its re-run collides with the uploaded name and fails; the run then takes
+the re-dispatch path, which builds a fresh run.
 
 ### Every incident entry says what to change
 

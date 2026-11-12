@@ -68,6 +68,7 @@ DEFERRED = "deferred"        # a NEWER tag is still building; wait and see
 REDISPATCH = "redispatch"    # stuck, and we still have budget to retry
 ESCALATE = "escalate"        # stuck, and out of budget — a human must look
 CIRCUIT_OPEN = "circuit-open"  # product validation failed; do not retry the tag
+RERUN_TIMED_OUT = "rerun-timed-out"  # a leg hit its timeout; re-run that run's failed jobs once
 
 # These steps validate immutable release content. Failures in bootstrap, artifact
 # transfer, attestation, or publication are workflow failures and retain the
@@ -146,6 +147,76 @@ def tag_immutable_failure(log_text: str) -> str | None:
     return None
 
 
+# GitHub's own wording when a `timeout-minutes` expires: a step reports
+# "The action '<step>' has timed out after N minutes." (older runners: "The
+# action has timed out."), a job "The job running on runner <r> has exceeded
+# the maximum execution time of N minutes.". A timeout says a leg HUNG, not that
+# the tag's content is wrong, so it is never product-validation evidence and is
+# the one failure a same-run re-run is the cheapest fix for.
+TIMEOUT_EVIDENCE = (
+    re.compile(r"has timed out\b[^\r\n]*"),
+    re.compile(r"has exceeded the maximum execution time of \d+ minutes?"),
+)
+
+
+def timeout_evidence(messages: Iterable[str]) -> str | None:
+    """Return the first message proving a job or step hit its timeout, if any."""
+    for message in messages:
+        for pattern in TIMEOUT_EVIDENCE:
+            if pattern.search(message or ""):
+                return (message or "").strip()[:_SIGNATURE_LIMIT]
+    return None
+
+
+def timeout_rerun_candidate(
+    runs: Iterable[dict],
+    job_cache: dict[int, list[dict]],
+    timed_out: Callable[[dict], str | None],
+) -> tuple[int | None, tuple[str, ...]]:
+    """Decide whether the tag's newest completed run should be re-run once.
+
+    Returns `(run_id, timed_out_legs)`. `run_id` is set only when the newest
+    completed run is on its FIRST attempt, at least one of its jobs carries
+    timeout evidence, and no job failed for any other reason (a cancelled
+    sibling is collateral, not a verdict). `rerun-failed-jobs` then re-runs only
+    the hung leg and the jobs that need it, on the same tag commit; the green
+    legs' artifacts stay with the run. The attempt check makes the retry
+    happen once: a second timeout falls through to the ordinary bounded
+    re-dispatch path and the drought incident.
+    """
+    completed = sorted(
+        (r for r in runs if r.get("status") == "completed"),
+        key=lambda r: r.get("created_at", ""),
+        reverse=True,
+    )
+    if not completed:
+        return None, ()
+    run = completed[0]
+    if run.get("conclusion") not in ("failure", "cancelled"):
+        return None, ()
+    jobs = job_cache.get(run["id"], [])
+    if not jobs:
+        return None, ()
+    latest = max(int(j.get("run_attempt", 1)) for j in jobs)
+    current = [j for j in jobs if int(j.get("run_attempt", 1)) == latest]
+    legs: list[str] = []
+    other_failure = False
+    for job in current:
+        if job.get("conclusion") not in ("failure", "cancelled"):
+            continue
+        evidence = timed_out(job)
+        if evidence:
+            legs.append(f"{job.get('name', 'unknown job')} › {evidence}")
+        elif job.get("conclusion") == "failure":
+            other_failure = True
+    if not legs:
+        return None, ()
+    attempt = int(run.get("run_attempt", latest))
+    if other_failure or attempt > 1:
+        return None, tuple(legs)
+    return run["id"], tuple(legs)
+
+
 def run_is_doomed(
     jobs: Iterable[dict],
     log_fetcher: "Callable[[int], str] | None" = None,
@@ -217,6 +288,11 @@ class TagState:
     diagnoses: tuple[Diagnosis, ...] = ()
     # Failed jobs of the tag's newest `Sign and Release` run, if it failed.
     sign_failures: tuple[Diagnosis, ...] = ()
+    # The newest completed run, when it failed only because a leg hit its
+    # `timeout-minutes` and has not been re-run yet (see timeout_rerun_candidate).
+    rerun_run_id: int | None = None
+    # "<job> › <timeout message>" for each leg of that run that timed out.
+    timed_out_legs: tuple[str, ...] = ()
 
     @property
     def circuit_open(self) -> bool:
@@ -422,6 +498,18 @@ def decide(
             CIRCUIT_OPEN,
             f"{state.tag} failed immutable product validation: {observed}; circuit "
             "open — immutable-tag failures are not retried",
+        )
+
+    # A leg that HUNG and hit its timeout-minutes is re-run once in place
+    # (rerun-failed-jobs on the same run): one leg instead of the six-leg
+    # matrix a re-dispatch rebuilds. Idempotent like a re-dispatch — the
+    # finalizer no-ops on a published tag — and it does not spend the
+    # re-dispatch budget. A second timeout takes the ordinary path below.
+    if state.rerun_run_id is not None:
+        return Decision(
+            RERUN_TIMED_OUT,
+            f"{state.tag}: {'; '.join(state.timed_out_legs)}; re-running the failed "
+            f"jobs of run {state.rerun_run_id} once",
         )
 
     # No live run and no release yet — but the tag may simply have been pushed
@@ -675,6 +763,30 @@ def collect(
                 print(f"  job {job_id}: log not fetched — {error}")
             log_cache[job_id] = text
         return log_cache[job_id]
+    # Timeout evidence comes from the job's check-run annotations, where GitHub
+    # records "has timed out" / "exceeded the maximum execution time"; a job
+    # timeout's log need not carry it. Asked only about failed or cancelled
+    # jobs, and memoised, so a healthy sweep makes no extra calls.
+    timeout_cache: dict[int, str | None] = {}
+
+    def timed_out(job: dict) -> str | None:
+        job_id = job.get("id")
+        if job_id is None:
+            return None
+        if job_id not in timeout_cache:
+            messages: list[str] = []
+            try:
+                annotations = gh_json(
+                    ["api", f"repos/{repo}/check-runs/{job_id}/annotations?per_page=100"]
+                )
+                messages = [a.get("message", "") for a in annotations or []]
+            except (subprocess.CalledProcessError, ValueError):
+                pass
+            if job.get("conclusion") == "failure":
+                messages.append(log_fetcher(job_id))
+            timeout_cache[job_id] = timeout_evidence(messages)
+        return timeout_cache[job_id]
+
     for r in flat_runs:
         if not needs_job_details(r):
             continue
@@ -757,6 +869,9 @@ def collect(
             f"{d.job}: {d.cause} (tag-immutable; the upstream asset changed bytes)"
             for d in diagnoses if d.tag_immutable
         )
+        rerun_run_id, timed_out_legs = timeout_rerun_candidate(
+            tag_runs, job_cache, timed_out
+        )
         states.append(
             TagState(
                 tag=tag,
@@ -768,7 +883,7 @@ def collect(
                 ),
                 run_states=tuple(r["status"] for r in tag_runs),
                 validation_failures=latest_validation_failures(
-                    tag_runs, job_cache, log_fetcher=log_fetcher
+                    tag_runs, job_cache, log_fetcher=log_fetcher, timed_out=timed_out
                 ) + immutable + repeated_package_failures(
                     tag_runs, job_cache, log_fetcher
                 ),
@@ -780,6 +895,8 @@ def collect(
                 failed_legs=newest_failed_legs(tag_runs, job_cache),
                 diagnoses=diagnoses,
                 sign_failures=sign_failures,
+                rerun_run_id=rerun_run_id,
+                timed_out_legs=timed_out_legs,
             )
         )
     return states
@@ -845,6 +962,7 @@ def validation_failures(jobs: Iterable[dict]) -> tuple[str, ...]:
 def validation_outcomes(
     jobs: Iterable[dict],
     log_fetcher: "Callable[[int], str] | None" = None,
+    timed_out: "Callable[[dict], str | None] | None" = None,
 ) -> tuple[dict[str, str], set[str]]:
     """Return failed and passed product gates, keyed by platform and gate.
 
@@ -857,6 +975,15 @@ def validation_outcomes(
     passed: set[str] = set()
     for job in jobs:
         job_name = job.get("name", "unknown job")
+        # A job that hit its timeout hung; its failed step (even a smoke or
+        # product-matrix step) never reached a verdict, so it is neither
+        # failure nor pass evidence and must not open the circuit.
+        if (
+            timed_out is not None
+            and job.get("conclusion") in ("failure", "cancelled")
+            and timed_out(job)
+        ):
+            continue
         if log_fetcher is not None and job.get("conclusion") == "failure":
             signature = tag_immutable_failure(log_fetcher(job.get("id")))
             if signature:
@@ -887,6 +1014,7 @@ def latest_validation_failures(
     runs: Iterable[dict],
     job_cache: dict[int, list[dict]],
     log_fetcher: Callable[[int | None], str] | None = None,
+    timed_out: Callable[[dict], str | None] | None = None,
 ) -> tuple[str, ...]:
     """Return current validation evidence, allowing a later pass to clear it."""
     attempts: list[tuple[str, int, bool, list[dict]]] = []
@@ -906,7 +1034,7 @@ def latest_validation_failures(
     cleared: set[str] = set()
     active: dict[str, str] = {}
     for _, _, may_clear, jobs in newest_first:
-        failures, passed = validation_outcomes(jobs, log_fetcher)
+        failures, passed = validation_outcomes(jobs, log_fetcher, timed_out)
         for gate, why in failures.items():
             if gate not in cleared and gate not in active:
                 active[gate] = why
@@ -951,6 +1079,27 @@ def runs_this_tag(run: dict, tag: str, dispatch_tag: str | None = None) -> bool:
     if run.get("head_branch") == tag:
         return True
     return dispatch_tag is not None and dispatch_tag == tag
+
+
+def rerun_timed_out(repo: str, tag: str, run_id: int, dry_run: bool) -> None:
+    """Re-run the failed jobs of `run_id` once — the leg that hit its timeout.
+
+    `rerun-failed-jobs` re-runs failed and cancelled jobs plus the jobs that
+    depend on them (the smoke matrix and the `release` finalizer), on the same
+    tag commit and event as the original run, so the dispatch-ref guard and the
+    build provenance are unchanged. The green legs are not rebuilt; their
+    artifacts belong to the run and stay downloadable by the new attempt. The
+    finalizer no-ops on an already-published tag, so this cannot publish twice.
+    """
+    cmd = [
+        "gh", "api", "--method", "POST",
+        f"repos/{repo}/actions/runs/{run_id}/rerun-failed-jobs",
+    ]
+    if dry_run:
+        print(f"    DRY RUN: would run: {' '.join(cmd)}")
+        return
+    subprocess.run(cmd, check=True)
+    print(f"    re-ran the failed jobs of release-cli run {run_id} for {tag}")
 
 
 def redispatch(repo: str, tag: str, dry_run: bool) -> None:
@@ -1334,7 +1483,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         dry_spell = drought(
             state, now, drought_hours=drought_hours, newest_published=newest_published
         )
-        if decision.action == REDISPATCH:
+        if decision.action == RERUN_TIMED_OUT:
+            if dry_spell:
+                report.append((state.tag, f"{dry_spell}; re-running the timed-out leg"))
+            if budget <= 0:
+                print("    (deferred — re-dispatch budget for this sweep is spent)")
+            else:
+                budget -= 1
+                rerun_timed_out(repo, state.tag, state.rerun_run_id, dry_run)
+        elif decision.action == REDISPATCH:
             # Report before the budget check: a tag whose re-dispatch is
             # deferred this sweep is no less overdue.
             if dry_spell:

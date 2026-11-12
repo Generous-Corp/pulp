@@ -52,6 +52,9 @@ tools/scripts/test_windows_cli_release_precheck.py
 tools/scripts/test_windows_cli_compile_workflow.py
 tools/scripts/release_reconcile.py
 tools/scripts/test_release_reconcile.py
+tools/scripts/release_step_timeouts.py
+tools/scripts/test_release_step_timeouts.py
+tools/ci/release_step_timeouts.json
 tools/scripts/release_failure_diagnosis.py
 tools/scripts/test_release_failure_diagnosis.py
 tools/scripts/fixtures/release_failure/**
