@@ -145,6 +145,17 @@ pulp_add_test_suite(pulp-test-interpolator GROUP pulp-test-group-app-signal
 pulp_add_test_suite(pulp-test-midi-expansion GROUP pulp-test-group-app-midi
     LIBRARIES pulp::midi)
 
+# MidiOutput::send_sysex: framing, the mock backend, large messages, the default
+# for a backend without SysEx output, and (macOS) real CoreMIDI delivery to an
+# in-process virtual destination.
+pulp_add_test_suite(pulp-test-midi-output-sysex
+    SOURCES test_midi_output_sysex.cpp
+    LIBRARIES pulp::midi)
+if(APPLE)
+    target_link_libraries(pulp-test-midi-output-sysex PRIVATE
+        "-framework CoreMIDI" "-framework CoreFoundation")
+endif()
+
 # Audio process load measurer tests
 pulp_add_test_suite(pulp-test-load-measurer
     SOURCES test_load_measurer.cpp harness/rt_allocation_probe.cpp
