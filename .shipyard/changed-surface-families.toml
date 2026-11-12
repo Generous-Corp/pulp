@@ -717,7 +717,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0da361033064"
+name = "script-readers-9cde39ff9a6b"
 paths = ["tools/scripts/gate_python_imports_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -727,6 +727,7 @@ tests = [
   "changed-surface-script-families-selftest",
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
+  "drift-fast-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gate-python-imports",
@@ -3689,7 +3690,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1296992e46e8"
+name = "script-readers-30629643c079"
 paths = ["tools/scripts/test_generated_version_bump_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -3699,6 +3700,7 @@ tests = [
   "changed-surface-script-families-selftest",
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
+  "drift-fast-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gpu-audio-provider-identity-selftest",
@@ -8230,8 +8232,12 @@ tests = [
   "decisions-contract-validate",
   "deferred-admission-selftest",
   "diff-cover-targets-selftest",
+  "drift-fast-selftest",
   "example-validation-paths",
   "executable-keys-selftest",
+  "flake-exoneration-selftest",
+  "flake-exoneration-shadow-selftest",
+  "flake-quarantine-selftest",
   "framework-neutrality",
   "framework-neutrality-selftest",
   "gate-common-selftest",

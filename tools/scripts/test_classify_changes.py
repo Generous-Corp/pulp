@@ -885,13 +885,59 @@ def _github_glob(pattern: str) -> re.Pattern[str]:
     return re.compile(out + r"\Z")
 
 
-def _workflow_paths_ignore(name: str) -> list[str]:
-    import yaml  # PyYAML: present wherever the workflow lint runs
+def _workflow_event_block(name: str, event: str) -> list[str]:
+    """Return the scalar lines in one top-level ``on`` event.
 
-    doc = yaml.safe_load((THIS_DIR.parents[1] / ".github" / "workflows" / name)
-                         .read_text(encoding="utf-8"))
-    on = doc.get(True, doc.get("on"))
-    return list((on.get("pull_request") or {}).get("paths-ignore") or [])
+    The gate Python deliberately has no YAML dependency. These tests only
+    need the small, indentation-based event fields below, so reading that
+    shape directly keeps the ctest lane runnable with its standard library.
+    """
+    lines = (THIS_DIR.parents[1] / ".github" / "workflows" / name).read_text(
+        encoding="utf-8"
+    ).splitlines()
+    in_on = False
+    in_event = False
+    event_indent = 0
+    out: list[str] = []
+    for raw in lines:
+        without_comment = raw.split("#", 1)[0].rstrip()
+        if not without_comment.strip():
+            continue
+        indent = len(without_comment) - len(without_comment.lstrip())
+        text = without_comment.strip()
+        if not in_on:
+            if indent == 0 and text == "on:":
+                in_on = True
+            continue
+        if indent == 0:
+            break
+        if indent == 2 and text == f"{event}:":
+            in_event = True
+            event_indent = indent
+            out = []
+            continue
+        if in_event and indent <= event_indent:
+            break
+        if in_event:
+            out.append(text)
+    return out
+
+
+def _workflow_paths_ignore(name: str) -> list[str]:
+    lines = _workflow_event_block(name, "pull_request")
+    try:
+        start = lines.index("paths-ignore:") + 1
+    except ValueError:
+        return []
+    values = []
+    for line in lines[start:]:
+        if not line.startswith("-"):
+            break
+        value = line[1:].strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        values.append(value)
+    return values
 
 
 def _skipped_by(patterns: list[str], files: list[str]) -> bool:
@@ -982,14 +1028,10 @@ class CodeqlDocsSkipTests(unittest.TestCase):
                                 or path == "planning", path)
 
     def test_codeql_still_runs_on_main_and_schedule(self) -> None:
-        import yaml
-
-        doc = yaml.safe_load((THIS_DIR.parents[1] / ".github" / "workflows" /
-                              "codeql-advanced.yml").read_text(encoding="utf-8"))
-        on = doc.get(True, doc.get("on"))
-        self.assertNotIn("paths-ignore", on["push"] or {})
-        self.assertNotIn("paths", on["push"] or {})
-        self.assertIn("schedule", on)
+        push = _workflow_event_block("codeql-advanced.yml", "push")
+        self.assertNotIn("paths-ignore:", push)
+        self.assertNotIn("paths:", push)
+        self.assertTrue(_workflow_event_block("codeql-advanced.yml", "schedule"))
 
 
 if __name__ == "__main__":
