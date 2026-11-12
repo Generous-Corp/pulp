@@ -174,15 +174,15 @@ struct PopupWindow::Impl : std::enable_shared_from_this<PopupWindow::Impl> {
                 return;
             switch (popup_resign_action(self->panel.isKeyWindow == YES,
                                         self->parent.isKeyWindow == YES, self->key_reclaims)) {
-                case PopupResignAction::stay_open:
-                    return;
-                case PopupResignAction::take_key_back:
-                    ++self->key_reclaims;
-                    [self->panel makeKeyWindow];
-                    return;
-                case PopupResignAction::close_focus_lost:
-                    self->dismiss(PopupDismissReason::focus_lost);
-                    return;
+            case PopupResignAction::stay_open:
+                return;
+            case PopupResignAction::take_key_back:
+                ++self->key_reclaims;
+                [self->panel makeKeyWindow];
+                return;
+            case PopupResignAction::close_focus_lost:
+                self->dismiss(PopupDismissReason::focus_lost);
+                return;
             }
         });
         if (!posted)

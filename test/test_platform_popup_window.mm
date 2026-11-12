@@ -240,8 +240,8 @@ TEST_CASE("each dismissal path reports its reason once", "[platform][popup-windo
     for (const auto& c : cases) {
         INFO(c.name);
         std::vector<PopupDismissReason> reports;
-        auto popup = PopupWindow::open(scope, options,
-                                       [&](PopupDismissReason r) { reports.push_back(r); });
+        auto popup =
+            PopupWindow::open(scope, options, [&](PopupDismissReason r) { reports.push_back(r); });
         REQUIRE(popup != nullptr);
         c.trigger(*popup, editor);
         REQUIRE(pump_until([&] { return !reports.empty(); }));
@@ -258,10 +258,10 @@ TEST_CASE("losing key decides between staying open and taking key back and focus
     using A = PopupResignAction;
     REQUIRE(popup_resign_action(true, false, 0) == A::stay_open);
     REQUIRE(popup_resign_action(true, true, 9) == A::stay_open);
-    REQUIRE(popup_resign_action(false, true, 0) == A::take_key_back);  // activation hand-back
+    REQUIRE(popup_resign_action(false, true, 0) == A::take_key_back); // activation hand-back
     REQUIRE(popup_resign_action(false, true, 2) == A::take_key_back);
     REQUIRE(popup_resign_action(false, true, 3) == A::close_focus_lost);  // bounded
-    REQUIRE(popup_resign_action(false, false, 0) == A::close_focus_lost);  // key went elsewhere
+    REQUIRE(popup_resign_action(false, false, 0) == A::close_focus_lost); // key went elsewhere
 }
 
 // Activation can hand the key window back to the editor after the popup has
@@ -281,11 +281,11 @@ TEST_CASE("key handed back to the editor without a click keeps the popup open",
     if (!panel.isKeyWindow)
         SKIP("this test session cannot hold a key window (the application is not active)");
 
-    [editor.window makeKeyWindow];  // what activation does, with no click
+    [editor.window makeKeyWindow]; // what activation does, with no click
     dispatch_events(100ms);
     REQUIRE(reports.empty());
     REQUIRE(popup->is_open());
-    REQUIRE(panel.isKeyWindow);  // the popup took key back
+    REQUIRE(panel.isKeyWindow); // the popup took key back
 }
 
 // Control for the case above: key moving anywhere other than the popup's own
