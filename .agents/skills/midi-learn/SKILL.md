@@ -55,6 +55,14 @@ worked example is `examples/midi-learn-demo/`.
   output, nothing about what a host does with it. Add a format only after reading
   its outbound path. Do not make claims about a host you have not observed.
 
+- Mapping settings in the right-click menu (invert, relative mode, takeover,
+  feedback) go through `MidiLearnTarget::set_options`. Each control sends the
+  full settings with its own field changed, and `MidiLearnSession` applies them
+  through the undo editor, which records a step only when the mapping really
+  changed. The menu's choice lists are in enum order, so adding an enum value
+  means adding its label. Invert swaps the mapping's window ends; do not store a
+  separate flag.
+
 ## Testing traps
 
 - Suites registered with `GROUP` have no target of their own. Build the group
