@@ -77,6 +77,27 @@ private:
     std::intptr_t handle_ = -1;
 };
 
+/// Opaque capability for joining children to this process's existing group.
+///
+/// The capability can only be minted by a process-group leader. It carries no
+/// serializable or caller-supplied group id; launch validates that the creating
+/// process and its current group are unchanged before spawning.
+class CurrentProcessGroup {
+  public:
+    static std::optional<CurrentProcessGroup> capture();
+    CurrentProcessGroup(CurrentProcessGroup&&) noexcept;
+    CurrentProcessGroup& operator=(CurrentProcessGroup&&) noexcept;
+    CurrentProcessGroup(const CurrentProcessGroup&) = delete;
+    CurrentProcessGroup& operator=(const CurrentProcessGroup&) = delete;
+
+  private:
+    friend class ChildProcess;
+    explicit CurrentProcessGroup(int creator_pid, int process_group_id) noexcept
+        : creator_pid_(creator_pid), process_group_id_(process_group_id) {}
+    int creator_pid_ = -1;
+    int process_group_id_ = -1;
+};
+
 /// Owns a post-spawn exchange over the child's private inherited input channel.
 /// The callback runs synchronously outside ChildProcess's internal lock and
 /// must bound every blocking operation to the supplied deadline. Like the byte
@@ -117,7 +138,37 @@ struct RetainedProcessCleanup {
     bool kill_sent = false;
 };
 
+/// Observation of a joined worker. A joined worker never retains authority over
+/// the anchor's process group; this receipt covers the direct child only.
+enum class JoinedChildState { Unsupported, NotStarted, Running, Exited, Reaped, CustodyLost };
+
+struct JoinedChildObservation {
+    JoinedChildState state = JoinedChildState::NotStarted;
+    int process_id = -1;
+    int process_group_id = -1;
+    int exit_code = -1;
+    int termination_signal = 0;
+};
+
+enum class JoinedChildCleanupStatus {
+    Complete,
+    Incomplete,
+    Busy,
+    NotJoined,
+    Unsupported,
+    CustodyLost
+};
+
+struct JoinedChildCleanup {
+    JoinedChildCleanupStatus status = JoinedChildCleanupStatus::NotJoined;
+    JoinedChildObservation observation;
+    bool child_reaped = false;
+    bool term_sent = false;
+    bool kill_sent = false;
+};
+
 class RetainedProcessCustody;
+class JoinedChildCustody;
 
 /// Cross-platform child process with timeout, cancellation, and line-by-line
 /// output callbacks. Uses posix_spawn on POSIX (sandbox-compatible for AU
@@ -177,6 +228,24 @@ public:
                                                     const StandardInputChannelSession& session,
                                                     const ProcessOptions& options = {});
 
+    /// macOS desktop only. Join the worker to the captured process group's
+    /// existing group while retaining direct-child custody in a move-only
+    /// reservation. The worker's group is never signalled or cleaned up by
+    /// this handle; unsupported platforms refuse before spawning. The caller
+    /// must keep SIGCHLD reap behavior compatible and must not independently
+    /// reap or signal the child while the reservation is live. Reservations
+    /// belong to the caller's finite quarantine; reusing an occupied
+    /// reservation is refused before callback or spawn, and no global
+    /// capacity registry is implied.
+    bool start_joined_to_current_group(const CurrentProcessGroup& group,
+                                       JoinedChildCustody& custody, const std::string& command,
+                                       const std::vector<std::string>& args,
+                                       const ProcessOptions& options = {});
+    bool start_joined_to_current_group_with_standard_input_channel(
+        const CurrentProcessGroup& group, JoinedChildCustody& custody, const std::string& command,
+        const std::vector<std::string>& args, const StandardInputChannelSession& session,
+        const ProcessOptions& options = {});
+
     /// Non-reaping observation. CustodyLost prohibits any further group signal.
     RetainedProcessObservation retained_process_observation() const;
     /// Control-thread cleanup, limited to the supplied deadline and two seconds.
@@ -184,6 +253,10 @@ public:
     /// No blocking waitpid is used.
     RetainedProcessCleanup
     cleanup_retained_process_group(std::chrono::steady_clock::time_point deadline);
+
+    /// Non-reaping observation and direct-child cleanup for a joined worker.
+    JoinedChildObservation joined_child_observation() const;
+    JoinedChildCleanup cleanup_joined_child(std::chrono::steady_clock::time_point deadline);
 
     /// Check if the started process is still running.
     bool is_running() const;
@@ -193,15 +266,17 @@ public:
     /// signal a completed process.
     int process_id() const;
 
-    /// Request cancellation. Sends SIGTERM to the private process group on
-    /// POSIX (or TerminateProcess on Windows), waits a short grace period,
-    /// then sends SIGKILL if the child or a descendant is still alive.
+    /// Request cancellation. Ordinary launches send SIGTERM to their private
+    /// process group on POSIX (or TerminateProcess on Windows), then escalate
+    /// after a short grace period. Joined launches signal and reap only their
+    /// direct child; the anchor's group is never signalled by this handle.
     void cancel();
 
     /// Wait for the process to complete and return the result.
-    /// For retained launches, return the current snapshot immediately without
-    /// draining output, applying timeout_ms, or reaping. Use retained cleanup
-    /// to release custody and its observation for signal termination details.
+    /// For retained and joined launches, return the current snapshot immediately
+    /// without draining output, applying timeout_ms, or reaping. Use the
+    /// corresponding custody cleanup to release the reservation and obtain
+    /// signal termination details.
     ProcessResult wait();
 
     /// Read any available output without blocking (for non-blocking mode).
@@ -209,12 +284,15 @@ public:
 
   private:
     friend class RetainedProcessCustody;
+    friend class JoinedChildCustody;
     bool start_impl(const std::string& command, const std::vector<std::string>& args,
                     const ProcessOptions& options,
                     const std::span<const std::uint8_t>* standard_input,
                     const StandardInputByteProvider* standard_input_provider,
                     const StandardInputChannelSession* standard_input_session,
-                    RetainedProcessCustody* custody = nullptr);
+                    RetainedProcessCustody* custody = nullptr,
+                    const CurrentProcessGroup* joined_group = nullptr,
+                    JoinedChildCustody* joined_custody = nullptr);
 
     struct Impl;
     std::shared_ptr<Impl> impl_;
@@ -238,6 +316,30 @@ class RetainedProcessCustody {
     RetainedProcessObservation retained_process_observation() const;
     RetainedProcessCleanup
     cleanup_retained_process_group(std::chrono::steady_clock::time_point deadline);
+
+  private:
+    friend class ChildProcess;
+    std::shared_ptr<ChildProcess::Impl> impl_;
+};
+
+/// Caller-owned finite-quarantine reservation for one joined direct child. Moving or
+/// destroying a handle never releases the anchor's group authority. An
+/// unresolved direct-child record remains diagnosed until host exit, matching
+/// retained custody's fail-closed lifetime rules. The reservation is the sole
+/// reaper and signal owner for its direct child: callers must serialize its
+/// control-thread operations, must not independently reap the child, and must
+/// not install SIGCHLD auto-reaping while it is live.
+class JoinedChildCustody {
+  public:
+    JoinedChildCustody() = default;
+    ~JoinedChildCustody();
+    JoinedChildCustody(JoinedChildCustody&&) noexcept;
+    JoinedChildCustody& operator=(JoinedChildCustody&&) noexcept;
+    JoinedChildCustody(const JoinedChildCustody&) = delete;
+    JoinedChildCustody& operator=(const JoinedChildCustody&) = delete;
+
+    JoinedChildObservation joined_child_observation() const;
+    JoinedChildCleanup cleanup_joined_child(std::chrono::steady_clock::time_point deadline);
 
   private:
     friend class ChildProcess;
