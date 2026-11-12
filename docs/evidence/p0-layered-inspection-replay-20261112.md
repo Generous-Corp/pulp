@@ -23,6 +23,11 @@ This evidence-only slice keeps the five inspection layers independent:
 
 `tools/scripts/p0_layered_replay_receipt.py` composes the existing G3 resolved
 identity consumer and the separate spectral frame consumer when supplied. The
+consumer fixtures emit explicit protocol attestation tokens
+(`pulp.graph.g3-resolved-identity-consumer.v1` and
+`pulp.signal.spectral-frame-codec-consumer.v1`) so the receipt can bind output
+to the named public binaries. This is fixture output metadata only and does
+not add a runtime/API surface. The focused self-test guards both tokens. The
 checked-in envelope and layer values are synthetic tooling fixtures; they do
 not invoke the production serializer, resolver, prepared-plan compiler,
 notation, or probe paths. The receipt is
