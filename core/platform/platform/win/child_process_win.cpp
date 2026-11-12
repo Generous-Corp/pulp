@@ -209,6 +209,22 @@ ChildProcessInputChannel::operator=(ChildProcessInputChannel&& other) noexcept {
     return *this;
 }
 
+std::optional<CurrentProcessGroup> CurrentProcessGroup::capture() {
+    return std::nullopt;
+}
+
+CurrentProcessGroup::CurrentProcessGroup(CurrentProcessGroup&& other) noexcept
+    : creator_pid_(std::exchange(other.creator_pid_, -1)),
+      process_group_id_(std::exchange(other.process_group_id_, -1)) {}
+
+CurrentProcessGroup& CurrentProcessGroup::operator=(CurrentProcessGroup&& other) noexcept {
+    if (this != &other) {
+        creator_pid_ = std::exchange(other.creator_pid_, -1);
+        process_group_id_ = std::exchange(other.process_group_id_, -1);
+    }
+    return *this;
+}
+
 ChildProcess::ChildProcess() : impl_(std::make_shared<Impl>()) {}
 ChildProcess::~ChildProcess() {
     if (impl_ && impl_->started && !impl_->finished) {
@@ -240,6 +256,23 @@ RetainedProcessCustody::cleanup_retained_process_group(std::chrono::steady_clock
     return {.status = RetainedCleanupStatus::Unsupported,
             .observation = {.state = RetainedProcessState::Unsupported}};
 }
+JoinedChildObservation ChildProcess::joined_child_observation() const {
+    return {.state = JoinedChildState::Unsupported};
+}
+JoinedChildCleanup ChildProcess::cleanup_joined_child(std::chrono::steady_clock::time_point) {
+    return {.status = JoinedChildCleanupStatus::Unsupported,
+            .observation = {.state = JoinedChildState::Unsupported}};
+}
+JoinedChildCustody::~JoinedChildCustody() = default;
+JoinedChildCustody::JoinedChildCustody(JoinedChildCustody&&) noexcept = default;
+JoinedChildCustody& JoinedChildCustody::operator=(JoinedChildCustody&&) noexcept = default;
+JoinedChildObservation JoinedChildCustody::joined_child_observation() const {
+    return {.state = JoinedChildState::Unsupported};
+}
+JoinedChildCleanup JoinedChildCustody::cleanup_joined_child(std::chrono::steady_clock::time_point) {
+    return {.status = JoinedChildCleanupStatus::Unsupported,
+            .observation = {.state = JoinedChildState::Unsupported}};
+}
 bool ChildProcess::start_retained(RetainedProcessCustody&, const std::string&,
                                   const std::vector<std::string>&, const ProcessOptions&) {
     return false;
@@ -249,6 +282,17 @@ bool ChildProcess::start_retained_with_standard_input_channel(RetainedProcessCus
                                                               const std::vector<std::string>&,
                                                               const StandardInputChannelSession&,
                                                               const ProcessOptions&) {
+    return false;
+}
+bool ChildProcess::start_joined_to_current_group(const CurrentProcessGroup&, JoinedChildCustody&,
+                                                 const std::string&,
+                                                 const std::vector<std::string>&,
+                                                 const ProcessOptions&) {
+    return false;
+}
+bool ChildProcess::start_joined_to_current_group_with_standard_input_channel(
+    const CurrentProcessGroup&, JoinedChildCustody&, const std::string&,
+    const std::vector<std::string>&, const StandardInputChannelSession&, const ProcessOptions&) {
     return false;
 }
 
@@ -282,8 +326,10 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
                               const std::span<const std::uint8_t>* standard_input,
                               const StandardInputByteProvider* standard_input_provider,
                               const StandardInputChannelSession* standard_input_session,
-                              RetainedProcessCustody* custody) {
-    if (custody)
+                              RetainedProcessCustody* custody,
+                              const CurrentProcessGroup* joined_group,
+                              JoinedChildCustody* joined_custody) {
+    if (custody || joined_group || joined_custody)
         return false;
     if (standard_input_session)
         return false;

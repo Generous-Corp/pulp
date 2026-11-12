@@ -1108,9 +1108,13 @@ TEST_CASE("run_process preserves output beyond the platform child default cap",
                      std::string("$n = ") + std::to_string(expected_size) +
                          "; [Console]::Out.Write(('x' * $n)); [Console]::Error.Write(('y' * $n))"});
 #else
-    auto result = run_process(
-        "/bin/sh", {"-c", std::string("yes x | head -c ") + std::to_string(expected_size) +
-                              "; yes y | head -c " + std::to_string(expected_size) + " >&2"});
+    // Keep this output-cap probe finite and independent of the inherited SIGPIPE
+    // disposition.  A producer pipeline can append its own Broken pipe
+    // diagnostic when the reader reaches the cap, changing the measured stderr
+    // size without testing ChildProcess's capture limit.
+    const auto command = std::string("printf '%*s' ") + std::to_string(expected_size) +
+                         " ''; printf '%*s' " + std::to_string(expected_size) + " '' >&2";
+    auto result = run_process("/bin/sh", {"-c", command});
 #endif
 
     REQUIRE(result.has_value());
@@ -2464,6 +2468,28 @@ auto custody_deadline() {
 }
 } // namespace
 
+TEST_CASE("Joined child uses the captured group and direct custody",
+          "[runtime][child-process][joined-child][contract]") {
+    using namespace pulp::platform;
+    auto group = CurrentProcessGroup::capture();
+    if (!group)
+        SKIP("the test runner is not a process-group leader; capture refuses before spawn");
+    JoinedChildCustody custody;
+    ChildProcess process;
+    REQUIRE(process.start_joined_to_current_group(*group, custody, "/bin/sh", {"-c", "exit 23"}));
+    const int worker = process.process_id();
+    REQUIRE(custody_eventually(
+        [&] { return custody.joined_child_observation().state == JoinedChildState::Exited; }));
+    const auto observed = custody.joined_child_observation();
+    CHECK(observed.process_id == worker);
+    CHECK(observed.process_group_id == ::getpgrp());
+    CHECK(observed.exit_code == 23);
+    const auto cleaned = custody.cleanup_joined_child(custody_deadline());
+    CHECK(cleaned.status == JoinedChildCleanupStatus::Complete);
+    CHECK(cleaned.child_reaped);
+    CHECK(cleaned.observation.state == JoinedChildState::Reaped);
+}
+
 TEST_CASE("Retained observation preserves an exited leader until cleanup",
           "[runtime][child-process][retained-custody][retained-observation]") {
     using namespace pulp::platform;
@@ -2866,6 +2892,7 @@ TEST_CASE("Retained cleanup removes finite descendant churn",
         CHECK(count <= 9);
     }
 }
+
 #else
 TEST_CASE("Retained process custody refuses unsupported platforms without spawning",
           "[runtime][child-process][retained-custody]") {
@@ -2884,5 +2911,6 @@ TEST_CASE("Retained process custody refuses unsupported platforms without spawni
     CHECK(process.retained_process_observation().state == RetainedProcessState::Unsupported);
     CHECK(reservation.cleanup_retained_process_group(std::chrono::steady_clock::now()).status ==
           RetainedCleanupStatus::Unsupported);
+    CHECK_FALSE(CurrentProcessGroup::capture());
 }
 #endif

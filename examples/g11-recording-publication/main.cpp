@@ -39,6 +39,9 @@ using pulp::audio::SampleSlotBank;
 
 constexpr double kSampleRate = 48'000.0;
 constexpr std::size_t kFrames = 64;
+constexpr std::size_t kTwoTakeFrames = 96;
+constexpr double kTakeAFrequency = 440.0;
+constexpr double kTakeBFrequency = 660.0;
 
 float expected_sample(std::size_t frame) {
     const double phase = static_cast<double>(frame) / 17.0;
@@ -123,6 +126,128 @@ class PublishedPlayerNode final : public pulp::format::Processor {
     bool ready_ = false;
 };
 
+// Input generator used by the synthetic graph source. The acceptance oracle
+// below intentionally has its own constants and implementation.
+float capture_tone_sample(double frequency, std::size_t frame) {
+    return static_cast<float>(0.35 * std::sin(2.0 * std::numbers::pi * frequency *
+                                              static_cast<double>(frame) / kSampleRate));
+}
+
+float oracle_tone_sample(double frequency, std::size_t frame) {
+    constexpr double kOracleRate = 48'000.0;
+    constexpr double kOracleAmplitude = 0.35;
+    constexpr double kOraclePi = 3.141592653589793238462643383279502884;
+    const double phase = (2.0 * kOraclePi * frequency * static_cast<double>(frame)) / kOracleRate;
+    return static_cast<float>(kOracleAmplitude * std::sin(phase));
+}
+
+class TwoTakeNode final : public pulp::format::Processor {
+  public:
+    explicit TwoTakeNode(SampleSlotBank& bank) : bank_(bank) {}
+
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {.name = "G11 two-take capture/player",
+                .manufacturer = "Pulp",
+                .bundle_id = "com.pulp.g11.recording-publication.two-take",
+                .version = "1.0.0",
+                .category = pulp::format::PluginCategory::Instrument,
+                .input_buses = {{"Input", 1}},
+                .output_buses = {{"Output", 1}}};
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+
+    void capture(RealtimeSampleRecorder* recorder) noexcept {
+        capture_ = recorder;
+    }
+
+    bool note_on_a() noexcept {
+        return start_voice(voice_a_);
+    }
+    bool note_on_b() noexcept {
+        return start_voice(voice_b_);
+    }
+
+    bool note_off_a() noexcept {
+        if (!voice_a_.active)
+            return false;
+        voice_a_.cursor.stop();
+        voice_a_.active = false;
+        voice_a_.channel = nullptr;
+        voice_a_.view = {};
+        const auto current = bank_.read_published_view();
+        return current.valid && bank_.acknowledge_audio_generation(current.generation);
+    }
+    bool note_off_b() noexcept {
+        return release_voice(voice_b_);
+    }
+
+    void process(BufferView<float>& output, const BufferView<const float>& input,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        if (capture_ != nullptr)
+            capture_->process(input, static_cast<std::uint32_t>(input.num_samples()));
+        for (std::size_t frame = 0; frame < output.num_samples(); ++frame) {
+            output.channel(0)[frame] = read_voice(voice_a_) + read_voice(voice_b_);
+        }
+    }
+
+  private:
+    struct Voice {
+        PublishedSampleView view{};
+        const float* channel = nullptr;
+        LoopRegion region{};
+        LoopPlaybackCursor cursor;
+        bool active = false;
+    };
+
+    bool start_voice(Voice& voice) noexcept {
+        const auto view = bank_.read_published_view();
+        if (!view.valid || !bank_.slot_view_valid(view) || view.num_frames != kTwoTakeFrames)
+            return false;
+        const auto* channel = bank_.channel_data(view, 0);
+        if (channel == nullptr)
+            return false;
+        voice.view = view;
+        voice.channel = channel;
+        voice.region = {.start_frame = 0,
+                        .end_frame = view.num_frames,
+                        .source_sample_rate = view.sample_rate,
+                        .playback_mode = LoopPlaybackMode::Forward,
+                        .interpolation = pulp::audio::LoopInterpolationMode::None};
+        voice.active = voice.cursor.set_region(voice.region, view.num_frames);
+        voice.cursor.start();
+        return voice.active;
+    }
+
+    bool release_voice(Voice& voice) noexcept {
+        if (!voice.active)
+            return false;
+        voice.cursor.stop();
+        const auto generation = voice.view.generation;
+        voice.active = false;
+        voice.channel = nullptr;
+        voice.view = {};
+        (void)generation;
+        return true;
+    }
+
+    float read_voice(Voice& voice) noexcept {
+        if (!voice.active || !voice.cursor.active() || voice.channel == nullptr)
+            return 0.0f;
+        const float value =
+            LoopReader::read(BufferView<const float>(&voice.channel, 1, voice.view.num_frames),
+                             voice.region, 0, voice.cursor.position());
+        voice.cursor.advance();
+        return value;
+    }
+
+    SampleSlotBank& bank_;
+    RealtimeSampleRecorder* capture_ = nullptr;
+    Voice voice_a_;
+    Voice voice_b_;
+};
+
 bool graph_prepare(pulp::host::SignalGraph& graph, int max_block) {
     graph.set_limits({.max_nodes = 4,
                       .max_connections = 3,
@@ -205,6 +330,187 @@ std::vector<float> playback(const SampleSlotBank& bank, std::span<const int> sch
     return cursor == kFrames ? rendered : std::vector<float>{};
 }
 
+bool matches_tone(std::span<const float> samples, double frequency, std::size_t first_frame = 0) {
+    for (std::size_t frame = 0; frame < samples.size(); ++frame) {
+        const auto expected = oracle_tone_sample(frequency, first_frame + frame);
+        if (!std::isfinite(samples[frame]) ||
+            std::abs(static_cast<double>(samples[frame]) - expected) > 1.0e-5)
+            return false;
+    }
+    return true;
+}
+
+bool matches_sum(std::span<const float> samples, double frequency_a, double frequency_b,
+                 std::size_t first_frame = 0) {
+    for (std::size_t frame = 0; frame < samples.size(); ++frame) {
+        const auto expected = oracle_tone_sample(frequency_a, first_frame + frame) +
+                              oracle_tone_sample(frequency_b, first_frame + frame);
+        if (!std::isfinite(samples[frame]) ||
+            std::abs(static_cast<double>(samples[frame]) - expected) > 1.0e-5)
+            return false;
+    }
+    return true;
+}
+
+std::vector<float> run_graph_schedule(pulp::host::SignalGraph& graph, std::span<const int> blocks,
+                                      double frequency, std::size_t frame_count) {
+    std::vector<float> rendered;
+    rendered.reserve(frame_count);
+    std::size_t cursor = 0;
+    const float* no_input[1] = {nullptr};
+    for (const int block : blocks) {
+        if (block <= 0 || cursor + static_cast<std::size_t>(block) > frame_count)
+            return {};
+        Buffer<float> input_buffer(1, static_cast<std::size_t>(block));
+        Buffer<float> output_buffer(1, static_cast<std::size_t>(block));
+        for (int frame = 0; frame < block; ++frame)
+            input_buffer.channel(0)[static_cast<std::size_t>(frame)] =
+                capture_tone_sample(frequency, cursor + static_cast<std::size_t>(frame));
+        const auto& input_const = input_buffer;
+        auto input_view = input_const.view();
+        auto output_view = output_buffer.view();
+        graph.process(output_view, input_view, block);
+        rendered.insert(rendered.end(), output_buffer.channel(0).begin(),
+                        output_buffer.channel(0).end());
+        cursor += static_cast<std::size_t>(block);
+    }
+    return cursor == frame_count ? rendered : std::vector<float>{};
+}
+
+int run_two_take() {
+    const std::array<int, 4> regular{24, 24, 24, 24};
+    const std::array<int, 7> irregular{11, 7, 19, 5, 23, 13, 18};
+
+    // Refusal control: an idle recorder cannot accept Stop.
+    RealtimeSampleRecorder refusal;
+    if (!refusal.prepare(
+            {.num_channels = 1, .max_frames = kTwoTakeFrames, .sample_rate = kSampleRate}))
+        return 31;
+    RealtimeSampleRecorderCommand stop;
+    stop.sequence_id = 99;
+    stop.type = RealtimeSampleRecorderCommandType::Stop;
+    if (!refusal.enqueue_command(stop))
+        return 32;
+    Buffer<float> empty(1, 0);
+    std::vector<const float*> empty_ptrs(1);
+    refusal.process(BufferView<const float>(empty_ptrs.data(), 1, 0), 0);
+    RealtimeSampleRecorderEvent refusal_event;
+    if (refusal.state() != RealtimeSampleRecorderState::Idle || !refusal.pop_event(refusal_event) ||
+        refusal_event.type != RealtimeSampleRecorderEventType::CommandRejected)
+        return 33;
+
+    SampleSlotBank bank;
+    RealtimeSampleRecorder take_a;
+    RealtimeSampleRecorder take_b;
+    if (!bank.prepare(2, 1, kTwoTakeFrames) ||
+        !take_a.prepare(
+            {.num_channels = 1, .max_frames = kTwoTakeFrames, .sample_rate = kSampleRate}) ||
+        !take_b.prepare(
+            {.num_channels = 1, .max_frames = kTwoTakeFrames, .sample_rate = kSampleRate}))
+        return 34;
+
+    pulp::host::SignalGraph graph;
+    const auto input = graph.add_input_node(1, "input");
+    auto node = std::make_unique<TwoTakeNode>(bank);
+    auto* node_ptr = node.get();
+    const auto player = graph.add_processor_node(std::move(node), "two-take");
+    const auto output = graph.add_output_node(1, "output");
+    if (!input || !player || !output || !graph.connect(input, 0, player, 0) ||
+        !graph.connect(player, 0, output, 0) || !graph_prepare(graph, 32))
+        return 35;
+
+    // Planted mutation: feed the recorder a one-hertz frequency error and
+    // prove the independent oracle rejects the captured material. Reset the
+    // recorder before the admitted A/B sequence below.
+    RealtimeSampleRecorderCommand mutation_start;
+    mutation_start.sequence_id = 900;
+    mutation_start.type = RealtimeSampleRecorderCommandType::Start;
+    mutation_start.max_frames = kTwoTakeFrames;
+    if (!take_b.enqueue_command(mutation_start))
+        return 36;
+    node_ptr->capture(&take_b);
+    (void)run_graph_schedule(graph, irregular, kTakeBFrequency + 1.0, kTwoTakeFrames);
+    node_ptr->capture(nullptr);
+    const auto* mutated_data = take_b.channel_data(0);
+    if (take_b.state() != RealtimeSampleRecorderState::Completed || mutated_data == nullptr ||
+        matches_tone(std::span(mutated_data, kTwoTakeFrames), kTakeBFrequency))
+        return 37;
+    std::cout << "G11 two-take mutation detected: capture-frequency" << '\n';
+    take_b.reset();
+
+    RealtimeSampleRecorderCommand start_a;
+    start_a.sequence_id = 1;
+    start_a.type = RealtimeSampleRecorderCommandType::Start;
+    start_a.max_frames = kTwoTakeFrames;
+    if (!take_a.enqueue_command(start_a))
+        return 38;
+    node_ptr->capture(&take_a);
+    const auto silence = run_graph_schedule(graph, regular, kTakeAFrequency, kTwoTakeFrames);
+    node_ptr->capture(nullptr);
+    if (silence.size() != kTwoTakeFrames ||
+        take_a.state() != RealtimeSampleRecorderState::Completed)
+        return 39;
+    const float* scratch[1] = {};
+    if (!publish_completed_recording_to_slot(take_a, bank, std::span(scratch), 0))
+        return 40;
+    const auto view_a = bank.read_published_view();
+    const auto* data_a = bank.channel_data(view_a, 0);
+    if (!view_a.valid || data_a == nullptr ||
+        !matches_tone(std::span(data_a, kTwoTakeFrames), kTakeAFrequency))
+        return 41;
+    if (!node_ptr->note_on_a())
+        return 42;
+
+    RealtimeSampleRecorderCommand start_b;
+    start_b.sequence_id = 2;
+    start_b.type = RealtimeSampleRecorderCommandType::Start;
+    start_b.max_frames = kTwoTakeFrames;
+    if (!take_b.enqueue_command(start_b))
+        return 43;
+    node_ptr->capture(&take_b);
+    const auto a_while_recording_b =
+        run_graph_schedule(graph, irregular, kTakeBFrequency, kTwoTakeFrames);
+    node_ptr->capture(nullptr);
+    if (!matches_tone(a_while_recording_b, kTakeAFrequency) ||
+        take_b.state() != RealtimeSampleRecorderState::Completed)
+        return 44;
+
+    // Publish B while A's view is still held by the prepared graph.
+    if (!publish_completed_recording_to_slot(take_b, bank, std::span(scratch), 0))
+        return 45;
+    const auto view_b = bank.read_published_view();
+    if (!view_b.valid || view_b.generation == view_a.generation || !bank.slot_view_valid(view_a))
+        return 46;
+    // Both slots are occupied (A retired but still held, B published), so a
+    // third publication is refused until the audio generation is acknowledged.
+    Buffer<float> refused(1, kTwoTakeFrames);
+    if (bank.reserve_slot(1, kTwoTakeFrames, kSampleRate) >= 0)
+        return 47;
+    if (!node_ptr->note_on_b())
+        return 48;
+    const std::array<int, 2> overlap_blocks{7, 9};
+    const auto overlap = run_graph_schedule(graph, overlap_blocks, kTakeBFrequency, 16);
+    if (!matches_sum(overlap, kTakeAFrequency, kTakeBFrequency))
+        return 49;
+
+    // Release A only after B is sounding. Its retired generation must then be
+    // refused by generation-aware readers.
+    const bool released_a = node_ptr->note_off_a();
+    if (!released_a || bank.slot_view_valid(view_a) || bank.channel_data(view_a, 0) != nullptr) {
+        return 50;
+    }
+    const auto b_only = run_graph_schedule(graph, overlap_blocks, kTakeBFrequency, 16);
+    if (!matches_tone(b_only, kTakeBFrequency, 16))
+        return 51;
+    if (!node_ptr->note_off_b())
+        return 52;
+
+    std::cout << "G11 two-take graph passed: source=440Hz/660Hz, regular+irregular, "
+                 "A-held-through-B-publication, generations "
+              << view_a.generation << " -> " << view_b.generation << '\n';
+    return 0;
+}
+
 // The oracle: every sample must equal expected_sample(frame) * scale. Planted
 // controls never change this function; they corrupt the data it is given.
 bool matches(std::span<const float> samples, float scale = 1.0f) {
@@ -241,6 +547,8 @@ int detected(std::string_view control) {
 constexpr int kUndetected = 42;
 
 int run(std::string_view mode) {
+    if (mode == "two-take")
+        return run_two_take();
     const bool wrong_buffer = mode == "wrong";
     const bool timing = mode == "timing";
     const bool stale = mode == "stale";
@@ -346,10 +654,11 @@ int main(int argc, char** argv) {
     if (argc > 2)
         return 64;
     const std::string_view mode = argc == 2 ? std::string_view(argv[1]) : std::string_view{};
-    if (!mode.empty() && mode != "--planted-wrong-buffer" && mode != "--planted-timing" &&
-        mode != "--planted-stale-publication")
+    if (!mode.empty() && mode != "--two-take" && mode != "--planted-wrong-buffer" &&
+        mode != "--planted-timing" && mode != "--planted-stale-publication")
         return 64;
-    return run(mode == "--planted-wrong-buffer"        ? "wrong"
+    return run(mode == "--two-take"                    ? "two-take"
+               : mode == "--planted-wrong-buffer"      ? "wrong"
                : mode == "--planted-timing"            ? "timing"
                : mode == "--planted-stale-publication" ? "stale"
                                                        : "positive");

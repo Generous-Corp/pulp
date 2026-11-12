@@ -9,6 +9,7 @@ target_link_libraries(pulp-g11-recording-publication PRIVATE Pulp::audio Pulp::h
 
 enable_testing()
 add_test(NAME g11-recording-publication-positive COMMAND pulp-g11-recording-publication)
+add_test(NAME g11-recording-publication-two-take COMMAND pulp-g11-recording-publication --two-take)
 add_test(NAME g11-recording-publication-wrong-buffer
     COMMAND pulp-g11-recording-publication --planted-wrong-buffer)
 add_test(NAME g11-recording-publication-timing
@@ -16,6 +17,7 @@ add_test(NAME g11-recording-publication-timing
 add_test(NAME g11-recording-publication-stale
     COMMAND pulp-g11-recording-publication --planted-stale-publication)
 set_tests_properties(g11-recording-publication-positive PROPERTIES LABELS "examples;installed-sdk;graph;g11")
+set_tests_properties(g11-recording-publication-two-take PROPERTIES LABELS "examples;installed-sdk;graph;g11")
 # Planted controls exit 0 only when the oracle rejects the planted defect, and
 # must print the exact detection marker; a setup failure, crash or usage error
 # therefore fails the test instead of passing it.
