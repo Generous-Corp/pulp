@@ -32,6 +32,19 @@ bool rt_allocation_probe_active() noexcept {
     return g_current_probe != nullptr;
 }
 
+bool RtAllocationProbe::self_check() noexcept {
+    RtAllocationProbe probe;
+    try {
+        void* volatile raw = ::operator new(24);
+        ::operator delete(raw);
+        int* volatile escaped = new int(7);
+        delete escaped;
+    } catch (...) {
+        return false;
+    }
+    return probe.allocation_count() == 2 && probe.allocated_bytes() == 24 + sizeof(int);
+}
+
 }  // namespace pulp::test
 
 namespace {
