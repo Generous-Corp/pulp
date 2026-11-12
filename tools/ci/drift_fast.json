@@ -65,36 +65,7 @@
     }
   ],
   "docs_only": {
-    "_comment": "Docs fast path (tools/ci/drift_fast.py scope). For a diff tools/scripts/classify_changes.py calls docs-only, every listed test whose source can read a changed file runs from source, with no bootstrap or configure. A test that needs a configure and can read the change forces the full lane, except one listed in prose_not_readers when every changed file is prose under docs/ outside docs/status/. Each entry is a reviewed claim that the test cannot observe such a change; the whole-tree scan heuristic flags it only because it scans the tree and mentions documentation elsewhere. A test whose command needs a built target is never run by this lane, so it is not consulted.",
-    "prose_not_readers": [
-      {
-        "name": "consumption-census-drift",
-        "why": "reads the configured target graph and git-tracked public headers; its only docs path is its own output docs/status/consumption-profiles.*, which classify_changes.py forces out of docs-only"
-      },
-      {
-        "name": "consumption-census-negative-contract",
-        "why": "same inputs as consumption-census-drift: the committed census and the header roster, never prose"
-      },
-      {
-        "name": "script-test-inputs-drift",
-        "why": "script_test_inputs.py records which inputs exist, not their content, and drops prose under docs/ outside docs/status/ when it derives a script's inputs (_literal_paths, _shell_var_paths)"
-      },
-      {
-        "name": "source-selftest-lane-contract",
-        "why": "compares tools/ci/source_selftests.json with the configured registrations and labels; prose is neither"
-      },
-      {
-        "name": "prepush-refresh-push",
-        "why": "drives the pre-push refresh against fixture repositories it creates; the docs it reads are .agents/skills SKILL.md files and docs/status manifests, never prose under docs/"
-      },
-      {
-        "name": "wasm-skia-fetch-mapping",
-        "why": "maps the Skia wasm slice pins in tools/deps/manifest.json to release assets; its tree scan walks downloaded archives"
-      },
-      {
-        "name": "gate-python-imports",
-        "why": "checks the import closure of the Python gate scripts; prose is not Python"
-      }
-    ]
+    "_comment": "Docs fast path (tools/ci/drift_fast.py scope). The policy is intentionally empty until each configure-needing reader has a separate review. With no reviewed exemption, a docs-only diff that a configured test could read fails closed to the full lane.",
+    "prose_not_readers": []
   }
 }

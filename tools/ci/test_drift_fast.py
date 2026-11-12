@@ -235,6 +235,23 @@ class DocsOnlyScopeTests(unittest.TestCase):
 
     PROSE = ["docs/reports/a9-edit-replay-evidence-20261112.md"]
 
+    def reviewed_policy_fixture(self):
+        data = drift_fast.load_manifest()
+        data["docs_only"] = {
+            "prose_not_readers": [
+                {"name": name, "why": "unit-test policy fixture"}
+                for name in (
+                    "consumption-census-drift",
+                    "consumption-census-negative-contract",
+                    "prepush-refresh-push",
+                    "script-test-inputs-drift",
+                    "source-selftest-lane-contract",
+                    "wasm-skia-fetch-mapping",
+                )
+            ]
+        }
+        return data
+
     def test_code_diff_takes_the_full_lane(self):
         # Positive control: every code-touching diff keeps today's full lane.
         for files in (["core/view/src/widgets.cpp"],
@@ -252,7 +269,9 @@ class DocsOnlyScopeTests(unittest.TestCase):
         self.assertEqual(drift_fast.docs_only_plan([])[0], "full")
 
     def test_prose_diff_runs_its_readers_from_source(self):
-        mode, entries, why = drift_fast.docs_only_plan(self.PROSE)
+        mode, entries, why = drift_fast.docs_only_plan(
+            self.PROSE, data=self.reviewed_policy_fixture()
+        )
         self.assertEqual(mode, "source", why)
         names = {e["name"] for e in entries}
         for reader in ("skills-doc-sync", "tools-registry-check"):
@@ -260,6 +279,11 @@ class DocsOnlyScopeTests(unittest.TestCase):
         # Nothing it runs needs a configure.
         for entry in entries:
             self.assertFalse(any("${" in a or "$<" in a for a in entry["argv"]), entry)
+
+    def test_manifest_policy_is_empty_until_follow_up_review(self):
+        self.assertEqual(
+            drift_fast.load_manifest()["docs_only"]["prose_not_readers"], []
+        )
 
     def test_without_the_reviewed_exemptions_prose_takes_the_full_lane(self):
         # Negative control: the exemption list is what admits source mode.
