@@ -44,6 +44,9 @@ from reuse_policy_replay import (  # noqa: E402
 )
 import classify_changes  # noqa: E402
 
+# The event listed for run metadata only, never for artifacts.
+PUSH_METADATA_EVENT = "push"
+
 # --------------------------------------------------------------------------
 # ctest job-log parsing
 # --------------------------------------------------------------------------
@@ -1035,6 +1038,14 @@ class Collector:
                     "head_sha": (doc.get("head") or {}).get("sha")}
         return self._cached(f"pulls/{pr}.json.gz", fetch)
 
+    def main_push_runs(self, since: dt.datetime) -> list[dict]:
+        """Completed `push` runs of main, oldest first. Metadata only (id, sha,
+        conclusion, time): no artifact of a push run is ever read, so
+        this is the one place the collector lists the `push` event."""
+        runs = self.list_runs(PUSH_METADATA_EVENT, since, dt.datetime.now(dt.timezone.utc))
+        return sorted((r for r in runs if r.get("head_branch") == "main" and r.get("status") == "completed"),
+                      key=lambda r: r["created_at"])
+
     def first_push_containing(self, merge: dict | None, pushes: list[dict]) -> dict | None:
         """The first completed `push` run of main whose head contains the merge."""
         if not merge or not merge.get("merged_at") or not merge.get("merge_commit_sha"):
@@ -1185,9 +1196,7 @@ class Collector:
                 judged.append((g, failing))
         if not judged:
             return
-        pushes = sorted((r for r in self.list_runs("push", since, dt.datetime.now(dt.timezone.utc))
-                         if r.get("head_branch") == "main" and r.get("status") == "completed"),
-                        key=lambda r: r["created_at"])
+        pushes = self.main_push_runs(since)
         landed_groups = sorted((x for x in groups if x.get("landed") and x.get("macos_conclusion") == "success"),
                                key=lambda x: x["created_at"])
         for g, failing in judged:
