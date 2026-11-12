@@ -183,6 +183,16 @@
     "docs/guides/test-lanes.md"
    ],
    "why": "Hosted macOS advisory cadence and arm-time dispatch are documented in test-lanes.md; workflow trigger changes without that guide drift the operator-facing CI load policy."
+  },
+  {
+   "paths": [
+    ".github/workflows/vellum-sdk-consumer.yml",
+    "tools/ci/vellum_sdk_consumer.py"
+   ],
+   "docs": [
+    "docs/guides/test-lanes.md"
+   ],
+   "why": "The Vellum SDK consumer lane's triggers, artifact resolution, negative control and runner routing are documented in test-lanes.md; changing the lane without that guide drifts the documented account of what catches a Vellum change that breaks a Pulp consumer."
   }
  ]
 }
