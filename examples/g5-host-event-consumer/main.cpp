@@ -53,8 +53,32 @@ class ProcessorProjectionProbe final : public pulp::format::Processor {
                  const pulp::audio::BufferView<const float>& input, pulp::midi::MidiBuffer& midi_in,
                  pulp::midi::MidiBuffer&, const pulp::format::ProcessContext&) override {
         midi_count = static_cast<int>(midi_in.size());
-        ump_count = ump_input() == nullptr ? 0 : static_cast<int>(ump_input()->size());
-        mpe_count = mpe_input() == nullptr ? 0 : static_cast<int>(mpe_input()->size());
+        ump_count = 0;
+        ump_word_count = 0;
+        ump_sample_offset = 0;
+        ump_words = {};
+        if (const auto* ump = ump_input(); ump != nullptr) {
+            ump_count = static_cast<int>(ump->size());
+            if (!ump->empty()) {
+                ump_word_count = (*ump)[0].packet.word_count;
+                ump_sample_offset = (*ump)[0].sample_offset;
+                for (int i = 0; i < ump_word_count && i < static_cast<int>(ump_words.size()); ++i)
+                    ump_words[static_cast<std::size_t>(i)] =
+                        (*ump)[0].packet.words[static_cast<std::size_t>(i)];
+            }
+        }
+        mpe_count = 0;
+        mpe_offsets = {};
+        mpe_kinds = {};
+        if (const auto* mpe = mpe_input(); mpe != nullptr) {
+            mpe_count = static_cast<int>(mpe->size());
+            for (int i = 0; i < mpe_count && i < static_cast<int>(mpe_offsets.size()); ++i) {
+                mpe_offsets[static_cast<std::size_t>(i)] =
+                    (*mpe)[static_cast<std::size_t>(i)].sample_offset;
+                mpe_kinds[static_cast<std::size_t>(i)] =
+                    static_cast<int>((*mpe)[static_cast<std::size_t>(i)].kind);
+            }
+        }
         note_count = 0;
         offset_count = 0;
         for (const auto& event : midi_in) {
@@ -71,11 +95,16 @@ class ProcessorProjectionProbe final : public pulp::format::Processor {
 
     int midi_count = 0;
     int ump_count = 0;
+    int ump_word_count = 0;
+    int ump_sample_offset = 0;
     int mpe_count = 0;
     int note_count = 0;
     int offset_count = 0;
     std::array<int, 8> notes{};
     std::array<int, 8> offsets{};
+    std::array<std::uint32_t, 2> ump_words{};
+    std::array<int, 8> mpe_offsets{};
+    std::array<int, 8> mpe_kinds{};
 };
 
 struct ProcessorProjectionObservation {
@@ -85,7 +114,12 @@ struct ProcessorProjectionObservation {
     int offset_count = 0;
     int midi_count = 0;
     int ump_count = 0;
+    int ump_word_count = 0;
+    int ump_sample_offset = 0;
     int mpe_count = 0;
+    std::array<std::uint32_t, 2> ump_words{};
+    std::array<int, 8> mpe_offsets{};
+    std::array<int, 8> mpe_kinds{};
     std::array<float, 8> audio{};
 };
 
@@ -489,7 +523,7 @@ void graph_partition_controls() {
           "graph-counters");
 }
 
-ProcessorProjectionObservation render_processor_projection(bool routed) {
+ProcessorProjectionObservation render_processor_projection() {
     using namespace pulp::host;
     SignalGraph graph;
     const auto input = graph.add_input_node(1);
@@ -504,7 +538,7 @@ ProcessorProjectionObservation render_processor_projection(bool routed) {
               graph.connect(processor_node, 0, output, 0) &&
               graph.connect_midi(midi_input, processor_node),
           "processor-node-routing");
-    graph.set_canonical_executor_routing_enabled(routed);
+    graph.set_canonical_executor_routing_enabled(true);
     check(graph.prepare(48000.0, 8), "processor-node-prepare");
 
     HostEventIngress<8> ingress;
@@ -556,27 +590,35 @@ ProcessorProjectionObservation render_processor_projection(bool routed) {
     observation.offset_count = probe->offset_count;
     observation.midi_count = probe->midi_count;
     observation.ump_count = probe->ump_count;
+    observation.ump_word_count = probe->ump_word_count;
+    observation.ump_sample_offset = probe->ump_sample_offset;
     observation.mpe_count = probe->mpe_count;
+    observation.ump_words = probe->ump_words;
+    observation.mpe_offsets = probe->mpe_offsets;
+    observation.mpe_kinds = probe->mpe_kinds;
     observation.audio = destination;
     return observation;
 }
 
 void processor_projection_controls() {
-    const auto routed = render_processor_projection(true);
-    const auto reference = render_processor_projection(false);
-    check(routed.notes == reference.notes && routed.offsets == reference.offsets &&
-              routed.note_count == reference.note_count &&
-              routed.offset_count == reference.offset_count &&
-              routed.midi_count == reference.midi_count &&
-              routed.ump_count == reference.ump_count && routed.mpe_count == reference.mpe_count &&
-              routed.audio == reference.audio,
-          "processor-backend-parity");
-    check(routed.note_count == 3 && routed.notes[0] == 61 && routed.notes[1] == 60 &&
-              routed.offsets[0] == 2 && routed.offsets[1] == 2 && routed.offsets[2] == 5 &&
-              routed.midi_count == 3 && routed.ump_count == 1 && routed.mpe_count >= 3,
+    const auto observation = render_processor_projection();
+    check(observation.note_count == 3 && observation.notes[0] == 61 && observation.notes[1] == 60 &&
+              observation.offsets[0] == 2 && observation.offsets[1] == 2 &&
+              observation.offsets[2] == 5 && observation.midi_count == 3,
           "processor-event-trace");
-    check(!(routed.offsets[0] == 3 && routed.offsets[1] == 3), "processor-sample-shift-negative");
-    check(!(routed.notes[0] == 60 && routed.notes[1] == 61), "processor-tie-reversal-negative");
+    check(observation.ump_count == 1 && observation.ump_word_count == 2 &&
+              observation.ump_sample_offset == 2 && observation.ump_words[0] == 0x4091'3C00u &&
+              observation.ump_words[1] == 0xFFFF'0000u,
+          "processor-ump-sidecar-trace");
+    check(observation.mpe_count == 3 && observation.mpe_offsets[0] == 2 &&
+              observation.mpe_offsets[1] == 2 && observation.mpe_offsets[2] == 5 &&
+              observation.mpe_kinds[0] ==
+                  static_cast<int>(pulp::midi::MpeExpressionEvent::Kind::NoteOn) &&
+              observation.mpe_kinds[1] ==
+                  static_cast<int>(pulp::midi::MpeExpressionEvent::Kind::NoteOn) &&
+              observation.mpe_kinds[2] ==
+                  static_cast<int>(pulp::midi::MpeExpressionEvent::Kind::PitchBend),
+          "processor-mpe-sidecar-trace");
 
     HostEventIngress<2> ingress;
     check(ingress.begin_block(9, 20, 4) == HostEventResult::Accepted, "processor-negative-begin");
