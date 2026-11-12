@@ -2472,7 +2472,8 @@ TEST_CASE("Joined child uses the captured group and direct custody",
           "[runtime][child-process][joined-child][contract]") {
     using namespace pulp::platform;
     auto group = CurrentProcessGroup::capture();
-    REQUIRE(group.has_value());
+    if (!group)
+        SKIP("the test runner is not a process-group leader; capture refuses before spawn");
     JoinedChildCustody custody;
     ChildProcess process;
     REQUIRE(process.start_joined_to_current_group(*group, custody, "/bin/sh", {"-c", "exit 23"}));
