@@ -11,6 +11,12 @@ resolver, prepared-plan, notation, or probe paths. When supplied, it can
 attest two independent public consumers: the installed G3 host consumer and
 the installed spectral frame consumer.
 
+The two consumer fixtures emit explicit protocol attestation tokens required by
+the receipt tool (`pulp.graph.g3-resolved-identity-consumer.v1` and
+`pulp.signal.spectral-frame-codec-consumer.v1`). This is evidence-only output
+metadata; it does not change a runtime or public API contract. The focused P0
+self-test guards both tokens and the existing five planted layer mutations.
+
 The envelope has separate authored, resolved, plan, event, and output IDs. The
 fixture oracle records 64- and 128-frame partition labels and five independent
 planted negative mutations. It does not execute distinct block boundaries, so
