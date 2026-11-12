@@ -7,6 +7,12 @@ on:
 permissions:
   contents: read
 
+# Keep pull-request validation to the newest head for each PR while preserving
+# independent merge-group, main-push, scheduled, and manual runs.
+concurrency:
+  group: vellum-freeze-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   freeze-check:
     name: Vellum freeze
