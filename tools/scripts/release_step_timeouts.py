@@ -157,7 +157,9 @@ def check(policy: dict, root: str = REPO_ROOT) -> list[str]:
 
 def _gh_json(args: list[str]) -> object:
     binary = os.environ.get("RELEASE_TIMEOUTS_GH", "ghread")
-    out = subprocess.run([binary, *args], check=True, capture_output=True, text=True).stdout
+    out = subprocess.run(
+        [binary, *args], check=True, capture_output=True, text=True, encoding="utf-8"
+    ).stdout
     return json.loads(out)
 
 
