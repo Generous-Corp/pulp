@@ -4,9 +4,9 @@ Status: **PARTIAL / tooling experiment**.
 
 The checked-in fixture receipt is
 `p0-layered-inspection-replay-20261112/receipt.json` (raw-file SHA-256
-`bb7c6653d706ee01689c23b9e8d9987da7bc4b7c0e21784ec7798a5cb6f5feea`; the
+`0b6965f5987c9823dee12466b06c671892c5473ff3018258d0cac4f68909e253`; the
 canonical JSON digest is
-`97bf5456ff673f31c7ed087160770c4b89657b22406847a5d25f6eb43bd2c460`). Its
+`2c4cc34fa164eaa09ab17bb04bf5c7cff715af39730b97a19eb624f552a2fb72`). Its
 consumer gate is **NOT_QUALIFIED** because this checkout could not supply the
 installed public binaries: the source build's generated package refers to
 relocatable support modules that are materialized only by a completed SDK
