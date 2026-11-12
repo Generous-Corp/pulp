@@ -4,10 +4,12 @@ Status: **CONDITIONAL HOLD**. The exact-source installed-SDK consumer passes;
 graph save/restore and swap while sounding remain **NOT_CHECKED**.
 
 This is a fixture-only audit from a fresh worktree whose audit base is exact
-`origin/main`; the executed SDK and consumer are bound to this PR head:
+`origin/main`; the executed SDK and consumer are bound to the recorded source
+head `e777deef` (an ancestor of this documentation repair):
 
 - audit base: `6b4004acfe7ff18a9fa5e1d81b0acf474076b3ec`
-- executed PR source head: `e777deef9dea919aa00ddafdea86e75e32f2a8dc`
+- executed SDK/source head: `e777deef9dea919aa00ddafdea86e75e32f2a8dc`
+- current PR head (documentation only): `38354ddd1abae273b94d34091d43e3609bb78d1c`
 - branch: `codex/g6-voice-fixture-audit-20261112`
 - worktree: `/Users/danielraffel/agent-worktrees/pulp-g6-voice-fixture-audit-20261112`
 - lineage: active, owner `g6-voice-fixture-audit`
@@ -26,7 +28,8 @@ development SDK:
 - SDK: `/Users/danielraffel/.pulp/sdk-dev/forge-v1/darwin-arm64/e777deef9dea919aa00ddafdea86e75e32f2a8dc/b5d7d23fc155`
 - provenance: `sdk-provenance.json`, SHA-256
   `58d40f39e7352613870194b194045de4494a84df4052365e28e1460f4b780759`;
-  `source_git_sha=e777deef9dea919aa00ddafdea86e75e32f2a8dc` (the PR head),
+  `source_git_sha=e777deef9dea919aa00ddafdea86e75e32f2a8dc` (recorded SDK/source
+  head; not the current documentation commit),
   `source_git_dirty=false`, `build_type=Release`,
   `distribution_eligible=false`. That source is this PR's fixture-only commit,
   descended from the audit base `6b4004acfe7ff18a9fa5e1d81b0acf474076b3ec`.
