@@ -66,8 +66,14 @@ preparation. When rendering a graph interval for an instrument, pass a
 zero-channel input `BufferView` with that interval's exact frame count. A
 default-constructed empty view has zero frames and makes routed execution fail
 closed. Keep both the between-event and final-tail branches covered by the
-installed SDK consumer and its independent planted mutations. This surface
-does not add CC64/120/121/123 sustain or saved-bank activation.
+installed SDK consumer and its independent planted mutations. The bounded
+bank now handles member and manager CC64 sustain, scoped CC120/121/123,
+generation-scoped release, and member-channel pitch, pressure, and CC74
+expression. Manager expression returns `UnsupportedExpression`. Its A1 scalar
+fixture uses a fixed `1/sqrt(8)` eight-slot stereo sum and four in-slot linear
+release frames. Saved-bank activation, edit/undo, DAW adapters, and paced
+realtime qualification remain open; do not infer them from the source-installed
+consumer.
 
 `PluginSlot` is the uniform interface. Each format backend is a single
 free function — `load_<format>_plugin(info)` — that returns a
@@ -1916,6 +1922,12 @@ Apple's units and the host probe:
   `PULP_TEST_AUV3_PROBE_OUT_OF_PROCESS=1` with the component installed; remove
   it afterwards. Confirm the process boundary by finding the component mapped
   in the `AUHostingService` process with `lsof`.
+  Getting this wrong does not fail the load: the system hands back an
+  `AUAudioUnit_RemoteV2` with zero input and zero output buses, and the error
+  only surfaces at `prepare()` as -10875 from `allocateRenderResources`.
+  `AuV3LoadOptions::out_of_process` defaults to true, so a test that registers
+  in process must set it false. The slot logs `kRemoteUnitWithoutBuses` at
+  load when an instrument, effect or generator arrives this way.
 - **A unit republishes its parameter tree after a bus format change.** About
   2 ms after `setFormat:` (AUDelay, AUPeakLimiter; not DLSMusicDevice or the
   mixer), and only if the host has already read `parameterTree`. A warm

@@ -1,0 +1,157 @@
+# Vellum SDK consumer: build Pulp's editor-host slice against Vellum main.
+#
+# Pulp's editor-host slice (test/editor_host_slice/) compiles against an
+# installed Vellum SDK. A Vellum change can break it without anything in Pulp
+# changing, so this lane takes the SDK archive from Vellum main's newest green
+# "Locked macOS GPU proof" run, verifies it against the artifact's SHA256SUMS,
+# builds the slice and runs the acceptance runner
+# (tools/scripts/editor_host_acceptance.py) against it.
+#
+# Every full run also proves the lane can see a break: a negative control
+# recompiles one Vellum-side translation unit against a copy of the SDK's
+# mirror headers with vellum/canvas/canvas.hpp renamed, and requires that
+# compile to fail on that missing header (tools/ci/vellum_sdk_consumer.py).
+#
+# Advisory: not a required check. The nightly run is the one that catches a
+# Vellum change, because Vellum commits fire no Pulp events; it stops after
+# the resolve step when Vellum main's head equals the head the last green run
+# checked. Pull requests that touch the slice or this lane run it in full.
+name: Vellum SDK consumer
+
+on:
+  schedule:
+    - cron: '41 4 * * *'
+  pull_request:
+    paths:
+      - 'test/editor_host_slice/**'
+      - 'test/cmake/editor_host_slice_tests.cmake'
+      - 'tools/scripts/editor_host_acceptance.py'
+      - 'tools/ci/vellum_sdk_consumer.py'
+      - '.github/workflows/vellum-sdk-consumer.yml'
+  workflow_dispatch:
+    inputs:
+      vellum_run_id:
+        description: 'A specific Vellum Locked macOS GPU proof run id; empty means the newest green run on main'
+        required: false
+        type: string
+
+concurrency:
+  group: vellum-sdk-consumer-${{ github.event_name == 'schedule' && 'nightly' || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  resolve-advisory-macos:
+    name: Resolve isolated advisory macOS runner
+    if: github.head_ref != 'release/version-bump' && (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO)
+    runs-on: ubuntu-latest
+    outputs:
+      selector_json: ${{ steps.resolve.outputs.selector_json }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - id: resolve
+        shell: bash
+        env:
+          CONFIGURED_JSON: ${{ vars.PULP_ADVISORY_MACOS_RUNS_ON_JSON }}
+        run: |
+          python3 tools/scripts/resolve_advisory_macos_runner.py \
+            --configured-json "$CONFIGURED_JSON" \
+            --fallback-json '"macos-15"' \
+            --event-name "${{ github.event_name }}"
+
+  consumer:
+    name: Editor-host slice against Vellum main (macOS)
+    needs: resolve-advisory-macos
+    # The resolver rejects pulp-build* and pulp-preamble* labels, so this
+    # advisory lane never takes a runner the required macos gate needs.
+    runs-on: ${{ fromJSON(needs.resolve-advisory-macos.outputs.selector_json) }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      # Vellum is public; its artifacts still need an authenticated token, and
+      # github.token is enough. A failed lookup or digest fails this step.
+      - name: Resolve Vellum main's SDK archive
+        id: sdk
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.vellum_run_id }}
+        run: |
+          set -euo pipefail
+          args=(resolve --out-dir "$RUNNER_TEMP/vellum-sdk")
+          if [ -n "${RUN_ID:-}" ]; then
+            args+=(--run-id "$RUN_ID")
+          elif [ "${{ github.event_name }}" = schedule ]; then
+            args+=(--skip-if-unchanged "${{ github.repository }}:vellum-sdk-consumer.yml")
+          fi
+          python3 -I tools/ci/vellum_sdk_consumer.py "${args[@]}"
+
+      - name: Report an unchanged Vellum head
+        if: steps.sdk.outputs.unchanged == 'true'
+        shell: bash
+        run: |
+          echo "Vellum main ${{ steps.sdk.outputs.vellum_head_sha }} was already checked by the last green run; nothing to do." \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Fetch Skia (darwin-arm64)
+        if: steps.sdk.outputs.unchanged != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/fetch_skia_for_release.py darwin-arm64 \
+            --cache-root "${PULP_SKIA_CACHE_ROOT:-$HOME/.cache/pulp/skia}" \
+            --cache-lock-timeout "${PULP_SKIA_CACHE_LOCK_TIMEOUT_SECS:-300}"
+
+      - name: Deps
+        if: steps.sdk.outputs.unchanged != 'true'
+        shell: bash
+        run: ./setup.sh --ci --deps-only
+
+      # The runner configures build-acceptance, builds only the slice target
+      # through tools/ci/governed-build.sh, and runs the slice's ctest label,
+      # the direction check, the 6a census and the 3g mutation.
+      - name: Editor-host acceptance against Vellum main
+        if: steps.sdk.outputs.unchanged != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/editor_host_acceptance.py \
+            --vellum-prefix "${{ steps.sdk.outputs.prefix }}" \
+            --json "$RUNNER_TEMP/vellum-sdk/acceptance.json" 2>&1 | tee "$RUNNER_TEMP/vellum-sdk/acceptance.log"
+
+      - name: Negative control (a renamed SDK header must fail the build)
+        if: steps.sdk.outputs.unchanged != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -I tools/ci/vellum_sdk_consumer.py negative-control \
+            --build-dir build-acceptance --prefix "${{ steps.sdk.outputs.prefix }}" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Summarize
+        if: always() && steps.sdk.outputs.unchanged != 'true'
+        shell: bash
+        run: |
+          set -uo pipefail
+          dir="$RUNNER_TEMP/vellum-sdk"
+          {
+            echo '### Vellum SDK consumer'
+            [ -f "$dir/receipt.json" ] && { echo '```json'; cat "$dir/receipt.json"; echo '```'; }
+            [ -f "$dir/acceptance.log" ] && { echo '```'; sed -n '/^Item  *Verdict/,$p' "$dir/acceptance.log"; echo '```'; }
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The receipt is what the next nightly run compares against, so it is
+      # uploaded only when the whole run is green.
+      - name: Upload receipt
+        if: success() && steps.sdk.outputs.unchanged != 'true'
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: vellum-sdk-consumer-receipt
+          path: |
+            ${{ runner.temp }}/vellum-sdk/receipt.json
+            ${{ runner.temp }}/vellum-sdk/acceptance.json
+          retention-days: 30

@@ -45,7 +45,7 @@ _g11_run("ctest" "${CMAKE_CTEST_COMMAND}" --test-dir "${_build}"
 # All four registered tests must have been discovered and run.
 execute_process(COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${_build}" -C "${_config}" -N
     OUTPUT_VARIABLE _listing)
-if(NOT _listing MATCHES "Total Tests: 4([^0-9]|$)")
-    message(FATAL_ERROR "G-11 consumer expected 4 tests (positive + 3 planted controls):\n${_listing}")
+if(NOT _listing MATCHES "Total Tests: 5([^0-9]|$)")
+message(FATAL_ERROR "G-11 consumer expected 5 tests (positive + two-take + 3 planted controls):\n${_listing}")
 endif()
 message(STATUS "g11_recording_publication_consumer_verified=true")

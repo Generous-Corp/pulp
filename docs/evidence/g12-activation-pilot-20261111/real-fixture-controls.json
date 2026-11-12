@@ -1,0 +1,66 @@
+[
+  {
+    "backend": "direct",
+    "fault": "omit_commit",
+    "independent_validator_rejection": "missing commit or audio activation",
+    "label": "direct-omit_commit",
+    "raw_sha256": "135a2fd894504291cf4444c3a9e9c3b0cc3b07e00f756dcf2e9586f7e7478b7c",
+    "returncode": 42
+  },
+  {
+    "backend": "direct",
+    "fault": "",
+    "independent_validator_rejection": null,
+    "label": "direct-positive",
+    "raw_sha256": "a61554fbefa295830dbf913921b08652eb9e5db517f180f98384c1b1d8274dd5",
+    "returncode": 0
+  },
+  {
+    "backend": "direct",
+    "fault": "",
+    "independent_validator_rejection": null,
+    "label": "direct-restored",
+    "raw_sha256": "8ecac41d01e89fdad1d860316cdc8c0e9419016c10ad0b976918379efce1c542",
+    "returncode": 0
+  },
+  {
+    "backend": "direct",
+    "fault": "wrong_gain",
+    "independent_validator_rejection": "missing commit or audio activation",
+    "label": "direct-wrong_gain",
+    "raw_sha256": "25c3c8e5d231e46a0b53e50f2f921e3aea7fac3abaaaf3014d78f17f570f7990",
+    "returncode": 42
+  },
+  {
+    "backend": "routed",
+    "fault": "omit_commit",
+    "independent_validator_rejection": "missing commit or audio activation",
+    "label": "routed-omit_commit",
+    "raw_sha256": "d09f66363b531d2b503db1cd0091902f1867b9133d9d2c9b474c449e5acb7190",
+    "returncode": 42
+  },
+  {
+    "backend": "routed",
+    "fault": "",
+    "independent_validator_rejection": null,
+    "label": "routed-positive",
+    "raw_sha256": "2c9fa5b3af41394bfc71589c527d8e1aa96f2a994d815c8e8ac58d0faeefcc72",
+    "returncode": 0
+  },
+  {
+    "backend": "routed",
+    "fault": "",
+    "independent_validator_rejection": null,
+    "label": "routed-restored",
+    "raw_sha256": "62935e72205af69a03c14dd192857eeadb4677e006adb923936acd63f3a22caf",
+    "returncode": 0
+  },
+  {
+    "backend": "routed",
+    "fault": "wrong_gain",
+    "independent_validator_rejection": "missing commit or audio activation",
+    "label": "routed-wrong_gain",
+    "raw_sha256": "7b63f7d87d0b27e4e1f302b738ce06e0951ca41427fa5d4ccea96ebfd11c5ff8",
+    "returncode": 42
+  }
+]

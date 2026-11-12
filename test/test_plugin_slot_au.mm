@@ -25,6 +25,7 @@
 #include <pulp/midi/buffer.hpp>
 #include "harness/rt_allocation_probe.hpp"
 #include "../core/host/src/plugin_slot_au_internal.hpp"
+#include "../core/host/src/plugin_slot_auv3_internal.hpp"
 
 #include <AudioToolbox/AudioToolbox.h>
 #include <AudioUnit/AudioUnit.h>
@@ -527,4 +528,20 @@ TEST_CASE("AU host negotiates the caller's requested channel width", "[host][au]
     }
 
     slot->release();
+}
+
+TEST_CASE("AUv3 slot names a bus-less out-of-process unit only when its type needs audio",
+          "[host][auv3]") {
+    using pulp::host::auv3_internal::remote_unit_lost_its_buses;
+    // The case the diagnostic exists for: a process-local registration loaded
+    // out of process arrives with no buses.
+    CHECK(remote_unit_lost_its_buses(true, true, 0, 0));
+    // In process, or with any bus present, the unit is not the remote stand-in.
+    CHECK_FALSE(remote_unit_lost_its_buses(false, true, 0, 0));
+    CHECK_FALSE(remote_unit_lost_its_buses(true, true, 1, 0));
+    CHECK_FALSE(remote_unit_lost_its_buses(true, true, 0, 6));
+    // A MIDI processor may have no audio buses at all.
+    CHECK_FALSE(remote_unit_lost_its_buses(true, false, 0, 0));
+    CHECK(std::string(pulp::host::auv3_internal::kRemoteUnitWithoutBuses)
+              .find("out_of_process = false") != std::string::npos);
 }

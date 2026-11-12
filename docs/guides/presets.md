@@ -114,3 +114,105 @@ for (const auto& item : library.query(query).items)
 
 `PULP_PRESET_LIBRARY_API_VERSION` identifies the surface for code that must
 compile against both older and newer SDKs.
+
+## Program numbers: Bank Select and Program Change
+
+A plug-in can let a DAW, a controller or a sequencer choose presets by MIDI
+number. This is opt-in: `PresetLibrary::enable_program_map()` gives every
+preset a slot and saves the assignments with the other edits; a library that
+never calls it writes no map.
+
+- **Numbers.** A bank is a 14-bit number (Bank Select MSB * 128 + LSB) of up to
+  128 program slots. Factory presets fill bank 0, user presets bank 1 and each
+  content pack the next free bank. A source with more than 128 presets spills
+  into a further bank.
+- **Stable.** Assignments are keyed by preset key and are made once. An update
+  that adds presets gives the newcomers free slots and moves none of the
+  others; a preset that goes missing leaves its slot empty (a Program Change to
+  it does nothing) and it answers to the same number when it returns. A slot you
+  clear stays empty. Edit the map with `assign_program`, `clear_program`,
+  `set_bank_name` and `renumber_bank`; look a number up with `preset_at()`, or a
+  preset's number with `program_of()`. `PresetQuery::bank` and
+  `PresetSort::program` list a bank in program order.
+- **Renames.** A renamed preset keeps its slot only when the library can
+  re-link it (it has an edit with a recorded content digest, see above).
+  Otherwise its old slot is empty and the renamed file gets a new one.
+
+`format::PresetProgramRouter` turns incoming MIDI into load requests without
+loading anything on the audio thread:
+
+```cpp
+// audio thread, each block
+router.process(input_midi);
+
+// message thread
+if (auto request = router.take_request())
+    if (auto preset = library.preset_at(request->position))
+        presets.load(preset->path);
+```
+
+- Bank Select (CC 0, CC 32) is latched per channel and applies to the next
+  Program Change. `BankSelectMode` chooses 14-bit, MSB-only (the bank is CC 0
+  alone) or ignored (always bank 0). `channel` is 0 for every channel or 1 to 16
+  for one.
+- A burst of Program Changes leaves only the newest request. `take_request()`
+  empties the slot, and `sequence` counts every Program Change seen.
+- Reset All Controllers (CC 121) does not clear the latched bank, as General
+  MIDI specifies; `reset()` does.
+- The router only observes: the MIDI buffer is untouched, so a processor that
+  handles Program Change itself still sees it. `claims_controller()` tells a
+  controller-mapping feature which controller numbers the router is using.
+- `process()` and `on_message()` allocate nothing and take no lock.
+- The router implements `state::MidiSourceReservation`: while enabled it claims
+  Bank Select (CC 0 and CC 32, and the 14-bit pair on CC 0, in the modes that
+  read them) and every Program Change, on the channels it listens to. A feature
+  that maps controllers, such as MIDI Learn, asks `claims()` to decline those
+  sources and shows `reason()` instead.
+
+A Program Change applied from the message thread takes effect after the block
+that carried it, so a note in the same block plays with the old preset.
+
+### Opting in from a plug-in (CLAP)
+
+Set `supports_program_change = true` in the `PluginDescriptor`. The CLAP
+adapter then creates a `PresetLibrary` for the instance (edits stored under the
+per-user application data folder), pins the program map, scans incoming MIDI
+for Bank Select + Program Change on the audio thread, and loads the matching
+preset from `on_main_thread` after asking the host for a callback. Bank
+Select is 14-bit and every channel is listened to. A plug-in that does not set
+the flag is unchanged: no library, no scan, no callback request.
+
+The adapter also answers `clap.preset-load` at the plug-in location
+(`CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN`) with a library key as the load key,
+for example `factory:Pads/Warm`. Other formats do not use the flag yet.
+
+## Preset browser: library mode
+
+`PresetBrowser::set_library(&library)` switches the browser to the library's
+query results; `set_library(nullptr)` restores the plain list. In library mode
+each row shows a favourite star, the display name (a rename never touches the
+file), the tags and the MIDI program number when a program map is enabled.
+
+- Click the star column or press `F` to toggle the favourite of the selected
+  row; Cmd/Ctrl+F is left alone. The selected row stays selected across edits.
+- The search text uses the library grammar: every word must match the name,
+  folder, tags, author or description. `set_favourites_only` and
+  `set_tag_filter` narrow it further.
+- `rename_selected`, `add_tag_to_selected` and `remove_tag_from_selected` are
+  for a host dialog or a script; the browser has no text-entry field of its own.
+- Preset callbacks still receive a `PresetInfo` carrying the file's own name, so
+  loading is unchanged. `selected_summary()` returns the library's view of the
+  row (key, display name, tags, favourite, program).
+
+Without a library the browser is unchanged.
+
+### Opting in from a plug-in (standalone)
+
+The standalone host honours `supports_program_change` the same way. It creates
+the library and router when the processor is created, scans hardware MIDI for
+Bank Select + Program Change inside the audio callback (latch only), and loads
+the preset from `StandaloneApp::service_program_changes()`, which the built-in
+editors call from their idle loop and which throttles itself to about 30 Hz. A
+host that runs its own loop calls it a few times a second. The factory folder is
+`Presets` inside the app bundle's resource directory when it exists.
+
