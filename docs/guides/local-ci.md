@@ -3349,6 +3349,12 @@ only those (or those plus known flakes). They surface only when a head is
 combined with the current tip, and on `macos` they run after a ~20-minute
 build that none of them needs.
 
+When `script-test-inputs` is the failing check, the job uploads a non-blocking
+`script-inputs-expected` artifact holding the exact fragments `--write` would produce
+for the drifted entries (`script_test_inputs.py --check --emit-expected DIR`, default
+`$RUNNER_TEMP/script-inputs-expected`). A repair downloads it and copies it into
+`test/ctest_script_inputs/`, with no configure.
+
 `.github/workflows/drift-fast.yml` runs them on `ubuntu-latest` for every
 `pull_request` (the `refs/pull/N/merge` tree) and every `merge_group`, both of
 which are the tip combined with the head. The job bootstraps dependencies,

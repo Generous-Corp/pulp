@@ -1466,6 +1466,25 @@ def compiled_entry_paths(rec: dict) -> set[str]:
             | set(rec.get("undeclared_sources") or []) | set(rec.get("inputs") or []))
 
 
+def emit_expected(current: dict, checked_in: dict, problems: list, out_dir: Path) -> list[str]:
+    """Write the fragments a --write would change for the drifted entries in
+    `problems` under `out_dir`; returns their store-relative paths. The text is
+    store.split's, so it is byte-identical to a --write, with no configure."""
+    expected, have = store.split(current), store.split(checked_in)
+    wanted = set()
+    for kind, name, _ in problems:
+        sect = store.EXECUTABLES_DIR if "executable" in kind else store.TESTS_DIR
+        wanted.add(f"{sect}/{store.slug(name)}.json")
+    written = []
+    for rel in sorted(wanted):
+        if rel in expected and have.get(rel) != expected[rel]:
+            target = out_dir / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(expected[rel], encoding="utf-8")
+            written.append(rel)
+    return written
+
+
 def touched_by(changed: set[str], paths: set[str]) -> bool:
     return any(f == p or f.startswith(p.rstrip("/") + "/") for f in changed for p in paths)
 
@@ -1569,6 +1588,11 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--allow-delete", action="store_true",
                     help="let --write remove checked-in entries this configure does not produce "
                          "(only when their registration was really removed)")
+    ap.add_argument("--emit-expected", default=os.environ.get("PULP_SCRIPT_INPUTS_EMIT_DIR") or (
+        str(Path(os.environ["RUNNER_TEMP"]) / "script-inputs-expected") if os.environ.get("RUNNER_TEMP") else None),
+                    metavar="DIR", help="with --check, write each blocking drifted entry's expected fragment "
+                    "(the bytes --write would produce) under DIR, mirroring test/ctest_script_inputs/ "
+                    "(default: $RUNNER_TEMP/script-inputs-expected when set)")
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument("--write", action="store_true")
     mode.add_argument("--check", action="store_true")
@@ -1782,6 +1806,15 @@ def main(argv: list[str]) -> int:
                   + ". Reconfigure first (`pulp build --clean`), then re-run --check; a --write from a\n"
                   "tree older than main silently reverts main's newer entries.")
         print(fix)
+        if a.emit_expected:
+            emitted = emit_expected(current, checked_in, [pr for pr in blocking
+                                                         if pr[0] != "new undeclared data source"],
+                                    Path(a.emit_expected))
+            if emitted:
+                print(f"script-test-inputs: expected fragments for {len(emitted)} entr"
+                      f"{'y' if len(emitted) == 1 else 'ies'} written to {a.emit_expected}. No-configure repair: "
+                      "download the `script-inputs-expected` artifact of this run, then "
+                      f"`cp -R <artifact-dir>/. {DEFAULT_LIST.as_posix()}/` and commit it.")
         if advisory_here():
             # The enforcement point is the PULL-REQUEST HEAD, where the pr-fast
             # tier runs on every push and the author sees the verdict. A merge
