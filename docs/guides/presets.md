@@ -206,6 +206,30 @@ file), the tags and the MIDI program number when a program map is enabled.
 
 Without a library the browser is unchanged.
 
+### Context menu and program editor
+
+In library mode a right-click on a browser row selects it and calls
+`PresetBrowser::on_context_menu(position, items)`. Show the items with
+`ContextMenu::show` and pass the chosen id to `perform_menu_action`. The menu
+offers favourite on/off, rename, add tag, remove each tag, assign a MIDI program
+and clear it.
+
+The browser and the editor have no text field. Actions that need text (rename,
+add tag, a program as `bank:program`) call `on_text_request`; the host shows its
+own dialog and answers through `complete_text_request`. An empty rename clears the
+override, an empty tag is refused, and a program that is not `bank:program` in
+range (`parse_bank_program`) is refused.
+
+`PresetProgramEditor` shows one bank's 128 slots with the preset in each. The
+arrows in its header, the Left and Right keys, or `next_bank`/`previous_bank`
+change bank; Up and Down move the selected program and scroll it into
+view, and the wheel scrolls the list; Delete clears it; a double
+click or Enter calls `on_assign_request(slot)` so the host can pick a preset and
+answer with `complete_assign(key)`. A double click on the title asks for a bank
+name through `on_bank_text_request`, and `complete_bank_text` renames or
+renumbers it. A slot whose preset is not installed is shown with its key and
+"(not installed)". With no program map enabled the editor shows "(no banks)".
+
 ### Opting in from a plug-in (standalone)
 
 The standalone host honours `supports_program_change` the same way. It creates

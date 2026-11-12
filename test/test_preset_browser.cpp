@@ -499,7 +499,7 @@ TEST_CASE("PresetBrowser F key toggles the favourite only in library mode",
     REQUIRE(browser.on_key_event(key));
     REQUIRE_FALSE(f.library->find("user:Bright Lead")->favourite);
 
-    key.modifiers = kModCmd; // Cmd+F is not ours
+    key.modifiers = kModCmd | kModCtrl; // the platform's main modifier + F is not ours
     REQUIRE_FALSE(browser.on_key_event(key));
 }
 

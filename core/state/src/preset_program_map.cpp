@@ -25,6 +25,42 @@ bool parse_program(const std::string& text, std::uint8_t& out) {
 
 } // namespace
 
+std::string format_bank_program(BankProgram position) {
+    return std::to_string(position.bank) + ":" + std::to_string(position.program);
+}
+
+std::optional<BankProgram> parse_bank_program(std::string_view text) {
+    auto trim = [](std::string_view s) {
+        while (!s.empty() && (s.front() == ' ' || s.front() == '\t'))
+            s.remove_prefix(1);
+        while (!s.empty() && (s.back() == ' ' || s.back() == '\t'))
+            s.remove_suffix(1);
+        return s;
+    };
+    auto number = [](std::string_view s, int limit) -> std::optional<int> {
+        if (s.empty())
+            return std::nullopt;
+        int value = 0;
+        const auto [end, ec] = std::from_chars(s.data(), s.data() + s.size(), value);
+        if (ec != std::errc() || end != s.data() + s.size() || value < 0 || value > limit)
+            return std::nullopt;
+        return value;
+    };
+    text = trim(text);
+    const auto colon = text.find(':');
+    if (colon == std::string_view::npos) {
+        const auto p = number(trim(text), kMaxProgramNumber);
+        if (!p)
+            return std::nullopt;
+        return BankProgram{0, static_cast<std::uint8_t>(*p)};
+    }
+    const auto b = number(trim(text.substr(0, colon)), kMaxProgramBank);
+    const auto p = number(trim(text.substr(colon + 1)), kMaxProgramNumber);
+    if (!b || !p)
+        return std::nullopt;
+    return BankProgram{static_cast<std::uint16_t>(*b), static_cast<std::uint8_t>(*p)};
+}
+
 bool operator==(const ProgramMap& a, const ProgramMap& b) {
     if (a.banks_.size() != b.banks_.size() || a.seen_ != b.seen_)
         return false;
