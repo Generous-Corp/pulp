@@ -389,3 +389,147 @@ TEST_CASE("midi learn session: a successful learn clears an earlier refusal at o
     CHECK(now - 1000 < view::MidiLearnSession::kRefusalShowMs);
     CHECK(target.state(kCut).refused_reason.empty());
 }
+
+// ── Mapping options ──
+
+namespace {
+
+struct OptionCalls {
+    std::vector<std::pair<state::ParamID, view::MidiLearnMappingOptions>> calls;
+};
+
+} // namespace
+
+TEST_CASE("midi learn menu: a mapped parameter shows its settings rows",
+          "[view][midi-learn][menu][options]") {
+    Scripted s;
+    OptionCalls rec;
+    auto t = s.target();
+    t.set_options = [&](state::ParamID id, const view::MidiLearnMappingOptions& o) {
+        rec.calls.push_back({id, o});
+    };
+    s.st.phase = Phase::mapped;
+    s.st.mapping_label = "CC 74 ch 1";
+
+    auto items = view::midi_learn_menu_items(t, kCut);
+    CHECK(labels(items) == std::vector<std::string>{"MIDI Learn", "Mapped to CC 74 ch 1", "Invert",
+                                                    "Relative mode", "Takeover",
+                                                    "Clear MIDI Mapping"});
+
+    // The feedback row appears only where the format can send feedback.
+    s.st.feedback_supported = true;
+    items = view::midi_learn_menu_items(t, kCut);
+    CHECK(labels(items) == std::vector<std::string>{"MIDI Learn", "Mapped to CC 74 ch 1", "Invert",
+                                                    "Relative mode", "Takeover", "Send feedback",
+                                                    "Clear MIDI Mapping"});
+
+    // Not mapped, or no way to change settings: no settings rows.
+    s.st.phase = Phase::idle;
+    CHECK(labels(view::midi_learn_menu_items(t, kCut)) == std::vector<std::string>{"MIDI Learn"});
+    s.st.phase = Phase::mapped;
+    t.set_options = nullptr;
+    items = view::midi_learn_menu_items(t, kCut);
+    CHECK(labels(items) ==
+          std::vector<std::string>{"MIDI Learn", "Mapped to CC 74 ch 1", "Clear MIDI Mapping"});
+}
+
+TEST_CASE("midi learn menu: changing a row sends the full settings with that field changed",
+          "[view][midi-learn][menu][options]") {
+    Scripted s;
+    OptionCalls rec;
+    auto t = s.target();
+    t.set_options = [&](state::ParamID id, const view::MidiLearnMappingOptions& o) {
+        rec.calls.push_back({id, o});
+        s.st.options = o; // the target applies it
+    };
+    s.st.phase = Phase::mapped;
+    s.st.mapping_label = "CC 1";
+    s.st.feedback_supported = true;
+    s.st.options = {2, 1, false, true};
+
+    auto items = view::midi_learn_menu_items(t, kCut);
+    auto find = [&](const char* label) -> view::ContextMenu::Item& {
+        for (auto& i : items)
+            if (i.label == label)
+                return i;
+        FAIL("no row " << label);
+        return items.front();
+    };
+
+    // Rows start at the current values.
+    CHECK_FALSE(find("Invert").checked);
+    CHECK(find("Relative mode").choice_index == 2);
+    CHECK(find("Takeover").choice_index == 1);
+    CHECK(find("Send feedback").checked);
+
+    find("Invert").set_toggled(true);
+    REQUIRE(rec.calls.size() == 1);
+    CHECK(rec.calls[0].first == kCut);
+    CHECK((rec.calls[0].second == view::MidiLearnMappingOptions{2, 1, true, true}));
+
+    find("Relative mode").set_choice_index(3);
+    CHECK((rec.calls.back().second == view::MidiLearnMappingOptions{3, 1, true, true}));
+    find("Takeover").set_choice_index(2);
+    CHECK((rec.calls.back().second == view::MidiLearnMappingOptions{3, 2, true, true}));
+    find("Send feedback").set_toggled(false);
+    CHECK((rec.calls.back().second == view::MidiLearnMappingOptions{3, 2, true, false}));
+    CHECK(rec.calls.size() == 4);
+}
+
+TEST_CASE("midi learn session: settings change the mapping, route correctly and undo",
+          "[view][midi-learn][session][options]") {
+    state::StateStore store;
+    populate(store);
+    state::MidiLearnEngine engine;
+    state::UndoManager undo;
+    state::MidiLearnEditor editor(engine, undo);
+    std::uint64_t now = 0;
+    view::MidiLearnSession session(engine, [&] { return now; }, &editor);
+    session.set_feedback_supported(true);
+    auto target = session.target();
+
+    state::MidiMapping m;
+    m.source = {state::MidiSourceKind::cc7, 0, 74};
+    m.id = kCut;
+    REQUIRE(editor.set_mapping(m));
+    CHECK(target.state(kCut).feedback_supported);
+    CHECK((target.state(kCut).options == view::MidiLearnMappingOptions{}));
+
+    // Invert: the response flips for the audio thread.
+    auto o = target.state(kCut).options;
+    o.invert = true;
+    target.set_options(kCut, o);
+    CHECK(target.state(kCut).options.invert);
+    engine.begin_block();
+    engine.route(store, state::RawMidi{0xB0, 74, 127});
+    CHECK(store.get_normalized(kCut) < 0.01f);
+
+    o = target.state(kCut).options;
+    o.relative_mode = 1;
+    o.takeover = 2;
+    o.feedback = true;
+    target.set_options(kCut, o);
+    const auto stored = engine.mapping_for(kCut);
+    REQUIRE(stored.has_value());
+    CHECK(stored->mode == state::RelativeMode::twos_complement);
+    CHECK(stored->takeover == state::TakeoverMode::scale);
+    CHECK(stored->feedback);
+    CHECK(stored->scale.min > stored->scale.max); // still inverted
+
+    // Turning invert back off restores the original window.
+    o = target.state(kCut).options;
+    o.invert = false;
+    target.set_options(kCut, o);
+    CHECK(engine.mapping_for(kCut)->scale.min < engine.mapping_for(kCut)->scale.max);
+
+    // Each change is one undo step; unchanged settings record nothing.
+    undo.undo();
+    CHECK(target.state(kCut).options.invert);
+    const bool had_undo = undo.can_undo();
+    target.set_options(kCut, target.state(kCut).options);
+    CHECK(undo.can_undo() == had_undo);
+
+    // An unmapped parameter ignores the call.
+    target.set_options(kRes, view::MidiLearnMappingOptions{1, 1, true, true});
+    CHECK_FALSE(engine.mapping_for(kRes).has_value());
+}
