@@ -3,6 +3,7 @@
  "record": {
   "entry": "tools/scripts/test_hotspot_edit_guard.py",
   "inputs": [
+   "docs/status/consumption-profiles.json",
    "test/ctest_script_inputs",
    "tools/agent-capabilities/fingerprints",
    "tools/scripts/agent_capability_catalog_signal.py",
