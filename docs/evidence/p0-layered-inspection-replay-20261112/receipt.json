@@ -8,14 +8,20 @@
   },
   "consumers": [
     {
+      "identity": null,
       "name": "g3-installed-public-consumer",
+      "protocol": null,
       "reason": "command not supplied",
-      "status": "UNAVAILABLE"
+      "status": "UNAVAILABLE",
+      "timeout_seconds": 10
     },
     {
+      "identity": null,
       "name": "spectral-installed-public-consumer",
+      "protocol": null,
       "reason": "command not supplied",
-      "status": "UNAVAILABLE"
+      "status": "UNAVAILABLE",
+      "timeout_seconds": 10
     }
   ],
   "layers": [
@@ -164,7 +170,8 @@
       64,
       128
     ],
-    "status": "PASS"
+    "reason": "sample-level fixture does not execute distinct block boundaries",
+    "status": "NOT_CHECKED"
   },
   "planted_negative_controls": {
     "controls": [
@@ -211,7 +218,7 @@
     "tool": "tools/scripts/p0_layered_replay_receipt.py"
   },
   "schema": "pulp.graph.layered-replay-receipt.v1",
-  "source_head": "544a70c2791cd12f56de5519b637aef702eace21",
+  "source_head": "23fd30ff066925076d26f4c7da6153e4c3163a3c",
   "unavailable_lanes": [
     "runtime",
     "realtime",

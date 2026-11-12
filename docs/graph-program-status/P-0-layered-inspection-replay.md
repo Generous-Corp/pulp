@@ -20,7 +20,7 @@ unavailable.
 
 The current fixture receipt is
 `../evidence/p0-layered-inspection-replay-20261112/receipt.json`, SHA-256
-`fbf68c1ae8e18b42fe0b5f53d584dca58e3f497005f00cc4a1164397b3bfd91f`.
+`b66229e3d6986d4015fae89939a8ab6f63bdf1c4bbaf7e67b6577d1c0c91c9a6`.
 Both installed-consumer commands are `UNAVAILABLE` in this handoff because the
 source build did not complete its relocatable SDK support-module install.
 
