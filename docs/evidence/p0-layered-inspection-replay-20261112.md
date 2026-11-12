@@ -26,10 +26,11 @@ command, executable digest, output digest, and return code. The consumer gate
 is fail-closed: absent commands exit 2 unless `--allow-unavailable` is used;
 that mode writes `NOT_QUALIFIED` and never reports a completed experiment.
 
-The fixture oracle renders sample-level canonical signed 32-bit PCM for two
-partitions (64 and 128 frames). It checks partition-invariant output and plants
-one mutation at a time in authored, resolved, plan, event, and output layers.
-These controls are explicitly synthetic tooling controls; they do not claim
+The fixture oracle renders sample-level canonical signed 32-bit PCM and records
+two partition labels (64 and 128 frames). It does not execute distinct block
+boundaries, so the partition control is **NOT_CHECKED**. It plants one mutation
+at a time in authored, resolved, plan, event, and output layers. These controls
+are explicitly synthetic tooling controls; they do not claim
 runtime scheduling, realtime safety, or audio-provider parity.
 
 ## Focused controls
@@ -45,7 +46,11 @@ python3 tools/scripts/p0_layered_replay_receipt.py \
   --output docs/evidence/p0-layered-inspection-replay-20261112/receipt.json \
   --source-head "$(git rev-parse HEAD)" \
   --g3-command /path/to/pulp-g3-resolved-identity-consumer \
-  --spectral-command /path/to/spectral-frame-codec-consumer
+  --g3-identity pulp-g3-resolved-identity-consumer \
+  --g3-protocol pulp.graph.g3-resolved-identity-consumer.v1 \
+  --spectral-command /path/to/spectral-frame-codec-consumer \
+  --spectral-identity spectral-frame-codec-consumer \
+  --spectral-protocol pulp.signal.spectral-frame-codec-consumer.v1
 ```
 
 The resulting receipt is qualified only when both independent public consumers

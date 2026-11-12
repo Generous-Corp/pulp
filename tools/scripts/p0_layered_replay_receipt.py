@@ -21,10 +21,18 @@ from typing import Any, Sequence
 
 SCHEMA = "pulp.graph.layered-replay-receipt.v1"
 PARTITIONS = (64, 128)
+CONSUMER_TIMEOUT_SECONDS = 10
+CONSUMER_PROTOCOLS = {
+    "g3": ("pulp-g3-resolved-identity-consumer", "pulp.graph.g3-resolved-identity-consumer.v1"),
+    "spectral": ("spectral-frame-codec-consumer", "pulp.signal.spectral-frame-codec-consumer.v1"),
+}
 
 
 def canonical(value: Any) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    try:
+        return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ValueError("invalid UTF-8 in receipt value") from exc
 
 
 def digest(value: Any) -> str:
@@ -41,33 +49,59 @@ class Layer:
         return digest(self.value)
 
 
-def run_consumer(label: str, command: Sequence[str] | None) -> dict[str, Any]:
-    """Run one independent installed consumer and record only stable evidence."""
+def run_consumer(label: str, command: Sequence[str] | None, identity: str | None,
+                 protocol: str | None, consumer_kind: str) -> dict[str, Any]:
+    """Run a named consumer only when its executable and protocol are explicit."""
+    expected_name, expected_protocol = CONSUMER_PROTOCOLS[consumer_kind]
+    record: dict[str, Any] = {"name": label, "status": "UNAVAILABLE",
+                              "identity": identity, "protocol": protocol,
+                              "timeout_seconds": CONSUMER_TIMEOUT_SECONDS}
     if not command:
-        return {"name": label, "status": "UNAVAILABLE", "reason": "command not supplied"}
+        record["reason"] = "command not supplied"
+        return record
+    executable = Path(command[0])
+    if identity != expected_name or protocol != expected_protocol:
+        record["reason"] = "explicit executable identity/protocol did not match the named consumer"
+        return record
+    if executable.name != expected_name or not executable.is_file():
+        record["reason"] = "executable path is not the named public consumer"
+        return record
     try:
         result = subprocess.run(command, capture_output=True, stdin=subprocess.DEVNULL,
-                                text=True, encoding="utf-8", check=False)
+                                timeout=CONSUMER_TIMEOUT_SECONDS, check=False)
+    except subprocess.TimeoutExpired as exc:
+        record["reason"] = "consumer timed out"
+        record["output_sha256"] = "sha256:" + hashlib.sha256(
+            (exc.output or b"") + (exc.stderr or b"")).hexdigest()
+        return record
     except OSError as exc:
-        return {"name": label, "status": "UNAVAILABLE", "reason": str(exc)}
-    output = (result.stdout + result.stderr).encode()
-    executable = Path(command[0])
-    record: dict[str, Any] = {
-        "name": label,
-        "status": "PASS" if result.returncode == 0 else "FAIL",
-        "returncode": result.returncode,
-        "command": list(command),
-        "output_sha256": "sha256:" + hashlib.sha256(output).hexdigest(),
-    }
-    if executable.is_file():
-        record["executable_sha256"] = "sha256:" + hashlib.sha256(executable.read_bytes()).hexdigest()
+        record["reason"] = str(exc)
+        return record
+    raw_output = result.stdout + result.stderr
+    record.update({"returncode": result.returncode, "command": list(command),
+                   "output_sha256": "sha256:" + hashlib.sha256(raw_output).hexdigest(),
+                   "executable_sha256": "sha256:" + hashlib.sha256(executable.read_bytes()).hexdigest()})
+    try:
+        output = raw_output.decode("utf-8")
+    except UnicodeDecodeError:
+        record["reason"] = "consumer output is not valid UTF-8"
+        return record
+    if expected_protocol not in output:
+        record["reason"] = "consumer output did not attest the required protocol"
+        return record
+    record["status"] = "PASS" if result.returncode == 0 else "FAIL"
     if result.returncode != 0:
-        record["output_tail"] = (result.stdout + result.stderr)[-400:]
+        record["output_tail"] = output[-400:]
     return record
 
 
 def output_for(partition: int, event: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
-    """Produce canonical PCM bytes from sample positions, independent of blocks."""
+    """Produce canonical PCM bytes from sample positions.
+
+    ``partition`` is recorded for a future block-execution fixture; this
+    sample-level oracle intentionally does not claim to exercise block
+    boundaries.
+    """
     frames = 256
     samples: list[float] = []
     gain = float(plan["gain"])
@@ -146,7 +180,9 @@ def receipt(layers: list[Layer], consumers: list[dict[str, Any]], source_head: s
                            else "NOT_QUALIFIED",
                            "requires": ["g3-installed-public-consumer", "spectral-installed-public-consumer"]},
         "layers": layer_records,
-        "partition_controls": {"fixture": "synthetic-sample-level-oracle", "partitions": list(PARTITIONS), "status": "PASS",
+        "partition_controls": {"fixture": "synthetic-sample-level-oracle", "partitions": list(PARTITIONS),
+                                "status": "NOT_CHECKED",
+                                "reason": "sample-level fixture does not execute distinct block boundaries",
                                 "output_sha256": [output_for(p, baseline["event"], baseline["plan"])["pcm_sha256"]
                                                   for p in PARTITIONS]},
         "planted_negative_controls": {"fixture": "synthetic-layer-mutation-oracle", "controls": controls},
@@ -159,12 +195,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--source-head", default="unknown")
     parser.add_argument("--g3-command", nargs="+")
+    parser.add_argument("--g3-identity")
+    parser.add_argument("--g3-protocol")
     parser.add_argument("--spectral-command", nargs="+")
+    parser.add_argument("--spectral-identity")
+    parser.add_argument("--spectral-protocol")
     parser.add_argument("--allow-unavailable", action="store_true",
                         help="write a NOT_QUALIFIED receipt when consumer commands are absent")
     args = parser.parse_args(argv)
-    result = receipt(base_layers(), [run_consumer("g3-installed-public-consumer", args.g3_command),
-                                     run_consumer("spectral-installed-public-consumer", args.spectral_command)],
+    result = receipt(base_layers(), [
+        run_consumer("g3-installed-public-consumer", args.g3_command,
+                     args.g3_identity, args.g3_protocol, "g3"),
+        run_consumer("spectral-installed-public-consumer", args.spectral_command,
+                     args.spectral_identity, args.spectral_protocol, "spectral"),
+    ],
                      args.source_head)
     missing = any(consumer["status"] == "UNAVAILABLE" for consumer in result["consumers"])
     failed = any(consumer["status"] == "FAIL" for consumer in result["consumers"])

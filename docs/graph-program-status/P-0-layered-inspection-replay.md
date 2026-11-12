@@ -11,8 +11,10 @@ independent public consumers: the installed G3 host consumer and the installed
 spectral frame consumer.
 
 The envelope has separate authored, resolved, plan, event, and output IDs. The
-fixture oracle covers 64- and 128-frame partitions and five independent planted
-negative mutations. Synthetic controls are labeled as such. The consumer gate
+fixture oracle records 64- and 128-frame partition labels and five independent
+planted negative mutations. It does not execute distinct block boundaries, so
+the partition control is **NOT_CHECKED**. Synthetic controls are labeled as
+such. The consumer gate
 requires both installed binaries and remains `NOT_QUALIFIED` when either is
 unavailable.
 
