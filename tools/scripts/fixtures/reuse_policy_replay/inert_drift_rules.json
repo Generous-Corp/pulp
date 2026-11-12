@@ -186,7 +186,7 @@
    }
   },
   {
-   "label": "the planning gitlink is not a planning/ file: runs",
+   "label": "a path that only starts like planning/ is not a planning/ file: runs",
    "policy": "inert-drift",
    "corpus": {
     "runs": [
@@ -247,7 +247,7 @@
        {
         "run_id": "p1",
         "drift_files": [
-         "planning"
+         "planning-notes.txt"
         ],
         "drift_declared_input_hits": [],
         "required_contexts_green": true
