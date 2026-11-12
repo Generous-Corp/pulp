@@ -9,6 +9,19 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11160"></a>
+## [1.116.0] - 2026-11-12
+
+- release/version bump ([#12111](https://github.com/Generous-Corp/pulp/pull/12111))
+- feature/native gl surface interface ([#12101](https://github.com/Generous-Corp/pulp/pull/12101))
+- g5/event runtime 20261111 ([#12091](https://github.com/Generous-Corp/pulp/pull/12091))
+- codex/g3 d5 saved identity 20261111 ([#12095](https://github.com/Generous-Corp/pulp/pull/12095))
+- codex/post roadmap graph capability gap 20261111 ([#12105](https://github.com/Generous-Corp/pulp/pull/12105))
+- fix/android lilv copy file range 20261112 ([#12100](https://github.com/Generous-Corp/pulp/pull/12100))
+- fix/scale probe au in process ([#12097](https://github.com/Generous-Corp/pulp/pull/12097))
+- feature/vellum sdk consumer lane ([#12089](https://github.com/Generous-Corp/pulp/pull/12089))
+- release/version bump ([#12096](https://github.com/Generous-Corp/pulp/pull/12096))
+
 <a id="v11150"></a>
 ## [1.115.0] - 2026-11-12
 
@@ -12830,6 +12843,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.116.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.116.0
 [1.115.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.115.0
 [1.114.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.114.0
 [1.113.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.113.0
