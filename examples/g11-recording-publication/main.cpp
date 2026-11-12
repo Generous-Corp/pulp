@@ -126,9 +126,19 @@ class PublishedPlayerNode final : public pulp::format::Processor {
     bool ready_ = false;
 };
 
-float tone_sample(double frequency, std::size_t frame) {
+// Input generator used by the synthetic graph source. The acceptance oracle
+// below intentionally has its own constants and implementation.
+float capture_tone_sample(double frequency, std::size_t frame) {
     return static_cast<float>(0.35 * std::sin(2.0 * std::numbers::pi * frequency *
                                               static_cast<double>(frame) / kSampleRate));
+}
+
+float oracle_tone_sample(double frequency, std::size_t frame) {
+    constexpr double kOracleRate = 48'000.0;
+    constexpr double kOracleAmplitude = 0.35;
+    constexpr double kOraclePi = 3.141592653589793238462643383279502884;
+    const double phase = (2.0 * kOraclePi * frequency * static_cast<double>(frame)) / kOracleRate;
+    return static_cast<float>(kOracleAmplitude * std::sin(phase));
 }
 
 class TwoTakeNode final : public pulp::format::Processor {
@@ -322,7 +332,7 @@ std::vector<float> playback(const SampleSlotBank& bank, std::span<const int> sch
 
 bool matches_tone(std::span<const float> samples, double frequency, std::size_t first_frame = 0) {
     for (std::size_t frame = 0; frame < samples.size(); ++frame) {
-        const auto expected = tone_sample(frequency, first_frame + frame);
+        const auto expected = oracle_tone_sample(frequency, first_frame + frame);
         if (!std::isfinite(samples[frame]) ||
             std::abs(static_cast<double>(samples[frame]) - expected) > 1.0e-5)
             return false;
@@ -333,8 +343,8 @@ bool matches_tone(std::span<const float> samples, double frequency, std::size_t 
 bool matches_sum(std::span<const float> samples, double frequency_a, double frequency_b,
                  std::size_t first_frame = 0) {
     for (std::size_t frame = 0; frame < samples.size(); ++frame) {
-        const auto expected = tone_sample(frequency_a, first_frame + frame) +
-                              tone_sample(frequency_b, first_frame + frame);
+        const auto expected = oracle_tone_sample(frequency_a, first_frame + frame) +
+                              oracle_tone_sample(frequency_b, first_frame + frame);
         if (!std::isfinite(samples[frame]) ||
             std::abs(static_cast<double>(samples[frame]) - expected) > 1.0e-5)
             return false;
@@ -355,7 +365,7 @@ std::vector<float> run_graph_schedule(pulp::host::SignalGraph& graph, std::span<
         Buffer<float> output_buffer(1, static_cast<std::size_t>(block));
         for (int frame = 0; frame < block; ++frame)
             input_buffer.channel(0)[static_cast<std::size_t>(frame)] =
-                tone_sample(frequency, cursor + static_cast<std::size_t>(frame));
+                capture_tone_sample(frequency, cursor + static_cast<std::size_t>(frame));
         const auto& input_const = input_buffer;
         auto input_view = input_const.view();
         auto output_view = output_buffer.view();
@@ -409,72 +419,91 @@ int run_two_take() {
         !graph.connect(player, 0, output, 0) || !graph_prepare(graph, 32))
         return 35;
 
+    // Planted mutation: feed the recorder a one-hertz frequency error and
+    // prove the independent oracle rejects the captured material. Reset the
+    // recorder before the admitted A/B sequence below.
+    RealtimeSampleRecorderCommand mutation_start;
+    mutation_start.sequence_id = 900;
+    mutation_start.type = RealtimeSampleRecorderCommandType::Start;
+    mutation_start.max_frames = kTwoTakeFrames;
+    if (!take_b.enqueue_command(mutation_start))
+        return 36;
+    node_ptr->capture(&take_b);
+    (void)run_graph_schedule(graph, irregular, kTakeBFrequency + 1.0, kTwoTakeFrames);
+    node_ptr->capture(nullptr);
+    const auto* mutated_data = take_b.channel_data(0);
+    if (take_b.state() != RealtimeSampleRecorderState::Completed || mutated_data == nullptr ||
+        matches_tone(std::span(mutated_data, kTwoTakeFrames), kTakeBFrequency))
+        return 37;
+    std::cout << "G11 two-take mutation detected: capture-frequency" << '\n';
+    take_b.reset();
+
     RealtimeSampleRecorderCommand start_a;
     start_a.sequence_id = 1;
     start_a.type = RealtimeSampleRecorderCommandType::Start;
     start_a.max_frames = kTwoTakeFrames;
     if (!take_a.enqueue_command(start_a))
-        return 36;
+        return 38;
     node_ptr->capture(&take_a);
     const auto silence = run_graph_schedule(graph, regular, kTakeAFrequency, kTwoTakeFrames);
     node_ptr->capture(nullptr);
     if (silence.size() != kTwoTakeFrames ||
         take_a.state() != RealtimeSampleRecorderState::Completed)
-        return 37;
+        return 39;
     const float* scratch[1] = {};
     if (!publish_completed_recording_to_slot(take_a, bank, std::span(scratch), 0))
-        return 38;
+        return 40;
     const auto view_a = bank.read_published_view();
     const auto* data_a = bank.channel_data(view_a, 0);
     if (!view_a.valid || data_a == nullptr ||
         !matches_tone(std::span(data_a, kTwoTakeFrames), kTakeAFrequency))
-        return 39;
+        return 41;
     if (!node_ptr->note_on_a())
-        return 40;
+        return 42;
 
     RealtimeSampleRecorderCommand start_b;
     start_b.sequence_id = 2;
     start_b.type = RealtimeSampleRecorderCommandType::Start;
     start_b.max_frames = kTwoTakeFrames;
     if (!take_b.enqueue_command(start_b))
-        return 41;
+        return 43;
     node_ptr->capture(&take_b);
     const auto a_while_recording_b =
         run_graph_schedule(graph, irregular, kTakeBFrequency, kTwoTakeFrames);
     node_ptr->capture(nullptr);
     if (!matches_tone(a_while_recording_b, kTakeAFrequency) ||
         take_b.state() != RealtimeSampleRecorderState::Completed)
-        return 42;
+        return 44;
 
     // Publish B while A's view is still held by the prepared graph.
     if (!publish_completed_recording_to_slot(take_b, bank, std::span(scratch), 0))
-        return 43;
+        return 45;
     const auto view_b = bank.read_published_view();
     if (!view_b.valid || view_b.generation == view_a.generation || !bank.slot_view_valid(view_a))
-        return 44;
+        return 46;
     // Both slots are occupied (A retired but still held, B published), so a
     // third publication is refused until the audio generation is acknowledged.
     Buffer<float> refused(1, kTwoTakeFrames);
     if (bank.reserve_slot(1, kTwoTakeFrames, kSampleRate) >= 0)
-        return 45;
+        return 47;
     if (!node_ptr->note_on_b())
-        return 46;
+        return 48;
     const std::array<int, 2> overlap_blocks{7, 9};
     const auto overlap = run_graph_schedule(graph, overlap_blocks, kTakeBFrequency, 16);
     if (!matches_sum(overlap, kTakeAFrequency, kTakeBFrequency))
-        return 47;
+        return 49;
 
     // Release A only after B is sounding. Its retired generation must then be
     // refused by generation-aware readers.
     const bool released_a = node_ptr->note_off_a();
     if (!released_a || bank.slot_view_valid(view_a) || bank.channel_data(view_a, 0) != nullptr) {
-        return 48;
+        return 50;
     }
     const auto b_only = run_graph_schedule(graph, overlap_blocks, kTakeBFrequency, 16);
     if (!matches_tone(b_only, kTakeBFrequency, 16))
-        return 49;
+        return 51;
     if (!node_ptr->note_off_b())
-        return 50;
+        return 52;
 
     std::cout << "G11 two-take graph passed: source=440Hz/660Hz, regular+irregular, "
                  "A-held-through-B-publication, generations "

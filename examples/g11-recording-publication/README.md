@@ -32,7 +32,8 @@ irregular schedule, and publishes voice B while A remains held. It then
 releases and acknowledges A's retired generation before checking B alone under
 a regular schedule. Slot exhaustion, stale-generation reads, and idle-command
 refusal are negative controls; exact scalar 440/660 Hz oracles check the
-captured and sounding samples.
+captured and sounding samples. Before the admitted sequence, a one-hertz input
+mutation is captured and must be rejected by the independent oracle.
 
 This is a bounded offline graph fixture. It does not claim device capture,
 callback file I/O, realtime deadline qualification, graph serialization of
