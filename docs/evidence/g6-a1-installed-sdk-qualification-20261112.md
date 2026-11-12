@@ -1,4 +1,4 @@
-# G6/A1 installed SDK qualification — 2026-11-12
+# G6/A1 development source-install qualification — 2026-11-12
 
 This is a bounded evidence refresh for the existing G6 voice-bank runtime. It
 adds no runtime or public API. The consumer was built from the installed SDK
@@ -7,12 +7,12 @@ staged by the Release build at source `f5eeb16bd24d7226a53cbda781f55cad6fbee72f`
 
 ## Verified
 
-- SDK provenance: `darwin-arm64`, source install from a CMake `Release` build with
+- SDK provenance: `darwin-arm64`, non-distribution-eligible development source install from a CMake `Release` build with
 `build_profile=dev`, `source_git_dirty=false`.
   The provenance file SHA-256 is
   `f30882dec0e7ce14612a3927e4a819b2eb25b8d0b86f34960e958893f2a305da`.
 - Scalar reference: `A1 scalar reference PASS positives=7 planted_negatives=10`.
-- Installed public consumer: governed build and direct execution passed for
+- Installed development-SDK public consumer: governed build and direct execution passed for
   partitions `1,32,64,127,256`, `samples=800`, with the expected sample values.
   The executable SHA-256 is
   `55d3e3423f0e1eb998aca3e4fe43ed3646be45a726435eeaeb1564b60387beec`.
@@ -43,7 +43,7 @@ python3 examples/g6-voice-bank-consumer/prove_mutations.py \
 
 ## Boundary
 
-This qualifies the existing macOS installed-consumer and mutation contract.
+This qualifies the existing macOS installed development-consumer and mutation contract; it is not a distribution SDK qualification.
 It does not establish save/restore, graph swaps, paced callback allocation or
 lock bounds, DAW adapter behavior, or Linux/Windows parity. G6 remains
 `PARTIAL/HOLD` until those separately admitted requirements have evidence.
