@@ -61,16 +61,16 @@ HINSTANCE this_module() {
 
 LRESULT CALLBACK child_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
     switch (message) {
-        case WM_ERASEBKGND:
-            return 1; // the client paints every pixel
-        case WM_PAINT: {
-            PAINTSTRUCT ps;
-            BeginPaint(hwnd, &ps);
-            EndPaint(hwnd, &ps);
-            return 0;
-        }
-        default:
-            return DefWindowProcW(hwnd, message, wparam, lparam);
+    case WM_ERASEBKGND:
+        return 1; // the client paints every pixel
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        BeginPaint(hwnd, &ps);
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    default:
+        return DefWindowProcW(hwnd, message, wparam, lparam);
     }
 }
 
@@ -197,8 +197,8 @@ struct WglWindow final : GlSurface::Impl {
         if (report.major > 3 || (report.major == 3 && report.minor >= 2)) {
             GLint mask = 0;
             glGetIntegerv(kGlContextProfileMask, &mask);
-            report.profile = (mask & kGlContextCoreProfileBit) != 0 ? GlProfile::core
-                                                                  : GlProfile::compatibility;
+            report.profile =
+                (mask & kGlContextCoreProfileBit) != 0 ? GlProfile::core : GlProfile::compatibility;
         } else if (asked == GlProfile::compatibility && report.major >= 3) {
             report.profile = GlProfile::compatibility;
         }
@@ -239,8 +239,8 @@ struct WglWindow final : GlSurface::Impl {
             wglMakeCurrent(previous_dc, previous_context);
             return false;
         }
-        const auto create_attribs = reinterpret_cast<CreateContextAttribs>(
-            wglGetProcAddress("wglCreateContextAttribsARB"));
+        const auto create_attribs =
+            reinterpret_cast<CreateContextAttribs>(wglGetProcAddress("wglCreateContextAttribsARB"));
 
         for (std::size_t i = 0; i < options.requests.size(); ++i) {
             const GlContextRequest& request = options.requests[i];
@@ -254,17 +254,16 @@ struct WglWindow final : GlSurface::Impl {
             const int profile = request.profile == GlProfile::core
                                     ? kWglContextCoreProfileBit
                                     : kWglContextCompatibilityProfileBit;
-            const int attribs[] = {kWglContextMajorVersion,
-                                   request.major,
-                                   kWglContextMinorVersion,
-                                   request.minor,
-                                   kWglContextProfileMask,
-                                   profile,
-                                   kWglContextFlags,
-                                   request.profile == GlProfile::core
-                                       ? kWglContextForwardCompatibleBit
-                                       : 0,
-                                   0};
+            const int attribs[] = {
+                kWglContextMajorVersion,
+                request.major,
+                kWglContextMinorVersion,
+                request.minor,
+                kWglContextProfileMask,
+                profile,
+                kWglContextFlags,
+                request.profile == GlProfile::core ? kWglContextForwardCompatibleBit : 0,
+                0};
             HGLRC modern = create_attribs(hdc, nullptr, attribs);
             if (modern == nullptr)
                 continue;

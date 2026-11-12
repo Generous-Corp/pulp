@@ -14,7 +14,7 @@ TEST_CASE("a binary-unique name is the base plus this image's token", "[platform
     const std::string token = binary_image_token();
     REQUIRE_FALSE(token.empty());
 #if !defined(__EMSCRIPTEN__)
-    REQUIRE(token != "0");  // the platform could say where this image is loaded
+    REQUIRE(token != "0"); // the platform could say where this image is loaded
 #endif
     REQUIRE(token == binary_image_token());
     REQUIRE(token.find_first_not_of("0123456789abcdef") == std::string::npos);

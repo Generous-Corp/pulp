@@ -43,7 +43,11 @@ struct HostWindow {
     int children() const {
         int count = 0;
         EnumChildWindows(
-            hwnd, [](HWND, LPARAM p) -> BOOL { ++*reinterpret_cast<int*>(p); return TRUE; },
+            hwnd,
+            [](HWND, LPARAM p) -> BOOL {
+                ++*reinterpret_cast<int*>(p);
+                return TRUE;
+            },
             reinterpret_cast<LPARAM>(&count));
         return count;
     }
@@ -53,7 +57,8 @@ struct HostWindow {
 // driver has only Microsoft's OpenGL 1.1 software renderer.
 GlSurfaceOptions any_driver() {
     GlSurfaceOptions options;
-    options.requests = {{3, 3, GlProfile::core, 0}, {2, 1, GlProfile::any, 0}, {1, 1, GlProfile::any, 0}};
+    options.requests = {
+        {3, 3, GlProfile::core, 0}, {2, 1, GlProfile::any, 0}, {1, 1, GlProfile::any, 0}};
     return options;
 }
 
@@ -75,7 +80,7 @@ TEST_CASE("attach makes a child of the host window and detach removes it",
     REQUIRE_FALSE(surface->offscreen());
     REQUIRE_FALSE(surface->attach(nullptr));
     REQUIRE(surface->attach(host.hwnd));
-    REQUIRE_FALSE(surface->attach(host.hwnd));  // already attached
+    REQUIRE_FALSE(surface->attach(host.hwnd)); // already attached
     HWND child = static_cast<HWND>(surface->native_window());
     REQUIRE(IsWindow(child));
     REQUIRE(GetParent(child) == host.hwnd);
@@ -178,10 +183,10 @@ TEST_CASE("invalidate after the host window is gone touches nothing",
     REQUIRE(surface->attach(host->hwnd));
     int releases = 0;
     surface->set_release_handler([&] { ++releases; });
-    host.reset();  // destroys the host window and, with it, the child
+    host.reset(); // destroys the host window and, with it, the child
     surface->invalidate();
-    surface->invalidate();  // idempotent
+    surface->invalidate(); // idempotent
     REQUIRE(releases == 1);
     REQUIRE_FALSE(surface->attached());
-    REQUIRE_FALSE(surface->attach(reinterpret_cast<void*>(1)));  // invalidated for good
+    REQUIRE_FALSE(surface->attach(reinterpret_cast<void*>(1))); // invalidated for good
 }
