@@ -25,7 +25,9 @@ def test_find_build_requires_configure_marker() -> None:
         root = Path(tmp)
         (root / "build").mkdir()
         assert module.find_build(root, None) is None
-        (root / "build" / "CMakeCache.txt").write_text("# configured\n")
+        (root / "build" / "CMakeCache.txt").write_text(
+            "# configured\n", encoding="utf-8"
+        )
         assert module.find_build(root, None) == (root / "build").resolve()
 
 

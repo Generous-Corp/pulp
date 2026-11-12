@@ -911,8 +911,7 @@ if [ -f "$PREPUSH_AFFECTED_TESTS" ]; then
         echo "[pre-push] affected tests: NOT CHECKED via PULP_SKIP_PREPUSH_AFFECTED=1; CI remains authoritative." >&2
     else
         run_gate_captured "$PYTHON" "$PREPUSH_AFFECTED_TESTS" --root "$ROOT" --base "$BASE"
-        gate_rc=$?
-        case $gate_rc in
+        gate_rc=$?; case $gate_rc in
             0) ;;
             77)
                 if [ "${PULP_ALLOW_PREPUSH_AFFECTED_NOT_CHECKED:-0}" = "1" ]; then
