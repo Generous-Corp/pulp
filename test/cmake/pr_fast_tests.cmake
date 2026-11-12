@@ -31,6 +31,7 @@ add_test(NAME pr-fast-tier-contract
 add_test(NAME pr-fast-tier-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_pr_fast_tier_check.py")
+# script-inputs: not-gated focused unit test is run directly by the graph receipt lane
 add_test(NAME p0-layered-replay-receipt-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_p0_layered_replay_receipt.py")

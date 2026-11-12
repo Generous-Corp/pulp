@@ -47,7 +47,7 @@ def run_consumer(label: str, command: Sequence[str] | None) -> dict[str, Any]:
         return {"name": label, "status": "UNAVAILABLE", "reason": "command not supplied"}
     try:
         result = subprocess.run(command, capture_output=True, stdin=subprocess.DEVNULL,
-                                text=True, check=False)
+                                text=True, encoding="utf-8", check=False)
     except OSError as exc:
         return {"name": label, "status": "UNAVAILABLE", "reason": str(exc)}
     output = (result.stdout + result.stderr).encode()
@@ -170,10 +170,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     failed = any(consumer["status"] == "FAIL" for consumer in result["consumers"])
     if failed or (missing and not args.allow_unavailable):
         args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+        args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return 1
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+    args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps({"receipt": str(args.output), "receipt_sha256": digest(result),
                       "qualification": result["consumer_gate"]["status"],
                       "consumer_status": [consumer["status"] for consumer in result["consumers"]]},

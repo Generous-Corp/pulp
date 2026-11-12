@@ -33,9 +33,10 @@ class LayeredReceiptTests(unittest.TestCase):
             command = [sys.executable, str(script), "--output", str(output),
                        "--source-head", "test-head", "--g3-command", sys.executable,
                        "--spectral-command", sys.executable]
-            completed = subprocess.run(command, capture_output=True, text=True, check=False)
+            completed = subprocess.run(command, capture_output=True, text=True,
+                                       encoding="utf-8", check=False)
             self.assertEqual(completed.returncode, 0, completed.stderr)
-            data = json.loads(output.read_text())
+            data = json.loads(output.read_text(encoding="utf-8"))
             self.assertEqual([item["name"] for item in data["consumers"]],
                              ["g3-installed-public-consumer", "spectral-installed-public-consumer"])
             self.assertEqual([item["status"] for item in data["consumers"]], ["PASS", "PASS"])
