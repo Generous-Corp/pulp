@@ -163,6 +163,8 @@ def output_for(partition: int, event: dict[str, Any], plan: dict[str, Any]) -> d
                           "sample_rate": 48000, "bytes_per_sample": 4},
         "partition_frames": partition,
         "frame_count": frames,
+        "peak_tolerance": 1e-7,
+        "rms_tolerance": 1e-7,
         "quality": {"peak": round(peak, 9), "rms": round(rms, 9),
                      "peak_tolerance": 1e-7, "rms_tolerance": 1e-7,
                      "comparison": "exact_pcm_digest_with_metric_tolerances"},
