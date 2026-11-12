@@ -177,15 +177,15 @@
     {
       "canonical_bytes": {
         "encoding": "utf-8",
-        "length": 862,
-        "sha256": "sha256:616639e9d6a99f3c8eb0458459b5e4427d8e2848ccf39461dd6b5494b60eeb9d"
+        "length": 952,
+        "sha256": "sha256:007bd4afc03a36c35c7da1e36d0c3e732db08ac6d7118a4ebe25dc84181d5307"
       },
-      "canonical_bytes_length": 862,
-      "canonical_bytes_sha256": "sha256:616639e9d6a99f3c8eb0458459b5e4427d8e2848ccf39461dd6b5494b60eeb9d",
+      "canonical_bytes_length": 952,
+      "canonical_bytes_sha256": "sha256:007bd4afc03a36c35c7da1e36d0c3e732db08ac6d7118a4ebe25dc84181d5307",
       "name": "output",
-      "semantic_bytes_length": 862,
-      "semantic_bytes_sha256": "sha256:616639e9d6a99f3c8eb0458459b5e4427d8e2848ccf39461dd6b5494b60eeb9d",
-      "sha256": "sha256:616639e9d6a99f3c8eb0458459b5e4427d8e2848ccf39461dd6b5494b60eeb9d",
+      "semantic_bytes_length": 952,
+      "semantic_bytes_sha256": "sha256:007bd4afc03a36c35c7da1e36d0c3e732db08ac6d7118a4ebe25dc84181d5307",
+      "sha256": "sha256:007bd4afc03a36c35c7da1e36d0c3e732db08ac6d7118a4ebe25dc84181d5307",
       "value": {
         "partition_invariant": true,
         "partitions": [
@@ -204,13 +204,15 @@
             "frame_count": 256,
             "partition_frames": 64,
             "pcm_sha256": "sha256:c56dbe1d0b0e4e347eda7e99dd9727aa8a64fb7996b8275024dbed512cf88c33",
+            "peak_tolerance": 1e-07,
             "quality": {
               "comparison": "exact_pcm_digest_with_metric_tolerances",
               "peak": 1.0,
               "peak_tolerance": 1e-07,
               "rms": 0.613234597,
               "rms_tolerance": 1e-07
-            }
+            },
+            "rms_tolerance": 1e-07
           },
           {
             "canonical_pcm": {
@@ -227,13 +229,15 @@
             "frame_count": 256,
             "partition_frames": 128,
             "pcm_sha256": "sha256:c56dbe1d0b0e4e347eda7e99dd9727aa8a64fb7996b8275024dbed512cf88c33",
+            "peak_tolerance": 1e-07,
             "quality": {
               "comparison": "exact_pcm_digest_with_metric_tolerances",
               "peak": 1.0,
               "peak_tolerance": 1e-07,
               "rms": 0.613234597,
               "rms_tolerance": 1e-07
-            }
+            },
+            "rms_tolerance": 1e-07
           }
         ]
       }
@@ -340,7 +344,7 @@
       "status": "NOT_CHECKED"
     },
     {
-      "canonical_bytes": "sha256:616639e9d6a99f3c8eb0458459b5e4427d8e2848ccf39461dd6b5494b60eeb9d",
+      "canonical_bytes": "sha256:007bd4afc03a36c35c7da1e36d0c3e732db08ac6d7118a4ebe25dc84181d5307",
       "layer": "output",
       "reason": "synthetic baseline bookkeeping; no parser/replay acceptance",
       "status": "NOT_CHECKED"
@@ -349,7 +353,7 @@
   "provenance": {
     "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
     "python": "3.13.7",
-    "requested_source_head": "7dbd8ba01088ae3008add28ae196fc31d898bc0f",
+    "requested_source_head": "8da475caa18e3fdd6a5e4425766046ff1834a83a",
     "sdk": {
       "consumers": [
         "g3-installed-public-consumer",
@@ -360,13 +364,13 @@
         null
       ]
     },
-    "source_head": "7dbd8ba01088ae3008add28ae196fc31d898bc0f",
+    "source_head": "8da475caa18e3fdd6a5e4425766046ff1834a83a",
     "source_head_status": "validated",
     "tool": "tools/scripts/p0_layered_replay_receipt.py",
-    "tool_sha256": "sha256:81c59c837e783b9fb86493c8168ef0931a26bd6e709a576da90b093c97c396cb"
+    "tool_sha256": "sha256:f38ef1355b21908ce4d567ca11f64656152efa27060765b96ff9b8e6576c8919"
   },
   "schema": "pulp.graph.layered-replay-receipt.v1",
-  "source_head": "7dbd8ba01088ae3008add28ae196fc31d898bc0f",
+  "source_head": "8da475caa18e3fdd6a5e4425766046ff1834a83a",
   "unavailable_lanes": [
     "runtime",
     "realtime",
