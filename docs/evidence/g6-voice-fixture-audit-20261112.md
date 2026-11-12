@@ -3,9 +3,11 @@
 Status: **CONDITIONAL HOLD**. The exact-source installed-SDK consumer passes;
 graph save/restore and swap while sounding remain **NOT_CHECKED**.
 
-This is a fixture-only audit from a fresh worktree at exact `origin/main`:
+This is a fixture-only audit from a fresh worktree whose audit base is exact
+`origin/main`; the executed SDK and consumer are bound to this PR head:
 
-- source head: `6b4004acfe7ff18a9fa5e1d81b0acf474076b3ec`
+- audit base: `6b4004acfe7ff18a9fa5e1d81b0acf474076b3ec`
+- executed PR source head: `e777deef9dea919aa00ddafdea86e75e32f2a8dc`
 - branch: `codex/g6-voice-fixture-audit-20261112`
 - worktree: `/Users/danielraffel/agent-worktrees/pulp-g6-voice-fixture-audit-20261112`
 - lineage: active, owner `g6-voice-fixture-audit`
@@ -24,7 +26,7 @@ development SDK:
 - SDK: `/Users/danielraffel/.pulp/sdk-dev/forge-v1/darwin-arm64/e777deef9dea919aa00ddafdea86e75e32f2a8dc/b5d7d23fc155`
 - provenance: `sdk-provenance.json`, SHA-256
   `58d40f39e7352613870194b194045de4494a84df4052365e28e1460f4b780759`;
-  `source_git_sha=e777deef9dea919aa00ddafdea86e75e32f2a8dc`,
+  `source_git_sha=e777deef9dea919aa00ddafdea86e75e32f2a8dc` (the PR head),
   `source_git_dirty=false`, `build_type=Release`,
   `distribution_eligible=false`. That source is this PR's fixture-only commit,
   descended from the audit base `6b4004acfe7ff18a9fa5e1d81b0acf474076b3ec`.
@@ -39,21 +41,27 @@ sample10=0`. The installed consumer's CTest
 `g6-voice-bank-public-consumer` passed **1/1**; its transcript is
 `build-g6-voice-exact-20261112/Testing/Temporary/LastTest.log` (SHA-256
 `234c384f3ddc112a4e5ac5b05c3b6a3f9a7cb39f0cc9f9305b728e8caeb44f45`).
-The source-tree wrapper CTest and a planted mutation control remain
-**NOT_CHECKED** in this run.
+The source-tree wrapper CTest (`test/cmake/test_g6_voice_bank_sdk_consumer.cmake:23-86`)
+and a planted mutation control are **NOT_CHECKED** in this run. The wrapper's
+hash/provenance checks are source text, not a receipt for an executed wrapper.
 
 ## Existing fixture coverage (source inspection)
 
-`examples/g6-voice-bank-consumer/main.cpp` already contains source-level
-checks for:
+The executed consumer's source contains checks for the following behaviors;
+these line references describe the code path, while the receipt above is the
+only execution evidence:
 
-- note-on/note-off and finite release tails;
-- sustain and channel-mode handling, including manager/zone expression refusal;
-- member MPE pitch, pressure, and timbre expression;
-- four steal policies and ordered victim selection;
-- slot reuse after release and tracker-capacity refusal;
-- stale generation and stale epoch mutation refusal;
-- A1 frozen vectors for bounded tail and hard-steal cases.
+- note-on/note-off, rendering, finite release reclamation, and partition loop
+  (`examples/g6-voice-bank-consumer/main.cpp:35-66,675-701`);
+- four steal policies and ordered victim selection (`main.cpp:68-109`);
+- stale generation and stale epoch refusal (`main.cpp:111-146`);
+- expression validation, capacity, and slot reuse (`main.cpp:148-379`);
+- sustain/channel-mode and expression refusal paths (`main.cpp:478-540`);
+- A1 frozen vectors for bounded tail and hard-steal cases (`main.cpp:545-628`).
+
+These checks exercise the public `VoiceBankBinding` consumer and its authored
+`ProbeProcessor` fixture (`fixture.hpp:20-112,202-231`); they do not prove graph
+ownership or lifecycle semantics.
 
 The fixture does **not** establish graph save/restore or a graph swap while a
 voice is sounding. Those remain **NOT_CHECKED**; the A1 replacement vectors are
