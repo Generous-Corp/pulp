@@ -1,0 +1,30 @@
+{
+  "build": {
+    "command": "cmake -S examples/p1-event-admission-consumer -B build-p1-event-admission -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$PULP_SDK_PREFIX",
+    "profile": "Release",
+    "reason": "installed SDK 1.54.0 does not contain the current public graph_event_contract.hpp header",
+    "result": "REFUSED"
+  },
+  "consumer": "examples/p1-event-admission-consumer",
+  "controls": {
+    "midi": "planned: absolute ingress, stale epoch, late, stable producer ordering",
+    "parameter": "planned: stable sort and fixed-capacity overflow",
+    "partitions": [
+      4,
+      8
+    ],
+    "planted_negative_count": 5,
+    "trigger": "planned: two blocks, absolute sample, sequence, epoch, reset",
+    "voice_intent": "planned: test-owned G-4 identity plus existing MPE allocator"
+  },
+  "schema": "pulp.graph.p1-event-admission-consumer.v1",
+  "source_head": "c3eac0983ada",
+  "status": "NOT_QUALIFIED",
+  "unavailable_lanes": [
+    "installed_sdk",
+    "runtime",
+    "realtime",
+    "provider_parity",
+    "non_darwin"
+  ]
+}
