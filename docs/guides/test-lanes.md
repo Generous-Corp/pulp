@@ -364,9 +364,9 @@ manifest, `tools/ci/source_selftests.json`:
   required `Enforce version & skill sync` job needs every part and passes only
   when all of them succeeded.
 
-**Docs-only impact scope.** Both parts run with `--impact-scope <base>`, where
-the base is the merge ref's first parent on a pull request and the group's
-`base_sha` on a merge group. When `tools/scripts/classify_changes.py` calls
+**Docs-only impact scope.** On a pull request both parts run with
+`--impact-scope HEAD^1` (the merge ref's first parent); a merge group runs
+every entry, because it lands every entry queued ahead of it. When `tools/scripts/classify_changes.py` calls
 that diff `docs-only`, only the entries that can read a changed file run
 (`select_for_docs_only`: the entry's script names the path or its basename,
 walks a directory holding it, or scans the tree and mentions documentation);

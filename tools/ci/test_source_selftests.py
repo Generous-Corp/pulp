@@ -1441,6 +1441,10 @@ class ImpactScopeTests(unittest.TestCase):
 
     def test_lane_workflow_passes_the_impact_scope_to_both_parts(self):
         text = lane.LANE_WORKFLOW.read_text(encoding="utf-8")
+        # Pull requests only: a merge group lands every entry ahead of it.
+        self.assertEqual(
+            text.count("IMPACT_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}"), 2)
+        self.assertNotIn("merge_group.base_sha || github.event_name == 'pull_request'", text)
         for needle in ("--part shared ${IMPACT_BASE:+--impact-scope",
                        "--shard ${{ matrix.shard }}/2 ${IMPACT_BASE:+--impact-scope"):
             self.assertIn(needle, text)

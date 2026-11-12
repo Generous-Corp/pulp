@@ -401,13 +401,17 @@ def scope_problems(text: str, name: str) -> list[str]:
     """The docs fast path may replace the full lane only on mode=source.
 
     The full run must be gated ``!= 'source'`` so an empty or failed scope
-    output still runs it, and the source run gated ``== 'source'``.
+    output still runs it, the source run gated ``== 'source'``, and the scope
+    step itself must run only on pull requests.
     """
     problems: list[str] = []
     lines = text.splitlines()
     for needle, gate in (
         ("tools/ci/drift_fast.py run --build-dir", "if: steps.scope.outputs.mode != 'source'"),
         ("tools/ci/drift_fast.py run-source", "if: steps.scope.outputs.mode == 'source'"),
+        # A merge group lands every entry queued ahead of it, so its own
+        # entry's diff cannot scope it (tools/scripts/resolve_classify_base.py).
+        ("tools/ci/drift_fast.py scope", "if: github.event_name == 'pull_request'"),
     ):
         at = next((i for i, line in enumerate(lines)
                    if needle in line and not line.lstrip().startswith("#")), None)
@@ -417,8 +421,6 @@ def scope_problems(text: str, name: str) -> list[str]:
         start = max(i for i in range(at + 1) if lines[i].lstrip().startswith("- "))
         if not any(line.strip() == gate for line in lines[start:at]):
             problems.append(f"{name}: the step calling {needle} is not gated `{gate}`")
-    if "tools/ci/drift_fast.py scope" not in text:
-        problems.append(f"{name}: never calls tools/ci/drift_fast.py scope")
     return problems
 
 

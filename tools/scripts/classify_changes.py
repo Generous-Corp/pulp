@@ -40,7 +40,8 @@ not selected. Consumers:
   - `tools/ci/source_selftests.py run --impact-scope` and
     `tools/ci/drift_fast.py scope` run, for a docs-only diff, only the checks
     that can read a changed file. Every other class runs everything.
-main pushes and the nightly schedules never scope.
+Only pull requests scope: a merge group lands every entry queued ahead of it
+(resolve_classify_base.py), and main pushes and the nightly run everything.
 
 EVERYTHING ELSE forces the native build — including `core/**`,
 `apple/**`, `examples/**`, `test/**`, every `CMakeLists.txt`,

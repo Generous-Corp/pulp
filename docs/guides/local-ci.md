@@ -3398,9 +3398,11 @@ to each other.
 
 ### Docs fast path
 
-The job classifies its own event's diff first (the merge ref's first parent on
-a pull request, the group's `base_sha` on a merge group) with
-`tools/scripts/classify_changes.py`'s `impact_class`. For anything other than
+On a pull request the job classifies the diff against the merge ref's first
+parent with `tools/scripts/classify_changes.py`'s `impact_class`. A merge
+group always takes the full lane: it lands every entry queued ahead of it, so
+its own entry's diff does not say what it lands (the docs-only entry at the end
+of a batch is the case `tools/scripts/resolve_classify_base.py` exists for). For anything other than
 `docs-only`, or on any doubt, `tools/ci/drift_fast.py scope` prints
 `mode=full` and every step above runs unchanged. For a docs-only diff it
 resolves the selection from the CMake manifests without a configure and keeps
@@ -3431,14 +3433,16 @@ a diff: `docs-only` (Markdown, `docs/`, the `planning` gitlink; never a
 `code:<surfaces>`; an unreadable or empty diff is `code:unknown`. Jobs consume
 it with the cheapest mechanism that keeps required checks reporting:
 
-| Job | Required | docs-only behaviour | Mechanism |
+| Job | Required | docs-only pull request | Mechanism |
 |-----|----------|---------------------|-----------|
 | `macos`, `linux`, `windows` (`build.yml`) | `macos` | skip the native build (unchanged) | `classify` job + job `if:` |
 | `CodeQL (advanced)` | no | does not run | `pull_request.paths-ignore` = `DOCS_PATHS_IGNORE`; main pushes and the schedule still analyze |
 | `drift-fast` | yes | readers run from source, no configure | `drift_fast.py scope` + step `if:` |
 | `Enforce version & skill sync` | yes | every gate script still runs; source selftests run only the entries that can read the change | `source_selftests.py run --impact-scope` |
 
-Every other class selects exactly what it selected before. A workflow that is
+Merge groups are never scoped: a group lands every entry queued ahead of it, so
+a docs-only entry at the end of a batch says nothing about what the group
+lands. Every other class selects exactly what it selected before. A workflow that is
 not a required check may use `paths-ignore`; a required one may not, because a
 required context that never reports holds the pull request on "Expected".
 `test_classify_changes.py`, `tools/ci/test_drift_fast.py` and

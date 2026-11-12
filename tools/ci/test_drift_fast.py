@@ -301,6 +301,16 @@ class DocsOnlyScopeTests(unittest.TestCase):
         self.assertNotEqual(broken, text)
         self.assertTrue(drift_fast.scope_problems(broken, "w"))
 
+    def test_scope_on_merge_groups_breaks_the_contract(self):
+        text = drift_fast.WORKFLOW.read_text(encoding="utf-8")
+        broken = text.replace("        if: github.event_name == 'pull_request'\n"
+                              "        run: |\n"
+                              "          python3 tools/ci/drift_fast.py scope",
+                              "        run: |\n"
+                              "          python3 tools/ci/drift_fast.py scope")
+        self.assertNotEqual(broken, text)
+        self.assertTrue(drift_fast.scope_problems(broken, "w"))
+
     def test_run_source_refuses_a_full_diff(self):
         with unittest.mock.patch.object(drift_fast, "docs_only_plan",
                                         return_value=("full", [], "code:core")), \
