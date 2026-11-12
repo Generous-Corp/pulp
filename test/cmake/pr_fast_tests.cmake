@@ -31,6 +31,10 @@ add_test(NAME pr-fast-tier-contract
 add_test(NAME pr-fast-tier-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_pr_fast_tier_check.py")
+add_test(NAME p0-layered-replay-receipt-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_p0_layered_replay_receipt.py")
+set_tests_properties(p0-layered-replay-receipt-selftest PROPERTIES LABELS "pr-fast;graph")
 
 # Every ctest name must be unique: the name is the join key for the JUnit
 # report and for the receipt a merge group reuses from its PR head, and the
@@ -133,6 +137,7 @@ endif()
 set(PULP_PR_FAST_TESTS
     pr-fast-tier-contract
     pr-fast-tier-selftest
+    p0-layered-replay-receipt-selftest
     unregistered-tests-check
     ctest-unique-names
     ctest-unique-names-selftest
