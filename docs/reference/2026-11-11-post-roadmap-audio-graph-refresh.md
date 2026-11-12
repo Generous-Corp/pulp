@@ -249,9 +249,11 @@ not promote a capability.
 `cmake-g6-voice-bank-sdk-consumer` test from the Release build, then add the
 independent audio/tail oracle named by
 `docs/evidence/g6-audio-tail-audit-20261110-live.md` and
-`docs/evidence/a1-audio-oracle-gap-20261110.md`. The verifier is now an
-independent scalar A1 oracle with copied/hashed vectors; it does not close the
-graph-owned tail/swap/persistence/realtime qualification boundary.
+`docs/evidence/a1-audio-oracle-gap-20261110.md`. The verifier currently provides
+an independent scalar self-test boundary on main; the copied vector data and
+hash-bound installed-consumer gate remain in the open G6 follow-up and must not
+be described as current-main evidence until that PR lands. Neither boundary
+closes graph-owned tail/swap/persistence/realtime qualification.
 
 ### P3: explicit spectral/frame conversion (conditional)
 
