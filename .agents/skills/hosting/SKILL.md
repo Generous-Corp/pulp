@@ -3167,3 +3167,12 @@ append named `midi` ports without changing audio counts; named connect must set
 the MIDI edge flag. Keep strict patch validation additive: the legacy serializer
 may drop bad edges, while strict validation must check every original edge.
 Opaque state and richer edge kinds need explicit contracts before formatting.
+
+### Vendored lilv/zix on Android
+
+`pulp-host-lilv` (external/lilv) compiles into `pulp-host` on every platform,
+including the Android NDK build. zix assumes any `__linux__` target has
+`copy_file_range`, but bionic only declares it from API 34 (minSdk is 26), so the
+Android branch in `core/host/CMakeLists.txt` defines `HAVE_COPY_FILE_RANGE=0`.
+The `android-build` job runs only on main pushes (it is skipped for
+`pull_request` and `merge_group`), so a host-side C break shows up only there.
