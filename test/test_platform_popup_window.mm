@@ -199,13 +199,6 @@ TEST_CASE("each dismissal path reports its reason once", "[platform][popup-windo
     };
     const std::vector<Case> cases = {
         {"client", [](PopupWindow& p, Editor&) { p.close(); }, PopupDismissReason::client},
-        {"resign key",
-         [](PopupWindow& p, Editor&) {
-             [[NSNotificationCenter defaultCenter]
-                 postNotificationName:NSWindowDidResignKeyNotification
-                               object:(__bridge NSWindow*)p.native_window()];
-         },
-         PopupDismissReason::focus_lost},
         {"app deactivates",
          [](PopupWindow&, Editor&) {
              [[NSNotificationCenter defaultCenter]
@@ -237,11 +230,18 @@ TEST_CASE("each dismissal path reports its reason once", "[platform][popup-windo
          },
          PopupDismissReason::escape},
     };
+    // These paths do not depend on the popup holding key, and a test process
+    // is not the active application, so whether it can hold key varies from
+    // run to run. A popup that never takes key cannot see a stray resign-key
+    // arrive before the path under test; the resign-key rule has its own
+    // cases above.
+    PopupWindowOptions options = options_for(editor);
+    options.takes_key_focus = false;
     for (const auto& c : cases) {
         INFO(c.name);
         std::vector<PopupDismissReason> reports;
-        auto popup = PopupWindow::open(scope, options_for(editor),
-                                       [&](PopupDismissReason r) { reports.push_back(r); });
+        auto popup =
+            PopupWindow::open(scope, options, [&](PopupDismissReason r) { reports.push_back(r); });
         REQUIRE(popup != nullptr);
         c.trigger(*popup, editor);
         REQUIRE(pump_until([&] { return !reports.empty(); }));
@@ -251,6 +251,72 @@ TEST_CASE("each dismissal path reports its reason once", "[platform][popup-windo
         REQUIRE(reports.front() == c.expected);
         REQUIRE_FALSE(popup->is_open());
     }
+}
+
+TEST_CASE("losing key decides between staying open and taking key back and focus_lost",
+          "[platform][popup-window][activation]") {
+    using A = PopupResignAction;
+    REQUIRE(popup_resign_action(true, false, 0) == A::stay_open);
+    REQUIRE(popup_resign_action(true, true, 9) == A::stay_open);
+    REQUIRE(popup_resign_action(false, true, 0) == A::take_key_back); // activation hand-back
+    REQUIRE(popup_resign_action(false, true, 2) == A::take_key_back);
+    REQUIRE(popup_resign_action(false, true, 3) == A::close_focus_lost);  // bounded
+    REQUIRE(popup_resign_action(false, false, 0) == A::close_focus_lost); // key went elsewhere
+}
+
+// Activation can hand the key window back to the editor after the popup has
+// taken it: AppKit finishes activating the application asynchronously and
+// restores key to the window that had it. No click happened, so this is not
+// the user leaving the popup, and it must not close it.
+TEST_CASE("key handed back to the editor without a click keeps the popup open",
+          "[platform][popup-window][native][activation]") {
+    Editor editor;
+    MainThreadScope scope;
+    std::vector<PopupDismissReason> reports;
+    auto popup = PopupWindow::open(scope, options_for(editor),
+                                   [&](PopupDismissReason r) { reports.push_back(r); });
+    REQUIRE(popup != nullptr);
+    NSWindow* panel = (__bridge NSWindow*)popup->native_window();
+    dispatch_events(30ms);
+    // An inactive application does not move key between its windows the way
+    // activation does, so neither window reports key afterwards and the
+    // popup is right to report focus_lost; the hand-back needs a live app.
+    if (!panel.isKeyWindow || !NSApp.isActive)
+        SKIP("this test session cannot hold a key window (the application is not active)");
+
+    [editor.window makeKeyWindow]; // what activation does, with no click
+    dispatch_events(100ms);
+    // The application lost activation meanwhile (another app took focus):
+    // neither window is key, and focus_lost is the right report.
+    if (!NSApp.isActive)
+        SKIP("the application was deactivated during the test");
+    INFO("reports: " << reports.size()
+                     << ", first: " << (reports.empty() ? "none" : to_string(reports.front())));
+    REQUIRE(reports.empty());
+    REQUIRE(popup->is_open());
+    REQUIRE(panel.isKeyWindow); // the popup took key back
+}
+
+// Control for the case above: key moving anywhere other than the popup's own
+// editor window is a real loss of focus.
+TEST_CASE("key moving to an unrelated window closes the popup as focus_lost",
+          "[platform][popup-window][native][activation]") {
+    Editor editor;
+    Editor other;
+    MainThreadScope scope;
+    std::vector<PopupDismissReason> reports;
+    auto popup = PopupWindow::open(scope, options_for(editor),
+                                   [&](PopupDismissReason r) { reports.push_back(r); });
+    REQUIRE(popup != nullptr);
+    dispatch_events(30ms);
+    if (!static_cast<NSWindow*>((__bridge NSWindow*)popup->native_window()).isKeyWindow ||
+        !NSApp.isActive)
+        SKIP("this test session cannot hold a key window (the application is not active)");
+    [other.window makeKeyWindow];
+    REQUIRE(pump_until([&] { return !reports.empty(); }));
+    REQUIRE(reports.size() == 1);
+    REQUIRE(reports.front() == PopupDismissReason::focus_lost);
+    REQUIRE_FALSE(popup->is_open());
 }
 
 TEST_CASE("destroying the popup or its scope closes it without a report",
