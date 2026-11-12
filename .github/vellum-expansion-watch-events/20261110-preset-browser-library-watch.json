@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261110-preset-browser-library-watch",
+  "created_at": "2026-11-10T00:09:54Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Adds an optional library mode to PresetBrowser (core/view/include/pulp/view/preset_browser.hpp) that lists a PresetLibrary's results with a favourite star, tags and program number. Pulp-owned widget; without a library it is unchanged. No design-import, Chromium, rendering or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-clap-midi-events",
+    "ctest --test-dir build -R pulp-test-preset-browser",
+    "ctest --test-dir build -R pulp-test-preset-library",
+    "ctest --test-dir build -R pulp-test-preset-program-map",
+    "ctest --test-dir build -R pulp-test-preset-program-router",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
