@@ -30,7 +30,7 @@
    "mode": "serialized",
    "path": "docs/status/consumption-profiles.json",
    "why": "the build-derived census is one large aggregate; concurrent profile regenerations rewrote the same header and profile blocks and produced DIRTY refresh work (for example Pulp #11938)",
-   "writer": "python3 tools/scripts/consumption_census.py --build-dir <build-dir> --write"
+   "writer": "python3 tools/scripts/consumption_census.py --build-dir <build-dir> --write, committed with the line `Serialized-Hotspot: docs/status/consumption-profiles.json reason=<why this branch is the writer>`"
   }
  ],
  "schema": "pulp-hotspot-edit-guard/v1"

@@ -19,8 +19,15 @@ passes.
 
 Registered hotspots live in `tools/scripts/hotspot_edit_guard.json`.  A
 `serialized` entry is a generated aggregate that has not yet been split into
-fragments; it is refused by default and may only be changed by an explicitly
-coordinated writer (`PULP_ALLOW_SERIALIZED_HOTSPOT=1`).
+fragments; it is refused by default and may only be changed by a coordinated
+single writer that declares itself in a commit on the branch with the line
+
+  Serialized-Hotspot: <registered path> reason=<why this branch is the writer>
+
+The guard reads that line from the commits in `merge-base(base, head)..head`,
+so CI sees it on the pull request checkout and a reviewer can audit it in the
+pull request's own history. A process environment variable is not an
+override: CI cannot see an author's local environment.
 
   hotspot_edit_guard.py [--base REF] [--head REV]
 
@@ -145,6 +152,20 @@ def added_lines(root: Path, base: str, head: str, path: str) -> list[str]:
     return lines
 
 
+SERIALIZED_OVERRIDE = re.compile(r"^Serialized-Hotspot:[ \t]*(\S+)[ \t]+reason=[ \t]*(\S.*?)[ \t]*$",
+                                 re.MULTILINE)
+
+
+def serialized_overrides(root: Path, base: str, head: str) -> dict[str, str]:
+    """{path: reason} declared by `Serialized-Hotspot:` lines in the branch's own commits."""
+    mb = _git(root, "merge-base", base, head)
+    anchor = mb.stdout.strip() if mb.returncode == 0 and mb.stdout.strip() else base
+    res = _git(root, "log", "--format=%B%x00", f"{anchor}..{head}")
+    if res.returncode != 0:
+        raise RuntimeError(f"git log {anchor}..{head} failed: {res.stderr.strip()}")
+    return {m.group(1): m.group(2) for m in SERIALIZED_OVERRIDE.finditer(res.stdout)}
+
+
 def violations(hotspots: list[dict], changed: dict[str, str],
                added: "Callable[[str], list[str]] | None" = None) -> list[tuple[dict, str]]:
     """(hotspot, status) for every refused edit; status "L" is an added line.
@@ -208,16 +229,24 @@ def main(argv: list[str]) -> int:
     print(f"hotspot-edit-guard: {len(bad)} registered hotspot aggregate(s) edited directly "
           f"(against {base}):")
     refused = False
+    overrides: dict[str, str] | None = None
     for spot, status in bad:
         if spot.get("mode", "fragment") == "serialized":
-            if os.environ.get("PULP_ALLOW_SERIALIZED_HOTSPOT") == "1":
+            if overrides is None:
+                try:
+                    overrides = serialized_overrides(root, base, a.head)
+                except RuntimeError as exc:
+                    print(f"hotspot-edit-guard: ERROR: {exc}", file=sys.stderr)
+                    return 2
+            if spot["path"] in overrides:
                 print(f"  file={spot['path']}; cause_class=SERIALIZED_HOTSPOT_EDIT; "
-                      "explicit owner override accepted; safe_to_auto_apply=no")
+                      f"override=Serialized-Hotspot commit line on this branch; "
+                      f"reason={overrides[spot['path']]}; accepted")
                 continue
             print(f"  file={spot['path']}; cause_class=SERIALIZED_HOTSPOT_EDIT; "
-                  f"fix=coordinate the single writer ({spot['writer']}) and set "
-                  "PULP_ALLOW_SERIALIZED_HOTSPOT=1 only for that push; "
-                  "safe_to_auto_apply=no")
+                  f"fix=coordinate the single writer ({spot['writer']}) and add the line "
+                  f"`Serialized-Hotspot: {spot['path']} reason=<why this branch is the writer>` "
+                  "to a commit on this branch; safe_to_auto_apply=no")
             if spot.get("why"):
                 print(f"    why: {spot['why']}")
             refused = True
