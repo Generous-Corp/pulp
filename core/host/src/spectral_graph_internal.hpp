@@ -4,6 +4,7 @@
 #include <pulp/host/signal_graph_connection.hpp>
 #include <pulp/host/spectral_graph.hpp>
 #include <pulp/signal/spectral_frame_engine.hpp>
+#include "spectral_asset_morph_internal.hpp"
 
 #include <array>
 #include <limits>
@@ -26,6 +27,10 @@ class SpectralRuntimeBank {
         SpectralIdentity identity;
         graph::SpectralFrameContract contract;
         std::optional<QualifiedSpectralStage> stage;
+        std::shared_ptr<const SpectralAssetMorphConfig> retained_assets;
+        SpectralAssetMorphState asset_morph;
+        std::uint64_t finite_frames = std::numeric_limits<std::uint64_t>::max();
+        std::int64_t finite_cutoff = std::numeric_limits<std::int64_t>::max();
         std::unique_ptr<signal::SpectralFrameEngine> engine;
         std::vector<std::complex<float>> working;
         graph::SpectralFrameBatchView* input = nullptr;
@@ -40,7 +45,10 @@ class SpectralRuntimeBank {
 
         Node(const GraphNode& n)
             : id(n.id), type(n.type), identity(*n.spectral_identity),
-              contract(identity.frame_contract()), stage(n.spectral_stage) {}
+              contract(identity.frame_contract()), stage(n.spectral_stage),
+              retained_assets(n.spectral_asset_morph) {
+            asset_morph.assets = retained_assets.get();
+        }
         void error(SpectralError e) noexcept {
             if (first_error == SpectralError::None) {
                 first_error = e;
@@ -108,7 +116,29 @@ class SpectralRuntimeBank {
                 n.origin > limit - n.identity.fft_size() - n.identity.hop())
                 n.fatal(std::min(n.origin, limit - n.identity.fft_size() - n.identity.hop()),
                         SpectralError::ChronologyExhausted);
-            if (n.type == NodeType::SpectralAnalysis && n.fatal_origin == limit) {
+            if (n.type == NodeType::SpectralAssetMorph && n.fatal_origin == limit) {
+                for (int i = 0; i < count && n.sequence < n.finite_frames; ++i) {
+                    const auto value = ctx.node_inputs.channel_ptr(0)[i];
+                    if (!std::isfinite(value) || value < 0 || value > 1) {
+                        n.fatal(n.origin, SpectralError::InvalidFrame);
+                        break;
+                    }
+                    n.asset_morph.sum += value;
+                    if (++n.asset_morph.samples == 64) {
+                        const auto amount = static_cast<float>(n.asset_morph.sum / 64);
+                        n.asset_morph.sum = 0;
+                        n.asset_morph.samples = 0;
+                        if (!n.asset_morph.frame(n.sequence, amount, n.working) ||
+                            !n.valid_bins(n.working)) {
+                            n.fatal(n.origin, SpectralError::InvalidFrame);
+                            break;
+                        }
+                        n.publish();
+                        if (!n.advance())
+                            break;
+                    }
+                }
+            } else if (n.type == NodeType::SpectralAnalysis && n.fatal_origin == limit) {
                 std::array<const float*, 16> inputs{};
                 for (int c = 0; c < channels; ++c)
                     inputs[c] = ctx.node_inputs.channel_ptr(c);
@@ -138,7 +168,8 @@ class SpectralRuntimeBank {
                     return false;
                 }
                 std::uint32_t cursor = 0;
-                while (n.origin + n.identity.fft_size() <= n.output_clock + count) {
+                while (n.sequence < n.finite_frames &&
+                       n.origin + n.identity.fft_size() <= n.output_clock + count) {
                     if (batch->fatal && n.origin >= batch->fatal_origin) {
                         if (n.type == NodeType::SpectralSynthesis)
                             n.engine->stop_synthesis_guarded();
@@ -215,9 +246,10 @@ class SpectralRuntimeBank {
             }
             if (n.type == NodeType::SpectralSynthesis) {
                 const auto latency = n.identity.fft_size() + n.identity.hop();
-                const auto cutoff = n.fatal_origin == limit
-                                        ? limit
-                                        : std::max<std::int64_t>(0, n.fatal_origin) + latency;
+                const auto cutoff = std::min(
+                    n.finite_cutoff, n.fatal_origin == limit
+                                         ? limit
+                                         : std::max<std::int64_t>(0, n.fatal_origin) + latency);
                 const int prefix =
                     static_cast<int>(std::clamp<std::int64_t>(latency - n.output_clock, 0, count));
                 for (int c = 0; c < channels; ++c)
@@ -255,6 +287,7 @@ class SpectralRuntimeBank {
                 node->engine->reset();
             node->epoch = epoch;
             node->sequence = 0;
+            node->asset_morph.reset();
             node->origin = signal::spectral_frame_engine_first_frame_start(
                 node->identity.fft_size(), node->identity.hop(), true);
             node->output_clock = 0;

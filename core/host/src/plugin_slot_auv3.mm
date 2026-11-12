@@ -37,6 +37,7 @@
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/spsc_queue.hpp>
 
+#include "plugin_slot_auv3_internal.hpp"
 #include "plugin_slot_process_request.hpp"
 
 #import <AVFoundation/AVFoundation.h>
@@ -1218,6 +1219,15 @@ std::unique_ptr<PluginSlot> load_auv3_plugin(const PluginInfo& requested,
         return nullptr;
     }
     [failure release];
+
+    const bool expects_audio = desc.componentType == kAudioUnitType_MusicDevice ||
+                               desc.componentType == kAudioUnitType_Effect ||
+                               desc.componentType == kAudioUnitType_MusicEffect ||
+                               desc.componentType == kAudioUnitType_Generator;
+    if (auv3_internal::remote_unit_lost_its_buses(options.out_of_process, expects_audio,
+                                                  unit.inputBusses.count, unit.outputBusses.count))
+        runtime::log_error("AUv3 load: '{}': {}", requested.unique_id,
+                           auv3_internal::kRemoteUnitWithoutBuses);
 
     PluginInfo info = requested;
     if (info.name.empty())

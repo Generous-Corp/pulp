@@ -7,6 +7,12 @@ on:
 permissions:
   contents: read
 
+# Keep pull-request validation to the newest head for each PR while preserving
+# independent merge-group, main-push, scheduled, and manual runs.
+concurrency:
+  group: vellum-freeze-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   freeze-check:
     name: Vellum freeze
@@ -157,6 +163,11 @@ jobs:
       - name: Install inventory parser dependency
         run: tools/ci/net-retry.sh python3 -m pip install --quiet 'pyyaml==6.0.2'
 
+      - name: Report UI drift from the export (advisory)
+        if: hashFiles('.github/vellum-export-receipt/unit-of.json') != ''
+        continue-on-error: true
+        run: python3 tools/scripts/vellum_ui_drift_report.py --head HEAD
+
       - name: Run freeze-check negative controls
         run: |
           python3 tools/scripts/test_vellum_freeze_check.py
@@ -165,6 +176,7 @@ jobs:
           python3 tools/scripts/test_github_app_jwt.py
           python3 tools/scripts/test_vellum_authority_workflows.py
           python3 tools/scripts/test_vellum_trusted_merge.py
+          python3 tools/scripts/test_vellum_ui_drift_report.py
           python3 tools/scripts/test_vellum_borrowed_coverage_check.py
 
       - name: Verify extraction and tooling inventories

@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/scanner_vibrato.hpp",
+  "fingerprint": "sha256:68756657c39c6d95b8669991138e45068a49d1ac6c4892c9e66217771cda053f",
+  "include": "pulp/signal/scanner_vibrato.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

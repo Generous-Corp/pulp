@@ -1,0 +1,9 @@
+{
+  "domain": "playback",
+  "source": "core/playback/include/pulp/playback/chord_pattern_renderer.hpp",
+  "fingerprint": "sha256:60e4e8779676eedff5f0e2f4b31b7f2cb610079168cbdaa84c7c3b774d3f919a",
+  "include": "pulp/playback/chord_pattern_renderer.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Registration of the pulp.playback.chord_pattern content schema and its ChordPatternContent value type against the compile-context registry. It is one registered content kind inside the playback compiler rather than an advertised consumer capability; the capability claim, if one is made, belongs to the content surface that authors these patterns."
+}

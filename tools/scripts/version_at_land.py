@@ -586,20 +586,42 @@ def _fold_migration_notes(repo: Path, plan: list[Assignment]) -> list[str]:
         return []
 
 
-# What `agent_capability_manifest.py --assign-pending` rewrites: the counter
-# constants and the three generated artifacts that carry them.
+# What `agent_capability_manifest.py --assign-pending` may rewrite: the counter
+# constants, the installed snapshot, the surface ledger's meta file (which holds
+# its counter), and new history entry files. Matched as fnmatch globs.
 CAPABILITY_SCRIPT = "tools/scripts/agent_capability_manifest.py"
 CAPABILITY_ASSIGNED_PATHS = (
     CAPABILITY_SCRIPT,
     "docs/status/agent-capabilities.json",
-    "docs/status/agent-capability-surface.json",
-    "tools/agent-capabilities/contract-history.json",
+    "docs/status/agent-capability-surface/meta.json",
+    "tools/agent-capabilities/history/*.json",
+)
+# Everything a capability `--write` can touch. An assignment that moved any of
+# these outside CAPABILITY_ASSIGNED_PATHS found drift on main (a header record
+# or fingerprint the tree no longer matches), which is not the bump's to carry:
+# it is discarded and the counters stay pending.
+CAPABILITY_RECORD_PATHS = (
+    CAPABILITY_SCRIPT,
+    "docs/status/agent-capabilities.json",
+    "docs/status/agent-capability-surface",
+    "tools/agent-capabilities/history",
+    "tools/agent-capabilities/fingerprints",
+    "test/test_agent_capability_compile.cpp",
 )
 
 
 # --assign-pending regenerates the manifest, surface ledger and history, which
 # takes seconds; a hung run must not hold the bump that releases everything else.
 CAPABILITY_ASSIGN_TIMEOUT_SECS = 300
+
+
+def _restore_capability_records(repo: Path) -> None:
+    """Put every capability record back as HEAD has it, new files included."""
+    # One path at a time: a pathspec the tree does not track would make a
+    # combined checkout restore nothing.
+    for path in CAPABILITY_RECORD_PATHS:
+        subprocess.run(["git", "checkout", "--", path], cwd=repo, capture_output=True)
+        subprocess.run(["git", "clean", "-fq", "--", path], cwd=repo, capture_output=True)
 
 
 def _assign_capability_counters(repo: Path, plan: list[Assignment]) -> list[str]:
@@ -623,14 +645,23 @@ def _assign_capability_counters(repo: Path, plan: list[Assignment]) -> list[str]
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as error:
         print(f"version-at-land: could not assign pending capability counters; "
               f"they stay pending{_failure_tail(error)}", file=sys.stderr)
-        # One path at a time: a pathspec the tree does not track would make a
-        # combined checkout restore nothing.
-        for path in CAPABILITY_ASSIGNED_PATHS:
-            subprocess.run(["git", "checkout", "--", path], cwd=repo, capture_output=True)
+        _restore_capability_records(repo)
         return []
-    moved = subprocess.run(["git", "status", "--porcelain", "--", *CAPABILITY_ASSIGNED_PATHS],
-                           cwd=repo, capture_output=True, text=True, encoding="utf-8").stdout
-    return [line[3:] for line in moved.splitlines() if line.strip()]
+    status = subprocess.run(["git", "status", "--porcelain", "--untracked-files=all", "--",
+                             *CAPABILITY_RECORD_PATHS],
+                            cwd=repo, capture_output=True, text=True, encoding="utf-8").stdout
+    moved = [line[3:] for line in status.splitlines() if line.strip()]
+    stray = [path for path in moved
+             if not any(fnmatch.fnmatchcase(path, pattern) for pattern in CAPABILITY_ASSIGNED_PATHS)]
+    if stray:
+        print("version-at-land: could not assign pending capability counters; they stay "
+              "pending: the assignment also rewrote " + ", ".join(sorted(stray)[:5])
+              + (" ..." if len(stray) > 5 else "")
+              + ", which means main's capability records are not fresh "
+              "(run agent_capability_manifest.py --check on main)", file=sys.stderr)
+        _restore_capability_records(repo)
+        return []
+    return moved
 
 
 def _write_plan(repo: Path, config: Config, plan: list[Assignment]) -> list[str]:
@@ -1086,6 +1117,35 @@ def _plan_rises_above_tip(repo: Path, config: Config, plan: list[Assignment],
     return False
 
 
+def _capability_assignment_is_stale(repo: Path, tip: str, head: str) -> bool:
+    """Whether the standing bump assigns capability counters main has outgrown.
+
+    `--assign-pending` assigns the capability material of the commit the bump
+    was cut from. A landing that changes that material afterwards (a public
+    header, a capability record) makes the assignment name a state main no
+    longer has, and `agent_capability_manifest.py --check` rejects the merge
+    result every time: the bump PR cannot land green until it is rebuilt on
+    the new main. Unlike a version that merely lags, this is not something the
+    next drain can absorb, so it is updated at once rather than held for the
+    coalesce window. Unreadable history counts as stale: a rebuild is cheap
+    and a doomed merge group is not."""
+    cut = _git(repo, "rev-parse", "--verify", "--quiet", f"{tip}^1",
+               check=False).stdout.strip()
+    if not cut:
+        return True
+    carried = _git(repo, "diff", "--name-only", cut, tip, "--",
+                   *CAPABILITY_RECORD_PATHS, check=False)
+    if carried.returncode != 0:
+        return True
+    if not any(any(fnmatch.fnmatchcase(path, pattern)
+                   for pattern in CAPABILITY_ASSIGNED_PATHS)
+               for path in carried.stdout.split()):
+        return False
+    moved = _git(repo, "diff", "--quiet", cut, head, "--",
+                 *CAPABILITY_RECORD_PATHS, check=False)
+    return moved.returncode != 0
+
+
 def _standing_bump_is_current(repo: Path, tip: str, head: str,
                               edited: list[str], message: str) -> bool:
     """Whether the bump just built on `head` is the bump the standing PR carries.
@@ -1215,7 +1275,8 @@ def _update_standing_pr(
     push against the observed `tip`; the PR, its number, labels and review
     thread stay), `"stale-wait"` when the standing head already is this bump
     and is healthy, `"standing-held"` when an update is due but the coalesce
-    window has not passed and no surface needs a higher version, `"noop"` when
+    window has not passed, no surface needs a higher version and the head's
+    capability assignment still matches main, `"noop"` when
     the plan writes nothing, and `"exhausted"` when the push lost its lease.
 
     A dead or red head is repaired the same way: replacing the head clears the
@@ -1239,7 +1300,9 @@ def _update_standing_pr(
         return "stale-wait"
     age = _tip_age_minutes(repo, tip, now)
     rises = (not current) and _plan_rises_above_tip(repo, config, plan, tip)
-    if not (release_now or window <= 0 or rises or age is None or age >= window):
+    doomed = (not current) and _capability_assignment_is_stale(repo, tip, head)
+    if not (release_now or window <= 0 or rises or doomed or age is None
+            or age >= window):
         if report is not None:
             report.update(coalesce=(
                 f"the standing bump PR was built {age} min ago (window "
@@ -1297,8 +1360,9 @@ def apply_via_pr(
                      how a dead or red head is repaired with `heal_stale`:
                      replacing it clears the verdict and reruns the checks.
       "standing-held" — an update is due but `coalesce_window` has not passed
-                     since the standing head was built and no surface needs a
-                     higher version; the PR keeps its head. `report` carries
+                     since the standing head was built, no surface needs a
+                     higher version, and no capability landing has outgrown
+                     the head's counter assignment; the PR keeps its head. `report` carries
                      the reason.
       "stale-wait" — the standing bump PR is left as it is: it is in the merge
                      queue, its head already is the bump this run would build,
@@ -1391,7 +1455,10 @@ def apply_via_pr(
             return "stale-defer", plan
         if state == "queued":
             return "stale-wait", plan
-        if state in ("red", "dead") and not heal_stale:
+        if state in ("red", "dead") and not heal_stale and not (
+                tip is not None and _capability_assignment_is_stale(repo, tip, head)):
+            # A head whose capability assignment main has outgrown can never
+            # land, so repairing it needs no opt-in.
             return "stale-defer", plan
         if tip is None:
             # The branch could not be read, so there is nothing to compare

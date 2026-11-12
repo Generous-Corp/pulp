@@ -33,7 +33,7 @@
         "docs/status/agent-capabilities.json",
         "docs/status/agent-capabilities.schema.json",
         "docs/status/agent-capability-handoff.schema.json",
-        "docs/status/agent-capability-surface.json",
+        "docs/status/agent-capability-surface/**",
         "docs/status/agent-capability-surface.schema.json",
         "docs/status/authority-navigation.json",
         "docs/status/authority-navigation.schema.json",
@@ -499,6 +499,20 @@
         "android/app/src/main/kotlin/com/pulp/motion/**",
         "android/app/src/test/kotlin/com/pulp/motion/**",
         "test/test_motion_android_bridge.cpp"
+      ]
+    },
+    "midi-learn": {
+      "paths": [
+        "core/state/include/**/midi_learn*",
+        "core/state/include/**/midi_feedback.hpp",
+        "core/state/include/**/midi_mapping.hpp",
+        "core/state/include/**/midi_decode.hpp",
+        "core/state/include/**/midi_source.hpp",
+        "core/state/src/midi_learn*",
+        "core/format/include/**/midi_learn_support.hpp",
+        "core/view/include/**/midi_learn*",
+        "core/view/src/midi_learn*",
+        "examples/midi-learn-demo/**"
       ]
     },
     "mpe": {
@@ -1043,7 +1057,10 @@
         "core/timeline/PulpTimelineSources.cmake",
         "core/playback/PulpPlaybackSources.cmake",
         "core/audio/include/pulp/audio/wav_decoder.hpp",
+        "core/audio/include/pulp/audio/wave_layout.hpp",
         "core/audio/src/wav_decoder.cpp",
+        "core/audio/src/wav_frame_reader.hpp",
+        "core/audio/src/wave_layout.cpp",
         "external/dr_libs/dr_wav.h",
         "tools/scripts/*web_timeline_source_closure_check.py",
         ".github/workflows/web-plugins.yml",

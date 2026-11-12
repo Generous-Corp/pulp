@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/source_filter_analysis.hpp",
+  "fingerprint": "sha256:eb64faa37ff3e4b93fc884943fda3ea4acc723b61b9b8593abac3f0102dd3d26",
+  "include": "pulp/signal/source_filter_analysis.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.source-filter-analysis"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

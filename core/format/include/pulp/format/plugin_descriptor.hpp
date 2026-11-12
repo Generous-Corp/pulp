@@ -331,6 +331,14 @@ struct PluginDescriptor {
     /// positional aggregate initializer's meaning.
     std::uint32_t voice_count = 0;
 
+    /// Opt in to choosing presets by MIDI Bank Select + Program Change. Format
+    /// adapters that support it create a preset library with a program map for
+    /// the instance, scan incoming MIDI for the numbers on the audio thread
+    /// (no loading there) and load the matching preset on the main thread.
+    /// Appended last so every positional aggregate initializer keeps its
+    /// meaning. Default false: a plug-in that does not opt in sees no change.
+    bool supports_program_change = false;
+
     NodeCapabilities effective_capabilities() const {
         return {
             .supports_mpe = supports_mpe || node_capabilities.supports_mpe,

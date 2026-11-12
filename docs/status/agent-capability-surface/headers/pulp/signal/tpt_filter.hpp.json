@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/tpt_filter.hpp",
+  "fingerprint": "sha256:44621a5e2035d72cce3ef0c62d3a334c913ef7059780d2c7475834df4dfce04f",
+  "include": "pulp/signal/tpt_filter.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "First-order topology-preserving-transform lowpass/highpass/allpass with per-sample and block paths. A bounded DSP primitive documented in the signal guide; it makes no installed agent capability claim of its own."
+}

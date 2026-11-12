@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 1.97.0
+    VERSION 1.117.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -1010,12 +1010,22 @@ if(PULP_BUILD_TESTS)
     add_subdirectory(test/fixtures/native_ui_link_floor)
     add_subdirectory(test/fixtures/no_editor_link_floor)
     add_subdirectory(test/fixtures/host_probe)
+    add_subdirectory(test/fixtures/scale_probe)
     add_subdirectory(test/fixtures/host_midi_probe)
     add_subdirectory(test/fixtures/data_display_editor)
     add_subdirectory(test/fixtures/editor_ui_package)
     add_subdirectory(test/fixtures/linux_plugin_isolation)
     add_subdirectory(test/fixtures/linux_reload_host)
     add_subdirectory(test/fixtures/ui_script_plugin)
+endif()
+
+# The pulp-native example plug-in, built with the tests so its host proof and
+# symbol census run, or on request with the examples.
+if(TARGET pulp-native AND (PULP_BUILD_TESTS OR PULP_BUILD_EXAMPLES))
+    add_subdirectory(integrations/pulp-native/examples/metal-probe)
+endif()
+if(TARGET pulp-rmlui-native AND PULP_BUILD_TESTS)
+    add_subdirectory(integrations/rmlui-native/tests)
 endif()
 
 # ── CPU-only GPU-probe contract model (desktop tooling) ───────────────────
@@ -1114,6 +1124,7 @@ endif()
 # ── Out-of-process plugin scan worker ─────────────────────────────────────
 if(NOT IOS AND NOT ANDROID AND PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/scan-worker)
+    add_subdirectory(tools/clap-worker)
 endif()
 
 # ── Design Tool ───────────────────────────────────────────────────────────

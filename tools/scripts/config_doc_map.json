@@ -52,6 +52,16 @@
   },
   {
    "paths": [
+    ".github/workflows/release-configure.yml",
+    "tools/ci/release_configure_matrix.py"
+   ],
+   "docs": [
+    "docs/guides/local-ci.md"
+   ],
+   "why": "The release-configure lane (which release legs it configures, on which hosted images, what it replays from release-cli.yml and what it skips, its scope list and why its trigger must never be path-filtered) is documented in local-ci.md; changing any of that without a doc edit drifts the description."
+  },
+  {
+   "paths": [
     "tools/scripts/runner_topology.json",
     ".github/workflows/runner-topology-check.yml"
    ],
@@ -143,13 +153,12 @@
   },
   {
    "paths": [
-    ".github/workflows/codex-review-request.yml",
     "tools/scripts/codex_review_signal.sh"
    ],
    "docs": [
     "docs/guides/local-ci.md"
    ],
-   "why": "Codex skips automatic review on App-authored PRs, so the request workflow and its signal check are the only thing standing between an agent-opened PR and merging unreviewed; local-ci.md documents which identity is used and what counts as proof a review happened. Changing either without the guide drifts the documented review coverage."
+   "why": "Codex skips automatic review on App-authored PRs, and a bot-posted request does not start one; local-ci.md documents what counts as proof a review happened. Changing the signal check without the guide drifts the documented review coverage."
   },
   {
    "paths": [
@@ -174,6 +183,16 @@
     "docs/guides/test-lanes.md"
    ],
    "why": "Hosted macOS advisory cadence and arm-time dispatch are documented in test-lanes.md; workflow trigger changes without that guide drift the operator-facing CI load policy."
+  },
+  {
+   "paths": [
+    ".github/workflows/vellum-sdk-consumer.yml",
+    "tools/ci/vellum_sdk_consumer.py"
+   ],
+   "docs": [
+    "docs/guides/test-lanes.md"
+   ],
+   "why": "The Vellum SDK consumer lane's triggers, artifact resolution, negative control and runner routing are documented in test-lanes.md; changing the lane without that guide drifts the documented account of what catches a Vellum change that breaks a Pulp consumer."
   }
  ]
 }

@@ -1,11 +1,36 @@
 {
- "_comment": "Shared generated aggregates that a branch must never edit directly (tools/scripts/hotspot_edit_guard.py). Each was a top merge-conflict hotspot and now lives as one fragment per entry; a branch writes the fragment through `writer`, never the aggregate. Register a hotspot here only once its fragments exist, or every legitimate edit would be refused.",
+ "_comment": "Shared generated aggregates that a branch must never edit directly (tools/scripts/hotspot_edit_guard.py). Each was a top merge-conflict hotspot and now lives as one fragment per entry; a branch writes the fragment through `writer`, never the aggregate. Register a hotspot here only once its fragments exist, or every legitimate edit would be refused. A hotspot that was a literal repeated inside hand-written files registers `path` as a glob plus an `added_line_pattern`; only a change that adds a matching line is refused.",
  "hotspots": [
   {
    "fragments": "test/ctest_script_inputs/",
    "path": "test/ctest_script_inputs.json",
    "why": "75 non-merge commits on main in one week, and the most conflicted file in the repository: every pull request that added or re-pointed a script test rewrote neighbouring lines of one generated document",
    "writer": "python3 tools/scripts/script_test_inputs.py --build-dir <configured build dir> --write"
+  },
+  {
+   "fragments": "docs/status/agent-capability-surface/",
+   "path": "docs/status/agent-capability-surface.json",
+   "why": "every capability change that added, removed or re-reviewed a public header rewrote one sorted ledger, so two branches adding headers at neighbouring positions conflicted; it is now one record file per header",
+   "writer": "python3 tools/scripts/agent_capability_manifest.py --write"
+  },
+  {
+   "fragments": "tools/agent-capabilities/history/",
+   "path": "tools/agent-capabilities/contract-history.json",
+   "why": "an append-only array: every recorded state was written at the same tail, so two branches always conflicted on its last lines; it is now one file per recorded state, chained by parent digest",
+   "writer": "python3 tools/scripts/agent_capability_manifest.py --write"
+  },
+  {
+   "added_line_pattern": "\\bheader_fingerprint\\s*=",
+   "fragments": "tools/agent-capabilities/fingerprints/",
+   "path": "tools/scripts/agent_capability_catalog_*.py",
+   "why": "236 copies of whole-header digests sat on catalog rows, one per binding, so one header edit rewrote every row naming it; each header's reviewed digest is now one fragment",
+   "writer": "python3 tools/scripts/agent_capability_manifest.py --migrate-fingerprints (or --accept-fingerprint <include> after reviewing the header)"
+  },
+  {
+   "mode": "serialized",
+   "path": "docs/status/consumption-profiles.json",
+   "why": "the build-derived census is one large aggregate; concurrent profile regenerations rewrote the same header and profile blocks and produced DIRTY refresh work (for example Pulp #11938)",
+   "writer": "python3 tools/scripts/consumption_census.py --build-dir <build-dir> --write, committed with the line `Serialized-Hotspot: docs/status/consumption-profiles.json reason=<why this branch is the writer>`"
   }
  ],
  "schema": "pulp-hotspot-edit-guard/v1"

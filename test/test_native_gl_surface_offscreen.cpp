@@ -166,8 +166,10 @@ TEST_CASE("destruction runs the release handler once, with the context refused",
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     });
-    while (frames.load() < 3)
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (frames.load() < 3 && std::chrono::steady_clock::now() < deadline)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    REQUIRE(frames.load() >= 3);
     int releases = 0;
     bool refused_during_release = false;
     s->set_release_handler([&] {

@@ -1,6 +1,6 @@
 // The Vellum side of the slice's editor. Compiled against the installed Vellum
-// SDK only: every `pulp::view` / `pulp::canvas` name below is Vellum's mirrored
-// unit, resolved from Vellum's shared libraries.
+// SDK only: every `view::` / `canvas::` name below is Vellum's mirrored unit,
+// resolved from Vellum's shared libraries.
 //
 // The installed SDK packages no foreign-window host for a mirrored view tree
 // (`PluginViewHost::create` lives in the unpackaged view-tooling unit), so
@@ -8,12 +8,7 @@
 // a foreign host, and the Pulp side presents them.
 
 #include "knob_panel.hpp"
-
-#include <pulp/canvas/canvas.hpp>
-#include <pulp/view/screenshot.hpp>
-#include <pulp/view/text_editor.hpp>
-#include <pulp/view/view.hpp>
-#include <pulp/view/widgets.hpp>
+#include "mirror_spelling.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -23,8 +18,8 @@ namespace slice_vellum_ui {
 
 namespace {
 
-namespace view = pulp::view;
-namespace canvas = pulp::canvas;
+namespace view = units::view;
+namespace canvas = units::canvas;
 
 std::atomic<int> g_live_panels{0};
 

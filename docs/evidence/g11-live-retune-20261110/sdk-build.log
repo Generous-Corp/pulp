@@ -1,0 +1,26 @@
+[governed-build] interactive lease acquired id=pulp-shipyard-local-5026-1794339515 cores=7 (asked 26, normal QoS)
+[governed-build] heartbeat every 60s for lease id=pulp-shipyard-local-5026-1794339515
+[0/2] Re-checking globbed directories...
+[1/17] Building CXX object core/audio/CMakeFiles/pulp-audio.dir/src/audio_file.cpp.o
+[2/17] Linking CXX static library core/audio/libpulp-audio.a
+[3/17] Linking CXX executable tools/timeline/pulp-sync-soak-capture
+ld: warning: ignoring duplicate libraries: 'core/midi/libpulp-midi.a', 'core/timebase/libpulp-timebase.a'
+[4/17] Linking CXX executable core/playback/pulp-android-fixture-runner
+[5/17] Linking CXX executable tools/design-ab/pulp-design-ab
+[6/17] Linking CXX executable tools/screenshot/pulp-screenshot
+ld: warning: ignoring duplicate libraries: 'core/state/libpulp-state.a'
+[7/17] Recording Pulp runtime pins
+[8/17] Linking CXX executable tools/audio/pulp-au-instrument-probe
+ld: warning: ignoring duplicate libraries: 'core/audio/libpulp-audio.a', 'core/midi/libpulp-midi.a', 'core/runtime/libpulp-runtime.a'
+[9/17] Linking CXX executable tools/audio/pulp-au-effect-ab
+ld: warning: ignoring duplicate libraries: 'core/audio/libpulp-audio.a', 'core/midi/libpulp-midi.a', 'core/runtime/libpulp-runtime.a'
+[10/17] Linking CXX executable tools/mcp/pulp-mcp
+[11/17] Linking CXX executable tools/editor-open/pulp-host-lane-probe
+[12/17] Linking CXX executable tools/appearance/pulp-appearance-audit
+ld: warning: ignoring duplicate libraries: 'core/state/libpulp-state.a'
+[13/17] Linking CXX executable tools/scan-worker/pulp-scan-worker
+ld: warning: ignoring duplicate libraries: 'core/runtime/libpulp-runtime.a'
+[14/17] Linking CXX executable tools/design/pulp-design-debug
+ld: warning: ignoring duplicate libraries: 'core/state/libpulp-state.a'
+[15/17] Linking CXX executable inspect/pulp-control-standalone-host
+[16/17] Generating pulp-control-shipping-stamps/pulp-control-standalone-host.STANDALONE.Release.sidecars-v2.stamp

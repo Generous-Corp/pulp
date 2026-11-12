@@ -643,7 +643,10 @@ holds the worker's real output. `AsyncBlockMode::Auto` also waits while
 `audio::PullRateDetector` sees the host pulling faster than real time without
 declaring it, which some hosts do when they bounce or freeze; without it such
 a render is silent. Waits are bounded by the configured deadline. Zero latency
-blocks waits on every call, like rendering inline.
+blocks waits on every call, like rendering inline. Auto times each call with
+`AsyncBlockWorkerConfig::pull_clock`, which defaults to the steady clock; a
+caller that already knows the pull rate (or a test that must not depend on
+thread scheduling) can supply its own realtime-safe clock.
 
 ## Verifying the contract in tests
 
@@ -657,6 +660,21 @@ lock writes `[pulp-rt-trap] allocation inside no-alloc scope` and
 by a soft assertion. A Rust `#[global_allocator]` routes the checking
 core's allocations through the same trap. On non-UNIX builds the
 fallback `RtAllocationProbe` *counts* allocations instead.
+
+A count of zero proves nothing unless the probe can see allocations at all:
+if `harness/rt_allocation_probe.cpp` is not linked, or another replacement of
+`operator new` wins, every absence assertion passes without looking. Call
+`RtAllocationProbe::self_check()` first. It allocates through
+`::operator new` and through a new-expression whose pointer escapes, so
+neither can be optimised away, and returns true only if both were counted
+with their sizes:
+
+```cpp
+REQUIRE(pulp::test::RtAllocationProbe::self_check());
+pulp::test::RtAllocationProbe probe;
+processor.process(buffer);
+REQUIRE_FALSE(probe.saw_allocation());
+```
 
 `test/harness/scoped_rt_process_probe.hpp` exposes the shared
 `pulp::test::ScopedRtProcessProbe`, which enters an always-on

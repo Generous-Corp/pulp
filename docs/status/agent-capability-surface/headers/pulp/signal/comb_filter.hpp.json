@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/comb_filter.hpp",
+  "fingerprint": "sha256:6f5963276c7fc2f68985dba678754f7afc4216b2486f3f4c356b3344eeceda4c",
+  "include": "pulp/signal/comb_filter.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.comb-filter"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

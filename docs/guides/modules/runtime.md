@@ -21,6 +21,77 @@ The runtime module provides lock-free primitives, logging, assertions, and scope
 
 **Never use on the audio thread**: `std::mutex`, `std::condition_variable`, heap allocation, I/O.
 
+## Retained child process custody
+
+`pulp/platform/child_process.hpp` provides an opt-in macOS desktop process-group
+cleanup contract. Create a `RetainedProcessCustody` reservation in the owner's
+finite quarantine before calling `ChildProcess::start_retained()` or
+`start_retained_with_standard_input_channel()`. Other platforms return `false`
+before spawning and report `Unsupported`. The ordinary `start()` behavior is
+unchanged.
+
+The direct child stays unreaped after exit, reserving its PID and process-group
+identity until descendants have disappeared. `retained_process_observation()`
+and `is_running()` never reap it. For retained launches, `wait()` returns the
+current result snapshot immediately; it does not wait, drain output, enforce
+`timeout_ms`, or release custody. Use the observation's `exit_code` and
+`termination_signal` to distinguish normal exit from signal termination.
+Output snapshots include only bytes already captured by private-channel
+handshake draining. `read_available_output()` returns stdout bytes directly
+without accumulating them in that snapshot.
+
+Call `cleanup_retained_process_group(deadline)` on a control thread. It attempts
+TERM, allows 100 ms before KILL, retries KILL every 10 ms while custody remains,
+and checks group disappearance before a
+nonblocking child reap. Each call is capped by the supplied steady-clock
+deadline and two seconds. `Incomplete` and `Busy` leave cleanup pending: retain
+the reservation and retry from the owner. A deadline that has already elapsed
+causes no signals. `Complete` with `descendants_gone` and `child_reaped` is the
+receipt for a spawned child; a failed pre-spawn launch has no child to reap.
+`CustodyLost` forbids further group signals and never means successful cleanup.
+
+The handle and reservation are single-use. Moving or destroying the process
+handle preserves the reservation, including after a failed private-channel
+handshake. Keep the reservation until cleanup completes and bound the owner's
+quarantine capacity before admitting new workers. Last-owner destruction
+attempts bounded cleanup; unresolved custody is diagnosed and its record is
+self-retained until host exit. This is a contract violation, not successful
+cleanup. No global reaper owns these records.
+
+### Joined direct-child custody
+
+`CurrentProcessGroup::capture()` mints a move-only, process-local capability
+only for a macOS desktop process that is still its own process-group leader.
+Pass that capability and a fresh `JoinedChildCustody` to
+`ChildProcess::start_joined_to_current_group()` (or its private-channel
+variant). The launch uses the anchor's existing group and verifies the exact
+child's membership while it is suspended, before a vendor-permission callback
+can run. Other platforms reject the request before spawning.
+
+Joined custody owns only the direct child's observation, signaling and
+nonblocking reaping. `wait()`, `is_running()`, handle moves, cancellation and
+destruction never signal the anchor's group. Keep each move-only reservation
+in the owner's finite quarantine until `cleanup_joined_child()` returns
+`Complete`; `Incomplete`, `Busy`, or `CustodyLost` leave the record pending.
+The caller must serialize control-thread operations, must not reap the child
+independently, and must not install SIGCHLD auto-reaping while the reservation
+is live. Spawn closes unrelated inherited descriptors, including duplicated
+anchor endpoints, and gives a joined worker deterministic `/dev/null` stdin
+unless a private channel is explicitly requested.
+
+This prerequisite covers a surviving anchor. It does not claim cleanup after
+host death or provide a security sandbox.
+
+All operations, including observation, are control-thread operations. Serialize
+handle moves, destruction, and launch against other operations. Cleanup may
+return `Busy` when another thread holds the same process state. Do not call
+`waitpid` independently, install `SIGCHLD` auto-reaping, or run another child
+reaper over a retained or joined child. Private-channel callbacks must bound their own
+work to their supplied deadline; internal output draining runs on a worker
+thread and may also request cleanup after a callback failure. Process groups do not contain a descendant
+that deliberately escapes through `setsid`/`setpgid`, and this contract does not
+provide cleanup after host death or a security sandbox.
+
 ## SeqLock
 
 Lock-free reader/writer for coherent multi-field snapshots. The writer increments a sequence counter (odd = writing, even = complete). The reader retries if the sequence was odd or changed during the read.

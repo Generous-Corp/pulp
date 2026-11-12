@@ -39,7 +39,6 @@ EXPORTS = [
                 include='pulp/signal/unit_delay.hpp',
                 qualified_name='pulp::signal::UnitDelay',
                 target='Pulp::signal',
-                header_fingerprint='sha256:7e91b280e5a3a83b78ed1f84301990eee1b6dcaa8b7736f07287452896d22726',
             ),
         ],
     ),
@@ -293,7 +292,6 @@ EXPORTS = [
                 include='pulp/host/sample_region_authoring.hpp',
                 qualified_name='pulp::host::SampleRegionDefinition',
                 target='Pulp::host',
-                header_fingerprint='sha256:15e798963f6115b371c9a644de16619a6ea10e5c797845b25db72c14301ebaf7',
             ),
             binding(
                 role='descriptor',
@@ -301,7 +299,6 @@ EXPORTS = [
                 include='pulp/host/sample_region_authoring.hpp',
                 qualified_name='pulp::host::SampleRegionDescriptor',
                 target='Pulp::host',
-                header_fingerprint='sha256:15e798963f6115b371c9a644de16619a6ea10e5c797845b25db72c14301ebaf7',
             ),
             binding(
                 role='result',
@@ -309,7 +306,6 @@ EXPORTS = [
                 include='pulp/host/sample_region_authoring.hpp',
                 qualified_name='pulp::host::SampleRegionResult',
                 target='Pulp::host',
-                header_fingerprint='sha256:15e798963f6115b371c9a644de16619a6ea10e5c797845b25db72c14301ebaf7',
             ),
             binding(
                 role='promoted_parameter',
@@ -317,7 +313,6 @@ EXPORTS = [
                 include='pulp/host/sample_region_authoring.hpp',
                 qualified_name='pulp::host::SampleRegionPromotedParameter',
                 target='Pulp::host',
-                header_fingerprint='sha256:15e798963f6115b371c9a644de16619a6ea10e5c797845b25db72c14301ebaf7',
             ),
             binding(
                 role='proof',
@@ -325,7 +320,6 @@ EXPORTS = [
                 include='pulp/host/sample_region_proof.hpp',
                 qualified_name='pulp::host::SampleRegionProof',
                 target='Pulp::host',
-                header_fingerprint='sha256:f40d8f2adf1ba7cb5c2b5e415d1f8c0219b95eb9c470f89041e9f45569f8f4a4',
             ),
             binding(
                 role='limits',
@@ -333,7 +327,6 @@ EXPORTS = [
                 include='pulp/host/sample_region_proof.hpp',
                 qualified_name='pulp::host::SampleRegionLimits',
                 target='Pulp::host',
-                header_fingerprint='sha256:f40d8f2adf1ba7cb5c2b5e415d1f8c0219b95eb9c470f89041e9f45569f8f4a4',
             ),
             binding(
                 role='kernel_config',
@@ -341,7 +334,6 @@ EXPORTS = [
                 include='pulp/host/custom_node_type.hpp',
                 qualified_name='pulp::host::SampleKernelConfig',
                 target='Pulp::host',
-                header_fingerprint='sha256:8cc51fc538c6415fd580a4d4bf4a45e3a6570435b7649581b3516f1074dd4df7',
             ),
             binding(
                 role='kernel_descriptor',
@@ -349,7 +341,6 @@ EXPORTS = [
                 include='pulp/host/custom_node_type.hpp',
                 qualified_name='pulp::host::SampleKernelDescriptor',
                 target='Pulp::host',
-                header_fingerprint='sha256:8cc51fc538c6415fd580a4d4bf4a45e3a6570435b7649581b3516f1074dd4df7',
             ),
             binding(
                 role='graph',
@@ -357,7 +348,6 @@ EXPORTS = [
                 include='pulp/host/signal_graph.hpp',
                 qualified_name='pulp::host::SignalGraph',
                 target='Pulp::host',
-                header_fingerprint='sha256:5d27680ef37b465e122b3edb957b8d7ff01d691042004a93d1f91df4d90d49f3',
             ),
             binding(
                 role='parameter_contract',
@@ -365,7 +355,6 @@ EXPORTS = [
                 include='pulp/host/sample_region_parameters.hpp',
                 qualified_name='pulp::host::SampleRegionParameterContract',
                 target='Pulp::host',
-                header_fingerprint='sha256:39d608c270c2714a56d0f6213d75837abfead2b271503e02b597ddf6f21e8c25',
             ),
             binding(
                 role='register_graph',
@@ -373,7 +362,6 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::register_builtin_sample_region_types',
                 target='Pulp::host',
-                header_fingerprint='sha256:2c4909390c39a83a2360a1dea23bf6ee1449276edf42949742e818dade300c8d',
                 address_expression='static_cast<bool (*)(pulp::host::SignalGraph&)>(&pulp::host::register_builtin_sample_region_types)',
             ),
             binding(
@@ -382,7 +370,6 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::register_builtin_sample_region_types',
                 target='Pulp::host',
-                header_fingerprint='sha256:2c4909390c39a83a2360a1dea23bf6ee1449276edf42949742e818dade300c8d',
                 address_expression='static_cast<bool (*)(pulp::host::SignalGraph::PreparedTopologyEdit&)>(&pulp::host::register_builtin_sample_region_types)',
             ),
             binding(
@@ -391,7 +378,6 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::begin_prepared_topology_edit',
                 target='Pulp::host',
-                header_fingerprint='sha256:2c4909390c39a83a2360a1dea23bf6ee1449276edf42949742e818dade300c8d',
             ),
             binding(
                 role='edit_declare_sample_region',
@@ -399,7 +385,6 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::declare_sample_region',
                 target='Pulp::host',
-                header_fingerprint='sha256:2c4909390c39a83a2360a1dea23bf6ee1449276edf42949742e818dade300c8d',
             ),
             binding(
                 role='edit_remove_sample_region',
@@ -407,7 +392,6 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::remove_sample_region',
                 target='Pulp::host',
-                header_fingerprint='sha256:2c4909390c39a83a2360a1dea23bf6ee1449276edf42949742e818dade300c8d',
             ),
             binding(
                 role='edit_add_sample_region_member',
@@ -415,7 +399,6 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::add_sample_region_member',
                 target='Pulp::host',
-                header_fingerprint='sha256:2c4909390c39a83a2360a1dea23bf6ee1449276edf42949742e818dade300c8d',
             ),
             binding(
                 role='edit_remove_sample_region_member',
@@ -423,7 +406,6 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::remove_sample_region_member',
                 target='Pulp::host',
-                header_fingerprint='sha256:2c4909390c39a83a2360a1dea23bf6ee1449276edf42949742e818dade300c8d',
             ),
             binding(
                 role='edit_set_sample_kernel_config',
@@ -431,7 +413,6 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::set_sample_kernel_config',
                 target='Pulp::host',
-                header_fingerprint='sha256:2c4909390c39a83a2360a1dea23bf6ee1449276edf42949742e818dade300c8d',
             ),
             binding(
                 role='edit_connect_in_sample_region',
@@ -439,7 +420,6 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::connect_in_sample_region',
                 target='Pulp::host',
-                header_fingerprint='sha256:2c4909390c39a83a2360a1dea23bf6ee1449276edf42949742e818dade300c8d',
             ),
             binding(
                 role='edit_prove_sample_region',
@@ -447,7 +427,6 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::prove_sample_region',
                 target='Pulp::host',
-                header_fingerprint='sha256:2c4909390c39a83a2360a1dea23bf6ee1449276edf42949742e818dade300c8d',
             ),
             binding(
                 role='edit_sample_region',
@@ -455,7 +434,6 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::sample_region',
                 target='Pulp::host',
-                header_fingerprint='sha256:2c4909390c39a83a2360a1dea23bf6ee1449276edf42949742e818dade300c8d',
             ),
             binding(
                 role='edit_sample_regions',
@@ -463,7 +441,6 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::sample_regions',
                 target='Pulp::host',
-                header_fingerprint='sha256:2c4909390c39a83a2360a1dea23bf6ee1449276edf42949742e818dade300c8d',
             ),
             binding(
                 role='edit_sample_region_parameter_contract',
@@ -471,7 +448,6 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::sample_region_parameter_contract',
                 target='Pulp::host',
-                header_fingerprint='sha256:2c4909390c39a83a2360a1dea23bf6ee1449276edf42949742e818dade300c8d',
             ),
             binding(
                 role='edit_prepare',
@@ -479,7 +455,6 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::prepare',
                 target='Pulp::host',
-                header_fingerprint='sha256:2c4909390c39a83a2360a1dea23bf6ee1449276edf42949742e818dade300c8d',
             ),
             binding(
                 role='edit_commit',
@@ -487,7 +462,6 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::commit',
                 target='Pulp::host',
-                header_fingerprint='sha256:2c4909390c39a83a2360a1dea23bf6ee1449276edf42949742e818dade300c8d',
             ),
             binding(
                 role='graph_prove_sample_region',
@@ -495,7 +469,6 @@ EXPORTS = [
                 include='pulp/host/signal_graph_runtime.hpp',
                 qualified_name='pulp::host::SignalGraph::prove_sample_region',
                 target='Pulp::host',
-                header_fingerprint='sha256:18a656271d2371678a12712b64019d70250186fe260bb6ffd61d352f8ff25be0',
             ),
             binding(
                 role='graph_sample_region',
@@ -503,7 +476,6 @@ EXPORTS = [
                 include='pulp/host/signal_graph_runtime.hpp',
                 qualified_name='pulp::host::SignalGraph::sample_region',
                 target='Pulp::host',
-                header_fingerprint='sha256:18a656271d2371678a12712b64019d70250186fe260bb6ffd61d352f8ff25be0',
             ),
             binding(
                 role='graph_sample_regions',
@@ -511,7 +483,6 @@ EXPORTS = [
                 include='pulp/host/signal_graph_runtime.hpp',
                 qualified_name='pulp::host::SignalGraph::sample_regions',
                 target='Pulp::host',
-                header_fingerprint='sha256:18a656271d2371678a12712b64019d70250186fe260bb6ffd61d352f8ff25be0',
             ),
             binding(
                 role='SampleRegionCandidate',
@@ -519,7 +490,6 @@ EXPORTS = [
                 include='pulp/host/sample_region_proof.hpp',
                 qualified_name='pulp::host::SampleRegionCandidate',
                 target='Pulp::host',
-                header_fingerprint='sha256:f40d8f2adf1ba7cb5c2b5e415d1f8c0219b95eb9c470f89041e9f45569f8f4a4',
             ),
             binding(
                 role='SampleRegionGraphProof',
@@ -527,7 +497,6 @@ EXPORTS = [
                 include='pulp/host/sample_region_proof.hpp',
                 qualified_name='pulp::host::SampleRegionGraphProof',
                 target='Pulp::host',
-                header_fingerprint='sha256:f40d8f2adf1ba7cb5c2b5e415d1f8c0219b95eb9c470f89041e9f45569f8f4a4',
             ),
             binding(
                 role='SampleRegionParserShape',
@@ -535,7 +504,6 @@ EXPORTS = [
                 include='pulp/host/sample_region_proof.hpp',
                 qualified_name='pulp::host::SampleRegionParserShape',
                 target='Pulp::host',
-                header_fingerprint='sha256:f40d8f2adf1ba7cb5c2b5e415d1f8c0219b95eb9c470f89041e9f45569f8f4a4',
             ),
             binding(
                 role='SampleRegionParserProof',
@@ -543,7 +511,6 @@ EXPORTS = [
                 include='pulp/host/sample_region_proof.hpp',
                 qualified_name='pulp::host::SampleRegionParserProof',
                 target='Pulp::host',
-                header_fingerprint='sha256:f40d8f2adf1ba7cb5c2b5e415d1f8c0219b95eb9c470f89041e9f45569f8f4a4',
             ),
             binding(
                 role='SampleRegionKernelNode',
@@ -551,7 +518,6 @@ EXPORTS = [
                 include='pulp/host/sample_region_proof.hpp',
                 qualified_name='pulp::host::SampleRegionKernelNode',
                 target='Pulp::host',
-                header_fingerprint='sha256:f40d8f2adf1ba7cb5c2b5e415d1f8c0219b95eb9c470f89041e9f45569f8f4a4',
             ),
             binding(
                 role='SampleRegionConnection',
@@ -559,7 +525,6 @@ EXPORTS = [
                 include='pulp/host/sample_region_proof.hpp',
                 qualified_name='pulp::host::SampleRegionConnection',
                 target='Pulp::host',
-                header_fingerprint='sha256:f40d8f2adf1ba7cb5c2b5e415d1f8c0219b95eb9c470f89041e9f45569f8f4a4',
             ),
             binding(
                 role='SampleRegionResourceStats',
@@ -567,7 +532,6 @@ EXPORTS = [
                 include='pulp/host/sample_region_proof.hpp',
                 qualified_name='pulp::host::SampleRegionResourceStats',
                 target='Pulp::host',
-                header_fingerprint='sha256:f40d8f2adf1ba7cb5c2b5e415d1f8c0219b95eb9c470f89041e9f45569f8f4a4',
             ),
             binding(
                 role='SampleRegionKernelRegistryView',
@@ -575,7 +539,6 @@ EXPORTS = [
                 include='pulp/host/sample_region_proof.hpp',
                 qualified_name='pulp::host::SampleRegionKernelRegistryView',
                 target='Pulp::host',
-                header_fingerprint='sha256:f40d8f2adf1ba7cb5c2b5e415d1f8c0219b95eb9c470f89041e9f45569f8f4a4',
             ),
             binding(
                 role='proof_is_sample_region_v1_descriptor',
@@ -583,7 +546,6 @@ EXPORTS = [
                 include='pulp/host/sample_region_proof.hpp',
                 qualified_name='pulp::host::is_sample_region_v1_descriptor',
                 target='Pulp::host',
-                header_fingerprint='sha256:f40d8f2adf1ba7cb5c2b5e415d1f8c0219b95eb9c470f89041e9f45569f8f4a4',
             ),
             binding(
                 role='proof_sample_region_config_matches',
@@ -591,7 +553,6 @@ EXPORTS = [
                 include='pulp/host/sample_region_proof.hpp',
                 qualified_name='pulp::host::sample_region_config_matches',
                 target='Pulp::host',
-                header_fingerprint='sha256:f40d8f2adf1ba7cb5c2b5e415d1f8c0219b95eb9c470f89041e9f45569f8f4a4',
             ),
             binding(
                 role='proof_prove_sample_region',
@@ -599,7 +560,6 @@ EXPORTS = [
                 include='pulp/host/sample_region_proof.hpp',
                 qualified_name='pulp::host::prove_sample_region',
                 target='Pulp::host',
-                header_fingerprint='sha256:f40d8f2adf1ba7cb5c2b5e415d1f8c0219b95eb9c470f89041e9f45569f8f4a4',
             ),
             binding(
                 role='proof_prove_sample_regions',
@@ -607,7 +567,6 @@ EXPORTS = [
                 include='pulp/host/sample_region_proof.hpp',
                 qualified_name='pulp::host::prove_sample_regions',
                 target='Pulp::host',
-                header_fingerprint='sha256:f40d8f2adf1ba7cb5c2b5e415d1f8c0219b95eb9c470f89041e9f45569f8f4a4',
             ),
             binding(
                 role='proof_prove_sample_region_parser_shape',
@@ -615,7 +574,6 @@ EXPORTS = [
                 include='pulp/host/sample_region_proof.hpp',
                 qualified_name='pulp::host::prove_sample_region_parser_shape',
                 target='Pulp::host',
-                header_fingerprint='sha256:f40d8f2adf1ba7cb5c2b5e415d1f8c0219b95eb9c470f89041e9f45569f8f4a4',
             ),
             binding(
                 role='contract_from_regions',
@@ -623,7 +581,6 @@ EXPORTS = [
                 include='pulp/host/sample_region_parameters.hpp',
                 qualified_name='pulp::host::SampleRegionParameterContract::from_regions',
                 target='Pulp::host',
-                header_fingerprint='sha256:39d608c270c2714a56d0f6213d75837abfead2b271503e02b597ddf6f21e8c25',
             ),
             binding(
                 role='contract_freeze',
@@ -631,7 +588,6 @@ EXPORTS = [
                 include='pulp/host/sample_region_parameters.hpp',
                 qualified_name='pulp::host::SampleRegionParameterContract::freeze',
                 target='Pulp::host',
-                header_fingerprint='sha256:39d608c270c2714a56d0f6213d75837abfead2b271503e02b597ddf6f21e8c25',
             ),
             binding(
                 role='contract_bind',
@@ -639,7 +595,6 @@ EXPORTS = [
                 include='pulp/host/sample_region_parameters.hpp',
                 qualified_name='pulp::host::SampleRegionParameterContract::bind',
                 target='Pulp::host',
-                header_fingerprint='sha256:39d608c270c2714a56d0f6213d75837abfead2b271503e02b597ddf6f21e8c25',
             ),
             binding(
                 role='edit_bind_parameters',
@@ -647,7 +602,6 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::bind_sample_region_parameters',
                 target='Pulp::host',
-                header_fingerprint='sha256:2c4909390c39a83a2360a1dea23bf6ee1449276edf42949742e818dade300c8d',
             ),
             binding(
                 role='edit_add_exact_node',
@@ -655,7 +609,6 @@ EXPORTS = [
                 include='pulp/host/signal_graph_prepared_topology_edit.hpp',
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::add_custom_node',
                 target='Pulp::host',
-                header_fingerprint='sha256:2c4909390c39a83a2360a1dea23bf6ee1449276edf42949742e818dade300c8d',
                 address_expression='static_cast<pulp::host::NodeId (pulp::host::SignalGraph::PreparedTopologyEdit::*)(std::string_view, int, const std::string&)>(&pulp::host::SignalGraph::PreparedTopologyEdit::add_custom_node)',
             ),
             binding(
@@ -665,7 +618,6 @@ EXPORTS = [
                 qualified_name='pulp::host::SignalGraph::PreparedTopologyEdit::connect',
                 address_expression='static_cast<bool (pulp::host::SignalGraph::PreparedTopologyEdit::*)(pulp::host::NodeId, pulp::host::PortIndex, pulp::host::NodeId, pulp::host::PortIndex)>(&pulp::host::SignalGraph::PreparedTopologyEdit::connect)',
                 target='Pulp::host',
-                header_fingerprint='sha256:2c4909390c39a83a2360a1dea23bf6ee1449276edf42949742e818dade300c8d',
             ),
         ],
     ),
@@ -690,11 +642,9 @@ EXPORTS = [
         tail="no padded analysis tail", scheduling="streaming hop cadence",
         bindings=[
             binding(role="chroma", kind="cpp_type", include="pulp/signal/analysis_frontends.hpp",
-                    qualified_name="pulp::signal::ChromaFrontEndT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:1c61b8a488617ee1cde8fd1d8092c0b1533bf55cbce5102d55ae153d40aaeca0"),
+                    qualified_name="pulp::signal::ChromaFrontEndT<float>", target="Pulp::signal"),
             binding(role="onset_novelty", kind="cpp_type", include="pulp/signal/analysis_frontends.hpp",
-                    qualified_name="pulp::signal::OnsetNoveltyFrontEndT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:1c61b8a488617ee1cde8fd1d8092c0b1533bf55cbce5102d55ae153d40aaeca0"),
+                    qualified_name="pulp::signal::OnsetNoveltyFrontEndT<float>", target="Pulp::signal"),
         ],
         _link_probes=[
             {"role": "chroma", "binding": "pulp::signal::ChromaFrontEndT<float>",
@@ -732,13 +682,11 @@ EXPORTS = [
             binding(role="entrypoint", kind="cpp_type",
                     include="pulp/signal/spectral_feature_frontends.hpp",
                     qualified_name="pulp::signal::SpectralFeatureFrontEndT<float>",
-                    target="Pulp::signal",
-                    header_fingerprint="sha256:2c125023b757d1343adb961acd4581cd015bcee94c5eb1333921c5cce78d7273"),
+                    target="Pulp::signal"),
             binding(role="frame", kind="cpp_type",
                     include="pulp/signal/spectral_feature_frontends.hpp",
                     qualified_name="pulp::signal::SpectralFeatureFrameT<float>",
-                    target="Pulp::signal",
-                    header_fingerprint="sha256:2c125023b757d1343adb961acd4581cd015bcee94c5eb1333921c5cce78d7273"),
+                    target="Pulp::signal"),
         ],
         _link_probes=[
             {"role": "entrypoint", "binding": "pulp::signal::SpectralFeatureFrontEndT<float>",
@@ -769,25 +717,20 @@ EXPORTS = [
         tail="prepared delay history until drained or reset", scheduling="sample-continuous",
         bindings=[
             binding(role="matrix", kind="cpp_type", include="pulp/signal/audio_matrix_mixer.hpp",
-                    qualified_name="pulp::signal::AudioMatrixMixerT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:36ef815dfd9072f7bba8d72aa0e0d53662952e1ee470f1c6b0cd4d64413c55ac"),
+                    qualified_name="pulp::signal::AudioMatrixMixerT<float>", target="Pulp::signal"),
             binding(role="mid_side", kind="cpp_function", include="pulp/signal/mid_side.hpp",
                     qualified_name="pulp::signal::mid_side_encode_block<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:709cb80f95a21bd20ec21ac9f055da2d41cf47b86ce91cdd444a408e00ff6443",
                     address_expression=("static_cast<bool (*)(const float*, const float*, float*, "
                                         "float*, std::size_t) noexcept>("
                                         "&pulp::signal::mid_side_encode_block<float>)")),
             binding(role="nway", kind="cpp_function", include="pulp/signal/nway_crossfade.hpp",
                     qualified_name="pulp::signal::nway_constant_power_gains<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:b1d33521a93b3cefd167f9441b6523b83fdffe1b873a20fb50caedac790ce9be",
                     address_expression=("static_cast<bool (*)(float, std::span<float>) noexcept>("
                                         "&pulp::signal::nway_constant_power_gains<float>)")),
             binding(role="aligner", kind="cpp_type", include="pulp/signal/path_latency_aligner.hpp",
-                    qualified_name="pulp::signal::PathLatencyAlignerT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:a7874bab7001e6c6ad31fd85a7176ec13af44c5047bf38d631e207ce3ae914c6"),
+                    qualified_name="pulp::signal::PathLatencyAlignerT<float>", target="Pulp::signal"),
             binding(role="switcher", kind="cpp_type", include="pulp/signal/path_switcher.hpp",
-                    qualified_name="pulp::signal::ClickFreePathSwitcherT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:adbf41862725587e477711ac144f5326cdcff3a31560aba47708a42d5cd471f1"),
+                    qualified_name="pulp::signal::ClickFreePathSwitcherT<float>", target="Pulp::signal"),
         ],
         _link_probes=[
             {"role": "matrix", "binding": "pulp::signal::AudioMatrixMixerT<float>",
@@ -818,14 +761,11 @@ EXPORTS = [
         latency="zero", tail="program-defined until idle", scheduling="sample-synchronous",
         bindings=[
             binding(role="curve", kind="cpp_type", include="pulp/signal/modulation_curve.hpp",
-                    qualified_name="pulp::signal::ModulationCurve", target="Pulp::signal",
-                    header_fingerprint="sha256:da89147c18e3c0479bf02294273bc7ec8ff76bc83cc7e198e645b14fe100a298"),
+                    qualified_name="pulp::signal::ModulationCurve", target="Pulp::signal"),
             binding(role="breakpoint", kind="cpp_type", include="pulp/signal/breakpoint_envelope.hpp",
-                    qualified_name="pulp::signal::BreakpointEnvelopeT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:4f37c4c188e7094d8bf615144d0735a629d26a974f394f40e380a69d82a74c06"),
+                    qualified_name="pulp::signal::BreakpointEnvelopeT<float>", target="Pulp::signal"),
             binding(role="rise_fall", kind="cpp_type", include="pulp/signal/rise_fall_generator.hpp",
-                    qualified_name="pulp::signal::RiseFallGeneratorT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:67185305462aff7fef2f089d00f0bf6eeaa5708436e3f042fca6b8271c4b3fa3"),
+                    qualified_name="pulp::signal::RiseFallGeneratorT<float>", target="Pulp::signal"),
         ],
         _link_probes=[
             {"role": "curve", "binding": "pulp::signal::ModulationCurve",
@@ -851,8 +791,7 @@ EXPORTS = [
         latency="zero", tail="continuous dither while enabled; reset clears error state",
         scheduling="sample-synchronous",
         bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/dither.hpp",
-                         qualified_name="pulp::signal::DitherQuantizerT<float>", target="Pulp::signal",
-                         header_fingerprint="sha256:72536ca7644208062b3769cceddfc8aa935d4b441db999b5a61171947446a9af")],
+                         qualified_name="pulp::signal::DitherQuantizerT<float>", target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::DitherQuantizerT<float>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
@@ -884,12 +823,10 @@ EXPORTS = [
         bindings=[
             binding(role="event_block", kind="cpp_type",
                     include="pulp/host/custom_node_events.hpp",
-                    qualified_name="pulp::host::CustomNodeEventBlock", target="Pulp::host",
-                    header_fingerprint="sha256:65e1cee2feab83530094c72b89dc87bde523c9b4ac10e5822e370f6dcc14f114"),
+                    qualified_name="pulp::host::CustomNodeEventBlock", target="Pulp::host"),
             binding(role="node_type", kind="cpp_type",
                     include="pulp/host/custom_node_type.hpp",
-                    qualified_name="pulp::host::CustomNodeType", target="Pulp::host",
-                    header_fingerprint="sha256:8cc51fc538c6415fd580a4d4bf4a45e3a6570435b7649581b3516f1074dd4df7"),
+                    qualified_name="pulp::host::CustomNodeType", target="Pulp::host"),
         ],
         _link_probes=[
             {"role": "event_block", "binding": "pulp::host::CustomNodeEventBlock",
@@ -914,17 +851,13 @@ EXPORTS = [
         latency="zero", tail="zero", scheduling="sample-synchronous",
         bindings=[
             binding(role="dust", kind="cpp_type", include="pulp/signal/dust.hpp",
-                    qualified_name="pulp::signal::DustT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:89ad91c2a9a54ab6f897d379c3587df4566c402abad75b1f71a802b66291684d"),
+                    qualified_name="pulp::signal::DustT<float>", target="Pulp::signal"),
             binding(role="lfsr", kind="cpp_type", include="pulp/signal/lfsr.hpp",
-                    qualified_name="pulp::signal::LfsrT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:16f353a4e8c715db25f84696bf5ff50ecdbd96aa29364dc3be1232c9e8a209de"),
+                    qualified_name="pulp::signal::LfsrT<float>", target="Pulp::signal"),
             binding(role="tilt", kind="cpp_type", include="pulp/signal/noise_tilt.hpp",
-                    qualified_name="pulp::signal::NoiseTiltT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:016c8e7e818ad23543da6e37c1e96e41557ed53f898afe80f8d9d65666912adb"),
+                    qualified_name="pulp::signal::NoiseTiltT<float>", target="Pulp::signal"),
             binding(role="velvet", kind="cpp_type", include="pulp/signal/velvet_noise.hpp",
-                    qualified_name="pulp::signal::VelvetNoiseGridT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:22c73b19189ad33fe12be75c3e8d20f6c7b098810756e31c6bd2dc3f02b75973"),
+                    qualified_name="pulp::signal::VelvetNoiseGridT<float>", target="Pulp::signal"),
         ],
         _link_probes=[
             {"role": role, "binding": name, "operation": "member_call", "member": "reset", "arguments": ""}
@@ -950,8 +883,7 @@ EXPORTS = [
         units=["samples", "hertz", "frames", "linear gain", "radians"],
         latency="zero", tail="exact longest configured release", scheduling="sample-synchronous",
         bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/fm_operator_engine.hpp",
-                         qualified_name="pulp::signal::FmOperatorEngineT<float>", target="Pulp::signal",
-                         header_fingerprint="sha256:020ce998eccea8e1f6451a24ca972bf47597ec2e1b971552d31af55543b2a0a2")],
+                         qualified_name="pulp::signal::FmOperatorEngineT<float>", target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::FmOperatorEngineT<float>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
@@ -978,8 +910,7 @@ EXPORTS = [
         scheduling="sample-synchronous with 32-sample bounded control ramps",
         bindings=[binding(
             role="entrypoint", kind="cpp_type", include="pulp/signal/additive_bank.hpp",
-            qualified_name="pulp::signal::AdditiveBankT<float>", target="Pulp::signal",
-            header_fingerprint="sha256:4a3a79b3d1d8faff30cb3778afd1b47c3591f525f6e30d0bb79c4ed50950be22")],
+            qualified_name="pulp::signal::AdditiveBankT<float>", target="Pulp::signal")],
         _link_probes=[{
             "role": "entrypoint", "binding": "pulp::signal::AdditiveBankT<float>",
             "operation": "member_call", "member": "reset", "arguments": ""
@@ -1002,11 +933,9 @@ EXPORTS = [
         tail="prepared delay history until overwritten or reset", scheduling="sample-synchronous",
         bindings=[
             binding(role="line", kind="cpp_type", include="pulp/signal/fractional_delay.hpp",
-                    qualified_name="pulp::signal::FractionalDelayLineT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:375d2e2acd389ad5a7194d5c362eac77a03e0a6c4e2c89bf38b09e10d86ed5e7"),
+                    qualified_name="pulp::signal::FractionalDelayLineT<float>", target="Pulp::signal"),
             binding(role="history", kind="cpp_type", include="pulp/signal/fractional_delay.hpp",
-                    qualified_name="pulp::signal::FractionalDelayHistoryT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:375d2e2acd389ad5a7194d5c362eac77a03e0a6c4e2c89bf38b09e10d86ed5e7"),
+                    qualified_name="pulp::signal::FractionalDelayHistoryT<float>", target="Pulp::signal"),
         ],
         _link_probes=[
             {"role": "line", "binding": "pulp::signal::FractionalDelayLineT<float>",
@@ -1040,7 +969,6 @@ EXPORTS = [
             include="pulp/signal/nlms_adaptive_filter.hpp",
             qualified_name="pulp::signal::NlmsAdaptiveFilterT<float>",
             target="Pulp::signal",
-            header_fingerprint="sha256:ac5d8961a7dc69bd24a4ab8f6389e6e0f62eb5ac7dc433ebabe845e15366298b",
         )],
         _link_probes=[{
             "role": "entrypoint",
@@ -1095,21 +1023,18 @@ EXPORTS = [
                 include="pulp/signal/commuted_string_excitation.hpp",
                 qualified_name="pulp::signal::CommutedStringExcitationPrepareStatus",
                 target="Pulp::signal",
-                header_fingerprint="sha256:08a2d9afa882ce95923b52afa02fed09733f5c8abd82b323704b0dc2c950f11b",
             ),
             binding(
                 role="profile", kind="cpp_type",
                 include="pulp/signal/commuted_string_excitation.hpp",
                 qualified_name="pulp::signal::CommutedStringExcitationProfileT<float>",
                 target="Pulp::signal",
-                header_fingerprint="sha256:08a2d9afa882ce95923b52afa02fed09733f5c8abd82b323704b0dc2c950f11b",
             ),
             binding(
                 role="cursor", kind="cpp_type",
                 include="pulp/signal/commuted_string_excitation.hpp",
                 qualified_name="pulp::signal::CommutedStringExcitationCursorT<float>",
                 target="Pulp::signal",
-                header_fingerprint="sha256:08a2d9afa882ce95923b52afa02fed09733f5c8abd82b323704b0dc2c950f11b",
             ),
         ],
         _link_probes=[
@@ -1170,14 +1095,12 @@ EXPORTS = [
                 include="pulp/signal/particle_collision_exciter.hpp",
                 qualified_name="pulp::signal::ParticleCollisionExciterT<float>",
                 target="Pulp::signal",
-                header_fingerprint="sha256:bfacb7a8890939910c7614e354646a6c9bdfe14d506848a69aa93c93b458d66e",
             ),
             binding(
                 role="voice", kind="cpp_type",
                 include="pulp/signal/particle_percussion_voice.hpp",
                 qualified_name="pulp::signal::ParticlePercussionVoiceT<float>",
                 target="Pulp::signal",
-                header_fingerprint="sha256:a9fbfb370bbb6d2b47f880d6a2687075b943ae6f4ba69213abb2a7279e5027a4",
             ),
         ],
         _link_probes=[
@@ -1214,20 +1137,17 @@ EXPORTS = [
             binding(
                 role="voice", kind="cpp_type", include="pulp/signal/drum/tom.hpp",
                 qualified_name="pulp::signal::drum::TomVoice", target="Pulp::signal",
-                header_fingerprint="sha256:7228487a4c0e7de5b2cfe5fe5ca26bb807cd1b44d1b4d021e6b43103adf5db41",
             ),
             binding(
                 role="ladder_profile", kind="cpp_type", include="pulp/signal/drum/tom.hpp",
                 qualified_name="pulp::signal::drum::TomVoice::LadderMathProfile",
                 target="Pulp::signal",
-                header_fingerprint="sha256:7228487a4c0e7de5b2cfe5fe5ca26bb807cd1b44d1b4d021e6b43103adf5db41",
             ),
             binding(
                 role="set_ladder_profile", kind="cpp_function",
                 include="pulp/signal/drum/tom.hpp",
                 qualified_name="pulp::signal::drum::TomVoice::set_ladder_math_profile",
                 target="Pulp::signal",
-                header_fingerprint="sha256:7228487a4c0e7de5b2cfe5fe5ca26bb807cd1b44d1b4d021e6b43103adf5db41",
                 address_expression=(
                     "static_cast<bool (pulp::signal::drum::TomVoice::*)("
                     "pulp::signal::drum::TomVoice::LadderMathProfile) noexcept>("
@@ -1239,7 +1159,6 @@ EXPORTS = [
                 include="pulp/signal/drum/tom.hpp",
                 qualified_name="pulp::signal::drum::TomVoice::ladder_math_profile",
                 target="Pulp::signal",
-                header_fingerprint="sha256:7228487a4c0e7de5b2cfe5fe5ca26bb807cd1b44d1b4d021e6b43103adf5db41",
                 address_expression=(
                     "static_cast<pulp::signal::drum::TomVoice::LadderMathProfile "
                     "(pulp::signal::drum::TomVoice::*)() const noexcept>("
@@ -1306,21 +1225,18 @@ EXPORTS = [
                 include="pulp/signal/waveguide_line.hpp",
                 qualified_name="pulp::signal::WaveguideLineT<float>",
                 target="Pulp::signal",
-                header_fingerprint="sha256:fbedd57acbc69cf0b827c3a17dcc93a90f43bb14af20bd57ce6d10bb4910d995",
             ),
             binding(
                 role="reflection", kind="cpp_type",
                 include="pulp/signal/waveguide_reflection_filter.hpp",
                 qualified_name="pulp::signal::WaveguideReflectionFilterT<float>",
                 target="Pulp::signal",
-                header_fingerprint="sha256:4584a07804fabc91d7651938e057f9118db29c15dc725be6b9dba5611630d74e",
             ),
             binding(
                 role="junction", kind="cpp_type",
                 include="pulp/signal/waveguide_junction.hpp",
                 qualified_name="pulp::signal::WaveguideJunctionT<float, 4>",
                 target="Pulp::signal",
-                header_fingerprint="sha256:3b2bfa32d07f91fc6bdbde2e1544df94b1d0646aca287bb88db58257902cf70d",
             ),
         ],
         _link_probes=[
@@ -1370,14 +1286,12 @@ EXPORTS = [
                 include="pulp/signal/waveguide_reed_exciter.hpp",
                 qualified_name="pulp::signal::ReedExciterT<float>",
                 target="Pulp::signal",
-                header_fingerprint="sha256:50fd8027a329b2a8c1c4dd983349e0c9ccf3b958ff3374adaa19dd00e7e8604a",
             ),
             binding(
                 role="whole_loop", kind="cpp_type",
                 include="pulp/signal/reed_waveguide_loop.hpp",
                 qualified_name="pulp::signal::ReedWaveguideLoopT<float>",
                 target="Pulp::signal",
-                header_fingerprint="sha256:b397431656231ddc94fbd0618f39582ac4ed1f018573479bfbf44fc2281546a7",
             ),
         ],
         _link_probes=[
@@ -1428,7 +1342,6 @@ EXPORTS = [
                 include="pulp/signal/beat_repeat_kernel.hpp",
                 qualified_name="pulp::signal::BeatRepeatKernelT<float>",
                 target="Pulp::signal",
-                header_fingerprint="sha256:f7c213c193f826f3e791688dbf3dd4626f0b3766aa8659a8910e98e7691ba23e",
             ),
         ],
         _link_probes=[
@@ -1453,14 +1366,11 @@ EXPORTS = [
         scheduling="sample-synchronous",
         bindings=[
             binding(role="wavefolder", kind="cpp_type", include="pulp/signal/nonlinear_shaping.hpp",
-                    qualified_name="pulp::signal::MultistageWavefolderT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:bce155041cc613f9e47890bd07c1a4fa9717695dc3fb5c43c32d4152a471a219"),
+                    qualified_name="pulp::signal::MultistageWavefolderT<float>", target="Pulp::signal"),
             binding(role="chebyshev", kind="cpp_type", include="pulp/signal/nonlinear_shaping.hpp",
-                    qualified_name="pulp::signal::ChebyshevHarmonicShaperT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:bce155041cc613f9e47890bd07c1a4fa9717695dc3fb5c43c32d4152a471a219"),
+                    qualified_name="pulp::signal::ChebyshevHarmonicShaperT<float>", target="Pulp::signal"),
             binding(role="ring", kind="cpp_type", include="pulp/signal/nonlinear_shaping.hpp",
-                    qualified_name="pulp::signal::NonlinearRingModulatorT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:bce155041cc613f9e47890bd07c1a4fa9717695dc3fb5c43c32d4152a471a219"),
+                    qualified_name="pulp::signal::NonlinearRingModulatorT<float>", target="Pulp::signal"),
         ],
         _link_probes=[
             {"role": role, "binding": name, "operation": "member_call", "member": "reset", "arguments": ""}
@@ -1487,8 +1397,7 @@ EXPORTS = [
         latency="zero audio-path latency; capture readiness is separate",
         tail="none", scheduling="sample-synchronous trigger observation",
         bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/scope_capture.hpp",
-                         qualified_name="pulp::signal::ScopeCaptureT<float>", target="Pulp::signal",
-                         header_fingerprint="sha256:0989e11d3171977da2f2e61d945fb1442fe9a9dfa9df94eb436b19fed3f104b5")],
+                         qualified_name="pulp::signal::ScopeCaptureT<float>", target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::ScopeCaptureT<float>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
@@ -1508,8 +1417,7 @@ EXPORTS = [
         latency="zero algorithmic", tail="smoothing and peak state until reset",
         scheduling="one update per supplied spectrum frame",
         bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/spectrum_trace.hpp",
-                         qualified_name="pulp::signal::SpectrumTraceT<float>", target="Pulp::signal",
-                         header_fingerprint="sha256:2db177e808a86cbe881d3a8c636eb33716db1a0ed556fbf1049a5d23583c5bee")],
+                         qualified_name="pulp::signal::SpectrumTraceT<float>", target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::SpectrumTraceT<float>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
@@ -1527,8 +1435,7 @@ EXPORTS = [
         output_domain="equalized audio", units=["samples", "hertz", "decibels", "Q"],
         latency="zero", tail="recursive IIR decay", scheduling="sample-synchronous",
         bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/six_band_eq.hpp",
-                         qualified_name="pulp::signal::SixBandEqT<float>", target="Pulp::signal",
-                         header_fingerprint="sha256:25699c04e11bdd358bbde25071f8528ec81bfddd3a5defda58f1afc3556def09")],
+                         qualified_name="pulp::signal::SixBandEqT<float>", target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::SixBandEqT<float>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
@@ -1557,7 +1464,6 @@ EXPORTS = [
             role="designer", kind="cpp_function", include="pulp/signal/fir_design.hpp",
             qualified_name="pulp::signal::design_fir_least_squares",
             target="Pulp::signal",
-            header_fingerprint="sha256:c2cece53531b491e436b8a358d06b54bb5f4babe432e82ad4938f0ab8edd1744",
             address_expression=(
                 "static_cast<pulp::signal::FirLeastSquaresResult (*)"
                 "(std::span<const pulp::signal::FirDesignPoint>, "
@@ -1602,7 +1508,6 @@ EXPORTS = [
             role="designer", kind="cpp_function", include="pulp/signal/fir_design.hpp",
             qualified_name="pulp::signal::design_fir_equiripple",
             target="Pulp::signal",
-            header_fingerprint="sha256:c2cece53531b491e436b8a358d06b54bb5f4babe432e82ad4938f0ab8edd1744",
             address_expression=(
                 "static_cast<pulp::signal::FirEquirippleResult (*)"
                 "(std::span<const pulp::signal::FirEquirippleBand>, "
@@ -1651,7 +1556,6 @@ EXPORTS = [
             role="reconstructor", kind="cpp_function", include="pulp/signal/fir_design.hpp",
             qualified_name="pulp::signal::reconstruct_minimum_phase_fir",
             target="Pulp::signal",
-            header_fingerprint="sha256:c2cece53531b491e436b8a358d06b54bb5f4babe432e82ad4938f0ab8edd1744",
             address_expression=(
                 "static_cast<pulp::signal::MinimumPhaseFirResult (*)"
                 "(std::span<const double>, "
@@ -1683,11 +1587,9 @@ EXPORTS = [
         latency="offline whole-frame analysis", tail="none", scheduling="offline request",
         bindings=[
             binding(role="cepstral", kind="cpp_type", include="pulp/signal/source_filter_analysis.hpp",
-                    qualified_name="pulp::signal::CepstralEnvelopeAnalyzerT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:eb64faa37ff3e4b93fc884943fda3ea4acc723b61b9b8593abac3f0102dd3d26"),
+                    qualified_name="pulp::signal::CepstralEnvelopeAnalyzerT<float>", target="Pulp::signal"),
             binding(role="lpc", kind="cpp_type", include="pulp/signal/source_filter_analysis.hpp",
-                    qualified_name="pulp::signal::LpcAnalyzerT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:eb64faa37ff3e4b93fc884943fda3ea4acc723b61b9b8593abac3f0102dd3d26"),
+                    qualified_name="pulp::signal::LpcAnalyzerT<float>", target="Pulp::signal"),
         ],
         _link_probes=[
             {"role": "cepstral", "binding": "pulp::signal::CepstralEnvelopeAnalyzerT<float>",
@@ -1712,11 +1614,9 @@ EXPORTS = [
         latency="zero", tail="continuous while voice is active", scheduling="absolute-frame audio",
         bindings=[
             binding(role="layout", kind="cpp_type", include="pulp/signal/unison.hpp",
-                    qualified_name="pulp::signal::UnisonLayout<>", target="Pulp::signal",
-                    header_fingerprint="sha256:0a3a14899d57ff5040b47823bb98c36ed055bf98b6946d2a8892c44a95a686a5"),
+                    qualified_name="pulp::signal::UnisonLayout<>", target="Pulp::signal"),
             binding(role="supersaw", kind="cpp_type", include="pulp/signal/supersaw.hpp",
-                    qualified_name="pulp::signal::SupersawT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:c790c2b734d6a86f02ffedd560a0b14ba7529dbb5ce50b4e93a29b414217f338"),
+                    qualified_name="pulp::signal::SupersawT<float>", target="Pulp::signal"),
         ],
         _link_probes=[
             {"role": "layout", "binding": "pulp::signal::UnisonLayout<>",
@@ -1742,8 +1642,7 @@ EXPORTS = [
         latency="detector latency plus scheduling horizon plus user lookahead",
         tail="exact latency_samples", scheduling="sample-synchronous lookahead",
         bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/true_peak_limiter.hpp",
-                         qualified_name="pulp::signal::TruePeakLimiterT<float>", target="Pulp::signal",
-                         header_fingerprint="sha256:027278e6f446a6eb769576cea18e0007648d7d5bcd25231023f1d09a844a84ca")],
+                         qualified_name="pulp::signal::TruePeakLimiterT<float>", target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::TruePeakLimiterT<float>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
@@ -1763,11 +1662,9 @@ EXPORTS = [
         latency="zero", tail="recursive envelope decay until reset", scheduling="sample-synchronous",
         bindings=[
             binding(role="mono", kind="cpp_type", include="pulp/signal/dynamics_contract.hpp",
-                    qualified_name="pulp::signal::EnvelopeFollowerT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:576ed92bd47a0cce545d9eb5df9a5e83732829944550fff7416c552de2506a2f"),
+                    qualified_name="pulp::signal::EnvelopeFollowerT<float>", target="Pulp::signal"),
             binding(role="stereo", kind="cpp_type", include="pulp/signal/dynamics_contract.hpp",
-                    qualified_name="pulp::signal::StereoEnvelopeFollowerT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:576ed92bd47a0cce545d9eb5df9a5e83732829944550fff7416c552de2506a2f"),
+                    qualified_name="pulp::signal::StereoEnvelopeFollowerT<float>", target="Pulp::signal"),
         ],
         _link_probes=[
             {"role": "mono", "binding": "pulp::signal::EnvelopeFollowerT<float>",
@@ -1791,8 +1688,7 @@ EXPORTS = [
         units=["samples", "hertz", "bands", "frames"],
         latency="zero", tail="recursive IIR decay", scheduling="sample-synchronous",
         bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/linkwitz_riley.hpp",
-                         qualified_name="pulp::signal::LinkwitzRileyCrossoverT<float>", target="Pulp::signal",
-                         header_fingerprint="sha256:8aae04787676825f9eae118a9d52df318e8c67af2c8c7138572be8da61bc0545")],
+                         qualified_name="pulp::signal::LinkwitzRileyCrossoverT<float>", target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::LinkwitzRileyCrossoverT<float>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
@@ -1806,7 +1702,7 @@ EXPORTS = [
         input_domain="normalized parent phase and explicit parent-cycle edges", output_domain="normalized sub-octave waveform",
         units=["cycles", "octaves", "normalized amplitude"], latency="zero", tail="none", scheduling="sample-synchronous",
         bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/sub_oscillator.hpp",
-            qualified_name="pulp::signal::SubOscillatorT<float>", target="Pulp::signal", header_fingerprint="sha256:e9d65a675da14e222b4bd49127e3277dd810d669dec0517c2878fb25232d5879")],
+            qualified_name="pulp::signal::SubOscillatorT<float>", target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::SubOscillatorT<float>", "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
     capability(
@@ -1819,7 +1715,7 @@ EXPORTS = [
         input_domain="finite sample rate, positive sub-Nyquist frequency, and normalized phase", output_domain="normalized band-limited impulse train",
         units=["hertz", "cycles", "harmonic count", "normalized amplitude"], latency="zero", tail="none", scheduling="sample-synchronous",
         bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/blit_oscillator.hpp",
-            qualified_name="pulp::signal::BlitOscillatorT<float>", target="Pulp::signal", header_fingerprint="sha256:8bf6a4bbbc04b30ff2c8e1a63c84c549c90a16813fed0e4409ae7c146f0f75d0")],
+            qualified_name="pulp::signal::BlitOscillatorT<float>", target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::BlitOscillatorT<float>", "operation": "member_call", "member": "prepare", "arguments": "48000.0f"}],
     ),
     capability(
@@ -1840,11 +1736,9 @@ EXPORTS = [
         tail="measurement history until reset", scheduling="block accumulation and snapshot",
         bindings=[
             binding(role="entrypoint", kind="cpp_type", include="pulp/signal/multi_channel_meter.hpp",
-                    qualified_name="pulp::signal::MultiChannelMeterT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:83d056fd906ff72eb37d3dde19a80293c3b7157af2934e2ca4e2e40cf6e57a15"),
+                    qualified_name="pulp::signal::MultiChannelMeterT<float>", target="Pulp::signal"),
             binding(role="loudness_support", kind="cpp_type", include="pulp/signal/multi_channel_meter.hpp",
-                    qualified_name="pulp::signal::MultiChannelMeterT<float>", target="Pulp::signal",
-                    header_fingerprint="sha256:83d056fd906ff72eb37d3dde19a80293c3b7157af2934e2ca4e2e40cf6e57a15"),
+                    qualified_name="pulp::signal::MultiChannelMeterT<float>", target="Pulp::signal"),
         ],
         _link_probes=[
             {"role": "entrypoint", "binding": "pulp::signal::MultiChannelMeterT<float>",
@@ -1870,8 +1764,7 @@ EXPORTS = [
         bindings=[binding(role="entrypoint", kind="cpp_type",
                          include="pulp/signal/transient_designer.hpp",
                          qualified_name="pulp::signal::TransientDesignerT<float>",
-                         target="Pulp::signal",
-                         header_fingerprint="sha256:f82fbba753fd01410ff7117cf86f9f8868d071a3979c36d87f677f99cbc34ae2")],
+                         target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::TransientDesignerT<float>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
@@ -1894,8 +1787,7 @@ EXPORTS = [
         bindings=[binding(role="entrypoint", kind="cpp_type",
                          include="pulp/signal/headphone_crossfeed.hpp",
                          qualified_name="pulp::signal::HeadphoneCrossfeedT<float>",
-                         target="Pulp::signal",
-                         header_fingerprint="sha256:ed91124815b320271a1246f87fa35655cc02ef989a9caa6cab734af0a363268c")],
+                         target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::HeadphoneCrossfeedT<float>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
@@ -1934,23 +1826,19 @@ EXPORTS = [
             binding(role="layout", kind="cpp_type",
                     include="pulp/signal/spectral_band_mask.hpp",
                     qualified_name="pulp::signal::SpectralBandLayoutT<float>",
-                    target="Pulp::signal",
-                    header_fingerprint="sha256:4875ea02702d6720a84c14103dd45ba7bc2f157ba43c163772e7c40011bf79d5"),
+                    target="Pulp::signal"),
             binding(role="table", kind="cpp_type",
                     include="pulp/signal/spectral_band_mask.hpp",
                     qualified_name="pulp::signal::SpectralMaskTableT<float>",
-                    target="Pulp::signal",
-                    header_fingerprint="sha256:4875ea02702d6720a84c14103dd45ba7bc2f157ba43c163772e7c40011bf79d5"),
+                    target="Pulp::signal"),
             binding(role="resolution", kind="cpp_type",
                     include="pulp/signal/spectral_band_mask.hpp",
                     qualified_name="pulp::signal::SpectralBandResolutionT<float>",
-                    target="Pulp::signal",
-                    header_fingerprint="sha256:4875ea02702d6720a84c14103dd45ba7bc2f157ba43c163772e7c40011bf79d5"),
+                    target="Pulp::signal"),
             binding(role="analyze_resolution", kind="cpp_function",
                     include="pulp/signal/spectral_band_mask.hpp",
                     qualified_name="pulp::signal::analyze_spectral_band_resolution<float>",
                     target="Pulp::signal",
-                    header_fingerprint="sha256:4875ea02702d6720a84c14103dd45ba7bc2f157ba43c163772e7c40011bf79d5",
                     address_expression=(
                         "static_cast<bool (*)(const pulp::signal::SpectralBandLayoutT<float>&, "
                         "int, float, pulp::signal::SpectralBandResolutionT<float>&) noexcept>("
@@ -1960,7 +1848,6 @@ EXPORTS = [
                     include="pulp/signal/spectral_band_mask.hpp",
                     qualified_name="pulp::signal::build_spectral_mask<float>",
                     target="Pulp::signal",
-                    header_fingerprint="sha256:4875ea02702d6720a84c14103dd45ba7bc2f157ba43c163772e7c40011bf79d5",
                     address_expression=(
                         "static_cast<bool (*)(const pulp::signal::SpectralBandLayoutT<float>&, "
                         "int, float, pulp::signal::SpectralMaskTableT<float>&) noexcept>("
@@ -1970,7 +1857,6 @@ EXPORTS = [
                     include="pulp/signal/spectral_band_mask.hpp",
                     qualified_name="pulp::signal::apply_spectral_mask<float>",
                     target="Pulp::signal",
-                    header_fingerprint="sha256:4875ea02702d6720a84c14103dd45ba7bc2f157ba43c163772e7c40011bf79d5",
                     address_expression=(
                         "static_cast<bool (*)(std::complex<float>* const*, int, int, "
                         "const pulp::signal::SpectralMaskTableT<float>&) noexcept>("
@@ -2048,18 +1934,12 @@ EXPORTS = [
                 include="pulp/signal/spectral_mask_processor.hpp",
                 qualified_name="pulp::signal::SpectralMaskProcessorT<float>",
                 target="Pulp::signal",
-                header_fingerprint=(
-                    "sha256:2a1aabaeb58cb73c19644c2aa6f5f7cb960e88aab0632ae79488c080d260267a"
-                ),
             ),
             binding(
                 role="config", kind="cpp_type",
                 include="pulp/signal/spectral_mask_processor.hpp",
                 qualified_name="pulp::signal::SpectralMaskProcessorConfigT<float>",
                 target="Pulp::signal",
-                header_fingerprint=(
-                    "sha256:2a1aabaeb58cb73c19644c2aa6f5f7cb960e88aab0632ae79488c080d260267a"
-                ),
             ),
         ],
         _link_probes=[
@@ -2092,8 +1972,7 @@ EXPORTS = [
         bindings=[binding(role="entrypoint", kind="cpp_type",
                          include="pulp/signal/spectral_gate_blur.hpp",
                          qualified_name="pulp::signal::SpectralGateT<float>",
-                         target="Pulp::signal",
-                         header_fingerprint="sha256:75cf322be3a308259d63737d67320b94a926c9b9fb290c6a751dd07ee781d845")],
+                         target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::SpectralGateT<float>",
                        "operation": "member_call", "member": "set_threshold_magnitude",
                        "arguments": "0.0f"}],
@@ -2118,8 +1997,7 @@ EXPORTS = [
         bindings=[binding(role="entrypoint", kind="cpp_type",
                          include="pulp/signal/spectral_gate_blur.hpp",
                          qualified_name="pulp::signal::SpectralFrameBlurT<float>",
-                         target="Pulp::signal",
-                         header_fingerprint="sha256:75cf322be3a308259d63737d67320b94a926c9b9fb290c6a751dd07ee781d845")],
+                         target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::SpectralFrameBlurT<float>",
                        "operation": "member_call", "member": "prepare", "arguments": "1, 1, 1"}],
     ),
@@ -2141,8 +2019,7 @@ EXPORTS = [
         bindings=[binding(role="entrypoint", kind="cpp_type",
                          include="pulp/signal/dynamic_eq.hpp",
                          qualified_name="pulp::signal::DynamicEqBandT<float>",
-                         target="Pulp::signal",
-                         header_fingerprint="sha256:eb6ed3b73030b8046706e6dfb8bfe9a143134b7dea59c289ce142fdcbb12254b")],
+                         target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::DynamicEqBandT<float>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
@@ -2164,8 +2041,7 @@ EXPORTS = [
         bindings=[binding(role="entrypoint", kind="cpp_type",
                          include="pulp/signal/spectral_morph.hpp",
                          qualified_name="pulp::signal::SpectralMorphT<float>",
-                         target="Pulp::signal",
-                         header_fingerprint="sha256:0991d2973294306182824a6d8b579007946dff976407511ce064774677c1adb3")],
+                         target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::SpectralMorphT<float>",
                        "operation": "member_call", "member": "prepare", "arguments": "1, 129"}],
     ),
@@ -2188,8 +2064,7 @@ EXPORTS = [
         bindings=[binding(role="entrypoint", kind="cpp_type",
                          include="pulp/signal/cross_feedback_multitap_delay.hpp",
                          qualified_name="pulp::signal::CrossFeedbackMultitapDelayT<float>",
-                         target="Pulp::signal",
-                         header_fingerprint="sha256:14184a88f394c3da92e4d39d7c8c5f9b481f5729acfafd7a0a7e5d773ee68e98")],
+                         target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint",
                        "binding": "pulp::signal::CrossFeedbackMultitapDelayT<float>",
                        "operation": "member_call", "member": "prepare",
@@ -2213,8 +2088,7 @@ EXPORTS = [
         bindings=[binding(role="entrypoint", kind="cpp_type",
                          include="pulp/signal/de_esser.hpp",
                          qualified_name="pulp::signal::DeEsserT<float>",
-                         target="Pulp::signal",
-                         header_fingerprint="sha256:fd61c1c4680c790d8617ec55164367d535cc079878e2bcb9780077c59bbf040d")],
+                         target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::DeEsserT<float>",
                        "operation": "member_call", "member": "prepare", "arguments": "48000.0f"}],
     ),
@@ -2235,8 +2109,7 @@ EXPORTS = [
         bindings=[binding(role="entrypoint", kind="cpp_type",
                          include="pulp/signal/expander.hpp",
                          qualified_name="pulp::signal::ExpanderT<float>",
-                         target="Pulp::signal",
-                         header_fingerprint="sha256:bf318bbe864c1ea706eed101e63f6469602a7c7c639ce86bffb650c13ef08741")],
+                         target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::ExpanderT<float>",
                        "operation": "member_call", "member": "prepare", "arguments": "48000.0f"}],
     ),
@@ -2269,7 +2142,6 @@ EXPORTS = [
             include="pulp/signal/explicit_q_resonator_bank.hpp",
             qualified_name="pulp::signal::ExplicitQResonatorBankT<float>",
             target="Pulp::signal",
-            header_fingerprint="sha256:1504f5c4bc3752754bc7591e6a6509a9aeb06df018417749bd149802463917da",
         )],
         _link_probes=[{
             "role": "entrypoint", "binding": "pulp::signal::ExplicitQResonatorBankT<float>",
@@ -2304,7 +2176,6 @@ EXPORTS = [
         bindings=[binding(
             role="entrypoint", kind="cpp_type", include="pulp/signal/spectral_delay_matrix.hpp",
             qualified_name="pulp::signal::SpectralDelayMatrixT<float>", target="Pulp::signal",
-            header_fingerprint="sha256:53ed4a5125e74d86fc8e4f8980a6309cbf00796d85f8f5b7cb9f1a06acbe0034",
         )],
         _link_probes=[{
             "role": "entrypoint", "binding": "pulp::signal::SpectralDelayMatrixT<float>",
@@ -2335,7 +2206,7 @@ EXPORTS = [
         bindings=[binding(role="entrypoint", kind="cpp_type",
                          include="pulp/signal/early_reflections.hpp",
                          qualified_name="pulp::signal::EarlyReflectionsT<float>",
-                         target="Pulp::signal", header_fingerprint="sha256:4e2c96110a97d359d96e1c3fbcd8f369024d8351579298729471f9ff4ebcd4d4")],
+                         target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::EarlyReflectionsT<float>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
@@ -2359,7 +2230,7 @@ EXPORTS = [
         bindings=[binding(role="entrypoint", kind="cpp_type",
                          include="pulp/signal/auto_ducked_send.hpp",
                          qualified_name="pulp::signal::AutoDuckedSendT<float>",
-                         target="Pulp::signal", header_fingerprint="sha256:8246383c5cfe77391c4a4d609112462ef92917bbd4d9aab6e09ac5dab4e584fb")],
+                         target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::AutoDuckedSendT<float>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
@@ -2385,8 +2256,7 @@ EXPORTS = [
         latency="zero", tail="recursive decay in feedback and allpass modes",
         scheduling="sample-synchronous",
         bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/comb_filter.hpp",
-                         qualified_name="pulp::signal::CombFilterT<float>", target="Pulp::signal",
-                         header_fingerprint="sha256:6f5963276c7fc2f68985dba678754f7afc4216b2486f3f4c356b3344eeceda4c")],
+                         qualified_name="pulp::signal::CombFilterT<float>", target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::CombFilterT<float>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
@@ -2408,8 +2278,7 @@ EXPORTS = [
         units=["samples", "hertz", "normalized morph position", "Q"],
         latency="zero", tail="recursive IIR decay", scheduling="sample-synchronous",
         bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/filter_morph.hpp",
-                         qualified_name="pulp::signal::FilterMorphT<float>", target="Pulp::signal",
-                         header_fingerprint="sha256:9065017c36f2451be9b3143efbb63650c2d70e412f197ae6fa2f3ad6871809b3")],
+                         qualified_name="pulp::signal::FilterMorphT<float>", target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::FilterMorphT<float>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
@@ -2436,8 +2305,7 @@ EXPORTS = [
         bindings=[binding(role="entrypoint", kind="cpp_type",
                          include="pulp/signal/formant_filter_bank.hpp",
                          qualified_name="pulp::signal::FormantFilterBankT<float>",
-                         target="Pulp::signal",
-                         header_fingerprint="sha256:3fe22c92f7793b10a219c1270d0b43d143cc025b7d9769566a98c29dd4fe62f5")],
+                         target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::FormantFilterBankT<float>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
@@ -2462,8 +2330,7 @@ EXPORTS = [
         units=["samples", "hertz", "decibels", "Q"],
         latency="zero", tail="recursive IIR decay", scheduling="sample-synchronous",
         bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/graphic_eq.hpp",
-                         qualified_name="pulp::signal::GraphicEqT<float, 31>", target="Pulp::signal",
-                         header_fingerprint="sha256:a556beb98a3e89254fe51ff90866a8290246410a7e4ae6e0b9f0f3a8cbc2561f")],
+                         qualified_name="pulp::signal::GraphicEqT<float, 31>", target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::GraphicEqT<float, 31>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
@@ -2488,8 +2355,7 @@ EXPORTS = [
         units=["samples", "hertz", "decibels"],
         latency="zero", tail="recursive IIR decay", scheduling="sample-synchronous",
         bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/tilt_eq.hpp",
-                         qualified_name="pulp::signal::TiltEqT<float, 2>", target="Pulp::signal",
-                         header_fingerprint="sha256:ed676f18106a4465246265aeaebe138bc28c75ef197db2083b95e934418efb3d")],
+                         qualified_name="pulp::signal::TiltEqT<float, 2>", target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::TiltEqT<float, 2>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
@@ -2516,7 +2382,7 @@ EXPORTS = [
         bindings=[binding(role="entrypoint", kind="cpp_type",
                          include="pulp/signal/transfer_curve.hpp",
                          qualified_name="pulp::signal::TransferCurveT<float, 32>",
-                         target="Pulp::signal", header_fingerprint="sha256:f9210a9d4124c63aae16c0b0d27ac9125a8f3c42c5e34f3c1b58dbc492487632")],
+                         target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::TransferCurveT<float, 32>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
@@ -2544,7 +2410,7 @@ EXPORTS = [
         bindings=[binding(role="entrypoint", kind="cpp_type",
                          include="pulp/signal/parallel_dynamics.hpp",
                          qualified_name="pulp::signal::ParallelDynamicsMixerT<float>",
-                         target="Pulp::signal", header_fingerprint="sha256:618eb3179e376d9f6ca92fea66e5eefbdb46c14c7cf23373e26462c200ccc62e")],
+                         target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint",
                        "binding": "pulp::signal::ParallelDynamicsMixerT<float>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
@@ -2584,8 +2450,7 @@ EXPORTS = [
         bindings=[binding(role="entrypoint", kind="cpp_type",
                          include="pulp/signal/diffusion_network.hpp",
                          qualified_name="pulp::signal::DiffusionNetworkT<float>",
-                         target="Pulp::signal",
-                         header_fingerprint="sha256:f09f50d1877d090ffd1c8ea200085461b572a6e29231534c3ad1b49445c0683c")],
+                         target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::DiffusionNetworkT<float>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
@@ -2624,8 +2489,7 @@ EXPORTS = [
         bindings=[binding(role="entrypoint", kind="cpp_type",
                          include="pulp/signal/spectral_cross_synthesis.hpp",
                          qualified_name="pulp::signal::SpectralCrossSynthesisT<float>",
-                         target="Pulp::signal",
-                         header_fingerprint="sha256:15a38e26fae4a62c1069e4ce35e96b2e1c19c25b4d66719543bedd48d8822d6a")],
+                         target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint",
                        "binding": "pulp::signal::SpectralCrossSynthesisT<float>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
@@ -2648,8 +2512,7 @@ EXPORTS = [
         bindings=[binding(role="entrypoint", kind="cpp_type",
                          include="pulp/signal/tempo_delay_wrapper.hpp",
                          qualified_name="pulp::signal::TempoDelayWrapper",
-                         target="Pulp::signal",
-                         header_fingerprint="sha256:f01d65b929e0137704e32b7a4a6e4dacc4d8f3dbf933ca1fe19529b16c9e0ccd")],
+                         target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::TempoDelayWrapper",
                        "operation": "member_call", "member": "prepare",
                        "arguments": "48000.0, 256"}],
@@ -2664,8 +2527,7 @@ EXPORTS = [
         tail="bounded by the configured SOS state", scheduling="sample-synchronous",
         determinism={"repeatability": "tolerance_bounded", "block_partition": "invariant", "platform_scope": "same_build", "transport_history": "irrelevant"},
         bindings=[binding(role="entrypoint", kind="cpp_type", include="pulp/signal/parametric_eq.hpp",
-                          qualified_name="pulp::signal::ParametricEqT<float>", target="Pulp::signal",
-                          header_fingerprint="sha256:7fac0742c304d74e201ece2799ee172c81805e3f7bf1ba5dcc7a8fab70d5fbb6")],
+                          qualified_name="pulp::signal::ParametricEqT<float>", target="Pulp::signal")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::ParametricEqT<float>", "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
 ]

@@ -28,9 +28,11 @@ class AudioProcessLoadMeasurer;
 
 namespace pulp::format {
 
-// One source-side audio observation, before downstream mixing/PDC and before
-// serial scratch reuse. Configure only while processing is stopped. The ring
-// has one audio-thread producer and one control-thread reader.
+// One source-side ordinary/sidechain audio observation before downstream
+// mixing/PDC and serial scratch reuse. Feedback observes the retained slot read
+// in this block, before current output is captured for the next block.
+// Configure only while processing is stopped. The ring has one audio-thread
+// producer and one control-thread reader.
 struct GraphRuntimeAudioEdgeProbe {
     static_assert(std::atomic<std::uint64_t>::is_always_lock_free &&
                   std::atomic<bool>::is_always_lock_free);

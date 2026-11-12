@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/character_delay/reverse.hpp",
+  "fingerprint": "sha256:8ffe9c4341a734e18aeae9900554cb042acfc3dd0982b243cde8705067140c91",
+  "include": "pulp/signal/character_delay/reverse.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Character Delay's internal reverse segmenter, specialized for continuously slewed window lengths and modulated fractional reads. docs/reference/reverse-buffer.md records the decision to keep it internal and to expose ReverseBufferT as the public reverse primitive, so it makes no installed agent capability claim of its own."
+}

@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/osc/minblep.hpp",
+  "fingerprint": "sha256:838567bf66f86f232dc6239d74b77cb7a456eb854831b73f70e9641e0d21c9f6",
+  "include": "pulp/signal/osc/minblep.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.minblep"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

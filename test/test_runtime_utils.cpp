@@ -27,6 +27,7 @@
 #include <pulp/runtime/scoped_no_alloc.hpp>
 #include <pulp/runtime/stream.hpp>
 #include <pulp/runtime/temporary_file.hpp>
+#include <pulp/platform/child_process.hpp>
 #include <pulp/runtime/text_diff.hpp>
 #include <thread>
 
@@ -34,7 +35,11 @@
 #include <cerrno>
 #include <signal.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
+#endif
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
 #endif
 
 using namespace pulp::runtime;
@@ -1103,9 +1108,13 @@ TEST_CASE("run_process preserves output beyond the platform child default cap",
                      std::string("$n = ") + std::to_string(expected_size) +
                          "; [Console]::Out.Write(('x' * $n)); [Console]::Error.Write(('y' * $n))"});
 #else
-    auto result = run_process(
-        "/bin/sh", {"-c", std::string("yes x | head -c ") + std::to_string(expected_size) +
-                              "; yes y | head -c " + std::to_string(expected_size) + " >&2"});
+    // Keep this output-cap probe finite and independent of the inherited SIGPIPE
+    // disposition.  A producer pipeline can append its own Broken pipe
+    // diagnostic when the reader reaches the cap, changing the measured stderr
+    // size without testing ChildProcess's capture limit.
+    const auto command = std::string("printf '%*s' ") + std::to_string(expected_size) +
+                         " ''; printf '%*s' " + std::to_string(expected_size) + " '' >&2";
+    auto result = run_process("/bin/sh", {"-c", command});
 #endif
 
     REQUIRE(result.has_value());
@@ -2441,3 +2450,467 @@ TEST_CASE("Range expanded covers negative fractional values", "[runtime][range]"
     REQUIRE_THAT(expanded.start, Catch::Matchers::WithinAbs(-3.25, 1e-12));
     REQUIRE_THAT(expanded.end, Catch::Matchers::WithinAbs(-1.0, 1e-12));
 }
+
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
+namespace {
+template <class Predicate> bool custody_eventually(Predicate predicate) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    do {
+        if (predicate())
+            return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    } while (std::chrono::steady_clock::now() < deadline);
+    return false;
+}
+
+auto custody_deadline() {
+    return std::chrono::steady_clock::now() + std::chrono::seconds(2);
+}
+} // namespace
+
+TEST_CASE("Joined child uses the captured group and direct custody",
+          "[runtime][child-process][joined-child][contract]") {
+    using namespace pulp::platform;
+    auto group = CurrentProcessGroup::capture();
+    if (!group)
+        SKIP("the test runner is not a process-group leader; capture refuses before spawn");
+    JoinedChildCustody custody;
+    ChildProcess process;
+    REQUIRE(process.start_joined_to_current_group(*group, custody, "/bin/sh", {"-c", "exit 23"}));
+    const int worker = process.process_id();
+    REQUIRE(custody_eventually(
+        [&] { return custody.joined_child_observation().state == JoinedChildState::Exited; }));
+    const auto observed = custody.joined_child_observation();
+    CHECK(observed.process_id == worker);
+    CHECK(observed.process_group_id == ::getpgrp());
+    CHECK(observed.exit_code == 23);
+    const auto cleaned = custody.cleanup_joined_child(custody_deadline());
+    CHECK(cleaned.status == JoinedChildCleanupStatus::Complete);
+    CHECK(cleaned.child_reaped);
+    CHECK(cleaned.observation.state == JoinedChildState::Reaped);
+}
+
+TEST_CASE("Retained observation preserves an exited leader until cleanup",
+          "[runtime][child-process][retained-custody][retained-observation]") {
+    using namespace pulp::platform;
+    RetainedProcessCustody reservation;
+    ChildProcess process;
+    REQUIRE(process.start_retained(reservation, "/bin/sh", {"-c", "exit 23"}));
+    const int leader = process.process_id();
+    INFO("retained leader=" << leader);
+    REQUIRE(custody_eventually([&] {
+        return reservation.retained_process_observation().state == RetainedProcessState::Exited;
+    }));
+    CHECK_FALSE(process.is_running());
+    CHECK(process.wait().exit_code == 23);
+    const auto observed = reservation.retained_process_observation();
+    CHECK(observed.process_id == leader);
+    CHECK(observed.process_group_id == leader);
+    CHECK(observed.identity_retained);
+    CHECK(observed.exit_code == 23);
+    siginfo_t witness{};
+    REQUIRE(::waitid(P_PID, static_cast<id_t>(leader), &witness, WEXITED | WNOHANG | WNOWAIT) == 0);
+    REQUIRE(witness.si_pid == leader);
+    CHECK(witness.si_status == 23);
+
+    const auto start = std::chrono::steady_clock::now();
+    const auto incomplete = process.cleanup_retained_process_group(start);
+    CHECK(incomplete.status == RetainedCleanupStatus::Incomplete);
+    CHECK(incomplete.observation.identity_retained);
+    CHECK_FALSE(incomplete.term_sent);
+    CHECK_FALSE(incomplete.kill_sent);
+    CHECK(std::chrono::steady_clock::now() - start < std::chrono::milliseconds(500));
+    CHECK_FALSE(process.start("/bin/sh", {"-c", "exit 0"}));
+    ChildProcess moved(std::move(process));
+    RetainedProcessCustody moved_reservation(std::move(reservation));
+    CHECK(moved.retained_process_observation().process_id == leader);
+    const auto cleaned = moved_reservation.cleanup_retained_process_group(custody_deadline());
+    CHECK(cleaned.status == RetainedCleanupStatus::Complete);
+    CHECK(cleaned.child_reaped);
+    CHECK(cleaned.descendants_gone);
+    CHECK_FALSE(cleaned.observation.identity_retained);
+    CHECK(cleaned.observation.state == RetainedProcessState::Reaped);
+    int status = 0;
+    CHECK(::waitpid(leader, &status, WNOHANG) == -1);
+    CHECK(errno == ECHILD);
+}
+
+TEST_CASE("Retained cleanup removes nested descendants with inherited pipes",
+          "[runtime][child-process][retained-custody][retained-descendants]") {
+    using namespace pulp::platform;
+    bool ignore_term = false;
+    SECTION("ordinary descendants") {}
+    SECTION("TERM resistant descendants") {
+        ignore_term = true;
+    }
+    TemporaryFile marker(".retained-descendants");
+    const auto marker_path = marker.path();
+    RetainedProcessCustody reservation;
+    int leader = -1, descendant = -1, grandchild = -1;
+    auto safety = make_scope_guard([&] {
+        // The external fixture cleanup is independent of production signaling.
+        // It may signal the group only while waitid proves our leader is unreaped.
+        siginfo_t witness{};
+        if (leader > 0 && ::waitid(P_PID, static_cast<id_t>(leader), &witness,
+                                   WEXITED | WNOHANG | WNOWAIT) == 0) {
+            (void)::kill(-leader, SIGKILL);
+            (void)reservation.cleanup_retained_process_group(custody_deadline());
+        }
+    });
+    {
+        ChildProcess process;
+        const std::string descendant_script =
+            std::string(ignore_term ? "trap '' TERM; " : "") +
+            "sleep 30 & printf '%s %s\\n' \"$$\" \"$!\" > \"$1\"; wait";
+        REQUIRE(process.start_retained(reservation, "/bin/sh",
+                                       {"-c", "/bin/sh -c \"$1\" child \"$2\" & exit 7", "leader",
+                                        descendant_script, marker_path}));
+        leader = process.process_id();
+        REQUIRE(custody_eventually([&] {
+            std::ifstream file(marker_path);
+            file >> descendant >> grandchild;
+            return descendant > 0 && grandchild > 0;
+        }));
+        INFO("leader=" << leader << " descendant=" << descendant << " grandchild=" << grandchild);
+        REQUIRE(custody_eventually([&] {
+            return process.retained_process_observation().state == RetainedProcessState::Exited;
+        }));
+        CHECK(::getpgid(descendant) == leader);
+        CHECK(::getpgid(grandchild) == leader);
+        CHECK(::kill(descendant, 0) == 0);
+        CHECK(::kill(grandchild, 0) == 0);
+        const auto expired =
+            process.cleanup_retained_process_group(std::chrono::steady_clock::now());
+        CHECK(expired.status == RetainedCleanupStatus::Incomplete);
+        CHECK(expired.observation.identity_retained);
+        ChildProcess destination;
+        destination = std::move(process);
+        CHECK(destination.retained_process_observation().process_id == leader);
+    }
+    // Destroying the handle leaves the supervisor's reservation and descendants
+    // intact, rather than silently reaping the exited group leader.
+    CHECK(reservation.retained_process_observation().state == RetainedProcessState::Exited);
+    CHECK(::kill(descendant, 0) == 0);
+    CHECK(::kill(grandchild, 0) == 0);
+    const auto start = std::chrono::steady_clock::now();
+    const auto cleaned = reservation.cleanup_retained_process_group(custody_deadline());
+    CHECK(std::chrono::steady_clock::now() - start < std::chrono::milliseconds(2500));
+    CHECK(cleaned.status == RetainedCleanupStatus::Complete);
+    CHECK(cleaned.term_sent);
+    CHECK(cleaned.child_reaped);
+    CHECK(cleaned.descendants_gone);
+    if (ignore_term)
+        CHECK(cleaned.kill_sent);
+    CHECK(::kill(descendant, 0) == -1);
+    CHECK(errno == ESRCH);
+    CHECK(::kill(grandchild, 0) == -1);
+    CHECK(errno == ESRCH);
+}
+
+TEST_CASE("Retained failed handshake leaves its cleanup receipt with the reservation",
+          "[runtime][child-process][retained-custody]") {
+    using namespace pulp::platform;
+    RetainedProcessCustody reservation;
+    int leader = -1;
+    {
+        ChildProcess process;
+        CHECK_FALSE(process.start_retained_with_standard_input_channel(
+            reservation, "/bin/sh", {"-c", "sleep 30"},
+            [&](int pid, ChildProcessInputChannel, auto) {
+                leader = pid;
+                return false;
+            }));
+        REQUIRE(leader > 0);
+    }
+    RetainedProcessCustody moved;
+    moved = std::move(reservation);
+    CHECK(moved.retained_process_observation().process_id == leader);
+    const auto cleaned = moved.cleanup_retained_process_group(custody_deadline());
+    CHECK(cleaned.status == RetainedCleanupStatus::Complete);
+    CHECK(cleaned.child_reaped);
+    CHECK(cleaned.descendants_gone);
+}
+
+TEST_CASE("Retained custody loss never signals a released process group identity",
+          "[runtime][child-process][retained-custody][retained-custody-loss]") {
+    using namespace pulp::platform;
+    RetainedProcessCustody reservation;
+    ChildProcess process;
+    TemporaryFile marker(".custody-loss");
+    std::optional<ChildProcessInputChannel> input;
+    int descendant = -1;
+    auto safety = make_scope_guard([&] {
+        // Closing the private channel lets the witness exit even after leader
+        // custody is lost; fixture cleanup never signals a released identity.
+        input.reset();
+        (void)reservation.cleanup_retained_process_group(custody_deadline());
+        if (descendant > 0)
+            (void)custody_eventually([&] { return ::kill(descendant, 0) < 0 && errno == ESRCH; });
+    });
+    REQUIRE(process.start_retained_with_standard_input_channel(
+        reservation, "/bin/sh",
+        {"-c", "/bin/sh -c \"$1\" child \"$2\" <&0 & exit 0", "leader",
+         "printf '%s\\n' \"$$\" > \"$1\"; read line; exit 0", marker.path()},
+        [&](int, ChildProcessInputChannel channel, auto) {
+            input.emplace(std::move(channel));
+            return true;
+        }));
+    const int leader = process.process_id();
+    REQUIRE(custody_eventually([&] {
+        std::ifstream file(marker.path());
+        return static_cast<bool>(file >> descendant) && descendant > 0;
+    }));
+    REQUIRE(::getpgid(descendant) == leader);
+    REQUIRE(custody_eventually([&] {
+        return process.retained_process_observation().state == RetainedProcessState::Exited;
+    }));
+    int status = 0;
+    REQUIRE(::waitpid(leader, &status, WNOHANG) == leader);
+    const auto before = std::chrono::steady_clock::now();
+    const auto lost = reservation.cleanup_retained_process_group(custody_deadline());
+    CHECK(std::chrono::steady_clock::now() - before < std::chrono::milliseconds(500));
+    CHECK(lost.status == RetainedCleanupStatus::CustodyLost);
+    CHECK_FALSE(lost.observation.identity_retained);
+    CHECK_FALSE(lost.term_sent);
+    CHECK_FALSE(lost.kill_sent);
+    CHECK_FALSE(lost.descendants_gone);
+    CHECK(::kill(descendant, 0) == 0);
+    input.reset();
+    CHECK(custody_eventually([&] { return ::kill(descendant, 0) < 0 && errno == ESRCH; }));
+}
+
+TEST_CASE("Retained cleanup keeps a live leader across a short deadline",
+          "[runtime][child-process][retained-custody]") {
+    using namespace pulp::platform;
+    RetainedProcessCustody reservation;
+    ChildProcess process;
+    REQUIRE(process.start_retained(reservation, "/bin/sh",
+                                   {"-c", "trap '' TERM; printf 'ready\\n'; while :; do :; done"}));
+    REQUIRE(custody_eventually(
+        [&] { return process.read_available_output().find("ready") != std::string::npos; }));
+    const int leader = process.process_id();
+    CHECK(process.wait().exit_code == -1);
+    const auto expired =
+        reservation.cleanup_retained_process_group(std::chrono::steady_clock::now());
+    CHECK(expired.status == RetainedCleanupStatus::Incomplete);
+    CHECK_FALSE(expired.term_sent);
+    CHECK_FALSE(expired.kill_sent);
+    const auto partial = reservation.cleanup_retained_process_group(
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(10));
+    CHECK(partial.status == RetainedCleanupStatus::Incomplete);
+    CHECK(partial.observation.identity_retained);
+    CHECK(partial.term_sent);
+    CHECK_FALSE(partial.kill_sent);
+    CHECK(::kill(leader, 0) == 0);
+    const auto complete = process.cleanup_retained_process_group(custody_deadline());
+    CHECK(complete.status == RetainedCleanupStatus::Complete);
+    CHECK(complete.kill_sent);
+    CHECK(complete.observation.termination_signal == SIGKILL);
+    CHECK(complete.child_reaped);
+}
+
+TEST_CASE("Retained occupied move assignments preserve both pending process identities",
+          "[runtime][child-process][retained-custody]") {
+    using namespace pulp::platform;
+    RetainedProcessCustody first, second;
+    ChildProcess first_process, second_process;
+    REQUIRE(first_process.start_retained(first, "/bin/sleep", {"30"}));
+    REQUIRE(second_process.start_retained(second, "/bin/sleep", {"30"}));
+    const int first_pid = first_process.process_id(), second_pid = second_process.process_id();
+    SECTION("replacing a process handle preserves its reservation") {
+        first_process = std::move(second_process);
+        CHECK(first.retained_process_observation().process_id == first_pid);
+        CHECK(first_process.retained_process_observation().process_id == second_pid);
+        CHECK(first.cleanup_retained_process_group(custody_deadline()).status ==
+              RetainedCleanupStatus::Complete);
+        CHECK(second.cleanup_retained_process_group(custody_deadline()).status ==
+              RetainedCleanupStatus::Complete);
+    }
+    SECTION("replacing a reservation preserves its process handle") {
+        first = std::move(second);
+        CHECK(first_process.retained_process_observation().process_id == first_pid);
+        CHECK(first.retained_process_observation().process_id == second_pid);
+        CHECK(first_process.cleanup_retained_process_group(custody_deadline()).status ==
+              RetainedCleanupStatus::Complete);
+        CHECK(first.cleanup_retained_process_group(custody_deadline()).status ==
+              RetainedCleanupStatus::Complete);
+    }
+    SECTION("replacing the last owner cleans its prior reservation") {
+        first_process = std::move(second_process);
+        first = std::move(second);
+        int status = 0;
+        CHECK(::waitpid(first_pid, &status, WNOHANG) == -1);
+        CHECK(errno == ECHILD);
+        CHECK(first.retained_process_observation().process_id == second_pid);
+        CHECK(first.cleanup_retained_process_group(custody_deadline()).status ==
+              RetainedCleanupStatus::Complete);
+    }
+}
+
+TEST_CASE("Retained competing cleanup reports Busy without consuming custody",
+          "[runtime][child-process][retained-custody]") {
+    using namespace pulp::platform;
+    RetainedProcessCustody reservation;
+    ChildProcess process;
+    std::atomic<bool> entered{false}, release{false}, started{false};
+    ProcessOptions options;
+    options.suspended_process_validator = [&](int) {
+        entered.store(true, std::memory_order_release);
+        return custody_eventually([&] { return release.load(std::memory_order_acquire); });
+    };
+    std::thread launcher(
+        [&] { started = process.start_retained(reservation, "/bin/sleep", {"30"}, options); });
+    auto join = make_scope_guard([&] {
+        release = true;
+        launcher.join();
+    });
+    REQUIRE(custody_eventually([&] { return entered.load(std::memory_order_acquire); }));
+    const auto before = std::chrono::steady_clock::now();
+    CHECK(reservation.cleanup_retained_process_group(custody_deadline()).status ==
+          RetainedCleanupStatus::Busy);
+    CHECK(std::chrono::steady_clock::now() - before < std::chrono::milliseconds(500));
+    release = true;
+    REQUIRE(custody_eventually([&] { return started.load(); }));
+    CHECK(reservation.cleanup_retained_process_group(custody_deadline()).status ==
+          RetainedCleanupStatus::Complete);
+}
+
+TEST_CASE("Retained failed spawn consumes no process identity",
+          "[runtime][child-process][retained-custody]") {
+    using namespace pulp::platform;
+    RetainedProcessCustody reservation;
+    ChildProcess process;
+    REQUIRE_FALSE(process.start_retained(reservation, "/nonexistent/pulp-custody-worker", {}));
+    CHECK(reservation.retained_process_observation().state == RetainedProcessState::NotStarted);
+    const auto receipt = reservation.cleanup_retained_process_group(custody_deadline());
+    CHECK(receipt.status == RetainedCleanupStatus::Complete);
+    CHECK(receipt.descendants_gone);
+    CHECK_FALSE(receipt.child_reaped);
+    CHECK_FALSE(receipt.term_sent);
+    CHECK_FALSE(receipt.kill_sent);
+    CHECK_FALSE(process.start_retained(reservation, "/bin/true", {}));
+}
+
+TEST_CASE("Retained launch refuses child auto-reaping before spawn",
+          "[runtime][child-process][retained-custody]") {
+    using namespace pulp::platform;
+    struct sigaction original{}, changed{};
+    REQUIRE(::sigaction(SIGCHLD, nullptr, &original) == 0);
+    auto restore = make_scope_guard([&] { (void)::sigaction(SIGCHLD, &original, nullptr); });
+    changed.sa_handler = SIG_DFL;
+    sigemptyset(&changed.sa_mask);
+    SECTION("ignored SIGCHLD") {
+        changed.sa_handler = SIG_IGN;
+    }
+    SECTION("SA_NOCLDWAIT") {
+        changed.sa_flags = SA_NOCLDWAIT;
+    }
+    REQUIRE(::sigaction(SIGCHLD, &changed, nullptr) == 0);
+    RetainedProcessCustody reservation;
+    ChildProcess process;
+    CHECK_FALSE(process.start_retained(reservation, "/bin/sleep", {"30"}));
+    CHECK(process.process_id() == -1);
+    CHECK(reservation.retained_process_observation().state == RetainedProcessState::NotStarted);
+}
+
+TEST_CASE("Retained suspended rejection cleans the child before it executes",
+          "[runtime][child-process][retained-custody][retained-suspended]") {
+    using namespace pulp::platform;
+    RetainedProcessCustody reservation;
+    ChildProcess process;
+    TemporaryFile marker(".suspended-custody");
+    std::filesystem::remove(marker.path());
+    ProcessOptions options;
+    int leader = -1;
+    RetainedProcessObservation suspended;
+    options.suspended_process_validator = [&](int pid) {
+        leader = pid;
+        suspended = process.retained_process_observation();
+        return false;
+    };
+    const auto before = std::chrono::steady_clock::now();
+    CHECK_FALSE(process.start_retained(reservation, "/bin/sh",
+                                       {"-c", "printf executed > \"$1\"", "child", marker.path()},
+                                       options));
+    CHECK(std::chrono::steady_clock::now() - before < std::chrono::milliseconds(2500));
+    REQUIRE(leader > 0);
+    CHECK(suspended.state == RetainedProcessState::Running);
+    CHECK(suspended.identity_retained);
+    CHECK_FALSE(std::filesystem::exists(marker.path()));
+    const auto receipt = reservation.cleanup_retained_process_group(custody_deadline());
+    CHECK(receipt.status == RetainedCleanupStatus::Complete);
+    CHECK(receipt.term_sent);
+    CHECK((receipt.observation.termination_signal == SIGTERM ||
+           receipt.observation.termination_signal == SIGKILL));
+    CHECK(receipt.child_reaped);
+    CHECK(receipt.descendants_gone);
+}
+
+TEST_CASE("Retained cleanup removes finite descendant churn",
+          "[runtime][child-process][retained-custody][retained-churn]") {
+    using namespace pulp::platform;
+    for (int repetition = 0; repetition < 4; ++repetition) {
+        TemporaryFile marker(".custody-churn");
+        RetainedProcessCustody reservation;
+        ChildProcess process;
+        int leader = -1;
+        auto safety = make_scope_guard([&] {
+            siginfo_t witness{};
+            if (leader > 0 && ::waitid(P_PID, static_cast<id_t>(leader), &witness,
+                                       WEXITED | WNOHANG | WNOWAIT) == 0) {
+                (void)::kill(-leader, SIGKILL);
+                (void)reservation.cleanup_retained_process_group(custody_deadline());
+            }
+        });
+        REQUIRE(process.start_retained(
+            reservation, "/bin/sh",
+            {"-c", "/bin/sh -c \"$1\" child \"$2\" <&0 & exit 9", "leader",
+             "trap '' TERM; printf '%s\\n' \"$$\" > \"$1\"; i=0; "
+             "while [ \"$i\" -lt 8 ]; do sleep 30 & printf '%s\\n' \"$!\" >> \"$1\"; "
+             "i=$((i+1)); sleep 0.015; done; wait",
+             marker.path()}));
+        leader = process.process_id();
+        REQUIRE(custody_eventually([&] {
+            std::ifstream file(marker.path());
+            int pid = -1;
+            return static_cast<bool>(file >> pid) && pid > 0;
+        }));
+        const auto receipt = reservation.cleanup_retained_process_group(custody_deadline());
+        CHECK(receipt.status == RetainedCleanupStatus::Complete);
+        CHECK(receipt.kill_sent);
+        CHECK(receipt.descendants_gone);
+        CHECK(receipt.child_reaped);
+        std::ifstream file(marker.path());
+        int pid = -1, count = 0;
+        while (file >> pid) {
+            INFO("leader=" << leader << " descendant=" << pid << " repetition=" << repetition);
+            CHECK(::kill(pid, 0) == -1);
+            CHECK(errno == ESRCH);
+            ++count;
+        }
+        CHECK(count >= 1);
+        CHECK(count <= 9);
+    }
+}
+
+#else
+TEST_CASE("Retained process custody refuses unsupported platforms without spawning",
+          "[runtime][child-process][retained-custody]") {
+    using namespace pulp::platform;
+    RetainedProcessCustody reservation;
+    ChildProcess process;
+    CHECK_FALSE(process.start_retained(reservation, "unsupported-worker", {}));
+    bool called = false;
+    CHECK_FALSE(process.start_retained_with_standard_input_channel(
+        reservation, "unsupported-worker", {}, [&](int, ChildProcessInputChannel, auto) {
+            called = true;
+            return true;
+        }));
+    CHECK_FALSE(called);
+    CHECK(process.process_id() == -1);
+    CHECK(process.retained_process_observation().state == RetainedProcessState::Unsupported);
+    CHECK(reservation.cleanup_retained_process_group(std::chrono::steady_clock::now()).status ==
+          RetainedCleanupStatus::Unsupported);
+    CHECK_FALSE(CurrentProcessGroup::capture());
+}
+#endif

@@ -366,7 +366,13 @@ retain those fields in the PR/landing evidence.
   `vellum-gpu-runtime` entry's `upstream.commit` (the gpu-runtime Pulp builds
   against, `tools/cmake/PulpGpuRuntime.cmake`), and fails unless the lock's
   `macos-arm64.sha256` and `milestone` equal Pulp's
-  `release_assets.mac-universal.sha256` and Skia `version`. A milestone bump
+  `release_assets.mac-universal.sha256` and Skia `version`. The lock pins one
+  macOS asset, and every macOS build forwards to gpu-runtime, so the audit also
+  requires every `mac-*` key (`mac-arm64`, `mac-x86_64`) to carry that universal
+  digest. Never point `mac-x86_64` back at the thin x86_64 archive: its objects
+  are byte-identical to the universal x86_64 slice, but its `.a` digests are not,
+  so every Intel build (the `darwin-x64` release leg) fails gpu-runtime's Dawn
+  check at configure. A milestone bump
   therefore lands in Vellum's lock first, then one Pulp change moves the Skia
   entry, the drift-check commit and the gpu-runtime pin together; pointing
   either commit elsewhere is the negative control. The read is fail-closed (no
@@ -379,6 +385,16 @@ retain those fields in the PR/landing evidence.
   with `-DPULP_USE_GPU_RUNTIME=OFF` and build `pulp-test-gpu-device-only-consumer`.
   `gpu-runtime-mode-consistency` fails when a mode's `PULP_GPU_RUNTIME` define
   is missing or leaks.
+  gpu-runtime's renderer lock has one macOS platform, `macos-arm64`, pinned to
+  the universal skia-build asset's Dawn. Every Apple target forwards to
+  gpu-runtime, including an x86_64-only one (release-cli's `darwin-x64`
+  cross-compile, or a native Intel build): it resolves the same universal asset
+  and links its x86_64 slice, so there is one GPU device path for Intel and
+  Apple Silicon. Do not reintroduce an architecture opt-out that drops x86_64
+  to Pulp's own device sources; `gpu-runtime-apple-targets` fails if any Apple
+  target shape returns before reaching gpu-runtime. A renderer bump must
+  therefore keep gpu-runtime compiling for x86_64, so run the release dry-run's
+  `darwin-x64` leg on it.
   Vellum's GPU mirror build pins the archive and header digests of the Pulp
   commit it was exported from, so its renderer bump can only pass after Pulp's
   lands.

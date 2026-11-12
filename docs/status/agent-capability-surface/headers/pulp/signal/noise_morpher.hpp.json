@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/noise_morpher.hpp",
+  "fingerprint": "sha256:5a57d65be64030dc08ed092f642062ae205fedb3f5802d718c9b8926971dd24c",
+  "include": "pulp/signal/noise_morpher.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

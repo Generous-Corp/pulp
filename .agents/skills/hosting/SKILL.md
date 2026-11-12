@@ -9,6 +9,49 @@ description: |
 
 # hosting
 
+## Opt-in isolated CLAP processing
+
+`pulp/host/isolated_plugin_slot.hpp` supplies experimental MacClapStereo64V1
+and a separate retained lifecycle handle. Use the ordinary `add_plugin_node`
+ownership path. Never load the vendor in the parent or replace the fixed shared
+mapping callback with synchronous RPC. Read `docs/guides/isolated-clap-worker.md`
+for mode, refusal, custody, checkpoint and terminal-silence contracts. Keep real
+hostile-fixture, endpoint, sibling/PDC and production-mutation controls together.
+Functional callback traps do not establish full realtime or A10 qualification;
+host death and deliberate group escape are outside first-mode custody.
+
+**Graph code that calls an isolation helper must also link on the web.** The
+WAM / WebCLAP sample-region profile compiles a curated source list
+(`tools/cmake/PulpSampleRegionWebSources.cmake`), not `pulp-host`, and
+`isolated_plugin_slot.cpp` is deliberately absent because it needs a child
+process. A new call from `signal_graph_*.cpp` into that file fails only at
+`wasm-ld` (an advisory job that still ejects ALLGREEN queue batches). Give the
+web list a wasm-safe definition, as `isolated_plugin_slot_web.cpp` does for
+`is_isolated_plugin_slot`, and add the symbol to the closure selftest in
+`tools/scripts/test_sample_region_compat_baseline.py`.
+
+
+## Live retuning at a callback boundary
+
+For a graph-owned in-process instrument, retain its public
+`ProcessorNodeInstance` and resolve the frequency parameter by its frozen
+catalog name. Query `TuningProvider` on the control thread, validate the note,
+filter flag, finite frequency, Nyquist and product range, then update the
+instance's `StateStore`. A prepared `ParamReader` can adopt it once per block
+without resetting the existing oscillator or envelope. This does not require
+`set_node_parameter`, whose Plugin-slot contract is different.
+
+Boundary timing must come from the host. An offline test can split callback
+partitions at a pinned absolute sample and join its control writer before the
+next callback; that does not prove an arbitrary UI write's sample timestamp,
+intra-block scheduling or raced realtime control. Give input views the actual
+block frame extent even when rendering an instrument with silence: a
+zero-frame default view can fail the routed `ProcessBlock` validation and
+produce silence. Require a positive sounding render before trusting planted
+timing/reset failures. The installed public-header recipe and its independent
+phase/audio/sibling oracle live in `examples/g11-live-retune-consumer` and
+`docs/guides/g11-live-retune-cookbook.md`.
+
 ## When this skill applies
 
 - Adding or modifying a format backend under `core/host/src/plugin_slot_<format>.cpp`.
@@ -25,6 +68,22 @@ target so the dependency reduction does not silently break existing umbrella
 consumers.
 
 ## Mental model
+
+The bounded G6 in-process voice bank is `voice_bank_binding.hpp` plus one
+authored `SubgraphTemplate` Processor per slot. Its owner retains the existing
+MPE allocator; factories and named parameter binding run during control-thread
+preparation. When rendering a graph interval for an instrument, pass a
+zero-channel input `BufferView` with that interval's exact frame count. A
+default-constructed empty view has zero frames and makes routed execution fail
+closed. Keep both the between-event and final-tail branches covered by the
+installed SDK consumer and its independent planted mutations. The bounded
+bank now handles member and manager CC64 sustain, scoped CC120/121/123,
+generation-scoped release, and member-channel pitch, pressure, and CC74
+expression. Manager expression returns `UnsupportedExpression`. Its A1 scalar
+fixture uses a fixed `1/sqrt(8)` eight-slot stereo sum and four in-slot linear
+release frames. Saved-bank activation, edit/undo, DAW adapters, and paced
+realtime qualification remain open; do not infer them from the source-installed
+consumer.
 
 `PluginSlot` is the uniform interface. Each format backend is a single
 free function — `load_<format>_plugin(info)` — that returns a
@@ -1873,6 +1932,12 @@ Apple's units and the host probe:
   `PULP_TEST_AUV3_PROBE_OUT_OF_PROCESS=1` with the component installed; remove
   it afterwards. Confirm the process boundary by finding the component mapped
   in the `AUHostingService` process with `lsof`.
+  Getting this wrong does not fail the load: the system hands back an
+  `AUAudioUnit_RemoteV2` with zero input and zero output buses, and the error
+  only surfaces at `prepare()` as -10875 from `allocateRenderResources`.
+  `AuV3LoadOptions::out_of_process` defaults to true, so a test that registers
+  in process must set it false. The slot logs `kRemoteUnitWithoutBuses` at
+  load when an instrument, effect or generator arrives this way.
 - **A unit republishes its parameter tree after a bus format change.** About
   2 ms after `setFormat:` (AUDelay, AUPeakLimiter; not DLSMusicDevice or the
   mixer), and only if the host has already read `parameterTree`. A warm
@@ -3109,3 +3174,21 @@ SignalGraph control and event edge probes are serial routed diagnostics with
 fixed-capacity publication and explicit refusal in unsupported execution modes.
 Host lifecycle changes must preserve detach-on-reset and the source-edge event
 observation boundary.
+
+### Catalog-derived graph notation
+
+`pulp/host/graph_patch.hpp` projects registered Processor descriptors and actual
+named GraphNode ports into a control-thread catalog. Processor MIDI capabilities
+append named `midi` ports without changing audio counts; named connect must set
+the MIDI edge flag. Keep strict patch validation additive: the legacy serializer
+may drop bad edges, while strict validation must check every original edge.
+Opaque state and richer edge kinds need explicit contracts before formatting.
+
+### Vendored lilv/zix on Android
+
+`pulp-host-lilv` (external/lilv) compiles into `pulp-host` on every platform,
+including the Android NDK build. zix assumes any `__linux__` target has
+`copy_file_range`, but bionic only declares it from API 34 (minSdk is 26), so the
+Android branch in `core/host/CMakeLists.txt` defines `HAVE_COPY_FILE_RANGE=0`.
+The `android-build` job runs only on main pushes (it is skipped for
+`pull_request` and `merge_group`), so a host-side C break shows up only there.

@@ -214,6 +214,37 @@ projects (`cmake-clean-consumer-fixture`) or every exported capability
 (`agent-capability-installed-sdk`) stays `slow`, the latter restored per change
 as described below. Measure a new consumer against this table before choosing.
 
+### The Vellum SDK consumer lane
+
+`vellum-sdk-consumer.yml` builds the editor-host slice (`test/editor_host_slice/`)
+against the SDK archive from Vellum main's newest green "Locked macOS GPU proof"
+run and runs `tools/scripts/editor_host_acceptance.py` against it. It exists
+because a Vellum change can break a Pulp consumer with nothing in Pulp changing:
+when Vellum renamed its mirrored headers from `pulp/` to `vellum/`, the slice
+stopped compiling and no Pulp check noticed.
+
+- **Triggers.** Nightly, which is the run that catches a Vellum change; pull
+  requests that touch the slice, the acceptance runner or the lane; and manual
+  dispatch, optionally pinned to one Vellum run id. A nightly run stops after the
+  resolve step when Vellum main's head equals the head the last green run
+  checked, so it costs a few API calls when Vellum has not moved.
+- **Inputs.** `tools/ci/vellum_sdk_consumer.py resolve` downloads the
+  `vellum-gpu-macos-arm64-evidence` artifact with `github.token` (Vellum is
+  public, but artifact downloads still need a token), checks the archive against
+  the artifact's `SHA256SUMS`, and records the run id, head sha, artifact id and
+  archive sha256 in the step summary and a `vellum-sdk-consumer-receipt`
+  artifact. Any lookup or digest failure fails the step; nothing falls back.
+- **Negative control.** Every full run recompiles one Vellum-side translation
+  unit (`knob_panel.cpp`) with `-fsyntax-only`, once against the SDK as
+  published, which must succeed, and once against a copy of its mirror headers
+  with `vellum/canvas/canvas.hpp` renamed, which must fail naming that header. A
+  failure for any other reason is INCONCLUSIVE and fails the job. It costs one
+  compile, not a second build.
+- **Runner.** Advisory and not a required check. Its macOS job takes its runner
+  from `resolve_advisory_macos_runner.py`, so it never claims a runner the
+  required `macos` gate needs, and the acceptance runner builds through
+  `tools/ci/governed-build.sh`.
+
 ### Affected slow proofs
 
 `agent-capability-installed-sdk` installs Pulp and builds an independent
@@ -569,6 +600,13 @@ make sure it is enforced somewhere. During the staged rollout,
 promotion to a required context is what turns that signal into enforcement.
 Use a dedicated gating lane for anything that must block before then. "It runs
 nightly" is a backstop, not enforcement.
+
+The one automatic exit is the flake quarantine (`tools/ci/flake_quarantine.py`):
+a test the merge-group gate excused as a corroborated flake 3 times in 7 days
+leaves the gate for at most 14 days, behind an owner issue labelled `ci:flake`.
+Its enforcer is the expiry, which returns it to the gate; meanwhile the
+`Quarantined flaky tests (advisory)` step runs it on every gate run, and a
+change that touches the test runs it in the gate. See `docs/guides/local-ci.md`.
 
 ### A label is not the only way to leave the gate
 

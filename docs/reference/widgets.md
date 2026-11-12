@@ -158,6 +158,7 @@ lowercase names for serialization and the JS bridge.
 | `TableListBox` (`Table`) | Sortable column table | columns (header/width/sortable/align), `TableModel`/`SimpleTableModel`, click-to-sort, themed rows | `table.hpp` |
 | `TreeView` | Hierarchical tree | expand/collapse, selection, toggle/select/activate callbacks, keyboard nav | `tree_view.hpp` |
 | `PresetBrowser` | Factory/user preset browser | show-mode filter, search filter, selection | `preset_browser.hpp` |
+| `PresetProgramEditor` | MIDI program-number editor for a preset library (bank, slot, assign/clear) | selected bank, selected slot, assign/clear/renumber | `preset_program_editor.hpp` |
 
 ## Navigation & menus
 
@@ -171,6 +172,7 @@ lowercase names for serialization and the JS bridge.
 | `SidePanel` (`Sidebar`) | Slide-in edge panel | edge, extent, animated open/close, slide offset, state callback | `side_panel.hpp` |
 | `ContextMenu` (`PopupMenu`) | View-tree popup menu | items (id/label/enabled/checked/separator), anchor, keyboard nav, outside/Esc dismiss | `context_menu.hpp` |
 | `ContextMenu::show_modulation` | Shared two-lane modulation popup | LFO 1/LFO 2 enabled toggles, waveform choices, rate/depth sliders, arrow/Return selection, outside/Esc dismiss, reset callback | `context_menu.hpp` |
+| `MidiLearnOverlay` | MIDI Learn state decoration over a parameter control | listening outline and chip, bind confirmation, mapped dot; hidden when MIDI Learn is unavailable; not hit-testable | `midi_learn_menu.hpp` |
 
 ## Indicators & feedback
 

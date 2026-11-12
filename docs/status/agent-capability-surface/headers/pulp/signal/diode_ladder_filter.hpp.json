@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/diode_ladder_filter.hpp",
+  "fingerprint": "sha256:381d92d35bce20345ed8fd1e9c4e938eb618de103733560e82932dfb07ce5a33",
+  "include": "pulp/signal/diode_ladder_filter.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Four-stage diode-coupled ladder lowpass with zero-delay feedback, a saturating resonance path and a bracketed Newton solve exposed as solve_loop(). A bounded DSP primitive documented in the signal guide; it makes no installed agent capability claim of its own."
+}

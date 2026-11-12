@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/trigger_kit.hpp",
+  "fingerprint": "sha256:39e6800b2bceaa27c01910cfdbeaa76b0541f53d21e56d521c7acb11f2206532",
+  "include": "pulp/signal/trigger_kit.hpp",
+  "disposition": "legacy_unreviewed",
+  "capability_keys": [],
+  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+}

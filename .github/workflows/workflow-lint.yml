@@ -12,315 +12,25 @@ name: Workflow lint
 # failed silently with "workflow file issue" and 0 jobs; this lint workflow
 # prevents the recurrence class.
 #
-# Scope: runs only on PRs that touch workflows/actions or the independently
-# tested Windows runner-policy surfaces. Keeps the check fast on the 99% of
-# PRs that don't touch CI.
+# Scope: the suites run only when a change touches workflows/actions or one of
+# the CI-policy surfaces listed in tools/ci/workflow_lint_paths.txt, which keeps
+# the check under a minute on the PRs that don't touch CI. The decision is made
+# per event by the `scope` job, for pull requests, merge-queue batches and
+# pushes to main alike.
 
 on:
+  # No `paths:` filter on any trigger: `workflow-lint` is meant to be a required
+  # check, and a required check that never reports holds a pull request on
+  # "Expected" forever. merge_group takes no `paths:` filter at all, and the
+  # queue batch is the only run that sees two pull requests' workflow changes
+  # together: each can pass alone while their combined tree fails. The `scope`
+  # job reads tools/ci/workflow_lint_paths.txt instead and the suites run only
+  # when the change touches one of those paths; the `workflow-lint` job
+  # reports on every run either way.
   pull_request:
-    paths:
-      - '.github/actionlint.yaml'
-      - '.github/workflows/**'
-      - 'tools/scripts/test_release_cache_isolation.py'
-      - 'tools/scripts/test_release_package_step.py'
-      - 'tools/ci/release_package_cli.sh'
-      - 'tools/ci/release_path_changed.py'
-      - 'tools/scripts/action_pin_lint.py'
-      - 'tools/scripts/view_audio_archive_manifest.py'
-      # The manifest and its tests read listings through this reader.
-      - 'tools/scripts/nm_symbols.py'
-      - 'tools/scripts/test_view_audio_archive_manifest.py'
-      - 'tools/scripts/test_action_pin_lint.py'
-      - '.github/schedule-backstop.json'
-      - 'tools/scripts/schedule_backstop_check.py'
-      - 'tools/scripts/test_schedule_backstop_check.py'
-      - '.github/actions/**'
-      - '.shipyard/ci-profiles/normal-local-fast.toml'
-      - 'tools/scripts/resolve_release_runners.py'
-      - 'tools/scripts/test_resolve_release_runners.py'
-      - 'tools/scripts/resolve_advisory_macos_runner.py'
-      - 'tools/scripts/test_advisory_macos_runner_policy.py'
-      - 'tools/scripts/resolve_linux_route.py'
-      - 'tools/scripts/test_resolve_linux_route.py'
-      - 'tools/ci/macos_pr_lane.py'
-      - 'tools/ci/test_macos_pr_lane.py'
-      - 'tools/ci/clean_merge_lane.py'
-      - 'tools/ci/test_clean_merge_lane.py'
-      - 'tools/ci/test_macos_tier_record.py'
-      - 'tools/ci/test_build_pr_dispatch.py'
-      - 'tools/scripts/workflow_runner_selector_audit.py'
-      - 'tools/scripts/test_workflow_runner_selector_audit.py'
-      - 'tools/scripts/test_windows_runner_policy.py'
-      - 'tools/scripts/test_codeql_workflow_concurrency.py'
-      - 'tools/scripts/test_cross_platform_check_concurrency.py'
-      - 'tools/scripts/windows_runner_selector.py'
-      - 'tools/scripts/test_windows_runner_selector.py'
-      - 'tools/scripts/test_windows_x64_routing.py'
-      - 'tools/scripts/windows_cli_compile_scope.py'
-      - 'tools/scripts/test_windows_cli_compile_scope.py'
-      - 'tools/scripts/windows_cli_release_precheck.py'
-      - 'tools/scripts/test_windows_cli_release_precheck.py'
-      - 'tools/scripts/test_windows_cli_compile_workflow.py'
-      - 'tools/scripts/release_reconcile.py'
-      - 'tools/scripts/test_release_reconcile.py'
-      - 'tools/scripts/release_failure_diagnosis.py'
-      - 'tools/scripts/test_release_failure_diagnosis.py'
-      - 'tools/scripts/fixtures/release_failure/**'
-      - 'tools/scripts/release_artifact_contents.py'
-      - 'tools/scripts/test_release_artifact_contents.py'
-      - 'tools/scripts/package_cli.py'
-      - 'tools/scripts/test_package_cli.py'
-      - 'tools/scripts/release_build_matrix.py'
-      - 'tools/scripts/test_release_build_matrix.py'
-      - 'tools/scripts/release_platform_subset_check.py'
-      - 'tools/scripts/test_release_platform_subset_check.py'
-      - 'tools/scripts/sdk_provenance.py'
-      - 'tools/scripts/test_sdk_provenance.py'
-      - 'tools/scripts/protected_merge_receipt.py'
-      - 'tools/scripts/test_protected_merge_receipt.py'
-      - 'tools/scripts/required_check_machinery.py'
-      - 'tools/scripts/test_required_check_machinery.py'
-      - '.github/rulesets/**'
-      - 'tools/scripts/required_gate_liveness.py'
-      - 'tools/scripts/test_required_gate_liveness.py'
-      - 'tools/scripts/queue_age_watchdog.py'
-      - 'tools/scripts/test_queue_age_watchdog.py'
-      - 'tools/scripts/unserved_job_check.py'
-      - 'tools/scripts/test_unserved_job_check.py'
-      - 'tools/scripts/fixtures/nightly_intel_unserved_jobs.json'
-      - 'tools/scripts/merge_stall_watchdog.py'
-      - 'tools/scripts/test_merge_stall_watchdog.py'
-      - 'tools/scripts/stale_run_reaper.py'
-      - 'tools/scripts/test_stale_run_reaper.py'
-      - 'tools/scripts/test_release_breakage_watchdog_wiring.py'
-      - 'tools/scripts/test_codecov_upload_contract.py'
-      - 'tools/scripts/test_coverage_surface_contract.py'
-      - 'ci/coverage-surfaces.yaml'
-      - 'tools/scripts/generated_version_bump_check.py'
-      - 'tools/scripts/test_generated_version_bump_check.py'
-      - 'tools/scripts/release_product_matrix.json'
-      - 'CMakeLists.txt'
-      - '**/CMakeLists.txt'
-      - 'tools/cmake/**'
-      - 'tools/scripts/resign_macos_release_tree.py'
-      - 'tools/scripts/test_resign_macos_release_tree.py'
-      - 'tools/ci/install_linux_build_deps.py'
-      - 'tools/ci/linux_build_deps.json'
-      - 'tools/ci/linux_build_deps_workflows.json'
-      - 'tools/ci/test_install_linux_build_deps.py'
-      - 'tools/ci/pulp-worktree.sh'
-      - 'tools/ci/test_pulp_worktree_cache_env.py'
-      - 'tools/ci/test_pulp_worktree_gc.py'
-      - 'tools/ci/build-dir-sentinel.sh'
-      - 'tools/scripts/test_build_dir_sentinel.py'
-      - 'tools/scripts/checkout_preflight.py'
-      - 'tools/scripts/test_checkout_preflight.py'
-      - 'tools/scripts/fetch_skia_for_release.py'
-      - 'tools/scripts/test_fetch_skia_for_release.py'
-      - 'tools/scripts/test_fetch_skia_for_release_extra.py'
-      - 'tools/scripts/download_retry.py'
-      - 'tools/scripts/test_download_retry.py'
-      - 'tools/scripts/verify_skia_m153_capabilities.py'
-      - 'tools/scripts/test_verify_skia_m153_capabilities.py'
-      - 'tools/build-skia.sh'
-      - 'tools/scripts/test_build_skia_source_pin.py'
-      - 'tools/deps/validate_render_update.py'
-      - 'tools/deps/test_validate_render_update.py'
-      - 'tools/deps/validate_hosts.py'
-      - 'tools/deps/test_validate_hosts.py'
-      - '.shipyard/config.toml'
-      - 'tools/scripts/test_ci_throughput_workflows.py'
-      - 'tools/scripts/dispatch_advisory_lanes.sh'
-      - 'tools/scripts/test_dispatch_advisory_lanes.py'
-      - 'tools/scripts/test_fork_pr_runner_routing.py'
-      - 'tools/scripts/fork_runner_guard_check.py'
-      - 'tools/scripts/test_fork_runner_guard_check.py'
-      - 'tools/scripts/resolve_runs_on.py'
-      - 'tools/scripts/test_resolve_runs_on_fork.py'
-      - 'tools/scripts/ctest_scheduling_policy.py'
-      - 'tools/scripts/test_ctest_scheduling_contract.py'
-      - 'tools/scripts/test_api_contracts_workflow.py'
-      - 'tools/build-api-docs.sh'
-      - 'tools/scripts/verify_control_shipping_native_evidence.py'
-      - 'tools/scripts/test_verify_control_shipping_native_evidence.py'
-      - 'tools/scripts/test_control_shipping_native_workflow.py'
-      - 'tools/scripts/test_workflow_lint.py'
-      - 'tools/scripts/test_visual_python_deps_step.py'
-      - 'tools/scripts/test_node_build_deps_step.py'
-      - 'tools/scripts/test_build_fetch_resilience.py'
-      - 'tools/ci/net-retry.sh'
-      - 'tools/install-shipyard.sh'
-      - 'tools/scripts/install_shipyard_token_check.py'
-      - 'tools/scripts/test_install_shipyard_token_check.py'
-      - 'tools/scripts/test_android_premerge_probe.py'
-      - 'tools/scripts/shell_portability_check.py'
-      - 'tools/scripts/test_shell_portability_check.py'
-      - 'tools/scripts/shell_portability_rules.json'
-      - 'docs/guides/agent-efficiency-audits.md'
-      - 'tools/ci/**'
-      - 'scripts/**'
-      - 'tools/scripts/ctest_nonruns.py'
-      - 'tools/scripts/test_ctest_nonruns.py'
-      - 'tools/scripts/test_ios_gate_skip_contract.py'
-      - 'tools/shipyard.toml'
-      - 'tools/scripts/example_validation_paths.py'
-      - 'tools/scripts/test_example_validation_paths.py'
-      - 'tools/scripts/test_gpu_provenance_ci_wiring.py'
-      - 'tools/scripts/runner_topology.json'
-      - '.shipyard/config.toml'
-      - 'test/cmake/**'
+  merge_group:
   push:
     branches: [main]
-    paths:
-      - '.github/actionlint.yaml'
-      - '.github/workflows/**'
-      - 'tools/scripts/test_release_cache_isolation.py'
-      - 'tools/scripts/test_release_package_step.py'
-      - 'tools/ci/release_package_cli.sh'
-      - 'tools/ci/release_path_changed.py'
-      - 'tools/scripts/action_pin_lint.py'
-      - 'tools/scripts/view_audio_archive_manifest.py'
-      # The manifest and its tests read listings through this reader.
-      - 'tools/scripts/nm_symbols.py'
-      - 'tools/scripts/test_view_audio_archive_manifest.py'
-      - 'tools/scripts/test_action_pin_lint.py'
-      - '.github/schedule-backstop.json'
-      - 'tools/scripts/schedule_backstop_check.py'
-      - 'tools/scripts/test_schedule_backstop_check.py'
-      - '.github/actions/**'
-      - '.shipyard/ci-profiles/normal-local-fast.toml'
-      - 'tools/scripts/resolve_release_runners.py'
-      - 'tools/scripts/test_resolve_release_runners.py'
-      - 'tools/scripts/resolve_advisory_macos_runner.py'
-      - 'tools/scripts/test_advisory_macos_runner_policy.py'
-      - 'tools/scripts/resolve_linux_route.py'
-      - 'tools/scripts/test_resolve_linux_route.py'
-      - 'tools/ci/macos_pr_lane.py'
-      - 'tools/ci/test_macos_pr_lane.py'
-      - 'tools/ci/clean_merge_lane.py'
-      - 'tools/ci/test_clean_merge_lane.py'
-      - 'tools/ci/test_macos_tier_record.py'
-      - 'tools/ci/test_build_pr_dispatch.py'
-      - 'tools/scripts/workflow_runner_selector_audit.py'
-      - 'tools/scripts/test_workflow_runner_selector_audit.py'
-      - 'tools/scripts/test_windows_runner_policy.py'
-      - 'tools/scripts/test_codeql_workflow_concurrency.py'
-      - 'tools/scripts/test_cross_platform_check_concurrency.py'
-      - 'tools/scripts/windows_runner_selector.py'
-      - 'tools/scripts/test_windows_runner_selector.py'
-      - 'tools/scripts/test_windows_x64_routing.py'
-      - 'tools/scripts/windows_cli_compile_scope.py'
-      - 'tools/scripts/test_windows_cli_compile_scope.py'
-      - 'tools/scripts/windows_cli_release_precheck.py'
-      - 'tools/scripts/test_windows_cli_release_precheck.py'
-      - 'tools/scripts/test_windows_cli_compile_workflow.py'
-      - 'tools/scripts/release_reconcile.py'
-      - 'tools/scripts/test_release_reconcile.py'
-      - 'tools/scripts/release_failure_diagnosis.py'
-      - 'tools/scripts/test_release_failure_diagnosis.py'
-      - 'tools/scripts/fixtures/release_failure/**'
-      - 'tools/scripts/release_artifact_contents.py'
-      - 'tools/scripts/test_release_artifact_contents.py'
-      - 'tools/scripts/package_cli.py'
-      - 'tools/scripts/test_package_cli.py'
-      - 'tools/scripts/release_build_matrix.py'
-      - 'tools/scripts/test_release_build_matrix.py'
-      - 'tools/scripts/release_platform_subset_check.py'
-      - 'tools/scripts/test_release_platform_subset_check.py'
-      - 'tools/scripts/sdk_provenance.py'
-      - 'tools/scripts/test_sdk_provenance.py'
-      - 'tools/scripts/protected_merge_receipt.py'
-      - 'tools/scripts/test_protected_merge_receipt.py'
-      - 'tools/scripts/required_check_machinery.py'
-      - 'tools/scripts/test_required_check_machinery.py'
-      - '.github/rulesets/**'
-      - 'tools/scripts/required_gate_liveness.py'
-      - 'tools/scripts/test_required_gate_liveness.py'
-      - 'tools/scripts/queue_age_watchdog.py'
-      - 'tools/scripts/test_queue_age_watchdog.py'
-      - 'tools/scripts/unserved_job_check.py'
-      - 'tools/scripts/test_unserved_job_check.py'
-      - 'tools/scripts/fixtures/nightly_intel_unserved_jobs.json'
-      - 'tools/scripts/merge_stall_watchdog.py'
-      - 'tools/scripts/test_merge_stall_watchdog.py'
-      - 'tools/scripts/stale_run_reaper.py'
-      - 'tools/scripts/test_stale_run_reaper.py'
-      - 'tools/scripts/test_release_breakage_watchdog_wiring.py'
-      - 'tools/scripts/test_codecov_upload_contract.py'
-      - 'tools/scripts/test_coverage_surface_contract.py'
-      - 'ci/coverage-surfaces.yaml'
-      - 'tools/scripts/generated_version_bump_check.py'
-      - 'tools/scripts/test_generated_version_bump_check.py'
-      - 'tools/scripts/release_product_matrix.json'
-      - 'CMakeLists.txt'
-      - '**/CMakeLists.txt'
-      - 'tools/cmake/**'
-      - 'tools/scripts/resign_macos_release_tree.py'
-      - 'tools/scripts/test_resign_macos_release_tree.py'
-      - 'tools/ci/install_linux_build_deps.py'
-      - 'tools/ci/linux_build_deps.json'
-      - 'tools/ci/linux_build_deps_workflows.json'
-      - 'tools/ci/test_install_linux_build_deps.py'
-      - 'tools/ci/pulp-worktree.sh'
-      - 'tools/ci/test_pulp_worktree_cache_env.py'
-      - 'tools/ci/test_pulp_worktree_gc.py'
-      - 'tools/ci/build-dir-sentinel.sh'
-      - 'tools/scripts/test_build_dir_sentinel.py'
-      - 'tools/scripts/checkout_preflight.py'
-      - 'tools/scripts/test_checkout_preflight.py'
-      - 'tools/scripts/fetch_skia_for_release.py'
-      - 'tools/scripts/test_fetch_skia_for_release.py'
-      - 'tools/scripts/test_fetch_skia_for_release_extra.py'
-      - 'tools/scripts/download_retry.py'
-      - 'tools/scripts/test_download_retry.py'
-      - 'tools/scripts/verify_skia_m153_capabilities.py'
-      - 'tools/scripts/test_verify_skia_m153_capabilities.py'
-      - 'tools/build-skia.sh'
-      - 'tools/scripts/test_build_skia_source_pin.py'
-      - 'tools/deps/validate_render_update.py'
-      - 'tools/deps/test_validate_render_update.py'
-      - 'tools/deps/validate_hosts.py'
-      - 'tools/deps/test_validate_hosts.py'
-      - '.shipyard/config.toml'
-      - 'tools/scripts/test_ci_throughput_workflows.py'
-      - 'tools/scripts/dispatch_advisory_lanes.sh'
-      - 'tools/scripts/test_dispatch_advisory_lanes.py'
-      - 'tools/scripts/test_fork_pr_runner_routing.py'
-      - 'tools/scripts/fork_runner_guard_check.py'
-      - 'tools/scripts/test_fork_runner_guard_check.py'
-      - 'tools/scripts/resolve_runs_on.py'
-      - 'tools/scripts/test_resolve_runs_on_fork.py'
-      - 'tools/scripts/ctest_scheduling_policy.py'
-      - 'tools/scripts/test_ctest_scheduling_contract.py'
-      - 'tools/scripts/test_api_contracts_workflow.py'
-      - 'tools/build-api-docs.sh'
-      - 'tools/scripts/verify_control_shipping_native_evidence.py'
-      - 'tools/scripts/test_verify_control_shipping_native_evidence.py'
-      - 'tools/scripts/test_control_shipping_native_workflow.py'
-      - 'tools/scripts/test_workflow_lint.py'
-      - 'tools/scripts/test_visual_python_deps_step.py'
-      - 'tools/scripts/test_node_build_deps_step.py'
-      - 'tools/scripts/test_build_fetch_resilience.py'
-      - 'tools/ci/net-retry.sh'
-      - 'tools/install-shipyard.sh'
-      - 'tools/scripts/install_shipyard_token_check.py'
-      - 'tools/scripts/test_install_shipyard_token_check.py'
-      - 'tools/scripts/shell_portability_check.py'
-      - 'tools/scripts/test_shell_portability_check.py'
-      - 'tools/scripts/shell_portability_rules.json'
-      - 'docs/guides/agent-efficiency-audits.md'
-      - 'tools/ci/**'
-      - 'scripts/**'
-      - 'tools/scripts/ctest_nonruns.py'
-      - 'tools/scripts/test_ctest_nonruns.py'
-      - 'tools/scripts/test_ios_gate_skip_contract.py'
-      - 'tools/shipyard.toml'
-      - 'tools/scripts/example_validation_paths.py'
-      - 'tools/scripts/test_example_validation_paths.py'
-      - 'tools/scripts/test_gpu_provenance_ci_wiring.py'
-      - 'tools/scripts/runner_topology.json'
-      - '.shipyard/config.toml'
-      - 'test/cmake/**'
 
 permissions:
   contents: read
@@ -330,7 +40,46 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Decide whether this change can affect a workflow-lint suite. A pull
+  # request, a queue batch and a push to main are judged by one list
+  # (tools/ci/workflow_lint_paths.txt); an unreadable diff runs every suite.
+  scope:
+    name: workflow-lint scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          lfs: false
+          fetch-depth: 1
+          sparse-checkout: |
+            tools/ci/workflow_lint_scope.py
+            tools/ci/workflow_lint_paths.txt
+            tools/ci/release_path_changed.py
+          sparse-checkout-cone-mode: false
+      - name: Decide whether this change touches a workflow-lint path
+        id: decide
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          MQ_BASE: ${{ github.event.merge_group.base_sha }}
+          MQ_HEAD: ${{ github.event.merge_group.head_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.event.after }}
+        run: |
+          set -euo pipefail
+          run="$(python3 tools/ci/workflow_lint_scope.py scope --from-event --repo "$GITHUB_REPOSITORY")"
+          echo "Change touches a workflow-lint path: ${run}"
+          echo "run=${run}" >> "$GITHUB_OUTPUT"
+
   lint:
+    needs: scope
+    if: needs.scope.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     name: yamllint + actionlint + structural parse
@@ -447,6 +196,9 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/scripts/test_workflow_lint.py
+          # workflow-lint reports on every event, merge groups included, and
+          # runs its suites only in scope.
+          python3 tools/ci/test_workflow_lint_scope.py
           python3 tools/scripts/test_action_pin_lint.py
           python3 tools/scripts/action_pin_lint.py
           python3 tools/scripts/test_shell_portability_check.py
@@ -488,6 +240,9 @@ jobs:
           # release-cli, the dry-run and the release-path PR gate package
           # through one script and isolate with one step body.
           python3 tools/scripts/test_release_package_step.py
+          # The release-configure gate replays release-cli.yml's
+          # build-cli steps by name; a renamed or unclassified step fails here.
+          python3 tools/ci/test_release_configure_matrix.py
           # Signing/publishing jobs compile with ccache disabled and re-fetch
           # every dependency into a fresh job root, never a shared host cache.
           python3 tools/scripts/test_release_cache_isolation.py
@@ -621,6 +376,8 @@ jobs:
   # about two minutes combined). Run on its own clock so it can neither starve
   # the lint job's 10-minute budget nor be cancelled by it.
   generated-version-bump-contract:
+    needs: scope
+    if: needs.scope.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     name: generated version-bump fast-path contract
@@ -640,3 +397,33 @@ jobs:
           set -euo pipefail
           python3 -m pip install --quiet 'pyyaml>=6'
           python3 tools/scripts/test_generated_version_bump_check.py
+
+  # The check to require. It runs on every event under `if: always()` and
+  # passes only when the scope job succeeded and, in scope, every suite job
+  # did; out of scope, the skipped suites pass. Its name is the status context.
+  workflow-lint:
+    name: workflow-lint
+    needs: [scope, lint, generated-version-bump-contract]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          lfs: false
+          fetch-depth: 1
+          sparse-checkout: |
+            tools/ci/workflow_lint_scope.py
+            tools/ci/release_path_changed.py
+          sparse-checkout-cone-mode: false
+      - name: Every in-scope workflow-lint suite passed
+        shell: bash
+        env:
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          RUN: ${{ needs.scope.outputs.run }}
+          LINT_RESULT: ${{ needs.lint.result }}
+          VERSION_BUMP_RESULT: ${{ needs.generated-version-bump-contract.result }}
+        run: |
+          set -euo pipefail
+          python3 tools/ci/workflow_lint_scope.py verdict --scope-result "$SCOPE_RESULT" --run "$RUN" \
+            --job "lint=$LINT_RESULT" --job "generated-version-bump-contract=$VERSION_BUMP_RESULT"

@@ -410,3 +410,195 @@ TEST_CASE("PresetBrowser refresh updates list", "[view][preset_browser]") {
     browser.refresh();
     REQUIRE(browser.visible_count() == 4);
 }
+
+// ── Library mode ────────────────────────────────────────────────────────────
+
+namespace {
+
+struct LibraryFixture : TestPresetFixture {
+    fs::path overlay;
+    std::unique_ptr<PresetLibrary> library;
+
+    LibraryFixture() {
+        overlay = tmp_dir.parent_path() / (unique_plugin_name() + "-overlay") / "library.json";
+        library = std::make_unique<PresetLibrary>(*pm, overlay);
+    }
+    ~LibraryFixture() {
+        std::error_code ec;
+        fs::remove_all(overlay.parent_path(), ec);
+    }
+    // Select the row whose key is `key` by walking the list.
+    void select(PresetBrowser& b, const std::string& key) {
+        for (int i = 0; i < b.visible_count(); ++i)
+            if (b.summary_at(i)->key == key) {
+                b.on_mouse_event(mouse_down(60, 32 + 4 + static_cast<float>(i) * 24 + 12));
+                return;
+            }
+        FAIL("no row for " << key);
+    }
+};
+
+} // namespace
+
+TEST_CASE("PresetBrowser library mode lists the library and falls back when detached",
+          "[view][preset_browser][library]") {
+    LibraryFixture f;
+    PresetBrowser browser(*f.pm);
+    browser.set_bounds({0, 0, 300, 400});
+    REQUIRE_FALSE(browser.has_library());
+    REQUIRE(browser.summary_at(0) == nullptr);
+
+    browser.set_library(f.library.get());
+    REQUIRE(browser.has_library());
+    REQUIRE(browser.visible_count() == 3);
+    REQUIRE(browser.summary_at(0) != nullptr);
+
+    browser.set_library(nullptr);
+    REQUIRE(browser.visible_count() == 3);
+    REQUIRE(browser.summary_at(0) == nullptr);
+}
+
+TEST_CASE("PresetBrowser clicking the star column toggles the favourite and keeps the row selected",
+          "[view][preset_browser][library]") {
+    LibraryFixture f;
+    PresetBrowser browser(*f.pm);
+    browser.set_bounds({0, 0, 300, 400});
+    browser.set_library(f.library.get());
+    f.select(browser, "user:Clean");
+    REQUIRE(browser.selected_summary()->key == "user:Clean");
+    REQUIRE_FALSE(browser.selected_summary()->favourite);
+
+    const int row = browser.selected_index();
+    browser.on_mouse_event(mouse_down(8, 32 + 4 + static_cast<float>(row) * 24 + 12));
+    REQUIRE(browser.selected_summary()->key == "user:Clean");
+    REQUIRE(browser.selected_summary()->favourite);
+    REQUIRE(f.library->find("user:Clean")->favourite);
+
+    // Without the library the same click is a plain selection (no edit).
+    browser.set_library(nullptr);
+    browser.on_mouse_event(mouse_down(8, 32 + 4 + 12));
+    REQUIRE(f.library->find("user:Clean")->favourite);
+}
+
+TEST_CASE("PresetBrowser F key toggles the favourite only in library mode",
+          "[view][preset_browser][library]") {
+    LibraryFixture f;
+    PresetBrowser browser(*f.pm);
+    browser.set_bounds({0, 0, 300, 400});
+    browser.select_next();
+
+    KeyEvent key;
+    key.key = KeyCode::f;
+    key.is_down = true;
+    REQUIRE_FALSE(browser.on_key_event(key)); // no library: unhandled
+
+    browser.set_library(f.library.get());
+    f.select(browser, "user:Bright Lead");
+    REQUIRE(browser.on_key_event(key));
+    REQUIRE(f.library->find("user:Bright Lead")->favourite);
+    REQUIRE(browser.on_key_event(key));
+    REQUIRE_FALSE(f.library->find("user:Bright Lead")->favourite);
+
+    key.modifiers = kModCmd | kModCtrl; // the platform's main modifier + F is not ours
+    REQUIRE_FALSE(browser.on_key_event(key));
+}
+
+TEST_CASE("PresetBrowser favourites and tag filters narrow the library list",
+          "[view][preset_browser][library]") {
+    LibraryFixture f;
+    PresetBrowser browser(*f.pm);
+    browser.set_library(f.library.get());
+
+    f.select(browser, "user:Clean");
+    REQUIRE(browser.toggle_favourite_selected());
+    REQUIRE(browser.add_tag_to_selected("pad"));
+    browser.set_favourites_only(true);
+    REQUIRE(browser.visible_count() == 1);
+    REQUIRE(browser.summary_at(0)->key == "user:Clean");
+    browser.set_favourites_only(false);
+
+    browser.set_tag_filter("PAD");
+    REQUIRE(browser.visible_count() == 1);
+    browser.set_tag_filter("");
+    REQUIRE(browser.visible_count() == 3);
+
+    f.select(browser, "user:Clean");
+    REQUIRE(browser.remove_tag_from_selected("pad"));
+    browser.set_tag_filter("pad");
+    REQUIRE(browser.visible_count() == 0);
+}
+
+TEST_CASE("PresetBrowser rename changes the shown name, not the file",
+          "[view][preset_browser][library]") {
+    LibraryFixture f;
+    PresetBrowser browser(*f.pm);
+    browser.set_bounds({0, 0, 300, 400});
+    browser.set_library(f.library.get());
+    f.select(browser, "user:Clean");
+    REQUIRE(browser.rename_selected("Squeaky Clean"));
+
+    RecordingCanvas canvas;
+    browser.paint(canvas);
+    REQUIRE(has_text_command(canvas, "Squeaky Clean"));
+    REQUIRE_FALSE(has_text_command(canvas, "Clean"));
+    REQUIRE(fs::exists(f.tmp_dir / "Clean.json"));
+    // The callback payload keeps the file's own name, so loading is unaffected.
+    REQUIRE(browser.selected_preset()->name == "Clean");
+
+    REQUIRE(browser.rename_selected(""));
+    RecordingCanvas again;
+    browser.paint(again);
+    REQUIRE(has_text_command(again, "Clean"));
+}
+
+TEST_CASE("PresetBrowser library search takes every word and survives edits",
+          "[view][preset_browser][library]") {
+    LibraryFixture f;
+    PresetBrowser browser(*f.pm);
+    browser.set_library(f.library.get());
+    browser.set_filter("bright lead");
+    REQUIRE(browser.visible_count() == 1);
+    browser.set_filter("lead bass");
+    REQUIRE(browser.visible_count() == 0); // both words must match one preset
+    browser.set_filter("");
+    REQUIRE(browser.visible_count() == 3);
+}
+
+TEST_CASE("PresetBrowser library rows draw the star, tags and program number",
+          "[view][preset_browser][library]") {
+    LibraryFixture f;
+    f.library->enable_program_map();
+    PresetBrowser browser(*f.pm);
+    browser.set_bounds({0, 0, 300, 400});
+    browser.set_library(f.library.get());
+    f.select(browser, "user:Clean");
+    browser.toggle_favourite_selected();
+    browser.add_tag_to_selected("pad");
+
+    RecordingCanvas canvas;
+    browser.paint(canvas);
+    REQUIRE(has_text_command(canvas, "\xe2\x98\x85")); // filled star on the favourite
+    REQUIRE(has_text_command(canvas, "\xe2\x98\x86")); // outline stars on the others
+    bool tags_and_program = false;
+    for (const auto& cmd : canvas.commands())
+        if (cmd.type == DrawCommand::Type::fill_text &&
+            cmd.text.find("#pad") != std::string::npos && cmd.text.find("1:") != std::string::npos)
+            tags_and_program = true;
+    REQUIRE(tags_and_program);
+
+    // Without a library none of this appears.
+    browser.set_library(nullptr);
+    RecordingCanvas plain;
+    browser.paint(plain);
+    REQUIRE_FALSE(has_text_command(plain, "\xe2\x98\x85"));
+}
+
+TEST_CASE("PresetBrowser edit helpers refuse without a library or a selection",
+          "[view][preset_browser][library]") {
+    LibraryFixture f;
+    PresetBrowser browser(*f.pm);
+    REQUIRE_FALSE(browser.toggle_favourite_selected());
+    REQUIRE_FALSE(browser.add_tag_to_selected("x"));
+    browser.set_library(f.library.get());
+    REQUIRE_FALSE(browser.rename_selected("x")); // nothing selected yet
+}

@@ -2735,8 +2735,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/pulp-vellum-change-routing/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "dae6a9668146e341b0182cae5e649de957dcb21d",
-          "object_id": "35def38f94fa163b545ad9ecb7c39aea416110c2",
+          "revision": "1543b6ee92921b756adbeecd3ce160c3873c81d9",
+          "object_id": "dd60c97d51ab51368edac73f2073b0422a067e5d",
           "object_type": "blob"
         },
         {
@@ -2751,8 +2751,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/skia-gpu-build/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "7b7483e1c98faa3a701e5fcc09cf0cb330e504a5",
-          "object_id": "1da2f790a8358c6c5b44449fd2accbcd88827fbd",
+          "revision": "46480306057b16cc95fd4aa12bc8228bcd7ff306",
+          "object_id": "a88e216ba1c97ee26a6ca4f4eb775c4960ded464",
           "object_type": "blob"
         },
         {
@@ -2775,16 +2775,16 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/view-bridge/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "09e32034beb4d0763e0af34e31134d46b884bd6e",
-          "object_id": "3ac7e4b3704ecd3d164314901317efbdd5e3d8ae",
+          "revision": "f7414a84d44718ccb4013e31858ca5ef8d40ef22",
+          "object_id": "ea4e04537f81e22b6f5358cfbc22b8b23ce434e9",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/web-plugins/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "f91bbca6b38e01cc546cd5608ef05c9ade79a919",
-          "object_id": "ccb374c723c4091ebc5a8e943ca126a9b069031d",
+          "revision": "3c84fc6363a23c45b81e9945c4284e82f095affc",
+          "object_id": "39d75da9aedc0e460ca3cec80cde8ec2d5a5f197",
           "object_type": "blob"
         },
         {
@@ -3010,8 +3010,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".github/workflows/release-cli.yml",
           "state": "pulp-owned-retained",
-          "revision": "d3ceef8832f3bac929918b4803c2569f11867d5c",
-          "object_id": "462a887d1b6aa68e9733b819dcc76ab1d74267f0",
+          "revision": "94562e8e7dd61392d498712035b35be063ee43f0",
+          "object_id": "eb4b8534287d70996645b368ed00dc87d3c46554",
           "object_type": "blob"
         },
         {

@@ -132,8 +132,9 @@ void merge_into(std::map<std::string, PresetRecord>& into,
 
 PresetMetadataStore::PresetMetadataStore(fs::path file) : file_(std::move(file)) {}
 
-bool PresetMetadataStore::read_file(std::map<std::string, PresetRecord>& out) const {
-    out.clear();
+bool PresetMetadataStore::read_file(Disk& disk) const {
+    auto& out = disk.records;
+    disk = {};
     if (file_.empty())
         return true;
     std::error_code ec;
@@ -150,6 +151,11 @@ bool PresetMetadataStore::read_file(std::map<std::string, PresetRecord>& out) co
         auto records = doc["records"];
         if (!records.isArray())
             return false;
+        if (doc.hasObjectMember("program_map") && doc["program_map"].isObject()) {
+            disk.program_map_json = choc::json::toString(doc["program_map"]);
+            if (doc.hasObjectMember("program_map_updated") && is_int(doc["program_map_updated"]))
+                disk.program_map_updated_ms = as_int(doc["program_map_updated"]);
+        }
         for (std::uint32_t i = 0; i < records.size(); ++i) {
             auto r = records[i];
             if (!r.isObject() || !r.hasObjectMember("key") || !r["key"].isString())
@@ -171,13 +177,22 @@ bool PresetMetadataStore::read_file(std::map<std::string, PresetRecord>& out) co
             out[rec.key] = std::move(rec);
         }
     } catch (...) {
-        out.clear();
+        disk = {};
         return false;
     }
     return true;
 }
 
-bool PresetMetadataStore::write_file(const std::map<std::string, PresetRecord>& records) {
+void PresetMetadataStore::merge_disk(const Disk& disk) {
+    merge_into(records_, disk.records);
+    if (disk.program_map_updated_ms > program_map_updated_ms_) {
+        program_map_json_ = disk.program_map_json;
+        program_map_updated_ms_ = disk.program_map_updated_ms;
+    }
+}
+
+bool PresetMetadataStore::write_file() {
+    const auto& records = records_;
     if (file_.empty())
         return true;
     std::error_code ec;
@@ -188,7 +203,7 @@ bool PresetMetadataStore::write_file(const std::map<std::string, PresetRecord>& 
     out << "{\n  \"schema\": " << kSchema << ",\n  \"revision\": " << (revision_ + 1)
         << ",\n  \"records\": [";
     bool first = true;
-    const auto cutoff = now_ms() - kTombstoneKeepMs;
+    const auto cutoff = clock_now() - kTombstoneKeepMs;
     for (const auto& [key, rec] : records) {
         if (rec.deleted && rec.updated_ms < cutoff)
             continue; // compact old tombstones
@@ -210,7 +225,11 @@ bool PresetMetadataStore::write_file(const std::map<std::string, PresetRecord>& 
             out << ", \"deleted\": true";
         out << "}";
     }
-    out << "\n  ]\n}\n";
+    out << "\n  ]";
+    if (!program_map_json_.empty())
+        out << ",\n  \"program_map\": " << program_map_json_
+            << ",\n  \"program_map_updated\": " << program_map_updated_ms_;
+    out << "\n}\n";
 
     fs::path tmp = file_;
     tmp += ".tmp";
@@ -239,9 +258,11 @@ bool PresetMetadataStore::write_file(const std::map<std::string, PresetRecord>& 
 }
 
 bool PresetMetadataStore::load() {
-    std::map<std::string, PresetRecord> disk;
+    Disk disk;
     const bool ok = read_file(disk);
-    records_ = std::move(disk);
+    records_ = std::move(disk.records);
+    program_map_json_ = std::move(disk.program_map_json);
+    program_map_updated_ms_ = disk.program_map_updated_ms;
     std::error_code ec;
     seen_file_ = !file_.empty() && fs::exists(file_, ec);
     if (seen_file_) {
@@ -261,18 +282,25 @@ bool PresetMetadataStore::reload_if_changed() {
     if (exists && seen_file_ && fs::last_write_time(file_, ec) == seen_mtime_ &&
         fs::file_size(file_, ec) == seen_size_)
         return false;
-    std::map<std::string, PresetRecord> disk;
+    Disk disk;
     if (!read_file(disk))
         return false;
     // Keep edits made here that have not reached the file.
-    merge_into(disk, records_);
-    const bool changed =
-        disk.size() != records_.size() ||
-        !std::equal(disk.begin(), disk.end(), records_.begin(), [](const auto& a, const auto& b) {
-            return a.first == b.first && a.second.updated_ms == b.second.updated_ms &&
-                   a.second.deleted == b.second.deleted;
-        });
-    records_ = std::move(disk);
+    auto merged = std::move(disk.records);
+    merge_into(merged, records_);
+    const bool changed = merged.size() != records_.size() ||
+                         !std::equal(merged.begin(), merged.end(), records_.begin(),
+                                     [](const auto& a, const auto& b) {
+                                         return a.first == b.first &&
+                                                a.second.updated_ms == b.second.updated_ms &&
+                                                a.second.deleted == b.second.deleted;
+                                     }) ||
+                         disk.program_map_updated_ms > program_map_updated_ms_;
+    records_ = std::move(merged);
+    if (disk.program_map_updated_ms > program_map_updated_ms_) {
+        program_map_json_ = std::move(disk.program_map_json);
+        program_map_updated_ms_ = disk.program_map_updated_ms;
+    }
     seen_file_ = exists;
     if (exists) {
         seen_mtime_ = fs::last_write_time(file_, ec);
@@ -294,40 +322,62 @@ std::vector<PresetRecord> PresetMetadataStore::records() const {
     return out;
 }
 
-bool PresetMetadataStore::commit() {
+std::int64_t PresetMetadataStore::clock_now() const {
+    return clock_ ? clock_() : now_ms();
+}
+
+std::int64_t PresetMetadataStore::next_stamp(std::int64_t after) const {
+    return std::max(clock_now(), after + 1);
+}
+
+// `apply` makes the change and returns false when, against the merged state,
+// there is nothing to change; the file is then left alone and commit() fails.
+template <typename Apply> bool PresetMetadataStore::commit(Apply&& apply) {
     if (file_.empty())
-        return true;
+        return apply();
     std::error_code ec;
     if (file_.has_parent_path()) {
         fs::create_directories(file_.parent_path(), ec);
-        if (!fs::is_directory(file_.parent_path(), ec))
+        if (!fs::is_directory(file_.parent_path(), ec)) {
+            apply(); // the edit lasts for the session
             return false;
+        }
     }
     fs::path lock_path = file_;
     lock_path += ".lock";
     DirLock lock(lock_path);
-    if (!lock.acquire())
+    if (!lock.acquire()) {
+        apply();
         return false;
+    }
 
-    std::map<std::string, PresetRecord> disk;
+    // Merge the file first and apply the edit on top, so the edit's stamp is
+    // taken after every version it replaces has been seen. Stamps are then a
+    // Lamport clock per record: an edit always outranks the state it was made
+    // over, even when both share a clock tick or this machine's clock is behind.
+    Disk disk;
     if (!read_file(disk))
-        disk.clear(); // a corrupt file is replaced by the merged state
-    merge_into(records_, disk);
-    return write_file(records_);
+        disk = {}; // a corrupt file is replaced by the merged state
+    merge_disk(disk);
+    if (!apply())
+        return false;
+    return write_file();
 }
 
 template <typename Edit>
 bool PresetMetadataStore::edit(const std::string& key, const std::string& digest, Edit&& apply) {
-    auto& rec = records_[key];
-    rec.key = key;
-    rec.deleted = false;
-    apply(rec);
-    if (!digest.empty())
-        rec.digest = digest;
-    rec.updated_ms = std::max(now_ms(), rec.updated_ms + 1);
-    if (rec.empty())
-        rec.deleted = true;
-    return commit();
+    return commit([&] {
+        auto& rec = records_[key];
+        rec.key = key;
+        rec.deleted = false;
+        apply(rec);
+        if (!digest.empty())
+            rec.digest = digest;
+        rec.updated_ms = next_stamp(rec.updated_ms);
+        if (rec.empty())
+            rec.deleted = true;
+        return true;
+    });
 }
 
 bool PresetMetadataStore::set_favourite(const std::string& key, bool favourite,
@@ -358,26 +408,52 @@ bool PresetMetadataStore::remove_tag(const std::string& key, const std::string& 
     });
 }
 
+bool PresetMetadataStore::set_program_map_json(const std::string& json) {
+    return commit([&] {
+        program_map_json_ = json;
+        program_map_updated_ms_ = next_stamp(program_map_updated_ms_);
+        return true;
+    });
+}
+
 bool PresetMetadataStore::rekey(const std::string& old_key, const std::string& new_key) {
     auto it = records_.find(old_key);
     if (it == records_.end() || it->second.deleted || old_key == new_key)
         return false;
-    PresetRecord moved = it->second;
-    moved.key = new_key;
-    moved.updated_ms = std::max(now_ms(), moved.updated_ms + 1);
-    it->second.deleted = true;
-    it->second.updated_ms = moved.updated_ms;
-    records_[new_key] = std::move(moved);
-    return commit();
+    return commit([&] {
+        auto from = records_.find(old_key);
+        if (from == records_.end() || from->second.deleted)
+            return false; // another instance removed it meanwhile
+        auto to = records_.find(new_key);
+        if (to != records_.end() && !to->second.deleted)
+            return false; // another instance edited the target meanwhile; keep its edits
+        // Outrank a tombstone at the target so the move is not undone by a merge.
+        const std::int64_t seen =
+            std::max(from->second.updated_ms,
+                     to == records_.end() ? std::int64_t{0} : to->second.updated_ms);
+        PresetRecord moved = from->second;
+        moved.key = new_key;
+        moved.updated_ms = next_stamp(seen);
+        from->second.deleted = true;
+        from->second.updated_ms = moved.updated_ms;
+        records_[new_key] = std::move(moved);
+        return true;
+    });
 }
 
 bool PresetMetadataStore::erase(const std::string& key) {
     auto it = records_.find(key);
     if (it == records_.end() || it->second.deleted)
         return false;
-    it->second.deleted = true;
-    it->second.updated_ms = std::max(now_ms(), it->second.updated_ms + 1);
-    return commit();
+    return commit([&] {
+        auto& rec = records_[key];
+        if (rec.deleted)
+            return false; // another instance removed it meanwhile
+        rec.key = key;
+        rec.updated_ms = next_stamp(rec.updated_ms);
+        rec.deleted = true;
+        return true;
+    });
 }
 
 } // namespace pulp::state

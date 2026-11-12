@@ -1,0 +1,12 @@
+{
+ "name": "graph-patch-grammar-fixture",
+ "record": {
+  "entry": "tools/rack/generate_signal_graph_grammar.py",
+  "inputs": [
+   "core/host/src/graph_patch_grammar.hpp",
+   "tools/rack/generate_signal_graph_grammar.py",
+   "tools/rack/patch_lang.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,11 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/beat_repeat_kernel.hpp",
+  "fingerprint": "sha256:f7c213c193f826f3e791688dbf3dd4626f0b3766aa8659a8910e98e7691ba23e",
+  "include": "pulp/signal/beat_repeat_kernel.hpp",
+  "disposition": "capability_entrypoint",
+  "capability_keys": [
+    "signal.beat-repeat-kernel"
+  ],
+  "rationale": "Public binding for a curated consumer capability."
+}

@@ -29,6 +29,14 @@ ACTIONLINT_CONFIG = REPO_ROOT / ".github" / "actionlint.yaml"
 STEWARD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "shipyard-merge-steward.yml"
 
 
+SCOPE_PATHS = REPO_ROOT / "tools" / "ci" / "workflow_lint_paths.txt"
+
+
+def _scope_paths() -> list[str]:
+    lines = SCOPE_PATHS.read_text(encoding="utf-8").splitlines()
+    return [line.split("#", 1)[0].strip() for line in lines if line.split("#", 1)[0].strip()]
+
+
 def _workflow_text() -> str:
     return WORKFLOW.read_text(encoding="utf-8")
 
@@ -68,17 +76,22 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
         self.text = _workflow_text()
 
     def test_trigger_scope_covers_workflow_and_action_changes(self) -> None:
+        # The triggers carry no paths filter (a required check must report on
+        # every event); the scope list lives in tools/ci/workflow_lint_paths.txt
+        # and tools/ci/test_workflow_lint_scope.py holds the trigger shape.
         self.assertRegex(self.text, r"(?m)^on:\s*$")
         self.assertRegex(self.text, r"(?m)^\s{2}pull_request:\s*$")
+        self.assertRegex(self.text, r"(?m)^\s{2}merge_group:\s*$")
         self.assertRegex(self.text, r"(?m)^\s{2}push:\s*$")
         self.assertRegex(self.text, r"(?m)^\s{4}branches:\s*\[main\]\s*$")
+        self.assertNotRegex(self.text, r"(?m)^\s{4}paths(-ignore)?:")
 
-        path_patterns = re.findall(r"(?m)^\s{6}-\s+'([^']+)'\s*$", self.text)
-        self.assertGreaterEqual(path_patterns.count(".github/actionlint.yaml"), 2)
-        self.assertGreaterEqual(path_patterns.count(".github/workflows/**"), 2)
-        self.assertGreaterEqual(path_patterns.count(".github/actions/**"), 2)
-        self.assertGreaterEqual(path_patterns.count("tools/shipyard.toml"), 2)
+        path_patterns = _scope_paths()
         for path in (
+            ".github/actionlint.yaml",
+            ".github/workflows/**",
+            ".github/actions/**",
+            "tools/shipyard.toml",
             "tools/scripts/fetch_skia_for_release.py",
             "tools/scripts/test_fetch_skia_for_release.py",
             "tools/scripts/test_fetch_skia_for_release_extra.py",
@@ -94,7 +107,7 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
             "tools/ci/test_pulp_worktree_cache_env.py",
             "tools/ci/test_pulp_worktree_gc.py",
         ):
-            self.assertGreaterEqual(path_patterns.count(path), 2, path)
+            self.assertIn(path, path_patterns, path)
 
     def test_actionlint_knows_the_self_hosted_runner_labels(self) -> None:
         self.assertTrue(
@@ -118,13 +131,9 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
         # A deleted script that stays listed here is silent twice over: its
         # trigger path can never match, and its `python3 <script>` line fails
         # only after the gate has already been skipped on the PR that deleted it.
-        workflow = yaml.safe_load(self.text)
-        triggers = workflow.get("on", workflow.get(True))
-        named: set[str] = set()
-        for event in ("pull_request", "push"):
-            for entry in (triggers.get(event) or {}).get("paths", []):
-                if not any(ch in entry for ch in "*?[!"):
-                    named.add(entry)
+        named: set[str] = {
+            entry for entry in _scope_paths() if not any(ch in entry for ch in "*?[!")
+        }
         invoked = set(
             re.findall(r"python3\s+((?:tools|scripts)/[\w./-]+\.py)", self.text)
         )
@@ -203,7 +212,7 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
         step = _find_step(self.text, "Release-pipeline regression tests (#720, #1962, #2467)")
         self.assertIn("python3 tools/scripts/test_ctest_nonruns.py", step)
         for path in ("tools/scripts/ctest_nonruns.py", "tools/scripts/test_ctest_nonruns.py"):
-            self.assertEqual(self.text.count(f"- '{path}'"), 2)
+            self.assertIn(path, _scope_paths())
         self.assertIn("set -euo pipefail", step)
         self.assertIn(
             "python3 tools/scripts/test_release_workflow_test_step.py",

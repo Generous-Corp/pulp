@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <set>
 
 namespace fs = std::filesystem;
@@ -192,6 +193,7 @@ PresetLibrary::PresetLibrary(PresetManager& manager, fs::path overlay_file)
     store_.load();
     std::lock_guard<std::mutex> lock(mutex_);
     rebuild_locked();
+    load_program_map_locked();
     relink_locked();
 }
 
@@ -276,8 +278,11 @@ void PresetLibrary::relink_locked() {
                 match = e;
                 ++count;
             }
-        if (count == 1)
+        if (count == 1) {
             store_.rekey(orphan.key, match->key);
+            if (program_map_.rekey(orphan.key, match->key))
+                save_program_map_locked();
+        }
     }
 }
 
@@ -286,7 +291,10 @@ void PresetLibrary::refresh() {
         std::lock_guard<std::mutex> lock(mutex_);
         store_.reload_if_changed();
         rebuild_locked();
+        load_program_map_locked();
         relink_locked();
+        if (program_map_enabled_)
+            pin_program_defaults_locked();
     }
     notify(true);
 }
@@ -302,6 +310,8 @@ PresetSummary PresetLibrary::summarize_locked(const Entry& entry) const {
     s.path = entry.info.path;
     s.display_name = entry.info.name;
     s.tags = entry.info.tags;
+    if (!program_map_.empty())
+        s.program = program_map_.position_of(entry.key);
     if (const auto* rec = store_.find(entry.key)) {
         s.favourite = rec->favourite;
         if (!rec->display_name.empty())
@@ -339,6 +349,8 @@ PresetPage PresetLibrary::query(const PresetQuery& q) const {
         if (q.favourite && s.favourite != *q.favourite)
             continue;
         if (q.source && s.source != *q.source)
+            continue;
+        if (q.bank && !(s.program && s.program->bank == *q.bank))
             continue;
         bool tags_ok = true;
         for (const auto& t : q.tags_all)
@@ -404,6 +416,14 @@ PresetPage PresetLibrary::query(const PresetQuery& q) const {
         case PresetSort::source:
             if (a.summary.source != b.summary.source)
                 return source_rank(a.summary.source) < source_rank(b.summary.source);
+            break;
+        case PresetSort::program:
+            // Presets with a slot first, in (bank, program) order.
+            if (a.summary.program.has_value() != b.summary.program.has_value())
+                return a.summary.program.has_value();
+            if (a.summary.program && b.summary.program &&
+                !(*a.summary.program == *b.summary.program))
+                return *a.summary.program < *b.summary.program;
             break;
         case PresetSort::name:
             break;
@@ -523,6 +543,153 @@ void PresetLibrary::clear_orphans() {
     notify(any);
 }
 
+void PresetLibrary::load_program_map_locked() {
+    if (store_.program_map_json().empty()) {
+        program_map_ = {};
+        return;
+    }
+    if (auto parsed = ProgramMap::from_json(store_.program_map_json()))
+        program_map_ = std::move(*parsed);
+}
+
+bool PresetLibrary::save_program_map_locked() {
+    const bool ok = store_.set_program_map_json(program_map_.to_json());
+    if (!ok)
+        persist_ok_ = false;
+    ++generation_;
+    return ok;
+}
+
+bool PresetLibrary::pin_program_defaults_locked() {
+    // New presets of each source, in a stable order (file name, then key) that
+    // does not move when a preset is renamed in the overlay.
+    std::map<std::string, std::vector<const Entry*>> by_scope;
+    for (const auto& e : entries_)
+        by_scope[key_scope(e.key)].push_back(&e);
+    std::vector<ProgramPinGroup> groups;
+    auto make_group = [&](const std::string& scope, const std::string& label) {
+        auto it = by_scope.find(scope);
+        if (it == by_scope.end())
+            return;
+        auto entries = it->second;
+        std::sort(entries.begin(), entries.end(), [](const Entry* a, const Entry* b) {
+            const auto la = lower_ascii(a->info.name), lb = lower_ascii(b->info.name);
+            return la != lb ? la < lb : a->key < b->key;
+        });
+        ProgramPinGroup g;
+        g.scope = scope;
+        g.label = label;
+        for (const auto* e : entries)
+            g.keys.push_back(e->key);
+        groups.push_back(std::move(g));
+        by_scope.erase(it);
+    };
+    make_group("factory:", "Factory");
+    make_group("user:", "User");
+    // Whatever is left is a content pack, in scope order: "content:<pack>:".
+    std::vector<std::string> rest;
+    for (const auto& [scope, v] : by_scope)
+        rest.push_back(scope);
+    for (const auto& scope : rest) {
+        std::string label = scope;
+        if (scope.rfind("content:", 0) == 0)
+            label = scope.substr(8, scope.size() - 9);
+        make_group(scope, label);
+    }
+    if (!program_map_.pin_defaults(groups))
+        return false;
+    save_program_map_locked();
+    return true;
+}
+
+void PresetLibrary::enable_program_map() {
+    bool changed;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const bool was_enabled = program_map_enabled_;
+        program_map_enabled_ = true;
+        changed = pin_program_defaults_locked() || !was_enabled;
+        if (changed)
+            ++generation_;
+    }
+    notify(changed);
+}
+
+bool PresetLibrary::program_map_enabled() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return program_map_enabled_;
+}
+
+ProgramMap PresetLibrary::program_map() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return program_map_;
+}
+
+std::optional<PresetSummary> PresetLibrary::preset_at(BankProgram position) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto key = program_map_.key_at(position);
+    if (!key)
+        return std::nullopt;
+    const Entry* e = find_entry_locked(*key);
+    if (!e)
+        return std::nullopt;
+    return summarize_locked(*e);
+}
+
+std::optional<BankProgram> PresetLibrary::program_of(const std::string& key) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return program_map_.position_of(key);
+}
+
+bool PresetLibrary::assign_program(BankProgram position, const std::string& key) {
+    bool ok = false;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (find_entry_locked(key) && program_map_.assign(position, key)) {
+            save_program_map_locked();
+            ok = true;
+        }
+    }
+    notify(ok);
+    return ok;
+}
+
+bool PresetLibrary::clear_program(BankProgram position) {
+    bool ok;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        ok = program_map_.clear(position);
+        if (ok)
+            save_program_map_locked();
+    }
+    notify(ok);
+    return ok;
+}
+
+bool PresetLibrary::set_bank_name(std::uint16_t bank, const std::string& name) {
+    bool ok;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        ok = program_map_.set_bank_name(bank, name);
+        if (ok)
+            save_program_map_locked();
+    }
+    notify(ok);
+    return ok;
+}
+
+bool PresetLibrary::renumber_bank(std::uint16_t from, std::uint16_t to) {
+    bool ok;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        ok = program_map_.renumber_bank(from, to);
+        if (ok && from != to)
+            save_program_map_locked();
+    }
+    notify(ok);
+    return ok;
+}
+
 std::uint64_t PresetLibrary::generation() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return generation_;
@@ -532,6 +699,7 @@ PresetLibraryCapabilities PresetLibrary::capabilities() const {
     std::lock_guard<std::mutex> lock(mutex_);
     PresetLibraryCapabilities c;
     c.persistence = store_.persistent() && persist_ok_;
+    c.program_map = program_map_enabled_;
     return c;
 }
 

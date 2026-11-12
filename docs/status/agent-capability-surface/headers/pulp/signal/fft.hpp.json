@@ -1,0 +1,12 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/fft.hpp",
+  "fingerprint": "sha256:57e78a39081ec72cb53cbf6518f7e95180be864621fd1f2cf4382d0d368a323d",
+  "include": "pulp/signal/fft.hpp",
+  "disposition": "capability_support",
+  "capability_keys": [
+    "signal.source-filter-analysis",
+    "signal.streaming-analysis-frontends"
+  ],
+  "rationale": "Shared prepared FFT and retained-storage accounting underpin the curated analysis capabilities; this slice adds no separate FFT authoring promise."
+}

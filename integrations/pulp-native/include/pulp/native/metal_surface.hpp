@@ -31,6 +31,7 @@
 /// teardown longer than that.
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -51,6 +52,10 @@ struct MetalSurfaceOptions {
     DrawableSizing sizing = DrawableSizing::automatic;
     /// 2 or 3; Core Animation's own limits.
     std::uint32_t maximum_drawable_count = 3;
+    /// The `id<MTLDevice>` to use, retained by the surface, for a client whose
+    /// renderer was built on a device before the surface existed. Null: the
+    /// system default device.
+    void* device = nullptr;
 };
 
 /// A drawable handed out by `MetalSurface::acquire_drawable()`. It keeps the
@@ -183,6 +188,10 @@ class MetalSurface {
     /// The Objective-C class of the surface's view. Its name is unique to the
     /// binary that contains this library.
     static std::string view_class_name();
+
+    /// Surfaces alive in this process (each owns one CAMetalLayer), for leak
+    /// checks and diagnostics.
+    static std::size_t live_surfaces() noexcept;
 
     struct Impl;
 

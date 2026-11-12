@@ -31,6 +31,10 @@ pulp_add_test_group(pulp-test-group-fmt-format-view
 # AudioFocusRegistry — cross-platform observer for OS audio-focus
 # signals (Android AudioManager.OnAudioFocusChangeListener,
 # AVAudioSession interruptions). Pure C++ unit tests — no platform deps.
+pulp_add_test_suite(pulp-test-preset-program-router GROUP pulp-test-group-fmt-audio
+    SOURCES test_preset_program_router.cpp harness/rt_allocation_probe.cpp
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/format/include)
+
 pulp_add_test_suite(pulp-test-audio-focus GROUP pulp-test-group-fmt-audio
     LIBRARIES pulp::audio)
 # `pulp audio render` arg grammar + the device-free block stepper (no PluginSlot).
@@ -464,6 +468,10 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_AUSDK)
     set_target_properties(pulp-test-group-fmt-au-v2 PROPERTIES CXX_STANDARD 23)
 
     pulp_add_test_suite(pulp-test-au-v2-effect GROUP pulp-test-group-fmt-au-v2
+        LIBRARIES pulp::format pulp::midi ausdk)
+
+    # MIDI Learn feedback through the AU v2 MIDI output packet builder.
+    pulp_add_test_suite(pulp-test-au-midi-learn GROUP pulp-test-group-fmt-au-v2
         LIBRARIES pulp::format pulp::midi ausdk)
 
     # AU v2 MIDI-processor (`aumi`) adapter. Drives the real adapter end to end:

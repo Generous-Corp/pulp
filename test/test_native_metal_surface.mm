@@ -8,6 +8,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/native/metal_surface.hpp>
+
+#include "support/thread_progress.hpp"
 #include <pulp/platform/objc_unique_class.hpp>
 
 #import <AppKit/AppKit.h>
@@ -368,11 +370,25 @@ TEST_CASE("a reader thread always sees one consistent geometry snapshot",
                 reads.fetch_add(1);
             }
         });
-        for (int i = 0; i < 500; ++i)
-            [view setFrameSize:NSMakeSize(50 + (i % 97), 40 + (i % 53))];
+        // The reader must be running before the resizes start, and must read
+        // many times while they run, or "never torn" proves nothing. Neither
+        // can be left to the scheduler: on a loaded or sanitized runner the
+        // reader may not get a turn during a fixed number of resizes. So wait
+        // for it to start, and keep resizing until enough reads overlapped.
+        const bool reader_started =
+            pulp::test::wait_for_condition([&] { return reads.load() > 0; });
+        const int before = reads.load();
+        constexpr int kOverlappingReads = 200;
+        int resizes = 0;
+        for (; resizes < 500 || (reads.load() - before < kOverlappingReads && resizes < 200000);
+             ++resizes)
+            [view setFrameSize:NSMakeSize(50 + (resizes % 97), 40 + (resizes % 53))];
+        const int overlapped = reads.load() - before;
         stop.store(true);
         reader.join();
-        REQUIRE(reads.load() > 0);
+        INFO(resizes << " resizes, " << overlapped << " reads during them");
+        REQUIRE(reader_started);
+        REQUIRE(overlapped >= kOverlappingReads);
         REQUIRE(torn.load() == 0);
         surface->detach();
         [window close];
