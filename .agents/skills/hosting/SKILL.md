@@ -20,6 +20,13 @@ hostile-fixture, endpoint, sibling/PDC and production-mutation controls together
 Functional callback traps do not establish full realtime or A10 qualification;
 host death and deliberate group escape are outside first-mode custody.
 
+Graph code that calls `is_isolated_plugin_slot()` also compiles into the curated
+sample-region web closure (`tools/cmake/PulpSampleRegionWebSources.cmake`),
+which deliberately omits the worker-backed `isolated_plugin_slot.cpp` and links
+`isolated_plugin_slot_web_stub.cpp` (always false) instead. A new free function
+from that file called by graph sources needs a matching web-stub definition, or
+the WAMv2 + WebCLAP lane fails at wasm-ld; native-only builds will not show it.
+
 
 ## Live retuning at a callback boundary
 

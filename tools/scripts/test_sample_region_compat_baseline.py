@@ -53,6 +53,29 @@ class BaselineTests(unittest.TestCase):
         self.assertIn('${ROOT}/core/runtime/src/durable_file_replacement.cpp"', listing)
         self.assertIn('${ROOT}/core/host/src/processor_restore.cpp"', listing)
 
+    def test_web_sources_define_is_isolated_plugin_slot(self):
+        # Graph authoring and prepare ask is_isolated_plugin_slot() of every
+        # plugin node. The isolated web profile does not compile
+        # isolated_plugin_slot.cpp (worker processes, mapped files, threads),
+        # so it must compile the web stub that answers false, or wasm-ld
+        # reports the symbol undefined.
+        repo = Path(__file__).resolve().parents[2]
+        listing = (repo / "tools" / "cmake" /
+                   "PulpSampleRegionWebSources.cmake").read_text(encoding="utf-8")
+        for caller in ("signal_graph_authoring.cpp", "signal_graph_prepare.cpp"):
+            source = (repo / "core/host/src" / caller).read_text(encoding="utf-8")
+            if "is_isolated_plugin_slot(" not in source:
+                continue
+            with self.subTest(caller=caller):
+                self.assertIn(f'${{ROOT}}/core/host/src/{caller}"', listing)
+                self.assertTrue(
+                    '${ROOT}/core/host/src/isolated_plugin_slot.cpp"' in listing or
+                    '${ROOT}/core/host/src/isolated_plugin_slot_web_stub.cpp"' in listing,
+                    "web sources call is_isolated_plugin_slot() without defining it")
+        stub = (repo / "core/host/src/isolated_plugin_slot_web_stub.cpp").read_text(
+            encoding="utf-8")
+        self.assertIn("is_isolated_plugin_slot(const PluginSlot&) noexcept { return false; }", stub)
+
     def test_generator_reads_linked_source_closure_from_cmake_dependinfo(self):
         repo = Path(__file__).resolve().parents[2]
         with tempfile.TemporaryDirectory() as raw:
