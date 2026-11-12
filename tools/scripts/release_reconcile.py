@@ -1486,11 +1486,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if decision.action == RERUN_TIMED_OUT:
             if dry_spell:
                 report.append((state.tag, f"{dry_spell}; re-running the timed-out leg"))
-            if budget <= 0:
-                print("    (deferred — re-dispatch budget for this sweep is spent)")
-            else:
-                budget -= 1
-                rerun_timed_out(repo, state.tag, state.rerun_run_id, dry_run)
+            # A timeout rerun is a bounded in-place repair of one failed leg. It
+            # does not create another release matrix, so it must not compete
+            # with the separate full-matrix re-dispatch budget below.
+            rerun_timed_out(repo, state.tag, state.rerun_run_id, dry_run)
         elif decision.action == REDISPATCH:
             # Report before the budget check: a tag whose re-dispatch is
             # deferred this sweep is no less overdue.

@@ -1114,14 +1114,16 @@ def sweep(
     states: list[TagState],
     abandoned: tuple[tuple[tuple, tuple], ...] = (),
     stdout: list[str] | None = None,
+    reruns: list[tuple[str, int]] | None = None,
 ) -> tuple[dict[str, str], list[str]]:
     """Run main() over `states` with all I/O stubbed; return (report, rebuilt)."""
     import os
 
     captured: dict = {}
     redispatched: list[str] = []
+    timed_out_reruns = [] if reruns is None else reruns
     saved = (
-        rr.collect, rr.sdk_tags, rr.sync_incident, rr.redispatch,
+        rr.collect, rr.sdk_tags, rr.sync_incident, rr.redispatch, rr.rerun_timed_out,
         rr.datetime, rr.read_abandoned,
     )
 
@@ -1136,6 +1138,7 @@ def sweep(
         rr.collect = lambda *_: states
         rr.sync_incident = lambda repo, report, dry: captured.setdefault("r", report)
         rr.redispatch = lambda repo, tag, dry: redispatched.append(tag)
+        rr.rerun_timed_out = lambda repo, tag, run_id, dry: timed_out_reruns.append((tag, run_id))
         rr.datetime = FrozenDatetime
         rr.read_abandoned = lambda: abandoned
         os.environ.update({"REPO": "example/repo", "DRY_RUN": "true"})
@@ -1148,7 +1151,7 @@ def sweep(
         os.environ.clear()
         os.environ.update(old_env)
         (
-            rr.collect, rr.sdk_tags, rr.sync_incident, rr.redispatch,
+            rr.collect, rr.sdk_tags, rr.sync_incident, rr.redispatch, rr.rerun_timed_out,
             rr.datetime, rr.read_abandoned,
         ) = saved
     return dict(captured["r"]), redispatched
@@ -1209,6 +1212,27 @@ class SweepReportsTheIncidentShape(unittest.TestCase):
         report, rebuilt = sweep([newer, older, PUBLISHED_PRIOR])
         self.assertEqual(rebuilt, ["v0.899.1"])
         self.assertEqual(sorted(report), ["v0.899.0", "v0.899.1"])
+
+    def test_timeout_rerun_is_independent_of_rebuild_budget(self) -> None:
+        newer = tag_state(
+            age_hours=3, run_states=("completed",), tag="v0.900.0",
+        )
+        timed_out = TagState(
+            tag="v0.899.0",
+            created_at=NOW - timedelta(hours=4),
+            published=False,
+            has_release_object=False,
+            assets=frozenset(),
+            run_states=("completed",),
+            validation_failures=(),
+            dispatch_attempts=0,
+            rerun_run_id=43259055785,
+            timed_out_legs=("CLI darwin-x64 › timed out",),
+        )
+        reruns: list[tuple[str, int]] = []
+        _, rebuilt = sweep([newer, timed_out, PUBLISHED_PRIOR], reruns=reruns)
+        self.assertEqual(rebuilt, ["v0.900.0"])
+        self.assertEqual(reruns, [("v0.899.0", 43259055785)])
 
     def test_healthy_young_release_opens_nothing(self) -> None:
         building = tag_state(age_hours=1, run_states=("in_progress",))
