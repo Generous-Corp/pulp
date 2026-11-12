@@ -17,7 +17,8 @@
    "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_result.hpp",
    "tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/probe_result.hpp",
    "tools/cmake/PulpInstallRules.cmake",
-   "tools/scripts/doxygen_installed_header_check.py"
+   "tools/scripts/doxygen_installed_header_check.py",
+   "tools/testing/rt_allocation_probe/include"
   ],
   "kind": "python"
  }
