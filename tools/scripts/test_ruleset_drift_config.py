@@ -31,6 +31,7 @@ EXPECTED_REQUIRED_CONTEXTS = {
     "Vellum freeze",
     "Vellum trusted freeze",
     "drift-fast",
+    "workflow-lint",
 }
 
 EXPECTED_ADVISORY_CONTEXTS = {

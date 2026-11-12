@@ -1,0 +1,64 @@
+{
+  "local_head": "2e491121bdc4419df9eb725c6c8006a5c83be147",
+  "retained_docs_tip": "161422352da06bc3fcf221d10cd4ff78106835af",
+  "sdk_producer": "2e299b27b3b854ef5d4f8228fb32668e7e2ba6e8",
+  "remote_branch_head": null,
+  "api_pr_head": null,
+  "api_matching_prs": [],
+  "initial_comment_sweep": "N/A: API finds no PR; ordinary hook rejected push before creation",
+  "shipyard_invocations": 1,
+  "shipyard_exit": 1,
+  "gate_initial_exit": 1,
+  "gate_repaired_exit": 1,
+  "repaired_content": "lead-delegated agent-capabilities skill documentation; canonical skill-sync passes",
+  "blocking_hook_error": "hotspot_size_guard.py exit 1: core/host/include/pulp/host/signal_graph_runtime.hpp grows frozen hotspot 2134 -> 2136 LOC (> reference 1555)",
+  "additional_gate_failure": "configured changed-surface script families exit 77; static prediction passes, SDK build is not gate profile",
+  "omitted": [
+    "build-gate configure",
+    "source-only selftests",
+    "workflow-lint selftests",
+    "pr-fast CTest",
+    "CTest-registered Python",
+    "compiled script-test-input drift",
+    "diff coverage"
+  ],
+  "bypass": false,
+  "armed": false,
+  "enqueued": false,
+  "merged": false,
+  "logs": [
+    {
+      "path": "<g7-worktree>/build-g7/publication-normal-gates.log",
+      "bytes": 23826,
+      "sha256": "aa9cfe45d34ee6e03532b5f3eb1cd7bdb36b66b3accb51bd194c709247c71c1d"
+    },
+    {
+      "path": "<g7-worktree>/build-g7/publication-repaired-gates.log",
+      "bytes": 25549,
+      "sha256": "39ab9fc7aa49bdcf1c7c7f54a2bb05febeb4bc788653604addf4a5c9e9e6e0c6"
+    },
+    {
+      "path": "<g7-worktree>/build-g7/publication-skill-sync.log",
+      "bytes": 300,
+      "sha256": "46843d797e11fb97d4fb3b707d0201f154dada73342762b3ddec09d721430348"
+    },
+    {
+      "path": "<g7-worktree>/build-g7/publication-shipyard-pr.log",
+      "bytes": 20965,
+      "sha256": "9f86aa83256d6abcb8960c05428bb979ba25f34a636922f4738cca0addbfe038"
+    },
+    {
+      "path": "<g7-worktree>/build-g7/publication-api-prs.json",
+      "bytes": 2,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    }
+  ],
+  "repair": {
+    "merge_origin_main": "83336079c95a901226e7d53cfaa07a6487e67655",
+    "merge_commit": "2e491121bdc4419df9eb725c6c8006a5c83be147",
+    "scope": "docs-only evidence path redaction and generated capability metadata regeneration",
+    "private_paths_redacted": true,
+    "runtime_source_unchanged": true,
+    "publication_state": "unarmed; unqueued; unmerged; re-review required"
+  }
+}

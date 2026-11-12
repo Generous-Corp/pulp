@@ -1696,9 +1696,14 @@ identity re-keys on every configure, by declaration rather than by learning it
 from history. Without a Ninja log the record warns that generated headers are
 not keyed.
 
-When a merge-group `macos` ctest fails, the job also annotates a **flake
+When a merge-group `macos` ctest fails, the run also annotates a **flake
 exoneration verdict in shadow mode** (`pulp-flake-exoneration-shadow/v1`,
-from `tools/ci/flake_exoneration_shadow.py`): for each failing test, whether
+from `tools/ci/flake_exoneration_shadow.py`). It runs in the advisory
+`flake-exoneration-shadow (advisory)` job after `build`, reading the macOS
+leg's uploaded `ctest-logs-macos` JUnit, not inside `macos`: the shadow
+changes no outcome and needs only the JUnit and the GitHub API, so the red
+gate job finishes (and the queue ejects the group) without waiting about 95 s
+for it. The instrument reports, for each failing test, whether
 it failed on at least two other heads in the last 24 hours (other runs'
 `ctest-logs-macos` artifacts) and passes on main's tip, judged by the tip's
 required gate job, Chromium's `OCCURS_ON_OTHER_CLS`. It exonerates nothing;
@@ -2080,78 +2085,20 @@ pack.
 
 Codex's automatic code review fires on PR open only when the pull request's
 author is a GitHub *User*. A PR opened by a GitHub App is skipped. Because
-`shipyard pr` opens PRs as `shipyard-local[bot]`, and that is the mandated path
-for agents, the default outcome is that agent-opened PRs merge with no review
-while human-opened ones are reviewed.
+`shipyard pr` opens PRs as `shipyard-local[bot]`, agent-opened PRs get no Codex
+review. The skip is Codex-side and cannot be configured from this repository.
 
-Codex reports the distinction itself. Its review-summary comment carries a
-"Review trigger" cell that reads `PR opened` on a User-authored PR and
-`Manual request` on an App-authored one — the App-authored PRs that were
-reviewed at all had been reviewed because somebody asked.
+Codex's review-summary comment carries a "Review trigger" cell that reads
+`PR opened` on a User-authored PR and `Manual request` on one reviewed on
+request.
 
-**Only the automatic trigger is restricted; asking still works.** A `@codex
-review` comment gets a real review on an App-authored PR, and it does so even
-when the comment itself comes from an App. (Codex replies to a bot commenter
-with "To use Codex here, create a Codex account and connect to github", which
-looks like a refusal and is not — the review runs anyway.) The skip is Codex-side
-and cannot be configured from this repository; there is no workflow trigger or
-`github.actor` guard here involved. What this repository can do is ask.
-
-`.github/workflows/codex-review-request.yml` is that ask. On a PR opened by
-`shipyard-local[bot]` it posts the same `@codex review` comment a human would,
-using `GITHUB_TOKEN` and no privileged secret at all, then verifies a review
-actually completed when the connector is available. The check is advisory:
-missing credentials, API failures, unavailable connectors, and review timeouts
-emit warnings and pass so they never block an otherwise green PR.
-
-The absence of a user PAT there is deliberate. A same-repository
-`pull_request` evaluates the workflow file from the PR's own revision, so any
-secret exposed to this job is readable by a PR that edits this file — and the
-PRs it runs on are exactly the unreviewed ones. An App identity is sufficient:
-a `@codex review` from one does produce a completed review.
-
-It runs on `synchronize` as well as `opened` and `ready_for_review`. That is
-load-bearing rather than thorough: under this repo's up-to-date branch
-protection a PR is pushed to repeatedly, and on `opened` alone the commit that
-was reviewed and the commit that merges are different ones. Superseded runs are
-cancelled, because during a burst of pushes only the final head can merge.
-
-The verification is the point. A mitigation that posts a comment and never
-checks whether anything came back can no-op in silence, which is the same
-failure it exists to correct. Three distinctions keep that check honest, and all
-three live in `tools/scripts/codex_review_signal.sh` (self-tested by
-`test_codex_review_signal.sh`, ctest `codex-review-signal-selftest`):
-
-- **Acknowledgement is not completion.** Codex posts the summary comment and
-  reacts with EYES the instant a review is requested, before it knows what it
-  can do. Only `**Completed**` in the summary's status cell counts.
-- **Completion is per-commit.** The summary names the commit it reviewed, and
-  the check requires the PR's current head to be that commit. Without the
-  binding, a review of an earlier push would answer for code nobody has seen —
-  a real path, since the workflow can fire on `opened` and again on
-  `ready_for_review` with commits in between.
-- **An unreachable API is not a finding.** Any `gh` failure exits 2, distinct
-  from the exit 1 that means "no review", and the workflow treats it as unknown
-  rather than as a verdict.
-
-THUMBS_UP is reported rather than required: it separates "reviewed, no findings"
-from "reviewed, left comments", which is worth printing, but it carries no
-commit and so cannot prove anything about a particular head.
-
-**The job checks out the base commit, never the PR.** The checker decides
-whether a PR was reviewed, so running the PR's own copy would let an unreviewed
-change rule that it needs no review. The base copy is the reviewed one, and a PR
-that edits the checker is still judged by the version already on the branch it
-targets.
-
-That has one consequence worth knowing: on the pull request that first adds the
-checker, the base commit has no copy of it, so the checker cannot run. The job
-reports that exit distinctly — "did not run" rather than "not reviewed" — and
-passes with a warning because review coverage is advisory.
-
-This workflow requests reviews; it does not audit whether older PRs got one.
-`.github/workflows/post-merge-review-sweep.yml` remains the separate, scheduled
-sweep that collects bot review comments on already-merged PRs.
+A `@codex review` comment posted by an App does not work around this. Codex
+answers a bot commenter with "To use Codex here, create a Codex account and
+connect to github" (or a usage-limit notice) and starts no review. A workflow
+that posted that comment on every App-authored PR was removed after it produced
+hundreds of such replies and no review. Human review and the required checks
+are the review path for agent-opened PRs; `tools/scripts/codex_review_signal.sh`
+remains available to tell whether a given PR head has a completed Codex review.
 
 ## Keeping fleet Macs on current Shipyard
 
@@ -2373,6 +2320,26 @@ PATH, which is every tartci gate VM (the golden bakes both). Nothing later in
 the job runs `brew install` there, so the update only downloaded a portable
 Ruby and the Homebrew API data on every gate job. A runner missing either tool
 (Namespace, GitHub-hosted) still updates before installing.
+
+## Base-poison hold and fix fast-track
+
+`[base_health]` in `.shipyard/config.toml` sets `merge_group_hold = "dry-run"` and
+`auto_jump = "dry-run"`, so the rule below is evaluated and recorded but holds
+and jumps nothing. A 7-day replay over Pulp's merge-group history found 12
+episodes, only 2 of them true base breakage (a `ui-script-plugin-editor-au`
+cluster and a version-date check); in the other 10 the next unrelated group
+passed, so a live hold would have stalled healthy heads for 6 to 99 minutes
+(median about 23). The keys stay in dry-run until a precision gate is met, then
+move to `"on"`. Each steward pass reads the newest merge groups; a required
+context that failed in two or more consecutive groups carrying different pull
+requests, with none common to all, marks the base poisoned. With `"on"`,
+while it is poisoned the steward enqueues only a named fix (label `shipyard:unblock`, or a
+title or description naming the context beside a fix word) and reports every
+other approved green head as `held_base_poisoned:<context>`. `auto_jump` enqueues
+that fix at the front of the queue. The hold lifts when a merge group passes the
+context, and an unreadable merge-group history never holds anything. The
+reviewer kick and priority file are machine-only keys set in the machine-global
+Shipyard config, never in this file.
 
 ## Repository history and pinned archives from the tartci host cache
 
@@ -3040,9 +3007,9 @@ reported on.
 head sha is main's tip (`main_evidence_source: head-sha`). Under the MERGE
 method its runs tested exactly the commit on main. It is judged on **every
 required status context** — `.shipyard/config.toml` `[governance]
-required_status_checks` (six contexts: `macos`, `Enforce version & skill sync`,
+required_status_checks` (seven contexts: `macos`, `Enforce version & skill sync`,
 `Build + prove + (owner-gated) deploy`, `Vellum freeze`, `Vellum trusted
-freeze`, `drift-fast`) — gathered from the merge_group runs of every workflow in
+freeze`, `drift-fast`, `workflow-lint`) — gathered from the merge_group runs of every workflow in
 `[landability] workflows`: build.yml's jobs through the jobs API (their steps
 tell an executed `macos` suite from a reused receipt), the other workflows'
 jobs through one `commits/<sha>/check-runs` read kept to those runs' check
@@ -3476,7 +3443,7 @@ required check equally; see the `contrib-intake` skill.
 Live enforcement is classic branch protection, not a ruleset; the checked-in
 `.github/rulesets/main-protection.json` and `.shipyard/config.toml`
 `[governance]` mirror it, and `base-poison-detector-selftest` fails when those
-two disagree (and the detector judges all six on main's tip). `[governance]` is the full six-context contract, because
+two disagree (and the detector judges all seven on main's tip). `[governance]` is the full seven-context contract, because
 `shipyard governance apply` pushes exactly that list to branch protection.
 Removing it again is the reverse `required_status_checks` edit.
 
@@ -8539,10 +8506,10 @@ plus a local `git show` of the workflow file.
 #### `[landability] workflows` in `.shipyard/config.toml`
 
 The check can only resolve a required context to a lane if it has read the
-workflow that produces it. Branch protection on `main` requires **six**
+workflow that produces it. Branch protection on `main` requires **seven**
 contexts, and the tool's built-in default reads only `build.yml` — which left
 the others `no_producer`: not checked, and reported as a warning that reads
-identically to a clean result. `.shipyard/config.toml` therefore names all six
+identically to a clean result. `.shipyard/config.toml` therefore names all seven
 producers explicitly:
 
 | required context | producing workflow |
@@ -8553,8 +8520,9 @@ producers explicitly:
 | `Vellum freeze` | `vellum-freeze-check.yml` |
 | `Vellum trusted freeze` | `vellum-trusted-gate.yml` |
 | `drift-fast` | `drift-fast.yml` |
+| `workflow-lint` | `workflow-lint.yml` |
 
-None of the six is path-filtered under `pull_request` — `wclap-cloudflare.yml`
+None of the seven is path-filtered under `pull_request` — `wclap-cloudflare.yml`
 keeps its `paths:` under `push` on purpose, because a path-filtered **required**
 check leaves unrelated pull requests stuck on "Expected — Waiting for status"
 forever. Add a row here whenever a workflow starts producing a required context,
@@ -8646,7 +8614,7 @@ A required context counts as present when the head carries it as a check run
 **or** a commit status: `Vellum trusted freeze` reaches a pull request's head
 as a status posted by a `pull_request_target` run, so a check-run-only reader
 would call it absent on every pull request. The required set is
-`[governance] required_status_checks`, all six contexts.
+`[governance] required_status_checks`, all seven contexts.
 
 Every tick first replays `tools/scripts/fixtures/landing_watchdog_wedge.json`
 against that set as a negative control; it must fire (`absent`, `unassigned`,
