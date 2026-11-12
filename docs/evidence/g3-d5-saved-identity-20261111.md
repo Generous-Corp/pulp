@@ -31,5 +31,5 @@ the existing resolved-plan receipt path.
 - `git diff --check` passed. `tools/scripts/gates.sh origin/main` ran all
   host-available checks; the dedicated-builder host refused the source-only
   build-gate suites and the script-input manifest check reported NOT CHECKED.
-- Mutation proof was not run because `confirm_failure.sh` requires a clean
-  tracked source file and this admission slice remains uncommitted.
+- Mutation proof is run after the repair commit on a clean tracked source file;
+  the receipt records baseline, planted digest break, and restored-green runs.

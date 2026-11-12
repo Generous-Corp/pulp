@@ -49,8 +49,25 @@
       "authority": {
         "admission": "read_only",
         "writer_profile": null,
-        "bounds": null,
-        "refusal_codes": []
+        "bounds": {
+          "max_file_bytes": 67108864,
+          "max_document_depth": 64
+        },
+        "refusal_codes": [
+          "empty_input",
+          "input_too_large",
+          "root_not_object",
+          "invalid_json",
+          "invalid_format_version",
+          "unsupported_future_version",
+          "logical_identity_missing",
+          "unsupported_document_profile",
+          "duplicate_key",
+          "non_finite_number",
+          "depth_exceeded",
+          "allocation_failed",
+          "internal_error"
+        ]
       }
     },
     "offline_timeline_cli": {

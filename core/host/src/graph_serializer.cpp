@@ -1043,6 +1043,11 @@ GraphDocumentInspection GraphSerializer::inspect_document(std::string_view json)
                 return result;
             }
             format_version = *version;
+            if (format_version < kFormatVersion) {
+                result.refusal = GraphDocumentRefusal::InvalidFormatVersion;
+                result.detail = "saved document format is older than this inspector supports";
+                return result;
+            }
             if (format_version > kFormatVersion) {
                 result.refusal = GraphDocumentRefusal::UnsupportedFutureVersion;
                 result.detail = "saved document format is newer than this reader";
@@ -1079,6 +1084,17 @@ GraphDocumentInspection GraphSerializer::inspect_document(std::string_view json)
             }
             profile = "pulp.graph.saved-identity.v6";
         }
+        if (root.hasObjectMember("logical_identities")) {
+            const auto& identities = root["logical_identities"];
+            if (!identities.isObject() || !identities.hasObjectMember("profile") ||
+                !identities["profile"].isString() ||
+                identities["profile"].getString() != "pulp.graph.saved-identity.v6") {
+                result.refusal = GraphDocumentRefusal::UnsupportedDocumentProfile;
+                result.detail = "logical_identities has no admitted profile";
+                return result;
+            }
+            profile = "pulp.graph.saved-identity.v6";
+        }
         if (format_version == 0 && profile.empty()) {
             result.refusal = GraphDocumentRefusal::LogicalIdentityMissing;
             result.detail = "document has no explicit logical identity profile";
@@ -1095,9 +1111,11 @@ GraphDocumentInspection GraphSerializer::inspect_document(std::string_view json)
         result.document.format_version_ = format_version;
         result.document.profile_ = std::move(profile);
         result.document.canonical_bytes_ = std::move(canonical);
+        std::string semantic_preimage = "pulp.graph.semantic.v6";
+        semantic_preimage.push_back('\0');
+        semantic_preimage += result.document.canonical_bytes_;
         result.document.semantic_digest_ =
-            "sha256:" +
-            runtime::sha256_hex("pulp.graph.semantic.v6\0" + result.document.canonical_bytes_);
+            "sha256:" + runtime::sha256_hex(semantic_preimage);
         return result;
     } catch (const std::bad_alloc&) {
         result.refusal = GraphDocumentRefusal::AllocationFailed;

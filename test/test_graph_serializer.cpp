@@ -46,6 +46,8 @@ TEST_CASE("GraphSerializer inspects an owned identity document", "[host][seriali
     CHECK(first.document.profile() == "pulp.graph.authored-io-gain.v1");
     CHECK(first.document.canonical_bytes() == reordered.document.canonical_bytes());
     CHECK(first.document.semantic_digest() == reordered.document.semantic_digest());
+    CHECK(first.document.semantic_digest() ==
+          "sha256:50249ca16a7781b2e8d453153eddfbb6f4c829db2991a988655e54fe08c507c9");
     CHECK(first.document.canonical_bytes().find("\"a\":1") <
           first.document.canonical_bytes().find("\"b\":2"));
 }
@@ -62,6 +64,18 @@ TEST_CASE("GraphSerializer inspection refuses identity and parser hazards",
     const auto future = GraphSerializer::inspect_document(
         R"({"format_version":999,"identity_schema":"pulp.graph.saved-identity.v6"})");
     CHECK(future.refusal == GraphDocumentRefusal::UnsupportedFutureVersion);
+
+    const auto legacy_version = GraphSerializer::inspect_document(
+        R"({"format_version":3,"identity_schema":"pulp.graph.saved-identity.v6"})");
+    CHECK(legacy_version.refusal == GraphDocumentRefusal::InvalidFormatVersion);
+
+    const auto missing_logical_profile = GraphSerializer::inspect_document(
+        R"({"format_version":4,"logical_identities":{}})");
+    CHECK(missing_logical_profile.refusal == GraphDocumentRefusal::UnsupportedDocumentProfile);
+
+    const auto unknown_logical_profile = GraphSerializer::inspect_document(
+        R"({"format_version":4,"logical_identities":{"profile":"pulp.graph.unknown.v1"}})");
+    CHECK(unknown_logical_profile.refusal == GraphDocumentRefusal::UnsupportedDocumentProfile);
 
     const auto wrong_profile =
         GraphSerializer::inspect_document(R"({"document_schema":"pulp.graph.unknown.v1"})");
