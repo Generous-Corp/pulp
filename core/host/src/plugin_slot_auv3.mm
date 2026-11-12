@@ -1225,8 +1225,7 @@ std::unique_ptr<PluginSlot> load_auv3_plugin(const PluginInfo& requested,
                                desc.componentType == kAudioUnitType_MusicEffect ||
                                desc.componentType == kAudioUnitType_Generator;
     if (auv3_internal::remote_unit_lost_its_buses(options.out_of_process, expects_audio,
-                                                  unit.inputBusses.count,
-                                                  unit.outputBusses.count))
+                                                  unit.inputBusses.count, unit.outputBusses.count))
         runtime::log_error("AUv3 load: '{}': {}", requested.unique_id,
                            auv3_internal::kRemoteUnitWithoutBuses);
 
