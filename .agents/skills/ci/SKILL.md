@@ -10620,6 +10620,11 @@ So `Vellum trusted freeze` legitimately shows up twice in `gh pr checks` — onc
 as the posted status, once as the `merge_group` job skipped on a `pull_request`
 event. Fix the underlying freeze-check failure and all three clear together.
 
+The `Vellum freeze` job also runs `vellum_ui_drift_report.py` as a
+`continue-on-error` step. It lists transferred UI paths that are not frozen and
+differ from the export receipt blobs. A listed path never turns the job red;
+only an unreadable input (exit 2) shows as a failed step.
+
 The usual cause is a change to a `framework-authoritative-transferred` slice
 with no matching change event under `.github/vellum-change-events/`. The
 diagnostic names each uncovered slice, the changed paths behind it, and the

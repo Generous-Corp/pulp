@@ -9,6 +9,31 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11150"></a>
+## [1.115.0] - 2026-11-12
+
+- release/version bump ([#12094](https://github.com/Generous-Corp/pulp/pull/12094))
+- drain first try prepush 20261111 ([#12076](https://github.com/Generous-Corp/pulp/pull/12076))
+- drain dirty consumption 20261111 ([#12077](https://github.com/Generous-Corp/pulp/pull/12077))
+- feature/vellum drift report ([#12067](https://github.com/Generous-Corp/pulp/pull/12067))
+- codex/g9 native group join 20261110 ([#12019](https://github.com/Generous-Corp/pulp/pull/12019))
+
+<a id="v11140"></a>
+## [1.114.0] - 2026-11-12
+
+- release/version bump ([#12080](https://github.com/Generous-Corp/pulp/pull/12080))
+- codex/g11 two take 20261111 ([#12088](https://github.com/Generous-Corp/pulp/pull/12088))
+- docs/pr workflow concurrency policy 20261111 ([#12082](https://github.com/Generous-Corp/pulp/pull/12082))
+- codex/preset browser clean 20261111 ([#12064](https://github.com/Generous-Corp/pulp/pull/12064))
+- fix/vellum freeze advisory step ([#12087](https://github.com/Generous-Corp/pulp/pull/12087))
+- codex/g12 qualification closure 20261111 ([#12083](https://github.com/Generous-Corp/pulp/pull/12083))
+- docs/g6 status reconcile 20261111 ([#12085](https://github.com/Generous-Corp/pulp/pull/12085))
+- docs/postroadmap refresh 20261111 ([#12078](https://github.com/Generous-Corp/pulp/pull/12078))
+- codex/preset standalone clean 20261111 ([#12065](https://github.com/Generous-Corp/pulp/pull/12065))
+- codex/g6 a1 merged12000 20261110 ([#12017](https://github.com/Generous-Corp/pulp/pull/12017))
+- codex/g5 event consumer p1 20261111 ([#12055](https://github.com/Generous-Corp/pulp/pull/12055))
+- feature/preset program wiring ([#11932](https://github.com/Generous-Corp/pulp/pull/11932))
+
 <a id="v11130"></a>
 ## [1.113.0] - 2026-11-11
 
@@ -12805,6 +12830,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.115.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.115.0
+[1.114.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.114.0
 [1.113.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.113.0
 [1.112.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.112.0
 [1.111.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.111.0

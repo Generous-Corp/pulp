@@ -1,0 +1,11 @@
+{
+ "name": "vellum-ui-drift-report-selftest",
+ "record": {
+  "entry": "tools/scripts/test_vellum_ui_drift_report.py",
+  "inputs": [
+   ".github/workflows/vellum-freeze-check.yml",
+   "tools/scripts/test_vellum_ui_drift_report.py"
+  ],
+  "kind": "python"
+ }
+}

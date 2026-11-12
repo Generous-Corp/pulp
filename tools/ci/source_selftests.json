@@ -1238,6 +1238,13 @@
       "timeout": 120.0
     },
     {
+      "name": "vellum-ui-drift-report-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_vellum_ui_drift_report.py"
+      ],
+      "timeout": 120.0
+    },
+    {
       "name": "vellum-watch-preflight-selftest",
       "argv": [
         "{repo}/tools/scripts/test_vellum_watch_preflight.py"
