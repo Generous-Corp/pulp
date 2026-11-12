@@ -1308,6 +1308,10 @@ pulp_add_test_suite(pulp-test-clipboard GROUP pulp-test-group-core-platform
 pulp_add_test_suite(pulp-test-file-dialog GROUP pulp-test-group-core-platform
     LIBRARIES pulp::platform)
 
+# binary_unique_name: names unique to the binary that holds the code.
+pulp_add_test_suite(pulp-test-binary-unique-name GROUP pulp-test-group-core-platform
+    LIBRARIES pulp::platform)
+
 # How asynchronous dialogs deliver their completion: posted with a main-thread
 # backend, inline without one, dropped once the scope is gone. Portable, so it
 # covers the platforms with no main-thread backend. Reads the platform's

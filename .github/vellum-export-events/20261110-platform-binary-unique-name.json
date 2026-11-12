@@ -8,6 +8,6 @@
     "core/platform/include/pulp/platform/binary_unique_name.hpp",
     "core/platform/src/binary_unique_name.cpp"
   ],
-  "vellum_inherits": true,
-  "rationale": "Adds binary_unique_name to the generic platform layer: a name carrying the load address of the image that holds the code (dladdr on POSIX, GetModuleHandleEx on Windows), so process-wide registrations such as Win32 window classes are unique to each plug-in binary. Additive and free of view or render dependencies, so the next Vellum re-export of core/platform should carry it."
+  "vellum_inherits": false,
+  "rationale": "Adds binary_unique_name to Pulp's platform layer: a name carrying the load address of the image that holds the code (dladdr on POSIX, GetModuleHandleEx on Windows), so process-wide registrations such as Win32 window classes are unique to each plug-in binary. Vellum's framework transfer is in effect, so this is a Pulp-only addition."
 }
