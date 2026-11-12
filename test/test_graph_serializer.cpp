@@ -69,8 +69,8 @@ TEST_CASE("GraphSerializer inspection refuses identity and parser hazards",
         R"({"format_version":3,"identity_schema":"pulp.graph.saved-identity.v6"})");
     CHECK(legacy_version.refusal == GraphDocumentRefusal::InvalidFormatVersion);
 
-    const auto missing_logical_profile = GraphSerializer::inspect_document(
-        R"({"format_version":4,"logical_identities":{}})");
+    const auto missing_logical_profile =
+        GraphSerializer::inspect_document(R"({"format_version":4,"logical_identities":{}})");
     CHECK(missing_logical_profile.refusal == GraphDocumentRefusal::UnsupportedDocumentProfile);
 
     const auto unknown_logical_profile = GraphSerializer::inspect_document(

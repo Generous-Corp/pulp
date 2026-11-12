@@ -1114,8 +1114,7 @@ GraphDocumentInspection GraphSerializer::inspect_document(std::string_view json)
         std::string semantic_preimage = "pulp.graph.semantic.v6";
         semantic_preimage.push_back('\0');
         semantic_preimage += result.document.canonical_bytes_;
-        result.document.semantic_digest_ =
-            "sha256:" + runtime::sha256_hex(semantic_preimage);
+        result.document.semantic_digest_ = "sha256:" + runtime::sha256_hex(semantic_preimage);
         return result;
     } catch (const std::bad_alloc&) {
         result.refusal = GraphDocumentRefusal::AllocationFailed;
