@@ -9,7 +9,8 @@ head `e777deef` (an ancestor of this documentation repair):
 
 - audit base: `6b4004acfe7ff18a9fa5e1d81b0acf474076b3ec`
 - executed SDK/source head: `e777deef9dea919aa00ddafdea86e75e32f2a8dc`
-- current PR head (documentation only): `38354ddd1abae273b94d34091d43e3609bb78d1c`
+- historical documentation commit: `38354ddd1abae273b94d34091d43e3609bb78d1c`
+- reviewed PR head (documentation only): `ebd86425f62e544d91bdfad2e342ad1de7140ee8`
 - branch: `codex/g6-voice-fixture-audit-20261112`
 - worktree: `/Users/danielraffel/agent-worktrees/pulp-g6-voice-fixture-audit-20261112`
 - lineage: active, owner `g6-voice-fixture-audit`
