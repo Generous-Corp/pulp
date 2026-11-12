@@ -85,12 +85,22 @@ TEST_CASE("GraphSerializer inspection refuses identity and parser hazards",
         R"({"document_schema":"pulp.graph.authored-io-gain.v1","value":NaN})");
     CHECK(nonfinite.refusal == GraphDocumentRefusal::InvalidJson);
 
+    const auto brackets_in_string = GraphSerializer::inspect_document(
+        R"({"document_schema":"pulp.graph.authored-io-gain.v1","text":"[[[[not nesting]]]]"})");
+    CHECK(brackets_in_string.ok());
+
     std::string deep = "0";
     for (std::size_t i = 0; i <= GraphSerializer::max_document_depth; ++i)
         deep = R"({"v":)" + deep + "}";
     deep = R"({"document_schema":"pulp.graph.authored-io-gain.v1","v":)" + deep + "}";
     const auto too_deep = GraphSerializer::inspect_document(deep);
     CHECK(too_deep.refusal == GraphDocumentRefusal::NestingLimitExceeded);
+
+    std::string hostile(200'000, '[');
+    hostile.push_back('0');
+    hostile.append(200'000, ']');
+    const auto hostile_depth = GraphSerializer::inspect_document(hostile);
+    CHECK(hostile_depth.refusal == GraphDocumentRefusal::NestingLimitExceeded);
 }
 
 TEST_CASE("GraphSerializer admits the reserved saved identity envelope",

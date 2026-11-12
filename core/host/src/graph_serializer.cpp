@@ -50,6 +50,32 @@ std::function<void(const std::filesystem::path&)> g_after_first_read_hook;
 std::atomic<bool> g_fail_next_write{false};
 std::atomic<bool> g_fail_next_replace{false};
 
+GraphDocumentRefusal preflight_document_depth(std::string_view json) noexcept {
+    bool in_string = false;
+    bool escaped = false;
+    std::size_t depth = 0;
+    for (const auto character : json) {
+        if (in_string) {
+            if (escaped)
+                escaped = false;
+            else if (character == '\\')
+                escaped = true;
+            else if (character == '"')
+                in_string = false;
+            continue;
+        }
+        if (character == '"') {
+            in_string = true;
+        } else if (character == '{' || character == '[') {
+            if (++depth > GraphSerializer::max_document_depth)
+                return GraphDocumentRefusal::NestingLimitExceeded;
+        } else if ((character == '}' || character == ']') && depth != 0) {
+            --depth;
+        }
+    }
+    return GraphDocumentRefusal::None;
+}
+
 template <typename V>
 bool append_document_canonical(const V& value, std::string& output, GraphDocumentRefusal& refusal,
                                std::size_t depth) {
@@ -1023,6 +1049,12 @@ GraphDocumentInspection GraphSerializer::inspect_document(std::string_view json)
     if (json.size() > max_file_bytes) {
         result.refusal = GraphDocumentRefusal::DocumentTooLarge;
         result.detail = "document exceeds the encoded size limit";
+        return result;
+    }
+    if (const auto refusal = preflight_document_depth(json);
+        refusal != GraphDocumentRefusal::None) {
+        result.refusal = refusal;
+        result.detail = graph_document_refusal_name(refusal);
         return result;
     }
 
