@@ -135,8 +135,11 @@ class DriftReportTest(unittest.TestCase):
 
     def test_workflow_waits_for_the_later_unit_map(self):
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        # The advisory step is gated on the later unit map with the exact
+        # condition the merge-group invariant in
+        # test_vellum_borrowed_coverage_check.py exempts.
         self.assertIn(
-            "if [[ -f .github/vellum-export-receipt/unit-of.json ]]; then",
+            "if: hashFiles('.github/vellum-export-receipt/unit-of.json') != ''",
             workflow,
         )
 
