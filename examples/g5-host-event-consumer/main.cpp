@@ -1,4 +1,5 @@
 #include <pulp/format/process_context.hpp>
+#include <pulp/format/processor.hpp>
 #include <pulp/host/graph_event_contract.hpp>
 #include <pulp/host/signal_graph_runtime.hpp>
 #include <pulp/host/trigger_graph.hpp>
@@ -27,6 +28,67 @@ void check(bool condition, const char* rule) {
     if (!condition)
         throw std::runtime_error(rule);
 }
+
+class ProcessorProjectionProbe final : public pulp::format::Processor {
+  public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        pulp::format::PluginDescriptor descriptor;
+        descriptor.name = "G5 Processor Projection Probe";
+        descriptor.manufacturer = "Pulp";
+        descriptor.bundle_id = "dev.pulp.g5.processor-projection-probe";
+        descriptor.version = "1.0.0";
+        descriptor.category = pulp::format::PluginCategory::Effect;
+        descriptor.input_buses = {{"Main In", 1, false}};
+        descriptor.output_buses = {{"Main Out", 1, false}};
+        descriptor.accepts_midi = true;
+        descriptor.supports_mpe = true;
+        descriptor.supports_ump = true;
+        return descriptor;
+    }
+
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+
+    void process(pulp::audio::BufferView<float>& output,
+                 const pulp::audio::BufferView<const float>& input,
+                 pulp::midi::MidiBuffer& midi_in, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        midi_count = static_cast<int>(midi_in.size());
+        ump_count = ump_input() == nullptr ? 0 : static_cast<int>(ump_input()->size());
+        mpe_count = mpe_input() == nullptr ? 0 : static_cast<int>(mpe_input()->size());
+        note_count = 0;
+        offset_count = 0;
+        for (const auto& event : midi_in) {
+            if (note_count < static_cast<int>(notes.size()))
+                notes[static_cast<std::size_t>(note_count++)] = event.note();
+            if (offset_count < static_cast<int>(offsets.size()))
+                offsets[static_cast<std::size_t>(offset_count++)] = event.sample_offset;
+        }
+        for (std::size_t channel = 0; channel < output.num_channels(); ++channel)
+            for (std::size_t frame = 0; frame < output.num_samples(); ++frame)
+                output.channel_ptr(channel)[frame] =
+                    input.num_channels() > channel ? input.channel_ptr(channel)[frame] : 0.0f;
+    }
+
+    int midi_count = 0;
+    int ump_count = 0;
+    int mpe_count = 0;
+    int note_count = 0;
+    int offset_count = 0;
+    std::array<int, 8> notes{};
+    std::array<int, 8> offsets{};
+};
+
+struct ProcessorProjectionObservation {
+    std::array<int, 8> notes{};
+    std::array<int, 8> offsets{};
+    int note_count = 0;
+    int offset_count = 0;
+    int midi_count = 0;
+    int ump_count = 0;
+    int mpe_count = 0;
+    std::array<float, 8> audio{};
+};
 
 HostEventRecord record(std::uint64_t epoch, std::int64_t sample, std::uint64_t sequence,
                        std::uint32_t producer, pulp::midi::MidiEvent event) {
@@ -428,6 +490,142 @@ void graph_partition_controls() {
           "graph-counters");
 }
 
+ProcessorProjectionObservation render_processor_projection(bool routed) {
+    using namespace pulp::host;
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1);
+    const auto output = graph.add_output_node(1);
+    const auto midi_input = graph.add_midi_input_node("G5 processor host input");
+    auto processor = std::make_unique<ProcessorProjectionProbe>();
+    auto* probe = processor.get();
+    const auto processor_node = graph.add_processor_node(std::move(processor), "G5 projection");
+    check(input != 0 && output != 0 && midi_input != 0 && processor_node != 0,
+          "processor-node-admission");
+    check(graph.connect(input, 0, processor_node, 0) &&
+              graph.connect(processor_node, 0, output, 0) &&
+              graph.connect_midi(midi_input, processor_node),
+          "processor-node-routing");
+    graph.set_canonical_executor_routing_enabled(routed);
+    check(graph.prepare(48000.0, 8), "processor-node-prepare");
+
+    HostEventIngress<8> ingress;
+    check(ingress.begin_block(7, 100, 8) == HostEventResult::Accepted,
+          "processor-ingress-begin");
+    auto first = record(7, 102, 1, 2, pulp::midi::MidiEvent::note_on(1, 60, 100));
+    auto tie = record(7, 102, 1, 1, pulp::midi::MidiEvent::note_on(1, 61, 100));
+    auto bend = record(7, 105, 2, 1, pulp::midi::MidiEvent::pitch_bend(1, 10'000));
+    first.has_ump = true;
+    first.ump.word_count = 2;
+    first.ump.words[0] = 0x4091'3C00u;
+    first.ump.words[1] = 0xFFFF'0000u;
+    check(ingress.publish(first) == HostEventResult::Accepted &&
+              ingress.publish(tie) == HostEventResult::Accepted &&
+              ingress.publish(bend) == HostEventResult::Accepted,
+          "processor-ingress-publish");
+    std::array<HostEventRecord, 8> projected{};
+    std::size_t projected_count = 0;
+    check(ingress.project(projected, projected_count) == HostEventResult::Accepted &&
+              projected_count == 3 && projected[0].producer == 1 &&
+              projected[1].producer == 2,
+          "processor-ingress-tie-order");
+    pulp::midi::MidiBuffer midi;
+    midi.reserve(8, 128, 8);
+    midi.set_realtime_capacity_limit(true);
+    pulp::midi::UmpBuffer ump;
+    ump.reserve(8);
+    ump.set_realtime_capacity_limit(true);
+    midi.attach_ump(&ump);
+    pulp::midi::MpeVoiceTracker tracker;
+    pulp::midi::MpeBuffer mpe;
+    mpe.reserve(512);
+    mpe.set_realtime_capacity_limit(true);
+    check(project_host_event_block(std::span<const HostEventRecord>(projected.data(), projected_count),
+                                   100, 8, midi, &tracker, &mpe) == HostEventResult::Accepted,
+          "processor-ingress-project");
+    check(graph.inject_midi(midi_input, midi, mpe), "processor-ingress-mailbox");
+    std::array<float, 8> source{};
+    std::array<float, 8> destination{};
+    const float* source_ptr = source.data();
+    float* destination_ptr = destination.data();
+    pulp::audio::BufferView<const float> in(&source_ptr, 1, source.size());
+    pulp::audio::BufferView<float> out(&destination_ptr, 1, destination.size());
+    graph.process(out, in, static_cast<int>(source.size()));
+
+    ProcessorProjectionObservation observation;
+    observation.notes = probe->notes;
+    observation.offsets = probe->offsets;
+    observation.note_count = probe->note_count;
+    observation.offset_count = probe->offset_count;
+    observation.midi_count = probe->midi_count;
+    observation.ump_count = probe->ump_count;
+    observation.mpe_count = probe->mpe_count;
+    observation.audio = destination;
+    return observation;
+}
+
+void processor_projection_controls() {
+    const auto routed = render_processor_projection(true);
+    const auto reference = render_processor_projection(false);
+    check(routed.notes == reference.notes && routed.offsets == reference.offsets &&
+              routed.note_count == reference.note_count && routed.offset_count == reference.offset_count &&
+              routed.midi_count == reference.midi_count && routed.ump_count == reference.ump_count &&
+              routed.mpe_count == reference.mpe_count && routed.audio == reference.audio,
+          "processor-backend-parity");
+    check(routed.note_count == 3 && routed.notes[0] == 61 && routed.notes[1] == 60 &&
+              routed.offsets[0] == 2 && routed.offsets[1] == 2 && routed.offsets[2] == 5 &&
+              routed.midi_count == 3 && routed.ump_count == 1 && routed.mpe_count >= 3,
+          "processor-event-trace");
+    check(!(routed.offsets[0] == 3 && routed.offsets[1] == 3),
+          "processor-sample-shift-negative");
+    check(!(routed.notes[0] == 60 && routed.notes[1] == 61),
+          "processor-tie-reversal-negative");
+
+    HostEventIngress<2> ingress;
+    check(ingress.begin_block(9, 20, 4) == HostEventResult::Accepted,
+          "processor-negative-begin");
+    check(ingress.publish(record(8, 20, 1, 1, pulp::midi::MidiEvent::note_on(1, 60, 100))) ==
+              HostEventResult::StaleEpoch,
+          "processor-stale-epoch-negative");
+    check(ingress.publish(record(9, 19, 2, 1, pulp::midi::MidiEvent::note_off(1, 60))) ==
+              HostEventResult::Late,
+          "processor-late-negative");
+    check(ingress.publish(record(9, 24, 3, 1, pulp::midi::MidiEvent::note_on(1, 61, 100))) ==
+              HostEventResult::Accepted,
+          "processor-future-stage");
+    std::array<HostEventRecord, 2> projected{};
+    std::size_t count = 0;
+    check(ingress.project(projected, count) == HostEventResult::Accepted && count == 0,
+          "processor-future-not-early");
+    check(ingress.end_block() == HostEventResult::Accepted &&
+              ingress.begin_block(9, 24, 1) == HostEventResult::Accepted &&
+              ingress.project(projected, count) == HostEventResult::Accepted && count == 1,
+          "processor-future-delivery");
+    check(ingress.end_block() == HostEventResult::Accepted, "processor-future-end");
+
+    check(ingress.begin_block(10, 0, 1) == HostEventResult::Accepted,
+          "processor-reset-begin");
+    ingress.reset(11);
+    check(ingress.epoch() == 11 && ingress.pending() == 0, "processor-reset");
+
+    std::array<HostEventRecord, 2> records{
+        record(1, 0, 1, 1, pulp::midi::MidiEvent::note_on(1, 60, 100)),
+        record(1, 0, 2, 1, pulp::midi::MidiEvent::note_on(1, 61, 100)),
+    };
+    pulp::midi::MidiBuffer one_byte_short;
+    one_byte_short.reserve(1, 128, 1);
+    one_byte_short.set_realtime_capacity_limit(true);
+    check(project_host_event_block(records, 0, 1, one_byte_short) ==
+              HostEventResult::OutputCapacity && one_byte_short.empty(),
+          "processor-one-byte-capacity-negative");
+    HostEventIngress<2> queue;
+    check(queue.begin_block(1, 0, 1) == HostEventResult::Accepted &&
+              queue.publish(records[0]) == HostEventResult::Accepted &&
+              queue.publish(records[1]) == HostEventResult::Accepted &&
+              queue.publish(record(1, 0, 3, 1, pulp::midi::MidiEvent::note_on(1, 62, 100))) ==
+                  HostEventResult::Overflow,
+          "processor-ingress-capacity-negative");
+}
+
 struct AuthoredGraphObservation {
     std::vector<GraphAuthoredEvent> events;
     std::vector<float> audio;
@@ -591,6 +789,7 @@ int main() {
     try {
         host_ingress_controls();
         projection_queue_lifecycle_controls();
+        processor_projection_controls();
         graph_partition_controls();
         graph_authored_runtime_controls();
         graph_authored_reset_controls();
