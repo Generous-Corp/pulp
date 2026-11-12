@@ -2396,12 +2396,13 @@ pulp audio waveform take.wav --png take-wave.png --select 12,18
 ```
 
 Input is read through `MemoryMappedAudioReader` in fixed windows, so a
-multi-hour WAV or AIFF renders with memory bounded by the window and never
-goes through the whole-file WAV decoder (which caps at 100,000,000 frames).
-Formats the ranged reader cannot seek (FLAC, MP3, Ogg, and the platform
-decoders) are decoded **whole-file once**: memory is then bounded by the
-decoded file, not the window, and the verb prints a one-line `note:` on stderr
-saying so. Lossy decoders on Apple platforms are CoreAudio and the sidecar says
+multi-hour WAV, AIFF, FLAC, MP3 or Ogg file renders with memory bounded by the
+window and never goes through the whole-file WAV decoder (which caps at
+100,000,000 frames). A FLAC or Ogg stream whose header gives no length, and
+the platform decoders, are decoded **whole-file once**: memory is then bounded
+by the decoded file, not the window, and the verb prints a one-line `note:` on
+stderr saying so. MP3 seeks backward by decoding forward from the start, so a
+late `--start` costs time, not memory. Lossy decoders on Apple platforms are CoreAudio and the sidecar says
 so. Float input above 0 dBFS is drawn clamped and reported unclamped; nothing
 is normalized.
 

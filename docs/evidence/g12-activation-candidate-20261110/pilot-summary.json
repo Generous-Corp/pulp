@@ -1,0 +1,9 @@
+{
+  "source": "e893f20d0048dfc11536c4b688d11be97ba9e167",
+  "cells": 24,
+  "callbacks_per_cell": 64,
+  "samples": 184320,
+  "deadline_misses": 44,
+  "timing_qualified": false,
+  "receipt_digest": "ec541d04edde20c8081471a9fa795fcb3fe520f3963f61939d1e04e5da5e012c"
+}

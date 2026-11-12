@@ -74,6 +74,9 @@ LiveSwapAdmission evaluate_live_swap_admission(
 SignalGraph::SwapResult
 SignalGraph::stage_plugin_replacement(NodeId id, PluginCatalogToken token) {
     GraphMutationLock mutation_lock(*this);
+    if (refuse_isolated_mode_locked_("stage_plugin_replacement"))
+        return SwapResult::NeedsEagerPrepare;
+
     if (refuse_spectral_mutation_())
         return SwapResult::NeedsEagerPrepare;
     if (!in_swap_edit_)
@@ -436,6 +439,9 @@ SignalGraph::staged_node_loads_locked_() const {
 
 void SignalGraph::begin_swap_edit() {
     GraphMutationLock lock(*this);
+    if (refuse_isolated_mode_locked_("begin_swap_edit"))
+        return;
+
     if (refuse_spectral_mutation_())
         return;
     if (!trigger_producers_.empty() || !trigger_envelopes_.empty() || !trigger_audio_.empty() ||
@@ -475,6 +481,9 @@ SignalGraph::SwapResult SignalGraph::prepare_swap(double sample_rate,
     std::vector<ObserverCall> observer_calls;
 
     GraphMutationLock lock(*this);
+    if (refuse_isolated_mode_locked_("prepare_swap"))
+        return SwapResult::NeedsEagerPrepare;
+
     if (refuse_spectral_mutation_())
         return SwapResult::NeedsEagerPrepare;
     if (!trigger_producers_.empty() || !trigger_envelopes_.empty() || !trigger_audio_.empty() ||
