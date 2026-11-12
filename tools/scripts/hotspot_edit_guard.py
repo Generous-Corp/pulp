@@ -17,7 +17,17 @@ an `added_line_pattern`: a change that adds a line matching the pattern to a
 matching file is refused the same way, while every other edit to those files
 passes.
 
-Registered hotspots live in `tools/scripts/hotspot_edit_guard.json`.
+Registered hotspots live in `tools/scripts/hotspot_edit_guard.json`.  A
+`serialized` entry is a generated aggregate that has not yet been split into
+fragments; it is refused by default and may only be changed by a coordinated
+single writer that declares itself in a commit on the branch with the line
+
+  Serialized-Hotspot: <registered path> reason=<why this branch is the writer>
+
+The guard reads that line from the commits in `merge-base(base, head)..head`,
+so CI sees it on the pull request checkout and a reviewer can audit it in the
+pull request's own history. A process environment variable is not an
+override: CI cannot see an author's local environment.
 
   hotspot_edit_guard.py [--base REF] [--head REV]
 
@@ -66,7 +76,11 @@ def load_registry(root: Path, path: Path | None = None) -> list[dict]:
     if not isinstance(hotspots, list) or not hotspots:
         raise ValueError(f"{path}: no hotspots registered")
     for spot in hotspots:
-        for key in ("path", "fragments", "writer"):
+        mode = spot.get("mode", "fragment")
+        if mode not in ("fragment", "serialized"):
+            raise ValueError(f"{path}: hotspot {spot!r} has invalid mode {mode!r}")
+        required = ("path", "writer") if mode == "serialized" else ("path", "fragments", "writer")
+        for key in required:
             if not isinstance(spot.get(key), str) or not spot[key]:
                 raise ValueError(f"{path}: hotspot {spot!r} has no {key}")
         pattern = spot.get("added_line_pattern")
@@ -138,6 +152,20 @@ def added_lines(root: Path, base: str, head: str, path: str) -> list[str]:
     return lines
 
 
+SERIALIZED_OVERRIDE = re.compile(r"^Serialized-Hotspot:[ \t]*(\S+)[ \t]+reason=[ \t]*(\S.*?)[ \t]*$",
+                                 re.MULTILINE)
+
+
+def serialized_overrides(root: Path, base: str, head: str) -> dict[str, str]:
+    """{path: reason} declared by `Serialized-Hotspot:` lines in the branch's own commits."""
+    mb = _git(root, "merge-base", base, head)
+    anchor = mb.stdout.strip() if mb.returncode == 0 and mb.stdout.strip() else base
+    res = _git(root, "log", "--format=%B%x00", f"{anchor}..{head}")
+    if res.returncode != 0:
+        raise RuntimeError(f"git log {anchor}..{head} failed: {res.stderr.strip()}")
+    return {m.group(1): m.group(2) for m in SERIALIZED_OVERRIDE.finditer(res.stdout)}
+
+
 def violations(hotspots: list[dict], changed: dict[str, str],
                added: "Callable[[str], list[str]] | None" = None) -> list[tuple[dict, str]]:
     """(hotspot, status) for every refused edit; status "L" is an added line.
@@ -200,7 +228,29 @@ def main(argv: list[str]) -> int:
         return 0
     print(f"hotspot-edit-guard: {len(bad)} registered hotspot aggregate(s) edited directly "
           f"(against {base}):")
+    refused = False
+    overrides: dict[str, str] | None = None
     for spot, status in bad:
+        if spot.get("mode", "fragment") == "serialized":
+            if overrides is None:
+                try:
+                    overrides = serialized_overrides(root, base, a.head)
+                except RuntimeError as exc:
+                    print(f"hotspot-edit-guard: ERROR: {exc}", file=sys.stderr)
+                    return 2
+            if spot["path"] in overrides:
+                print(f"  file={spot['path']}; cause_class=SERIALIZED_HOTSPOT_EDIT; "
+                      f"override=Serialized-Hotspot commit line on this branch; "
+                      f"reason={overrides[spot['path']]}; accepted")
+                continue
+            print(f"  file={spot['path']}; cause_class=SERIALIZED_HOTSPOT_EDIT; "
+                  f"fix=coordinate the single writer ({spot['writer']}) and add the line "
+                  f"`Serialized-Hotspot: {spot['path']} reason=<why this branch is the writer>` "
+                  "to a commit on this branch; safe_to_auto_apply=no")
+            if spot.get("why"):
+                print(f"    why: {spot['why']}")
+            refused = True
+            continue
         if status == "L":
             print(f"  file={spot['path']}; cause_class=HOTSPOT_LITERAL_EDIT; evidence=adds a line matching "
                   f"`{spot['added_line_pattern']}` on this branch; fix=drop that line and record the value "
@@ -208,6 +258,7 @@ def main(argv: list[str]) -> int:
                   "verify=`python3 tools/scripts/hotspot_edit_guard.py`")
             if spot.get("why"):
                 print(f"    why: {spot['why']}")
+            refused = True
             continue
         verb = "re-added" if status == "A" else "modified"
         print(f"  file={spot['path']}; cause_class=HOTSPOT_AGGREGATE_EDIT; evidence={verb} on this branch; "
@@ -216,7 +267,8 @@ def main(argv: list[str]) -> int:
               "safe_to_auto_apply=no; verify=`python3 tools/scripts/hotspot_edit_guard.py`")
         if spot.get("why"):
             print(f"    why: {spot['why']}")
-    return 1
+        refused = True
+    return 1 if refused else 0
 
 
 if __name__ == "__main__":

@@ -183,11 +183,76 @@ class GuardTests(unittest.TestCase):
     def test_the_checked_in_registry_is_valid_and_its_fragments_exist(self) -> None:
         root = HERE.parents[1]
         for spot in guard.load_registry(root):
+            if spot.get("mode") == "serialized":
+                self.assertTrue((root / spot["path"]).is_file())
+                continue
             self.assertTrue((root / spot["fragments"]).is_dir(),
                             f"{spot['path']} is registered but {spot['fragments']} does not exist: "
                             "register a hotspot only once its fragments exist")
             self.assertFalse((root / spot["path"]).exists(), f"{spot['path']} is back beside its fragments")
 
+    def _serialized_repo(self, tmp: str) -> tuple[Repo, str, Path]:
+        repo = Repo(Path(tmp))
+        serialized = "docs/status/consumption-profiles.json"
+        repo.write(serialized, "{}\n")
+        repo.commit("base", ".")
+        repo.git("branch", "base-ref")
+        registry = Path(tmp) / "registry.json"
+        registry.write_text(json.dumps({
+            "schema": guard.SCHEMA,
+            "hotspots": [{
+                "mode": "serialized", "path": serialized,
+                "writer": "single owner",
+            }],
+        }), encoding="utf-8")
+        return repo, serialized, registry
+
+    def test_serialized_hotspot_is_refused_without_a_trailer_even_with_the_old_env_var(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo, serialized, registry = self._serialized_repo(tmp)
+            repo.write(serialized, "{\"changed\": true}\n")
+            repo.commit("regenerate", serialized)
+            blocked = repo.run("--base", "base-ref", "--registry", str(registry))
+            self.assertEqual(blocked.returncode, 1, blocked.stdout + blocked.stderr)
+            self.assertIn("SERIALIZED_HOTSPOT_EDIT", blocked.stdout)
+            self.assertIn("Serialized-Hotspot: " + serialized + " reason=", blocked.stdout)
+            # A process env var is invisible to CI and to a reviewer; it is not an override.
+            env_only = repo.run("--base", "base-ref", "--registry", str(registry),
+                                env={"PULP_ALLOW_SERIALIZED_HOTSPOT": "1"})
+            self.assertEqual(env_only.returncode, 1, env_only.stdout + env_only.stderr)
+
+    def test_serialized_hotspot_override_is_read_from_the_branch_commits(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo, serialized, registry = self._serialized_repo(tmp)
+            repo.write(serialized, "{\"changed\": true}\n")
+            repo.commit("regenerate census\n\nSerialized-Hotspot: " + serialized
+                        + " reason=single writer for the census refresh", serialized)
+            allowed = repo.run("--base", "base-ref", "--registry", str(registry))
+            self.assertEqual(allowed.returncode, 0, allowed.stdout + allowed.stderr)
+            self.assertIn("reason=single writer for the census refresh", allowed.stdout)
+
+    def test_serialized_hotspot_override_needs_a_reason_and_the_exact_path(self) -> None:
+        for trailer in ("Serialized-Hotspot: docs/status/consumption-profiles.json",
+                        "Serialized-Hotspot: docs/status/consumption-profiles.json reason=",
+                        "Serialized-Hotspot: docs/status/other.json reason=wrong file"):
+            with self.subTest(trailer=trailer), tempfile.TemporaryDirectory() as tmp:
+                repo, serialized, registry = self._serialized_repo(tmp)
+                repo.write(serialized, "{\"changed\": true}\n")
+                repo.commit("regenerate\n\n" + trailer, serialized)
+                res = repo.run("--base", "base-ref", "--registry", str(registry))
+                self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+
+    def test_serialized_hotspot_override_on_the_base_side_does_not_count(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo, serialized, registry = self._serialized_repo(tmp)
+            repo.git("checkout", "-q", "base-ref")
+            repo.git("commit", "-q", "--allow-empty", "-m", "main\n\nSerialized-Hotspot: "
+                     + serialized + " reason=someone else's refresh")
+            repo.git("checkout", "-q", "-b", "topic", "HEAD~1")
+            repo.write(serialized, "{\"changed\": true}\n")
+            repo.commit("regenerate", serialized)
+            res = repo.run("--base", "base-ref", "--registry", str(registry))
+            self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
 
 if __name__ == "__main__":
     unittest.main()
