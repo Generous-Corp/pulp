@@ -19,7 +19,9 @@ requires both installed binaries and remains `NOT_QUALIFIED` when either is
 unavailable.
 
 The current fixture receipt is
-`../evidence/p0-layered-inspection-replay-20261112/receipt.json`, SHA-256
+`../evidence/p0-layered-inspection-replay-20261112/receipt.json`, raw-file
+SHA-256 `9c449409c89f219a8edad829ec2f1fb89308d69c312c70a2483c68af111812c7`;
+its canonical JSON digest is
 `b66229e3d6986d4015fae89939a8ab6f63bdf1c4bbaf7e67b6577d1c0c91c9a6`.
 Both installed-consumer commands are `UNAVAILABLE` in this handoff because the
 source build did not complete its relocatable SDK support-module install.
