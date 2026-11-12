@@ -6,6 +6,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -19,20 +21,22 @@ class LayeredReceiptTests(unittest.TestCase):
                    for partition in receipt.PARTITIONS]
         self.assertEqual(outputs[0]["pcm_sha256"], outputs[1]["pcm_sha256"])
         result = receipt.receipt(receipt.base_layers(), [], "test-head")
-        self.assertEqual(result["partition_controls"]["status"], "PASS")
+        self.assertEqual(result["partition_controls"]["status"], "NOT_CHECKED")
         self.assertEqual(result["partition_controls"]["partitions"], [64, 128])
         self.assertEqual(len(result["partition_controls"]["output_sha256"]), 2)
 
     def test_each_mutation_is_attributed_to_one_layer(self) -> None:
         result = receipt.receipt(receipt.base_layers(), [], "test-head")
         controls = result["planted_negative_controls"]["controls"]
-        self.assertEqual([control["status"] for control in controls], ["PASS"] * 5)
+        self.assertEqual([control["status"] for control in controls], ["NOT_CHECKED"] * 5)
+        self.assertEqual([control["attribution"] for control in controls], ["PASS"] * 5)
         self.assertEqual([control["changed_layers"] for control in controls],
                          [[name] for name in ("authored", "resolved", "plan", "event", "output")])
         self.assertEqual([control["rejected_at_layer"] for control in controls],
                          [control["expected_failure_layer"] for control in controls])
         self.assertEqual([control["status"] for control in result["positive_controls"]],
-                         ["PASS"] * 5)
+                         ["NOT_CHECKED"] * 5)
+        self.assertEqual(result["planted_negative_controls"]["status"], "NOT_CHECKED")
 
     def test_cli_keeps_missing_consumers_unqualified(self) -> None:
         script = Path(__file__).with_name("p0_layered_replay_receipt.py")
@@ -58,7 +62,7 @@ class LayeredReceiptTests(unittest.TestCase):
                 "g3-installed-public-consumer", [str(executable)],
                 "pulp-g3-resolved-identity-consumer",
                 "pulp.graph.g3-resolved-identity-consumer.v1", "g3")
-            self.assertEqual(record["status"], "PASS")
+            self.assertEqual(record["status"], "UNAVAILABLE")
             bad = receipt.run_consumer(
                 "g3-installed-public-consumer", [str(executable)],
                 "wrong", "pulp.graph.g3-resolved-identity-consumer.v1", "g3")
@@ -77,8 +81,22 @@ class LayeredReceiptTests(unittest.TestCase):
                 "g3-installed-public-consumer", [str(executable)],
                 "pulp-g3-resolved-identity-consumer",
                 "pulp.graph.g3-resolved-identity-consumer.v1", "g3", receipt.PARTITIONS)
-            self.assertEqual(record["status"], "PASS")
-            self.assertEqual([run["status"] for run in record["runs"]], ["PASS", "PASS"])
+            self.assertEqual(record["status"], "UNAVAILABLE")
+            self.assertEqual([run["status"] for run in record["runs"]], ["UNAVAILABLE", "UNAVAILABLE"])
+
+    def test_consumer_protocol_requires_an_exact_token(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / "pulp-g3-resolved-identity-consumer"
+            executable.write_bytes(b"\x7fELF" + b"native-test")
+            executable.chmod(0o755)
+            fake = SimpleNamespace(returncode=0, stdout=b"prefixpulp.graph.g3-resolved-identity-consumer.v1suffix", stderr=b"")
+            with mock.patch.object(receipt.subprocess, "run", return_value=fake):
+                record = receipt.run_consumer(
+                    "g3-installed-public-consumer", [str(executable)],
+                    "pulp-g3-resolved-identity-consumer",
+                    "pulp.graph.g3-resolved-identity-consumer.v1", "g3")
+            self.assertEqual(record["status"], "UNAVAILABLE")
+            self.assertIn("exact", record["reason"])
 
     def test_receipt_keeps_layer_bytes_and_quality_metadata_separate(self) -> None:
         result = receipt.receipt(receipt.base_layers(), [], "test-head")
@@ -90,7 +108,8 @@ class LayeredReceiptTests(unittest.TestCase):
         output = next(layer["value"] for layer in result["layers"] if layer["name"] == "output")
         self.assertEqual(output["partitions"][0]["canonical_pcm"]["encoding"], "s32le")
         self.assertIn("quality", output["partitions"][0])
-        self.assertEqual(result["provenance"]["source_head"], "test-head")
+        self.assertIsNone(result["source_head"])
+        self.assertEqual(result["provenance"]["source_head_status"], "UNBOUND")
 
     def test_public_consumer_fixtures_emit_protocol_attestations(self) -> None:
         fixtures = {

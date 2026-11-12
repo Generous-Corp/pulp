@@ -13,6 +13,7 @@ import argparse
 import hashlib
 import json
 import platform
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -27,6 +28,7 @@ CONSUMER_PROTOCOLS = {
     "g3": ("pulp-g3-resolved-identity-consumer", "pulp.graph.g3-resolved-identity-consumer.v1"),
     "spectral": ("spectral-frame-codec-consumer", "pulp.signal.spectral-frame-codec-consumer.v1"),
 }
+SOURCE_HEAD_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
 def canonical(value: Any) -> bytes:
@@ -62,8 +64,17 @@ def _run_consumer_once(label: str, command: Sequence[str], identity: str | None,
     if identity != expected_name or protocol != expected_protocol:
         record["reason"] = "explicit executable identity/protocol did not match the named consumer"
         return record
-    if executable.name != expected_name or not executable.is_file():
+    if executable.name != expected_name or not executable.is_file() or executable.is_symlink():
         record["reason"] = "executable path is not the named public consumer"
+        return record
+    try:
+        magic = executable.read_bytes()[:4]
+    except OSError as exc:
+        record["reason"] = f"cannot inspect executable provenance: {exc}"
+        return record
+    if magic[:2] == b"#!" or magic not in (b"\x7fELF", b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe",
+                                             b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe"):
+        record["reason"] = "consumer executable is not a native installed-SDK binary"
         return record
     invoked = list(command)
     if partition is not None:
@@ -88,10 +99,11 @@ def _run_consumer_once(label: str, command: Sequence[str], identity: str | None,
     except UnicodeDecodeError:
         record["reason"] = "consumer output is not valid UTF-8"
         return record
-    if expected_protocol not in output:
-        record["reason"] = "consumer output did not attest the required protocol"
+    tokens = output.split()
+    if expected_protocol not in tokens:
+        record["reason"] = "consumer output did not attest the required protocol as an exact token"
         return record
-    if partition is not None and f"partition_frames={partition}" not in output:
+    if partition is not None and f"partition_frames={partition}" not in tokens:
         record["reason"] = "consumer output did not attest the requested block partition"
         return record
     record["status"] = "PASS" if result.returncode == 0 else "FAIL"
@@ -104,7 +116,6 @@ def run_consumer(label: str, command: Sequence[str] | None, identity: str | None
                  protocol: str | None, consumer_kind: str,
                  partitions: Sequence[int] | None = None) -> dict[str, Any]:
     """Run a named consumer, optionally once for each required block partition."""
-    expected_name, expected_protocol = CONSUMER_PROTOCOLS[consumer_kind]
     if not command:
         return {"name": label, "status": "UNAVAILABLE", "identity": identity,
                 "protocol": protocol, "timeout_seconds": CONSUMER_TIMEOUT_SECONDS,
@@ -131,9 +142,8 @@ def run_consumer(label: str, command: Sequence[str] | None, identity: str | None
 def output_for(partition: int, event: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
     """Produce canonical PCM bytes from sample positions.
 
-    ``partition`` is recorded for a future block-execution fixture; this
-    sample-level oracle intentionally does not claim to exercise block
-    boundaries.
+    ``partition`` is recorded for the bounded fixture; this sample-level
+    oracle intentionally does not claim to exercise block boundaries.
     """
     frames = 256
     samples: list[float] = []
@@ -194,6 +204,13 @@ def base_layers() -> list[Layer]:
 
 
 def receipt(layers: list[Layer], consumers: list[dict[str, Any]], source_head: str) -> dict[str, Any]:
+    validated_head = None
+    if SOURCE_HEAD_RE.fullmatch(source_head or ""):
+        repo_root = Path(__file__).resolve().parents[2]
+        checked = subprocess.run(["git", "cat-file", "-e", f"{source_head}^{{commit}}"],
+                                 cwd=repo_root, capture_output=True, check=False)
+        if checked.returncode == 0:
+            validated_head = source_head
     layer_records = []
     for layer in layers:
         encoded = canonical(layer.value)
@@ -222,32 +239,40 @@ def receipt(layers: list[Layer], consumers: list[dict[str, Any]], source_head: s
         changed = [name for name in baseline if digest(baseline[name]) != digest(mutated[name])]
         controls.append({"mutation": target, "expected_failure_layer": target,
                          "rejected_at_layer": target if changed == [target] else None,
-                         "status": "PASS" if changed == [target] else "FAIL",
+                         "status": "NOT_CHECKED",
+                         "attribution": "PASS" if changed == [target] else "FAIL",
                          "changed_layers": changed})
-    positive_controls = [{"layer": layer.name, "status": "PASS" if layer.hash else "FAIL",
+    positive_controls = [{"layer": layer.name, "status": "NOT_CHECKED",
+                          "reason": "synthetic baseline bookkeeping; no parser/replay acceptance",
                           "canonical_bytes": layer.hash} for layer in layers]
     return {
         "schema": SCHEMA,
-        "source_head": source_head,
+        "source_head": validated_head,
         "provenance": {"tool": "tools/scripts/p0_layered_replay_receipt.py",
                         "tool_sha256": "sha256:" + hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                         "python": sys.version.split()[0], "platform": platform.platform(),
-                        "source_head": source_head,
+                        "requested_source_head": source_head,
+                        "source_head": validated_head,
+                        "source_head_status": "validated" if validated_head else "UNBOUND",
                         "sdk": {"consumers": [item["name"] for item in consumers],
                                 "protocols": [item["protocol"] for item in consumers]}},
         "consumers": consumers,
-        "consumer_gate": {"status": "PASS" if all(item["status"] == "PASS" for item in consumers)
-                           else "NOT_QUALIFIED",
+        "consumer_gate": {"status": "NOT_QUALIFIED",
+                           "reason": "partition execution and synthetic layer mutations are not qualified",
                            "requires": ["g3-installed-public-consumer", "spectral-installed-public-consumer"]},
         "layers": layer_records,
         "partition_controls": {"fixture": "canonical-sample-level-oracle", "partitions": list(PARTITIONS),
-                                "status": "PASS",
+                                "status": "NOT_CHECKED",
+                                "reason": "sample-level fixture does not execute distinct block boundaries",
                                 "output_sha256": [output_for(p, baseline["event"], baseline["plan"])["pcm_sha256"]
                                                   for p in PARTITIONS],
                                 "tolerances": {"peak": 1e-7, "rms": 1e-7,
                                                "pcm": "byte_exact"}},
         "positive_controls": positive_controls,
-        "planted_negative_controls": {"fixture": "synthetic-layer-mutation-oracle", "controls": controls},
+        "planted_negative_controls": {"fixture": "synthetic-layer-mutation-bookkeeping",
+                                      "status": "NOT_CHECKED",
+                                      "reason": "mutations are digest attribution only; no parser/replay refusal was run",
+                                      "controls": controls},
         "unavailable_lanes": ["runtime", "realtime", "cross_platform", "scheduler", "provider_parity"],
     }
 

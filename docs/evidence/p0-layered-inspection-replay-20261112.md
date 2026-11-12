@@ -4,9 +4,9 @@ Status: **PARTIAL / tooling experiment**.
 
 The checked-in fixture receipt is
 `p0-layered-inspection-replay-20261112/receipt.json` (raw-file SHA-256
-`0b6965f5987c9823dee12466b06c671892c5473ff3018258d0cac4f68909e253`; the
+`856bf84a12dac5f2e2f63ddd9649b56a132a87aad23a9169efaeb48cd3994b02`; the
 canonical JSON digest is
-`2c4cc34fa164eaa09ab17bb04bf5c7cff715af39730b97a19eb624f552a2fb72`). Its
+`9fc5f468f1fe4b87503c5a3821cb5113b456353ffd3a64cc5e727322d4207d04`). Its
 consumer gate is **NOT_QUALIFIED** because this checkout could not supply the
 installed public binaries: the source build's generated package refers to
 relocatable support modules that are materialized only by a completed SDK
@@ -23,7 +23,11 @@ This evidence-only slice keeps the five inspection layers independent:
 
 `tools/scripts/p0_layered_replay_receipt.py` composes the existing G3 resolved
 identity consumer and the separate spectral frame consumer when supplied. The
-consumer fixtures emit explicit protocol attestation tokens
+receipt includes canonical semantic bytes and digests for every layer,
+prepared capacity/latency/fallback facts, event stream and epoch, source/tool
+and SDK provenance, and canonical PCM format/channel/rate/partition/quality
+metadata. The consumer fixtures emit explicit protocol and partition
+attestation tokens
 (`pulp.graph.g3-resolved-identity-consumer.v1` and
 `pulp.signal.spectral-frame-codec-consumer.v1`) so the receipt can bind output
 to the named public binaries. This is fixture output metadata only and does
@@ -37,12 +41,13 @@ is fail-closed: absent or invalid consumer commands exit 1 unless
 `--allow-unavailable` is used;
 that mode writes `NOT_QUALIFIED` and never reports a completed experiment.
 
-The fixture oracle renders sample-level canonical signed 32-bit PCM and records
-two partition labels (64 and 128 frames). It does not execute distinct block
-boundaries, so the partition control is **NOT_CHECKED**. It plants one mutation
-at a time in authored, resolved, plan, event, and output layers. These controls
-are explicitly synthetic tooling controls; they do not claim
-runtime scheduling, realtime safety, or audio-provider parity.
+The fixture oracle renders canonical signed 32-bit PCM and records two
+partitions (64 and 128 frames). Each installed consumer is run at both
+partitions, and the gate requires both protocol and partition attestations. It
+plants one mutation at a time in authored, resolved, plan, event, and output
+layers; each mutation must be attributed to and rejected at its corresponding
+layer. These controls remain bounded evidence and do not claim runtime
+scheduling, realtime safety, or audio-provider parity.
 
 ## Focused controls
 

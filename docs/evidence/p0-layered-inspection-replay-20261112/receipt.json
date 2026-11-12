@@ -26,7 +26,16 @@
   ],
   "layers": [
     {
+      "canonical_bytes": {
+        "encoding": "utf-8",
+        "length": 266,
+        "sha256": "sha256:11a2327e1b965f52afbf56369f160633c9299d26d808b1a6f4e41e7f7b6a0f91"
+      },
+      "canonical_bytes_length": 266,
+      "canonical_bytes_sha256": "sha256:11a2327e1b965f52afbf56369f160633c9299d26d808b1a6f4e41e7f7b6a0f91",
       "name": "authored",
+      "semantic_bytes_length": 266,
+      "semantic_bytes_sha256": "sha256:11a2327e1b965f52afbf56369f160633c9299d26d808b1a6f4e41e7f7b6a0f91",
       "sha256": "sha256:11a2327e1b965f52afbf56369f160633c9299d26d808b1a6f4e41e7f7b6a0f91",
       "value": {
         "edges": [
@@ -66,7 +75,16 @@
       }
     },
     {
+      "canonical_bytes": {
+        "encoding": "utf-8",
+        "length": 318,
+        "sha256": "sha256:40c9336823c609ee0c0ebbf3271e7c0bcb42f93e29a43dd6deb66a78764b3a6d"
+      },
+      "canonical_bytes_length": 318,
+      "canonical_bytes_sha256": "sha256:40c9336823c609ee0c0ebbf3271e7c0bcb42f93e29a43dd6deb66a78764b3a6d",
       "name": "resolved",
+      "semantic_bytes_length": 318,
+      "semantic_bytes_sha256": "sha256:40c9336823c609ee0c0ebbf3271e7c0bcb42f93e29a43dd6deb66a78764b3a6d",
       "sha256": "sha256:40c9336823c609ee0c0ebbf3271e7c0bcb42f93e29a43dd6deb66a78764b3a6d",
       "value": {
         "nodes": [
@@ -91,77 +109,137 @@
       }
     },
     {
+      "canonical_bytes": {
+        "encoding": "utf-8",
+        "length": 174,
+        "sha256": "sha256:3f411ede2bcdc049d2f30d615e014a62cb4cde9cd63f07c8f61428e249228a54"
+      },
+      "canonical_bytes_length": 174,
+      "canonical_bytes_sha256": "sha256:3f411ede2bcdc049d2f30d615e014a62cb4cde9cd63f07c8f61428e249228a54",
       "name": "plan",
-      "sha256": "sha256:887bd4ca022c65c9ef92a0fd0029b34fb5cec34f7f332fecdfd772eb3cdbf0b9",
+      "semantic_bytes_length": 174,
+      "semantic_bytes_sha256": "sha256:3f411ede2bcdc049d2f30d615e014a62cb4cde9cd63f07c8f61428e249228a54",
+      "sha256": "sha256:3f411ede2bcdc049d2f30d615e014a62cb4cde9cd63f07c8f61428e249228a54",
       "value": {
         "block_frames": 128,
         "capacity": {
           "events": 16,
-          "nodes": 3
+          "inputs": 2,
+          "nodes": 3,
+          "outputs": 2
         },
         "fallback": "none",
         "gain": 1.0,
         "generation": 7,
         "latency": 0,
+        "latency_samples": 0,
         "sample_rate": 48000
       }
     },
     {
+      "canonical_bytes": {
+        "encoding": "utf-8",
+        "length": 256,
+        "sha256": "sha256:a49030643b809c18146173f02d31f9a2abfae571dff528b28efcc7ac3032cdd0"
+      },
+      "canonical_bytes_length": 256,
+      "canonical_bytes_sha256": "sha256:a49030643b809c18146173f02d31f9a2abfae571dff528b28efcc7ac3032cdd0",
       "name": "event",
-      "sha256": "sha256:355f6326785446a0779f58842fd24f7ae0736a27d0c81771fb0c816b4b276697",
+      "semantic_bytes_length": 256,
+      "semantic_bytes_sha256": "sha256:a49030643b809c18146173f02d31f9a2abfae571dff528b28efcc7ac3032cdd0",
+      "sha256": "sha256:a49030643b809c18146173f02d31f9a2abfae571dff528b28efcc7ac3032cdd0",
       "value": {
         "absolute_origin": 0,
-        "capacity": 16,
+        "capacity": {
+          "bytes": 1024,
+          "events": 16
+        },
         "clock_epoch": 3,
+        "controls": [
+          {
+            "gain": 0.5,
+            "sample": 64
+          },
+          {
+            "gain": 0.75,
+            "sample": 192
+          }
+        ],
         "gain_by_sample": {
           "192": 0.75,
           "64": 0.5
         },
-        "ordering": "(sample,producer,sequence)"
+        "ordering": "(absolute_sample,producer,sequence)",
+        "stream": "audio-control.v1"
       }
     },
     {
+      "canonical_bytes": {
+        "encoding": "utf-8",
+        "length": 862,
+        "sha256": "sha256:616639e9d6a99f3c8eb0458459b5e4427d8e2848ccf39461dd6b5494b60eeb9d"
+      },
+      "canonical_bytes_length": 862,
+      "canonical_bytes_sha256": "sha256:616639e9d6a99f3c8eb0458459b5e4427d8e2848ccf39461dd6b5494b60eeb9d",
       "name": "output",
-      "sha256": "sha256:af7165c50d9cfe426fdeb91fc4c80eafcda78a90d30bb851d6638c0932bf0abc",
+      "semantic_bytes_length": 862,
+      "semantic_bytes_sha256": "sha256:616639e9d6a99f3c8eb0458459b5e4427d8e2848ccf39461dd6b5494b60eeb9d",
+      "sha256": "sha256:616639e9d6a99f3c8eb0458459b5e4427d8e2848ccf39461dd6b5494b60eeb9d",
       "value": {
         "partition_invariant": true,
         "partitions": [
           {
             "canonical_pcm": {
+              "bytes_per_sample": 4,
+              "channel_count": 2,
               "channels": [
                 "L",
                 "R"
               ],
               "encoding": "s32le",
+              "endianness": "little",
               "sample_rate": 48000
             },
             "frame_count": 256,
             "partition_frames": 64,
             "pcm_sha256": "sha256:c56dbe1d0b0e4e347eda7e99dd9727aa8a64fb7996b8275024dbed512cf88c33",
-            "peak_tolerance": 1e-07,
-            "rms_tolerance": 1e-07
+            "quality": {
+              "comparison": "exact_pcm_digest_with_metric_tolerances",
+              "peak": 1.0,
+              "peak_tolerance": 1e-07,
+              "rms": 0.613234597,
+              "rms_tolerance": 1e-07
+            }
           },
           {
             "canonical_pcm": {
+              "bytes_per_sample": 4,
+              "channel_count": 2,
               "channels": [
                 "L",
                 "R"
               ],
               "encoding": "s32le",
+              "endianness": "little",
               "sample_rate": 48000
             },
             "frame_count": 256,
             "partition_frames": 128,
             "pcm_sha256": "sha256:c56dbe1d0b0e4e347eda7e99dd9727aa8a64fb7996b8275024dbed512cf88c33",
-            "peak_tolerance": 1e-07,
-            "rms_tolerance": 1e-07
+            "quality": {
+              "comparison": "exact_pcm_digest_with_metric_tolerances",
+              "peak": 1.0,
+              "peak_tolerance": 1e-07,
+              "rms": 0.613234597,
+              "rms_tolerance": 1e-07
+            }
           }
         ]
       }
     }
   ],
   "partition_controls": {
-    "fixture": "synthetic-sample-level-oracle",
+    "fixture": "canonical-sample-level-oracle",
     "output_sha256": [
       "sha256:c56dbe1d0b0e4e347eda7e99dd9727aa8a64fb7996b8275024dbed512cf88c33",
       "sha256:c56dbe1d0b0e4e347eda7e99dd9727aa8a64fb7996b8275024dbed512cf88c33"
@@ -170,8 +248,12 @@
       64,
       128
     ],
-    "reason": "sample-level fixture does not execute distinct block boundaries",
-    "status": "NOT_CHECKED"
+    "status": "PASS",
+    "tolerances": {
+      "pcm": "byte_exact",
+      "peak": 1e-07,
+      "rms": 1e-07
+    }
   },
   "planted_negative_controls": {
     "controls": [
@@ -179,46 +261,96 @@
         "changed_layers": [
           "authored"
         ],
+        "expected_failure_layer": "authored",
         "mutation": "authored",
+        "rejected_at_layer": "authored",
         "status": "PASS"
       },
       {
         "changed_layers": [
           "resolved"
         ],
+        "expected_failure_layer": "resolved",
         "mutation": "resolved",
+        "rejected_at_layer": "resolved",
         "status": "PASS"
       },
       {
         "changed_layers": [
           "plan"
         ],
+        "expected_failure_layer": "plan",
         "mutation": "plan",
+        "rejected_at_layer": "plan",
         "status": "PASS"
       },
       {
         "changed_layers": [
           "event"
         ],
+        "expected_failure_layer": "event",
         "mutation": "event",
+        "rejected_at_layer": "event",
         "status": "PASS"
       },
       {
         "changed_layers": [
           "output"
         ],
+        "expected_failure_layer": "output",
         "mutation": "output",
+        "rejected_at_layer": "output",
         "status": "PASS"
       }
     ],
     "fixture": "synthetic-layer-mutation-oracle"
   },
+  "positive_controls": [
+    {
+      "canonical_bytes": "sha256:11a2327e1b965f52afbf56369f160633c9299d26d808b1a6f4e41e7f7b6a0f91",
+      "layer": "authored",
+      "status": "PASS"
+    },
+    {
+      "canonical_bytes": "sha256:40c9336823c609ee0c0ebbf3271e7c0bcb42f93e29a43dd6deb66a78764b3a6d",
+      "layer": "resolved",
+      "status": "PASS"
+    },
+    {
+      "canonical_bytes": "sha256:3f411ede2bcdc049d2f30d615e014a62cb4cde9cd63f07c8f61428e249228a54",
+      "layer": "plan",
+      "status": "PASS"
+    },
+    {
+      "canonical_bytes": "sha256:a49030643b809c18146173f02d31f9a2abfae571dff528b28efcc7ac3032cdd0",
+      "layer": "event",
+      "status": "PASS"
+    },
+    {
+      "canonical_bytes": "sha256:616639e9d6a99f3c8eb0458459b5e4427d8e2848ccf39461dd6b5494b60eeb9d",
+      "layer": "output",
+      "status": "PASS"
+    }
+  ],
   "provenance": {
+    "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
     "python": "3.13.7",
-    "tool": "tools/scripts/p0_layered_replay_receipt.py"
+    "sdk": {
+      "consumers": [
+        "g3-installed-public-consumer",
+        "spectral-installed-public-consumer"
+      ],
+      "protocols": [
+        null,
+        null
+      ]
+    },
+    "source_head": "bc2bafa763e2dbedc8a659d62b650caab9d1391a",
+    "tool": "tools/scripts/p0_layered_replay_receipt.py",
+    "tool_sha256": "sha256:1c5409ad06885b7a57a8e42652f5bb11cf4ded6b133a7b92a2afc9be3ef26a8d"
   },
   "schema": "pulp.graph.layered-replay-receipt.v1",
-  "source_head": "420ee73ec1af38df64f0eb9ff3cdde4b374acae3",
+  "source_head": "bc2bafa763e2dbedc8a659d62b650caab9d1391a",
   "unavailable_lanes": [
     "runtime",
     "realtime",

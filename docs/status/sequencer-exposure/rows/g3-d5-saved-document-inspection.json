@@ -1,15 +1,20 @@
 {
   "id": "g3-d5-saved-document-inspection",
-  "title": "Bounded saved-document identity inspection is ledgered",
+  "title": "Bounded saved-document identity and P0 replay inspection are ledgered",
   "classification": "public_sdk",
   "delivery_state": "pending",
-  "claim_id": "g3-d5-saved-document-inspection-20261111",
+  "claim_id": "g3-d5-saved-document-inspection-p0-replay-20261112",
   "owned_paths": [
     "core/host/include/pulp/host/graph_serializer.hpp",
     "core/host/src/graph_serializer.cpp",
     "test/test_graph_serializer.cpp",
     "examples/g3-resolved-identity-consumer/main.cpp",
     "docs/evidence/g3-d5-saved-identity-20261111.md",
+    "docs/evidence/p0-layered-inspection-replay-20261112.md",
+    "tools/scripts/p0_layered_replay_receipt.py",
+    "tools/scripts/test_p0_layered_replay_receipt.py",
+    "docs/graph-program-status/P-0-layered-inspection-replay.md",
+    "docs/graph-program-status/G-3.md",
     "docs/status/sequencer-exposure/rows/g3-d5-saved-document-inspection.json"
   ],
   "evidence": [
@@ -28,12 +33,20 @@
     {
       "path": "examples/g3-resolved-identity-consumer/main.cpp",
       "needles": ["inspect_document", "semantic_digest", "kP0ProtocolAttestation"]
+    },
+    {
+      "path": "tools/scripts/p0_layered_replay_receipt.py",
+      "needles": ["pulp.graph.layered-replay-receipt.v1", "canonical_bytes_sha256", "PARTITIONS"]
+    },
+    {
+      "path": "docs/evidence/p0-layered-inspection-replay-20261112.md",
+      "needles": ["64 and 128", "planted-negative", "NOT_QUALIFIED"]
     }
   ],
   "surfaces": {
     "installed_sdk": {
       "disposition": "exposed",
-      "rationale": "GraphDocumentInspection and GraphSerializer::inspect_document are public, read-only, bounded host APIs. Inspection owns canonical bytes and a domain-separated digest and refuses malformed, unsupported, or over-depth documents without loading plugins or mutating a graph.",
+      "rationale": "GraphDocumentInspection and GraphSerializer::inspect_document are public, read-only, bounded host APIs. The P0 receipt composes those existing identity primitives with the installed consumers, retaining separate canonical-byte layer digests and fail-closed partition/mutation evidence without adding a runtime seam.",
       "evidence": [
         {
           "kind": "sdk_header",
@@ -44,6 +57,11 @@
           "kind": "test",
           "path": "examples/g3-resolved-identity-consumer/main.cpp",
           "needles": ["inspect_document", "semantic_digest"]
+        },
+        {
+          "kind": "receipt",
+          "path": "docs/evidence/p0-layered-inspection-replay-20261112.md",
+          "needles": ["layered-replay-receipt.v1", "64 and 128"]
         }
       ],
       "authority": {
