@@ -278,11 +278,16 @@ TEST_CASE("key handed back to the editor without a click keeps the popup open",
     REQUIRE(popup != nullptr);
     NSWindow* panel = (__bridge NSWindow*)popup->native_window();
     dispatch_events(30ms);
-    if (!panel.isKeyWindow)
+    // An inactive application does not move key between its windows the way
+    // activation does, so neither window reports key afterwards and the
+    // popup is right to report focus_lost; the hand-back needs a live app.
+    if (!panel.isKeyWindow || !NSApp.isActive)
         SKIP("this test session cannot hold a key window (the application is not active)");
 
     [editor.window makeKeyWindow]; // what activation does, with no click
     dispatch_events(100ms);
+    INFO("reports: " << reports.size() << ", first: "
+                     << (reports.empty() ? "none" : to_string(reports.front())));
     REQUIRE(reports.empty());
     REQUIRE(popup->is_open());
     REQUIRE(panel.isKeyWindow); // the popup took key back
@@ -300,7 +305,8 @@ TEST_CASE("key moving to an unrelated window closes the popup as focus_lost",
                                    [&](PopupDismissReason r) { reports.push_back(r); });
     REQUIRE(popup != nullptr);
     dispatch_events(30ms);
-    if (!static_cast<NSWindow*>((__bridge NSWindow*)popup->native_window()).isKeyWindow)
+    if (!static_cast<NSWindow*>((__bridge NSWindow*)popup->native_window()).isKeyWindow ||
+        !NSApp.isActive)
         SKIP("this test session cannot hold a key window (the application is not active)");
     [other.window makeKeyWindow];
     REQUIRE(pump_until([&] { return !reports.empty(); }));
