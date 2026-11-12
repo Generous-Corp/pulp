@@ -5,11 +5,10 @@ roadmap and does not authorize runtime or API implementation.
 
 **Review date:** 2026-11-11
 
-**Verified source head:** `7cc9b8d5cb0c29e25c071b6135ca547e8f0d3166`
+**Verified source head:** `58fe9c4a5ca5ceac5b5940124f5ba0c44ee3f200`
 (`origin/main` in the clean worktree used for this review). This refresh
-rebinds the document after PR #12071 (A1 verifier) and PR #12073 landed;
-older source-head claims below are historical provenance, not current-main
-state.
+rebinds the document after G6 PR #12017 merged; older source-head claims below
+are historical provenance, not current-main state.
 
 **Prior context:** `docs/reference/2026-11-10-post-roadmap-audio-graph-opportunities.md`
 is the broader proposal. This refresh records what changed on current `main`
@@ -45,7 +44,7 @@ wording:
 | PR [#11999](https://github.com/Generous-Corp/pulp/pull/11999), merged `fa5a9f0205b38d255820505ae185d01ab9b4a47c`, source head `77a9777d50a9b8a46bff293efd9118f31c47ca9d` | Catalog-derived notation and strict graph diagnostics are available. | A single receipt that correlates authored graph, resolved resources, prepared plan, event replay, and output is still missing. |
 | PR [#12008](https://github.com/Generous-Corp/pulp/pull/12008), merged `bb01aab010ad9ba88c70ee08007707f5907bd15b`, source head `29d9627c9a81a8b2d0b042b5c95ad295e062d2b6` | The bounded `pulp.graph.resolved-plan.v1` / `pulp.graph.resolved.io-gain.v1` identity bridge and detached receipt are now in `main`. | G-3 remains **PARTIAL/HOLD**: the installed public-only consumer is partial, upper-half unsigned-64 JSON values are refused, and whole-graph, realtime/resource, portability, and undo evidence remain open. |
 | PR [#12058](https://github.com/Generous-Corp/pulp/pull/12058), merged `59e50747c59ebfd6f1f8238bce6915e991795535`, source head `1c919f4206e580fb200613b988c4d0ca37791c36` | The bounded analyzed spectral-frame consumer now runs from the installed `Pulp::signal` target and exercises positive, unknown-profile, and chronology controls. | G-10/A3 remains **PARTIAL/HOLD**: this does not qualify runtime resynthesis, morphing, granular modulation, EOF/tail audio, realtime behavior, or cross-platform parity. |
-| PR [#12017](https://github.com/Generous-Corp/pulp/pull/12017), **open**, head `f10c9eb72e3aa308b77e103d85fd1ff5d864fdc6` | Candidate G6 pedal/A1 voice evidence. | It is not merged; the graph voice lifecycle remains an evidence question. |
+| PR [#12017](https://github.com/Generous-Corp/pulp/pull/12017), merged `58fe9c4a5ca5ceac5b5940124f5ba0c44ee3f200`, head `f10c9eb72e3aa308b77e103d85fd1ff5d864fdc6` | The bounded G6 pedal/A1 voice evidence and vector/generated-header consumer are now on `main`. | G-6 remains **PARTIAL/HOLD**: scheduling, tails, state migration, realtime, and cross-platform qualification remain open. |
 | PR [#11733](https://github.com/Generous-Corp/pulp/pull/11733), closed without merge, head `d90324a2749fa6c6ab6acd90943fab6330be8425` | Earlier bounded control/event probe proposal. | Its candidate code is not current `main` and must not be copied as an implementation dependency. |
 
 The source status files preserve the limits: `G-3` remains **PARTIAL/HOLD**,
@@ -249,11 +248,10 @@ not promote a capability.
 `cmake-g6-voice-bank-sdk-consumer` test from the Release build, then add the
 independent audio/tail oracle named by
 `docs/evidence/g6-audio-tail-audit-20261110-live.md` and
-`docs/evidence/a1-audio-oracle-gap-20261110.md`. The verifier currently provides
-an independent scalar self-test boundary on main; the copied vector data and
-hash-bound installed-consumer gate remain in the open G6 follow-up and must not
-be described as current-main evidence until that PR lands. Neither boundary
-closes graph-owned tail/swap/persistence/realtime qualification.
+`docs/evidence/a1-audio-oracle-gap-20261110.md`. The merged G6 follow-up now provides the copied vector data, generated header,
+and hash-bound installed-consumer gate on main. Those checks remain bounded
+evidence: they do not close graph-owned tail/swap/persistence/realtime
+qualification, and their receipts retain the tested-source and platform limits.
 
 ### P3: explicit spectral/frame conversion (conditional)
 
