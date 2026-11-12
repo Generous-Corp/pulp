@@ -209,6 +209,12 @@ if(TARGET lv2-headers)
     elseif(WIN32)
         target_compile_definitions(pulp-host-lilv PRIVATE
             WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS)
+    elseif(ANDROID)
+        # Bionic declares copy_file_range only from API 34, but zix's detection
+        # assumes any __linux__ target has it. Use zix's read/write fallback.
+        target_compile_definitions(pulp-host-lilv PRIVATE
+            HAVE_COPY_FILE_RANGE=0
+            _POSIX_C_SOURCE=200809L _XOPEN_SOURCE=600)
     elseif(CMAKE_SYSTEM_NAME MATCHES "Linux|GNU")
         target_compile_definitions(pulp-host-lilv PRIVATE
             _GNU_SOURCE _POSIX_C_SOURCE=200809L _XOPEN_SOURCE=600)

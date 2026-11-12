@@ -1932,6 +1932,12 @@ Apple's units and the host probe:
   `PULP_TEST_AUV3_PROBE_OUT_OF_PROCESS=1` with the component installed; remove
   it afterwards. Confirm the process boundary by finding the component mapped
   in the `AUHostingService` process with `lsof`.
+  Getting this wrong does not fail the load: the system hands back an
+  `AUAudioUnit_RemoteV2` with zero input and zero output buses, and the error
+  only surfaces at `prepare()` as -10875 from `allocateRenderResources`.
+  `AuV3LoadOptions::out_of_process` defaults to true, so a test that registers
+  in process must set it false. The slot logs `kRemoteUnitWithoutBuses` at
+  load when an instrument, effect or generator arrives this way.
 - **A unit republishes its parameter tree after a bus format change.** About
   2 ms after `setFormat:` (AUDelay, AUPeakLimiter; not DLSMusicDevice or the
   mixer), and only if the host has already read `parameterTree`. A warm
@@ -3177,3 +3183,12 @@ append named `midi` ports without changing audio counts; named connect must set
 the MIDI edge flag. Keep strict patch validation additive: the legacy serializer
 may drop bad edges, while strict validation must check every original edge.
 Opaque state and richer edge kinds need explicit contracts before formatting.
+
+### Vendored lilv/zix on Android
+
+`pulp-host-lilv` (external/lilv) compiles into `pulp-host` on every platform,
+including the Android NDK build. zix assumes any `__linux__` target has
+`copy_file_range`, but bionic only declares it from API 34 (minSdk is 26), so the
+Android branch in `core/host/CMakeLists.txt` defines `HAVE_COPY_FILE_RANGE=0`.
+The `android-build` job runs only on main pushes (it is skipped for
+`pull_request` and `merge_group`), so a host-side C break shows up only there.

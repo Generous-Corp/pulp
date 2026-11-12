@@ -45,7 +45,7 @@ Spread spread_of(std::vector<double> samples) {
 TEST_CASE("Per-block parameter sync at 2,000 parameters stays bounded in every format",
           "[host][scale][performance]") {
     using clock = std::chrono::steady_clock;
-    for (const auto& target : slot_targets()) {
+    for (const auto& target : targets()) {
         INFO(target.label);
         std::string why;
         auto slot = load(target, why);
