@@ -874,6 +874,16 @@ class Collector:
         self.prime_commits([self.parsed_log(j["id"])["checkout_sha"] for j in group_logs if j]
                             + [g["head_sha"] for g in groups])
 
+        def warm_entry_delta(g: dict) -> None:
+            # Each compare is a slow API read; warm the cache in parallel so
+            # run_record's own call below is a cache hit.
+            commit = self.commit(g["head_sha"])
+            if commit and len(commit["parents"]) == 2:
+                self.entry_delta(commit["parents"][0], g["head_sha"])
+        with concurrent.futures.ThreadPoolExecutor(self.workers) as pool:
+            for _ in pool.map(warm_entry_delta, groups):
+                pass
+
         runs: dict[str, dict] = {}
         pairs: list[dict] = []
         group_records: list[dict] = []
