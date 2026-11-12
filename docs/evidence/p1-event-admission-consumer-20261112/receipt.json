@@ -18,7 +18,7 @@
     "voice_intent": "planned: test-owned G-4 identity plus existing MPE allocator"
   },
   "schema": "pulp.graph.p1-event-admission-consumer.v1",
-  "source_head": "75445d8264874cb00490d7f2f185e9b059745ef9",
+  "source_head": "020ce99c1ac4676786eb040e5d518d67fc2e4ee7",
   "status": "NOT_QUALIFIED",
   "unavailable_lanes": [
     "installed_sdk",
