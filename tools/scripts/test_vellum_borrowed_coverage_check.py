@@ -31,6 +31,7 @@ WORKFLOW = ROOT / ".github" / "workflows" / "vellum-freeze-check.yml"
 # so the two never conflict in the candidate merge.
 FOLLOW_UP_PATH = "docs/guides/fixture-follow-up.md"
 STEP_NAME = "Warn on watch coverage borrowed from a stacked parent"
+ADVISORY_STEP_NAME = "Report UI drift from the export (advisory)"
 
 
 class BorrowedCoverageCheckTest(_PreflightRepo, unittest.TestCase):
@@ -226,18 +227,45 @@ class WorkflowWiringTest(unittest.TestCase):
                         names.index(STEP_NAME))
 
     def test_the_merge_group_path_is_unchanged(self) -> None:
-        # No other step names the check, and every other step runs on both
-        # events, so merge_group sees exactly the steps it saw before.
-        for step in self.steps:
-            if step.get("name") == STEP_NAME:
-                continue
-            self.assertNotIn("tools/scripts/vellum_borrowed_coverage_check.py",
-                             str(step.get("run", "")))
-            self.assertNotIn("if", step, step.get("name"))
+        self._assert_merge_group_steps_unchanged(self.steps)
         comparison = next(s for s in self.steps if s.get("id") == "comparison")["run"]
         self.assertIn('echo "base=$MERGE_BASE"', comparison)
         self.assertIn('echo "head=$MERGE_HEAD"', comparison)
         self.assertIn('echo "source_head=$MERGE_HEAD"', comparison)
+
+    def _assert_merge_group_steps_unchanged(self, steps: list[dict[str, object]]) -> None:
+        # The borrowed-coverage warning is pull_request-only. The UI drift
+        # reader is an explicitly advisory, read-only step: it may be gated on
+        # the export receipt without changing freeze enforcement.
+        for step in steps:
+            name = step.get("name")
+            if name == STEP_NAME:
+                continue
+            if name == ADVISORY_STEP_NAME:
+                self.assertEqual(
+                    step.get("if"),
+                    "hashFiles('.github/vellum-export-receipt/unit-of.json') != ''",
+                )
+                self.assertIs(step.get("continue-on-error"), True)
+                self.assertIn("tools/scripts/vellum_ui_drift_report.py",
+                              str(step.get("run", "")))
+                continue
+            self.assertNotIn("tools/scripts/vellum_borrowed_coverage_check.py",
+                             str(step.get("run", "")))
+            self.assertNotIn("if", step, name)
+
+    def test_a_real_freeze_step_cannot_gain_a_condition(self) -> None:
+        # Negative control: a condition on the durable freeze validation still
+        # fails the merge-group invariant; only the named advisory reader is
+        # exempted.
+        mutated = [dict(step) for step in self.steps]
+        validation = next(
+            step for step in mutated
+            if step.get("name") == "Validate durable source-authority events"
+        )
+        validation["if"] = "github.event_name == 'pull_request'"
+        with self.assertRaises(AssertionError):
+            self._assert_merge_group_steps_unchanged(mutated)
 
 
 if __name__ == "__main__":

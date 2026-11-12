@@ -15,6 +15,10 @@ partition schedules containing 1, 32, 64, 127, and 256 frame blocks. The graph
 lane includes missing-edge, one-sample boundary, reversed-tie, and payload
 mismatch negatives. Hosted plugin voice delivery remains outside this slice.
 
+The lifecycle controls additionally exercise staging overflow, transactional
+output-capacity refusal, late publication, epoch reset, queued look-ahead
+delivery, and refusal of a retired graph epoch.
+
 Build against a freshly installed SDK from the same source revision:
 
 ```sh
@@ -28,5 +32,9 @@ ctest --test-dir build-g5-host-event-consumer --output-on-failure
 Expected receipt:
 
 ```text
-g5-host-event-contract PASS checks=314 host_mpe_events=3 graph_events=9 graph_ingress_events=5 partitions=1,32,64,127,256 planted_negative=5
+g5-host-event-contract PASS checks=378 host_mpe_events=3 graph_events=9 graph_ingress_events=5 partitions=1,32,64,127,256 planted_negative=5
 ```
+
+The `checks=378` count is the expected count from the current fixture source;
+it is not a receipt until the executable is built and run against a freshly
+installed SDK from the same source revision.
