@@ -66,8 +66,14 @@ preparation. When rendering a graph interval for an instrument, pass a
 zero-channel input `BufferView` with that interval's exact frame count. A
 default-constructed empty view has zero frames and makes routed execution fail
 closed. Keep both the between-event and final-tail branches covered by the
-installed SDK consumer and its independent planted mutations. This surface
-does not add CC64/120/121/123 sustain or saved-bank activation.
+installed SDK consumer and its independent planted mutations. The bounded
+bank now handles member and manager CC64 sustain, scoped CC120/121/123,
+generation-scoped release, and member-channel pitch, pressure, and CC74
+expression. Manager expression returns `UnsupportedExpression`. Its A1 scalar
+fixture uses a fixed `1/sqrt(8)` eight-slot stereo sum and four in-slot linear
+release frames. Saved-bank activation, edit/undo, DAW adapters, and paced
+realtime qualification remain open; do not infer them from the source-installed
+consumer.
 
 `PluginSlot` is the uniform interface. Each format backend is a single
 free function — `load_<format>_plugin(info)` — that returns a

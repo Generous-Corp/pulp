@@ -1,0 +1,422 @@
+{
+  "schema": "pulp.graph.a1-audio-tail-oracle",
+  "schema_version": 1,
+  "reference_profile": {
+    "slot_count": 8,
+    "sample_rate_hz": 48000,
+    "block_partition_frames": [
+      1,
+      32,
+      64,
+      127,
+      256
+    ],
+    "gain_law": "fixed_rms_bank_v1",
+    "bank_gain": 0.3535533905932738,
+    "slot_gain_is_authored": true,
+    "channel_shape": "stereo_identity",
+    "arithmetic": {
+      "source_sample": "f32(raw fixture sample)",
+      "authored_slot_gain": "f32(raw authored gain)",
+      "bank_gain": "f32(raw bank gain)",
+      "effective_gain": "f32(authored_slot_gain_f32 * bank_gain_f32), cached once per slot",
+      "state_factor": "f32(1.0 or derived release factor)",
+      "contribution": "f32(source_sample_f32 * state_factor_f32 * effective_gain_f32)",
+      "sum": "f32(accumulator_f32 + contribution_f32), accumulator starts f32(0.0)"
+    },
+    "numeric_tolerance": {
+      "absolute": 2e-06,
+      "relative": 2e-06,
+      "nonfinite": "refuse"
+    },
+    "release_frames": 4,
+    "release_curve": "linear",
+    "tail_policy": "hard_termination_v1"
+  },
+  "negative_controls": [
+    {"id": "wrong_sum_order_high_dynamic"},
+    {"id": "wrong_sum_order_low_magnitude"},
+    {"id": "wrong_gain_law"},
+    {"id": "wrong_channel_swap"},
+    {"id": "wrong_mono_duplication"},
+    {"id": "wrong_release_policy"},
+    {"id": "release_note_off_shift"},
+    {"id": "release_length_change"},
+    {"id": "invalid_release_range"},
+    {"id": "unbounded_or_steal_tail"}
+  ],
+  "voice_vectors": [
+    {
+      "slot": 0,
+      "gain": 1.0,
+      "left": [
+        0.125,
+        -0.0625,
+        0.03125,
+        -0.015625
+      ],
+      "right": [
+        -0.09375,
+        0.046875,
+        -0.0234375,
+        0.01171875
+      ]
+    },
+    {
+      "slot": 1,
+      "gain": 0.5,
+      "left": [
+        0.25,
+        -0.125,
+        0.0625,
+        -0.03125
+      ],
+      "right": [
+        -0.1875,
+        0.09375,
+        -0.046875,
+        0.0234375
+      ]
+    },
+    {
+      "slot": 2,
+      "gain": 0.75,
+      "left": [
+        0.375,
+        -0.1875,
+        0.09375,
+        -0.046875
+      ],
+      "right": [
+        -0.28125,
+        0.140625,
+        -0.0703125,
+        0.03515625
+      ]
+    },
+    {
+      "slot": 3,
+      "gain": 1.25,
+      "left": [
+        0.5,
+        -0.25,
+        0.125,
+        -0.0625
+      ],
+      "right": [
+        -0.375,
+        0.1875,
+        -0.09375,
+        0.046875
+      ]
+    },
+    {
+      "slot": 4,
+      "gain": 0.6,
+      "left": [
+        0.625,
+        -0.3125,
+        0.15625,
+        -0.078125
+      ],
+      "right": [
+        -0.46875,
+        0.234375,
+        -0.1171875,
+        0.05859375
+      ]
+    },
+    {
+      "slot": 5,
+      "gain": 1.1,
+      "left": [
+        0.75,
+        -0.375,
+        0.1875,
+        -0.09375
+      ],
+      "right": [
+        -0.5625,
+        0.28125,
+        -0.140625,
+        0.0703125
+      ]
+    },
+    {
+      "slot": 6,
+      "gain": 0.9,
+      "left": [
+        0.875,
+        -0.4375,
+        0.21875,
+        -0.109375
+      ],
+      "right": [
+        -0.65625,
+        0.328125,
+        -0.1640625,
+        0.08203125
+      ]
+    },
+    {
+      "slot": 7,
+      "gain": 0.8,
+      "left": [
+        1.0,
+        -0.5,
+        0.25,
+        -0.125
+      ],
+      "right": [
+        -0.75,
+        0.375,
+        -0.1875,
+        0.09375
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "id": "all_eight_active_fixed_rms",
+      "kind": "sum",
+      "active_slots": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "expected_left": [
+        1.3943262100219727,
+        -0.6971631050109863,
+        0.34858155250549316,
+        -0.17429077625274658
+      ],
+      "expected_right": [
+        -1.0457446575164795,
+        0.5228723287582397,
+        -0.2614361643791199,
+        0.13071808218955994
+      ]
+    },
+    {
+      "id": "sparse_slots_gain_and_channel",
+      "kind": "sum",
+      "active_slots": [
+        0,
+        3,
+        7
+      ],
+      "expected_left": [
+        0.5480077266693115,
+        -0.27400386333465576,
+        0.13700193166732788,
+        -0.06850096583366394
+      ],
+      "expected_right": [
+        -0.41100582480430603,
+        0.20550291240215302,
+        -0.10275145620107651,
+        0.051375728100538254
+      ]
+    },
+    {
+      "id": "single_slot_5_keeps_bank_gain",
+      "kind": "sum",
+      "active_slots": [
+        5
+      ],
+      "expected_left": [
+        0.29168155789375305,
+        -0.14584077894687653,
+        0.07292038947343826,
+        -0.03646019473671913
+      ],
+      "expected_right": [
+        -0.21876117587089539,
+        0.10938058793544769,
+        -0.054690293967723846,
+        0.027345146983861923
+      ]
+    },
+    {
+      "id": "sum_order_stress",
+      "kind": "sum_custom",
+      "active_slots": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "left": [
+        -100000000.0,
+        -2.0,
+        -10000000.0,
+        100000000.0,
+        0.01,
+        -10000000.0,
+        0.01,
+        0.1
+      ],
+      "right": [
+        100000000.0,
+        3.0,
+        -100000000.0,
+        0.25,
+        0.125,
+        -0.2,
+        0.01,
+        -0.1
+      ],
+      "expected_left": [
+        -7071066.0
+      ],
+      "expected_right": [
+        0.030052024871110916
+      ]
+    },
+    {
+      "id": "sum_order_bounded_low_magnitude",
+      "kind": "sum_custom",
+      "active_slots": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "left": [
+        12.57420043,
+        48.46871846,
+        -24.46786029,
+        -37.51141344,
+        -79.83454638,
+        -36.6050603,
+        65.61435412,
+        51.72738013
+      ],
+      "right": [
+        -12.57420043,
+        -48.46871846,
+        24.46786029,
+        37.51141344,
+        79.83454638,
+        36.6050603,
+        -65.61435412,
+        -51.72738013
+      ],
+      "expected_left": [
+        -0.012098312377929688
+      ],
+      "expected_right": [
+        0.012098312377929688
+      ]
+    },
+    {
+      "id": "note_off_linear_release_and_bounded_tail",
+      "kind": "release",
+      "note_off_sample": 2,
+      "release_factors": [
+        1.0,
+        1.0,
+        1.0,
+        0.75,
+        0.5,
+        0.25,
+        0.0,
+        0.0
+      ],
+      "source_left": [
+        0.8,
+        -0.6,
+        0.4,
+        -0.2,
+        0.1,
+        -0.05,
+        0.025,
+        -0.0125
+      ],
+      "source_right": [
+        -0.7,
+        0.5,
+        -0.3,
+        0.2,
+        -0.1,
+        0.075,
+        -0.0375,
+        0.01875
+      ],
+      "expected_left": [
+        0.2828427255153656,
+        -0.2121320366859436,
+        0.1414213627576828,
+        -0.0530330091714859,
+        0.01767767034471035,
+        -0.0044194175861775875,
+        0.0,
+        -0.0
+      ],
+      "expected_right": [
+        -0.2474873661994934,
+        0.1767766922712326,
+        -0.1060660183429718,
+        0.0530330091714859,
+        -0.01767767034471035,
+        0.006629126146435738,
+        -0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "steal_hard_reset_no_tail",
+      "kind": "steal",
+      "steal_sample": 2,
+      "old_left": [
+        0.4,
+        0.3,
+        0.2,
+        0.1
+      ],
+      "old_right": [
+        -0.2,
+        -0.15,
+        -0.1,
+        -0.05
+      ],
+      "new_left": [
+        -0.6,
+        -0.45,
+        -0.3,
+        -0.15
+      ],
+      "new_right": [
+        0.5,
+        0.375,
+        0.25,
+        0.125
+      ],
+      "expected_left": [
+        0.1414213627576828,
+        0.1060660183429718,
+        -0.2121320366859436,
+        -0.1590990126132965
+      ],
+      "expected_right": [
+        -0.0707106813788414,
+        -0.0530330091714859,
+        0.1767766922712326,
+        0.13258251547813416
+      ]
+    }
+  ]
+}

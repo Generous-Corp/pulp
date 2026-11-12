@@ -4,6 +4,7 @@
 #include <pulp/format/preset_program_router.hpp>
 #include <pulp/midi/buffer.hpp>
 
+#include <string>
 #include <vector>
 
 using namespace pulp::format;
@@ -186,4 +187,48 @@ TEST_CASE("processing a block allocates nothing", "[format][preset][program][rt-
         r.process(block);
     r.take_request();
     REQUIRE_FALSE(probe.saw_allocation());
+}
+
+TEST_CASE("the router reserves the sources it consumes, by mode and channel",
+          "[format][preset][program][reservation]") {
+    using pulp::state::MidiSource;
+    using pulp::state::MidiSourceKind;
+    auto src = [](MidiSourceKind k, std::uint16_t n, std::uint8_t ch = MidiSource::kOmni) {
+        return MidiSource{k, ch, n};
+    };
+
+    PresetProgramRouter off;
+    REQUIRE_FALSE(off.claims(src(MidiSourceKind::cc7, 0)));
+    REQUIRE_FALSE(off.claims(src(MidiSourceKind::program_change, 3)));
+
+    PresetProgramRouter r;
+    enable(r);
+    REQUIRE(r.claims(src(MidiSourceKind::cc7, 0)));
+    REQUIRE(r.claims(src(MidiSourceKind::cc7, 32)));
+    REQUIRE(r.claims(src(MidiSourceKind::cc14, 0)));
+    REQUIRE(r.claims(src(MidiSourceKind::program_change, 99)));
+    REQUIRE_FALSE(r.claims(src(MidiSourceKind::cc7, 74)));
+    REQUIRE_FALSE(r.claims(src(MidiSourceKind::cc14, 1)));
+    REQUIRE_FALSE(r.claims(src(MidiSourceKind::pitch_bend, 0)));
+    REQUIRE(std::string(r.reason()).size() > 0);
+
+    PresetProgramRouter msb;
+    enable(msb, 0, BankSelectMode::msb_only);
+    REQUIRE(msb.claims(src(MidiSourceKind::cc7, 0)));
+    REQUIRE_FALSE(msb.claims(src(MidiSourceKind::cc7, 32)));
+    REQUIRE_FALSE(msb.claims(src(MidiSourceKind::cc14, 0)));
+
+    PresetProgramRouter ignore;
+    enable(ignore, 0, BankSelectMode::ignore_bank);
+    REQUIRE_FALSE(ignore.claims(src(MidiSourceKind::cc7, 0)));
+    REQUIRE(ignore.claims(src(MidiSourceKind::program_change, 0)));
+
+    // A single-channel router (channel 3 = zero-based 2) reserves that channel
+    // and any omni source, and nothing on other channels.
+    PresetProgramRouter ch3;
+    enable(ch3, 3);
+    REQUIRE(ch3.claims(src(MidiSourceKind::cc7, 0, 2)));
+    REQUIRE(ch3.claims(src(MidiSourceKind::cc7, 0))); // omni overlaps channel 3
+    REQUIRE_FALSE(ch3.claims(src(MidiSourceKind::cc7, 0, 5)));
+    REQUIRE_FALSE(ch3.claims(src(MidiSourceKind::program_change, 1, 0)));
 }
