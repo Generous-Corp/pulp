@@ -9,10 +9,19 @@
 // isolated slot can exist in a web module, so the answer is always false.
 // Native builds compile isolated_plugin_slot.cpp and never this file.
 
-#include <pulp/host/isolated_plugin_slot.hpp>
+// Deliberately forward-declares instead of including isolated_plugin_slot.hpp:
+// that header pulls in buffer.hpp and parameter.hpp, whose include fan-out is
+// capped (tools/scripts/header_fanout_guard.json). The signature must match
+// the declaration in pulp/host/isolated_plugin_slot.hpp exactly.
 
 namespace pulp::host {
 
-bool is_isolated_plugin_slot(const PluginSlot&) noexcept { return false; }
+class PluginSlot;
+
+bool is_isolated_plugin_slot(const PluginSlot&) noexcept;
+
+bool is_isolated_plugin_slot(const PluginSlot&) noexcept {
+    return false;
+}
 
 } // namespace pulp::host

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -74,7 +75,18 @@ class BaselineTests(unittest.TestCase):
                     "web sources call is_isolated_plugin_slot() without defining it")
         stub = (repo / "core/host/src/isolated_plugin_slot_web_stub.cpp").read_text(
             encoding="utf-8")
-        self.assertIn("is_isolated_plugin_slot(const PluginSlot&) noexcept { return false; }", stub)
+        header = (repo / "core/host/include/pulp/host/isolated_plugin_slot.hpp").read_text(
+            encoding="utf-8")
+        signature = "bool is_isolated_plugin_slot(const PluginSlot&) noexcept"
+        # The stub forward-declares PluginSlot instead of including the header,
+        # so nothing but this check ties its signature to the real declaration.
+        self.assertIn(signature + ";", header)
+        self.assertIn(signature + ";", stub)
+        self.assertIn("class PluginSlot;", stub)
+        self.assertRegex(stub, re.escape(signature) + r"\s*\{\s*return false;\s*\}")
+        # isolated_plugin_slot.hpp reaches buffer.hpp and parameter.hpp, whose
+        # fan-out is capped by tools/scripts/header_fanout_guard.json.
+        self.assertNotRegex(stub, r"(?m)^\s*#\s*include\b")
 
     def test_generator_reads_linked_source_closure_from_cmake_dependinfo(self):
         repo = Path(__file__).resolve().parents[2]
