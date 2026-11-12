@@ -79,6 +79,18 @@ class PlanTests(unittest.TestCase):
         self.assertLess(labels.index("binary-identity"), labels.index("test-receipts"),
                         "identity must run first so receipts can reuse its hashes")
 
+    def test_deferred_receipts_evaluation_writes_its_input_into_the_work_dir(self) -> None:
+        with mock.patch.object(mgs, "_first_parent", return_value="p1"):
+            steps = {label: argv for label, _mod, argv in
+                     mgs.plan(args(ctest_outcome="success", receipts_evaluation="deferred"))}
+            default = {label: argv for label, _mod, argv in mgs.plan(args(ctest_outcome="success"))}
+        argv = steps["test-receipts"]
+        self.assertEqual(argv[argv.index("--evaluation") + 1], "deferred")
+        self.assertEqual(argv[argv.index("--eval-out") + 1], "/t/test-receipts-eval.json")
+        # The keys the reuse record reads are still written in-job.
+        self.assertEqual(argv[argv.index("--keys-out") + 1], "/t/test-keys.json")
+        self.assertNotIn("--evaluation", default["test-receipts"])
+
     def test_skipped_ctest_or_no_parent_skips_affected_tests(self) -> None:
         with mock.patch.object(mgs, "_first_parent", return_value="p1"):
             steps = {label: argv for label, _mod, argv in mgs.plan(args(ctest_outcome="skipped"))}

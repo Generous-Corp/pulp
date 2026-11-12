@@ -3206,13 +3206,22 @@ inherits. Do not enforce while `would_skip_failed` is ever nonzero or binary
 identity (`binary_identity_shadow.py report`) is below ~100%: an unreproducible
 binary only means zero hits, but a missed runtime input means a false skip.
 
-The shadow step sits on the required merge-group job's critical path (about
-3.2 min median). Only binary identity's hashes (`our-identity.json`) and the
-receipts' keys (`test-keys.json`) feed the reuse record; the affected-test and
-flake-exoneration instruments only annotate. Before moving or dropping any of
-them, read the `merge-group shadows timing:` line the runner prints after its
-summary (each instrument's wall seconds, also flushed as `<label> took <s>s`
-when it finishes), not the step total.
+The required merge-group `macos` job takes 21.6 min, the median of 15
+successful native merge-group runs (2026-11-11..12, job `started_at` to
+`completed_at`; p90 25.7 min). The shadow step sits on its critical path (77 s
+median over 33 native merge groups, 2026-11-11..12). Only binary identity's
+hashes (`our-identity.json`) and the receipts' keys (`test-keys.json`) feed the
+reuse record; the affected-test and flake-exoneration instruments only
+annotate. The receipts' would-skip report (20 receipt downloads over the API,
+a median 44 s) runs in the advisory `test-receipts-shadow` job from the
+`test-receipts-eval-macos` input (`--receipts-evaluation deferred`); keep the
+keys and the `test-receipts-macos` upload in the gate job, because they read
+the build tree and later merge groups trust only that writer. Before moving or
+dropping any other instrument, read the `merge-group shadows timing:` line the
+runner prints after its summary (each instrument's wall seconds, also flushed
+as `<label> took <s>s` when it finishes), not the step total. Something that
+reads the build tree cannot move to a follow-on job: the gate VM is ephemeral,
+so only what was uploaded survives it.
 
 ## Compiled tests declare runtime data with `pulp_test_data()`
 

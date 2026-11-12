@@ -24,10 +24,12 @@ start, the sanitizer and coverage lanes included, routes it to the lane's
 GitHub-hosted fallback. See [local-ci.md](local-ci.md) for the rule and its
 lint.
 
-The required gate is **serialized on self-hosted macOS runners** and takes
-about 40 min (median 39.8 min of wall-clock over 45 sampled `pull_request`
-runs). Keeping it
-lean is why the two label groups below are excluded from it.
+The required gate is **serialized on self-hosted macOS runners**. Measured
+from the jobs API (job `started_at` to `completed_at`), the median of **15
+successful native merge-group runs** is **21.6 min** (p90 25.7 min). A
+pull-request head is shorter because it runs only the fast tier and affected
+tests unless the head is ready to land. Keeping it lean is why the two label
+groups below are excluded from it.
 
 The **ThreadSanitizer lane** keeps its SignalGraph selection exact and
 bounded. It includes the compile-first lifecycle case, the mutation-lock and
@@ -39,18 +41,27 @@ sync when adding another lifecycle race proof.
 
 ### Where the required gate's wall-clock goes
 
-Measured per-step medians over the same sample, across the 40 runs that
-allocated a native macOS build (the other 5 resolved to the no-native-build
-alias and are excluded here, since they run no build or test step). The step
-medians sum to 39.5 min, slightly under the 39.8 min job median — the
-difference is per-run scheduling overhead, not a missing step:
+Per-step medians over the same 15 successful native merge-group jobs. The medians do not
+sum to the job median; each is the median of its own column:
 
-| Step | Median | Share |
-|------|--------|-------|
-| `Build` | 21.3 min | 54 % |
-| `Test (non-Windows)` | 14.8 min | 37 % |
-| `Configure` | 1.3 min | 3 % |
-| everything else (checkout, brew, ccache install, bootstrap, receipts) | ~2.1 min | 5 % |
+| Step | Median | p90 |
+|------|--------|-----|
+| `Test*` steps (summed per job) | 12.4 min | 16.1 min |
+| `Build` | 3.4 min | 5.9 min |
+| `Configure` | 0.4 min | 0.5 min |
+| everything else (checkout, bootstrap, shadows, uploads, records) | 4.6 min | 5.8 min |
+
+`Build` is short because the gate VMs share a warm ccache. Of "everything
+else", four upload and record steps cost about 3.5 min at their medians:
+`Merge-group shadow instruments` about 1.3 min, `Upload exact GPU-audio SDK`
+0.8–1.6 min, `Record per-test results for reuse replay` 0.6–1.2 min and
+`Upload plugin bundles` 0.5–0.7 min. The audit moved only the shadow step's
+would-skip API report: its keys and receipt read the build tree, but its reads
+of 20 earlier receipts need only a small input file, so they run in the
+advisory `test-receipts-shadow` job after the gate. The other three stay in the
+gate: the SDK artifact must exist whenever the gate is green (downstream
+consumers bind to it), and the reuse record and plugin bundles read the build
+tree, which lives only on the ephemeral gate VM.
 
 Two properties of that profile are worth knowing before optimizing it. `Build`
 already runs against a warm build dir at a 92-94 % ccache hit rate, so it is

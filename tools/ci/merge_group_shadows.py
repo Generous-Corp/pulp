@@ -22,7 +22,12 @@ is not held back by GitHub API reads that cannot change it;
 receipts run whenever ctest ran (passed or failed) and write
 `<work-dir>/test-receipts.json`, which the workflow uploads as the
 `test-receipts-macos` artifact, and every entry's key to
-`<work-dir>/test-keys.json`, which the per-job reuse record carries. Binary
+`<work-dir>/test-keys.json`, which the per-job reuse record carries. With
+`--receipts-evaluation deferred` the receipts instrument stops there and also
+writes `<work-dir>/test-receipts-eval.json`; the advisory
+`test-receipts-shadow` job reads it and makes the would-skip report, whose
+reads of 20 earlier receipts over the GitHub API took about 44 s of the
+required job (median over 33 merge groups). Binary
 identity runs first and leaves its per-binary hashes in
 `<work-dir>/our-identity.json` so neither receipts nor the reuse record hash
 the test binaries twice.
@@ -36,7 +41,7 @@ instrument worth moving off it from one that is cheap.
     merge_group_shadows.py run --build-dir B --source-root S --repository O/R \\
         --merge-sha SHA --token T --junit J --selected-json I \\
         --ctest-outcome success|failure|skipped [--hours 24] [--work-dir W] [--run-id N]
-        [--exoneration in-job|deferred]
+        [--exoneration in-job|deferred] [--receipts-evaluation in-job|deferred]
 """
 from __future__ import annotations
 
@@ -105,13 +110,16 @@ def plan(a: argparse.Namespace) -> list[tuple[str, str, list[str]] | tuple[str, 
     else:
         steps.append(("flake-exoneration", "flake_exoneration_shadow", None))
     if a.ctest_outcome in ("success", "failure"):
-        steps.append(("test-receipts", "test_receipts_shadow",
-                      ["run", "--build-dir", a.build_dir, "--source-root", a.source_root,
-                       "--repository", a.repository, "--merge-sha", a.merge_sha, "--token", a.token,
-                       "--junit", a.junit, "--selected-json", a.selected_json, "--run-id", a.run_id,
-                       "--receipts-out", os.path.join(a.work_dir, "test-receipts.json"),
-                       "--identity-json", os.path.join(a.work_dir, "our-identity.json"),
-                       "--keys-out", os.path.join(a.work_dir, "test-keys.json")]))
+        argv = ["run", "--build-dir", a.build_dir, "--source-root", a.source_root,
+                "--repository", a.repository, "--merge-sha", a.merge_sha, "--token", a.token,
+                "--junit", a.junit, "--selected-json", a.selected_json, "--run-id", a.run_id,
+                "--receipts-out", os.path.join(a.work_dir, "test-receipts.json"),
+                "--identity-json", os.path.join(a.work_dir, "our-identity.json"),
+                "--keys-out", os.path.join(a.work_dir, "test-keys.json")]
+        if getattr(a, "receipts_evaluation", "in-job") == "deferred":
+            argv += ["--evaluation", "deferred",
+                     "--eval-out", os.path.join(a.work_dir, "test-receipts-eval.json")]
+        steps.append(("test-receipts", "test_receipts_shadow", argv))
     else:
         steps.append(("test-receipts", "test_receipts_shadow", None))
     return steps
@@ -133,6 +141,7 @@ def main(argv: list[str]) -> int:
     r.add_argument("--work-dir", default=os.environ.get("RUNNER_TEMP", "/tmp"))
     r.add_argument("--run-id", default=os.environ.get("GITHUB_RUN_ID", ""))
     r.add_argument("--exoneration", choices=("in-job", "deferred"), default="in-job")
+    r.add_argument("--receipts-evaluation", choices=("in-job", "deferred"), default="in-job")
     a = ap.parse_args(argv[1:])
     results = []
     timings = []

@@ -442,6 +442,115 @@ class CliTests(unittest.TestCase):
             self.assertIn("receipt lookup failed: HTTP 401", verdict["lookup_error"])
             self.assertIn("receipt lookup failed: HTTP 401", summary.read_text())
 
+    def test_deferred_evaluation_reports_the_same_verdict_as_in_job(self) -> None:
+        """`run --evaluation deferred` writes the keys and receipt but no
+        verdict, and `evaluate` on its input file then reports exactly what
+        the in-job path does against the same receipts."""
+        with tempfile.TemporaryDirectory() as tmp:
+            w = World(Path(tmp))
+            # A non-CMake change, so a CMake-forced full run is not the verdict.
+            w.change("core/a.cpp", "int a2;\n")
+            # Each always-run rule the input must carry: a labelled test and a
+            # script test that declares a top-level directory, both passing
+            # with a prior receipt, so dropping either from the input would
+            # turn them into would-skip hits.
+            b = str(w.build)
+            inventory = w.inventory() + [
+                {"name": "C labelled", "command": [f"{b}/test/pulp-test-a", "C labelled"],
+                 "properties": [{"name": "WORKING_DIRECTORY", "value": b},
+                                {"name": "LABELS", "value": ["pr-fast"]}]}]
+            sel = Path(tmp) / "selected.json"
+            sel.write_text(json.dumps({"tests": inventory}), encoding="utf-8")
+            junit = Path(tmp) / "j.xml"
+            junit.write_text('<testsuite><testcase name="A case one" time="1"/>'
+                             '<testcase name="C labelled" time="1"/>'
+                             '<testcase name="check-selftest" time="1"/>'
+                             '<testcase name="B case" time="2"><failure/></testcase></testsuite>',
+                             encoding="utf-8")
+            declared = mock.patch.object(trs.ats, "load_script_inputs",
+                                         return_value={"check-selftest": ["tools"]})
+            declared.start()
+            self.addCleanup(declared.stop)
+            base = ["trs", "run", "--build-dir", str(w.build), "--source-root", str(w.src),
+                    "--repository", "O/R", "--merge-sha", "HEAD", "--junit", str(junit),
+                    "--selected-json", str(sel), "--run-id", "55", "--toolchain-id", "tc", "--token", "t"]
+
+            def verdict_of(text: str) -> dict:
+                line = next(l for l in text.splitlines() if l.startswith(f"::notice title={trs.TITLE}::"))
+                return json.loads(line.split("::", 2)[2])
+
+            in_job = Path(tmp) / "in-job"
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()), \
+                    mock.patch.object(trs, "load_receipts", return_value=([], [], [])):
+                self.assertEqual(trs.main(base + ["--receipts-out", str(in_job / "r.json"),
+                                                  "--summary", str(Path(tmp) / "s1.md")]), 0)
+            # Prior receipts: the in-job run's own, as a different run id, so
+            # the passing key is a would-skip hit.
+            prior = dict(json.loads((in_job / "r.json").read_text(encoding="utf-8")), run_id="7")
+            with contextlib.redirect_stdout(out := io.StringIO()), contextlib.redirect_stderr(io.StringIO()), \
+                    mock.patch.object(trs, "load_receipts", return_value=([prior], [], [])):
+                self.assertEqual(trs.main(base + ["--receipts-out", str(in_job / "r.json"),
+                                                  "--summary", str(Path(tmp) / "s1.md")]), 0)
+            expected = verdict_of(out.getvalue())
+
+            deferred = Path(tmp) / "deferred"
+            eval_json = deferred / "test-receipts-eval.json"
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()), \
+                    mock.patch.object(trs, "load_receipts", side_effect=AssertionError("no API read in-job")):
+                self.assertEqual(trs.main(base + ["--receipts-out", str(deferred / "r.json"),
+                                                  "--keys-out", str(deferred / "keys.json"),
+                                                  "--evaluation", "deferred", "--eval-out", str(eval_json)]), 0)
+            self.assertNotIn(f"::notice title={trs.TITLE}::", out.getvalue())
+            self.assertIn("deferred", out.getvalue())
+            self.assertEqual(json.loads((deferred / "r.json").read_text(encoding="utf-8")),
+                             json.loads((in_job / "r.json").read_text(encoding="utf-8")))
+            self.assertTrue((deferred / "keys.json").is_file(), "the reuse record still gets its keys")
+            # The input carries no build-tree path: the advisory job has none.
+            self.assertNotIn(str(w.build), eval_json.read_text(encoding="utf-8"))
+
+            out = io.StringIO()
+            summary = Path(tmp) / "s2.md"
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()), \
+                    mock.patch.object(trs, "load_receipts", return_value=([prior], [], [])) as load:
+                self.assertEqual(trs.main(["trs", "evaluate", "--eval-json", str(eval_json),
+                                           "--repository", "O/R", "--token", "t",
+                                           "--summary", str(summary)]), 0)
+            load.assert_called_once_with("O/R", "t", "55")
+            got = verdict_of(out.getvalue())
+            self.assertEqual(got.pop("evaluation"), "deferred")
+            for v in (got, expected):
+                v.pop("seconds")
+                v.pop("key_seconds")
+            self.assertEqual(got, expected)
+            self.assertEqual(expected["would_skip"], 1)
+            self.assertIsNone(expected["would_force_full"])
+            self.assertEqual(expected["ran_reasons"].get("label"), 1)
+            self.assertEqual(expected["ran_reasons"].get("declares-a-top-level-directory"), 1)
+            self.assertIn("Per-test receipts (shadow)", summary.read_text(encoding="utf-8"))
+
+    def test_deferred_run_without_an_eval_out_gives_no_verdict(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                rc = trs.main(["trs", "run", "--build-dir", tmp, "--source-root", tmp, "--repository", "O/R",
+                               "--merge-sha", "HEAD", "--junit", f"{tmp}/j.xml", "--selected-json",
+                               f"{tmp}/s.json", "--receipts-out", f"{tmp}/r.json", "--evaluation", "deferred"])
+        self.assertEqual(rc, 2)
+
+    def test_an_unreadable_evaluation_input_gives_no_verdict(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "e.json"
+            for content in ("not json", json.dumps({"schema": "other/v1"}),
+                            json.dumps({"schema": trs.EVAL_SCHEMA, "key_version": trs.KEY_VERSION})):
+                bad.write_text(content, encoding="utf-8")
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()), \
+                        mock.patch.object(trs, "load_receipts", side_effect=AssertionError("no read")):
+                    rc = trs.main(["trs", "evaluate", "--eval-json", str(bad), "--repository", "O/R"])
+                self.assertEqual(rc, 2, content)
+                self.assertNotIn("::notice", out.getvalue())
+
     def test_unreadable_inputs_give_no_verdict(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             proc = subprocess.run([sys.executable, str(HERE / "test_receipts_shadow.py"), "run",
@@ -449,7 +558,7 @@ class CliTests(unittest.TestCase):
                                    "--merge-sha", "HEAD", "--junit", f"{tmp}/none.xml",
                                    "--selected-json", f"{tmp}/none.json", "--receipts-out", f"{tmp}/r.json",
                                    "--toolchain-id", "tc"],
-                                  capture_output=True, text=True, timeout=60)
+                                  capture_output=True, text=True, encoding="utf-8", timeout=60)
         self.assertEqual(proc.returncode, 2)
         self.assertNotIn("::notice", proc.stdout)
 

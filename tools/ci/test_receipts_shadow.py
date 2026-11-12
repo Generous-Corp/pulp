@@ -53,9 +53,19 @@ Proxies read from the annotation (`pulp-test-receipts-shadow/v1`):
   that FAILED in this very run. It must stay 0 over a long window before any
   enforcement is proposed (a decisions-contract amendment).
 
+Two phases. Keys and the receipt read the build tree, so `run` computes
+them in the gate job. The would-skip report reads only the keys, this run's
+results and the last 20 trusted receipts over the GitHub API, so
+`run --evaluation deferred` stops after writing them plus an evaluation-input
+file (`--eval-out`), and the advisory `test-receipts-shadow` job in build.yml
+runs `evaluate` on that file once the required `macos` job has finished. The
+report is identical either way; only where it is printed moves.
+
     test_receipts_shadow.py run --build-dir B --source-root S --repository O/R \\
         --merge-sha SHA --token T --junit J --selected-json I --run-id N \\
         --receipts-out F [--identity-json F] [--keys-out F] [--summary F]
+        [--evaluation in-job|deferred --eval-out F]
+    test_receipts_shadow.py evaluate --eval-json F --repository O/R --token T [--summary F]
 """
 from __future__ import annotations
 
@@ -514,10 +524,71 @@ def compute_keys(tests: list[dict], build_dir: Path, source_root: Path,
     return {t.get("name", ""): test_key(t, ctx) for t in tests}
 
 
+EVAL_SCHEMA = "pulp-test-receipts-eval-input/v1"
+
+
+def evaluation_input(tests: list[dict], keys: dict[str, tuple[str | None, str]],
+                     results: dict[str, tuple[str, float]], script_inputs: dict[str, list[str]],
+                     cmake_changed: bool, run_id: str, merge_sha: str, key_seconds: float,
+                     receipts_written: int) -> dict:
+    """Everything `evaluate` reads, so the advisory job needs no build tree
+    and no checkout of the merge: each selected test's name and labels, its
+    key, its result here, the script inputs of the tests that have them, and
+    whether the group changed CMake."""
+    names = {t.get("name", "") for t in tests}
+    return {"schema": EVAL_SCHEMA, "key_version": KEY_VERSION, "run_id": str(run_id),
+            "merge_sha": merge_sha, "cmake_changed": cmake_changed,
+            "key_seconds": key_seconds, "receipts_written": receipts_written,
+            "tests": [{"name": t.get("name", ""), "labels": sorted(labels(t))} for t in tests],
+            "keys": {n: [k, kind] for n, (k, kind) in keys.items()},
+            "results": {n: [st, secs] for n, (st, secs) in results.items()},
+            "script_inputs": {n: v for n, v in script_inputs.items() if n in names}}
+
+
+def report(tests: list[dict], keys: dict[str, tuple[str | None, str]],
+           results: dict[str, tuple[str, float]], script_inputs: dict[str, list[str]],
+           cmake_changed: bool, repository: str, token: str, run_id: str,
+           extra: dict, summary: str | None, t0: float) -> dict:
+    """Read the trusted receipts, judge this run against them, and print the
+    notice and summary line. Shared by the in-job and deferred paths so the
+    two report the same verdict."""
+    prior, refusals, lookup_errors = [], [], []
+    if token:
+        try:
+            prior, refusals, lookup_errors = load_receipts(repository, token, run_id)
+        except Exception as exc:  # noqa: BLE001 - no receipts is a verdict of zero hits, stated
+            lookup_errors.append(f"listing: {pmr.describe_lookup_error(exc)}")
+    for why in refusals[:10]:
+        print("test-receipts shadow: receipt refused; continuing without reuse", file=sys.stderr)
+    for why in lookup_errors[:10]:
+        print(f"test-receipts shadow: receipt lookup failed: {why}", file=sys.stderr)  # codeql[py/clear-text-logging-sensitive-data]
+    if lookup_errors:
+        print(f"::warning title={TITLE}-lookup::{lookup_failure(lookup_errors)}")
+    verdict = evaluate(tests, keys, prior, results, script_inputs,
+                       cmake_changed, int(run_id) if str(run_id).isdigit() else None)
+    verdict.update(extra)
+    verdict.update({"refused_receipts": len(refusals),
+                    "lookup_errors": len(lookup_errors),
+                    "lookup_error": lookup_failure(lookup_errors) if lookup_errors else None,
+                    "seconds": round(time.monotonic() - t0, 1)})
+    print(f"test-receipts shadow: would skip {verdict['would_skip']} of {verdict['selected']} "
+          f"(~{verdict['would_skip_seconds']:.0f} s); would-skip tests that failed: "
+          f"{verdict['would_skip_failed']}; wrote {verdict['receipts_written']} receipts")
+    print(f"::notice title={TITLE}::{json.dumps(verdict, sort_keys=True)}")
+    summary = summary or os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as fh:
+            fh.write(summary_line(verdict))
+    return verdict
+
+
 def cmd_run(a: argparse.Namespace) -> int:
     t0 = time.monotonic()
     build_dir = Path(a.build_dir).resolve()
     source_root = Path(a.source_root).resolve()
+    if a.evaluation == "deferred" and not a.eval_out:
+        print("test-receipts shadow: --evaluation deferred needs --eval-out", file=sys.stderr)
+        return 2
     try:
         tests = json.loads(Path(a.selected_json).read_text(encoding="utf-8")).get("tests", [])
         results = junit_results(Path(a.junit))
@@ -531,7 +602,8 @@ def cmd_run(a: argparse.Namespace) -> int:
             ident = json.loads(Path(a.identity_json).read_text(encoding="utf-8"))
             seed = {os.path.realpath(str(build_dir / f["path"])): f["sha256"] for f in ident.get("files", [])}
         toolchain = _h("toolchain-override", a.toolchain_id) if a.toolchain_id else toolchain_digest(build_dir)
-        keys = compute_keys(tests, build_dir, source_root, ats.load_script_inputs(source_root),
+        script_inputs = ats.load_script_inputs(source_root)
+        keys = compute_keys(tests, build_dir, source_root, script_inputs,
                             FileHasher(seed), toolchain, blobs)
     except (OSError, ValueError, subprocess.CalledProcessError, ET.ParseError, RuntimeError) as exc:
         print(f"test-receipts shadow: no verdict, input unreadable: {exc}", file=sys.stderr)
@@ -545,34 +617,43 @@ def cmd_run(a: argparse.Namespace) -> int:
         # reuse record (tools/ci/reuse_record.py) carries it as output_key.
         Path(a.keys_out).write_text(json.dumps({n: {"key": k, "kind": kind} for n, (k, kind) in keys.items()},
                                                sort_keys=True), encoding="utf-8")
-    prior, refusals, lookup_errors = [], [], []
-    if a.token:
-        try:
-            prior, refusals, lookup_errors = load_receipts(a.repository, a.token, a.run_id)
-        except Exception as exc:  # noqa: BLE001 - no receipts is a verdict of zero hits, stated
-            lookup_errors.append(f"listing: {pmr.describe_lookup_error(exc)}")
-    for why in refusals[:10]:
-        print("test-receipts shadow: receipt refused; continuing without reuse", file=sys.stderr)
-    for why in lookup_errors[:10]:
-        print(f"test-receipts shadow: receipt lookup failed: {why}", file=sys.stderr)  # codeql[py/clear-text-logging-sensitive-data]
-    if lookup_errors:
-        print(f"::warning title={TITLE}-lookup::{lookup_failure(lookup_errors)}")
     cmake_changed = ats.classify_changes(changed)["cmake_changed"] if base else True
-    verdict = evaluate(tests, keys, prior, results, ats.load_script_inputs(source_root),
-                       cmake_changed, int(a.run_id) if str(a.run_id).isdigit() else None)
-    verdict.update({"receipts_written": len(receipt["passed"]), "refused_receipts": len(refusals),
-                    "lookup_errors": len(lookup_errors),
-                    "lookup_error": lookup_failure(lookup_errors) if lookup_errors else None,
-                    "key_seconds": round(keyed_at - t0, 1),
-                    "seconds": round(time.monotonic() - t0, 1)})
-    print(f"test-receipts shadow: would skip {verdict['would_skip']} of {verdict['selected']} "
-          f"(~{verdict['would_skip_seconds']:.0f} s); would-skip tests that failed: "
-          f"{verdict['would_skip_failed']}; wrote {verdict['receipts_written']} receipts")
-    print(f"::notice title={TITLE}::{json.dumps(verdict, sort_keys=True)}")
-    summary = a.summary or os.environ.get("GITHUB_STEP_SUMMARY")
-    if summary:
-        with open(summary, "a", encoding="utf-8") as fh:
-            fh.write(summary_line(verdict))
+    key_seconds = round(keyed_at - t0, 1)
+    if a.evaluation == "deferred":
+        doc = evaluation_input(tests, keys, results, script_inputs, cmake_changed, a.run_id,
+                               a.merge_sha, key_seconds, len(receipt["passed"]))
+        Path(a.eval_out).parent.mkdir(parents=True, exist_ok=True)
+        Path(a.eval_out).write_text(json.dumps(doc, sort_keys=True), encoding="utf-8")
+        print(f"test-receipts shadow: wrote {len(receipt['passed'])} receipts and the evaluation input "
+              f"in {round(time.monotonic() - t0, 1)}s; the would-skip report is deferred to the "
+              f"advisory test-receipts-shadow job")
+        return 0
+    report(tests, keys, results, script_inputs, cmake_changed, a.repository, a.token, a.run_id,
+           {"receipts_written": len(receipt["passed"]), "key_seconds": key_seconds}, a.summary, t0)
+    return 0
+
+
+def cmd_evaluate(a: argparse.Namespace) -> int:
+    """The deferred half of `run`: the same report from an evaluation-input
+    file the gate job wrote, with no build tree."""
+    t0 = time.monotonic()
+    try:
+        doc = json.loads(Path(a.eval_json).read_text(encoding="utf-8"))
+        if doc.get("schema") != EVAL_SCHEMA or doc.get("key_version") != KEY_VERSION:
+            raise ValueError(f"schema {doc.get('schema')!r} or key version {doc.get('key_version')!r} differs")
+        tests = [{"name": t["name"], "properties": [{"name": "LABELS", "value": list(t.get("labels") or [])}]}
+                 for t in doc["tests"]]
+        keys = {n: (v[0], v[1]) for n, v in doc["keys"].items()}
+        results = {n: (v[0], float(v[1])) for n, v in doc["results"].items()}
+        script_inputs = {n: list(v) for n, v in (doc.get("script_inputs") or {}).items()}
+        cmake_changed = bool(doc["cmake_changed"])
+        run_id = str(doc["run_id"])
+    except (OSError, ValueError, KeyError, TypeError, IndexError, json.JSONDecodeError) as exc:
+        print(f"test-receipts shadow: no verdict, evaluation input unreadable: {exc}", file=sys.stderr)
+        return 2
+    report(tests, keys, results, script_inputs, cmake_changed, a.repository, a.token, run_id,
+           {"receipts_written": doc.get("receipts_written"), "key_seconds": doc.get("key_seconds"),
+            "evaluation": "deferred"}, a.summary, t0)
     return 0
 
 
@@ -593,7 +674,16 @@ def main(argv: list[str]) -> int:
     r.add_argument("--keys-out", default=None, help="write every entry's key (or unkeyable kind) here")
     r.add_argument("--summary", default=None)
     r.add_argument("--toolchain-id", default=None, help="override the probed toolchain identity (tests)")
+    r.add_argument("--evaluation", choices=("in-job", "deferred"), default="in-job",
+                   help="deferred: write the keys, receipt and --eval-out, and leave the report to `evaluate`")
+    r.add_argument("--eval-out", default=None, help="the evaluation-input file `evaluate` reads")
     r.set_defaults(func=cmd_run)
+    e = sub.add_parser("evaluate")
+    e.add_argument("--eval-json", required=True)
+    e.add_argument("--repository", required=True)
+    e.add_argument("--token", default=os.environ.get("GITHUB_TOKEN", ""))
+    e.add_argument("--summary", default=None)
+    e.set_defaults(func=cmd_evaluate)
     a = ap.parse_args(argv[1:])
     return a.func(a)
 

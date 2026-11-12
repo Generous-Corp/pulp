@@ -3593,7 +3593,11 @@ jobs:
       # advisory flake-exoneration-shadow job: it runs only on a red ctest,
       # needs nothing but the uploaded JUnit and the GitHub API, and took
       # about 95 s of every failed gate job while the verdict was already
-      # known. The instruments that stay read the build tree.
+      # known. The per-test receipts' would-skip report is deferred the same
+      # way (`--receipts-evaluation deferred`): its keys and receipt read the
+      # build tree and stay here, while its reads of 20 earlier receipts over
+      # the API (a median 44 s of this job) move to the advisory
+      # test-receipts-shadow job. The instruments that stay read the build tree.
       - name: Merge-group shadow instruments
         if: >-
           always() && github.event_name == 'merge_group' && runner.os == 'macOS'
@@ -3610,6 +3614,7 @@ jobs:
             --junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml" \
             --selected-json "$RUNNER_TEMP/ctest-evidence/selected.json" \
             --ctest-outcome "${{ steps.ctest.outcome }}" --hours 24 --exoneration deferred \
+            --receipts-evaluation deferred \
             --work-dir "$RUNNER_TEMP/merge-group-shadows" || true
 
       # The per-test receipts the shadow step above wrote (keys of the tests
@@ -3628,6 +3633,23 @@ jobs:
           if-no-files-found: ignore
           overwrite: true
           retention-days: 14
+
+      # The input of the deferred would-skip report: each selected test's name
+      # and labels, key, result and script inputs, and whether CMake changed
+      # (tools/ci/test_receipts_shadow.py `evaluate`). A separate artifact,
+      # because a trusted test-receipts-macos archive holds exactly one file.
+      - name: Upload receipt evaluation input (shadow)
+        if: >-
+          always() && github.event_name == 'merge_group' && runner.os == 'macOS'
+          && steps.build.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: test-receipts-eval-macos
+          path: ${{ runner.temp }}/merge-group-shadows/test-receipts-eval.json
+          if-no-files-found: ignore
+          overwrite: true
+          retention-days: 3
 
       # Observation, not a gate. A ctest SKIP reads exactly like a PASS on this
       # check, so a test that has never run once is indistinguishable from one
@@ -4856,6 +4878,55 @@ jobs:
           fi
           python3 tools/ci/flake_exoneration_shadow.py --repo "$GITHUB_REPOSITORY" \
             --junit "$junit" --head "$GITHUB_SHA" --hours 24 || true
+
+  # The per-test receipts' would-skip report, off the required `macos` job.
+  # The gate job computes the keys and the receipt (they read the build tree)
+  # and uploads test-receipts-eval-macos; this job reads the last 20 trusted
+  # receipts over the API and annotates the same `pulp-test-receipts-shadow/v1`
+  # verdict. It reports on green and red groups alike, and never gates.
+  test-receipts-shadow:
+    name: test-receipts-shadow (advisory)
+    needs: [build]
+    if: >-
+      (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true'))
+      && !cancelled()
+      && github.event_name == 'merge_group'
+      && (needs.build.result == 'success' || needs.build.result == 'failure')
+    # GitHub-hosted, like flake-exoneration-shadow: an API report must never
+    # take a self-hosted gate slot.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 1
+          lfs: false
+          persist-credentials: false
+          # test_receipts_shadow imports tools/ci and tools/scripts helpers.
+          sparse-checkout: |
+            tools/ci
+            tools/scripts
+          sparse-checkout-cone-mode: true
+      - name: Download the receipt evaluation input
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: test-receipts-eval-macos
+          path: ${{ runner.temp }}/test-receipts-eval
+      - name: Per-test receipts (shadow)
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          eval_json="$RUNNER_TEMP/test-receipts-eval/test-receipts-eval.json"
+          if [ ! -s "$eval_json" ]; then
+            echo "::notice title=test-receipts-shadow::no receipt evaluation input in this run (ctest did not run, or the macOS upload failed); no verdict"
+            exit 0
+          fi
+          python3 tools/ci/test_receipts_shadow.py evaluate --eval-json "$eval_json" \
+            --repository "$GITHUB_REPOSITORY" --token "$GH_TOKEN" || true
 
   # Names the cause of each failed job in this run as a `ci.cause/v1` record,
   # printed as a `::notice title=ci-cause::` annotation. A job's own log can be

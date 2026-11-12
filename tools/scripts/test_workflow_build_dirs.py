@@ -427,6 +427,8 @@ class WorkflowBuildDirTests(unittest.TestCase):
         # A red gate job does not wait on the exoneration shadow's API reads:
         # the required job defers it to the advisory job below.
         self.assertIn("--exoneration deferred", run)
+        # Nor does any gate job wait on the receipts' API reads.
+        self.assertIn("--receipts-evaluation deferred", run)
         for name in ("Build", "Test (non-Windows)"):
             body = str(workflow_named_step(BUILD_WORKFLOW, "build", name)["run"])
             for token in ("merge_group_shadows", "merge-group-shadows", "binary_identity",
@@ -475,6 +477,54 @@ class WorkflowBuildDirTests(unittest.TestCase):
                 continue
             for step in other.get("steps", []):
                 self.assertNotIn("flake_exoneration_shadow.py", str(step.get("run", "")), name)
+
+    def test_receipts_would_skip_report_runs_in_an_advisory_job_after_build(self) -> None:
+        """The per-test receipts' would-skip report runs off the required
+        `macos` job: the gate job writes the keys, the receipt and the
+        evaluation input (all read the build tree) and uploads the input
+        without ever failing on it; an advisory job that needs `build`, on
+        green and red merge groups, never named like a required context,
+        reads it and does the API reads that held a median 44 s of the gate
+        job. The trusted receipt artifact itself is still uploaded in-job."""
+        try:
+            import yaml
+        except ImportError:  # pragma: no cover - workflow-lint installs PyYAML
+            raise unittest.SkipTest("PyYAML not installed")
+        upload = workflow_named_step(BUILD_WORKFLOW, "build", "Upload receipt evaluation input (shadow)")
+        self.assertTrue(upload.get("continue-on-error"))
+        cond = " ".join(str(upload.get("if")).split())
+        for needle in ("always()", "github.event_name == 'merge_group'", "runner.os == 'macOS'"):
+            self.assertIn(needle, cond)
+        self.assertEqual(upload["with"]["name"], "test-receipts-eval-macos")
+        self.assertIn("merge-group-shadows/test-receipts-eval.json", upload["with"]["path"])
+        receipts = workflow_named_step(BUILD_WORKFLOW, "build", "Record per-test receipts (shadow)")
+        self.assertEqual(receipts["with"]["name"], "test-receipts-macos")
+
+        jobs = yaml.safe_load(BUILD_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+        job = jobs["test-receipts-shadow"]
+        self.assertEqual(job["name"], "test-receipts-shadow (advisory)")
+        self.assertEqual(job["needs"], ["build"])
+        self.assertTrue(job.get("continue-on-error"))
+        self.assertLessEqual(int(job["timeout-minutes"]), 15)
+        self.assertEqual(job["runs-on"], "ubuntu-latest")
+        cond = " ".join(str(job["if"]).split())
+        for needle in ("!cancelled()", "github.event_name == 'merge_group'",
+                       "needs.build.result == 'success'", "needs.build.result == 'failure'"):
+            self.assertIn(needle, cond)
+        steps = job["steps"]
+        sparse = str(steps[0]["with"]["sparse-checkout"]).split()
+        for path in ("tools/ci", "tools/scripts"):
+            self.assertIn(path, sparse)
+        download = next(s for s in steps if str(s.get("uses", "")).startswith("actions/download-artifact"))
+        self.assertEqual(download["with"]["name"], "test-receipts-eval-macos")
+        report = next(s for s in steps if s.get("name") == "Per-test receipts (shadow)")
+        self.assertTrue(report.get("continue-on-error"))
+        self.assertIn("test_receipts_shadow.py evaluate", str(report["run"]))
+        for name, other in jobs.items():
+            if name == "test-receipts-shadow":
+                continue
+            for step in other.get("steps", []):
+                self.assertNotIn("test_receipts_shadow.py evaluate", str(step.get("run", "")), name)
 
     def test_flake_exoneration_gate_is_scoped_to_merge_group_macos(self) -> None:
         """Only a failed merge-group run of the required macos leg may consult

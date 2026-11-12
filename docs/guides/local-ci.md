@@ -1537,10 +1537,19 @@ compiled test the runtime surface (every tracked non-compiled, non-doc file)
 and the build's non-test executables (compiled tests read both through
 `PULP_SOURCE_DIR`/`PULP_BUILD_DIR`). The job writes the keys of the tests
 that passed, and the names that failed, as the `test-receipts-macos`
-artifact, only from merge-group runs. It then reads the last 20 trusted
-receipts and reports how many selected tests a receipt-keyed skip WOULD have
-skipped and their test-seconds (job summary: "Per-test receipts (shadow):
-would skip N of M tests"). A failed receipt request is counted apart from a
+artifact, only from merge-group runs. The keys and the receipt read the
+build tree, so they are computed in the `macos` job; the report is not. That
+job uploads a small evaluation input (`test-receipts-eval-macos`: each selected
+test's name, labels, key and result, the script inputs, and whether CMake
+changed), and the advisory `test-receipts-shadow` job, which needs `build`,
+reads the last 20 trusted receipts and reports how many selected tests a
+receipt-keyed skip WOULD have skipped and their test-seconds (its job summary:
+"Per-test receipts (shadow): would skip N of M tests"; the same
+`pulp-test-receipts-shadow/v1` notice, with `"evaluation": "deferred"`). Those
+API reads held a median 44 s of every native merge-group `macos` job (n=33,
+2026-11-11..12, the per-job difference between the notice's `seconds` and
+`key_seconds`) without changing its verdict, out of a 21.6 min job (the median
+of 15 successful native merge-group runs, 2026-11-11..12). A failed receipt request is counted apart from a
 refused receipt (`lookup_errors` and `lookup_error` in the notice, a
 `test-receipts-shadow-lookup` warning, and `receipt lookup failed: <status>`
 in the summary), so `receipt_runs: 0` from a broken lookup cannot pass for an
