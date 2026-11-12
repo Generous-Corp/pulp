@@ -452,7 +452,8 @@
        "conclusion": "success",
        "head_sha": "main2",
        "created_at": "2026-11-01T11:05:00Z"
-      }
+      },
+      "landing_contains_merge": true
      },
      {
       "run_id": "g1b",

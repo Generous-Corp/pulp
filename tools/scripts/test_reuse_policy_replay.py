@@ -709,7 +709,8 @@ class EntryDeltaAttributionTests(unittest.TestCase):
 
     def test_landing_with_another_head_or_a_red_push_does_not_exonerate(self):
         for change in ({"pr_merge": {"merged_at": "x", "merge_commit_sha": "m1b", "head_sha": "other"}},
-                       {"main_push_run": {"run_id": "p1", "conclusion": "failure"}}):
+                       {"main_push_run": {"run_id": "p1", "conclusion": "failure"}},
+                       {"landing_contains_merge": False}):
             c = self.case(3)
             c.runs["g1"].update(change)
             self.assertEqual(rpr.score(c, "entry-delta-docs")["exonerated"], 0, change)
@@ -757,9 +758,10 @@ class EntryDeltaAttributionTests(unittest.TestCase):
                                                            "declared_inputs": ["tools/x.py"]}},
                                 "head_sha": "h", "pr_merge": {"merged_at": "x", "merge_commit_sha": f"m{i}",
                                                               "head_sha": "h"},
-                                "landing_group_run_id": f"l{i}", "main_push_run": {"conclusion": "success"}})
+                                "landing_group_run_id": f"l{i}", "landing_contains_merge": True,
+                                "main_push_run": {"conclusion": "success"}, "created_at": "2026-11-01T10:00:00Z"})
             corpus_runs.append({"run_id": f"l{i}", "run_kind": "merge_group", "group_sha": f"m{i}",
-                                "macos_conclusion": "success"})
+                                "macos_conclusion": "success", "landed": True})
             rows.append({"pr": i, "group_run_id": f"g{i}", "test_id": "t"})
         result = rpr.attribute_failures(rpr.Corpus(corpus_runs, []), rows, 3)
         self.assertEqual((result["exonerated"], result["quarantine_candidates"]), (3, ["t"]))
@@ -825,6 +827,10 @@ class EntryDeltaCollectTests(unittest.TestCase):
         missing = {"objects": {"a.o": ["test/x.cpp"]}, "members": {"lib.a": {"b.o": ["b.o"]}}}
         self.assertIsNone(rrc.Collector._executable_sources("test/x", link, missing))
         self.assertIsNone(rrc.Collector._executable_sources("test/y", link, deps))
+        # A prebuilt archive outside the build tree compiles from no checkout file.
+        prebuilt = {"test/x": {"objects": ["a.o"], "members": {"lib.a": ["b.o"], "/opt/sdk/libdawn.a": ["c.o"]}}}
+        self.assertEqual(rrc.Collector._executable_sources("test/x", prebuilt, deps),
+                         {"test/x.cpp", "core/b.cpp", "core/b.hpp"})
 
     def test_failing_test_facts_name_tier_inputs_and_sources(self):
         c = rrc.Collector.__new__(rrc.Collector)
@@ -854,6 +860,7 @@ class EntryDeltaCollectTests(unittest.TestCase):
         c = rrc.Collector.__new__(rrc.Collector)
         c._is_ancestor = lambda sha, ref: ref == "p2"
         pushes = [{"id": 1, "head_sha": "p0", "created_at": "2026-11-01T09:00:00Z", "conclusion": "success"},
+                  {"id": 9, "head_sha": "p2", "created_at": "2026-11-01T10:30:00Z", "conclusion": "cancelled"},
                   {"id": 2, "head_sha": "p1", "created_at": "2026-11-01T11:00:00Z", "conclusion": "failure"},
                   {"id": 3, "head_sha": "p2", "created_at": "2026-11-01T11:30:00Z", "conclusion": "success"}]
         merge = {"merged_at": "2026-11-01T10:00:00Z", "merge_commit_sha": "m"}

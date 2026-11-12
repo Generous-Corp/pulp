@@ -626,12 +626,15 @@ class Collector:
                 else:
                     # An ejected group's merge commit is often no longer
                     # fetchable, but the API still describes it.
-                    try:
-                        doc = self.gh.json(f"repos/{self.gh.repository}/git/commits/{sha}")
-                        self._commit_cache[sha] = {"tree": doc["tree"]["sha"], "local": False,
-                                                   "parents": [p["sha"] for p in doc.get("parents", [])]}
-                    except (urllib.error.HTTPError, KeyError):
-                        self._commit_cache[sha] = None
+                    def fetch() -> dict | None:
+                        try:
+                            doc = self.gh.json(f"repos/{self.gh.repository}/git/commits/{sha}")
+                            return {"tree": doc["tree"]["sha"], "local": False,
+                                    "parents": [p["sha"] for p in doc.get("parents", [])]}
+                        except (urllib.error.HTTPError, KeyError):
+                            return None
+                    # A commit object never changes, so its API answer is cached on disk.
+                    self._commit_cache[sha] = self._cached(f"commits/{sha}.json.gz", fetch)
             return self._commit_cache[sha]
 
     def diff_files(self, a: str, b: str) -> list[str] | None:
@@ -1038,7 +1041,8 @@ class Collector:
             return None
         landed = _parse_time(merge["merged_at"])
         for run in pushes:
-            if _parse_time(run["created_at"]) < landed:
+            # A cancelled or skipped run proved nothing about the tree.
+            if _parse_time(run["created_at"]) < landed or run.get("conclusion") not in ("success", "failure"):
                 continue
             if self._is_ancestor(merge["merge_commit_sha"], run["head_sha"]):
                 return {"run_id": str(run["id"]), "conclusion": run.get("conclusion"),
@@ -1147,6 +1151,11 @@ class Collector:
             return None
         objects = set(link[exe].get("objects") or [])
         for archive, members in (link[exe].get("members") or {}).items():
+            if archive.startswith("/"):
+                # A prebuilt archive outside the build tree (the toolchain's
+                # runtime, a prebuilt Skia/Dawn) is compiled from no file of
+                # this checkout, so it cannot read the delta.
+                continue
             names = (deps.get("members") or {}).get(archive) or {}
             for member in members:
                 if member not in names:
@@ -1179,7 +1188,8 @@ class Collector:
         pushes = sorted((r for r in self.list_runs("push", since, dt.datetime.now(dt.timezone.utc))
                          if r.get("head_branch") == "main" and r.get("status") == "completed"),
                         key=lambda r: r["created_at"])
-        by_sha = {g["group_sha"]: g for g in groups}
+        landed_groups = sorted((x for x in groups if x.get("landed") and x.get("macos_conclusion") == "success"),
+                               key=lambda x: x["created_at"])
         for g, failing in judged:
             delta = list(g["first_parent_delta_files"])
             rev = self.facts_rev(g)
@@ -1189,8 +1199,16 @@ class Collector:
             g["entry_test_facts"] = self.test_facts(g, failing, rev, delta)
             merge = self.pr_merge(g["pr"]) if g.get("pr") else None
             g["pr_merge"] = merge
-            landing = by_sha.get((merge or {}).get("merge_commit_sha"))
+            # The group that landed the merge: the first green group on main
+            # whose commit contains it (the batch head under HEADGREEN, the
+            # entry's own group under ALLGREEN).
+            landing = None
+            sha = (merge or {}).get("merge_commit_sha")
+            if sha:
+                landing = next((x for x in landed_groups if x["created_at"] >= g["created_at"]
+                                and self._is_ancestor(sha, x["group_sha"])), None)
             g["landing_group_run_id"] = landing["run_id"] if landing else None
+            g["landing_contains_merge"] = bool(landing)
             g["main_push_run"] = self.first_push_containing(merge, pushes)
 
     def write(self, runs: dict[str, dict], pairs: list[dict]) -> None:

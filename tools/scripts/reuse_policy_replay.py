@@ -580,14 +580,15 @@ def docs_caused(group: dict, test_id: str) -> str | None:
 
 
 def landed_green(group: dict, corpus: Corpus) -> dict | None:
-    """C: the same head later landed through a green group, and the first
+    """C: the same head later landed through a green group on main whose
+    commit contains the merge (the batch head under HEADGREEN), and the first
     main push run containing the merge was green. Evidence, or None."""
     merge = group.get("pr_merge") or {}
     if not merge.get("merged_at") or merge.get("head_sha") != group.get("head_sha"):
         return None
     landing = corpus.run(group.get("landing_group_run_id"))
     push = group.get("main_push_run") or {}
-    if (landing is None or landing.get("group_sha") != merge.get("merge_commit_sha")
+    if (landing is None or group.get("landing_contains_merge") is not True or landing.get("landed") is not True
             or landing.get("macos_conclusion") != "success" or push.get("conclusion") != "success"):
         return None
     return {"rule": "C", "landing_group_run_id": landing["run_id"], "main_push_run_id": push.get("run_id")}
