@@ -1,5 +1,6 @@
 {
   "consumer_gate": {
+    "reason": "partition execution and synthetic layer mutations are not qualified",
     "requires": [
       "g3-installed-public-consumer",
       "spectral-installed-public-consumer"
@@ -248,7 +249,8 @@
       64,
       128
     ],
-    "status": "PASS",
+    "reason": "sample-level fixture does not execute distinct block boundaries",
+    "status": "NOT_CHECKED",
     "tolerances": {
       "pcm": "byte_exact",
       "peak": 1e-07,
@@ -258,83 +260,96 @@
   "planted_negative_controls": {
     "controls": [
       {
+        "attribution": "PASS",
         "changed_layers": [
           "authored"
         ],
         "expected_failure_layer": "authored",
         "mutation": "authored",
         "rejected_at_layer": "authored",
-        "status": "PASS"
+        "status": "NOT_CHECKED"
       },
       {
+        "attribution": "PASS",
         "changed_layers": [
           "resolved"
         ],
         "expected_failure_layer": "resolved",
         "mutation": "resolved",
         "rejected_at_layer": "resolved",
-        "status": "PASS"
+        "status": "NOT_CHECKED"
       },
       {
+        "attribution": "PASS",
         "changed_layers": [
           "plan"
         ],
         "expected_failure_layer": "plan",
         "mutation": "plan",
         "rejected_at_layer": "plan",
-        "status": "PASS"
+        "status": "NOT_CHECKED"
       },
       {
+        "attribution": "PASS",
         "changed_layers": [
           "event"
         ],
         "expected_failure_layer": "event",
         "mutation": "event",
         "rejected_at_layer": "event",
-        "status": "PASS"
+        "status": "NOT_CHECKED"
       },
       {
+        "attribution": "PASS",
         "changed_layers": [
           "output"
         ],
         "expected_failure_layer": "output",
         "mutation": "output",
         "rejected_at_layer": "output",
-        "status": "PASS"
+        "status": "NOT_CHECKED"
       }
     ],
-    "fixture": "synthetic-layer-mutation-oracle"
+    "fixture": "synthetic-layer-mutation-bookkeeping",
+    "reason": "mutations are digest attribution only; no parser/replay refusal was run",
+    "status": "NOT_CHECKED"
   },
   "positive_controls": [
     {
       "canonical_bytes": "sha256:11a2327e1b965f52afbf56369f160633c9299d26d808b1a6f4e41e7f7b6a0f91",
       "layer": "authored",
-      "status": "PASS"
+      "reason": "synthetic baseline bookkeeping; no parser/replay acceptance",
+      "status": "NOT_CHECKED"
     },
     {
       "canonical_bytes": "sha256:40c9336823c609ee0c0ebbf3271e7c0bcb42f93e29a43dd6deb66a78764b3a6d",
       "layer": "resolved",
-      "status": "PASS"
+      "reason": "synthetic baseline bookkeeping; no parser/replay acceptance",
+      "status": "NOT_CHECKED"
     },
     {
       "canonical_bytes": "sha256:3f411ede2bcdc049d2f30d615e014a62cb4cde9cd63f07c8f61428e249228a54",
       "layer": "plan",
-      "status": "PASS"
+      "reason": "synthetic baseline bookkeeping; no parser/replay acceptance",
+      "status": "NOT_CHECKED"
     },
     {
       "canonical_bytes": "sha256:a49030643b809c18146173f02d31f9a2abfae571dff528b28efcc7ac3032cdd0",
       "layer": "event",
-      "status": "PASS"
+      "reason": "synthetic baseline bookkeeping; no parser/replay acceptance",
+      "status": "NOT_CHECKED"
     },
     {
       "canonical_bytes": "sha256:616639e9d6a99f3c8eb0458459b5e4427d8e2848ccf39461dd6b5494b60eeb9d",
       "layer": "output",
-      "status": "PASS"
+      "reason": "synthetic baseline bookkeeping; no parser/replay acceptance",
+      "status": "NOT_CHECKED"
     }
   ],
   "provenance": {
     "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
     "python": "3.13.7",
+    "requested_source_head": "7dbd8ba01088ae3008add28ae196fc31d898bc0f",
     "sdk": {
       "consumers": [
         "g3-installed-public-consumer",
@@ -345,12 +360,13 @@
         null
       ]
     },
-    "source_head": "bc2bafa763e2dbedc8a659d62b650caab9d1391a",
+    "source_head": "7dbd8ba01088ae3008add28ae196fc31d898bc0f",
+    "source_head_status": "validated",
     "tool": "tools/scripts/p0_layered_replay_receipt.py",
-    "tool_sha256": "sha256:1c5409ad06885b7a57a8e42652f5bb11cf4ded6b133a7b92a2afc9be3ef26a8d"
+    "tool_sha256": "sha256:81c59c837e783b9fb86493c8168ef0931a26bd6e709a576da90b093c97c396cb"
   },
   "schema": "pulp.graph.layered-replay-receipt.v1",
-  "source_head": "bc2bafa763e2dbedc8a659d62b650caab9d1391a",
+  "source_head": "7dbd8ba01088ae3008add28ae196fc31d898bc0f",
   "unavailable_lanes": [
     "runtime",
     "realtime",

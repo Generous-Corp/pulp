@@ -4,9 +4,9 @@ Status: **PARTIAL / tooling experiment**.
 
 The checked-in fixture receipt is
 `p0-layered-inspection-replay-20261112/receipt.json` (raw-file SHA-256
-`856bf84a12dac5f2e2f63ddd9649b56a132a87aad23a9169efaeb48cd3994b02`; the
+`75b255dbc5227112881f905423845b64b848224cec91a30ceb9cf56c0aef723e`; the
 canonical JSON digest is
-`9fc5f468f1fe4b87503c5a3821cb5113b456353ffd3a64cc5e727322d4207d04`). Its
+`66dfc9ae82b42908f5c974fa4cde43052fce4358df414957b6d6cb5c623be65c`). Its
 consumer gate is **NOT_QUALIFIED** because this checkout could not supply the
 installed public binaries: the source build's generated package refers to
 relocatable support modules that are materialized only by a completed SDK
@@ -42,12 +42,14 @@ is fail-closed: absent or invalid consumer commands exit 1 unless
 that mode writes `NOT_QUALIFIED` and never reports a completed experiment.
 
 The fixture oracle renders canonical signed 32-bit PCM and records two
-partitions (64 and 128 frames). Each installed consumer is run at both
-partitions, and the gate requires both protocol and partition attestations. It
-plants one mutation at a time in authored, resolved, plan, event, and output
-layers; each mutation must be attributed to and rejected at its corresponding
-layer. These controls remain bounded evidence and do not claim runtime
-scheduling, realtime safety, or audio-provider parity.
+partition labels (64 and 128 frames). Each installed consumer is run at both
+labels, and the gate requires both protocol and partition attestations, but
+the fixture does not execute distinct block boundaries, so partition execution
+is **NOT_CHECKED**. It records one mutation at a time in authored, resolved,
+plan, event, and output layers as synthetic digest attribution bookkeeping;
+parser/replay rejection and positive acceptance remain **NOT_CHECKED**. These
+controls remain bounded evidence and do not claim runtime scheduling, realtime
+safety, or audio-provider parity.
 
 ## Focused controls
 

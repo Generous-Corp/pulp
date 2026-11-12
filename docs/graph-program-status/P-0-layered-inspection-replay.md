@@ -21,23 +21,26 @@ The envelope has separate authored, resolved, plan, event, and output IDs,
 canonical-byte digests, source/tool/SDK provenance, PCM format and quality
 metadata, and explicit capacities, latency, fallback, stream, and epoch facts.
 The consumer gate invokes each named binary at both 64- and 128-frame
-partitions and requires a matching partition attestation. Five one-layer
-mutations are attributed to and rejected at their corresponding layer, with
-positive controls for every baseline layer. The gate remains
-`NOT_QUALIFIED` when either installed binary is unavailable.
+partitions and requires a matching partition attestation, but the current
+fixtures do not execute partition-dependent blocks, so partition execution is
+**NOT_CHECKED**. Five one-layer mutations are recorded as synthetic digest
+attribution bookkeeping; parser/replay rejection and positive acceptance are
+**NOT_CHECKED**. The gate remains `NOT_QUALIFIED` until those independent
+runtime checks exist and when either installed binary is unavailable.
 
 The current fixture receipt is
 `../evidence/p0-layered-inspection-replay-20261112/receipt.json`, raw-file
-SHA-256 `856bf84a12dac5f2e2f63ddd9649b56a132a87aad23a9169efaeb48cd3994b02`;
+SHA-256 `75b255dbc5227112881f905423845b64b848224cec91a30ceb9cf56c0aef723e`;
 its canonical JSON digest is
-`9fc5f468f1fe4b87503c5a3821cb5113b456353ffd3a64cc5e727322d4207d04`.
+`66dfc9ae82b42908f5c974fa4cde43052fce4358df414957b6d6cb5c623be65c`.
 Both installed-consumer commands are `UNAVAILABLE` in this handoff because the
 source build did not complete its relocatable SDK support-module install. The
 receipt's `source_head` binds the code-producing repair commit; later manifest
 and documentation-only commits do not alter the fixture implementation.
 
 This slice adds no runtime/API surface, queue, scheduler, callback behavior,
-or duplicate graph seam. The rendered-output oracle is deterministic and
-byte-exact for the checked-in fixture; runtime event projection, realtime or
-resource safety, cross-platform parity, provider/device nondeterminism, and
-complete whole-graph identity remain **NOT CHECKED**.
+or duplicate graph seam. The rendered-output oracle is deterministic for the
+checked-in fixture, but it is not a runtime block-boundary or audio-quality
+qualification. Runtime event projection, realtime or resource safety,
+cross-platform parity, provider/device nondeterminism, and complete whole-graph
+identity remain **NOT CHECKED**.
