@@ -1084,6 +1084,17 @@ class Collector:
         except (urllib.error.URLError, RuntimeError, OSError, zipfile.BadZipFile, ValueError):
             return None
 
+    def _json_in_clone(self, rev: str, path: str) -> dict | None:
+        """A JSON file at `rev` from the local clone only (facts_rev is
+        always local), or None when absent or unparsable."""
+        res = self._git("show", f"{rev}:{path}", check=False)
+        if res.returncode:
+            return None
+        try:
+            return json.loads(res.stdout)
+        except json.JSONDecodeError:
+            return None
+
     def facts_rev(self, record: dict) -> str:
         for sha in (record.get("checkout_sha"), record.get("base_sha")):
             commit = self.commit(sha)
@@ -1094,7 +1105,7 @@ class Collector:
     def test_facts(self, record: dict, failing: list[str], rev: str, delta: list[str]) -> dict[str, dict]:
         record_doc = self.reuse_record(record["run_id"])
         regs = self.registrations(record["run_id"])
-        drift = self.json_at(rev, "tools/ci/drift_fast.json", "drift-fast") or None
+        drift = self._json_in_clone(rev, "tools/ci/drift_fast.json") or None
         tier_labels = set((drift or {}).get("ctest_labels") or [])
         tier_names = {t.get("name") for t in (drift or {}).get("tests") or [] if isinstance(t, dict)}
         executables = record_doc.get("executables") or {}
@@ -1108,7 +1119,7 @@ class Collector:
                 deterministic = bool(labels & tier_labels) or name in tier_names
             facts = {"kind": "unknown", "deterministic": deterministic, "declared_inputs": None,
                      "executable": None, "sources_naming_delta": None}
-            fragment = self.json_at(rev, f"{SCRIPT_INPUTS_PATH}/tests/{name}.json", "script-inputs-test")
+            fragment = self._json_in_clone(rev, f"{SCRIPT_INPUTS_PATH}/tests/{name}.json")
             exe = executables.get(name)
             if fragment is not None:
                 rec = fragment.get("record") or {}
@@ -1119,8 +1130,7 @@ class Collector:
                 sources = self._executable_sources(exe, link, deps)
                 if sources is not None:
                     facts["sources_naming_delta"] = self._grep_naming(rev, delta, sorted(sources))
-                exe_doc = self.json_at(rev, f"{SCRIPT_INPUTS_PATH}/executables/{Path(exe).name}.json",
-                                       "script-inputs-exe")
+                exe_doc = self._json_in_clone(rev, f"{SCRIPT_INPUTS_PATH}/executables/{Path(exe).name}.json")
                 if exe_doc and exe_doc.get("inputs"):
                     facts["declared_inputs"] = sorted(exe_doc["inputs"])
             elif reg and reg.get("command") and re.search(r"(?i)python|bash|(^|/)sh$|node|zsh",

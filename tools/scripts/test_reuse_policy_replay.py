@@ -839,7 +839,7 @@ class EntryDeltaCollectTests(unittest.TestCase):
         docs = {"tools/ci/drift_fast.json": {"ctest_labels": ["pr-fast"], "tests": [{"name": "listed"}]},
                 "test/ctest_script_inputs/tests/fast-one.json": {"record": {"entry": "t.py",
                                                                             "inputs": ["docs/a.md"]}}}
-        c.json_at = lambda rev, path, cache: docs.get(path)
+        c._json_in_clone = lambda rev, path: docs.get(path)
         c._grep_naming = lambda rev, needles, specs: ["test/x.cpp"] if "test/x.cpp" in specs else []
         facts = c.test_facts({"run_id": "1"}, ["Case A", "fast-one", "bare-script", "gone"], "rev", ["docs/a.md"])
         self.assertEqual(facts["Case A"]["kind"], "compiled")
