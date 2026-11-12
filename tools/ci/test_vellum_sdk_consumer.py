@@ -55,7 +55,7 @@ class VerifyArchiveTests(unittest.TestCase):
         name = "vellum-sdk-0.1.10-darwin-arm64.tar.gz"
         (d / name).write_bytes(payload)
         digest = listed or hashlib.sha256(payload).hexdigest()
-        (d / "SHA256SUMS").write_text(f"{digest}  {name}\nabc  install.sh\n")
+        (d / "SHA256SUMS").write_text(f"{digest}  {name}\nabc  install.sh\n", encoding="utf-8")
         return d
 
     def test_matching_digest_passes(self):
@@ -130,7 +130,7 @@ class SkipIfUnchangedTests(unittest.TestCase):
         import os
         os.environ["GH_TOKEN"] = "t"
         rc = vsc.resolve(args)
-        return rc, outputs.read_text() if outputs.exists() else ""
+        return rc, outputs.read_text(encoding="utf-8") if outputs.exists() else ""
 
     def test_same_head_reports_unchanged_without_downloading(self):
         self.recorded = "sha1"
@@ -246,16 +246,17 @@ class _StandInSdk:
         self.root = Path(tempfile.mkdtemp())
         inc = self.root / "sdk/mirror/include/vellum/canvas"
         inc.mkdir(parents=True)
-        (inc / "canvas.hpp").write_text("#pragma once\nint canvas_value();\n")
+        (inc / "canvas.hpp").write_text("#pragma once\nint canvas_value();\n", encoding="utf-8")
         (self.root / "src").mkdir()
         self.source = "src/consumer.cpp"
-        (self.root / self.source).write_text(self.body)
+        (self.root / self.source).write_text(self.body, encoding="utf-8")
         build = self.root / "build"
         build.mkdir()
         (build / "build.ninja").write_text(
             "rule cxx\n  command = {cxx} -isystem {inc} -std=c++17 -MD -MF $out.d -o $out -c $in\n"
             "build consumer.o: cxx {src}\nbuild target: phony consumer.o\n".format(
-                cxx=self.cxx, inc=self.root / "sdk/mirror/include", src=self.root / self.source))
+                cxx=self.cxx, inc=self.root / "sdk/mirror/include", src=self.root / self.source),
+            encoding="utf-8")
         self.args = ["negative-control", "--build-dir", str(build), "--prefix", str(self.root / "sdk"),
                      "--target", "target", "--source", self.source, "--header", "vellum/canvas/canvas.hpp"]
 

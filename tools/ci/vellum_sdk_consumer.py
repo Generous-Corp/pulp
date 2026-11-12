@@ -77,6 +77,15 @@ class _DropAuthOnRedirect(urllib.request.HTTPRedirectHandler):
 _OPENER = urllib.request.build_opener(_DropAuthOnRedirect)
 
 
+def _open_url(request: urllib.request.Request, timeout: int = 300):
+    """Open a URL through _OPENER (the auth-dropping redirect handler).
+
+    Goes through urlopen, not _OPENER.open, so this stays a byte-level network
+    read and not a text-mode file open for the encoding lint."""
+    urllib.request.install_opener(_OPENER)
+    return urllib.request.urlopen(request, timeout=timeout)
+
+
 def _api(path: str, token: str, *, raw: bool = False):
     if not token:
         raise ResolveError("no GitHub token: set GH_TOKEN (artifact downloads need an authenticated token)")
@@ -89,7 +98,7 @@ def _api(path: str, token: str, *, raw: bool = False):
         },
     )
     try:
-        with _OPENER.open(request, timeout=300) as response:
+        with _open_url(request, timeout=300) as response:
             body = response.read()
     except urllib.error.HTTPError as error:
         raise ResolveError(f"GET {path}: HTTP {error.code} {error.reason}") from error
@@ -335,7 +344,7 @@ def negative_control(args: argparse.Namespace) -> int:
         print(f"negative-control: INCONCLUSIVE: {mirror_include / header} does not exist", file=sys.stderr)
         return INCONCLUSIVE
     commands = subprocess.run(["ninja", "-C", str(build), "-t", "commands", args.target],
-                              capture_output=True, text=True)
+                              capture_output=True, text=True, encoding="utf-8")
     lines = [line for line in commands.stdout.splitlines() if args.source in line and " -c " in f" {line} "]
     if commands.returncode != 0 or len(lines) != 1:
         print(f"negative-control: INCONCLUSIVE: expected one compile of {args.source} in {args.target}, "
@@ -349,8 +358,8 @@ def negative_control(args: argparse.Namespace) -> int:
             renamed = broken_include / header
             renamed.rename(renamed.with_name(renamed.name + ".renamed-by-negative-control"))
             broken = substitute(clean, str(mirror_include), str(broken_include))
-            clean_run = subprocess.run(clean.argv, cwd=build, capture_output=True, text=True)
-            broken_run = subprocess.run(broken.argv, cwd=build, capture_output=True, text=True)
+            clean_run = subprocess.run(clean.argv, cwd=build, capture_output=True, text=True, encoding="utf-8")
+            broken_run = subprocess.run(broken.argv, cwd=build, capture_output=True, text=True, encoding="utf-8")
     except ValueError as error:
         print(f"negative-control: INCONCLUSIVE: {error}", file=sys.stderr)
         return INCONCLUSIVE
