@@ -4,14 +4,12 @@
   "data": "none",
   "inputs": [],
   "kind": "compiled",
-  "runtime_targets": [
-   "pulp-g9-joined-child-fixture"
-  ],
+  "runtime_targets": [],
   "sources": [],
   "spawning_sources": [
    "test/test_runtime_utils.cpp"
   ],
-  "spawns": "declared",
+  "spawns": "none",
   "undeclared_sources": []
  },
  "scanned": true
