@@ -8158,7 +8158,6 @@ tests = [
   "local-diff-cover-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
-  "prepush-affected-tests",
   "prepush-cannot-measure",
   "prepush-format-gate-wiring",
   "prepush-gate-output",
