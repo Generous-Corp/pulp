@@ -157,6 +157,18 @@ TIMEOUT_EVIDENCE = (
     re.compile(r"has timed out\b[^\r\n]*"),
     re.compile(r"has exceeded the maximum execution time of \d+ minutes?"),
 )
+# GitHub normally reports a timed-out job as `failure` or `cancelled` and puts
+# the timeout wording in a check-run annotation. Some API surfaces instead
+# preserve the explicit `timed_out` conclusion, so every failed-leg path must
+# recognize it as the same retryable timeout.
+JOB_FAILURE_CONCLUSIONS = frozenset(("failure", "timed_out"))
+JOB_TERMINAL_FAILURE_CONCLUSIONS = frozenset(("failure", "cancelled", "timed_out"))
+
+
+def _check_run_id(job: dict) -> int | None:
+    """Return the check-run id, distinct from the workflow-job id."""
+    match = re.search(r"/check-runs/(\d+)(?:/|\?|$)", job.get("check_run_url", ""))
+    return int(match.group(1)) if match else None
 
 
 def timeout_evidence(messages: Iterable[str]) -> str | None:
@@ -192,7 +204,7 @@ def timeout_rerun_candidate(
     if not completed:
         return None, ()
     run = completed[0]
-    if run.get("conclusion") not in ("failure", "cancelled"):
+    if run.get("conclusion") not in JOB_TERMINAL_FAILURE_CONCLUSIONS:
         return None, ()
     jobs = job_cache.get(run["id"], [])
     if not jobs:
@@ -202,12 +214,14 @@ def timeout_rerun_candidate(
     legs: list[str] = []
     other_failure = False
     for job in current:
-        if job.get("conclusion") not in ("failure", "cancelled"):
+        if job.get("conclusion") not in JOB_TERMINAL_FAILURE_CONCLUSIONS:
             continue
         evidence = timed_out(job)
+        if evidence is None and job.get("conclusion") == "timed_out":
+            evidence = "job concluded timed_out"
         if evidence:
             legs.append(f"{job.get('name', 'unknown job')} › {evidence}")
-        elif job.get("conclusion") == "failure":
+        elif job.get("conclusion") in JOB_FAILURE_CONCLUSIONS:
             other_failure = True
     if not legs:
         return None, ()
@@ -575,13 +589,13 @@ def failed_legs(jobs: Iterable[dict]) -> tuple[str, ...]:
     """Name each failed job and the first step it failed in."""
     legs: list[str] = []
     for job in jobs:
-        if job.get("conclusion") != "failure":
+        if job.get("conclusion") not in JOB_FAILURE_CONCLUSIONS:
             continue
         step = next(
             (
                 st.get("name", "")
                 for st in job.get("steps", [])
-                if st.get("conclusion") == "failure"
+                if st.get("conclusion") in JOB_FAILURE_CONCLUSIONS
             ),
             "",
         )
@@ -599,7 +613,7 @@ DISPATCH_GUARD_STEP = "Dispatch must run on the tag it publishes"
 def _first_failed_step(job: dict) -> str:
     return next(
         (st.get("name", "") for st in job.get("steps", [])
-         if st.get("conclusion") == "failure"),
+         if st.get("conclusion") in JOB_FAILURE_CONCLUSIONS),
         "",
     )
 
@@ -621,7 +635,7 @@ def root_cause_run(
             continue
         latest = max(int(j.get("run_attempt", 1)) for j in jobs)
         current = [j for j in jobs if int(j.get("run_attempt", 1)) == latest]
-        failed = [j for j in current if j.get("conclusion") == "failure"]
+        failed = [j for j in current if j.get("conclusion") in JOB_FAILURE_CONCLUSIONS]
         if failed and all(_first_failed_step(j) == DISPATCH_GUARD_STEP for j in failed):
             if fallback[0] is None:
                 fallback = (run, current)
@@ -771,20 +785,26 @@ def collect(
 
     def timed_out(job: dict) -> str | None:
         job_id = job.get("id")
+        check_run_id = _check_run_id(job)
         if job_id is None:
             return None
         if job_id not in timeout_cache:
             messages: list[str] = []
-            try:
-                annotations = gh_json(
-                    ["api", f"repos/{repo}/check-runs/{job_id}/annotations?per_page=100"]
-                )
-                messages = [a.get("message", "") for a in annotations or []]
-            except (subprocess.CalledProcessError, ValueError):
-                pass
+            if check_run_id is not None:
+                try:
+                    annotations = gh_json(
+                        ["api", f"repos/{repo}/check-runs/{check_run_id}/annotations?per_page=100"]
+                    )
+                    messages = [a.get("message", "") for a in annotations or []]
+                except (subprocess.CalledProcessError, ValueError):
+                    pass
+            if job.get("conclusion") == "timed_out":
+                messages.append("job concluded timed_out")
             if job.get("conclusion") == "failure":
                 messages.append(log_fetcher(job_id))
             timeout_cache[job_id] = timeout_evidence(messages)
+            if timeout_cache[job_id] is None and job.get("conclusion") == "timed_out":
+                timeout_cache[job_id] = "job concluded timed_out"
         return timeout_cache[job_id]
 
     for r in flat_runs:
@@ -978,9 +998,9 @@ def validation_outcomes(
         # A job that hit its timeout hung; its failed step (even a smoke or
         # product-matrix step) never reached a verdict, so it is neither
         # failure nor pass evidence and must not open the circuit.
-        if (
+        if job.get("conclusion") == "timed_out" or (
             timed_out is not None
-            and job.get("conclusion") in ("failure", "cancelled")
+            and job.get("conclusion") in JOB_TERMINAL_FAILURE_CONCLUSIONS
             and timed_out(job)
         ):
             continue
@@ -1003,7 +1023,7 @@ def validation_outcomes(
             if prefix is None:
                 continue
             gate = f"{job_name}|{prefix}"
-            if step.get("conclusion") == "failure":
+            if step.get("conclusion") in JOB_FAILURE_CONCLUSIONS:
                 failures[gate] = f"{job_name}: {name}"
             elif step.get("conclusion") == "success":
                 passed.add(gate)

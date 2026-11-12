@@ -1109,6 +1109,16 @@ class FailedLegs(unittest.TestCase):
             (),
         )
 
+    def test_timed_out_job_is_named_as_a_failed_leg(self) -> None:
+        runs = [{"id": 1, "status": "completed", "created_at": "2026-10-03T09:00:00Z"}]
+        jobs = {
+            1: [{"name": "CLI darwin-x64", "conclusion": "timed_out", "run_attempt": 1,
+                 "steps": [{"name": "Build", "conclusion": "timed_out"}]}]
+        }
+        self.assertEqual(
+            rr.newest_failed_legs(runs, jobs), ("CLI darwin-x64 › Build",)
+        )
+
 
 def sweep(
     states: list[TagState],
@@ -1320,6 +1330,17 @@ class TimedOutLegIsRerunOnce(unittest.TestCase):
         self.assertEqual(run_id, 43259055785)
         self.assertEqual(legs, (f"CLI darwin-x64 › {self.MESSAGE}",))
 
+    def test_timed_out_conclusion_is_a_rerun_candidate_without_annotation(self) -> None:
+        run = self.run_(conclusion="timed_out")
+        jobs = self.jobs()
+        jobs[0]["conclusion"] = "timed_out"
+        jobs[0]["steps"][0]["conclusion"] = "timed_out"
+        run_id, legs = rr.timeout_rerun_candidate(
+            [run], {run["id"]: jobs}, lambda _job: None
+        )
+        self.assertEqual(run_id, 43259055785)
+        self.assertEqual(legs, ("CLI darwin-x64 › job concluded timed_out",))
+
     def test_second_attempt_is_not_rerun_again(self) -> None:
         run = self.run_(attempt=2)
         run_id, legs = rr.timeout_rerun_candidate(
@@ -1392,6 +1413,20 @@ class TimedOutLegIsRerunOnce(unittest.TestCase):
         self.assertTrue(rr.validation_outcomes([job])[0])
         failures, passed = rr.validation_outcomes([job], None, lambda _j: "has timed out")
         self.assertEqual((failures, passed), ({}, set()))
+
+    def test_timed_out_conclusion_does_not_open_the_circuit(self) -> None:
+        job = {"id": 9, "name": "Smoke darwin-x64", "conclusion": "timed_out",
+               "steps": [{"name": "Smoke CLI", "conclusion": "timed_out"}]}
+        self.assertEqual(rr.validation_outcomes([job]), ({}, set()))
+
+    def test_check_run_id_comes_from_check_run_url(self) -> None:
+        self.assertEqual(
+            rr._check_run_id({
+                "id": 131325226864,
+                "check_run_url": "https://api.github.com/repos/o/r/check-runs/987654321",
+            }),
+            987654321,
+        )
 
     def test_rerun_uses_rerun_failed_jobs_and_is_dry_run_safe(self) -> None:
         out = io.StringIO()
