@@ -18,7 +18,7 @@ the GitHub API. For a matrix job the p95 is the slowest leg's, since one value
 bounds every leg. `tools/ci/release_step_timeouts.json` records N, each p95 and
 each derived value, and is what `check` enforces.
 
-    derive   fetch history and print the table (JSON) — run it to refresh
+    derive   fetch history and print the table (JSON); run it to refresh
     check    fail if a policed workflow has a job without `timeout-minutes`,
              or a step listed in the policy without the recorded value
 

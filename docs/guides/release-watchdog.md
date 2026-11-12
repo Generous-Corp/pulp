@@ -42,7 +42,7 @@ firehose.
 | 2. Auto-release watchdog | `workflow_run` completion | auto-release.yml runtime failure (any cause) | 1-2 minutes |
 | 3. Cadence check | `schedule` every 30 min | version bumped on main but no tag created | ≤45 min |
 | 4. **Release reconciler** | `schedule` every 30 min + each Release CLI completion | **tag exists but never published — and REPAIRS it**; re-runs a leg that hit its timeout once; reports a compile error at once and any tag unpublished after 2 h, naming the failing leg | ≤30 min |
-| 4a. Release step timeouts | every release job and long step (`timeout-minutes`) | a leg that HANGS instead of failing — it would otherwise hold the release for GitHub's 6-hour default | at the step's timeout (4 x its p95) |
+| 4a. Release step timeouts | every release job and long step (`timeout-minutes`) | a leg that HANGS instead of failing, which would otherwise hold the release for GitHub's 6-hour default | at the step's timeout (4 x its p95) |
 | 5. Release content gate | each native release leg + release finalizer | correctly named archives containing missing, stale, wrong-version, non-executable, or invalidly signed products | pre-publish |
 | 6. Deletion tripwire | `release: [deleted]` | a human/agent deleted a release or draft — burned tag name, destroyed assets | ~1 minute |
 

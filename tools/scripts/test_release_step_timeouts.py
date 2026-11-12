@@ -2,7 +2,7 @@
 """Tests for tools/scripts/release_step_timeouts.py.
 
 The lint must fail when a release job has no `timeout-minutes`, when a long
-step loses its timeout, and when a value drifts from the derived policy — and
+step loses its timeout, and when a value drifts from the derived policy, and
 must pass on the tree as committed. The derivation must size a step for its
 SLOWEST matrix leg and must bound the v1.119.0 hang well below its 105+ minutes.
 """

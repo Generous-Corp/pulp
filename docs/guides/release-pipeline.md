@@ -565,7 +565,7 @@ Update this doc whenever you change any of these files:
 - `.github/workflows/release-reconcile.yml`
 - `tools/scripts/release_reconcile.py`
 - `tools/ci/release_step_timeouts.json` / `tools/scripts/release_step_timeouts.py`
-  — the derived `timeout-minutes` of every release job and long step (see
+  (the derived `timeout-minutes` of every release job and long step; see
   [release-watchdog.md](release-watchdog.md#a-hung-leg-fails-at-its-own-timeout-and-is-re-run-once))
 - `.github/workflows/auto-release-watchdog.yml`
 - `.github/workflows/release-cadence-check.yml`

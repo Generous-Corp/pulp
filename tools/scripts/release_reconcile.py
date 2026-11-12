@@ -502,8 +502,8 @@ def decide(
 
     # A leg that HUNG and hit its timeout-minutes is re-run once in place
     # (rerun-failed-jobs on the same run): one leg instead of the six-leg
-    # matrix a re-dispatch rebuilds. Idempotent like a re-dispatch — the
-    # finalizer no-ops on a published tag — and it does not spend the
+    # matrix a re-dispatch rebuilds. Idempotent like a re-dispatch (the
+    # finalizer no-ops on a published tag), and it does not spend the
     # re-dispatch budget. A second timeout takes the ordinary path below.
     if state.rerun_run_id is not None:
         return Decision(
@@ -1082,7 +1082,7 @@ def runs_this_tag(run: dict, tag: str, dispatch_tag: str | None = None) -> bool:
 
 
 def rerun_timed_out(repo: str, tag: str, run_id: int, dry_run: bool) -> None:
-    """Re-run the failed jobs of `run_id` once — the leg that hit its timeout.
+    """Re-run the failed jobs of `run_id` once: the leg that hit its timeout.
 
     `rerun-failed-jobs` re-runs failed and cancelled jobs plus the jobs that
     depend on them (the smoke matrix and the `release` finalizer), on the same
