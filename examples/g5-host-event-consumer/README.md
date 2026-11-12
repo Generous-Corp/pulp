@@ -46,6 +46,6 @@ Expected receipt:
 g5-host-event-contract PASS checks=409 host_mpe_events=3 graph_events=9 graph_ingress_events=5 partitions=1,32,64,127,256 planted_negative=5
 ```
 
-The `checks=378` count is the expected count from the current fixture source;
+The `checks=409` count is the expected count from the current fixture source;
 it is not a receipt until the executable is built and run against a freshly
 installed SDK from the same source revision.
