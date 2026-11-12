@@ -963,6 +963,12 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME merge-group-hold-check-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_merge_group_hold_check.py")
         set_tests_properties(merge-group-hold-check-selftest PROPERTIES TIMEOUT 60)
+        # The merge-group docs entry-delta step (protected-base classifier,
+        # ALLGREEN strategy guard, enforce/shadow mode), run against a scratch
+        # repository and a local rulesets stand-in.
+        add_test(NAME build-yml-docs-entry-delta-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_build_yml_docs_entry_delta.py")
+        set_tests_properties(build-yml-docs-entry-delta-selftest PROPERTIES TIMEOUT 120)
         # The one merge-group step that runs all four shadow instruments.
         add_test(NAME merge-group-shadows-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_merge_group_shadows.py")

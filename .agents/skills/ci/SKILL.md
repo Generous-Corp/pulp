@@ -605,6 +605,19 @@ fails the HOLD check and a live breaker closed. A group failing with "main's
 tip could not be resolved" is that fallback: read the step's `merge-group base:`
 line, then re-run classify or re-queue.
 
+One deliberate exception narrows only `native_build_required`: the "Docs-only
+entry delta (merge groups)" step skips the native build for a group whose OWN
+entry (`base_sha..head_sha --no-renames`, classified by the protected base's
+`classify_changes.py`) is `docs-only`. It is sound only under ALLGREEN, so the
+step reads the rulesets live on every run and keeps the build unless exactly
+one active `merge_queue` rule on the default branch says ALLGREEN, and it
+skips only when `PULP_DOCS_ENTRY_DELTA` is exactly `enforce` (otherwise it
+reports `would_skip`). Read its `docs-entry-delta` notice before assuming a
+skip-safe group was misclassified. Never cache or remove the strategy read
+(decision 11), never let it change another output, and never move the HOLD
+check, breaker, A2T or bump path onto the entry delta. A new entry-delta rule
+ships only after `reuse_policy_replay.py score` reads 0 false skips for it.
+
 ## Diff-scoped gates on merge_group use the entry's own base
 
 `Enforce version & skill sync` diffs against `merge_group.base_sha` on a queued
