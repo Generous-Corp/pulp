@@ -53,6 +53,34 @@ class BaselineTests(unittest.TestCase):
         self.assertIn('${ROOT}/core/runtime/src/durable_file_replacement.cpp"', listing)
         self.assertIn('${ROOT}/core/host/src/processor_restore.cpp"', listing)
 
+    def test_web_sources_define_every_host_query_the_closure_calls(self):
+        # The isolated web profile links only the curated closure, so a
+        # function its sources call must be DEFINED by one of its sources or
+        # wasm-ld fails with an undefined symbol. Each entry names a query
+        # whose native implementation cannot be compiled for wasm, and so needs
+        # a web-safe definition inside the closure.
+        import re
+        repo = Path(__file__).resolve().parents[2]
+        listing = (repo / "tools" / "cmake" /
+                   "PulpSampleRegionWebSources.cmake").read_text(encoding="utf-8")
+        closure = re.findall(r'"\$\{ROOT\}/([^"]+\.cpp)"', listing)
+        self.assertIn("core/host/src/signal_graph_authoring.cpp", closure)
+        texts = {path: (repo / path).read_text(encoding="utf-8") for path in closure}
+        for symbol, native_only in (
+            ("is_isolated_plugin_slot", "core/host/src/isolated_plugin_slot.cpp"),
+        ):
+            with self.subTest(symbol=symbol):
+                call = re.compile(r"\b" + symbol + r"\s*\(")
+                definition = re.compile(
+                    r"^(?!\s)[^;\n]*\b" + symbol +
+                    r"\s*\([^;{]*\)\s*(?:const\s*)?(?:noexcept\s*)?\{", re.M)
+                callers = [p for p, text in texts.items() if call.search(text)]
+                definers = [p for p, text in texts.items() if definition.search(text)]
+                self.assertTrue(callers, f"no closure source calls {symbol}")
+                self.assertTrue(definers,
+                                f"{symbol} is called by {callers} but no web source defines it")
+                self.assertNotIn(native_only, closure)
+
     def test_generator_reads_linked_source_closure_from_cmake_dependinfo(self):
         repo = Path(__file__).resolve().parents[2]
         with tempfile.TemporaryDirectory() as raw:
