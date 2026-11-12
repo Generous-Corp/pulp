@@ -281,7 +281,7 @@ TEST_CASE("Scale probe bundles are built for every hosted format", "[host][scale
 TEST_CASE("Every format shows the host all 2,000 parameter IDs, stable across instances",
           "[host][scale][params]") {
     const auto expected = fixture_ids();
-    for (const auto& target : slot_targets()) {
+    for (const auto& target : targets()) {
         INFO(target.label);
         auto first = load_prepared(target);
         auto second = load_prepared(target);
@@ -351,7 +351,7 @@ TEST_CASE("Every format shows the host all 2,000 parameter IDs, stable across in
 TEST_CASE("Every format restores 2,000-parameter state into a new instance byte-identically",
           "[host][scale][state]") {
     using clock = std::chrono::steady_clock;
-    for (const auto& target : slot_targets()) {
+    for (const auto& target : targets()) {
         INFO(target.label);
         auto source = load_prepared(target);
         const auto params = source->parameters();
@@ -416,7 +416,7 @@ TEST_CASE("Every format renders each output bus's own tone and delivers the inpu
           "[host][scale][buses]") {
     namespace analysis = pulp::test::audio;
     constexpr int kBlocks = 64;
-    for (const auto& target : slot_targets()) {
+    for (const auto& target : targets()) {
         INFO(target.label);
         auto slot = load_prepared(target);
         Block<kFrames> block;
@@ -456,7 +456,7 @@ TEST_CASE("Every format renders each output bus's own tone and delivers the inpu
 TEST_CASE("Every format's audio callback allocates nothing at 2,000 parameters",
           "[host][scale][rt-safety]") {
     constexpr int kBlocks = 256;
-    for (const auto& target : slot_targets()) {
+    for (const auto& target : targets()) {
         INFO(target.label);
         auto slot = load_prepared(target);
         Block<kFrames> block;
@@ -531,9 +531,17 @@ TEST_CASE("The standalone's persistence path round-trips 2,000-parameter state",
 TEST_CASE("The AU instrument with six outputs and an input prepares in the AUv3 slot",
           "[host][scale][buses][au]") {
 #ifdef PULP_TEST_SCALE_PROBE_AU
-    // Not a pass: the case is held out until the AU six-output fix lands, and
-    // says so in the test output.
-    SKIP(kAuSlotKnownFailure);
+    // Loaded in process because the test registers the component with this
+    // process only; the shared tone and state cases then render all seven
+    // elements through the slot.
+    const Target au{host::PluginFormat::AudioUnitV3, PULP_TEST_SCALE_PROBE_AU, "AU (in process)"};
+    std::string why;
+    auto slot = load(au, why);
+    INFO(why);
+    REQUIRE(slot);
+    REQUIRE(slot->prepare(48000.0, kFrames));
+    Block<kFrames> block;
+    block.run(*slot);
 #else
     SKIP("the AU component is not built in this configuration");
 #endif

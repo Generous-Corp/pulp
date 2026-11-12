@@ -16,6 +16,11 @@
 #include <pulp/runtime/spsc_queue.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 #include <pulp/state/modulation_lane.hpp>
+#include <pulp/format/preset_program_router.hpp>
+#include <pulp/format/detail/clap_preset_library_gate.hpp>
+#if PULP_CLAP_PRESET_LIBRARY
+#include <pulp/state/preset_library.hpp>
+#endif
 #include <pulp/state/preset_manager.hpp>
 #include <pulp/signal/delay_line.hpp>
 #include <clap/clap.h>
@@ -283,6 +288,13 @@ struct PulpClapPlugin {
 
     // Preset management (optional — set by plugins that provide presets)
     std::unique_ptr<state::PresetManager> preset_manager;
+    // Present only when the descriptor sets supports_program_change. Declared
+    // after preset_manager so it is destroyed first (it holds a reference).
+#if PULP_CLAP_PRESET_LIBRARY
+    std::unique_ptr<state::PresetLibrary> preset_library;
+#endif
+    // Audio thread scans MIDI into it; the main thread takes its requests.
+    PresetProgramRouter program_router;
 
     // ARA document controller (optional; Processor opts in by overriding
     // create_ara_document_controller()).

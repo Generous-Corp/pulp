@@ -10012,6 +10012,16 @@ while debugging runner routing.
 
 ### Verifying your branch isn't burning macOS runner time
 
+### PR workflow concurrency is per-PR and event-gated
+
+Every workflow triggered by `pull_request` or `pull_request_target` needs a
+workflow-level concurrency group keyed by the PR number (falling back to
+`github.ref`) and must set `cancel-in-progress` only for those PR events. This
+lets a newer head release queued runner capacity without cancelling pushes to
+`main`, merge-group entries, tags, releases, schedules, or manual dispatches.
+Existing workflows with deliberate concurrency comments retain their documented
+policy; audit new PR-triggered workflows for this block before adding them.
+
 Each failed macOS leg consumes one of the scarce self-hosted runners and
 queues every other PR behind your run. Before broadcasting "my CI is stuck",
 inspect the exact job state and queue age, then the eligible hosts'
@@ -10609,6 +10619,11 @@ red together is the normal shape of a *single* freeze-check failure:
 So `Vellum trusted freeze` legitimately shows up twice in `gh pr checks` — once
 as the posted status, once as the `merge_group` job skipped on a `pull_request`
 event. Fix the underlying freeze-check failure and all three clear together.
+
+The `Vellum freeze` job also runs `vellum_ui_drift_report.py` as a
+`continue-on-error` step. It lists transferred UI paths that are not frozen and
+differ from the export receipt blobs. A listed path never turns the job red;
+only an unreadable input (exit 2) shows as a failed step.
 
 The usual cause is a change to a `framework-authoritative-transferred` slice
 with no matching change event under `.github/vellum-change-events/`. The
@@ -13576,3 +13591,21 @@ or a title naming the context beside a fix word) and reports other approved
 heads as `held_base_poisoned:<context>`. A held head is not broken: do not
 re-push it, the hold lifts once a merge group passes the context. The reviewer
 kick and priority file are machine-only keys and must stay out of this file.
+
+## Downloading another repository's Actions artifact
+
+`vellum-sdk-consumer.yml` reads Vellum's SDK artifact from Pulp's CI. Three things
+about that path are not obvious:
+
+- **A public repository's artifacts still need a token.** The artifact zip
+  endpoint refuses anonymous requests even when the repository is public;
+  `github.token` from any repository is enough.
+- **The token must not follow the redirect.** `actions/artifacts/<id>/zip`
+  answers with a redirect to signed blob storage, and that host rejects a
+  forwarded GitHub `Authorization` header with HTTP 401. Python's `urllib`
+  forwards it by default; `tools/ci/vellum_sdk_consumer.py` drops it on any
+  cross-host redirect. `curl -L` without `--location-trusted` already drops it.
+- **Skip by head, but only from a green run.** The nightly lane stops early when
+  Vellum main's head equals the head recorded in the last *successful* run's
+  receipt artifact, and it uploads that receipt only when the whole run is
+  green, so a red night is retried on the next one rather than forgotten.

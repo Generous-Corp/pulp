@@ -869,6 +869,12 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_vellum_trusted_merge.py")
     set_tests_properties(vellum-trusted-merge-selftest PROPERTIES TIMEOUT 120)
 
+    # Advisory drift report over transferred UI paths: planted-change control,
+    # non-UI and frozen exclusions, and the exit-2 contract for missing records.
+    add_test(NAME vellum-ui-drift-report-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_vellum_ui_drift_report.py")
+    set_tests_properties(vellum-ui-drift-report-selftest PROPERTIES TIMEOUT 120)
+
     # Development-inspector truth gate: mutation tests prove capability/profile
     # and user-facing runtime claims fail when either side drifts.
     add_test(NAME inspector-truth-check-selftest COMMAND ${Python3_EXECUTABLE}

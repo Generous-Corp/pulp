@@ -6,6 +6,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/ui_components.hpp>
+#include <pulp/state/preset_library.hpp>
 #include <pulp/state/preset_manager.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <functional>
@@ -30,6 +31,13 @@ namespace pulp::view {
 /// };
 /// root.add_child(std::move(browser_ptr));
 /// @endcode
+///
+/// With a `state::PresetLibrary` attached (`set_library`) the browser lists the
+/// library's query results instead: each row shows a favourite star, the
+/// display name (a rename never touches the file), tags and the MIDI program
+/// number when the library has a program map. The search text uses the
+/// library's grammar (every word must match). Without a library the browser
+/// behaves exactly as before.
 class PresetBrowser : public View {
 public:
     explicit PresetBrowser(state::PresetManager& manager)
@@ -45,10 +53,72 @@ public:
     /// Called when a preset is activated (double click or Enter).
     std::function<void(const state::PresetInfo&)> on_preset_activated;
 
-    /// Refresh the preset list from the PresetManager.
+    /// Refresh the preset list from the PresetManager (or the library).
     void refresh() {
+        if (library_) {
+            apply_library_query();
+            return;
+        }
         all_presets_ = manager_.all_presets();
         apply_filter();
+    }
+
+    // ── Library mode ────────────────────────────────────────────────────
+
+    /// Attach a library (not owned; it must outlive the browser) or detach with
+    /// nullptr. Switches the list to the library's query results.
+    void set_library(state::PresetLibrary* library) {
+        library_ = library;
+        refresh();
+    }
+    bool has_library() const {
+        return library_ != nullptr;
+    }
+
+    /// Only favourites. No effect without a library.
+    void set_favourites_only(bool only) {
+        favourites_only_ = only;
+        refresh();
+    }
+    /// Only presets carrying this tag (empty clears). No effect without a library.
+    void set_tag_filter(const std::string& tag) {
+        tag_filter_ = tag;
+        refresh();
+    }
+
+    /// The library summary behind the selected row, or nullptr.
+    const state::PresetSummary* selected_summary() const {
+        if (!library_ || selected_index_ < 0 ||
+            selected_index_ >= static_cast<int>(summaries_.size()))
+            return nullptr;
+        return &summaries_[static_cast<size_t>(selected_index_)];
+    }
+    const state::PresetSummary* summary_at(int index) const {
+        if (!library_ || index < 0 || index >= static_cast<int>(summaries_.size()))
+            return nullptr;
+        return &summaries_[static_cast<size_t>(index)];
+    }
+
+    /// Edits on the selected row. Each returns false without a library or a
+    /// selection, and re-queries so the list reflects the change.
+    bool toggle_favourite_selected() {
+        const auto* s = selected_summary();
+        if (!s)
+            return false;
+        return edit_selected(
+            [&](const std::string& key) { return library_->set_favourite(key, !s->favourite); });
+    }
+    bool add_tag_to_selected(const std::string& tag) {
+        return edit_selected([&](const std::string& key) { return library_->add_tag(key, tag); });
+    }
+    bool remove_tag_from_selected(const std::string& tag) {
+        return edit_selected(
+            [&](const std::string& key) { return library_->remove_tag(key, tag); });
+    }
+    /// An empty name clears the override and shows the file name again.
+    bool rename_selected(const std::string& display_name) {
+        return edit_selected(
+            [&](const std::string& key) { return library_->set_display_name(key, display_name); });
     }
 
     /// Set search filter text. Empty string shows all presets.
@@ -164,9 +234,17 @@ public:
                 canvas.fill_rect(b.x + 2, y, b.width - 4, row_height_);
             }
 
-            // Factory/user indicator
+            const state::PresetSummary* summary = summary_at(i);
+
+            // Factory/user indicator, or the favourite star in library mode
             canvas.set_font("system", 10);
-            if (preset.is_factory) {
+            if (summary) {
+                canvas.set_fill_color(
+                    summary->favourite ? resolve_color("accent", canvas::Color::hex(0xe94560))
+                                       : resolve_color("text_muted", canvas::Color::hex(0x606070)));
+                canvas.fill_text(summary->favourite ? "\xe2\x98\x85" : "\xe2\x98\x86", // ★ ☆
+                                 b.x + 6, y + row_height_ * 0.65f);
+            } else if (preset.is_factory) {
                 canvas.set_fill_color(resolve_color("text_muted",
                     canvas::Color::hex(0x606070)));
                 canvas.fill_text("F", b.x + 6, y + row_height_ * 0.65f);
@@ -176,7 +254,23 @@ public:
             canvas.set_font("system", 13);
             canvas.set_fill_color(resolve_color("text",
                 canvas::Color::hex(0xe0e0e0)));
-            canvas.fill_text(preset.name, b.x + 22, y + row_height_ * 0.65f);
+            canvas.fill_text(summary ? summary->display_name : preset.name, b.x + 22,
+                             y + row_height_ * 0.65f);
+
+            if (summary) {
+                std::string extra;
+                for (const auto& t : summary->tags)
+                    extra += (extra.empty() ? "" : " ") + ("#" + t);
+                if (summary->program)
+                    extra += (extra.empty() ? "" : "  ") + std::to_string(summary->program->bank) +
+                             ":" + std::to_string(summary->program->program);
+                if (!extra.empty()) {
+                    canvas.set_font("system", 10);
+                    canvas.set_fill_color(
+                        resolve_color("text_muted", canvas::Color::hex(0x808090)));
+                    canvas.fill_text(extra, b.x + b.width - 130, y + row_height_ * 0.65f);
+                }
+            }
 
             // Folder path (if any)
             if (!preset.folder.empty()) {
@@ -220,6 +314,11 @@ public:
 
         if (index >= 0 && index < static_cast<int>(filtered_.size())) {
             selected_index_ = index;
+            // The star column toggles the favourite instead of selecting.
+            if (library_ && event.position.x < 20.0f) {
+                toggle_favourite_selected();
+                return;
+            }
             notify_selection();
 
             if (event.click_count == 2 && on_preset_activated) {
@@ -231,6 +330,10 @@ public:
     bool on_key_event(const KeyEvent& event) override {
         if (!event.is_down) return false;
 
+        if (library_ && event.key == KeyCode::f && !event.isMainModifier() && selected_summary()) {
+            toggle_favourite_selected();
+            return true;
+        }
         if (event.key == KeyCode::up) { select_previous(); return true; }
         if (event.key == KeyCode::down) { select_next(); return true; }
         if (event.key == KeyCode::enter && selected_preset()) {
@@ -251,8 +354,67 @@ private:
     int selected_index_ = -1;
     float row_height_ = 24.0f;
     float scroll_offset_ = 0.0f;
+    state::PresetLibrary* library_ = nullptr;
+    std::vector<state::PresetSummary> summaries_; ///< Parallel to filtered_ in library mode
+    bool favourites_only_ = false;
+    std::string tag_filter_;
+
+    template <typename Edit> bool edit_selected(Edit&& edit) {
+        const auto* s = selected_summary();
+        if (!s)
+            return false;
+        const std::string key = s->key; // the query below invalidates s
+        const bool ok = edit(key);
+        apply_library_query(key);
+        return ok;
+    }
+
+    void apply_library_query(const std::string& keep_key = {}) {
+        std::string selected = keep_key;
+        if (selected.empty())
+            if (const auto* s = selected_summary())
+                selected = s->key;
+
+        state::PresetQuery q;
+        q.text = filter_text_;
+        if (favourites_only_)
+            q.favourite = true;
+        if (!tag_filter_.empty())
+            q.tags_all = {tag_filter_};
+        if (show_mode_ == ShowMode::factory_only)
+            q.source = state::PresetSource::factory;
+        // user_only: every source that is not factory; filtered below.
+        auto page = library_->query(q);
+
+        summaries_.clear();
+        filtered_.clear();
+        for (auto& s : page.items) {
+            if (show_mode_ == ShowMode::user_only && s.is_factory)
+                continue;
+            state::PresetInfo info;
+            info.name = s.name;
+            info.path = s.path;
+            info.is_factory = s.is_factory;
+            info.folder = s.folder;
+            info.author = s.author;
+            info.tags = s.tags;
+            filtered_.push_back(std::move(info));
+            summaries_.push_back(std::move(s));
+        }
+
+        selected_index_ = -1;
+        for (size_t i = 0; i < summaries_.size(); ++i)
+            if (!selected.empty() && summaries_[i].key == selected)
+                selected_index_ = static_cast<int>(i);
+        if (selected_index_ < 0 && !filtered_.empty() && !selected.empty())
+            selected_index_ = 0;
+    }
 
     void apply_filter() {
+        if (library_) {
+            apply_library_query();
+            return;
+        }
         filtered_.clear();
         for (const auto& p : all_presets_) {
             if (show_mode_ == ShowMode::factory_only && !p.is_factory) continue;
