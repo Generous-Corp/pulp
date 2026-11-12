@@ -7,7 +7,8 @@ staged by the Release build at source `f5eeb16bd24d7226a53cbda781f55cad6fbee72f`
 
 ## Verified
 
-- SDK provenance: `darwin-arm64`, `Release` artifacts, `source_git_dirty=false`.
+- SDK provenance: `darwin-arm64`, source install from a CMake `Release` build with
+`build_profile=dev`, `source_git_dirty=false`.
   The provenance file SHA-256 is
   `f30882dec0e7ce14612a3927e4a819b2eb25b8d0b86f34960e958893f2a305da`.
 - Scalar reference: `A1 scalar reference PASS positives=7 planted_negatives=10`.
