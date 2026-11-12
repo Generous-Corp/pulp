@@ -203,8 +203,10 @@ shrinks by one.
 
 The bounded G6 `pulp/host/voice_bank_binding.hpp` and its amended
 `signal_graph_subgraph.hpp` are reviewed host infrastructure, not advertised
-generator capabilities while sustain, saved-bank activation, and paced
-realtime proof remain open. Register both in `REVIEWED_HOST_HEADERS`, classify
+generator capabilities while saved-bank activation and paced realtime proof
+remain open. The bounded sustain and channel-mode behavior is exercised by the
+installed consumer, but does not establish those remaining lanes. Register both
+in `REVIEWED_HOST_HEADERS`, classify
 both with measured fingerprints, regenerate the surface, and update the
 current checkout's consumption census after staging the new header. The
 installed consumer and production-source mutation proof exercise the public

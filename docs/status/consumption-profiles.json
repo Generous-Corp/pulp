@@ -286,6 +286,7 @@
       "pulp/format/detail/appkit_contract_key.hpp",
       "pulp/format/detail/au_v2_editor_resize.hpp",
       "pulp/format/detail/audio_buffer_list_validation.hpp",
+      "pulp/format/detail/clap_preset_library_gate.hpp",
       "pulp/format/detail/delayed_action.hpp",
       "pulp/format/detail/editor_environment.hpp",
       "pulp/format/detail/frame_time_summary.hpp",
@@ -371,6 +372,7 @@
       "pulp/format/plugin_descriptor.hpp",
       "pulp/format/plugin_state_io.hpp",
       "pulp/format/prepare_resources.hpp",
+      "pulp/format/preset_program_router.hpp",
       "pulp/format/process_block.hpp",
       "pulp/format/process_context.hpp",
       "pulp/format/processor.hpp",
@@ -1272,6 +1274,7 @@
       "pulp/state/preset_library.hpp",
       "pulp/state/preset_manager.hpp",
       "pulp/state/preset_metadata_store.hpp",
+      "pulp/state/preset_program_map.hpp",
       "pulp/state/properties_file.hpp",
       "pulp/state/sequencer_state_channel.hpp",
       "pulp/state/stable_sort.hpp",
@@ -1513,6 +1516,7 @@
       "pulp/view/pointer_dispatch.hpp",
       "pulp/view/preferences_panel.hpp",
       "pulp/view/preset_browser.hpp",
+      "pulp/view/preset_program_editor.hpp",
       "pulp/view/press_reach.hpp",
       "pulp/view/property_list.hpp",
       "pulp/view/property_panel.hpp",
@@ -1684,8 +1688,10 @@
     ],
     "integrations/pulp-native/include": [
       "pulp/native/frame_pump.hpp",
+      "pulp/native/gl_surface.hpp",
       "pulp/native/input.hpp",
-      "pulp/native/metal_surface.hpp"
+      "pulp/native/metal_surface.hpp",
+      "pulp/native/surface.hpp"
     ],
     "tools/audio/analysis/include": [
       "pulp/audio/analysis/audio_artifacts.hpp",
@@ -1980,7 +1986,7 @@
           },
           {
             "exported_as": "Pulp::native",
-            "closure_node_count": 10
+            "closure_node_count": 11
           },
           {
             "exported_as": "Pulp::signal-fft-backend",
@@ -6529,7 +6535,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "integrations/pulp-native",
           "closure": {
-            "node_count": 10,
+            "node_count": 11,
             "pulp_targets": [
               "pulp-platform"
             ],
@@ -6539,7 +6545,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 9,
+            "count": 10,
             "third_party_targets": [
               "gpu-runtime-device-api",
               "pulp-native"
@@ -6552,6 +6558,7 @@
               "CoreFoundation",
               "CoreVideo",
               "Metal",
+              "OpenGL",
               "QuartzCore",
               "UniformTypeIdentifiers"
             ],
@@ -6567,6 +6574,7 @@
             "framework:AppKit",
             "framework:CoreVideo",
             "framework:Metal",
+            "framework:OpenGL",
             "framework:QuartzCore",
             "pulp-platform"
           ]

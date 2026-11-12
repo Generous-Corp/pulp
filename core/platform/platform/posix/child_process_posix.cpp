@@ -261,31 +261,50 @@ struct ChildProcess::Impl {
     mutable bool exit_cached = false;
     ProcessResult result;
     bool retained = false;
+    bool joined = false;
+    pid_t joined_group = -1;
     bool custody_lost = false;
     bool retained_reaped = false;
+    bool joined_reaped = false;
     bool retained_term_attempted = false;
     bool retained_term_sent = false;
     bool retained_kill_sent = false;
     std::chrono::steady_clock::time_point retained_term_time;
     std::chrono::steady_clock::time_point retained_kill_time;
     RetainedProcessObservation retained_observation;
+    JoinedChildObservation joined_observation;
+    bool joined_term_attempted = false;
+    bool joined_term_sent = false;
+    bool joined_kill_sent = false;
+    std::chrono::steady_clock::time_point joined_term_time;
+    std::chrono::steady_clock::time_point joined_kill_time;
     std::shared_ptr<Impl> abandoned_reservation;
 
     RetainedProcessObservation observe_retained_locked();
     RetainedProcessCleanup cleanup_retained(std::chrono::steady_clock::time_point deadline);
+    JoinedChildObservation observe_joined_locked();
+    JoinedChildCleanup cleanup_joined(std::chrono::steady_clock::time_point deadline);
     void preserve_abandoned_reservation(const std::shared_ptr<Impl>& owner) {
-        if (retained && started && !finished && owner.use_count() == 1) {
+        if ((retained || joined) && started && !finished && owner.use_count() == 1) {
             abandoned_reservation = owner;
             std::fprintf(stderr,
                          "ChildProcess: unresolved custody retained until host exit "
-                         "(pid=%d pgid=%d); cleanup did not complete\n",
-                         pid, process_group);
+                         "(pid=%d pgid=%d joined=%d); cleanup did not complete\n",
+                         pid, process_group, joined ? 1 : 0);
         }
     }
 };
 
 namespace {
 bool retained_custody_supported() noexcept {
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool joined_child_supported() noexcept {
 #if defined(__APPLE__) && !TARGET_OS_IPHONE
     return true;
 #else
@@ -363,6 +382,124 @@ RetainedProcessObservation ChildProcess::Impl::observe_retained_locked() {
     if (custody_lost)
         observation.state = RetainedProcessState::CustodyLost;
     return observation;
+}
+
+JoinedChildObservation ChildProcess::Impl::observe_joined_locked() {
+    if (!joined_child_supported())
+        return {.state = JoinedChildState::Unsupported};
+    if (!joined || !started)
+        return {};
+    auto& observation = joined_observation;
+    observation.process_id = pid;
+    observation.process_group_id = joined_group;
+    if (joined_reaped) {
+        observation.state = JoinedChildState::Reaped;
+        return observation;
+    }
+    if (!custody_lost) {
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
+        siginfo_t info{};
+        if (::waitid(P_PID, static_cast<id_t>(pid), &info, WEXITED | WNOHANG | WNOWAIT) != 0) {
+            if (errno == EINTR)
+                return observation;
+            custody_lost = true;
+        } else if (info.si_pid == pid &&
+                   (info.si_code == CLD_EXITED || info.si_code == CLD_KILLED ||
+                    info.si_code == CLD_DUMPED)) {
+            observation.state = JoinedChildState::Exited;
+            observation.exit_code = info.si_code == CLD_EXITED ? info.si_status : -1;
+            observation.termination_signal = info.si_code == CLD_EXITED ? 0 : info.si_status;
+        } else if (observation.state == JoinedChildState::Exited) {
+            // An observed zombie that disappears without our waitpid is a
+            // custody loss. Never signal a reused direct-child PID.
+            custody_lost = true;
+        } else {
+            observation.state = JoinedChildState::Running;
+        }
+#endif
+    }
+    if (custody_lost)
+        observation.state = JoinedChildState::CustodyLost;
+    return observation;
+}
+
+JoinedChildCleanup
+ChildProcess::Impl::cleanup_joined(std::chrono::steady_clock::time_point requested_deadline) {
+    JoinedChildCleanup result;
+    if (!joined_child_supported()) {
+        result.status = JoinedChildCleanupStatus::Unsupported;
+        result.observation.state = JoinedChildState::Unsupported;
+        return result;
+    }
+    std::unique_lock lock(mutex, std::try_to_lock);
+    if (!lock.owns_lock()) {
+        result.status = JoinedChildCleanupStatus::Busy;
+        return result;
+    }
+    if (!joined)
+        return result;
+    const auto deadline =
+        std::min(requested_deadline, std::chrono::steady_clock::now() + std::chrono::seconds(2));
+    result.status = JoinedChildCleanupStatus::Incomplete;
+    const auto finish_result = [&] {
+        result.observation = observe_joined_locked();
+        if (result.observation.state == JoinedChildState::CustodyLost)
+            result.status = JoinedChildCleanupStatus::CustodyLost;
+        result.term_sent = joined_term_sent;
+        result.kill_sent = joined_kill_sent;
+        result.child_reaped = joined_reaped;
+        return result;
+    };
+    if (!started || finished) {
+        result.status = JoinedChildCleanupStatus::Complete;
+        finished = true;
+        return finish_result();
+    }
+
+    while (std::chrono::steady_clock::now() < deadline) {
+        const auto observation = observe_joined_locked();
+        if (observation.state == JoinedChildState::CustodyLost) {
+            result.status = JoinedChildCleanupStatus::CustodyLost;
+            return finish_result();
+        }
+        if (observation.state == JoinedChildState::Exited) {
+            int status = 0;
+            const auto reaped = ::waitpid(pid, &status, WNOHANG);
+            if (reaped == pid) {
+                joined_reaped = true;
+                finished = true;
+                cached_exit_status = status;
+                exit_cached = true;
+                this->result.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+                stdout_pipe.close_all();
+                stderr_pipe.close_all();
+                standard_input.close_all();
+                result.status = JoinedChildCleanupStatus::Complete;
+                return finish_result();
+            }
+            if (reaped < 0 && errno == ECHILD) {
+                custody_lost = true;
+                result.status = JoinedChildCleanupStatus::CustodyLost;
+                return finish_result();
+            }
+        } else if (observation.state == JoinedChildState::Running) {
+            if (!joined_term_attempted) {
+                joined_term_time = std::chrono::steady_clock::now();
+                joined_term_attempted = true;
+                joined_term_sent = ::kill(pid, SIGTERM) == 0;
+            } else if (std::chrono::steady_clock::now() - joined_term_time >=
+                           std::chrono::milliseconds(100) &&
+                       std::chrono::steady_clock::now() - joined_kill_time >=
+                           std::chrono::milliseconds(10)) {
+                joined_kill_time = std::chrono::steady_clock::now();
+                const bool sent = ::kill(pid, SIGKILL) == 0;
+                joined_kill_sent = joined_kill_sent || sent;
+            }
+        }
+        std::this_thread::sleep_until(
+            std::min(deadline, std::chrono::steady_clock::now() + std::chrono::milliseconds(1)));
+    }
+    return finish_result();
 }
 
 RetainedProcessCleanup
@@ -550,12 +687,40 @@ ChildProcessInputChannel::operator=(ChildProcessInputChannel&& other) noexcept {
     return *this;
 }
 
+std::optional<CurrentProcessGroup> CurrentProcessGroup::capture() {
+    if (!joined_child_supported())
+        return std::nullopt;
+    const auto process_id = static_cast<pid_t>(::getpid());
+    const auto process_group = ::getpgrp();
+    if (process_id <= 0 || process_group != process_id)
+        return std::nullopt;
+    return CurrentProcessGroup(static_cast<int>(process_id), static_cast<int>(process_group));
+}
+
+CurrentProcessGroup::CurrentProcessGroup(CurrentProcessGroup&& other) noexcept
+    : creator_pid_(std::exchange(other.creator_pid_, -1)),
+      process_group_id_(std::exchange(other.process_group_id_, -1)) {}
+
+CurrentProcessGroup& CurrentProcessGroup::operator=(CurrentProcessGroup&& other) noexcept {
+    if (this != &other) {
+        creator_pid_ = std::exchange(other.creator_pid_, -1);
+        process_group_id_ = std::exchange(other.process_group_id_, -1);
+    }
+    return *this;
+}
+
 ChildProcess::ChildProcess() : impl_(std::make_shared<Impl>()) {}
 ChildProcess::~ChildProcess() {
-    if (impl_ && impl_->retained) {
-        if (impl_.use_count() == 1)
-            (void)impl_->cleanup_retained(std::chrono::steady_clock::now() +
-                                          std::chrono::seconds(2));
+    if (impl_ && (impl_->retained || impl_->joined)) {
+        if (impl_.use_count() == 1) {
+            if (impl_->joined) {
+                (void)impl_->cleanup_joined(std::chrono::steady_clock::now() +
+                                            std::chrono::seconds(2));
+            } else {
+                (void)impl_->cleanup_retained(std::chrono::steady_clock::now() +
+                                              std::chrono::seconds(2));
+            }
+        }
         impl_->preserve_abandoned_reservation(impl_);
         return;
     }
@@ -572,10 +737,16 @@ ChildProcess::~ChildProcess() {
 ChildProcess::ChildProcess(ChildProcess&&) noexcept = default;
 ChildProcess& ChildProcess::operator=(ChildProcess&& other) noexcept {
     if (this != &other) {
-        if (impl_ && impl_->retained) {
-            if (impl_.use_count() == 1)
-                (void)impl_->cleanup_retained(std::chrono::steady_clock::now() +
-                                              std::chrono::seconds(2));
+        if (impl_ && (impl_->retained || impl_->joined)) {
+            if (impl_.use_count() == 1) {
+                if (impl_->joined) {
+                    (void)impl_->cleanup_joined(std::chrono::steady_clock::now() +
+                                                std::chrono::seconds(2));
+                } else {
+                    (void)impl_->cleanup_retained(std::chrono::steady_clock::now() +
+                                                  std::chrono::seconds(2));
+                }
+            }
             impl_->preserve_abandoned_reservation(impl_);
         }
         impl_ = std::move(other.impl_);
@@ -598,6 +769,27 @@ RetainedProcessCustody& RetainedProcessCustody::operator=(RetainedProcessCustody
             if (impl_.use_count() == 1)
                 (void)impl_->cleanup_retained(std::chrono::steady_clock::now() +
                                               std::chrono::seconds(2));
+            impl_->preserve_abandoned_reservation(impl_);
+        }
+        impl_ = std::move(other.impl_);
+    }
+    return *this;
+}
+
+JoinedChildCustody::~JoinedChildCustody() {
+    if (impl_) {
+        if (impl_.use_count() == 1)
+            (void)impl_->cleanup_joined(std::chrono::steady_clock::now() + std::chrono::seconds(2));
+        impl_->preserve_abandoned_reservation(impl_);
+    }
+}
+JoinedChildCustody::JoinedChildCustody(JoinedChildCustody&&) noexcept = default;
+JoinedChildCustody& JoinedChildCustody::operator=(JoinedChildCustody&& other) noexcept {
+    if (this != &other) {
+        if (impl_) {
+            if (impl_.use_count() == 1)
+                (void)impl_->cleanup_joined(std::chrono::steady_clock::now() +
+                                            std::chrono::seconds(2));
             impl_->preserve_abandoned_reservation(impl_);
         }
         impl_ = std::move(other.impl_);
@@ -636,6 +828,39 @@ RetainedProcessCleanup RetainedProcessCustody::cleanup_retained_process_group(
                      .observation = {.state = RetainedProcessState::Unsupported}};
 }
 
+JoinedChildObservation ChildProcess::joined_child_observation() const {
+    if (!impl_)
+        return joined_child_supported()
+                   ? JoinedChildObservation{}
+                   : JoinedChildObservation{.state = JoinedChildState::Unsupported};
+    std::lock_guard lock(impl_->mutex);
+    return impl_->observe_joined_locked();
+}
+
+JoinedChildCleanup
+ChildProcess::cleanup_joined_child(std::chrono::steady_clock::time_point deadline) {
+    return impl_ ? impl_->cleanup_joined(deadline) : JoinedChildCleanup{};
+}
+
+JoinedChildObservation JoinedChildCustody::joined_child_observation() const {
+    if (!impl_)
+        return joined_child_supported()
+                   ? JoinedChildObservation{}
+                   : JoinedChildObservation{.state = JoinedChildState::Unsupported};
+    std::lock_guard lock(impl_->mutex);
+    return impl_->observe_joined_locked();
+}
+
+JoinedChildCleanup
+JoinedChildCustody::cleanup_joined_child(std::chrono::steady_clock::time_point deadline) {
+    if (impl_)
+        return impl_->cleanup_joined(deadline);
+    return joined_child_supported()
+               ? JoinedChildCleanup{}
+               : JoinedChildCleanup{.status = JoinedChildCleanupStatus::Unsupported,
+                                    .observation = {.state = JoinedChildState::Unsupported}};
+}
+
 bool ChildProcess::start_retained(RetainedProcessCustody& custody, const std::string& command,
                                   const std::vector<std::string>& args,
                                   const ProcessOptions& options) {
@@ -646,6 +871,22 @@ bool ChildProcess::start_retained_with_standard_input_channel(
     const std::vector<std::string>& args, const StandardInputChannelSession& session,
     const ProcessOptions& options) {
     return start_impl(command, args, options, nullptr, nullptr, &session, &custody);
+}
+
+bool ChildProcess::start_joined_to_current_group(const CurrentProcessGroup& group,
+                                                 JoinedChildCustody& custody,
+                                                 const std::string& command,
+                                                 const std::vector<std::string>& args,
+                                                 const ProcessOptions& options) {
+    return start_impl(command, args, options, nullptr, nullptr, nullptr, nullptr, &group, &custody);
+}
+
+bool ChildProcess::start_joined_to_current_group_with_standard_input_channel(
+    const CurrentProcessGroup& group, JoinedChildCustody& custody, const std::string& command,
+    const std::vector<std::string>& args, const StandardInputChannelSession& session,
+    const ProcessOptions& options) {
+    return start_impl(command, args, options, nullptr, nullptr, &session, nullptr, &group,
+                      &custody);
 }
 
 bool ChildProcess::start(const std::string& command, const std::vector<std::string>& args,
@@ -678,7 +919,13 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
                               const std::span<const std::uint8_t>* standard_input,
                               const StandardInputByteProvider* standard_input_provider,
                               const StandardInputChannelSession* standard_input_session,
-                              RetainedProcessCustody* custody) {
+                              RetainedProcessCustody* custody,
+                              const CurrentProcessGroup* joined_group,
+                              JoinedChildCustody* joined_custody) {
+    const bool joined_launch = joined_group != nullptr || joined_custody != nullptr;
+    if (joined_launch && (!joined_group || !joined_custody || custody ||
+                          !joined_child_supported() || joined_custody->impl_))
+        return false;
     if (custody) {
         if (!retained_custody_supported() || custody->impl_)
             return false;
@@ -687,13 +934,31 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
             (disposition.sa_flags & SA_NOCLDWAIT) != 0)
             return false;
     }
+    if (joined_launch) {
+        struct sigaction disposition{};
+        if (::sigaction(SIGCHLD, nullptr, &disposition) != 0 || disposition.sa_handler == SIG_IGN ||
+            (disposition.sa_flags & SA_NOCLDWAIT) != 0)
+            return false;
+    }
     std::unique_lock<std::recursive_mutex> lock(impl_->mutex);
-    if (impl_->retained)
+    if (impl_->retained || impl_->joined)
         return false;
+    if (joined_launch) {
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
+        const auto process_id = static_cast<pid_t>(::getpid());
+        const auto process_group = ::getpgrp();
+        if (joined_group->creator_pid_ != process_id ||
+            joined_group->process_group_id_ != process_group || process_group != process_id)
+            return false;
+#else
+        return false;
+#endif
+    }
     const bool has_standard_input = standard_input || standard_input_provider ||
                                     standard_input_session;
     if (impl_->started && !impl_->finished) {
-        if (is_running() || process_group_exists(impl_->process_group))
+        if ((impl_->joined && is_running()) ||
+            (!impl_->joined && (is_running() || process_group_exists(impl_->process_group))))
             cancel();
         else
             wait();
@@ -712,14 +977,23 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
     impl_->cached_exit_status = -1;
     impl_->result = {};
     impl_->retained = custody != nullptr;
+    impl_->joined = joined_launch;
+    impl_->joined_group = joined_launch ? static_cast<pid_t>(joined_group->process_group_id_) : -1;
+    impl_->joined_observation = {};
+    impl_->joined_reaped = false;
+    impl_->joined_term_attempted = false;
+    impl_->joined_term_sent = false;
+    impl_->joined_kill_sent = false;
     if (custody)
         custody->impl_ = impl_;
+    if (joined_custody)
+        joined_custody->impl_ = impl_;
 
 #ifdef __ANDROID__
     // Android's fork/exec path cannot provide the suspended-before-first-code
     // contract. Reject the option before creating a child rather than silently
     // executing an unvalidated process.
-    if (options.suspended_process_validator) {
+    if (options.suspended_process_validator || joined_launch) {
         impl_->result.exit_code = -1;
         return false;
     }
@@ -820,12 +1094,13 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
         if (attribute_error == 0) {
             attributes_pointer = &attributes;
             short flags = POSIX_SPAWN_SETPGROUP;
-            if (has_standard_input)
+            if (has_standard_input || joined_launch)
                 flags |= POSIX_SPAWN_CLOEXEC_DEFAULT;
-            if (options.suspended_process_validator)
+            if (options.suspended_process_validator || joined_launch)
                 flags |= POSIX_SPAWN_START_SUSPENDED;
             add_action(posix_spawnattr_setflags(&attributes, flags));
-            add_action(posix_spawnattr_setpgroup(&attributes, 0));
+            add_action(posix_spawnattr_setpgroup(
+                &attributes, joined_launch ? joined_group->process_group_id_ : 0));
         } else {
             setup_error = attribute_error;
         }
@@ -850,6 +1125,12 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
                                                     STDIN_FILENO));
         add_action(posix_spawn_file_actions_addclose(&actions, impl_->standard_input.parent));
         add_action(posix_spawn_file_actions_addclose(&actions, impl_->standard_input.child));
+    } else if (joined_launch) {
+        // CLOEXEC_DEFAULT closes unrelated inherited descriptors. Keep the
+        // worker's stdin deterministic rather than inheriting an anchor's
+        // liveness endpoint or descriptor alias.
+        add_action(
+            posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0));
     }
     if (options.capture_stdout) {
         add_action(posix_spawn_file_actions_adddup2(&actions, impl_->stdout_pipe.write_end(),
@@ -932,7 +1213,7 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
         return false;
     }
 
-    impl_->process_group = impl_->pid;
+    impl_->process_group = joined_launch ? impl_->joined_group : impl_->pid;
     if (impl_->retained) {
         impl_->started = true;
         impl_->retained_observation = {
@@ -942,19 +1223,40 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
             .identity_retained = true,
         };
     }
+    if (joined_launch) {
+        impl_->started = true;
+        impl_->joined_observation = {
+            .state = JoinedChildState::Running,
+            .process_id = impl_->pid,
+            .process_group_id = impl_->joined_group,
+        };
+    }
 
-    if (options.suspended_process_validator) {
+    if (options.suspended_process_validator || joined_launch) {
 #if defined(__APPLE__)
-        bool accepted = false;
-        try {
-            accepted = options.suspended_process_validator(impl_->pid);
-        } catch (...) {
-            accepted = false;
+        bool accepted = true;
+        if (joined_launch) {
+            // Validate membership while the process is still suspended. The
+            // caller's vendor-loading permission is only reached after this
+            // exact child has joined the captured anchor group.
+            accepted = ::getpgid(impl_->pid) == impl_->joined_group;
+        }
+        if (accepted && options.suspended_process_validator) {
+            try {
+                accepted = options.suspended_process_validator(impl_->pid);
+            } catch (...) {
+                accepted = false;
+            }
         }
         if (!accepted || ::kill(impl_->pid, SIGCONT) != 0) {
             if (impl_->retained) {
                 (void)impl_->cleanup_retained(std::chrono::steady_clock::now() +
                                               std::chrono::seconds(2));
+                return false;
+            }
+            if (impl_->joined) {
+                (void)impl_->cleanup_joined(std::chrono::steady_clock::now() +
+                                            std::chrono::seconds(2));
                 return false;
             }
             signal_process_group(impl_->process_group, impl_->pid, true, SIGKILL);
@@ -1120,6 +1422,8 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
 
 bool ChildProcess::is_running() const {
     std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
+    if (impl_->joined)
+        return impl_->observe_joined_locked().state == JoinedChildState::Running;
     if (impl_->retained)
         return impl_->observe_retained_locked().state == RetainedProcessState::Running;
     if (!impl_->started || impl_->finished) return false;
@@ -1149,6 +1453,11 @@ int ChildProcess::process_id() const {
 
 void ChildProcess::cancel() {
     std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
+    if (impl_->joined) {
+        impl_->result.was_cancelled = impl_->started && !impl_->finished;
+        (void)impl_->cleanup_joined(std::chrono::steady_clock::now() + std::chrono::seconds(2));
+        return;
+    }
     if (impl_->retained) {
         impl_->result.was_cancelled = impl_->started && !impl_->finished;
         (void)impl_->cleanup_retained(std::chrono::steady_clock::now() + std::chrono::seconds(2));
@@ -1182,6 +1491,14 @@ void ChildProcess::cancel() {
 
 ProcessResult ChildProcess::wait() {
     std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
+    if (impl_->joined) {
+        const auto observation = impl_->observe_joined_locked();
+        auto result = impl_->result;
+        result.exit_code = observation.exit_code;
+        result.stdout_output = impl_->stdout_full;
+        result.stderr_output = impl_->stderr_full;
+        return result;
+    }
     if (impl_->retained) {
         const auto observation = impl_->observe_retained_locked();
         auto result = impl_->result;

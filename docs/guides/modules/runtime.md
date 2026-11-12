@@ -58,11 +58,35 @@ attempts bounded cleanup; unresolved custody is diagnosed and its record is
 self-retained until host exit. This is a contract violation, not successful
 cleanup. No global reaper owns these records.
 
+### Joined direct-child custody
+
+`CurrentProcessGroup::capture()` mints a move-only, process-local capability
+only for a macOS desktop process that is still its own process-group leader.
+Pass that capability and a fresh `JoinedChildCustody` to
+`ChildProcess::start_joined_to_current_group()` (or its private-channel
+variant). The launch uses the anchor's existing group and verifies the exact
+child's membership while it is suspended, before a vendor-permission callback
+can run. Other platforms reject the request before spawning.
+
+Joined custody owns only the direct child's observation, signaling and
+nonblocking reaping. `wait()`, `is_running()`, handle moves, cancellation and
+destruction never signal the anchor's group. Keep each move-only reservation
+in the owner's finite quarantine until `cleanup_joined_child()` returns
+`Complete`; `Incomplete`, `Busy`, or `CustodyLost` leave the record pending.
+The caller must serialize control-thread operations, must not reap the child
+independently, and must not install SIGCHLD auto-reaping while the reservation
+is live. Spawn closes unrelated inherited descriptors, including duplicated
+anchor endpoints, and gives a joined worker deterministic `/dev/null` stdin
+unless a private channel is explicitly requested.
+
+This prerequisite covers a surviving anchor. It does not claim cleanup after
+host death or provide a security sandbox.
+
 All operations, including observation, are control-thread operations. Serialize
 handle moves, destruction, and launch against other operations. Cleanup may
 return `Busy` when another thread holds the same process state. Do not call
 `waitpid` independently, install `SIGCHLD` auto-reaping, or run another child
-reaper over a retained child. Private-channel callbacks must bound their own
+reaper over a retained or joined child. Private-channel callbacks must bound their own
 work to their supplied deadline; internal output draining runs on a worker
 thread and may also request cleanup after a callback failure. Process groups do not contain a descendant
 that deliberately escapes through `setsid`/`setpgid`, and this contract does not

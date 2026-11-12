@@ -68,6 +68,19 @@ it and its tests, and both look like bugs until you know them:
   leaves a host's key routing (Musical Typing) dead, as the plug-in host's
   key-focus etiquette below describes.
 
+`pulp::native::GlSurface` is the OpenGL counterpart for Windows and X11. On
+macOS only its offscreen backend exists (CGL into a framebuffer object), for
+tests and offline capture. Two things about it are easy to get wrong:
+
+- **The context is created on the first `make_current()`, on that thread.**
+  Do not "warm it up" on the UI thread: that binds it there, which the
+  surface promises never to do. A test checks that the main thread's current
+  context is still null after a render thread has used the surface.
+- **macOS stops at OpenGL 4.1 core, and has no compatibility profile above
+  2.1.** A 4.6 request falls through to the next entry in the request list.
+  It is not clamped, so `GlContextReport::request_index` says which entry
+  won. Write CI expectations against 4.1, not "the highest you asked for".
+
 The view's Objective-C class is registered at run time through
 `pulp/platform/objc_unique_class.hpp`, so two plug-ins never share it. Every
 override calls super through `super_implementation(<registered class>, sel)`,
@@ -3988,3 +4001,11 @@ link follows the reference. A bundle whose scripts come only from keyed
 missing builder, reports it in `last_error()` and opens AutoUi. Reaching the runtime only by name (`dlsym`) cannot
 work: nothing links it. `docs/reference/cmake.md` "Shipped Module Size" is the
 user-facing version.
+
+## The CLAP plugin struct carries the preset library
+
+`PulpClapPlugin` (`clap_adapter.hpp`) now holds an optional `PresetLibrary` and a
+`PresetProgramRouter` for plug-ins that set `supports_program_change`. An editor
+that wants a preset browser reads the library from the adapter's instance rather
+than building a second one: two libraries over one overlay file merge on write
+but each keeps its own in-memory index until `refresh()`.
