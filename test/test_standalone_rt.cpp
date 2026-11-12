@@ -26,6 +26,12 @@
 #include <pulp/audio/device.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/standalone.hpp>
+#include <pulp/midi/message.hpp>
+#include <pulp/state/preset_library.hpp>
+#include <pulp/state/preset_manager.hpp>
+#include "preset_test_sandbox.hpp"
+#include <filesystem>
+#include <fstream>
 
 #include "harness/scoped_rt_process_probe.hpp"
 
@@ -192,6 +198,18 @@ struct StandaloneRenderTestAccess {
         }
     }
     static void prepare(StandaloneApp& app) { app.prepare_render_state(); }
+    static void init_program_change(StandaloneApp& app) {
+        app.init_program_change();
+    }
+    static void push_hardware_midi(StandaloneApp& app, const midi::MidiEvent& e) {
+        (void)app.hardware_midi_queue_.try_push(e);
+    }
+    static state::PresetManager* manager(StandaloneApp& app) {
+        return app.preset_manager_.get();
+    }
+    static state::PresetLibrary* library(StandaloneApp& app) {
+        return app.preset_library_.get();
+    }
     static void render(StandaloneApp& app,
                        const audio::BufferView<const float>& input,
                        audio::BufferView<float>& output,
@@ -435,4 +453,131 @@ TEST_CASE("Standalone services panic requests as a voice reset without MIDI out"
     CHECK(g_panic_standalone->last_mode == format::PanicMode::release);
     StandaloneRenderTestAccess::render(app, input, output, ctx);
     CHECK(g_panic_standalone->panic_calls == 1);
+}
+
+namespace {
+
+class ProgramChangeSynth final : public format::Processor {
+  public:
+    format::PluginDescriptor descriptor() const override {
+        format::PluginDescriptor d;
+        d.name = "ProgramStandalone";
+        d.manufacturer = "PulpTest";
+        d.bundle_id = "com.pulp.test.standalone.program";
+        d.version = "1.0.0";
+        d.category = format::PluginCategory::Instrument;
+        d.input_buses.clear();
+        d.accepts_midi = true;
+        d.supports_program_change = opt_in;
+        return d;
+    }
+    void define_parameters(state::StateStore& store) override {
+        store.add_parameter({.id = 1, .name = "Gain", .range = {-60.0f, 12.0f, 0.0f, 0.0f}});
+    }
+    void prepare(const format::PrepareContext&) override {}
+    void process(audio::BufferView<float>& out, const audio::BufferView<const float>&,
+                 midi::MidiBuffer&, midi::MidiBuffer&, const format::ProcessContext&) override {
+        out.clear();
+    }
+    static inline bool opt_in = true;
+};
+std::unique_ptr<format::Processor> make_program_synth() {
+    return std::make_unique<ProgramChangeSynth>();
+}
+
+void write_preset_file(const std::filesystem::path& file, float gain) {
+    std::error_code ec;
+    std::filesystem::create_directories(file.parent_path(), ec);
+    std::ofstream out(file);
+    out << "{\"parameters\":{\"Gain\":" << gain << "}}";
+}
+
+} // namespace
+
+TEST_CASE(
+    "Standalone: a Program Change loads on the main-thread service, never in the render callback",
+    "[standalone][format][preset][program]") {
+    using pulp::format::StandaloneRenderTestAccess;
+    using namespace std::chrono_literals;
+    pulp::test::PresetTestSandbox sandbox("pulp-standalone-program");
+    ProgramChangeSynth::opt_in = true;
+
+    constexpr int kFrames = 128;
+    format::StandaloneConfig cfg;
+    cfg.sample_rate = 48000.0;
+    cfg.buffer_size = kFrames;
+    cfg.output_channels = 2;
+    cfg.input_channels = 0;
+    cfg.persist_settings = false;
+    cfg.transport_playing = false;
+
+    format::StandaloneApp app(make_program_synth);
+    app.set_config(cfg);
+    StandaloneRenderTestAccess::ensure_processor(app);
+    StandaloneRenderTestAccess::init_program_change(app);
+    auto* manager = StandaloneRenderTestAccess::manager(app);
+    auto* library = StandaloneRenderTestAccess::library(app);
+    REQUIRE(manager != nullptr);
+    REQUIRE(library != nullptr);
+
+    const auto factory = sandbox.root / "factory";
+    write_preset_file(factory / "Loud.json", 6.0f);
+    write_preset_file(factory / "Quiet.json", -20.0f);
+    manager->set_factory_presets_dir(factory);
+    library->refresh();
+    REQUIRE(library->program_of("factory:Quiet") == state::BankProgram{0, 1});
+
+    StandaloneRenderTestAccess::prepare(app);
+    std::array<float, kFrames> out_l{};
+    std::array<float, kFrames> out_r{};
+    float* out_ptrs[2] = {out_l.data(), out_r.data()};
+    const float* in_ptrs[1] = {nullptr};
+    audio::BufferView<const float> input(in_ptrs, 0, kFrames);
+    audio::BufferView<float> output(out_ptrs, 2, kFrames);
+    audio::CallbackContext ctx;
+    ctx.sample_rate = 48000.0;
+    ctx.buffer_size = kFrames;
+
+    // Warm up, then send Bank Select 0 + Program Change 1 as hardware MIDI.
+    StandaloneRenderTestAccess::render(app, input, output, ctx);
+    StandaloneRenderTestAccess::push_hardware_midi(app, midi::MidiEvent::cc(0, 0, 0));
+    StandaloneRenderTestAccess::push_hardware_midi(app, midi::MidiEvent::cc(0, 32, 0));
+    StandaloneRenderTestAccess::push_hardware_midi(app,
+                                                   {choc::midi::ShortMessage(0xC0, 1, 0), 0, 0.0});
+
+    std::size_t allocations = 0;
+    {
+        pulp::test::ScopedRtProcessProbe probe;
+        StandaloneRenderTestAccess::render(app, input, output, ctx);
+        allocations = probe.allocation_count();
+    }
+    REQUIRE(allocations == 0);
+    REQUIRE(app.state().get_value(1) == 0.0f); // the render callback loaded nothing
+
+    const auto t0 = std::chrono::steady_clock::now();
+    app.service_program_changes(t0);
+    REQUIRE(app.state().get_value(1) == -20.0f);
+    REQUIRE(manager->current_preset_name() == "Quiet");
+
+    // Throttled: a request inside the 33 ms window waits for the next tick.
+    StandaloneRenderTestAccess::push_hardware_midi(app,
+                                                   {choc::midi::ShortMessage(0xC0, 0, 0), 0, 0.0});
+    StandaloneRenderTestAccess::render(app, input, output, ctx);
+    app.service_program_changes(t0 + 10ms);
+    REQUIRE(app.state().get_value(1) == -20.0f);
+    app.service_program_changes(t0 + 50ms);
+    REQUIRE(app.state().get_value(1) == 6.0f);
+}
+
+TEST_CASE("Standalone: a plug-in that does not opt in has no program-change objects",
+          "[standalone][format][preset][program]") {
+    using pulp::format::StandaloneRenderTestAccess;
+    pulp::test::PresetTestSandbox sandbox("pulp-standalone-program-off");
+    ProgramChangeSynth::opt_in = false;
+    format::StandaloneApp app(make_program_synth);
+    StandaloneRenderTestAccess::ensure_processor(app);
+    StandaloneRenderTestAccess::init_program_change(app);
+    REQUIRE(StandaloneRenderTestAccess::library(app) == nullptr);
+    app.service_program_changes(); // a no-op, not a crash
+    ProgramChangeSynth::opt_in = true;
 }
