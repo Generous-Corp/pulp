@@ -41,12 +41,6 @@ the BASE branch's schema, so a pull request cannot use an event field that the
 same pull request adds to the schema; word the rationale so it needs no field
 instead.
 
-The `vellum-freeze-check.yml` and `vellum-routing-contract.yml` workflows use
-workflow-level concurrency keyed by PR number, with cancellation enabled only
-for pull-request events. Keep merge-group, main-push, scheduled, and manual
-dispatch runs independent when changing these workflows so stale PR heads do
-not consume runner capacity while authoritative Vellum checks remain intact.
-
 The ctest runs with `--base auto`. In CI that is the base commit the GitHub
 event names, because a merge-group checkout has no `origin/main`; a gate that
 hard-codes `--base origin/main` goes red on every merge group that runs the

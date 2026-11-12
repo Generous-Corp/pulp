@@ -10012,16 +10012,6 @@ while debugging runner routing.
 
 ### Verifying your branch isn't burning macOS runner time
 
-### PR workflow concurrency is per-PR and event-gated
-
-Every workflow triggered by `pull_request` or `pull_request_target` needs a
-workflow-level concurrency group keyed by the PR number (falling back to
-`github.ref`) and must set `cancel-in-progress` only for those PR events. This
-lets a newer head release queued runner capacity without cancelling pushes to
-`main`, merge-group entries, tags, releases, schedules, or manual dispatches.
-Existing workflows with deliberate concurrency comments retain their documented
-policy; audit new PR-triggered workflows for this block before adding them.
-
 Each failed macOS leg consumes one of the scarce self-hosted runners and
 queues every other PR behind your run. Before broadcasting "my CI is stuck",
 inspect the exact job state and queue age, then the eligible hosts'
