@@ -36,6 +36,58 @@
 
 using namespace pulp::host;
 
+TEST_CASE("GraphSerializer inspects an owned identity document", "[host][serializer][g3][d5]") {
+    const auto first = GraphSerializer::inspect_document(
+        R"({"document_schema":"pulp.graph.authored-io-gain.v1","nodes":{"b":2,"a":1}})");
+    const auto reordered = GraphSerializer::inspect_document(
+        R"({"nodes":{"a":1,"b":2},"document_schema":"pulp.graph.authored-io-gain.v1"})");
+    REQUIRE(first.ok());
+    REQUIRE(reordered.ok());
+    CHECK(first.document.profile() == "pulp.graph.authored-io-gain.v1");
+    CHECK(first.document.canonical_bytes() == reordered.document.canonical_bytes());
+    CHECK(first.document.semantic_digest() == reordered.document.semantic_digest());
+    CHECK(first.document.canonical_bytes().find("\"a\":1") <
+          first.document.canonical_bytes().find("\"b\":2"));
+}
+
+TEST_CASE("GraphSerializer inspection refuses identity and parser hazards",
+          "[host][serializer][g3][d5]") {
+    const auto duplicate = GraphSerializer::inspect_document(
+        R"({"document_schema":"pulp.graph.authored-io-gain.v1","nodes":{},"nodes":{}})");
+    CHECK(duplicate.refusal == GraphDocumentRefusal::DuplicateJsonKey);
+
+    const auto legacy = GraphSerializer::inspect_document(R"({"format_version":4,"nodes":[]})");
+    CHECK(legacy.refusal == GraphDocumentRefusal::LogicalIdentityMissing);
+
+    const auto future = GraphSerializer::inspect_document(
+        R"({"format_version":999,"identity_schema":"pulp.graph.saved-identity.v6"})");
+    CHECK(future.refusal == GraphDocumentRefusal::UnsupportedFutureVersion);
+
+    const auto wrong_profile =
+        GraphSerializer::inspect_document(R"({"document_schema":"pulp.graph.unknown.v1"})");
+    CHECK(wrong_profile.refusal == GraphDocumentRefusal::UnsupportedDocumentProfile);
+
+    const auto nonfinite = GraphSerializer::inspect_document(
+        R"({"document_schema":"pulp.graph.authored-io-gain.v1","value":NaN})");
+    CHECK(nonfinite.refusal == GraphDocumentRefusal::InvalidJson);
+
+    std::string deep = "0";
+    for (std::size_t i = 0; i <= GraphSerializer::max_document_depth; ++i)
+        deep = R"({"v":)" + deep + "}";
+    deep = R"({"document_schema":"pulp.graph.authored-io-gain.v1","v":)" + deep + "}";
+    const auto too_deep = GraphSerializer::inspect_document(deep);
+    CHECK(too_deep.refusal == GraphDocumentRefusal::NestingLimitExceeded);
+}
+
+TEST_CASE("GraphSerializer admits the reserved saved identity envelope",
+          "[host][serializer][g3][d5]") {
+    const auto inspected = GraphSerializer::inspect_document(
+        R"({"identity_schema":"pulp.graph.saved-identity.v6","bindings":{},"format_version":4})");
+    REQUIRE(inspected.ok());
+    CHECK(inspected.document.profile() == "pulp.graph.saved-identity.v6");
+    CHECK(inspected.document.semantic_digest().starts_with("sha256:"));
+}
+
 namespace {
 
 PluginInfo make_fake_plugin_info(const std::string& name,

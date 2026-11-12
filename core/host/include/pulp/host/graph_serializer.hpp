@@ -17,10 +17,12 @@
 
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/processor_restore.hpp>
+#include <pulp/runtime/result.hpp>
 #include <filesystem>
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -28,6 +30,62 @@ namespace pulp::host {
 
 class HostScanCache;
 class ScanBlacklist;
+
+/// Refusal reasons for the data-only saved-document inspection surface.
+/// Inspection never loads plugins, restores Processor state, or mutates a
+/// SignalGraph; callers can therefore safely use it on untrusted bytes.
+enum class GraphDocumentRefusal : std::uint8_t {
+    None,
+    EmptyDocument,
+    DocumentTooLarge,
+    InvalidJson,
+    RootNotObject,
+    InvalidFormatVersion,
+    UnsupportedFutureVersion,
+    LogicalIdentityMissing,
+    UnsupportedDocumentProfile,
+    DuplicateJsonKey,
+    NestingLimitExceeded,
+    NonFiniteNumber,
+    AllocationFailed,
+};
+
+const char* graph_document_refusal_name(GraphDocumentRefusal) noexcept;
+
+/// Immutable, value-owned identity input produced by inspect_document().
+/// The canonical bytes are sorted by object key while array order is kept;
+/// no parser/vendor value or runtime NodeId escapes this type.
+class GraphDocument {
+  public:
+    int format_version() const noexcept {
+        return format_version_;
+    }
+    std::string_view profile() const noexcept {
+        return profile_;
+    }
+    std::string_view canonical_bytes() const noexcept {
+        return canonical_bytes_;
+    }
+    std::string_view semantic_digest() const noexcept {
+        return semantic_digest_;
+    }
+
+  private:
+    int format_version_ = 0;
+    std::string profile_;
+    std::string canonical_bytes_;
+    std::string semantic_digest_;
+    friend class GraphSerializer;
+};
+
+struct GraphDocumentInspection {
+    GraphDocument document;
+    GraphDocumentRefusal refusal = GraphDocumentRefusal::None;
+    std::string detail;
+    bool ok() const noexcept {
+        return refusal == GraphDocumentRefusal::None;
+    }
+};
 
 // How from_json turns a plugin node's stored identity into a loaded slot.
 //
@@ -100,6 +158,13 @@ class GraphSerializer {
     // user-selected .pulpgraph path to the serializer. The limit covers the
     // encoded JSON envelope (including base64 state), not decoded payloads.
     static constexpr std::size_t max_file_bytes = 64u * 1024u * 1024u;
+    static constexpr std::size_t max_document_depth = 64;
+
+    /// Inspect one bounded saved document without loading plugins, invoking
+    /// factories, restoring state, preparing, or writing a file. Legacy
+    /// format-version documents without an explicit identity envelope are
+    /// refused with LogicalIdentityMissing.
+    static GraphDocumentInspection inspect_document(std::string_view json);
 
     using MigrationFn =
         std::function<bool(const std::string& source_json,

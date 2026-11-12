@@ -3,6 +3,7 @@
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/processor_restore.hpp>
 #include <pulp/host/sample_region_parameters.hpp>
+#include <pulp/runtime/crypto.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/detail/durable_file_replacement.hpp>
 
@@ -48,6 +49,58 @@ namespace {
 std::function<void(const std::filesystem::path&)> g_after_first_read_hook;
 std::atomic<bool> g_fail_next_write{false};
 std::atomic<bool> g_fail_next_replace{false};
+
+template <typename V>
+bool append_document_canonical(const V& value, std::string& output, GraphDocumentRefusal& refusal,
+                               std::size_t depth) {
+    if (depth > GraphSerializer::max_document_depth) {
+        refusal = GraphDocumentRefusal::NestingLimitExceeded;
+        return false;
+    }
+    if (value.isObject()) {
+        std::vector<std::string> names;
+        names.reserve(value.size());
+        for (std::uint32_t i = 0; i < value.size(); ++i)
+            names.emplace_back(value.getObjectMemberAt(i).name);
+        std::sort(names.begin(), names.end(), [](const auto& a, const auto& b) {
+            return std::lexicographical_compare(
+                a.begin(), a.end(), b.begin(), b.end(),
+                [](unsigned char x, unsigned char y) { return x < y; });
+        });
+        if (std::adjacent_find(names.begin(), names.end()) != names.end()) {
+            refusal = GraphDocumentRefusal::DuplicateJsonKey;
+            return false;
+        }
+        output.push_back('{');
+        for (std::size_t i = 0; i < names.size(); ++i) {
+            if (i)
+                output.push_back(',');
+            output += choc::json::toString(choc::value::createString(names[i]), false);
+            output.push_back(':');
+            if (!append_document_canonical(value[names[i]], output, refusal, depth + 1))
+                return false;
+        }
+        output.push_back('}');
+        return true;
+    }
+    if (value.isArray()) {
+        output.push_back('[');
+        for (std::uint32_t i = 0; i < value.size(); ++i) {
+            if (i)
+                output.push_back(',');
+            if (!append_document_canonical(value[i], output, refusal, depth + 1))
+                return false;
+        }
+        output.push_back(']');
+        return true;
+    }
+    if ((value.isFloat32() || value.isFloat64()) && !std::isfinite(value.getFloat64())) {
+        refusal = GraphDocumentRefusal::NonFiniteNumber;
+        return false;
+    }
+    output += choc::json::toString(value, false);
+    return true;
+}
 
 // Tolerant numeric coercion — choc distinguishes int/float strictly and
 // getFloat64() throws on integers, so wrap accesses to coerce the common
@@ -926,6 +979,139 @@ void GraphSerializerTestAccess::fail_next_write() noexcept {
 
 void GraphSerializerTestAccess::fail_next_replace() noexcept {
     g_fail_next_replace.store(true, std::memory_order_release);
+}
+
+const char* graph_document_refusal_name(GraphDocumentRefusal refusal) noexcept {
+    switch (refusal) {
+    case GraphDocumentRefusal::None:
+        return "none";
+    case GraphDocumentRefusal::EmptyDocument:
+        return "empty_document";
+    case GraphDocumentRefusal::DocumentTooLarge:
+        return "document_too_large";
+    case GraphDocumentRefusal::InvalidJson:
+        return "invalid_json";
+    case GraphDocumentRefusal::RootNotObject:
+        return "root_not_object";
+    case GraphDocumentRefusal::InvalidFormatVersion:
+        return "invalid_format_version";
+    case GraphDocumentRefusal::UnsupportedFutureVersion:
+        return "unsupported_future_version";
+    case GraphDocumentRefusal::LogicalIdentityMissing:
+        return "logical_identity_missing";
+    case GraphDocumentRefusal::UnsupportedDocumentProfile:
+        return "unsupported_document_profile";
+    case GraphDocumentRefusal::DuplicateJsonKey:
+        return "duplicate_json_key";
+    case GraphDocumentRefusal::NestingLimitExceeded:
+        return "nesting_limit_exceeded";
+    case GraphDocumentRefusal::NonFiniteNumber:
+        return "non_finite_number";
+    case GraphDocumentRefusal::AllocationFailed:
+        return "allocation_failed";
+    }
+    return "invalid_document";
+}
+
+GraphDocumentInspection GraphSerializer::inspect_document(std::string_view json) {
+    GraphDocumentInspection result;
+    if (json.empty()) {
+        result.refusal = GraphDocumentRefusal::EmptyDocument;
+        result.detail = "document is empty";
+        return result;
+    }
+    if (json.size() > max_file_bytes) {
+        result.refusal = GraphDocumentRefusal::DocumentTooLarge;
+        result.detail = "document exceeds the encoded size limit";
+        return result;
+    }
+
+    try {
+        const auto root = choc::json::parse(json);
+        if (!root.isObject()) {
+            result.refusal = GraphDocumentRefusal::RootNotObject;
+            result.detail = "saved document root is not an object";
+            return result;
+        }
+
+        int format_version = 0;
+        if (root.hasObjectMember("format_version")) {
+            const auto version = graph_format_version(root);
+            if (!version.has_value()) {
+                result.refusal = GraphDocumentRefusal::InvalidFormatVersion;
+                result.detail = "format_version must be a bounded integer";
+                return result;
+            }
+            format_version = *version;
+            if (format_version > kFormatVersion) {
+                result.refusal = GraphDocumentRefusal::UnsupportedFutureVersion;
+                result.detail = "saved document format is newer than this reader";
+                return result;
+            }
+            if (!root.hasObjectMember("identity_schema") &&
+                !root.hasObjectMember("logical_identities")) {
+                result.refusal = GraphDocumentRefusal::LogicalIdentityMissing;
+                result.detail = "legacy graph has no explicit logical identity envelope";
+                return result;
+            }
+        }
+
+        std::string profile;
+        if (root.hasObjectMember("document_schema")) {
+            if (!root["document_schema"].isString()) {
+                result.refusal = GraphDocumentRefusal::UnsupportedDocumentProfile;
+                result.detail = "document_schema must be a string";
+                return result;
+            }
+            profile = std::string(root["document_schema"].getString());
+            if (profile != "pulp.graph.authored-io-gain.v1") {
+                result.refusal = GraphDocumentRefusal::UnsupportedDocumentProfile;
+                result.detail = "document_schema is not an admitted identity profile";
+                return result;
+            }
+        }
+        if (root.hasObjectMember("identity_schema")) {
+            if (!root["identity_schema"].isString() ||
+                root["identity_schema"].getString() != "pulp.graph.saved-identity.v6") {
+                result.refusal = GraphDocumentRefusal::UnsupportedDocumentProfile;
+                result.detail = "identity_schema is not the admitted v6 envelope";
+                return result;
+            }
+            profile = "pulp.graph.saved-identity.v6";
+        }
+        if (format_version == 0 && profile.empty()) {
+            result.refusal = GraphDocumentRefusal::LogicalIdentityMissing;
+            result.detail = "document has no explicit logical identity profile";
+            return result;
+        }
+
+        std::string canonical;
+        GraphDocumentRefusal canonical_refusal = GraphDocumentRefusal::None;
+        if (!append_document_canonical(root, canonical, canonical_refusal, 0)) {
+            result.refusal = canonical_refusal;
+            result.detail = graph_document_refusal_name(canonical_refusal);
+            return result;
+        }
+        result.document.format_version_ = format_version;
+        result.document.profile_ = std::move(profile);
+        result.document.canonical_bytes_ = std::move(canonical);
+        result.document.semantic_digest_ =
+            "sha256:" +
+            runtime::sha256_hex("pulp.graph.semantic.v6\0" + result.document.canonical_bytes_);
+        return result;
+    } catch (const std::bad_alloc&) {
+        result.refusal = GraphDocumentRefusal::AllocationFailed;
+        result.detail = "document inspection allocation failed";
+    } catch (const std::exception& error) {
+        const std::string message = error.what();
+        result.refusal = (message.find("duplicate") != std::string::npos ||
+                          message.find("Duplicate") != std::string::npos ||
+                          message.find("already contains a member") != std::string::npos)
+                             ? GraphDocumentRefusal::DuplicateJsonKey
+                             : GraphDocumentRefusal::InvalidJson;
+        result.detail = std::string("JSON parse failed: ") + message;
+    }
+    return result;
 }
 
 int GraphSerializer::current_format_version() {
