@@ -3,8 +3,6 @@
  "record": {
   "entry": "tools/scripts/test_prepush_affected_tests.py",
   "inputs": [
-   ".githooks/pre-push",
-   "tools/ci/pr_head_affected_tests.py",
    "tools/scripts/prepush_affected_tests.py",
    "tools/scripts/test_prepush_affected_tests.py"
   ],
