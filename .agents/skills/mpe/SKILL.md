@@ -94,6 +94,13 @@ allocation (oldest-steal when full), routes per-note expression updates
 to the right voice, and runs note-off logic including the glide
 refcount. Do not call `on_note_on` / `on_note_off` directly.
 
+The bounded G6 graph voice bank keeps this allocator as the generation owner.
+Its CC64 pedal can hold a physical NoteOff, then dispatch the release through
+the allocator when the last applicable pedal rises. A steal hard-resets the
+victim; there is no separate tail queue. The A1 scalar fixture uses four
+in-slot linear release frames, while the allocator's public lifecycle remains
+the same. Manager-channel expression audio is still unsupported in this bank.
+
 Voices are accessed by index via `allocator_.voice(i)` with
 `allocator_.polyphony()` giving the count — there's no `voices()`
 iterator.
