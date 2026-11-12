@@ -637,6 +637,36 @@ class Collector:
         res = self._git("diff", "--no-renames", "--name-only", a, b, check=False)
         return None if res.returncode else sorted(p for p in res.stdout.splitlines() if p)
 
+    def entry_delta(self, base: str, group_sha: str) -> list[str] | None:
+        """The files a merge group's own entry changed: its commit against its
+        first parent (`merge_group.base_sha`, the previous speculative group
+        when entries are queued ahead), renames listed as two paths.
+
+        Read from the local clone when both commits are there, else from the
+        API's compare, which lists at most 300 files: a delta at that cap, a
+        status other than `ahead`, or any read error is None (unreadable),
+        never a short list, so a policy reading it fails closed."""
+        a, b = self.commit(base), self.commit(group_sha)
+        if a and b and a.get("local") and b.get("local"):
+            files = self.diff_files(base, group_sha)
+            return files if files else None
+
+        def fetch() -> list[str] | None:
+            try:
+                doc = self.gh.json(f"repos/{self.gh.repository}/compare/{base}...{group_sha}?per_page=100")
+            except urllib.error.HTTPError:
+                return None
+            rows = doc.get("files")
+            if doc.get("status") != "ahead" or not isinstance(rows, list) or not rows or len(rows) >= 300:
+                return None
+            out: set[str] = set()
+            for row in rows:
+                out.add(row.get("filename") or "")
+                if row.get("previous_filename"):
+                    out.add(row["previous_filename"])
+            return None if "" in out else sorted(out)
+        return self._cached(f"compare/{base}-{group_sha}.json.gz", fetch)
+
     def drift(self, head: dict, group: dict) -> tuple[list[str] | None, str | None]:
         """Files that differ between the head run's and the group's checkouts.
 
@@ -804,14 +834,29 @@ class Collector:
                               and j.get("conclusion") == "success"), None)
             if reuse_job:
                 record["observed_decision"] = self.decision(reuse_job["id"])
+            # The required `macos` check as the merge queue saw it (the native
+            # leg or the bootstrap that owns the name), and the entry's own
+            # delta: what the entry-delta policies and their ALLGREEN
+            # attribution read.
+            macos = next((j for j in jobs if j.get("name") == "macos"), None)
+            record["macos_conclusion"] = macos.get("conclusion") if macos else None
+            record["macos_minutes"] = _job_minutes(macos)
+            parents = record["checkout_parents"] or []
+            record["first_parent_delta_files"] = (self.entry_delta(parents[0], checkout)
+                                                  if len(parents) == 2 else None)
         return record, parsed["tests"]
 
-    def collect(self, since: dt.datetime, until: dt.datetime, lookback_days: int = 7) -> dict:
+    def collect(self, since: dt.datetime, until: dt.datetime, lookback_days: int = 7,
+                groups_only: bool = False) -> dict:
+        """`groups_only` records merge groups and no PR-head runs: enough for a
+        policy that reads only the group (entry-delta-docs), at a fraction of
+        the API calls. Every pair then has no head candidate."""
         groups = self.list_runs("merge_group", since, until)
         groups = [g for g in groups if QUEUE_BRANCH_RE.match(g.get("head_branch") or "")
                   and g.get("status") == "completed"]
         print(f"collect: {len(groups)} completed merge-group runs", file=sys.stderr)
-        heads_listing = self.list_runs("pull_request", since - dt.timedelta(days=lookback_days), until)
+        heads_listing = ([] if groups_only else
+                         self.list_runs("pull_request", since - dt.timedelta(days=lookback_days), until))
         by_head: dict[str, list[dict]] = {}
         for run in heads_listing:
             if run.get("status") == "completed":
@@ -919,7 +964,7 @@ class Collector:
         self.write(runs, pairs)
         manifest = {
             "schema": "pulp-reuse-replay-corpus/v1", "repository": self.gh.repository,
-            "since": since.isoformat(), "until": until.isoformat(),
+            "since": since.isoformat(), "until": until.isoformat(), "groups_only": groups_only,
             "merge_groups": len(group_records),
             "pairs_with_head_run": sum(1 for p in pairs if p["heads"]),
             "head_runs": sum(1 for r in runs.values() if r["run_kind"] == "pr_head"),
@@ -945,6 +990,14 @@ class Collector:
                  "attempts": t["attempts"], "duration_s": t["duration_s"], "source_key": None,
                  "output_key": None, "runner_image": run["runner_image"], "exonerated": None}
                 for t in rows))
+
+
+def _job_minutes(job: dict | None) -> float | None:
+    """A job's `completed_at - started_at` in minutes, or None when unknown."""
+    if not job or not job.get("started_at") or not job.get("completed_at"):
+        return None
+    seconds = (_parse_time(job["completed_at"]) - _parse_time(job["started_at"])).total_seconds()
+    return round(max(seconds, 0.0) / 60.0, 2)
 
 
 def reference_selected(group: dict, groups: list[dict]) -> int:

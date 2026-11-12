@@ -101,6 +101,20 @@ POLICIES
   source-key-list-level
                  control: a list edit re-runs every declared script test; it
                  must read lower than per-entry.
+  entry-delta-docs
+                 build-skipping: a merge group skips its native build when its
+                 OWN entry's delta (the group commit against its first parent,
+                 `first_parent_delta_files`) is `docs-only` by
+                 `classify_changes.impact_class`, stacked or not; any other
+                 class, or an unreadable delta, builds. It reads no PR-head run,
+                 so `collect --groups-only` is enough. It is scored under the
+                 ALLGREEN attribution rule: a skipped group whose build or
+                 tests failed is a false skip only when its predecessor group's
+                 `macos` passed, its first parent is main's tip, or the
+                 predecessor cannot be found (fail closed); a failure behind a
+                 red or cancelled predecessor is a `neighbour_failure`, counted
+                 separately, because under ALLGREEN the predecessor's entry
+                 does not land and this group is rebuilt without it.
   suite-source-key, per-executable
                  tier-1b and tier-2 seams: registered, not implemented.
   none, key-match-reference, selection-reference
@@ -108,6 +122,18 @@ POLICIES
                  `key-match-reference` skips a test whose head and group
                  records carry the same output_key; `selection-reference`
                  skips what a recorded selection left out. None is a candidate.
+
+METRICS (entry-delta policies, besides the above)
+
+  neighbour_failures  failures in skipped groups that the ALLGREEN rule
+               attributes to a red predecessor group; reported, not false.
+  unattributed_failures  skipped groups whose `macos` failed with no build or
+               test failure on record (an infrastructure failure, an expired
+               log); reported beside the zero so a reader can check them.
+  skip_all_groups / skip_all_native_groups / skip_all_macos_minutes
+               over every pair, whatever its status: the groups the policy
+               would skip, those of them whose own `macos` ran the native gate
+               (over one minute), and the `macos` minutes those groups spent.
 
 Exit codes: 0 success; 1 `score` found a false skip or a scenario verdict
 mismatch, or `collect` found no merge groups or no PR-head pairs (the
@@ -236,6 +262,13 @@ class Corpus:
     def run(self, run_id: Any) -> dict | None:
         return self.runs.get(str(run_id)) if run_id is not None else None
 
+    def group_by_sha(self, sha: Any) -> dict | None:
+        """The merge-group run whose commit is `sha` (the latest created)."""
+        if not sha:
+            return None
+        found = [r for r in self.runs.values() if r.get("run_kind") == "merge_group" and r.get("group_sha") == sha]
+        return max(found, key=lambda r: str(r.get("created_at") or "")) if found else None
+
 
 def read_jsonl(path: Path) -> Iterator[dict]:
     opener = gzip.open if path.suffix == ".gz" else open
@@ -300,6 +333,9 @@ class Policy:
     decide: Callable[[dict, Corpus, dict], Decision] | None
     candidate: bool
     summary: str
+    # "allgreen": a failure in a skipped group is attributed to its
+    # predecessor group first (see `allgreen_blame`).
+    attribution: str = "none"
 
 
 def _group_and_heads(pair: dict, corpus: Corpus, opts: dict
@@ -461,6 +497,43 @@ def decide_key_match_reference(pair: dict, corpus: Corpus, opts: dict) -> Decisi
     return _unevaluable("no head test records")
 
 
+def decide_entry_delta_docs(pair: dict, corpus: Corpus, opts: dict) -> Decision:
+    """Skip the build when the group's own entry delta is docs-only.
+
+    The delta is the group commit against its first parent, so for a group
+    stacked on entries ahead it is the last entry alone: the design leans on
+    ALLGREEN, where every group ahead had to pass on its own. Fail closed: an
+    unreadable delta runs everything."""
+    group = corpus.run(pair.get("group_run_id"))
+    if group is None or group.get("run_kind") != "merge_group" or validate_run(group):
+        return _unevaluable("group checkout unknown or rejected")
+    files = group.get("first_parent_delta_files")
+    if files is None:
+        return _unevaluable("entry delta unreadable")
+    change_class = classify_changes.impact_class(list(files))
+    if change_class == classify_changes.DOCS_ONLY:
+        return Decision(True, f"entry delta docs-only ({len(files)} files)", skip_all=True)
+    return Decision(True, f"entry delta {change_class}")
+
+
+def allgreen_blame(pair: dict, group: dict, corpus: Corpus) -> str:
+    """Who a failure in a skipped group belongs to under ALLGREEN.
+
+    `false_skip` when the first parent is main's tip (the pair is not stacked),
+    when the predecessor group's `macos` passed, or when the predecessor cannot
+    be found or read (fail closed); `neighbour_failure` only when the
+    predecessor group's `macos` was red, cancelled or timed out: that entry
+    does not land, and GitHub rebuilds this group without it."""
+    if pair.get("stacked") is False:
+        return "false_skip"
+    predecessor = corpus.group_by_sha(group.get("base_sha"))
+    if predecessor is None:
+        return "false_skip"
+    if predecessor.get("macos_conclusion") in ("failure", "cancelled", "timed_out"):
+        return "neighbour_failure"
+    return "false_skip"
+
+
 POLICIES: dict[str, Policy] = {p.name: p for p in (
     Policy("whole-receipt", decide_whole_receipt, True,
            "identical tree on identical base (the live rule)"),
@@ -484,6 +557,9 @@ POLICIES: dict[str, Policy] = {p.name: p for p in (
            "tier 2 estimate: source-key-manifest-data-recorded with recorded output hashes deciding rebuilds"),
     Policy("source-key-list-level", _source_key("list-level"), False,
            "control: any change to the script-input list re-runs every declared script test"),
+    Policy("entry-delta-docs", decide_entry_delta_docs, True,
+           "build-skipping: skip the native build when the entry's own delta is docs-only (ALLGREEN attribution)",
+           attribution="allgreen"),
     Policy("suite-source-key", None, True,
            "tier 1b: one source key over the whole suite (not implemented)"),
     Policy("per-executable", None, True,
@@ -547,6 +623,11 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
     false_skips: list[dict] = []
     flake_skips: list[dict] = []
     build_failures_skipped: list[dict] = []
+    neighbour_failures: list[dict] = []
+    unattributed_failures: list[dict] = []
+    skip_all_groups = skip_all_native_groups = 0
+    skip_all_macos_minutes = 0.0
+    allgreen = policy.attribution == "allgreen"
     evaluable = scored = skipped_groups = failing_tests = 0
     skipped_seconds = total_seconds = 0.0
     replay_vs_observed = {"both_reuse": 0, "replay_only": 0, "observed_only": 0, "neither": 0}
@@ -562,8 +643,23 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
                    "replay_only" if decision.skip_all else
                    "observed_only" if observed == "reuse" else "neither")
             replay_vs_observed[key] += 1
+        if decision.skip_all:
+            skip_all_groups += 1
+            minutes = (group or {}).get("macos_minutes")
+            if isinstance(minutes, (int, float)):
+                skip_all_macos_minutes += float(minutes)
+                skip_all_native_groups += int(minutes > 1.0)
+        blame = allgreen_blame(pair, group, corpus) if allgreen and decision.skip_all and group else "false_skip"
         if status == "build_failed" and decision.skip_all:
             build_failures_skipped.append({"pr": pair.get("pr"), "group_run_id": pair.get("group_run_id")})
+            if allgreen:
+                row = {"pr": pair.get("pr"), "group_run_id": pair.get("group_run_id"), "test_id": "(build)",
+                       "outcome": "build_failed", "attempts": 1, "reason": decision.reason}
+                (neighbour_failures if blame == "neighbour_failure" else false_skips).append(row)
+        if (allgreen and decision.skip_all and status not in ("scored", "build_failed")
+                and (group or {}).get("macos_conclusion") == "failure"):
+            unattributed_failures.append({"pr": pair.get("pr"), "group_run_id": pair.get("group_run_id"),
+                                          "status": status})
         if status != "scored":
             continue
         scored += 1
@@ -603,7 +699,12 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
             row = {"pr": pair.get("pr"), "group_run_id": group["run_id"], "test_id": t["test_id"],
                    "outcome": outcome, "attempts": attempts, "reason": decision.reason}
             if outcome in FAIL_OUTCOMES:
-                (flake_skips if t.get("exonerated") is True else false_skips).append(row)
+                if t.get("exonerated") is True:
+                    flake_skips.append(row)
+                elif blame == "neighbour_failure":
+                    neighbour_failures.append(row)
+                else:
+                    false_skips.append(row)
             elif outcome == "pass" and attempts > 1:
                 flake_skips.append(row)
         skipped_seconds += pair_skipped
@@ -640,6 +741,13 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
         "false_skip_rows": false_skips,
         "flake_skips": len(flake_skips),
         "flake_skip_rows": flake_skips,
+        "neighbour_failures": len(neighbour_failures),
+        "neighbour_failure_rows": neighbour_failures,
+        "unattributed_failures": len(unattributed_failures),
+        "unattributed_failure_rows": unattributed_failures,
+        "skip_all_groups": skip_all_groups,
+        "skip_all_native_groups": skip_all_native_groups,
+        "skip_all_macos_minutes": round(skip_all_macos_minutes, 2),
         "build_failed": statuses.get("build_failed", 0),
         "build_failures_skipped": len(build_failures_skipped),
         "build_failures_skipped_rows": build_failures_skipped,
@@ -793,7 +901,18 @@ def render(result: dict) -> str:
         f"build_failed {result['build_failed']} (skipped by policy {result['build_failures_skipped']})  "
         f"rejected runs {result['rejected_runs']}",
         f"  replay vs recorded decision {result['replay_vs_observed']}",
+        f"  would skip {result['skip_all_groups']} of {result['pairs']} groups (any status); "
+        f"{result['skip_all_native_groups']} of them ran the native macos gate, "
+        f"{result['skip_all_macos_minutes']:.1f} macos minutes",
     ]
+    if POLICIES.get(result["policy"]) and POLICIES[result["policy"]].attribution == "allgreen":
+        lines.append(f"  ALLGREEN attribution: neighbour failures {result['neighbour_failures']} "
+                     f"(behind a red predecessor group; not false skips)  unattributed macos failures "
+                     f"{result['unattributed_failures']}")
+        for row in result["neighbour_failure_rows"][:20]:
+            lines.append(f"  neighbour failure: PR {row['pr']} group run {row['group_run_id']}: {row['test_id']}")
+        for row in result["unattributed_failure_rows"][:20]:
+            lines.append(f"  unattributed: PR {row['pr']} group run {row['group_run_id']} ({row['status']})")
     for row in result["false_skip_rows"][:20]:
         lines.append(f"  false skip: PR {row['pr']} group run {row['group_run_id']}: {row['test_id']} "
                      f"({row['outcome']}, attempts {row['attempts']}; {row['reason']})")
@@ -869,6 +988,8 @@ def main(argv: list[str]) -> int:
     c.add_argument("--workers", type=int, default=6)
     c.add_argument("--rate-reserve", type=int, default=2500,
                    help="pause when fewer API calls than this remain (the limit is shared)")
+    c.add_argument("--groups-only", action="store_true",
+                   help="record merge groups only, no PR-head runs (enough for entry-delta-docs)")
     k = sub.add_parser("source-keys", help="reconstruct tier-1a source keys into a corpus's pairs")
     k.add_argument("--corpus", required=True, type=Path)
     k.add_argument("--test-map", required=True, type=Path,
@@ -933,7 +1054,8 @@ def main(argv: list[str]) -> int:
         import reuse_replay_collect as rrc
         gh = rrc.GitHub(a.repository, a.token, reserve=a.rate_reserve)
         try:
-            manifest = rrc.Collector(gh, a.out, a.repo, a.workers).collect(since, until)
+            manifest = rrc.Collector(gh, a.out, a.repo, a.workers).collect(since, until,
+                                                                         groups_only=a.groups_only)
         except rrc.ListingShort as err:
             print(f"collect: LISTING SHORT: {err}; the corpus is not rewritten: every pair needing a missing run "
                   "would have been dropped", file=sys.stderr)
@@ -946,7 +1068,7 @@ def main(argv: list[str]) -> int:
         for row in manifest.get("listing_shortfalls") or []:
             print(f"collect: instrument event: {row['event']} runs created {row['day']} listed {row['listed']} of "
                   f"total_count {row['total_count']}; whole when asked again", file=sys.stderr)
-        if manifest["merge_groups"] == 0 or manifest["pairs_with_head_run"] == 0:
+        if manifest["merge_groups"] == 0 or (manifest["pairs_with_head_run"] == 0 and not a.groups_only):
             print("collect: CONTROL FAILED: no merge groups or no PR-head pairs in the window; "
                   "the instrument is broken, not the history", file=sys.stderr)
             return 1

@@ -13,7 +13,12 @@ What must hold:
   retry lines ctest prints without a counter, and reads the receipt verdict
   from the rendered notice, never from the step script that echoes it;
 - registered seams without a decision function refuse to score;
-- `collect` exits 1 when it finds no merge groups or no PR-head pairs.
+- `collect` exits 1 when it finds no merge groups or no PR-head pairs
+  (`--groups-only` needs no PR-head pairs);
+- entry-delta-docs skips a group only on a docs-only entry delta, and under
+  the ALLGREEN rule a failure in a skipped group is a false skip unless its
+  predecessor group was red (a neighbour failure); the planted fixture
+  reads exactly one of each.
 
 Run:
     python3 tools/scripts/test_reuse_policy_replay.py
@@ -577,6 +582,145 @@ class ScoreTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
 
 
+class EntryDeltaDocsTests(unittest.TestCase):
+    """The docs entry-delta lane's replay: what it skips, and the ALLGREEN
+    attribution of a failure in a skipped group."""
+
+    FIXTURE = SCENARIOS / "entry_delta_allgreen.json"
+
+    def corpus(self, keep: set[str] | None = None, **overrides) -> rpr.Corpus:
+        data = json.loads(self.FIXTURE.read_text(encoding="utf-8"))["cases"][0]["corpus"]
+        runs = [dict(r, **overrides.get(r["run_id"], {})) for r in data["runs"]
+                if keep is None or r["run_id"] in keep]
+        pairs = [p for p in data["pairs"] if keep is None or p["group_run_id"] in keep]
+        return rpr.Corpus(runs, pairs, tests=data["tests"])
+
+    def decisions(self) -> dict[str, rpr.Decision]:
+        c = self.corpus()
+        return {p["group_run_id"]: rpr.POLICIES["entry-delta-docs"].decide(p, c, {}) for p in c.pairs}
+
+    def test_skips_docs_deltas_stacked_or_not_and_builds_every_other_class(self):
+        d = self.decisions()
+        self.assertEqual({k for k, v in d.items() if v.skip_all}, {"g1", "g2", "g3"})
+        self.assertIn("code:core", d["g0"].reason)
+        self.assertIn("code:core", d["g4"].reason)  # docs plus one core file is mixed
+        self.assertIn("code:docs", d["g5"].reason)  # a migration note feeds the build
+
+    def test_planted_failure_behind_a_green_predecessor_is_one_false_skip(self):
+        result = rpr.score(self.corpus({"g0", "g1"}), "entry-delta-docs")
+        self.assertEqual((result["false_skips"], result["neighbour_failures"]), (1, 0))
+        self.assertEqual(result["false_skip_rows"][0]["group_run_id"], "g1")
+        self.assertEqual(result["verdict"], "UNSAFE: false skips")
+
+    def test_failure_behind_a_red_predecessor_is_a_neighbour_failure(self):
+        result = rpr.score(self.corpus({"gx", "g2"}), "entry-delta-docs")
+        self.assertEqual((result["false_skips"], result["neighbour_failures"]), (0, 1))
+        self.assertEqual(result["neighbour_failure_rows"][0]["group_run_id"], "g2")
+
+    def test_the_whole_fixture_reads_one_of_each(self):
+        result = rpr.score(self.corpus(), "entry-delta-docs")
+        self.assertEqual((result["false_skips"], result["neighbour_failures"]), (1, 1))
+        self.assertEqual((result["skip_all_groups"], result["skip_all_native_groups"]), (3, 3))
+        self.assertEqual(result["skip_all_macos_minutes"], 63.0)
+        self.assertIn("neighbour failures 1", rpr.render(result))
+
+    def test_a_cancelled_predecessor_is_a_neighbour_too(self):
+        result = rpr.score(self.corpus({"gx", "g2"}, gx={"macos_conclusion": "cancelled"}), "entry-delta-docs")
+        self.assertEqual((result["false_skips"], result["neighbour_failures"]), (0, 1))
+
+    def test_an_unknown_predecessor_fails_closed_to_a_false_skip(self):
+        result = rpr.score(self.corpus({"g2"}), "entry-delta-docs")
+        self.assertEqual((result["false_skips"], result["neighbour_failures"]), (1, 0))
+
+    def test_a_group_on_mains_tip_owns_its_failure_even_if_a_group_shares_its_base(self):
+        c = self.corpus({"gx", "g2"})
+        c.pairs[1]["stacked"] = False
+        self.assertEqual(rpr.score(c, "entry-delta-docs")["false_skips"], 1)
+
+    def test_a_skipped_build_failure_is_attributed_like_a_test_failure(self):
+        over = {"g1": {"build_failed": True, "ctest": {"ran": False}}}
+        result = rpr.score(self.corpus({"g0", "g1"}, **over), "entry-delta-docs")
+        self.assertEqual((result["false_skips"], result["build_failures_skipped"]), (1, 1))
+        self.assertEqual(result["false_skip_rows"][0]["outcome"], "build_failed")
+        over = {"g2": {"build_failed": True, "ctest": {"ran": False}}}
+        result = rpr.score(self.corpus({"gx", "g2"}, **over), "entry-delta-docs")
+        self.assertEqual((result["false_skips"], result["neighbour_failures"]), (0, 1))
+
+    def test_a_macos_failure_without_evidence_is_reported_not_hidden(self):
+        over = {"g3": {"macos_conclusion": "failure", "ctest": {"ran": False}}}
+        result = rpr.score(self.corpus({"g0", "g3"}, **over), "entry-delta-docs")
+        self.assertEqual((result["unattributed_failures"], result["false_skips"]), (1, 0))
+        self.assertIn("unattributed macos failures 1", rpr.render(result))
+
+    def test_an_unreadable_delta_never_skips(self):
+        for delta in (None, []):
+            result = rpr.score(self.corpus({"g0", "g1"}, g1={"first_parent_delta_files": delta}),
+                               "entry-delta-docs")
+            self.assertEqual((result["skip_all_groups"], result["false_skips"]), (0, 0), delta)
+
+    def test_the_skip_nothing_control_reads_zero_on_the_same_corpus(self):
+        result = rpr.score(self.corpus(), "none")
+        self.assertEqual((result["skip_all_groups"], result["false_skips"], result["neighbour_failures"]), (0, 0, 0))
+
+
+class EntryDeltaCollectTests(unittest.TestCase):
+    def collector(self, doc=None, local=False, error=None) -> rrc.Collector:
+        c = rrc.Collector.__new__(rrc.Collector)
+        c.commit = lambda sha: {"tree": "t", "parents": [], "local": local}
+        c.diff_files = lambda a, b: ["docs/a.md"]
+        c._cached = lambda name, fetch, keep=True: fetch()
+        gh = mock.Mock(repository="O/R")
+        if error is not None:
+            gh.json.side_effect = error
+        else:
+            gh.json.return_value = doc
+        c.gh = gh
+        return c
+
+    def test_local_commits_diff_without_the_api(self):
+        c = self.collector(local=True)
+        self.assertEqual(c.entry_delta("b", "m"), ["docs/a.md"])
+        c.gh.json.assert_not_called()
+
+    def test_compare_lists_both_sides_of_a_rename(self):
+        doc = {"status": "ahead", "files": [{"filename": "docs/new.md", "previous_filename": "core/old.cpp"}]}
+        self.assertEqual(self.collector(doc).entry_delta("b", "m"), ["core/old.cpp", "docs/new.md"])
+
+    def test_a_capped_diverged_or_failed_compare_is_unreadable(self):
+        capped = {"status": "ahead", "files": [{"filename": f"docs/{i}.md"} for i in range(300)]}
+        for doc in (capped, {"status": "diverged", "files": [{"filename": "docs/a.md"}]},
+                    {"status": "ahead", "files": []}):
+            self.assertIsNone(self.collector(doc).entry_delta("b", "m"))
+        err = urllib.error.HTTPError("u", 404, "gone", {}, None)
+        self.assertIsNone(self.collector(error=err).entry_delta("b", "m"))
+
+    def test_a_group_record_carries_its_macos_check_and_entry_delta(self):
+        c = rrc.Collector.__new__(rrc.Collector)
+        jobs = [{"id": 5, "name": "macos", "runner_name": "gate-vm-1", "conclusion": "success",
+                 "started_at": "2026-11-01T10:00:00Z", "completed_at": "2026-11-01T10:21:00Z"}]
+        c.jobs = lambda run_id: jobs
+        c.parsed_log = lambda job_id: {"checkout_sha": "m1", "ctest": {"ran": True, "complete": True, "failed": 0},
+                                       "tests": [], "receipt_issued": None}
+        c.commit = lambda sha: {"tree": "t", "parents": ["b", "h"], "local": True}
+        seen = []
+        c.entry_delta = lambda base, sha: seen.append((base, sha)) or ["docs/a.md"]
+        run = {"id": 1, "head_sha": "m1", "created_at": "2026-11-01T10:00:00Z", "updated_at": None,
+               "conclusion": "success"}
+        rec = c.run_record(run, "merge_group", 7, "h")[0]
+        self.assertEqual((rec["macos_conclusion"], rec["macos_minutes"]), ("success", 21.0))
+        self.assertEqual(rec["first_parent_delta_files"], ["docs/a.md"])
+        self.assertEqual(seen, [("b", "m1")])
+
+    def test_groups_only_collect_needs_no_head_pairs(self):
+        manifest = {"merge_groups": 5, "pairs_with_head_run": 0}
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(rrc.Collector, "collect", return_value=manifest) as collect, \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            rc = rpr.main(["collect", "--since", "2026-10-15", "--out", tmp, "--token", "x", "--groups-only"])
+        self.assertEqual(rc, 0)
+        self.assertTrue(collect.call_args.kwargs["groups_only"])
+
+
 class ValidateTests(unittest.TestCase):
     def test_bound_records_pass(self):
         self.assertIsNone(rpr.validate_run(group()))
@@ -701,6 +845,7 @@ class RunRecordTests(unittest.TestCase):
         c.jobs = lambda run_id: [job]
         c.parsed_log = lambda job_id: parsed
         c.commit = lambda sha: {"tree": "t", "parents": ["b", "h"], "local": True}
+        c.entry_delta = lambda base, sha: ["docs/a.md"]
         run = {"id": 1, "head_sha": "m1", "created_at": "2026-09-01T00:00:00Z", "updated_at": None, "conclusion": "failure"}
         return c.run_record(run, "merge_group", 7, "h")[0]
 
