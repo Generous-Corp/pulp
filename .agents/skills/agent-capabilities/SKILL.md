@@ -2117,3 +2117,13 @@ Changes to the isolated CLAP host headers, including
 Run rederive, fingerprint acceptance, manifest write, and installed-consumer
 checks together; do not hand-edit generated fragments or treat a passing worker
 test as sufficient provenance evidence.
+
+## A new host-side header with no generator-facing capability
+
+Application plumbing (for example a device session class under `pulp/audio/`)
+still trips `unclassified public header`. Add an `infrastructure` entry to
+`REVIEWED_HEADERS` in `agent_capability_registry.py` with a placeholder
+fingerprint, run `agent_capability_manifest.py --check`, copy the digest it
+prints as `got sha256:...` into the entry, then run `--write`. Stage the new
+`docs/status/agent-capability-surface/headers/...json` fragment, which `--write`
+creates untracked.
