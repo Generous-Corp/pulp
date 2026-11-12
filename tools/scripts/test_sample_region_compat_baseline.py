@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import json
-import re
 import sys
 import tempfile
 import unittest
@@ -54,39 +53,33 @@ class BaselineTests(unittest.TestCase):
         self.assertIn('${ROOT}/core/runtime/src/durable_file_replacement.cpp"', listing)
         self.assertIn('${ROOT}/core/host/src/processor_restore.cpp"', listing)
 
-    def test_web_sources_define_is_isolated_plugin_slot(self):
-        # Graph authoring and prepare ask is_isolated_plugin_slot() of every
-        # plugin node. The isolated web profile does not compile
-        # isolated_plugin_slot.cpp (worker processes, mapped files, threads),
-        # so it must compile the web stub that answers false, or wasm-ld
-        # reports the symbol undefined.
+    def test_web_sources_define_every_host_query_the_closure_calls(self):
+        # The isolated web profile links only the curated closure, so a
+        # function its sources call must be DEFINED by one of its sources or
+        # wasm-ld fails with an undefined symbol. Each entry names a query
+        # whose native implementation cannot be compiled for wasm, and so needs
+        # a web-safe definition inside the closure.
+        import re
         repo = Path(__file__).resolve().parents[2]
         listing = (repo / "tools" / "cmake" /
                    "PulpSampleRegionWebSources.cmake").read_text(encoding="utf-8")
-        for caller in ("signal_graph_authoring.cpp", "signal_graph_prepare.cpp"):
-            source = (repo / "core/host/src" / caller).read_text(encoding="utf-8")
-            if "is_isolated_plugin_slot(" not in source:
-                continue
-            with self.subTest(caller=caller):
-                self.assertIn(f'${{ROOT}}/core/host/src/{caller}"', listing)
-                self.assertTrue(
-                    '${ROOT}/core/host/src/isolated_plugin_slot.cpp"' in listing or
-                    '${ROOT}/core/host/src/isolated_plugin_slot_web_stub.cpp"' in listing,
-                    "web sources call is_isolated_plugin_slot() without defining it")
-        stub = (repo / "core/host/src/isolated_plugin_slot_web_stub.cpp").read_text(
-            encoding="utf-8")
-        header = (repo / "core/host/include/pulp/host/isolated_plugin_slot.hpp").read_text(
-            encoding="utf-8")
-        signature = "bool is_isolated_plugin_slot(const PluginSlot&) noexcept"
-        # The stub forward-declares PluginSlot instead of including the header,
-        # so nothing but this check ties its signature to the real declaration.
-        self.assertIn(signature + ";", header)
-        self.assertIn(signature + ";", stub)
-        self.assertIn("class PluginSlot;", stub)
-        self.assertRegex(stub, re.escape(signature) + r"\s*\{\s*return false;\s*\}")
-        # isolated_plugin_slot.hpp reaches buffer.hpp and parameter.hpp, whose
-        # fan-out is capped by tools/scripts/header_fanout_guard.json.
-        self.assertNotRegex(stub, r"(?m)^\s*#\s*include\b")
+        closure = re.findall(r'"\$\{ROOT\}/([^"]+\.cpp)"', listing)
+        self.assertIn("core/host/src/signal_graph_authoring.cpp", closure)
+        texts = {path: (repo / path).read_text(encoding="utf-8") for path in closure}
+        for symbol, native_only in (
+            ("is_isolated_plugin_slot", "core/host/src/isolated_plugin_slot.cpp"),
+        ):
+            with self.subTest(symbol=symbol):
+                call = re.compile(r"\b" + symbol + r"\s*\(")
+                definition = re.compile(
+                    r"^(?!\s)[^;\n]*\b" + symbol +
+                    r"\s*\([^;{]*\)\s*(?:const\s*)?(?:noexcept\s*)?\{", re.M)
+                callers = [p for p, text in texts.items() if call.search(text)]
+                definers = [p for p, text in texts.items() if definition.search(text)]
+                self.assertTrue(callers, f"no closure source calls {symbol}")
+                self.assertTrue(definers,
+                                f"{symbol} is called by {callers} but no web source defines it")
+                self.assertNotIn(native_only, closure)
 
     def test_generator_reads_linked_source_closure_from_cmake_dependinfo(self):
         repo = Path(__file__).resolve().parents[2]

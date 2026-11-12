@@ -20,12 +20,15 @@ hostile-fixture, endpoint, sibling/PDC and production-mutation controls together
 Functional callback traps do not establish full realtime or A10 qualification;
 host death and deliberate group escape are outside first-mode custody.
 
-Graph code that calls `is_isolated_plugin_slot()` also compiles into the curated
-sample-region web closure (`tools/cmake/PulpSampleRegionWebSources.cmake`),
-which deliberately omits the worker-backed `isolated_plugin_slot.cpp` and links
-`isolated_plugin_slot_web_stub.cpp` (always false) instead. A new free function
-from that file called by graph sources needs a matching web-stub definition, or
-the WAMv2 + WebCLAP lane fails at wasm-ld; native-only builds will not show it.
+**Graph code that calls an isolation helper must also link on the web.** The
+WAM / WebCLAP sample-region profile compiles a curated source list
+(`tools/cmake/PulpSampleRegionWebSources.cmake`), not `pulp-host`, and
+`isolated_plugin_slot.cpp` is deliberately absent because it needs a child
+process. A new call from `signal_graph_*.cpp` into that file fails only at
+`wasm-ld` (an advisory job that still ejects ALLGREEN queue batches). Give the
+web list a wasm-safe definition, as `isolated_plugin_slot_web.cpp` does for
+`is_isolated_plugin_slot`, and add the symbol to the closure selftest in
+`tools/scripts/test_sample_region_compat_baseline.py`.
 
 
 ## Live retuning at a callback boundary
