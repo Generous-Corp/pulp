@@ -1,0 +1,222 @@
+{
+  "consumer_gate": {
+    "requires": [
+      "g3-installed-public-consumer",
+      "spectral-installed-public-consumer"
+    ],
+    "status": "NOT_QUALIFIED"
+  },
+  "consumers": [
+    {
+      "name": "g3-installed-public-consumer",
+      "reason": "command not supplied",
+      "status": "UNAVAILABLE"
+    },
+    {
+      "name": "spectral-installed-public-consumer",
+      "reason": "command not supplied",
+      "status": "UNAVAILABLE"
+    }
+  ],
+  "layers": [
+    {
+      "name": "authored",
+      "sha256": "sha256:11a2327e1b965f52afbf56369f160633c9299d26d808b1a6f4e41e7f7b6a0f91",
+      "value": {
+        "edges": [
+          [
+            "input",
+            "gain"
+          ],
+          [
+            "gain",
+            "output"
+          ]
+        ],
+        "nodes": [
+          {
+            "channels": [
+              "L",
+              "R"
+            ],
+            "id": "input",
+            "kind": "audio_input"
+          },
+          {
+            "gain_bits": "3f800000",
+            "id": "gain",
+            "kind": "gain"
+          },
+          {
+            "channels": [
+              "L",
+              "R"
+            ],
+            "id": "output",
+            "kind": "audio_output"
+          }
+        ],
+        "profile": "pulp.graph.authored-io-gain.v1"
+      }
+    },
+    {
+      "name": "resolved",
+      "sha256": "sha256:40c9336823c609ee0c0ebbf3271e7c0bcb42f93e29a43dd6deb66a78764b3a6d",
+      "value": {
+        "nodes": [
+          {
+            "implementation": "pulp.builtin.audio-input.v1",
+            "logical_id": "input",
+            "resource": null
+          },
+          {
+            "implementation": "pulp.builtin.gain.v1",
+            "logical_id": "gain",
+            "resource": null
+          },
+          {
+            "implementation": "pulp.builtin.audio-output.v1",
+            "logical_id": "output",
+            "resource": null
+          }
+        ],
+        "profile": "pulp.graph.resolved-plan.v1",
+        "resources": []
+      }
+    },
+    {
+      "name": "plan",
+      "sha256": "sha256:887bd4ca022c65c9ef92a0fd0029b34fb5cec34f7f332fecdfd772eb3cdbf0b9",
+      "value": {
+        "block_frames": 128,
+        "capacity": {
+          "events": 16,
+          "nodes": 3
+        },
+        "fallback": "none",
+        "gain": 1.0,
+        "generation": 7,
+        "latency": 0,
+        "sample_rate": 48000
+      }
+    },
+    {
+      "name": "event",
+      "sha256": "sha256:355f6326785446a0779f58842fd24f7ae0736a27d0c81771fb0c816b4b276697",
+      "value": {
+        "absolute_origin": 0,
+        "capacity": 16,
+        "clock_epoch": 3,
+        "gain_by_sample": {
+          "192": 0.75,
+          "64": 0.5
+        },
+        "ordering": "(sample,producer,sequence)"
+      }
+    },
+    {
+      "name": "output",
+      "sha256": "sha256:af7165c50d9cfe426fdeb91fc4c80eafcda78a90d30bb851d6638c0932bf0abc",
+      "value": {
+        "partition_invariant": true,
+        "partitions": [
+          {
+            "canonical_pcm": {
+              "channels": [
+                "L",
+                "R"
+              ],
+              "encoding": "s32le",
+              "sample_rate": 48000
+            },
+            "frame_count": 256,
+            "partition_frames": 64,
+            "pcm_sha256": "sha256:c56dbe1d0b0e4e347eda7e99dd9727aa8a64fb7996b8275024dbed512cf88c33",
+            "peak_tolerance": 1e-07,
+            "rms_tolerance": 1e-07
+          },
+          {
+            "canonical_pcm": {
+              "channels": [
+                "L",
+                "R"
+              ],
+              "encoding": "s32le",
+              "sample_rate": 48000
+            },
+            "frame_count": 256,
+            "partition_frames": 128,
+            "pcm_sha256": "sha256:c56dbe1d0b0e4e347eda7e99dd9727aa8a64fb7996b8275024dbed512cf88c33",
+            "peak_tolerance": 1e-07,
+            "rms_tolerance": 1e-07
+          }
+        ]
+      }
+    }
+  ],
+  "partition_controls": {
+    "fixture": "synthetic-sample-level-oracle",
+    "output_sha256": [
+      "sha256:c56dbe1d0b0e4e347eda7e99dd9727aa8a64fb7996b8275024dbed512cf88c33",
+      "sha256:c56dbe1d0b0e4e347eda7e99dd9727aa8a64fb7996b8275024dbed512cf88c33"
+    ],
+    "partitions": [
+      64,
+      128
+    ],
+    "status": "PASS"
+  },
+  "planted_negative_controls": {
+    "controls": [
+      {
+        "changed_layers": [
+          "authored"
+        ],
+        "mutation": "authored",
+        "status": "PASS"
+      },
+      {
+        "changed_layers": [
+          "resolved"
+        ],
+        "mutation": "resolved",
+        "status": "PASS"
+      },
+      {
+        "changed_layers": [
+          "plan"
+        ],
+        "mutation": "plan",
+        "status": "PASS"
+      },
+      {
+        "changed_layers": [
+          "event"
+        ],
+        "mutation": "event",
+        "status": "PASS"
+      },
+      {
+        "changed_layers": [
+          "output"
+        ],
+        "mutation": "output",
+        "status": "PASS"
+      }
+    ],
+    "fixture": "synthetic-layer-mutation-oracle"
+  },
+  "provenance": {
+    "python": "3.13.7",
+    "tool": "tools/scripts/p0_layered_replay_receipt.py"
+  },
+  "schema": "pulp.graph.layered-replay-receipt.v1",
+  "source_head": "544a70c2791cd12f56de5519b637aef702eace21",
+  "unavailable_lanes": [
+    "runtime",
+    "realtime",
+    "cross_platform",
+    "scheduler",
+    "provider_parity"
+  ]
+}
