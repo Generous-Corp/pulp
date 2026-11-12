@@ -761,10 +761,27 @@ delta (merge groups)" step uses that:
 The step is `continue-on-error`: if it breaks, `skip` is unset and the group
 builds. `tools/scripts/reuse_policy_replay.py score --policy
 entry-delta-docs` replays the rule over merge-queue history (`collect
---groups-only` is enough) and must read 0 false skips under its ALLGREEN
-attribution, where a failure behind a red predecessor group is a neighbour
-failure, not a false skip. Decision 11 in `.agents/contract.toml` records the
-guard; do not disable or cache the strategy read.
+--groups-only` is enough). A failure behind a red predecessor group is a
+neighbour failure. Every other failure in a group the rule would skip is
+attributed per failing test, failing closed at every fact it cannot read:
+
+- `docs_caused`: the test is in the deterministic tier (`pr-fast` or
+  `tools/ci/drift_fast.json`), its declared inputs meet the delta or are
+  missing, its executable or sources are unknown or name a delta path, or a
+  delta path is a `FORCE_BUILD_PREFIXES` input or named by non-test CMake;
+- `exonerated`, a replay-only hindsight class that never decides a live run:
+  the same head later landed through a green group and main's first push run
+  holding it was green, or the test failed in at least two other pull
+  requests' non-docs groups of other batches within 7 days and passed later
+  in a landed group;
+- `unexplained`: neither.
+
+The rule ships only with `docs_caused` 0, `unexplained` 0, and exonerated
+groups per skipped native group at or below the window's merge-group `macos`
+red rate. The raw false-skip count stays in the report, each exoneration
+prints its evidence runs, and a test exonerated in three or more docs groups
+is listed as a quarantine candidate. Decision 11 in `.agents/contract.toml`
+records the guard; do not disable or cache the strategy read.
 
 ### The preamble slot
 

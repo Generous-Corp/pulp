@@ -616,7 +616,11 @@ reports `would_skip`). Read its `docs-entry-delta` notice before assuming a
 skip-safe group was misclassified. Never cache or remove the strategy read
 (decision 11), never let it change another output, and never move the HOLD
 check, breaker, A2T or bump path onto the entry delta. A new entry-delta rule
-ships only after `reuse_policy_replay.py score` reads 0 false skips for it.
+ships only when `reuse_policy_replay.py score` reads `docs_caused` 0 and
+`unexplained` 0 for it, with exonerated groups at or below the window's
+`macos` red rate. Its "exonerated" class is replay-only hindsight (the same
+head landed green, or the failure recurs in other batches' non-docs groups),
+never a reason to pass a live run.
 
 ## Diff-scoped gates on merge_group use the entry's own base
 
