@@ -158,6 +158,7 @@ lowercase names for serialization and the JS bridge.
 | `TableListBox` (`Table`) | Sortable column table | columns (header/width/sortable/align), `TableModel`/`SimpleTableModel`, click-to-sort, themed rows | `table.hpp` |
 | `TreeView` | Hierarchical tree | expand/collapse, selection, toggle/select/activate callbacks, keyboard nav | `tree_view.hpp` |
 | `PresetBrowser` | Factory/user preset browser | show-mode filter, search filter, selection | `preset_browser.hpp` |
+| `PresetProgramEditor` | MIDI program-number editor for a preset library (bank, slot, assign/clear) | selected bank, selected slot, assign/clear/renumber | `preset_program_editor.hpp` |
 
 ## Navigation & menus
 
