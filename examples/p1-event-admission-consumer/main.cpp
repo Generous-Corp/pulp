@@ -195,7 +195,8 @@ void voice_intent_adapter_controls() {
     stale_intent.event = stale;
     check(!dispatch_intent(stale_intent), "voice-intent-stale-generation-refusal");
     auto malformed_intent = intent;
-    malformed_intent.generation = 2;
+    malformed_intent.generation = 1;
+    malformed_intent.event = stale;
     check(!dispatch_intent(malformed_intent), "voice-intent-generation-mismatch-refusal");
     check(allocator.voice(0).pressure() == 0.0f, "voice-intent-stale-generation-refusal");
     check(encoded.sha256 == pulp::host::canonical_voice_identity(intent.identity).sha256,
