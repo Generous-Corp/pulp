@@ -3207,6 +3207,95 @@ TEST_CASE("WAV bit depth is part of the file: a 24-bit file does not read as 16-
     CHECK(a.data_size != b.data_size);
 }
 
+TEST_CASE("WAV writer uses the plain format tag for mono and stereo",
+          "[audio][file][wav-atomic][wav-header]") {
+    // One or two channels at 16 or 24-bit integer or 32-bit float take the
+    // canonical 44-byte header: a 16-byte fmt chunk with tag 1 or 3, not
+    // WAVE_FORMAT_EXTENSIBLE, which some readers and older tools reject.
+    struct Case {
+        WavBitDepth depth;
+        uint16_t tag, bits;
+    };
+    for (const auto& c : {Case{WavBitDepth::Int16, 1, 16}, Case{WavBitDepth::Int24, 1, 24},
+                          Case{WavBitDepth::Float32, 3, 32}}) {
+        for (const size_t channels : {size_t{1}, size_t{2}}) {
+            DYNAMIC_SECTION(channels << " channel(s), " << c.bits << " bits") {
+                ScratchDir dir;
+                auto data = stereo_signal();
+                data.channels.resize(channels);
+                const auto path = dir.root / "out.wav";
+                REQUIRE(write_wav_file(path.string(), data, c.depth));
+                const auto bytes = slurp(path);
+                const auto w = parse_wav(bytes);
+                REQUIRE(w.ok);
+                CHECK(w.riff_size_ok);
+                CHECK(w.raw_tag == c.tag);
+                CHECK(le32(bytes, 16) == 16u); // the fmt chunk's size
+                CHECK(std::memcmp(bytes.data() + 12, "fmt ", 4) == 0);
+                CHECK(w.data_at == 44u);
+                CHECK(w.channels == channels);
+                CHECK(w.bits == c.bits);
+                CHECK(w.block_align == channels * c.bits / 8);
+                CHECK(w.byte_rate == 48000u * w.block_align);
+                CHECK(bytes.size() == 44u + w.data_size + (w.data_size & 1u));
+
+                // The reader gets the signal back.
+                const auto back = read_audio_file(path.string());
+                REQUIRE(back.has_value());
+                REQUIRE(back->num_channels() == channels);
+                REQUIRE(back->num_frames() == data.num_frames());
+                const double step =
+                    c.depth == WavBitDepth::Float32 ? 0.0 : std::ldexp(1.0, 1 - c.bits);
+                for (size_t ch = 0; ch < channels; ++ch)
+                    for (size_t i = 0; i < data.num_frames(); ++i)
+                        CHECK(std::abs(back->channels[ch][i] - data.channels[ch][i]) <=
+                              step + 1e-7);
+            }
+        }
+    }
+}
+
+TEST_CASE("WAV writer pads an odd data chunk and keeps the RIFF size exact",
+          "[audio][file][wav-atomic][wav-header]") {
+    ScratchDir dir;
+    AudioFileData data;
+    data.sample_rate = 44100;
+    data.channels = {{0.25f, -0.5f, 0.75f}}; // mono 24-bit, 3 frames: 9 data bytes
+    const auto path = dir.root / "odd.wav";
+    REQUIRE(write_wav_file(path.string(), data, WavBitDepth::Int24));
+    const auto bytes = slurp(path);
+    const auto w = parse_wav(bytes);
+    REQUIRE(w.ok);
+    CHECK(w.raw_tag == 1);
+    CHECK(w.data_size == 9u);
+    CHECK(bytes.size() == 44u + 10u);
+    CHECK(bytes.back() == 0);
+    CHECK(w.riff_size_ok);
+    CHECK(read_audio_file(path.string()).has_value());
+}
+
+TEST_CASE("WAV writer keeps WAVE_FORMAT_EXTENSIBLE for three or more channels",
+          "[audio][file][wav-atomic][wav-header]") {
+    // Control for the plain-tag case: three channels still need the extensible
+    // header, with the real format in the sub-format GUID.
+    for (const auto depth : {WavBitDepth::Int16, WavBitDepth::Float32}) {
+        ScratchDir dir;
+        auto data = stereo_signal();
+        data.channels.push_back(data.channels[0]);
+        const auto path = dir.root / "three.wav";
+        REQUIRE(write_wav_file(path.string(), data, depth));
+        const auto bytes = slurp(path);
+        const auto w = parse_wav(bytes);
+        REQUIRE(w.ok);
+        CHECK(w.raw_tag == 0xFFFE);
+        CHECK(w.format_tag == (depth == WavBitDepth::Float32 ? 3 : 1));
+        CHECK(w.channels == 3);
+        const auto back = read_audio_file(path.string());
+        REQUIRE(back.has_value());
+        CHECK(back->num_channels() == 3);
+    }
+}
+
 TEST_CASE("an atomic write leaves exactly the published file", "[audio][file][wav-atomic]") {
     ScratchDir dir;
     const auto path = dir.root / "render.wav";
