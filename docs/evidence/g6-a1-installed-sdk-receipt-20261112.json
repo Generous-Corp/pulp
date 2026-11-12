@@ -1,0 +1,125 @@
+{
+  "cases": {
+    "accept_invalid_deferred_expression": {
+      "binary_sha256": "6eb95ef39307d27e07ddbdb63dc3fdaf7b339ed04911955ed0b061c93e4b859a",
+      "exit_code": 1,
+      "output": "g6-voice-bank-public-consumer FAIL rule=deferred-expression-refusal",
+      "source_sha256": "3d1718297f0c7ab9555dfc282a41b829633188fae6b2c20f9e27d53c452e3dee"
+    },
+    "accept_stale_epoch": {
+      "binary_sha256": "093d7295f9fda351c5402cf2fe650aa274ac88d09e2785f55c227640ca30a47c",
+      "exit_code": 1,
+      "output": "g6-voice-bank-public-consumer FAIL rule=stale-epoch-refusal",
+      "source_sha256": "c9f70b157359a97280307156d45206e41a340dd3c368ef8ca253492c0d39cc47"
+    },
+    "allow_aliased_slot_state": {
+      "binary_sha256": "3faf3d785ba2cf47a199261712434cad3bf0effa5f622df2b1da9f8625e31749",
+      "exit_code": 1,
+      "output": "g6-voice-bank-public-consumer FAIL rule=aliased-state-refusal",
+      "source_sha256": "3ea46a8a24e26a18b3075e3b67fb5f5d6e9ca302423069217cdc22d078de6d67"
+    },
+    "allow_wrong_binding_path": {
+      "binary_sha256": "a0f1047d3a1f47bb431f90c7d9d706d2693549b5fb8023cb9be12a9292c39514",
+      "exit_code": 1,
+      "output": "g6-voice-bank-public-consumer FAIL rule=wrong-path-refusal",
+      "source_sha256": "e70a5afd2c12c7c69aa6ae53f58d58dff976bb0f01884b027678cdbbb985586f"
+    },
+    "ignore_steal_policy": {
+      "binary_sha256": "61cc0449958df59b7cc5ef7a13118888891d5479e5693a2c1b1460f0b0318cff",
+      "exit_code": 1,
+      "output": "g6-voice-bank-public-consumer FAIL rule=steal-victim",
+      "source_sha256": "957aa46d532d498b0b72d42f000678a204a288398829eaebd36ab48ff6da4cd1"
+    },
+    "interval_input_default_empty": {
+      "binary_sha256": "70e18f4802f230af7b667a5733c65f2d6607507d64f4e8bbe5cdf9dec8afa280",
+      "exit_code": 1,
+      "output": "g6-voice-bank-public-consumer FAIL rule=render-code=6",
+      "source_sha256": "ca13674b2cadaae5934bc944a72e41df65f8da390890f29c55409cf7ecc1a7e0"
+    },
+    "positive": {
+      "binary_sha256": "07fba77271d226b3626ddc6671c145cfd0acf744a759831ae7006e6d628ec06f",
+      "exit_code": 0,
+      "output": "g6-voice-bank-public-consumer PASS partitions=1,32,64,127,256 samples=800 sample3=-0.353553 sample6=-0.314663 sample10=0",
+      "source_sha256": "916e579258198d60f8dfe31a336a039cbd5560fcfcf0d9e441216e64667dfcb6"
+    },
+    "restored": {
+      "binary_sha256": "07fba77271d226b3626ddc6671c145cfd0acf744a759831ae7006e6d628ec06f",
+      "exit_code": 0,
+      "output": "g6-voice-bank-public-consumer PASS partitions=1,32,64,127,256 samples=800 sample3=-0.353553 sample6=-0.314663 sample10=0",
+      "source_sha256": "916e579258198d60f8dfe31a336a039cbd5560fcfcf0d9e441216e64667dfcb6"
+    },
+    "silently_accept_poly_pressure": {
+      "binary_sha256": "31501f492ce1a78b6844f12a54935a0e135ec3f27bdd7841db5b6094a94956b8",
+      "exit_code": 1,
+      "output": "g6-voice-bank-public-consumer FAIL rule=poly-pressure-typed-refusal",
+      "source_sha256": "7af5889b0b0d02effb669e1330d77fdd76bd5d1b8a07759a12f91238b2780ebd"
+    },
+    "skip_cc120_capacity_preview": {
+      "binary_sha256": "f486d231959fe83a39c16e067707d4014ca39033a52114d7a7271a29d64d2e17",
+      "exit_code": 1,
+      "output": "g6-voice-bank-public-consumer FAIL rule=capacity-cc120-reuse",
+      "source_sha256": "5951a67cf034b9a0d77d160e37869d9b4898cfad2937a7d6e90a402a42fc325d"
+    },
+    "skip_cc121_hold_drain": {
+      "binary_sha256": "aec000ee2cd0b1ce5eadff4d3a93a69651fe32ee9a257667b53b83e1d57f3300",
+      "exit_code": 1,
+      "output": "g6-voice-bank-public-consumer FAIL rule=cc121-drains-last-hold",
+      "source_sha256": "aa8a561b854734bef4a73170756431aee7599280d38673716f7512f75ee3ec1a"
+    },
+    "skip_cc123_capacity_preview": {
+      "binary_sha256": "2ef24018f97204a4227bdd633717e0fc20c2a1436286b22ccf02b2e08c9a79e8",
+      "exit_code": 1,
+      "output": "g6-voice-bank-public-consumer FAIL rule=capacity-cc123-reuse",
+      "source_sha256": "d0d556bbeb9f430749c35b1d70d69710b2c2d83aaa756ad5230778e46a1819dd"
+    },
+    "skip_cc123_note_off": {
+      "binary_sha256": "d78b36013d13b7bf22cfb6c3c8eceef98699d7328caf2569fce82e146b67b4fd",
+      "exit_code": 1,
+      "output": "g6-voice-bank-public-consumer FAIL rule=cc123-dispatches-release",
+      "source_sha256": "d9ee2b2460b609e21ad60d0c27acbac8911b7f0cf481e7d2acf389946f58f2f4"
+    },
+    "skip_tracker_capacity_refusal": {
+      "binary_sha256": "550f371171ede1072ab75861e20af3e6fc9c9c8b49d0f053af48441dcf00559e",
+      "exit_code": 1,
+      "output": "g6-voice-bank-public-consumer FAIL rule=capacity-typed-refusal",
+      "source_sha256": "65a0015ef31c6186d887bb9f07b9a7e1aabeee472e7e78fb4660ff72ae7ddba5"
+    },
+    "suppress_note_release": {
+      "binary_sha256": "481c7eb2e4da744178befa0adc9e52f16f658a1a4eb668734775c4277733f720",
+      "exit_code": 1,
+      "output": "g6-voice-bank-public-consumer FAIL rule=finite-release-reclaimed",
+      "source_sha256": "85fd857ca57175d38ff59c1cc480943080e0c17f5579d0e4380fa8b1288d3eb4"
+    },
+    "tail_input_default_empty": {
+      "binary_sha256": "c51c476164ba58be96536328ab633d9c44afa906018a88736542128b2c2059e9",
+      "exit_code": 1,
+      "output": "g6-voice-bank-public-consumer FAIL rule=render-code=6",
+      "source_sha256": "b34a148da744619eef2e9b849df555183056757bd09be4c552201b3ff3e02aff"
+    },
+    "widen_member_panic": {
+      "binary_sha256": "ffd15bd0de3c072a6f85252f9f1f5cad4eec2f2d5e2dd68381ed458449641d4b",
+      "exit_code": 1,
+      "output": "g6-voice-bank-public-consumer FAIL rule=member-panic-preserves-other",
+      "source_sha256": "96c08a3000378da5b3daac7863d2ed721eacc8778c953ea59049f92cc139951f"
+    },
+    "wrong_cc64_boundary": {
+      "binary_sha256": "5ff8e6c8d8f9402513ea902d99b1156dec8a055e70820a0dc08068d3c8cd3d5b",
+      "exit_code": 1,
+      "output": "g6-voice-bank-public-consumer FAIL rule=pedal-64-down",
+      "source_sha256": "13ece03bbbf1a710eedff3280b414340eb1017d230587df4ec3757371ffed1e8"
+    }
+  },
+  "schema": "pulp.g6-production-mutation-proof.v1",
+  "sdk_provenance": {
+    "bridge_exec": true,
+    "build_profile": "dev",
+    "distribution_eligible": false,
+    "kind": "source-install",
+    "platform": "darwin-arm64",
+    "schema": "pulp.sdk-provenance.v1",
+    "source_git_dirty": false,
+    "source_git_sha": "f5eeb16bd24d7226a53cbda781f55cad6fbee72f"
+  },
+  "source_git_dirty": true,
+  "source_head": "f5eeb16bd24d7226a53cbda781f55cad6fbee72f"
+}
