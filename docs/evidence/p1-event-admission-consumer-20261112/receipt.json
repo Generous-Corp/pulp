@@ -18,7 +18,7 @@
     "voice_intent": "implemented: test-owned G-4 identity plus existing MPE allocator and stale generation refusal"
   },
   "schema": "pulp.graph.p1-event-admission-consumer.v1",
-  "source_head": "63e4c881e5ada3d6e598c5f8f5ff4bce73338467",
+  "source_head": "8b5c694e22adf43bcae53b5832dc2dad6356346c",
   "status": "NOT_QUALIFIED",
   "unavailable_lanes": [
     "installed_sdk",
