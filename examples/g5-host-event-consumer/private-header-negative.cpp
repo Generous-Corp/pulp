@@ -3,4 +3,6 @@
 // nonzero compiler exit.
 #include <pulp/host/signal_graph_internal.hpp>
 
-int main() { return 0; }
+int main() {
+    return 0;
+}
