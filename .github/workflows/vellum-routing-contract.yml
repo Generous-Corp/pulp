@@ -15,6 +15,12 @@ on:
 permissions:
   contents: read
 
+# Keep pull-request validation to the newest head for each PR while preserving
+# independent main-push and manual runs.
+concurrency:
+  group: vellum-routing-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   routing-contract:
     name: vellum-routing-contract
