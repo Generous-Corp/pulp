@@ -4,6 +4,10 @@
 #include <iostream>
 #include <string_view>
 
+namespace {
+constexpr std::string_view kP0ProtocolAttestation = "pulp.signal.spectral-frame-codec-consumer.v1";
+}
+
 int main(int argc, char** argv) {
     using namespace pulp::signal;
     auto stream = make_spectral_stream({256, 64, 2, 48000}, 2);
@@ -42,4 +46,7 @@ int main(int argc, char** argv) {
     }
     std::cout << "owned spectral codec: analyzed frames=2 origins=[-192,-128] "
                  "exact roundtrip and strict rejection passed\n";
+    // Bind the evidence receipt to this named installed consumer. This is
+    // fixture output metadata and does not change the public/runtime contract.
+    std::cout << kP0ProtocolAttestation << '\n';
 }
