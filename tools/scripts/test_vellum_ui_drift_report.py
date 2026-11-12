@@ -136,7 +136,7 @@ class DriftReportTest(unittest.TestCase):
     def test_workflow_waits_for_the_later_unit_map(self):
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
         self.assertIn(
-            "if: hashFiles('.github/vellum-export-receipt/unit-of.json') != ''",
+            "if [[ -f .github/vellum-export-receipt/unit-of.json ]]; then",
             workflow,
         )
 
