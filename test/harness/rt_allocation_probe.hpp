@@ -25,7 +25,7 @@ public:
     // as REQUIRE_FALSE(probe.saw_allocation()) would pass without looking.
     static bool self_check() noexcept;
 
-private:
+  private:
     friend void rt_allocation_probe_record(std::size_t bytes) noexcept;
 
     RtAllocationProbe* previous_ = nullptr;
