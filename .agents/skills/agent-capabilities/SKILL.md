@@ -1368,7 +1368,11 @@ and only some of them run in `gates.sh`:
 - `docs/status/consumption-profiles.json`, regenerated per profile with
   `consumption_census.py --write` from a configure of each feature set it
   records;
-- `docs/status/modules.yaml` and `docs/reference/modules.md`.
+- `docs/status/modules.yaml` and `docs/reference/modules.md`. A package
+  outside `core/` (`integrations/pulp-native`) gives its entry a `path:`
+  (`path: integrations/pulp-native`); without one, `tools/check-docs.sh`
+  looks for `core/<name>/` and fails. `modules_yaml_dirs_check.py` owns that
+  rule and accepts only paths under `core/` or `integrations/`.
 
 Keep one include root per module. The Doxygen parity check accepts a second
 public install root only by name, so a module that installs `audio/include`
