@@ -7,18 +7,18 @@
   },
   "consumer": "examples/p1-event-admission-consumer",
   "controls": {
-    "midi": "planned: absolute ingress, stale epoch, late, stable producer ordering",
-    "parameter": "planned: stable sort and fixed-capacity overflow",
+    "midi": "implemented: two-block absolute ingress, stale epoch, late, duplicate sequence, stable producer ordering",
+    "parameter": "implemented: two-block stable sort and fixed-capacity overflow",
     "partitions": [
       4,
       8
     ],
     "planted_negative_count": 5,
-    "trigger": "planned: two blocks, absolute sample, sequence, epoch, reset",
-    "voice_intent": "planned: test-owned G-4 identity plus existing MPE allocator"
+    "trigger": "implemented: two blocks, absolute sample, sequence, epoch, reset",
+    "voice_intent": "implemented: test-owned G-4 identity plus existing MPE allocator and stale generation refusal"
   },
   "schema": "pulp.graph.p1-event-admission-consumer.v1",
-  "source_head": "020ce99c1ac4676786eb040e5d518d67fc2e4ee7",
+  "source_head": "63e4c881e5ada3d6e598c5f8f5ff4bce73338467",
   "status": "NOT_QUALIFIED",
   "unavailable_lanes": [
     "installed_sdk",

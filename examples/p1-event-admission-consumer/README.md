@@ -15,8 +15,9 @@ exercises existing public seams across two block partitions:
 The fixture is qualified only when built from a complete installed SDK and the
 positive executable exits zero. Missing SDK support modules are `NOT_CHECKED`,
 not a qualification claim. The five planted negatives are stale MIDI epoch,
-late MIDI, parameter overflow, stale voice generation, and reset/sequence
-boundary misuse.
+late MIDI, duplicate MIDI sequence, parameter overflow, and stale voice
+generation. The positive control also proves two-block MIDI and parameter
+projection plus partition-invariant event output.
 
 ```sh
 cmake -S examples/p1-event-admission-consumer -B build-p1-event-admission \

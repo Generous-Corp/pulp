@@ -37,7 +37,7 @@ HostEventRecord midi_record(std::uint64_t epoch, std::int64_t sample, std::uint6
     return record;
 }
 
-void host_and_parameter_controls(std::size_t partition) {
+std::array<int, 4> host_and_parameter_controls(std::size_t partition) {
     HostEventIngress<8> ingress;
     check(ingress.begin_block(7, 0, partition) == HostEventResult::Accepted, "midi-block-begin");
     auto note = midi_record(7, 2, 1, 4, pulp::midi::MidiEvent::note_on(1, 60, 100));
@@ -50,13 +50,29 @@ void host_and_parameter_controls(std::size_t partition) {
     check(ingress.project(projected, count) == HostEventResult::Accepted && count == 2,
           "midi-project");
     check(projected[0].producer == 3 && projected[1].producer == 4, "midi-stable-producer-order");
+    check(ingress.publish(midi_record(7, 2, 1, 3, pulp::midi::MidiEvent::note_on(1, 62, 100))) ==
+              HostEventResult::InvalidSequence,
+          "midi-duplicate-sequence-refusal");
     check(ingress.publish(midi_record(6, 2, 3, 1, pulp::midi::MidiEvent::note_on(1, 62, 100))) ==
               HostEventResult::StaleEpoch,
           "midi-stale-epoch-refusal");
-    check(ingress.publish(midi_record(7, -1, 4, 1, pulp::midi::MidiEvent::note_off(1, 60))) ==
+    check(ingress.publish(midi_record(7, static_cast<std::int64_t>(partition) - 1, 4, 1,
+                                      pulp::midi::MidiEvent::note_off(1, 60))) ==
               HostEventResult::Late,
           "midi-late-refusal");
     check(ingress.end_block() == HostEventResult::Accepted, "midi-block-end");
+
+    check(ingress.begin_block(7, partition, partition) == HostEventResult::Accepted,
+          "midi-second-block-begin");
+    check(ingress.publish(midi_record(7, static_cast<std::int64_t>(partition) + 1, 2, 5,
+                                      pulp::midi::MidiEvent::note_on(1, 64, 100))) ==
+              HostEventResult::Accepted,
+          "midi-second-block-publish");
+    count = 0;
+    check(ingress.project(projected, count) == HostEventResult::Accepted && count == 1 &&
+              projected[0].absolute_sample == partition + 1,
+          "midi-second-block-project");
+    check(ingress.end_block() == HostEventResult::Accepted, "midi-second-block-end");
 
     pulp::state::ParameterEventQueue parameters;
     parameters.push({.param_id = 11, .sample_offset = 3, .value = 0.75f});
@@ -68,6 +84,15 @@ void host_and_parameter_controls(std::size_t partition) {
         parameters.push({.param_id = 12, .sample_offset = 0, .value = 1.0f});
     check(parameters.overflowed() && parameters.dropped_event_count() == 2,
           "parameter-overflow-refusal");
+    parameters.clear();
+    parameters.push({.param_id = 11, .sample_offset = 2, .value = 0.9f});
+    parameters.push({.param_id = 11, .sample_offset = 0, .value = 0.1f});
+    parameters.sort();
+    check(parameters.events()[0].sample_offset == 0 && parameters.events()[1].sample_offset == 2 &&
+              parameters.events()[0].value == 0.1f && parameters.events()[1].value == 0.9f,
+          "parameter-second-block-order");
+    return {2, 1, static_cast<int>(parameters.events()[0].sample_offset),
+            static_cast<int>(parameters.events()[1].sample_offset)};
 }
 
 void trigger_two_block_controls() {
@@ -114,6 +139,7 @@ void voice_intent_adapter_controls() {
     struct VoiceIntent {
         pulp::host::VoiceIdentityKey identity;
         pulp::midi::MpeExpressionEvent event;
+        std::uint64_t generation = 0;
         std::uint64_t absolute_sample = 0;
     };
     VoiceIntent intent;
@@ -135,6 +161,7 @@ void voice_intent_adapter_controls() {
     intent.event.state.channel = 1;
     intent.event.state.note = 60;
     intent.event.state.velocity = 100;
+    intent.generation = 1;
     intent.absolute_sample = 6;
     struct ProbeVoice final : pulp::midi::MpeSynthVoice {
         void render(float*, int frames) override {
@@ -143,14 +170,33 @@ void voice_intent_adapter_controls() {
         }
     };
     pulp::midi::MpeVoiceAllocator<ProbeVoice> allocator(1);
-    allocator.dispatch(intent.event);
+    const auto dispatch_intent = [&allocator](const VoiceIntent& value) {
+        // Test-owned adapter guard: the authored generation must agree with
+        // the existing MPE note-generation carried by the event and, for
+        // expression events, must still name the live allocator generation.
+        if (value.generation == 0 || value.generation != value.event.state.note_id)
+            return false;
+        if (value.event.kind != pulp::midi::MpeExpressionEvent::Kind::NoteOn &&
+            (allocator.active_count() == 0 ||
+             allocator.voice(0).note_id() != value.event.state.note_id))
+            return false;
+        allocator.dispatch(value.event);
+        return true;
+    };
+    check(dispatch_intent(intent), "voice-intent-generation-admission");
     check(allocator.active_count() == 1 && allocator.voice(0).note_id() == 1,
           "voice-intent-mpe-delivery");
     auto stale = intent.event;
     stale.kind = pulp::midi::MpeExpressionEvent::Kind::Pressure;
     stale.state.note_id = 2;
     stale.state.pressure = 0.75f;
-    allocator.dispatch(stale);
+    auto stale_intent = intent;
+    stale_intent.generation = 2;
+    stale_intent.event = stale;
+    check(!dispatch_intent(stale_intent), "voice-intent-stale-generation-refusal");
+    auto malformed_intent = intent;
+    malformed_intent.generation = 2;
+    check(!dispatch_intent(malformed_intent), "voice-intent-generation-mismatch-refusal");
     check(allocator.voice(0).pressure() == 0.0f, "voice-intent-stale-generation-refusal");
     check(encoded.sha256 == pulp::host::canonical_voice_identity(intent.identity).sha256,
           "voice-intent-identity-stable");
@@ -160,12 +206,13 @@ void voice_intent_adapter_controls() {
 
 int main() {
     try {
-        host_and_parameter_controls(4);
-        host_and_parameter_controls(8);
+        const auto partition4 = host_and_parameter_controls(4);
+        const auto partition8 = host_and_parameter_controls(8);
+        check(partition4 == partition8, "partition-invariant-event-output");
         trigger_two_block_controls();
         voice_intent_adapter_controls();
         std::cout << "p1-event-admission PASS checks=" << checks
-                  << " partitions=4,8 planted_negative=5 consumer_gate=QUALIFIED\n";
+                  << " partitions=4,8 planted_negative=5 consumer_gate=NOT_QUALIFIED\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "p1-event-admission FAIL rule=" << error.what() << '\n';
