@@ -268,6 +268,13 @@ this workflow is where they block a merge. The run is split across jobs by
 - The `Exclusive source selftests 1/2` and `2/2` jobs run `--part exclusive
   --shard N/2`. These are the entries with `PROCESSORS` above 1, each still
   alone on its runner.
+- Both parts pass `--impact-scope` with the event's own base (the merge ref's
+  first parent, or the merge group's `base_sha`). For a diff
+  `tools/scripts/classify_changes.py` calls `docs-only`, only the entries that
+  can read a changed file run; every other class runs every entry. The gate
+  scripts in the `Version & skill sync checks` job (skill-sync, version-bump,
+  config-doc, planning-gitlink and the rest) always run. See
+  [local-ci.md](local-ci.md#impact-scoped-jobs).
 
 The required context **`Enforce version & skill sync`** is a third job. It needs
 both, runs `if: always()`, and fails unless both concluded `success`, so a
