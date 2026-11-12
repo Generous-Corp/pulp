@@ -633,6 +633,9 @@ def termination_boundary_tests() -> None:
     def resume(_process: Any) -> None:
         events.append("resume")
 
+    # Build the path before faking os.name: before Python 3.12, Path() picks
+    # WindowsPath from os.name at call time and refuses it on POSIX.
+    owned = Path("/owned")
     with (
         mock.patch.object(process_boundary.os, "name", "nt"),
         mock.patch.object(
@@ -641,7 +644,7 @@ def termination_boundary_tests() -> None:
         mock.patch.object(process_boundary, "_assign_windows_job", side_effect=assign),
         mock.patch.object(process_boundary, "_resume_windows_process", side_effect=resume),
     ):
-        assert runner._spawn_adapter(["adapter"], cwd=Path("/owned")) is suspended
+        assert runner._spawn_adapter(["adapter"], cwd=owned) is suspended
     assert events == ["spawn-suspended", "assign-job", "resume"]
     spawn_options = spawn.call_args.kwargs
     assert spawn_options["start_new_session"] is False
@@ -665,7 +668,7 @@ def termination_boundary_tests() -> None:
         mock.patch.object(process_boundary, "_close_windows_job"),
     ):
         try:
-            runner._spawn_adapter(["adapter"], cwd=Path("/owned"))
+            runner._spawn_adapter(["adapter"], cwd=owned)
         except runner.AdapterTerminationError:
             pass
         else:

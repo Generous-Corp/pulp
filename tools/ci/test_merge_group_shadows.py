@@ -4,7 +4,7 @@
 What must hold:
 - the plan runs binary identity always, affected tests when ctest ran and the
   merge commit has a first parent, flake exoneration only on a failed ctest
-  outcome, and per-test receipts whenever ctest ran (passed or failed), with
+  outcome and never in-job when it is deferred to the advisory job, and per-test receipts whenever ctest ran (passed or failed), with
   its receipts file and binary identity's hashes in the work dir; each
   instrument gets the arguments it documents;
 - an instrument that raises or exits non-zero is named in the summary and
@@ -51,6 +51,14 @@ class PlanTests(unittest.TestCase):
         with mock.patch.object(mgs, "_first_parent", return_value="p1"):
             steps = {label: argv for label, _mod, argv in mgs.plan(args(ctest_outcome="failure", hours=36))}
         self.assertEqual(steps["flake-exoneration"][steps["flake-exoneration"].index("--hours") + 1], "36")
+        self.assertIsNotNone(steps["affected-tests"])
+
+    def test_deferred_exoneration_is_not_run_in_job(self) -> None:
+        with mock.patch.object(mgs, "_first_parent", return_value="p1"):
+            steps = {label: argv for label, _mod, argv in
+                     mgs.plan(args(ctest_outcome="failure", exoneration="deferred"))}
+        self.assertEqual(steps["flake-exoneration"], "deferred")
+        self.assertIsNotNone(steps["test-receipts"])
         self.assertIsNotNone(steps["affected-tests"])
 
     def test_receipts_run_when_ctest_ran_and_write_into_the_work_dir(self) -> None:
@@ -122,6 +130,20 @@ class IsolationTests(unittest.TestCase):
         # The status summary keeps its exact shape for anything that reads it.
         self.assertIn("merge-group shadows: binary-identity=rc=0 affected-tests=rc=0 "
                       "flake-exoneration=skipped test-receipts=rc=0", printed)
+
+    def test_deferred_exoneration_never_imports_the_shadow_and_says_so(self) -> None:
+        ok = mock.MagicMock(); ok.main.return_value = 0
+        modules = {"binary_identity_shadow": ok, "affected_tests_shadow": ok, "test_receipts_shadow": ok}
+        with mock.patch.object(mgs, "_first_parent", return_value="p1"), \
+                mock.patch.object(mgs, "load_module", side_effect=lambda name: modules[name]), \
+                mock.patch("sys.stdout") as out:
+            rc = mgs.main(["merge_group_shadows", "run", "--build-dir", "/b", "--source-root", "/s",
+                           "--repository", "O/R", "--merge-sha", "m", "--token", "t", "--junit", "/j",
+                           "--selected-json", "/i", "--ctest-outcome", "failure", "--exoneration", "deferred"])
+        self.assertEqual(rc, 0)
+        printed = "".join(c.args[0] for c in out.write.call_args_list if c.args)
+        self.assertIn("flake-exoneration=deferred", printed)
+        self.assertNotIn("flake-exoneration took", printed)
 
     def test_cli_exits_0_even_when_every_instrument_lacks_its_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
