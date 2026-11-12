@@ -17,16 +17,22 @@
 namespace pulp::test {
 
 class RtAllocationProbe {
-public:
+  public:
     RtAllocationProbe() noexcept;
     ~RtAllocationProbe() noexcept;
 
     RtAllocationProbe(const RtAllocationProbe&) = delete;
     RtAllocationProbe& operator=(const RtAllocationProbe&) = delete;
 
-    std::size_t allocation_count() const noexcept { return allocation_count_; }
-    std::size_t allocated_bytes() const noexcept { return allocated_bytes_; }
-    bool saw_allocation() const noexcept { return allocation_count_ != 0; }
+    std::size_t allocation_count() const noexcept {
+        return allocation_count_;
+    }
+    std::size_t allocated_bytes() const noexcept {
+        return allocated_bytes_;
+    }
+    bool saw_allocation() const noexcept {
+        return allocation_count_ != 0;
+    }
 
     // The probe's positive control. Allocates twice inside a fresh probe, once
     // through ::operator new and once through a new-expression whose pointer
@@ -48,4 +54,4 @@ public:
 void rt_allocation_probe_record(std::size_t bytes) noexcept;
 bool rt_allocation_probe_active() noexcept;
 
-}  // namespace pulp::test
+} // namespace pulp::test
