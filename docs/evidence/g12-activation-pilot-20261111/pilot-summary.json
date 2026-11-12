@@ -1,0 +1,35 @@
+{
+  "build_profile": {
+    "CMAKE_BUILD_TYPE": "Release",
+    "PULP_SANITIZER": ""
+  },
+  "callbacks_per_cell": 64,
+  "cells": 24,
+  "deadline_misses": 34,
+  "executable_bytes": 33027920,
+  "executable_sha256": "edfd79cee293ca56526dfdecd6da6fa00839ed6e2a93ac2de05d5a2dea1d3fc6",
+  "matrix": {
+    "backends": [
+      "direct",
+      "routed"
+    ],
+    "expected_cell_count": 24,
+    "frames": [
+      32,
+      64,
+      128,
+      256
+    ],
+    "rates": [
+      44100,
+      48000,
+      96000
+    ]
+  },
+  "receipt_digest": "4e6b7151343d52925840c57435f8337e64369cd9af34de31e8495efbb4198fd6",
+  "receipt_file_sha256": "bc39465a12db83891092d2828479cc2b43e071e3e0e02f8737d39ad8edce082f",
+  "samples": 184320,
+  "source": "0c1fc0d9ff0f0d2aa10e79a0a84179d0a1cc1e44",
+  "source_fixture_sha256": "887e633e954a84ed0289bc9f0583be46ea83943021754a5eed7c6b16374a286d",
+  "timing_qualified": false
+}
