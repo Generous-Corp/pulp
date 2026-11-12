@@ -364,7 +364,8 @@
     "neighbour_failures": 1,
     "skipped_groups": 3,
     "skip_all_groups": 3,
-    "verdict": "UNSAFE: false skips"
+    "verdict": "UNSAFE: docs-caused failures",
+    "docs_caused": 1
    }
   },
   {

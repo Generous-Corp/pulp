@@ -115,6 +115,21 @@ POLICIES
                  red or cancelled predecessor is a `neighbour_failure`, counted
                  separately, because under ALLGREEN the predecessor's entry
                  does not land and this group is rebuilt without it.
+                 Each remaining failure is then attributed per failing test,
+                 failing closed at every unread fact, in this order:
+                 `docs_caused` (the test is in the deterministic tier, its
+                 declared inputs meet the delta or are missing, its
+                 executable or sources are unknown or name a delta path, or a
+                 delta path is a FORCE_BUILD_PREFIXES input or named by
+                 non-test CMake); `exonerated` (replay-only hindsight, never
+                 a live verdict: C, the same head later landed through a
+                 green group and the first main push run containing it was
+                 green; or B, the test failed in >= 2 other PRs' non-docs
+                 groups of other batches within 7 days and passed later in a
+                 landed group); else `unexplained`. The verdict needs
+                 docs_caused == 0, unexplained == 0, and exonerated groups /
+                 skipped native groups at or below the window's merge-group
+                 `macos` red rate; the raw false-skip count is still printed.
   suite-source-key, per-executable
                  tier-1b and tier-2 seams: registered, not implemented.
   none, key-match-reference, selection-reference
@@ -516,6 +531,150 @@ def decide_entry_delta_docs(pair: dict, corpus: Corpus, opts: dict) -> Decision:
     return Decision(True, f"entry delta {change_class}")
 
 
+EXONERATION_WINDOW = dt.timedelta(days=7)
+CORROBORATING_PRS = 2
+QUARANTINE_CANDIDATE_GROUPS = 3
+
+
+def _delta_hits(paths: list[str], delta: list[str]) -> bool:
+    """A declared input equals a delta path or is a directory holding one."""
+    return any(d == p or d.startswith(p.rstrip("/") + "/") for p in paths for d in delta)
+
+
+def docs_caused(group: dict, test_id: str) -> str | None:
+    """Why the docs-only delta may have caused this failure, or None.
+
+    Fails closed: every unread fact is a reason."""
+    delta = list(group.get("first_parent_delta_files") or [])
+    if not delta:
+        return "entry delta unreadable"
+    if any(d.startswith(classify_changes.FORCE_BUILD_PREFIXES) for d in delta):
+        return "a delta path is a FORCE_BUILD_PREFIXES input"
+    named = group.get("delta_cmake_named")
+    if named is None:
+        return "non-test CMake not scanned"
+    if named:
+        return f"non-test CMake names a delta path ({named[0]})"
+    if test_id == "(build)":
+        return None
+    facts = (group.get("entry_test_facts") or {}).get(test_id)
+    if facts is None:
+        return "no facts recorded for the test"
+    if facts.get("deterministic") is not False:
+        return "deterministic tier" if facts.get("deterministic") else "tier unknown"
+    inputs = facts.get("declared_inputs")
+    if facts.get("kind") == "script":
+        if inputs is None:
+            return "script test without a declared-inputs record"
+        return "declared inputs include the delta" if _delta_hits(inputs, delta) else None
+    if facts.get("kind") == "compiled":
+        if not facts.get("executable"):
+            return "executable unknown"
+        if inputs and _delta_hits(inputs, delta):
+            return "declared data inputs include the delta"
+        naming = facts.get("sources_naming_delta")
+        if naming is None:
+            return "executable sources unknown"
+        return f"a source names a delta path ({naming[0]})" if naming else None
+    return "test kind unknown"
+
+
+def landed_green(group: dict, corpus: Corpus) -> dict | None:
+    """C: the same head later landed through a green group, and the first
+    main push run containing the merge was green. Evidence, or None."""
+    merge = group.get("pr_merge") or {}
+    if not merge.get("merged_at") or merge.get("head_sha") != group.get("head_sha"):
+        return None
+    landing = corpus.run(group.get("landing_group_run_id"))
+    push = group.get("main_push_run") or {}
+    if (landing is None or landing.get("group_sha") != merge.get("merge_commit_sha")
+            or landing.get("macos_conclusion") != "success" or push.get("conclusion") != "success"):
+        return None
+    return {"rule": "C", "landing_group_run_id": landing["run_id"], "main_push_run_id": push.get("run_id")}
+
+
+def _corroborated(group: dict, test_id: str, outcomes: dict[str, list[tuple[dict, str]]]) -> dict | None:
+    """B: the test failed in >= 2 other PRs' groups within the window whose
+    entry delta was not docs-only and whose batch sits on another main
+    commit, and it passed in a later group that landed. Evidence, or None."""
+    created = _parse_time(group["created_at"])
+    batch = group.get("main_base")
+    if not batch:
+        return None
+    others: dict[int, str] = {}
+    passed_later = None
+    for run, outcome in outcomes.get(test_id, []):
+        when = _parse_time(run["created_at"])
+        if outcome == "pass" and when > created and run.get("landed") is True and passed_later is None:
+            passed_later = run["run_id"]
+        if outcome not in FAIL_OUTCOMES or run is group or run.get("pr") in (None, group.get("pr")):
+            continue
+        if abs(when - created) > EXONERATION_WINDOW:
+            continue
+        delta = run.get("first_parent_delta_files")
+        if not delta or classify_changes.impact_class(list(delta)) == classify_changes.DOCS_ONLY:
+            continue
+        if not run.get("main_base") or run["main_base"] == batch:
+            continue
+        others.setdefault(run["pr"], run["run_id"])
+    if len(others) < CORROBORATING_PRS or passed_later is None:
+        return None
+    return {"rule": "B", "corroborating": [{"pr": pr, "group_run_id": rid} for pr, rid in sorted(others.items())],
+            "passed_later_group_run_id": passed_later}
+
+
+def attribute_failures(corpus: Corpus, rows: list[dict], skipped_native_groups: int) -> dict:
+    """Attribute each non-neighbour failure in a skipped group (see
+    POLICIES["entry-delta-docs"]): docs_caused, then exonerated, else
+    unexplained. Pure over the corpus."""
+    needed = {r["test_id"] for r in rows}
+    outcomes: dict[str, list[tuple[dict, str]]] = collections.defaultdict(list)
+    if needed:
+        for run in corpus.runs.values():
+            if run.get("run_kind") != "merge_group":
+                continue
+            for t in corpus.tests(run["run_id"]) or []:
+                if t["test_id"] in needed:
+                    outcomes[t["test_id"]].append((run, t.get("outcome")))
+    caused, exonerated, unexplained = [], [], []
+    for row in rows:
+        group = corpus.run(row["group_run_id"]) or {}
+        reason = docs_caused(group, row["test_id"])
+        if reason:
+            caused.append(dict(row, attribution=reason))
+            continue
+        evidence = landed_green(group, corpus)
+        if evidence is None and row["test_id"] != "(build)":
+            evidence = _corroborated(group, row["test_id"], outcomes)
+        (exonerated if evidence else unexplained).append(dict(row, evidence=evidence))
+    groups = {str(r["group_run_id"]) for r in exonerated}
+    per_test = collections.Counter(r["test_id"] for r in {(r["test_id"], str(r["group_run_id"])): r
+                                                           for r in exonerated}.values())
+    merge_groups = [r for r in corpus.runs.values() if r.get("run_kind") == "merge_group"]
+    red = sum(1 for r in merge_groups if r.get("macos_conclusion") == "failure")
+    return {
+        "docs_caused": len(caused), "docs_caused_rows": caused,
+        "exonerated": len(exonerated), "exonerated_rows": exonerated, "exonerated_groups": len(groups),
+        "unexplained": len(unexplained), "unexplained_rows": unexplained,
+        "exoneration_rate": (len(groups) / skipped_native_groups) if skipped_native_groups else 0.0,
+        "macos_red_rate": (red / len(merge_groups)) if merge_groups else None,
+        "quarantine_candidates": sorted(t for t, n in per_test.items() if n >= QUARANTINE_CANDIDATE_GROUPS),
+    }
+
+
+def attributed_verdict(result: dict, min_sample: int) -> str:
+    if result["docs_caused"]:
+        return "UNSAFE: docs-caused failures"
+    if result["unexplained"]:
+        return "UNSAFE: unexplained failures"
+    red = result["macos_red_rate"]
+    if red is None or result["exoneration_rate"] > red:
+        return "UNSAFE: exonerated groups above the window's macos red rate"
+    if result["evaluable_pairs"] < min_sample:
+        return "insufficient sample"
+    return "safe over the window"
+
+
 def allgreen_blame(pair: dict, group: dict, corpus: Corpus) -> str:
     """Who a failure in a skipped group belongs to under ALLGREEN.
 
@@ -709,7 +868,7 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
                 flake_skips.append(row)
         skipped_seconds += pair_skipped
         benefits.append(pair_skipped / group_seconds if group_seconds > 0 else 0.0)
-    return {
+    result = {
         "policy": policy_name,
         "candidate": policy.candidate,
         "pairs": len(corpus.pairs),
@@ -756,6 +915,10 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
         "verdict": ("UNSAFE: changed binaries not rebuilt" if unreached else
                     verdict_for(false_skips, scored, evaluable, opts.get("min_sample", 20))),
     }
+    if allgreen:
+        result.update(attribute_failures(corpus, false_skips, skip_all_native_groups))
+        result["verdict"] = attributed_verdict(result, opts.get("min_sample", 20))
+    return result
 
 
 KEY_BLIND_SCHEMA = "pulp-key-blind/v1"
@@ -913,6 +1076,27 @@ def render(result: dict) -> str:
             lines.append(f"  neighbour failure: PR {row['pr']} group run {row['group_run_id']}: {row['test_id']}")
         for row in result["unattributed_failure_rows"][:20]:
             lines.append(f"  unattributed: PR {row['pr']} group run {row['group_run_id']} ({row['status']})")
+        lines.append(f"  attributed (raw FALSE SKIPS above): docs_caused {result['docs_caused']}  "
+                     f"unexplained {result['unexplained']}  exonerated {result['exonerated']} "
+                     f"({result['exonerated_groups']} groups; replay-only)  exonerated groups / skipped native "
+                     f"groups {_fmt(result['exoneration_rate'], True)} vs window macos red rate "
+                     f"{_fmt(result['macos_red_rate'], True)}")
+        for row in result["docs_caused_rows"]:
+            lines.append(f"  docs_caused: PR {row['pr']} group run {row['group_run_id']}: {row['test_id']} "
+                         f"({row['attribution']})")
+        for row in result["unexplained_rows"]:
+            lines.append(f"  unexplained: PR {row['pr']} group run {row['group_run_id']}: {row['test_id']}")
+        for row in result["exonerated_rows"]:
+            ev = row["evidence"]
+            if ev["rule"] == "C":
+                why = f"C: landed by group run {ev['landing_group_run_id']}, main push run {ev['main_push_run_id']}"
+            else:
+                why = ("B: failed in " + ", ".join(f"PR {c['pr']} run {c['group_run_id']}" for c in ev["corroborating"])
+                       + f"; passed later in landed group run {ev['passed_later_group_run_id']}")
+            lines.append(f"  exonerated: PR {row['pr']} group run {row['group_run_id']}: {row['test_id']} ({why})")
+        if result["quarantine_candidates"]:
+            lines.append("  quarantine candidates (exonerated in >= 3 docs groups): "
+                         + ", ".join(result["quarantine_candidates"]))
     for row in result["false_skip_rows"][:20]:
         lines.append(f"  false skip: PR {row['pr']} group run {row['group_run_id']}: {row['test_id']} "
                      f"({row['outcome']}, attempts {row['attempts']}; {row['reason']})")
@@ -1152,7 +1336,11 @@ def main(argv: list[str]) -> int:
         print(json.dumps(results, indent=2))
     else:
         print("\n\n".join(render(r) for r in results))
-    return 1 if any(r["false_skips"] for r in results if POLICIES[r["policy"]].candidate) else 0
+    def unsafe(r: dict) -> bool:
+        if POLICIES[r["policy"]].attribution == "allgreen":
+            return r["verdict"].startswith("UNSAFE")
+        return bool(r["false_skips"])
+    return 1 if any(unsafe(r) for r in results if POLICIES[r["policy"]].candidate) else 0
 
 
 if __name__ == "__main__":
