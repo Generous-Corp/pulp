@@ -3,6 +3,7 @@
  "record": {
   "entry": "tools/ci/test_vellum_sdk_consumer.py",
   "inputs": [
+   "test/editor_host_slice/vellum_ui/knob_panel.cpp",
    "tools/ci/test_vellum_sdk_consumer.py",
    "tools/ci/vellum_sdk_consumer.py"
   ],
