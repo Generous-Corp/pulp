@@ -3484,6 +3484,12 @@ a configured build: `script_test_inputs.py --build-dir B --write`,
 `source_selftests.py write --build-dir B` (`--add <name>` for a new entry), and
 `changed_surface_script_families.py --build-dir B --write` (the build needs a
 codemodel reply: touch `B/.cmake/api/v1/query/codemodel-v2` and reconfigure).
+No configure available (a gate host at its ceiling)? When `script-test-inputs`
+fails in `drift-fast`, the run uploads the `script-inputs-expected` artifact:
+the exact fragments `--write` would produce for the drifted entries
+(`--emit-expected DIR`, default `$RUNNER_TEMP/script-inputs-expected`). Download
+it and `cp -R <artifact-dir>/. test/ctest_script_inputs/`, then commit; the
+failure log prints this recipe.
 `gates.sh` runs all three checks in one lane (`gates_script_inputs.py`) whenever
 the diff touches a Python file under `tools/`, `test/cmake/`, a skill doc or one
 of the generated files, configuring `build-gate` without compiling if no current
