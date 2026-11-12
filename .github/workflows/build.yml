@@ -1396,7 +1396,6 @@ jobs:
         if: ${{ github.event_name == 'merge_group' || github.event_name == 'pull_request' }}
         continue-on-error: true
         env:
-          GH_TOKEN: ${{ github.token }}
           MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
           EVENT_HEAD_SHA: ${{ github.sha }}
           MERGE_GROUP_MAIN_BASE: ${{ steps.merge_group_base.outputs.base }}
@@ -1409,8 +1408,9 @@ jobs:
           export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
           # The live merge-queue rule. Exactly one active merge_queue rule on
           # the default branch; its grouping_strategy, or why there is none.
-          # Read on every run, never cached.
-          strategy=$(python3 - <<'PY' 2>/dev/null
+          # Read on every run, never cached. The token reaches only this
+          # inline reader, never code from the checkout.
+          strategy=$(GH_TOKEN="${{ github.token }}" python3 - <<'PY' 2>/dev/null
           import json, os, re, urllib.request
           api = os.environ.get("GITHUB_API_URL", "https://api.github.com")
           repo = os.environ["GITHUB_REPOSITORY"]
@@ -1496,9 +1496,13 @@ jobs:
             exit 0
           fi
           ci_python=$(python3 -I "$finder" 2>/dev/null) || ci_python=
+          if [ -z "$ci_python" ]; then
+            report kept python311_missing
+            exit 0
+          fi
           change_class=$(
-            env GITHUB_OUTPUT='' "${ci_python:-python3}" -I "$classifier" --mode=files --json -- "${files[@]}" 2>/dev/null \
-              | python3 -c 'import json,sys; print(json.load(sys.stdin)["impact_class"])' 2>/dev/null
+            env GITHUB_OUTPUT='' "$ci_python" -I "$classifier" --mode=files --json -- "${files[@]}" 2>/dev/null \
+              | "$ci_python" -c 'import json,sys; print(json.load(sys.stdin)["impact_class"])' 2>/dev/null
           ) || change_class=
           [[ "$change_class" =~ ^[A-Za-z0-9_.,:-]+$ ]] || change_class=classifier_failed
           if [ "$change_class" = docs-only ] && [ "$strategy" = ALLGREEN ]; then

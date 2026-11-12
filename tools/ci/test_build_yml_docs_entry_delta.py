@@ -90,6 +90,11 @@ class StepContractTests(unittest.TestCase):
         self.assertLess(control, self.script.index("git diff"))
         self.assertIn('if [ "$GITHUB_EVENT_NAME" != merge_group ]; then', self.script)
 
+    def test_the_token_reaches_only_the_inline_strategy_reader(self) -> None:
+        self.assertNotIn("GH_TOKEN:", self.block)
+        self.assertEqual(self.script.count("${{ github.token }}"), 1)
+        self.assertIn('strategy=$(GH_TOKEN="${{ github.token }}" python3 - <<', self.script)
+
     def test_never_fails_the_job(self) -> None:
         self.assertIn("continue-on-error: true", self.block)
         self.assertIn("set +e", self.script)
@@ -196,7 +201,9 @@ class StepBehaviourTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.script = step_script(step_block(BUILD_WORKFLOW.read_text(encoding="utf-8"), STEP_ID))
+        # Actions substitutes the token expression before the shell runs.
+        cls.script = step_script(step_block(BUILD_WORKFLOW.read_text(encoding="utf-8"), STEP_ID)).replace(
+            "${{ github.token }}", "test-token")
         cls.tmp = tempfile.TemporaryDirectory()
         repo = Path(cls.tmp.name) / "repo"
         repo.mkdir()
@@ -250,7 +257,7 @@ class StepBehaviourTests(unittest.TestCase):
         env.update({
             "GITHUB_EVENT_NAME": event, "GITHUB_REPOSITORY": "O/R", "GITHUB_OUTPUT": str(out),
             "GITHUB_API_URL": f"http://127.0.0.1:{self.server.server_address[1]}",
-            "GH_TOKEN": "test-token", "DOCS_ENTRY_DELTA_MODE": mode,
+            "DOCS_ENTRY_DELTA_MODE": mode,
             "MERGE_GROUP_BASE_SHA": base if base is not None else self.code_group,
             "EVENT_HEAD_SHA": head if head is not None else self.docs_group,
             "MERGE_GROUP_MAIN_BASE": main if main is not None else self.main,
