@@ -291,7 +291,9 @@ TEST_CASE("unplug mid-block: the old callback finishes, then exactly one new one
         ++callbacks;
         if (hold_next.exchange(false)) {
             std::unique_lock<std::mutex> lk(gate_m);
-            gate_cv.wait(lk, [&] { return release; });
+            // Bounded so a regression that never releases the gate fails the test
+            // instead of hanging the job.
+            gate_cv.wait_for(lk, std::chrono::seconds(10), [&] { return release; });
         }
     };
 
@@ -300,8 +302,10 @@ TEST_CASE("unplug mid-block: the old callback finishes, then exactly one new one
     FakeDevice* old_handle = sys.handle("A");
 
     std::thread audio([&] { old_handle->pump(); });
-    while (!old_handle->in_callback)
+    const auto spin_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (!old_handle->in_callback && std::chrono::steady_clock::now() < spin_deadline)
         std::this_thread::yield();
+    REQUIRE(old_handle->in_callback.load());
 
     sys.remove("A");
     std::atomic<bool> reconciled{false};
