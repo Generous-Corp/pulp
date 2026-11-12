@@ -1,4 +1,5 @@
 #include <pulp/midi/device.hpp>
+#include <pulp/midi/sysex_send_gate.hpp>
 #include <pulp/midi/ump.hpp>
 #include <pulp/midi/ump_conversion.hpp>
 #include <pulp/midi/ump_sysex7_reassembler.hpp>
@@ -329,13 +330,11 @@ public:
             return false;
         if (!is_valid_sysex_message(bytes))
             return false;
-        if (in_flight_->fetch_add(1) >= kMaxSysexInFlight) {
-            in_flight_->fetch_sub(1);
+        if (!gate_->try_acquire())
             return false;
-        }
         auto* job = new SysexJob;
         job->data.assign(bytes.begin(), bytes.end());
-        job->in_flight = in_flight_;
+        job->gate = gate_;
         job->request.destination = dest_;
         job->request.data = job->data.data();
         job->request.bytesToSend = static_cast<UInt32>(job->data.size());
@@ -343,7 +342,7 @@ public:
         job->request.completionProc = &CoreMidiOutput::sysex_done;
         job->request.completionRefCon = job;
         if (MIDISendSysex(&job->request) != noErr) {
-            in_flight_->fetch_sub(1);
+            gate_->release();
             delete job;
             return false;
         }
@@ -375,12 +374,12 @@ public:
     struct SysexJob {
         MIDISysexSendRequest request{};
         std::vector<std::uint8_t> data;
-        std::shared_ptr<std::atomic<int>> in_flight;
+        std::shared_ptr<SysexSendGate> gate;
     };
 
     static void sysex_done(MIDISysexSendRequest* request) {
         auto* job = static_cast<SysexJob*>(request->completionRefCon);
-        job->in_flight->fetch_sub(1);
+        job->gate->release();
         delete job;
     }
 
@@ -388,7 +387,7 @@ public:
     MIDIEndpointRef dest_ = 0;
     SInt32 dest_unique_id_ = 0;
     bool is_open_ = false;
-    std::shared_ptr<std::atomic<int>> in_flight_ = std::make_shared<std::atomic<int>>(0);
+    std::shared_ptr<SysexSendGate> gate_ = std::make_shared<SysexSendGate>(kMaxSysexInFlight);
 };
 
 class CoreMidiSystem : public MidiSystem {

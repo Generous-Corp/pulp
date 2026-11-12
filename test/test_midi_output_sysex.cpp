@@ -8,15 +8,15 @@
 #include <pulp/midi/device.hpp>
 #include <pulp/midi/mock_midi_system.hpp>
 
+#include <atomic>
+#include <chrono>
 #include <cstdint>
+#include <mutex>
+#include <thread>
 #include <vector>
 
 #if defined(__APPLE__)
 #include <CoreMIDI/CoreMIDI.h>
-#include <atomic>
-#include <chrono>
-#include <mutex>
-#include <thread>
 #endif
 
 using namespace pulp::midi;
@@ -261,3 +261,61 @@ TEST_CASE("CoreMIDI output frees every request and bounds the queue",
 }
 
 #endif
+
+// ── The in-flight bound (runs everywhere; the CoreMIDI backend uses this gate) ──
+
+#include <pulp/midi/sysex_send_gate.hpp>
+
+TEST_CASE("sysex gate: a send past the bound is refused, nothing is lost, and slots come back",
+          "[midi][sysex][output][gate]") {
+    SysexSendGate gate(16);
+    CHECK(gate.max_in_flight() == 16);
+
+    // The first 16 are accepted.
+    for (int i = 0; i < 16; ++i)
+        REQUIRE(gate.try_acquire());
+    CHECK(gate.in_flight() == 16);
+
+    // The 17th and every one after it is refused, and a refusal takes no slot,
+    // so a later release is not shadowed by a phantom count.
+    for (int i = 0; i < 100; ++i)
+        CHECK_FALSE(gate.try_acquire());
+    CHECK(gate.in_flight() == 16);
+
+    // Each completion frees exactly one slot.
+    gate.release();
+    CHECK(gate.in_flight() == 15);
+    CHECK(gate.try_acquire());
+    CHECK_FALSE(gate.try_acquire());
+
+    // Everything completes: the count returns to zero, with no leaked slot.
+    for (int i = 0; i < 16; ++i)
+        gate.release();
+    CHECK(gate.in_flight() == 0);
+    for (int i = 0; i < 16; ++i)
+        CHECK(gate.try_acquire());
+}
+
+TEST_CASE("sysex gate: concurrent senders never exceed the bound", "[midi][sysex][output][gate]") {
+    SysexSendGate gate(16);
+    std::atomic<int> accepted{0};
+    std::atomic<int> over{0};
+    std::vector<std::thread> workers;
+    for (int t = 0; t < 8; ++t) {
+        workers.emplace_back([&] {
+            for (int i = 0; i < 20000; ++i) {
+                if (gate.try_acquire()) {
+                    if (gate.in_flight() > 16)
+                        ++over;
+                    ++accepted;
+                    gate.release();
+                }
+            }
+        });
+    }
+    for (auto& w : workers)
+        w.join();
+    CHECK(over.load() == 0);
+    CHECK(gate.in_flight() == 0);
+    CHECK(accepted.load() > 0);
+}
