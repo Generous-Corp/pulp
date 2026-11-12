@@ -31,5 +31,8 @@ the existing resolved-plan receipt path.
 - `git diff --check` passed. `tools/scripts/gates.sh origin/main` ran all
   host-available checks; the dedicated-builder host refused the source-only
   build-gate suites and the script-input manifest check reported NOT CHECKED.
-- Mutation proof is run after the repair commit on a clean tracked source file;
-  the receipt records baseline, planted digest break, and restored-green runs.
+- Mutation proof: `tools/scripts/confirm_failure.sh` on a clean tracked source
+  file, targeting `pulp-test-group-app-host '[g3][d5]'`. The planted mutation
+  omitted the required embedded-NUL separator; baseline PASS, broken FAIL, and
+  restored PASS were all observed. The harness reported `CONFIRMED` after
+  recompiling `core/host/src/graph_serializer.cpp` in each phase.
