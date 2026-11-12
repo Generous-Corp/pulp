@@ -3,6 +3,8 @@
  "record": {
   "entry": "tools/scripts/test_p0_layered_replay_receipt.py",
   "inputs": [
+   "examples/g3-resolved-identity-consumer/main.cpp",
+   "examples/spectral-frame-codec-consumer/main.cpp",
    "tools/scripts/p0_layered_replay_receipt.py",
    "tools/scripts/test_p0_layered_replay_receipt.py"
   ],

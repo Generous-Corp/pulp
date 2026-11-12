@@ -58,6 +58,18 @@ class LayeredReceiptTests(unittest.TestCase):
                 "wrong", "pulp.graph.g3-resolved-identity-consumer.v1", "g3")
             self.assertEqual(bad["status"], "UNAVAILABLE")
 
+    def test_public_consumer_fixtures_emit_protocol_attestations(self) -> None:
+        fixtures = {
+            Path(__file__).parents[2] / "examples/g3-resolved-identity-consumer/main.cpp":
+                "pulp.graph.g3-resolved-identity-consumer.v1",
+            Path(__file__).parents[2] / "examples/spectral-frame-codec-consumer/main.cpp":
+                "pulp.signal.spectral-frame-codec-consumer.v1",
+        }
+        for path, protocol in fixtures.items():
+            source = path.read_text(encoding="utf-8")
+            self.assertIn(protocol, source)
+            self.assertIn("kP0ProtocolAttestation", source)
+
 
 if __name__ == "__main__":
     unittest.main()
