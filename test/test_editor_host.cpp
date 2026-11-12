@@ -6,6 +6,7 @@
 // end. Ordering is what hosts latch on for touch automation and undo grouping,
 // so the stream is compared whole rather than counted.
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/format/contract_editor_session.hpp>
@@ -755,6 +756,87 @@ TEST_CASE("a contract session whose owner is gone draws no more frames", "[edito
     session->tick();
     session->tick();
     REQUIRE(idles == 1);
+    session->close_for_owner();
+}
+
+namespace {
+
+/// Subscribes to the context's ParamPort and records every notification.
+class ListeningEditor final : public Editor {
+  public:
+    ListeningEditor(EditorContext& context, std::vector<std::pair<ParamID, float>>& seen)
+        : subscription_(context.params().add_listener(
+              [&seen](ParamID id, float value) { seen.emplace_back(id, value); })) {}
+    bool supports_parent(NativeParentKind kind) const override {
+        return kind == NativeParentKind::cocoa_view;
+    }
+    bool attach(const NativeParent&) override {
+        return true;
+    }
+    void detach() override {}
+    void invalidate() override {}
+    EditorSize size() const override {
+        return {400, 300, 1.0};
+    }
+    bool set_size(const EditorSize&) override {
+        return true;
+    }
+    void idle() override {}
+
+  private:
+    ParamSubscription subscription_;
+};
+
+class ListeningFactory final : public EditorFactory {
+  public:
+    explicit ListeningFactory(std::vector<std::pair<ParamID, float>>& seen) : seen_(seen) {}
+    bool supports(EditorRole role) const override {
+        return role == EditorRole::editor;
+    }
+    std::unique_ptr<Editor> create(Processor&, EditorContext& context, EditorRole) override {
+        return std::make_unique<ListeningEditor>(context, seen_);
+    }
+
+  private:
+    std::vector<std::pair<ParamID, float>>& seen_;
+};
+
+} // namespace
+
+TEST_CASE("a contract session's tick delivers audio-thread writes and state restores to port "
+          "listeners",
+          "[editor-host][param-port]") {
+    Fixture f;
+    GainProcessor processor;
+    std::vector<std::pair<ParamID, float>> seen;
+    ListeningFactory factory(seen);
+    auto session = ContractEditorSession::create(processor, f.store, factory, {},
+                                                 ContractEditorSession::IdleSource::host_driven);
+    REQUIRE(session);
+    int parent = 0;
+    REQUIRE(session->attach({NativeParentKind::cocoa_view, &parent, 0}));
+
+    f.store.set_value_rt(kGain, 0.25f);
+    REQUIRE(seen.empty());
+    session->tick();
+    REQUIRE(seen.size() == 1);
+    REQUIRE(seen[0].first == kGain);
+    REQUIRE(seen[0].second == Catch::Approx(0.25f));
+
+    // A restore writes the atomics silently; the tick replays the restored
+    // values to the listener.
+    f.store.set_value(kGain, 0.9f);
+    const auto blob = f.store.serialize();
+    f.store.set_value(kGain, 0.1f);
+    seen.clear();
+    REQUIRE(f.store.deserialize(blob));
+    REQUIRE(seen.empty());
+    session->tick();
+    bool restored = false;
+    for (const auto& [id, value] : seen)
+        restored = restored || (id == kGain && value == Catch::Approx(0.9f));
+    REQUIRE(restored);
+
     session->close_for_owner();
 }
 
