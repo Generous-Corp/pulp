@@ -610,13 +610,16 @@ void processor_projection_controls() {
               observation.ump_sample_offset == 2 && observation.ump_words[0] == 0x4091'3C00u &&
               observation.ump_words[1] == 0xFFFF'0000u,
           "processor-ump-sidecar-trace");
-    check(observation.mpe_count == 3 && observation.mpe_offsets[0] == 2 &&
+    check(observation.mpe_count == 4 && observation.mpe_offsets[0] == 2 &&
               observation.mpe_offsets[1] == 2 && observation.mpe_offsets[2] == 5 &&
+              observation.mpe_offsets[3] == 5 &&
               observation.mpe_kinds[0] ==
                   static_cast<int>(pulp::midi::MpeExpressionEvent::Kind::NoteOn) &&
               observation.mpe_kinds[1] ==
                   static_cast<int>(pulp::midi::MpeExpressionEvent::Kind::NoteOn) &&
               observation.mpe_kinds[2] ==
+                  static_cast<int>(pulp::midi::MpeExpressionEvent::Kind::PitchBend) &&
+              observation.mpe_kinds[3] ==
                   static_cast<int>(pulp::midi::MpeExpressionEvent::Kind::PitchBend),
           "processor-mpe-sidecar-trace");
 
