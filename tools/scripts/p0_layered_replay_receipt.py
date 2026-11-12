@@ -46,7 +46,8 @@ def run_consumer(label: str, command: Sequence[str] | None) -> dict[str, Any]:
     if not command:
         return {"name": label, "status": "UNAVAILABLE", "reason": "command not supplied"}
     try:
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        result = subprocess.run(command, capture_output=True, stdin=subprocess.DEVNULL,
+                                text=True, check=False)
     except OSError as exc:
         return {"name": label, "status": "UNAVAILABLE", "reason": str(exc)}
     output = (result.stdout + result.stderr).encode()
