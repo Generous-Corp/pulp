@@ -16,6 +16,7 @@
 /// that handles Program Change itself still sees it.
 
 #include <pulp/midi/buffer.hpp>
+#include <pulp/state/midi_source_reservation.hpp>
 #include <pulp/state/preset_program_map.hpp>
 
 #include <array>
@@ -39,7 +40,7 @@ struct ProgramRouterSettings {
     BankSelectMode mode = BankSelectMode::msb_lsb;
 };
 
-class PresetProgramRouter {
+class PresetProgramRouter final : public state::MidiSourceReservation {
   public:
     struct Request {
         state::BankProgram position;
@@ -69,6 +70,34 @@ class PresetProgramRouter {
             return false;
         }
         return false;
+    }
+
+    /// MidiSourceReservation: the sources this router consumes while enabled.
+    /// Bank Select (CC 0 and CC 32, and the 14-bit pair on CC 0 whose low half
+    /// is CC 32) in the modes that read it, and every Program Change. A source
+    /// on an omni channel overlaps whichever channel the router listens to.
+    bool claims(const state::MidiSource& source) const noexcept override {
+        const auto s = settings();
+        if (!s.enabled)
+            return false;
+        if (s.channel != 0 && source.channel != state::MidiSource::kOmni &&
+            source.channel != s.channel - 1)
+            return false;
+        using Kind = state::MidiSourceKind;
+        switch (source.kind) {
+        case Kind::program_change:
+            return true;
+        case Kind::cc7:
+            return (source.number == 0 && s.mode != BankSelectMode::ignore_bank) ||
+                   (source.number == 32 && s.mode == BankSelectMode::msb_lsb);
+        case Kind::cc14:
+            return source.number == 0 && s.mode == BankSelectMode::msb_lsb;
+        default:
+            return false;
+        }
+    }
+    const char* reason() const noexcept override {
+        return "Bank Select and Program Change choose presets";
     }
 
     // ── Audio thread ────────────────────────────────────────────────────
@@ -130,6 +159,11 @@ class PresetProgramRouter {
     }
 
     // ── Message thread ──────────────────────────────────────────────────
+
+    /// True when a Program Change is waiting. Real-time safe; does not take it.
+    bool has_pending() const noexcept {
+        return request_.load(std::memory_order_relaxed) != 0;
+    }
 
     /// The newest unhandled Program Change, if any. Taking it empties the slot.
     std::optional<Request> take_request() noexcept {
