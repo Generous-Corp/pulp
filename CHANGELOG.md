@@ -9,6 +9,15 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11150"></a>
+## [1.115.0] - 2026-11-12
+
+- release/version bump ([#12094](https://github.com/Generous-Corp/pulp/pull/12094))
+- drain first try prepush 20261111 ([#12076](https://github.com/Generous-Corp/pulp/pull/12076))
+- drain dirty consumption 20261111 ([#12077](https://github.com/Generous-Corp/pulp/pull/12077))
+- feature/vellum drift report ([#12067](https://github.com/Generous-Corp/pulp/pull/12067))
+- codex/g9 native group join 20261110 ([#12019](https://github.com/Generous-Corp/pulp/pull/12019))
+
 <a id="v11140"></a>
 ## [1.114.0] - 2026-11-12
 
@@ -12821,6 +12830,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.115.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.115.0
 [1.114.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.114.0
 [1.113.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.113.0
 [1.112.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.112.0
