@@ -1013,6 +1013,18 @@ then process. If the adapter needs additional logic (e.g.
 gesture-coalesced output events), insert it after `process()` and
 before the snapshot diff, not before `set_normalized`.
 
+### A host sees 2,080 hidden MIDI-controller parameters on top of the plug-in's own
+
+VST3 has no MIDI CC events, so an adapter for a plug-in that accepts MIDI
+registers one hidden proxy parameter per channel and controller
+(16 x 130 = 2,080) in the reserved range from `kVst3MidiCcParamBase`, and maps
+them through `IMidiMapping`. A host's parameter list for a 2,000-parameter
+plug-in therefore holds about 4,081 entries (its own, the proxies and a
+bypass). Tests that count parameters should classify the proxies by
+`is_vst3_midi_cc_param()` rather than treat them as extras;
+`test_host_scale_probe_bundles.cpp` does. The per-block sync work is counted
+the same way as for CLAP (`param_sync_counts()` in `adapter_boundary.hpp`).
+
 ### Per-block work is gated on the StateStore generation
 
 Every store write advances `StateStore::state_generation()`. `process()`

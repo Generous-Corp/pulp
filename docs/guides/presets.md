@@ -205,3 +205,14 @@ file), the tags and the MIDI program number when a program map is enabled.
   row (key, display name, tags, favourite, program).
 
 Without a library the browser is unchanged.
+
+### Opting in from a plug-in (standalone)
+
+The standalone host honours `supports_program_change` the same way. It creates
+the library and router when the processor is created, scans hardware MIDI for
+Bank Select + Program Change inside the audio callback (latch only), and loads
+the preset from `StandaloneApp::service_program_changes()`, which the built-in
+editors call from their idle loop and which throttles itself to about 30 Hz. A
+host that runs its own loop calls it a few times a second. The factory folder is
+`Presets` inside the app bundle's resource directory when it exists.
+

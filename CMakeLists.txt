@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 1.107.0
+    VERSION 1.113.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -1010,6 +1010,7 @@ if(PULP_BUILD_TESTS)
     add_subdirectory(test/fixtures/native_ui_link_floor)
     add_subdirectory(test/fixtures/no_editor_link_floor)
     add_subdirectory(test/fixtures/host_probe)
+    add_subdirectory(test/fixtures/scale_probe)
     add_subdirectory(test/fixtures/host_midi_probe)
     add_subdirectory(test/fixtures/data_display_editor)
     add_subdirectory(test/fixtures/editor_ui_package)
@@ -1123,6 +1124,7 @@ endif()
 # ── Out-of-process plugin scan worker ─────────────────────────────────────
 if(NOT IOS AND NOT ANDROID AND PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/scan-worker)
+    add_subdirectory(tools/clap-worker)
 endif()
 
 # ── Design Tool ───────────────────────────────────────────────────────────

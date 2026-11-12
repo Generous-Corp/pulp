@@ -50,14 +50,49 @@ MUTATIONS = {
         "finite-release-reclaimed",
     ),
     "skip_tracker_capacity_refusal": (
-        "if (free == membership.end()) return refuse(VoiceBankBindingCode::TrackerCapacity);",
-        "if (free == membership.end()) continue;",
+        "if (free == membership.end())\n                return refuse(VoiceBankBindingCode::TrackerCapacity);",
+        "if (free == membership.end())\n                continue;",
         "capacity-typed-refusal",
+    ),
+    "skip_cc120_capacity_preview": (
+        "message.cc_number() == 120 || message.cc_number() == 123",
+        "false || message.cc_number() == 123",
+        "capacity-cc120-reuse",
+    ),
+    "skip_cc123_capacity_preview": (
+        "message.cc_number() == 120 || message.cc_number() == 123",
+        "message.cc_number() == 120 || false",
+        "capacity-cc123-reuse",
     ),
     "silently_accept_poly_pressure": (
         "const bool supported = kind == 0x80 || kind == 0x90 || kind == 0xd0 ||",
         "const bool supported = kind == 0x80 || kind == 0x90 || kind == 0xa0 || kind == 0xd0 ||",
         "poly-pressure-typed-refusal",
+    ),
+    "wrong_cc64_boundary": (
+        "if (control == 64) {",
+        "if (control == 64 && value != 64) {",
+        "pedal-64-down",
+    ),
+    "skip_cc121_hold_drain": (
+        "reset_orphan_expression(scope);\n            release_unheld();",
+        "reset_orphan_expression(scope);",
+        "cc121-drains-last-hold",
+    ),
+    "skip_cc123_note_off": (
+        "} else if (control == 123) {\n            all_notes_off(scope);",
+        "} else if (control == 123) {\n            (void)scope;",
+        "cc123-dispatches-release",
+    ),
+    "widen_member_panic": (
+        "if (!scope.manager)\n            return scope.channel == channel;",
+        "if (!scope.manager)\n            return true;",
+        "member-panic-preserves-other",
+    ),
+    "accept_invalid_deferred_expression": (
+        "if (!valid_deferred_expression(kind, state, impl_->tracker.member_bend_range(state.channel)))",
+        "if (false)",
+        "deferred-expression-refusal",
     ),
 }
 
@@ -82,6 +117,7 @@ def main() -> None:
     scratch.mkdir(parents=True, exist_ok=True)
     assert (prefix / "lib/cmake/Pulp/PulpConfig.cmake").is_file()
     original = PRODUCTION.read_text()
+    subprocess.run(["python3", str(FIXTURE / "generate_a1_vectors.py"), "--check"], check=True)
     provenance = json.loads((prefix / "sdk-provenance.json").read_text())
     cases = [("positive", None), *MUTATIONS.items(), ("restored", None)]
     results = {}
@@ -90,6 +126,7 @@ def main() -> None:
         source.mkdir(exist_ok=True)
         shutil.copyfile(FIXTURE / "main.cpp", source / "main.cpp")
         shutil.copyfile(FIXTURE / "fixture.hpp", source / "fixture.hpp")
+        shutil.copyfile(FIXTURE / "a1_reference_vectors.hpp", source / "a1_reference_vectors.hpp")
         code = original
         if mutation:
             before, after, _ = mutation
@@ -129,7 +166,8 @@ def main() -> None:
             marker = mutation[2]
             if execution.returncode == 0 or marker not in output:
                 raise AssertionError(f"{name}: planted failure was not observed: {output}")
-        elif execution.returncode or "sample3=-0.125" not in output or "sample10=0" not in output:
+        elif (execution.returncode or "g6-voice-bank-public-consumer PASS" not in output
+              or "sample10=0" not in output):
             raise AssertionError(f"{name}: positive numeric oracle failed: {output}")
         results[name] = {
             "exit_code": execution.returncode,

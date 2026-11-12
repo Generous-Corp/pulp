@@ -1,0 +1,12 @@
+review still running: codex elapsed=60s pid=62271
+review still running: codex elapsed=120s pid=62271
+autoreview target: branch
+branch: codex/g7-any-edge-probes-20261110
+engine: codex
+tools: on
+web_search: on
+ref: 6c3ff80830797c201931a63b893c512686329e3e
+bundle: 79553 chars
+autoreview clean: no accepted/actionable findings reported
+overall: patch is correct (0.88)
+The admitted changes consistently implement sidechain, feedback, and dense-control observation through the existing bounded probe infrastructure. Feedback reads the retained previous-block slot before capture, dense control records mapped/slewed per-edge values after connection delay, and lifecycle, mode, attachment, and loss accounting remain guarded by existing serial-routing constraints. No actionable defect was found in the reviewed hunks.

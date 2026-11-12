@@ -1411,6 +1411,81 @@ class StandingBumpPrTest(unittest.TestCase):
         self.assertEqual(status, "pr-updated")
         self.assertNotEqual(self._tip(), held)
 
+    def _carry_capability_assignment(self) -> None:
+        """Make the standing head carry a capability counter assignment, as
+        `--assign-pending` writes one: a new history entry in the bump commit
+        itself, so the head is still one marker commit on its cut."""
+        work = self.root / "carry-assignment"
+        subprocess.run(["git", "clone", "-q", "-b", val.BUMP_BRANCH,
+                        str(self.origin), str(work)], check=True)
+        self._config(work)
+        entry = work / "tools/agent-capabilities/history/assigned.json"
+        entry.parent.mkdir(parents=True, exist_ok=True)
+        entry.write_text('{"inventory_version": 2}\n', encoding="utf-8")
+        _git(work, "add", "--", str(entry))
+        _git(work, "commit", "-q", "--amend", "--no-edit")
+        _git(work, "push", "-q", "--force", "origin", f"HEAD:{val.BUMP_BRANCH}")
+
+    def test_a_capability_landing_updates_a_head_that_assigns_capabilities(self) -> None:
+        """A bump whose capability assignment main has outgrown fails
+        `agent_capability_manifest.py --check` in every merge group, so it is
+        rebuilt at once instead of waiting out the coalesce window."""
+        self.assertEqual(self._drain(_FakeGh(open_prs=0))[0], "pr-opened")
+        self._carry_capability_assignment()
+        carried = self._tip()
+        stamp = self._tip_time()
+
+        # Control: a landing that leaves the capability records alone keeps
+        # the head for the window.
+        self._land("docs", "docs/note.md", "docs: unrelated note")
+        status, _ = self._drain(_FakeGh(open_prs=1, covers=False),
+                                coalesce_window=120, now=stamp + 10 * 60)
+        self.assertEqual(status, "standing-held")
+        self.assertEqual(self._tip(), carried)
+
+        # A landing that changes capability material inside the window.
+        self._land("header", "docs/status/agent-capability-surface/headers/pulp/a.hpp.json",
+                   "feat(signal): a public header")
+        fake = _FakeGh(open_prs=1, covers=False)
+        status, _ = self._drain(fake, coalesce_window=120, now=stamp + 10 * 60)
+        self.assertEqual(status, "pr-updated")
+        self.assertNotEqual(self._tip(), carried)
+        self.assertTrue(fake.did("pr", "edit"))
+
+    def test_a_doomed_ejected_head_is_repaired_without_the_heal_opt_in(self) -> None:
+        """An ejected bump whose capability assignment main has outgrown can
+        never land; it is rebuilt even with the heal off, while an ejected
+        head that could still land keeps waiting for its owner."""
+        self.assertEqual(self._drain(_FakeGh(open_prs=0))[0], "pr-opened")
+        self._carry_capability_assignment()
+        carried = self._tip()
+        dead = dict(open_prs=1, covers=False, ejected=True, armed=False)
+
+        self._land("docs", "docs/note.md", "docs: unrelated note")
+        status, _ = self._drain(_FakeGh(**dead), coalesce_window=0)
+        self.assertEqual(status, "stale-defer")
+        self.assertEqual(self._tip(), carried)
+
+        self._land("header", "docs/status/agent-capability-surface/headers/pulp/a.hpp.json",
+                   "feat(signal): a public header")
+        status, _ = self._drain(_FakeGh(**dead), coalesce_window=0)
+        self.assertEqual(status, "pr-updated")
+        self.assertNotEqual(self._tip(), carried)
+
+    def test_a_capability_landing_leaves_a_head_without_an_assignment_held(self) -> None:
+        """Control: the same landing cannot doom a bump that assigns no
+        capability counter, so the window still spaces its updates."""
+        self.assertEqual(self._drain(_FakeGh(open_prs=0))[0], "pr-opened")
+        built = self._tip()
+        stamp = self._tip_time()
+        self._land("header", "docs/status/agent-capability-surface/headers/pulp/a.hpp.json",
+                   "docs: a header record")
+        fake = _FakeGh(open_prs=1, covers=False)
+        status, _ = self._drain(fake, coalesce_window=120, now=stamp + 10 * 60)
+        self.assertEqual(status, "stale-wait")
+        self.assertEqual(self._tip(), built)
+        self.assertFalse(fake.did("pr", "edit"))
+
     def test_a_rebuild_identical_to_the_standing_head_is_not_an_update(self) -> None:
         """Nothing changed since the head was built (same tree, parent, message
         and time): the force push would be a no-op, so it must not be reported
