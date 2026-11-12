@@ -1,0 +1,11 @@
+{
+ "name": "modules-yaml-dirs-selftest",
+ "record": {
+  "entry": "tools/scripts/test_modules_yaml_dirs_check.py",
+  "inputs": [
+   "tools/scripts/modules_yaml_dirs_check.py",
+   "tools/scripts/test_modules_yaml_dirs_check.py"
+  ],
+  "kind": "python"
+ }
+}
