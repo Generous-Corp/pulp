@@ -184,8 +184,7 @@ bool write_canonical_wav(std::ostream& out, const AudioFileData& data, WavBitDep
     put_le<std::uint16_t>(out, bit_depth == WavBitDepth::Float32 ? 3 : 1);
     put_le<std::uint16_t>(out, static_cast<std::uint16_t>(channels));
     put_le<std::uint32_t>(out, sample_rate);
-    put_le<std::uint32_t>(
-        out, static_cast<std::uint32_t>(data.sample_rate * static_cast<double>(block_align) + 0.5));
+    put_le<std::uint32_t>(out, sample_rate * static_cast<std::uint32_t>(block_align));
     put_le<std::uint16_t>(out, static_cast<std::uint16_t>(block_align));
     put_le<std::uint16_t>(out, static_cast<std::uint16_t>(bytes_per_sample * 8));
     put_tag(out, "data");

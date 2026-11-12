@@ -3274,6 +3274,23 @@ TEST_CASE("WAV writer pads an odd data chunk and keeps the RIFF size exact",
     CHECK(read_audio_file(path.string()).has_value());
 }
 
+TEST_CASE("WAV writer derives byte rate from its stored sample rate",
+          "[audio][file][wav-atomic][wav-header]") {
+    ScratchDir dir;
+    AudioFileData data;
+    data.sample_rate = 44100;
+    data.channels = {{0.25f, -0.5f}};
+    const auto path = dir.root / "byte-rate.wav";
+    REQUIRE(write_wav_file(path.string(), data, WavBitDepth::Int16));
+
+    const auto bytes = slurp(path);
+    const auto w = parse_wav(bytes);
+    REQUIRE(w.ok);
+    CHECK(w.rate == 44100u);
+    CHECK(w.block_align == 2u);
+    CHECK(w.byte_rate == w.rate * w.block_align);
+}
+
 TEST_CASE("WAV writer keeps WAVE_FORMAT_EXTENSIBLE for three or more channels",
           "[audio][file][wav-atomic][wav-header]") {
     // Control for the plain-tag case: three channels still need the extensible
