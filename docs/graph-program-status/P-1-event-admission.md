@@ -8,7 +8,9 @@ and trigger graph execution across blocks. It also contains standalone parameter
 adapter checks; those do not prove graph/mailbox projection and remain
 NOT_CHECKED/PLANNED. Parameter-mailbox projection for a public Processor and
 public TriggerContext current/future delivery are **NOT_CHECKED / UNAVAILABLE**;
-see `docs/evidence/p1-projection-consumer-20261112/README.md:5-19`. The
+see `docs/evidence/p1-event-admission-consumer-20261112.md:5-14` and the
+control disposition in
+`docs/evidence/p1-event-admission-consumer-20261112/receipt.json:10-24`. The
 trigger-graph trace is not a TriggerContext consumer receipt.
 
 It intentionally adds no runtime queue, voice-intent API, universal event bus,

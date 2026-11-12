@@ -49,8 +49,9 @@ including voice intent.
   public `Processor` consumer. `SignalGraph::inject_parameter_events()` may
   accept a queue while a plain `add_processor_node()` receives no parameter
   events; routed delivery requires the private exact-parameter claim path. See
-  `docs/evidence/p1-projection-consumer-20261112/README.md:5-19` and its source
-  anchors.
+  `docs/evidence/p1-event-admission-consumer-20261112.md:5-14` and the receipt's
+  control disposition at
+  `docs/evidence/p1-event-admission-consumer-20261112/receipt.json:10-24`.
 * Public TriggerContext delivery is also **NOT_CHECKED / UNAVAILABLE** for
   the installed consumer: ordinary public CustomNode callbacks do not receive
   a trigger context, whose construction is private. Existing trigger-graph
@@ -122,5 +123,7 @@ overflow, and the test-owned voice-identity adapter remain standalone evidence.
 Do not admit a G-5 fixture expansion until an exact installed-SDK consumer can
 prove parameter-mailbox projection and public TriggerContext current/future
 delivery across two blocks. The projection seam is recorded at
-`docs/evidence/p1-projection-consumer-20261112/README.md:5-19`; no runtime/API
-change or second queue is authorized by this packet.
+`docs/evidence/p1-event-admission-consumer-20261112.md:5-14`, with the exact
+qualification result in
+`docs/evidence/p1-event-admission-consumer-20261112/receipt.json:21-31`; no
+runtime/API change or second queue is authorized by this packet.
