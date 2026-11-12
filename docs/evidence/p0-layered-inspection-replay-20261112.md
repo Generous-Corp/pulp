@@ -29,9 +29,11 @@ and SDK provenance, and canonical PCM format/channel/rate/partition/quality
 metadata. The consumer fixtures emit explicit protocol and partition
 attestation tokens
 (`pulp.graph.g3-resolved-identity-consumer.v1` and
-`pulp.signal.spectral-frame-codec-consumer.v1`) so the receipt can bind output
-to the named public binaries. This is fixture output metadata only and does
-not add a runtime/API surface. The focused self-test guards both tokens. The
+`pulp.signal.spectral-frame-codec-consumer.v1`) that attest only the bounded
+invocation of the named consumer. They do not bind rendered output to an
+installed-SDK package, source tree, or runtime implementation. This is fixture
+output metadata only and does not add a runtime/API surface. The focused
+self-test guards both tokens. The
 checked-in envelope and layer values are synthetic tooling fixtures; they do
 not invoke the production serializer, resolver, prepared-plan compiler,
 notation, or probe paths. The receipt is
@@ -40,6 +42,9 @@ command, executable digest, output digest, and return code. The consumer gate
 is fail-closed: absent or invalid consumer commands exit 1 unless
 `--allow-unavailable` is used;
 that mode writes `NOT_QUALIFIED` and never reports a completed experiment.
+
+The planted-negative controls below are synthetic bookkeeping only; they are
+not parser/replay qualification.
 
 The fixture oracle renders canonical signed 32-bit PCM and records two
 partition labels (64 and 128 frames). Each installed consumer is run at both
@@ -71,6 +76,10 @@ python3 tools/scripts/p0_layered_replay_receipt.py \
   --spectral-protocol pulp.signal.spectral-frame-codec-consumer.v1
 ```
 
-The resulting receipt is qualified only when both independent public consumers
-exit zero. Runtime/event scheduler, realtime, cross-platform, provider parity,
-and broad graph identity lanes remain unavailable by design.
+The resulting receipt would still require both independent public consumers to
+exit zero, native-magic/protocol checks to pass, and independent runtime
+partition and mutation acceptance evidence. Those latter checks are absent in
+this fixture, so both consumers cannot qualify this receipt and
+`consumer_gate` remains `NOT_QUALIFIED`. Runtime/event scheduler, realtime,
+cross-platform, provider parity, and broad graph identity lanes remain
+unavailable by design.

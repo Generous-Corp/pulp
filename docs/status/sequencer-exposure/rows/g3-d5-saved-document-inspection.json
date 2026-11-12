@@ -59,7 +59,7 @@
           "needles": ["inspect_document", "semantic_digest"]
         },
         {
-          "kind": "receipt",
+          "kind": "doc",
           "path": "docs/evidence/p0-layered-inspection-replay-20261112.md",
           "needles": ["layered-replay-receipt.v1", "64 and 128"]
         }
