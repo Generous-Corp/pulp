@@ -194,7 +194,7 @@ static pulp::view::View* pulp_plugin_cancel_marked_text_and_revalidate(
 pulp::view::ComboBox* pulp_plugin_open_popup_at(pulp::view::View* root,
                                                 pulp::view::Point pt) {
     if (!root) return nullptr;
-    auto* combo = pulp::view::ComboBox::active_popup_in(*root);
+    auto* combo = pulp::view::enabled_open_popup_in(*root);
     if (!combo) return nullptr;
     float ddx = 0, ddy = 0, ddw = 0, ddh = 0;
     if (!combo->dropdown_window_rect(ddx, ddy, ddw, ddh)) return nullptr;

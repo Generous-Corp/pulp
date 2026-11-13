@@ -25,6 +25,15 @@ tools:
   availability: always
   skill: prototype-loop
   docs: reference/cli.md#affected
+- name: midi-ports
+  path: tools/midi-ports/midi_ports.sh
+  category: midi
+  use_when: You need the exact id Pulp passes to MidiInput/MidiOutput open() for every MIDI source and destination, plus the device, entity and endpoint names that identify it, before saving or resolving a port choice.
+  invocation: bash tools/midi-ports/midi_ports.sh --json
+  inputs: A built pulp-midi-ports target (not built on iOS or Android). No arguments for a text listing, --json for JSON.
+  outputs: For each source and destination, the Pulp id (on CoreMIDI the endpoint's unique id), display name, device, entity and endpoint names, a stable_key built from them, and whether the port is online.
+  availability: always
+  caveat: Lists what the OS reports now. It says nothing about whether an id survives a reboot, replug or USB-port change, and device, entity and endpoint names are filled on CoreMIDI only.
 - name: editor-open-oop-probe
   path: tools/editor-open/editor_open_oop_probe.sh
   category: editor-open

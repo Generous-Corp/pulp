@@ -2,31 +2,64 @@
   "build": {
     "command": "cmake -S examples/p1-event-admission-consumer -B build-p1-event-admission -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$PULP_SDK_PREFIX",
     "profile": "Release",
-    "reason": "installed SDK 1.54.0 does not contain the current public graph_event_contract.hpp header",
-    "result": "REFUSED"
+    "result": "PASS",
+    "sdk": {
+      "kind": "source-install",
+      "build_profile": "release",
+      "source_git_sha": "4c69e183387017c47d048b477218a6d0a4947bcc",
+      "source_git_dirty": false,
+      "platform": "darwin-arm64",
+      "sdk_provenance_sha256": "6e087db51c35537ffac6816728fcbc337bcbcd1df562cda9c5e8a5b75b2736eb",
+      "pulp_config_cmake_sha256": "46cbd6fedbb4690f5447d4bf71b00c8bb4e50fea107f31b332f652a57c9df278",
+      "graph_event_contract_hpp_sha256": "1364609e77aee4e39fa3c1692e36c715ec9385856515dc3076d1de7ef0b0350a",
+      "signal_graph_runtime_hpp_sha256": "9527c8e535cf0a2f7eaa4e7eff0249784c8a02ec891a998a458422687e0d1748",
+      "installed_headers_match_source_head": true
+    },
+    "previous_refusal": "installed SDK 1.54.0 did not contain graph_event_contract.hpp"
   },
   "consumer": "examples/p1-event-admission-consumer",
   "controls": {
-    "midi": "implemented: two-block absolute ingress, stale epoch, late, duplicate sequence, stable producer ordering",
+    "midi": "PASS (installed SDK): two-block absolute ingress, stale epoch, late, duplicate sequence, stable producer ordering",
     "parameter": "NOT_CHECKED: standalone stable sort and fixed-capacity overflow only; graph/mailbox projection planned",
     "partitions": [
       4,
       8
     ],
     "planted_negative_count": 5,
-    "trigger": "implemented: two blocks, absolute sample, sequence, epoch, reset",
+    "trigger": "PASS (installed SDK): two blocks, absolute sample, sequence, epoch, reset; trigger-graph trace, not a public TriggerContext consumer",
     "voice_intent": "NOT_CHECKED: standalone test-owned identity/MPE adapter only; graph voice projection planned",
-    "cross_block_verified": "MIDI ingress and trigger graph only; parameter/voice projection not checked"
+    "cross_block_verified": "MIDI ingress and trigger graph only, from an installed SDK; parameter/voice projection not checked"
   },
   "schema": "pulp.graph.p1-event-admission-consumer.v1",
-  "source_head": "37d5d32932af8c32d17727cab8d8b98cc8323986",
+  "source_head": "2f17500e5e6171587248b9720161c3697628a501",
   "status": "NOT_QUALIFIED",
-  "qualification_scope": "PARTIAL: MIDI/trigger cross-block controls implemented; parameter/voice graph projection NOT_CHECKED",
+  "qualification_scope": "PARTIAL: MIDI/trigger cross-block controls PASS from an installed SDK; parameter-mailbox and public TriggerContext delivery UNAVAILABLE; voice projection NOT_CHECKED",
   "unavailable_lanes": [
-    "installed_sdk",
     "runtime",
     "realtime",
     "provider_parity",
-    "non_darwin"
+    "non_darwin",
+    "parameter_mailbox_public_processor",
+    "public_trigger_context"
+  ],
+  "run": {
+    "command": "build-p1-event-admission/pulp-p1-event-admission-consumer",
+    "returncode": 0,
+    "stdout": "p1-event-admission PASS checks=48 partitions=4,8 planted_negative=5 consumer_gate=NOT_QUALIFIED",
+    "ctest": "p1-event-admission-public-consumer 1/1 passed"
+  },
+  "fixture_corrections": [
+    "midi-duplicate-sequence-refusal: published before project(); HostEventIngress detects duplicates only among staged records and project() removes delivered records",
+    "trigger-cross-block-samples: trigger_trace() is read after each block; the view covers only the most recent block"
+  ],
+  "mutation_controls": [
+    {
+      "mutation": "duplicate MIDI record given a unique producer_sequence",
+      "result": "FAIL rule=midi-duplicate-sequence-refusal"
+    },
+    {
+      "mutation": "second-block trigger impulse moved from frame 2 to frame 3",
+      "result": "FAIL rule=trigger-cross-block-samples"
+    }
   ]
 }

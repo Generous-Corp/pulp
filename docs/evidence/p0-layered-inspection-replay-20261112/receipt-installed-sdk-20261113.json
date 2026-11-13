@@ -1,0 +1,451 @@
+{
+  "consumer_gate": {
+    "reason": "partition execution and synthetic layer mutations are not qualified",
+    "requires": [
+      "g3-installed-public-consumer",
+      "spectral-installed-public-consumer"
+    ],
+    "status": "NOT_QUALIFIED"
+  },
+  "consumers": [
+    {
+      "executable_sha256": "sha256:caeb76ee7e86483df5db4ff9d03b7e52721eb04d1129c3aed7e15342fc01227b",
+      "identity": "pulp-g3-resolved-identity-consumer",
+      "name": "g3-installed-public-consumer",
+      "partitions": [
+        64,
+        128
+      ],
+      "protocol": "pulp.graph.g3-resolved-identity-consumer.v1",
+      "runs": [
+        {
+          "command": [
+            "build-g3-resolved-identity-consumer/pulp-g3-resolved-identity-consumer",
+            "--partition",
+            "64"
+          ],
+          "executable_sha256": "sha256:caeb76ee7e86483df5db4ff9d03b7e52721eb04d1129c3aed7e15342fc01227b",
+          "identity": "pulp-g3-resolved-identity-consumer",
+          "name": "g3-installed-public-consumer",
+          "output_sha256": "sha256:0d1a392759e08324effbcd5e5dcedfd9b8b90a9c661072ed0918ecbd4ae2be40",
+          "protocol": "pulp.graph.g3-resolved-identity-consumer.v1",
+          "returncode": 0,
+          "status": "PASS",
+          "timeout_seconds": 10
+        },
+        {
+          "command": [
+            "build-g3-resolved-identity-consumer/pulp-g3-resolved-identity-consumer",
+            "--partition",
+            "128"
+          ],
+          "executable_sha256": "sha256:caeb76ee7e86483df5db4ff9d03b7e52721eb04d1129c3aed7e15342fc01227b",
+          "identity": "pulp-g3-resolved-identity-consumer",
+          "name": "g3-installed-public-consumer",
+          "output_sha256": "sha256:33bb0d88818435714cd6cabda7371b2cb68eb1ff6a86e99457924c866d9d240e",
+          "protocol": "pulp.graph.g3-resolved-identity-consumer.v1",
+          "returncode": 0,
+          "status": "PASS",
+          "timeout_seconds": 10
+        }
+      ],
+      "status": "PASS"
+    },
+    {
+      "executable_sha256": "sha256:f8a78397e7ceea2560ef3b0f1863af341604b2b58997c3d2dcea308282cc75e2",
+      "identity": "spectral-frame-codec-consumer",
+      "name": "spectral-installed-public-consumer",
+      "partitions": [
+        64,
+        128
+      ],
+      "protocol": "pulp.signal.spectral-frame-codec-consumer.v1",
+      "runs": [
+        {
+          "command": [
+            "build-spectral-frame-codec-consumer/spectral-frame-codec-consumer",
+            "--partition",
+            "64"
+          ],
+          "executable_sha256": "sha256:f8a78397e7ceea2560ef3b0f1863af341604b2b58997c3d2dcea308282cc75e2",
+          "identity": "spectral-frame-codec-consumer",
+          "name": "spectral-installed-public-consumer",
+          "output_sha256": "sha256:3c15fc945eeffd11eddf6de28ea9ffe7282323717ccc0cf87575d0995c825c2d",
+          "protocol": "pulp.signal.spectral-frame-codec-consumer.v1",
+          "returncode": 0,
+          "status": "PASS",
+          "timeout_seconds": 10
+        },
+        {
+          "command": [
+            "build-spectral-frame-codec-consumer/spectral-frame-codec-consumer",
+            "--partition",
+            "128"
+          ],
+          "executable_sha256": "sha256:f8a78397e7ceea2560ef3b0f1863af341604b2b58997c3d2dcea308282cc75e2",
+          "identity": "spectral-frame-codec-consumer",
+          "name": "spectral-installed-public-consumer",
+          "output_sha256": "sha256:efc34afe2149e98c02e08d07da1237dc794bb8180beca01116e76a1b6497bdac",
+          "protocol": "pulp.signal.spectral-frame-codec-consumer.v1",
+          "returncode": 0,
+          "status": "PASS",
+          "timeout_seconds": 10
+        }
+      ],
+      "status": "PASS"
+    }
+  ],
+  "layers": [
+    {
+      "canonical_bytes": {
+        "encoding": "utf-8",
+        "length": 266,
+        "sha256": "sha256:11a2327e1b965f52afbf56369f160633c9299d26d808b1a6f4e41e7f7b6a0f91"
+      },
+      "canonical_bytes_length": 266,
+      "canonical_bytes_sha256": "sha256:11a2327e1b965f52afbf56369f160633c9299d26d808b1a6f4e41e7f7b6a0f91",
+      "name": "authored",
+      "semantic_bytes_length": 266,
+      "semantic_bytes_sha256": "sha256:11a2327e1b965f52afbf56369f160633c9299d26d808b1a6f4e41e7f7b6a0f91",
+      "sha256": "sha256:11a2327e1b965f52afbf56369f160633c9299d26d808b1a6f4e41e7f7b6a0f91",
+      "value": {
+        "edges": [
+          [
+            "input",
+            "gain"
+          ],
+          [
+            "gain",
+            "output"
+          ]
+        ],
+        "nodes": [
+          {
+            "channels": [
+              "L",
+              "R"
+            ],
+            "id": "input",
+            "kind": "audio_input"
+          },
+          {
+            "gain_bits": "3f800000",
+            "id": "gain",
+            "kind": "gain"
+          },
+          {
+            "channels": [
+              "L",
+              "R"
+            ],
+            "id": "output",
+            "kind": "audio_output"
+          }
+        ],
+        "profile": "pulp.graph.authored-io-gain.v1"
+      }
+    },
+    {
+      "canonical_bytes": {
+        "encoding": "utf-8",
+        "length": 318,
+        "sha256": "sha256:40c9336823c609ee0c0ebbf3271e7c0bcb42f93e29a43dd6deb66a78764b3a6d"
+      },
+      "canonical_bytes_length": 318,
+      "canonical_bytes_sha256": "sha256:40c9336823c609ee0c0ebbf3271e7c0bcb42f93e29a43dd6deb66a78764b3a6d",
+      "name": "resolved",
+      "semantic_bytes_length": 318,
+      "semantic_bytes_sha256": "sha256:40c9336823c609ee0c0ebbf3271e7c0bcb42f93e29a43dd6deb66a78764b3a6d",
+      "sha256": "sha256:40c9336823c609ee0c0ebbf3271e7c0bcb42f93e29a43dd6deb66a78764b3a6d",
+      "value": {
+        "nodes": [
+          {
+            "implementation": "pulp.builtin.audio-input.v1",
+            "logical_id": "input",
+            "resource": null
+          },
+          {
+            "implementation": "pulp.builtin.gain.v1",
+            "logical_id": "gain",
+            "resource": null
+          },
+          {
+            "implementation": "pulp.builtin.audio-output.v1",
+            "logical_id": "output",
+            "resource": null
+          }
+        ],
+        "profile": "pulp.graph.resolved-plan.v1",
+        "resources": []
+      }
+    },
+    {
+      "canonical_bytes": {
+        "encoding": "utf-8",
+        "length": 174,
+        "sha256": "sha256:3f411ede2bcdc049d2f30d615e014a62cb4cde9cd63f07c8f61428e249228a54"
+      },
+      "canonical_bytes_length": 174,
+      "canonical_bytes_sha256": "sha256:3f411ede2bcdc049d2f30d615e014a62cb4cde9cd63f07c8f61428e249228a54",
+      "name": "plan",
+      "semantic_bytes_length": 174,
+      "semantic_bytes_sha256": "sha256:3f411ede2bcdc049d2f30d615e014a62cb4cde9cd63f07c8f61428e249228a54",
+      "sha256": "sha256:3f411ede2bcdc049d2f30d615e014a62cb4cde9cd63f07c8f61428e249228a54",
+      "value": {
+        "block_frames": 128,
+        "capacity": {
+          "events": 16,
+          "inputs": 2,
+          "nodes": 3,
+          "outputs": 2
+        },
+        "fallback": "none",
+        "gain": 1.0,
+        "generation": 7,
+        "latency": 0,
+        "latency_samples": 0,
+        "sample_rate": 48000
+      }
+    },
+    {
+      "canonical_bytes": {
+        "encoding": "utf-8",
+        "length": 256,
+        "sha256": "sha256:a49030643b809c18146173f02d31f9a2abfae571dff528b28efcc7ac3032cdd0"
+      },
+      "canonical_bytes_length": 256,
+      "canonical_bytes_sha256": "sha256:a49030643b809c18146173f02d31f9a2abfae571dff528b28efcc7ac3032cdd0",
+      "name": "event",
+      "semantic_bytes_length": 256,
+      "semantic_bytes_sha256": "sha256:a49030643b809c18146173f02d31f9a2abfae571dff528b28efcc7ac3032cdd0",
+      "sha256": "sha256:a49030643b809c18146173f02d31f9a2abfae571dff528b28efcc7ac3032cdd0",
+      "value": {
+        "absolute_origin": 0,
+        "capacity": {
+          "bytes": 1024,
+          "events": 16
+        },
+        "clock_epoch": 3,
+        "controls": [
+          {
+            "gain": 0.5,
+            "sample": 64
+          },
+          {
+            "gain": 0.75,
+            "sample": 192
+          }
+        ],
+        "gain_by_sample": {
+          "192": 0.75,
+          "64": 0.5
+        },
+        "ordering": "(absolute_sample,producer,sequence)",
+        "stream": "audio-control.v1"
+      }
+    },
+    {
+      "canonical_bytes": {
+        "encoding": "utf-8",
+        "length": 952,
+        "sha256": "sha256:007bd4afc03a36c35c7da1e36d0c3e732db08ac6d7118a4ebe25dc84181d5307"
+      },
+      "canonical_bytes_length": 952,
+      "canonical_bytes_sha256": "sha256:007bd4afc03a36c35c7da1e36d0c3e732db08ac6d7118a4ebe25dc84181d5307",
+      "name": "output",
+      "semantic_bytes_length": 952,
+      "semantic_bytes_sha256": "sha256:007bd4afc03a36c35c7da1e36d0c3e732db08ac6d7118a4ebe25dc84181d5307",
+      "sha256": "sha256:007bd4afc03a36c35c7da1e36d0c3e732db08ac6d7118a4ebe25dc84181d5307",
+      "value": {
+        "partition_invariant": true,
+        "partitions": [
+          {
+            "canonical_pcm": {
+              "bytes_per_sample": 4,
+              "channel_count": 2,
+              "channels": [
+                "L",
+                "R"
+              ],
+              "encoding": "s32le",
+              "endianness": "little",
+              "sample_rate": 48000
+            },
+            "frame_count": 256,
+            "partition_frames": 64,
+            "pcm_sha256": "sha256:c56dbe1d0b0e4e347eda7e99dd9727aa8a64fb7996b8275024dbed512cf88c33",
+            "peak_tolerance": 1e-07,
+            "quality": {
+              "comparison": "exact_pcm_digest_with_metric_tolerances",
+              "peak": 1.0,
+              "peak_tolerance": 1e-07,
+              "rms": 0.613234597,
+              "rms_tolerance": 1e-07
+            },
+            "rms_tolerance": 1e-07
+          },
+          {
+            "canonical_pcm": {
+              "bytes_per_sample": 4,
+              "channel_count": 2,
+              "channels": [
+                "L",
+                "R"
+              ],
+              "encoding": "s32le",
+              "endianness": "little",
+              "sample_rate": 48000
+            },
+            "frame_count": 256,
+            "partition_frames": 128,
+            "pcm_sha256": "sha256:c56dbe1d0b0e4e347eda7e99dd9727aa8a64fb7996b8275024dbed512cf88c33",
+            "peak_tolerance": 1e-07,
+            "quality": {
+              "comparison": "exact_pcm_digest_with_metric_tolerances",
+              "peak": 1.0,
+              "peak_tolerance": 1e-07,
+              "rms": 0.613234597,
+              "rms_tolerance": 1e-07
+            },
+            "rms_tolerance": 1e-07
+          }
+        ]
+      }
+    }
+  ],
+  "partition_controls": {
+    "fixture": "canonical-sample-level-oracle",
+    "output_sha256": [
+      "sha256:c56dbe1d0b0e4e347eda7e99dd9727aa8a64fb7996b8275024dbed512cf88c33",
+      "sha256:c56dbe1d0b0e4e347eda7e99dd9727aa8a64fb7996b8275024dbed512cf88c33"
+    ],
+    "partitions": [
+      64,
+      128
+    ],
+    "reason": "sample-level fixture does not execute distinct block boundaries",
+    "status": "NOT_CHECKED",
+    "tolerances": {
+      "pcm": "byte_exact",
+      "peak": 1e-07,
+      "rms": 1e-07
+    }
+  },
+  "planted_negative_controls": {
+    "controls": [
+      {
+        "attribution": "PASS",
+        "changed_layers": [
+          "authored"
+        ],
+        "expected_failure_layer": "authored",
+        "mutation": "authored",
+        "rejected_at_layer": "authored",
+        "status": "NOT_CHECKED"
+      },
+      {
+        "attribution": "PASS",
+        "changed_layers": [
+          "resolved"
+        ],
+        "expected_failure_layer": "resolved",
+        "mutation": "resolved",
+        "rejected_at_layer": "resolved",
+        "status": "NOT_CHECKED"
+      },
+      {
+        "attribution": "PASS",
+        "changed_layers": [
+          "plan"
+        ],
+        "expected_failure_layer": "plan",
+        "mutation": "plan",
+        "rejected_at_layer": "plan",
+        "status": "NOT_CHECKED"
+      },
+      {
+        "attribution": "PASS",
+        "changed_layers": [
+          "event"
+        ],
+        "expected_failure_layer": "event",
+        "mutation": "event",
+        "rejected_at_layer": "event",
+        "status": "NOT_CHECKED"
+      },
+      {
+        "attribution": "PASS",
+        "changed_layers": [
+          "output"
+        ],
+        "expected_failure_layer": "output",
+        "mutation": "output",
+        "rejected_at_layer": "output",
+        "status": "NOT_CHECKED"
+      }
+    ],
+    "fixture": "synthetic-layer-mutation-bookkeeping",
+    "reason": "mutations are digest attribution only; no parser/replay refusal was run",
+    "status": "NOT_CHECKED"
+  },
+  "positive_controls": [
+    {
+      "canonical_bytes": "sha256:11a2327e1b965f52afbf56369f160633c9299d26d808b1a6f4e41e7f7b6a0f91",
+      "layer": "authored",
+      "reason": "synthetic baseline bookkeeping; no parser/replay acceptance",
+      "status": "NOT_CHECKED"
+    },
+    {
+      "canonical_bytes": "sha256:40c9336823c609ee0c0ebbf3271e7c0bcb42f93e29a43dd6deb66a78764b3a6d",
+      "layer": "resolved",
+      "reason": "synthetic baseline bookkeeping; no parser/replay acceptance",
+      "status": "NOT_CHECKED"
+    },
+    {
+      "canonical_bytes": "sha256:3f411ede2bcdc049d2f30d615e014a62cb4cde9cd63f07c8f61428e249228a54",
+      "layer": "plan",
+      "reason": "synthetic baseline bookkeeping; no parser/replay acceptance",
+      "status": "NOT_CHECKED"
+    },
+    {
+      "canonical_bytes": "sha256:a49030643b809c18146173f02d31f9a2abfae571dff528b28efcc7ac3032cdd0",
+      "layer": "event",
+      "reason": "synthetic baseline bookkeeping; no parser/replay acceptance",
+      "status": "NOT_CHECKED"
+    },
+    {
+      "canonical_bytes": "sha256:007bd4afc03a36c35c7da1e36d0c3e732db08ac6d7118a4ebe25dc84181d5307",
+      "layer": "output",
+      "reason": "synthetic baseline bookkeeping; no parser/replay acceptance",
+      "status": "NOT_CHECKED"
+    }
+  ],
+  "provenance": {
+    "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+    "python": "3.13.7",
+    "requested_source_head": "5b904b8712667b87d2ecd43f9315c574fc37ec68",
+    "sdk": {
+      "consumers": [
+        "g3-installed-public-consumer",
+        "spectral-installed-public-consumer"
+      ],
+      "protocols": [
+        "pulp.graph.g3-resolved-identity-consumer.v1",
+        "pulp.signal.spectral-frame-codec-consumer.v1"
+      ]
+    },
+    "source_head": "5b904b8712667b87d2ecd43f9315c574fc37ec68",
+    "source_head_status": "validated",
+    "tool": "tools/scripts/p0_layered_replay_receipt.py",
+    "tool_sha256": "sha256:f38ef1355b21908ce4d567ca11f64656152efa27060765b96ff9b8e6576c8919"
+  },
+  "schema": "pulp.graph.layered-replay-receipt.v1",
+  "source_head": "5b904b8712667b87d2ecd43f9315c574fc37ec68",
+  "unavailable_lanes": [
+    "runtime",
+    "realtime",
+    "cross_platform",
+    "scheduler",
+    "provider_parity"
+  ]
+}

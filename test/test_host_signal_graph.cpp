@@ -5563,6 +5563,38 @@ class NegateProcessor final : public pulp::format::Processor {
     }
 };
 
+TEST_CASE("SignalGraph refuses live parameter events for Processor nodes",
+          "[host][graph][parameter]") {
+    using Result = SignalGraph::PreparedTopologyEdit::Result;
+
+    SignalGraph graph;
+    const auto in_node = graph.add_input_node(2, "In");
+    const auto processor = graph.add_processor_node(std::make_unique<NegateProcessor>());
+    const auto out_node = graph.add_output_node(2, "Out");
+    REQUIRE(graph.connect(in_node, 0, processor, 0));
+    REQUIRE(graph.connect(in_node, 1, processor, 1));
+    REQUIRE(graph.connect(processor, 0, out_node, 0));
+    REQUIRE(graph.connect(processor, 1, out_node, 1));
+    auto slot = std::make_unique<MockAutomatable>();
+    const auto plugin = graph.add_plugin_node(std::move(slot), 0, 1, "probe");
+    REQUIRE(graph.prepare(48000.0, 16));
+
+    pulp::host::ParameterEventQueue events;
+    REQUIRE(events.push({42, 3, 0.5f, 0}));
+    // A Processor node never drains the live mailbox, so accepting would drop
+    // the events silently. The PluginSlot node in the same graph still accepts.
+    CHECK_FALSE(graph.inject_parameter_events(processor, events));
+    CHECK(graph.inject_parameter_events(plugin, events));
+
+    auto edit = graph.begin_prepared_topology_edit();
+    REQUIRE(edit->prepare(48000.0, 16) == Result::Prepared);
+    REQUIRE(edit->commit() == Result::Committed);
+    const auto pinned = edit->committed_execution_snapshot();
+    REQUIRE(pinned);
+    CHECK_FALSE(pinned.inject_parameter_events(processor, events));
+    CHECK(pinned.inject_parameter_events(plugin, events));
+}
+
 bool same_bits(const std::vector<float>& a, const std::vector<float>& b) {
     return a.size() == b.size() && std::memcmp(a.data(), b.data(), a.size() * sizeof(float)) == 0;
 }

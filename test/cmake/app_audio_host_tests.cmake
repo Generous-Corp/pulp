@@ -169,6 +169,18 @@ pulp_add_test_suite(pulp-test-live-dsp-telemetry
     SOURCES test_live_dsp_telemetry.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio pulp::runtime)
 
+# MIDI port identity: the enumerated id is the key open() takes, stable across
+# systems and processes; unknown ids fail; resolve_port() rebinds a saved port.
+pulp_add_test_suite(pulp-test-midi-port-identity
+    SOURCES test_midi_port_identity.cpp
+    LIBRARIES pulp::midi)
+target_include_directories(pulp-test-midi-port-identity PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/midi-ports)
+if(APPLE)
+    target_link_libraries(pulp-test-midi-port-identity PRIVATE
+        "-framework CoreMIDI" "-framework CoreFoundation")
+endif()
+
 # Live per-node DSP telemetry snapshot → JSON serializer (schema contract)
 pulp_add_test_suite(pulp-test-live-dsp-telemetry-json GROUP pulp-test-group-app-audio
     SOURCES test_live_dsp_telemetry_json.cpp

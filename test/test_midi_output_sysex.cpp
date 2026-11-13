@@ -184,7 +184,7 @@ struct VirtualDestination {
 // 3000 bytes took 0.93 s to an in-process destination), so the wait scales with
 // the bytes expected instead of using a fixed timeout.
 bool wait_for_bytes(VirtualDestination& d, std::size_t n) {
-    const auto limit = std::chrono::milliseconds(3000 + static_cast<long>(n) / 2);
+    const auto limit = std::chrono::milliseconds(15000 + static_cast<long>(n));
     const auto start = std::chrono::steady_clock::now();
     while (d.size() < n && std::chrono::steady_clock::now() - start < limit)
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -246,23 +246,27 @@ TEST_CASE("CoreMIDI output frees every request and bounds the queue",
     if (!out->open(std::to_string(kDestId)))
         SKIP("the virtual destination was not visible to the output");
 
-    // A burst larger than the in-flight bound: some are accepted and, once
-    // the earlier ones complete, the next send is accepted again.
-    const auto m = message(400, 0x05);
+    // Each 1000-byte message takes about 0.3 s on the wire, far longer than
+    // issuing the whole burst, so no request completes while the burst is
+    // sent regardless of scheduling priority: exactly the bound is accepted
+    // and the next send is refused.
+    const auto m = message(1000, 0x05);
     int accepted = 0;
-    for (int i = 0; i < 64; ++i)
+    for (int i = 0; i < 17; ++i)
         accepted += out->send_sysex(m) ? 1 : 0;
-    CHECK(accepted >= 1);
-    CHECK(accepted < 64); // the bound refused some of the burst
-    REQUIRE(wait_for_bytes(dest, static_cast<std::size_t>(accepted) * m.size()));
-    // Completed requests no longer count against the bound.
+    CHECK(accepted == 16);
+    // One completion is enough to free a slot; wait for it, not for the whole
+    // burst, so the test does not depend on how fast the system delivers.
+    REQUIRE(wait_for_bytes(dest, m.size()));
     bool again = false;
-    for (int i = 0; i < 200 && !again; ++i) {
+    for (int i = 0; i < 500 && !again; ++i) {
         again = out->send_sysex(m);
         if (!again)
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     CHECK(again);
+    // Let queued requests finish before the destination goes away.
+    wait_for_bytes(dest, static_cast<std::size_t>(accepted + (again ? 1 : 0)) * m.size());
 }
 
 #endif
