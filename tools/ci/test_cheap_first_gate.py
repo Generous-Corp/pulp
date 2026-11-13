@@ -174,8 +174,8 @@ class MainTests(unittest.TestCase):
                        GITHUB_API_URL="http://127.0.0.1:9")
             proc = subprocess.run(
                 [sys.executable, str(SCRIPT), "--repo", "o/r",
-                 *args], env=env, capture_output=True, text=True, timeout=60)
-            outputs = dict(line.split("=", 1) for line in out.read_text().splitlines()
+                 *args], env=env, capture_output=True, text=True, encoding="utf-8", timeout=60)
+            outputs = dict(line.split("=", 1) for line in out.read_text(encoding="utf-8").splitlines()
                            if "=" in line) if out.exists() else {}
             return proc.returncode, outputs
 
@@ -200,7 +200,7 @@ class MainTests(unittest.TestCase):
 
 class RequiredContextTests(unittest.TestCase):
     def test_every_cheap_check_is_a_required_context_on_main(self) -> None:
-        ruleset = json.loads((ROOT / ".github/rulesets/main-protection.json").read_text())
+        ruleset = json.loads((ROOT / ".github/rulesets/main-protection.json").read_text(encoding="utf-8"))
         contexts = {
             c["context"]
             for rule in ruleset.get("rules", [])
