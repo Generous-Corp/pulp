@@ -4781,6 +4781,62 @@ VM, and the pushes that cancelled a claimed VM in a 140-run sample arrived 4
 to 27 minutes apart, so a window long enough to catch them would add that
 latency to every native pull-request run to save a few VM-minutes a day.
 `tools/scripts/test_build_workflow.py` (`NoPrGateSettleTest`) keeps it out.
+The `cheap-first` wait below is not a settle window: it waits on the cheap
+required checks' verdict, not on a clock.
+
+## Cheap checks run first
+
+The native matrix in `build.yml` (the ~40-minute required `macos` gate VM) does
+not start on a head whose `drift-fast` or `Enforce version & skill sync` check
+is already red. Both are required checks in their own workflows, so `needs:`
+cannot reach them; the `cheap-first` job (`tools/ci/cheap_first_gate.py`) reads
+their newest GitHub Actions check runs on the head the build tests (the pull
+request's head sha, the `pr_number` dispatch commit, or the merge group's own
+commit) and publishes a verdict:
+
+- `pass`: every cheap check is green, skipped, neutral or cancelled, or never
+  appeared within 10 minutes. The matrix starts.
+- `block`: a cheap check concluded red. `build` is skipped and the `macos`
+  alias (`macos` on pull requests and dispatches, `macos-merge-group` in the
+  queue) reports a red `macos` naming the red check. A group with nothing
+  native to build, or whose `macos` comes from a reused receipt, used no gate
+  VM and keeps its own verdict.
+- `unknown`: the 30-minute deadline passed or the API could not be read. The
+  matrix starts.
+
+Only `block` withholds anything, and `build` reads the verdict, never the
+job's result, so a skipped, crashed or timed-out gate starts the matrix. The
+gate never weakens a check: the red cheap check is required, so the head could
+not merge either way. A push run, a plain dispatch and a pull request into a
+base other than `main` pass at once. `PULP_CHEAP_FIRST_MODE=off` (repository
+variable) turns the wait off without a change.
+
+After fixing a flaky cheap check by re-running it, re-run the Build run's
+failed jobs: `cheap-first` and everything it withheld run again.
+
+The cost was measured before it shipped (2026-11-10..13), because the PR gate
+settle window above was removed for adding latency that bought too little:
+
+- The job runs beside the preamble, so the native leg waits only for what is
+  still running when the preamble ends. Over 41 recent pull-request and 8
+  merge-group native runs, the cheap checks finished after the native `macos`
+  job had started by a median of 1.0 minute (p90 5.3, max 9.4; mean 2.3) on
+  pull requests and 0.3 minutes (p90 4.0, max 4.3) in merge groups, and before
+  it in 19 and 4 of them. That is an estimate: the native start includes
+  gate-VM queueing that the wait may overlap.
+- On their own the cheap checks take longer (pull request p50: `drift-fast`
+  6.0 minutes, version & skill sync 9.7, p90 17.2), which is why the wait
+  starts at the run's start rather than after `classify`.
+- In the same window 44 heads had a red cheap check, and their native `macos`
+  jobs spent 578 gate-VM minutes (428 on pull-request heads, 150 in merge
+  groups), about 200 a day at most, where a 600-second settle window would
+  have saved 20.5 a day. Not all of it is saved: a cheap check that is red,
+  re-run and green delays the native leg rather than sparing it.
+
+A red version & skill sync alone now also withholds the macOS result for that
+head, so fix the bump before expecting one. `tools/ci/test_cheap_first_gate.py`
+(the `cheap-first-gate-selftest` ctest) covers the verdicts and
+`tools/scripts/test_build_workflow.py` (`CheapFirstGateTest`) the wiring.
 
 ## The preamble and alias lanes run GitHub-hosted, and a persistent runner may not own them
 

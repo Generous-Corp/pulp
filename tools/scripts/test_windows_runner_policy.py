@@ -81,7 +81,7 @@ class WindowsRunnerPolicyTests(unittest.TestCase):
 
         consumer = job(self.build, "build")
         self.assertIn(
-            "needs: [resolve-provider, classify, protected-receipt-reuse]",
+            "needs: [resolve-provider, classify, protected-receipt-reuse, cheap-first]",
             consumer,
         )
         self.assertIn(
@@ -645,14 +645,18 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         self.assertNotIn("PULP_ALIAS_RUNS_ON_JSON", merge_runs_on)
 
     def test_required_macos_alias_paths_do_not_share_advisory_dependencies(self) -> None:
-        """Advisory results neither delay nor determine required macOS."""
+        """Advisory results neither delay nor determine required macOS.
+
+        `cheap-first` reads only required checks (drift-fast and the version &
+        skill sync), never an advisory leg.
+        """
         condition = " ".join(self.workflow["jobs"]["macos"]["if"].split())
         self.assertIn("github.event_name == 'pull_request'", condition)
         self.assertIn("github.event_name == 'workflow_dispatch'", condition)
         self.assertIn("native_build_required != 'true'", condition)
         self.assertEqual(
             self.workflow["jobs"]["macos"]["needs"],
-            ["resolve-provider", "classify"],
+            ["resolve-provider", "classify", "cheap-first"],
         )
         self.assertNotIn("build", self.workflow["jobs"]["macos"]["needs"])
         self.assertNotIn("gh api", "\n".join(
