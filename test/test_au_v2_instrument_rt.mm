@@ -783,6 +783,8 @@ class CountedShapeProcessor : public format::Processor {
             .bundle_id = "com.pulp.test.au-instrument-count",
             .version = "1.0.0",
             .category = format::PluginCategory::Instrument,
+            .input_buses = {},
+            .output_buses = {},
             .accepts_midi = true,
         };
         for (std::size_t i = 0; i < g_counted_inputs; ++i)
