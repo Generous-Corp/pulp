@@ -29,9 +29,13 @@ including voice intent.
   absolute coordinate. `ModulationEventQueue` is a separate 1024-entry typed
   queue (`parameter_event_queue.hpp:41-74`).
 * `pulp::host::TriggerContext::emit_at_sample` exposes absolute-sample trigger
-  publication and bounded refusal results (`core/host/include/pulp/host/trigger_graph.hpp:19-59`).
-  `TriggerRecord` carries epoch, sample, sequence, producer, and token; this is
-  trigger-only, not a general voice envelope.
+  publication and bounded refusal results (`core/host/include/pulp/host/trigger_graph.hpp:19-59`),
+  but its construction is private and public custom nodes do not receive it,
+  so it was refused as a consumer seam. The graph-authored trigger lane is
+  `CustomNodeType::process_events` with `SignalGraph::connect_graph_event`,
+  `GraphEventWriter::emit_at`, and `GraphEventReader::events`
+  (`core/host/include/pulp/host/custom_node_events.hpp`,
+  `graph_event_contract.hpp`).
 * `SignalGraph::ExecutionSnapshot` exposes block-local MIDI/UMP/MPE injection
   and parameter injection (`core/host/include/pulp/host/signal_graph_execution_snapshot.hpp:33-49`).
   The existing mailbox expects block-relative events and is not evidence of
@@ -45,17 +49,17 @@ including voice intent.
   runtime and lifecycle qualification open (`docs/graph-program-status/G-4.md:5-7,78-86`;
   `docs/graph-program-status/G-6.md:1-30,126-143`).
 
-* The parameter mailbox row is currently **NOT_CHECKED / UNAVAILABLE** for a
-  public `Processor` consumer. `SignalGraph::inject_parameter_events()` may
-  accept a queue while a plain `add_processor_node()` receives no parameter
-  events; routed delivery requires the private exact-parameter claim path. See
-  `docs/evidence/p1-event-admission-consumer-20261112.md:5-14` and the receipt's
-  control disposition at
-  `docs/evidence/p1-event-admission-consumer-20261112/receipt.json:21-44`.
-* Public TriggerContext delivery is also **NOT_CHECKED / UNAVAILABLE** for
-  the installed consumer: ordinary public CustomNode callbacks do not receive
-  a trigger context, whose construction is private. Existing trigger-graph
-  traces therefore do not satisfy the TriggerContext current/future row.
+* The parameter mailbox row is **UNAVAILABLE** for a plain
+  `add_processor_node()` `Processor`, which receives no parameter events
+  without the private exact-parameter claim path. It is checked instead
+  through a `PluginSlot` node added with `add_plugin_node`. See
+  `docs/evidence/p1-event-admission-consumer-20261112.md:92-182` and the
+  receipt's control disposition at
+  `docs/evidence/p1-event-admission-consumer-20261112/receipt.json:8-66`.
+* Public `TriggerContext` delivery is **UNAVAILABLE** and was refused as a
+  seam: ordinary public custom-node callbacks do not receive a trigger
+  context, whose construction is private. The trigger row is satisfied
+  through the graph-authored trigger lane instead.
 
 ## Admission contract
 
@@ -72,9 +76,12 @@ partition schedules (for example 1/32/64/127/256), are:
 1. MIDI/UMP/MPE note and expression events through the existing ingress and
    `inject_midi` path.
 2. A parameter event through `ParameterEventQueue` and the existing parameter
-   mailbox, with stable equal-offset ordering and overflow telemetry.
-3. A trigger emitted at an absolute sample through `TriggerContext`, including
-   current-block and bounded-future delivery.
+   mailbox into a `PluginSlot` node, with stable equal-offset ordering and
+   overflow telemetry.
+3. A trigger emitted at an absolute sample through the graph-authored trigger
+   lane (`GraphEventWriter::emit_at` to a `connect_graph_event` consumer),
+   including current-block and bounded-future delivery. Public
+   `TriggerContext` was refused as a seam.
 4. A voice-intent record represented by an already reviewed G-4/G-6 binding
    identity and a fixed-slot control-side record. It must prove note-on,
    note-off or release intent, slot/generation identity, and stale-generation
@@ -117,13 +124,13 @@ packet and names the exact consumer worktree and file claim.
 ## Recommended next action
 
 Keep P-1 **CONDITIONAL HOLD**. The existing
-`examples/p1-event-admission-consumer` is the authoritative partial fixture:
-its MIDI and trigger-graph checks run across blocks, while parameter ordering,
-overflow, and the test-owned voice-identity adapter remain standalone evidence.
-Do not admit a G-5 fixture expansion until an exact installed-SDK consumer can
-prove parameter-mailbox projection and public TriggerContext current/future
-delivery across two blocks. The projection seam is recorded at
-`docs/evidence/p1-event-admission-consumer-20261112.md:5-14`, with the exact
+`examples/p1-event-admission-consumer` is the authoritative partial fixture.
+It now proves each family across blocks from an installed SDK: MIDI ingress,
+the graph-authored trigger lane, the parameter mailbox into a `PluginSlot`
+node, and voice intent through `VoiceBankBinding`. It does not yet coordinate
+the four families through one shared epoch and sample origin, and the other
+rows listed in the receipt remain NOT_CHECKED. The evidence is recorded at
+`docs/evidence/p1-event-admission-consumer-20261112.md:92-182`, with the exact
 qualification result in
-`docs/evidence/p1-event-admission-consumer-20261112/receipt.json:21-44`; no
+`docs/evidence/p1-event-admission-consumer-20261112/receipt.json:8-66`; no
 runtime/API change or second queue is authorized by this packet.
