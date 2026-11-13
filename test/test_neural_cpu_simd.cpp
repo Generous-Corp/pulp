@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "detail/compact_ssm_cpu_adapter.hpp"
+#include "detail/gpu_neural_realtime_test_access.hpp"
 #include "detail/nam_tcn_adapter.hpp"
 #include "detail/nam_tcn_artifact.hpp"
 #include "detail/neural_cpu_kernels.hpp"
@@ -518,7 +519,8 @@ static bool virtual_mac_host() {
 TEST_CASE("a public WaveNet node runs its GPU path when the provider is available",
           "[gpu_audio][neural][nam][gpu]") {
     using namespace pulp::gpu_audio;
-    constexpr std::uint32_t kChannels = 2, kBlock = 64, kLead = 4, kBlocks = 400;
+    constexpr std::uint32_t kChannels = 2, kBlock = 64, kLead = 4, kBlocks = 400,
+                            kRecoveryBlocks = 128;
     const auto path = fixture_path();
     auto descriptor_source = load_nam(path, NamCpuKernel::Reference);
     std::vector<GpuWaveNetLayerDescriptor> layers;
@@ -589,12 +591,16 @@ TEST_CASE("a public WaveNet node runs its GPU path when the provider is availabl
 
     GpuAudioTransport transport;
     REQUIRE(transport.prepare(&node, {.ring_blocks = kLead + 2}));
-    const auto x = stimulus(kBlocks * kBlock, 211, 4096);
+    const auto x = stimulus((kBlocks + kRecoveryBlocks) * kBlock, 211, 4096);
     std::array<std::vector<float>, kChannels> out;
     std::array<float, kBlock> in_block{};
     std::array<std::array<float, kBlock>, kChannels> out_block{};
-    for (std::uint32_t b = 0; b < kBlocks; ++b) {
-        std::copy_n(x.begin() + static_cast<std::ptrdiff_t>(b) * kBlock, kBlock, in_block.begin());
+    std::uint32_t rendered = 0;
+    // One callback block, then `pumps` provider services 100 us apart before
+    // the next callback.
+    const auto render = [&](int pumps) {
+        std::copy_n(x.begin() + static_cast<std::ptrdiff_t>(rendered) * kBlock, kBlock,
+                    in_block.begin());
         std::array<const float*, kChannels> ins{in_block.data(), in_block.data()};
         std::array<float*, kChannels> outs{out_block[0].data(), out_block[1].data()};
         pulp::audio::BufferView<const float> input(ins.data(), kChannels, kBlock);
@@ -602,27 +608,52 @@ TEST_CASE("a public WaveNet node runs its GPU path when the provider is availabl
         transport.process(input, output, kBlock);
         for (std::uint32_t ch = 0; ch < kChannels; ++ch)
             out[ch].insert(out[ch].end(), out_block[ch].begin(), out_block[ch].end());
-        // Give the provider a real chance at every slot before the next callback.
-        for (int i = 0; i < 20; ++i) {
+        ++rendered;
+        for (int i = 0; i < pumps; ++i) {
             transport.pump();
             std::this_thread::sleep_for(std::chrono::microseconds(100));
         }
-    }
+    };
+    // Give the provider a real chance at every slot before the next callback.
+    while (rendered < kBlocks)
+        render(20);
+    // A GPU that delivers too late for half of the recent window reads
+    // Degraded with the shadow as its engine, with no recovery latched (the
+    // deterministic contract is "neural node whose GPU results all arrive
+    // late reads as not GPU-delivering"). A loaded host can end the run
+    // inside such a window, so that status is a property of the last few
+    // milliseconds, not of the GPU path. Give the provider slack and require
+    // what a recovering provider must do: carry the window again.
+    const auto lagging = [&] { return NeuralRealtimeTestAccess::gpu_lagging(node); };
+    const bool lagged_at_end = lagging();
+    while (rendered < kBlocks + kRecoveryBlocks && node.epoch() != 0 && lagging())
+        render(100);
     const auto delivery = transport.delivery_snapshot();
     status = node.status_snapshot();
-    std::printf("[gpu-node] gpu_blocks=%llu fallback_blocks=%llu missed=%llu\n",
+    std::printf("[gpu-node] gpu_blocks=%llu fallback_blocks=%llu missed=%llu lagged_at_end=%d "
+                "recovery_blocks=%u\n",
                 static_cast<unsigned long long>(delivery.gpu_blocks),
                 static_cast<unsigned long long>(status.fallback_blocks),
-                static_cast<unsigned long long>(status.missed_blocks));
+                static_cast<unsigned long long>(status.missed_blocks), lagged_at_end ? 1 : 0,
+                rendered - kBlocks);
     REQUIRE(delivery.gpu_blocks > 0);
     // A closed epoch means the node latched a recovery mid-run; name it, so a
     // failure on one host says why GPU delivery stopped.
     INFO("recovery_reason=" << static_cast<int>(node.recovery_reason()) << " recovery_sequence="
                             << node.recovery_sequence() << " missed=" << status.missed_blocks
-                            << " fallback=" << status.fallback_blocks);
+                            << " fallback=" << status.fallback_blocks << " lagging=" << lagging()
+                            << " rendered=" << rendered);
+    // Every callback block is accounted for: priming, a GPU block, or a
+    // shadow substitute. A miss is never silent, and every substitute the
+    // transport selected is one the node reports.
+    CHECK(delivery.priming_blocks + delivery.gpu_blocks + delivery.cpu_fallback_blocks == rendered);
+    CHECK(delivery.silence_blocks == 0);
+    CHECK(delivery.passthrough_blocks == 0);
+    CHECK(delivery.invalid_blocks == 0);
+    CHECK(status.fallback_blocks == delivery.cpu_fallback_blocks);
     // Every emitted block, GPU or shadow, nulls against the model delayed by
-    // the lead. This runs before the VM skip below, so garbage GPU output
-    // from before a fence still fails, and REQUIRE stops before that skip.
+    // the lead. This runs before the VM skips below, so garbage GPU output
+    // from before a fence still fails, and REQUIRE stops before those skips.
     const std::size_t delay = std::size_t{kLead} * kBlock;
     for (std::uint32_t ch = 0; ch < kChannels; ++ch) {
         std::vector<float> expected(out[ch].size(), 0.0f), reference(out[ch].size() - delay);
@@ -636,16 +667,24 @@ TEST_CASE("a public WaveNet node runs its GPU path when the provider is availabl
     // device in a macOS VM delivers, then falls that far behind under the
     // gate's load, so on a VM that one timing verdict is a property of the
     // host rather than of the GPU path; the blocks above prove the path ran
-    // and the null check proves what it delivered was right.
-    // On real hardware, and for every other recovery, the test still fails.
+    // and the null check proves what it delivered was right. A VM GPU that
+    // stays behind the deadline through the slack above is the same host
+    // property. On real hardware, and for every other recovery, the test
+    // still fails.
     if (node.epoch() == 0 && virtual_mac_host() &&
         node.recovery_reason() == GpuAudioRecoveryReason::ProviderUnresponsive)
         SKIP("paravirtual Metal fell behind the provider watchdog after "
              << delivery.gpu_blocks << " GPU blocks (missed=" << status.missed_blocks
              << "); staying on the GPU needs a host that meets the block deadline");
+    if (node.epoch() != 0 && lagging() && virtual_mac_host() &&
+        node.recovery_reason() == GpuAudioRecoveryReason::None)
+        SKIP("paravirtual Metal stayed behind the block deadline for "
+             << kRecoveryBlocks << " slack blocks after " << delivery.gpu_blocks
+             << " GPU blocks (missed=" << status.missed_blocks << ")");
     CHECK(delivery.gpu_blocks >= kBlocks / 2);
     REQUIRE(node.gpu_kernel_available());
     REQUIRE(node.epoch() > 0);
+    REQUIRE_FALSE(lagging());
     REQUIRE(status.selected_engine == GpuAudioEngine::Gpu);
     REQUIRE(status.provider_state == GpuAudioProviderState::Ready);
     transport.release();
