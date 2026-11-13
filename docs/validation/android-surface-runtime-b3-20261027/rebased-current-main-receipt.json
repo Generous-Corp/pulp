@@ -8,7 +8,7 @@
   "toolchain": {
     "host": "macOS arm64",
     "java": "Temurin 17.0.20.1",
-    "android_sdk": "/Users/danielraffel/Library/Android/sdk",
+    "android_sdk": "~/Library/Android/sdk",
     "ndk": "30.0.14904198",
     "compile_sdk": 35,
     "abi": "arm64-v8a"
@@ -33,7 +33,7 @@
     "cases": 6
   },
   "gradle_build": {
-    "command": "JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home ANDROID_HOME=/Users/danielraffel/Library/Android/sdk ./gradlew :app:assembleDebug",
+    "command": "JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home ANDROID_HOME=~/Library/Android/sdk ./gradlew :app:assembleDebug",
     "result": "PASS",
     "tasks": 37
   },

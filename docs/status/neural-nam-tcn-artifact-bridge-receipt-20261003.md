@@ -10,7 +10,7 @@ does not change the public ABI, ModelStore, E126, or MLX paths.
 ## Provenance
 
 The fixture is copied from the verified sibling checkout
-`/Users/danielraffel/Code/pulp-gpu-nam/src/models/example.nam` at detached HEAD
+`<code-root>/pulp-gpu-nam/src/models/example.nam` at detached HEAD
 `014f243`. Its SHA-256 is
 `66bda2b379289eff079c0755588bc9a92760654d9cc9af1b97cf30d0e92b167d`.
 The sibling attribution identifies bundled example models as MIT-licensed

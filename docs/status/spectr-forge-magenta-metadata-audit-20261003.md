@@ -10,11 +10,11 @@ updated to the protected-head SHA. The Forge catalog still has zero
 `spectr.gpu_nam` rows.
 
 The named GPU-NAM checkout exists at
-`/Users/danielraffel/Code/pulp-gpu-nam`, revision
+`<code-root>/pulp-gpu-nam`, revision
 `014f24325a7f4211ee5052993badd9c90151b414`; it is an external CPU-oracle/plugin
 source and is not a Forge registration. The Magenta model store paths
-`/Users/danielraffel/.pulp/magenta` and
-`/Users/danielraffel/.pulp/magenta/models` are absent.
+`~/.pulp/magenta` and
+`~/.pulp/magenta/models` are absent.
 
 The current MLX execution receipt's 100,000-block run is explicitly synthetic,
 has no product-model/transport/fallback evidence, and says **gate not claimed**.
