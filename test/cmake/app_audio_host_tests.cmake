@@ -163,6 +163,8 @@ pulp_add_test_suite(pulp-test-live-dsp-telemetry
 pulp_add_test_suite(pulp-test-midi-port-identity
     SOURCES test_midi_port_identity.cpp
     LIBRARIES pulp::midi)
+target_include_directories(pulp-test-midi-port-identity PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/midi-ports)
 if(APPLE)
     target_link_libraries(pulp-test-midi-port-identity PRIVATE
         "-framework CoreMIDI" "-framework CoreFoundation")

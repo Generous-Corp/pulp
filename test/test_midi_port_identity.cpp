@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/midi/device.hpp>
+#include <ports_json.hpp>
 
 #include <string>
 #include <vector>
@@ -51,6 +52,23 @@ TEST_CASE("resolve_port skips offline ports", "[midi][port-identity]") {
     CHECK(resolve_port(ports, "11", "Dev|1|A") == 1);
     const std::vector<MidiPortInfo> only_offline = {port("11", "Dev|1|A", false)};
     CHECK(resolve_port(only_offline, "11", "Dev|1|A") == -1);
+}
+
+TEST_CASE("ports_json lists every identity field and escapes strings", "[midi][port-identity]") {
+    MidiPortInfo p;
+    p.id = "42";
+    p.name = "Dev \"A\"";
+    p.device_name = "Dev";
+    p.entity_name = "E\\1";
+    p.endpoint_name = "A";
+    p.stable_key = "Dev|E\\1|A";
+    p.online = false;
+    const std::string json = pulp::midi::tools::ports_json({p}, {});
+    CHECK(json.find("\"id\": \"42\"") != std::string::npos);
+    CHECK(json.find("\"name\": \"Dev \\\"A\\\"\"") != std::string::npos);
+    CHECK(json.find("\"entity\": \"E\\\\1\"") != std::string::npos);
+    CHECK(json.find("\"online\": false") != std::string::npos);
+    CHECK(json.find("\"outputs\": []") != std::string::npos);
 }
 
 #ifdef __APPLE__

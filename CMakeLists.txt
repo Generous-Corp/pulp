@@ -1113,6 +1113,11 @@ if(PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/screenshot)
 endif()
 
+# ── MIDI port listing probe ──────────────────────────────────────────────
+if(NOT IOS AND NOT ANDROID AND PROJECT_IS_TOP_LEVEL)
+    add_subdirectory(tools/midi-ports)
+endif()
+
 # ── Editor-open probe (out-of-process AU editor stages) ───────────────────
 if(PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/editor-open)
