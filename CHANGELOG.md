@@ -9,6 +9,22 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11230"></a>
+## [1.123.0] - 2026-11-13
+
+- release/version bump ([#12188](https://github.com/Generous-Corp/pulp/pull/12188))
+- graph/w2e g11 notation 20261113 ([#12195](https://github.com/Generous-Corp/pulp/pull/12195))
+- graph/w1f g9 sibling continuity 20261113 ([#12189](https://github.com/Generous-Corp/pulp/pull/12189))
+- fix/merge tree timeout load aware ([#12185](https://github.com/Generous-Corp/pulp/pull/12185))
+- graph/w1e g12 rtsan receipt 20261113 ([#12191](https://github.com/Generous-Corp/pulp/pull/12191))
+- graph/p2 voice bank fixture 20261113 ([#12184](https://github.com/Generous-Corp/pulp/pull/12184))
+- graph/p1 combined epoch 20261113 ([#12182](https://github.com/Generous-Corp/pulp/pull/12182))
+- feature/xml properties file ([#12176](https://github.com/Generous-Corp/pulp/pull/12176))
+- docs/home path redaction 20261113 ([#12183](https://github.com/Generous-Corp/pulp/pull/12183))
+- graph/closeout status docs 20261113 ([#12181](https://github.com/Generous-Corp/pulp/pull/12181))
+- graph/g11 review repair 20261113 ([#12179](https://github.com/Generous-Corp/pulp/pull/12179))
+- feature/au instrument single construction ([#12178](https://github.com/Generous-Corp/pulp/pull/12178))
+
 <a id="v11220"></a>
 ## [1.122.0] - 2026-11-13
 
@@ -12912,6 +12928,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.123.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.123.0
 [1.122.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.122.0
 [1.121.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.121.0
 [1.119.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.119.0
