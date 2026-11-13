@@ -1374,6 +1374,15 @@ and only some of them run in `gates.sh`:
   looks for `core/<name>/` and fails. `modules_yaml_dirs_check.py` owns that
   rule and accepts only paths under `core/` or `integrations/`.
 
+`docs/status/consumption-profiles.json` is a serialized hotspot: the commit
+that regenerates it needs a `Serialized-Hotspot:
+docs/status/consumption-profiles.json reason="..."` line, or
+`hotspot-edit-guard` ejects the PR in the merge queue. Regenerate it from the
+gate profile (the configure with `external/vst3sdk`, `external/AudioUnitSDK` and
+`npm ci` in `tools/import-design/jsx-runtime`): a plainer configure writes a
+different profile, and `consumption-census-drift` still reports the new target
+missing from the gate's.
+
 Keep one include root per module. The Doxygen parity check accepts a second
 public install root only by name, so a module that installs `audio/include`
 beside `include` fails it. The same holds for a package outside `core/`
