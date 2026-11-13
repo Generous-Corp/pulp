@@ -209,6 +209,78 @@ TEST_CASE("Seek and loop discontinuities open a new epoch", "[graph][g5][clap]")
     }
 }
 
+TEST_CASE("A playing forward gap with matching transport stays in the epoch", "[graph][g5][clap]") {
+    HostBlockTimeline timeline;
+    HostEventIngress<64> ingress;
+    ingress.reset(1);
+    HostBlockWindow window;
+
+    // Block one at (steady 500, transport 1000). Stage a record that lands in
+    // the window the host will deliver after skipping 136 samples.
+    REQUIRE(timeline.advance(playing_block(500, 64, 1000), window) == HostEventResult::Accepted);
+    REQUIRE(ingress.begin_block(window.epoch, window.sample_start, window.frames) ==
+            HostEventResult::Accepted);
+    HostEventRecord staged;
+    staged.epoch = window.epoch;
+    staged.absolute_sample = 230;
+    staged.producer = kClapProducer;
+    staged.producer_sequence = 1;
+    staged.midi = to_midi(clap_note_on(0, 60));
+    REQUIRE(ingress.publish(staged) == HostEventResult::Accepted);
+    std::array<HostEventRecord, 64> out{};
+    std::size_t count = 0;
+    REQUIRE(ingress.project(out, count) == HostEventResult::Accepted);
+    CHECK(count == 0);
+    REQUIRE(ingress.end_block() == HostEventResult::Accepted);
+    REQUIRE(ingress.pending() == 1);
+
+    // Block two at (700, 1200): counter and transport both moved by 200.
+    REQUIRE(timeline.advance(playing_block(700, 64, 1200), window) == HostEventResult::Accepted);
+    CHECK(timeline.last_boundary() == HostBlockBoundary::Gap);
+    CHECK(window.epoch == 1);
+    CHECK(window.sample_start == 200);
+    REQUIRE(ingress.begin_block(window.epoch, window.sample_start, window.frames) ==
+            HostEventResult::Accepted);
+    REQUIRE(ingress.project(out, count) == HostEventResult::Accepted);
+    REQUIRE(count == 1);
+    CHECK(out[0].absolute_sample == 230);
+    REQUIRE(ingress.end_block() == HostEventResult::Accepted);
+}
+
+TEST_CASE("A transport delta that differs from the counter delta is a seek", "[graph][g5][clap]") {
+    HostBlockTimeline timeline;
+    HostBlockWindow window;
+
+    SECTION("forward counter gap, transport jumped further") {
+        REQUIRE(timeline.advance(playing_block(500, 64, 1000), window) ==
+                HostEventResult::Accepted);
+        REQUIRE(timeline.advance(playing_block(700, 64, 1300), window) ==
+                HostEventResult::Accepted);
+        CHECK(timeline.last_boundary() == HostBlockBoundary::NewEpoch);
+        CHECK(window.epoch == 2);
+        CHECK(window.sample_start == 0);
+    }
+
+    SECTION("no counter and a transport that skipped") {
+        REQUIRE(timeline.advance(playing_block(-1, 64, 1000), window) == HostEventResult::Accepted);
+        REQUIRE(timeline.advance(playing_block(-1, 64, 1200), window) == HostEventResult::Accepted);
+        CHECK(timeline.last_boundary() == HostBlockBoundary::NewEpoch);
+        CHECK(window.epoch == 2);
+    }
+
+    SECTION("a stopped transport is not compared") {
+        auto first = playing_block(500, 64, 1000);
+        first.transport_playing = false;
+        auto second = playing_block(700, 64, 5000);
+        second.transport_playing = false;
+        REQUIRE(timeline.advance(first, window) == HostEventResult::Accepted);
+        REQUIRE(timeline.advance(second, window) == HostEventResult::Accepted);
+        CHECK(timeline.last_boundary() == HostBlockBoundary::Gap);
+        CHECK(window.epoch == 1);
+        CHECK(window.sample_start == 200);
+    }
+}
+
 TEST_CASE("Event times outside the block are refused, never clamped", "[graph][g5][clap]") {
     HostBlockTimeline timeline;
     HostBlockWindow window;

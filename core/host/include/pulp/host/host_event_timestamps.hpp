@@ -15,11 +15,15 @@
 ///  * Consecutive blocks on an unbroken clock are contiguous in one epoch.
 ///  * A forward jump of the monotonic clock (the host skipped blocks) stays in
 ///    the same epoch and advances the window by the gap; `HostEventIngress`
-///    evicts staged records left behind such a jump.
-///  * A seek or loop (an explicit host discontinuity, or a transport position
-///    that does not follow the previous playing block), a monotonic clock that
-///    runs backwards, or a change in clock availability starts a new epoch at
-///    sample zero. The ingress clears its staging area on a new epoch, so a
+///    evicts staged records left behind such a jump. When both blocks are
+///    playing, the transport must have advanced by the same number of samples
+///    as the counter for the jump to count as a gap.
+///  * A seek or loop (an explicit host discontinuity, or a playing transport
+///    whose delta differs from the counter's delta, or from the block length
+///    when the host has no counter), a counter that runs backwards, or a
+///    change in clock availability starts a new epoch at sample zero. A
+///    transport that is not playing in either block is never compared, so
+///    stopping, starting, or relocating while stopped is not a seek. The ingress clears its staging area on a new epoch, so a
 ///    record timed against the old timeline can never be delivered against
 ///    the new one.
 ///  * An event time at or past the block's frame count is refused with
@@ -191,33 +195,51 @@ class HostBlockTimeline final {
     }
 
   private:
+    static bool checked_delta(std::int64_t to, std::int64_t from, std::int64_t& delta) noexcept {
+        constexpr auto kMin = std::numeric_limits<std::int64_t>::min();
+        constexpr auto kMax = std::numeric_limits<std::int64_t>::max();
+        if ((from > 0 && to < kMin + from) || (from < 0 && to > kMax + from))
+            return false;
+        delta = to - from;
+        return true;
+    }
+
     HostBlockBoundary classify(const HostBlockClock& clock, bool has_steady) const noexcept {
         if (clock.discontinuity)
             return HostBlockBoundary::NewEpoch;
-        // A transport position that does not follow the previous playing block
-        // is a seek or loop wrap even when the monotonic clock is unbroken.
-        if (prev_transport_valid_ && clock.has_transport_sample && clock.transport_playing) {
-            const auto prev = prev_transport_sample_;
-            const auto step = static_cast<std::int64_t>(window_.frames);
-            if (prev > std::numeric_limits<std::int64_t>::max() - step ||
-                clock.transport_sample != prev + step)
-                return HostBlockBoundary::NewEpoch;
-        }
         const bool prev_has_steady = prev_steady_ >= 0;
         if (has_steady != prev_has_steady)
             return HostBlockBoundary::NewEpoch;
-        if (!has_steady)
-            return HostBlockBoundary::Continuous;
-        const auto step = static_cast<std::int64_t>(window_.frames);
-        if (prev_steady_ > std::numeric_limits<std::int64_t>::max() - step)
+        const auto frames = static_cast<std::int64_t>(window_.frames);
+        // Transport positions are compared only when both blocks were playing;
+        // a stopped transport does not advance, so its position says nothing
+        // about elapsed time.
+        const bool transport_checked =
+            prev_transport_valid_ && clock.has_transport_sample && clock.transport_playing;
+        std::int64_t transport_delta = 0;
+        if (transport_checked &&
+            !checked_delta(clock.transport_sample, prev_transport_sample_, transport_delta))
             return HostBlockBoundary::NewEpoch;
-        const auto expected = prev_steady_ + step;
-        if (clock.steady_sample == expected)
+
+        if (!has_steady) {
+            // Without a sample counter elapsed time cannot be measured, so a
+            // transport that does not follow the previous block is a seek.
+            if (transport_checked && transport_delta != frames)
+                return HostBlockBoundary::NewEpoch;
             return HostBlockBoundary::Continuous;
-        // A backwards clock would retime samples that were already delivered.
-        if (clock.steady_sample < expected)
+        }
+        // Both counters are non-negative, so this subtraction cannot overflow.
+        const auto steady_delta = clock.steady_sample - prev_steady_;
+        // A counter that runs backwards or overlaps the previous block would
+        // retime samples that were already delivered.
+        if (steady_delta < frames)
             return HostBlockBoundary::NewEpoch;
-        return HostBlockBoundary::Gap;
+        // While playing, the transport must move by exactly the elapsed
+        // samples. A different delta is a seek or loop wrap; an equal delta
+        // larger than the block is a forward gap on one unbroken timeline.
+        if (transport_checked && transport_delta != steady_delta)
+            return HostBlockBoundary::NewEpoch;
+        return steady_delta == frames ? HostBlockBoundary::Continuous : HostBlockBoundary::Gap;
     }
 
     HostBlockWindow window_{};
