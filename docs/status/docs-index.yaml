@@ -344,6 +344,16 @@ docs:
     kind: guide
     summary: Bounded scalar DSP inside an ordinary SignalGraph — declaring sample regions, UnitDelay causality, promoted parameters, and lowering to one prepared Processor
 
+  - slug: graph-first-steps
+    path: guides/graph-first-steps.md
+    kind: guide
+    summary: First SignalGraph in five minutes — build targets, a minimal patch, validate, save, probe, and stdlib Python WAV read/write
+
+  - slug: graph-notation-cookbook
+    path: guides/graph-notation-cookbook.md
+    kind: guide
+    summary: Which graph notation recipes validate in the default catalog and what to register in C++ for the rest
+
   - slug: dsp-dynamics
     path: guides/dsp-dynamics.md
     kind: guide
