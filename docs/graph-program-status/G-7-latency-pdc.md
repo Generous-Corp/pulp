@@ -66,10 +66,12 @@ does not add a CLI/MCP surface.
 and installed MCP sibling now accept opt-in `--plan`, `--latency`, and
 `--node-loads` sections. Plan output is authored topology, latency output is
 copied from the prepared snapshot's deterministic node/PDC map, and node loads
-use the existing opt-in latest-value measurers. The default probe remains
-audio-only and does no per-node clock reads. Control/event taps remain
-deferred until a prepared lock-free producer/consumer contract exists;
-unsupported or unknown requests fail closed. The installed consumer parity
+use the existing opt-in latest-value measurers. The default probe is audio
+and does no per-node clock reads. Control and event taps now exist in the C++
+API on the serial routed executor; the CLI/MCP select them with `--edge-kind`.
+The CLI event path seeds one fixed note-on, and a CLI control request always
+refuses `MissingEdge` because CLI-loaded graphs cannot contain automation edges.
+Unsupported or unknown requests fail closed. The installed consumer parity
 fixture and planted unknown-option control are the acceptance evidence for
 this tooling slice; this status does not claim realtime qualification or full
 G-7 completion.
