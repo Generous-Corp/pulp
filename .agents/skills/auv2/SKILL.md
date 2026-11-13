@@ -82,6 +82,8 @@ So the entry macro is type-specific:
 
 **The `aumu` instrument variant is the same trap** (seen with PulpTempoSampler): a `category = Instrument` plugin gets an `aumu` Info.plist from CMake, but if its `au_v2_entry.cpp` uses `PULP_AU_PLUGIN` (→ `AUBaseFactory`) instead of `PULP_AU_INSTRUMENT` (`#include <pulp/format/au_v2_instrument_entry.hpp>` → `AUMusicDeviceFactory`/`AUMusicLookup`), the host's `MusicDeviceMIDIEvent` returns **-4**. The plugin loads and plays UI-triggered audio (slice taps, on-screen keyboard — those bypass host MIDI via the UI→audio queue), so it looks fine, but **silently ignores all host MIDI in Logic/Ableton**. `auval -v aumu` catches it (`Test MIDI` fails); the same `[dispatch]` test now also pins `AUMusicLookup` carries the selector and `AUBaseLookup` does not. The factory name (`<ClassName>Factory`) is identical across both macros, so swapping `PULP_AU_PLUGIN` → `PULP_AU_INSTRUMENT` keeps the generated `Info.plist` factory reference valid.
 
+**Construct the processor once.** `PulpAUInstrument` creates its `Processor` before the `MusicDeviceBase` constructor runs and sizes the input/output element counts from that instance's descriptor, so the registered factory is called exactly once per instance (pinned by `[construction]` in `test/test_au_v2_instrument_rt.mm`). Do not reintroduce a throwaway `factory()` probe to read the descriptor: a plug-in with an expensive constructor pays for every extra call on each open.
+
 ### Flow
 
 The adapter inherits `AUMIDIEffectBase` (`AUEffectBase` + `AUMIDIBase`) so the SDK's `MIDIEvent` / `SysEx` entry points exist. Inbound MIDI flows:
