@@ -15,6 +15,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -37,35 +38,49 @@ UNAVAILABLE = None
 # not run" as "passed".
 NOT_CHECKED = 4
 BASE_CHECK_TIMEOUT = 20.0
-MAX_CHECK_TIMEOUT = 300.0
+MAX_CHECK_TIMEOUT = 240.0
+ENV_VAR = "PULP_MERGE_TREE_CHECK_TIMEOUT"
+
+
+def _load_per_core() -> tuple[float, float]:
+    """(1-minute load average, load per core); (0.0, 0.0) when unreadable."""
+    try:
+        load = os.getloadavg()[0]
+    except (OSError, AttributeError):
+        return 0.0, 0.0
+    return load, load / max(1, os.cpu_count() or 1)
 
 
 def _check_timeout() -> float:
     """Seconds one check may take. PULP_MERGE_TREE_CHECK_TIMEOUT overrides;
-    otherwise 20 s scaled by the 1-minute load per core (never below 20 s,
-    never above 300 s), so a loaded host does not turn every check into a
-    timeout."""
-    override = os.environ.get("PULP_MERGE_TREE_CHECK_TIMEOUT")
+    otherwise 20 s while the host has at most half a runnable task per core,
+    growing by 80 s per extra load-per-core above that (60 s at one per core,
+    180 s at 2.5), capped at 240 s, so a loaded shared host does not turn
+    every check into a timeout."""
+    override = os.environ.get(ENV_VAR)
     if override:
         try:
             return float(override)
         except ValueError:
             pass
-    try:
-        per_core = os.getloadavg()[0] / max(1, os.cpu_count() or 1)
-    except (OSError, AttributeError):
-        per_core = 1.0
-    return min(MAX_CHECK_TIMEOUT, BASE_CHECK_TIMEOUT * max(1.0, per_core))
+    _, per_core = _load_per_core()
+    return min(MAX_CHECK_TIMEOUT, BASE_CHECK_TIMEOUT * max(1.0, 4.0 * per_core - 1.0))
 
 
 def _run(cmd: list[str], cwd: Path, env: dict[str, str], timeout: float | None = None) -> int | None:
     if timeout is None:
         timeout = _check_timeout()
+    start = time.monotonic()
     try:
         proc = subprocess.run(cmd, cwd=cwd, env=env, text=True, encoding="utf-8",
                               timeout=timeout, capture_output=True)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        print(f"merge-tree script-state: {cmd[0]} unavailable or timed out: {exc}", file=sys.stderr)
+        elapsed = time.monotonic() - start
+        load, _ = _load_per_core()
+        print(f"merge-tree script-state: {cmd[0]} unavailable or timed out: {exc} "
+              f"(elapsed {elapsed:.1f}s, limit {timeout:.0f}s, 1-min load {load:.1f}); "
+              f"raise it with {ENV_VAR}=<seconds>, e.g. {ENV_VAR}=240",
+              file=sys.stderr)
         return UNAVAILABLE
     if proc.stdout:
         print(proc.stdout, end="", file=sys.stderr)

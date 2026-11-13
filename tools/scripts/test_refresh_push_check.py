@@ -463,6 +463,8 @@ def case_a_timed_out_check_is_not_a_stale_verdict(fx: Fixture) -> None:
     assert res.returncode == merge_tree_state.NOT_CHECKED == 4, (res.returncode, res.stderr)
     assert "timed out" in res.stderr, res.stderr
     assert "NOT CHECKED" in res.stderr, res.stderr
+    assert "elapsed" in res.stderr and "1-min load" in res.stderr, res.stderr
+    assert "PULP_MERGE_TREE_CHECK_TIMEOUT=" in res.stderr, res.stderr
     assert merge_tree_state.STALE not in res.stderr, res.stderr
 
 
@@ -492,9 +494,13 @@ def case_the_check_timeout_scales_with_load(fx: Fixture) -> None:
             with mock.patch.object(os, "getloadavg", return_value=(4.0, 0, 0)):
                 assert merge_tree_state._check_timeout() == 20.0
             with mock.patch.object(os, "getloadavg", return_value=(20.0, 0, 0)):
-                assert merge_tree_state._check_timeout() == 50.0
+                assert merge_tree_state._check_timeout() == 20.0 * 9  # 2.5/core
+            with mock.patch.object(os, "getloadavg", return_value=(8.0, 0, 0)):
+                assert merge_tree_state._check_timeout() == 60.0  # 1/core
+            with mock.patch.object(os, "getloadavg", return_value=(0.0, 0, 0)):
+                assert merge_tree_state._check_timeout() == 20.0  # idle
             with mock.patch.object(os, "getloadavg", return_value=(800.0, 0, 0)):
-                assert merge_tree_state._check_timeout() == merge_tree_state.MAX_CHECK_TIMEOUT
+                assert merge_tree_state._check_timeout() == merge_tree_state.MAX_CHECK_TIMEOUT == 240.0
         os.environ["PULP_MERGE_TREE_CHECK_TIMEOUT"] = "7"
         assert merge_tree_state._check_timeout() == 7.0
 

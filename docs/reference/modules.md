@@ -1581,6 +1581,26 @@ app.user_settings().set_bool("first_run", false);
 app.save();
 ```
 
+`PropertiesFile` stores JSON. To share a settings file with programs that use
+the flat XML properties format (a `<PROPERTIES>` root holding one
+`<VALUE name="..." val="..."/>` per entry), use `XmlPropertiesFile` from
+`xml_properties_file.hpp`. It writes that format's canonical bytes (CRLF line
+endings, two-space indent, ASCII-only escaping) and reads it tolerantly. It
+differs from the format's usual handling in two ways: a file that does not
+parse is never written over (it is copied once to `<path>.bak` and the load
+returns the error), and a save replaces the file atomically without leaving a
+temporary file. A save with no changed entries writes nothing.
+
+```cpp
+#include <pulp/state/xml_properties_file.hpp>
+
+pulp::state::XmlPropertiesError error;
+if (auto file = pulp::state::XmlPropertiesFile::load(path, &error)) {
+    file->set("volume", "8");
+    file->save(&error);
+}
+```
+
 ### Other state features
 
 | Feature | Header | Description |
