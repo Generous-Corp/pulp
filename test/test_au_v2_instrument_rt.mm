@@ -766,3 +766,80 @@ TEST_CASE("AU v2 instrument refuses a side-chain rate that differs from the outp
         instrument.DoCleanup();
     }
 }
+
+namespace {
+
+int g_counted_factory_calls = 0;
+std::size_t g_counted_inputs = 0;
+std::size_t g_counted_outputs = 1;
+
+// Descriptor shape is driven by globals so one factory covers every case.
+class CountedShapeProcessor : public format::Processor {
+  public:
+    format::PluginDescriptor descriptor() const override {
+        format::PluginDescriptor d{
+            .name = "AUInstrumentCountTest",
+            .manufacturer = "PulpTest",
+            .bundle_id = "com.pulp.test.au-instrument-count",
+            .version = "1.0.0",
+            .category = format::PluginCategory::Instrument,
+            .accepts_midi = true,
+        };
+        for (std::size_t i = 0; i < g_counted_inputs; ++i)
+            d.input_buses.push_back({i == 0 ? "Input" : "Side Chain", 2});
+        for (std::size_t i = 0; i < g_counted_outputs; ++i)
+            d.output_buses.push_back({"Out " + std::to_string(i), 2});
+        return d;
+    }
+    void define_parameters(state::StateStore&) override {}
+    void prepare(const format::PrepareContext&) override {}
+    void process(audio::BufferView<float>&, const audio::BufferView<const float>&,
+                 midi::MidiBuffer&, midi::MidiBuffer&, const format::ProcessContext&) override {}
+};
+
+std::unique_ptr<format::Processor> create_counted_shape() {
+    ++g_counted_factory_calls;
+    return std::make_unique<CountedShapeProcessor>();
+}
+
+UInt32 element_count(format::au::PulpAUInstrument& instrument, AudioUnitScope scope) {
+    UInt32 count = 0;
+    REQUIRE(instrument.DispatchGetProperty(kAudioUnitProperty_ElementCount, scope, 0, &count) ==
+            noErr);
+    return count;
+}
+
+}  // namespace
+
+TEST_CASE("AU v2 instrument constructs its processor exactly once",
+          "[au][au-v2][instrument][construction]") {
+    ScopedFactoryRegistration registration(create_counted_shape);
+    constexpr std::size_t kCap = format::BusBufferSet::kMaxBuses;
+
+    struct Shape {
+        std::size_t inputs;
+        std::size_t outputs;
+        UInt32 expect_inputs;
+        UInt32 expect_outputs;
+    };
+    const Shape shapes[] = {
+        {0, 1, 0, 1},
+        {1, 1, 1, 1},
+        {2, 2, 2, 2},
+        {0, kCap + 2, 0, static_cast<UInt32>(kCap)},
+    };
+    for (const auto& shape : shapes) {
+        g_counted_inputs = shape.inputs;
+        g_counted_outputs = shape.outputs;
+        g_counted_factory_calls = 0;
+        {
+            format::au::PulpAUInstrument instrument(nullptr);
+            instrument.CreateElements();
+            CHECK(g_counted_factory_calls == 1);
+            CHECK(element_count(instrument, kAudioUnitScope_Input) == shape.expect_inputs);
+            CHECK(element_count(instrument, kAudioUnitScope_Output) == shape.expect_outputs);
+        }
+    }
+    g_counted_inputs = 0;
+    g_counted_outputs = 1;
+}
