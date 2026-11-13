@@ -29,15 +29,20 @@ abandons the write.
 
 ## Header
 
-The writer emits `WAVE_FORMAT_EXTENSIBLE` with the PCM or IEEE-float sub-format,
-so a reader that checks only the base format tag sees `0xFFFE`; read the
-sub-format GUID for the real format. For the integer depths, silence is exactly zero and every sample is within one
-code of the exact value (`sample * 2^(bits-1)`).
+One or two channels get the canonical 44-byte header: `RIFF`, a 16-byte
+`fmt ` chunk with format tag 1 (integer PCM) or 3 (IEEE float), then `data`.
+Every WAV reader accepts it. Three or more channels use
+`WAVE_FORMAT_EXTENSIBLE` (tag `0xFFFE`, the real format in the sub-format GUID),
+as does a mono or stereo file too long for a 32-bit RIFF size, which is written
+as RF64. The sample bytes are the same either way. For the integer depths,
+silence is exactly zero and every sample is within one code of the exact value
+(`sample * 2^(bits-1)`).
 Float32 is written bit-exactly, including values beyond ±1.0.
 
 ## Tests
 
 `test/test_audio_file.cpp` (`[wav-atomic]`) checks the header fields and sample
-bytes for each depth, a write that fails half-way (no target, no temporary file),
+bytes for each depth, the plain tag for mono and stereo with a reader round trip,
+an odd data chunk's pad byte, `WAVE_FORMAT_EXTENSIBLE` for three channels, a write that fails half-way (no target, no temporary file),
 a failed write over an existing file, `FailIfExists`, and an unwritable
 directory.

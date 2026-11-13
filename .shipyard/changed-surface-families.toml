@@ -60,6 +60,7 @@ paths = [
   "tools/scripts/reap_stranded_tracker.py",
   "tools/scripts/release_checksum_manifest.py",
   "tools/scripts/release_platform_subset_check.py",
+  "tools/scripts/release_step_timeouts.py",
   "tools/scripts/required_check_machinery.py",
   "tools/scripts/resign_macos_release_tree.py",
   "tools/scripts/resolve_linux_route.py",
@@ -202,6 +203,7 @@ paths = [
   "tools/scripts/test_release_failure_diagnosis.py",
   "tools/scripts/test_release_platform_subset_check.py",
   "tools/scripts/test_release_reconcile.py",
+  "tools/scripts/test_release_step_timeouts.py",
   "tools/scripts/test_release_workflow_test_step.py",
   "tools/scripts/test_required_check_machinery.py",
   "tools/scripts/test_required_gate_liveness.py",
@@ -717,7 +719,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0da361033064"
+name = "script-readers-9cde39ff9a6b"
 paths = ["tools/scripts/gate_python_imports_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -727,6 +729,7 @@ tests = [
   "changed-surface-script-families-selftest",
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
+  "drift-fast-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gate-python-imports",
@@ -3689,7 +3692,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1296992e46e8"
+name = "script-readers-30629643c079"
 paths = ["tools/scripts/test_generated_version_bump_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -3699,6 +3702,7 @@ tests = [
   "changed-surface-script-families-selftest",
   "changed-surface-shadow-plans-selftest",
   "clean-worktree-planning-selftest",
+  "drift-fast-selftest",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gpu-audio-provider-identity-selftest",
@@ -8230,6 +8234,7 @@ tests = [
   "decisions-contract-validate",
   "deferred-admission-selftest",
   "diff-cover-targets-selftest",
+  "drift-fast-selftest",
   "example-validation-paths",
   "executable-keys-selftest",
   "framework-neutrality",
@@ -8394,6 +8399,7 @@ paths = [
   "tools/scripts/relay_contract_check.py",
   "tools/scripts/release_checksum_manifest.py",
   "tools/scripts/release_platform_subset_check.py",
+  "tools/scripts/release_step_timeouts.py",
   "tools/scripts/render_upward_edge_check.py",
   "tools/scripts/required_check_machinery.py",
   "tools/scripts/resign_macos_release_tree.py",
@@ -8663,6 +8669,7 @@ paths = [
   "tools/scripts/test_release_failure_diagnosis.py",
   "tools/scripts/test_release_platform_subset_check.py",
   "tools/scripts/test_release_reconcile.py",
+  "tools/scripts/test_release_step_timeouts.py",
   "tools/scripts/test_release_trailer_guard.py",
   "tools/scripts/test_release_workflow_test_step.py",
   "tools/scripts/test_render_upward_edge_check.py",
@@ -9005,6 +9012,7 @@ paths = [
   "tools/scripts/relay_contract_check.py",
   "tools/scripts/release_checksum_manifest.py",
   "tools/scripts/release_platform_subset_check.py",
+  "tools/scripts/release_step_timeouts.py",
   "tools/scripts/render_upward_edge_check.py",
   "tools/scripts/required_check_machinery.py",
   "tools/scripts/resign_macos_release_tree.py",
@@ -9274,6 +9282,7 @@ paths = [
   "tools/scripts/test_release_failure_diagnosis.py",
   "tools/scripts/test_release_platform_subset_check.py",
   "tools/scripts/test_release_reconcile.py",
+  "tools/scripts/test_release_step_timeouts.py",
   "tools/scripts/test_release_trailer_guard.py",
   "tools/scripts/test_release_workflow_test_step.py",
   "tools/scripts/test_render_upward_edge_check.py",
