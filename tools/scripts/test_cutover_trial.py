@@ -113,6 +113,15 @@ class InputTests(unittest.TestCase):
             self.assertEqual(ct.main(["--inputs", f"{tmp}/none.json", "--report",
                                       f"{tmp}/r.json", "--analyze-log", str(bad)]), 2)
 
+    def test_malformed_json_shapes_are_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for value in ([], {"delete_paths": [], "stranded_rows": None},
+                          {"delete_paths": [], "stranded_rows": 3}):
+                bad = Path(tmp) / f"bad-{len(value) if isinstance(value, list) else type(value["stranded_rows"]).__name__}.json"
+                bad.write_text(json.dumps(value), encoding="utf-8")
+                with self.assertRaises(ct.InputError):
+                    ct.load_inputs(bad)
+
     def test_scratch_refusals(self):
         with tempfile.TemporaryDirectory() as tmp:
             src = Path(tmp)

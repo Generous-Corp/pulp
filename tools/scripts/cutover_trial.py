@@ -37,20 +37,22 @@ class InputError(Exception):
 def load_inputs(path: Path = INPUTS) -> dict:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise InputError("inputs root must be an object")
         paths = data["delete_paths"]
         rows = data["stranded_rows"]
-    except (OSError, ValueError, KeyError) as error:
+    except (OSError, ValueError, KeyError, InputError) as error:
         raise InputError(f"cannot read inputs {path}: {error}") from error
     if (not isinstance(paths, list) or not paths
             or not all(isinstance(p, str) and p and ".." not in p.split("/")
                        and not p.startswith("/") for p in paths)):
         raise InputError("delete_paths must be a non-empty list of relative paths")
-    if data.get("ledger_stranded_count") != len(rows):
-        raise InputError("stranded_rows does not match ledger_stranded_count")
     if not isinstance(rows, list) or not all(
             isinstance(r, dict) and isinstance(r.get("id"), str)
             and isinstance(r.get("paths"), list) for r in rows):
         raise InputError("stranded_rows is malformed")
+    if data.get("ledger_stranded_count") != len(rows):
+        raise InputError("stranded_rows does not match ledger_stranded_count")
     return data
 
 
