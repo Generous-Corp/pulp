@@ -122,5 +122,85 @@ class CommandLineTests(unittest.TestCase):
         self.assertRegex(result.stdout, r"ok \(\d{4,} file\(s\)")
 
 
+def _git(repo: Path, *args: str) -> str:
+    env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+           "GIT_COMMITTER_EMAIL": "t@t", "GIT_CONFIG_NOSYSTEM": "1", "HOME": str(repo),
+           "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"}
+    return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True,
+                          env=env).stdout.strip()
+
+
+class ChangedFromTests(unittest.TestCase):
+    """--changed-from: the pre-push form. Diff-scoped, committed blobs only."""
+
+    def make_repo(self, tmp: str) -> Path:
+        repo = Path(tmp) / "repo"
+        repo.mkdir()
+        _git(repo, "init", "-q", "-b", "main")
+        # A violation already on the base: an unrelated push must not be blocked by it.
+        (repo / "old_bad.py").write_text(REJECTED["same quote in a field"], encoding="utf-8")
+        _git(repo, "add", "old_bad.py")
+        _git(repo, "commit", "-qm", "base")
+        _git(repo, "checkout", "-qb", "feat")
+        return repo
+
+    def commit(self, repo: Path, rel: str, text: str) -> None:
+        (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+        (repo / rel).write_text(text, encoding="utf-8")
+        _git(repo, "add", rel)
+        _git(repo, "commit", "-qm", rel)
+
+    def violations(self, repo: Path) -> list[str] | None:
+        files = floor.changed_python(repo, "main")
+        if files is None:
+            return None
+        return [p for name, text in files for p in floor.floor_violations(text, name)]
+
+    def test_a_changed_bad_file_is_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.make_repo(tmp)
+            self.commit(repo, "tools/new_bad.py", REJECTED["same quote in a field"])
+            found = self.violations(repo)
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("tools/new_bad.py:2", found[0])
+
+    def test_a_violation_only_on_the_base_does_not_block(self) -> None:
+        # Negative control for the diff scope: old_bad.py is bad on main and untouched here.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.make_repo(tmp)
+            self.commit(repo, "tools/new_good.py", ACCEPTED["other quote in a field"])
+            self.assertEqual(self.violations(repo), [])
+            self.assertEqual(len(floor.changed_python(repo, "main")), 1)
+
+    def test_the_committed_blob_is_judged_not_the_working_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.make_repo(tmp)
+            self.commit(repo, "a.py", REJECTED["same quote in a field"])
+            (repo / "a.py").write_text(ACCEPTED["other quote in a field"], encoding="utf-8")  # uncommitted fix
+            self.assertEqual(len(self.violations(repo)), 1)
+
+    def test_no_merge_base_is_not_a_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.make_repo(tmp)
+            self.assertIsNone(floor.changed_python(repo, "no-such-ref"))
+
+    def test_the_cli_exits_1_on_a_changed_bad_file_and_2_without_a_base(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.make_repo(tmp)
+            script = repo / "tools/scripts/python_floor_syntax_check.py"
+            script.parent.mkdir(parents=True)
+            shutil.copy2(floor.__file__, script)
+            self.commit(repo, "tools/scripts/python_floor_syntax_check.py", script.read_text(encoding="utf-8"))
+            self.commit(repo, "x.py", REJECTED["comment in a field"])
+            bad = subprocess.run([sys.executable, str(script), "--changed-from", "main"],
+                                 capture_output=True, text=True, encoding="utf-8")
+            missing = subprocess.run([sys.executable, str(script), "--changed-from", "nope"],
+                                     capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(bad.returncode, 1, bad.stderr)
+        self.assertIn("x.py", bad.stderr)
+        self.assertNotIn("old_bad.py", bad.stderr)
+        self.assertEqual(missing.returncode, 2, missing.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

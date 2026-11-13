@@ -86,7 +86,9 @@ from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -391,18 +393,10 @@ def scan_file(path: Path, wide: bool = False) -> list[tuple[int, str, str]]:
     return [hits[k] for k in sorted(hits)]
 
 
-def run(wide: bool) -> int:
-    if not TEST_DIR.is_dir():
-        print(f"thread_assert_check: no test dir at {TEST_DIR}", file=sys.stderr)
-        return 0
-    files = sorted(TEST_DIR.rglob("*.cpp")) + sorted(TEST_DIR.rglob("*.mm"))
+def report(found: list[tuple[str, list[tuple[int, str, str]]]], wide: bool) -> int:
     total = 0
-    for path in files:
-        hits = scan_file(path, wide=wide)
-        if not hits:
-            continue
+    for rel, hits in found:
         total += len(hits)
-        rel = path.relative_to(REPO_ROOT)
         for ln, src, shape in hits:
             print(f"{rel}:{ln}: Catch2 assertion inside a worker-thread "
                   f"lambda (thread-unsafe) [{shape}]: {src}")
@@ -424,11 +418,67 @@ def run(wide: bool) -> int:
     return 0
 
 
+def run(wide: bool) -> int:
+    if not TEST_DIR.is_dir():
+        print(f"thread_assert_check: no test dir at {TEST_DIR}", file=sys.stderr)
+        return 0
+    files = sorted(TEST_DIR.rglob("*.cpp")) + sorted(TEST_DIR.rglob("*.mm"))
+    found = []
+    for path in files:
+        hits = scan_file(path, wide=wide)
+        if hits:
+            found.append((str(path.relative_to(REPO_ROOT)), hits))
+    return report(found, wide)
+
+
+def changed_test_sources(root: Path, base: str, head: str = "HEAD") -> list[tuple[str, str]] | None:
+    """(path, committed text) for each test/**/*.cpp|.mm added, modified or renamed between merge-base(base, head)
+    and head. None when there is no merge-base."""
+    def git(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", "-C", str(root), *args], capture_output=True)
+    mb = git("merge-base", base, head)
+    if mb.returncode != 0:
+        return None
+    diff = git("diff", "--name-only", "--diff-filter=AMR", "-z", mb.stdout.decode().strip(), head,
+               "--", "test/*.cpp", "test/*.mm")
+    if diff.returncode != 0:
+        return None
+    out = []
+    for name in diff.stdout.decode("utf-8", "replace").split("\0"):
+        if name:
+            shown = git("show", f"{head}:{name}")
+            if shown.returncode == 0:
+                out.append((name, shown.stdout.decode("utf-8", "replace")))
+    return out
+
+
+def run_changed(base: str, root: Path = REPO_ROOT) -> int:
+    files = changed_test_sources(root, base)
+    if files is None:
+        print(f"thread_assert_check: no merge-base with {base}; nothing was checked", file=sys.stderr)
+        return 2
+    found = []
+    with tempfile.TemporaryDirectory() as td:
+        for name, text in files:
+            tmp = Path(td) / Path(name).name
+            tmp.write_text(text, encoding="utf-8")
+            hits = scan_file(tmp)
+            if hits:
+                found.append((name, hits))
+    return report(found, wide=False)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--wide", action="store_true",
                     help="diagnostic over-broad pass; never fails")
-    return run(ap.parse_args().wide)
+    ap.add_argument("--changed-from", metavar="REF",
+                    help="scan only the test sources HEAD changed against its merge-base with REF, "
+                         "read from the commit (the pre-push hook's form)")
+    a = ap.parse_args()
+    if a.changed_from:
+        return run_changed(a.changed_from)
+    return run(a.wide)
 
 
 if __name__ == "__main__":

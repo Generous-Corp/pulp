@@ -279,5 +279,54 @@ class ThreadAssertCheck(unittest.TestCase):
         self.assertEqual(scan_source(NO_THREAD_HELPER, wide=True), [])
 
 
+class ChangedFromTests(unittest.TestCase):
+    """--changed-from: the pre-push form. Only test sources the push changed, read from the commit."""
+
+    def git(self, repo: Path, *args: str) -> None:
+        import os
+        import subprocess
+        env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
+                   GIT_COMMITTER_EMAIL="t@t", GIT_CONFIG_NOSYSTEM="1", HOME=str(repo))
+        for k in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+            env.pop(k, None)
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, env=env)
+
+    def repo_with(self, tmp: str, base: dict, change: dict) -> Path:
+        repo = Path(tmp) / "repo"
+        repo.mkdir()
+        self.git(repo, "init", "-q", "-b", "main")
+        for files, msg in ((base, "base"), (change, "change")):
+            if msg == "change":
+                self.git(repo, "checkout", "-qb", "feat")
+            for rel, text in files.items():
+                (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+                (repo / rel).write_text(text)
+                self.git(repo, "add", rel)
+            self.git(repo, "commit", "-q", "--allow-empty", "-m", msg)
+        return repo
+
+    def test_a_changed_unsafe_test_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.repo_with(tmp, {"test/keep.cpp": DIRECT_SAFE}, {"test/sub/new.cpp": DIRECT_UNSAFE})
+            self.assertEqual(guard.run_changed("main", root=repo), 1)
+
+    def test_an_unsafe_test_only_on_the_base_does_not_block(self):
+        # Negative control: the same unsafe source, but on main and untouched by the push.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.repo_with(tmp, {"test/old.cpp": DIRECT_UNSAFE}, {"test/new.cpp": DIRECT_SAFE})
+            self.assertEqual(guard.run_changed("main", root=repo), 0)
+
+    def test_sources_outside_test_are_not_scanned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.repo_with(tmp, {}, {"core/x.cpp": DIRECT_UNSAFE})
+            self.assertEqual(guard.run_changed("main", root=repo), 0)
+            self.assertEqual(guard.changed_test_sources(repo, "main"), [])
+
+    def test_no_merge_base_is_not_a_pass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.repo_with(tmp, {}, {"test/new.cpp": DIRECT_UNSAFE})
+            self.assertEqual(guard.run_changed("no-such-ref", root=repo), 2)
+
+
 if __name__ == "__main__":
     unittest.main()
