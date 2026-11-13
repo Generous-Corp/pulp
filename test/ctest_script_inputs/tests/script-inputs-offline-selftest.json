@@ -16,6 +16,7 @@
    "test/fixtures",
    "test/support",
    "test/test_cli_shellout_loop.cpp",
+   "test/test_g5_host_event_timestamps.cpp",
    "test/test_trigger_graph.cpp",
    "tools/ci/cmake_registration_impact.py",
    "tools/ci/governed-build.sh",
