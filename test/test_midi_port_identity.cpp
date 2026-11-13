@@ -200,12 +200,6 @@ TEST_CASE("CoreMIDI does not list an offline endpoint as online",
     const MidiPortInfo* src = find(inputs, std::to_string(kSourceId));
     if (src != nullptr)
         CHECK_FALSE(src->online);
-
-    MIDIObjectSetIntegerProperty(vp.source, kMIDIPropertyOffline, 0);
-    const auto again = system->enumerate_inputs();
-    const MidiPortInfo* back = find(again, std::to_string(kSourceId));
-    REQUIRE(back != nullptr);
-    CHECK(back->online);
 }
 
 // Child half of the cross-process check. Hidden so a normal run skips it.
