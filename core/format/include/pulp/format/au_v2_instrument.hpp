@@ -85,8 +85,8 @@ class PulpAUInstrument : public ausdk::MusicDeviceBase {
 public:
     explicit PulpAUInstrument(AudioComponentInstance ci);
     // Multi-plugin-bundle ctor — see PulpAUEffect. The bound factory is used
-    // both for the output-element-count probe in the base-ctor argument list
-    // and to construct the processor.
+    // to construct the processor exactly once; its descriptor sizes the AU
+    // elements before the base constructor runs.
     PulpAUInstrument(AudioComponentInstance ci, ProcessorFactory factory);
 
     OSStatus GetParameterList(AudioUnitScope inScope,
@@ -204,6 +204,9 @@ protected:
 
     // clang-format off: preserve the repository's four-space private-section style.
 private:
+    PulpAUInstrument(AudioComponentInstance ci, std::unique_ptr<Processor> processor,
+                     bool has_factory);
+
     // AU v2 instruments are a separate adapter path from PulpAUEffect. Keep
     // the tracing attachment on the actual host-facing object so a traced AU
     // instrument retains a live reference to the runtime trace controller.
