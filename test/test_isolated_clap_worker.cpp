@@ -1071,3 +1071,47 @@ TEST_CASE("Isolated CLAP graph recovery races release on another control thread"
         REQUIRE(next.control->stop() == IsolationCleanup::complete);
     }
 }
+
+TEST_CASE("Isolated CLAP graph recovery lookup races release without a torn read",
+          "[host][isolation]") {
+    // A tight loop of cheap refusals (the control does not own the node) keeps
+    // the published-proxy lookup running while another control thread
+    // releases the graph. The lookup must take the graph lock; an unlocked
+    // read races release() and is reported by ThreadSanitizer.
+    auto state = load_isolated_clap(options("state"));
+    auto other = load_isolated_clap(options());
+    REQUIRE(state);
+    REQUIRE(other);
+    RecoveryRig rig(std::move(state.slot));
+    REQUIRE(rig.step() == 0.0f);
+    std::atomic<bool> released{false};
+    std::atomic<int> calls{0}, unexpected{0};
+    const auto foreign_options = options();
+    std::thread spinner([&] {
+        // Bounded: stops a little after release, or after 200000 calls.
+        int after_release = 0;
+        for (int i = 0; i < 200000 && after_release < 1000; ++i) {
+            const auto outcome =
+                recover_isolated_graph_node(rig.graph, rig.node, foreign_options, *other.control)
+                    .outcome;
+            if (outcome != IsolatedNodeRecovery::control_mismatch &&
+                outcome != IsolatedNodeRecovery::not_isolated_node)
+                unexpected.fetch_add(1, std::memory_order_relaxed);
+            calls.fetch_add(1, std::memory_order_relaxed);
+            if (released.load(std::memory_order_acquire))
+                ++after_release;
+        }
+    });
+    const auto started = std::chrono::steady_clock::now() + 2s;
+    while (calls.load(std::memory_order_relaxed) < 100 &&
+           std::chrono::steady_clock::now() < started)
+        std::this_thread::yield();
+    rig.graph.release();
+    released.store(true, std::memory_order_release);
+    spinner.join();
+    INFO("calls=" << calls.load());
+    REQUIRE(unexpected.load() == 0);
+    REQUIRE(rig.published() == nullptr);
+    REQUIRE(state.control->stop() == IsolationCleanup::complete);
+    REQUIRE(other.control->stop() == IsolationCleanup::complete);
+}
