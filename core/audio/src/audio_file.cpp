@@ -4,6 +4,7 @@
 #include "decode_limits_detail.hpp"
 #include "wav_frame_reader.hpp"
 #include <cmath>
+#include <cstring>
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -143,9 +144,112 @@ read_audio_file(const std::string& path, const std::function<bool(const AudioFil
     }
 }
 
+namespace {
+
+void put_tag(std::ostream& out, const char (&tag)[5]) {
+    out.write(tag, 4);
+}
+
+template <typename Int> void put_le(std::ostream& out, Int value) {
+    char bytes[sizeof(Int)];
+    for (std::size_t i = 0; i < sizeof(Int); ++i)
+        bytes[i] = static_cast<char>((static_cast<std::uint64_t>(value) >> (8 * i)) & 0xffu);
+    out.write(bytes, sizeof(Int));
+}
+
+// The canonical WAV layout: RIFF, a 16-byte `fmt ` chunk with format tag 1
+// (integer PCM) or 3 (IEEE float), and `data`, 44 bytes of header. Samples are
+// converted with the same CHOC routines the EXTENSIBLE writer uses, so only the
+// header differs between the two. Used for one or two channels, the case the
+// plain tag describes completely; false when the data would not fit a 32-bit
+// RIFF size.
+bool write_canonical_wav(std::ostream& out, const AudioFileData& data, WavBitDepth bit_depth) {
+    const std::uint32_t channels = data.num_channels();
+    const std::uint64_t frames = data.num_frames();
+    const std::uint32_t bytes_per_sample = bit_depth == WavBitDepth::Float32 ? 4u
+                                           : bit_depth == WavBitDepth::Int24 ? 3u
+                                                                             : 2u;
+    const std::uint64_t block_align = std::uint64_t{channels} * bytes_per_sample;
+    const std::uint64_t data_bytes = frames * block_align;
+    const std::uint64_t riff_size = 4 + (8 + 16) + (8 + data_bytes + (data_bytes & 1u));
+    if (riff_size > std::numeric_limits<std::uint32_t>::max())
+        return false;
+    const auto sample_rate = static_cast<std::uint32_t>(data.sample_rate + 0.5);
+
+    put_tag(out, "RIFF");
+    put_le<std::uint32_t>(out, static_cast<std::uint32_t>(riff_size));
+    put_tag(out, "WAVE");
+    put_tag(out, "fmt ");
+    put_le<std::uint32_t>(out, 16);
+    put_le<std::uint16_t>(out, bit_depth == WavBitDepth::Float32 ? 3 : 1);
+    put_le<std::uint16_t>(out, static_cast<std::uint16_t>(channels));
+    put_le<std::uint32_t>(out, sample_rate);
+    put_le<std::uint32_t>(out, sample_rate * static_cast<std::uint32_t>(block_align));
+    put_le<std::uint16_t>(out, static_cast<std::uint16_t>(block_align));
+    put_le<std::uint16_t>(out, static_cast<std::uint16_t>(bytes_per_sample * 8));
+    put_tag(out, "data");
+    put_le<std::uint32_t>(out, static_cast<std::uint32_t>(data_bytes));
+
+    constexpr std::uint32_t block_frames = 4096;
+    std::vector<char> interleaved(static_cast<std::size_t>(block_frames * block_align));
+    choc::buffer::ChannelArrayBuffer<float> block(channels, block_frames);
+    for (std::uint64_t start = 0; start < frames; start += block_frames) {
+        const auto count =
+            static_cast<std::uint32_t>(std::min<std::uint64_t>(block_frames, frames - start));
+        auto view = block.getView().getStart(count);
+        for (std::uint32_t ch = 0; ch < channels; ++ch) {
+            auto channel = view.getChannel(ch);
+            for (std::uint32_t i = 0; i < count; ++i)
+                channel.data.data[i] = data.channels[ch][start + i];
+        }
+        namespace sd = choc::audio::sampledata;
+        auto* dest = interleaved.data();
+        if (bit_depth == WavBitDepth::Int16) {
+            sd::copyToInterleavedIntData<sd::Int16LittleEndian>(dest, 2, view);
+        } else if (bit_depth == WavBitDepth::Int24) {
+            sd::copyToInterleavedIntData<sd::Int24LittleEndian>(dest, 3, view);
+        } else {
+            for (std::uint32_t i = 0; i < count; ++i)
+                for (std::uint32_t ch = 0; ch < channels; ++ch) {
+                    std::uint32_t bits;
+                    const float sample = view.getSample(ch, i);
+                    std::memcpy(&bits, &sample, sizeof bits);
+                    for (int b = 0; b < 4; ++b)
+                        dest[(i * channels + ch) * 4 + b] =
+                            static_cast<char>((bits >> (8 * b)) & 0xffu);
+                }
+        }
+        out.write(interleaved.data(),
+                  static_cast<std::streamsize>(std::uint64_t{count} * block_align));
+    }
+    if (data_bytes & 1u)
+        out.put('\0');
+    out.flush();
+    return out.good();
+}
+
+} // namespace
+
 bool write_wav_stream(std::ostream& output, const AudioFileData& data, WavBitDepth bit_depth) {
     if (!can_write_wav(data))
         return false;
+
+    // One or two channels take the canonical header with the plain format tag,
+    // which every reader accepts; more channels need WAVE_FORMAT_EXTENSIBLE
+    // (and CHOC's writer, which also handles RF64 for very long files).
+    if (data.num_channels() <= 2) {
+        try {
+            const auto start = output.tellp();
+            if (write_canonical_wav(output, data, bit_depth))
+                return true;
+            // Too long for a 32-bit RIFF size: nothing was written, so CHOC's
+            // RF64 writer takes the file from the same position.
+            if (output.tellp() != start)
+                return false;
+        } catch (...) {
+            return false;
+        }
+    }
 
     try {
         choc::audio::WAVAudioFileFormat<true> wav;

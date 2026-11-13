@@ -19,6 +19,14 @@ historical GPU-probe acceptance test from a depth-2 checkout. Keep its bounded
 removing it produces a deterministic shallow-history failure unrelated to the
 source change.
 
+Docs-only pull requests take a fast path that still reports every required
+context: CodeQL does not run (`paths-ignore`), `drift-fast` runs only its
+readers from source, and the source selftests run only the entries that can
+read the change. The class comes from `classify_changes.impact_class`; never
+add `paths`/`paths-ignore` or a job-level `if:` to a required workflow to get
+the same effect, and never extend `drift_fast.json`'s `prose_not_readers`
+without a reviewed reason. See `docs/guides/local-ci.md` "Impact-scoped jobs".
+
 ## Landing a Pulp PR fast — the checklist
 
 Every step below exists because skipping it cost a CI round trip (20-40 min)
@@ -119,6 +127,17 @@ on a real PR. Do them in order.
    gate's self-test until `tools/ci/release_configure_matrix.py` classifies it
    (replayed, mirrored or skipped with a reason). See `docs/guides/local-ci.md`
    § `release-configure`.
+
+   **Release jobs and long release steps carry derived `timeout-minutes`.**
+   `tools/ci/release_step_timeouts.json` holds `max(floor, 4 x p95)` of each
+   step's slowest leg over recent successful `Release CLI` runs, and
+   `release_step_timeouts.py check` (workflow-lint) fails a release job with no
+   timeout or a long step without its recorded value. When a long step is
+   renamed or a release step gets slower, re-run
+   `release_step_timeouts.py derive` and update the policy and workflow
+   together; do not hand-raise one number. A timed-out leg is re-run once by
+   the release reconciler (`rerun-failed-jobs`), so a hang no longer waits for
+   the drought alarm. See `docs/guides/release-watchdog.md`.
 3. **Open with `shipyard pr` and leave auto-merge armed.** Before you start,
    `shipyard ship-state list` shows whether someone is already landing it.
 4. **Read `mergeStateStatus` correctly:**
