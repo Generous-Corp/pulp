@@ -406,8 +406,20 @@ pub fn scaffold(
     let aax_product_code = make_aax_product_code(&class_name);
     let mfr_code = make_mfr_code(&args.manufacturer);
     let bundle_id = format!("com.{}.{}", to_namespace_name(&args.manufacturer), ns);
-    let formats = default_formats(&args.kind);
-    let description = match args.kind.as_str() {
+    // The agent-toolkit template is a controlled instrument that builds as
+    // Standalone only, whatever --type says.
+    let agent_toolkit = args.template.as_deref() == Some("agent-toolkit");
+    let kind = if agent_toolkit {
+        "instrument"
+    } else {
+        args.kind.as_str()
+    };
+    let formats = if agent_toolkit {
+        "Standalone".to_owned()
+    } else {
+        default_formats(kind)
+    };
+    let description = match kind {
         "app" => "A standalone Pulp audio application".to_owned(),
         "bare" => "A minimal Pulp project".to_owned(),
         other => format!("A Pulp audio {other}"),
@@ -439,7 +451,7 @@ pub fn scaffold(
     ];
 
     // Pick template_key (prefer --template if supplied).
-    let template_key = args.template.clone().unwrap_or_else(|| args.kind.clone());
+    let template_key = args.template.clone().unwrap_or_else(|| kind.to_owned());
     let source_template_dir = templates_base.join(&template_key);
     let standalone_mode = !args.in_tree;
     let mut cmake_template_dir = if standalone_mode {
@@ -468,16 +480,17 @@ pub fn scaffold(
         log,
         "Creating {} ({}) at {}\n",
         args.name,
-        args.kind,
+        kind,
         out_dir.display()
     )
     .map_err(io)?;
 
     // File map — same source-to-output list as C++.
     let test_name = format!("test_{lower_underscored}.cpp");
-    let file_map: [(&str, &str); 9] = [
+    let file_map: [(&str, &str); 10] = [
         ("processor.hpp.template", "processor.hpp"), // overwritten below
         ("processor.cpp.template", "processor.cpp"), // overwritten below
+        ("agent_operations.cpp.template", "agent_operations.cpp"),
         ("CMakeLists.txt.template", "CMakeLists.txt"),
         ("clap_entry.cpp.template", "clap_entry.cpp"),
         ("vst3_entry.cpp.template", "vst3_entry.cpp"),
@@ -495,7 +508,7 @@ pub fn scaffold(
     ];
 
     let mut mpe_mode = args.mpe;
-    if mpe_mode && args.kind != "instrument" {
+    if mpe_mode && kind != "instrument" {
         writeln!(
             log,
             "Warning: --mpe has no effect unless --type instrument; ignoring."
@@ -575,7 +588,7 @@ pub fn scaffold(
              }}\n",
             header = header_name,
             ns = ns,
-            in_ch = if args.kind == "instrument" { 0 } else { 2 },
+            in_ch = if kind == "instrument" { 0 } else { 2 },
         );
         let main_path = out_dir.join("main.cpp");
         fs::write(&main_path, main_body).map_err(|e| CliError::io(main_path, e))?;
@@ -934,6 +947,56 @@ mod tests {
         assert!(cmake.contains("project(MyGain)"));
         let test = fs::read_to_string(out_dir.join("test_my_gain.cpp")).unwrap();
         assert!(test.contains("t=my_gain"));
+    }
+
+    #[test]
+    fn scaffold_agent_toolkit_is_a_standalone_instrument() {
+        let td = tempfile::tempdir().unwrap();
+        let templates = td.path().join("tools/templates/agent-toolkit");
+        fs::create_dir_all(&templates).unwrap();
+        fs::write(
+            templates.join("processor.hpp.template"),
+            "class {{CLASS_NAME}};\n",
+        )
+        .unwrap();
+        fs::write(
+            templates.join("agent_operations.cpp.template"),
+            "ops={{LOWER_NAME}}\n",
+        )
+        .unwrap();
+        fs::write(
+            templates.join("CMakeLists.txt.template"),
+            "formats={{FORMATS}}\n",
+        )
+        .unwrap();
+
+        // The default kind is effect; the template must override it.
+        let args = CreateArgs {
+            name: "Probe".to_owned(),
+            kind: "effect".to_owned(),
+            template: Some("agent-toolkit".to_owned()),
+            in_tree: true,
+            no_build: true,
+            ci_mode: true,
+            ..CreateArgs::default()
+        };
+        let out_dir = td.path().join("out");
+        let mut log = Vec::new();
+        scaffold(
+            &args,
+            &out_dir,
+            &td.path().join("tools/templates"),
+            Some(td.path()),
+            "x",
+            &mut log,
+        )
+        .unwrap();
+        let ops = fs::read_to_string(out_dir.join("agent_operations.cpp")).unwrap();
+        assert_eq!(ops, "ops=probe\n");
+        let cmake = fs::read_to_string(out_dir.join("CMakeLists.txt")).unwrap();
+        assert_eq!(cmake, "formats=Standalone\n");
+        let main = fs::read_to_string(out_dir.join("main.cpp")).unwrap();
+        assert!(main.contains("config.input_channels = 0;"));
     }
 
     #[test]

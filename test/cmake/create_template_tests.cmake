@@ -84,10 +84,21 @@ foreach(_type IN LISTS _pulp_create_template_types)
         list(APPEND _extra_sources "${_out_dir}/tplcheck_${_ident}.cpp")
     endif()
 
+    # The control-handler source the generated CMakeLists.txt passes as
+    # CONTROL_VENDOR_SOURCES is compiled against the toolkit it includes.
+    set(_extra_libs "")
+    if(EXISTS "${_src_dir}/agent_operations.cpp.template")
+        _pulp_expand_create_template(${_type}
+            "${_src_dir}/agent_operations.cpp.template"
+            "${_out_dir}/tplcheck_${_ident}_agent_operations.cpp")
+        list(APPEND _extra_sources "${_out_dir}/tplcheck_${_ident}_agent_operations.cpp")
+        list(APPEND _extra_libs pulp::inspect-agent-toolkit pulp::inspect-standalone-runtime)
+    endif()
+
     set(_target pulp-test-create-template-${_type})
     add_executable(${_target} "${_out_dir}/test_tplcheck_${_ident}.cpp" ${_extra_sources})
     target_include_directories(${_target} PRIVATE "${_out_dir}")
-    target_link_libraries(${_target} PRIVATE pulp::format Catch2::Catch2WithMain)
+    target_link_libraries(${_target} PRIVATE pulp::format Catch2::Catch2WithMain ${_extra_libs})
     catch_discover_tests(${_target}
         TEST_PREFIX "create-template-${_type}: "
         PROPERTIES LABELS "cli;create-template")
