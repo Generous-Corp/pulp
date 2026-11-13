@@ -1,4 +1,16 @@
 {
  "name": "pulp-test-midi-port-identity",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [],
+  "spawning_sources": [
+   "test/test_midi_port_identity.cpp"
+  ],
+  "spawns": "undeclared",
+  "undeclared_sources": []
+ },
  "scanned": true
 }
