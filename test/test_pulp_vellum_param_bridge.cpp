@@ -258,12 +258,13 @@ TEST_CASE("a subscriber that writes back what it heard does not create a host ed
     });
 
     f.store.set_value_rt(kGain, 0.8f);
+    const int values_before_tick = f.host.values; // the automation write itself
     f.tick();
 
     REQUIRE(heard == 1);
     REQUIRE(f.host.entries.empty());
-    REQUIRE(f.host.values == 0);
-    REQUIRE(f.model->normalized(gain) == 0.8);
+    REQUIRE(f.host.values == values_before_tick);
+    REQUIRE(std::abs(f.model->normalized(gain) - 0.8) < 1e-6);
 }
 
 TEST_CASE("audio-thread writes never leave the UI behind the store", "[pulp-vellum][hammer]") {
