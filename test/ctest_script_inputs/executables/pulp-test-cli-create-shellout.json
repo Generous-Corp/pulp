@@ -10,6 +10,7 @@
    "fixtures/packages/gain-dsp-kit",
    "fixtures/packages/simple-plugin-template",
    "tools/packages/registry.json",
+   "tools/templates/agent-toolkit",
    "tools/templates/effect",
    "tools/templates/gain",
    "tools/templates/standalone"

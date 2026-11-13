@@ -8,13 +8,15 @@
 # with fixed placeholder values and compiled against the in-tree SDK, the same
 # way the generated CMakeLists.txt builds them.
 
-set(_pulp_create_template_types gain effect app instrument bare)
+set(_pulp_create_template_types gain effect app instrument bare agent-toolkit)
 set(_pulp_create_template_root "${CMAKE_SOURCE_DIR}/tools/templates")
 set(_pulp_create_template_out "${CMAKE_BINARY_DIR}/test/create-templates")
 
 function(_pulp_expand_create_template type in_file out_file)
-    set(class "TplCheck${type}")
-    set(lower "tplcheck_${type}")
+    # Template names such as agent-toolkit are not valid C++ identifiers.
+    string(REPLACE "-" "_" ident "${type}")
+    set(class "TplCheck${ident}")
+    set(lower "tplcheck_${ident}")
     file(READ "${in_file}" content)
     foreach(pair
             "PLUGIN_NAME=${class}"
@@ -64,27 +66,43 @@ function(_pulp_expand_create_template type in_file out_file)
 endfunction()
 
 foreach(_type IN LISTS _pulp_create_template_types)
+    string(REPLACE "-" "_" _ident "${_type}")
     set(_src_dir "${_pulp_create_template_root}/${_type}")
     set(_out_dir "${_pulp_create_template_out}/${_type}")
     file(MAKE_DIRECTORY "${_out_dir}")
     _pulp_expand_create_template(${_type}
-        "${_src_dir}/processor.hpp.template" "${_out_dir}/tplcheck_${_type}.hpp")
+        "${_src_dir}/processor.hpp.template" "${_out_dir}/tplcheck_${_ident}.hpp")
     _pulp_expand_create_template(${_type}
-        "${_src_dir}/test.cpp.template" "${_out_dir}/test_tplcheck_${_type}.cpp")
+        "${_src_dir}/test.cpp.template" "${_out_dir}/test_tplcheck_${_ident}.cpp")
 
     # Types whose processor body lives in its own source compile it here too,
     # as the generated CMakeLists.txt lists it under SOURCES.
     set(_extra_sources "")
     if(EXISTS "${_src_dir}/processor.cpp.template")
         _pulp_expand_create_template(${_type}
-            "${_src_dir}/processor.cpp.template" "${_out_dir}/tplcheck_${_type}.cpp")
-        list(APPEND _extra_sources "${_out_dir}/tplcheck_${_type}.cpp")
+            "${_src_dir}/processor.cpp.template" "${_out_dir}/tplcheck_${_ident}.cpp")
+        list(APPEND _extra_sources "${_out_dir}/tplcheck_${_ident}.cpp")
+    endif()
+
+    # The control-handler source the generated CMakeLists.txt passes as
+    # CONTROL_VENDOR_SOURCES is compiled against the toolkit it includes, and
+    # links what the generated Standalone and ControlHost link: the standalone
+    # control host references the Standalone test-input host defined in
+    # pulp::standalone, which pulp::format does not carry.
+    set(_extra_libs "")
+    if(EXISTS "${_src_dir}/agent_operations.cpp.template")
+        _pulp_expand_create_template(${_type}
+            "${_src_dir}/agent_operations.cpp.template"
+            "${_out_dir}/tplcheck_${_ident}_agent_operations.cpp")
+        list(APPEND _extra_sources "${_out_dir}/tplcheck_${_ident}_agent_operations.cpp")
+        list(APPEND _extra_libs pulp::inspect-agent-toolkit
+            pulp::inspect-standalone-runtime pulp::standalone)
     endif()
 
     set(_target pulp-test-create-template-${_type})
-    add_executable(${_target} "${_out_dir}/test_tplcheck_${_type}.cpp" ${_extra_sources})
+    add_executable(${_target} "${_out_dir}/test_tplcheck_${_ident}.cpp" ${_extra_sources})
     target_include_directories(${_target} PRIVATE "${_out_dir}")
-    target_link_libraries(${_target} PRIVATE pulp::format Catch2::Catch2WithMain)
+    target_link_libraries(${_target} PRIVATE pulp::format Catch2::Catch2WithMain ${_extra_libs})
     catch_discover_tests(${_target}
         TEST_PREFIX "create-template-${_type}: "
         PROPERTIES LABELS "cli;create-template")

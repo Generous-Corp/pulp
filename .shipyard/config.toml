@@ -861,18 +861,18 @@ generated_paths = []
 known_flaky_tests = []
 
 [base_health]
-# `shipyard base-health --act` records "would jump PR #n" once per poisoned
-# episode (tools/ci/base_poison_detector.py names the fix) and changes nothing.
-# `on` re-enqueues the fix with `jump: true` (Shipyard checks a trusted approval
+# Red-main fix-first is on (Shipyard PR 1279; docs/automated-draining.md in
+# the Shipyard repo). `shipyard base-health --act` records "would jump PR #n" in
+# `dry-run` and changes nothing. `on` re-enqueues the fix with `jump: true` (Shipyard checks a trusted approval
 # on the head it enqueues and falls back to a plain enqueue when a jump is
 # refused).
-auto_jump = "dry-run"
+auto_jump = "on"
 # With the hold on, a poisoned base (one required context failing in
-# consecutive merge groups with different PRs) enqueues only a named fix and
-# reports every other approved head as held. It runs in dry-run, which records
-# the would-be hold and holds nothing, until a replay shows it is precise. The
+# consecutive merge groups with different PRs, confirmed by the base tip's own
+# run) enqueues only a named fix and reports every other approved head as held.
+# Nothing already queued is removed: `merge_group_pause` stays unset. The
 # reviewer kick and priority file are machine-global keys and are not set here.
-merge_group_hold = "dry-run"
+merge_group_hold = "on"
 
 [train]
 # Shipyard's merge train, read-only (phase 1): `shipyard train status

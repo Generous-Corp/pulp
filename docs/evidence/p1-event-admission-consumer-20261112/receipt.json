@@ -2,8 +2,8 @@
   "schema": "pulp.graph.p1-event-admission-consumer.v1",
   "consumer": "examples/p1-event-admission-consumer",
   "status": "NOT_QUALIFIED",
-  "source_head": "59fff62c0d355677bd5f44c87535988db87730d8",
-  "source_head_note": "fixture commit; the receipt itself lands in the following docs commit",
+  "source_head": "e6503a81163a2f1f6e4957f4ed31028796532721",
+  "source_head_note": "fixture commit with the executor parity control; the receipt itself lands in the following docs commit",
   "qualification_scope": "PARTIAL: all four families PASS individually and together under one test-owned epoch and absolute sample origin from an installed SDK (MIDI host ingress into SignalGraph::inject_midi, graph-authored trigger lane, PluginSlot parameter mailbox, VoiceBankBinding voice intent); NOT_QUALIFIED because the remaining admission-contract rows are NOT_CHECKED",
   "controls": {
     "midi": "PASS (installed SDK): HostEventIngress two-block absolute ingress, stale epoch, late, duplicate sequence, stable producer ordering at partitions 4 and 8; in the combined control, ingress projection converted to block-relative offsets and injected through SignalGraph::inject_midi into a MIDI input node routed by connect_midi to a CustomNodeType consumer, at five schedules. UMP and MPE expression sidecars are NOT_CHECKED in this fixture",
@@ -43,7 +43,7 @@
       "combined-midi-stale-epoch-refusal",
       "combined-voice-stale-generation-refusal"
     ],
-    "mutation_control_count": 29,
+    "mutation_control_count": 33,
     "trigger": "PASS (installed SDK, graph-authored lane): CustomNodeType::process_events producer/consumer joined by SignalGraph::connect_graph_event; GraphEventWriter::emit_at current-block delivery, bounded-future delivery staged in block 0 and delivered in the later block containing it, Future, Late and Overflow refusals, deterministic same-sample sequence order, reset cancelling a staged record with an epoch advance, identical events and audio across schedules 2+2+4 and 3+5. Public TriggerContext was refused as a seam and is not used",
     "trigger_graph": "PASS (installed SDK): existing trigger-graph two-block absolute sample, sequence, epoch and reset check; trigger-graph evidence, not a TriggerContext consumer",
     "voice_intent": "PASS (installed SDK, control-side): pulp::host::VoiceBankBinding with MpeVoiceBankOwner over 32 samples at partitions 4 and 8; note-on at sample 2 lands on one slot and generation, note-off at sample 10 puts that generation into release, double release, wrong slot, wrong generation, retired generation and retired generation on the reused slot are refused with StaleGeneration via dispatch_deferred, a live generation accepts deferred pressure and release, a stale epoch is refused; audio, slots and generations are partition-invariant. No graph voice allocator or audio scheduler is claimed",
@@ -118,20 +118,32 @@
         "voice": "76096164fc3782a6"
       }
     },
-    "callback_observation": "graph-lane, reset and combined consumers and the PluginSlot probe record into preallocated fixed arrays with a count and an overflow flag asserted after rendering; the block loop makes no topology call. Construction property only: no allocation instrumentation, RTSan or realtime claim"
+    "callback_observation": "graph-lane, reset and combined consumers and the PluginSlot probe record into preallocated fixed arrays with a count and an overflow flag asserted after rendering; the block loop makes no topology call. Construction property only: no allocation instrumentation, RTSan or realtime claim",
+    "executor_parity": {
+      "result": "PASS (installed SDK): the combined schedule renders on the reference walk (canonical executor routing disabled) and the routed serial executor, at five schedules; canonical trace, four per-family digests, voice audio, graph audio (ramp input) and native-epoch map identical; 15 comparisons",
+      "backend_dispatch": "routing_executor_stats().blocks_processed is 0 on the reference walk and 276/276 blocks on the routed executor; routed_walk_fallbacks() is 0",
+      "parallel": "REFUSED: set_parallel_routing_enabled(true) is a no-op once connect_graph_event has bound the lane; requested after the bind, parallel_routing_enabled() stays false, parallel_levels_dispatched stays 0; recorded, not forced",
+      "planted_negatives": [
+        "parameter record order key +1 on the routed side only -> backend-trace, only the parameter digest changes",
+        "one graph-output sample +1.0 on the routed side -> backend-graph-audio",
+        "one voice-audio sample +1.0 on the routed side -> backend-voice-audio"
+      ],
+      "sdk_headers": "installed signal_graph_runtime.hpp differs from origin/main 333b37effe57 only in comments; graph_event_contract.hpp is byte-identical"
+    }
   },
   "closed_rows": [
     "single shared test-owned epoch and absolute sample origin across all four families (combined control)",
     "MIDI 1.0 projection through SignalGraph::inject_midi inside this fixture",
     "partition schedules beyond two (five for the combined control)",
-    "a sequence mutation that fails while the unaffected records remain explainable"
+    "a sequence mutation that fails while the unaffected records remain explainable",
+    "routed serial executor versus reference walk parity for the graph-authored lane, MIDI input and parameter mailbox (trace, four digests, voice audio, graph audio, epoch map) across five schedules"
   ],
   "not_checked_rows": [
     "UMP and MPE expression sidecars through SignalGraph::inject_midi(node, midi, mpe) inside this fixture (covered separately by examples/g5-host-event-consumer)",
     "parameter overflow telemetry counters (overflow_count) through the graph mailbox; only the false return and retained prefix are asserted",
     "reset and epoch cancellation applied to all four families at once; reset is checked per family",
     "callback allocation freedom as a measured or realtime property (fixture callbacks use fixed arrays; runtime and VoiceBankBinding::render are not instrumented)",
-    "routed versus reference executor parity for the graph-authored lane, MIDI input and parameter mailbox",
+    "parallel-routed versus reference executor parity: set_parallel_routing_enabled is refused once the graph-authored lane is bound, so it was requested after the bind, refused, and not forced",
     "voice intent as a SignalGraph node; the voice bank runs its own prepared graph on the shared block grid"
   ],
   "unavailable_lanes": [
@@ -174,9 +186,10 @@
   "run": {
     "command": "build-p1-event-admission/pulp-p1-event-admission-consumer",
     "returncode": 0,
-    "stdout": "p1-event-admission PASS checks=2763 partitions=4,8 graph_event_schedules=2+2+4,3+5 graph_events=9 voice_slot_reuse=1 combined_schedules=1,32,64,127+127+2,3+61+1+127+64 combined_records=27 digests=midi:349d8d9cbaead7ac,parameter:21c6a5a653826137,trigger:79300472c428c8e4,voice:76096164fc3782a6 sequence_mutations=5 consumer_gate=NOT_QUALIFIED",
+    "stdout": "p1-event-admission PASS checks=14135 partitions=4,8 graph_event_schedules=2+2+4,3+5 graph_events=9 voice_slot_reuse=1 combined_schedules=1,32,64,127+127+2,3+61+1+127+64 combined_records=27 digests=midi:349d8d9cbaead7ac,parameter:21c6a5a653826137,trigger:79300472c428c8e4,voice:76096164fc3782a6 sequence_mutations=5 executor_parity=reference-walk,routed-executor parity_comparisons=15 routed_executor_blocks=276/276 routing_fallbacks=0 parallel_after_bind=refused parity_planted_negatives=3 consumer_gate=NOT_QUALIFIED",
     "ctest": "p1-event-admission-public-consumer 1/1 passed",
-    "trace_command": "build-p1-event-admission/pulp-p1-event-admission-consumer --trace docs/evidence/p1-event-admission-consumer-20261112/combined-trace.jsonl (checks=2765: two file-write checks)"
+    "trace_command": "build-p1-event-admission/pulp-p1-event-admission-consumer --trace docs/evidence/p1-event-admission-consumer-20261112/combined-trace.jsonl (historical captured count=2765: two file-write checks, before the executor-parity control; current count is 14137 = 14135 untraced checks + 2 file-write checks; trace command not rerun in this evidence packet)",
+    "checks_note": "The committed positive run records checks=14135 without --trace. The checks=2763/2765 trace counts are historical evidence from before the parity control; the current trace count is 14137 by the same two-file-write increment, and the trace command was not rerun in this evidence packet."
   },
   "fixture_corrections": [
     "midi-duplicate-sequence-refusal: published before project(); HostEventIngress detects duplicates only among staged records and project() removes delivered records",
@@ -299,6 +312,22 @@
     {
       "mutation": "sequence mutation: digest made order-insensitive (sum of record hashes)",
       "result": "FAIL rule=order-mutation-detected"
+    },
+    {
+      "mutation": "executor parity: reference backend also enables canonical executor routing",
+      "result": "FAIL rule=parity-reference-walk-only"
+    },
+    {
+      "mutation": "executor parity: routed backend trace shifted by one sample after rendering",
+      "result": "FAIL rule=parity-reference-vs-routed"
+    },
+    {
+      "mutation": "executor parity: routed backend graph output sample shifted by 0.5",
+      "result": "FAIL rule=parity-reference-vs-routed"
+    },
+    {
+      "mutation": "executor parity: parallel request asserted accepted instead of refused",
+      "result": "FAIL rule=parity-parallel-refused-after-bind"
     }
   ]
 }

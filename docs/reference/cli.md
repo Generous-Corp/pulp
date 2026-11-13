@@ -27,6 +27,7 @@ pulp create "My FX" --output ~/projects/my-fx      # custom output directory
 pulp create "Android App" --type app --targets android --no-build # scaffold Android files
 pulp create "Debug Knob" --in-tree                 # add an example under examples/
 pulp create "Kit Gain" --template ./my-template-kit # scaffold from a local template kit
+pulp create "Agent Synth" --template agent-toolkit # synth an agent can drive through the broker
 pulp create "Pinned FX" --pin                      # write an exact SDK version
 pulp create "Debug FX" --debug                     # configure Debug instead of Release
 pulp create "My FX" --no-build                     # scaffold only, skip build
@@ -34,6 +35,8 @@ pulp create "My FX" --no-interactive               # CI/scripting mode (no promp
 ```
 
 Available types: `effect` (default), `instrument`, `app`, `bare`. Built-in templates are in `tools/templates/<type>/`.
+
+`--template agent-toolkit` scaffolds a one-voice synth that registers the agent tool kit's vendor operations (presets, patch, offline render) and builds as a development-only Standalone that an agent reaches through the capability broker, the same way `examples/agent-toolkit-synth` does. It is always an instrument and builds only the Standalone, so `--type` is ignored. The CLI derives a reverse-DNS bundle/vendor id such as `com.pulp.agent_synth` from the manufacturer and project name and writes the same id to `CMakeLists.txt` and `agent_operations.cpp`; if you customize it, keep those two values identical. See [Vendor operations](capability-control.md#vendor-operations).
 
 `--template <name-or-kit-dir>` accepts either a built-in template name or an explicit local template kit directory containing `pulp.package.json`. Local template kits are validated before scaffolding, must declare kind `template`, and must export exactly one safe template directory. They do not execute package CMake, JavaScript, scripts, or dynamic libraries. If a template kit declares dependency packages, install those curated dependencies explicitly with `pulp add <id>` first; `pulp create` will not widen the trust boundary by adding them implicitly. A template kit only builds format targets for entry templates it exports, so a small CLAP/Standalone starter does not pretend to support VST3/AU.
 

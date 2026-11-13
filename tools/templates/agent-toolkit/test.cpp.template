@@ -1,0 +1,83 @@
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
+#include <pulp/format/headless.hpp>
+#include <pulp/midi/buffer.hpp>
+#include "{{HEADER_NAME}}"
+
+#include <algorithm>
+#include <cmath>
+
+using Catch::Approx;
+
+namespace {
+
+// Render one 512-sample block, optionally with MIDI, and return the peak.
+float render_peak(pulp::format::HeadlessHost& host, pulp::audio::Buffer<float>& out,
+                  pulp::midi::MidiBuffer& midi_in) {
+    pulp::audio::BufferView<const float> no_input;
+    pulp::midi::MidiBuffer midi_out;
+    auto ov = out.view();
+    host.process(ov, no_input, midi_in, midi_out);
+    float peak = 0.0f;
+    for (std::size_t ch = 0; ch < out.num_channels(); ++ch)
+        for (float s : out.channel(ch)) peak = std::max(peak, std::abs(s));
+    return peak;
+}
+
+} // namespace
+
+TEST_CASE("{{PLUGIN_NAME}} is silent until a note arrives") {
+    pulp::format::HeadlessHost host({{NAMESPACE}}::create_{{FACTORY_NAME}});
+    host.prepare(48000, 512);
+    pulp::audio::Buffer<float> out(2, 512);
+    pulp::midi::MidiBuffer none;
+    REQUIRE(render_peak(host, out, none) == 0.0f);
+}
+
+TEST_CASE("{{PLUGIN_NAME}} plays a held note at its level and stops on release") {
+    pulp::format::HeadlessHost host({{NAMESPACE}}::create_{{FACTORY_NAME}});
+    host.prepare(48000, 512);
+    host.state().set_value({{NAMESPACE}}::kLevel, 0.5f);
+    pulp::audio::Buffer<float> out(2, 512);
+
+    pulp::midi::MidiBuffer note_on;
+    note_on.add(pulp::midi::MidiEvent::note_on(0, 69, 100));
+    const float peak = render_peak(host, out, note_on);
+    REQUIRE(peak > 0.4f);
+    REQUIRE(peak <= 0.5f);
+
+    pulp::midi::MidiBuffer note_off;
+    note_off.add(pulp::midi::MidiEvent::note_off(0, 69));
+    render_peak(host, out, note_off);
+    pulp::midi::MidiBuffer none;
+    REQUIRE(render_peak(host, out, none) == 0.0f);
+}
+
+TEST_CASE("{{PLUGIN_NAME}} global factory builds the same processor") {
+    // The controlled host and the offline render previews use this factory.
+    auto processor = create_{{LOWER_NAME}}();
+    REQUIRE(processor != nullptr);
+    REQUIRE(processor->descriptor().name == "{{PLUGIN_NAME}}");
+}
+
+TEST_CASE("{{PLUGIN_NAME}} has correct descriptor") {
+    pulp::format::HeadlessHost host({{NAMESPACE}}::create_{{FACTORY_NAME}});
+    auto desc = host.descriptor();
+
+    REQUIRE(desc.name == "{{PLUGIN_NAME}}");
+    REQUIRE(desc.manufacturer == "{{MANUFACTURER}}");
+    REQUIRE(desc.category == pulp::format::PluginCategory::Instrument);
+    REQUIRE(desc.accepts_midi);
+}
+
+TEST_CASE("{{PLUGIN_NAME}} state round-trip") {
+    pulp::format::HeadlessHost host({{NAMESPACE}}::create_{{FACTORY_NAME}});
+    host.prepare(48000, 512);
+
+    host.state().set_value({{NAMESPACE}}::kDetune, 7.0f);
+
+    auto data = host.save_state();
+    host.state().set_value({{NAMESPACE}}::kDetune, 0.0f);
+    REQUIRE(host.load_state(data));
+    REQUIRE(host.state().get_value({{NAMESPACE}}::kDetune) == Approx(7.0f));
+}
