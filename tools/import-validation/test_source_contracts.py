@@ -437,6 +437,9 @@ class SourceContractsTest(unittest.TestCase):
         self.assertEqual(on_actions.returncode, 0, on_actions.stdout + on_actions.stderr)
         self.assertIn("[info] stale-source-contract stitch", on_actions.stdout)
         self.assertIn("[info] source-contract-recheck-due figma", on_actions.stdout)
+        # The figma fixture must stay due, never overdue: an overdue fixture
+        # means the date drifted out of the window this test is meant to cover.
+        self.assertNotIn("[info] stale-source-contract figma", on_actions.stdout)
         self.assertIn("::warning title=stale-source-contract stitch::", on_actions.stdout)
         self.assertIn("::warning title=source-contract-recheck-due figma::", on_actions.stdout)
         # Negative control: no annotations outside GitHub Actions.
