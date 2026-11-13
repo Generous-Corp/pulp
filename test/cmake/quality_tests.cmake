@@ -1838,6 +1838,13 @@ if(Python3_Interpreter_FOUND)
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
         set_tests_properties(clean-build-cov-selftest PROPERTIES TIMEOUT 300)
 
+        # The cutover trial report parser: a planted missing header must land in
+        # its capability row, and a log without it must hit no row.
+        add_test(NAME cutover-trial-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_cutover_trial
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(cutover-trial-selftest PROPERTIES TIMEOUT 120)
+
         # Build-speed measurement. Each suite carries a negative control: a blind
         # dry run must refuse (exit 3) rather than report zero edges, and a value
         # nobody measured must stay unknown instead of reading as 0.
