@@ -1034,20 +1034,30 @@ class Collector:
         res = self._git("merge-base", "--is-ancestor", sha, ref, check=False)
         return {0: True, 1: False}.get(res.returncode)
 
-    def main_base(self, group: dict, max_steps: int = 64) -> str | None:
-        """The main commit a group's batch sits on: its first-parent chain
-        walked down from `base_sha` to the first commit on main."""
-        current = group.get("base_sha")
+    def main_base(self, group: dict, queue_commits: dict[str, dict],
+                  pushes: list[dict], max_steps: int = 64) -> str | None:
+        """Recover the protected base using observations made before each group.
+
+        Current main ancestry cannot distinguish speculative predecessors that
+        subsequently landed. A main push witnesses that its head was protected
+        by that time; otherwise only a recorded predecessor can be walked.
+        Missing history stays unknown, including a chain cut by the window.
+        """
+        current = group
         for _ in range(max_steps):
-            if not current:
+            base, created = current.get("base_sha"), current.get("created_at")
+            if not base or not created:
                 return None
-            on_main = self._is_ancestor(current)
-            if on_main:
-                return current
-            commit = self.commit(current)
-            if not commit or not commit.get("parents"):
+            prior = [p for p in pushes if p.get("head_sha") and p.get("created_at")
+                     and _parse_time(p["created_at"]) < _parse_time(created)]
+            anchor = max(prior, key=lambda p: _parse_time(p["created_at"]), default=None)
+            if anchor and self._is_ancestor(base, anchor["head_sha"]) is True:
+                return base
+            predecessor = queue_commits.get(base)
+            if (not predecessor or not predecessor.get("created_at")
+                    or _parse_time(predecessor["created_at"]) > _parse_time(created)):
                 return None
-            current = commit["parents"][0]
+            current = predecessor
         return None
 
     def pr_merge(self, pr: int) -> dict | None:
@@ -1132,14 +1142,17 @@ class Collector:
         except json.JSONDecodeError:
             return None
 
-    def facts_rev(self, record: dict) -> str:
-        for sha in (record.get("checkout_sha"), record.get("base_sha")):
-            commit = self.commit(sha)
-            if commit and commit.get("local"):
-                return sha
-        return "origin/main"
+    def facts_rev(self, record: dict) -> str | None:
+        # Only the tested checkout supplies its declarations and source bytes.
+        # Even its parent can have different inputs or deterministic-tier rules.
+        sha = record.get("checkout_sha")
+        commit = self.commit(sha)
+        return sha if commit and commit.get("local") else None
 
-    def test_facts(self, record: dict, failing: list[str], rev: str, delta: list[str]) -> dict[str, dict]:
+    def test_facts(self, record: dict, failing: list[str], rev: str | None, delta: list[str]) -> dict[str, dict]:
+        if rev is None:
+            return {name: {"kind": "unknown", "deterministic": None, "declared_inputs": None,
+                           "executable": None, "sources_naming_delta": None} for name in failing}
         record_doc = self.reuse_record(record["run_id"])
         regs = self.registrations(record["run_id"])
         drift = self._json_in_clone(rev, "tools/ci/drift_fast.json") or None
@@ -1203,9 +1216,13 @@ class Collector:
         return files
 
     def record_attribution(self, groups: list[dict], since: dt.datetime, until: dt.datetime) -> None:
+        # Include observations before the window; insufficient history still
+        # leaves the base unknown rather than inferring it from today's main.
+        pushes = self.main_push_runs(since - dt.timedelta(days=7)) if groups else []
+        queue_commits = {g["group_sha"]: g for g in groups if g.get("group_sha")}
         for g in groups:
             g["landed"] = self._is_ancestor(g.get("group_sha"))
-            g["main_base"] = self.main_base(g)
+            g["main_base"] = self.main_base(g, queue_commits, pushes)
         judged = []
         for g in groups:
             delta = g.get("first_parent_delta_files")
@@ -1218,7 +1235,6 @@ class Collector:
                 judged.append((g, failing))
         if not judged:
             return
-        pushes = self.main_push_runs(since)
         landed_groups = sorted((x for x in groups if x.get("landed") and x.get("macos_conclusion") == "success"),
                                key=lambda x: x["created_at"])
         for g, failing in judged:
@@ -1226,7 +1242,7 @@ class Collector:
             rev = self.facts_rev(g)
             g["facts_rev"] = rev
             g["delta_cmake_named"] = self._grep_naming(
-                rev, delta, ["*CMakeLists.txt", "*.cmake", "*.cmake.in", ":!test/"])
+                rev, delta, ["*CMakeLists.txt", "*.cmake", "*.cmake.in", ":!test/"]) if rev else None
             g["entry_test_facts"] = self.test_facts(g, failing, rev, delta)
             merge = self.pr_merge(g["pr"]) if g.get("pr") else None
             g["pr_merge"] = merge

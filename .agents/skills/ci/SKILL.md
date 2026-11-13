@@ -3456,6 +3456,14 @@ timestamp) before any per-binary reuse is proposed.
 
 ## Per-test replay history lives in `reuse-record-macos`, not `ctest-logs-macos`
 
+Entry-delta attribution uses main-push observations made before each merge
+group's creation and recorded predecessor links to recover its historical batch
+base. Today's main ancestry does not establish that base. Missing history stays
+unknown. Input declarations, source scans, and deterministic tiers come only
+from the tested checkout; an unavailable checkout cannot use its parent or
+today's main as a substitute.
+
+
 `ctest-logs-macos` expires in 7 days, and its `LastTest.log` is NOT the suite's:
 every ctest call after the run (the `--show-only` listing, the GPU-adapter
 probe) replaces that file, so the artifact holds only the last probe's block.

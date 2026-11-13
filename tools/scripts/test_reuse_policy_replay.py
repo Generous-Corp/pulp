@@ -761,6 +761,90 @@ class EntryDeltaCollectTests(unittest.TestCase):
         self.assertEqual((facts["bare-script"]["kind"], facts["bare-script"]["declared_inputs"]), ("script", None))
         self.assertEqual(facts["gone"]["kind"], "unknown")
 
+    def test_landed_predecessors_keep_their_historical_batch_identity(self):
+        c = rrc.Collector.__new__(rrc.Collector)
+        # All speculative predecessors are on today's main. Only b was on
+        # protected main when this batch started; m1 lands during the batch.
+        ancestors = {"b": {"b"}, "m1": {"b", "m1"},
+                     "m3": {"b", "m1", "m2", "m3"}}
+        c._is_ancestor = lambda sha, ref="origin/main": sha in ancestors.get(ref, ancestors["m3"])
+        groups = [group(run_id=f"g{i}", pr=i, group_sha=f"m{i}",
+                        base_sha="b" if i == 1 else f"m{i - 1}",
+                        created_at=f"2026-11-01T10:0{i}:00Z",
+                        first_parent_delta_files=["docs/a.md"] if i == 1 else ["core/a.cpp"])
+                  for i in range(1, 4)]
+        queue = {g["group_sha"]: g for g in groups}
+        pushes = [{"head_sha": "b", "created_at": "2026-11-01T09:00:00Z"},
+                  {"head_sha": "m1", "created_at": "2026-11-01T10:02:30Z"},
+                  {"head_sha": "m3", "created_at": "2026-11-01T11:00:00Z"}]
+        for g in groups:
+            g["main_base"] = c.main_base(g, queue, pushes)
+        later = group(run_id="later", landed=True, created_at="2026-11-01T12:00:00Z")
+        outcomes = {"t": [(g, "fail") for g in groups] + [(later, "pass")]}
+        self.assertIsNone(rpr._corroborated(groups[0], "t", outcomes))
+        self.assertEqual([g["main_base"] for g in groups], ["b"] * 3)
+        # Once a push witnessed m3 on main, a new group may use it as its base.
+        self.assertEqual(c.main_base(dict(later, base_sha="m3"), queue, pushes), "m3")
+        # Independent batches remain usable corroboration (positive control).
+        for i, g in enumerate(groups[1:], 1):
+            g["main_base"] = f"independent-{i}"
+        self.assertEqual(rpr._corroborated(groups[0], "t", outcomes)["rule"], "B")
+
+    def test_unwitnessed_or_incomplete_batch_history_is_unknown(self):
+        c = rrc.Collector.__new__(rrc.Collector)
+        c._is_ancestor = lambda sha, ref="origin/main": True if ref == "origin/main" else None
+        g = group(base_sha="missing")
+        push = {"head_sha": "b", "created_at": "2026-09-29T10:00:00Z"}
+        self.assertIsNone(c.main_base(g, {}, []))
+        self.assertIsNone(c.main_base(g, {}, [push]))
+        self.assertIsNone(c.main_base(g, {"missing": g}, [push], max_steps=2))
+        # A push in the same timestamp cannot prove it preceded the group.
+        c._is_ancestor = lambda sha, ref: True
+        self.assertIsNone(c.main_base(g, {}, [dict(push, created_at=g["created_at"])]))
+
+    def test_missing_checkout_does_not_substitute_parent_or_current_declarations(self):
+        c = rrc.Collector.__new__(rrc.Collector)
+        c.commit = lambda sha: {"local": sha in ("base", "origin/main")}
+        record = {"run_id": "1", "checkout_sha": "missing", "base_sha": "base"}
+        # Current declarations have removed both the docs input and fast tier.
+        docs = {"tools/ci/drift_fast.json": {"tests": [], "ctest_labels": []},
+                "test/ctest_script_inputs/tests/t.json": {"record": {"entry": "t.py", "inputs": []}}}
+        c._json_in_clone = mock.Mock(side_effect=lambda rev, path: docs.get(path))
+        c.reuse_record = mock.Mock(return_value={})
+        c.registrations = mock.Mock(return_value={"t": {"labels": [], "command": ["python", "t.py"]}})
+        rev = c.facts_rev(record)
+        facts = c.test_facts(record, ["t"], rev, ["docs/a.md"])
+        self.assertIsNone(rev)
+        self.assertIsNone(facts["t"]["deterministic"])
+        self.assertIsNone(facts["t"]["declared_inputs"])
+        c._json_in_clone.assert_not_called()
+        self.assertIsNotNone(rpr.docs_caused({"first_parent_delta_files": ["docs/a.md"],
+                                            "delta_cmake_named": [], "entry_test_facts": facts}, "t"))
+        # With the tested checkout available, declarations can be read normally.
+        c.commit = lambda sha: {"local": True}
+        self.assertEqual(c.facts_rev(record), "missing")
+        facts = c.test_facts(record, ["t"], "missing", ["docs/a.md"])
+        self.assertIs(facts["t"]["deterministic"], False)
+        self.assertEqual(facts["t"]["declared_inputs"], ["t.py"])
+
+    def test_record_attribution_preserves_unknown_historical_facts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            c = rrc.Collector.__new__(rrc.Collector)
+            c.out = Path(tmp)
+            c._is_ancestor = lambda sha, ref="origin/main": False
+            c.main_push_runs = lambda since: []
+            c.commit = lambda sha: None
+            c._grep_naming = mock.Mock(return_value=[])
+            c.pr_merge = lambda pr: None
+            g = group(first_parent_delta_files=["docs/a.md"], macos_conclusion="failure")
+            rpr.write_jsonl(c.out / "tests" / "g1.jsonl.gz", [{"test_id": "t", "outcome": "fail"}])
+            since = dt.datetime(2026, 9, 29, tzinfo=dt.timezone.utc)
+            c.record_attribution([g], since, since + dt.timedelta(days=1))
+            self.assertIsNone(g["facts_rev"])
+            self.assertIsNone(g["delta_cmake_named"])
+            self.assertEqual(g["entry_test_facts"]["t"]["kind"], "unknown")
+            c._grep_naming.assert_not_called()
+
     def test_first_push_run_must_contain_the_merge(self):
         c = rrc.Collector.__new__(rrc.Collector)
         c._is_ancestor = lambda sha, ref: ref == "p2"
