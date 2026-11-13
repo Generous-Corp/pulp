@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "harness/scoped_rt_process_probe.hpp"
 #include "isolated_clap_endpoint.hpp"
+#include "isolated_recovery_test_hook.hpp"
 #include <array>
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
@@ -1235,4 +1236,78 @@ TEST_CASE("Isolated CLAP graph recovery lookup races release without a torn read
     REQUIRE(rig.published() == nullptr);
     REQUIRE(state.control->stop() == IsolationCleanup::complete);
     REQUIRE(other.control->stop() == IsolationCleanup::complete);
+}
+
+namespace {
+// Installs the post-prepare recovery hook for one scope and always clears it.
+struct PreparedHook {
+    PreparedHook(detail::IsolatedRecoveryPreparedHook hook, void* context) {
+        detail::set_isolated_recovery_prepared_hook_for_test(hook, context);
+    }
+    ~PreparedHook() {
+        detail::set_isolated_recovery_prepared_hook_for_test(nullptr, nullptr);
+    }
+};
+} // namespace
+
+TEST_CASE("Isolated CLAP recovery refuses a worker that exits after prepare", "[host][isolation]") {
+    auto state = load_isolated_clap(options("state"));
+    REQUIRE(state);
+    REQUIRE(state.control->checkpoint());
+    RecoveryRig rig(std::move(state.slot));
+    REQUIRE(rig.step() == 0.0f);
+    REQUIRE(rig.step() == 0.5f);
+    REQUIRE(kill_worker(*state.control) == IsolationReason::worker_exited);
+    const auto terminal = rig.graph.published_plugin_slot(rig.node);
+    REQUIRE(terminal);
+    REQUIRE(state.control->cleanup(std::chrono::steady_clock::now() + 2s) ==
+            IsolationCleanup::complete);
+
+    // The fresh worker prepares, then exits inside the window between the
+    // unlocked prepare and the locked revalidation.
+    auto fresh = recover_isolated_clap(options("state"), *state.control);
+    REQUIRE(fresh);
+    struct Context {
+        IsolatedClapControl* control;
+        IsolationReason observed = IsolationReason::none;
+    } context{fresh.control.get()};
+    {
+        PreparedHook hook(
+            [](PluginSlot& replacement, void* raw) {
+                auto& ctx = *static_cast<Context*>(raw);
+                ctx.observed = kill_worker(*ctx.control);
+                (void)replacement;
+            },
+            &context);
+        REQUIRE(rig.graph.publish_isolated_recovery(rig.node, *terminal, std::move(fresh.slot)) ==
+                SignalGraph::SwapResult::NeedsEagerPrepare);
+    }
+    REQUIRE(context.observed == IsolationReason::worker_exited);
+    REQUIRE(rig.graph.last_swap_diagnostics().reason == LiveSwapFallbackReason::PrepareFailed);
+    REQUIRE(rig.graph.published_plugin_slot(rig.node) == terminal);
+    REQUIRE(rig.step() == 0.0f);
+    REQUIRE(fresh.control->stop() == IsolationCleanup::complete);
+
+    // Through the orchestrator the same window reports publication_refused,
+    // stops the fresh worker, and leaves the node recoverable.
+    {
+        PreparedHook hook([](PluginSlot& replacement, void*) { replacement.release(); }, nullptr);
+        const auto refused =
+            recover_isolated_graph_node(rig.graph, rig.node, options("state"), *state.control);
+        REQUIRE(refused.outcome == IsolatedNodeRecovery::publication_refused);
+        REQUIRE(refused.control == nullptr);
+    }
+    REQUIRE(rig.graph.last_swap_diagnostics().reason == LiveSwapFallbackReason::PrepareFailed);
+    REQUIRE(rig.graph.published_plugin_slot(rig.node) == terminal);
+    auto next = load_isolated_clap(options());
+    REQUIRE(next);
+    REQUIRE(next.control->stop() == IsolationCleanup::complete);
+
+    auto recovered =
+        recover_isolated_graph_node(rig.graph, rig.node, options("state"), *state.control);
+    REQUIRE(recovered);
+    REQUIRE(rig.step() == 0.0f);
+    REQUIRE(rig.step() == 0.75f);
+    rig.graph.release();
+    REQUIRE(recovered.control->stop() == IsolationCleanup::complete);
 }

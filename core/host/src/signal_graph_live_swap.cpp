@@ -26,8 +26,10 @@
 #include <pulp/runtime/log.hpp>
 #include "signal_graph_internal.hpp"
 #include "signal_graph_live_swap_detail.hpp"
+#include "isolated_recovery_test_hook.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <array>
 #include <cstdint>
 #include <span>
@@ -789,6 +791,17 @@ void SignalGraph::abort_swap_edit() {
     invalidate_live_locked_();
 }
 
+namespace {
+std::atomic<detail::IsolatedRecoveryPreparedHook> isolated_recovery_prepared_hook{nullptr};
+std::atomic<void*> isolated_recovery_prepared_context{nullptr};
+} // namespace
+
+void detail::set_isolated_recovery_prepared_hook_for_test(IsolatedRecoveryPreparedHook hook,
+                                                          void* context) noexcept {
+    isolated_recovery_prepared_context.store(context, std::memory_order_relaxed);
+    isolated_recovery_prepared_hook.store(hook, std::memory_order_release);
+}
+
 std::shared_ptr<PluginSlot> SignalGraph::published_plugin_slot(NodeId id) const {
     GraphMutationLock lock(*this);
     if (refuse_spectral_mutation_())
@@ -815,6 +828,11 @@ SignalGraph::publish_isolated_recovery(NodeId id, const PluginSlot& terminal,
         LiveSwapFallbackReason reason = LiveSwapFallbackReason::None;
         const char* message = nullptr;
     };
+    // A fresh proxy reports unloaded once its worker exited or any fault
+    // latched. Checked after prepare, under the lock, and again right before
+    // publication, so a worker lost in between is never reported as recovered.
+    const auto healthy = [](const PluginSlot& slot) { return slot.is_loaded(); };
+    constexpr const char* kUnhealthy = "replacement worker exited or faulted before publication";
     // Validated once before the worker prepare and again under the publishing
     // lock, because the graph may be released or edited while the lock is free.
     const auto validate = [&]() -> Refusal {
@@ -839,6 +857,8 @@ SignalGraph::publish_isolated_recovery(NodeId id, const PluginSlot& terminal,
         if (terminal.is_loaded())
             return {LiveSwapFallbackReason::PredicateExcluded, "isolated node is not terminal"};
         // Binds the plugin bytes (SHA-256) and descriptor, not only PluginInfo.
+        if (!healthy(*replacement))
+            return {LiveSwapFallbackReason::PrepareFailed, kUnhealthy};
         if (!same_plugin_identity(terminal.info(), replacement->info()) ||
             !same_isolated_plugin_binary(terminal, *replacement))
             return {LiveSwapFallbackReason::UntrustedIdentity,
@@ -874,6 +894,12 @@ SignalGraph::publish_isolated_recovery(NodeId id, const PluginSlot& terminal,
         GraphMutationLock lock(*this);
         return refuse(LiveSwapFallbackReason::PrepareFailed, "replacement did not prepare");
     }
+    if (!healthy(*replacement)) {
+        GraphMutationLock lock(*this);
+        return refuse(LiveSwapFallbackReason::PrepareFailed, kUnhealthy);
+    }
+    if (const auto hook = isolated_recovery_prepared_hook.load(std::memory_order_acquire))
+        hook(*replacement, isolated_recovery_prepared_context.load(std::memory_order_relaxed));
 
     struct ObserverCall {
         std::shared_ptr<PluginSlot> old_slot, new_slot;
@@ -908,12 +934,14 @@ SignalGraph::publish_isolated_recovery(NodeId id, const PluginSlot& terminal,
         // The staged entry only relaxes the reinit-free instance-identity check
         // for this node; it is cleared before the lock is released on every path.
         staged_replacements_[id] = std::move(staged);
-        const auto rollback = [&](const char* message) {
+        const auto rollback = [&](const char* message,
+                                  LiveSwapFallbackReason reason =
+                                      LiveSwapFallbackReason::PredicateExcluded) {
             n->plugin = old_slot;
             n->plugin_info = old_info;
             prepared_plugin_meta_[id] = old_meta;
             staged_replacements_.clear();
-            return refuse(LiveSwapFallbackReason::PredicateExcluded, message);
+            return refuse(reason, message);
         };
         if (!snapshot_is_plugin_reinit_free_locked_(*live, sample_rate, block_size))
             return rollback("graph is not eligible for a live swap");
@@ -922,6 +950,8 @@ SignalGraph::publish_isolated_recovery(NodeId id, const PluginSlot& terminal,
             return rollback("candidate graph did not compile");
         if (const char* refusal = adopt_live_snapshot_state(*next, *live))
             return rollback(refusal);
+        if (!healthy(*fresh))
+            return rollback(kUnhealthy, LiveSwapFallbackReason::PrepareFailed);
 
         // Same publication order as prepare_swap(): the audio thread pins either
         // the old snapshot (terminal silence) or the new one, never a torn pointer,
