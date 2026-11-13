@@ -62,6 +62,24 @@ TEST_CASE("the first request a context honours is chosen", "[native][gl-surface]
     REQUIRE_FALSE(is_software_renderer("Apple M1 Pro"));
 }
 
+TEST_CASE("a request for more samples than the pixel format has is not honoured",
+          "[native][gl-surface]") {
+    const std::vector<GlContextRequest> list{
+        {3, 3, GlProfile::core, 4},
+        {3, 3, GlProfile::core, 0},
+    };
+    // A single-sampled format (the Windows child window's) skips the sampled
+    // entry instead of reporting it honoured with no multisampling.
+    REQUIRE(first_honoured_request(list, 4, 1, GlProfile::core, 0) == 1u);
+    REQUIRE(first_honoured_request(list, 4, 1, GlProfile::core, 2) == 1u);
+    REQUIRE(first_honoured_request(list, 4, 1, GlProfile::core, 4) == 0u);
+    REQUIRE(first_honoured_request(list, 4, 1, GlProfile::core, 8) == 0u);
+    REQUIRE_FALSE(first_honoured_request({list[0]}, 4, 1, GlProfile::core, 0).has_value());
+    // The sample count does not loosen the version or profile checks.
+    REQUIRE_FALSE(first_honoured_request(list, 3, 2, GlProfile::core, 8).has_value());
+    REQUIRE_FALSE(first_honoured_request(list, 4, 1, GlProfile::compatibility, 8).has_value());
+}
+
 TEST_CASE("a windowed GL surface is not offered on macOS", "[native][gl-surface]") {
     REQUIRE(GlSurface::create() == nullptr);
     REQUIRE(GlSurface::create_offscreen(0, 16) == nullptr);

@@ -115,6 +115,10 @@ struct WglWindow final : GlSurface::Impl {
     HDC hdc = nullptr;
     HGLRC context = nullptr;
     bool class_held = false;
+    // Samples per pixel of the window's pixel format. ChoosePixelFormat only
+    // offers single-sampled formats, so this stays 0 and a request that asks
+    // for multisampling is refused rather than silently given none.
+    int window_samples = 0;
 
     ~WglWindow() override {
         destroy_window();
@@ -215,7 +219,7 @@ struct WglWindow final : GlSurface::Impl {
                 GlContextReport& out) {
         GlContextReport report = read_report(options.requests[index].profile);
         if (!first_honoured_request({options.requests[index]}, report.major, report.minor,
-                                    report.profile))
+                                    report.profile, window_samples))
             return false;
         report.request_index = index;
         context = candidate;

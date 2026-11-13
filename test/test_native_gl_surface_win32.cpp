@@ -153,6 +153,36 @@ TEST_CASE("the context is created on the client thread and honours a request",
     surface->detach();
 }
 
+TEST_CASE("a multisampled request is refused rather than given a single-sampled context",
+          "[native][gl-surface][win32]") {
+    HostWindow host;
+    GlSurfaceOptions sampled_only;
+    sampled_only.requests = {{1, 1, GlProfile::any, 4}};
+    auto refused = GlSurface::create(sampled_only);
+    REQUIRE(refused->attach(host.hwnd));
+    bool made = true;
+    std::thread first([&] { made = refused->context().make_current(); });
+    first.join();
+    REQUIRE_FALSE(made);
+    refused->detach();
+
+    GlSurfaceOptions fallback;
+    fallback.requests = {{1, 1, GlProfile::any, 4}, {1, 1, GlProfile::any, 0}};
+    auto surface = GlSurface::create(fallback);
+    REQUIRE(surface->attach(host.hwnd));
+    std::size_t index = 99;
+    std::thread second([&] {
+        GlContext& gl = surface->context();
+        if (gl.make_current()) {
+            index = gl.report().request_index;
+            gl.release_current();
+        }
+    });
+    second.join();
+    REQUIRE(index == 1u);
+    surface->detach();
+}
+
 TEST_CASE("detach runs the release handler while the child window still exists",
           "[native][gl-surface][win32]") {
     HostWindow host;

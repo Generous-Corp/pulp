@@ -59,7 +59,11 @@ struct GlContextRequest {
     int major = 3;
     int minor = 3;
     GlProfile profile = GlProfile::core;
-    /// Samples per pixel for multisampling; 0 turns it off.
+    /// Samples per pixel for multisampling; 0 turns it off. A context with
+    /// fewer samples than this does not honour the request, which then falls
+    /// through to the next entry. The Windows backend's child window has a
+    /// single-sampled pixel format, so there a request above 0 is never
+    /// honoured.
     int samples = 0;
 };
 
@@ -101,6 +105,13 @@ struct GlSurfaceOptions {
 /// choice can be checked without a GL driver.
 std::optional<std::size_t> first_honoured_request(const std::vector<GlContextRequest>& requests,
                                                   int major, int minor, GlProfile profile);
+
+/// As above, for a context whose pixel format has `samples` samples per pixel
+/// (0 when it is not multisampled): a request also needs at least its own
+/// `samples`. Pure.
+std::optional<std::size_t> first_honoured_request(const std::vector<GlContextRequest>& requests,
+                                                  int major, int minor, GlProfile profile,
+                                                  int samples);
 
 /// Whether a `GL_RENDERER` string names a software rasterizer.
 bool is_software_renderer(const std::string& renderer);
