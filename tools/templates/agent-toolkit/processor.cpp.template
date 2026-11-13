@@ -1,0 +1,44 @@
+#include "{{HEADER_NAME}}"
+
+#include <cmath>
+#include <numbers>
+
+namespace {{NAMESPACE}} {
+
+// process() is defined here rather than in the header so that editing it
+// recompiles this one file, not every target that includes the header.
+void {{CLASS_NAME}}::process(
+    pulp::audio::BufferView<float>& output,
+    const pulp::audio::BufferView<const float>& /*input*/,
+    pulp::midi::MidiBuffer& midi_in,
+    pulp::midi::MidiBuffer& /*midi_out*/,
+    const pulp::format::ProcessContext& ctx)
+{
+    for (const auto& event : midi_in) {
+        if (event.is_note_on() && event.velocity() > 0)
+            note_ = event.note();
+        else if ((event.is_note_off() || event.is_note_on()) && note_ == event.note())
+            note_.reset();
+    }
+
+    const double level = level_.get();
+    const double pitch = note_ ? static_cast<double>(*note_) + detune_.get() : 0.0;
+    const double step =
+        2.0 * std::numbers::pi * 440.0 * std::pow(2.0, (pitch - 69.0) / 12.0) / sample_rate_;
+
+    for (int frame = 0; frame < ctx.num_samples; ++frame) {
+        float sample = 0.0f;
+        if (note_) {
+            sample = static_cast<float>(level * std::sin(phase_));
+            phase_ = std::fmod(phase_ + step, 2.0 * std::numbers::pi);
+        }
+        for (std::size_t channel = 0; channel < output.num_channels(); ++channel)
+            output.channel_ptr(channel)[static_cast<std::size_t>(frame)] = sample;
+    }
+}
+
+} // namespace {{NAMESPACE}}
+
+std::unique_ptr<pulp::format::Processor> create_{{LOWER_NAME}}() {
+    return std::make_unique<{{NAMESPACE}}::{{CLASS_NAME}}>();
+}
