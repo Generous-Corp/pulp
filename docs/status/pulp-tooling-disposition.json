@@ -2232,6 +2232,14 @@
             "kind": "option"
           },
           {
+            "name": "--edge-kind",
+            "kind": "option"
+          },
+          {
+            "name": "--destination-param",
+            "kind": "option"
+          },
+          {
             "name": "--sample-rate",
             "kind": "option"
           },
