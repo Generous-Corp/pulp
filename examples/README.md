@@ -162,6 +162,7 @@ These directories prove a contract and are exercised by CI. Do not copy them as 
 | `g6-voice-bank-consumer` | Eight authored graph voices, scalar audio oracle, binding and stale refusals (**SDK project**) | `ctest -R cmake-g6-voice-bank-sdk-consumer` | `test/consumers/g6-voice-bank-consumer` |
 | `g7-latency-pdc-consumer` | Public latency reporting on a graph (**SDK project**) | Configure as an SDK project | `test/consumers/g7-latency-pdc-consumer` |
 | `spectral-frame-codec-consumer` | Spectral frame codec from an installed SDK (**SDK project**) | `ctest -R cmake-spectral-frame-codec-consumer` | `test/consumers/spectral-frame-codec-consumer` |
+| `spectral-resynthesis-consumer` | Routed analysis, stage and resynthesis with geometry, latency, tail, partition and planted-mutation checks from an installed SDK (**SDK project**) | `ctest -R cmake-spectral-resynthesis-consumer` | `test/consumers/spectral-resynthesis-consumer` |
 | `timeline-sdk-consumer` | Timeline SDK closure, cookbook and chord renderer from an installed SDK (**SDK project**) | `ctest -R cmake-timeline-sdk-consumer` | `test/consumers/timeline-sdk-consumer` |
 | `graph-agent-loop` | Bounded agent loop over the public graph API (**SDK project**) | Configure as an SDK project | `test/consumers/graph-agent-loop` |
 | `graph-agent-loop-replay` | Save, edit, and replay a prepared stereo graph with planted refusal controls (**SDK project**) | Configure as an SDK project | `test/consumers/graph-agent-loop-replay` |
