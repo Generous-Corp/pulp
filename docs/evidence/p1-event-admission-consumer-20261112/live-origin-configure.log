@@ -1,0 +1,7 @@
+-- Pulp min-OS: macOS deployment target = 13.4 (max of: skia;dawn;libcxx)
+-- Pulp macOS archive floor: 13.0 <= 13.4 (/Users/danielraffel/.pulp/sdk/1.54.0/external/skia-build/build/mac-gpu/lib/Release/libskia.a)
+-- Pulp macOS archive floor: 13.0 <= 13.4 (/Users/danielraffel/.pulp/sdk/1.54.0/external/skia-build/build/mac-gpu/lib/Release/libdawn_combined.a)
+-- Skia: found at /Users/danielraffel/.pulp/sdk/1.54.0/external/skia-build (mac)
+-- Configuring done (1.9s)
+-- Generating done (0.0s)
+-- Build files have been written to: /Volumes/Workshop/Code/agent-worktrees/pulp-p1-event-projection-20261112/build-p1-event-admission
