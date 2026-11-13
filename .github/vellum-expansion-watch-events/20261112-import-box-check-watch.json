@@ -1,18 +1,17 @@
 {
   "schema_version": 1,
   "kind": "authority-expansion-watch-change",
-  "event_id": "20261113-12148-source-contract-eject-20261113-watch",
-  "created_at": "2026-11-13T01:36:21Z",
+  "event_id": "20261112-import-box-check-watch",
+  "created_at": "2026-11-12T23:47:03Z",
   "acceptance_id": "full-design-import-render-v1-pulp-watch",
   "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
   "capability_families": [
     "design-output-and-packaging",
-    "visual-proof-harness"
+    "design-source-ingest"
   ],
-  "rationale": "The repair stabilizes a date-sensitive source-contract cadence fixture so CI remains due across UTC date boundaries. It changes no design-import, Chromium, rendering, packaging, or authority ownership; the event is watch-only.",
+  "rationale": "layout_parity.py gains a per-node boxes listing in its JSON report and tests for it. It is a development-time geometry checker; no design-import, Chromium, rendering, or packaging authority moves.",
   "tests": [
-    "ctest --test-dir build -R pulp-test-audio-file",
-    "python3 tools/import-validation/test_source_contracts.py",
+    "python3 test/test_layout_parity.py",
     "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
     "vellum-expansion-watch"
   ],

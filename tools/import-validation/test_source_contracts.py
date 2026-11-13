@@ -401,15 +401,17 @@ class SourceContractsTest(unittest.TestCase):
 
     def test_due_or_overdue_rechecks_never_fail_strict_and_annotate_on_actions(self) -> None:
         registry = _load_registry()
-        # Keep the Figma fixture due, rather than overdue, regardless of the day
-        # on which CI runs this test.  The checker uses the process date.
-        figma_verified = (dt.date.today() - dt.timedelta(days=2)).isoformat()
-        for source, verified in (("stitch", "2020-01-01"), ("figma", figma_verified)):
+        # The CLI checks against the real clock (date.today()), so the "due soon" entry must be
+        # relative to today: a fixed date went overdue once the clock passed it (CI, 2026-11-13).
+        # Due in one day keeps it a warning rather than overdue on any day this runs. Its
+        # verification_note names the date, so the evidence rule still accepts it.
+        due_soon = (dt.date.today() - dt.timedelta(days=2)).isoformat()
+        for source, verified in (("stitch", "2020-01-01"), ("figma", due_soon)):
             entry = _contract(registry, source)
             entry["recheck_interval_days"] = 3
             entry["last_verified"] = verified
             if source == "figma":
-                entry["verification_note"] = f"{verified}: synthetic cadence fixture"
+                entry["verification_note"] = f"Recheck pinned to {verified} for the cadence annotation test."
         with tempfile.TemporaryDirectory() as td:
             registry_path = _write_registry(Path(td), registry)
             cmd = [
