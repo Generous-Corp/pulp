@@ -65,6 +65,15 @@ make_control_signal_graph_executor(ControlSignalGraphAuthorityResolver resolve) 
                 detail.addMember("diagnostic", choc::json::parse(host::graph_patch_diagnostic_json(
                                                    result.diagnostic)));
                 detail.addMember("topology_result", static_cast<int>(result.topology_result));
+                // A stale base is not a bad request: the caller must refresh
+                // its generation from this receipt's detail and retry.
+                if (result.code == host::GraphFileReloadCode::StaleBase)
+                    return {.terminal_state = ControlReceiptState::Failed,
+                            .result = {.result_code = ControlResultCode::StateConflict,
+                                       .retry = ControlRetryClassification::AfterRefresh,
+                                       .explanation = "graph generation is stale; refresh the "
+                                                      "generation from detail.generation and retry",
+                                       .detail_json = choc::json::toString(detail, false)}};
                 if (!result)
                     return {
                         .terminal_state = ControlReceiptState::Failed,

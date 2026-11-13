@@ -6177,7 +6177,7 @@
           "path": "inspect/include/pulp/inspect/control_registry_digest.inc",
           "needles": [
             "PULP_CONTROL_REGISTRY_DIGEST_V1",
-            "f8a5ca216facaddc321b2e5ae55a3ac98a02bfeb25181983e46522a313ed4246"
+            "02929f4004e5a7234fad4132a503fdaaf2dcd6196a20f3dca0a3351b826d6954"
           ]
         }
       ],
