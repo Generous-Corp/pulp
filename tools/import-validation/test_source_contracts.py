@@ -24,6 +24,8 @@ SPEC.loader.exec_module(checker)
 ROOT = checker.REPO_ROOT
 REGISTRY_PATH = checker.DEFAULT_REGISTRY
 TODAY = dt.date(2026, 8, 12)
+# Subprocess runs of the checker pin the clock so date literals in a test never expire.
+FIXED_TODAY = "2026-11-12"
 
 
 def _load_registry() -> dict:
@@ -399,6 +401,30 @@ class SourceContractsTest(unittest.TestCase):
         checker._check_cadence(wide, entry, dt.date(2026, 10, 27), warn_days=14)
         self.assertEqual([f.code for f in wide], ["source-contract-recheck-due"])
 
+    def test_subprocess_checker_runs_pin_the_clock(self) -> None:
+        # Poka-yoke: every checker subprocess command must carry --today.
+        src = Path(__file__).read_text(encoding="utf-8")
+        launches = src.count("str(CHECKER_PATH),\n")
+        pinned = src.count('str(CHECKER_PATH),\n                "--today",')
+        pinned += src.count('str(CHECKER_PATH),\n            "--today",')
+        self.assertEqual(launches, pinned)
+
+    def test_today_override_is_deterministic_regardless_of_real_clock(self) -> None:
+        registry = _load_registry()
+        entry = _contract(registry, "figma")
+        entry["recheck_interval_days"] = 3
+        entry["last_verified"] = "2026-11-09"
+        with tempfile.TemporaryDirectory() as td:
+            path = _write_registry(Path(td), registry)
+            def run(today: str) -> str:
+                return subprocess.run(
+                    [sys.executable, str(CHECKER_PATH), "--root", str(ROOT),
+                     "--registry", str(path), "--today", today],
+                    check=False, capture_output=True, text=True, encoding="utf-8",
+                ).stdout
+            self.assertIn("source-contract-recheck-due figma", run("2026-11-12"))
+            self.assertIn("stale-source-contract figma", run("2027-11-12"))
+
     def test_due_or_overdue_rechecks_never_fail_strict_and_annotate_on_actions(self) -> None:
         registry = _load_registry()
         for source, verified in (("stitch", "2020-01-01"), ("figma", "2026-11-09")):
@@ -410,6 +436,8 @@ class SourceContractsTest(unittest.TestCase):
             cmd = [
                 sys.executable,
                 str(CHECKER_PATH),
+                "--today",
+                FIXED_TODAY,
                 "--root",
                 str(ROOT),
                 "--registry",
@@ -472,6 +500,8 @@ class SourceContractsTest(unittest.TestCase):
             base_cmd = [
                 sys.executable,
                 str(CHECKER_PATH),
+                "--today",
+                FIXED_TODAY,
                 "--root",
                 str(ROOT),
                 "--registry",
@@ -492,6 +522,8 @@ class SourceContractsTest(unittest.TestCase):
             cmd = [
                 sys.executable,
                 str(CHECKER_PATH),
+                "--today",
+                FIXED_TODAY,
                 "--root",
                 str(ROOT),
                 "--registry",
@@ -512,6 +544,8 @@ class SourceContractsTest(unittest.TestCase):
             cmd = [
                 sys.executable,
                 str(CHECKER_PATH),
+                "--today",
+                FIXED_TODAY,
                 "--root",
                 str(ROOT),
                 "--registry",
@@ -528,6 +562,8 @@ class SourceContractsTest(unittest.TestCase):
         cmd = [
             sys.executable,
             str(CHECKER_PATH),
+            "--today",
+            FIXED_TODAY,
             "--root",
             str(ROOT),
             "--registry",
