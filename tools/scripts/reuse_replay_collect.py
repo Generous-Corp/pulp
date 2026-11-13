@@ -672,10 +672,15 @@ class Collector:
                                        f"?per_page={per_page}&page={page}")
                 except urllib.error.HTTPError:
                     return None
-                if not isinstance(doc, dict) or doc.get("status", "ahead" if page > 1 else None) != "ahead":
+                # Every page, not just the first, must say `ahead` and carry a
+                # `files` list: a malformed later page is unreadable, never an
+                # empty last page that would end a truncated delta early.
+                if not isinstance(doc, dict) or doc.get("status") != "ahead":
                     return None
-                rows = doc.get("files", [] if page > 1 else None)
+                rows = doc.get("files")
                 if not isinstance(rows, list) or (page == 1 and not rows):
+                    return None
+                if not all(isinstance(row, dict) for row in rows):
                     return None
                 listed += len(rows)
                 if listed >= cap:

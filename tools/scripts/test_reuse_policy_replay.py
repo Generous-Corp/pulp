@@ -838,6 +838,17 @@ class EntryDeltaCollectTests(unittest.TestCase):
         c.gh.json.side_effect = self.paged({1: files})
         self.assertEqual(c.entry_delta("b", "m"), files)
 
+    def test_a_malformed_later_page_is_unreadable(self):
+        # Page 1 is a full page of docs; page 2 is malformed. Treating it as
+        # an empty last page would end a truncated delta as docs-only.
+        page1 = {"status": "ahead", "files": [{"filename": f"docs/{i:03}.md"} for i in range(100)]}
+        for bad in ({}, {"files": []}, {"status": "ahead"}, {"status": "ahead", "files": None},
+                    {"status": "ahead", "files": {}}, {"status": "behind", "files": []},
+                    {"status": "ahead", "files": ["core/a.cpp"]}, [], None):
+            c = self.collector()
+            c.gh.json.side_effect = lambda path, bad=bad: bad if "page=2" in path else page1
+            self.assertIsNone(c.entry_delta("b", "m"), bad)
+
     def test_a_group_record_carries_its_macos_check_and_entry_delta(self):
         c = rrc.Collector.__new__(rrc.Collector)
         jobs = [{"id": 5, "name": "macos", "runner_name": "gate-vm-1", "conclusion": "success",
