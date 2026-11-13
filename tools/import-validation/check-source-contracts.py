@@ -688,10 +688,19 @@ def main(argv: list[str] | None = None) -> int:
         help="report a recheck this many days before it falls due (default: %(default)s)",
     )
     parser.add_argument("--format", choices=("text", "markdown"), default="text")
+    parser.add_argument(
+        "--today",
+        type=_dt.date.fromisoformat,
+        default=None,
+        help="evaluate recheck cadence as of this ISO date (default: the current date)",
+    )
     args = parser.parse_args(argv)
 
     findings = compute_findings(
-        root=args.root, registry_path=args.registry, warn_days=max(args.warn_days, 0)
+        root=args.root,
+        registry_path=args.registry,
+        warn_days=max(args.warn_days, 0),
+        today=args.today,
     )
     sys.stdout.write(render_report(findings, fmt=args.format))
     if os.environ.get("GITHUB_ACTIONS") == "true":

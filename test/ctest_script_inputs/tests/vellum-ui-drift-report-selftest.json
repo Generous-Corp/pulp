@@ -3,6 +3,7 @@
  "record": {
   "entry": "tools/scripts/test_vellum_ui_drift_report.py",
   "inputs": [
+   ".github/vellum-export-receipt/unit-of.json",
    ".github/workflows/vellum-freeze-check.yml",
    "tools/scripts/test_vellum_ui_drift_report.py"
   ],
