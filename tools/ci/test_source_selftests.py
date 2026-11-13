@@ -21,6 +21,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -1372,6 +1373,81 @@ class DefaultWorkersTests(unittest.TestCase):
         self.assertEqual(lane.default_workers({}, cpus=10), 2)
         self.assertEqual(lane.default_workers({}, cpus=64), 16)
         self.assertEqual(lane.default_workers({"PULP_BUILD_JOBS": "x"}, cpus=64), 16)
+
+
+class ImpactScopeTests(unittest.TestCase):
+    """--impact-scope narrows only a docs-only diff, and fails closed."""
+
+    REAL = lane.REPO_ROOT
+
+    def entries(self):
+        return lane.load_manifest(self.REAL / "tools" / "ci" / "source_selftests.json")
+
+    def test_code_diff_runs_every_entry(self):
+        # Positive control: a code change keeps the whole manifest.
+        entries = self.entries()
+        for files in (["core/view/src/widgets.cpp"],
+                      ["tools/scripts/classify_changes.py", "docs/guides/local-ci.md"],
+                      [".github/workflows/build.yml"]):
+            kept, change_class = lane.impact_scope(entries, "unused", self.REAL, files=files)
+            self.assertNotEqual(change_class, "docs-only", files)
+            self.assertEqual(len(kept), len(entries), files)
+
+    def test_docs_only_diff_runs_a_subset_that_includes_its_readers(self):
+        entries = self.entries()
+        kept, change_class = lane.impact_scope(
+            entries, "unused", self.REAL,
+            files=["docs/reports/a9-edit-replay-evidence-20261112.md"])
+        self.assertEqual(change_class, "docs-only")
+        self.assertLess(len(kept), len(entries))
+        names = {e["name"] for e in kept}
+        # framework_neutrality_check walks docs/: it can read the change.
+        self.assertIn("framework-neutrality-selftest", names)
+
+    def test_entry_naming_a_changed_doc_is_selected(self):
+        entries = self.entries()
+        kept, _ = lane.impact_scope(entries, "unused", self.REAL, files=["planning"])
+        self.assertIn("planning-gitlink-guard-selftest", {e["name"] for e in kept})
+
+    def test_unreadable_diff_runs_every_entry(self):
+        entries = self.entries()
+        with mock.patch.object(lane, "diff_names", return_value=None):
+            kept, change_class = lane.impact_scope(entries, "bogus", self.REAL)
+        self.assertEqual(change_class, "code:unknown")
+        self.assertEqual(len(kept), len(entries))
+
+    def test_classifier_error_runs_every_entry(self):
+        entries = self.entries()
+        with mock.patch.object(lane, "_load_classifier", side_effect=RuntimeError("boom")):
+            with contextlib.redirect_stdout(io.StringIO()):
+                kept, change_class = lane.impact_scope(
+                    entries, "unused", self.REAL, files=["docs/a.md"])
+        self.assertEqual(change_class, "code:unknown")
+        self.assertEqual(len(kept), len(entries))
+
+    def test_whole_tree_scan_that_mentions_docs_is_selected(self):
+        script = REPO / "tools" / "scripts" / "test_scan_docs.py"
+        script.write_text("import pathlib\nfor p in pathlib.Path('.').rglob('*.md'):\n    pass\n", encoding="utf-8")
+        other = REPO / "tools" / "scripts" / "test_scan_code.py"
+        other.write_text("import pathlib\nfor p in pathlib.Path('.').rglob('*.cpp'):\n    pass\n", encoding="utf-8")
+        entries = [{"name": "scan-docs", "argv": ["{repo}/tools/scripts/test_scan_docs.py"]},
+                   {"name": "scan-code", "argv": ["{repo}/tools/scripts/test_scan_code.py"]}]
+        kept = lane.select_for_docs_only(entries, ["docs/new.md"], REPO)
+        self.assertEqual([e["name"] for e in kept], ["scan-docs"])
+
+    def test_cli_rejects_impact_scope_with_another_selector(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            lane.main(["run", "--impact-scope", "HEAD^1", "--changed-from", "origin/main"])
+
+    def test_lane_workflow_passes_the_impact_scope_to_both_parts(self):
+        text = lane.LANE_WORKFLOW.read_text(encoding="utf-8")
+        # Pull requests only: a merge group lands every entry ahead of it.
+        self.assertEqual(
+            text.count("IMPACT_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}"), 2)
+        self.assertNotIn("merge_group.base_sha || github.event_name == 'pull_request'", text)
+        for needle in ("--part shared ${IMPACT_BASE:+--impact-scope",
+                       "--shard ${{ matrix.shard }}/2 ${IMPACT_BASE:+--impact-scope"):
+            self.assertIn(needle, text)
 
 
 if __name__ == "__main__":

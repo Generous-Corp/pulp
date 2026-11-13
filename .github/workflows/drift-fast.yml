@@ -22,6 +22,15 @@ name: Drift fast
 # `paths:`/`paths-ignore:` filter on the trigger and no job-level `if:`.
 # `tools/ci/drift_fast.py check` (drift-fast-selftest) enforces both. Step-level
 # `if:` is fine; it skips a step, never the job. See docs/guides/local-ci.md.
+#
+# DOCS FAST PATH (pull requests only): the `scope` step classifies the pull
+# request's diff with tools/scripts/classify_changes.py. For a docs-only diff
+# whose readers all run from source (`tools/ci/drift_fast.py scope`,
+# mode=source) the job skips the bootstrap and configure and runs only those
+# tests; every other diff, and any doubt, takes the full lane exactly as
+# before. A merge group always takes the full lane: a group lands every entry
+# queued ahead of it, so its own entry's diff does not say what it lands (see
+# tools/scripts/resolve_classify_base.py). The job reports either way.
 
 on:
   pull_request:
@@ -52,6 +61,8 @@ jobs:
     timeout-minutes: 40
     env:
       PULP_BUILD_DIR: build-linux
+      # The pull request's own change: the merge ref's first parent.
+      IMPACT_BASE: HEAD^1
     steps:
       # pull_request checks out refs/pull/N/merge and merge_group checks out
       # the group's own commit: both are the tip combined with the head, which
@@ -81,7 +92,17 @@ jobs:
         shell: bash
         run: python3 tools/scripts/hydrate_gpu_provenance_commits.py
 
+      # mode=source only for a docs-only pull request whose readers all run
+      # from source; anything else, including the empty output of a merge
+      # group (this step does not run there), is the full lane.
+      - name: Scope
+        id: scope
+        if: github.event_name == 'pull_request'
+        run: |
+          python3 tools/ci/drift_fast.py scope --base "$IMPACT_BASE"
+
       - name: Install Linux dependencies
+        if: steps.scope.outputs.mode != 'source'
         uses: ./.github/actions/install-linux-build-deps
 
       # Restore only: main's Linux build leg publishes this cache, and this job
@@ -90,6 +111,7 @@ jobs:
       # on Linux, so that directory must be restored or every run re-clones
       # three.js and the SDK submodules cold. It never saves.
       - name: Restore FetchContent sources
+        if: steps.scope.outputs.mode != 'source'
         uses: actions/cache/restore@v6
         with:
           path: |
@@ -100,24 +122,41 @@ jobs:
             ${{ runner.os }}-linux-fetchcontent-
 
       - name: Bootstrap repository dependencies
+        if: steps.scope.outputs.mode != 'source'
         timeout-minutes: 20
         run: ./setup.sh --ci --deps-only
 
       # The gate's own configure (Release, examples off, GPU on), minus the
       # build. The GPU stays on so the registered test graph is the gate's.
       - name: Configure (no build)
+        if: steps.scope.outputs.mode != 'source'
         run: |
           cmake -S . -B "$PULP_BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF
 
       - name: Run drift checks
+        if: steps.scope.outputs.mode != 'source'
         run: |
           python3 tools/ci/drift_fast.py run --build-dir "$PULP_BUILD_DIR"
+
+      - name: Set up Python (docs fast path)
+        if: steps.scope.outputs.mode == 'source'
+        uses: actions/setup-python@v7.1.0
+        with:
+          python-version: "3.12"
+
+      # The full lane runs on the runner image's system Python; this pinned
+      # interpreter needs PyYAML installed (tools-registry-check reads YAML).
+      - name: Run docs-only drift checks from source
+        if: steps.scope.outputs.mode == 'source'
+        run: |
+          tools/ci/net-retry.sh python3 -m pip install --quiet 'PyYAML==6.0.2'
+          python3 tools/ci/drift_fast.py run-source --base "$IMPACT_BASE"
 
       # script-test-inputs --check writes the expected fragment of each drifted
       # entry to $RUNNER_TEMP/script-inputs-expected; a repair copies them into
       # test/ctest_script_inputs/ with no configure. Never blocks the check.
       - name: Upload expected script-inputs fragments
-        if: failure()
+        if: failure() && steps.scope.outputs.mode != 'source'
         continue-on-error: true
         uses: actions/upload-artifact@v7.0.2
         with:

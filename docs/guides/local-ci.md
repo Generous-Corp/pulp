@@ -3402,6 +3402,60 @@ registration or when ctest ran a different number of tests than were selected.
 lane) pins the selection and verdict logic and holds the manifest and workflow
 to each other.
 
+### Docs fast path
+
+On a pull request the job classifies the diff against the merge ref's first
+parent with `tools/scripts/classify_changes.py`'s `impact_class`. A merge
+group always takes the full lane: it lands every entry queued ahead of it, so
+its own entry's diff does not say what it lands (the docs-only entry at the end
+of a batch is the case `tools/scripts/resolve_classify_base.py` exists for). For anything other than
+`docs-only`, or on any doubt, `tools/ci/drift_fast.py scope` prints
+`mode=full` and every step above runs unchanged. For a docs-only diff it
+resolves the selection from the CMake manifests without a configure and keeps
+the tests that can read a changed file (`source_selftests.select_for_docs_only`:
+the script or a declared input is the changed file, its source names the path
+or walks a directory containing it, or it scans the tree and mentions
+documentation). When every kept test runs from source on this runner, the mode
+is `source`: the job skips the dependency install, bootstrap and configure and
+runs just those tests with `drift_fast.py run-source`. The required context
+still reports.
+
+A kept test that needs a configure forces `mode=full`, unless the diff is
+prose (everything under `docs/` outside `docs/status/`) and the test is listed
+in `docs_only.prose_not_readers` in `tools/ci/drift_fast.json` with the reason
+it cannot observe prose. Those reasons are reviewed claims, not heuristics;
+the drift-fast selftest's negative control proves prose falls back to the
+full lane without them. `drift_fast.py check` fails if the full run is not
+gated `steps.scope.outputs.mode != 'source'`, so an empty or failed scope
+always runs the full lane. Pushes to main and the nightly schedules run every
+test, which is the backstop for anything the docs fast path skipped.
+
+## Impact-scoped jobs
+
+One classifier, `tools/scripts/classify_changes.py`, names the impact class of
+a diff: `docs-only` (Markdown, `docs/`, the `planning` gitlink; never a
+`FORCE_BUILD_PREFIXES` input or the installed-SDK capability proof),
+`ci-only` (`.github/`, `.githooks/`, `.shipyard*` plus docs), or
+`code:<surfaces>`; an unreadable or empty diff is `code:unknown`. Jobs consume
+it with the cheapest mechanism that keeps required checks reporting:
+
+| Job | Required | docs-only pull request | Mechanism |
+|-----|----------|---------------------|-----------|
+| `macos`, `linux`, `windows` (`build.yml`) | `macos` | skip the native build (unchanged) | `classify` job + job `if:` |
+| `CodeQL (advanced)` | no | does not run | `pull_request.paths-ignore` = `DOCS_PATHS_IGNORE`; main pushes and the schedule still analyze |
+| `drift-fast` | yes | readers run from source, no configure | `drift_fast.py scope` + step `if:` |
+| `Enforce version & skill sync` | yes | every gate script still runs; source selftests run only the entries that can read the change | `source_selftests.py run --impact-scope` |
+
+Merge groups are never scoped: a group lands every entry queued ahead of it, so
+a docs-only entry at the end of a batch says nothing about what the group
+lands. Every other class selects exactly what it selected before. A workflow that is
+not a required check may use `paths-ignore`; a required one may not, because a
+required context that never reports holds the pull request on "Expected".
+`test_classify_changes.py`, `tools/ci/test_drift_fast.py` and
+`tools/ci/test_source_selftests.py` hold the table of path sets to selected
+jobs, including the positive controls (a code diff still runs CodeQL, the full
+drift lane and every selftest).
+
 Adding a test: append it to `tools/ci/drift_fast.json` with a `why`. It must
 pass from a configure alone; a test that needs a built binary does not belong
 here. A red `drift-fast` should mean the same tree fails `macos` too. When a
