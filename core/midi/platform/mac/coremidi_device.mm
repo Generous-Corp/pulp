@@ -1,4 +1,5 @@
 #include <pulp/midi/device.hpp>
+#include <pulp/midi/sysex_send_gate.hpp>
 #include <pulp/midi/ump.hpp>
 #include <pulp/midi/ump_conversion.hpp>
 #include <pulp/midi/ump_sysex7_reassembler.hpp>
@@ -11,8 +12,11 @@
 #endif
 #include <dispatch/dispatch.h>
 
+#include <atomic>
+#include <cstdint>
 #include <memory>
 #include <mutex>
+#include <vector>
 
 #include "coremidi_shared_client.h"
 
@@ -358,6 +362,34 @@ public:
         return is_open_ && endpoint_is_current(dest_, dest_unique_id_);
     }
 
+    // MIDISendSysex hands the message to CoreMIDI asynchronously and reads the
+    // bytes until its completion proc runs, so the request and its copy of the
+    // data live on the heap and the completion proc frees them. The in-flight
+    // count is shared with each job so it outlives this port.
+    bool send_sysex(std::span<const std::uint8_t> bytes) override {
+        if (!is_open_ || !dest_ || !endpoint_is_current(dest_, dest_unique_id_))
+            return false;
+        if (!is_valid_sysex_message(bytes))
+            return false;
+        if (!gate_->try_acquire())
+            return false;
+        auto* job = new SysexJob;
+        job->data.assign(bytes.begin(), bytes.end());
+        job->gate = gate_;
+        job->request.destination = dest_;
+        job->request.data = job->data.data();
+        job->request.bytesToSend = static_cast<UInt32>(job->data.size());
+        job->request.complete = false;
+        job->request.completionProc = &CoreMidiOutput::sysex_done;
+        job->request.completionRefCon = job;
+        if (MIDISendSysex(&job->request) != noErr) {
+            gate_->release();
+            delete job;
+            return false;
+        }
+        return true;
+    }
+
     void send(const MidiEvent& event) override {
         if (!is_open_ || !dest_ || !endpoint_is_current(dest_, dest_unique_id_))
             return;
@@ -376,11 +408,27 @@ public:
         MIDISendEventList(port_, dest_, &list);
     }
 
-private:
+  private:
+    // More than this many messages waiting in CoreMIDI is a runaway caller.
+    static constexpr int kMaxSysexInFlight = 16;
+
+    struct SysexJob {
+        MIDISysexSendRequest request{};
+        std::vector<std::uint8_t> data;
+        std::shared_ptr<SysexSendGate> gate;
+    };
+
+    static void sysex_done(MIDISysexSendRequest* request) {
+        auto* job = static_cast<SysexJob*>(request->completionRefCon);
+        job->gate->release();
+        delete job;
+    }
+
     MIDIPortRef port_ = 0;
     MIDIEndpointRef dest_ = 0;
     SInt32 dest_unique_id_ = 0;
     bool is_open_ = false;
+    std::shared_ptr<SysexSendGate> gate_ = std::make_shared<SysexSendGate>(kMaxSysexInFlight);
 };
 
 class CoreMidiSystem : public MidiSystem {

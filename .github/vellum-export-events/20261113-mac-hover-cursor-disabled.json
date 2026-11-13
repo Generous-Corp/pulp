@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "event_id": "20261113-mac-hover-cursor-disabled",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-13T03:30:00Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/view/include/pulp/view/hover_cursor.hpp",
+    "core/view/platform/mac/window_host_mac.mm",
+    "core/view/src/hover_cursor.cpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "The macOS host resolves its hover cursor through a new hover_cursor_under, built on hover_cursor_at, so a disabled view shows the default cursor and the host logic is testable without a window. Vellum carries the same behaviour in its own copy of the host, with the logic inline, so nothing flows back through the export."
+}

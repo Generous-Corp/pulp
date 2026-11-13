@@ -28,6 +28,12 @@ namespace pulp::view {
 /// pointer handlers, factored out so the frame path can re-run it.
 View::CursorStyle hover_cursor_at(View& root, Point p);
 
+/// What a platform host publishes for a pointer at `p`: `hover_cursor_at`'s
+/// answer when anything is painted there (a disabled view included, which
+/// answers `default_`), or `nullopt` when nothing is, so the host leaves the
+/// current cursor alone.
+std::optional<View::CursorStyle> hover_cursor_under(View& root, Point p);
+
 /// Remembers the pointer position and the style last handed to the platform.
 ///
 /// A host calls `set_pointer` / `clear_pointer` from its enter/move/exit

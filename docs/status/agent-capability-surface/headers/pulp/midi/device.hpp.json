@@ -1,9 +1,9 @@
 {
   "domain": "midi",
   "source": "core/midi/include/pulp/midi/device.hpp",
-  "fingerprint": "sha256:672b101b3e52fa6b2c4ad4830ca0255b241ecdb13017092c57391c29ffa1b3d6",
+  "fingerprint": "sha256:afd1eb7e4f6e8cad2090339cf5cbc492cf77f90179018bf3f6b69fd9221e6300",
   "include": "pulp/midi/device.hpp",
   "disposition": "infrastructure",
   "capability_keys": [],
-  "rationale": "MIDI port interfaces (MidiInput, MidiOutput, MidiSystem) and port identity (MidiPortInfo, resolve_port); platform device I/O, not a generator-facing capability. Edited to add port identity fields."
+  "rationale": "MIDI port interfaces (MidiInput, MidiOutput, MidiSystem), the SysEx framing check, and port identity (MidiPortInfo, resolve_port); platform device I/O, not a generator-facing capability."
 }

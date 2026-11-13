@@ -1,6 +1,9 @@
 #pragma once
 
 #include <pulp/midi/message.hpp>
+#include <cstddef>
+#include <cstdint>
+#include <span>
 #include <string>
 #include <vector>
 #include <functional>
@@ -74,6 +77,26 @@ public:
     virtual void set_sysex_callback(MidiSysexCallback /*cb*/) {}
 };
 
+/// Largest System Exclusive message `MidiOutput::send_sysex` accepts, framing
+/// bytes included. Real devices use a few kilobytes at most; the bound keeps a
+/// bad caller from queueing an unbounded copy.
+inline constexpr std::size_t kMaxSysexSendBytes = 1u << 20;
+
+/// True when `bytes` is one complete System Exclusive message: it starts with
+/// 0xF0, ends with 0xF7, and every byte between them is a data byte (< 0x80).
+/// An embedded status byte would end the message early on the wire, so it is
+/// rejected rather than sent. Pure, allocation-free, safe on any thread.
+inline bool is_valid_sysex_message(std::span<const std::uint8_t> bytes) noexcept {
+    if (bytes.size() < 2 || bytes.size() > kMaxSysexSendBytes)
+        return false;
+    if (bytes.front() != 0xF0 || bytes.back() != 0xF7)
+        return false;
+    for (std::size_t i = 1; i + 1 < bytes.size(); ++i)
+        if (bytes[i] & 0x80)
+            return false;
+    return true;
+}
+
 // MIDI output port
 class MidiOutput {
 public:
@@ -82,6 +105,26 @@ public:
     virtual void close() = 0;
     virtual bool is_open() const = 0;
     virtual void send(const MidiEvent& event) = 0;
+
+    /// Send one System Exclusive message (0xF0 ... 0xF7, see
+    /// `is_valid_sysex_message`). Returns true when the backend accepted it
+    /// for delivery; delivery itself is asynchronous and its completion is not
+    /// reported. Returns false when the message is malformed or too large, the
+    /// port is not open, or the backend has no SysEx output, which is the
+    /// default so existing backends compile unchanged.
+    ///
+    /// CoreMIDI delivers a message at MIDI wire speed, about 3 KB/s even to an
+    /// in-process destination (3000 bytes took 0.93 s when measured on macOS),
+    /// so a large dump takes seconds to finish. At most 16 messages may be
+    /// waiting at once; the next send returns false until one completes.
+    ///
+    /// Not real-time safe: it validates, copies the message and may take a
+    /// lock. Call it from a UI, control or worker thread, never from an audio
+    /// callback. The bytes are copied before this returns, so the caller may
+    /// reuse its buffer at once.
+    virtual bool send_sysex(std::span<const std::uint8_t> /*bytes*/) {
+        return false;
+    }
 };
 
 // MIDI system — enumerates ports and creates I/O instances
