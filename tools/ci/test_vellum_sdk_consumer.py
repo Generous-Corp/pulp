@@ -37,6 +37,47 @@ class PickRunTests(unittest.TestCase):
             vsc.pick_run([_run(1, conclusion="failure")])
 
 
+class MinimumCommitTests(unittest.TestCase):
+    """A run older than the required Vellum commit is refused, not downloaded."""
+
+    def setUp(self):
+        self.saved = vsc._api
+        self.paths = []
+
+    def tearDown(self):
+        vsc._api = self.saved
+
+    def _resolve(self, compare_status):
+        import argparse
+        import os
+
+        def fake(path, token, raw=False):
+            self.paths.append(path)
+            if path.startswith(f"repos/{vsc.VELLUM_REPO}/actions/runs?"):
+                return {"workflow_runs": [_run(1)]}
+            if path.startswith(f"repos/{vsc.VELLUM_REPO}/compare/"):
+                return {"status": compare_status}
+            raise vsc.ResolveError(f"unexpected {path}")
+
+        vsc._api = fake
+        os.environ["GH_TOKEN"] = "t"
+        args = argparse.Namespace(out_dir=tempfile.mkdtemp(), run_id=None, previous_receipt=None,
+                                  skip_if_unchanged=None, github_output=None, min_vellum_sha="abc")
+        return vsc.resolve(args)
+
+    def test_run_behind_the_minimum_is_refused_before_any_download(self):
+        self.assertEqual(self._resolve("behind"), vsc.INCONCLUSIVE)
+        self.assertFalse(any("artifacts" in p for p in self.paths))
+        self.assertTrue(any(p.endswith("compare/abc...sha1") for p in self.paths))
+
+    def test_run_at_or_ahead_of_the_minimum_goes_on_to_download(self):
+        for status in ("identical", "ahead"):
+            self.paths.clear()
+            # The fake has no artifact listing, so the download step fails loudly.
+            self.assertEqual(self._resolve(status), vsc.INCONCLUSIVE)
+            self.assertTrue(any("runs/1/artifacts" in p for p in self.paths), status)
+
+
 class PickArtifactTests(unittest.TestCase):
     def test_exactly_one_live_evidence_artifact(self):
         art = {"id": 9, "name": vsc.EVIDENCE_ARTIFACT, "expired": False}

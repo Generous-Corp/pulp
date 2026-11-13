@@ -1029,6 +1029,16 @@ endif()
 if(TARGET pulp-rmlui-native AND PULP_BUILD_TESTS)
     add_subdirectory(integrations/rmlui-native/tests)
 endif()
+# Test directories the optional integration packages registered
+# (integrations/CMakeLists.txt), added now that Catch2 exists.
+get_property(_pulp_integration_test_dirs GLOBAL PROPERTY PULP_INTEGRATION_TEST_DIRS)
+if(PULP_BUILD_TESTS)
+    foreach(_dir IN LISTS _pulp_integration_test_dirs)
+        get_filename_component(_package "${_dir}" DIRECTORY)
+        get_filename_component(_package "${_package}" NAME)
+        add_subdirectory("${_dir}" "${CMAKE_BINARY_DIR}/integrations/${_package}-tests")
+    endforeach()
+endif()
 
 # ── CPU-only GPU-probe contract model (desktop tooling) ───────────────────
 # MCP remains available in GPU-disabled/package-stripped configurations, so

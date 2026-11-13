@@ -36,6 +36,10 @@ use without hard-coding macOS, Windows, Linux, iOS, or Web behavior.
 
 `pulp::native` (`integrations/pulp-native`, macOS) gives an editor that brings its own renderer a native surface: a child `NSView` backed by a `CAMetalLayer` (`metal_surface.hpp`), a display-linked frame pump (`frame_pump.hpp`) and pointer and key input (`input.hpp`). It links Pulp's platform layer and system frameworks only, with no view, canvas, render or GPU-runtime target and no Skia, Dawn, Vellum or RmlUi.
 
+## pulp_vellum
+
+`pulp::vellum` (`integrations/pulp-vellum`, optional, off unless `PULP_ENABLE_PULP_VELLUM=ON`) presents Pulp's editor-host ports in Vellum's value interfaces, so a Vellum widget binds to a processor's parameters without either side naming the other's types. `ParamPortModel` is a `vellum::value::ParamModel` over a `format::ParamPort`: parameters resolve by name or decimal id (or a plug-in's own resolver), gestures nest and reach the port once, a host change a subscriber echoes back is not written as an edit, and restored state replays through the port's listener. `mapping.hpp` holds the pure value mapping (`to_normalized`, `to_plain`, text parse and format) over Pulp's own `ParamRange`, callable without a model. `VisualPortFeed` presents a `format::VisualPort` as a `vellum::value::ValueFeed`. Modulation readout takes a reader the caller supplies over `StateStore::displayed_modulation`. It needs an installed Vellum SDK on `CMAKE_PREFIX_PATH`, nothing in `core/` links it (`integrations_boundary_check.py`), and its tests run in the Vellum SDK consumer workflow against the newest green Vellum main SDK.
+
 ## simd
 
 Portable block kernels for DSP: elementwise buffer arithmetic (`add`, `sub`,
