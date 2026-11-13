@@ -123,6 +123,25 @@ class InputTests(unittest.TestCase):
                 with self.assertRaises(ct.InputError):
                     ct.load_inputs(bad)
 
+    def test_a_non_string_row_path_exits_2_without_a_traceback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "b.log"
+            log.write_text(HEADER_LOG, encoding="utf-8")
+            out = f"{tmp}/r.json"
+            for bad_path in (None, 3, ""):
+                data = json.loads(json.dumps(INPUTS))
+                data["stranded_rows"][0]["paths"] = [bad_path]
+                bad = Path(tmp) / "bad.json"
+                bad.write_text(json.dumps(data), encoding="utf-8")
+                with self.assertRaises(ct.InputError):
+                    ct.load_inputs(bad)
+                self.assertEqual(ct.main(["--inputs", str(bad), "--analyze-log", str(log),
+                                          "--report", out]), 2)
+            good = Path(tmp) / "good.json"
+            good.write_text(json.dumps(INPUTS), encoding="utf-8")
+            self.assertEqual(ct.main(["--inputs", str(good), "--analyze-log", str(log),
+                                      "--report", out]), 0)
+
     def test_scratch_refusals(self):
         with tempfile.TemporaryDirectory() as tmp:
             src = Path(tmp)

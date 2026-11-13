@@ -49,7 +49,9 @@ def load_inputs(path: Path = INPUTS) -> dict:
         raise InputError("delete_paths must be a non-empty list of relative paths")
     if not isinstance(rows, list) or not all(
             isinstance(r, dict) and isinstance(r.get("id"), str)
-            and isinstance(r.get("paths"), list) for r in rows):
+            and isinstance(r.get("paths"), list)
+            and all(isinstance(p, str) and p for p in r["paths"])
+            for r in rows):
         raise InputError("stranded_rows is malformed")
     if data.get("ledger_stranded_count") != len(rows):
         raise InputError("stranded_rows does not match ledger_stranded_count")
