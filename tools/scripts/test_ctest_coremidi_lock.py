@@ -65,7 +65,7 @@ def main():
     self_check()
     done = subprocess.run(
         ["ctest", "--test-dir", args.build_dir, "--show-only=json-v1"],
-        capture_output=True, text=True, check=False)
+        capture_output=True, text=True, encoding="utf-8", check=False)
     if done.returncode != 0:
         print((done.stderr or done.stdout).strip(), file=sys.stderr)
         return 1

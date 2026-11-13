@@ -1,0 +1,10 @@
+{
+ "name": "ctest-coremidi-lock-contract",
+ "record": {
+  "entry": "tools/scripts/test_ctest_coremidi_lock.py",
+  "inputs": [
+   "tools/scripts/test_ctest_coremidi_lock.py"
+  ],
+  "kind": "python"
+ }
+}
