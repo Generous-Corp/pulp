@@ -36,7 +36,11 @@ absolute sample, order key) trace must be identical across five schedules
 (1, 32, 64, 127+127+2, 3+61+1+127+64). In-binary planted negatives change one
 record's order key per family, and swap two equal-sample MIDI records; only
 that family's digest may change, and a record diff must name only the touched
-records. `--trace <path>` writes the canonical trace and digests as JSON lines.
+records. The same combined schedule also runs on the reference walk (canonical
+executor routing disabled) and the routed serial executor, and the trace,
+digests, voice audio, graph audio and epoch map must match; planted
+perturbations on one backend must be named. Parallel routing is refused once
+the graph-authored lane is bound, so it is requested and recorded, not forced. `--trace <path>` writes the canonical trace and digests as JSON lines.
 Callback-side observation uses preallocated fixed arrays.
 
 It adds no runtime queue, voice-intent API, or graph seam. The fixture is qualified only when built from a complete installed
