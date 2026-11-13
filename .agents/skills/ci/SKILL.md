@@ -5434,7 +5434,7 @@ uses, or the golden warms a cache the real jobs never touch.
 - **A gate that did not run is not a pass.** The merge-tree checks exit 4
   (NOT_CHECKED) when one times out or cannot start; gates.sh exits 4 and the
   pre-push hook blocks on it (bypass: `PULP_PREPUSH_ALLOW_NOT_CHECKED=1`).
-  Each check's timeout is 20 s scaled by load per core, capped at 300 s;
+  Each check's timeout is 20 s at idle, scaled up with 1-minute load per core (60 s at one per core), capped at 240 s; a timeout prints elapsed time, load and the env var;
   `PULP_MERGE_TREE_CHECK_TIMEOUT` overrides it.
 
 - **A workflow that runs a test binary by name breaks when that suite joins

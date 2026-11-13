@@ -14,7 +14,7 @@ toolchain-check: 7 difference(s) from the manifest; continuing (warn mode)
 -- Pulp: AAX support disabled
 -- Pulp: VCV Rack support disabled
 -- Pulp: Ableton Link support disabled
--- Pulp: using shared cache for choc: /Users/danielraffel/Library/Caches/Pulp/fetchcontent-src/choc-b586f33d1c9e8bee98c2b420a5b20bf525c3c7be
+-- Pulp: using shared cache for choc: ~/Library/Caches/Pulp/fetchcontent-src/choc-b586f33d1c9e8bee98c2b420a5b20bf525c3c7be
 -- Pulp: using build-local mutable copy for choc: /Volumes/Workshop/Code/agent-worktrees/g11-live-retune-20261110/build-g11-release/_deps/pulp-mutable-choc-src
 -- Pulp: applied CHOC WAV extensible container-width patch
 -- Pulp: applied CHOC WAV block-align bounds patch
@@ -25,7 +25,7 @@ Call Stack (most recent call first):
   CMakeLists.txt:434 (include)
 
 
--- Pulp: using shared cache for SDL3: /Users/danielraffel/Library/Caches/Pulp/fetchcontent-src/sdl3-release-3.4.18
+-- Pulp: using shared cache for SDL3: ~/Library/Caches/Pulp/fetchcontent-src/sdl3-release-3.4.18
 -- 
 -- SDL3 was configured with the following options:
 -- 
@@ -170,16 +170,16 @@ Call Stack (most recent call first):
 -- 
 -- Pulp: SDL3 enabled
 -- Pulp: VST3 SDK not found — VST3 format disabled
--- Pulp: using shared cache for clap: /Users/danielraffel/Library/Caches/Pulp/fetchcontent-src/clap-1.2.10
+-- Pulp: using shared cache for clap: ~/Library/Caches/Pulp/fetchcontent-src/clap-1.2.10
 -- CLAP version: 1.2.10
 -- Pulp: CLAP SDK available
--- Pulp: using shared cache for lv2: /Users/danielraffel/Library/Caches/Pulp/fetchcontent-src/lv2-v1.18.10
+-- Pulp: using shared cache for lv2: ~/Library/Caches/Pulp/fetchcontent-src/lv2-v1.18.10
 -- Pulp: LV2 SDK available
 -- Pulp: Scala .scl/.kbm tuning enabled (Surge Synth Team tuning-library)
--- Pulp: using shared cache for yoga: /Users/danielraffel/Library/Caches/Pulp/fetchcontent-src/yoga-v3.2.1
+-- Pulp: using shared cache for yoga: ~/Library/Caches/Pulp/fetchcontent-src/yoga-v3.2.1
 -- Pulp: Yoga layout engine enabled
--- Pulp: using shared cache for highway: /Users/danielraffel/Library/Caches/Pulp/fetchcontent-src/highway-1.4.0
-CMake Deprecation Warning at /Users/danielraffel/Library/Caches/Pulp/fetchcontent-src/highway-1.4.0/CMakeLists.txt:28 (cmake_policy):
+-- Pulp: using shared cache for highway: ~/Library/Caches/Pulp/fetchcontent-src/highway-1.4.0
+CMake Deprecation Warning at ~/Library/Caches/Pulp/fetchcontent-src/highway-1.4.0/CMakeLists.txt:28 (cmake_policy):
   The OLD behavior for policy CMP0111 will be removed from a future version
   of CMake.
 
@@ -190,8 +190,8 @@ CMake Deprecation Warning at /Users/danielraffel/Library/Caches/Pulp/fetchconten
 
 
 -- Pulp: Highway SIMD library enabled
--- Pulp: using shared cache for mbedtls: /Users/danielraffel/Library/Caches/Pulp/fetchcontent-src/mbedtls-107ea89daaefb9867ea9121002fbbdf926780e98
-CMake Deprecation Warning at /Users/danielraffel/Library/Caches/Pulp/fetchcontent-src/mbedtls-107ea89daaefb9867ea9121002fbbdf926780e98/CMakeLists.txt:21 (cmake_minimum_required):
+-- Pulp: using shared cache for mbedtls: ~/Library/Caches/Pulp/fetchcontent-src/mbedtls-107ea89daaefb9867ea9121002fbbdf926780e98
+CMake Deprecation Warning at ~/Library/Caches/Pulp/fetchcontent-src/mbedtls-107ea89daaefb9867ea9121002fbbdf926780e98/CMakeLists.txt:21 (cmake_minimum_required):
   Compatibility with CMake < 3.10 will be removed from a future version of
   CMake.
 
@@ -201,12 +201,12 @@ CMake Deprecation Warning at /Users/danielraffel/Library/Caches/Pulp/fetchconten
 
 
 -- Pulp: Mbed TLS crypto library enabled
--- Pulp: using shared cache for SheenBidi: /Users/danielraffel/Library/Caches/Pulp/fetchcontent-src/sheenbidi-v3.0.0
+-- Pulp: using shared cache for SheenBidi: ~/Library/Caches/Pulp/fetchcontent-src/sheenbidi-v3.0.0
 -- Pulp: SheenBidi bidi engine enabled (v3.0.0)
--- Pulp: using shared cache for brotli: /Users/danielraffel/Library/Caches/Pulp/fetchcontent-src/brotli-v1.2.1
--- Pulp: using shared cache for woff2: /Users/danielraffel/Library/Caches/Pulp/fetchcontent-src/woff2-fb9c3379f2605b10f3e8f1d9636664ab5576775c
+-- Pulp: using shared cache for brotli: ~/Library/Caches/Pulp/fetchcontent-src/brotli-v1.2.1
+-- Pulp: using shared cache for woff2: ~/Library/Caches/Pulp/fetchcontent-src/woff2-fb9c3379f2605b10f3e8f1d9636664ab5576775c
 -- Pulp: captured WOFF2 font decoder enabled
--- Pulp: using shared cache for yaml-cpp: /Users/danielraffel/Library/Caches/Pulp/fetchcontent-src/yaml-cpp-yaml-cpp-0.9.0
+-- Pulp: using shared cache for yaml-cpp: ~/Library/Caches/Pulp/fetchcontent-src/yaml-cpp-yaml-cpp-0.9.0
 -- Pulp: yaml-cpp 0.9.0 available (DESIGN.md import)
 -- Pulp: AudioUnitSDK not found — AU v2 format disabled
 -- Pulp profile: release (PULP_ENABLE_DESIGN_IMPORT=OFF PULP_ENABLE_INSPECTOR=ON)

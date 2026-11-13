@@ -25,9 +25,21 @@ and two partition schedules:
   `StaleGeneration` while a live generation is accepted (partitions 4 and 8).
   This is control-side evidence, not a graph voice allocator.
 
-It adds no runtime queue, voice-intent API, or graph seam. Each family runs in
-its own graph or binding; one shared epoch across all four families is not
-checked. The fixture is qualified only when built from a complete installed
+A combined control then drives all four families through one test-owned epoch
+and absolute sample origin on the same block boundaries: a control-side adapter
+projects `HostEventIngress` MIDI and injects block-relative events with
+`SignalGraph::inject_midi` into a MIDI input node, converts absolute parameter
+records to block-relative `inject_parameter_events` into a `PluginSlot` node,
+a graph-authored lane producer in the same graph emits at absolute targets, and
+a `VoiceBankBinding` renders on the same blocks. The canonical (family,
+absolute sample, order key) trace must be identical across five schedules
+(1, 32, 64, 127+127+2, 3+61+1+127+64). In-binary planted negatives change one
+record's order key per family, and swap two equal-sample MIDI records; only
+that family's digest may change, and a record diff must name only the touched
+records. `--trace <path>` writes the canonical trace and digests as JSON lines.
+Callback-side observation uses preallocated fixed arrays.
+
+It adds no runtime queue, voice-intent API, or graph seam. The fixture is qualified only when built from a complete installed
 SDK and the positive executable exits zero; the receipt stays `NOT_QUALIFIED`
 until the remaining admission rows are checked. Missing SDK support modules are
 `NOT_CHECKED`, not a qualification claim.

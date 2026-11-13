@@ -1,5 +1,15 @@
 # G-5 event fixture preparation
 
+## Close-out (2026-11-13)
+
+Final status: PARTIAL bounded runtime; full event-plane HOLD (unchanged).
+
+The frozen trace oracle in examples/g5-event-consumer and the bounded typed runtime consumer receipt are on main.
+
+PR pointers below are historical; all PRs cited in this file that were queried (checked 2026-11-13) are merged, none remain open.
+
+Remaining work is deferred to https://github.com/Generous-Corp/pulp/issues/12177.
+
 **State: PARTIAL bounded runtime; full event-plane HOLD.** The frozen trace oracle in
 `examples/g5-event-consumer` checks two legal partitions of the reviewed
 one-producer, two-sample event contract. It has one accepted control and planted
