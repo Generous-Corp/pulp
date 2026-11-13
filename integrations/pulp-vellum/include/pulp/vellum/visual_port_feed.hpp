@@ -5,6 +5,12 @@
 /// `vellum::value::ValueFeed`. The two shapes match one to one, so this only
 /// renames types: channel indices, latest-wins reads and publish counts pass
 /// straight through, and the single-reader-thread rule is the port's.
+///
+/// One limit is the feed's own: `read_events` copies through a fixed stack
+/// block (reads stay allocation-free), so it returns at most
+/// `kMaxEventsPerRead` occurrences however large the caller's span is. The
+/// limit equals the most events one Pulp audio block can publish, so nothing
+/// a Pulp port reports is dropped.
 
 #include <vellum/value/value_feed.hpp>
 
@@ -20,6 +26,10 @@ namespace pulp::vellum {
 
 class VisualPortFeed final : public ::vellum::value::ValueFeed {
   public:
+    /// The most occurrences one `read_events` call returns: the per-block
+    /// bound of Pulp's events channels (`dataplane::EventFrame::kMaxEvents`).
+    static constexpr std::size_t kMaxEventsPerRead = 1024;
+
     /// The port must outlive the feed.
     explicit VisualPortFeed(format::VisualPort& port) noexcept : port_(port) {}
 

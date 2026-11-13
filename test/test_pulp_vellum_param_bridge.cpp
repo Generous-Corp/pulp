@@ -5,6 +5,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/dataplane/value_source.hpp>
 #include <pulp/format/editor_host.hpp>
 #include <pulp/format/host_parameter_edit.hpp>
 #include <pulp/state/store.hpp>
@@ -15,12 +16,14 @@
 #include <vellum/value/param_model.hpp>
 #include <vellum/value/value_feed.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <thread>
 #include <vector>
@@ -531,4 +534,80 @@ TEST_CASE("the visual feed maps channels and reads one to one", "[pulp-vellum][f
     REQUIRE(feed.read_meter(9, rms, peak) == 0);
     REQUIRE(feed.publish_count(9) == 0);
     REQUIRE(feed.channel(9).name.empty());
+}
+
+namespace {
+
+// An events-only VisualPort whose latest block holds `count` occurrences,
+// each recognizable by its position.
+class BurstVisualPort final : public pulp::format::VisualPort {
+  public:
+    explicit BurstVisualPort(std::size_t count) noexcept : count_(count) {}
+    std::size_t channel_count() const noexcept override {
+        return 1;
+    }
+    pulp::format::VisualChannelInfo channel(std::size_t) const noexcept override {
+        return {"onsets", "", pulp::format::VisualChannelShape::events, 0.0f};
+    }
+    bool read_scalar(std::size_t, float&) noexcept override {
+        return false;
+    }
+    std::size_t read_meter(std::size_t, std::span<float>, std::span<float>) noexcept override {
+        return 0;
+    }
+    std::size_t read_vector(std::size_t, std::span<float>) noexcept override {
+        return 0;
+    }
+    std::size_t read_events(std::size_t i,
+                            std::span<pulp::format::VisualEvent> e) noexcept override {
+        if (i != 0)
+            return 0;
+        const std::size_t n = std::min(count_, e.size());
+        for (std::size_t k = 0; k < n; ++k)
+            e[k] = {static_cast<std::uint32_t>(k), static_cast<float>(k) * 0.5f};
+        return n;
+    }
+    std::uint32_t publish_count(std::size_t) const noexcept override {
+        return 1;
+    }
+
+  private:
+    std::size_t count_;
+};
+
+} // namespace
+
+TEST_CASE("the visual feed returns a full Pulp event block", "[pulp-vellum][feed]") {
+    // The largest block a Pulp events channel can publish reaches the caller
+    // whole: no occurrence past an internal copy limit is dropped.
+    const auto full = static_cast<std::size_t>(pulp::dataplane::EventFrame::kMaxEvents);
+    REQUIRE(pulp::vellum::VisualPortFeed::kMaxEventsPerRead == full);
+
+    BurstVisualPort port(full);
+    pulp::vellum::VisualPortFeed feed(port);
+    std::vector<vellum::value::ChannelEvent> events(full + 16);
+    REQUIRE(feed.read_events(0, events) == full);
+    bool all_match = true;
+    for (std::size_t k = 0; k < full; ++k)
+        all_match = all_match && events[k].frame_index == k &&
+                    events[k].value == static_cast<float>(k) * 0.5f;
+    REQUIRE(all_match);
+}
+
+TEST_CASE("the visual feed enforces its documented event limit", "[pulp-vellum][feed]") {
+    // A port reporting more than one Pulp block's worth is cut at the
+    // documented limit, and nothing past it in the caller's span is written.
+    constexpr std::size_t limit = pulp::vellum::VisualPortFeed::kMaxEventsPerRead;
+    BurstVisualPort port(limit + 50);
+    pulp::vellum::VisualPortFeed feed(port);
+    std::vector<vellum::value::ChannelEvent> events(limit + 50, {7u, -1.0f});
+    REQUIRE(feed.read_events(0, events) == limit);
+    REQUIRE(events[limit - 1].frame_index == limit - 1);
+    REQUIRE(events[limit].frame_index == 7u);
+    REQUIRE(events[limit].value == -1.0f);
+
+    // A span smaller than the block is filled to its size.
+    std::vector<vellum::value::ChannelEvent> few(3);
+    REQUIRE(feed.read_events(0, few) == 3);
+    REQUIRE(few[2].frame_index == 2);
 }

@@ -1,5 +1,6 @@
 #include <pulp/vellum/visual_port_feed.hpp>
 
+#include <pulp/dataplane/value_source.hpp>
 #include <pulp/format/editor_host.hpp>
 
 #include <algorithm>
@@ -25,9 +26,10 @@ ChannelShape shape_of(format::VisualChannelShape shape) noexcept {
     return ChannelShape::scalar;
 }
 
-// The most occurrences one read copies. The port's events channels are
-// bounded lists from a single audio block; a block never carries this many.
-constexpr std::size_t kMaxEventsPerRead = 256;
+// A Pulp events channel publishes at most EventFrame::kMaxEvents occurrences
+// per block, so a read block of that size never truncates a Pulp port.
+static_assert(VisualPortFeed::kMaxEventsPerRead ==
+              static_cast<std::size_t>(dataplane::EventFrame::kMaxEvents));
 
 } // namespace
 
@@ -59,7 +61,7 @@ std::size_t VisualPortFeed::read_events(std::size_t index,
                                         std::span<::vellum::value::ChannelEvent> events) noexcept {
     if (index >= port_.channel_count())
         return 0;
-    std::array<format::VisualEvent, kMaxEventsPerRead> block;
+    std::array<format::VisualEvent, VisualPortFeed::kMaxEventsPerRead> block;
     const std::size_t want = std::min(events.size(), block.size());
     const std::size_t got = std::min(port_.read_events(index, std::span(block.data(), want)), want);
     for (std::size_t i = 0; i < got; ++i)
