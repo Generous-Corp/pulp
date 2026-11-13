@@ -16,6 +16,13 @@
 #include <sstream>
 #include <string>
 
+static std::size_t occurrences(const std::string& text, std::string_view needle) {
+    std::size_t count = 0;
+    for (auto at = text.find(needle); at != std::string::npos; at = text.find(needle, at + 1))
+        ++count;
+    return count;
+}
+
 TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
           "[inspect][control][graph-file-reload][e2e]") {
 #ifdef __APPLE__
@@ -393,6 +400,8 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
     INFO("expired exit=" << expired.exit_code << " timed_out=" << expired.timed_out);
     REQUIRE(expired.exit_code == 0);
     REQUIRE(expired.stderr_output.find("renewal refused") != std::string::npos);
+    // One report per distinct refusal (expired, then not owned), not one per renewal.
+    REQUIRE(occurrences(expired.stderr_output, "renewal refused") <= 2);
     REQUIRE(expired.stdout_output.find("committed") == std::string::npos);
 
     const auto restricted = run(cli, root.runtime,
@@ -407,6 +416,9 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
     INFO(denied_renewal.stderr_output);
     REQUIRE(denied_renewal.exit_code == 0);
     REQUIRE(denied_renewal.stderr_output.find("renewal refused") != std::string::npos);
+    // Admission refuses this grant for session control: stop once, naming the fix.
+    REQUIRE(occurrences(denied_renewal.stderr_output, "renewal refused") == 1);
+    REQUIRE(denied_renewal.stderr_output.find("stopped for this watch") != std::string::npos);
     REQUIRE(denied_renewal.stdout_output.find("committed") == std::string::npos);
     CHECK(audio_state(2, develop_grant, 0.375) == before_refusals);
     const auto revoked_watch = watch("dev", 2, patch + "# revocation\n", true, develop_grant, true);
@@ -414,6 +426,11 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
     INFO(revoked_watch.stderr_output);
     REQUIRE(revoked_watch.exit_code == 0);
     REQUIRE(revoked_watch.stderr_output.find("renewal refused") != std::string::npos);
+    // The revoked grant is refused at the renewal before the next send, once,
+    // and the watch stops; no reload request reaches admission after revocation.
+    REQUIRE(occurrences(revoked_watch.stderr_output, "renewal refused") == 1);
+    REQUIRE(revoked_watch.stderr_output.find("stopped for this watch") != std::string::npos);
+    REQUIRE(revoked_watch.stdout_output.find("admission-denied") == std::string::npos);
     const auto first_commit = revoked_watch.stdout_output.find("committed");
     REQUIRE(first_commit != std::string::npos);
     REQUIRE(revoked_watch.stdout_output.find("committed", first_commit + 1) == std::string::npos);

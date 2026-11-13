@@ -30,9 +30,13 @@ class GraphReloadWatch {
 
   private:
     void report_file_refusal(int code) const;
+    bool renew();
+    static constexpr unsigned kMaxNotApplied = 3;
     unsigned polls_ = 0;
+    unsigned not_applied_ = 0;
     bool lease_ready_ = false;
     bool halted_ = false;
+    std::string last_renewal_refusal_;
     GraphReloadOptions options_;
     std::unique_ptr<pulp::host::GraphFileWatch> watch_;
 };

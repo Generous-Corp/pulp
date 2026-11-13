@@ -1,5 +1,6 @@
 #include "cli_graph_reload.hpp"
 #include "cli_common.hpp"
+#include "cli_graph_reload_receipt.hpp"
 #include <charconv>
 #include <choc/text/choc_JSON.h>
 #include <iostream>
@@ -78,63 +79,55 @@ void GraphReloadWatch::report_file_refusal(int value) const {
               << std::flush;
 }
 
-namespace {
-enum class ReceiptOutcome { Published, Refused, NotApplied, Unknown };
-
-// Completed and typed refusals are terminal: the executor ran and the result
-// is final. A failure without the executor's typed code was refused before it
-// ran (admission, grant, deadline before start), so the change is retried.
-// Anything else may or may not have published.
-ReceiptOutcome classify_receipt(int exit_code, const std::string& receipt,
-                                std::uint64_t& generation) {
+bool GraphReloadWatch::renew() {
+    std::ostringstream renewal;
+    auto* previous = std::cout.rdbuf(renewal.rdbuf());
+    int renewed = 1;
     try {
-        const auto response = choc::json::parse(receipt);
-        if (!response["state"].isString())
-            return ReceiptOutcome::Unknown;
-        const auto state = response["state"].getString();
-        const auto detail = response["detail"];
-        const bool typed = detail.isObject() && detail["code"].isString();
-        if ((state == "completed" || state == "completed_after_revocation") && exit_code == 0) {
-            if (detail.isObject() && detail["generation"].isInt())
-                generation = static_cast<std::uint64_t>(detail["generation"].getInt64());
-            return ReceiptOutcome::Published;
-        }
-        if (state == "failed" && typed)
-            return ReceiptOutcome::Refused;
-        if (state == "failed" || state == "cancelled")
-            return ReceiptOutcome::NotApplied;
-        return ReceiptOutcome::Unknown;
+        renewed = cmd_control({"call", "dev.pulp.session/control@1", "--instance",
+                               options_.instance, "--grant", options_.grant, "--params",
+                               R"({"action":"renew"})", "--json", "--timeout-ms", "3000"});
     } catch (...) {
-        return ReceiptOutcome::Unknown;
+        std::cout.rdbuf(previous);
+        renewal.str("lease renewal threw before a receipt\n");
     }
+    std::cout.rdbuf(previous);
+    if (renewed == 0) {
+        last_renewal_refusal_.clear();
+        return true;
+    }
+    const auto output = renewal.str();
+    if (graph_reload_authority_refused(output)) {
+        // Admission refused the grant itself (revoked, expired or missing
+        // session control); renewing with it again cannot succeed.
+        halted_ = true;
+        std::cerr << "graph reload: existing controller lease renewal refused: " << output
+                  << "graph reload: stopped for this watch; live graph retained. Request a new "
+                     "grant with `pulp control grant-request --instance "
+                  << options_.instance << " --profile develop` and restart the watch with it\n"
+                  << std::flush;
+        return false;
+    }
+    // A lease refusal repeats every renewal until the lease is reacquired; say
+    // it once per distinct refusal, not every two seconds.
+    const auto key = graph_reload_refusal_key(output);
+    if (key != last_renewal_refusal_) {
+        last_renewal_refusal_ = key;
+        std::cerr << "graph reload: existing controller lease renewal refused: " << output
+                  << "graph reload: live graph retained; reacquire the controller lease with "
+                     "`pulp control call --instance "
+                  << options_.instance
+                  << " dev.pulp.session/control@1 --params '{\"action\":\"acquire\"}'`\n"
+                  << std::flush;
+    }
+    return false;
 }
-} // namespace
 
 void GraphReloadWatch::poll() {
     if (halted_)
         return;
-    if ((polls_++ % 4) == 0) {
-        lease_ready_ = false;
-        std::ostringstream renewal;
-        auto* previous = std::cout.rdbuf(renewal.rdbuf());
-        int renewed = 1;
-        try {
-            renewed = cmd_control({"call", "dev.pulp.session/control@1", "--instance",
-                                   options_.instance, "--grant", options_.grant, "--params",
-                                   R"({"action":"renew"})", "--json", "--timeout-ms", "3000"});
-        } catch (...) {
-            std::cout.rdbuf(previous);
-            std::cerr << "graph reload: lease renewal failed; live graph retained\n";
-            return;
-        }
-        std::cout.rdbuf(previous);
-        if (renewed != 0) {
-            std::cerr << "graph reload: existing controller lease renewal refused: "
-                      << renewal.str() << std::flush;
-            return;
-        }
-        lease_ready_ = true;
-    }
+    if ((polls_++ % 4) == 0)
+        lease_ready_ = renew();
     if (!lease_ready_)
         return;
     const auto change = watch_->poll();
@@ -145,6 +138,12 @@ void GraphReloadWatch::poll() {
         report_file_refusal(static_cast<int>(change.code));
         return;
     }
+    // Confirm authority immediately before sending, so a lease lost or a
+    // grant revoked since the last periodic renewal is refused here rather
+    // than by admission on the reload request.
+    lease_ready_ = renew();
+    if (!lease_ready_)
+        return;
     auto params = choc::value::createObject("");
     params.addMember("text", change.text);
     params.addMember("format", change.format == pulp::host::GraphFileFormat::Notation
@@ -170,21 +169,38 @@ void GraphReloadWatch::poll() {
                               "--json", "--timeout-ms", "3000"});
     } catch (...) {
         std::cout.rdbuf(previous);
-        std::cerr << "graph reload: control request failed before a receipt; the change will be "
-                     "retried; live graph retained\n";
-        return;
+        receipt.str("");
     }
     std::cout.rdbuf(previous);
-    std::cout << "graph reload: " << receipt.str() << std::flush;
-    switch (classify_receipt(result, receipt.str(), options_.generation)) {
-    case ReceiptOutcome::Published:
-    case ReceiptOutcome::Refused:
+    const auto outcome = classify_graph_reload_receipt(result, receipt.str(), options_.generation);
+    if (outcome != GraphReloadOutcome::AuthorityRefused)
+        std::cout << "graph reload: " << receipt.str() << std::flush;
+    switch (outcome) {
+    case GraphReloadOutcome::Published:
+    case GraphReloadOutcome::Refused:
+        not_applied_ = 0;
         watch_->acknowledge();
         return;
-    case ReceiptOutcome::NotApplied:
-        std::cerr << "graph reload: request was not applied; the change will be retried\n";
+    case GraphReloadOutcome::NotApplied:
+        if (++not_applied_ < kMaxNotApplied) {
+            std::cerr << "graph reload: request was not applied; the change will be retried\n";
+            return;
+        }
+        halted_ = true;
+        std::cerr << "graph reload: request was refused before it ran " << kMaxNotApplied
+                  << " times; graph reload stopped for this watch; live graph retained. Check "
+                     "that the product is running and responsive, then restart the watch\n"
+                  << std::flush;
         return;
-    case ReceiptOutcome::Unknown:
+    case GraphReloadOutcome::AuthorityRefused:
+        halted_ = true;
+        std::cerr << "graph reload: grant refused by admission: " << receipt.str()
+                  << "graph reload: stopped for this watch; live graph retained. Request a new "
+                     "grant with `pulp control grant-request --instance "
+                  << options_.instance << " --profile develop` and restart the watch with it\n"
+                  << std::flush;
+        return;
+    case GraphReloadOutcome::Unknown:
         halted_ = true;
         std::cerr << "graph reload: outcome unknown; the live graph may already hold this file. "
                      "Graph reload is paused for this watch. Read the current generation from "

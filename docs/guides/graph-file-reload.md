@@ -34,10 +34,11 @@ graph's DSP state is not reset at startup. Each 500 ms poll checks the size firs
 and refuses a file over 1 MiB without reading it. Two consecutive identical reads
 coalesce a save; content changes are detected even with unchanged size and
 modification time. A change is recorded as handled only after a terminal receipt:
-a publication or a typed refusal is not resent, a request refused before it ran
-(admission, grant, deadline before start) is retried, and an unknown outcome
-pauses graph reload for that watch with a message naming how to read the current
-generation. Refused files are reported by name (unreadable, too-large,
+a publication or a typed refusal is not resent, a request the product refused
+before it ran (deadline before start, cancelled) is retried up to three times, an
+admission refusal of the grant stops graph reload for that watch with a message
+naming how to request a new grant, and an unknown outcome pauses graph reload with
+a message naming how to read the current generation. Refused files are reported by name (unreadable, too-large,
 unsupported-format) with the fix. `--graph-watch-polls N` exits after 1..120
 polls for bounded automation and terminates and joins its own `--run` child process
 group before returning. Source changes continue through the normal governed
@@ -71,10 +72,13 @@ local file reads and the public transaction input are separately bounded at
 1 MiB for both formats. Oversize public input is refused before a candidate edit
 is constructed; oversize broker requests are refused before submission. Admission, grants, leases, deadlines and
 main-thread fencing remain enforced by the existing control client and host.
-The watch renews the existing controller lease every four polls using the supplied
-grant; it never acquires a lease automatically. If initial building outlasts the
-lease, reacquire it through the existing control flow. Refused renewal retains
-the live graph and reports the missing authority.
+The watch renews the existing controller lease every four polls and again just
+before sending a change, using the supplied grant; it never acquires a lease
+automatically. If initial building outlasts the lease, reacquire it through the
+existing control flow. A refused lease renewal retains the live graph and is
+reported once per distinct refusal. When admission refuses the grant itself (for
+example after the owner revokes it), the watch reports it once and stops graph
+reload, since renewing with that grant cannot succeed.
 
 Malformed ports/kinds, cycles, invalid parameter controls, unsupported contracts,
 failed prepare, cancellation and stale candidates retain old state/audio.

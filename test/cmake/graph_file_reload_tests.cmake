@@ -21,3 +21,12 @@ if(UNIX AND NOT CMAKE_CROSSCOMPILING AND TARGET pulp-host)
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/graph_file_reload_control_tests.cmake")
+
+# The watch's receipt classification decides resend, stop or move on; the
+# broker e2e reaches it only on macOS with a main-thread pump.
+add_executable(pulp-test-cli-graph-reload-receipt test_cli_graph_reload_receipt.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_graph_reload_receipt.cpp)
+target_include_directories(pulp-test-cli-graph-reload-receipt PRIVATE
+    ${CMAKE_SOURCE_DIR} ${choc_SOURCE_DIR})
+target_link_libraries(pulp-test-cli-graph-reload-receipt PRIVATE Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-graph-reload-receipt PROPERTIES LABELS "cli;graph")

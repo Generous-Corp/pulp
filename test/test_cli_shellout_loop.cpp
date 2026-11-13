@@ -462,7 +462,7 @@ TEST_CASE("pulp loop names a refused graph file and how to fix it",
             project,
             {"loop", "--target", "proof", "--no-dev-shared", "--graph-file", c.file,
              "--graph-instance", "instance-absent", "--graph-grant", "grant-absent",
-             "--graph-generation", "0", "--graph-watch-polls", "1"},
+             "--graph-generation", "0", "--graph-watch-polls", "9"},
             120000);
         INFO(r.stdout_output);
         INFO(r.stderr_output);
@@ -470,6 +470,15 @@ TEST_CASE("pulp loop names a refused graph file and how to fix it",
         REQUIRE(r.exit_code == 0);
         REQUIRE(r.stderr_output.find(c.message) != std::string::npos);
         REQUIRE(r.stderr_output.find("live graph retained") != std::string::npos);
+        // Nine polls renew three times against an absent instance: the same
+        // refusal is reported once, and an absent instance is not an admission
+        // refusal of the grant, so the watch keeps waiting rather than stopping.
+        std::size_t renewals = 0;
+        for (auto at = r.stderr_output.find("renewal refused"); at != std::string::npos;
+             at = r.stderr_output.find("renewal refused", at + 1))
+            ++renewals;
+        REQUIRE(renewals == 1);
+        REQUIRE(r.stderr_output.find("stopped for this watch") == std::string::npos);
     }
     fs::remove_all(project);
 }
