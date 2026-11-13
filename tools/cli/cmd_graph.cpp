@@ -15,6 +15,8 @@
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/offline_signal_graph_host.hpp>
 #include <pulp/host/signal_graph.hpp>
+#include <string>
+#include <utility>
 
 namespace {
 void usage() {
@@ -34,6 +36,51 @@ void json_error(const std::string& code, const std::string& message) {
     value.addMember("code", code);
     value.addMember("message", message);
     std::cout << choc::json::toString(value) << '\n';
+}
+
+// Each attach refusal names its cause and the change that clears it, so a
+// caller can act on the message without reading the probe implementation.
+std::pair<std::string, std::string> probe_refusal(pulp::host::SignalGraph::EdgeProbeStatus status,
+                                                  const std::string& edge_kind) {
+    using Status = pulp::host::SignalGraph::EdgeProbeStatus;
+    switch (status) {
+    case Status::Unprepared:
+        return {"Unprepared", "the graph is not prepared, so no edge can be probed; check that "
+                              "`pulp graph validate` accepts the file"};
+    case Status::UnknownPort:
+        if (edge_kind == "control")
+            return {"UnknownPort",
+                    "no such port: --source-port must name an output port of --source-node; a "
+                    "control edge is selected by --destination-node and --destination-param, "
+                    "not by a destination port"};
+        return {"UnknownPort",
+                "no such port: --source-port must name an output port of --source-node and "
+                "--destination-port an input port of --destination-node"};
+    case Status::MissingEdge:
+        if (edge_kind == "control")
+            return {"MissingEdge",
+                    "no automation edge reaches --destination-param on --destination-node; graphs "
+                    "loaded by the CLI cannot contain automation edges, so control probes are "
+                    "available only through the C++ API (SignalGraph::attach_control_edge_probe)"};
+        return {"MissingEdge", "no connection joins the named source and destination ports; pick "
+                               "a pair from the graph file's connections array"};
+    case Status::UnsupportedKind:
+        return {"UnsupportedKind",
+                "the selected ports do not carry a " + edge_kind +
+                    " edge; use --edge-kind audio for audio connections, event for MIDI "
+                    "connections and control for automation connections"};
+    case Status::UnsupportedExecution:
+        return {"UnsupportedExecution",
+                "edge probes attach only to the serial routed executor; disable parallel routing "
+                "and anticipation, then prepare the graph again"};
+    case Status::Busy:
+        return {"Busy", "a prepared topology edit is in progress; retry after it commits or is "
+                        "cancelled"};
+    case Status::Attached:
+    case Status::Detached:
+        break;
+    }
+    return {"Detached", "the probe did not attach"};
 }
 
 int probe_graph(const std::vector<std::string>& args) {
@@ -198,34 +245,10 @@ int probe_graph(const std::vector<std::string>& args) {
             return fail("invalid_destination_param", "destination-param must be an integer");
         status = graph.attach_control_edge_probe(source_port, destination->id, parameter);
     }
-    const char* status_name = "Busy";
-    switch (status) {
-    case Graph::EdgeProbeStatus::Attached:
-        status_name = "Attached";
-        break;
-    case Graph::EdgeProbeStatus::Detached:
-        status_name = "Detached";
-        break;
-    case Graph::EdgeProbeStatus::Unprepared:
-        status_name = "Unprepared";
-        break;
-    case Graph::EdgeProbeStatus::UnknownPort:
-        status_name = "UnknownPort";
-        break;
-    case Graph::EdgeProbeStatus::MissingEdge:
-        status_name = "MissingEdge";
-        break;
-    case Graph::EdgeProbeStatus::UnsupportedKind:
-        status_name = "UnsupportedKind";
-        break;
-    case Graph::EdgeProbeStatus::UnsupportedExecution:
-        status_name = "UnsupportedExecution";
-        break;
-    case Graph::EdgeProbeStatus::Busy:
-        break;
+    if (status != Graph::EdgeProbeStatus::Attached) {
+        const auto [code, message] = probe_refusal(status, edge_kind);
+        return fail(code, message);
     }
-    if (status != Graph::EdgeProbeStatus::Attached)
-        return fail(status_name, "cannot attach the requested prepared control/event edge");
     const auto identity = edge_kind == "audio"     ? graph.audio_edge_probe_identity()
                           : edge_kind == "control" ? graph.control_edge_probe_identity()
                                                    : graph.event_edge_probe_identity();
