@@ -16,7 +16,7 @@
 // two spaces, in the file's order. Writing escapes & < > " as named entities,
 // tab as &#9;, line feed as &#10; and carriage return as &#13;, and writes every
 // non-ASCII character as a decimal character reference, so the bytes are ASCII.
-// Other control characters are written as decimal references (&#1;), and an
+// Other control characters are written as decimal references, such as &#1;, and an
 // apostrophe as is. A file with no entries is the root's start and end tags on
 // consecutive lines.
 //
@@ -32,7 +32,7 @@
 //
 // Where this deliberately differs from the format's usual handling:
 // - A name or value that is not valid UTF-8 (which only a hand-edited file can
-//   produce) is written with one U+FFFD reference (&#65533;) per invalid byte,
+//   produce) is written with one U+FFFD reference, &#65533;, per invalid byte,
 //   rather than as a control-character reference built from the byte's bits.
 // - Fail closed. A file that is not well-formed XML, is empty, or has a root
 //   other than PROPERTIES does not load. The bytes are copied once to the
