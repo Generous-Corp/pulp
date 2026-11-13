@@ -717,6 +717,59 @@ namespace {
     return pulp::platform::ChildProcess::run(binary, args, options);
 }
 
+TEST_CASE("pulp create --template agent-toolkit scaffolds a controlled Standalone instrument",
+          "[cli][create][shellout][agent-toolkit]") {
+    // The scaffold registers the tool kit's vendor operations and builds only
+    // the Standalone (plus the broker-launched host), whatever --type says.
+    if (!pulp_binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+
+    TempDir tmp("pulp-create-agent-toolkit");
+    ScopedEnvVar pulp_home("PULP_HOME", native_path_string(tmp.path / "pulp-home").c_str());
+
+    const auto out_dir = tmp.path / "Agent Synth";
+    auto r = run_create({"create", "Agent Synth", "--template", "agent-toolkit",
+                         "--output", native_path_string(out_dir), "--no-build", "--ci"},
+                        source_root());
+    INFO(r.stderr_output);
+    INFO(r.stdout_output);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+
+    for (const char* file : {"CMakeLists.txt", "agent_synth.hpp", "agent_synth.cpp",
+                             "agent_operations.cpp", "test_agent_synth.cpp", "main.cpp",
+                             "pulp.toml"}) {
+        INFO(file);
+        REQUIRE(fs::exists(out_dir / file));
+    }
+    // Only the Standalone format: no plugin entry points are written.
+    CHECK_FALSE(fs::exists(out_dir / "vst3_entry.cpp"));
+    CHECK_FALSE(fs::exists(out_dir / "clap_entry.cpp"));
+
+    const auto cmake = read_file(out_dir / "CMakeLists.txt");
+    CHECK(cmake.find("pulp_control_agent_toolkit_declaration(_agent_toolkit_operations VENDOR com.example)")
+          != std::string::npos);
+    CHECK(cmake.find("FORMATS         Standalone") != std::string::npos);
+    CHECK(cmake.find("PROCESSOR_FACTORY create_agent_synth") != std::string::npos);
+    CHECK(cmake.find("CONTROL_VENDOR_OPERATIONS \"${_agent_toolkit_operations}\"") != std::string::npos);
+    CHECK(cmake.find("CONTROL_VENDOR_SOURCES agent_operations.cpp") != std::string::npos);
+    CHECK(cmake.find("dev.pulp.vendor/render@1") != std::string::npos);
+
+    const auto operations = read_file(out_dir / "agent_operations.cpp");
+    CHECK(operations.find("add_control_agent_toolkit") != std::string::npos);
+    CHECK(operations.find("render_factory = &create_agent_synth") != std::string::npos);
+    CHECK(read_file(out_dir / "main.cpp").find("config.input_channels = 0;") != std::string::npos);
+
+    for (const char* file : {"CMakeLists.txt", "agent_synth.hpp", "agent_synth.cpp",
+                             "agent_operations.cpp", "test_agent_synth.cpp"}) {
+        INFO(file);
+        // Bus initializers legitimately contain `{{`; a placeholder does not.
+        CHECK_FALSE(std::regex_search(read_file(out_dir / file),
+                                      std::regex(R"(\{\{[A-Z_][A-Z0-9_]*\}\})")));
+    }
+}
+
 } // namespace
 
 TEST_CASE("pulp create --ci pins the CLI's SDK version and the project configures",

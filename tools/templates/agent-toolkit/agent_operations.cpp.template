@@ -1,0 +1,30 @@
+// Built only into the controlled Standalone and its broker-launched host
+// (CONTROL_VENDOR_SOURCES in CMakeLists.txt), never into other targets.
+
+#include "{{HEADER_NAME}}"
+
+#include <pulp/inspect/control_agent_toolkit.hpp>
+#include <pulp/inspect/control_standalone_host.hpp>
+#include <pulp/state/preset_manager.hpp>
+
+#include <memory>
+
+namespace {
+
+std::shared_ptr<const pulp::inspect::ControlVendorOperationHandlers>
+agent_operations(pulp::format::Processor&, pulp::state::StateStore& store) {
+    auto handlers = std::make_shared<pulp::inspect::ControlVendorOperationHandlers>();
+    pulp::inspect::add_control_agent_toolkit(
+        *handlers, store,
+        // Keep this vendor id equal to the one in CMakeLists.txt.
+        {.vendor_id = "com.example",
+         .presets = std::make_shared<pulp::state::PresetManager>(store, "{{MANUFACTURER}}",
+                                                                 "{{PLUGIN_NAME}}"),
+         .render_factory = &create_{{LOWER_NAME}}});
+    return handlers;
+}
+
+[[maybe_unused]] const bool agent_operations_installed =
+    pulp::inspect::install_standalone_vendor_operations_factory(&agent_operations);
+
+} // namespace

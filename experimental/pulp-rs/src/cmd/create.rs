@@ -195,7 +195,14 @@ pub fn template_points_to_local_package(cwd: &Path, args: &CreateArgs) -> bool {
 fn is_builtin_template_name(template: &str) -> bool {
     matches!(
         template,
-        "effect" | "instrument" | "app" | "bare" | "gain" | "from-figma" | "from-v0"
+        "effect"
+            | "instrument"
+            | "app"
+            | "bare"
+            | "gain"
+            | "agent-toolkit"
+            | "from-figma"
+            | "from-v0"
     )
 }
 
@@ -211,7 +218,7 @@ pub fn print_help(out: &mut impl Write) -> Result<()> {
         Options:\n\
         \x20 --type <effect|instrument|app|bare>  Plugin type (default: effect)\n\
         \x20 --mpe                                Opt into MPE (per-note expression) - instrument only\n\
-        \x20 --template <name-or-kit-dir>         Use named template (e.g. gain) or local template kit\n\
+        \x20 --template <name-or-kit-dir>         Use named template (e.g. gain, agent-toolkit) or local template kit\n\
         \x20 --manufacturer <name>                Manufacturer (default: Pulp)\n\
         \x20 --output <dir>                       Override output directory\n\
         \x20 --targets <list>                     Comma-separated extra targets (e.g. android)\n\

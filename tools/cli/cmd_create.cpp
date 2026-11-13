@@ -127,6 +127,7 @@ static bool is_builtin_template_name(const std::string& template_arg) {
         || template_arg == "app"
         || template_arg == "bare"
         || template_arg == "gain"
+        || template_arg == "agent-toolkit"
         || template_arg == "from-figma"
         || template_arg == "from-v0";
 }
@@ -337,7 +338,7 @@ int cmd_create(const std::vector<std::string>& args) {
             std::cout << "Options:\n";
             std::cout << "  --type <effect|instrument|app|bare>  Plugin type (default: effect)\n";
             std::cout << "  --mpe                                Opt into MPE (per-note expression) — only with --type instrument\n";
-            std::cout << "  --template <name-or-kit-dir>         Use named template (e.g. gain) or local template kit\n";
+            std::cout << "  --template <name-or-kit-dir>         Use named template (e.g. gain, agent-toolkit) or local template kit\n";
             std::cout << "  --manufacturer <name>                Manufacturer (default: Pulp)\n";
             std::cout << "  --output <dir>                       Override output directory\n";
             std::cout << "  --targets <list>                     Comma-separated extra targets (e.g. android)\n";
@@ -401,6 +402,12 @@ int cmd_create(const std::vector<std::string>& args) {
             return 1;
         }
     }
+
+    // The agent tool kit template is a controlled instrument: a Standalone
+    // build the capability broker can drive, so it is always an instrument and
+    // only builds that one format.
+    const bool agent_toolkit_template = tmpl == "agent-toolkit";
+    if (agent_toolkit_template) type = "instrument";
 
     std::string template_key = tmpl.empty() ? type : tmpl;
 
@@ -496,9 +503,11 @@ int cmd_create(const std::vector<std::string>& args) {
     log("  \xe2\x9c\x93 Environment OK\n\n");
 
     if (standalone_mode && !root.empty()) {
-        const bool needs_vst3 = type != "app" && type != "bare" && !checkout_supports_vst3(root);
+        const bool needs_vst3 = type != "app" && type != "bare" && !agent_toolkit_template
+            && !checkout_supports_vst3(root);
 #ifdef __APPLE__
-        const bool needs_au = type != "app" && type != "bare" && !checkout_supports_au(root);
+        const bool needs_au = type != "app" && type != "bare" && !agent_toolkit_template
+            && !checkout_supports_au(root);
 #else
         const bool needs_au = false;
 #endif
@@ -513,7 +522,9 @@ int cmd_create(const std::vector<std::string>& args) {
     }
 
     auto formats = default_create_formats(root, type);
-    if (standalone_mode && !root.empty() && type != "app" && type != "bare") {
+    if (agent_toolkit_template) formats = "Standalone";
+    if (standalone_mode && !root.empty() && type != "app" && type != "bare"
+        && !agent_toolkit_template) {
         if (formats.find("VST3") == std::string::npos) {
             print_warn("VST3 SDK unavailable in current checkout — generating without VST3 support");
         }
@@ -600,7 +611,7 @@ int cmd_create(const std::vector<std::string>& args) {
     if (!fs::exists(source_template_dir)) {
         std::cerr << "Error: template directory not found at " << source_template_dir.string() << "\n";
         if (!tmpl.empty())
-            std::cerr << "Available templates: effect, instrument, gain\n";
+            std::cerr << "Available templates: effect, instrument, gain, agent-toolkit\n";
         return 1;
     }
     if (template_kit) {
@@ -662,6 +673,7 @@ int cmd_create(const std::vector<std::string>& args) {
     std::vector<FileMapping> file_map = {
         {"processor.hpp.template", header_name},
         {"processor.cpp.template", source_name},
+        {"agent_operations.cpp.template", "agent_operations.cpp"},
         {"CMakeLists.txt.template", "CMakeLists.txt"},
         {"clap_entry.cpp.template", "clap_entry.cpp"},
         {"vst3_entry.cpp.template", "vst3_entry.cpp"},
