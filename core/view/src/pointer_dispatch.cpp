@@ -718,7 +718,14 @@ void deliver_mouse_cancel(View& root, View* target, Point root_pt,
 
 ComboBox* enabled_open_popup_in(View& root) {
     auto* combo = ComboBox::active_popup_in(root);
-    return combo && combo->effectively_enabled() ? combo : nullptr;
+    if (!combo || !combo->effectively_enabled())
+        return nullptr;
+    // Same visibility rule hit_test applies: a hidden view, or a view under a
+    // hidden ancestor, takes no input even though its popup rect still exists.
+    for (const View* v = combo; v != nullptr; v = v->parent())
+        if (!v->visible())
+            return nullptr;
+    return combo;
 }
 
 void deliver_mouse_wheel(View& root, Point root_pt,

@@ -1120,3 +1120,17 @@ TEST_CASE("ComboBox: hosts find an open dropdown only while its combo is enabled
     REQUIRE(ComboBox::active_popup_in(*open.root) == open.combo); // control: still open
     REQUIRE(enabled_open_popup_in(*open.root) == nullptr);
 }
+
+TEST_CASE("ComboBox: hosts skip an open dropdown whose combo or ancestor is hidden", "[combo]") {
+    OpenCombo open;
+    REQUIRE(enabled_open_popup_in(*open.root) == open.combo);
+
+    open.combo->set_visible(false);
+    REQUIRE(ComboBox::active_popup_in(*open.root) == open.combo); // control: still open
+    REQUIRE(enabled_open_popup_in(*open.root) == nullptr);
+
+    open.combo->set_visible(true);
+    REQUIRE(enabled_open_popup_in(*open.root) == open.combo);
+    open.root->set_visible(false);
+    REQUIRE(enabled_open_popup_in(*open.root) == nullptr);
+}
