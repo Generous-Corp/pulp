@@ -169,6 +169,11 @@ if(APPLE AND NOT PULP_IOS)
     pulp_add_test_suite(pulp-test-window-host-first-frame-macos GROUP pulp-test-group-view-host-mac
         SOURCES test_window_host_first_frame_macos.mm
         LIBRARIES pulp::view "-framework AppKit")
+    # A plug-in editor's wheel event says whether its deltas are wheel lines
+    # or points (MouseEvent::scroll_precise from hasPreciseScrollingDeltas).
+    pulp_add_test_suite(pulp-test-plugin-view-wheel-macos GROUP pulp-test-group-view-host-mac
+        SOURCES test_plugin_view_host_wheel_macos.mm
+        LIBRARIES pulp::view "-framework AppKit")
 endif()
 
 # The lite editor stack's plug-in view host. The executable compiles the macOS

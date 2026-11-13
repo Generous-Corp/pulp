@@ -272,10 +272,11 @@ extern "C" void pulp_mac_text_input_client_category_anchor();
     // pump and passes a no-op).
     pulp::view::WheelHost host;
     host.request_repaint = [self] { [self setNeedsDisplay:YES]; };
-    pulp::view::deliver_mouse_wheel(
-        *self.rootView, pt, static_cast<float>(event.scrollingDeltaX),
-        static_cast<float>(-event.scrollingDeltaY),
-        modifiers_from_ns_flags(event.modifierFlags), host);
+    pulp::view::WheelAttributes attributes;
+    attributes.modifiers = modifiers_from_ns_flags(event.modifierFlags);
+    attributes.precise = event.hasPreciseScrollingDeltas;
+    pulp::view::deliver_mouse_wheel(*self.rootView, pt, static_cast<float>(event.scrollingDeltaX),
+                                    static_cast<float>(-event.scrollingDeltaY), attributes, host);
 }
 
 - (void)mouseDown:(NSEvent*)event {

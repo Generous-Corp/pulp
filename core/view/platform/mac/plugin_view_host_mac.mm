@@ -567,11 +567,14 @@ void pulp_plugin_wheel(pulp::view::View* root, pulp::view::Point pt, NSEvent* ev
     // with the standalone window host — see pointer_dispatch.hpp for the
     // precedence contract. The embedded plugin host drives its own CVDisplayLink
     // frame pump, so no request_repaint hook is needed (empty = no-op).
-    pulp::view::deliver_mouse_wheel(
-        *root, pt, static_cast<float>(event.scrollingDeltaX),
-        static_cast<float>(-event.scrollingDeltaY),
-        pulp::view::mac_geometry::modifiers_from_ns_flags(event.modifierFlags),
-        /*host=*/{});
+    // A classic wheel reports line counts, a trackpad points; the view needs
+    // the difference to size its scroll step.
+    pulp::view::WheelAttributes attributes;
+    attributes.modifiers = pulp::view::mac_geometry::modifiers_from_ns_flags(event.modifierFlags);
+    attributes.precise = event.hasPreciseScrollingDeltas;
+    pulp::view::deliver_mouse_wheel(*root, pt, static_cast<float>(event.scrollingDeltaX),
+                                    static_cast<float>(-event.scrollingDeltaY), attributes,
+                                    /*host=*/{});
   } catch (const std::exception& e) {
     std::fprintf(stderr, "[plugin-view-host] scrollWheel handler threw: %s\n", e.what());
   } catch (...) {
