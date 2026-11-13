@@ -279,13 +279,14 @@ TEST_CASE("pulp graph probe refusals name the cause and the fix", "[cli][shellou
         run_pulp({"graph", "render", graph.string(), "--output", input.string(), "--json"});
     REQUIRE(rendered.exit_code == 0);
     const auto probe = [&](std::vector<std::string> extra) {
-        std::vector<std::string> args{"graph",   "probe",        graph.string(), "--json",
+        std::vector<std::string> args{"graph",   "probe",        graph.string(),  "--json",
                                       "--input", input.string(), "--source-node", "in"};
         args.insert(args.end(), extra.begin(), extra.end());
         return run_pulp(args);
     };
 
-    const auto missing = probe({"--source-port", "audio", "--destination-node", "out", "--destination-port", "audio"});
+    const auto missing = probe(
+        {"--source-port", "audio", "--destination-node", "out", "--destination-port", "audio"});
     REQUIRE(missing.exit_code == 2);
     REQUIRE(missing.stdout_output.find("\"code\": \"MissingEdge\"") != std::string::npos);
     REQUIRE(missing.stdout_output.find(
@@ -300,7 +301,8 @@ TEST_CASE("pulp graph probe refusals name the cause and the fix", "[cli][shellou
                 "graphs loaded by the CLI cannot contain automation edges, so control probes "
                 "are available only through the C++ API") != std::string::npos);
 
-    const auto unknown = probe({"--source-port", "absent", "--destination-node", "trim", "--destination-port", "audio"});
+    const auto unknown = probe(
+        {"--source-port", "absent", "--destination-node", "trim", "--destination-port", "audio"});
     REQUIRE(unknown.exit_code == 2);
     REQUIRE(unknown.stdout_output.find("\"code\": \"UnknownPort\"") != std::string::npos);
     REQUIRE(unknown.stdout_output.find(
