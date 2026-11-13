@@ -1,9 +1,9 @@
 {
   "domain": "midi",
   "source": "core/midi/include/pulp/midi/device.hpp",
-  "fingerprint": "sha256:e09c197d2137be61c745d5f2db9c6266bbac7e8f9b757fcf386daae5881be45d",
+  "fingerprint": "sha256:c98a919da5183e38f6845f2dfaae4704c49d43c72099245877a0bc7975c668aa",
   "include": "pulp/midi/device.hpp",
-  "disposition": "legacy_unreviewed",
+  "disposition": "infrastructure",
   "capability_keys": [],
-  "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+  "rationale": "MIDI port interfaces (MidiInput, MidiOutput, MidiSystem) and the SysEx framing check; platform device I/O, not a generator-facing capability. Edited to add MidiOutput::send_sysex."
 }

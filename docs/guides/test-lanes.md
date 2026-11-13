@@ -364,6 +364,15 @@ manifest, `tools/ci/source_selftests.json`:
   required `Enforce version & skill sync` job needs every part and passes only
   when all of them succeeded.
 
+**Docs-only impact scope.** On a pull request both parts run with
+`--impact-scope HEAD^1` (the merge ref's first parent); a merge group runs
+every entry, because it lands every entry queued ahead of it. When `tools/scripts/classify_changes.py` calls
+that diff `docs-only`, only the entries that can read a changed file run
+(`select_for_docs_only`: the entry's script names the path or its basename,
+walks a directory holding it, or scans the tree and mentions documentation);
+any other class, an unreadable diff, or a classifier error runs every entry.
+Pushes to main run every entry on the Linux build leg, which is the backstop.
+
 `source-selftest-lane-contract` (a ctest that stays on the gate, because it
 needs the configured tree) runs `source_selftests.py check`. It fails when a
 labelled test is missing from the manifest, a listed test is not registered or

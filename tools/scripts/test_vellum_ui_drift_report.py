@@ -143,6 +143,17 @@ class DriftReportTest(unittest.TestCase):
             workflow,
         )
 
+    def test_committed_unit_map_exists_and_the_report_reads_it(self):
+        # The workflow skips the advisory step when the unit map is absent, so
+        # a deleted map silently turns the report off. Fail here instead.
+        repo = pathlib.Path(__file__).parents[2]
+        self.assertTrue(
+            (repo / drift.UNIT_PATH).is_file(),
+            f"{drift.UNIT_PATH} is missing: the drift report would not run",
+        )
+        report = drift.build_report(repo, "HEAD")
+        self.assertGreater(report["ui_paths"], 0)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

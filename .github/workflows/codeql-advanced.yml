@@ -3,7 +3,18 @@ name: CodeQL (advanced)
 on:
   push:
     branches: [main]
+  # A pull request that changes only Markdown, docs/ or the planning gitlink
+  # has nothing for CodeQL to analyze, so it does not run; every other pull
+  # request, every push to main and the weekly schedule still do. CodeQL is not
+  # a required check, so skipping it never leaves a pull request on "Expected".
+  # This list is classify_changes.DOCS_PATHS_IGNORE: test_classify_changes.py
+  # proves every docs-only diff (impact_class) is skipped and no diff touching
+  # a file outside it is.
   pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "planning"
   schedule:
     - cron: '23 3 * * 1'
   workflow_dispatch:

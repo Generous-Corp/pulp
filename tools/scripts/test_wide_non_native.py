@@ -336,7 +336,7 @@ class ClassifierFlagTests(unittest.TestCase):
         self.assertEqual(err_a, err_b)
         self.assertEqual(
             set(plain),
-            {"native_build_required", "ios_compile_required",
+            {"native_build_required", "impact_class", "ios_compile_required",
              "agent_capability_installed_sdk_required", "changed_file_count",
              "reason"},
         )

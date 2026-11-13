@@ -623,6 +623,7 @@
       "pulp/midi/synthesiser.hpp",
       "pulp/midi/sysex_accumulator.hpp",
       "pulp/midi/sysex_chunk_assembler.hpp",
+      "pulp/midi/sysex_send_gate.hpp",
       "pulp/midi/tuning.hpp",
       "pulp/midi/ump.hpp",
       "pulp/midi/ump_buffer.hpp",
