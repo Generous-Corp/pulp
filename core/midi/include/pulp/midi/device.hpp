@@ -23,8 +23,8 @@ namespace pulp::midi {
 ///    devices are attached. `resolve_port()` uses it only when exactly one
 ///    port carries it. This fallback is a Pulp policy, not a documented
 ///    CoreMIDI guarantee and not a copy of any other host's behaviour.
-///  - Virtual endpoints (IAC bus, other apps' ports) have an `id` like any
-///    other port and an empty `device_name`; their `id` lives as long as the
+///  - An endpoint an app creates in its own process has an `id` like any
+///    other port and an empty `device_name`; its `id` lives as long as the
 ///    creating process keeps the endpoint, and may be reassigned if it
 ///    restarts.
 ///  - `open()` takes an `id`. An unknown or malformed `id` fails; it never
