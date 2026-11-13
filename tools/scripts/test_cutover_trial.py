@@ -10,7 +10,7 @@ ROWS = [
     {"id": "H4", "capability": "mcp tools", "paths": ["tools/mcp/"]},
     {"id": "A13", "capability": "jsc", "paths": ["core/view/src/js_*.mm"]},
 ]
-INPUTS = {"export_id": "x", "delete_paths": ["core/view/include/pulp/view/motion.hpp"],
+INPUTS = {"export_id": "x", "ledger_stranded_count": 3, "delete_paths": ["core/view/include/pulp/view/motion.hpp"],
           "stranded_rows": ROWS}
 
 HEADER_LOG = """\
@@ -88,6 +88,21 @@ class InputTests(unittest.TestCase):
         data = ct.load_inputs()
         self.assertEqual(len(data["delete_paths"]), 687)
         self.assertEqual(len(set(data["delete_paths"])), 687)
+
+    def test_row_count_equals_the_ledger_stranded_count(self):
+        data = ct.load_inputs()
+        self.assertEqual(data["ledger_stranded_count"], 42)
+        self.assertEqual(len(data["stranded_rows"]), 42)
+        self.assertEqual(len({r["id"] for r in data["stranded_rows"]}), 42)
+
+    def test_control_a_dropped_row_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data = ct.load_inputs()
+            data["stranded_rows"].pop()
+            short = Path(tmp) / "short.json"
+            short.write_text(json.dumps(data), encoding="utf-8")
+            with self.assertRaises(ct.InputError):
+                ct.load_inputs(short)
 
     def test_unreadable_or_malformed_inputs_exit_2(self):
         with tempfile.TemporaryDirectory() as tmp:

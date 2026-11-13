@@ -808,12 +808,25 @@
    ]
   },
   {
+   "id": "C12",
+   "capability": "Illustrator PDF-to-SVG ingest",
+   "paths": [],
+   "unlocated": true
+  },
+  {
    "id": "C14",
    "capability": "Design CLI family: design and subcommands, design-debug, import-design, export-tokens, tweaks, ui build",
    "paths": [
     "tools/cli/cmd_design_subcommands.cpp",
     "tools/design/pulp_design_debug.cpp",
     "tools/ui-build/"
+   ]
+  },
+  {
+   "id": "D3",
+   "capability": "Audio widgets: meters, scopes, EQ curve, keyboards, waveform and spectrum views, audio inspector panel",
+   "paths": [
+    "core/view/audio/"
    ]
   },
   {
@@ -827,7 +840,14 @@
   {
    "id": "D9",
    "capability": "Accessibility on Windows (UIA), Linux (AT-SPI), iOS, Android",
-   "paths": []
+   "paths": [
+    "core/view/platform/win/",
+    "core/view/platform/linux/",
+    "core/view/platform/ios/",
+    "core/view/platform/android/",
+    "pulp/view/platform/uia_mapping.hpp",
+    "pulp/view/platform/atspi_mapping.hpp"
+   ]
   },
   {
    "id": "D15",
@@ -836,6 +856,12 @@
     "tools/harness/",
     "tools/screenshot/pulp_screenshot.cpp"
    ]
+  },
+  {
+   "id": "D16",
+   "capability": "Non-blocking native menus, file dialogs, alerts",
+   "paths": [],
+   "unlocated": true
   },
   {
    "id": "D18",
@@ -853,6 +879,16 @@
    ]
   },
   {
+   "id": "E4",
+   "capability": "3D: renderer3d, core/scene, glTF and Draco tooling",
+   "paths": [
+    "core/render/src/renderer3d*.cpp",
+    "core/scene/",
+    "shaders/renderer3d_scene.wgsl",
+    "tools/scene3d/"
+   ]
+  },
+  {
    "id": "E6",
    "capability": "Android rendering: surface, Choreographer, JNI, render loop",
    "paths": [
@@ -863,7 +899,10 @@
   {
    "id": "F2",
    "capability": "macOS plug-in view host (drag, text input, script keys)",
-   "paths": []
+   "paths": [
+    "core/view/platform/mac/plugin_view_host_mac*",
+    "core/view/platform/mac/web_view_snapshot_mac.mm"
+   ]
   },
   {
    "id": "F3",
@@ -963,6 +1002,21 @@
    ]
   },
   {
+   "id": "H6",
+   "capability": "UI examples",
+   "paths": [
+    "examples/"
+   ]
+  },
+  {
+   "id": "H7",
+   "capability": "Installed SDK surface: Pulp::view, Pulp::canvas, Pulp::render, Pulp::view-native, Pulp::design-import",
+   "paths": [
+    "tools/cmake/PulpConfig.cmake.in",
+    "tools/validation/sdk-smoke/CMakeLists.txt"
+   ]
+  },
+  {
    "id": "H9",
    "capability": "Claude plug-in commands /design, /import-design, /inspect",
    "paths": [
@@ -970,5 +1024,6 @@
     "claude/"
    ]
   }
- ]
+ ],
+ "ledger_stranded_count": 42
 }

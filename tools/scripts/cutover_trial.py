@@ -45,6 +45,8 @@ def load_inputs(path: Path = INPUTS) -> dict:
             or not all(isinstance(p, str) and p and ".." not in p.split("/")
                        and not p.startswith("/") for p in paths)):
         raise InputError("delete_paths must be a non-empty list of relative paths")
+    if data.get("ledger_stranded_count") != len(rows):
+        raise InputError("stranded_rows does not match ledger_stranded_count")
     if not isinstance(rows, list) or not all(
             isinstance(r, dict) and isinstance(r.get("id"), str)
             and isinstance(r.get("paths"), list) for r in rows):
@@ -177,6 +179,7 @@ def build_report(inputs: dict, configure_text: str, build_text: str,
         "configure": {"ok": configure_ok, "errors": configure_errors},
         "build": {"ran": build_ran, "failed_targets": failures},
         "stranded_rows_total": len(rows),
+        "rows_without_paths": [r["id"] for r in rows if not r["paths"]],
         "stranded_rows_hit": len(grouping["by_row"]),
         **grouping,
     }
