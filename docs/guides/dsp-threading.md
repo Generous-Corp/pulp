@@ -676,6 +676,13 @@ processor.process(buffer);
 REQUIRE_FALSE(probe.saw_allocation());
 ```
 
+Projects built on the installed SDK get the same probe: link
+`Pulp::rt-allocation-probe` (`find_package(Pulp COMPONENTS
+rt-allocation-probe)`) into a test executable and include
+`<pulp/test/rt_allocation_probe.hpp>`. It replaces the global allocation
+operators for the whole executable, so link it into tests only, never into a
+plug-in or an application.
+
 `test/harness/scoped_rt_process_probe.hpp` exposes the shared
 `pulp::test::ScopedRtProcessProbe`, which enters an always-on
 `RtNoAllocScope` (independent of `NDEBUG`, so the check is live even in
