@@ -1,32 +1,156 @@
 {
-  "build": {
-    "command": "cmake -S examples/p1-event-admission-consumer -B build-p1-event-admission -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$PULP_SDK_PREFIX",
-    "profile": "Release",
-    "reason": "installed SDK 1.54.0 does not contain the current public graph_event_contract.hpp header",
-    "result": "REFUSED"
-  },
+  "schema": "pulp.graph.p1-event-admission-consumer.v1",
   "consumer": "examples/p1-event-admission-consumer",
+  "status": "NOT_QUALIFIED",
+  "source_head": "16c0477d3a43d24fc17539d426557cd6d30813c5",
+  "source_head_note": "fixture commit; the receipt itself lands in the following docs commit",
+  "qualification_scope": "PARTIAL: all four families PASS individually from an installed SDK (MIDI host ingress, graph-authored trigger lane, PluginSlot parameter mailbox, VoiceBankBinding voice intent); NOT_QUALIFIED because the remaining admission-contract rows are NOT_CHECKED",
   "controls": {
-    "midi": "implemented: two-block absolute ingress, stale epoch, late, duplicate sequence, stable producer ordering",
-    "parameter": "NOT_CHECKED: standalone stable sort and fixed-capacity overflow only; graph/mailbox projection planned",
+    "midi": "PASS (installed SDK): HostEventIngress two-block absolute ingress, stale epoch, late, duplicate sequence, stable producer ordering at partitions 4 and 8; projection into SignalGraph::inject_midi and UMP/MPE sidecars NOT_CHECKED in this fixture",
+    "parameter": "PASS (installed SDK, PluginSlot node): SignalGraph::inject_parameter_events into an add_plugin_node PluginSlot over four blocks at block sizes 4 and 8; latest-wins, sorted delivery, stable equal-offset order, one-shot mailbox, source-side overflow returns false with the 1024-event retained prefix published, partition-invariant delivery. Plain add_processor_node Processor delivery is not relied on and stays UNAVAILABLE",
+    "parameter_queue_standalone": "PASS: ParameterEventQueue stable sort and fixed-capacity overflow (standalone)",
     "partitions": [
       4,
       8
     ],
-    "planted_negative_count": 5,
-    "trigger": "implemented: two blocks, absolute sample, sequence, epoch, reset",
-    "voice_intent": "NOT_CHECKED: standalone test-owned identity/MPE adapter only; graph voice projection planned",
-    "cross_block_verified": "MIDI ingress and trigger graph only; parameter/voice projection not checked"
+    "graph_event_schedules": [
+      [
+        2,
+        2,
+        4
+      ],
+      [
+        3,
+        5
+      ]
+    ],
+    "in_run_refusal_controls": [
+      "midi-stale-epoch-refusal",
+      "midi-late-refusal",
+      "midi-duplicate-sequence-refusal",
+      "parameter-overflow-refusal",
+      "graph-event-future-refusal",
+      "graph-event-late-refusal",
+      "graph-event-overflow-refusal",
+      "graph-event-reset-cancels-pending",
+      "parameter-mailbox-source-overflow-refusal",
+      "voice-bank-wrong-generation-refusal",
+      "voice-bank-wrong-slot-refusal",
+      "voice-bank-double-release-refusal",
+      "voice-bank-retired-generation-refusal",
+      "voice-bank-stale-generation-refusal",
+      "voice-bank-stale-epoch-refusal"
+    ],
+    "mutation_control_count": 13,
+    "trigger": "PASS (installed SDK, graph-authored lane): CustomNodeType::process_events producer/consumer joined by SignalGraph::connect_graph_event; GraphEventWriter::emit_at current-block delivery, bounded-future delivery staged in block 0 and delivered in the later block containing it, Future, Late and Overflow refusals, deterministic same-sample sequence order, reset cancelling a staged record with an epoch advance, identical events and audio across schedules 2+2+4 and 3+5. Public TriggerContext was refused as a seam and is not used",
+    "trigger_graph": "PASS (installed SDK): existing trigger-graph two-block absolute sample, sequence, epoch and reset check; trigger-graph evidence, not a TriggerContext consumer",
+    "voice_intent": "PASS (installed SDK, control-side): pulp::host::VoiceBankBinding with MpeVoiceBankOwner over 32 samples at partitions 4 and 8; note-on at sample 2 lands on one slot and generation, note-off at sample 10 puts that generation into release, double release, wrong slot, wrong generation, retired generation and retired generation on the reused slot are refused with StaleGeneration via dispatch_deferred, a live generation accepts deferred pressure and release, a stale epoch is refused; audio, slots and generations are partition-invariant. No graph voice allocator or audio scheduler is claimed",
+    "cross_block_verified": "MIDI ingress, trigger graph, graph-authored event lane, PluginSlot parameter mailbox and voice-bank binding, each from an installed SDK across at least two blocks and two partition schedules; each family runs in its own graph or binding"
   },
-  "schema": "pulp.graph.p1-event-admission-consumer.v1",
-  "source_head": "37d5d32932af8c32d17727cab8d8b98cc8323986",
-  "status": "NOT_QUALIFIED",
-  "qualification_scope": "PARTIAL: MIDI/trigger cross-block controls implemented; parameter/voice graph projection NOT_CHECKED",
+  "not_checked_rows": [
+    "single shared epoch and absolute sample origin coordinating all four families in one consumer projection (each family runs in its own graph or binding)",
+    "MIDI/UMP/MPE projection through SignalGraph::inject_midi inside this fixture (covered separately by examples/g5-host-event-consumer)",
+    "parameter overflow telemetry counters (overflow_count) through the graph mailbox; only the false return and retained prefix are asserted",
+    "a sequence mutation that fails while the unaffected records remain explainable",
+    "callback allocation and topology-mutation freedom (the probe PluginSlot records events into a vector)",
+    "partition schedules beyond two per family (for example 1/32/64/127/256)",
+    "routed versus reference executor parity for the graph-authored lane and parameter mailbox"
+  ],
   "unavailable_lanes": [
-    "installed_sdk",
     "runtime",
     "realtime",
     "provider_parity",
-    "non_darwin"
+    "non_darwin",
+    "parameter_mailbox_public_processor",
+    "public_trigger_context_refused_as_seam"
+  ],
+  "build": {
+    "command": "cmake -S examples/p1-event-admission-consumer -B build-p1-event-admission -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$PULP_SDK_PREFIX",
+    "profile": "Release",
+    "result": "PASS",
+    "sdk": {
+      "kind": "source-install",
+      "build_profile": "release",
+      "source_git_sha": "4c69e183387017c47d048b477218a6d0a4947bcc",
+      "source_git_dirty": false,
+      "platform": "darwin-arm64",
+      "sdk_provenance_sha256": "6e087db51c35537ffac6816728fcbc337bcbcd1df562cda9c5e8a5b75b2736eb",
+      "pulp_config_cmake_sha256": "46cbd6fedbb4690f5447d4bf71b00c8bb4e50fea107f31b332f652a57c9df278",
+      "graph_event_contract_hpp_sha256": "1364609e77aee4e39fa3c1692e36c715ec9385856515dc3076d1de7ef0b0350a",
+      "signal_graph_runtime_hpp_sha256": "9527c8e535cf0a2f7eaa4e7eff0249784c8a02ec891a998a458422687e0d1748",
+      "installed_headers_match_source_head": true,
+      "voice_bank_binding_hpp_sha256": "d622f444c145ccced476407b97bc62f59912601d4804dc557e4d022882d503a4",
+      "custom_node_type_hpp_sha256": "8cc51fc538c6415fd580a4d4bf4a45e3a6570435b7649581b3516f1074dd4df7",
+      "custom_node_events_hpp_sha256": "65e1cee2feab83530094c72b89dc87bde523c9b4ac10e5822e370f6dcc14f114",
+      "plugin_slot_hpp_sha256": "69927dee51b495256394c0561f8e31be2abac5cf73dbd462a310565d637a92bb",
+      "parameter_event_queue_hpp_sha256": "74e61cf0b1cd57caf4357e26433ec3e0f2aa7a9a838c56049b3ad3f0e639b653",
+      "installed_headers_match_origin_main": "1042181bec4b33ea3180ced14972a8ab01fd63bf"
+    },
+    "previous_refusal": "installed SDK 1.54.0 did not contain graph_event_contract.hpp"
+  },
+  "run": {
+    "command": "build-p1-event-admission/pulp-p1-event-admission-consumer",
+    "returncode": 0,
+    "stdout": "p1-event-admission PASS checks=223 partitions=4,8 graph_event_schedules=2+2+4,3+5 graph_events=9 voice_slot_reuse=1 consumer_gate=NOT_QUALIFIED",
+    "ctest": "p1-event-admission-public-consumer 1/1 passed"
+  },
+  "fixture_corrections": [
+    "midi-duplicate-sequence-refusal: published before project(); HostEventIngress detects duplicates only among staged records and project() removes delivered records",
+    "trigger-cross-block-samples: trigger_trace() is read after each block; the view covers only the most recent block",
+    "voice intent: the test-owned note_id-generation adapter is replaced by the installed VoiceBankBinding"
+  ],
+  "mutation_controls": [
+    {
+      "mutation": "duplicate MIDI record given a unique producer_sequence",
+      "result": "FAIL rule=midi-duplicate-sequence-refusal"
+    },
+    {
+      "mutation": "second-block trigger impulse moved from frame 2 to frame 3",
+      "result": "FAIL rule=trigger-cross-block-samples"
+    },
+    {
+      "mutation": "graph lane: far-future emission retargeted inside the look-ahead horizon",
+      "result": "FAIL rule=graph-event-future-refusal"
+    },
+    {
+      "mutation": "graph lane: late emission retargeted to a sample not yet consumed",
+      "result": "FAIL rule=graph-event-late-refusal"
+    },
+    {
+      "mutation": "graph lane: ninth same-sample emission moved to a different sample",
+      "result": "FAIL rule=graph-event-overflow-refusal"
+    },
+    {
+      "mutation": "graph lane: reset_requested cleared on the reset block",
+      "result": "FAIL rule=graph-event-reset-cancels-pending"
+    },
+    {
+      "mutation": "parameter mailbox: older queue injected after the latest",
+      "result": "FAIL rule=parameter-mailbox-latest-wins"
+    },
+    {
+      "mutation": "parameter mailbox: latest queue re-injected before the quiet block",
+      "result": "FAIL rule=parameter-mailbox-one-shot"
+    },
+    {
+      "mutation": "parameter mailbox: equal-offset events pushed in the opposite order",
+      "result": "FAIL rule=parameter-mailbox-equal-offset-order"
+    },
+    {
+      "mutation": "parameter mailbox: overflow fill stops at capacity",
+      "result": "FAIL rule=parameter-mailbox-source-overflow-refusal"
+    },
+    {
+      "mutation": "voice bank: note-on moved past the first checkpoint",
+      "result": "FAIL rule=voice-bank-note-on-slot"
+    },
+    {
+      "mutation": "voice bank: note-off moved past the release checkpoint",
+      "result": "FAIL rule=voice-bank-release-intent"
+    },
+    {
+      "mutation": "voice bank: retired-generation record replaced by the live generation",
+      "result": "FAIL rule=voice-bank-stale-generation-refusal"
+    }
   ]
 }

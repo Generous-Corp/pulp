@@ -40,6 +40,19 @@ source build did not complete its relocatable SDK support-module install. The
 receipt's `source_head` binds the code-producing repair commit; later manifest
 and documentation-only commits do not alter the fixture implementation.
 
+An installed-SDK rerun on 2026-11-13 supplies both consumers. They were built
+from a clean Release source install of
+`4c69e183387017c47d048b477218a6d0a4947bcc`, whose `core/` and `tools/cmake/`
+trees match `origin/main` `5b904b8712667b87d2ecd43f9315c574fc37ec68`, with
+the consumer sources from that later head. Both consumers PASS at 64 and 128
+frames. The receipt is
+`../evidence/p0-layered-inspection-replay-20261112/receipt-installed-sdk-20261113.json`,
+raw-file SHA-256
+`2c96a7e4d53e2a50e1048324a4460656afb83196492a42ed335a476757034738`. The
+installed-consumer lane is therefore no longer `UNAVAILABLE`. The gate remains
+`NOT_QUALIFIED` for the reasons above: partition execution and layer-mutation
+rejection are still not checked.
+
 This slice adds no runtime/API surface, queue, scheduler, callback behavior,
 or duplicate graph seam. The rendered-output oracle is deterministic for the
 checked-in fixture, but it is not a runtime block-boundary or audio-quality
