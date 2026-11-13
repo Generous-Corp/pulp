@@ -10,8 +10,12 @@ What must hold:
   the CTest inventory the generators read is already complete;
 - a configure that leaves a target object file, or a command that is a build
   (`cmake --build`, `ninja`, `make`), is refused with exit 3;
-- the configure is governed: it runs under the governor as a background
-  one-core lease;
+- the configure and the command are governed: each runs under the governor
+  as a background one-core lease, at nice 10, and the granted lease is shown;
+- a build hidden in a wrapper command is caught after the command;
+- SIGTERM sends TERM to the governor (whose trap releases the lease) and
+  removes the tree; a stale tree is swept at the next start and a live one is
+  kept; no other lane adopts a temporary tree as its build;
 - `changed_surface_script_families.py --configure-only` takes this path.
 
 Run:
@@ -22,9 +26,11 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -36,11 +42,9 @@ SCRIPT = HERE / "configure_only.py"
 
 FAKE_CMAKE = r"""#!/bin/sh
 echo "$*" >> "$FAKE_CMAKE_LOG"
+if [ "$1" = "--build" ]; then : > "$2/.ninja_log"; exit 0; fi
 dir=""
-while [ $# -gt 0 ]; do
-    [ "$1" = "-B" ] && { dir="$2"; shift; }
-    shift
-done
+for a in "$@"; do [ "$prev" = "-B" ] && dir="$a"; prev="$a"; done
 [ -n "$FAKE_CMAKE_FAILS" ] && { echo "CMake Error: planted" >&2; exit 1; }
 mkdir -p "$dir/CMakeFiles/3.31.0/CompilerIdCXX" "$dir/CMakeFiles/_CMakeLTOTest-C/bin/CMakeFiles/foo.dir"
 : > "$dir/CMakeFiles/_CMakeLTOTest-C/bin/CMakeFiles/foo.dir/foo.c.o"
@@ -55,9 +59,15 @@ if [ -n "$FAKE_CMAKE_NINJA_LOG" ]; then
 fi
 """
 
-FAKE_GOVERNOR = r"""#!/bin/sh
-echo "class=$PULP_BUILD_CLASS jobs=$PULP_BUILD_JOBS" >> "$FAKE_GOVERNOR_LOG"
-exec "$@"
+# Like governed-build.sh: runs the command as a child and releases its lease in
+# a TERM/EXIT trap, which a SIGKILL would skip.
+FAKE_GOVERNOR = r"""#!/bin/bash
+echo "class=$PULP_BUILD_CLASS jobs=$PULP_BUILD_JOBS cmd=$*" >> "$FAKE_GOVERNOR_LOG"
+echo "[governed-build] background lease acquired id=fake cores=1 (asked 1)" >&2
+trap 'echo "lease released" >> "$FAKE_GOVERNOR_LOG"; [ -n "$child" ] && kill "$child" 2>/dev/null; exit 143' TERM
+"$@" &
+child=$!
+wait "$child"
 """
 
 
@@ -113,10 +123,77 @@ class ConfigureOnlyTests(unittest.TestCase):
                       call)
         self.assertNotIn("--build", call)
 
-    def test_the_configure_is_governed_as_one_background_core(self) -> None:
+    def test_the_configure_and_the_command_are_governed_and_niced(self) -> None:
         r = self.run_tool("true")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(self.governor_log.read_text(encoding="utf-8").strip(), "class=background jobs=1")
+        lines = self.governor_log.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines), 2, lines)  # the configure, then the command
+        for line in lines:
+            self.assertTrue(line.startswith("class=background jobs=1 cmd="), line)
+            if shutil.which("nice"):
+                self.assertIn("cmd=nice -n 10 ", line)
+        self.assertIn(" -B ", lines[0])
+        self.assertTrue(lines[1].endswith("nice -n 10 true") or lines[1].endswith("cmd=true"), lines[1])
+        # The lease the governor granted is shown on success.
+        self.assertIn("configure-only:   [governed-build] background lease acquired", r.stderr)
+
+    def test_a_build_hidden_in_a_wrapper_is_caught_after_the_command(self) -> None:
+        r = self.run_tool("bash", "-c", f"{self.bin / 'cmake'} --build {{build}}")
+        self.assertEqual(r.returncode, configure_only.COMPILED, r.stderr)
+        self.assertIn("the command compiled", r.stderr)
+        self.assertIn(".ninja_log", r.stderr)
+        self.assertEqual(self.temp_trees(), [])
+
+    def test_sigterm_releases_the_governor_lease_and_removes_the_tree(self) -> None:
+        started = self.tmp / "started"
+        proc = subprocess.Popen(
+            [sys.executable, str(SCRIPT), "--repo-root", str(self.root), "--", sys.executable, "-c",
+             "import pathlib, sys, time; pathlib.Path(sys.argv[1]).write_text('x', encoding='utf-8'); "
+             "time.sleep(120)", str(started)],
+            env=self.env(PULP_CONFIGURE_ONLY_TERM_GRACE="20"), stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, encoding="utf-8")
+        deadline = time.monotonic() + 60
+        while not started.exists() and time.monotonic() < deadline and proc.poll() is None:
+            time.sleep(0.1)
+        self.assertTrue(started.exists(), proc.stderr.read() if proc.poll() is not None else "")
+        self.assertEqual(len(self.temp_trees()), 1)
+        proc.send_signal(signal.SIGTERM)
+        _, err = proc.communicate(timeout=60)
+        self.assertEqual(proc.returncode, 128 + signal.SIGTERM, err)
+        # The governor got TERM (not KILL), so its trap released the lease.
+        self.assertIn("lease released", self.governor_log.read_text(encoding="utf-8"))
+        self.assertEqual(self.temp_trees(), [])
+
+    def test_a_stale_tree_is_swept_and_a_live_one_kept(self) -> None:
+        stale = self.root / (configure_only.TEMP_PREFIX + "stale")
+        live = self.root / (configure_only.TEMP_PREFIX + "live")
+        for tree in (stale, live):
+            tree.mkdir()
+            (tree / configure_only.LOCK_NAME).write_text("", encoding="utf-8")
+        held = configure_only._try_lock(live / configure_only.LOCK_NAME)
+        if held is False:
+            self.skipTest("no fcntl locks on this platform")
+        self.addCleanup(held.close)
+        r = self.run_tool("true")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(stale.exists())
+        self.assertTrue(live.exists())
+        self.assertIn("swept 1 stale temporary tree", r.stderr)
+
+    def test_other_lanes_never_adopt_a_temporary_tree(self) -> None:
+        sys.path.insert(0, str(HERE.parent / "ci"))
+        import source_selftests  # noqa: PLC0415
+        self.assertEqual(source_selftests.CONFIGURE_ONLY_PREFIX, configure_only.TEMP_PREFIX)
+        tree = self.root / (configure_only.TEMP_PREFIX + "abc")
+        tree.mkdir()
+        (tree / "CMakeCache.txt").write_text("CMAKE_GENERATOR:INTERNAL=Ninja\n", encoding="utf-8")
+        (tree / "CTestTestfile.cmake").write_text("# x\n", encoding="utf-8")
+        build, why = source_selftests.choose_build_dir(self.root, {})
+        self.assertIsNone(build, why)
+        # Control: the same tree under an ordinary build name is adopted.
+        tree.rename(self.root / "build-ordinary")
+        build, why = source_selftests.choose_build_dir(self.root, {})
+        self.assertEqual(build, (self.root / "build-ordinary").resolve(), why)
 
     def test_a_failing_command_keeps_its_exit_code_and_still_cleans_up(self) -> None:
         r = self.run_tool(sys.executable, "-c", "raise SystemExit(5)")

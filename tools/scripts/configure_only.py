@@ -16,22 +16,30 @@ gate_host_policy.sh refuses:
 The bounds, which gate_host_policy.sh names as the configure-only allowance:
 
 - configure only. The command may not be a build (`cmake --build`, `ninja`,
-  `make`, `xcodebuild`), and after configure the tree must hold no `.ninja_log`
-  and no object file outside CMake's own configure-time probe directories
-  (compiler identification, try_compile, the LTO support check). Either
-  violation fails the run.
+  `make`, `xcodebuild` as its argv[0]), and after the configure AND again after
+  the command the tree must hold no `.ninja_log` and no object file outside
+  CMake's own configure-time probe directories (compiler identification,
+  try_compile, the LTO support check). Any violation fails the run with 3, so a
+  build hidden in a wrapper (`bash -c 'cmake --build {build}'`) is still caught,
+  after the fact.
 - a temporary `build-configure-only.*` directory under the checkout (ignored by
   git, never under /tmp, which the root configure refuses), removed afterwards
-  on success, failure or SIGTERM.
-- governed: the configure runs under tools/ci/governed-build.sh as a background
-  one-core lease (PULP_BUILD_CLASS=background, PULP_BUILD_JOBS=1) and at nice
-  10, so it takes the host's background share and never more.
+  on success, failure or SIGTERM. On SIGTERM the running child (the governor)
+  gets TERM and a grace period before KILL, so its EXIT trap releases its lease.
+  A tree whose owner is gone (its lock is free) is swept at the next start.
+- governed: the configure and the command both run under
+  tools/ci/governed-build.sh as a background one-core lease
+  (PULP_BUILD_CLASS=background, PULP_BUILD_JOBS=1) at nice 10, so together they
+  take the host's background share and never more.
 
 Before configuring it materializes what the gate's configure sees, so the
 inventory matches the gate's: `setup.sh --deps-only` (the shared dependency
 cache), and `npm ci` for tools/import-design/jsx-runtime when its
 node_modules are missing (without them the configure omits two Node test
 registrations and the generators refuse the tree as INCOMPLETE_CONFIGURE).
+Those two steps run at nice 10 but OUTSIDE the governor: they fetch and link
+into shared caches (network and disk bound, no compile), and a warm cache makes
+them a few seconds.
 
 Exit codes: the command's own exit code; 2 the configure (or its setup) failed;
 3 the configure compiled something, or the command is a build.
@@ -51,6 +59,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Iterator
 
@@ -70,6 +79,10 @@ PROBE_DIR_MARKERS = ("CompilerId", "CMakeScratch", "CMakeTmp", "_CMake")
 BUILD_TOOLS = ("ninja", "make", "gmake", "xcodebuild", "msbuild")
 
 GOVERNED_ENV = {"PULP_BUILD_CLASS": "background", "PULP_BUILD_JOBS": "1"}
+LOCK_NAME = ".configure-only.lock"
+# A tree with no lock to test (no fcntl) counts as stale after this long.
+STALE_WITHOUT_LOCK_S = 6 * 3600
+TERM_GRACE_S = float(os.environ.get("PULP_CONFIGURE_ONLY_TERM_GRACE", "10"))
 
 CONFIGURE_FAILED = 2
 COMPILED = 3
@@ -106,14 +119,41 @@ def compile_evidence(build: Path) -> list[str]:
     return sorted(found)
 
 
+def _niced(cmd: list[str]) -> list[str]:
+    return ["nice", "-n", "10", *cmd] if shutil.which("nice") else cmd
+
+
 def governor_prefix(root: Path) -> list[str]:
-    """The command prefix that bounds the configure to the host's background share."""
+    """The prefix that bounds the configure and the command to the host's
+    background share: the governor, then nice 10."""
     governor = os.environ.get("PULP_CONFIGURE_ONLY_GOVERNOR",
                               str(root / "tools" / "ci" / "governed-build.sh"))
-    prefix = ["nice", "-n", "10"] if shutil.which("nice") else []
+    prefix = _niced([])
     if governor and Path(governor).is_file():
         return ["bash", governor, *prefix]
     return prefix
+
+
+def run_child(cmd: list[str], root: Path, env: dict[str, str] | None = None,
+              capture: bool = True) -> tuple[int, str]:
+    """Run ``cmd``; on any interruption (SIGTERM arrives as SystemExit) send it
+    TERM and wait TERM_GRACE_S before KILL, so a governor's EXIT trap can
+    release its lease. Returns (returncode, combined output when captured)."""
+    out = subprocess.PIPE if capture else None
+    proc = subprocess.Popen(cmd, cwd=root, env=env, stdout=out,
+                            stderr=subprocess.STDOUT if capture else None,
+                            text=True, encoding="utf-8", errors="replace")
+    try:
+        text, _ = proc.communicate()
+    except BaseException:
+        proc.terminate()
+        try:
+            proc.wait(timeout=TERM_GRACE_S)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+        raise
+    return proc.returncode, text or ""
 
 
 def _run(cmd: list[str], root: Path, env: dict[str, str] | None = None) -> str:
@@ -121,14 +161,18 @@ def _run(cmd: list[str], root: Path, env: dict[str, str] | None = None) -> str:
     shown = " ".join(cmd[:4])
     say(f"running {shown}{' …' if len(cmd) > 4 else ''}")
     try:
-        proc = subprocess.run(cmd, cwd=root, capture_output=True, text=True,
-                              encoding="utf-8", errors="replace", env=env)
+        rc, text = run_child(cmd, root, env)
     except OSError as exc:
         return f"{cmd[0]} could not run: {exc}"
-    if proc.returncode != 0:
-        for line in (proc.stdout + proc.stderr).strip().splitlines()[-15:]:
+    lines = text.strip().splitlines()
+    if rc != 0:
+        for line in lines[-15:]:
             say(f"  {line}")
-        return f"`{shown} …` exited {proc.returncode}"
+        return f"`{shown} …` exited {rc}"
+    # The lease the governor granted is the evidence the share was bounded.
+    for line in lines:
+        if line.startswith("[governed-build]"):
+            say(f"  {line}")
     return ""
 
 
@@ -136,8 +180,7 @@ def prepare_dependencies(root: Path) -> str:
     """Materialize the inputs the gate's configure sees; "" on success."""
     setup = os.environ.get("PULP_GATES_SETUP", str(root / "setup.sh"))
     if setup and Path(setup).is_file():
-        why = _run(["nice", "-n", "10", "bash", setup, "--deps-only", "--non-interactive"]
-                   if shutil.which("nice") else ["bash", setup, "--deps-only", "--non-interactive"], root)
+        why = _run(_niced(["bash", setup, "--deps-only", "--non-interactive"]), root)
         if why:
             return why
     jsx = root / JSX_RUNTIME
@@ -148,7 +191,7 @@ def prepare_dependencies(root: Path) -> str:
             say(f"npm not found; {JSX_RUNTIME.as_posix()} dependencies stay missing and the "
                 "generators will refuse the tree if the configure finds Node")
         else:
-            why = _run([npm, "ci", "--prefix", str(jsx), "--prefer-offline", "--no-audit", "--no-fund"], root)
+            why = _run(_niced([npm, "ci", "--prefix", str(jsx), "--prefer-offline", "--no-audit", "--no-fund"]), root)
             if why:
                 return why
     return ""
@@ -166,10 +209,54 @@ def configure(root: Path, build: Path, *, governed: bool = True) -> str:
     return _run(cmd, root, env)
 
 
+def _try_lock(path: Path):
+    """An exclusive non-blocking lock on ``path``: the open file, None when
+    another process holds it, or False where locks are unavailable."""
+    try:
+        import fcntl  # noqa: PLC0415  (POSIX only)
+    except ImportError:
+        return False
+    handle = open(path, "a+", encoding="utf-8")  # noqa: SIM115  (held for the tree's life)
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return None
+    return handle
+
+
+def sweep_stale(root: Path) -> list[str]:
+    """Remove temporary trees whose owner is gone (their lock is free, or with
+    no lock support, older than STALE_WITHOUT_LOCK_S). Returns their names."""
+    swept = []
+    for tree in sorted(root.glob(TEMP_PREFIX + "*")):
+        if not tree.is_dir():
+            continue
+        lock = tree / LOCK_NAME
+        if lock.is_file():
+            held = _try_lock(lock)
+            if held is None:
+                continue  # a live run owns it
+            if held is False and time.time() - tree.stat().st_mtime < STALE_WITHOUT_LOCK_S:
+                continue
+            if held:
+                held.close()
+        elif time.time() - tree.stat().st_mtime < 60:
+            continue  # being created right now, before its lock exists
+        shutil.rmtree(tree, ignore_errors=True)
+        swept.append(tree.name)
+    if swept:
+        say(f"swept {len(swept)} stale temporary tree(s): {', '.join(swept)}")
+    return swept
+
+
 @contextlib.contextmanager
 def temporary_build(root: Path) -> Iterator[Path]:
-    """A fresh build directory under ``root``, removed on exit, SIGTERM included."""
+    """A fresh build directory under ``root``, removed on exit, SIGTERM included.
+    Holds a lock inside it for its life, so a later run can tell it is live."""
+    sweep_stale(root)
     build = Path(tempfile.mkdtemp(prefix=TEMP_PREFIX, dir=root))
+    lock = _try_lock(build / LOCK_NAME)
     previous = signal.getsignal(signal.SIGTERM)
 
     def _terminate(signum, frame):  # noqa: ARG001
@@ -183,6 +270,8 @@ def temporary_build(root: Path) -> Iterator[Path]:
         yield build
     finally:
         shutil.rmtree(build, ignore_errors=True)
+        if lock:
+            lock.close()
         if previous is not None:
             signal.signal(signal.SIGTERM, previous)
 
@@ -224,13 +313,20 @@ def main(argv: list[str]) -> int:
         if build is None:
             say(f"FAILED: {why}")
             return code
-        say(f"configured {build.name} (configure only, no compile); running the command")
-        argv_out = [part.replace("{build}", str(build)) for part in command]
+        say(f"configured {build.name} (configure only, no compile); running the command "
+            "under the same governed share")
+        argv_out = governor_prefix(root) + [part.replace("{build}", str(build)) for part in command]
         try:
-            return subprocess.run(argv_out, cwd=root).returncode
+            rc, _ = run_child(argv_out, root, {**os.environ, **GOVERNED_ENV}, capture=False)
         except OSError as exc:
             say(f"{argv_out[0]} could not run: {exc}")
             return CONFIGURE_FAILED
+        compiled = compile_evidence(build)
+        if compiled:
+            say("FAILED: the command compiled in the configure-only tree: " + ", ".join(compiled[:5])
+                + ". This path never builds; build with `pulp build` on a host whose role allows it.")
+            return COMPILED
+        return rc
 
 
 if __name__ == "__main__":

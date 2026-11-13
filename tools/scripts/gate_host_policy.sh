@@ -68,12 +68,18 @@ pulp_gate_host_builds_reserved() {
 # inputs, the source-selftest manifest, the consumption census), which their
 # generators read from the CTest inventory and the file-API codemodel and never
 # from a compile. Its bounds, enforced by tools/scripts/configure_only.py:
-#   - configure only: no build step runs, and a .ninja_log or an object file
-#     outside CMake's own configure probes fails the run;
+#   - configure only: no build step runs. A build command is refused up front,
+#     and a .ninja_log or an object file outside CMake's own configure probes
+#     fails the run, checked after the configure and again after the command
+#     run against the tree;
 #   - a temporary build-configure-only.* directory under the worktree, removed
-#     afterwards (success, failure or SIGTERM);
-#   - governed: tools/ci/governed-build.sh with PULP_BUILD_CLASS=background and
-#     PULP_BUILD_JOBS=1 (one background core), at nice 10.
+#     afterwards (success, failure or SIGTERM, which TERMs the governor so it
+#     releases its lease); a leftover tree is swept at the next start;
+#   - governed: the configure AND the command run under
+#     tools/ci/governed-build.sh with PULP_BUILD_CLASS=background and
+#     PULP_BUILD_JOBS=1 (one background core), at nice 10. The dependency
+#     steps before it (setup.sh --deps-only, npm ci for the jsx runtime) run at
+#     nice 10 outside the governor: shared-cache fetches, no compile.
 # Compiles, ctest suites and diff-coverage stay refused (pulp_gate_host_skip_line).
 pulp_gate_host_configure_only_allowance() {
     echo "[gate-host] ALLOWED configure-only for the generated test manifests: a temporary build-configure-only.* tree under the worktree, governed (one background core), no compile, removed afterwards (tools/scripts/configure_only.py). Regenerate the families file here with: python3 tools/scripts/changed_surface_script_families.py --configure-only --write" >&2
