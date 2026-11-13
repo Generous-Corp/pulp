@@ -264,6 +264,10 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME modules-yaml-dirs-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_modules_yaml_dirs_check.py")
+    # The texture-upload recorder's run comparison (multiset, no pixels in the report).
+    add_test(NAME texture-upload-compare-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/testing/texture_upload_recorder/test_texture_upload_compare.py")
     add_test(NAME transient-interaction-trace-budget-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_transient_interaction_trace.py")
