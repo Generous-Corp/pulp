@@ -4120,6 +4120,7 @@ TEST_CASE("G7 edge probe paced matrix cell", "[.][signal-graph][edge-probe][g7][
     if (attached)
         reader = std::thread([&] {
             pulp::graph::GraphRuntimeProbeSample sample;
+            // unbounded-wait: allow the test thread sets done right after the bounded paced loop
             while (!done.load(std::memory_order_acquire)) {
                 while (graph.read_audio_edge_probe(sample))
                     ++read;
@@ -4142,10 +4143,9 @@ TEST_CASE("G7 edge probe paced matrix cell", "[.][signal-graph][edge-probe][g7][
     while (attached && graph.read_audio_edge_probe(sample))
         ++read;
     const auto dropped = attached ? graph.audio_edge_probe_dropped() : 0;
-    const auto failures =
-        pulp::test::paced::print_cell("g7-edge-probe", config, rows,
-                                      "probe_read=" + std::to_string(read) +
-                                          " probe_dropped=" + std::to_string(dropped));
+    const auto failures = pulp::test::paced::print_cell(
+        "g7-edge-probe", config, rows,
+        "probe_read=" + std::to_string(read) + " probe_dropped=" + std::to_string(dropped));
     CHECK(failures == 0);
     CHECK(read + dropped == (attached ? config.callbacks : 0));
 }

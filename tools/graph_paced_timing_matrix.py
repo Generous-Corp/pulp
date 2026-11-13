@@ -134,7 +134,7 @@ def nearest_rank(values: list[int], fraction: float) -> int:
 def _run_text(command: list[str]) -> str:
     try:
         return subprocess.run(command, check=True, capture_output=True, text=True,
-                              timeout=10).stdout.strip()
+                              encoding="utf-8", errors="replace", timeout=10).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return ""
 
@@ -154,11 +154,11 @@ def host_identity_class() -> dict[str, Any]:
         identity["memory_gib"] = round(int(memory) / 2**30) if memory.isdigit() else 0
     elif system == "Linux":
         try:
-            for line in Path("/proc/cpuinfo").read_text().splitlines():
+            for line in Path("/proc/cpuinfo").read_text(encoding="utf-8", errors="replace").splitlines():
                 if line.startswith("model name"):
                     identity["cpu_model"] = line.split(":", 1)[1].strip()
                     break
-            for line in Path("/proc/meminfo").read_text().splitlines():
+            for line in Path("/proc/meminfo").read_text(encoding="utf-8", errors="replace").splitlines():
                 if line.startswith("MemTotal:"):
                     identity["memory_gib"] = round(int(line.split()[1]) / 2**20)
                     break
@@ -499,8 +499,8 @@ def record_matrix(*, mode: str, source_root: Path, build_dir: Path, output_dir: 
             result = subprocess.run([str(executable), fixture.test_case],
                                     env=_cell_env(fixture, variant, rate, frames, callbacks,
                                                   planted_sleep_us, planted_every),
-                                    capture_output=True, text=True,
-                                    timeout=timeout_seconds or cell_timeout(
+                                    capture_output=True, text=True, encoding="utf-8",
+                                    errors="replace", timeout=timeout_seconds or cell_timeout(
                                         rate, frames, callbacks, planted_sleep_us, planted_every))
             stdout, returncode = result.stdout, result.returncode
             # A rebuild during the run would silently mix binaries.

@@ -23,8 +23,7 @@ TEST_CASE("Public spectral lowering exposes no callable constructor",
 namespace {
 // Builds the analysis -> identity -> real-mask -> synthesis spectral graph and
 // hands it to `use` while every stage it was authored from is still alive.
-template <class Use>
-void with_spectral_graph(float gain, Use&& use) {
+template <class Use> void with_spectral_graph(float gain, Use&& use) {
     using namespace pulp::host;
     auto identity = SpectralIdentity::make(256, 63, 1, 48000);
     REQUIRE(identity);
@@ -125,24 +124,20 @@ TEST_CASE("G10 routed spectral paced matrix cell", "[.][host][spectral-ports][pa
         pulp::audio::BufferView<float> ov(op, 1, frames);
         const auto rows = pulp::test::paced::run_cell(
             config,
-            [&](std::size_t, std::uint64_t) {
-                graph.process(ov, iv, static_cast<int>(frames));
-            },
+            [&](std::size_t, std::uint64_t) { graph.process(ov, iv, static_cast<int>(frames)); },
             [&](std::size_t, std::uint64_t first) {
                 bool ok = true;
                 for (std::size_t i = 0; i < frames; ++i) {
                     const auto t = first + i;
-                    const float wanted =
-                        t < latency ? 0.0f : gain * table[(t - latency) % period];
+                    const float wanted = t < latency ? 0.0f : gain * table[(t - latency) % period];
                     ok = ok && std::isfinite(output[i]) && std::abs(output[i] - wanted) <= 1e-4f;
                 }
                 fill(first + frames);
                 return ok;
             });
-        CHECK(pulp::test::paced::print_cell("g10-routed-spectral", config, rows,
-                                            "walk_fallbacks=" +
-                                                std::to_string(graph.routed_walk_fallbacks())) ==
-              0);
+        CHECK(pulp::test::paced::print_cell(
+                  "g10-routed-spectral", config, rows,
+                  "walk_fallbacks=" + std::to_string(graph.routed_walk_fallbacks())) == 0);
         CHECK(graph.routed_walk_fallbacks() == 0);
     });
 }

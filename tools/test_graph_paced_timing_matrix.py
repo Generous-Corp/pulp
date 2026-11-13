@@ -67,13 +67,13 @@ class ReceiptSchemaTest(unittest.TestCase):
             out = Path(tmp)
             receipt, _ = record(out)
             path = out / "receipt.json"
-            original = path.read_text()
+            original = path.read_text(encoding="utf-8")
             raw = out / receipt["cells"][0]["raw_stdout"]["path"]
-            saved = raw.read_text()
-            raw.write_text(saved.replace("P 0 0 ", "P 0 1 ", 1))
+            saved = raw.read_text(encoding="utf-8")
+            raw.write_text(saved.replace("P 0 0 ", "P 0 1 ", 1), encoding="utf-8")
             with self.assertRaises(matrix.MatrixError):
                 matrix.validate_receipt(path)
-            raw.write_text(saved)
+            raw.write_text(saved, encoding="utf-8")
             for mutate in (
                 lambda r: r["cells"][0]["metrics"].__setitem__("deadline_misses", 3),
                 lambda r: r.__setitem__("timing_qualified", True),
@@ -83,10 +83,10 @@ class ReceiptSchemaTest(unittest.TestCase):
                 changed = json.loads(original)
                 mutate(changed)
                 changed["receipt_sha256"] = matrix.receipt_digest(changed)
-                path.write_text(json.dumps(changed))
+                path.write_text(json.dumps(changed), encoding="utf-8")
                 with self.assertRaises(matrix.MatrixError):
                     matrix.validate_receipt(path)
-            path.write_text(original)
+            path.write_text(original, encoding="utf-8")
             matrix.validate_receipt(path)
 
 

@@ -101,8 +101,8 @@ std::vector<CellRow> run_cell(const CellConfig& config, Process&& process, Verif
         };
         for (std::uint64_t i = 0; i < config.callbacks; ++i) {
             // Integer schedule arithmetic: no accumulated floating drift.
-            const auto target_ns = static_cast<std::int64_t>(
-                i * config.frames * 1'000'000'000ull / config.rate);
+            const auto target_ns =
+                static_cast<std::int64_t>(i * config.frames * 1'000'000'000ull / config.rate);
             const auto target = origin + std::chrono::nanoseconds(target_ns);
             std::this_thread::sleep_until(target);
             const auto start = clock::now();
@@ -125,7 +125,7 @@ std::vector<CellRow> run_cell(const CellConfig& config, Process&& process, Verif
 // Prints one cell in the line format parsed by tools/graph_paced_timing_matrix.py
 // and returns the number of blocks whose fixture oracle failed.
 inline std::uint64_t print_cell(std::string_view fixture, const CellConfig& config,
-                       const std::vector<CellRow>& rows, std::string_view extra = {}) {
+                                const std::vector<CellRow>& rows, std::string_view extra = {}) {
     std::uint64_t oracle_failures = 0;
     for (const auto& row : rows)
         oracle_failures += row.ok ? 0 : 1;
@@ -143,11 +143,10 @@ inline std::uint64_t print_cell(std::string_view fixture, const CellConfig& conf
     std::cout << '\n';
     for (std::size_t i = 0; i < rows.size(); ++i) {
         const auto& row = rows[i];
-        std::cout << "P " << i << ' ' << row.target_ns << ' ' << row.start_ns << ' '
-                  << row.end_ns << ' ' << static_cast<int>(row.ok) << '\n';
+        std::cout << "P " << i << ' ' << row.target_ns << ' ' << row.start_ns << ' ' << row.end_ns
+                  << ' ' << static_cast<int>(row.ok) << '\n';
     }
-    std::cout << "PACED_END rows=" << rows.size() << " oracle_failures=" << oracle_failures
-              << '\n';
+    std::cout << "PACED_END rows=" << rows.size() << " oracle_failures=" << oracle_failures << '\n';
     return oracle_failures;
 }
 

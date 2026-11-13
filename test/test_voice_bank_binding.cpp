@@ -781,9 +781,9 @@ TEST_CASE("G6 voice bank paced matrix cell", "[.][host][graph][g6][paced-matrix]
                 return;
             if (index == 0)
                 for (std::uint8_t slot = 0; slot < 8; ++slot)
-                    if (bank->publish(event(bank->epoch(), 0, slot + 1,
-                                            midi::MidiEvent::note_on(slot + 1, 60 + slot,
-                                                                     100 - slot * 10))) !=
+                    if (bank->publish(event(
+                            bank->epoch(), 0, slot + 1,
+                            midi::MidiEvent::note_on(slot + 1, 60 + slot, 100 - slot * 10))) !=
                         HostEventResult::Accepted)
                         return;
             auto view = buffer.view();
