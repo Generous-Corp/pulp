@@ -153,8 +153,7 @@ bool run_layout(std::size_t index, bool swap_names) {
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc == 2 && std::string_view(argv[1]) == "--planted-swap")
-    {
+    if (argc == 2 && std::string_view(argv[1]) == "--planted-swap") {
         // Exit 0 only when the oracle rejects the swapped bus names, and say so.
         if (run_layout(1, true)) {
             std::cerr << "planted swap was not detected\n";
