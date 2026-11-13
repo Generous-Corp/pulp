@@ -19,10 +19,36 @@ Polyphonic key pressure is refused before note or output mutation because this
 bounded MIDI path does not route it; channel pressure remains supported.
 The numeric first-sample oracle observes `sample3=-0.353553`, `sample10=0`.
 
+State round trip: the consumer sets distinct per-slot levels on a live bank,
+keeps its own copy of those values (the binding has no parameter getter),
+encodes them against the bank manifest, decodes and restores them onto a
+freshly prepared bank, and reapplies them with `set_slot_parameter`. The
+restored bank has no active voice, re-encodes to identical bytes, and renders
+the same eight-note script bit-exact. A wrong manifest digest, a manifest from
+another template revision, a forged slot 8, an undeclared target, and NaN or
+infinite values are refused with the destination unchanged, both as structs
+and as forged wire bytes. The persisted schema carries no parameter bounds:
+a finite value above the authored maximum restores, and `set_slot_parameter`
+refuses it when it is applied.
+
+Hard-cut swap: `activate()` inside an open block returns `InvalidBlock` and
+leaves the voice sounding. Between blocks it advances the epoch and retires
+every voice, so the next block is exactly zero. Old-epoch deferred dispatch
+returns `StaleEpoch`, an old-epoch publish is refused, and a new-epoch note
+renders with a larger generation. Two separately prepared banks both start at
+epoch 1 and generation 1, so a retired bank's token can address an identical
+note in a replacement bank; the consumer advances the replacement past the
+retired epoch before routing to it, which turns that token into `StaleEpoch`.
+Release tails survive a bank swap when the host keeps rendering the retired
+bank until its voices finish.
+
 `prove_mutations.py --sdk-prefix <installed-sdk> --scratch <build-directory>`
-compiles independent mutations of the production binding source against the
-installed SDK. It requires a positive, each planted failure, and restored
-positive result, with per-case logs and a JSON receipt under the scratch path.
+compiles independent mutations against the installed SDK: planted changes to
+scratch copies of the production binding and voice-template sources, and to
+scratch copies of this consumer's `main.cpp` and `fixture.hpp`. The repository
+sources are never edited. It requires a positive, each planted failure with its
+named rule, and a restored positive result, with per-case logs and a JSON
+receipt under the scratch path.
 
 `a1_reference_vectors.json` freezes seven stereo cases for eight-slot gain,
 sum order, sparse slots, bounded release, and hard steal. The separate
