@@ -38,14 +38,14 @@ Commands and results:
 ```text
 cmake -S examples/graph-agent-loop-replay -B build/a9-edit-replay-2 \
   -DCMAKE_BUILD_TYPE=Release \
-  -DPulp_DIR=/Users/danielraffel/.pulp/lib/cmake/Pulp
+  -DPulp_DIR=~/.pulp/lib/cmake/Pulp
 ...
 Found package configuration file .../PulpConfig.cmake
 but it set Pulp_FOUND to FALSE
 
 cmake -S examples/graph-agent-loop-replay -B build/a9-edit-replay-823 \
   -DCMAKE_BUILD_TYPE=Release \
-  -DPulp_DIR=/Users/danielraffel/.pulp/sdk-build/darwin-arm64-0.823.0
+  -DPulp_DIR=~/.pulp/sdk-build/darwin-arm64-0.823.0
 ...
 include could not find requested file: PulpAAX.cmake,
 PulpSdkProvenance.cmake, PulpPlatformConfig.cmake, PulpMinOs.cmake,

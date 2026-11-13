@@ -431,6 +431,12 @@ commands:
       - name: --block-frames
         kind: option
         description: Probe block size from 1 to 4096 frames (default 64)
+      - name: --edge-kind
+        kind: option
+        description: Probe kind audio, control or event (default audio); event seeds one fixed note-on, control always refuses MissingEdge because CLI graphs have no automation edges
+      - name: --destination-param
+        kind: option
+        description: Destination parameter id for --edge-kind control (replaces --destination-port)
       - name: --sample-rate
         kind: option
         description: Report preparation sample rate (default 48000)
@@ -683,7 +689,7 @@ commands:
         description: "Manufacturer name (default: Pulp)"
       - name: --template
         kind: option
-        description: Built-in template name or explicit local template kit directory. Local kits are validated, must declare kind `template`, and do not implicitly install dependency packages.
+        description: Built-in template name (for example gain or agent-toolkit) or explicit local template kit directory. Local kits are validated, must declare kind `template`, and do not implicitly install dependency packages.
       - name: --output
         kind: option
         description: Output directory override (otherwise uses PULP_PROJECTS_DIR, ~/.pulp/config.toml, repo sibling, or ./<name>)

@@ -28,3 +28,18 @@ Boundary selection and thread joins belong to this offline test host. They
 do not provide arbitrary sample scheduling, a runtime executor, or realtime
 qualification. `tuning_control.hpp` is product-owned glue around Pulp's
 existing provider/catalog/store interfaces.
+
+## Notation
+
+`graph.pat` spells this fixture's graph in SignalGraph patch notation as far as
+the notation profile allows. It cannot be accepted: the fixture's nodes are
+application code or constructs outside the default catalog, so the real
+validator refuses it, and that refusal is the recorded result:
+
+```sh
+pulp graph validate graph.pat --json
+# exit 1, "code": "UnsupportedContract", "rule": "unregistered type/version '<id>'"
+```
+
+The `g11-live-retune-consumer-notation-refusal` ctest runs the validator and pins the exit code,
+code, node and type. See docs/guides/graph-patch-notation.md for the profile.

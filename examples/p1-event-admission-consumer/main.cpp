@@ -14,10 +14,13 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdio>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <span>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -155,7 +158,8 @@ void trigger_two_block_controls() {
 // producer emits through GraphEventWriter::emit_at and a connected consumer
 // reads GraphEventReader::events. Results are recorded inside the callback and
 // asserted after rendering so a failed rule is reported, not thrown from the
-// audio callback.
+// audio callback. Callback-side observation writes into preallocated fixed
+// arrays; the vectors below are filled from them after rendering.
 
 struct GraphLaneObservation {
     std::vector<pulp::host::GraphAuthoredEvent> events;
@@ -180,6 +184,11 @@ GraphLaneObservation render_graph_event_lane(const std::vector<std::size_t>& sch
         std::size_t producer_calls = 0;
         std::size_t consumer_block = 0;
         std::uint64_t consumer_cursor = 0;
+        std::array<GraphAuthoredEvent, 16> delivered{};
+        std::array<std::size_t, 16> delivered_block{};
+        std::array<std::uint64_t, 16> delivered_block_start{};
+        std::size_t delivered_count = 0;
+        bool delivered_dropped = false;
         GraphLaneObservation observation;
     };
     auto state = std::make_shared<State>();
@@ -206,9 +215,14 @@ GraphLaneObservation render_graph_event_lane(const std::vector<std::size_t>& sch
         }
         if (events.graph_reader != nullptr) {
             for (const auto& event : events.graph_reader->events()) {
-                obs.events.push_back(event);
-                obs.delivered_block.push_back(state->consumer_block);
-                obs.delivered_block_start.push_back(state->consumer_cursor);
+                if (state->delivered_count == state->delivered.size()) {
+                    state->delivered_dropped = true;
+                    continue;
+                }
+                state->delivered[state->delivered_count] = event;
+                state->delivered_block[state->delivered_count] = state->consumer_block;
+                state->delivered_block_start[state->delivered_count] = state->consumer_cursor;
+                ++state->delivered_count;
                 if (event.sample >= state->consumer_cursor &&
                     event.sample - state->consumer_cursor < static_cast<std::uint64_t>(frames))
                     out.channel_ptr(0)[event.sample - state->consumer_cursor] =
@@ -241,7 +255,14 @@ GraphLaneObservation render_graph_event_lane(const std::vector<std::size_t>& sch
         for (std::size_t i = 0; i < frames; ++i)
             state->observation.audio.push_back(destination[i]);
     }
-    return state->observation;
+    check(!state->delivered_dropped, "graph-event-observation-capacity");
+    auto& obs = state->observation;
+    for (std::size_t i = 0; i < state->delivered_count; ++i) {
+        obs.events.push_back(state->delivered[i]);
+        obs.delivered_block.push_back(state->delivered_block[i]);
+        obs.delivered_block_start.push_back(state->delivered_block_start[i]);
+    }
+    return obs;
 }
 
 std::size_t graph_event_lane_controls(const std::vector<std::size_t>& schedule,
@@ -282,7 +303,8 @@ void graph_event_reset_controls() {
         GraphEventResult staged_current = GraphEventResult::Unbound;
         GraphEventResult staged_future = GraphEventResult::Unbound;
         GraphEventResult post_reset = GraphEventResult::Unbound;
-        std::vector<GraphAuthoredEvent> delivered;
+        std::array<GraphAuthoredEvent, 8> delivered{};
+        std::size_t delivered_count = 0;
     };
     auto state = std::make_shared<State>();
     SignalGraph graph;
@@ -304,7 +326,8 @@ void graph_event_reset_controls() {
         }
         if (events.graph_reader != nullptr)
             for (const auto& event : events.graph_reader->events())
-                state->delivered.push_back(event);
+                if (state->delivered_count < state->delivered.size())
+                    state->delivered[state->delivered_count++] = event;
     };
     check(graph.register_custom_node_type(type), "graph-event-reset-register");
     const auto input = graph.add_input_node(1);
@@ -327,27 +350,36 @@ void graph_event_reset_controls() {
     reset.position_samples = 0;
     graph.process(out, in, 2, reset);
     graph.process(out, in, 2);
+    const std::span delivered(state->delivered.data(), state->delivered_count);
     check(state->staged_current == GraphEventResult::Accepted &&
               state->staged_future == GraphEventResult::Accepted,
           "graph-event-reset-stage");
     // The record staged for sample 3 before the reset is retired with its
     // epoch; the post-reset block that covers sample 3 never delivers it.
-    check(std::none_of(state->delivered.begin(), state->delivered.end(),
+    check(std::none_of(delivered.begin(), delivered.end(),
                        [](const GraphAuthoredEvent& event) { return event.payload == 2; }),
           "graph-event-reset-cancels-pending");
-    check(state->post_reset == GraphEventResult::Accepted && state->delivered.size() == 2 &&
-              state->delivered[0].payload == 1 && state->delivered[1].payload == 3,
+    check(state->post_reset == GraphEventResult::Accepted && delivered.size() == 2 &&
+              delivered[0].payload == 1 && delivered[1].payload == 3,
           "graph-event-reset-post-emit");
-    check(state->delivered[1].epoch == state->delivered[0].epoch + 1 &&
-              state->delivered[1].sample == 2,
+    check(delivered[1].epoch == delivered[0].epoch + 1 && delivered[1].sample == 2,
           "graph-event-reset-epoch-advance");
 }
 
 // ── Parameter mailbox through a PluginSlot node ────────────────────────────
 
+// The probe records each delivered event into a preallocated fixed array with
+// its block index and absolute sample, so the process() callback does not
+// allocate. Per-block vectors are assembled after rendering.
 class ParameterProbeSlot final : public pulp::host::PluginSlot {
   public:
     static constexpr std::uint32_t kParamId = 11;
+    static constexpr std::size_t kEntryCapacity = 2048;
+    struct Entry {
+        std::size_t block = 0;
+        std::uint64_t absolute = 0;
+        pulp::host::ParameterEvent event{};
+    };
     const pulp::host::PluginInfo& info() const override {
         return info_;
     }
@@ -361,7 +393,16 @@ class ParameterProbeSlot final : public pulp::host::PluginSlot {
     void process(pulp::audio::BufferView<float>& out, const pulp::audio::BufferView<const float>&,
                  const pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
                  const pulp::host::ParameterEventQueue& events, int frames) override {
-        blocks_.emplace_back(events.begin(), events.end());
+        for (const auto& event : events) {
+            if (count_ == entries_.size()) {
+                dropped_ = true;
+                continue;
+            }
+            entries_[count_++] = {block_count_,
+                                  cursor_ + static_cast<std::uint64_t>(event.sample_offset), event};
+        }
+        ++block_count_;
+        cursor_ += static_cast<std::uint64_t>(frames);
         for (std::size_t c = 0; c < out.num_channels(); ++c)
             for (int i = 0; i < frames; ++i)
                 out.channel_ptr(c)[i] = 0.0f;
@@ -402,8 +443,21 @@ class ParameterProbeSlot final : public pulp::host::PluginSlot {
     int tail_samples() const override {
         return 0;
     }
-    const std::vector<std::vector<pulp::host::ParameterEvent>>& blocks() const {
-        return blocks_;
+    std::size_t block_count() const {
+        return block_count_;
+    }
+    bool dropped() const {
+        return dropped_;
+    }
+    std::span<const Entry> entries() const {
+        return {entries_.data(), count_};
+    }
+    std::vector<pulp::host::ParameterEvent> block(std::size_t index) const {
+        std::vector<pulp::host::ParameterEvent> result;
+        for (const auto& entry : entries())
+            if (entry.block == index)
+                result.push_back(entry.event);
+        return result;
     }
 
   private:
@@ -416,7 +470,11 @@ class ParameterProbeSlot final : public pulp::host::PluginSlot {
         info.category = "Fx";
         return info;
     }();
-    std::vector<std::vector<pulp::host::ParameterEvent>> blocks_;
+    std::array<Entry, kEntryCapacity> entries_{};
+    std::size_t count_ = 0;
+    std::size_t block_count_ = 0;
+    std::uint64_t cursor_ = 0;
+    bool dropped_ = false;
 };
 
 struct ParameterObservation {
@@ -469,17 +527,16 @@ ParameterObservation render_parameter_mailbox(std::size_t frames) {
     observation.overflow_refused = !graph.inject_parameter_events(plugin, overflowing);
     graph.process(out, in, static_cast<int>(frames));
 
-    const auto& blocks = probe->blocks();
-    check(blocks.size() == 4, "parameter-mailbox-block-count");
+    check(probe->block_count() == 4 && !probe->dropped(), "parameter-mailbox-block-count");
     for (std::size_t b = 0; b < 3; ++b) {
         std::vector<std::pair<int, float>> values;
-        for (const auto& event : blocks[b]) {
+        for (const auto& event : probe->block(b)) {
             check(event.param_id == id, "parameter-mailbox-param-id");
             values.emplace_back(event.sample_offset, event.value);
         }
         observation.blocks.push_back(std::move(values));
     }
-    observation.retained_prefix = blocks[3].size();
+    observation.retained_prefix = probe->block(3).size();
     return observation;
 }
 
@@ -499,9 +556,12 @@ void parameter_mailbox_controls(const ParameterObservation& obs) {
 
 // ── Voice intent through the installed voice-bank binding ──────────────────
 
-class P1Voice final : public pulp::midi::MpeSynthVoice {
+// ReleaseFrames sets how long a released note keeps its slot. The combined
+// control holds every slot for the whole run so slot and generation stay
+// observable after any block size.
+template <unsigned ReleaseFrames> class P1VoiceT final : public pulp::midi::MpeSynthVoice {
   public:
-    static constexpr unsigned kReleaseFrames = 8;
+    static constexpr unsigned kReleaseFrames = ReleaseFrames;
     void on_note_on(const pulp::midi::MpeNoteState& note) override {
         pulp::midi::MpeSynthVoice::on_note_on(note);
         release_frame_ = 0;
@@ -540,9 +600,12 @@ class P1Voice final : public pulp::midi::MpeSynthVoice {
     unsigned release_frame_ = 0;
 };
 
-class P1VoiceProcessor final : public pulp::format::Processor {
+using P1Voice = P1VoiceT<8>;
+using P1HeldVoice = P1VoiceT<4096>;
+
+template <typename Voice> class P1VoiceProcessor final : public pulp::format::Processor {
   public:
-    explicit P1VoiceProcessor(P1Voice& voice) : voice_(voice) {}
+    explicit P1VoiceProcessor(Voice& voice) : voice_(voice) {}
     pulp::format::PluginDescriptor descriptor() const override {
         pulp::format::PluginDescriptor d;
         d.name = "P1 Voice";
@@ -566,7 +629,7 @@ class P1VoiceProcessor final : public pulp::format::Processor {
     }
 
   private:
-    P1Voice& voice_;
+    Voice& voice_;
 };
 
 pulp::host::SubgraphTemplate voice_definition() {
@@ -631,19 +694,18 @@ pulp::host::VoiceTemplateSchema voice_schema() {
     return result;
 }
 
-using P1VoiceOwner = pulp::host::MpeVoiceBankOwner<P1Voice>;
-
-std::unique_ptr<pulp::host::VoiceBankBinding> make_voice_bank() {
+template <typename Voice = P1Voice>
+std::unique_ptr<pulp::host::VoiceBankBinding> make_voice_bank(int max_frames = 64) {
     using namespace pulp::host;
-    auto owner = std::make_unique<P1VoiceOwner>(
-        [](P1Voice& voice, std::uint32_t) -> std::unique_ptr<pulp::format::Processor> {
-            return std::make_unique<P1VoiceProcessor>(voice);
+    auto owner = std::make_unique<MpeVoiceBankOwner<Voice>>(
+        [](Voice& voice, std::uint32_t) -> std::unique_ptr<pulp::format::Processor> {
+            return std::make_unique<P1VoiceProcessor<Voice>>(voice);
         },
         std::array<VoiceBankInputEndpoint, 4>{
             {{"note_in", 0}, {"pitch", 1}, {"pressure", 2}, {"timbre", 3}}});
     VoiceBankBindingResult status;
     auto bank = VoiceBankBinding::prepare(voice_schema(), voice_definition(), std::move(owner),
-                                          "audio_out", 48000, 64, status);
+                                          "audio_out", 48000, max_frames, status);
     check(static_cast<bool>(bank), "voice-bank-prepare");
     return bank;
 }
@@ -794,9 +856,657 @@ void voice_bank_controls(const VoiceObservation& obs) {
           "voice-bank-reuse-sample");
 }
 
+// ── Combined epoch: four families on one block grid ────────────────────────
+// One test-owned epoch and absolute sample origin drive all four families
+// through the same block boundaries in one control loop. A control-side
+// adapter stages MIDI in a HostEventIngress, projects each block, and converts
+// the absolute positions to block-relative offsets for SignalGraph::inject_midi
+// into a MIDI input node. Parameter records are converted to block-relative
+// ParameterEventQueue offsets for inject_parameter_events into a PluginSlot
+// node in the same graph. A graph-authored lane producer in that graph emits at
+// absolute targets, and voice intent is published to a VoiceBankBinding over
+// the same blocks. The runtime has no shared epoch: each native epoch is
+// mapped to the test epoch and must stay constant for the whole run.
+
+constexpr std::uint64_t kCombinedEpoch = 7;
+constexpr std::uint64_t kCombinedFrames = 256;
+constexpr std::size_t kCombinedMaxBlock = 128;
+
+enum class Family : std::uint8_t { Midi = 0, Parameter = 1, Trigger = 2, Voice = 3 };
+constexpr std::array<const char*, 4> kFamilyNames{"midi", "parameter", "trigger", "voice"};
+
+// One canonical observation. `key` is the family's identity and ordering key:
+//   midi      {producer, producer_sequence, status << 8 | note}
+//   parameter {param_id, push index, 0}
+//   trigger   {lane sequence, payload, producer}
+//   voice     {slot, generation, 1 for note-on / 0 for release}
+struct TraceRecord {
+    Family family = Family::Midi;
+    std::uint64_t epoch = 0;
+    std::uint64_t absolute = 0;
+    std::array<std::uint64_t, 3> key{};
+    friend bool operator==(const TraceRecord&, const TraceRecord&) = default;
+};
+
+// The key position each family orders equal-time records by.
+constexpr std::array<std::size_t, 4> kOrderKey{1, 1, 0, 1};
+
+struct MidiScheduleEntry {
+    std::uint64_t absolute;
+    std::uint32_t producer;
+    std::uint64_t sequence;
+    std::uint8_t note;
+};
+constexpr std::array<MidiScheduleEntry, 8> kMidiSchedule{{{2, 4, 1, 60},
+                                                          {2, 3, 1, 61},
+                                                          {31, 3, 2, 62},
+                                                          {32, 4, 2, 63},
+                                                          {127, 3, 3, 64},
+                                                          {128, 4, 3, 65},
+                                                          {200, 3, 4, 66},
+                                                          {255, 4, 4, 67}}};
+// HostEventIngress orders equal samples by producer, so producer 3 precedes 4.
+constexpr std::array<std::uint8_t, 8> kMidiExpectedNotes{61, 60, 62, 63, 64, 65, 66, 67};
+
+struct ParameterScheduleEntry {
+    std::uint64_t absolute;
+    std::uint32_t index;
+};
+constexpr std::array<ParameterScheduleEntry, 7> kParameterSchedule{
+    {{5, 0}, {31, 1}, {32, 2}, {32, 3}, {100, 4}, {127, 5}, {254, 6}}};
+constexpr float kParameterStep = 1.0f / 16.0f;
+
+struct TriggerScheduleEntry {
+    std::uint64_t target;
+    std::uint16_t payload;
+};
+// Each trigger is emitted kTriggerLead samples before its target, so small
+// blocks stage it as bounded-future and large blocks deliver it in the
+// producer's own block.
+constexpr std::uint64_t kTriggerLead = 3;
+constexpr std::array<TriggerScheduleEntry, 8> kTriggerSchedule{
+    {{1, 40}, {4, 41}, {4, 42}, {33, 43}, {63, 44}, {64, 45}, {130, 46}, {250, 47}}};
+constexpr std::uint64_t trigger_emit_sample(const TriggerScheduleEntry& entry) {
+    return entry.target >= kTriggerLead ? entry.target - kTriggerLead : 0;
+}
+
+struct VoiceScheduleEntry {
+    std::uint64_t absolute;
+    bool note_on;
+    std::uint8_t note;
+};
+constexpr std::array<VoiceScheduleEntry, 4> kVoiceSchedule{
+    {{3, true, 60}, {40, true, 64}, {70, false, 60}, {200, false, 64}}};
+
+struct CombinedRun {
+    std::vector<TraceRecord> trace;
+    std::size_t blocks = 0;
+    std::size_t trigger_future_staged = 0;
+    std::size_t trigger_current_block = 0;
+    // Native epoch of each family, mapped to kCombinedEpoch. The parameter
+    // mailbox is block-relative and has no epoch, so its entry is 0.
+    std::array<std::uint64_t, 4> native_epoch{};
+    std::array<float, kCombinedFrames> voice_audio{};
+    // Graph output across the whole run; the input is a deterministic ramp, so
+    // this is a non-silent audio comparison for the routed executor.
+    std::vector<float> graph_audio;
+    // Executor telemetry read after the run: blocks the serial executor took,
+    // and blocks that were eligible yet fell back to the legacy walk.
+    std::uint64_t executor_blocks = 0;
+    std::uint64_t parallel_levels = 0;
+    std::uint64_t routing_fallbacks = 0;
+    bool parallel_requested_accepted = false;
+};
+
+enum class Backend { Reference, Routed, ParallelAfterBind };
+constexpr std::array<const char*, 3> kBackendNames{"reference-walk", "routed-executor",
+                                                   "parallel-after-bind"};
+
+// Callback-side state. The audio callbacks write only into these fixed
+// arrays; nothing in the callback path grows a container.
+struct CombinedCallbackState {
+    struct MidiSeen {
+        std::uint64_t absolute = 0;
+        std::uint8_t status = 0;
+        std::uint8_t note = 0;
+    };
+    std::size_t next_trigger = 0;
+    std::uint64_t producer_cursor = 0;
+    std::array<GraphEventResult, kTriggerSchedule.size()> emit_results{};
+    std::array<bool, kTriggerSchedule.size()> emit_future{};
+    std::uint64_t consumer_cursor = 0;
+    std::array<pulp::host::GraphAuthoredEvent, 16> triggers{};
+    std::array<std::uint64_t, 16> trigger_block_start{};
+    std::array<std::uint64_t, 16> trigger_block_end{};
+    std::size_t trigger_count = 0;
+    std::array<MidiSeen, 16> midi{};
+    std::size_t midi_count = 0;
+    bool dropped = false;
+};
+
+CombinedRun render_combined(const std::vector<std::size_t>& schedule,
+                            Backend backend = Backend::Routed) {
+    using namespace pulp::host;
+    auto state = std::make_shared<CombinedCallbackState>();
+    SignalGraph graph;
+    CustomNodeType type;
+    type.type_id = "p1.public.combined-epoch";
+    type.num_input_ports = type.num_output_ports = 1;
+    type.process_events = [state](auto& out, const auto& in, int frames,
+                                  const CustomNodeEventBlock& events) {
+        for (int i = 0; i < frames; ++i)
+            out.channel_ptr(0)[i] = in.channel_ptr(0)[i];
+        auto& s = *state;
+        const auto block_frames = static_cast<std::uint64_t>(frames);
+        if (events.graph_writer != nullptr) {
+            const auto block_end = s.producer_cursor + block_frames;
+            while (s.next_trigger < kTriggerSchedule.size() &&
+                   trigger_emit_sample(kTriggerSchedule[s.next_trigger]) < block_end) {
+                const auto& entry = kTriggerSchedule[s.next_trigger];
+                s.emit_results[s.next_trigger] =
+                    events.graph_writer->emit_at(entry.target, entry.payload);
+                s.emit_future[s.next_trigger] = entry.target >= block_end;
+                ++s.next_trigger;
+            }
+            s.producer_cursor = block_end;
+        }
+        if (events.graph_reader != nullptr) {
+            const auto block_end = s.consumer_cursor + block_frames;
+            for (const auto& event : events.graph_reader->events()) {
+                if (s.trigger_count == s.triggers.size()) {
+                    s.dropped = true;
+                    continue;
+                }
+                s.triggers[s.trigger_count] = event;
+                s.trigger_block_start[s.trigger_count] = s.consumer_cursor;
+                s.trigger_block_end[s.trigger_count] = block_end;
+                ++s.trigger_count;
+            }
+            if (events.in != nullptr) {
+                for (const auto& event : *events.in) {
+                    if (s.midi_count == s.midi.size()) {
+                        s.dropped = true;
+                        continue;
+                    }
+                    s.midi[s.midi_count++] = {s.consumer_cursor +
+                                                  static_cast<std::uint64_t>(event.sample_offset),
+                                              event.data()[0], event.data()[1]};
+                }
+            }
+            s.consumer_cursor = block_end;
+        }
+    };
+    check(graph.register_custom_node_type(type), "combined-register");
+    const auto input = graph.add_input_node(1);
+    const auto output = graph.add_output_node(1);
+    const auto producer = graph.add_custom_node(type.type_id);
+    const auto consumer = graph.add_custom_node(type.type_id);
+    const auto midi_input = graph.add_midi_input_node("P1 combined MIDI input");
+    auto slot = std::make_unique<ParameterProbeSlot>();
+    auto* probe = slot.get();
+    const auto plugin = graph.add_plugin_node(std::move(slot), 0, 1, "p1-combined-parameter");
+    check(graph.connect(input, 0, producer, 0) && graph.connect(producer, 0, consumer, 0) &&
+              graph.connect(consumer, 0, output, 0) && graph.connect_midi(midi_input, consumer) &&
+              graph.connect_graph_event({producer, consumer}) == GraphEventBindingResult::Accepted,
+          "combined-admission");
+    // Backend selection happens before prepare(). Parallel routing is
+    // requested after the graph-authored lane is bound; the runtime refuses it
+    // there, so the request is recorded rather than forced.
+    graph.set_canonical_executor_routing_enabled(backend != Backend::Reference);
+    graph.set_parallel_routing_enabled(backend == Backend::ParallelAfterBind);
+    CombinedRun run;
+    run.parallel_requested_accepted = graph.parallel_routing_enabled();
+    check(graph.canonical_executor_routing_enabled() == (backend != Backend::Reference),
+          "combined-backend-selected");
+    check(graph.prepare(48000.0, static_cast<int>(kCombinedMaxBlock)), "combined-prepare");
+    auto bank = make_voice_bank<P1HeldVoice>(static_cast<int>(kCombinedMaxBlock));
+    const auto voice_epoch = bank->epoch();
+
+    // Control-side adapter storage, preallocated before the first block.
+    HostEventIngress<32> ingress;
+    std::array<HostEventRecord, 32> projected{};
+    pulp::midi::MidiBuffer block_midi;
+    block_midi.reserve(32);
+    block_midi.set_realtime_capacity_limit(true);
+    pulp::state::ParameterEventQueue parameters;
+    std::array<float, kCombinedMaxBlock> source{}, destination{}, left{}, right{};
+    const float* source_ptr = source.data();
+    float* destination_ptr = destination.data();
+    std::array<float*, 2> voice_ptrs{left.data(), right.data()};
+
+    // Slot state is read after each block's render, so a note-on whose
+    // release lands in the same block is already releasing when observed.
+    struct VoiceSeen {
+        std::size_t entry;
+        SlotIntent intent;
+        bool released_in_block;
+    };
+    std::vector<VoiceSeen> voice_seen;
+    std::size_t next_parameter = 0;
+    std::size_t next_voice = 0;
+    std::uint64_t voice_sequence = 1;
+    std::uint64_t start = 0;
+    for (const auto frames : schedule) {
+        check(frames > 0 && frames <= kCombinedMaxBlock, "combined-block-size");
+        const auto end = start + frames;
+
+        // MIDI: absolute records staged once, projected per block, converted
+        // to block-relative offsets and injected into the MIDI input node.
+        check(ingress.begin_block(kCombinedEpoch, start, frames) == HostEventResult::Accepted,
+              "combined-midi-begin");
+        if (run.blocks == 0) {
+            for (const auto& entry : kMidiSchedule)
+                check(ingress.publish(midi_record(
+                          kCombinedEpoch, static_cast<std::int64_t>(entry.absolute), entry.sequence,
+                          entry.producer, pulp::midi::MidiEvent::note_on(1, entry.note, 100))) ==
+                          HostEventResult::Accepted,
+                      "combined-midi-stage");
+            check(ingress.publish(midi_record(kCombinedEpoch - 1, 3, 9, 3,
+                                              pulp::midi::MidiEvent::note_on(1, 70, 100))) ==
+                      HostEventResult::StaleEpoch,
+                  "combined-midi-stale-epoch-refusal");
+        }
+        std::size_t count = 0;
+        check(ingress.project(projected, count) == HostEventResult::Accepted,
+              "combined-midi-project");
+        block_midi.clear();
+        for (std::size_t i = 0; i < count; ++i) {
+            auto event = projected[i].midi;
+            event.sample_offset = static_cast<std::int32_t>(
+                static_cast<std::uint64_t>(projected[i].absolute_sample) - start);
+            check(block_midi.add(event), "combined-midi-adapter-capacity");
+        }
+        if (count > 0)
+            check(graph.inject_midi(midi_input, block_midi), "combined-midi-inject");
+        check(ingress.end_block() == HostEventResult::Accepted, "combined-midi-end");
+
+        // Parameter: absolute records converted to block-relative offsets.
+        parameters.clear();
+        while (next_parameter < kParameterSchedule.size() &&
+               kParameterSchedule[next_parameter].absolute < end) {
+            const auto& entry = kParameterSchedule[next_parameter++];
+            check(
+                parameters.push({.param_id = ParameterProbeSlot::kParamId,
+                                 .sample_offset = static_cast<std::int32_t>(entry.absolute - start),
+                                 .value = static_cast<float>(entry.index) * kParameterStep}),
+                "combined-parameter-push");
+        }
+        if (!parameters.empty())
+            check(graph.inject_parameter_events(plugin, parameters), "combined-parameter-inject");
+
+        pulp::audio::BufferView<const float> in(&source_ptr, 1, frames);
+        pulp::audio::BufferView<float> out(&destination_ptr, 1, frames);
+        for (std::size_t i = 0; i < frames; ++i)
+            source[i] = 0.001f * static_cast<float>((start + i) % 977);
+        graph.process(out, in, static_cast<int>(frames));
+        run.graph_audio.insert(run.graph_audio.end(), destination.begin(),
+                               destination.begin() + static_cast<std::ptrdiff_t>(frames));
+
+        // Voice intent on the same block boundaries.
+        check(bank->epoch() == voice_epoch, "combined-epoch-map");
+        check(bank->begin_block(start, frames) == HostEventResult::Accepted,
+              "combined-voice-begin");
+        const auto first_voice = next_voice;
+        while (next_voice < kVoiceSchedule.size() && kVoiceSchedule[next_voice].absolute < end) {
+            const auto& entry = kVoiceSchedule[next_voice++];
+            HostEventRecord record;
+            record.epoch = voice_epoch;
+            record.absolute_sample = static_cast<std::int64_t>(entry.absolute);
+            record.producer = 1;
+            record.producer_sequence = voice_sequence++;
+            record.midi = entry.note_on ? pulp::midi::MidiEvent::note_on(1, entry.note, 100)
+                                        : pulp::midi::MidiEvent::note_off(1, entry.note);
+            check(bank->publish(record) == HostEventResult::Accepted, "combined-voice-publish");
+        }
+        pulp::audio::BufferView<float> voice_view(voice_ptrs.data(), 2, frames);
+        check(bank->render(voice_view, start, frames) == VoiceBankBindingCode::Ok,
+              "combined-voice-render");
+        std::copy_n(left.begin(), frames,
+                    run.voice_audio.begin() + static_cast<std::ptrdiff_t>(start));
+        for (std::size_t k = first_voice; k < next_voice; ++k) {
+            SlotIntent found;
+            bool located = false;
+            for (std::uint32_t s = 0; s < 8 && !located; ++s) {
+                pulp::midi::MpeNoteState note{};
+                bool releasing = false;
+                if (bank->owner().slot_note(s, note, releasing) &&
+                    note.note == kVoiceSchedule[k].note) {
+                    found = {s, note, releasing};
+                    located = true;
+                }
+            }
+            check(located, "combined-voice-slot");
+            bool released_in_block = false;
+            for (std::size_t j = first_voice; j < next_voice; ++j)
+                released_in_block |=
+                    !kVoiceSchedule[j].note_on && kVoiceSchedule[j].note == kVoiceSchedule[k].note;
+            voice_seen.push_back({k, found, released_in_block});
+        }
+        start = end;
+        ++run.blocks;
+    }
+    check(start == kCombinedFrames, "combined-schedule-length");
+    {
+        const auto stats = graph.routing_executor_stats();
+        run.executor_blocks = stats.blocks_processed;
+        run.parallel_levels = stats.parallel_levels_dispatched;
+        run.routing_fallbacks = graph.routed_walk_fallbacks();
+    }
+
+    const auto& s = *state;
+    check(!s.dropped && !probe->dropped(), "combined-observation-capacity");
+
+    // MIDI
+    check(s.midi_count == kMidiSchedule.size(), "combined-midi-count");
+    for (std::size_t i = 0; i < s.midi_count; ++i) {
+        const auto& seen = s.midi[i];
+        check(seen.note == kMidiExpectedNotes[i], "combined-midi-tie-order");
+        const auto entry = std::find_if(kMidiSchedule.begin(), kMidiSchedule.end(),
+                                        [&](const auto& e) { return e.note == seen.note; });
+        check(entry != kMidiSchedule.end() && entry->absolute == seen.absolute,
+              "combined-midi-absolute");
+        run.trace.push_back(
+            {Family::Midi,
+             kCombinedEpoch,
+             seen.absolute,
+             {entry->producer, entry->sequence, (std::uint64_t{seen.status} << 8) | seen.note}});
+    }
+
+    // Parameter
+    const auto entries = probe->entries();
+    check(entries.size() == kParameterSchedule.size(), "combined-parameter-count");
+    for (std::size_t i = 0; i < entries.size(); ++i) {
+        const auto index =
+            static_cast<std::uint64_t>(entries[i].event.value / kParameterStep + 0.5f);
+        check(index == kParameterSchedule[i].index &&
+                  entries[i].absolute == kParameterSchedule[i].absolute,
+              "combined-parameter-order");
+        run.trace.push_back({Family::Parameter,
+                             kCombinedEpoch,
+                             entries[i].absolute,
+                             {entries[i].event.param_id, index, 0}});
+    }
+
+    // Trigger
+    for (std::size_t i = 0; i < kTriggerSchedule.size(); ++i) {
+        check(s.emit_results[i] == GraphEventResult::Accepted, "combined-trigger-emit");
+        ++(s.emit_future[i] ? run.trigger_future_staged : run.trigger_current_block);
+    }
+    check(s.trigger_count == kTriggerSchedule.size(), "combined-trigger-count");
+    const auto trigger_epoch = s.triggers[0].epoch;
+    run.native_epoch = {kCombinedEpoch, 0, trigger_epoch, voice_epoch};
+    for (std::size_t i = 0; i < s.trigger_count; ++i) {
+        const auto& event = s.triggers[i];
+        check(event.epoch == trigger_epoch, "combined-epoch-map");
+        check(event.sample == kTriggerSchedule[i].target &&
+                  event.payload == kTriggerSchedule[i].payload,
+              "combined-trigger-order");
+        check(s.trigger_block_start[i] <= event.sample && event.sample < s.trigger_block_end[i],
+              "combined-trigger-block-window");
+        run.trace.push_back({Family::Trigger,
+                             kCombinedEpoch,
+                             event.sample,
+                             {event.sequence, event.payload, event.producer}});
+    }
+
+    // Voice
+    check(voice_seen.size() == kVoiceSchedule.size(), "combined-voice-count");
+    for (const auto& seen : voice_seen) {
+        const auto& entry = kVoiceSchedule[seen.entry];
+        if (entry.note_on) {
+            check(seen.intent.state.note_id != 0 &&
+                      (!seen.intent.releasing || seen.released_in_block),
+                  "combined-voice-note-on");
+        } else {
+            const auto on = std::find_if(voice_seen.begin(), voice_seen.end(), [&](const auto& v) {
+                return kVoiceSchedule[v.entry].note_on &&
+                       kVoiceSchedule[v.entry].note == entry.note;
+            });
+            check(on != voice_seen.end() && seen.intent.releasing &&
+                      seen.intent.slot == on->intent.slot &&
+                      seen.intent.state.note_id == on->intent.state.note_id,
+                  "combined-voice-release-intent");
+        }
+        run.trace.push_back(
+            {Family::Voice,
+             kCombinedEpoch,
+             entry.absolute,
+             {seen.intent.slot, seen.intent.state.note_id, entry.note_on ? 1u : 0u}});
+    }
+    // The rendered audio places each intent at its absolute sample, not at the
+    // start of the block that carried it.
+    const auto& audio = run.voice_audio;
+    check(audio[2] == 0.0f && audio[3] > 0.0f && audio[40] > audio[39] && audio[71] < audio[69] &&
+              audio[201] < audio[199],
+          "combined-voice-onset-sample");
+    // A live generation on another slot is stale for the first note's slot.
+    const auto& first_on = voice_seen[0].intent;
+    const auto& second_on = voice_seen[1].intent;
+    check(first_on.slot != second_on.slot || first_on.state.note_id != second_on.state.note_id,
+          "combined-voice-distinct-identity");
+    check(bank->dispatch_deferred(bank->epoch(), first_on.slot, second_on.state.note_id,
+                                  pulp::midi::MpeExpressionEvent::Kind::Pressure,
+                                  first_on.state) == VoiceBankBindingCode::StaleGeneration,
+          "combined-voice-stale-generation-refusal");
+
+    std::stable_sort(run.trace.begin(), run.trace.end(),
+                     [](const TraceRecord& a, const TraceRecord& b) {
+                         if (a.absolute != b.absolute)
+                             return a.absolute < b.absolute;
+                         return a.family < b.family;
+                     });
+    return run;
+}
+
+// FNV-1a over each family's canonical records, in canonical order. The digest
+// is order-sensitive, so a changed order key or a reordered pair changes it.
+std::array<std::uint64_t, 4> family_digests(const std::vector<TraceRecord>& trace) {
+    std::array<std::uint64_t, 4> digest{};
+    digest.fill(1469598103934665603ull);
+    const auto mix = [](std::uint64_t& h, std::uint64_t v) {
+        for (int i = 0; i < 8; ++i) {
+            h ^= (v >> (i * 8)) & 0xffu;
+            h *= 1099511628211ull;
+        }
+    };
+    for (const auto& record : trace) {
+        auto& h = digest[static_cast<std::size_t>(record.family)];
+        mix(h, record.epoch);
+        mix(h, record.absolute);
+        for (const auto value : record.key)
+            mix(h, value);
+    }
+    return digest;
+}
+
+std::vector<std::size_t> differing_records(const std::vector<TraceRecord>& a,
+                                           const std::vector<TraceRecord>& b) {
+    std::vector<std::size_t> diff;
+    for (std::size_t i = 0; i < std::min(a.size(), b.size()); ++i)
+        if (!(a[i] == b[i]))
+            diff.push_back(i);
+    return diff;
+}
+
+struct MutationReceipt {
+    std::array<std::uint64_t, 4> baseline{};
+    std::array<std::array<std::uint64_t, 4>, 4> sequence_mutated{};
+    std::array<std::uint64_t, 4> order_swapped{};
+};
+
+// Planted negatives: change one record's order key in each family, and swap the
+// two equal-sample MIDI records. Exactly the touched family's digest changes,
+// the other three stay identical, and a record-by-record diff names only the
+// touched records, so every other record stays explainable.
+MutationReceipt sequence_mutation_controls(const std::vector<TraceRecord>& trace) {
+    MutationReceipt receipt;
+    receipt.baseline = family_digests(trace);
+    for (std::size_t f = 0; f < 4; ++f) {
+        auto mutated = trace;
+        const auto target = std::find_if(mutated.begin(), mutated.end(), [&](const auto& r) {
+            return static_cast<std::size_t>(r.family) == f;
+        });
+        check(target != mutated.end(), "sequence-mutation-target");
+        target->key[kOrderKey[f]] += 1;
+        const auto digests = family_digests(mutated);
+        receipt.sequence_mutated[f] = digests;
+        check(digests[f] != receipt.baseline[f], "sequence-mutation-detected");
+        for (std::size_t other = 0; other < 4; ++other)
+            if (other != f)
+                check(digests[other] == receipt.baseline[other], "sequence-mutation-isolated");
+        const auto diff = differing_records(trace, mutated);
+        check(diff.size() == 1 && diff[0] == static_cast<std::size_t>(target - mutated.begin()),
+              "sequence-mutation-explained");
+    }
+    auto swapped = trace;
+    std::size_t first = swapped.size();
+    for (std::size_t i = 0; i + 1 < swapped.size(); ++i)
+        if (swapped[i].family == Family::Midi && swapped[i + 1].family == Family::Midi &&
+            swapped[i].absolute == swapped[i + 1].absolute) {
+            first = i;
+            break;
+        }
+    check(first < swapped.size(), "order-mutation-target");
+    std::swap(swapped[first], swapped[first + 1]);
+    receipt.order_swapped = family_digests(swapped);
+    check(receipt.order_swapped[0] != receipt.baseline[0], "order-mutation-detected");
+    for (std::size_t other = 1; other < 4; ++other)
+        check(receipt.order_swapped[other] == receipt.baseline[other], "order-mutation-isolated");
+    const auto diff = differing_records(trace, swapped);
+    check(diff == std::vector<std::size_t>{first, first + 1}, "order-mutation-explained");
+    return receipt;
+}
+
+// Names the first channel on which two backends disagree, or "" when the
+// canonical trace, per-family digests, voice audio, graph audio and epoch map
+// are all identical.
+const char* backend_parity_diff(const CombinedRun& a, const CombinedRun& b) {
+    if (!(a.trace == b.trace))
+        return "backend-trace";
+    if (family_digests(a.trace) != family_digests(b.trace))
+        return "backend-digest";
+    if (!(a.voice_audio == b.voice_audio))
+        return "backend-voice-audio";
+    if (!(a.graph_audio == b.graph_audio))
+        return "backend-graph-audio";
+    if (!(a.native_epoch == b.native_epoch))
+        return "backend-epoch-map";
+    return "";
+}
+
+struct ParityReceipt {
+    std::size_t comparisons = 0;
+    std::uint64_t reference_executor_blocks = 0;
+    std::uint64_t routed_executor_blocks = 0;
+    std::uint64_t routed_blocks_total = 0;
+    std::uint64_t routing_fallbacks = 0;
+    bool parallel_refused = false;
+    std::uint64_t parallel_levels = 0;
+    std::array<std::uint64_t, 4> perturbed_digests{};
+    std::size_t audio_perturbed_index = 0;
+};
+
+// Runs every schedule on the reference walk and the routed executor (and the
+// parallel request) and requires identical output. Planted negatives perturb
+// one record, then one audio sample, on the routed side only; the comparator
+// must name each.
+ParityReceipt executor_parity_controls(const std::vector<std::vector<std::size_t>>& schedules) {
+    ParityReceipt receipt;
+    for (const auto& schedule : schedules) {
+        const auto reference = render_combined(schedule, Backend::Reference);
+        const auto routed = render_combined(schedule, Backend::Routed);
+        const auto parallel = render_combined(schedule, Backend::ParallelAfterBind);
+        check(reference.executor_blocks == 0, "parity-reference-walk-only");
+        check(routed.executor_blocks == schedule.size(), "parity-routed-executor-dispatched");
+        check(routed.routing_fallbacks == 0 && parallel.routing_fallbacks == 0,
+              "parity-no-routed-fallback");
+        check(!parallel.parallel_requested_accepted, "parity-parallel-refused-after-bind");
+        check(parallel.parallel_levels == 0, "parity-parallel-not-dispatched");
+        check(std::string(backend_parity_diff(reference, routed)).empty(),
+              "parity-reference-vs-routed");
+        check(std::string(backend_parity_diff(reference, parallel)).empty(),
+              "parity-reference-vs-parallel-request");
+        check(std::string(backend_parity_diff(routed, parallel)).empty(),
+              "parity-routed-vs-parallel-request");
+        receipt.comparisons += 3;
+        receipt.reference_executor_blocks += reference.executor_blocks;
+        receipt.routed_executor_blocks += routed.executor_blocks;
+        receipt.routed_blocks_total += schedule.size();
+        receipt.routing_fallbacks += routed.routing_fallbacks + parallel.routing_fallbacks;
+        receipt.parallel_refused = !parallel.parallel_requested_accepted;
+        receipt.parallel_levels += parallel.parallel_levels;
+    }
+    const auto reference = render_combined(schedules[0], Backend::Reference);
+    const auto routed = render_combined(schedules[0], Backend::Routed);
+    check(std::string(backend_parity_diff(reference, routed)).empty(), "parity-control-baseline");
+    auto record_perturbed = routed;
+    const auto target = std::find_if(record_perturbed.trace.begin(), record_perturbed.trace.end(),
+                                     [](const auto& r) { return r.family == Family::Parameter; });
+    check(target != record_perturbed.trace.end(), "parity-perturb-target");
+    target->key[kOrderKey[1]] += 1;
+    check(std::string(backend_parity_diff(reference, record_perturbed)) == "backend-trace",
+          "parity-planted-record-detected");
+    receipt.perturbed_digests = family_digests(record_perturbed.trace);
+    const auto base_digests = family_digests(reference.trace);
+    check(receipt.perturbed_digests[1] != base_digests[1] &&
+              receipt.perturbed_digests[0] == base_digests[0] &&
+              receipt.perturbed_digests[2] == base_digests[2] &&
+              receipt.perturbed_digests[3] == base_digests[3],
+          "parity-planted-record-isolated");
+    auto audio_perturbed = routed;
+    receipt.audio_perturbed_index = audio_perturbed.graph_audio.size() / 2;
+    audio_perturbed.graph_audio[receipt.audio_perturbed_index] += 1.0f;
+    check(std::string(backend_parity_diff(reference, audio_perturbed)) == "backend-graph-audio",
+          "parity-planted-audio-detected");
+    auto voice_perturbed = routed;
+    voice_perturbed.voice_audio[7] += 1.0f;
+    check(std::string(backend_parity_diff(reference, voice_perturbed)) == "backend-voice-audio",
+          "parity-planted-voice-audio-detected");
+    return receipt;
+}
+
+std::string hex(std::uint64_t value) {
+    char buffer[17];
+    std::snprintf(buffer, sizeof buffer, "%016llx", static_cast<unsigned long long>(value));
+    return buffer;
+}
+
+void write_trace(const std::string& path, const CombinedRun& run, const MutationReceipt& receipt) {
+    std::ofstream file(path);
+    check(static_cast<bool>(file), "trace-write");
+    file << "{\"test_epoch\":" << kCombinedEpoch << ",\"native_epoch\":{";
+    for (std::size_t f = 0; f < 4; ++f)
+        file << (f ? "," : "") << '"' << kFamilyNames[f] << "\":" << run.native_epoch[f];
+    file << "}}\n";
+    for (const auto& r : run.trace)
+        file << "{\"family\":\"" << kFamilyNames[static_cast<std::size_t>(r.family)]
+             << "\",\"epoch\":" << r.epoch << ",\"absolute\":" << r.absolute << ",\"key\":["
+             << r.key[0] << ',' << r.key[1] << ',' << r.key[2] << "]}\n";
+    file << "{\"digests\":{";
+    for (std::size_t f = 0; f < 4; ++f)
+        file << (f ? "," : "") << '"' << kFamilyNames[f] << "\":\"" << hex(receipt.baseline[f])
+             << '"';
+    file << "}}\n";
+    const auto digest_list = [&](const std::array<std::uint64_t, 4>& d) {
+        file << '[';
+        for (std::size_t f = 0; f < 4; ++f)
+            file << (f ? "," : "") << '"' << hex(d[f]) << '"';
+        file << ']';
+    };
+    file << "{\"sequence_mutation\":{";
+    for (std::size_t f = 0; f < 4; ++f) {
+        file << (f ? "," : "") << '"' << kFamilyNames[f] << "\":";
+        digest_list(receipt.sequence_mutated[f]);
+    }
+    file << "},\"midi_order_swap\":";
+    digest_list(receipt.order_swapped);
+    file << "}\n";
+    check(static_cast<bool>(file), "trace-write");
+}
+
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
     try {
         const auto partition4 = host_and_parameter_controls(4);
         const auto partition8 = host_and_parameter_controls(8);
@@ -827,10 +1537,49 @@ int main() {
                   voice4.second_generation == voice8.second_generation,
               "voice-bank-partition-invariance");
 
+        // One shared epoch and sample origin across all four families, at
+        // uniform and irregular block schedules over the same 256 samples.
+        const std::vector<std::vector<std::size_t>> combined_schedules{
+            std::vector<std::size_t>(256, 1),
+            std::vector<std::size_t>(8, 32),
+            std::vector<std::size_t>(4, 64),
+            {127, 127, 2},
+            {3, 61, 1, 127, 64}};
+        const auto combined = render_combined(combined_schedules[0]);
+        std::size_t future_staged = combined.trigger_future_staged;
+        std::size_t current_block = combined.trigger_current_block;
+        for (std::size_t i = 1; i < combined_schedules.size(); ++i) {
+            const auto other = render_combined(combined_schedules[i]);
+            check(other.trace == combined.trace && other.voice_audio == combined.voice_audio,
+                  "combined-partition-invariance");
+            check(family_digests(other.trace) == family_digests(combined.trace),
+                  "combined-partition-invariance");
+            check(other.native_epoch == combined.native_epoch, "combined-epoch-map");
+            future_staged += other.trigger_future_staged;
+            current_block += other.trigger_current_block;
+        }
+        check(future_staged > 0 && current_block > 0, "combined-trigger-current-and-future");
+        const auto receipt = sequence_mutation_controls(combined.trace);
+        const auto parity = executor_parity_controls(combined_schedules);
+        check(parity.comparisons == 3 * combined_schedules.size(), "parity-comparison-count");
+        for (int i = 1; i + 1 < argc; ++i)
+            if (std::string(argv[i]) == "--trace")
+                write_trace(argv[i + 1], combined, receipt);
+
         std::cout << "p1-event-admission PASS checks=" << checks
                   << " partitions=4,8 graph_event_schedules=2+2+4,3+5 graph_events=" << graph_events
                   << " voice_slot_reuse=" << (voice4.first_slot == voice4.second_slot ? 1 : 0)
-                  << " consumer_gate=NOT_QUALIFIED\n";
+                  << " combined_schedules=1,32,64,127+127+2,3+61+1+127+64 combined_records="
+                  << combined.trace.size() << " digests=midi:" << hex(receipt.baseline[0])
+                  << ",parameter:" << hex(receipt.baseline[1])
+                  << ",trigger:" << hex(receipt.baseline[2])
+                  << ",voice:" << hex(receipt.baseline[3])
+                  << " sequence_mutations=5 executor_parity=reference-walk,routed-executor"
+                  << " parity_comparisons=" << parity.comparisons
+                  << " routed_executor_blocks=" << parity.routed_executor_blocks << "/"
+                  << parity.routed_blocks_total << " routing_fallbacks=" << parity.routing_fallbacks
+                  << " parallel_after_bind=" << (parity.parallel_refused ? "refused" : "accepted")
+                  << " parity_planted_negatives=3 consumer_gate=NOT_QUALIFIED\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "p1-event-admission FAIL rule=" << error.what() << '\n';

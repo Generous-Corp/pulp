@@ -1,5 +1,15 @@
 # A9 — agent design loop
 
+## Close-out (2026-11-13)
+
+Final status: PARTIAL (unchanged).
+
+The installed-SDK consumer and fail-closed action-plan harness are on main (PR 11682 and later work). The glue-over-200-lines budget and the independent trial packet are not done.
+
+PR pointers below are historical; all PRs cited in this file that were queried (checked 2026-11-13) are merged, none remain open.
+
+Remaining work is deferred to https://github.com/Generous-Corp/pulp/issues/12177.
+
 Status: **PARTIAL — bounded installed-SDK consumer and fail-closed action-plan harness implemented**
 
 ## Action-plan harness (2026-11-06, source `3fad8b42a44d496361f97eeb469639e3a2b9e3c6`)
