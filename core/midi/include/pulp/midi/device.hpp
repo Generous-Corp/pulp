@@ -35,23 +35,22 @@ namespace pulp::midi {
 ///    "0", which select the first port and are not stable identifiers.
 struct MidiPortInfo {
     std::string id;
-    std::string name;   // display name (device plus endpoint where the OS joins them)
+    std::string name; // display name (device plus endpoint where the OS joins them)
     bool is_input = false;
     bool is_output = false;
 
-    std::string device_name;    // owning device, empty for virtual endpoints
-    std::string entity_name;    // owning entity within the device
-    std::string endpoint_name;  // the endpoint's own name
-    std::string stable_key;     // "device|entity|endpoint", empty when unknown
-    bool online = true;         // false when the OS lists the port but its device is offline
+    std::string device_name;   // owning device, empty for virtual endpoints
+    std::string entity_name;   // owning entity within the device
+    std::string endpoint_name; // the endpoint's own name
+    std::string stable_key;    // "device|entity|endpoint", empty when unknown
+    bool online = true;        // false when the OS lists the port but its device is offline
 };
 
 /// Pick the port an app saved earlier. `id` wins when present and the port is
 /// online. Otherwise `stable_key` is used, but only when exactly one port
 /// carries it, so identical devices never get confused. Returns the index into
 /// `ports`, or -1 when nothing matches unambiguously.
-int resolve_port(const std::vector<MidiPortInfo>& ports,
-                 const std::string& saved_id,
+int resolve_port(const std::vector<MidiPortInfo>& ports, const std::string& saved_id,
                  const std::string& saved_stable_key);
 
 // Callback for received MIDI short (channel-voice / system-realtime)

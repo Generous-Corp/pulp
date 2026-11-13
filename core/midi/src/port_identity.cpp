@@ -2,8 +2,7 @@
 
 namespace pulp::midi {
 
-int resolve_port(const std::vector<MidiPortInfo>& ports,
-                 const std::string& saved_id,
+int resolve_port(const std::vector<MidiPortInfo>& ports, const std::string& saved_id,
                  const std::string& saved_stable_key) {
     if (!saved_id.empty()) {
         for (size_t i = 0; i < ports.size(); ++i)
@@ -17,7 +16,7 @@ int resolve_port(const std::vector<MidiPortInfo>& ports,
         if (!ports[i].online || ports[i].stable_key != saved_stable_key)
             continue;
         if (found >= 0)
-            return -1;  // two ports share the key: refuse rather than guess
+            return -1; // two ports share the key: refuse rather than guess
         found = static_cast<int>(i);
     }
     return found;

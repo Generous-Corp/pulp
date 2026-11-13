@@ -5,8 +5,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <pulp/midi/device.hpp>
 #include <ports_json.hpp>
+#include <pulp/midi/device.hpp>
 
 #include <string>
 #include <vector>
@@ -98,7 +98,8 @@ struct VirtualPair {
 
         if (MIDIDestinationCreateWithProtocol(client, CFSTR("Pulp Identity Dest"),
                                               kMIDIProtocol_1_0, &dest,
-                                              ^(const MIDIEventList*, void*) {}) != noErr)
+                                              ^(const MIDIEventList*, void*){
+                                              }) != noErr)
             return false;
         MIDIObjectSetIntegerProperty(source, kMIDIPropertyUniqueID, kSourceId);
         MIDIObjectSetIntegerProperty(dest, kMIDIPropertyUniqueID, kDestId);
@@ -106,22 +107,27 @@ struct VirtualPair {
     }
 
     ~VirtualPair() {
-        if (source) MIDIEndpointDispose(source);
-        if (dest) MIDIEndpointDispose(dest);
-        if (client) MIDIClientDispose(client);
+        if (source)
+            MIDIEndpointDispose(source);
+        if (dest)
+            MIDIEndpointDispose(dest);
+        if (client)
+            MIDIClientDispose(client);
     }
 };
 
 const MidiPortInfo* find(const std::vector<MidiPortInfo>& ports, const std::string& id) {
     for (const auto& p : ports)
-        if (p.id == id) return &p;
+        if (p.id == id)
+            return &p;
     return nullptr;
 }
 
 std::string executable_path() {
     char buf[4096];
     uint32_t size = sizeof(buf);
-    if (_NSGetExecutablePath(buf, &size) != 0) return {};
+    if (_NSGetExecutablePath(buf, &size) != 0)
+        return {};
     return buf;
 }
 
@@ -148,7 +154,7 @@ TEST_CASE("CoreMIDI reports the same ids from two systems and fills identity fie
     CHECK(src->is_input);
     CHECK_FALSE(src->is_output);
     CHECK(src->endpoint_name == "Pulp Identity Source");
-    CHECK(src->device_name.empty());  // virtual endpoint: no owning device
+    CHECK(src->device_name.empty()); // virtual endpoint: no owning device
     CHECK(src->stable_key.empty());
     CHECK(src->online);
 
@@ -227,8 +233,10 @@ TEST_CASE("CoreMIDI ids reported by a separate process match this one",
     char line[1024];
     while (fgets(line, sizeof(line), pipe)) {
         std::string s(line);
-        if (s.rfind("PORT\t", 0) != 0) continue;
-        while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
+        if (s.rfind("PORT\t", 0) != 0)
+            continue;
+        while (!s.empty() && (s.back() == '\n' || s.back() == '\r'))
+            s.pop_back();
         child.insert(s);
     }
     pclose(pipe);

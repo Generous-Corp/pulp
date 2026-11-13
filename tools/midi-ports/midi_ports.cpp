@@ -36,9 +36,10 @@ int main(int argc, char** argv) {
     }
     auto print = [](const char* kind, const std::vector<pulp::midi::MidiPortInfo>& ports) {
         for (const auto& p : ports)
-            std::printf("%-3s id=%-12s online=%d name=\"%s\" device=\"%s\" entity=\"%s\" endpoint=\"%s\"\n",
-                        kind, p.id.c_str(), p.online ? 1 : 0, p.name.c_str(),
-                        p.device_name.c_str(), p.entity_name.c_str(), p.endpoint_name.c_str());
+            std::printf(
+                "%-3s id=%-12s online=%d name=\"%s\" device=\"%s\" entity=\"%s\" endpoint=\"%s\"\n",
+                kind, p.id.c_str(), p.online ? 1 : 0, p.name.c_str(), p.device_name.c_str(),
+                p.entity_name.c_str(), p.endpoint_name.c_str());
     };
     print("in", inputs);
     print("out", outputs);

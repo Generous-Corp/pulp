@@ -86,7 +86,6 @@ MidiPortInfo describe_endpoint(MIDIEndpointRef endpoint, bool is_input) {
     return info;
 }
 
-
 // True while `endpoint` is still the live object registered under
 // `unique_id`. A device that is unplugged, or that disappears across a system
 // sleep, takes its endpoint object with it; when it comes back it is a new
