@@ -49,6 +49,14 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(errors[0]["where"], "core/view/CMakeLists.txt:42")
         self.assertIn("Cannot find source file", errors[0]["detail"])
 
+    def test_configure_error_captures_following_source_path_for_grouping(self):
+        log = ("CMake Error at cmake/other/CMakeLists.txt:42 (add_library):\n"
+               "  Cannot find source file:\n\n    tools/mcp/server.cpp\n")
+        errors = ct.parse_configure_log(log)
+        self.assertIn("tools/mcp/server.cpp", errors[0]["detail"])
+        report = ct.build_report(INPUTS, log, "", 1, [], False, False)
+        self.assertEqual(list(report["by_row"]), ["H4"])
+
 
 class GroupingTests(unittest.TestCase):
     def report(self, build_text):
@@ -81,6 +89,17 @@ class GroupingTests(unittest.TestCase):
         report = ct.build_report(INPUTS, log, "", 1, [], False, False)
         self.assertFalse(report["build"]["ran"])
         self.assertEqual(list(report["by_row"]), ["H4"])
+
+    def test_build_returncode_distinguishes_success_from_unparsed_failure(self):
+        success = ct.build_report(INPUTS, "", "ninja: no work to do\n", 1, [], True,
+                                  True, 0)
+        failure = ct.build_report(INPUTS, "", "ninja: error: missing and no known rule\n",
+                                  1, [], True, True, 1)
+        self.assertTrue(success["build"]["ok"])
+        self.assertEqual(success["build"]["returncode"], 0)
+        self.assertFalse(failure["build"]["ok"])
+        self.assertEqual(failure["build"]["returncode"], 1)
+        self.assertEqual(failure["build"]["failed_targets"], [])
 
 
 class InputTests(unittest.TestCase):

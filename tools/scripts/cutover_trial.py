@@ -114,10 +114,15 @@ def parse_configure_log(text: str) -> list[dict]:
         if not match:
             continue
         detail = ""
-        for follower in lines[index + 1:index + 6]:
+        for offset, follower in enumerate(lines[index + 1:index + 6]):
             found = CMAKE_MISSING.search(follower)
             if found:
                 detail = f"{found.group(1)} {found.group(2)}".strip()
+                if not found.group(2).strip():
+                    for candidate in lines[index + offset + 2:index + 7]:
+                        if candidate.strip():
+                            detail = f"{detail} {candidate.strip()}"
+                            break
                 break
             if follower.strip() and not detail:
                 detail = follower.strip()
@@ -170,7 +175,7 @@ def group_failures(failures: list[dict], rows: list[dict],
 
 def build_report(inputs: dict, configure_text: str, build_text: str,
                  deleted: int, missing: list[str], configure_ok: bool,
-                 build_ran: bool) -> dict:
+                 build_ran: bool, build_returncode: int | None = None) -> dict:
     rows = inputs["stranded_rows"]
     failures = parse_build_log(build_text) if build_ran else []
     configure_errors = [] if configure_ok else parse_configure_log(configure_text)
@@ -181,7 +186,11 @@ def build_report(inputs: dict, configure_text: str, build_text: str,
         "paths": {"listed": len(inputs["delete_paths"]), "deleted": deleted,
                   "already_absent": missing},
         "configure": {"ok": configure_ok, "errors": configure_errors},
-        "build": {"ran": build_ran, "failed_targets": failures},
+        "build": {"ran": build_ran,
+                  "ok": (build_returncode == 0
+                         if build_returncode is not None else None),
+                  "returncode": build_returncode,
+                  "failed_targets": failures},
         "stranded_rows_total": len(rows),
         "rows_without_paths": [r["id"] for r in rows if not r["paths"]],
         "stranded_rows_hit": len(grouping["by_row"]),
@@ -254,15 +263,16 @@ def main(argv: list[str] | None = None) -> int:
                              "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release"])
             configure_text = configure.stdout + configure.stderr
             (log_dir / "cutover-configure.log").write_text(configure_text, encoding="utf-8")
-            build_text, ran = "", False
+            build_text, ran, build_returncode = "", False, None
             if configure.returncode == 0:
                 governed = args.scratch / "tools/ci/governed-build.sh"
                 built = run([str(governed), "cmake", "--build", str(build_dir), "--",
                              "-k", "0"], cwd=args.scratch)
-                build_text, ran = built.stdout + built.stderr, True
+                build_text, ran, build_returncode = (built.stdout + built.stderr,
+                                                     True, built.returncode)
                 (log_dir / "cutover-build.log").write_text(build_text, encoding="utf-8")
             report = build_report(inputs, configure_text, build_text, deleted, missing,
-                                  configure.returncode == 0, ran)
+                                  configure.returncode == 0, ran, build_returncode)
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8")
     except (InputError, OSError) as error:

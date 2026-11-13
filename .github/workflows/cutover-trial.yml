@@ -74,6 +74,10 @@ jobs:
           r = json.load(open(sys.argv[1]))
           print("## Cutover trial (advisory)")
           print(f"- configure ok: {r['configure']['ok']}")
+          print(f"- build ran: {r['build']['ran']}")
+          print(f"- build ok: {r['build']['ok']}")
+          if r['build']['returncode'] is not None:
+              print(f"- build return code: {r['build']['returncode']}")
           print(f"- failed targets: {len(r['build']['failed_targets'])}")
           print(f"- stranded rows hit: {r['stranded_rows_hit']} of {r['stranded_rows_total']}")
           for row, targets in sorted(r["by_row"].items()):
