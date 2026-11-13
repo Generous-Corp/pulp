@@ -56,6 +56,8 @@ constexpr std::array<std::string_view, 7> kPermissionTerms{
             input, "dev.pulp.schema/" slug "-output@1", output, "artifact",                        \
             {true, "artifact_id", "sha256", bytes, media}, {}                                      \
     }
+// Hand-laid schema literals: reformatting reflows every entry for a one-entry change.
+// clang-format off
 constexpr auto kControlOperations = std::to_array<ControlOperationDescriptor>({
     PULP_OPERATION(
         SessionDescribe, "instance/read", PULP_SCHEMA_EMPTY,
@@ -174,6 +176,7 @@ constexpr auto kControlOperations = std::to_array<ControlOperationDescriptor>({
         R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"action":{"enum":["set-range","set-enabled"]},"applied":{"type":"boolean"},"enabled":{"type":"boolean"},"end_tick":{"maximum":9007199254740991,"minimum":-9007199254740991,"type":"integer"},"receipt_id":{"maxLength":128,"minLength":1,"type":"string"},"sequence":{"maximum":9007199254740991,"minimum":0,"type":"integer"},"start_tick":{"maximum":9007199254740991,"minimum":-9007199254740991,"type":"integer"}},"required":["action","receipt_id","applied","enabled","start_tick","end_tick","sequence"],"type":"object"})",
         "receipt"),
 });
+// clang-format on
 consteval bool control_operations_are_unique_and_complete() {
     for (std::size_t i = 0; i < kControlOperations.size(); ++i) {
         const auto& operation = kControlOperations[i];
