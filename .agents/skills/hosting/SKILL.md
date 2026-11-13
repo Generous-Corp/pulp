@@ -3196,6 +3196,12 @@ append named `midi` ports without changing audio counts; named connect must set
 the MIDI edge flag. Keep strict patch validation additive: the legacy serializer
 may drop bad edges, while strict validation must check every original edge.
 Opaque state and richer edge kinds need explicit contracts before formatting.
+Diagnostics must name the real reason and the fix. The default catalog lists
+`pulp/gain`'s `gain` as a node setting, which `name = value` sets but `~>`
+cannot automate (it is not a Processor parameter); a chain hop infers a port
+only when the node has exactly one output, so stereo built-ins need explicit
+`node.audio` and `node.out1` ports. User-facing walkthroughs live in
+`docs/guides/graph-first-steps.md` and `docs/guides/graph-notation-cookbook.md`.
 
 ### Vendored lilv/zix on Android
 
