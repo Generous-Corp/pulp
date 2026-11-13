@@ -187,7 +187,7 @@ bool check_nested_macro() {
     SignalGraph graph;
     auto nested = instantiate_subgraph(graph, nested_source_stage_template(), "nested", 2);
     auto sink = instantiate_subgraph(graph, sink_stage_template(), "sink", 3);
-    if (!nested || !sink || nested.instance.parameters.at("inner.gain") != 1.0f ||
+    if (!nested || !sink || nested.instance.parameters.at("inner.gain") != 0.5f ||
         nested.instance.child_template_identities.at("inner") != "cookbook.source-stage.v1" ||
         !connect_subgraph_ports(graph, nested.instance, "output", sink.instance, "input"))
         return false;

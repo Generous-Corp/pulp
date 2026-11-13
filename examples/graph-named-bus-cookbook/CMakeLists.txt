@@ -13,4 +13,5 @@ set_tests_properties(graph-named-bus-cookbook PROPERTIES LABELS "examples;instal
 add_test(NAME graph-named-bus-planted-swap
          COMMAND pulp-graph-named-bus-cookbook --planted-swap)
 set_tests_properties(graph-named-bus-planted-swap PROPERTIES
-                     WILL_FAIL TRUE LABELS "examples;installed-sdk;graph;negative")
+                     LABELS "examples;installed-sdk;graph;negative"
+                     PASS_REGULAR_EXPRESSION "named-bus planted defect detected: swapped-names")

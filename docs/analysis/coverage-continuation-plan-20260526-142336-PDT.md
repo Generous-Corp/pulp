@@ -140,7 +140,7 @@ Do not use routine direct SSH for Windows/Ubuntu. Let Shipyard/GitHub runners ha
 4. If PR #2998 merges, clean the worktree and local branch:
 
    ```bash
-   cd /Users/danielraffel/Code/pulp
+   cd <code-root>/pulp
    git worktree remove /private/tmp/pulp-coverage-cli-command-contracts-20260526
    git branch -d feature/coverage-cli-command-contracts-20260526
    ```
@@ -185,12 +185,12 @@ Known unrelated worktrees present; do not clean unless their owner confirms they
 - `/private/tmp/pulp-prefs-tooltip-dragger`
 - `/private/tmp/pulp-runtime-utils`
 - `/private/tmp/pulp-webgpu-rpath-pr`
-- `/Users/danielraffel/Code/pulp-claudemd-release`
-- `/Users/danielraffel/Code/pulp-platform-native-window-embedding`
-- `/Users/danielraffel/Code/pulp-platform-osc`
-- `/Users/danielraffel/Code/pulp-windows-signal-m-pi`
-- `/Users/danielraffel/Code/pulp-wt-macos-cross-phase5`
-- `/Users/danielraffel/Code/pulp-wysiwyg-p1-p2`
-- `/Users/danielraffel/worktrees/cli-modularization`
+- `<code-root>/pulp-claudemd-release`
+- `<code-root>/pulp-platform-native-window-embedding`
+- `<code-root>/pulp-platform-osc`
+- `<code-root>/pulp-windows-signal-m-pi`
+- `<code-root>/pulp-wt-macos-cross-phase5`
+- `<code-root>/pulp-wysiwyg-p1-p2`
+- `<code-root>/cli-modularization`
 - locked `.claude/worktrees/agent-*` worktrees
 - Shipyard/local-ci prepared worktrees under `~/Library/Application Support/Pulp/local-ci/`
