@@ -1,26 +1,36 @@
 # P1 event admission public consumer
 
-This installed-SDK consumer is the bounded admission fixture for P1. It
-exercises MIDI and trigger public seams across two block partitions; parameter
-and voice checks remain standalone:
+This installed-SDK consumer is the bounded admission fixture for P1. Each of
+the four typed families runs through a public seam across at least two blocks
+and two partition schedules:
 
-* absolute MIDI host ingress, stable producer ordering, stale-epoch and late
-  refusal;
-* standalone fixed-capacity parameter-queue sorting and overflow refusal
-  (graph/mailbox projection is not checked);
-* the existing trigger graph through two blocks, including absolute samples,
-  sequence, epoch, and reset;
-* a standalone test-owned voice-intent adapter that pairs the existing G-4
-  authored voice identity with the existing MPE allocator (graph voice
-  projection is not checked). It adds no runtime queue or graph API.
+* absolute MIDI host ingress, stable producer ordering, and stale-epoch, late,
+  and duplicate-sequence refusal (partitions 4 and 8);
+* triggers through the graph-authored event lane: a `CustomNodeType` producer
+  and consumer joined by `SignalGraph::connect_graph_event`, emitting with
+  `GraphEventWriter::emit_at` and reading `GraphEventReader::events`. It covers
+  current-block and bounded-future delivery across a block boundary, `Future`,
+  `Late`, and `Overflow` refusals, reset cancelling a staged record with an
+  epoch advance, and identical output for the 2+2+4 and 3+5 schedules. Public
+  `TriggerContext` is not a consumer seam and is not used; the existing trigger
+  graph check is kept as trigger-graph evidence;
+* parameters through `SignalGraph::inject_parameter_events` into a small
+  `PluginSlot` node added with `add_plugin_node`: latest-wins, sorted delivery
+  with stable equal-offset order, one-shot delivery, and a source-side
+  overflow that returns `false` (block sizes 4 and 8). A standalone
+  `ParameterEventQueue` sort and overflow check is also kept;
+* voice intent through the installed `pulp::host::VoiceBankBinding`: note-on
+  and note-off land across blocks on one slot and generation, and
+  `dispatch_deferred` refuses wrong, retired, and re-used-slot generations with
+  `StaleGeneration` while a live generation is accepted (partitions 4 and 8).
+  This is control-side evidence, not a graph voice allocator.
 
-The fixture is qualified only when built from a complete installed SDK and the
-positive executable exits zero. Missing SDK support modules are `NOT_CHECKED`,
-not a qualification claim. The five planted negatives are stale MIDI epoch,
-late MIDI, duplicate MIDI sequence, parameter overflow, and stale voice
-generation. The positive control proves two-block MIDI and trigger behavior plus
-partition-invariant MIDI output. Parameter and voice projection remain planned,
-not checked by this fixture.
+It adds no runtime queue, voice-intent API, or graph seam. Each family runs in
+its own graph or binding; one shared epoch across all four families is not
+checked. The fixture is qualified only when built from a complete installed
+SDK and the positive executable exits zero; the receipt stays `NOT_QUALIFIED`
+until the remaining admission rows are checked. Missing SDK support modules are
+`NOT_CHECKED`, not a qualification claim.
 
 ```sh
 cmake -S examples/p1-event-admission-consumer -B build-p1-event-admission \
