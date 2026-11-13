@@ -2,7 +2,7 @@
 
 - Owner: `codex-p2-provenance-20261006`
 - Protected base: `7a0c2139eb077f14a37277d515d3bfdec2c6fba5`
-- Worktree: `/Users/danielraffel/Code/pulp-p2-provenance-20261006`
+- Worktree: `<code-root>/pulp-p2-provenance-20261006`
 - Bounded paths: `tools/scripts/gpu_audio_p2_campaign.py`, `tools/scripts/test_gpu_audio_p2_campaign.py`, and this ownership receipt.
 - Status: implementation complete; private tooling packet; published on PR 9755 with refreshed protected-main lineage rooted at head `b7b5a96d6f15dcbd00c25d947b20fdea7d313e6e`; receipt-only metadata updates are carried on the current PR head while awaiting protected checks and merge-queue admission.
 - Scope: require a clean tracked source tree before measurement and bind the exact driver SHA-256 and source revision into the campaign manifest with fail-closed mismatch checks. Preserve plan-only and matrix semantics.

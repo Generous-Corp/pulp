@@ -1,7 +1,7 @@
 # Neural ModelStore installer-layout receipt
 
 Date: 2026-10-04
-Worktree: `/Users/danielraffel/Code/pulp-modelstore-product-gate`
+Worktree: `<code-root>/pulp-modelstore-product-gate`
 
 ## Scope
 

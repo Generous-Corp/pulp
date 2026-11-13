@@ -6,8 +6,8 @@
     "scope": "three sequential scorecard commands"
   },
   "command": "shipyard metrics scorecard --mode isolated --fail-on-stale --project <project> --since 3d --json",
-  "metrics_database": "/Users/danielraffel/Library/Application Support/shipyard-dev/metrics/metrics.db",
-  "shipyard_executable": "/Users/danielraffel/Code/Shipyard-baseline-refresh/target/debug/shipyard",
+  "metrics_database": "~/Library/Application Support/shipyard-dev/metrics/metrics.db",
+  "shipyard_executable": "<code-root>/Shipyard-baseline-refresh/target/debug/shipyard",
   "protected_heads": {
     "pulp": "3c2334da9151e68e3040cd54de78c8da59d776e5",
     "danielraffel/tartci": "0ed9da98c044eea117ddc390f247c586f6e5b637",
@@ -706,14 +706,14 @@
     "raw_outputs": "Each scorecard object below is the parsed stdout from its individual command; this committed file assembles those objects with provenance metadata."
   },
   "shipyard_binary_provenance": {
-    "path": "/Users/danielraffel/Code/Shipyard-baseline-refresh/target/debug/shipyard",
-    "checkout": "/Users/danielraffel/Code/Shipyard-baseline-refresh",
+    "path": "<code-root>/Shipyard-baseline-refresh/target/debug/shipyard",
+    "checkout": "<code-root>/Shipyard-baseline-refresh",
     "head": "100d3bbabbe784fdbfd381350d401b2aad9fd916",
     "version": "0.343.0",
     "profile": "dev (unoptimized + debuginfo)"
   },
   "observed_sample_windows": {
-    "source": "/Users/danielraffel/Library/Application Support/shipyard-dev/metrics/metrics.db",
+    "source": "~/Library/Application Support/shipyard-dev/metrics/metrics.db",
     "query": "SELECT project, MIN(ts) AS oldest_sample_at, MAX(ts) AS newest_sample_at, COUNT(*) AS run_rows FROM runs WHERE project IN (?,?,?) GROUP BY project ORDER BY project",
     "rows": [
       {
