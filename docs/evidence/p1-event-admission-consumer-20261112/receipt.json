@@ -188,8 +188,8 @@
     "returncode": 0,
     "stdout": "p1-event-admission PASS checks=14135 partitions=4,8 graph_event_schedules=2+2+4,3+5 graph_events=9 voice_slot_reuse=1 combined_schedules=1,32,64,127+127+2,3+61+1+127+64 combined_records=27 digests=midi:349d8d9cbaead7ac,parameter:21c6a5a653826137,trigger:79300472c428c8e4,voice:76096164fc3782a6 sequence_mutations=5 executor_parity=reference-walk,routed-executor parity_comparisons=15 routed_executor_blocks=276/276 routing_fallbacks=0 parallel_after_bind=refused parity_planted_negatives=3 consumer_gate=NOT_QUALIFIED",
     "ctest": "p1-event-admission-public-consumer 1/1 passed",
-    "trace_command": "build-p1-event-admission/pulp-p1-event-admission-consumer --trace docs/evidence/p1-event-admission-consumer-20261112/combined-trace.jsonl (checks=2765: two file-write checks)",
-    "checks_note": "checks=14135 without --trace; the earlier checks=2763/2765 counts predate the parity control"
+    "trace_command": "build-p1-event-admission/pulp-p1-event-admission-consumer --trace docs/evidence/p1-event-admission-consumer-20261112/combined-trace.jsonl (historical captured count=2765: two file-write checks, before the executor-parity control; current count is 14137 = 14135 untraced checks + 2 file-write checks; trace command not rerun in this evidence packet)",
+    "checks_note": "The committed positive run records checks=14135 without --trace. The checks=2763/2765 trace counts are historical evidence from before the parity control; the current trace count is 14137 by the same two-file-write increment, and the trace command was not rerun in this evidence packet."
   },
   "fixture_corrections": [
     "midi-duplicate-sequence-refusal: published before project(); HostEventIngress detects duplicates only among staged records and project() removes delivered records",

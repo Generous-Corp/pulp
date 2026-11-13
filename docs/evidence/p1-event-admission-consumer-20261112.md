@@ -247,7 +247,7 @@ The positive run prints
 p1-event-admission PASS checks=2763 partitions=4,8 graph_event_schedules=2+2+4,3+5 graph_events=9 voice_slot_reuse=1 combined_schedules=1,32,64,127+127+2,3+61+1+127+64 combined_records=27 digests=midi:349d8d9cbaead7ac,parameter:21c6a5a653826137,trigger:79300472c428c8e4,voice:76096164fc3782a6 sequence_mutations=5 consumer_gate=NOT_QUALIFIED
 ```
 
-and CTest passes 1/1. With `--trace` the count is 2765 (two file-write checks).
+and CTest passes 1/1. The captured `--trace` count of 2765 is historical evidence from before the executor-parity control (two file-write checks). The current committed run records 14135 without `--trace`, so the current trace count is 14137 by the same increment; the trace command was not rerun in this evidence packet.
 
 Each new control was checked with a planted input mutation, rebuilt against
 the same installed SDK, run, and restored with `git checkout`; the restored
