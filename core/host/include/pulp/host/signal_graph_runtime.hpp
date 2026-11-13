@@ -640,14 +640,14 @@ class SignalGraph : public format::AudioWorkgroupClient {
         std::uint32_t parameter_id = 0;
     };
     // Ordinary/sidechain audio: source before PDC/mixing; feedback: retained input before
-    // current capture, timestamped at receiving block. Attach/detach may race process(): a
-    // displaced probe is parked until process() and pinned-snapshot readers drain. Reattach
-    // starts a fresh 256-record ring at sample 0. Reprepare/topology publication retires it;
-    // transport reset or an execution-mode change detaches it. Serial routing only.
+    // current capture, stamped at receiving block. Attach/detach may race process(): a displaced
+    // probe is parked (8 per kind; then attach is Busy and detach stops it in place) until no
+    // process() pin or snapshot handle remains, else until reprepare/topology publication.
+    // Fresh 256-record ring at sample 0; transport reset/mode change detaches. Serial only.
     EdgeProbeStatus attach_audio_edge_probe(const PortHandle& source,
                                             const PortHandle& destination);
     void detach_audio_edge_probe();
-    std::size_t parked_edge_probe_count() const; // displaced, awaiting reader drain
+    std::size_t parked_edge_probe_count() const; // displaced, not yet reclaimed
     // One control-thread consumer may read concurrently with process(). These
     // methods serialize with other control-thread lifecycle operations.
     bool read_audio_edge_probe(graph::GraphRuntimeProbeSample& sample);

@@ -37,6 +37,23 @@ void reclaim_parked_edge_probes(const runtime::Slot<Graph>& slot) noexcept {
     live->event_edge_probe.reclaim_parked();
 }
 
+// Detach one probe kind. Normally the probe is unpublished and parked. When the
+// cell is at its park capacity (a snapshot holder has blocked reclamation), the
+// probe is instead stopped in place: its ring stops accepting records, the
+// identity is cleared and status reports Detached, but the probe stays
+// published until a later attach or detach can park it. Records already in
+// its ring remain readable until then.
+template <typename Graph, typename Cell, typename Identity>
+void detach_edge_probe(const runtime::Slot<Graph>& slot, Cell& cell, Identity& identity) {
+    reclaim_parked_edge_probes(slot);
+    if (cell.can_park())
+        cell.reset();
+    else if (auto* probe = cell.owned())
+        probe->samples.detach();
+    identity = {};
+    reclaim_parked_edge_probes(slot);
+}
+
 } // namespace
 
 SignalGraph::EdgeProbeStatus SignalGraph::attach_audio_edge_probe(const PortHandle& source,
@@ -83,6 +100,11 @@ SignalGraph::EdgeProbeStatus SignalGraph::attach_audio_edge_probe(const PortHand
                 plan.nodes[resolved.dest_index].id != destination.node ||
                 resolved.source_port != source.index || resolved.dest_port != destination.index)
                 continue;
+            // Replacing a published probe parks it; refuse rather than grow
+            // the parked list while a snapshot holder blocks reclamation.
+            reclaim_parked_edge_probes(live_slot_);
+            if (!cg->audio_edge_probe.can_park())
+                return EdgeProbeStatus::Busy;
             auto probe = std::make_unique<format::GraphRuntimeAudioEdgeProbe>();
             probe->source_index = resolved.source_index;
             probe->source_port = resolved.source_port;
@@ -107,11 +129,8 @@ void SignalGraph::detach_audio_edge_probe() {
     GraphMutationLock lock(*this);
     if (refuse_spectral_mutation_())
         return;
-    if (const auto& cg = live_slot_.live()) {
-        cg->audio_edge_probe.reset();
-        cg->audio_edge_probe_identity = {};
-        reclaim_parked_edge_probes(live_slot_);
-    }
+    if (const auto& cg = live_slot_.live())
+        detach_edge_probe(live_slot_, cg->audio_edge_probe, cg->audio_edge_probe_identity);
 }
 
 bool SignalGraph::read_audio_edge_probe(graph::GraphRuntimeProbeSample& sample) {
@@ -187,6 +206,11 @@ SignalGraph::EdgeProbeStatus SignalGraph::attach_control_edge_probe(const PortHa
                 resolved.source_port != source.index ||
                 resolved.automation.param_id != parameter_id)
                 continue;
+            // Replacing a published probe parks it; refuse rather than grow
+            // the parked list while a snapshot holder blocks reclamation.
+            reclaim_parked_edge_probes(live_slot_);
+            if (!cg->control_edge_probe.can_park())
+                return EdgeProbeStatus::Busy;
             auto probe = std::make_unique<format::GraphRuntimeControlEdgeProbe>();
             probe->source_index = resolved.source_index;
             probe->source_port = resolved.source_port;
@@ -214,11 +238,8 @@ void SignalGraph::detach_control_edge_probe() {
     GraphMutationLock lock(*this);
     if (refuse_spectral_mutation_())
         return;
-    if (const auto& cg = live_slot_.live()) {
-        cg->control_edge_probe.reset();
-        cg->control_edge_probe_identity = {};
-        reclaim_parked_edge_probes(live_slot_);
-    }
+    if (const auto& cg = live_slot_.live())
+        detach_edge_probe(live_slot_, cg->control_edge_probe, cg->control_edge_probe_identity);
 }
 
 bool SignalGraph::read_control_edge_probe(graph::GraphRuntimeProbeSample& sample) {
@@ -280,6 +301,11 @@ SignalGraph::EdgeProbeStatus SignalGraph::attach_event_edge_probe(const PortHand
             if (!graph::is_event(resolved) || plan.nodes[resolved.source_index].id != source.node ||
                 plan.nodes[resolved.dest_index].id != destination.node)
                 continue;
+            // Replacing a published probe parks it; refuse rather than grow
+            // the parked list while a snapshot holder blocks reclamation.
+            reclaim_parked_edge_probes(live_slot_);
+            if (!cg->event_edge_probe.can_park())
+                return EdgeProbeStatus::Busy;
             auto probe = std::make_unique<format::GraphRuntimeEventEdgeProbe>();
             probe->source_index = resolved.source_index;
             probe->destination_index = resolved.dest_index;
@@ -305,11 +331,8 @@ void SignalGraph::detach_event_edge_probe() {
     GraphMutationLock lock(*this);
     if (refuse_spectral_mutation_())
         return;
-    if (const auto& cg = live_slot_.live()) {
-        cg->event_edge_probe.reset();
-        cg->event_edge_probe_identity = {};
-        reclaim_parked_edge_probes(live_slot_);
-    }
+    if (const auto& cg = live_slot_.live())
+        detach_edge_probe(live_slot_, cg->event_edge_probe, cg->event_edge_probe_identity);
 }
 
 bool SignalGraph::read_event_edge_probe(graph::GraphRuntimeProbeSample& sample) {

@@ -126,6 +126,14 @@ template <typename Probe> class EdgeProbeCell {
         publish(nullptr);
     }
 
+    // At most kParkCapacity displaced probes wait for reclamation; while a
+    // long-lived snapshot holder blocks reclamation the owner must refuse
+    // further displacement once can_park() is false rather than grow the list.
+    static constexpr std::size_t kParkCapacity = 8;
+    bool can_park() const noexcept {
+        return !owner_ || parked_.size() < kParkCapacity;
+    }
+
     // Owner thread only, and only once no reader can hold a parked pointer.
     void reclaim_parked() noexcept {
         parked_.clear();

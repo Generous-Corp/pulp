@@ -2,6 +2,8 @@
 #include <pulp/format/process_context.hpp>
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/host/signal_graph_execution_snapshot.hpp>
+#include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 #include <pulp/host/signal_graph_runtime.hpp>
 #include <pulp/midi/message.hpp>
 
@@ -496,13 +498,20 @@ TEST_CASE("Edge probe attach/detach hammered against a running process() stays c
 
     constexpr int kCycles = 2000;
     int attached = 0;
+    int busy = 0;
+    std::size_t peak_parked = 0;
     bool coherent = true;
+    const auto tally = [&](Status status) {
+        // Busy is the documented refusal once a kind's parked list is full.
+        if (status == Status::Attached)
+            ++attached;
+        else if (status == Status::Busy)
+            ++busy;
+    };
     for (int cycle = 0; cycle < kCycles; ++cycle) {
-        if (graph.attach_audio_edge_probe(source, destination) == Status::Attached)
-            ++attached;
-        if (graph.attach_control_edge_probe(source, fixture.plugin, ProbeSlot::kParam) ==
-            Status::Attached)
-            ++attached;
+        tally(graph.attach_audio_edge_probe(source, destination));
+        tally(graph.attach_control_edge_probe(source, fixture.plugin, ProbeSlot::kParam));
+        peak_parked = std::max(peak_parked, graph.parked_edge_probe_count());
         pulp::graph::GraphRuntimeProbeSample sample;
         while (graph.read_audio_edge_probe(sample))
             coherent = coherent && sample.kind == pulp::graph::GraphRuntimeProbeKind::Audio &&
@@ -518,8 +527,13 @@ TEST_CASE("Edge probe attach/detach hammered against a running process() stays c
     stop.store(true, std::memory_order_release);
     audio.join();
     REQUIRE(coherent);
-    REQUIRE(attached == 2 * kCycles);
+    REQUIRE(attached + busy == 2 * kCycles);
+    REQUIRE(attached > 0);
     REQUIRE(blocks.load() > 0);
+    // Parking must actually have happened under contention, within the cap.
+    CAPTURE(peak_parked, busy);
+    REQUIRE(peak_parked > 0);
+    REQUIRE(peak_parked <= 2 * pulp::format::EdgeProbeCell<int>::kParkCapacity);
 
     // Quiescent again: the next publications reclaim everything still parked,
     // and a fresh attachment numbers its records from zero.
@@ -536,4 +550,144 @@ TEST_CASE("Edge probe attach/detach hammered against a running process() stays c
         REQUIRE(sample.timestamp_samples == record * 8);
     }
     REQUIRE_FALSE(graph.read_audio_edge_probe(sample));
+}
+
+namespace {
+
+struct GatedProbeGraph {
+    pulp::host::SignalGraph graph;
+    std::atomic<int> gate{ProbeSlot::kOpen};
+    pulp::host::NodeId input = 0;
+    pulp::host::NodeId plugin = 0;
+
+    GatedProbeGraph() {
+        input = graph.add_input_node(1);
+        auto slot = std::make_unique<ProbeSlot>(pulp::host::ParamRate::ControlRate);
+        slot->gate = &gate;
+        plugin = graph.add_plugin_node(std::move(slot), 1, 1);
+        const auto output = graph.add_output_node(1);
+        REQUIRE(graph.connect(input, 0, plugin, 0));
+        REQUIRE(graph.connect(plugin, 0, output, 0));
+        graph.set_canonical_executor_routing_enabled(true);
+    }
+    pulp::host::PortHandle source() const {
+        return graph.node(input)->out("audio");
+    }
+    pulp::host::PortHandle destination() const {
+        return graph.node(plugin)->in("audio");
+    }
+};
+
+} // namespace
+
+TEST_CASE("Edge probe reclamation waits for snapshot handles outside the slot pin",
+          "[host][graph][g7][probe][rt-safety]") {
+    using Status = pulp::host::SignalGraph::EdgeProbeStatus;
+    GatedProbeGraph fixture;
+    auto& graph = fixture.graph;
+    REQUIRE(graph.prepare(48000.0, 8));
+    REQUIRE(graph.attach_audio_edge_probe(fixture.source(), fixture.destination()) ==
+            Status::Attached);
+
+    // A shared_ptr keepalive holds the snapshot without entering the slot's
+    // reader count, exactly as an ExecutionSnapshot render does.
+    auto keep = graph.live_snapshot_handle();
+    REQUIRE(keep);
+    graph.detach_audio_edge_probe();
+    REQUIRE(graph.attach_audio_edge_probe(fixture.source(), fixture.destination()) ==
+            Status::Attached);
+    REQUIRE(graph.parked_edge_probe_count() == 1);
+
+    keep.reset();
+    graph.detach_audio_edge_probe();
+    REQUIRE(graph.parked_edge_probe_count() == 0);
+}
+
+TEST_CASE("Edge probe detach during a pinned ExecutionSnapshot render parks the probe",
+          "[host][graph][g7][probe][rt-safety]") {
+    using Status = pulp::host::SignalGraph::EdgeProbeStatus;
+    using Result = pulp::host::SignalGraph::PreparedTopologyEdit::Result;
+    GatedProbeGraph fixture;
+    auto& graph = fixture.graph;
+    REQUIRE(graph.prepare(48000.0, 8));
+    auto edit = graph.begin_prepared_topology_edit();
+    REQUIRE(edit->prepare(48000.0, 8) == Result::Prepared);
+    REQUIRE(edit->commit() == Result::Committed);
+    auto pinned = edit->committed_execution_snapshot();
+    REQUIRE(pinned);
+    REQUIRE(graph.attach_audio_edge_probe(fixture.source(), fixture.destination()) ==
+            Status::Attached);
+
+    fixture.gate.store(ProbeSlot::kArmed);
+    std::thread render([&] {
+        std::array<float, 8> in{}, out{};
+        in.fill(0.5f);
+        const float* ips[] = {in.data()};
+        float* ops[] = {out.data()};
+        pulp::audio::BufferView<const float> iv(ips, 1, in.size());
+        pulp::audio::BufferView<float> ov(ops, 1, out.size());
+        pinned.process(ov, iv, static_cast<int>(in.size()));
+    });
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (fixture.gate.load() != ProbeSlot::kHeld && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::yield();
+    const bool held = fixture.gate.load() == ProbeSlot::kHeld;
+    if (held) {
+        // No slot pin exists: only the ExecutionSnapshot's shared_ptr keeps the
+        // render's probe pointer valid, so the probe must stay parked.
+        graph.detach_audio_edge_probe();
+        CHECK(graph.parked_edge_probe_count() == 1);
+    }
+    fixture.gate.store(ProbeSlot::kOpen);
+    render.join();
+    REQUIRE(held);
+    REQUIRE(graph.parked_edge_probe_count() == 1);
+
+    pinned = {};
+    edit.reset();
+    graph.detach_audio_edge_probe();
+    REQUIRE(graph.parked_edge_probe_count() == 0);
+}
+
+TEST_CASE("Edge probe parking is capped while a snapshot handle blocks reclamation",
+          "[host][graph][g7][probe][rt-safety]") {
+    using Status = pulp::host::SignalGraph::EdgeProbeStatus;
+    constexpr std::size_t kCap = pulp::format::EdgeProbeCell<int>::kParkCapacity;
+    GatedProbeGraph fixture;
+    auto& graph = fixture.graph;
+    REQUIRE(graph.prepare(48000.0, 8));
+    auto keep = graph.live_snapshot_handle();
+
+    int attached = 0, busy = 0;
+    bool bounded = true;
+    for (int cycle = 0; cycle < 1000; ++cycle) {
+        const auto status = graph.attach_audio_edge_probe(fixture.source(), fixture.destination());
+        attached += status == Status::Attached;
+        busy += status == Status::Busy;
+        graph.detach_audio_edge_probe();
+        REQUIRE(graph.audio_edge_probe_status() == Status::Detached);
+        bounded = bounded && graph.parked_edge_probe_count() <= kCap;
+    }
+    REQUIRE(bounded);
+    REQUIRE(graph.parked_edge_probe_count() == kCap);
+    REQUIRE(attached > 0);
+    REQUIRE(busy > 0);
+    REQUIRE(attached + busy == 1000);
+
+    // At the cap a detach stops the published probe in place: it records
+    // nothing more and reports no identity.
+    REQUIRE(graph.attach_audio_edge_probe(fixture.source(), fixture.destination()) == Status::Busy);
+    process_audio(graph);
+    pulp::graph::GraphRuntimeProbeSample sample;
+    REQUIRE_FALSE(graph.read_audio_edge_probe(sample));
+    REQUIRE(graph.audio_edge_probe_identity().connection == 0);
+
+    // Releasing the holder lets the next publication reclaim everything.
+    keep.reset();
+    REQUIRE(graph.attach_audio_edge_probe(fixture.source(), fixture.destination()) ==
+            Status::Attached);
+    REQUIRE(graph.parked_edge_probe_count() == 0);
+    process_audio(graph);
+    REQUIRE(graph.read_audio_edge_probe(sample));
+    REQUIRE(sample.sequence == 0);
 }
