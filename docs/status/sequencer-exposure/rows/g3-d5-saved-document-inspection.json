@@ -11,6 +11,7 @@
     "examples/g3-resolved-identity-consumer/main.cpp",
     "docs/evidence/g3-d5-saved-identity-20261111.md",
     "docs/evidence/p0-layered-inspection-replay-20261112.md",
+    "docs/evidence/p0-layered-inspection-replay-20261112/receipt-installed-sdk-20261113.json",
     "tools/scripts/p0_layered_replay_receipt.py",
     "tools/scripts/test_p0_layered_replay_receipt.py",
     "docs/graph-program-status/P-0-layered-inspection-replay.md",
@@ -41,6 +42,14 @@
     {
       "path": "docs/evidence/p0-layered-inspection-replay-20261112.md",
       "needles": ["64 and 128", "planted-negative", "NOT_QUALIFIED"]
+    },
+    {
+      "path": "docs/evidence/p0-layered-inspection-replay-20261112/receipt-installed-sdk-20261113.json",
+      "needles": ["g3-installed-public-consumer", "spectral-installed-public-consumer", "NOT_QUALIFIED"]
+    },
+    {
+      "path": "docs/graph-program-status/P-0-layered-inspection-replay.md",
+      "needles": ["receipt-installed-sdk-20261113.json", "Both consumers PASS at 64 and 128"]
     }
   ],
   "surfaces": {
