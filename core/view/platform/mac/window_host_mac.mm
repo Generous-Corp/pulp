@@ -1046,8 +1046,7 @@ extern "C" void pulp_mac_text_input_client_category_anchor();
     }
     if (inspector_cursor >= 0)
         return static_cast<pulp::view::View::CursorStyle>(inspector_cursor);
-    if (auto* target = pulp::view::hover_target_at(*self.rootView, pt)) return target->cursor();
-    return std::nullopt;
+    return pulp::view::hover_cursor_under(*self.rootView, pt);
 }
 
 // AppKit asks the owner of a NSTrackingCursorUpdate area what cursor to show
