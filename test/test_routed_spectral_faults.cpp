@@ -1272,3 +1272,57 @@ TEST_CASE("Controller frame tuples restart exactly at seek and replacement bound
         render(nullptr, false);
     REQUIRE(frames == 26);
 }
+
+TEST_CASE("A live spectral graph refuses graph event binding without changing its controller",
+          "[host][spectral-transition][spectral-graph-event-refusal]") {
+    using namespace pulp::host;
+    struct EventGraph {
+        SignalGraph graph;
+        NodeId producer = 0, consumer = 0;
+        std::array<float, 64> input{}, output{};
+        const float* ip[1] = {input.data()};
+        float* op[1] = {output.data()};
+        pulp::audio::BufferView<const float> iv{ip, 1, 64};
+        pulp::audio::BufferView<float> ov{op, 1, 64};
+        EventGraph() {
+            CustomNodeType type;
+            type.type_id = "spectral.test.event";
+            type.num_input_ports = type.num_output_ports = 1;
+            type.process_events = [](auto& out, const auto& in, int frames,
+                                     const CustomNodeEventBlock&) {
+                std::copy_n(in.channel_ptr(0), frames, out.channel_ptr(0));
+            };
+            REQUIRE(graph.register_custom_node_type(type));
+            const auto shape = *SpectralIdentity::make(256, 64, 1, 48000).value;
+            const auto in = graph.add_input_node(1), out = graph.add_output_node(1);
+            producer = graph.add_custom_node(type.type_id);
+            consumer = graph.add_custom_node(type.type_id);
+            REQUIRE(producer != 0);
+            REQUIRE(consumer != 0);
+            const auto a = *graph.add_spectral_analysis(shape, "analysis").value;
+            const auto s = *graph.add_spectral_synthesis(shape, "synthesis").value;
+            REQUIRE(graph.connect(in, 0, producer, 0));
+            REQUIRE(graph.connect(producer, 0, consumer, 0));
+            REQUIRE(graph.connect(graph.node(consumer)->out("audio"), a.audio[0]));
+            REQUIRE(graph.connect(a.frames, s.frames));
+            REQUIRE(graph.connect(s.audio[0], graph.node(out)->in("audio")));
+            REQUIRE(graph.prepare(48000, 64));
+            input.fill(0.25f);
+            for (int i = 0; i < 12; ++i)
+                graph.process(ov, iv, 64);
+        }
+    };
+    EventGraph target, control;
+    const auto latency = target.graph.latency_samples();
+    REQUIRE(latency == 320);
+    REQUIRE(target.graph.connect_graph_event({target.producer, target.consumer}) ==
+            GraphEventBindingResult::Mode);
+    REQUIRE_FALSE(target.graph.graph_event_edge());
+    REQUIRE(target.graph.spectral_error() == SpectralError::UnsupportedOperation);
+    REQUIRE(target.graph.latency_samples() == latency);
+    for (int block = 0; block < 12; ++block) {
+        target.graph.process(target.ov, target.iv, 64);
+        control.graph.process(control.ov, control.iv, 64);
+        REQUIRE(target.output == control.output);
+    }
+}
