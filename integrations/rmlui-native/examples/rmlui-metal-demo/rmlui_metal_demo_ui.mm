@@ -49,8 +49,7 @@ class Editor final : public ::pulp::format::Editor {
     }
 
     bool attach(const ::pulp::format::NativeParent& parent) override {
-        if (parent.kind != ::pulp::format::NativeParentKind::cocoa_view || !parent.handle ||
-            surface_)
+        if (parent.kind != ::pulp::format::NativeParentKind::cocoa_view || !parent.handle || ui_)
             return false;
         id<MTLDevice> device = MTLCreateSystemDefaultDevice();
         if (!device)
