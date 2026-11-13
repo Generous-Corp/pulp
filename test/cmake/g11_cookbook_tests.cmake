@@ -24,3 +24,32 @@ foreach(_entry
             TIMEOUT 1800)
     endif()
 endforeach()
+
+# Notation files for the graph cookbooks. Each fixture's graph names
+# application Processors the default CLI catalog cannot construct, so the real
+# validator must refuse it; the test pins that exact refusal.
+if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU AND PROJECT_IS_TOP_LEVEL)
+    set(_g11_cli "${CMAKE_BINARY_DIR}/tools/cli/pulp-cpp${CMAKE_EXECUTABLE_SUFFIX}")
+    if(CMAKE_CONFIGURATION_TYPES)
+        set(_g11_cli "${CMAKE_BINARY_DIR}/tools/cli/$<CONFIG>/pulp-cpp${CMAKE_EXECUTABLE_SUFFIX}")
+    endif()
+    foreach(_entry
+            "graph-named-bus-cookbook|placement|pulp.cookbook.NamedBusPlacement"
+            "graph-spatial-cookbook|stage|cookbook.static-stereo.v1"
+            "g11-tuning-cookbook|tone|pulp.cookbook.TuningToneProcessor"
+            "g11-recording-publication|capture|pulp.g11.CaptureNode"
+            "g11-live-retune-consumer|voice|pulp.g11.LiveRetuningInstrument")
+        string(REPLACE "|" ";" _parts "${_entry}")
+        list(GET _parts 0 _example)
+        list(GET _parts 1 _node)
+        list(GET _parts 2 _type)
+        add_test(NAME ${_example}-notation-refusal
+            COMMAND ${CMAKE_COMMAND}
+                "-DPULP_CLI=${_g11_cli}"
+                "-DPAT=${CMAKE_SOURCE_DIR}/examples/${_example}/graph.pat"
+                -DNODE=${_node} "-DTYPE=${_type}"
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/g11_notation_refusal.cmake)
+        set_tests_properties(${_example}-notation-refusal PROPERTIES
+            LABELS "graph;g11;notation" TIMEOUT 60)
+    endforeach()
+endif()

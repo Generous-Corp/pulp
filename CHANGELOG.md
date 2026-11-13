@@ -9,6 +9,16 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11220"></a>
+## [1.122.0] - 2026-11-13
+
+- release/version bump ([#12175](https://github.com/Generous-Corp/pulp/pull/12175))
+- graph/p1 fixture repoint 20261113 ([#12172](https://github.com/Generous-Corp/pulp/pull/12172))
+- feature/sysex queue test deterministic ([#12170](https://github.com/Generous-Corp/pulp/pull/12170))
+- feature/midi port identity ([#12161](https://github.com/Generous-Corp/pulp/pull/12161))
+- fix/graph processor live param refusal 20261113 ([#12169](https://github.com/Generous-Corp/pulp/pull/12169))
+- fix/combobox disabled open dropdown ([#12159](https://github.com/Generous-Corp/pulp/pull/12159))
+
 <a id="v11210"></a>
 ## [1.121.0] - 2026-11-13
 
@@ -12902,6 +12912,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.122.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.122.0
 [1.121.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.121.0
 [1.119.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.119.0
 [1.118.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.118.0
