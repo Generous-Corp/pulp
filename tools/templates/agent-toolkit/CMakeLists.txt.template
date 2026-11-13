@@ -5,11 +5,10 @@ target_link_libraries({{TARGET_NAME}}-test PRIVATE pulp::format Catch2::Catch2Wi
 target_include_directories({{TARGET_NAME}}-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 catch_discover_tests({{TARGET_NAME}}-test)
 
-# The agent tool kit's operation declaration for your vendor id: a lowercase
-# reverse-DNS id such as com.acme. Change "com.example" here and in
-# agent_operations.cpp together. Every operation group is bound, so nothing is
-# excluded; pass EXCLUDE presets (or another group) to leave one out.
-pulp_control_agent_toolkit_declaration(_agent_toolkit_operations VENDOR com.example)
+# The agent tool kit's operation declaration uses the generated bundle ID as
+# its vendor id. Every operation group is bound, so nothing is excluded; pass
+# EXCLUDE presets (or another group) to leave one out.
+pulp_control_agent_toolkit_declaration(_agent_toolkit_operations VENDOR {{BUNDLE_ID}})
 
 pulp_add_plugin({{TARGET_NAME}}
     SOURCES         {{SOURCE_NAME}}

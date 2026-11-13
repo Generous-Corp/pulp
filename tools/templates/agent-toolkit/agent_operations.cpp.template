@@ -16,8 +16,8 @@ agent_operations(pulp::format::Processor&, pulp::state::StateStore& store) {
     auto handlers = std::make_shared<pulp::inspect::ControlVendorOperationHandlers>();
     pulp::inspect::add_control_agent_toolkit(
         *handlers, store,
-        // Keep this vendor id equal to the one in CMakeLists.txt.
-        {.vendor_id = "com.example",
+        // Keep this vendor id equal to the generated bundle id in CMakeLists.txt.
+        {.vendor_id = "{{BUNDLE_ID}}",
          .presets = std::make_shared<pulp::state::PresetManager>(store, "{{MANUFACTURER}}",
                                                                  "{{PLUGIN_NAME}}"),
          .render_factory = &create_{{LOWER_NAME}}});

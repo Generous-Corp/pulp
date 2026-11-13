@@ -749,7 +749,7 @@ TEST_CASE("pulp create --template agent-toolkit scaffolds a controlled Standalon
 
     const auto cmake = read_file(out_dir / "CMakeLists.txt");
     CHECK(cmake.find("pulp_control_agent_toolkit_declaration(_agent_toolkit_operations VENDOR "
-                     "com.example)") != std::string::npos);
+                     "com.pulp.agent_synth)") != std::string::npos);
     CHECK(cmake.find("FORMATS         Standalone") != std::string::npos);
     CHECK(cmake.find("PROCESSOR_FACTORY create_agent_synth") != std::string::npos);
     CHECK(cmake.find("CONTROL_VENDOR_OPERATIONS \"${_agent_toolkit_operations}\"") !=
@@ -759,6 +759,7 @@ TEST_CASE("pulp create --template agent-toolkit scaffolds a controlled Standalon
 
     const auto operations = read_file(out_dir / "agent_operations.cpp");
     CHECK(operations.find("add_control_agent_toolkit") != std::string::npos);
+    CHECK(operations.find(".vendor_id = \"com.pulp.agent_synth\"") != std::string::npos);
     CHECK(operations.find("render_factory = &create_agent_synth") != std::string::npos);
     CHECK(read_file(out_dir / "main.cpp").find("config.input_channels = 0;") != std::string::npos);
 
