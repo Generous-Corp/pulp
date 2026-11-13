@@ -9,7 +9,7 @@ The Atelier destination is a **scratch cache**, not a backup or source of truth.
 Run without installing anything:
 
 ```bash
-python3 tools/ci/evidence_archive.py --root /Volumes/Atelier/pulp-replay-evidence --repo Generous-Corp/pulp --host-root /var/log/shipyard --sessions-root /Users/danielraffel/.codex/sessions
+python3 tools/ci/evidence_archive.py --root /Volumes/Atelier/pulp-replay-evidence --repo Generous-Corp/pulp --host-root /var/log/shipyard --sessions-root ~/.codex/sessions
 ```
 
 For a reviewable fixture/backfill, pass `--github-json` with an API response and explicit `--now`. The collector uses `ghapp api` with one paginated Actions-runs request when no fixture is supplied; it never stores raw logs.

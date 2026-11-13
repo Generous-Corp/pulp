@@ -2,7 +2,7 @@
 
 Date: 2026-10-05  
 Protected base: `origin/main` at `ff83c0e9fd147dc143af7228eac0e3298e84b35f`  
-Worktree: `/Users/danielraffel/Code/pulp-neural-package-b-20261005`  
+Worktree: `<code-root>/pulp-neural-package-b-20261005`  
 Scope: benchmark/test receipt only; no manifest or runtime source changes.
 
 > **Historical audit snapshot.** This receipt records the package-B benchmark

@@ -1,7 +1,7 @@
 # Private recurrent CPU-family implementation packet
 
 Date: 2026-10-05
-Worktree: `/Users/danielraffel/Code/pulp-neural-cpu-family-20261004`
+Worktree: `<code-root>/pulp-neural-cpu-family-20261004`
 Branch: `codex/neural-cpu-family-packet-20261004`
 Source baseline: `origin/main` at `9cc65128d0680b55ffeeafc351e2ce59b73c85cb`
 Scope: bounded private CPU fallback mechanics for one causal LSTM/GRU family; no
