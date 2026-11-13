@@ -153,9 +153,19 @@ PortHandle resolve_port(const SignalGraph& graph, NodeId id, const std::string& 
             return p;
         choices += (choices.empty() ? "" : ", ") + p.name;
     }
-    refuse(Code::UnknownPort, "unknown or ambiguous port '" + name + "'",
-           "use one of: " + (choices.empty() ? std::string("none") : choices), graph.node(id)->name,
-           name);
+    const auto& node_name = graph.node(id)->name;
+    if (name.empty() && !available.empty()) {
+        const std::string side = output ? "output" : "input";
+        refuse(Code::UnknownPort,
+               "ambiguous port: node '" + node_name + "' has " + std::to_string(available.size()) +
+                   " " + side + " ports and a chain hop infers a port only when the node has exactly one " +
+                   side,
+               "write the port explicitly, e.g. " + node_name + "." + available.front().name +
+                   (output ? " >> next.audio" : " as the destination") + "; use one of: " + choices,
+               node_name, name);
+    }
+    refuse(Code::UnknownPort, "unknown port '" + name + "'",
+           "use one of: " + (choices.empty() ? std::string("none") : choices), node_name, name);
 }
 bool has_path(const SignalGraph& graph, NodeId from, NodeId to, std::set<NodeId>& seen) {
     if (from == to)
@@ -218,6 +228,18 @@ const state::ParamInfo& parameter(const SignalGraph& graph, NodeId id, const std
         if (found)
             return *found;
     }
+    if (graph.node(id)->type == NodeType::Gain && name == "gain")
+        refuse(Code::UnknownPort,
+               "built-in pulp/gain exposes 'gain' as a node setting, not an automatable parameter",
+               "set it with " + graph.node(id)->name +
+                   ".gain = <value>, or automate a registered Processor parameter",
+               graph.node(id)->name, name);
+    if (!instance)
+        refuse(Code::UnknownPort,
+               "node '" + graph.node(id)->name + "' has no registered Processor parameters",
+               "automation targets only parameters of a registered Processor node; register one "
+               "with GraphPatchCatalog",
+               graph.node(id)->name, name);
     refuse(Code::UnknownPort, "unknown parameter '" + name + "'",
            "use a parameter name from the catalog", graph.node(id)->name, name);
 }
