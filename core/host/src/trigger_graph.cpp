@@ -357,6 +357,10 @@ std::vector<TriggerEdge> SignalGraph::trigger_edges() const {
 
 GraphEventBindingResult SignalGraph::connect_graph_event(GraphAuthoredEventEdge edge) {
     GraphMutationLock lock(*this);
+    // A live spectral controller owns its prepared generation; recording the
+    // binding would invalidate authoring state underneath it.
+    if (refuse_spectral_mutation_())
+        return GraphEventBindingResult::Mode;
     if (typed_trigger_authoring_.load(std::memory_order_relaxed))
         return GraphEventBindingResult::Mode;
     if (parallel_routing_enabled() || anticipation_enabled())

@@ -39,7 +39,7 @@ At handoff, `origin/main` was fetched and pointed at:
 9f77dc2bb fix: bundle 8 P2 Codex findings from #2976 (auv3 bundle path, coreaudio wg, vst3 59.94, clap lifecycle, ship, audio cache, midi-ci, screenshot) (#2991)
 ```
 
-The primary checkout at `/Users/danielraffel/Code/pulp` is bare; run worktree-specific `git status` commands from the worktree paths below.
+The primary checkout at `<code-root>/pulp` is bare; run worktree-specific `git status` commands from the worktree paths below.
 
 ## Open PR To Monitor
 
@@ -231,7 +231,7 @@ Dirty merged-looking worktrees that were intentionally left alone:
 - `/private/tmp/pulp-auv3-ios-validation`: branch merged to main but has local modifications.
 - `/private/tmp/pulp-nsd`: branch merged to main but has local modifications/untracked files.
 - `/private/tmp/pulp-prefs-tooltip-dragger`: branch merged to main but has local modifications/untracked files.
-- `/Users/danielraffel/Code/pulp-windows-signal-m-pi`: branch merged to main but has local modifications.
+- `<code-root>/pulp-windows-signal-m-pi`: branch merged to main but has local modifications.
 
 Other worktrees were either unmerged, unrelated, locked agent worktrees, local-ci prepared trees, or detached comparison trees. Do not clean them without a fresh status/merged check.
 

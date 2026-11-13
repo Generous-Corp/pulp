@@ -30,7 +30,7 @@ output, failure handling, and artifact paths are unchanged.
 - `bash -n tools/import-validation/spectr-roundtrip.sh` — PASS.
 - `python3 tools/ci/test_build_governance_paths.py` — 6/6 tests PASS.
 - Governed dry-run:
-  `PULP_BUILD_JOBS=1 bash tools/ci/governed-build.sh --dry-run cmake --build /Users/danielraffel/Code/spectr/build --config Release`
+  `PULP_BUILD_JOBS=1 bash tools/ci/governed-build.sh --dry-run cmake --build <code-root>/spectr/build --config Release`
   — PASS; receipt reports the bounded wrapper command.
 - `rg` over `tools/import-validation/*.sh` finds no raw build command carrying
   `-j` or `--parallel`; every actual build command is governed.
