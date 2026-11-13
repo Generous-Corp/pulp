@@ -23,7 +23,10 @@ constexpr std::string_view kCrlf = "\r\n";
 // U+FFFD and consumes one byte.
 std::uint32_t next_code_point(std::string_view s, std::size_t& at) {
     const auto b0 = static_cast<unsigned char>(s[at]);
-    auto fail = [&] { ++at; return 0xFFFDu; };
+    auto fail = [&] {
+        ++at;
+        return 0xFFFDu;
+    };
     if (b0 < 0x80) {
         ++at;
         return b0;
@@ -31,10 +34,20 @@ std::uint32_t next_code_point(std::string_view s, std::size_t& at) {
     int extra = 0;
     std::uint32_t cp = 0;
     std::uint32_t min = 0;
-    if ((b0 & 0xE0) == 0xC0) { extra = 1; cp = b0 & 0x1F; min = 0x80; }
-    else if ((b0 & 0xF0) == 0xE0) { extra = 2; cp = b0 & 0x0F; min = 0x800; }
-    else if ((b0 & 0xF8) == 0xF0) { extra = 3; cp = b0 & 0x07; min = 0x10000; }
-    else return fail();
+    if ((b0 & 0xE0) == 0xC0) {
+        extra = 1;
+        cp = b0 & 0x1F;
+        min = 0x80;
+    } else if ((b0 & 0xF0) == 0xE0) {
+        extra = 2;
+        cp = b0 & 0x0F;
+        min = 0x800;
+    } else if ((b0 & 0xF8) == 0xF0) {
+        extra = 3;
+        cp = b0 & 0x07;
+        min = 0x10000;
+    } else
+        return fail();
     if (at + static_cast<std::size_t>(extra) >= s.size())
         return fail();
     for (int i = 1; i <= extra; ++i) {
@@ -54,18 +67,26 @@ void append_escaped(std::string& out, std::string_view text) {
     while (at < text.size()) {
         const auto cp = next_code_point(text, at);
         switch (cp) {
-            case '&': out += "&amp;"; break;
-            case '<': out += "&lt;"; break;
-            case '>': out += "&gt;"; break;
-            case '"': out += "&quot;"; break;
-            default:
-                if (cp >= 0x20 && cp < 0x7F) {
-                    out += static_cast<char>(cp);
-                } else {
-                    out += "&#";
-                    out += std::to_string(cp);
-                    out += ';';
-                }
+        case '&':
+            out += "&amp;";
+            break;
+        case '<':
+            out += "&lt;";
+            break;
+        case '>':
+            out += "&gt;";
+            break;
+        case '"':
+            out += "&quot;";
+            break;
+        default:
+            if (cp >= 0x20 && cp < 0x7F) {
+                out += static_cast<char>(cp);
+            } else {
+                out += "&#";
+                out += std::to_string(cp);
+                out += ';';
+            }
         }
     }
 }
@@ -109,7 +130,8 @@ bool write_backup_once(const std::filesystem::path& backup, std::string_view byt
     if (ec && !std::filesystem::exists(backup)) {
         // A filesystem without hard links: copy, still refusing to overwrite.
         ec.clear();
-        std::filesystem::copy_file(partial, backup, std::filesystem::copy_options::skip_existing, ec);
+        std::filesystem::copy_file(partial, backup, std::filesystem::copy_options::skip_existing,
+                                   ec);
     }
     std::error_code ignored;
     std::filesystem::remove(partial, ignored);
@@ -134,29 +156,34 @@ std::filesystem::path XmlPropertiesFile::backup_path_for(const std::filesystem::
     return backup;
 }
 
-std::optional<std::vector<XmlPropertiesFile::Entry>> XmlPropertiesFile::parse(std::string_view bytes,
-                                                                              XmlPropertiesError* error) {
+std::optional<std::vector<XmlPropertiesFile::Entry>>
+XmlPropertiesFile::parse(std::string_view bytes, XmlPropertiesError* error) {
+    // parse_fragment keeps text at the document level as nodes, so text before
+    // the root can be refused (without it pugixml drops that text silently).
+    // parse_wconv_attribute is off so a literal tab or line feed in a value
+    // reads as itself rather than as a space.
+    constexpr unsigned options =
+        (pugi::parse_default | pugi::parse_fragment) & ~pugi::parse_wconv_attribute;
     pugi::xml_document doc;
-    const auto result = doc.load_buffer(bytes.data(), bytes.size(), pugi::parse_default, pugi::encoding_utf8);
+    const auto result = doc.load_buffer(bytes.data(), bytes.size(), options, pugi::encoding_utf8);
     if (!result) {
         set_error(error, XmlPropertiesError::Kind::parse,
-                  std::string("not well-formed XML at byte ") + std::to_string(result.offset) + ": " +
-                      result.description());
+                  std::string("not well-formed XML at byte ") + std::to_string(result.offset) +
+                      ": " + result.description());
         return std::nullopt;
     }
+    // Text before the first element is an error. Everything after the first
+    // element (another root, text, a comment) is ignored.
     pugi::xml_node root;
     for (auto node : doc.children()) {
         if (node.type() == pugi::node_pcdata || node.type() == pugi::node_cdata) {
-            set_error(error, XmlPropertiesError::Kind::parse, "text outside the root element");
+            set_error(error, XmlPropertiesError::Kind::parse, "text before the root element");
             return std::nullopt;
         }
-        if (node.type() != pugi::node_element)
-            continue;
-        if (root) {
-            set_error(error, XmlPropertiesError::Kind::parse, "more than one root element");
-            return std::nullopt;
+        if (node.type() == pugi::node_element) {
+            root = node;
+            break;
         }
-        root = node;
     }
     if (!root || std::string_view(root.name()) != kRoot) {
         set_error(error, XmlPropertiesError::Kind::parse,
@@ -267,7 +294,8 @@ bool XmlPropertiesFile::save(XmlPropertiesError* error) {
     const auto bytes = serialize(entries_);
     auto replacement = runtime::detail::DurableFileReplacement::create(path_);
     if (!replacement || !replacement->valid()) {
-        set_error(error, XmlPropertiesError::Kind::io, "cannot create a temporary file beside " + path_.string());
+        set_error(error, XmlPropertiesError::Kind::io,
+                  "cannot create a temporary file beside " + path_.string());
         return false;
     }
     const auto* data = reinterpret_cast<const std::uint8_t*>(bytes.data());

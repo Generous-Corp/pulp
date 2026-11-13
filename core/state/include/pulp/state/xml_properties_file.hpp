@@ -16,17 +16,24 @@
 // two spaces, in the file's order. Writing escapes & < > " as named entities,
 // tab as &#9;, line feed as &#10; and carriage return as &#13;, and writes every
 // non-ASCII character as a decimal character reference, so the bytes are ASCII.
-// An apostrophe is written as is. A file with no entries is the root's start and
-// end tags on consecutive lines.
+// Other control characters are written as decimal references (&#1;), and an
+// apostrophe as is. A file with no entries is the root's start and end tags on
+// consecutive lines.
 //
 // Reading accepts single or double quotes, entities, character references and
-// literal UTF-8. Leading and trailing spaces in names and values are kept.
+// literal UTF-8. Leading and trailing spaces in names and values are kept, and
+// a literal tab, line feed or other control byte in a value reads as itself.
+// Anything after the first root element (another root, text, a comment) is
+// ignored; text before it is a parse error.
 // Comments, blank lines, extra attributes, a VALUE without a name and any other
 // element are read past (and so dropped on the next save). A VALUE without a
 // val reads as an empty value. A name that appears twice keeps its first
 // position and takes its last value.
 //
 // Where this deliberately differs from the format's usual handling:
+// - A name or value that is not valid UTF-8 (which only a hand-edited file can
+//   produce) is written with one U+FFFD reference (&#65533;) per invalid byte,
+//   rather than as a control-character reference built from the byte's bits.
 // - Fail closed. A file that is not well-formed XML, is empty, or has a root
 //   other than PROPERTIES does not load. The bytes are copied once to the
 //   backup path (never overwriting an existing backup) and the error is
@@ -76,7 +83,9 @@ class XmlPropertiesFile {
 
     [[nodiscard]] std::optional<std::string> get(std::string_view name) const;
     [[nodiscard]] bool contains(std::string_view name) const;
-    [[nodiscard]] const std::vector<Entry>& entries() const noexcept { return entries_; }
+    [[nodiscard]] const std::vector<Entry>& entries() const noexcept {
+        return entries_;
+    }
 
     /// Sets an existing name in place, or appends a new one at the end.
     void set(std::string_view name, std::string_view value);
@@ -84,8 +93,12 @@ class XmlPropertiesFile {
     bool remove(std::string_view name);
 
     /// Whether the entries differ from the last load or save.
-    [[nodiscard]] bool dirty() const noexcept { return entries_ != saved_; }
-    [[nodiscard]] const std::filesystem::path& path() const noexcept { return path_; }
+    [[nodiscard]] bool dirty() const noexcept {
+        return entries_ != saved_;
+    }
+    [[nodiscard]] const std::filesystem::path& path() const noexcept {
+        return path_;
+    }
 
     /// Where a file that fails to parse is copied: `<path>.bak`.
     [[nodiscard]] static std::filesystem::path backup_path_for(const std::filesystem::path& path);

@@ -24,7 +24,8 @@ using Entries = std::vector<XmlPropertiesFile::Entry>;
 
 namespace {
 
-constexpr std::string_view kHead = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\r\n<PROPERTIES>\r\n";
+constexpr std::string_view kHead =
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\r\n<PROPERTIES>\r\n";
 constexpr std::string_view kTail = "</PROPERTIES>\r\n";
 
 std::string canonical(std::string_view body) {
@@ -58,8 +59,8 @@ struct Scratch {
 
 } // namespace
 
-TEST_CASE("XmlPropertiesFile writes the canonical layout byte for byte", "[state][xml-properties]") {
-    CHECK(XmlPropertiesFile::serialize({}) == canonical(""));
+TEST_CASE("XmlPropertiesFile writes the canonical layout byte for byte",
+          "[state][xml-properties]") {
     CHECK(XmlPropertiesFile::serialize({{"volume", "7"}, {"theme", "dark"}}) ==
           canonical("  <VALUE name=\"volume\" val=\"7\"/>\r\n"
                     "  <VALUE name=\"theme\" val=\"dark\"/>\r\n"));
@@ -70,18 +71,18 @@ TEST_CASE("XmlPropertiesFile escapes like the format's writer", "[state][xml-pro
     // apostrophe raw, every non-ASCII character as a decimal reference, and
     // leading and trailing spaces kept.
     const Entries entries = {
-        {"markup", "a & b <c> \"d\" 'e'"},
-        {"controls", "x\ty\nz"},
-        {"accents", "caf\xC3\xA9 \xE2\x82\xAC"},     // café €
-        {"astral", "\xF0\x9F\x98\x80"},              // U+1F600
+        {"markup", "a & b <c> \"d\" 'e'"},       {"controls", "x\ty\nz"},
+        {"accents", "caf\xC3\xA9 \xE2\x82\xAC"}, // café €
+        {"astral", "\xF0\x9F\x98\x80"},          // U+1F600
         {"  spaced  ", "  both ends  "},
     };
     const auto bytes = XmlPropertiesFile::serialize(entries);
-    CHECK(bytes == canonical("  <VALUE name=\"markup\" val=\"a &amp; b &lt;c&gt; &quot;d&quot; 'e'\"/>\r\n"
-                             "  <VALUE name=\"controls\" val=\"x&#9;y&#10;z\"/>\r\n"
-                             "  <VALUE name=\"accents\" val=\"caf&#233; &#8364;\"/>\r\n"
-                             "  <VALUE name=\"astral\" val=\"&#128512;\"/>\r\n"
-                             "  <VALUE name=\"  spaced  \" val=\"  both ends  \"/>\r\n"));
+    CHECK(bytes ==
+          canonical("  <VALUE name=\"markup\" val=\"a &amp; b &lt;c&gt; &quot;d&quot; 'e'\"/>\r\n"
+                    "  <VALUE name=\"controls\" val=\"x&#9;y&#10;z\"/>\r\n"
+                    "  <VALUE name=\"accents\" val=\"caf&#233; &#8364;\"/>\r\n"
+                    "  <VALUE name=\"astral\" val=\"&#128512;\"/>\r\n"
+                    "  <VALUE name=\"  spaced  \" val=\"  both ends  \"/>\r\n"));
     for (const auto c : bytes)
         CHECK(static_cast<unsigned char>(c) < 0x80);
 
@@ -119,7 +120,8 @@ TEST_CASE("XmlPropertiesFile reads what other writers produce", "[state][xml-pro
                       });
 }
 
-TEST_CASE("XmlPropertiesFile keeps a duplicate's first position and last value", "[state][xml-properties]") {
+TEST_CASE("XmlPropertiesFile keeps a duplicate's first position and last value",
+          "[state][xml-properties]") {
     const auto entries = XmlPropertiesFile::parse(canonical("  <VALUE name=\"a\" val=\"1\"/>\r\n"
                                                             "  <VALUE name=\"b\" val=\"2\"/>\r\n"
                                                             "  <VALUE name=\"a\" val=\"3\"/>\r\n"));
@@ -131,8 +133,9 @@ TEST_CASE("XmlPropertiesFile edits in place and appends new names", "[state][xml
     Scratch dir;
     const auto path = dir.root / "Product.xml";
     // LF endings, a comment and an unknown element: all normalized away on save.
-    spit(path, "<?xml version=\"1.0\"?>\n<PROPERTIES>\n  <!-- c -->\n  <VALUE name=\"b\" val=\"2\"/>\n"
-               "  <OTHER/>\n  <VALUE name=\"a\" val=\"1\"/>\n</PROPERTIES>\n");
+    spit(path,
+         "<?xml version=\"1.0\"?>\n<PROPERTIES>\n  <!-- c -->\n  <VALUE name=\"b\" val=\"2\"/>\n"
+         "  <OTHER/>\n  <VALUE name=\"a\" val=\"1\"/>\n</PROPERTIES>\n");
     auto file = XmlPropertiesFile::load(path);
     REQUIRE(file.has_value());
     file->set("a", "10");
@@ -160,23 +163,25 @@ TEST_CASE("XmlPropertiesFile writes nothing when nothing changed", "[state][xml-
     spit(path, original);
     const auto mtime = std::filesystem::last_write_time(path);
 #ifndef _WIN32
-    struct stat before {};
+    struct stat before{};
     REQUIRE(::stat(path.c_str(), &before) == 0);
 #endif
 
     auto file = XmlPropertiesFile::load(path);
     REQUIRE(file.has_value());
-    file->set("a", "1");           // the same value
+    file->set("a", "1"); // the same value
     REQUIRE(file->save());
-    file->set("a", "2");           // changed and changed back
+    file->set("a", "2"); // changed and changed back
     file->set("a", "1");
     CHECK_FALSE(file->dirty());
     REQUIRE(file->save());
 
     CHECK(slurp(path) == original);
-    CHECK(std::filesystem::last_write_time(path) == mtime);
+    // Compared as a bool: Catch2 cannot print the 128-bit file-clock duration.
+    const bool mtime_unchanged = std::filesystem::last_write_time(path) == mtime;
+    CHECK(mtime_unchanged);
 #ifndef _WIN32
-    struct stat after {};
+    struct stat after{};
     REQUIRE(::stat(path.c_str(), &after) == 0);
     CHECK(after.st_ino == before.st_ino);
 #endif
@@ -185,11 +190,10 @@ TEST_CASE("XmlPropertiesFile writes nothing when nothing changed", "[state][xml-
 
 TEST_CASE("XmlPropertiesFile fails closed on a file it cannot read", "[state][xml-properties]") {
     const std::vector<std::string> unreadable = {
-        "",                                                        // empty
-        "volume=7\n",                                              // not XML
-        "<PROPERTIES>\n  <VALUE name=\"a\" val=\"1\"/>\n",         // unterminated
+        "",                                                           // empty
+        "volume=7\n",                                                 // not XML
+        "<PROPERTIES>\n  <VALUE name=\"a\" val=\"1\"/>\n",            // unterminated
         "<SETTINGS>\n  <VALUE name=\"a\" val=\"1\"/>\n</SETTINGS>\n", // wrong root
-        "<PROPERTIES/>\n<PROPERTIES/>\n",                          // two roots
     };
     for (const auto& bytes : unreadable) {
         CAPTURE(bytes);
@@ -240,7 +244,8 @@ TEST_CASE("XmlPropertiesFile creates a missing file only when it has something t
     CHECK(entries_in(dir.root) == 1);
 }
 
-TEST_CASE("XmlPropertiesFile reports a failed save and leaves nothing behind", "[state][xml-properties]") {
+TEST_CASE("XmlPropertiesFile reports a failed save and leaves nothing behind",
+          "[state][xml-properties]") {
     Scratch dir;
     const auto path = dir.root / "missing-dir" / "Product.xml";
     XmlPropertiesFile file(path);
@@ -250,4 +255,90 @@ TEST_CASE("XmlPropertiesFile reports a failed save and leaves nothing behind", "
     CHECK(error.kind == XmlPropertiesError::Kind::io);
     CHECK(file.dirty());
     CHECK(entries_in(dir.root) == 0);
+}
+
+TEST_CASE("XmlPropertiesFile writes CR and other controls as references",
+          "[state][xml-properties]") {
+    const Entries entries = {{"cr", "a\rb"}, {"soh", std::string("x\x01y")}};
+    const auto bytes = XmlPropertiesFile::serialize(entries);
+    CHECK(bytes == canonical("  <VALUE name=\"cr\" val=\"a&#13;b\"/>\r\n"
+                             "  <VALUE name=\"soh\" val=\"x&#1;y\"/>\r\n"));
+    const auto back = XmlPropertiesFile::parse(bytes);
+    REQUIRE(back.has_value());
+    CHECK(*back == entries);
+}
+
+TEST_CASE("XmlPropertiesFile reads literal control bytes in a value as themselves",
+          "[state][xml-properties]") {
+    // A literal tab, line feed and SOH inside the quotes come back unchanged,
+    // and the next save writes them as references.
+    const auto entries = XmlPropertiesFile::parse(
+        std::string("<PROPERTIES>\n  <VALUE name=\"a\" val=\"x\ty\nz\x01w\"/>\n</PROPERTIES>\n"));
+    REQUIRE(entries.has_value());
+    CHECK(entries->at(0).second == std::string("x\ty\nz\x01w"));
+    CHECK(XmlPropertiesFile::serialize(*entries) ==
+          canonical("  <VALUE name=\"a\" val=\"x&#9;y&#10;z&#1;w\"/>\r\n"));
+}
+
+TEST_CASE("XmlPropertiesFile ignores everything after the first root", "[state][xml-properties]") {
+    const std::vector<std::string> trailers = {
+        "<PROPERTIES>\n  <VALUE name=\"z\" val=\"9\"/>\n</PROPERTIES>\n", // a second root
+        "trailing text\n",
+        "<!-- trailing comment -->\n",
+    };
+    for (const auto& trailer : trailers) {
+        CAPTURE(trailer);
+        Scratch dir;
+        const auto path = dir.root / "Product.xml";
+        spit(path, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<PROPERTIES>\n  <VALUE name=\"a\" "
+                   "val=\"1\"/>\n"
+                   "</PROPERTIES>\n" +
+                       trailer);
+        auto file = XmlPropertiesFile::load(path);
+        REQUIRE(file.has_value());
+        CHECK(file->entries() == Entries{{"a", "1"}});
+        // The trailer is dropped on save, and no backup is written.
+        file->set("b", "2");
+        REQUIRE(file->save());
+        CHECK(slurp(path) == canonical("  <VALUE name=\"a\" val=\"1\"/>\r\n"
+                                       "  <VALUE name=\"b\" val=\"2\"/>\r\n"));
+        CHECK(entries_in(dir.root) == 1);
+    }
+}
+
+TEST_CASE("XmlPropertiesFile fails closed on text before the root", "[state][xml-properties]") {
+    Scratch dir;
+    const auto path = dir.root / "Product.xml";
+    const std::string bytes = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\nstray\n<PROPERTIES>\n"
+                              "  <VALUE name=\"a\" val=\"1\"/>\n</PROPERTIES>\n";
+    spit(path, bytes);
+    XmlPropertiesError error;
+    CHECK_FALSE(XmlPropertiesFile::load(path, &error));
+    CHECK(error.kind == XmlPropertiesError::Kind::parse);
+    CHECK(slurp(path) == bytes);
+    CHECK(slurp(error.backup_path) == bytes);
+    // A comment before the root is not text, and loads.
+    CHECK(XmlPropertiesFile::parse("<!-- c -->\n<PROPERTIES/>\n").has_value());
+}
+
+// Design decisions where the original gives no answer or a corrupt one.
+
+TEST_CASE("XmlPropertiesFile writes an empty file as a start and end tag",
+          "[state][xml-properties][design]") {
+    // The original never writes a file with no entries; this follows its layout.
+    CHECK(XmlPropertiesFile::serialize({}) ==
+          "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\r\n<PROPERTIES>\r\n</PROPERTIES>\r\n");
+}
+
+TEST_CASE("XmlPropertiesFile writes each invalid UTF-8 byte as U+FFFD",
+          "[state][xml-properties][design]") {
+    // A lone continuation byte, a lead byte followed by ASCII, an overlong
+    // encoding and bytes that never start a sequence.
+    const Entries entries = {{"bad", std::string("a\x80"
+                                                 "b\xC3"
+                                                 "c\xC0\xAF"
+                                                 "\xFE\xFF")}};
+    CHECK(XmlPropertiesFile::serialize(entries) ==
+          canonical("  <VALUE name=\"bad\" "
+                    "val=\"a&#65533;b&#65533;c&#65533;&#65533;&#65533;&#65533;\"/>\r\n"));
 }
