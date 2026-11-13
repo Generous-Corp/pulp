@@ -1749,8 +1749,13 @@ rules:
 - **External parameter-event mailbox.** Hosts publish per-block events with
   `SignalGraph::inject_parameter_events()` before `process()`. The API is
   additive on `SignalGraph`; do not add a `Processor` or `PluginSlot` virtual.
-  Sample offsets are block-relative. A `false` return reports an invalid or
-  unavailable node, or a source queue that already overflowed; a retained
+  Sample offsets are block-relative. Only PluginSlot nodes drain this
+  mailbox: a `Processor` node added with `add_processor_node()` is refused
+  (`false`), because it takes parameter events only from `connect_automation`
+  or an owner-claimed exact timeline stream. Before this was enforced, the
+  injection returned true and the events were silently dropped. A `false`
+  return reports an invalid, unavailable or Processor node, or a source queue
+  that already overflowed; a retained
   source prefix can still be published and consumed. Destination overflow is
   observed later when the audio-thread merge fills the fixed queue. The live
   API rejects a node while a timeline binding owns its exact-generation writer

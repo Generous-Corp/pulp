@@ -69,7 +69,8 @@ live snapshot. **Never call them from the audio thread.**
   retains the undelivered suffix; attach/provide sufficient storage and call
   `extract_midi()` again to resume without replaying the delivered prefix.
 - `inject_parameter_events` — publishes one block of sample-offset parameter
-  events through a snapshot-owned lock-free mailbox. It is safe to call
+  events through a snapshot-owned lock-free mailbox to a PluginSlot node
+  (a `Processor` node is refused; use `connect_automation` for it). It is safe to call
   concurrently with `process()` from one control-side writer. The latest
   publication replaces any older unconsumed publication and is consumed once
   by the next successful block. Injected events are appended after graph
