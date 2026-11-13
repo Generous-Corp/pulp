@@ -122,14 +122,9 @@ static std::vector<std::string> json_string_array_field(const pulp::cli::pkg::Js
 }
 
 static bool is_builtin_template_name(const std::string& template_arg) {
-    return template_arg == "effect"
-        || template_arg == "instrument"
-        || template_arg == "app"
-        || template_arg == "bare"
-        || template_arg == "gain"
-        || template_arg == "agent-toolkit"
-        || template_arg == "from-figma"
-        || template_arg == "from-v0";
+    return template_arg == "effect" || template_arg == "instrument" || template_arg == "app" ||
+           template_arg == "bare" || template_arg == "gain" || template_arg == "agent-toolkit" ||
+           template_arg == "from-figma" || template_arg == "from-v0";
 }
 
 static bool template_dependencies_available(
@@ -338,7 +333,8 @@ int cmd_create(const std::vector<std::string>& args) {
             std::cout << "Options:\n";
             std::cout << "  --type <effect|instrument|app|bare>  Plugin type (default: effect)\n";
             std::cout << "  --mpe                                Opt into MPE (per-note expression) — only with --type instrument\n";
-            std::cout << "  --template <name-or-kit-dir>         Use named template (e.g. gain, agent-toolkit) or local template kit\n";
+            std::cout << "  --template <name-or-kit-dir>         Use named template (e.g. gain, "
+                         "agent-toolkit) or local template kit\n";
             std::cout << "  --manufacturer <name>                Manufacturer (default: Pulp)\n";
             std::cout << "  --output <dir>                       Override output directory\n";
             std::cout << "  --targets <list>                     Comma-separated extra targets (e.g. android)\n";
@@ -407,7 +403,8 @@ int cmd_create(const std::vector<std::string>& args) {
     // build the capability broker can drive, so it is always an instrument and
     // only builds that one format.
     const bool agent_toolkit_template = tmpl == "agent-toolkit";
-    if (agent_toolkit_template) type = "instrument";
+    if (agent_toolkit_template)
+        type = "instrument";
 
     std::string template_key = tmpl.empty() ? type : tmpl;
 
@@ -503,11 +500,11 @@ int cmd_create(const std::vector<std::string>& args) {
     log("  \xe2\x9c\x93 Environment OK\n\n");
 
     if (standalone_mode && !root.empty()) {
-        const bool needs_vst3 = type != "app" && type != "bare" && !agent_toolkit_template
-            && !checkout_supports_vst3(root);
+        const bool needs_vst3 = type != "app" && type != "bare" && !agent_toolkit_template &&
+                                !checkout_supports_vst3(root);
 #ifdef __APPLE__
-        const bool needs_au = type != "app" && type != "bare" && !agent_toolkit_template
-            && !checkout_supports_au(root);
+        const bool needs_au = type != "app" && type != "bare" && !agent_toolkit_template &&
+                              !checkout_supports_au(root);
 #else
         const bool needs_au = false;
 #endif
@@ -522,9 +519,10 @@ int cmd_create(const std::vector<std::string>& args) {
     }
 
     auto formats = default_create_formats(root, type);
-    if (agent_toolkit_template) formats = "Standalone";
-    if (standalone_mode && !root.empty() && type != "app" && type != "bare"
-        && !agent_toolkit_template) {
+    if (agent_toolkit_template)
+        formats = "Standalone";
+    if (standalone_mode && !root.empty() && type != "app" && type != "bare" &&
+        !agent_toolkit_template) {
         if (formats.find("VST3") == std::string::npos) {
             print_warn("VST3 SDK unavailable in current checkout — generating without VST3 support");
         }

@@ -729,17 +729,17 @@ TEST_CASE("pulp create --template agent-toolkit scaffolds a controlled Standalon
     ScopedEnvVar pulp_home("PULP_HOME", native_path_string(tmp.path / "pulp-home").c_str());
 
     const auto out_dir = tmp.path / "Agent Synth";
-    auto r = run_create({"create", "Agent Synth", "--template", "agent-toolkit",
-                         "--output", native_path_string(out_dir), "--no-build", "--ci"},
+    auto r = run_create({"create", "Agent Synth", "--template", "agent-toolkit", "--output",
+                         native_path_string(out_dir), "--no-build", "--ci"},
                         source_root());
     INFO(r.stderr_output);
     INFO(r.stdout_output);
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code == 0);
 
-    for (const char* file : {"CMakeLists.txt", "agent_synth.hpp", "agent_synth.cpp",
-                             "agent_operations.cpp", "test_agent_synth.cpp", "main.cpp",
-                             "pulp.toml"}) {
+    for (const char* file :
+         {"CMakeLists.txt", "agent_synth.hpp", "agent_synth.cpp", "agent_operations.cpp",
+          "test_agent_synth.cpp", "main.cpp", "pulp.toml"}) {
         INFO(file);
         REQUIRE(fs::exists(out_dir / file));
     }
@@ -748,11 +748,12 @@ TEST_CASE("pulp create --template agent-toolkit scaffolds a controlled Standalon
     CHECK_FALSE(fs::exists(out_dir / "clap_entry.cpp"));
 
     const auto cmake = read_file(out_dir / "CMakeLists.txt");
-    CHECK(cmake.find("pulp_control_agent_toolkit_declaration(_agent_toolkit_operations VENDOR com.example)")
-          != std::string::npos);
+    CHECK(cmake.find("pulp_control_agent_toolkit_declaration(_agent_toolkit_operations VENDOR "
+                     "com.example)") != std::string::npos);
     CHECK(cmake.find("FORMATS         Standalone") != std::string::npos);
     CHECK(cmake.find("PROCESSOR_FACTORY create_agent_synth") != std::string::npos);
-    CHECK(cmake.find("CONTROL_VENDOR_OPERATIONS \"${_agent_toolkit_operations}\"") != std::string::npos);
+    CHECK(cmake.find("CONTROL_VENDOR_OPERATIONS \"${_agent_toolkit_operations}\"") !=
+          std::string::npos);
     CHECK(cmake.find("CONTROL_VENDOR_SOURCES agent_operations.cpp") != std::string::npos);
     CHECK(cmake.find("dev.pulp.vendor/render@1") != std::string::npos);
 
