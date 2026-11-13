@@ -1346,10 +1346,6 @@ SignalGraph::PreparedTopologyEdit::~PreparedTopologyEdit() {
     if (!committed_) {
         GraphMutationLock owner_lock(*owner_);
         (void)rollback_quiesced_lifecycles_locked_();
-        {
-            GraphMutationLock candidate_lock(*candidate_);
-            (void)reject_baseline_processor_aliases_locked_();
-        }
         owner_lock.unlock();
         release_new_custom_instances_();
     }
