@@ -172,6 +172,14 @@ accessor that traverses the prepared `CompiledGraph` while `prepare()` or
 Keep concurrent lifecycle tests on a fixed authored topology; racing graph
 authoring against preparation tests a separate mutation contract.
 
+A live spectral controller publishes into `spectral_slots_`, not
+`live_slot_`, so `live_slot_` is empty while it renders. Do not treat an empty
+legacy slot as "nothing to protect". Every new authoring entry that reaches
+`invalidate_live_locked_()` must call `refuse_spectral_mutation_()` under the
+mutation lock first. Otherwise it bumps the authoring generation and zeroes
+the reported latency under the running controller. `connect_graph_event` once
+missed this; `[spectral-graph-event-refusal]` covers it.
+
 ## CLAP reference backend
 
 `plugin_slot_clap.cpp` is the simplest backend to study for dlopen,
