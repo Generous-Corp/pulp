@@ -1109,19 +1109,31 @@ class FailedLegs(unittest.TestCase):
             (),
         )
 
+    def test_timed_out_job_is_named_as_a_failed_leg(self) -> None:
+        runs = [{"id": 1, "status": "completed", "created_at": "2026-10-03T09:00:00Z"}]
+        jobs = {
+            1: [{"name": "CLI darwin-x64", "conclusion": "timed_out", "run_attempt": 1,
+                 "steps": [{"name": "Build", "conclusion": "timed_out"}]}]
+        }
+        self.assertEqual(
+            rr.newest_failed_legs(runs, jobs), ("CLI darwin-x64 › Build",)
+        )
+
 
 def sweep(
     states: list[TagState],
     abandoned: tuple[tuple[tuple, tuple], ...] = (),
     stdout: list[str] | None = None,
+    reruns: list[tuple[str, int]] | None = None,
 ) -> tuple[dict[str, str], list[str]]:
     """Run main() over `states` with all I/O stubbed; return (report, rebuilt)."""
     import os
 
     captured: dict = {}
     redispatched: list[str] = []
+    timed_out_reruns = [] if reruns is None else reruns
     saved = (
-        rr.collect, rr.sdk_tags, rr.sync_incident, rr.redispatch,
+        rr.collect, rr.sdk_tags, rr.sync_incident, rr.redispatch, rr.rerun_timed_out,
         rr.datetime, rr.read_abandoned,
     )
 
@@ -1136,6 +1148,7 @@ def sweep(
         rr.collect = lambda *_: states
         rr.sync_incident = lambda repo, report, dry: captured.setdefault("r", report)
         rr.redispatch = lambda repo, tag, dry: redispatched.append(tag)
+        rr.rerun_timed_out = lambda repo, tag, run_id, dry: timed_out_reruns.append((tag, run_id))
         rr.datetime = FrozenDatetime
         rr.read_abandoned = lambda: abandoned
         os.environ.update({"REPO": "example/repo", "DRY_RUN": "true"})
@@ -1148,7 +1161,7 @@ def sweep(
         os.environ.clear()
         os.environ.update(old_env)
         (
-            rr.collect, rr.sdk_tags, rr.sync_incident, rr.redispatch,
+            rr.collect, rr.sdk_tags, rr.sync_incident, rr.redispatch, rr.rerun_timed_out,
             rr.datetime, rr.read_abandoned,
         ) = saved
     return dict(captured["r"]), redispatched
@@ -1210,6 +1223,27 @@ class SweepReportsTheIncidentShape(unittest.TestCase):
         self.assertEqual(rebuilt, ["v0.899.1"])
         self.assertEqual(sorted(report), ["v0.899.0", "v0.899.1"])
 
+    def test_timeout_rerun_is_independent_of_rebuild_budget(self) -> None:
+        newer = tag_state(
+            age_hours=3, run_states=("completed",), tag="v0.900.0",
+        )
+        timed_out = TagState(
+            tag="v0.899.0",
+            created_at=NOW - timedelta(hours=4),
+            published=False,
+            has_release_object=False,
+            assets=frozenset(),
+            run_states=("completed",),
+            validation_failures=(),
+            dispatch_attempts=0,
+            rerun_run_id=43259055785,
+            timed_out_legs=("CLI darwin-x64 › timed out",),
+        )
+        reruns: list[tuple[str, int]] = []
+        _, rebuilt = sweep([newer, timed_out, PUBLISHED_PRIOR], reruns=reruns)
+        self.assertEqual(rebuilt, ["v0.900.0"])
+        self.assertEqual(reruns, [("v0.899.0", 43259055785)])
+
     def test_healthy_young_release_opens_nothing(self) -> None:
         building = tag_state(age_hours=1, run_states=("in_progress",))
         report, rebuilt = sweep([building, PUBLISHED_PRIOR])
@@ -1252,6 +1286,153 @@ class AbandonedTags(unittest.TestCase):
 
     def test_missing_file_means_nothing_abandoned(self) -> None:
         self.assertEqual(rr.read_abandoned("/nonexistent/abandoned.txt"), ())
+
+
+class TimedOutLegIsRerunOnce(unittest.TestCase):
+    """A leg that hits its timeout-minutes is re-run once, in place.
+
+    Shape of Release CLI run 43259055785 (v1.119.0): `CLI darwin-x64` hung in
+    `Prepare SDK build dir (macOS)` while the other five legs and the iOS gate
+    went green. With a step timeout the leg fails with GitHub's timeout
+    message; the reconciler must re-run that run's failed jobs (one leg), not
+    open the validation circuit and not re-dispatch the six-leg matrix.
+    """
+
+    STEP = "Prepare SDK build dir (macOS)"
+    MESSAGE = f"The action '{STEP}' has timed out after 68 minutes."
+
+    def run_(self, attempt: int = 1, conclusion: str = "failure") -> dict:
+        return {"id": 43259055785, "status": "completed", "conclusion": conclusion,
+                "created_at": "2026-11-12T16:28:31Z", "run_attempt": attempt}
+
+    def jobs(self, attempt: int = 1, *, real_failure: bool = False) -> list[dict]:
+        jobs = [
+            {"id": 131325226864, "name": "CLI darwin-x64", "conclusion": "failure",
+             "run_attempt": attempt,
+             "steps": [{"name": self.STEP, "conclusion": "failure"}]},
+            {"id": 131325227024, "name": "CLI darwin-arm64", "conclusion": "success",
+             "run_attempt": attempt, "steps": []},
+            {"id": 1, "name": "Smoke darwin-x64", "conclusion": "skipped",
+             "run_attempt": attempt, "steps": []},
+        ]
+        if real_failure:
+            jobs.append({"id": 2, "name": "CLI linux-x64", "conclusion": "failure",
+                         "run_attempt": attempt,
+                         "steps": [{"name": "Build", "conclusion": "failure"}]})
+        return jobs
+
+    def timed_out(self, job: dict) -> str | None:
+        return self.MESSAGE if job["id"] == 131325226864 else None
+
+    def test_first_attempt_timeout_is_a_rerun_candidate(self) -> None:
+        run = self.run_()
+        run_id, legs = rr.timeout_rerun_candidate([run], {run["id"]: self.jobs()}, self.timed_out)
+        self.assertEqual(run_id, 43259055785)
+        self.assertEqual(legs, (f"CLI darwin-x64 › {self.MESSAGE}",))
+
+    def test_timed_out_conclusion_is_a_rerun_candidate_without_annotation(self) -> None:
+        run = self.run_(conclusion="timed_out")
+        jobs = self.jobs()
+        jobs[0]["conclusion"] = "timed_out"
+        jobs[0]["steps"][0]["conclusion"] = "timed_out"
+        run_id, legs = rr.timeout_rerun_candidate(
+            [run], {run["id"]: jobs}, lambda _job: None
+        )
+        self.assertEqual(run_id, 43259055785)
+        self.assertEqual(legs, ("CLI darwin-x64 › job concluded timed_out",))
+
+    def test_second_attempt_is_not_rerun_again(self) -> None:
+        run = self.run_(attempt=2)
+        run_id, legs = rr.timeout_rerun_candidate(
+            [run], {run["id"]: self.jobs(1) + self.jobs(2)}, self.timed_out
+        )
+        self.assertIsNone(run_id)
+        self.assertTrue(legs, "the timed-out leg is still named")
+
+    def test_a_real_failure_alongside_keeps_the_ordinary_path(self) -> None:
+        run = self.run_()
+        run_id, _ = rr.timeout_rerun_candidate(
+            [run], {run["id"]: self.jobs(real_failure=True)}, self.timed_out
+        )
+        self.assertIsNone(run_id)
+
+    def test_cancelled_job_timeout_counts(self) -> None:
+        run = self.run_(conclusion="cancelled")
+        jobs = self.jobs()
+        jobs[0]["conclusion"] = "cancelled"
+        msg = "The job running on runner studio-pulp-gate-01 has exceeded the maximum execution time of 243 minutes."
+        run_id, _ = rr.timeout_rerun_candidate(
+            [run], {run["id"]: jobs},
+            lambda j: rr.timeout_evidence([msg]) if j["id"] == 131325226864 else None,
+        )
+        self.assertEqual(run_id, 43259055785)
+
+    def test_no_timeout_is_no_candidate(self) -> None:
+        run = self.run_()
+        run_id, legs = rr.timeout_rerun_candidate([run], {run["id"]: self.jobs()}, lambda _j: None)
+        self.assertEqual((run_id, legs), (None, ()))
+
+    def test_timeout_evidence_matches_github_wording_only(self) -> None:
+        self.assertTrue(rr.timeout_evidence([self.MESSAGE]))
+        self.assertTrue(rr.timeout_evidence(["##[error]The action has timed out."]))
+        self.assertTrue(rr.timeout_evidence([
+            "The job running on runner x has exceeded the maximum execution time of 30 minutes."
+        ]))
+        # Control: an ordinary failure message is not timeout evidence.
+        self.assertIsNone(rr.timeout_evidence(["Process completed with exit code 1.", ""]))
+
+    def test_decide_reruns_instead_of_redispatching(self) -> None:
+        st = TagState(
+            tag="v0.655.0", created_at=NOW - timedelta(minutes=200), published=False,
+            has_release_object=False, assets=frozenset(), run_states=("completed",),
+            validation_failures=(), dispatch_attempts=3,
+            rerun_run_id=43259055785, timed_out_legs=("CLI darwin-x64 › timed out",),
+        )
+        self.assertEqual(decide(st, NOW, **LIMITS).action, rr.RERUN_TIMED_OUT)
+        # Control: the same tag without a rerun candidate takes the old path.
+        plain = TagState(**{**st.__dict__, "rerun_run_id": None})
+        self.assertEqual(decide(plain, NOW, **LIMITS).action, ESCALATE)
+
+    def test_live_run_and_open_circuit_outrank_the_rerun(self) -> None:
+        base = dict(
+            tag="v0.655.0", created_at=NOW - timedelta(minutes=200), published=False,
+            has_release_object=False, assets=frozenset(), validation_failures=(),
+            dispatch_attempts=0, rerun_run_id=1, timed_out_legs=("x",),
+        )
+        live = TagState(**{**base, "run_states": ("in_progress",)})
+        self.assertEqual(decide(live, NOW, **LIMITS).action, IN_FLIGHT)
+        shut = TagState(**{**base, "run_states": ("completed",),
+                           "validation_failures": ("Smoke linux-x64: Smoke CLI",)})
+        self.assertEqual(decide(shut, NOW, **LIMITS).action, CIRCUIT_OPEN)
+
+    def test_timed_out_validation_step_does_not_open_the_circuit(self) -> None:
+        job = {"id": 9, "name": "Smoke darwin-x64", "conclusion": "failure",
+               "steps": [{"name": "Smoke CLI, delegates, MCP, and import-design runtime (Unix)",
+                          "conclusion": "failure"}]}
+        # Control: without timeout evidence the failed smoke step IS a verdict.
+        self.assertTrue(rr.validation_outcomes([job])[0])
+        failures, passed = rr.validation_outcomes([job], None, lambda _j: "has timed out")
+        self.assertEqual((failures, passed), ({}, set()))
+
+    def test_timed_out_conclusion_does_not_open_the_circuit(self) -> None:
+        job = {"id": 9, "name": "Smoke darwin-x64", "conclusion": "timed_out",
+               "steps": [{"name": "Smoke CLI", "conclusion": "timed_out"}]}
+        self.assertEqual(rr.validation_outcomes([job]), ({}, set()))
+
+    def test_check_run_id_comes_from_check_run_url(self) -> None:
+        self.assertEqual(
+            rr._check_run_id({
+                "id": 131325226864,
+                "check_run_url": "https://api.github.com/repos/o/r/check-runs/987654321",
+            }),
+            987654321,
+        )
+
+    def test_rerun_uses_rerun_failed_jobs_and_is_dry_run_safe(self) -> None:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rr.rerun_timed_out("o/r", "v0.655.0", 43259055785, dry_run=True)
+        self.assertIn("actions/runs/43259055785/rerun-failed-jobs", out.getvalue())
 
 
 if __name__ == "__main__":

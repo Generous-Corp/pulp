@@ -23,7 +23,8 @@
    "tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/recipes.hpp",
    "tools/cmake/PulpInstallRules.cmake",
    "tools/scripts/doxygen_installed_header_check.py",
-   "tools/scripts/test_doxygen_installed_header_check.py"
+   "tools/scripts/test_doxygen_installed_header_check.py",
+   "tools/testing/rt_allocation_probe/include"
   ],
   "kind": "python"
  }

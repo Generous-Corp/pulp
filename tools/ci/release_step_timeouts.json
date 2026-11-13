@@ -1,0 +1,183 @@
+{
+  "$comment": "Release workflow timeouts derived from history by tools/scripts/release_step_timeouts.py derive (timeout = max(floor, ceil(multiplier x p95)), p95 of the slowest matrix leg over the last n_runs successful runs). `check` enforces it: every job of a listed workflow has timeout-minutes, and every listed step with p95 >= long_step_minutes carries the recorded value. Derived 2026-11-12 after Release CLI run 43259055785 (v1.119.0) hung in CLI darwin-x64 > Prepare SDK build dir (macOS) for 105+ minutes.",
+  "derived_at": "2026-11-12",
+  "multiplier": 4,
+  "step_floor_minutes": 15,
+  "job_floor_minutes": 30,
+  "long_step_minutes": 2,
+  "workflows": {
+    ".github/workflows/release-cli.yml": {
+      "n_runs": 30,
+      "jobs": {
+        "build-cli": {
+          "n": 30,
+          "legs": 6,
+          "slowest_leg": "CLI windows-x64",
+          "p95_minutes": 60.7,
+          "max_minutes": 61.6,
+          "timeout_minutes": 243
+        },
+        "ios-compile-gate": {
+          "n": 30,
+          "legs": 1,
+          "slowest_leg": "ios-compile-gate",
+          "p95_minutes": 18.9,
+          "max_minutes": 19.5,
+          "timeout_minutes": 76
+        },
+        "release": {
+          "n": 30,
+          "legs": 1,
+          "slowest_leg": "release",
+          "p95_minutes": 5.1,
+          "max_minutes": 5.5,
+          "timeout_minutes": 30
+        },
+        "resolve-macos-runner": {
+          "n": 30,
+          "legs": 1,
+          "slowest_leg": "resolve-macos-runner",
+          "p95_minutes": 0.3,
+          "max_minutes": 0.3,
+          "timeout_minutes": 30
+        },
+        "smoke-cli": {
+          "n": 30,
+          "legs": 6,
+          "slowest_leg": "Smoke darwin-x64",
+          "p95_minutes": 2.9,
+          "max_minutes": 3.0,
+          "timeout_minutes": 30
+        }
+      },
+      "steps": {
+        "build-cli": {
+          "Bootstrap dependencies": {
+            "n": 30,
+            "legs": 6,
+            "slowest_leg": "CLI darwin-arm64",
+            "p95_minutes": 17.8,
+            "max_minutes": 26.0,
+            "timeout_minutes": 72
+          },
+          "Build": {
+            "n": 30,
+            "legs": 6,
+            "slowest_leg": "CLI windows-x64",
+            "p95_minutes": 55.1,
+            "max_minutes": 56.1,
+            "timeout_minutes": 221
+          },
+          "Configure (CLI, no WebView on Linux)": {
+            "n": 30,
+            "legs": 6,
+            "slowest_leg": "CLI windows-arm64",
+            "p95_minutes": 2.5,
+            "max_minutes": 4.5,
+            "timeout_minutes": 15
+          },
+          "Prepare SDK build dir (Linux)": {
+            "n": 30,
+            "legs": 2,
+            "slowest_leg": "CLI linux-x64",
+            "p95_minutes": 26.8,
+            "max_minutes": 27.5,
+            "timeout_minutes": 108
+          },
+          "Prepare SDK build dir (macOS)": {
+            "n": 30,
+            "legs": 2,
+            "slowest_leg": "CLI darwin-arm64",
+            "p95_minutes": 16.8,
+            "max_minutes": 18.0,
+            "timeout_minutes": 68
+          },
+          "Upload SDK artifact": {
+            "n": 30,
+            "legs": 6,
+            "slowest_leg": "CLI darwin-arm64",
+            "p95_minutes": 3.3,
+            "max_minutes": 3.6,
+            "timeout_minutes": 15
+          }
+        },
+        "ios-compile-gate": {
+          "iOS compile gate": {
+            "n": 30,
+            "legs": 1,
+            "slowest_leg": "ios-compile-gate",
+            "p95_minutes": 16.1,
+            "max_minutes": 18.6,
+            "timeout_minutes": 65
+          }
+        },
+        "release": {
+          "Verify assets, generate SHA256SUMS, publish": {
+            "n": 30,
+            "legs": 1,
+            "slowest_leg": "release",
+            "p95_minutes": 3.2,
+            "max_minutes": 3.3,
+            "timeout_minutes": 15
+          }
+        },
+        "smoke-cli": {
+          "Download CLI artifact for this platform": {
+            "n": 30,
+            "legs": 6,
+            "slowest_leg": "Smoke darwin-x64",
+            "p95_minutes": 2.0,
+            "max_minutes": 2.0,
+            "timeout_minutes": 15
+          }
+        }
+      },
+      "window": {
+        "newest_run": 43235362509,
+        "oldest_run": 42131845803
+      }
+    },
+    ".github/workflows/sign-and-release.yml": {
+      "n_runs": 30,
+      "jobs": {
+        "resolve-macos-runner": {
+          "n": 30,
+          "legs": 1,
+          "slowest_leg": "resolve-macos-runner",
+          "p95_minutes": 0.1,
+          "max_minutes": 0.1,
+          "timeout_minutes": 30
+        },
+        "build-and-sign-macos": {
+          "n": 0,
+          "p95_minutes": null,
+          "timeout_minutes": 240,
+          "source": "manual: skipped in every one of the last 30 successful runs, so there is no history; bounded by release-cli build-cli (derived 243) since it builds the same macOS product, plus notarization"
+        }
+      },
+      "steps": {},
+      "window": {
+        "newest_run": 43259055722,
+        "oldest_run": 42372899649
+      }
+    },
+    ".github/workflows/auto-release.yml": {
+      "n_runs": 30,
+      "jobs": {
+        "tag": {
+          "n": 30,
+          "legs": 1,
+          "slowest_leg": "tag",
+          "p95_minutes": 1.4,
+          "max_minutes": 1.5,
+          "timeout_minutes": 30
+        }
+      },
+      "steps": {},
+      "window": {
+        "newest_run": 43278210450,
+        "oldest_run": 43154763019
+      }
+    }
+  }
+}

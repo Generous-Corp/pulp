@@ -44,6 +44,7 @@ permissions:
 jobs:
   tag:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     name: Tag moved versions
 
     steps:

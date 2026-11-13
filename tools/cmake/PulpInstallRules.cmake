@@ -54,6 +54,11 @@ list(APPEND PULP_SDK_TARGETS
 if(TARGET pulp-audio-analysis)
     list(APPEND PULP_SDK_TARGETS pulp-audio-analysis)
 endif()
+# The RT allocation probe for consumers' tests; it replaces the global
+# allocation operators, so it is linked into test executables only.
+if(TARGET pulp-rt-allocation-probe)
+    list(APPEND PULP_SDK_TARGETS pulp-rt-allocation-probe)
+endif()
 # The view-free CLAP adapter behind pulp_add_plugin(NO_EDITOR); present only
 # when the CLAP SDK is.
 if(TARGET pulp-format-clap-core)
@@ -386,6 +391,12 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/core/view/audio/include/pulp/"
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/audio/analysis/include/pulp")
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tools/audio/analysis/include/pulp/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
+        FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
+endif()
+
+if(TARGET pulp-rt-allocation-probe)
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tools/testing/rt_allocation_probe/include/pulp/"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
         FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
 endif()

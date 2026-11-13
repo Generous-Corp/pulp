@@ -127,6 +127,17 @@ on a real PR. Do them in order.
    gate's self-test until `tools/ci/release_configure_matrix.py` classifies it
    (replayed, mirrored or skipped with a reason). See `docs/guides/local-ci.md`
    § `release-configure`.
+
+   **Release jobs and long release steps carry derived `timeout-minutes`.**
+   `tools/ci/release_step_timeouts.json` holds `max(floor, 4 x p95)` of each
+   step's slowest leg over recent successful `Release CLI` runs, and
+   `release_step_timeouts.py check` (workflow-lint) fails a release job with no
+   timeout or a long step without its recorded value. When a long step is
+   renamed or a release step gets slower, re-run
+   `release_step_timeouts.py derive` and update the policy and workflow
+   together; do not hand-raise one number. A timed-out leg is re-run once by
+   the release reconciler (`rerun-failed-jobs`), so a hang no longer waits for
+   the drought alarm. See `docs/guides/release-watchdog.md`.
 3. **Open with `shipyard pr` and leave auto-merge armed.** Before you start,
    `shipyard ship-state list` shows whether someone is already landing it.
 4. **Read `mergeStateStatus` correctly:**
