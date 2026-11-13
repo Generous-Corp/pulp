@@ -27,14 +27,12 @@ namespace {
 // Number of AU output elements to hand the MusicDeviceBase base constructor.
 // The base ctor stores the count and CreateElements() materialises exactly that
 // many output elements, so the count MUST be known before the base runs — hence
-// a throwaway probe of the registered factory here (instrument construction is
-// not on the audio thread, so the extra allocation is harmless). Falls back to a
-// single output bus if no factory is registered.
-UInt32 registry_output_element_count(ProcessorFactory factory) {
-    if (!factory) return 1;
-    auto probe = factory();
-    if (!probe) return 1;
-    const auto& desc = probe->descriptor();
+// the processor is created first and its descriptor read here. Falls back to a
+// single output bus if no processor exists.
+UInt32 output_element_count(const Processor* processor) {
+    if (!processor)
+        return 1;
+    const auto desc = processor->descriptor();
     const std::size_t declared = desc.output_buses.size();
     const std::size_t count = instrument_output_element_count(desc);
     if (declared > count) {
@@ -52,17 +50,14 @@ UInt32 registry_output_element_count(ProcessorFactory factory) {
     return static_cast<UInt32>(count);
 }
 
-// Number of AU input elements to hand the base constructor, probed the same
-// way as the output count: 0 for the classic synth, 1 for a main input, 2 for
-// main input plus side chain. MusicDeviceBase never pulls an input element on
-// its own, so Render() pulls every element advertised here.
-UInt32 registry_input_element_count(ProcessorFactory factory) {
-    if (!factory)
+// Number of AU input elements to hand the base constructor, read from the same
+// processor as the output count: 0 for the classic synth, 1 for a main input, 2
+// for main input plus side chain. MusicDeviceBase never pulls an input element
+// on its own, so Render() pulls every element advertised here.
+UInt32 input_element_count(const Processor* processor) {
+    if (!processor)
         return 0;
-    auto probe = factory();
-    if (!probe)
-        return 0;
-    return instrument_input_element_count(probe->descriptor());
+    return instrument_input_element_count(processor->descriptor());
 }
 }  // namespace
 
@@ -72,11 +67,15 @@ PulpAUInstrument::PulpAUInstrument(AudioComponentInstance ci)
 }
 
 PulpAUInstrument::PulpAUInstrument(AudioComponentInstance ci, ProcessorFactory factory)
-    : MusicDeviceBase(ci, /*numInputs=*/registry_input_element_count(factory),
-                      /*numOutputs=*/registry_output_element_count(factory),
+    : PulpAUInstrument(ci, factory ? factory() : nullptr, static_cast<bool>(factory)) {}
+
+PulpAUInstrument::PulpAUInstrument(AudioComponentInstance ci, std::unique_ptr<Processor> processor,
+                                   bool has_factory)
+    : MusicDeviceBase(ci, /*numInputs=*/input_element_count(processor.get()),
+                      /*numOutputs=*/output_element_count(processor.get()),
                       /*numGroups=*/0) {
-    if (factory) {
-        processor_ = factory();
+    if (has_factory) {
+        processor_ = std::move(processor);
         render_context_.bind(processor_.get());
         if (processor_) {
             processor_->set_state_store(&store_);
