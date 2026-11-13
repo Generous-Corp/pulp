@@ -1033,6 +1033,13 @@ when the condition holds. A loop that reads the same state every few seconds
 costs an agent turn per read and changes nothing: in one week of agent sessions
 on one host, poll turns were a fifth of all tool calls.
 
+A queued or in-progress required check is never "blocked". The fleet has a fixed
+number of macOS VM slots (2 per Mac), so a required `macos` job can sit queued for
+capacity for an hour or more; that is normal. Run one background
+`shipyard wait pr <n> --state actionable --timeout 3600 --json`, then take the next
+independent item or hand off. Do not mark the goal blocked or stop. Call a PR
+blocked only when `shipyard wait` returns a `next_action` that needs someone else.
+
 ## One push per fix round: read the head's `macos` job before pushing
 
 `build.yml` cancels a PR's older `pull_request` run when a new head arrives
