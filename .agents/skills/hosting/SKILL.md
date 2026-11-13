@@ -30,6 +30,17 @@ web list a wasm-safe definition, as `isolated_plugin_slot_web.cpp` does for
 `is_isolated_plugin_slot`, and add the symbol to the closure selftest in
 `tools/scripts/test_sample_region_compat_baseline.py`.
 
+**Recover a terminal isolated node by republishing, never by re-preparing.**
+An isolated graph refuses a second eager `prepare()`, `begin_swap_edit()` and
+prepared topology edits, so `recover_isolated_graph_node()` publishes the fresh
+generation through `SignalGraph::publish_isolated_recovery()`. That path shares
+the post-compile PDC adoption (`adopt_live_snapshot_state` in
+`signal_graph_live_swap_detail.hpp`) with `prepare_swap()`. Skipping the
+adoption restarts every sibling's PDC ring at zero, and the bit-exact sibling
+check in `test_isolated_clap_worker.cpp` fails. A refusal must keep the live
+snapshot; `fail_swap_edit_locked_` would silence the whole graph. Checkpoint
+before the node renders: `pause()` is terminal while a graph still renders it.
+
 
 ## Live retuning at a callback boundary
 

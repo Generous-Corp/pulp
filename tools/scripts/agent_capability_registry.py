@@ -190,10 +190,10 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         'include': 'pulp/host/isolated_plugin_slot.hpp',
-        'fingerprint': 'sha256:89e0eae24caedce120023b6fa6ec23766d8af54f0d2b01051fa0538b0907afa9',
+        'fingerprint': 'sha256:db38bd42247f80f3e2c510d3f14dea83e533fff0950030bd91e9e2fd8c0fe70e',
         'disposition': 'infrastructure',
         'capability_keys': [],
-        'rationale': 'Opt-in MacClapStereo64V1 hosted worker and bounded lifecycle control; no generator capability or full realtime qualification claim.',
+        'rationale': 'Opt-in MacClapStereo64V1 hosted worker, bounded lifecycle control and control-thread checkpoint recovery of a terminal graph node; no generator capability or full realtime qualification claim.',
     },
     {
         "include": "pulp/signal/spectrum_analyzer.hpp",

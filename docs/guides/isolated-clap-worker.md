@@ -60,7 +60,24 @@ the vendor ignores failure, preserving the last accepted checkpoint. Accepted
 state binds the plugin bytes/descriptor, fixed mode/rate/shape and state digest.
 Recovery requires complete previous cleanup and constructs a fresh mapping,
 worker and generation. It restores accepted state and primes silence; old
-proxies remain terminal and uncheckpointed DSP history is lost.
+proxies remain terminal and uncheckpointed DSP history is lost. A recovered
+generation starts with the checkpoint it was restored from as its accepted
+checkpoint, so it can recover again after a later fault.
+
+`recover_isolated_graph_node(graph, node, options, old)` returns a terminal node
+of a running graph to service. Take the checkpoint before the node renders
+(after load, before graph prepare): `pause` is terminal for a node the graph is
+still rendering. Recovery runs on the control thread while the callback keeps
+going. It refuses with a typed `IsolatedNodeRecovery` when the node is not an
+isolated proxy, `old` does not control it, the node is healthy, the plugin type
+or binary differs, no checkpoint was accepted, old custody cleanup is
+incomplete, or the fresh worker fails to start or restore. Otherwise
+`SignalGraph::publish_isolated_recovery` prepares the fresh proxy and publishes
+it through the live-swap tail (reinit-free predicate, swap compile, live PDC
+ring adoption, one snapshot publish). The callback renders terminal silence
+until that publish, then one block of latency silence, then the restored state.
+Siblings keep their delay history. Every refusal keeps the old snapshot
+published.
 
 The host reserves one of two finite entries **before spawn**, including failed
 handshakes. `RetainedProcessCustody` preserves child identity through group
