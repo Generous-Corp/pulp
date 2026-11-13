@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "comment": "Per-file count of text I/O calls without encoding=. Only ever lowered; regenerate with text_encoding_lint.py --write.",
-  "total": 4165,
+  "total": 4157,
   "files": {
     "test/cmake/test_forge_catalog_install.py": 22,
     "test/harness/test_canvas2d_adapter.py": 1,
@@ -539,7 +539,6 @@
     "tools/scripts/gate_python_imports_check.py": 1,
     "tools/scripts/gate_suite_executed.py": 1,
     "tools/scripts/gate_test_support.py": 12,
-    "tools/scripts/gates_script_inputs.py": 2,
     "tools/scripts/generate_minblep_table.py": 2,
     "tools/scripts/generate_widget_bridge_api.py": 5,
     "tools/scripts/generated_version_bump_check.py": 2,
@@ -699,7 +698,6 @@
     "tools/scripts/test_frontend_ir_review_regressions.py": 1,
     "tools/scripts/test_gate_common.py": 6,
     "tools/scripts/test_gate_python_imports_check.py": 1,
-    "tools/scripts/test_gates_script_inputs.py": 6,
     "tools/scripts/test_generate_vellum_cut_manifest.py": 1,
     "tools/scripts/test_generate_widget_bridge_api.py": 1,
     "tools/scripts/test_generated_version_bump_check.py": 10,

@@ -665,6 +665,7 @@
       "pulp/platform/alert.hpp",
       "pulp/platform/android/jni.hpp",
       "pulp/platform/android/motion_bridge.h",
+      "pulp/platform/binary_unique_name.hpp",
       "pulp/platform/child_process.hpp",
       "pulp/platform/clipboard.hpp",
       "pulp/platform/dbus.hpp",
