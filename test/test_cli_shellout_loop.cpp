@@ -164,7 +164,7 @@ TEST_CASE("pulp loop validates value options before focus state changes",
         std::vector<std::string> args;
         std::string stderr_substring;
     };
-    const std::vector<Case> cases = {
+    std::vector<Case> cases = {
         {{"loop", "--platform"}, "--platform requires a value"},
         {{"loop", "--platform", "--no-watch"}, "--platform requires a value"},
         {{"loop", "--watch-issues"}, "--watch-issues requires a value"},
@@ -185,6 +185,14 @@ TEST_CASE("pulp loop validates value options before focus state changes",
           "--graph-generation", "0", "--no-watch"},
          "--graph-file requires .pat or .pulpgraph"},
     };
+    const std::vector<std::string> graph = {"--graph-file",  "live.pat", "--graph-instance",   "i",
+                                            "--graph-grant", "g",        "--graph-generation", "0"};
+    for (const auto* mode : {"--no-watch", "--status", "--off"}) {
+        auto args = std::vector<std::string>{"loop"};
+        args.insert(args.end(), graph.begin(), graph.end());
+        args.push_back(mode);
+        cases.push_back({args, "--graph-file needs the watch loop"});
+    }
 
     for (const auto& c : cases) {
         INFO("loop args size: " << c.args.size());
@@ -404,4 +412,64 @@ TEST_CASE("pulp loop accepts --test, --validate, --target, --run flags via --no-
     pulp_unsetenv("PULP_HOME");
     pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
     fs::remove_all(tmp_home);
+}
+
+TEST_CASE("pulp loop names a refused graph file and how to fix it",
+          "[cli][shellout][loop][graph-file-reload]") {
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
+    if (!pulp::platform::find_on_path("cmake") || !pulp::platform::find_on_path("ninja")) {
+        SKIP("cmake and ninja are required to configure the watch project");
+    }
+
+    const auto project = unique_temp_dir("pulp-loop-graph-refusal");
+    fs::create_directories(project / "build");
+    ScopedEnvVar pulp_home("PULP_HOME");
+    pulp_home.set((project / "pulp-home").string());
+    {
+        std::ofstream(project / "pulp.toml") << "[plugin]\nname = \"graph-refusal\"\n";
+        std::ofstream(project / "CMakeLists.txt")
+            << "cmake_minimum_required(VERSION 3.24)\nproject(GraphRefusal NONE)\n"
+               "add_custom_target(proof)\n";
+    }
+    ProcessOptions configure;
+    configure.capture_stdout = true;
+    configure.capture_stderr = true;
+    configure.timeout_ms = 30000;
+    const auto configured =
+        ChildProcess::run("cmake",
+                          {"-S", project.string(), "-B", (project / "build").string(), "-G",
+                           "Ninja", "-DCMAKE_BUILD_TYPE=Release", "-DPULP_DEV_SHARED_UI=OFF"},
+                          configure);
+    INFO(configured.stderr_output);
+    REQUIRE(configured.exit_code == 0);
+
+    struct Case {
+        std::string file;
+        std::string message;
+    };
+    const auto oversize = project / "oversize.pat";
+    std::ofstream(oversize) << std::string(1024 * 1024 + 1, ' ');
+    for (const auto& c :
+         std::vector<Case>{{(project / "missing.pat").string(),
+                            "graph file unreadable (" + (project / "missing.pat").string() +
+                                "): check that the file exists and is readable"},
+                           {oversize.string(), "graph file too-large (" + oversize.string() +
+                                                   "): reduce the graph file to 1 MiB or less"}}) {
+        INFO(c.file);
+        const auto r = run_pulp_in_directory(
+            project,
+            {"loop", "--target", "proof", "--no-dev-shared", "--graph-file", c.file,
+             "--graph-instance", "instance-absent", "--graph-grant", "grant-absent",
+             "--graph-generation", "0", "--graph-watch-polls", "1"},
+            120000);
+        INFO(r.stdout_output);
+        INFO(r.stderr_output);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 0);
+        REQUIRE(r.stderr_output.find(c.message) != std::string::npos);
+        REQUIRE(r.stderr_output.find("live graph retained") != std::string::npos);
+    }
+    fs::remove_all(project);
 }

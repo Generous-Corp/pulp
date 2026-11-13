@@ -61,6 +61,9 @@ pub struct DevArgs {
     /// development-only shared Pulp runtime `pulp dev` uses for an SDK
     /// project on macOS.
     pub no_dev_shared: bool,
+    /// The first `--graph-*` option seen. Graph-file reload runs only in the
+    /// C++ delegate's watch loop; the Rust one-shot refuses it.
+    pub graph_option: Option<String>,
 }
 
 /// Print the C++ parity usage banner to `out`.
@@ -117,7 +120,15 @@ pub fn parse_args(args: &[String]) -> DevArgs {
             i += 1;
             continue;
         }
-        if a == "--test" || a == "-t" {
+        if a.starts_with("--graph-") {
+            if out.graph_option.is_none() {
+                out.graph_option = Some(a.clone());
+            }
+            // Every --graph-* option takes a value; keep it out of build_args.
+            if i + 1 < args.len() && !args[i + 1].starts_with("--") {
+                i += 1;
+            }
+        } else if a == "--test" || a == "-t" {
             out.run_tests = true;
         } else if a == "--all" {
             out.all = true;
@@ -178,6 +189,13 @@ pub fn run<S: Spawner>(
     let cpp_argv = crate::fallthrough::current_argv_tail();
     if let crate::fallthrough::Outcome::Delegated(rc) = crate::fallthrough::delegate(&cpp_argv)? {
         return Ok(rc);
+    }
+
+    if let Some(option) = &args.graph_option {
+        return Err(CliError::Other(format!(
+            "pulp dev: {option} needs the C++ delegate's watch loop (pulp-cpp), which was not \
+             found; install the full Pulp CLI or run the source build's tools/cli/pulp-cpp"
+        )));
     }
 
     let Some(proj) = project::resolve(cwd) else {
@@ -327,6 +345,20 @@ mod tests {
         let args = parse_args(&[]);
         let err = run(td.path(), &args, &rec, &mut buf).unwrap_err();
         assert!(err.to_string().contains("not in a Pulp project"));
+    }
+
+    #[test]
+    fn run_refuses_graph_options_without_the_cpp_delegate() {
+        let _fallthrough = EnvVarGuard::set(crate::fallthrough::DISABLE_ENV, "1");
+        let td = tempfile::tempdir().unwrap();
+        let rec = RecordingSpawner::ok();
+        let mut buf = Vec::new();
+        let args = parse_args(&to_vec(&["--graph-file", "live.pat", "--target", "proof"]));
+        assert_eq!(args.graph_option.as_deref(), Some("--graph-file"));
+        assert_eq!(args.build_args, vec!["--target", "proof"]);
+        let err = run(td.path(), &args, &rec, &mut buf).unwrap_err();
+        assert!(err.to_string().contains("--graph-file needs the C++ delegate"));
+        assert!(rec.calls.borrow().is_empty());
     }
 
     // ── parse_args edge cases ───────────────────────────────────────────

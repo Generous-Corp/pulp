@@ -175,6 +175,11 @@ int cmd_dev(const std::vector<std::string>& args) {
         return 2;
     }
 
+    // Take the graph file's baseline before the initial build, so a save made
+    // while it builds is applied once the watch starts.
+    std::optional<GraphReloadWatch> reload_watch;
+    if (!graph_reload.file.empty())
+        reload_watch.emplace(graph_reload);
     BuildPlan plan({project_root, build_dir, standalone_mode, examples, build_all, build_args,
                     "pulp dev", dev_shared_ui_default(no_dev_shared, standalone_mode)});
     if (!plan.ok()) {
@@ -195,10 +200,7 @@ int cmd_dev(const std::vector<std::string>& args) {
     auto watch = plan.watch_options(run_tests, test_filter, run_validate, launch_target,
                                     launch_args, hot_dsp);
     watch.graph_reload = graph_reload;
-    std::optional<GraphReloadWatch> reload_watch;
-    if (!graph_reload.file.empty()) {
-        reload_watch.emplace(std::move(graph_reload));
+    if (reload_watch)
         watch.graph_poll = [&] { reload_watch->poll(); };
-    }
     return watch_loop(watch);
 }

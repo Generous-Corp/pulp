@@ -11,7 +11,7 @@ if(PULP_ENABLE_INSPECTOR AND APPLE AND NOT IOS AND NOT PULP_IOS AND
         "dev.pulp.instance/read@1;dev.pulp.session/control@1;dev.pulp.graph/file.reload@1"
         FALSE)
     _pulp_configure_control_shipping(pulp-control-graph_file_reload-graph-product-fixture
-        "dev.pulp.test.graph-file-reload" "DSPX-04 Graph Product Fixture")
+        "dev.pulp.test.graph-file-reload" "Graph File Reload Product Fixture")
     _pulp_attach_control_shipping(pulp-control-graph_file_reload-graph-product-fixture
         pulp-control-graph_file_reload-graph-product-fixture Standalone)
     add_custom_command(TARGET pulp-control-graph_file_reload-graph-product-fixture POST_BUILD

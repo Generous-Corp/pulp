@@ -17,7 +17,7 @@
 #include <string>
 
 TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
-          "[inspect][control][dspx-04][e2e]") {
+          "[inspect][control][graph-file-reload][e2e]") {
 #ifdef __APPLE__
     Root root;
     const auto executable = self();
@@ -193,8 +193,10 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
         "# flow 1\nin : pulp/audio_in\ngain : pulp/gain\nout : pulp/audio_out\n"
         "in.audio >> gain.audio\ngain.audio >> out.audio\ngain.gain = 0.75\n";
     {
+        // The watch takes these starting contents as its baseline and never
+        // applies them; each run saves its document once the watch is ready.
         std::ofstream save(file);
-        save << patch;
+        save << "# baseline\n";
     }
     const auto child_script = project / "build" / "owned_child.py";
     const auto child_pid_file = project / "build" / "owned_child.pid";
@@ -204,7 +206,8 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
                   "f.write(str(os.getpid()))\ntime.sleep(120)\n";
     }
     std::string state_before_revocation;
-    const auto watch = [&](const char* command, std::uint64_t generation, bool acquire = true,
+    const auto watch = [&](const char* command, std::uint64_t generation,
+                           const std::string& save_on_ready, bool acquire = true,
                            std::string watch_grant = {}, bool revoke_after_publication = false) {
         if (watch_grant.empty())
             watch_grant = develop_grant;
@@ -239,6 +242,8 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
                              "--json", "--grant", develop_grant});
                     lease_acquired = acquired.exit_code == 0;
                 }
+                std::ofstream save(file, std::ios::trunc);
+                save << save_on_ready;
             }
             observe_child();
             if (revoke_after_publication && !publication_seen &&
@@ -343,35 +348,27 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
     };
     const auto initial_state = audio_state(0, develop_grant, 0.125);
     REQUIRE_FALSE(initial_state.empty());
-    const auto dev = watch("dev", 0);
+    const auto dev = watch("dev", 0, patch);
     INFO(dev.stdout_output);
     INFO(dev.stderr_output);
     REQUIRE(dev.exit_code == 0);
     REQUIRE_FALSE(dev.timed_out);
     REQUIRE(dev.stdout_output.find("committed") != std::string::npos);
     REQUIRE(dev.stdout_output.find("completed") != std::string::npos);
-    {
-        std::ofstream save(file);
-        save << patch << "bad.port >> out.audio\n";
-    }
-    const auto invalid = watch("dev", 1);
+    const auto invalid = watch("dev", 1, patch + "bad.port >> out.audio\n");
     INFO(invalid.stdout_output);
     INFO(invalid.stderr_output);
     REQUIRE(invalid.exit_code == 0);
     REQUIRE(invalid.stdout_output.find("invalid-document") != std::string::npos);
     REQUIRE(invalid.stdout_output.find("UnknownNode") != std::string::npos);
-    {
-        std::ofstream save(file);
-        save << patch;
-    }
-    const auto loop = watch("loop", 1);
+    const auto loop = watch("loop", 1, patch);
     INFO(loop.stdout_output);
     INFO(loop.stderr_output);
     REQUIRE(loop.exit_code == 0);
     REQUIRE_FALSE(loop.timed_out);
     REQUIRE(loop.stdout_output.find("committed") != std::string::npos);
     REQUIRE(loop.stdout_output.find("completed") != std::string::npos);
-    const auto stale = watch("dev", 0);
+    const auto stale = watch("dev", 0, patch + "# stale generation\n");
     INFO(stale.stdout_output);
     INFO(stale.stderr_output);
     REQUIRE(stale.exit_code == 0);
@@ -390,7 +387,7 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
     REQUIRE(expires > now);
     REQUIRE(expires - now <= 16000);
     std::this_thread::sleep_for(std::chrono::milliseconds(expires - now + 20));
-    const auto expired = watch("dev", 2, false);
+    const auto expired = watch("dev", 2, patch + "# expired lease\n", false);
     INFO(expired.stdout_output);
     INFO(expired.stderr_output);
     INFO("expired exit=" << expired.exit_code << " timed_out=" << expired.timed_out);
@@ -404,14 +401,15 @@ TEST_CASE("Graph file watch publishes through the standalone broker and CLI",
     REQUIRE(restricted.exit_code == 0);
     const auto restricted_doc = choc::json::parse(restricted.stdout_output);
     const std::string restricted_grant(restricted_doc["data"]["grant_id"].getString());
-    const auto denied_renewal = watch("dev", 2, true, restricted_grant);
+    const auto denied_renewal =
+        watch("dev", 2, patch + "# denied renewal\n", true, restricted_grant);
     INFO(denied_renewal.stdout_output);
     INFO(denied_renewal.stderr_output);
     REQUIRE(denied_renewal.exit_code == 0);
     REQUIRE(denied_renewal.stderr_output.find("renewal refused") != std::string::npos);
     REQUIRE(denied_renewal.stdout_output.find("committed") == std::string::npos);
     CHECK(audio_state(2, develop_grant, 0.375) == before_refusals);
-    const auto revoked_watch = watch("dev", 2, true, develop_grant, true);
+    const auto revoked_watch = watch("dev", 2, patch + "# revocation\n", true, develop_grant, true);
     INFO(revoked_watch.stdout_output);
     INFO(revoked_watch.stderr_output);
     REQUIRE(revoked_watch.exit_code == 0);

@@ -21,14 +21,24 @@ pulp loop --graph-file live.pulpgraph --graph-instance INSTANCE --graph-grant GR
 The graph authority starts at generation zero; successful modulation edits or
 file replacements advance it. Use the generation in the previous successful
 operation receipt. A stale generation refuses replacement and requires restarting
-the watch with the current receipt's generation. `--run` alone does not enroll a
-child or grant control permission. These options require the C++ delegate; the
-Rust fallback does not implement graph-file reload.
+the watch with the current receipt's generation; a stale refusal is classified
+`state_conflict` with retry after refresh, and its `detail.generation` carries the
+current value. `--run` alone does not enroll a child or grant control permission.
+These options require the C++ delegate; the Rust fallback refuses them with a
+message instead of building. `pulp loop` refuses them with `--no-watch`,
+`--status` or `--off`, which never start the watch.
 
-Each 500 ms poll reads bounded bytes. Two consecutive identical reads coalesce a
-save; content changes are detected even with unchanged size and modification
-time. An unchanged document is attempted once. Correcting a rejected document
-with different contents retries it. `--graph-watch-polls N` exits after 1..120
+The watch reads the file once before the initial build and takes those contents
+as its baseline: starting a watch never reapplies an unchanged file, so the live
+graph's DSP state is not reset at startup. Each 500 ms poll checks the size first
+and refuses a file over 1 MiB without reading it. Two consecutive identical reads
+coalesce a save; content changes are detected even with unchanged size and
+modification time. A change is recorded as handled only after a terminal receipt:
+a publication or a typed refusal is not resent, a request refused before it ran
+(admission, grant, deadline before start) is retried, and an unknown outcome
+pauses graph reload for that watch with a message naming how to read the current
+generation. Refused files are reported by name (unreadable, too-large,
+unsupported-format) with the fix. `--graph-watch-polls N` exits after 1..120
 polls for bounded automation and terminates and joins its own `--run` child process
 group before returning. Source changes continue through the normal governed
 build/test/relaunch path; graph file changes use the control request path.
@@ -52,7 +62,11 @@ saved-graph parser, validates every original edge, checks the catalog's state
 representation, builds an off-side candidate with named typed mutations, prepares
 it, and publishes with `PreparedTopologyEdit::commit`. The next audio block uses
 the new snapshot. Preparation and failure leave the previous live graph intact.
-The broker retains its 512 KiB serialized request bound, including JSON escaping;
+`SignalGraphControlAuthority` serializes file reload with modulation-route edits
+and reset on one mutex, because the standalone host runs file reload on its main
+thread and route edits on its RPC worker.
+The broker retains its 512 KiB serialized request bound, including JSON escaping,
+and the operation schema bounds `text` to the same 512 KiB;
 local file reads and the public transaction input are separately bounded at
 1 MiB for both formats. Oversize public input is refused before a candidate edit
 is constructed; oversize broker requests are refused before submission. Admission, grants, leases, deadlines and
