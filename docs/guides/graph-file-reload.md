@@ -97,7 +97,7 @@ This profile does not qualify arbitrary
 node/state contracts or constitute full G2 completion.
 
 The public consumer under `examples/graph-file-reload-consumer` uses only installed
-headers: a real file save stages a 0.25 gain, preserves old output 0.125 during
+headers: it checks that the starting file is only a baseline, then a real file save stages a 0.25 gain, preserves old output 0.125 during
 prepare, publishes 0.75 gain/output 0.375, and verifies malformed replacement keeps
 the new state/audio. Focused controls also retain old snapshots, exercise failed
 prepare and stale publication, and compare executor/public diagnostics.

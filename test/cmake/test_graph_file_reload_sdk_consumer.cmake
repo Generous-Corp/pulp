@@ -18,8 +18,11 @@ function(run_step label)
     file(WRITE "${_fixture}/${label}.log" "${_out}\n${_err}")
     file(APPEND "${_receipt}" "${label}: ${_result}\n${_out}\n${_err}\n")
     if(NOT "${_result}" STREQUAL "0")
-        message(FATAL_ERROR "G2 ${label} failed: ${_out}\n${_err}\nfixture=${_fixture}")
+        # Print the step's own exit status and output so a CI log names the cause.
+        message(FATAL_ERROR "G2 ${label} failed with exit status ${_result}\n"
+            "--- stdout ---\n${_out}\n--- stderr ---\n${_err}\nfixture=${_fixture}")
     endif()
+    set(_G2_LAST_STDOUT "${_out}" PARENT_SCOPE)
     message(STATUS "G2 ${label}: passed")
 endfunction()
 
@@ -56,3 +59,6 @@ run_step(configure "${CMAKE_COMMAND}" -S "${_source}" -B "${_build}" -G Ninja
 run_step(build "${CMAKE_COMMAND}" -E env PULP_BUILD_JOBS=1 bash
     "${PULP_SOURCE_DIR}/tools/ci/governed-build.sh" "${CMAKE_COMMAND}" --build "${_build}")
 run_step(consumer "${_build}/graph-file-reload-consumer" "${_fixture}/live.pat")
+if(NOT _G2_LAST_STDOUT MATCHES "^PASS ")
+    message(FATAL_ERROR "G2 consumer exited 0 without its PASS line; fixture=${_fixture}")
+endif()

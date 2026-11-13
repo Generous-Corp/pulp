@@ -24,36 +24,48 @@ bool audio_is(SignalGraph& graph, float expected) {
             return false;
     return true;
 }
+int fail(int code, const char* step) {
+    std::cerr << "FAIL " << step << '\n';
+    return code;
+}
+void save(const char* path, const std::string& text) {
+    std::ofstream file(path, std::ios::trunc);
+    file << text;
+}
 int main(int argc, char** argv) {
     if (argc != 2)
-        return 1;
+        return fail(1, "usage: graph-file-reload-consumer <live.pat>");
     GraphPatchCatalog catalog;
     register_patch_gain(catalog);
     auto live = parse_graph_patch(patch(0.25f), catalog);
     if (!live || !live.graph->prepare(48000, 64) || !audio_is(*live.graph, 0.125f))
-        return 2;
+        return fail(2, "initial graph does not render 0.125");
+    // The first readable contents are the watch's baseline and are never applied.
+    save(argv[1], patch(0.25f));
     GraphFileWatch watch(argv[1]);
-    {
-        std::ofstream file(argv[1]);
-        file << patch(0.75f);
-    }
+    if (watch.poll().code != GraphFileChange::Code::Unchanged)
+        return fail(3, "starting file was reported as a change");
+    save(argv[1], patch(0.75f));
     if (watch.poll().code != GraphFileChange::Code::Pending)
-        return 3;
+        return fail(4, "first read of a save is not pending");
     const auto change = watch.poll();
     if (change.code != GraphFileChange::Code::Changed)
-        return 4;
+        return fail(5, "settled save is not reported as changed");
     GraphFileReloadTransaction reload(*live.graph);
     if (!reload.prepare(change.text, change.format, catalog, 48000, 64) ||
         !audio_is(*live.graph, 0.125f))
-        return 5;
+        return fail(6, "prepare failed or disturbed the live graph");
     if (!reload.commit() || !audio_is(*live.graph, 0.375f))
-        return 6;
+        return fail(7, "commit did not publish 0.375");
+    watch.acknowledge();
+    if (watch.poll().code != GraphFileChange::Code::Unchanged)
+        return fail(8, "acknowledged change was offered again");
     const auto state = GraphSerializer::to_json(*live.graph);
     GraphFileReloadTransaction invalid(*live.graph);
     if (invalid.prepare("malformed", GraphFileFormat::Notation, catalog, 48000, 64) ||
         invalid.commit() || GraphSerializer::to_json(*live.graph) != state ||
         !audio_is(*live.graph, 0.375f))
-        return 7;
-    std::cout << "PASS real file change, staged old=0.125, published new=0.375; malformed "
-                 "preserves audio/state\n";
+        return fail(9, "malformed replacement changed audio or state");
+    std::cout << "PASS starting file is the baseline; real file change staged old=0.125, "
+                 "published new=0.375; malformed preserves audio/state\n";
 }
