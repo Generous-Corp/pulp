@@ -111,8 +111,11 @@ same rule as the G-12 lane.
 - mode is `qualification`, every qualifying fixture cell ran 100,000 callbacks,
   and no frames filter was used;
 - admission passed both before and after the run;
-- the build is Release with no sanitizer, and the clean source SHA equals every
-  cell's compiled source;
+- the build is Release with no sanitizer, every cell's binary carries a
+  Release configure-time stamp that matches the CMake cache (a cache flipped to
+  Release without a rebuild is `build_type_mismatch`), and the clean source SHA
+  equals every cell's compiled source;
+- the admission threshold is no looser than the default 0.25 per CPU;
 - no fault was planted;
 - every cell has zero deadline misses, zero oracle failures, a p99 callback
   duration under 70% of the block, and a p99 absolute wake under 0.1 sample.
@@ -128,6 +131,14 @@ Qualification mode refuses before any cell runs: it writes a `REFUSED` receipt
 and exits with code 3. A post-run sample above the threshold disqualifies the
 run. Short mode only records the verdict.
 
+`validate` recomputes both admission verdicts from the recorded load samples,
+logical CPU count (which must match the host identity class) and threshold.
+The pre-run load, CPU count and threshold are also bound into every raw file
+as a `PACED_ADMISSION` trailer. Flipping an `admitted` flag, or relaxing the
+threshold or lowering a load to make the verdicts agree, is rejected even when
+the receipt is re-signed. The post-run sample is taken after the last cell, so
+it is bound only by verdict recomputation, not by a raw file.
+
 `validate` re-hashes each raw file and re-parses it. The raw file is the
 authority for every cell field it determines: fixture, variant, rate, frames,
 callbacks, compiled source, build type, build dirty flag, extras, exit status
@@ -136,6 +147,11 @@ against Catch2's own summary) and the planted fault. A receipt field that
 disagrees with its raw file is rejected by name, even when the receipt is
 re-signed, and the disqualifier list and `timing_qualified` are recomputed
 from the raw-parsed values only. Matrix completeness is also rechecked.
+The totals are recomputed from the raw cells. Each cell's test case,
+executable path and source file must match the fixture registry, and one
+executable cannot carry two digests. The recorded mode must be legal for its
+callback count, planted fault and fixtures, and the tool, timing rule and
+admission rule text must be the current ones.
 
 For `g12-activation`, the build stamp is recorded and disqualified as
 `stale_binary`; it is neutralised before the typed G-12 audio/transition

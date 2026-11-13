@@ -281,6 +281,7 @@ def parse_g12_output(stdout: str) -> dict[str, Any]:
 PROCESS_TRAILER = "PACED_PROCESS"
 SOURCE_TRAILER = "PACED_SOURCE"
 BUILD_TRAILER = "PACED_BUILD"
+ADMISSION_TRAILER = "PACED_ADMISSION"
 CATCH_PASS_MARKER = "All tests passed"
 
 
@@ -316,6 +317,20 @@ def parse_provenance_trailers(stdout: str) -> dict[str, Any]:
             "pulp_sanitizer": _provenance_value(build["pulp_sanitizer"])}
 
 
+def parse_admission_trailer(stdout: str) -> dict[str, Any]:
+    """The pre-run admission inputs the runner bound into every raw cell."""
+    lines = [line for line in stdout.splitlines() if line.startswith(ADMISSION_TRAILER + " ")]
+    _require(len(lines) == 1, "raw output must carry exactly one admission trailer")
+    fields = dict(_TOKEN.findall(lines[0]))
+    _require(set(fields) == {"load1", "logical_cpus", "max_load_per_cpu"}, "malformed admission trailer")
+    try:
+        return {"load1": None if fields["load1"] == "none" else float(fields["load1"]),
+                "logical_cpus": int(fields["logical_cpus"]),
+                "max_load_per_cpu": float(fields["max_load_per_cpu"])}
+    except ValueError as exc:
+        raise MatrixError("malformed admission trailer") from exc
+
+
 def parse_process_trailer(stdout: str) -> int:
     """Return the runner-recorded exit status appended after the fixture's output."""
     lines = [line for line in stdout.splitlines() if line.startswith(PROCESS_TRAILER + " ")]
@@ -342,6 +357,7 @@ def raw_cell_view(fixture: Fixture, stdout: str) -> dict[str, Any]:
                 planted_every=meta["planted_every"],
                 metrics=compute_metrics(parsed["rows"], meta["rate"], meta["frames"]))
     view.update(provenance)
+    view["admission"] = parse_admission_trailer(stdout)
     return view
 
 
@@ -526,6 +542,8 @@ def disqualifiers_for(receipt: dict[str, Any]) -> list[str]:
     if receipt["planted"]["sleep_us"]:
         reasons.append("planted_fault")
     admission = receipt["admission"]
+    if admission["max_load_per_cpu"] > DEFAULT_MAX_LOAD_PER_CPU:
+        reasons.append("admission_threshold_relaxed")
     if not admission["before"]["admitted"]:
         reasons.append("admission_before_failed")
     if not admission.get("after") or not admission["after"]["admitted"]:
@@ -543,6 +561,11 @@ def disqualifiers_for(receipt: dict[str, Any]) -> list[str]:
             reasons.append(f"cell_failed:{tag}")
         if cell["compiled_source"] != receipt["source"]["sha"] or cell["build_dirty"]:
             reasons.append(f"stale_binary:{tag}")
+        # The CMake cache can be flipped to Release without a rebuild, so the
+        # binary's own configure-time stamp must agree with it.
+        if FIXTURES[cell["fixture"]].row_format != "reference" and (
+                cell["build_type"] != "Release" or cell["build_type"] != profile["CMAKE_BUILD_TYPE"]):
+            reasons.append(f"build_type_mismatch:{tag}")
         if cell["callbacks"] != receipt["requested"]["callbacks"]:
             reasons.append(f"short_cell:{tag}")
         if not cell["metrics"]["thresholds_met"]:
@@ -550,14 +573,17 @@ def disqualifiers_for(receipt: dict[str, Any]) -> list[str]:
     return reasons
 
 
-def _finish(receipt: dict[str, Any]) -> dict[str, Any]:
-    cells = receipt["cells"]
-    receipt["totals"] = {
+def _totals(cells: list[dict[str, Any]]) -> dict[str, int]:
+    return {
         "cells": len(cells), "callbacks": sum(c["callbacks"] for c in cells),
         "deadline_misses": sum(c["metrics"]["deadline_misses"] for c in cells),
         "oracle_failures": sum(c["metrics"]["oracle_failures"] for c in cells),
         "cells_meeting_thresholds": sum(1 for c in cells if c["metrics"]["thresholds_met"]),
     }
+
+
+def _finish(receipt: dict[str, Any]) -> dict[str, Any]:
+    receipt["totals"] = _totals(receipt["cells"])
     receipt["disqualifiers"] = disqualifiers_for(receipt)
     receipt["timing_qualified"] = not receipt["disqualifiers"]
     receipt["receipt_sha256"] = receipt_digest(receipt)
@@ -641,6 +667,8 @@ def record_matrix(*, mode: str, source_root: Path, build_dir: Path, output_dir: 
                    f"tracked_changes={source_state['tracked_changes']} "
                    f"untracked_count={source_state['untracked_count']} "
                    f"untracked_digest={source_state['untracked_digest']}\n")
+        stdout += (f"{ADMISSION_TRAILER} load1={before['load'][0] if before['load'] else 'none'} "
+                   f"logical_cpus={ncpu} max_load_per_cpu={max_load_per_cpu!r}\n")
         stdout += (f"{BUILD_TRAILER} cmake_build_type={_provenance_token(build_profile['CMAKE_BUILD_TYPE'])} "
                    f"pulp_sanitizer={_provenance_token(build_profile['PULP_SANITIZER'])}\n")
         raw_path.write_text(stdout, encoding="utf-8")
@@ -683,6 +711,45 @@ REQUIRED_CELL = {"fixture", "variant", "rate", "frames", "callbacks", "test_case
                  "extras", "returncode", "raw_stdout", "metrics"}
 
 
+def _validate_admission(receipt: dict[str, Any]) -> None:
+    """Recompute both admission verdicts from the recorded load samples."""
+    admission = receipt["admission"]
+    _require(isinstance(admission, dict) and set(admission) ==
+             {"rule", "max_load_per_cpu", "logical_cpus", "before", "after"}, "admission fields mismatch")
+    _require(admission["rule"] == ADMISSION_RULE, "admission rule text changed")
+    threshold, ncpu = admission["max_load_per_cpu"], admission["logical_cpus"]
+    _require(type(threshold) in (int, float) and math.isfinite(threshold) and threshold > 0 and
+             type(ncpu) is int, "malformed admission inputs")
+    _require(ncpu == receipt["host_identity_class"].get("logical_cpus"),
+             "admission CPU count disagrees with host identity")
+    samples = [("before", admission["before"])]
+    if receipt["status"] == "COMPLETE":
+        _require(admission["after"] is not None, "complete run is missing its post-run admission sample")
+    if admission["after"] is not None:
+        samples.append(("after", admission["after"]))
+    for name, sample in samples:
+        _require(isinstance(sample, dict) and isinstance(sample.get("load"), list) and
+                 all(type(v) in (int, float) for v in sample["load"]), f"malformed {name} admission sample")
+        _require(sample == admission_verdict(sample["load"], ncpu, threshold),
+                 f"{name} admission verdict disagrees with its load sample")
+
+
+def _validate_mode(receipt: dict[str, Any]) -> None:
+    """The requested callback count and planted fault must be legal for the recorded mode."""
+    requested, planted = receipt["requested"], receipt["planted"]
+    callbacks = requested["callbacks"]
+    _require(type(callbacks) is int, "malformed requested callback count")
+    if receipt["mode"] == "qualification":
+        _require(callbacks == QUALIFICATION_CALLBACKS and planted["sleep_us"] == 0 and
+                 all(FIXTURES[n].qualifying for n in requested["fixtures"]),
+                 "qualification receipt has short-mode inputs")
+    else:
+        _require(receipt["mode"] == "short" and
+                 SHORT_CALLBACK_RANGE[0] <= callbacks <= SHORT_CALLBACK_RANGE[1], "unknown mode or callback count")
+    _require(all(n in FIXTURES for n in requested["fixtures"]) and
+             len(set(requested["fixtures"])) == len(requested["fixtures"]), "unexpected requested fixture")
+
+
 def validate_receipt(path: Path) -> dict[str, Any]:
     """Recompute every verdict from the retained raw rows and the receipt's own inputs."""
     receipt = json.loads(path.read_text(encoding="utf-8"))
@@ -703,6 +770,9 @@ def validate_receipt(path: Path) -> dict[str, Any]:
              "source marked clean despite tracked changes or untracked files")
     _require(receipt["receipt_sha256"] == receipt_digest(receipt), "receipt digest mismatch")
     _require(receipt["timing_rule"] == TIMING_RULE, "timing rule text changed")
+    _require(receipt["tool"] == "tools/graph_paced_timing_matrix.py", "unexpected tool")
+    _validate_admission(receipt)
+    _validate_mode(receipt)
     _require("hostname" not in json.dumps(receipt["host_identity_class"]).lower(),
              "host identity must be a class, not a hostname")
     _require(receipt["status"] in ("COMPLETE", "REFUSED"), "unknown status")
@@ -711,6 +781,7 @@ def validate_receipt(path: Path) -> dict[str, Any]:
                  "refused receipt must have no cells and a refused admission")
     seen = set()
     raw_cells: list[dict[str, Any]] = []
+    executable_digests: dict[str, str] = {}
     for cell in receipt["cells"]:
         _require(set(cell) == REQUIRED_CELL, "cell fields mismatch")
         fixture = FIXTURES.get(cell["fixture"])
@@ -741,15 +812,26 @@ def validate_receipt(path: Path) -> dict[str, Any]:
         _require(view["cmake_build_type"] == receipt["build_profile"]["CMAKE_BUILD_TYPE"] and
                  view["pulp_sanitizer"] == receipt["build_profile"]["PULP_SANITIZER"],
                  "build profile disagrees with raw output")
-        if fixture.row_format != "reference":
-            _require(view["cmake_build_type"] == view["build_type"],
-                     "build type disagrees with CMake build profile")
+        admission = receipt["admission"]
+        _require(view["admission"] == {"load1": admission["before"]["load"][0] if admission["before"]["load"] else None,
+                                       "logical_cpus": admission["logical_cpus"],
+                                       "max_load_per_cpu": float(admission["max_load_per_cpu"])},
+                 "admission inputs disagree with raw output")
+        # Static per-fixture fields are recomputed from the fixture registry.
+        _require((cell["test_case"], cell["executable"], cell["source_file"]) ==
+                 (fixture.test_case, fixture.executable, fixture.source),
+                 "cell fixture registry fields disagree")
+        _require(re.fullmatch(r"[0-9a-f]{64}", str(cell["executable_sha256"])) is not None,
+                 "malformed executable digest")
+        _require(executable_digests.setdefault(cell["executable"], cell["executable_sha256"]) ==
+                 cell["executable_sha256"], "one executable recorded with two digests")
         raw_cells.append({**cell, **{f: view[f] for f in RAW_BOUND_CELL_FIELDS}})
     if receipt["status"] == "COMPLETE":
         expected = {(f.name, v, r, fr) for f, v, r, fr in matrix_cells(
             receipt["requested"]["fixtures"],
             set(receipt["requested"]["frames_filter"]) if receipt["requested"]["frames_filter"] else None)}
         _require(seen == expected, "matrix incomplete")
+    _require(receipt["totals"] == _totals(raw_cells), "totals disagree with raw cells")
     # Qualification is derived from the raw-parsed cell values only.
     recomputed = disqualifiers_for({**receipt, "cells": raw_cells})
     _require(receipt["disqualifiers"] == recomputed, "disqualifiers disagree with receipt")

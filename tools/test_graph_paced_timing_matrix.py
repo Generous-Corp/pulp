@@ -25,8 +25,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import graph_paced_timing_matrix as matrix  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
-QUIET = lambda: ([0.1, 0.1, 0.1], 8)  # noqa: E731
-LOADED = lambda: ([40.0, 30.0, 20.0], 8)  # noqa: E731
+# The CPU count must match the host identity class the receipt records.
+NCPU = os.cpu_count() or 1
+QUIET = lambda: ([0.0, 0.0, 0.0], NCPU)  # noqa: E731
+LOADED = lambda: ([1000.0, 900.0, 800.0], NCPU)  # noqa: E731
 
 
 def clean_repo(parent: Path) -> Path:
@@ -176,6 +178,7 @@ class RawBindingTest(unittest.TestCase):
             "fixture=python-reference", "fixture=g5-graph-event")
         trailers = ("PACED_SOURCE sha=" + "a" * 40 + " dirty=0 tracked_changes=0 untracked_count=0 "
                     "untracked_digest=" + "0" * 64 + "\n"
+                    "PACED_ADMISSION load1=0.0 logical_cpus=8 max_load_per_cpu=0.25\n"
                     "PACED_BUILD cmake_build_type=python pulp_sanitizer=none\n")
         passing = body + "All tests passed (10 assertions in 1 test case)\n"
         self.assertEqual(matrix.raw_cell_view(
@@ -300,6 +303,139 @@ class SourceStateTest(unittest.TestCase):
             path.write_text(original, encoding="utf-8")
 
 
+def resign(receipt):
+    receipt["receipt_sha256"] = matrix.receipt_digest(receipt)
+    return receipt
+
+
+class TrustedFieldTamperTest(unittest.TestCase):
+    """Fields a verdict depends on are recomputed, never trusted, even when re-signed."""
+
+    def tampered(self, path, original, mutate, message):
+        changed = json.loads(original)
+        mutate(changed)
+        path.write_text(json.dumps(resign(changed)), encoding="utf-8")
+        try:
+            with self.assertRaisesRegex(matrix.MatrixError, message):
+                matrix.validate_receipt(path)
+        finally:
+            path.write_text(original, encoding="utf-8")
+
+    def test_admission_verdict_is_recomputed_from_the_load_sample(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            receipt, _ = record(out, load_reader=LOADED)
+            self.assertIn("admission_after_failed", receipt["disqualifiers"])
+            path = out / "receipt.json"
+            original = path.read_text(encoding="utf-8")
+
+            def flip_after(r):  # the failing load sample stays as recorded
+                r["admission"]["after"].update(admitted=True, verdict="admit", reason="")
+                r["disqualifiers"].remove("admission_after_failed")
+            self.tampered(path, original, flip_after, "after admission verdict disagrees")
+
+            def flip_before(r):
+                r["admission"]["before"].update(admitted=True, verdict="admit", reason="")
+                r["disqualifiers"].remove("admission_before_failed")
+            self.tampered(path, original, flip_before, "before admission verdict disagrees")
+
+            def relax_threshold(r):  # consistent verdicts under a relaxed threshold
+                r["admission"]["max_load_per_cpu"] = 1e6
+                for name in ("before", "after"):
+                    r["admission"][name] = matrix.admission_verdict(
+                        r["admission"][name]["load"], r["admission"]["logical_cpus"], 1e6)
+                r["disqualifiers"] = matrix.disqualifiers_for(r)
+            self.tampered(path, original, relax_threshold, "admission inputs disagree with raw output")
+
+            def lower_load(r):
+                for name in ("before", "after"):
+                    r["admission"][name] = matrix.admission_verdict(
+                        [0.0, 0.0, 0.0], r["admission"]["logical_cpus"], r["admission"]["max_load_per_cpu"])
+                r["disqualifiers"] = matrix.disqualifiers_for(r)
+            self.tampered(path, original, lower_load, "admission inputs disagree with raw output")
+
+            self.tampered(path, original,
+                          lambda r: r["admission"].__setitem__("logical_cpus", 10_000),
+                          "CPU count disagrees with host identity")
+            matrix.validate_receipt(path)
+
+    def test_totals_registry_fields_and_mode_are_recomputed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            record(out)
+            path = out / "receipt.json"
+            original = path.read_text(encoding="utf-8")
+            self.tampered(path, original, lambda r: r["totals"].__setitem__("deadline_misses", 0)
+                          if r["totals"]["deadline_misses"] else r["totals"].__setitem__("deadline_misses", 7),
+                          "totals disagree")
+            self.tampered(path, original, lambda r: r["cells"][0].__setitem__("source_file", "x.cpp"),
+                          "fixture registry fields")
+            self.tampered(path, original, lambda r: r.__setitem__("mode", "qualification"),
+                          "qualification receipt has short-mode inputs")
+            self.tampered(path, original, lambda r: r["admission"].__setitem__("rule", "anything"),
+                          "admission rule text changed")
+
+
+FAKE_FIXTURE = """#!{python}
+import os, sys
+sys.path.insert(0, {tools!r})
+import graph_paced_timing_matrix as m
+env = os.environ
+text = m.reference_cell_output(env["PULP_PACED_VARIANT"], int(env["PULP_PACED_RATE"]),
+                               int(env["PULP_PACED_FRAMES"]), int(env["PULP_PACED_CALLBACKS"]), 0, 1)
+text = text.replace("fixture=python-reference", "fixture=g6-voice-bank")
+text = text.replace("build_type=python", "build_type={stamp}")
+sys.stdout.write(text + "All tests passed (1 assertion in 1 test case)\\n")
+"""
+
+
+class CompiledBuildTypeTest(unittest.TestCase):
+    """A Release cache over a binary stamped Debug (reconfigured, not rebuilt) cannot qualify."""
+
+    def run_fake(self, tmp, stamp):
+        build = tmp / "build"
+        exe = build / matrix.FIXTURES["g6-voice-bank"].executable
+        exe.parent.mkdir(parents=True)
+        exe.write_text(FAKE_FIXTURE.format(python=sys.executable, tools=str(ROOT / "tools"), stamp=stamp),
+                       encoding="utf-8")
+        exe.chmod(0o755)
+        (build / "CMakeCache.txt").write_text("CMAKE_BUILD_TYPE:STRING=Release\nPULP_SANITIZER:STRING=\n",
+                                              encoding="utf-8")
+        out = tmp / "out"
+        receipt, code = matrix.record_matrix(
+            mode="short", source_root=ROOT, build_dir=build, output_dir=out, fixtures=["g6-voice-bank"],
+            callbacks=8, frames_filter={128}, planted_sleep_us=0, planted_every=1,
+            max_load_per_cpu=matrix.DEFAULT_MAX_LOAD_PER_CPU, timeout_seconds=120, load_reader=QUIET)
+        self.assertEqual(code, 0)
+        return receipt, out / "receipt.json"
+
+    def test_debug_stamp_under_release_cache_is_disqualified_when_recorded_and_validated(self):
+        tag = "build_type_mismatch:g6-voice-bank/eight-slot/48000/128"
+        with tempfile.TemporaryDirectory() as tmp:
+            receipt, path = self.run_fake(Path(tmp), "Debug")
+            self.assertEqual(receipt["build_profile"]["CMAKE_BUILD_TYPE"], "Release")
+            self.assertEqual(receipt["cells"][0]["build_type"], "Debug")
+            self.assertIn(tag, receipt["disqualifiers"])
+            matrix.validate_receipt(path)
+            original = path.read_text(encoding="utf-8")
+            for mutate, message in (
+                (lambda r: r["disqualifiers"].remove(tag), "disqualifiers disagree"),
+                (lambda r: (r["cells"][0].__setitem__("build_type", "Release"),
+                            r["disqualifiers"].remove(tag)), "cell build_type disagrees with raw output"),
+            ):
+                changed = json.loads(original)
+                mutate(changed)
+                path.write_text(json.dumps(resign(changed)), encoding="utf-8")
+                with self.assertRaisesRegex(matrix.MatrixError, message):
+                    matrix.validate_receipt(path)
+
+    def test_release_stamp_control_has_no_build_type_disqualifier(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            receipt, path = self.run_fake(Path(tmp), "Release")
+            self.assertFalse([d for d in receipt["disqualifiers"] if d.startswith("build_type_mismatch:")])
+            matrix.validate_receipt(path)
+
+
 class MissCounterTest(unittest.TestCase):
     def test_deadline_rule_boundary(self):
         period = 4096 * 1_000_000_000 // 48000
@@ -332,13 +468,14 @@ class QualificationRuleTest(unittest.TestCase):
         for fixture, variant, rate, frames in matrix.matrix_cells(matrix.QUALIFYING_FIXTURES, None):
             cells.append({"fixture": fixture.name, "variant": variant, "rate": rate, "frames": frames,
                           "callbacks": matrix.QUALIFICATION_CALLBACKS, "returncode": 0,
-                          "compiled_source": "a" * 40, "build_dirty": 0,
+                          "compiled_source": "a" * 40, "build_dirty": 0, "build_type": "Release",
                           "metrics": {"thresholds_met": True}})
         return {"mode": "qualification", "status": "COMPLETE",
                 "requested": {"callbacks": matrix.QUALIFICATION_CALLBACKS,
                               "fixtures": list(matrix.QUALIFYING_FIXTURES), "frames_filter": None},
                 "planted": {"sleep_us": 0, "every": 1},
-                "admission": {"before": {"admitted": True}, "after": {"admitted": True}},
+                "admission": {"max_load_per_cpu": matrix.DEFAULT_MAX_LOAD_PER_CPU,
+                              "before": {"admitted": True}, "after": {"admitted": True}},
                 "build_profile": {"CMAKE_BUILD_TYPE": "Release", "PULP_SANITIZER": ""},
                 "source": {"sha": "a" * 40, "dirty": False}, "cells": cells}
 
@@ -351,6 +488,8 @@ class QualificationRuleTest(unittest.TestCase):
             "thresholds_failed:": lambda r: r["cells"][3]["metrics"].__setitem__("thresholds_met", False),
             "stale_binary:": lambda r: r["cells"][0].__setitem__("compiled_source", "b" * 40),
             "short_cell:": lambda r: r["cells"][1].__setitem__("callbacks", 99999),
+            "build_type_mismatch:": lambda r: r["cells"][2].__setitem__("build_type", "Debug"),
+            "admission_threshold_relaxed": lambda r: r["admission"].__setitem__("max_load_per_cpu", 0.5),
         }
         for reason, mutate in defects.items():
             receipt = self.ideal()
