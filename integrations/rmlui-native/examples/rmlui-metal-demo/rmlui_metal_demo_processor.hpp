@@ -21,9 +21,8 @@ class Processor final : public ::pulp::format::Processor {
     void define_parameters(::pulp::state::StateStore&) override {}
     void prepare(const ::pulp::format::PrepareContext&) override {}
     void process(::pulp::audio::BufferView<float>& output,
-                 const ::pulp::audio::BufferView<const float>& input,
-                 ::pulp::midi::MidiBuffer&, ::pulp::midi::MidiBuffer&,
-                 const ::pulp::format::ProcessContext&) override {
+                 const ::pulp::audio::BufferView<const float>& input, ::pulp::midi::MidiBuffer&,
+                 ::pulp::midi::MidiBuffer&, const ::pulp::format::ProcessContext&) override {
         for (std::size_t channel = 0; channel < output.num_channels(); ++channel) {
             auto out = output.channel(channel);
             if (channel >= input.num_channels()) {

@@ -40,14 +40,17 @@ body { width: 100%; height: 100%; margin: 0; background: #111827; }
 class Editor final : public ::pulp::format::Editor {
   public:
     explicit Editor(::pulp::format::EditorContext& context) : context_(context) {}
-    ~Editor() override { teardown(false); }
+    ~Editor() override {
+        teardown(false);
+    }
 
     bool supports_parent(::pulp::format::NativeParentKind kind) const override {
         return kind == ::pulp::format::NativeParentKind::cocoa_view;
     }
 
     bool attach(const ::pulp::format::NativeParent& parent) override {
-        if (parent.kind != ::pulp::format::NativeParentKind::cocoa_view || !parent.handle || surface_)
+        if (parent.kind != ::pulp::format::NativeParentKind::cocoa_view || !parent.handle ||
+            surface_)
             return false;
         id<MTLDevice> device = MTLCreateSystemDefaultDevice();
         if (!device)
@@ -70,13 +73,17 @@ class Editor final : public ::pulp::format::Editor {
         return true;
     }
 
-    void detach() override { teardown(true); }
+    void detach() override {
+        teardown(true);
+    }
     void invalidate() override {
         if (ui_)
             ui_->invalidate();
         teardown(false);
     }
-    ::pulp::format::EditorSize size() const override { return size_; }
+    ::pulp::format::EditorSize size() const override {
+        return size_;
+    }
     bool set_size(const ::pulp::format::EditorSize& size) override {
         if (size.width == 0 || size.height == 0)
             return false;
@@ -84,8 +91,12 @@ class Editor final : public ::pulp::format::Editor {
         return true;
     }
     ::pulp::format::ViewSize size_hints() const override {
-        return {.preferred_width = 320, .preferred_height = 240, .min_width = 240,
-                .min_height = 180, .max_width = 1280, .max_height = 960};
+        return {.preferred_width = 320,
+                .preferred_height = 240,
+                .min_width = 240,
+                .min_height = 180,
+                .max_width = 1280,
+                .max_height = 960};
     }
     void idle() override {
         if (ui_)
