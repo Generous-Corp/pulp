@@ -38,6 +38,17 @@ merge_group
     off the chain, or more than MAX_QUEUE_WALK entries) the resolver prints the
     fallback, which every caller treats as "native build required".
 
+ENTRY DELTA (merge groups, `--entry-delta`)
+    The docs entry-delta step in build.yml classifies a group's OWN entry,
+    `merge_group.base_sha..head_sha`, not the batch. That is sound only under
+    the ALLGREEN merge-queue strategy, where every group ahead had to pass its
+    own required checks, so the step reads the live strategy before it uses
+    the answer. `entry_delta_base` returns the usable `base_sha` for that
+    diff, or None (printed as an empty line), which the step treats as
+    "delta unreadable" and keeps the native build. It never replaces the
+    main-tip base above: the HOLD check, the queue breaker, classify and the
+    bump fast path keep judging the whole batch.
+
 workflow_dispatch / anything else
     No event-pinned base exists. Fall back to `origin/main`; a shallow caller
     without that ref fails closed to a native build.
@@ -56,6 +67,8 @@ Usage (reads the GitHub Actions context from the environment):
     python3 tools/scripts/resolve_classify_base.py
         env: GITHUB_EVENT_NAME, PR_BASE_SHA, PUSH_BEFORE_SHA,
              MERGE_GROUP_BASE_SHA, MERGE_GROUP_BASE_REF
+    python3 tools/scripts/resolve_classify_base.py --entry-delta
+        env: MERGE_GROUP_BASE_SHA; prints the entry-delta base or an empty line
 
 Prints the resolved base ref to stdout. Exit code is always 0 — the base is
 data, not a pass/fail signal.
@@ -140,6 +153,18 @@ def merge_group_main_base(
     return None
 
 
+def entry_delta_base(merge_group_base_sha: str | None) -> str | None:
+    """The base of a merge group's own entry delta, or None when unusable.
+
+    `merge_group.base_sha` is the group commit's first parent: main for the
+    first entry in the queue, the previous speculative group for every later
+    one, so `base_sha..head_sha` is exactly this entry's change. A missing,
+    all-zero or malformed sha is None, and the caller keeps the native build.
+    """
+    usable = _usable_sha(merge_group_base_sha)
+    return usable.lower() if usable else None
+
+
 def _git(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", *args], capture_output=True, text=True, encoding="utf-8", check=False
@@ -202,7 +227,16 @@ def resolve_from_env(environ: dict[str, str] | None = None) -> str:
     return resolved
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    if args == ["--entry-delta"]:
+        base = entry_delta_base(os.environ.get("MERGE_GROUP_BASE_SHA"))
+        sys.stderr.write(f"[classify-base] entry delta base={base or '(unusable)'}\n")
+        print(base or "")
+        return 0
+    if args:
+        sys.stderr.write(f"usage: {sys.argv[0]} [--entry-delta]\n")
+        return 2
     base = resolve_from_env()
     sys.stderr.write(
         f"[classify-base] event={os.environ.get('GITHUB_EVENT_NAME', '') or '(unset)'} "
