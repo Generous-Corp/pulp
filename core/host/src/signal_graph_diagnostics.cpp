@@ -46,10 +46,10 @@ void reclaim_parked_edge_probes(const runtime::Slot<Graph>& slot) noexcept {
 template <typename Graph, typename Cell, typename Identity>
 void detach_edge_probe(const runtime::Slot<Graph>& slot, Cell& cell, Identity& identity) {
     reclaim_parked_edge_probes(slot);
-    if (cell.can_park())
-        cell.reset();
-    else if (auto* probe = cell.owned())
-        probe->samples.detach();
+    if (!cell.reset()) {
+        if (auto* probe = cell.owned())
+            probe->samples.detach();
+    }
     identity = {};
     reclaim_parked_edge_probes(slot);
 }
