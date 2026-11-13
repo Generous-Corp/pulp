@@ -2,11 +2,11 @@
   "schema": "pulp.graph.p1-event-admission-consumer.v1",
   "consumer": "examples/p1-event-admission-consumer",
   "status": "NOT_QUALIFIED",
-  "source_head": "16c0477d3a43d24fc17539d426557cd6d30813c5",
+  "source_head": "59fff62c0d355677bd5f44c87535988db87730d8",
   "source_head_note": "fixture commit; the receipt itself lands in the following docs commit",
-  "qualification_scope": "PARTIAL: all four families PASS individually from an installed SDK (MIDI host ingress, graph-authored trigger lane, PluginSlot parameter mailbox, VoiceBankBinding voice intent); NOT_QUALIFIED because the remaining admission-contract rows are NOT_CHECKED",
+  "qualification_scope": "PARTIAL: all four families PASS individually and together under one test-owned epoch and absolute sample origin from an installed SDK (MIDI host ingress into SignalGraph::inject_midi, graph-authored trigger lane, PluginSlot parameter mailbox, VoiceBankBinding voice intent); NOT_QUALIFIED because the remaining admission-contract rows are NOT_CHECKED",
   "controls": {
-    "midi": "PASS (installed SDK): HostEventIngress two-block absolute ingress, stale epoch, late, duplicate sequence, stable producer ordering at partitions 4 and 8; projection into SignalGraph::inject_midi and UMP/MPE sidecars NOT_CHECKED in this fixture",
+    "midi": "PASS (installed SDK): HostEventIngress two-block absolute ingress, stale epoch, late, duplicate sequence, stable producer ordering at partitions 4 and 8; in the combined control, ingress projection converted to block-relative offsets and injected through SignalGraph::inject_midi into a MIDI input node routed by connect_midi to a CustomNodeType consumer, at five schedules. UMP and MPE expression sidecars are NOT_CHECKED in this fixture",
     "parameter": "PASS (installed SDK, PluginSlot node): SignalGraph::inject_parameter_events into an add_plugin_node PluginSlot over four blocks at block sizes 4 and 8; latest-wins, sorted delivery, stable equal-offset order, one-shot mailbox, source-side overflow returns false with the 1024-event retained prefix published, partition-invariant delivery. Plain add_processor_node Processor delivery is not relied on and stays UNAVAILABLE",
     "parameter_queue_standalone": "PASS: ParameterEventQueue stable sort and fixed-capacity overflow (standalone)",
     "partitions": [
@@ -39,22 +39,100 @@
       "voice-bank-double-release-refusal",
       "voice-bank-retired-generation-refusal",
       "voice-bank-stale-generation-refusal",
-      "voice-bank-stale-epoch-refusal"
+      "voice-bank-stale-epoch-refusal",
+      "combined-midi-stale-epoch-refusal",
+      "combined-voice-stale-generation-refusal"
     ],
-    "mutation_control_count": 13,
+    "mutation_control_count": 29,
     "trigger": "PASS (installed SDK, graph-authored lane): CustomNodeType::process_events producer/consumer joined by SignalGraph::connect_graph_event; GraphEventWriter::emit_at current-block delivery, bounded-future delivery staged in block 0 and delivered in the later block containing it, Future, Late and Overflow refusals, deterministic same-sample sequence order, reset cancelling a staged record with an epoch advance, identical events and audio across schedules 2+2+4 and 3+5. Public TriggerContext was refused as a seam and is not used",
     "trigger_graph": "PASS (installed SDK): existing trigger-graph two-block absolute sample, sequence, epoch and reset check; trigger-graph evidence, not a TriggerContext consumer",
     "voice_intent": "PASS (installed SDK, control-side): pulp::host::VoiceBankBinding with MpeVoiceBankOwner over 32 samples at partitions 4 and 8; note-on at sample 2 lands on one slot and generation, note-off at sample 10 puts that generation into release, double release, wrong slot, wrong generation, retired generation and retired generation on the reused slot are refused with StaleGeneration via dispatch_deferred, a live generation accepts deferred pressure and release, a stale epoch is refused; audio, slots and generations are partition-invariant. No graph voice allocator or audio scheduler is claimed",
-    "cross_block_verified": "MIDI ingress, trigger graph, graph-authored event lane, PluginSlot parameter mailbox and voice-bank binding, each from an installed SDK across at least two blocks and two partition schedules; each family runs in its own graph or binding"
+    "cross_block_verified": "MIDI ingress, trigger graph, graph-authored event lane, PluginSlot parameter mailbox and voice-bank binding, each from an installed SDK across at least two blocks and two partition schedules, and all four together on one block grid across five schedules",
+    "combined_epoch": "PASS (installed SDK): one test-owned epoch 7 and absolute sample origin over 256 samples; per block a control-side adapter projects HostEventIngress MIDI into inject_midi and converts absolute parameter records to block-relative inject_parameter_events into a PluginSlot node in the same SignalGraph, a graph-authored lane producer in that graph emits at absolute targets (bounded-future and current-block), and VoiceBankBinding note-on/note-off intent is published and rendered on the same block boundaries. Native epochs are mapped to the test epoch and held constant (midi 7, parameter none=0, trigger lane 1, voice bank 1). The canonical (family, epoch, absolute sample, order key) trace, voice audio and epoch map are identical across schedules 1, 32, 64, 127+127+2 and 3+61+1+127+64. The voice bank renders its own prepared graph on the shared block grid; it is not a SignalGraph node",
+    "combined_schedules": [
+      [
+        1
+      ],
+      [
+        32
+      ],
+      [
+        64
+      ],
+      [
+        127,
+        127,
+        2
+      ],
+      [
+        3,
+        61,
+        1,
+        127,
+        64
+      ]
+    ],
+    "combined_schedule_note": "uniform schedules repeat the listed block size to 256 samples",
+    "sequence_mutation": {
+      "result": "PASS (in-binary planted negatives): one record's order key changed per family, plus the two equal-sample MIDI records swapped; only the touched family's digest changes and a record diff names only the touched records",
+      "digest": "FNV-1a 64 per family over canonical records in canonical order",
+      "trace_file": "docs/evidence/p1-event-admission-consumer-20261112/combined-trace.jsonl",
+      "trace_file_sha256": "80d08295b8321e279f8ec04914edc9d42866bf3ee6edb621fecdde86125bff92",
+      "record_count": 27,
+      "baseline_digests": {
+        "midi": "349d8d9cbaead7ac",
+        "parameter": "21c6a5a653826137",
+        "trigger": "79300472c428c8e4",
+        "voice": "76096164fc3782a6"
+      },
+      "order_key_mutated_digests": {
+        "midi": {
+          "midi": "a2155fa17f2b098f",
+          "parameter": "21c6a5a653826137",
+          "trigger": "79300472c428c8e4",
+          "voice": "76096164fc3782a6"
+        },
+        "parameter": {
+          "midi": "349d8d9cbaead7ac",
+          "parameter": "94c415c19311de76",
+          "trigger": "79300472c428c8e4",
+          "voice": "76096164fc3782a6"
+        },
+        "trigger": {
+          "midi": "349d8d9cbaead7ac",
+          "parameter": "21c6a5a653826137",
+          "trigger": "99cf04c75281c3a5",
+          "voice": "76096164fc3782a6"
+        },
+        "voice": {
+          "midi": "349d8d9cbaead7ac",
+          "parameter": "21c6a5a653826137",
+          "trigger": "79300472c428c8e4",
+          "voice": "f7686f59a6467845"
+        }
+      },
+      "midi_order_swap_digests": {
+        "midi": "3069a9b08c5c9518",
+        "parameter": "21c6a5a653826137",
+        "trigger": "79300472c428c8e4",
+        "voice": "76096164fc3782a6"
+      }
+    },
+    "callback_observation": "graph-lane, reset and combined consumers and the PluginSlot probe record into preallocated fixed arrays with a count and an overflow flag asserted after rendering; the block loop makes no topology call. Construction property only: no allocation instrumentation, RTSan or realtime claim"
   },
+  "closed_rows": [
+    "single shared test-owned epoch and absolute sample origin across all four families (combined control)",
+    "MIDI 1.0 projection through SignalGraph::inject_midi inside this fixture",
+    "partition schedules beyond two (five for the combined control)",
+    "a sequence mutation that fails while the unaffected records remain explainable"
+  ],
   "not_checked_rows": [
-    "single shared epoch and absolute sample origin coordinating all four families in one consumer projection (each family runs in its own graph or binding)",
-    "MIDI/UMP/MPE projection through SignalGraph::inject_midi inside this fixture (covered separately by examples/g5-host-event-consumer)",
+    "UMP and MPE expression sidecars through SignalGraph::inject_midi(node, midi, mpe) inside this fixture (covered separately by examples/g5-host-event-consumer)",
     "parameter overflow telemetry counters (overflow_count) through the graph mailbox; only the false return and retained prefix are asserted",
-    "a sequence mutation that fails while the unaffected records remain explainable",
-    "callback allocation and topology-mutation freedom (the probe PluginSlot records events into a vector)",
-    "partition schedules beyond two per family (for example 1/32/64/127/256)",
-    "routed versus reference executor parity for the graph-authored lane and parameter mailbox"
+    "reset and epoch cancellation applied to all four families at once; reset is checked per family",
+    "callback allocation freedom as a measured or realtime property (fixture callbacks use fixed arrays; runtime and VoiceBankBinding::render are not instrumented)",
+    "routed versus reference executor parity for the graph-authored lane, MIDI input and parameter mailbox",
+    "voice intent as a SignalGraph node; the voice bank runs its own prepared graph on the shared block grid"
   ],
   "unavailable_lanes": [
     "runtime",
@@ -84,15 +162,21 @@
       "custom_node_events_hpp_sha256": "65e1cee2feab83530094c72b89dc87bde523c9b4ac10e5822e370f6dcc14f114",
       "plugin_slot_hpp_sha256": "69927dee51b495256394c0561f8e31be2abac5cf73dbd462a310565d637a92bb",
       "parameter_event_queue_hpp_sha256": "74e61cf0b1cd57caf4357e26433ec3e0f2aa7a9a838c56049b3ad3f0e639b653",
-      "installed_headers_match_origin_main": "1042181bec4b33ea3180ced14972a8ab01fd63bf"
+      "installed_headers_match_origin_main": "d486ff70c6b02c59acdeac504af747724d1fb906",
+      "trigger_graph_hpp_sha256": "f26b6613f55461f4f0d36fe4b2d027b45246b9220f18213b271d17831fbac68a",
+      "signal_graph_execution_snapshot_hpp_sha256": "fb2d9b56aadf50517075a3d915de0685cb9e08ec0be44b1af10d6288b774fbec",
+      "midi_buffer_hpp_sha256": "fc89c0c56e027b62538257f2eea76ea52bc85df42c65a5ed4394451565aa4d1f",
+      "midi_message_hpp_sha256": "3b3e65207b2467e835cade6fd5ed82d9c22c5ac5515715528cb85dcdf62ee716",
+      "installed_headers_origin_main_note": "all listed headers are byte-identical to that head except signal_graph_runtime.hpp, whose inject_parameter_events comment differs: origin/main adds a91f5681944c, which refuses live parameter injection into Processor nodes and leaves PluginSlot nodes unchanged; the fixture injects only into a PluginSlot node"
     },
     "previous_refusal": "installed SDK 1.54.0 did not contain graph_event_contract.hpp"
   },
   "run": {
     "command": "build-p1-event-admission/pulp-p1-event-admission-consumer",
     "returncode": 0,
-    "stdout": "p1-event-admission PASS checks=223 partitions=4,8 graph_event_schedules=2+2+4,3+5 graph_events=9 voice_slot_reuse=1 consumer_gate=NOT_QUALIFIED",
-    "ctest": "p1-event-admission-public-consumer 1/1 passed"
+    "stdout": "p1-event-admission PASS checks=2763 partitions=4,8 graph_event_schedules=2+2+4,3+5 graph_events=9 voice_slot_reuse=1 combined_schedules=1,32,64,127+127+2,3+61+1+127+64 combined_records=27 digests=midi:349d8d9cbaead7ac,parameter:21c6a5a653826137,trigger:79300472c428c8e4,voice:76096164fc3782a6 sequence_mutations=5 consumer_gate=NOT_QUALIFIED",
+    "ctest": "p1-event-admission-public-consumer 1/1 passed",
+    "trace_command": "build-p1-event-admission/pulp-p1-event-admission-consumer --trace docs/evidence/p1-event-admission-consumer-20261112/combined-trace.jsonl (checks=2765: two file-write checks)"
   },
   "fixture_corrections": [
     "midi-duplicate-sequence-refusal: published before project(); HostEventIngress detects duplicates only among staged records and project() removes delivered records",
@@ -151,6 +235,70 @@
     {
       "mutation": "voice bank: retired-generation record replaced by the live generation",
       "result": "FAIL rule=voice-bank-stale-generation-refusal"
+    },
+    {
+      "mutation": "combined: producer adds one late emit_at per block after the first, shifting lane sequences by block count",
+      "result": "FAIL rule=combined-partition-invariance"
+    },
+    {
+      "mutation": "combined: producer of the sample-2 note-on changed from 4 to 2",
+      "result": "FAIL rule=combined-midi-tie-order"
+    },
+    {
+      "mutation": "combined: stale-epoch probe published with the live test epoch",
+      "result": "FAIL rule=combined-midi-stale-epoch-refusal"
+    },
+    {
+      "mutation": "combined: MIDI adapter offset forced to 0",
+      "result": "FAIL rule=combined-midi-absolute"
+    },
+    {
+      "mutation": "combined: parameter adapter offset forced to 0",
+      "result": "FAIL rule=combined-parameter-order"
+    },
+    {
+      "mutation": "combined: trigger emitted one sample after its target",
+      "result": "FAIL rule=combined-trigger-order"
+    },
+    {
+      "mutation": "combined: voice note-off sent on another MIDI channel",
+      "result": "FAIL rule=combined-voice-release-intent"
+    },
+    {
+      "mutation": "combined: voice records published at the block start instead of their sample",
+      "result": "FAIL rule=combined-voice-onset-sample"
+    },
+    {
+      "mutation": "combined: voice note-off published as a note-on (retrigger releases the old generation, so release-intent still passes)",
+      "result": "FAIL rule=combined-voice-onset-sample"
+    },
+    {
+      "mutation": "combined: stale-generation probe uses the slot's own generation",
+      "result": "FAIL rule=combined-voice-stale-generation-refusal"
+    },
+    {
+      "mutation": "combined: graph reset requested at sample 200",
+      "result": "FAIL rule=combined-epoch-map"
+    },
+    {
+      "mutation": "combined: consumer trigger array shrunk to 4 entries",
+      "result": "FAIL rule=combined-observation-capacity"
+    },
+    {
+      "mutation": "sequence mutation: digest ignores the order key",
+      "result": "FAIL rule=sequence-mutation-detected"
+    },
+    {
+      "mutation": "sequence mutation: digest also mixes each record's order key into the next family",
+      "result": "FAIL rule=sequence-mutation-isolated"
+    },
+    {
+      "mutation": "sequence mutation: planted negative also changes a second record",
+      "result": "FAIL rule=sequence-mutation-explained"
+    },
+    {
+      "mutation": "sequence mutation: digest made order-insensitive (sum of record hashes)",
+      "result": "FAIL rule=order-mutation-detected"
     }
   ]
 }

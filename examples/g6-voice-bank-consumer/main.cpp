@@ -3,10 +3,12 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <iostream>
 #include <limits>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 using namespace pulp;
@@ -627,6 +629,334 @@ void check_frozen_a1_vectors() {
     }
 }
 
+constexpr std::size_t kScriptBlock = 32;
+constexpr std::size_t kScriptFrames = 96;
+constexpr std::array<float, 8> kSavedLevels{0.25f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f};
+
+void append(Stereo& output, const audio::BufferView<float>& view) {
+    for (std::size_t i = 0; i < view.num_samples(); ++i) {
+        output.left.push_back(view.channel(0)[i]);
+        output.right.push_back(view.channel(1)[i]);
+    }
+}
+
+// Eight notes on eight member channels, released together, rendered in fixed
+// blocks starting at `first`. Each slot carries its own level, so the sum
+// depends on every restored value.
+Stereo render_level_script(VoiceBankBinding& bank, std::uint64_t first) {
+    Stereo output;
+    for (std::size_t start = 0; start < kScriptFrames; start += kScriptBlock) {
+        check(bank.begin_block(first + start, kScriptBlock) == HostEventResult::Accepted,
+              "script-begin");
+        std::uint64_t sequence = 1;
+        for (std::uint8_t slot = 0; slot < 8; ++slot) {
+            const auto channel = static_cast<std::uint8_t>(slot + 1);
+            const auto note = static_cast<std::uint8_t>(60 + slot);
+            if (start == 0)
+                check(bank.publish(event(bank.epoch(), first, sequence++,
+                                         midi::MidiEvent::note_on(channel, note, 100))) ==
+                          HostEventResult::Accepted,
+                      "script-note-on");
+            if (start == kScriptBlock)
+                check(bank.publish(event(bank.epoch(), first + 48, sequence++,
+                                         midi::MidiEvent::note_off(channel, note))) ==
+                          HostEventResult::Accepted,
+                      "script-note-off");
+        }
+        audio::Buffer<float> buffer(2, kScriptBlock);
+        auto view = buffer.view();
+        check(bank.render(view, first + start, kScriptBlock) == VoiceBankBindingCode::Ok,
+              "script-render");
+        append(output, view);
+    }
+    check(owner(bank).allocator().active_count() == 0, "script-released");
+    return output;
+}
+
+bool bit_equal(const Stereo& a, const Stereo& b) {
+    return a.left.size() == b.left.size() && a.right.size() == b.right.size() &&
+           std::memcmp(a.left.data(), b.left.data(), a.left.size() * sizeof(float)) == 0 &&
+           std::memcmp(a.right.data(), b.right.data(), a.right.size() * sizeof(float)) == 0;
+}
+
+float peak(const audio::BufferView<float>& view) {
+    float result = 0.0f;
+    for (std::size_t channel = 0; channel < 2; ++channel)
+        for (std::size_t i = 0; i < view.num_samples(); ++i)
+            result = std::max(result, std::abs(view.channel(channel)[i]));
+    return result;
+}
+
+bool exactly_silent(const audio::BufferView<float>& view) {
+    for (std::size_t channel = 0; channel < 2; ++channel)
+        for (std::size_t i = 0; i < view.num_samples(); ++i)
+            if (view.channel(channel)[i] != 0.0f)
+                return false;
+    return true;
+}
+
+bool same_state(const VoiceBankState& a, const VoiceBankState& b) {
+    if (a.schema_version != b.schema_version || a.manifest_sha256 != b.manifest_sha256 ||
+        a.parameters.size() != b.parameters.size())
+        return false;
+    for (std::size_t i = 0; i < a.parameters.size(); ++i) {
+        const auto& x = a.parameters[i];
+        const auto& y = b.parameters[i];
+        if (x.slot_ordinal != y.slot_ordinal || x.path != y.path || x.target != y.target ||
+            std::memcmp(&x.value, &y.value, sizeof(float)) != 0)
+            return false;
+    }
+    return true;
+}
+
+void put_u32(std::vector<std::uint8_t>& bytes, std::size_t at, std::uint32_t value) {
+    bytes[at] = static_cast<std::uint8_t>(value >> 24);
+    bytes[at + 1] = static_cast<std::uint8_t>(value >> 16);
+    bytes[at + 2] = static_cast<std::uint8_t>(value >> 8);
+    bytes[at + 3] = static_cast<std::uint8_t>(value);
+}
+
+std::uint32_t get_u32(const std::vector<std::uint8_t>& bytes, std::size_t at) {
+    return (static_cast<std::uint32_t>(bytes[at]) << 24) |
+           (static_cast<std::uint32_t>(bytes[at + 1]) << 16) |
+           (static_cast<std::uint32_t>(bytes[at + 2]) << 8) |
+           static_cast<std::uint32_t>(bytes[at + 3]);
+}
+
+// Persist the declared slot levels of a live, sounding bank; restore them onto
+// a freshly prepared bank; replay the identical note script. Notes are not
+// state, so the restored bank must start with no active voice.
+void check_state_round_trip() {
+    VoiceBankBindingResult status;
+    auto live = make_bank(schema(), status);
+    check(static_cast<bool>(live), "restore-prepare-live");
+    const auto levels = kSavedLevels;
+    for (std::uint32_t slot = 0; slot < 8; ++slot)
+        check(live->set_slot_parameter(slot, "level", levels[slot]), "restore-set-live-level");
+    const auto reference = render_level_script(*live, 0);
+    auto unlevelled = make_bank(schema(), status);
+    check(static_cast<bool>(unlevelled), "restore-prepare-control");
+    const auto control = render_level_script(*unlevelled, 0);
+    check(!bit_equal(reference, control), "restore-levels-audible");
+    check(step(*live, kScriptFrames, {midi::MidiEvent::note_on(1, 72, 127)}) ==
+              VoiceBankBindingCode::Ok,
+          "restore-hold-live-note");
+    check(owner(*live).allocator().active_count() == 1, "restore-live-sounding");
+
+    const auto saved = capture_levels(*live, levels);
+    const auto encoded = encode_voice_bank_state(live->manifest(), saved);
+    check(encoded.valid && !encoded.encoding.empty(), "restore-encode");
+
+    auto fresh = make_bank(schema(), status);
+    check(static_cast<bool>(fresh), "restore-prepare-fresh");
+    VoiceBankBinding& target = *fresh;
+    check(target.manifest().sha256 == live->manifest().sha256, "restore-manifest-identity");
+    VoiceBankState decoded;
+    check(decode_voice_bank_state(encoded.encoding, decoded), "restore-decode");
+    VoiceBankState restored;
+    std::string error;
+    check(restore_voice_bank_state(target.manifest(), decoded, restored, &error), "restore-accept");
+    check(restored.parameters.size() == 8, "restore-parameter-count");
+    check(reapply_state(target, restored), "restore-reapply");
+    check(owner(target).allocator().active_count() == 0, "restore-no-active-voices");
+    const auto reencoded = encode_voice_bank_state(target.manifest(), restored);
+    check(reencoded.valid && reencoded.encoding == encoded.encoding &&
+              reencoded.sha256 == encoded.sha256,
+          "restore-canonical-bytes");
+    const auto replay = render_level_script(target, 0);
+    check(bit_equal(replay, reference), "restore-audio-bit-exact");
+
+    // Every refusal leaves the previously restored destination untouched.
+    const auto sentinel = restored;
+    auto stale = decoded;
+    stale.manifest_sha256[0] = stale.manifest_sha256[0] == '0' ? '1' : '0';
+    check(!restore_voice_bank_state(target.manifest(), stale, restored) &&
+              same_state(restored, sentinel),
+          "restore-sha-mismatch-refusal");
+    auto revised = schema();
+    revised.template_revision = 2;
+    const auto other = prepare_voice_bank(revised);
+    check(other.valid && other.manifest.sha256 != target.manifest().sha256,
+          "restore-other-manifest-prepare");
+    check(!restore_voice_bank_state(other.manifest, decoded, restored) &&
+              same_state(restored, sentinel),
+          "restore-other-manifest-refusal");
+    auto forged = decoded;
+    forged.parameters[0].slot_ordinal = 8;
+    check(!restore_voice_bank_state(target.manifest(), forged, restored) &&
+              same_state(restored, sentinel),
+          "restore-forged-slot-refusal");
+    auto undeclared = decoded;
+    undeclared.parameters[0].target = "cutoff";
+    check(!restore_voice_bank_state(target.manifest(), undeclared, restored) &&
+              same_state(restored, sentinel),
+          "restore-undeclared-target-refusal");
+    for (const float bad :
+         {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity(),
+          -std::numeric_limits<float>::infinity()}) {
+        auto non_finite = decoded;
+        non_finite.parameters[3].value = bad;
+        check(!restore_voice_bank_state(target.manifest(), non_finite, restored) &&
+                  same_state(restored, sentinel),
+              "restore-non-finite-refusal");
+    }
+
+    // The same forgeries on the wire are refused by decode. Layout: tag, schema
+    // string, version, digest string, count, then {slot, path, target, bits}.
+    constexpr std::size_t kSchemaName = 27;
+    const std::size_t first_slot = 1 + 4 + kSchemaName + 4 + 4 + 64 + 4;
+    check(get_u32(encoded.encoding, first_slot - 4) == 8 &&
+              get_u32(encoded.encoding, first_slot) == 0,
+          "restore-wire-layout");
+    VoiceBankState wire_destination = sentinel;
+    auto forged_wire = encoded.encoding;
+    put_u32(forged_wire, first_slot, 8);
+    check(!decode_voice_bank_state(forged_wire, wire_destination) &&
+              same_state(wire_destination, sentinel),
+          "restore-wire-forged-slot-refusal");
+    auto nan_wire = encoded.encoding;
+    put_u32(nan_wire, nan_wire.size() - 4, 0x7fc00000u);
+    check(!decode_voice_bank_state(nan_wire, wire_destination) &&
+              same_state(wire_destination, sentinel),
+          "restore-wire-non-finite-refusal");
+
+    // The persisted schema carries no parameter bounds, so a finite declared
+    // value above the authored maximum restores; application refuses it and
+    // the value already applied to that slot stays in force.
+    auto loud = decoded;
+    loud.parameters[0].value = 5.0f;
+    VoiceBankState loud_destination;
+    check(restore_voice_bank_state(target.manifest(), loud, loud_destination),
+          "restore-bounds-not-in-schema");
+    check(!reapply_state(target, loud_destination), "restore-out-of-range-reapply-refusal");
+    check(bit_equal(render_level_script(target, kScriptFrames), reference),
+          "restore-refused-value-keeps-level");
+}
+
+// A declared hard cut inside one bank: activate() retires every sounding voice
+// and every token from the previous epoch.
+void check_hard_cut_swap() {
+    VoiceBankBindingResult status;
+    auto bank = make_bank(schema(), status);
+    check(static_cast<bool>(bank), "swap-prepare");
+    const auto old_epoch = bank->epoch();
+    audio::Buffer<float> buffer(2, kScriptBlock);
+    auto view = buffer.view();
+    check(bank->begin_block(0, kScriptBlock) == HostEventResult::Accepted, "swap-begin");
+    check(bank->publish(event(old_epoch, 0, 1, midi::MidiEvent::note_on(1, 69, 127))) ==
+              HostEventResult::Accepted,
+          "swap-note-on");
+    check(bank->render(view, 0, kScriptBlock) == VoiceBankBindingCode::Ok, "swap-render-sounding");
+    check(peak(view) > 0.1f, "swap-sounding-audible");
+    midi::MpeNoteState note{};
+    bool releasing = true;
+    check(bank->owner().slot_note(0, note, releasing) && !releasing, "swap-voice-held");
+    const auto generation = note.note_id;
+
+    check(bank->begin_block(kScriptBlock, kScriptBlock) == HostEventResult::Accepted,
+          "swap-open-begin");
+    check(!bank->activate(status) && status.code == VoiceBankBindingCode::InvalidBlock,
+          "swap-activate-open-block-refusal");
+    check(bank->epoch() == old_epoch && owner(*bank).allocator().active_count() == 1,
+          "swap-open-block-refusal-preserves-voice");
+    check(bank->render(view, kScriptBlock, kScriptBlock) == VoiceBankBindingCode::Ok &&
+              peak(view) > 0.1f,
+          "swap-refused-activate-keeps-audio");
+
+    check(bank->activate(status) && status.code == VoiceBankBindingCode::Ok, "swap-activate");
+    check(bank->epoch() == old_epoch + 1, "swap-epoch-advanced");
+    check(owner(*bank).allocator().active_count() == 0, "swap-voices-cut");
+    check(bank->begin_block(2 * kScriptBlock, kScriptBlock) == HostEventResult::Accepted,
+          "swap-cut-begin");
+    check(bank->render(view, 2 * kScriptBlock, kScriptBlock) == VoiceBankBindingCode::Ok,
+          "swap-cut-render");
+    check(exactly_silent(view), "swap-next-block-silent");
+    check(bank->dispatch_deferred(old_epoch, 0, generation, midi::MpeExpressionEvent::Kind::NoteOff,
+                                  note) == VoiceBankBindingCode::StaleEpoch,
+          "swap-old-epoch-deferred-refusal");
+
+    check(bank->begin_block(3 * kScriptBlock, kScriptBlock) == HostEventResult::Accepted,
+          "swap-new-begin");
+    check(bank->publish(event(old_epoch, 3 * kScriptBlock, 1,
+                              midi::MidiEvent::note_on(1, 72, 127))) == HostEventResult::StaleEpoch,
+          "swap-old-epoch-publish-refusal");
+    check(bank->publish(event(bank->epoch(), 3 * kScriptBlock, 2,
+                              midi::MidiEvent::note_on(1, 72, 127))) == HostEventResult::Accepted,
+          "swap-new-epoch-publish");
+    check(bank->render(view, 3 * kScriptBlock, kScriptBlock) == VoiceBankBindingCode::Ok &&
+              peak(view) > 0.1f,
+          "swap-new-epoch-renders");
+    midi::MpeNoteState replacement{};
+    check(bank->owner().slot_note(0, replacement, releasing) && replacement.note == 72 &&
+              replacement.note_id > generation,
+          "swap-generation-monotonic");
+    check(bank->dispatch_deferred(bank->epoch(), 0, replacement.note_id,
+                                  midi::MpeExpressionEvent::Kind::NoteOff,
+                                  replacement) == VoiceBankBindingCode::Ok,
+          "swap-new-epoch-deferred");
+}
+
+// Swapping to a second prepared bank. Both bindings start at epoch 1 and
+// generation 1, so a retired token only stays dead in the replacement if the
+// host advances the replacement past the retired epoch before routing to it.
+void check_cross_bank_swap() {
+    VoiceBankBindingResult status;
+    auto retired = make_bank(schema(), status);
+    check(static_cast<bool>(retired), "cross-bank-prepare-retired");
+    check(step(*retired, 0, {midi::MidiEvent::note_on(1, 69, 127)}) == VoiceBankBindingCode::Ok,
+          "cross-bank-retired-note");
+    midi::MpeNoteState note{};
+    bool releasing = true;
+    check(retired->owner().slot_note(0, note, releasing), "cross-bank-retired-sounding");
+    const auto retired_epoch = retired->epoch();
+
+    auto collided = make_bank(schema(), status);
+    check(static_cast<bool>(collided), "cross-bank-prepare-collided");
+    check(collided->epoch() == retired_epoch, "cross-bank-epochs-start-equal");
+    check(collided->dispatch_deferred(retired_epoch, 0, note.note_id,
+                                      midi::MpeExpressionEvent::Kind::NoteOff,
+                                      note) == VoiceBankBindingCode::StaleGeneration,
+          "cross-bank-idle-token-not-live");
+    check(step(*collided, 0, {midi::MidiEvent::note_on(1, 69, 127)}) == VoiceBankBindingCode::Ok,
+          "cross-bank-collided-note");
+    midi::MpeNoteState collided_note{};
+    check(collided->owner().slot_note(0, collided_note, releasing) &&
+              collided_note.note_id == note.note_id,
+          "cross-bank-generation-collides");
+    const auto unguarded = collided->dispatch_deferred(
+        retired_epoch, 0, note.note_id, midi::MpeExpressionEvent::Kind::NoteOff, note);
+    std::cout << "cross-bank unguarded retired token on colliding replacement: code="
+              << static_cast<unsigned>(unguarded) << '\n';
+
+    auto replacement = make_bank(schema(), status);
+    check(static_cast<bool>(replacement), "cross-bank-prepare-replacement");
+    while (replacement->epoch() <= retired_epoch)
+        check(replacement->activate(status), "cross-bank-advance-epoch");
+    check(step(*replacement, 0, {midi::MidiEvent::note_on(1, 69, 127)}) == VoiceBankBindingCode::Ok,
+          "cross-bank-replacement-note");
+    check(replacement->dispatch_deferred(retired_epoch, 0, note.note_id,
+                                         midi::MpeExpressionEvent::Kind::NoteOff,
+                                         note) == VoiceBankBindingCode::StaleEpoch,
+          "cross-bank-retired-token-stale-epoch");
+
+    // Release tails survive a bank swap when the host keeps rendering the
+    // retired bank until its voices finish; the replacement takes new notes.
+    check(step(*retired, 1, {midi::MidiEvent::note_off(1, 69)}) == VoiceBankBindingCode::Ok,
+          "cross-bank-retired-release");
+    std::size_t tail = 0;
+    for (std::uint64_t sample = 2; owner(*retired).allocator().active_count() != 0; ++sample) {
+        check(retired->begin_block(sample, 1) == HostEventResult::Accepted,
+              "cross-bank-tail-begin");
+        audio::Buffer<float> buffer(2, 1);
+        auto view = buffer.view();
+        check(retired->render(view, sample, 1) == VoiceBankBindingCode::Ok,
+              "cross-bank-tail-render");
+        tail += peak(view) > 0.0f ? 1 : 0;
+        check(sample < 16, "cross-bank-tail-bounded");
+    }
+    check(tail >= 1, "cross-bank-tail-audible");
+}
+
 class AliasedOwner final : public VoiceBankOwner {
   public:
     AliasedOwner()
@@ -708,6 +1038,9 @@ int main() {
         check_pedals_and_modes();
         check_pedal_expression_audio_partitions();
         check_frozen_a1_vectors();
+        check_state_round_trip();
+        check_hard_cut_swap();
+        check_cross_bank_swap();
         VoiceBankBindingResult status;
         auto malformed = schema();
         malformed.bindings[0].target = "unbound-note-port";
