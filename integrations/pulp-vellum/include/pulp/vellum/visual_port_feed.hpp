@@ -6,9 +6,15 @@
 /// renames types: channel indices, latest-wins reads and publish counts pass
 /// straight through, and the single-reader-thread rule is the port's.
 
-#include <pulp/format/editor_host.hpp>
-
 #include <vellum/value/value_feed.hpp>
+
+#include <cstddef>
+#include <cstdint>
+#include <span>
+
+namespace pulp::format {
+class VisualPort;
+}
 
 namespace pulp::vellum {
 

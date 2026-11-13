@@ -1,5 +1,7 @@
 #include <pulp/vellum/visual_port_feed.hpp>
 
+#include <pulp/format/editor_host.hpp>
+
 #include <algorithm>
 #include <array>
 

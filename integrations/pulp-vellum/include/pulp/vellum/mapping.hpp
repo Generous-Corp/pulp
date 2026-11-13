@@ -9,11 +9,13 @@
 /// `constrain_param_value` and label helpers: there is one implementation of
 /// the curve, and it is Pulp's.
 
-#include <pulp/state/parameter.hpp>
-
 #include <optional>
 #include <string>
 #include <string_view>
+
+namespace pulp::state {
+struct ParamInfo;
+}
 
 namespace pulp::vellum {
 
