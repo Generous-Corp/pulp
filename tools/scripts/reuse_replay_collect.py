@@ -40,8 +40,12 @@ import link_members  # noqa: E402
 import object_deps  # noqa: E402
 from reuse_policy_replay import (  # noqa: E402
     FAIL_OUTCOMES, GREEN_CONCLUSIONS, MIN_SELECTED_PERCENT, PAIR_SCHEMA, RUN_SCHEMA,
-    SCRIPT_INPUTS_PATH, TEST_SCHEMA, _parse_time, validate_run, write_jsonl,
+    SCRIPT_INPUTS_PATH, TEST_SCHEMA, _parse_time, read_jsonl, validate_run, write_jsonl,
 )
+import classify_changes  # noqa: E402
+
+# The event listed for run metadata only, never for artifacts.
+PUSH_METADATA_EVENT = "push"
 
 # --------------------------------------------------------------------------
 # ctest job-log parsing
@@ -625,17 +629,72 @@ class Collector:
                 else:
                     # An ejected group's merge commit is often no longer
                     # fetchable, but the API still describes it.
-                    try:
-                        doc = self.gh.json(f"repos/{self.gh.repository}/git/commits/{sha}")
-                        self._commit_cache[sha] = {"tree": doc["tree"]["sha"], "local": False,
-                                                   "parents": [p["sha"] for p in doc.get("parents", [])]}
-                    except (urllib.error.HTTPError, KeyError):
-                        self._commit_cache[sha] = None
+                    def fetch() -> dict | None:
+                        try:
+                            doc = self.gh.json(f"repos/{self.gh.repository}/git/commits/{sha}")
+                            return {"tree": doc["tree"]["sha"], "local": False,
+                                    "parents": [p["sha"] for p in doc.get("parents", [])]}
+                        except (urllib.error.HTTPError, KeyError):
+                            return None
+                    # A commit object never changes, so its API answer is cached on disk.
+                    self._commit_cache[sha] = self._cached(f"commits/{sha}.json.gz", fetch)
             return self._commit_cache[sha]
 
     def diff_files(self, a: str, b: str) -> list[str] | None:
         res = self._git("diff", "--no-renames", "--name-only", a, b, check=False)
         return None if res.returncode else sorted(p for p in res.stdout.splitlines() if p)
+
+    def entry_delta(self, base: str, group_sha: str) -> list[str] | None:
+        """The files a merge group's own entry changed: its commit against its
+        first parent (`merge_group.base_sha`, the previous speculative group
+        when entries are queued ahead), renames listed as two paths.
+
+        Read from the local clone when both commits are there, else from the
+        API's compare, which lists at most 300 files for the whole comparison
+        and may page them: every page is read until one comes back short, so
+        a delta is only returned when its end was seen. A delta at the 300
+        cap, a page that cannot be read, a status other than `ahead`, or any
+        read error is None (unreadable), never a short list, so a policy
+        reading it fails closed."""
+        a, b = self.commit(base), self.commit(group_sha)
+        if a and b and a.get("local") and b.get("local"):
+            files = self.diff_files(base, group_sha)
+            return files if files else None
+
+        per_page, cap = 100, 300
+
+        def fetch() -> list[str] | None:
+            out: set[str] = set()
+            listed = 0
+            for page in range(1, cap // per_page + 2):
+                try:
+                    doc = self.gh.json(f"repos/{self.gh.repository}/compare/{base}...{group_sha}"
+                                       f"?per_page={per_page}&page={page}")
+                except urllib.error.HTTPError:
+                    return None
+                # Every page, not just the first, must say `ahead` and carry a
+                # `files` list: a malformed later page is unreadable, never an
+                # empty last page that would end a truncated delta early.
+                if not isinstance(doc, dict) or doc.get("status") != "ahead":
+                    return None
+                rows = doc.get("files")
+                if not isinstance(rows, list) or (page == 1 and not rows):
+                    return None
+                if not all(isinstance(row, dict) for row in rows):
+                    return None
+                listed += len(rows)
+                if listed >= cap:
+                    return None
+                for row in rows:
+                    out.add(row.get("filename") or "")
+                    if row.get("previous_filename"):
+                        out.add(row["previous_filename"])
+                if len(rows) < per_page:
+                    return None if "" in out else sorted(out)
+            return None
+        # Keyed apart from the single-page reads cached before every page was
+        # read: one of those can hold a truncated list.
+        return self._cached(f"compare-paged/{base}-{group_sha}.json.gz", fetch)
 
     def drift(self, head: dict, group: dict) -> tuple[list[str] | None, str | None]:
         """Files that differ between the head run's and the group's checkouts.
@@ -804,14 +863,29 @@ class Collector:
                               and j.get("conclusion") == "success"), None)
             if reuse_job:
                 record["observed_decision"] = self.decision(reuse_job["id"])
+            # The required `macos` check as the merge queue saw it (the native
+            # leg or the bootstrap that owns the name), and the entry's own
+            # delta: what the entry-delta policies and their ALLGREEN
+            # attribution read.
+            macos = next((j for j in jobs if j.get("name") == "macos"), None)
+            record["macos_conclusion"] = macos.get("conclusion") if macos else None
+            record["macos_minutes"] = _job_minutes(macos)
+            parents = record["checkout_parents"] or []
+            record["first_parent_delta_files"] = (self.entry_delta(parents[0], checkout)
+                                                  if len(parents) == 2 else None)
         return record, parsed["tests"]
 
-    def collect(self, since: dt.datetime, until: dt.datetime, lookback_days: int = 7) -> dict:
+    def collect(self, since: dt.datetime, until: dt.datetime, lookback_days: int = 7,
+                groups_only: bool = False) -> dict:
+        """`groups_only` records merge groups and no PR-head runs: enough for a
+        policy that reads only the group (entry-delta-docs), at a fraction of
+        the API calls. Every pair then has no head candidate."""
         groups = self.list_runs("merge_group", since, until)
         groups = [g for g in groups if QUEUE_BRANCH_RE.match(g.get("head_branch") or "")
                   and g.get("status") == "completed"]
         print(f"collect: {len(groups)} completed merge-group runs", file=sys.stderr)
-        heads_listing = self.list_runs("pull_request", since - dt.timedelta(days=lookback_days), until)
+        heads_listing = ([] if groups_only else
+                         self.list_runs("pull_request", since - dt.timedelta(days=lookback_days), until))
         by_head: dict[str, list[dict]] = {}
         for run in heads_listing:
             if run.get("status") == "completed":
@@ -828,6 +902,16 @@ class Collector:
                 pass
         self.prime_commits([self.parsed_log(j["id"])["checkout_sha"] for j in group_logs if j]
                             + [g["head_sha"] for g in groups])
+
+        def warm_entry_delta(g: dict) -> None:
+            # Each compare is a slow API read; warm the cache in parallel so
+            # run_record's own call below is a cache hit.
+            commit = self.commit(g["head_sha"])
+            if commit and len(commit["parents"]) == 2:
+                self.entry_delta(commit["parents"][0], g["head_sha"])
+        with concurrent.futures.ThreadPoolExecutor(self.workers) as pool:
+            for _ in pool.map(warm_entry_delta, groups):
+                pass
 
         runs: dict[str, dict] = {}
         pairs: list[dict] = []
@@ -913,13 +997,15 @@ class Collector:
         with concurrent.futures.ThreadPoolExecutor(self.workers) as pool:
             pairs = list(pool.map(build_pair, zip(group_records, head_ids)))
 
+        self.record_attribution(group_records, since, until)
+
         for record in runs.values():
             record["rejected"] = validate_run(record)
 
         self.write(runs, pairs)
         manifest = {
             "schema": "pulp-reuse-replay-corpus/v1", "repository": self.gh.repository,
-            "since": since.isoformat(), "until": until.isoformat(),
+            "since": since.isoformat(), "until": until.isoformat(), "groups_only": groups_only,
             "merge_groups": len(group_records),
             "pairs_with_head_run": sum(1 for p in pairs if p["heads"]),
             "head_runs": sum(1 for r in runs.values() if r["run_kind"] == "pr_head"),
@@ -931,6 +1017,246 @@ class Collector:
         }
         (self.out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
         return manifest
+
+    # -- entry-delta attribution facts ------------------------------------
+    # What reuse_policy_replay's ALLGREEN attribution of `entry-delta-docs`
+    # reads: per merge group, whether it landed on main and the main commit
+    # its batch sits on; and, for a group whose own entry is docs-only and
+    # that failed, the pull request's merge, the group that landed it, the
+    # first main push run containing that merge, the non-test CMake files
+    # naming a delta path, and per failing test its tier, declared inputs or
+    # executable sources. Anything unread is None, which the scorer treats as
+    # "the docs delta may have caused it".
+
+    def _is_ancestor(self, sha: str | None, ref: str = "origin/main") -> bool | None:
+        if not sha:
+            return None
+        res = self._git("merge-base", "--is-ancestor", sha, ref, check=False)
+        return {0: True, 1: False}.get(res.returncode)
+
+    def main_base(self, group: dict, queue_commits: dict[str, dict],
+                  pushes: list[dict], max_steps: int = 64) -> str | None:
+        """Recover the protected base using observations made before each group.
+
+        Current main ancestry cannot distinguish speculative predecessors that
+        subsequently landed. A main push witnesses that its head was protected
+        by that time; otherwise only a recorded predecessor can be walked.
+        Missing history stays unknown, including a chain cut by the window.
+        """
+        current = group
+        for _ in range(max_steps):
+            base, created = current.get("base_sha"), current.get("created_at")
+            if not base or not created:
+                return None
+            prior = [p for p in pushes if p.get("head_sha") and p.get("created_at")
+                     and _parse_time(p["created_at"]) < _parse_time(created)]
+            anchor = max(prior, key=lambda p: _parse_time(p["created_at"]), default=None)
+            if anchor and self._is_ancestor(base, anchor["head_sha"]) is True:
+                return base
+            predecessor = queue_commits.get(base)
+            if (not predecessor or not predecessor.get("created_at")
+                    or _parse_time(predecessor["created_at"]) > _parse_time(created)):
+                return None
+            current = predecessor
+        return None
+
+    def pr_merge(self, pr: int) -> dict | None:
+        def fetch() -> dict | None:
+            try:
+                doc = self.gh.json(f"repos/{self.gh.repository}/pulls/{pr}")
+            except urllib.error.HTTPError:
+                return None
+            return {"merged_at": doc.get("merged_at"), "merge_commit_sha": doc.get("merge_commit_sha"),
+                    "head_sha": (doc.get("head") or {}).get("sha")}
+        return self._cached(f"pulls/{pr}.json.gz", fetch)
+
+    def main_push_runs(self, since: dt.datetime) -> list[dict]:
+        """Completed `push` runs of main, oldest first. Metadata only (id, sha,
+        conclusion, time): no artifact of a push run is ever read, so
+        this is the one place the collector lists the `push` event."""
+        runs = self.list_runs(PUSH_METADATA_EVENT, since, dt.datetime.now(dt.timezone.utc))
+        return sorted((r for r in runs if r.get("head_branch") == "main" and r.get("status") == "completed"),
+                      key=lambda r: r["created_at"])
+
+    def first_push_containing(self, merge: dict | None, pushes: list[dict]) -> dict | None:
+        """The first completed `push` run of main whose head contains the merge."""
+        if not merge or not merge.get("merged_at") or not merge.get("merge_commit_sha"):
+            return None
+        landed = _parse_time(merge["merged_at"])
+        for run in pushes:
+            # A cancelled or skipped run proved nothing about the tree.
+            if _parse_time(run["created_at"]) < landed or run.get("conclusion") not in ("success", "failure"):
+                continue
+            if self._is_ancestor(merge["merge_commit_sha"], run["head_sha"]):
+                return {"run_id": str(run["id"]), "conclusion": run.get("conclusion"),
+                        "head_sha": run["head_sha"], "created_at": run["created_at"]}
+        return None
+
+    def _grep_naming(self, rev: str, needles: list[str], pathspecs: list[str]) -> list[str] | None:
+        """Files at `rev` under `pathspecs` naming any needle as a literal."""
+        found: set[str] = set()
+        args = [a for n in needles for a in ("-e", n)]
+        for start in range(0, max(len(pathspecs), 1), 400):
+            chunk = pathspecs[start:start + 400]
+            res = self._git("grep", "-F", "-l", *args, rev, "--", *chunk, check=False)
+            if res.returncode not in (0, 1):
+                return None
+            found |= {line.split(":", 1)[1] for line in res.stdout.splitlines() if ":" in line}
+        return sorted(found)
+
+    def registrations(self, run_id: str) -> dict[str, dict] | None:
+        """Test name -> {labels, command} from the run's reuse record."""
+        def fetch() -> dict | None:
+            listing = self.gh.json(f"repos/{self.gh.repository}/actions/runs/{run_id}/artifacts?per_page=100")
+            art = next((a for a in listing.get("artifacts", [])
+                        if a.get("name") == REUSE_RECORD_ARTIFACT and not a.get("expired")), None)
+            if art is None:
+                return None
+            with self.gh._request(art["archive_download_url"], "application/vnd.github+json") as resp:
+                blob = resp.read()
+            with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+                name = next((n for n in zf.namelist() if Path(n).name.startswith("registrations-")), None)
+                if name is None:
+                    return None
+                doc = json.loads(zf.read(name))
+            out = {}
+            for entry in doc.get("rows") or []:
+                row = entry.get("row") or {}
+                if row.get("name"):
+                    out[row["name"]] = {"labels": list((row.get("properties") or {}).get("LABELS") or []),
+                                        "command": list(row.get("command") or [])}
+            return out
+        try:
+            return self._cached(f"registrations-v1/{run_id}.json.gz", fetch)
+        except (urllib.error.URLError, RuntimeError, OSError, zipfile.BadZipFile, ValueError):
+            return None
+
+    def _json_in_clone(self, rev: str, path: str) -> dict | None:
+        """A JSON file at `rev` from the local clone only (facts_rev is
+        always local), or None when absent or unparsable."""
+        res = self._git("show", f"{rev}:{path}", check=False)
+        if res.returncode:
+            return None
+        try:
+            return json.loads(res.stdout)
+        except json.JSONDecodeError:
+            return None
+
+    def facts_rev(self, record: dict) -> str | None:
+        # Only the tested checkout supplies its declarations and source bytes.
+        # Even its parent can have different inputs or deterministic-tier rules.
+        sha = record.get("checkout_sha")
+        commit = self.commit(sha)
+        return sha if commit and commit.get("local") else None
+
+    def test_facts(self, record: dict, failing: list[str], rev: str | None, delta: list[str]) -> dict[str, dict]:
+        if rev is None:
+            return {name: {"kind": "unknown", "deterministic": None, "declared_inputs": None,
+                           "executable": None, "sources_naming_delta": None} for name in failing}
+        record_doc = self.reuse_record(record["run_id"])
+        regs = self.registrations(record["run_id"])
+        drift = self._json_in_clone(rev, "tools/ci/drift_fast.json") or None
+        tier_labels = set((drift or {}).get("ctest_labels") or [])
+        tier_names = {t.get("name") for t in (drift or {}).get("tests") or [] if isinstance(t, dict)}
+        executables = record_doc.get("executables") or {}
+        link, deps = record_doc.get("link"), record_doc.get("deps")
+        out: dict[str, dict] = {}
+        for name in failing:
+            reg = (regs or {}).get(name)
+            deterministic = None
+            if regs is not None and drift is not None:
+                labels = set((reg or {}).get("labels") or [])
+                deterministic = bool(labels & tier_labels) or name in tier_names
+            facts = {"kind": "unknown", "deterministic": deterministic, "declared_inputs": None,
+                     "executable": None, "sources_naming_delta": None}
+            fragment = self._json_in_clone(rev, f"{SCRIPT_INPUTS_PATH}/tests/{name}.json")
+            exe = executables.get(name)
+            if fragment is not None:
+                rec = fragment.get("record") or {}
+                facts["kind"] = "script"
+                facts["declared_inputs"] = sorted(set(rec.get("inputs") or []) | {rec.get("entry") or ""} - {""})
+            elif exe:
+                facts["kind"], facts["executable"] = "compiled", exe
+                sources = self._executable_sources(exe, link, deps)
+                if sources is not None:
+                    facts["sources_naming_delta"] = self._grep_naming(rev, delta, sorted(sources))
+                exe_doc = self._json_in_clone(rev, f"{SCRIPT_INPUTS_PATH}/executables/{Path(exe).name}.json")
+                if exe_doc and exe_doc.get("inputs"):
+                    facts["declared_inputs"] = sorted(exe_doc["inputs"])
+            elif reg and reg.get("command") and re.search(r"(?i)python|bash|(^|/)sh$|node|zsh",
+                                                           str(reg["command"][0])):
+                facts["kind"] = "script"  # a script test with no declared-inputs record
+            out[name] = facts
+        return out
+
+    @staticmethod
+    def _executable_sources(exe: str, link: dict | None, deps: dict | None) -> set[str] | None:
+        """Every repo file an executable's link pulled objects compiled from,
+        or None when any of its objects has no recorded reads."""
+        if not link or not deps or exe not in link:
+            return None
+        objects = set(link[exe].get("objects") or [])
+        for archive, members in (link[exe].get("members") or {}).items():
+            if archive.startswith("/"):
+                # A prebuilt archive outside the build tree (the toolchain's
+                # runtime, a prebuilt Skia/Dawn) is compiled from no file of
+                # this checkout, so it cannot read the delta.
+                continue
+            names = (deps.get("members") or {}).get(archive) or {}
+            for member in members:
+                if member not in names:
+                    return None
+                objects |= set(names[member])
+        files: set[str] = set()
+        for obj in objects:
+            reads = (deps.get("objects") or {}).get(obj)
+            if reads is None:
+                return None
+            files |= set(reads)
+        return files
+
+    def record_attribution(self, groups: list[dict], since: dt.datetime, until: dt.datetime) -> None:
+        # Include observations before the window; insufficient history still
+        # leaves the base unknown rather than inferring it from today's main.
+        pushes = self.main_push_runs(since - dt.timedelta(days=7)) if groups else []
+        queue_commits = {g["group_sha"]: g for g in groups if g.get("group_sha")}
+        for g in groups:
+            g["landed"] = self._is_ancestor(g.get("group_sha"))
+            g["main_base"] = self.main_base(g, queue_commits, pushes)
+        judged = []
+        for g in groups:
+            delta = g.get("first_parent_delta_files")
+            if not delta or classify_changes.impact_class(list(delta)) != classify_changes.DOCS_ONLY:
+                continue
+            path = self.out / "tests" / f"{g['run_id']}.jsonl.gz"
+            tests = list(read_jsonl(path)) if path.exists() else []
+            failing = sorted({t["test_id"] for t in tests if t.get("outcome") in FAIL_OUTCOMES})
+            if failing or g.get("build_failed") or g.get("macos_conclusion") == "failure":
+                judged.append((g, failing))
+        if not judged:
+            return
+        landed_groups = sorted((x for x in groups if x.get("landed") and x.get("macos_conclusion") == "success"),
+                               key=lambda x: x["created_at"])
+        for g, failing in judged:
+            delta = list(g["first_parent_delta_files"])
+            rev = self.facts_rev(g)
+            g["facts_rev"] = rev
+            g["delta_cmake_named"] = self._grep_naming(
+                rev, delta, ["*CMakeLists.txt", "*.cmake", "*.cmake.in", ":!test/"]) if rev else None
+            g["entry_test_facts"] = self.test_facts(g, failing, rev, delta)
+            merge = self.pr_merge(g["pr"]) if g.get("pr") else None
+            g["pr_merge"] = merge
+            # The group that landed the merge: the first green group on main
+            # whose commit contains it (the batch head under HEADGREEN, the
+            # entry's own group under ALLGREEN).
+            landing = None
+            sha = (merge or {}).get("merge_commit_sha")
+            if sha:
+                landing = next((x for x in landed_groups if x["created_at"] >= g["created_at"]
+                                and self._is_ancestor(sha, x["group_sha"])), None)
+            g["landing_group_run_id"] = landing["run_id"] if landing else None
+            g["landing_contains_merge"] = bool(landing)
+            g["main_push_run"] = self.first_push_containing(merge, pushes)
 
     def write(self, runs: dict[str, dict], pairs: list[dict]) -> None:
         write_jsonl(self.out / "runs.jsonl", sorted(runs.values(), key=lambda r: r["created_at"]))
@@ -945,6 +1271,14 @@ class Collector:
                  "attempts": t["attempts"], "duration_s": t["duration_s"], "source_key": None,
                  "output_key": None, "runner_image": run["runner_image"], "exonerated": None}
                 for t in rows))
+
+
+def _job_minutes(job: dict | None) -> float | None:
+    """A job's `completed_at - started_at` in minutes, or None when unknown."""
+    if not job or not job.get("started_at") or not job.get("completed_at"):
+        return None
+    seconds = (_parse_time(job["completed_at"]) - _parse_time(job["started_at"])).total_seconds()
+    return round(max(seconds, 0.0) / 60.0, 2)
 
 
 def reference_selected(group: dict, groups: list[dict]) -> int:
