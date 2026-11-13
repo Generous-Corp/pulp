@@ -27,7 +27,7 @@ TEST_CASE("Inspector method registry assigns one stable capability to every meth
           "[inspect][capabilities]") {
     const auto capabilities = inspector_capability_registry();
     const auto registry = inspector_method_registry();
-    REQUIRE(capabilities.size() == 32);
+    REQUIRE(capabilities.size() == 33);
     REQUIRE_FALSE(registry.empty());
 
     for (const auto& descriptor : capabilities) {
