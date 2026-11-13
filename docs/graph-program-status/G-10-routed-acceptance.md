@@ -1,5 +1,15 @@
 # Routed spectral acceptance audit
 
+## Close-out (2026-11-13)
+
+Final status: PARTIAL, acceptance not established (unchanged).
+
+The eighteen-row acceptance audit stays as written; unqualified rows remain open.
+
+PR pointers below are historical; all PRs cited in this file that were queried (checked 2026-11-13) are merged, none remain open.
+
+Remaining work is deferred to https://github.com/Generous-Corp/pulp/issues/12177.
+
 Status: **PARTIAL — acceptance is not established by the existing PR.**
 
 Authority: [admission](https://github.com/danielraffel/pulp-planning/blob/3920bf5bfa24f1ec9cd030a43dac13c212ca7a76/graph-program-status/G-10.md) and [lowering design](https://github.com/danielraffel/pulp-planning/blob/148602040cf0dce7f38d9353e1c3229778468bae/graph-program-status/g10-routed-lowering-design-20261103.md).

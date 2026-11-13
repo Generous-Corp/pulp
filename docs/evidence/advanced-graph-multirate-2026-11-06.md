@@ -55,6 +55,25 @@ These are Processor-local quality and allocation controls. They do not prove a
 graph-owned rate domain, conversion-edge admission, PDC, or mixed-rate
 scheduling.
 
+## Reproducing the counts
+
+Line anchors in this audit are pinned to source head `14a859df`; they drift on
+later heads. The counts above are case subsets selected inside these suites
+(the suites hold more cases than the counts), run from a Release build:
+
+- G-5 (8/8 and 4/4): `ctest -R 'pulp-test-trigger-graph'` (sources
+  `test/test_trigger_graph.cpp`, `test/test_g5_host_event_contract.cpp`), plus
+  `ctest -R 'trigger-runtime-public-consumer|g5-host-event-public-consumer'`.
+- Resampler (4/4): `ctest -R 'pulp-test-resampler'`, cases "Resampler output is
+  invariant to input block chunking", "Resampler ratio change mid-stream does
+  not click", and "Resampler 1 kHz round-trip 44.1→48→44.1 reconstructs the
+  sine" in `test/test_resampler.cpp`.
+- Oversampler (2/2): `ctest -R 'pulp-test-oversampling-quality'`, case
+  "Linear-phase oversampler is invariant to caller block partitioning" in
+  `test/test_oversampling_quality.cpp`. The allocation-free `process_block`
+  case behind the second count is not named by a test at the current head and
+  is not independently reproduced here.
+
 ## Reopening trigger
 
 Reopen G-8 only when the first named G-5 or G-6 workflow requires a node to run

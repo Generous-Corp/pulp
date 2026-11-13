@@ -28,6 +28,7 @@ use without hard-coding macOS, Windows, Linux, iOS, or Web behavior.
 | Popup windows | `popup_window.hpp` | `PopupWindow::open` gives a borderless child window anchored to a rectangle in an editor view, placed below or above it on that view's screen, with a layer-backed content view to draw into (combo lists that must look like the product). It closes on an outside click (consumed, so it never reaches the editor), Escape, focus loss or the parent closing, and silently when its `MainThreadScope` dies |
 | Popup menus | `popup_menu.hpp` | Native menus. `show_menu_async` (preferred in editors) opens an anchored NSMenu at least as wide as its anchor, with submenus, check marks and per-row text colour, without blocking the caller; the choice arrives once on the main thread and is dropped if the `MainThreadScope` dies. The synchronous `PopupMenu::show` / `show_at_view` block until the menu closes and return the chosen id |
 | Main-thread work | `main_thread.hpp` | `MainThreadScope` posts work to the main thread from any thread, and `MainThreadTimer` gives one-shot or repeating millisecond timers. Both run in the common run-loop modes, so they keep running during menu tracking, live resize and modal panels, and nothing runs after the scope is destroyed. macOS and iOS; other platforms report `main_thread_supported() == false` |
+| Binary-unique names | `binary_unique_name.hpp` | `binary_unique_name(base)` returns `<base>_<image token>`, where the token is the load address of the binary holding the code, so process-wide registrations (Win32 window classes, for example) differ between two Pulp plug-ins in one host |
 | Unique Objective-C classes | `objc_unique_class.hpp` | Registers Objective-C classes at run time under `<base>_<image token>`, so two Pulp binaries in one host process never share a class name and run each other's code. It adds methods from C functions and gives each instance a context slot. Apple platforms |
 
 ---
@@ -1579,6 +1580,26 @@ ApplicationProperties app("MyPlugin");
 app.load();
 app.user_settings().set_bool("first_run", false);
 app.save();
+```
+
+`PropertiesFile` stores JSON. To share a settings file with programs that use
+the flat XML properties format (a `<PROPERTIES>` root holding one
+`<VALUE name="..." val="..."/>` per entry), use `XmlPropertiesFile` from
+`xml_properties_file.hpp`. It writes that format's canonical bytes (CRLF line
+endings, two-space indent, ASCII-only escaping) and reads it tolerantly. It
+differs from the format's usual handling in two ways: a file that does not
+parse is never written over (it is copied once to `<path>.bak` and the load
+returns the error), and a save replaces the file atomically without leaving a
+temporary file. A save with no changed entries writes nothing.
+
+```cpp
+#include <pulp/state/xml_properties_file.hpp>
+
+pulp::state::XmlPropertiesError error;
+if (auto file = pulp::state::XmlPropertiesFile::load(path, &error)) {
+    file->set("volume", "8");
+    file->save(&error);
+}
 ```
 
 ### Other state features

@@ -30,6 +30,7 @@
    "tools/scripts/changed_surface_inventory.py",
    "tools/scripts/changed_surface_script_families.py",
    "tools/scripts/classify_changes.py",
+   "tools/scripts/configure_only.py",
    "tools/scripts/docs_noise_lint.py",
    "tools/scripts/fixtures/wide_non_native_replay.json",
    "tools/scripts/gate_common.py",

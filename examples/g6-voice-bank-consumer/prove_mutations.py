@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Compile planted production-source mutations against an installed Pulp SDK."""
+"""Compile planted production-source and consumer-fixture mutations against an installed Pulp SDK.
+
+Production mutations edit scratch copies of the binding and voice-template
+sources, which are compiled into the consumer ahead of the installed library.
+Fixture mutations edit scratch copies of the consumer's own main.cpp or
+fixture.hpp. The repository sources are never modified.
+"""
 
 import argparse
 import hashlib
@@ -12,6 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / "examples/g6-voice-bank-consumer"
 PRODUCTION = ROOT / "core/host/src/voice_bank_binding.cpp"
+TEMPLATE = ROOT / "core/host/src/voice_template.cpp"
 
 MUTATIONS = {
     "interval_input_default_empty": (
@@ -96,6 +103,74 @@ MUTATIONS = {
     ),
 }
 
+# Mutations of other scratch copies: {name: (target, before, after, marker)}.
+# Targets: "binding" and "template" are production copies; "main" and
+# "fixture" are the consumer's own sources.
+TARGETED_MUTATIONS = {
+    "activate_skips_owner_reset": (
+        "binding",
+        "    impl_->tracker.reset();\n    impl_->owner->reset();",
+        "    impl_->tracker.reset();",
+        "swap-voices-cut",
+    ),
+    "activate_keeps_epoch": (
+        "binding",
+        "    ++impl_->epoch;\n    impl_->ingress.reset(impl_->epoch);",
+        "    impl_->ingress.reset(impl_->epoch);",
+        "swap-epoch-advanced",
+    ),
+    "activate_inside_open_block": (
+        "binding",
+        "    if (impl_->block_open) {\n        result = {VoiceBankBindingCode::InvalidBlock",
+        "    if (false) {\n        result = {VoiceBankBindingCode::InvalidBlock",
+        "swap-activate-open-block-refusal",
+    ),
+    "skip_parameter_upper_bound": (
+        "binding",
+        "value > bounds->second.maximum)",
+        "false)",
+        "restore-out-of-range-reapply-refusal",
+    ),
+    "restore_ignores_manifest_identity": (
+        "template",
+        "candidate.manifest_sha256 != manifest.sha256)",
+        "false)",
+        "restore-sha-mismatch-refusal",
+    ),
+    "normalize_accepts_forged_slot": (
+        "template",
+        "if (value.slot_ordinal >= kSlots || !std::isfinite(value.value))",
+        "if (!std::isfinite(value.value))",
+        "restore-wire-forged-slot-refusal",
+    ),
+    "normalize_accepts_non_finite": (
+        "template",
+        "if (value.slot_ordinal >= kSlots || !std::isfinite(value.value))",
+        "if (value.slot_ordinal >= kSlots)",
+        "restore-non-finite-refusal",
+    ),
+    "drop_restore_reapply": (
+        "fixture",
+        "        if (!bank.set_slot_parameter(value.slot_ordinal, value.target, value.value))\n"
+        "            return false;",
+        "        (void)value;",
+        "restore-audio-bit-exact",
+    ),
+    "restore_onto_live_bank": (
+        "main",
+        "VoiceBankBinding& target = *fresh;",
+        "VoiceBankBinding& target = *live;",
+        "restore-no-active-voices",
+    ),
+    "skip_replacement_epoch_advance": (
+        "main",
+        "    while (replacement->epoch() <= retired_epoch)\n"
+        "        check(replacement->activate(status), \"cross-bank-advance-epoch\");\n",
+        "",
+        "cross-bank-retired-token-stale-epoch",
+    ),
+}
+
 
 def run(command: list[str], log: Path, cwd: Path) -> subprocess.CompletedProcess[str]:
     outcome = subprocess.run(command, cwd=cwd, capture_output=True, text=True, timeout=300)
@@ -116,29 +191,39 @@ def main() -> None:
     scratch = args.scratch.resolve()
     scratch.mkdir(parents=True, exist_ok=True)
     assert (prefix / "lib/cmake/Pulp/PulpConfig.cmake").is_file()
-    original = PRODUCTION.read_text()
+    originals = {
+        "binding": ("voice_bank_binding.cpp", PRODUCTION.read_text()),
+        "template": ("voice_template.cpp", TEMPLATE.read_text()),
+        "main": ("main.cpp", (FIXTURE / "main.cpp").read_text()),
+        "fixture": ("fixture.hpp", (FIXTURE / "fixture.hpp").read_text()),
+    }
     subprocess.run(["python3", str(FIXTURE / "generate_a1_vectors.py"), "--check"], check=True)
     provenance = json.loads((prefix / "sdk-provenance.json").read_text())
-    cases = [("positive", None), *MUTATIONS.items(), ("restored", None)]
+    cases = [
+        ("positive", None),
+        *((name, ("binding", *mutation)) for name, mutation in MUTATIONS.items()),
+        *TARGETED_MUTATIONS.items(),
+        ("restored", None),
+    ]
     results = {}
     for name, mutation in cases:
         source = scratch / name
         source.mkdir(exist_ok=True)
-        shutil.copyfile(FIXTURE / "main.cpp", source / "main.cpp")
-        shutil.copyfile(FIXTURE / "fixture.hpp", source / "fixture.hpp")
         shutil.copyfile(FIXTURE / "a1_reference_vectors.hpp", source / "a1_reference_vectors.hpp")
-        code = original
+        texts = {target: text for target, (_, text) in originals.items()}
         if mutation:
-            before, after, _ = mutation
-            if code.count(before) != 1:
-                raise AssertionError(f"{name}: production anchor count={code.count(before)}")
-            code = code.replace(before, after, 1)
-        (source / "voice_bank_binding.cpp").write_text(code)
+            target, before, after, _ = mutation
+            count = texts[target].count(before)
+            if count != 1:
+                raise AssertionError(f"{name}: {target} anchor count={count}")
+            texts[target] = texts[target].replace(before, after, 1)
+        for target, (filename, _) in originals.items():
+            (source / filename).write_text(texts[target])
         (source / "CMakeLists.txt").write_text(
             "cmake_minimum_required(VERSION 3.24)\n"
             "project(G6ProductionMutation LANGUAGES CXX)\n"
             "find_package(Pulp CONFIG REQUIRED COMPONENTS host)\n"
-            "add_executable(g6-production-mutation main.cpp voice_bank_binding.cpp)\n"
+            "add_executable(g6-production-mutation main.cpp voice_bank_binding.cpp voice_template.cpp)\n"
             "target_compile_features(g6-production-mutation PRIVATE cxx_std_20)\n"
             "target_link_libraries(g6-production-mutation PRIVATE Pulp::host)\n"
         )
@@ -163,7 +248,7 @@ def main() -> None:
         execution = run([str(binary)], source / "run.log", ROOT)
         output = execution.stdout + execution.stderr
         if mutation:
-            marker = mutation[2]
+            marker = mutation[3]
             if execution.returncode == 0 or marker not in output:
                 raise AssertionError(f"{name}: planted failure was not observed: {output}")
         elif (execution.returncode or "g6-voice-bank-public-consumer PASS" not in output
@@ -173,10 +258,14 @@ def main() -> None:
             "exit_code": execution.returncode,
             "binary_sha256": sha256(binary),
             "source_sha256": sha256(source / "voice_bank_binding.cpp"),
+            "mutated_file": mutation[0] if mutation else None,
+            "sources_sha256": {
+                filename: sha256(source / filename) for filename, _ in originals.values()
+            },
             "output": output.strip(),
         }
         print(f"{name}: exit={execution.returncode} {output.strip()}", flush=True)
-    if results["positive"]["source_sha256"] != results["restored"]["source_sha256"]:
+    if results["positive"]["sources_sha256"] != results["restored"]["sources_sha256"]:
         raise AssertionError("restored source differs from positive source")
     receipt = {
         "schema": "pulp.g6-production-mutation-proof.v1",

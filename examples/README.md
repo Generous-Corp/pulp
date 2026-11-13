@@ -162,11 +162,12 @@ These directories prove a contract and are exercised by CI. Do not copy them as 
 | `g6-voice-bank-consumer` | Eight authored graph voices, scalar audio oracle, binding and stale refusals (**SDK project**) | `ctest -R cmake-g6-voice-bank-sdk-consumer` | `test/consumers/g6-voice-bank-consumer` |
 | `g7-latency-pdc-consumer` | Public latency reporting on a graph (**SDK project**) | Configure as an SDK project | `test/consumers/g7-latency-pdc-consumer` |
 | `spectral-frame-codec-consumer` | Spectral frame codec from an installed SDK (**SDK project**) | `ctest -R cmake-spectral-frame-codec-consumer` | `test/consumers/spectral-frame-codec-consumer` |
+| `spectral-resynthesis-consumer` | Routed analysis, stage and resynthesis with geometry, latency, tail, partition and planted-mutation checks from an installed SDK (**SDK project**) | `ctest -R cmake-spectral-resynthesis-consumer` | `test/consumers/spectral-resynthesis-consumer` |
 | `timeline-sdk-consumer` | Timeline SDK closure, cookbook and chord renderer from an installed SDK (**SDK project**) | `ctest -R cmake-timeline-sdk-consumer` | `test/consumers/timeline-sdk-consumer` |
 | `graph-agent-loop` | Bounded agent loop over the public graph API (**SDK project**) | Configure as an SDK project | `test/consumers/graph-agent-loop` |
 | `graph-agent-loop-replay` | Save, edit, and replay a prepared stereo graph with planted refusal controls (**SDK project**) | Configure as an SDK project | `test/consumers/graph-agent-loop-replay` |
 | `graph-edge-probe` | Graph edge kinds from an installed SDK (**SDK project**) | Configure as an SDK project | `test/consumers/graph-edge-probe` |
-| `graph-control-event-probe` | Bounded control/event edge publication and planted mutation (**SDK project**) | Configure as an SDK project | `test/consumers/graph-control-event-probe` |
+| `graph-control-event-probe` | Bounded control/event edge publication and planted refusal-message controls (**SDK project**) | Configure as an SDK project | `test/consumers/graph-control-event-probe` |
 | `gpu-fault-continuity` | Plugin that injects GPU faults for the host smoke test; needs `PULP_GPU_AUDIO_FAULT_HOOKS` | `pulp build --examples --target PulpGpuFaultContinuity_CLAP` | `test/consumers/gpu-fault-continuity` |
 | `text-input-test` | Text editor widget in a window | `pulp build --examples --target pulp-text-input-test` | `test/consumers/text-input-test` |
 | `native-ui-phase-f-preview` | Preview of a generated native editor; builds only on macOS with the design-import option and a generated editor source present | `pulp build --examples --target pulp-native-ui-phase-f-preview` | `test/consumers/native-ui-phase-f-preview` |

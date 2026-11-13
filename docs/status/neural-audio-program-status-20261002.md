@@ -106,7 +106,7 @@ These are the exact neural package merges present on Pulp `origin/main`
   `e260a88701eb85d1a22e11952826f98a4a36671c`.
 * Planning snapshot: `planning` gitlink
   `9986b6a383e981277f71b297be216fba750b4567` (planning PR 534 merge).
-* The earlier parent worktree `/Users/danielraffel/Code/pulp-dsp-next-20261001`
+* The earlier parent worktree `<code-root>/pulp-dsp-next-20261001`
   remains a historical resume anchor; do not edit it for this reconciliation.
 * Do not mark the program complete while any open gate above remains without a
   receipt satisfying the corresponding plan criteria.
