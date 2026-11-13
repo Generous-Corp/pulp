@@ -650,29 +650,46 @@ class Collector:
         when entries are queued ahead), renames listed as two paths.
 
         Read from the local clone when both commits are there, else from the
-        API's compare, which lists at most 300 files: a delta at that cap, a
-        status other than `ahead`, or any read error is None (unreadable),
-        never a short list, so a policy reading it fails closed."""
+        API's compare, which lists at most 300 files for the whole comparison
+        and may page them: every page is read until one comes back short, so
+        a delta is only returned when its end was seen. A delta at the 300
+        cap, a page that cannot be read, a status other than `ahead`, or any
+        read error is None (unreadable), never a short list, so a policy
+        reading it fails closed."""
         a, b = self.commit(base), self.commit(group_sha)
         if a and b and a.get("local") and b.get("local"):
             files = self.diff_files(base, group_sha)
             return files if files else None
 
+        per_page, cap = 100, 300
+
         def fetch() -> list[str] | None:
-            try:
-                doc = self.gh.json(f"repos/{self.gh.repository}/compare/{base}...{group_sha}?per_page=100")
-            except urllib.error.HTTPError:
-                return None
-            rows = doc.get("files")
-            if doc.get("status") != "ahead" or not isinstance(rows, list) or not rows or len(rows) >= 300:
-                return None
             out: set[str] = set()
-            for row in rows:
-                out.add(row.get("filename") or "")
-                if row.get("previous_filename"):
-                    out.add(row["previous_filename"])
-            return None if "" in out else sorted(out)
-        return self._cached(f"compare/{base}-{group_sha}.json.gz", fetch)
+            listed = 0
+            for page in range(1, cap // per_page + 2):
+                try:
+                    doc = self.gh.json(f"repos/{self.gh.repository}/compare/{base}...{group_sha}"
+                                       f"?per_page={per_page}&page={page}")
+                except urllib.error.HTTPError:
+                    return None
+                if not isinstance(doc, dict) or doc.get("status", "ahead" if page > 1 else None) != "ahead":
+                    return None
+                rows = doc.get("files", [] if page > 1 else None)
+                if not isinstance(rows, list) or (page == 1 and not rows):
+                    return None
+                listed += len(rows)
+                if listed >= cap:
+                    return None
+                for row in rows:
+                    out.add(row.get("filename") or "")
+                    if row.get("previous_filename"):
+                        out.add(row["previous_filename"])
+                if len(rows) < per_page:
+                    return None if "" in out else sorted(out)
+            return None
+        # Keyed apart from the single-page reads cached before every page was
+        # read: one of those can hold a truncated list.
+        return self._cached(f"compare-paged/{base}-{group_sha}.json.gz", fetch)
 
     def drift(self, head: dict, group: dict) -> tuple[list[str] | None, str | None]:
         """Files that differ between the head run's and the group's checkouts.

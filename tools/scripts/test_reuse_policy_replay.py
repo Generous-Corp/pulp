@@ -32,6 +32,7 @@ import datetime as dt
 import os
 import subprocess
 import urllib.error
+import urllib.parse
 import sys
 import tempfile
 import unittest
@@ -799,6 +800,43 @@ class EntryDeltaCollectTests(unittest.TestCase):
             self.assertIsNone(self.collector(doc).entry_delta("b", "m"))
         err = urllib.error.HTTPError("u", 404, "gone", {}, None)
         self.assertIsNone(self.collector(error=err).entry_delta("b", "m"))
+
+    @staticmethod
+    def paged(pages: dict[int, list[str]], status="ahead"):
+        def json(path):
+            page = int(urllib.parse.parse_qs(urllib.parse.urlsplit(path).query).get("page", ["1"])[0])
+            return {"status": status, "files": [{"filename": f} for f in pages.get(page, [])]}
+        return json
+
+    def test_a_compare_past_one_page_reads_every_page(self):
+        # A 150-file delta: page 1 is all docs, the code file is on page 2.
+        # Reading page 1 alone would call this entry docs-only.
+        docs = [f"docs/{i:03}.md" for i in range(100)]
+        rest = [f"docs/{i:03}.md" for i in range(100, 149)] + ["core/a.cpp"]
+        c = self.collector()
+        c.gh.json.side_effect = self.paged({1: docs, 2: rest})
+        self.assertEqual(c.entry_delta("b", "m"), sorted(docs + rest))
+        self.assertEqual(c.gh.json.call_count, 2)
+
+    def test_a_compare_whose_end_is_never_seen_is_unreadable(self):
+        full = {p: [f"docs/{p}-{i}.md" for i in range(100)] for p in (1, 2, 3, 4)}
+        c = self.collector()
+        c.gh.json.side_effect = self.paged(full)
+        self.assertIsNone(c.entry_delta("b", "m"))
+        c = self.collector()
+        pages = {1: [f"docs/{i}.md" for i in range(100)]}
+        def failing(path):
+            if "page=2" in path:
+                raise urllib.error.HTTPError("u", 502, "bad", {}, None)
+            return self.paged(pages)(path)
+        c.gh.json.side_effect = failing
+        self.assertIsNone(c.entry_delta("b", "m"))
+
+    def test_a_compare_listing_every_file_on_page_one_ends_at_an_empty_page(self):
+        files = [f"docs/{i:03}.md" for i in range(150)]
+        c = self.collector()
+        c.gh.json.side_effect = self.paged({1: files})
+        self.assertEqual(c.entry_delta("b", "m"), files)
 
     def test_a_group_record_carries_its_macos_check_and_entry_delta(self):
         c = rrc.Collector.__new__(rrc.Collector)
