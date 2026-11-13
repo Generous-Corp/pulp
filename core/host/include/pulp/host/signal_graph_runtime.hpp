@@ -523,11 +523,10 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // Control-thread diagnostic; useful for signed-artifact rejection messages.
     NodeId last_prepare_custom_failure_node() const;
 
-    // Begin an isolated topology transaction. The returned edit owns a private
-    // authoring graph and custom-type registry; its mutations never invalidate
-    // this graph's live snapshot. prepare() compiles that candidate off-side and
-    // commit() installs the authoring graph and compiled snapshot together.
-    // Destroying an uncommitted edit is a complete rollback.
+    // Begin an isolated topology transaction. The returned edit owns a private authoring graph and
+    // custom-type registry; its mutations never invalidate this graph's live snapshot. prepare()
+    // compiles that candidate off-side and commit() installs the authoring graph and compiled
+    // snapshot together. Destroying an uncommitted edit is a complete rollback.
     std::unique_ptr<PreparedTopologyEdit> begin_prepared_topology_edit();
 
     // Live swap transaction outcomes.
@@ -542,12 +541,11 @@ class SignalGraph : public format::AudioWorkgroupClient {
         NotInSwapEdit,     // prepare_swap called without a matching begin_swap_edit.
     };
     // Begin a transactional topology edit that MAY publish with no silence. Between
-    // begin_swap_edit() and prepare_swap()/abort_swap_edit(), the CALLING thread's
-    // graph mutations (connect/disconnect/gain/add/remove) do NOT invalidate the
-    // live snapshot — it keeps playing the old compiled graph until prepare_swap
-    // atomically publishes the new one. A mutation from any OTHER thread, or a
-    // lifecycle/limits/registry mutation from any thread, cancels the no-silence
-    // attempt (the live snapshot is invalidated as usual). Single-owner: nesting is
+    // begin_swap_edit() and prepare_swap()/abort_swap_edit(), the CALLING thread's graph mutations
+    // (connect/disconnect/gain/add/remove) do NOT invalidate the live snapshot — it keeps playing
+    // the old compiled graph until prepare_swap atomically publishes the new one. A mutation from
+    // any OTHER thread, or a lifecycle/limits/registry mutation from any thread, cancels the
+    // no-silence attempt (the live snapshot is invalidated as usual). Single-owner: nesting is
     // refused. Caller must pair with prepare_swap or abort_swap_edit.
     void begin_swap_edit();
     // Publish the staged topology with no silent block if it is reinit-free (same
@@ -571,17 +569,19 @@ class SignalGraph : public format::AudioWorkgroupClient {
     bool set_node_hosted_editor_open(NodeId id, bool open);
     PluginCatalogToken register_scanned_plugin(const PluginInfo& info);
     void clear_scanned_plugin_catalog();
-    // Stage a live instance replacement for a node, resolved through the scanned
-    // catalog (never an arbitrary path). To capture the outgoing instance's state
-    // without a silent block, this reads the OLD, still-live plugin's save_state()
-    // and get_parameter() on the control thread while the audio thread may be inside
-    // its process(). CONTRACT: a hosted plugin that opts into live swap must make
-    // save_state()/get_parameter() safe to call concurrently with process() (they are
-    // read-only snapshots for most plugins). Parameter capture goes through the cached
-    // contract + atomic get_parameter; full-state capture is best-effort — a plugin
-    // whose getState is strictly main-thread-only may capture a torn state, so keep it
-    // concurrency-tolerant or rely on parameter re-sync alone.
+    // Stage a live instance replacement for a node, resolved through the scanned catalog
+    // (never an arbitrary path). To capture the outgoing instance's state without a silent
+    // block, this reads the OLD, still-live plugin's save_state() and get_parameter() on the
+    // control thread while the audio thread may be inside its process(). CONTRACT: a hosted
+    // plugin that opts into live swap must make save_state()/get_parameter() safe to call
+    // concurrently with process() (they are read-only snapshots for most plugins). Parameter
+    // capture goes through the cached contract + atomic get_parameter; full-state capture is
+    // best-effort — a plugin whose getState is strictly main-thread-only may capture a torn
+    // state, so keep it concurrency-tolerant or rely on parameter re-sync alone.
     SwapResult stage_plugin_replacement(NodeId id, PluginCatalogToken token);
+    // (node, terminal, replacement): publish an unprepared same-identity isolated proxy over
+    // the node's TERMINAL isolated slot; refusals keep the live snapshot. Control thread only.
+    SwapResult publish_isolated_recovery(NodeId, const PluginSlot&, std::unique_ptr<PluginSlot>);
     LiveSwapDiagnostics last_swap_diagnostics() const;
 
     using PluginLoaderForTest = std::function<std::unique_ptr<PluginSlot>(const PluginInfo&)>;

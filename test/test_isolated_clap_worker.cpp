@@ -2,6 +2,7 @@
 #include "harness/scoped_rt_process_probe.hpp"
 #include "isolated_clap_endpoint.hpp"
 #include <array>
+#include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <cmath>
@@ -639,4 +640,331 @@ TEST_CASE("Isolated CLAP refuses SysEx and UMP sidecars", "[host][isolation]") {
     REQUIRE(buffers.silent());
     REQUIRE(result.control->status().reason == IsolationReason::plugin_failed);
     REQUIRE(result.control->stop() == IsolationCleanup::complete);
+}
+
+namespace {
+// A prepared 48k/64 graph with one isolated node under test (outputs 0-1), an
+// in-process gain sibling (outputs 2-3) and, optionally, a healthy isolated
+// sibling (outputs 4-5). Every path carries the isolated node's 64-sample PDC,
+// so each output is a fixed gain applied to the previous block's input.
+struct RecoveryRig {
+    SignalGraph graph;
+    NodeId node = 0, gain = 0;
+    bool hosted_sibling = false;
+    audio::Buffer<float> source{2, 64}, rendered{6, 64};
+    std::array<float, 128> previous{};
+    int block = 0;
+
+    RecoveryRig(std::unique_ptr<PluginSlot> isolated, std::unique_ptr<PluginSlot> sibling = {}) {
+        hosted_sibling = sibling != nullptr;
+        const auto input = graph.add_input_node(2, "input");
+        node = graph.add_plugin_node(std::move(isolated), 2, 2, "recoverable");
+        gain = graph.add_gain_node("built-in sibling");
+        REQUIRE(graph.set_node_gain(gain, 0.25f));
+        const auto other =
+            hosted_sibling ? graph.add_plugin_node(std::move(sibling), 2, 2, "hosted sibling") : 0;
+        const auto output = graph.add_output_node(6, "outputs");
+        for (PortIndex c = 0; c < 2; ++c) {
+            REQUIRE(graph.connect(input, c, node, c));
+            REQUIRE(graph.connect(input, c, gain, c));
+            REQUIRE(graph.connect(node, c, output, c));
+            REQUIRE(graph.connect(gain, c, output, c + 2));
+            if (hosted_sibling) {
+                REQUIRE(graph.connect(input, c, other, c));
+                REQUIRE(graph.connect(other, c, output, c + 4));
+            }
+        }
+        REQUIRE(graph.prepare(48000, 64));
+        REQUIRE(graph.latency_samples() == 64);
+    }
+    // Renders one paced block and returns the node's gain: 0 for silence, the
+    // exact multiplier otherwise, or -1 when the node output is neither.
+    // Siblings are checked bit-exactly on every block.
+    float step() {
+        for (std::size_t c = 0; c < 2; ++c)
+            for (std::size_t n = 0; n < 64; ++n)
+                source.channel(c)[n] = static_cast<float>(block + 1 + n + 64 * c) / 256;
+        if (block++)
+            std::this_thread::sleep_for(10ms);
+        auto in = static_cast<const audio::Buffer<float>&>(source).view();
+        auto out = rendered.view();
+        {
+            test::ScopedRtProcessProbe probe;
+            graph.process(out, in, 64);
+        }
+        bool silent = true;
+        for (std::size_t c = 0; c < 2; ++c)
+            for (std::size_t n = 0; n < 64; ++n) {
+                const auto prior = previous[c * 64 + n];
+                INFO("block=" << block << " channel=" << c << " sample=" << n);
+                REQUIRE(rendered.channel(c + 2)[n] == prior * 0.25f);
+                if (hosted_sibling)
+                    REQUIRE(rendered.channel(c + 4)[n] == prior * 0.5f);
+                silent = silent && rendered.channel(c)[n] == 0.0f;
+            }
+        float observed = silent ? 0.0f : -1.0f;
+        for (float candidate : {0.5f, 0.75f}) {
+            bool match = !silent;
+            for (std::size_t c = 0; c < 2; ++c)
+                for (std::size_t n = 0; n < 64; ++n)
+                    match = match && rendered.channel(c)[n] == previous[c * 64 + n] * candidate;
+            if (match)
+                observed = candidate;
+        }
+        for (std::size_t c = 0; c < 2; ++c)
+            for (std::size_t n = 0; n < 64; ++n)
+                previous[c * 64 + n] = source.channel(c)[n];
+        return observed;
+    }
+    const PluginSlot* published() const {
+        return graph.live_plugin_slot(node);
+    }
+};
+
+IsolationReason kill_worker(IsolatedClapControl& control) {
+    const int pid = control.status().worker_pid;
+    REQUIRE(pid > 0);
+    REQUIRE(pid != ::getpid());
+    REQUIRE(::kill(pid, SIGKILL) == 0);
+    const auto deadline = std::chrono::steady_clock::now() + 2s;
+    while (control.status().reason == IsolationReason::none &&
+           std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(1ms);
+    return control.status().reason;
+}
+} // namespace
+
+TEST_CASE("Isolated CLAP terminal graph node recovers from its checkpoint", "[host][isolation]") {
+    // The state fixture saves gain 0.75 while rendering at 0.5, so recovered
+    // output proves the checkpoint (not a fresh default instance) was restored.
+    auto state = load_isolated_clap(options("state"));
+    auto healthy = load_isolated_clap(options());
+    REQUIRE(state);
+    REQUIRE(healthy);
+    REQUIRE(state.control->checkpoint());
+    const auto checkpoint = state.control->accepted_checkpoint();
+    REQUIRE(checkpoint.size() == sizeof(float));
+    const auto first_generation = state.control->status().generation;
+    const auto first_pid = state.control->status().worker_pid;
+    RecoveryRig rig(std::move(state.slot), std::move(healthy.slot));
+    REQUIRE(rig.step() == 0.0f);
+    for (int block = 0; block < 5; ++block)
+        REQUIRE(rig.step() == 0.5f);
+
+    REQUIRE(kill_worker(*state.control) == IsolationReason::worker_exited);
+    const auto* terminal = rig.published();
+    for (int block = 0; block < 4; ++block)
+        REQUIRE(rig.step() == 0.0f);
+
+    auto recovered =
+        recover_isolated_graph_node(rig.graph, rig.node, options("state"), *state.control);
+    INFO("outcome=" << static_cast<int>(recovered.outcome)
+                    << " worker_error=" << static_cast<int>(recovered.worker_error));
+    REQUIRE(recovered);
+    REQUIRE(recovered.control->status().reason == IsolationReason::none);
+    REQUIRE(recovered.control->status().generation != first_generation);
+    REQUIRE(recovered.control->status().worker_pid != first_pid);
+    REQUIRE(recovered.control->accepted_checkpoint() == checkpoint);
+    REQUIRE(rig.published() != terminal);
+    REQUIRE(rig.graph.last_swap_diagnostics().reason == LiveSwapFallbackReason::None);
+    // The old generation stays terminal; the new one renders one block of
+    // latency silence, then the checkpointed gain.
+    REQUIRE(state.control->status().reason == IsolationReason::worker_exited);
+    REQUIRE(rig.step() == 0.0f);
+    for (int block = 0; block < 6; ++block)
+        REQUIRE(rig.step() == 0.75f);
+    REQUIRE(recovered.control->status().reason == IsolationReason::none);
+    REQUIRE(healthy.control->status().reason == IsolationReason::none);
+    rig.graph.release();
+    REQUIRE(recovered.control->stop() == IsolationCleanup::complete);
+    REQUIRE(healthy.control->stop() == IsolationCleanup::complete);
+}
+
+TEST_CASE("Isolated CLAP graph recovery refusals keep the silent node published",
+          "[host][isolation]") {
+    auto state = load_isolated_clap(options("state"));
+    REQUIRE(state);
+    REQUIRE(state.control->checkpoint());
+    RecoveryRig rig(std::move(state.slot));
+    REQUIRE(rig.step() == 0.0f);
+    REQUIRE(rig.step() == 0.5f);
+    const auto* original = rig.published();
+
+    REQUIRE(recover_isolated_graph_node(rig.graph, rig.gain, options("state"), *state.control)
+                .outcome == IsolatedNodeRecovery::not_isolated_node);
+    {
+        auto other = load_isolated_clap(options());
+        REQUIRE(other);
+        REQUIRE(
+            recover_isolated_graph_node(rig.graph, rig.node, options(), *other.control).outcome ==
+            IsolatedNodeRecovery::control_mismatch);
+        REQUIRE(other.control->stop() == IsolationCleanup::complete);
+    }
+    // A healthy node is never preempted, and it keeps rendering afterwards.
+    REQUIRE(recover_isolated_graph_node(rig.graph, rig.node, options("state"), *state.control)
+                .outcome == IsolatedNodeRecovery::not_terminal);
+    REQUIRE(state.control->status().reason == IsolationReason::none);
+    {
+        // The graph-level guard refuses a same-identity proxy over a healthy node.
+        auto spare = load_isolated_clap(options("state"));
+        REQUIRE(spare);
+        REQUIRE(rig.graph.publish_isolated_recovery(rig.node, *original, std::move(spare.slot)) ==
+                SignalGraph::SwapResult::NeedsEagerPrepare);
+        REQUIRE(rig.graph.last_swap_diagnostics().message == "isolated node is not terminal");
+        REQUIRE(spare.control->stop() == IsolationCleanup::complete);
+    }
+    REQUIRE(rig.step() == 0.5f);
+    REQUIRE(rig.published() == original);
+
+    REQUIRE(kill_worker(*state.control) == IsolationReason::worker_exited);
+    REQUIRE(rig.step() == 0.0f);
+    REQUIRE(recover_isolated_graph_node(rig.graph, rig.node, options(), *state.control).outcome ==
+            IsolatedNodeRecovery::identity_mismatch);
+    auto foreign = options("state");
+    foreign.plugin_sha256[0] = foreign.plugin_sha256[0] == 'a' ? 'b' : 'a';
+    REQUIRE(recover_isolated_graph_node(rig.graph, rig.node, foreign, *state.control).outcome ==
+            IsolatedNodeRecovery::identity_mismatch);
+    auto broken_worker = options("state");
+    broken_worker.worker_path = PULP_MISMATCHED_CLAP_WORKER_PATH;
+    broken_worker.worker_sha256 =
+        *runtime::sha256_file_hex(broken_worker.worker_path, std::uint64_t{1} << 32);
+    const auto failed =
+        recover_isolated_graph_node(rig.graph, rig.node, broken_worker, *state.control);
+    REQUIRE(failed.outcome == IsolatedNodeRecovery::worker_failed);
+    REQUIRE(failed.worker_error == IsolationReason::launch_failed);
+    REQUIRE(failed.control == nullptr);
+    // Graph-level guard: a different-identity proxy is refused before prepare,
+    // and the refusal does not invalidate the live snapshot.
+    {
+        auto other = load_isolated_clap(options());
+        REQUIRE(other);
+        REQUIRE(rig.graph.publish_isolated_recovery(rig.node, *original, std::move(other.slot)) ==
+                SignalGraph::SwapResult::NeedsEagerPrepare);
+        REQUIRE(rig.graph.last_swap_diagnostics().reason ==
+                LiveSwapFallbackReason::UntrustedIdentity);
+        REQUIRE(other.control->stop() == IsolationCleanup::complete);
+    }
+    for (int block = 0; block < 3; ++block)
+        REQUIRE(rig.step() == 0.0f);
+    REQUIRE(rig.published() == original);
+    REQUIRE(state.control->status().reason == IsolationReason::worker_exited);
+
+    // Refusals left the node recoverable with the correct identity.
+    auto recovered =
+        recover_isolated_graph_node(rig.graph, rig.node, options("state"), *state.control);
+    REQUIRE(recovered);
+    REQUIRE(rig.step() == 0.0f);
+    REQUIRE(rig.step() == 0.75f);
+    rig.graph.release();
+    REQUIRE(recovered.control->stop() == IsolationCleanup::complete);
+}
+
+TEST_CASE("Isolated CLAP graph recovery without a checkpoint refuses", "[host][isolation]") {
+    auto plain = load_isolated_clap(options());
+    REQUIRE(plain);
+    RecoveryRig rig(std::move(plain.slot));
+    REQUIRE(rig.step() == 0.0f);
+    REQUIRE(rig.step() == 0.5f);
+    const auto* original = rig.published();
+    REQUIRE(kill_worker(*plain.control) == IsolationReason::worker_exited);
+    REQUIRE(recover_isolated_graph_node(rig.graph, rig.node, options(), *plain.control).outcome ==
+            IsolatedNodeRecovery::no_checkpoint);
+    REQUIRE(rig.step() == 0.0f);
+    REQUIRE(rig.published() == original);
+    rig.graph.release();
+    REQUIRE(plain.control->stop() == IsolationCleanup::complete);
+}
+
+TEST_CASE("Isolated CLAP graph recovery races a running callback", "[host][isolation]") {
+    auto state = load_isolated_clap(options("state"));
+    REQUIRE(state);
+    REQUIRE(state.control->checkpoint());
+    RecoveryRig rig(std::move(state.slot));
+    REQUIRE(rig.step() == 0.0f);
+    REQUIRE(rig.step() == 0.5f);
+
+    // Catch2 assertions are not thread-safe, so the callback thread only
+    // records outcomes; RecoveryRig::step() is not used off the test thread.
+    std::atomic<bool> done{false};
+    std::atomic<int> sibling_mismatches{0}, invalid_node_blocks{0}, blocks{0};
+    std::atomic<int> recovered_blocks{0};
+    std::thread callback([&] {
+        audio::Buffer<float> source(2, 64), rendered(6, 64);
+        std::array<float, 128> previous{};
+        for (std::size_t i = 0; i < previous.size(); ++i)
+            previous[i] = rig.previous[i];
+        // Bounded: about 8 s of paced 64-frame callbacks at most.
+        for (int block = 0; block < 800 && !done.load(std::memory_order_acquire); ++block) {
+            for (std::size_t c = 0; c < 2; ++c)
+                for (std::size_t n = 0; n < 64; ++n)
+                    source.channel(c)[n] = static_cast<float>(block + 7 + n + 64 * c) / 256;
+            std::this_thread::sleep_for(10ms);
+            auto in = static_cast<const audio::Buffer<float>&>(source).view();
+            auto out = rendered.view();
+            {
+                test::ScopedRtProcessProbe probe;
+                rig.graph.process(out, in, 64);
+            }
+            bool silent = true, half = true, recovered = true;
+            for (std::size_t c = 0; c < 2; ++c)
+                for (std::size_t n = 0; n < 64; ++n) {
+                    const auto prior = previous[c * 64 + n];
+                    if (rendered.channel(c + 2)[n] != prior * 0.25f)
+                        sibling_mismatches.fetch_add(1, std::memory_order_relaxed);
+                    const auto value = rendered.channel(c)[n];
+                    silent = silent && value == 0.0f;
+                    half = half && value == prior * 0.5f;
+                    recovered = recovered && value == prior * 0.75f;
+                    previous[c * 64 + n] = source.channel(c)[n];
+                }
+            if (!silent && !half && !recovered)
+                invalid_node_blocks.fetch_add(1, std::memory_order_relaxed);
+            if (recovered && !silent)
+                recovered_blocks.fetch_add(1, std::memory_order_relaxed);
+            blocks.fetch_add(1, std::memory_order_release);
+        }
+    });
+
+    // Repeated kill and recovery while the callback keeps running. Each
+    // recovered generation inherits the checkpoint it was restored from.
+    std::shared_ptr<IsolatedClapControl> current = state.control;
+    std::vector<std::shared_ptr<IsolatedClapControl>> retired;
+    bool all_recovered = true;
+    for (int cycle = 0; cycle < 3 && all_recovered; ++cycle) {
+        const int before = recovered_blocks.load(std::memory_order_acquire);
+        const auto wait_until = std::chrono::steady_clock::now() + 3s;
+        while (cycle && recovered_blocks.load(std::memory_order_acquire) < before + 3 &&
+               std::chrono::steady_clock::now() < wait_until)
+            std::this_thread::sleep_for(1ms);
+        const int pid = current->status().worker_pid;
+        all_recovered = pid > 0 && ::kill(pid, SIGKILL) == 0;
+        const auto fault_deadline = std::chrono::steady_clock::now() + 2s;
+        while (current->status().reason == IsolationReason::none &&
+               std::chrono::steady_clock::now() < fault_deadline)
+            std::this_thread::sleep_for(1ms);
+        auto recovered =
+            recover_isolated_graph_node(rig.graph, rig.node, options("state"), *current);
+        all_recovered = all_recovered && recovered;
+        retired.push_back(current);
+        if (recovered)
+            current = recovered.control;
+    }
+    const int settled = recovered_blocks.load(std::memory_order_acquire);
+    const auto wait_until = std::chrono::steady_clock::now() + 3s;
+    while (recovered_blocks.load(std::memory_order_acquire) < settled + 3 &&
+           std::chrono::steady_clock::now() < wait_until)
+        std::this_thread::sleep_for(1ms);
+    done.store(true, std::memory_order_release);
+    callback.join();
+
+    INFO("blocks=" << blocks.load() << " recovered_blocks=" << recovered_blocks.load());
+    REQUIRE(all_recovered);
+    REQUIRE(sibling_mismatches.load() == 0);
+    REQUIRE(invalid_node_blocks.load() == 0);
+    REQUIRE(recovered_blocks.load() >= 9);
+    REQUIRE(current->status().reason == IsolationReason::none);
+    for (const auto& control : retired)
+        REQUIRE(control->status().lifecycle == IsolationLifecycle::terminal);
+    rig.graph.release();
+    REQUIRE(current->stop() == IsolationCleanup::complete);
 }
