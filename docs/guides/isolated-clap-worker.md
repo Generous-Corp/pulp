@@ -62,7 +62,11 @@ Recovery requires complete previous cleanup and constructs a fresh mapping,
 worker and generation. It restores accepted state and primes silence; old
 proxies remain terminal and uncheckpointed DSP history is lost. A recovered
 generation starts with the checkpoint it was restored from as its accepted
-checkpoint, so it can recover again after a later fault.
+checkpoint, so it can recover again after a later fault. Every later recovery
+therefore restores the original pre-render checkpoint, not the state the node
+reached while rendering. When a fresh worker is refused and its own cleanup does
+not complete, the failed result carries its control; finish `cleanup()` on it,
+or its reservation keeps later loads refused as `quarantine_active`.
 
 `recover_isolated_graph_node(graph, node, options, old)` returns a terminal node
 of a running graph to service. Take the checkpoint before the node renders
@@ -72,12 +76,17 @@ going. It refuses with a typed `IsolatedNodeRecovery` when the node is not an
 isolated proxy, `old` does not control it, the node is healthy, the plugin type
 or binary differs, no checkpoint was accepted, old custody cleanup is
 incomplete, or the fresh worker fails to start or restore. Otherwise
-`SignalGraph::publish_isolated_recovery` prepares the fresh proxy and publishes
-it through the live-swap tail (reinit-free predicate, swap compile, live PDC
+`SignalGraph::publish_isolated_recovery` checks the descriptor and plugin
+SHA-256 again, prepares the fresh proxy without holding the graph lock,
+revalidates the node, rate and block size under the lock, and publishes it
+through the live-swap tail (reinit-free predicate, swap compile, live PDC
 ring adoption, one snapshot publish). The callback renders terminal silence
 until that publish, then one block of latency silence, then the restored state.
 Siblings keep their delay history. Every refusal keeps the old snapshot
-published.
+published; the graph call reports it as `NeedsEagerPrepare` with
+`last_swap_diagnostics()`, although eager prepare is itself refused for an
+isolated graph. A successful publication fires the node's
+`on_instance_swapped` observer after the graph lock is released.
 
 The host reserves one of two finite entries **before spawn**, including failed
 handshakes. `RetainedProcessCustody` preserves child identity through group

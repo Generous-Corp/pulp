@@ -789,90 +789,155 @@ void SignalGraph::abort_swap_edit() {
     invalidate_live_locked_();
 }
 
+std::shared_ptr<PluginSlot> SignalGraph::published_plugin_slot(NodeId id) const {
+    GraphMutationLock lock(*this);
+    if (refuse_spectral_mutation_())
+        return nullptr;
+    const auto& live = live_slot_.live();
+    if (!live)
+        return nullptr;
+    const auto it = live->plugins.find(id);
+    return it == live->plugins.end() ? nullptr : it->second;
+}
+
+// A refusal returns NeedsEagerPrepare as "not published"; eager prepare itself
+// is refused for isolated graphs, so callers read last_swap_diagnostics().
 SignalGraph::SwapResult
 SignalGraph::publish_isolated_recovery(NodeId id, const PluginSlot& terminal,
                                        std::unique_ptr<PluginSlot> replacement) {
-    GraphMutationLock lock(*this);
     // Every refusal leaves the live snapshot published: the terminal node keeps
     // rendering silence and its siblings never lose a block to a failed recovery.
     const auto refuse = [&](LiveSwapFallbackReason reason, const char* message) {
         set_live_swap_diagnostics_locked_(reason, id, message);
         return SwapResult::NeedsEagerPrepare;
     };
-    if (refuse_spectral_mutation_())
-        return SwapResult::NeedsEagerPrepare;
-    if (in_swap_edit_ || !trigger_producers_.empty() || !trigger_envelopes_.empty() ||
-        !trigger_audio_.empty() || !trigger_edges_.empty())
-        return refuse(LiveSwapFallbackReason::PredicateExcluded,
-                      "a swap edit or trigger graph owns publication");
-    const auto live = live_slot_.live();
-    auto* n = node_mut_locked_(id);
-    const auto published = [&] {
-        const auto it = live->plugins.find(id);
-        return it != live->plugins.end() && it->second.get() == &terminal;
+    struct Refusal {
+        LiveSwapFallbackReason reason = LiveSwapFallbackReason::None;
+        const char* message = nullptr;
     };
-    if (!live || !n || n->type != NodeType::Plugin || n->plugin.get() != &terminal || !published())
-        return refuse(LiveSwapFallbackReason::PredicateExcluded,
-                      "node does not publish the given isolated slot");
-    if (!replacement || !is_isolated_plugin_slot(terminal) ||
-        !is_isolated_plugin_slot(*replacement))
-        return refuse(LiveSwapFallbackReason::UntrustedIdentity,
-                      "recovery replaces only isolated proxies with isolated proxies");
-    // An isolated proxy reports unloaded exactly when its fault word is set.
-    if (terminal.is_loaded())
-        return refuse(LiveSwapFallbackReason::PredicateExcluded, "isolated node is not terminal");
-    if (!same_plugin_identity(terminal.info(), replacement->info()))
-        return refuse(LiveSwapFallbackReason::UntrustedIdentity,
-                      "replacement plugin identity differs from the terminal node");
-    const auto meta = prepared_plugin_meta_.find(id);
-    const auto shape = live->shapes.find(id);
-    if (meta == prepared_plugin_meta_.end() || shape == live->shapes.end() ||
-        shape->second.num_input_ports != replacement->info().num_inputs ||
-        shape->second.num_output_ports != replacement->info().num_outputs)
-        return refuse(LiveSwapFallbackReason::ShapeMismatch,
-                      "replacement port shape differs from the live node");
-    if (std::max(0, replacement->latency_samples()) != meta->second.latency_samples)
-        return refuse(LiveSwapFallbackReason::LatencyChanged,
-                      "replacement latency differs from the live node");
-    if (!replacement->prepare(live->sample_rate, live->max_block_size))
+    // Validated once before the worker prepare and again under the publishing
+    // lock, because the graph may be released or edited while the lock is free.
+    const auto validate = [&]() -> Refusal {
+        if (in_swap_edit_ || !trigger_producers_.empty() || !trigger_envelopes_.empty() ||
+            !trigger_audio_.empty() || !trigger_edges_.empty())
+            return {LiveSwapFallbackReason::PredicateExcluded,
+                    "a swap edit or trigger graph owns publication"};
+        const auto& live = live_slot_.live();
+        const auto* n = node_mut_locked_(id);
+        if (!live || !n || n->type != NodeType::Plugin || n->plugin.get() != &terminal)
+            return {LiveSwapFallbackReason::PredicateExcluded,
+                    "node does not publish the given isolated slot"};
+        const auto published = live->plugins.find(id);
+        if (published == live->plugins.end() || published->second.get() != &terminal)
+            return {LiveSwapFallbackReason::PredicateExcluded,
+                    "node does not publish the given isolated slot"};
+        if (!replacement || !is_isolated_plugin_slot(terminal) ||
+            !is_isolated_plugin_slot(*replacement))
+            return {LiveSwapFallbackReason::UntrustedIdentity,
+                    "recovery replaces only isolated proxies with isolated proxies"};
+        // An isolated proxy reports unloaded exactly when its fault word is set.
+        if (terminal.is_loaded())
+            return {LiveSwapFallbackReason::PredicateExcluded, "isolated node is not terminal"};
+        // Binds the plugin bytes (SHA-256) and descriptor, not only PluginInfo.
+        if (!same_plugin_identity(terminal.info(), replacement->info()) ||
+            !same_isolated_plugin_binary(terminal, *replacement))
+            return {LiveSwapFallbackReason::UntrustedIdentity,
+                    "replacement plugin identity differs from the terminal node"};
+        const auto meta = prepared_plugin_meta_.find(id);
+        const auto shape = live->shapes.find(id);
+        if (meta == prepared_plugin_meta_.end() || shape == live->shapes.end() ||
+            shape->second.num_input_ports != replacement->info().num_inputs ||
+            shape->second.num_output_ports != replacement->info().num_outputs)
+            return {LiveSwapFallbackReason::ShapeMismatch,
+                    "replacement port shape differs from the live node"};
+        if (std::max(0, replacement->latency_samples()) != meta->second.latency_samples)
+            return {LiveSwapFallbackReason::LatencyChanged,
+                    "replacement latency differs from the live node"};
+        return {};
+    };
+
+    double sample_rate = 0;
+    int block_size = 0;
+    {
+        GraphMutationLock lock(*this);
+        if (refuse_spectral_mutation_())
+            return refuse(LiveSwapFallbackReason::PredicateExcluded,
+                          "spectral mode owns the graph");
+        if (const auto refusal = validate(); refusal.message)
+            return refuse(refusal.reason, refusal.message);
+        sample_rate = live_slot_.live()->sample_rate;
+        block_size = live_slot_.live()->max_block_size;
+    }
+    // Worker IPC (a five-second lifecycle deadline) runs without the graph lock.
+    // The proxy is not reachable from any snapshot until it is published below.
+    if (!replacement->prepare(sample_rate, block_size)) {
+        GraphMutationLock lock(*this);
         return refuse(LiveSwapFallbackReason::PrepareFailed, "replacement did not prepare");
+    }
 
-    std::shared_ptr<PluginSlot> fresh(std::move(replacement));
-    const auto old_slot = n->plugin;
-    const auto old_meta = meta->second;
-    n->plugin = fresh;
-    meta->second.restart_requests = fresh->restart_request_count();
-    StagedReplacement staged;
-    staged.id = id;
-    staged.info = fresh->info();
-    staged.slot = fresh;
-    staged.metadata = meta->second;
-    staged.same_identity = true;
-    // The staged entry only relaxes the reinit-free instance-identity check for
-    // this node; it is cleared before the lock is released on every path.
-    staged_replacements_[id] = std::move(staged);
-    const auto rollback = [&](const char* message) {
-        n->plugin = old_slot;
-        prepared_plugin_meta_[id] = old_meta;
+    struct ObserverCall {
+        std::shared_ptr<PluginSlot> old_slot, new_slot;
+        NodeLiveSwapPolicy policy;
+    } observer;
+    {
+        GraphMutationLock lock(*this);
+        if (refuse_spectral_mutation_())
+            return refuse(LiveSwapFallbackReason::PredicateExcluded,
+                          "spectral mode owns the graph");
+        if (const auto refusal = validate(); refusal.message)
+            return refuse(refusal.reason, refusal.message);
+        const auto live = live_slot_.live();
+        if (live->sample_rate != sample_rate || live->max_block_size != block_size)
+            return refuse(LiveSwapFallbackReason::PrepareFailed,
+                          "graph rate or block size changed during recovery");
+        auto* n = node_mut_locked_(id);
+        const auto meta = prepared_plugin_meta_.find(id);
+        std::shared_ptr<PluginSlot> fresh(std::move(replacement));
+        const auto old_slot = n->plugin;
+        const auto old_info = n->plugin_info;
+        const auto old_meta = meta->second;
+        n->plugin = fresh;
+        n->plugin_info = fresh->info();
+        meta->second.restart_requests = fresh->restart_request_count();
+        StagedReplacement staged;
+        staged.id = id;
+        staged.info = fresh->info();
+        staged.slot = fresh;
+        staged.metadata = meta->second;
+        staged.same_identity = true;
+        // The staged entry only relaxes the reinit-free instance-identity check
+        // for this node; it is cleared before the lock is released on every path.
+        staged_replacements_[id] = std::move(staged);
+        const auto rollback = [&](const char* message) {
+            n->plugin = old_slot;
+            n->plugin_info = old_info;
+            prepared_plugin_meta_[id] = old_meta;
+            staged_replacements_.clear();
+            return refuse(LiveSwapFallbackReason::PredicateExcluded, message);
+        };
+        if (!snapshot_is_plugin_reinit_free_locked_(*live, sample_rate, block_size))
+            return rollback("graph is not eligible for a live swap");
+        auto next = compile_(sample_rate, block_size, CompileMode::SwapNoAnticipation);
+        if (!next)
+            return rollback("candidate graph did not compile");
+        if (const char* refusal = adopt_live_snapshot_state(*next, *live))
+            return rollback(refusal);
+
+        // Same publication order as prepare_swap(): the audio thread pins either
+        // the old snapshot (terminal silence) or the new one, never a torn pointer,
+        // and the displaced snapshot (with the terminal proxy) is reclaimed on this
+        // thread.
+        live_slot_.publish(next);
+        total_latency_samples_.store(next->total_latency_samples, std::memory_order_relaxed);
+        publish_prepared_stats_locked_(*next);
         staged_replacements_.clear();
-        return refuse(LiveSwapFallbackReason::PredicateExcluded, message);
-    };
-    if (!snapshot_is_plugin_reinit_free_locked_(*live, live->sample_rate, live->max_block_size))
-        return rollback("graph is not eligible for a live swap");
-    auto next = compile_(live->sample_rate, live->max_block_size, CompileMode::SwapNoAnticipation);
-    if (!next)
-        return rollback("candidate graph did not compile");
-    if (const char* refusal = adopt_live_snapshot_state(*next, *live))
-        return rollback(refusal);
-
-    // Same publication order as prepare_swap(): the audio thread pins either the
-    // old snapshot (terminal silence) or the new one, never a torn pointer, and the
-    // displaced snapshot (with the terminal proxy) is reclaimed on this thread.
-    live_slot_.publish(next);
-    total_latency_samples_.store(next->total_latency_samples, std::memory_order_relaxed);
-    publish_prepared_stats_locked_(*next);
-    staged_replacements_.clear();
-    set_live_swap_diagnostics_locked_(LiveSwapFallbackReason::None, 0, {});
+        set_live_swap_diagnostics_locked_(LiveSwapFallbackReason::None, 0, {});
+        observer = {old_slot, fresh, n->live_swap_policy};
+    }
+    // Like prepare_swap(), the observer runs after the graph lock is released.
+    if (observer.policy.on_instance_swapped)
+        observer.policy.on_instance_swapped(id, std::move(observer.old_slot),
+                                            std::move(observer.new_slot));
     return SwapResult::Swapped;
 }
 

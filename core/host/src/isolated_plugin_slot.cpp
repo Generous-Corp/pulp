@@ -563,8 +563,11 @@ IsolatedClapResult recover_isolated_clap(const IsolatedClapOptions& options,
     if (recovered && (recovered.control->status().generation == previous->generation ||
                       !IsolatedClapAccess::session(*recovered.control)
                            ->exchange(Command::restore, nullptr, &bytes))) {
-        recovered.control->stop();
-        return {{}, {}, IsolationReason::checkpoint_invalid};
+        // An incomplete cleanup keeps its finite reservation, so hand the control
+        // back rather than strand it where nothing can finish the cleanup.
+        if (recovered.control->stop() == IsolationCleanup::complete)
+            return {{}, {}, IsolationReason::checkpoint_invalid};
+        return {{}, std::move(recovered.control), IsolationReason::checkpoint_invalid};
     }
     if (recovered) {
         // The restored state is this generation's starting checkpoint, so a later
@@ -583,11 +586,12 @@ IsolatedNodeRecoveryResult recover_isolated_graph_node(SignalGraph& graph, NodeI
     const auto refuse = [](Outcome outcome, IsolationReason error = IsolationReason::none) {
         return IsolatedNodeRecoveryResult{outcome, error, nullptr};
     };
-    // Pin the live snapshot so the published proxy cannot be reclaimed (or its
-    // address reused) while it is identified and handed back for publication.
-    const auto pinned = graph.live_snapshot_handle();
-    const auto* published =
-        dynamic_cast<const IsolatedSlot*>(pinned ? graph.live_plugin_slot(node) : nullptr);
+    // Share ownership of the published proxy (read under the graph lock), so it
+    // cannot be freed or its address reused while it is identified here and
+    // handed back for publication, even if another control thread releases or
+    // re-publishes the graph meanwhile.
+    const auto owner = graph.published_plugin_slot(node);
+    const auto* published = dynamic_cast<const IsolatedSlot*>(owner.get());
     if (!published)
         return refuse(Outcome::not_isolated_node);
     const auto& previous = IsolatedClapAccess::session(old);
@@ -610,16 +614,28 @@ IsolatedNodeRecoveryResult recover_isolated_graph_node(SignalGraph& graph, NodeI
         return refuse(Outcome::cleanup_incomplete);
     auto recovered = recover_isolated_clap(options, old);
     if (!recovered)
-        return refuse(Outcome::worker_failed, recovered.error);
+        return {Outcome::worker_failed, recovered.error, std::move(recovered.control)};
     auto control = std::move(recovered.control);
     if (graph.publish_isolated_recovery(node, *published, std::move(recovered.slot)) !=
         SignalGraph::SwapResult::Swapped) {
-        control->stop();
-        return refuse(Outcome::publication_refused);
+        // A complete stop releases the reservation; otherwise the caller needs the
+        // control to finish cleanup() or later loads stay quarantine_active.
+        if (control->stop() == IsolationCleanup::complete)
+            control.reset();
+        return {Outcome::publication_refused, IsolationReason::none, std::move(control)};
     }
     return {Outcome::recovered, IsolationReason::none, std::move(control)};
 }
 bool is_isolated_plugin_slot(const PluginSlot& slot) noexcept {
     return dynamic_cast<const IsolatedSlot*>(&slot) != nullptr;
+}
+bool same_isolated_plugin_binary(const PluginSlot& a, const PluginSlot& b) noexcept {
+    const auto* left = dynamic_cast<const IsolatedSlot*>(&a);
+    const auto* right = dynamic_cast<const IsolatedSlot*>(&b);
+    if (!left || !right)
+        return false;
+    const auto& x = left->session()->options;
+    const auto& y = right->session()->options;
+    return x.selection.type == y.selection.type && x.plugin_sha256 == y.plugin_sha256;
 }
 } // namespace pulp::host

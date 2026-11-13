@@ -579,8 +579,8 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // best-effort — a plugin whose getState is strictly main-thread-only may capture a torn
     // state, so keep it concurrency-tolerant or rely on parameter re-sync alone.
     SwapResult stage_plugin_replacement(NodeId id, PluginCatalogToken token);
-    // (node, terminal, replacement): publish an unprepared same-identity isolated proxy over
-    // the node's TERMINAL isolated slot; refusals keep the live snapshot. Control thread only.
+    // (node, terminal, replacement): publish an unprepared proxy with the same descriptor and SHA
+    // over a TERMINAL isolated one. Refusal: NeedsEagerPrepare + diagnostics, live snapshot kept.
     SwapResult publish_isolated_recovery(NodeId, const PluginSlot&, std::unique_ptr<PluginSlot>);
     LiveSwapDiagnostics last_swap_diagnostics() const;
 
@@ -726,10 +726,10 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // live_snapshot_handle() is retained AND no re-prepare has occurred; a
     // routing built from it must be rebuilt after the graph recompiles.
     std::atomic<float>* live_gain_atomic(NodeId id) const noexcept;
-    // The live compiled snapshot's PluginSlot for a Plugin node, or nullptr.
-    // Same lifetime contract as live_gain_atomic: valid only while
-    // live_snapshot_handle() is retained and no re-prepare has occurred.
+    // The live compiled snapshot's PluginSlot for a Plugin node, or nullptr. Same lifetime contract
+    // as live_gain_atomic. published_plugin_slot() reads it under the lock and shares ownership.
     PluginSlot* live_plugin_slot(NodeId id) const noexcept;
+    std::shared_ptr<PluginSlot> published_plugin_slot(NodeId id) const;
     // The live compiled snapshot's resolved process callback for a Custom node,
     // or nullptr when the node is unresolved (unregistered type / shape
     // mismatch). The pointee is the snapshot's own callback (which keeps any

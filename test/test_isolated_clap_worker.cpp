@@ -968,3 +968,104 @@ TEST_CASE("Isolated CLAP graph recovery races a running callback", "[host][isola
     rig.graph.release();
     REQUIRE(current->stop() == IsolationCleanup::complete);
 }
+
+TEST_CASE("Isolated CLAP concurrent recoveries of one node publish exactly once",
+          "[host][isolation]") {
+    // Two control threads race to recover the same terminal node. Both usually
+    // pass the checks and spawn a worker before either publishes, so the loser
+    // is refused at publication and must stop its own worker; a leaked
+    // reservation would leave the next load refused.
+    bool saw_publication_refused = false;
+    for (int round = 0; round < 6 && !saw_publication_refused; ++round) {
+        INFO("round=" << round);
+        auto state = load_isolated_clap(options("state"));
+        REQUIRE(state);
+        REQUIRE(state.control->checkpoint());
+        RecoveryRig rig(std::move(state.slot));
+        REQUIRE(rig.step() == 0.0f);
+        REQUIRE(rig.step() == 0.5f);
+        REQUIRE(kill_worker(*state.control) == IsolationReason::worker_exited);
+
+        std::atomic<int> ready{0};
+        std::array<IsolatedNodeRecoveryResult, 2> results;
+        auto recover = [&](std::size_t index) {
+            ready.fetch_add(1, std::memory_order_acq_rel);
+            while (ready.load(std::memory_order_acquire) < 2)
+                std::this_thread::yield();
+            results[index] =
+                recover_isolated_graph_node(rig.graph, rig.node, options("state"), *state.control);
+        };
+        std::thread first(recover, 0), second(recover, 1);
+        first.join();
+        second.join();
+
+        const int winners = (results[0] ? 1 : 0) + (results[1] ? 1 : 0);
+        REQUIRE(winners == 1);
+        const auto& winner = results[0] ? results[0] : results[1];
+        const auto& loser = results[0] ? results[1] : results[0];
+        INFO("loser outcome=" << static_cast<int>(loser.outcome));
+        REQUIRE((loser.outcome == IsolatedNodeRecovery::control_mismatch ||
+                 loser.outcome == IsolatedNodeRecovery::publication_refused));
+        // A loser that stopped its worker cleanly hands back no control.
+        REQUIRE(loser.control == nullptr);
+        saw_publication_refused |= loser.outcome == IsolatedNodeRecovery::publication_refused;
+
+        REQUIRE(rig.step() == 0.0f);
+        REQUIRE(rig.step() == 0.75f);
+        // The winner holds one reservation; the loser must have released its own.
+        auto next = load_isolated_clap(options());
+        INFO("next load error=" << static_cast<int>(next.error));
+        REQUIRE(next);
+        REQUIRE(next.control->stop() == IsolationCleanup::complete);
+        rig.graph.release();
+        REQUIRE(winner.control->stop() == IsolationCleanup::complete);
+    }
+    REQUIRE(saw_publication_refused);
+}
+
+TEST_CASE("Isolated CLAP graph recovery races release on another control thread",
+          "[host][isolation]") {
+    // Recovery reads the published proxy under the graph lock and shares its
+    // ownership, so a concurrent release() can only turn recovery into a typed
+    // refusal, never a dangling or torn snapshot read.
+    for (int round = 0; round < 6; ++round) {
+        INFO("round=" << round);
+        auto state = load_isolated_clap(options("state"));
+        REQUIRE(state);
+        REQUIRE(state.control->checkpoint());
+        RecoveryRig rig(std::move(state.slot));
+        REQUIRE(rig.step() == 0.0f);
+        REQUIRE(kill_worker(*state.control) == IsolationReason::worker_exited);
+
+        std::atomic<bool> released{false};
+        std::thread releaser([&] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(round * 15));
+            rig.graph.release();
+            released.store(true, std::memory_order_release);
+        });
+        IsolatedNodeRecoveryResult result;
+        // Bounded: recover until it succeeds or the graph no longer publishes.
+        for (int attempt = 0; attempt < 50; ++attempt) {
+            result =
+                recover_isolated_graph_node(rig.graph, rig.node, options("state"), *state.control);
+            if (result || result.outcome != IsolatedNodeRecovery::publication_refused)
+                break;
+        }
+        releaser.join();
+        INFO("outcome=" << static_cast<int>(result.outcome));
+        REQUIRE((result.outcome == IsolatedNodeRecovery::recovered ||
+                 result.outcome == IsolatedNodeRecovery::not_isolated_node ||
+                 result.outcome == IsolatedNodeRecovery::publication_refused));
+        REQUIRE((result.outcome == IsolatedNodeRecovery::recovered) == (result.control != nullptr));
+        REQUIRE(released.load(std::memory_order_acquire));
+        // Released graphs refuse a second isolated prepare instead of reviving.
+        REQUIRE_FALSE(rig.graph.prepare(48000, 64));
+        if (result)
+            REQUIRE(result.control->stop() == IsolationCleanup::complete);
+        REQUIRE(state.control->stop() == IsolationCleanup::complete);
+        // No reservation leaked from any interleaving.
+        auto next = load_isolated_clap(options());
+        REQUIRE(next);
+        REQUIRE(next.control->stop() == IsolationCleanup::complete);
+    }
+}

@@ -94,7 +94,10 @@ struct IsolatedClapResult {
 IsolatedClapResult load_isolated_clap(const IsolatedClapOptions&);
 
 /// Requires complete old custody cleanup and an accepted checkpoint. Constructs
-/// a fresh generation; the old proxy remains terminal and cannot be revived.
+/// a fresh generation; the old proxy remains terminal and cannot be revived. When
+/// the fresh worker rejects the checkpoint and its own cleanup does not complete,
+/// the failed result still carries `control` (with no slot) so the caller can
+/// finish cleanup() and release the reservation.
 IsolatedClapResult recover_isolated_clap(const IsolatedClapOptions&,
                                          const IsolatedClapControl& old);
 
@@ -117,7 +120,9 @@ struct IsolatedNodeRecoveryResult {
     IsolatedNodeRecovery outcome = IsolatedNodeRecovery::not_isolated_node;
     /// Worker-side reason when outcome is worker_failed.
     IsolationReason worker_error = IsolationReason::none;
-    /// Control for the recovered generation; null unless recovered.
+    /// Control for the recovered generation. A failed result carries one only
+    /// when the fresh worker's cleanup did not complete: call cleanup() on it,
+    /// or its reservation keeps later loads refused as quarantine_active.
     std::shared_ptr<IsolatedClapControl> control;
     explicit operator bool() const noexcept {
         return outcome == IsolatedNodeRecovery::recovered;
@@ -132,11 +137,17 @@ struct IsolatedNodeRecoveryResult {
 /// it; siblings keep rendering throughout. Every refusal leaves the old silent
 /// node published. The checkpoint is the one accepted while the node was not
 /// processing (pause() is terminal for a node a graph is still rendering).
+/// Each later recovery restores that same original checkpoint, because a
+/// recovered generation adopts the checkpoint it was restored from.
 IsolatedNodeRecoveryResult recover_isolated_graph_node(SignalGraph& graph, NodeId node,
                                                        const IsolatedClapOptions& options,
                                                        IsolatedClapControl& old);
 
 /// Graph integration identifies the opt-in proxy without changing PluginSlot ABI.
 bool is_isolated_plugin_slot(const PluginSlot&) noexcept;
+
+/// True when both slots are isolated proxies bound to the same plugin
+/// descriptor and plugin-byte SHA-256.
+bool same_isolated_plugin_binary(const PluginSlot&, const PluginSlot&) noexcept;
 
 } // namespace pulp::host

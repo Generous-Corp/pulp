@@ -190,7 +190,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         'include': 'pulp/host/isolated_plugin_slot.hpp',
-        'fingerprint': 'sha256:db38bd42247f80f3e2c510d3f14dea83e533fff0950030bd91e9e2fd8c0fe70e',
+        'fingerprint': 'sha256:80ec7a2ac99dab05a379b47ad2d0d4b49a5a31e8dd1c8e15765d5002d748957a',
         'disposition': 'infrastructure',
         'capability_keys': [],
         'rationale': 'Opt-in MacClapStereo64V1 hosted worker, bounded lifecycle control and control-thread checkpoint recovery of a terminal graph node; no generator capability or full realtime qualification claim.',
