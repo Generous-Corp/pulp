@@ -124,7 +124,7 @@ fi
 # shellcheck source=gate_host_policy.sh
 source "$ROOT/tools/scripts/gate_host_policy.sh"
 gate_host_builds_skipped=0
-gate_host_skipped_what="the build-gate configure and the source-selftest suites (source-only, workflow-lint, pr-fast ctest, ctest-registered Python)"
+gate_host_skipped_what="compiles, a kept build-gate configure and the source-selftest suites (source-only, workflow-lint, pr-fast ctest, ctest-registered Python)"
 if pulp_gate_host_builds_reserved; then
     gate_host_builds_skipped=1
     pulp_gate_host_skip_line "$gate_host_skipped_what" "tools/scripts/gates.sh $BASE"
@@ -629,20 +629,24 @@ done
 # NOT CHECKED instead of configuring. The families check runs a build-free
 # prediction first and, when its configured half cannot run on a change to a
 # surface it blocks, FAILS instead of NOT CHECKED (the required gate checks it).
-# On a gate host the lane still runs, but never configures: the build-free
-# families prediction can still FAIL, and the configured halves report NOT
-# CHECKED unless a current build already exists.
+# On a gate host (dedicated-builder, dev-overflow) the lane takes the one
+# allowance gate_host_policy.sh names: a configure-only tree in a temporary
+# build-configure-only.* directory under the worktree, governed as one
+# background core, checked for any compile and removed when the lane ends.
+# PULP_GATES_NO_CONFIGURE=1 still keeps it build-free there.
+sti_temp_configure=""
 if [ -f "$ROOT/tools/scripts/gates_script_inputs.py" ]; then
     echo "" >&2
     sti_no_configure="${PULP_GATES_NO_CONFIGURE:-}"
     if [ "$gate_host_builds_skipped" -eq 1 ]; then
-        sti_no_configure=1
-        echo "▸ generated test manifests: script inputs, source-selftest manifest, changed-surface families (gate host: build-free checks only, never configures)" >&2
+        sti_temp_configure=1
+        echo "▸ generated test manifests: script inputs, source-selftest manifest, changed-surface families (gate host: configure-only in a temporary tree when the diff can drift them; never compiles)" >&2
+        pulp_gate_host_configure_only_allowance
     else
         echo "▸ generated test manifests: script inputs, source-selftest manifest, changed-surface families (configures build-gate when the diff can drift them)" >&2
     fi
     sti_log="$(mktemp "${TMPDIR:-/tmp}/pulp-gates-script-inputs.XXXXXX")"
-    if ! PULP_GATES_NO_CONFIGURE="$sti_no_configure" \
+    if ! PULP_GATES_NO_CONFIGURE="$sti_no_configure" PULP_GATES_CONFIGURE_ONLY_TEMP="$sti_temp_configure" \
             "$PYTHON" "$ROOT/tools/scripts/gates_script_inputs.py" --base "$BASE" --repo-root "$ROOT" >"$sti_log" 2>&1; then
         fail=1
     fi
