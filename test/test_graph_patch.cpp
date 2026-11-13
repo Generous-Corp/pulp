@@ -123,6 +123,35 @@ TEST_CASE("Notation refuses wrong ports kinds cycles and parameter ranges",
         }
     }
 }
+TEST_CASE("Notation explains built-in gain automation and chain port inference",
+          "[host][patch][controls]") {
+    GraphPatchCatalog c;
+    register_patch_gain(c);
+    const auto gain_route = parse_graph_patch("# flow 1\n"
+                                              "input : pulp/audio_in\n"
+                                              "g : pulp/gain\n"
+                                              "input.audio ~> g.gain @ 0.5\n",
+                                              c);
+    REQUIRE_FALSE(gain_route);
+    REQUIRE(gain_route.diagnostic.code == Code::UnknownPort);
+    REQUIRE(gain_route.diagnostic.rule ==
+            "built-in pulp/gain exposes 'gain' as a node setting, not an automatable parameter");
+    REQUIRE(gain_route.diagnostic.suggested_fix ==
+            "set it with g.gain = <value>, or automate a registered Processor parameter");
+
+    const auto chain = parse_graph_patch("# flow 1\n"
+                                         "input : pulp/audio_in\n"
+                                         "voice : \"com.example.PatchGain\"\n"
+                                         "out : pulp/audio_out\n"
+                                         "input.audio >> voice.audio >> out.audio\n",
+                                         c);
+    REQUIRE_FALSE(chain);
+    REQUIRE(chain.diagnostic.rule ==
+            "ambiguous port: node 'voice' has 2 output ports and a chain hop infers a port only "
+            "when the node has exactly one output");
+    REQUIRE(chain.diagnostic.suggested_fix ==
+            "write the port explicitly, e.g. voice.audio >> next.audio; use one of: audio, midi");
+}
 TEST_CASE("Strict JSON never certifies connections the legacy loader drops",
           "[host][patch][strict]") {
     SignalGraph g;
