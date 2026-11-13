@@ -1218,7 +1218,7 @@ TEST_CASE("Controller frame tuples restart exactly at seek and replacement bound
     // Independent tuple arithmetic: after a restart, frame k is
     // {epoch, k, first + k*H, first + k*H + N} and is published in the callback
     // whose end first reaches that frame's end, never earlier or later.
-    const auto render = [&](const pulp::format::ProcessContext* transport, bool restarts) {
+    const auto render_block = [&](const pulp::format::ProcessContext* transport, bool restarts) {
         target.process(transport);
         if (restarts) {
             ++serial;
@@ -1248,28 +1248,28 @@ TEST_CASE("Controller frame tuples restart exactly at seek and replacement bound
     pulp::format::ProcessContext seek, reset;
     seek.transport_jump = true;
     reset.reset_requested = true;
-    render(&seek, true);
+    render_block(&seek, true);
     for (int block = 0; block < 6; ++block)
-        render(nullptr, false);
+        render_block(nullptr, false);
     auto rejected = target.edit(32);
     REQUIRE(rejected->commit() == SignalGraph::PreparedTopologyEdit::Result::Staged);
-    render(nullptr, false);
+    render_block(nullptr, false);
     REQUIRE(target.graph.finalize_spectral_transition() == SpectralError::CapacityExceeded);
     auto replacement = target.edit();
     REQUIRE(replacement->commit() == SignalGraph::PreparedTopologyEdit::Result::Staged);
-    render(nullptr, true);
+    render_block(nullptr, true);
     REQUIRE(target.graph.finalize_spectral_transition() == SpectralError::None);
     for (int block = 0; block < 5; ++block)
-        render(nullptr, false);
-    render(&reset, true);
+        render_block(nullptr, false);
+    render_block(&reset, true);
     for (int block = 0; block < 5; ++block)
-        render(nullptr, false);
+        render_block(nullptr, false);
     replacement = target.edit();
     REQUIRE(replacement->commit() == SignalGraph::PreparedTopologyEdit::Result::Staged);
-    render(&seek, true);
+    render_block(&seek, true);
     REQUIRE(target.graph.finalize_spectral_transition() == SpectralError::None);
     for (int block = 0; block < 5; ++block)
-        render(nullptr, false);
+        render_block(nullptr, false);
     REQUIRE(frames == 26);
 }
 
