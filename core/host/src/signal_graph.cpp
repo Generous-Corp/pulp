@@ -32,6 +32,7 @@
 #include <queue>
 #include <thread>
 #include <unordered_map>
+#include <mutex>
 #include <unordered_set>
 #include <utility>
 
@@ -39,7 +40,7 @@ namespace pulp::host {
 
 struct SignalGraph::ProcessorNodeLifetime::Registry {
     std::mutex mutex;
-    ProcessorNodeLifetime* head = nullptr;
+    std::unordered_set<const format::ProcessorNodeInstance*> reserved;
 };
 
 SignalGraph::ProcessorNodeLifetime::Registry& SignalGraph::ProcessorNodeLifetime::registry_() {
@@ -47,26 +48,24 @@ SignalGraph::ProcessorNodeLifetime::Registry& SignalGraph::ProcessorNodeLifetime
     static_assert(!std::is_copy_assignable_v<ProcessorNodeLifetime>);
     static_assert(!std::is_move_constructible_v<ProcessorNodeLifetime>);
     static_assert(!std::is_move_assignable_v<ProcessorNodeLifetime>);
-    // Process lifetime: tokens may retire during another static's destruction.
-    // In-place storage has no teardown and never allocates a registry entry.
+    // Process lifetime: tokens may retire during another static's destruction,
+    // so the registry is constructed in place and never torn down.
     alignas(Registry) static std::byte storage[sizeof(Registry)];
     static auto* registry = ::new (static_cast<void*>(storage)) Registry;
     return *registry;
 }
 
+// Construction runs on the control thread when a node is authored. Reserving
+// an instance can allocate a set entry, so it may throw; callers construct the
+// token inside their existing authoring try blocks.
 SignalGraph::ProcessorNodeLifetime::ProcessorNodeLifetime(
-    std::shared_ptr<format::ProcessorNodeInstance> value) noexcept
+    std::shared_ptr<format::ProcessorNodeInstance> value)
     : instance(std::move(value)) {
+    if (!instance)
+        return;
     auto& registry = registry_();
     std::lock_guard lock(registry.mutex);
-    for (auto* token = registry.head; token; token = token->next_)
-        if (token->instance == instance)
-            return;
-    owns_lifecycle_ = bool(instance);
-    if (owns_lifecycle_) {
-        next_ = registry.head;
-        registry.head = this;
-    }
+    owns_lifecycle_ = registry.reserved.insert(instance.get()).second;
 }
 
 SignalGraph::ProcessorNodeLifetime::~ProcessorNodeLifetime() {
@@ -75,12 +74,11 @@ SignalGraph::ProcessorNodeLifetime::~ProcessorNodeLifetime() {
     // Keep the reservation visible while user release runs, without holding a
     // framework mutex across user code. Another graph cannot prepare it yet.
     (void)instance->release();
+    // Erasing never allocates. std::mutex::lock throws only for a misuse
+    // (deadlock or invalid mutex) that this single-level lock cannot reach.
     auto& registry = registry_();
     std::lock_guard lock(registry.mutex);
-    auto** token = &registry.head;
-    while (*token != this)
-        token = &(*token)->next_;
-    *token = next_;
+    registry.reserved.erase(instance.get());
 }
 
 bool SampleKernelDescriptor::is_valid_registration() const noexcept {

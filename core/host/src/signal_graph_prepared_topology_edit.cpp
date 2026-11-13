@@ -1351,21 +1351,6 @@ SignalGraph::PreparedTopologyEdit::~PreparedTopologyEdit() {
     }
 }
 
-bool SignalGraph::PreparedTopologyEdit::reject_baseline_processor_aliases_locked_() noexcept {
-    owner_->assert_graph_mutation_locked_();
-    candidate_->assert_graph_mutation_locked_();
-    bool rejected = false;
-    for (auto& [id, processor] : candidate_->processor_nodes_) {
-        if (!processor || !processor->instance)
-            continue;
-        // Token construction reserves ownership atomically across all graphs,
-        // including generations pinned beyond this edit's captured baseline.
-        if (!processor->owns_lifecycle())
-            rejected = true;
-    }
-    return rejected;
-}
-
 bool SignalGraph::PreparedTopologyEdit::base_is_current_locked_() const {
     owner_->assert_graph_mutation_locked_();
     return owner_->authoring_generation_ == base_authoring_generation_ &&
@@ -2295,8 +2280,6 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
             }
         }
         GraphMutationLock candidate_lock(*candidate_);
-        if (reject_baseline_processor_aliases_locked_())
-            return last_result_ = Result::ExternalPluginReprepareRequired;
         if (const auto rejection = sample_region_preparation_result_(sample_rate, max_block_size))
             return last_result_ = *rejection;
         const auto old_keepalive = owner_->spectral_mode_.load(std::memory_order_acquire)
@@ -3283,8 +3266,6 @@ SignalGraph::PreparedTopologyEdit::prepare_quiesced(double sample_rate,
 
         {
             GraphMutationLock candidate_lock(*candidate_);
-            if (reject_baseline_processor_aliases_locked_())
-                return last_result_ = Result::ExternalPluginReprepareRequired;
             if (const auto rejection =
                     sample_region_preparation_result_(sample_rate, max_block_size))
                 return last_result_ = *rejection;

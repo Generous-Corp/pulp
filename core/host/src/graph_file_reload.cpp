@@ -18,32 +18,57 @@ GraphFileChange GraphFileWatch::poll() {
     const auto extension = path_.extension();
     if (extension != ".pat" && extension != ".pulpgraph")
         return error(Code::UnsupportedFormat);
+    constexpr std::uintmax_t limit = 1024 * 1024;
+    std::error_code size_error;
+    const auto size = std::filesystem::file_size(path_, size_error);
+    if (size_error)
+        return error(Code::Unreadable);
+    if (size > limit)
+        return error(Code::TooLarge);
     std::ifstream file(path_, std::ios::binary);
     if (!file)
         return error(Code::Unreadable);
-    constexpr std::size_t limit = 1024 * 1024;
-    std::string text(limit + 1, '\0');
+    // The file may grow between the size check and the read; one extra byte
+    // detects that without reading past the bound.
+    std::string text(static_cast<std::size_t>(size) + 1, '\0');
     file.read(text.data(), static_cast<std::streamsize>(text.size()));
-    const auto bytes = file.gcount();
+    const auto bytes = static_cast<std::uintmax_t>(file.gcount());
     if (file.bad())
         return error(Code::Unreadable);
-    if (bytes > static_cast<std::streamsize>(limit))
-        return error(Code::TooLarge);
+    if (bytes > size) {
+        // Grew while being saved: oversize is refused, otherwise wait for the
+        // writer to finish and read the settled contents on the next poll.
+        if (bytes > limit)
+            return error(Code::TooLarge);
+        pending_.reset();
+        return {.code = Code::Pending};
+    }
     text.resize(static_cast<std::size_t>(bytes));
     previous_error_ = Code::Unchanged;
-    if (observed_ && text == *observed_) {
+    if (!observed_) {
+        observed_ = std::move(text);
+        return {};
+    }
+    if (text == *observed_) {
         pending_.reset();
+        offered_.reset();
         return {};
     }
     if (!pending_ || text != *pending_) {
         pending_ = std::move(text);
         return {.code = Code::Pending};
     }
-    observed_ = text;
     pending_.reset();
+    offered_ = text;
     return {.code = Code::Changed,
             .format = extension == ".pat" ? GraphFileFormat::Notation : GraphFileFormat::Pulpgraph,
             .text = std::move(text)};
+}
+
+void GraphFileWatch::acknowledge() {
+    if (offered_)
+        observed_ = std::move(offered_);
+    offered_.reset();
 }
 
 const char* graph_file_reload_code_name(GraphFileReloadCode code) noexcept {

@@ -11,9 +11,10 @@ SignalGraphControlAuthority::SignalGraphControlAuthority(SignalGraph& graph, dou
 
 SignalGraphRouteResult
 SignalGraphControlAuthority::apply(std::span<const SignalGraphRouteCommand> commands) {
+    std::lock_guard lock(mutation_mutex_);
     SignalGraphRouteResult result;
     result.capacity = kMaxDenseCommands;
-    result.generation = generation_;
+    result.generation = generation_.load(std::memory_order_relaxed);
     if (commands.empty()) {
         result.code = SignalGraphRouteResultCode::EmptyBatch;
         return result;
@@ -92,21 +93,22 @@ SignalGraphControlAuthority::apply(std::span<const SignalGraphRouteCommand> comm
         result.code = SignalGraphRouteResultCode::CommitFailed;
         return result;
     }
-    ++generation_;
-    result.generation = generation_;
+    result.generation = generation_.fetch_add(1, std::memory_order_release) + 1;
     result.code = SignalGraphRouteResultCode::Applied;
     return result;
 }
 
-void SignalGraphControlAuthority::reset() noexcept {
-    ++generation_;
+void SignalGraphControlAuthority::reset() {
+    std::lock_guard lock(mutation_mutex_);
+    generation_.fetch_add(1, std::memory_order_release);
 }
 
 GraphFileReloadResult
 SignalGraphControlAuthority::reload_graph_file(std::string_view text, GraphFileFormat format,
                                                std::uint64_t expected_generation,
                                                const std::function<bool()>& can_commit) {
-    if (expected_generation != generation_)
+    std::lock_guard lock(mutation_mutex_);
+    if (expected_generation != generation_.load(std::memory_order_relaxed))
         return {.code = GraphFileReloadCode::StaleBase,
                 .topology_result = SignalGraph::PreparedTopologyEdit::Result::StaleBase};
     const GraphPatchCatalog defaults;
@@ -120,7 +122,7 @@ SignalGraphControlAuthority::reload_graph_file(std::string_view text, GraphFileF
         return {.code = GraphFileReloadCode::CommitFailed};
     result = transaction.commit();
     if (result)
-        ++generation_;
+        generation_.fetch_add(1, std::memory_order_release);
     return result;
 }
 

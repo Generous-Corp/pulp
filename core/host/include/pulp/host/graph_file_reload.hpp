@@ -19,16 +19,21 @@ struct GraphFileChange {
     std::string text;
 };
 
-/// One bounded poll; no thread or timer. Two equal consecutive reads debounce
-/// a save. Rejections are consumed once; identical contents do not retrigger.
+/// One bounded poll; no thread or timer. The first readable contents seed the
+/// baseline and are not reported, so starting a watch never reapplies an
+/// unchanged file. Two equal consecutive reads debounce a save. A Changed
+/// result is offered again until acknowledge() records it as observed; call it
+/// once the change reached a terminal outcome (published or refused).
+/// Read errors are reported once per distinct error.
 class GraphFileWatch final {
   public:
     explicit GraphFileWatch(std::filesystem::path path) : path_(std::move(path)) {}
     GraphFileChange poll();
+    void acknowledge();
 
   private:
     std::filesystem::path path_;
-    std::optional<std::string> pending_, observed_;
+    std::optional<std::string> pending_, observed_, offered_;
     GraphFileChange::Code previous_error_ = GraphFileChange::Code::Unchanged;
 };
 enum class GraphFileReloadCode {

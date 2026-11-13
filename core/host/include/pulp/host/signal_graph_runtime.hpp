@@ -1267,8 +1267,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // and every executable snapshot share it, so final destruction releases only
     // after both domains are gone. Public instance handles never extend it.
     struct ProcessorNodeLifetime {
-        explicit ProcessorNodeLifetime(
-            std::shared_ptr<format::ProcessorNodeInstance> value) noexcept;
+        explicit ProcessorNodeLifetime(std::shared_ptr<format::ProcessorNodeInstance> value);
 
         ~ProcessorNodeLifetime();
         ProcessorNodeLifetime(const ProcessorNodeLifetime&) = delete;
@@ -1282,7 +1281,6 @@ class SignalGraph : public format::AudioWorkgroupClient {
       private:
         struct Registry;
         static Registry& registry_();
-        ProcessorNodeLifetime* next_ = nullptr;
         bool owns_lifecycle_ = false;
     };
 

@@ -1,6 +1,7 @@
 #include "../examples/graph-patch-consumer/hello.hpp"
 #include "support/unique_temp_dir.hpp"
 #include <algorithm>
+#include <atomic>
 #include <barrier>
 #include <catch2/catch_test_macros.hpp>
 #include <choc/text/choc_JSON.h>
@@ -58,8 +59,8 @@ TEST_CASE("Graph file change prepares off-side and publishes the next audio boun
     const auto file = directory.path / "live.pat";
     GraphFileWatch watch(file);
     write(file, patch(0.25f));
-    REQUIRE(watch.poll().code == GraphFileChange::Code::Pending);
-    REQUIRE(watch.poll().code == GraphFileChange::Code::Changed);
+    // The first readable contents are the baseline, not a change to apply.
+    REQUIRE(watch.poll().code == GraphFileChange::Code::Unchanged);
     REQUIRE(watch.poll().code == GraphFileChange::Code::Unchanged);
     // A real write with the same size and restored mtime must still be seen.
     const auto timestamp = std::filesystem::last_write_time(file);
@@ -86,6 +87,7 @@ TEST_CASE("Graph file change prepares off-side and publishes the next audio boun
     auto expected = parse_graph_patch(patch(0.75f), catalog);
     REQUIRE(expected);
     REQUIRE(formatted.text == format_graph_patch(*expected.graph, catalog).text);
+    watch.acknowledge();
     REQUIRE(watch.poll().code == GraphFileChange::Code::Unchanged);
 }
 
@@ -154,16 +156,67 @@ TEST_CASE("Graph file watcher bounds errors and coalesces repeated or partial sa
     GraphFileWatch watch(file);
     REQUIRE(watch.poll().code == GraphFileChange::Code::Unreadable);
     REQUIRE(watch.poll().code == GraphFileChange::Code::Unchanged);
+    write(file, patch(0.25f));
+    REQUIRE(watch.poll().code == GraphFileChange::Code::Unchanged);
     write(file, "partial");
     REQUIRE(watch.poll().code == GraphFileChange::Code::Pending);
     write(file, patch(0.75f));
     REQUIRE(watch.poll().code == GraphFileChange::Code::Pending);
     REQUIRE(watch.poll().code == GraphFileChange::Code::Changed);
+    watch.acknowledge();
     write(file, std::string(1024 * 1024 + 1, 'x'));
     REQUIRE(watch.poll().code == GraphFileChange::Code::TooLarge);
     REQUIRE(watch.poll().code == GraphFileChange::Code::Unchanged);
     GraphFileWatch bad_extension(directory.path / "live.cpp");
     REQUIRE(bad_extension.poll().code == GraphFileChange::Code::UnsupportedFormat);
+}
+
+TEST_CASE("Graph file watch does not reapply its starting contents",
+          "[host][graph-file-reload][watch]") {
+    pulp::test::ScopedTempDir directory("pulp-graph-watch-seed");
+    const auto file = directory.path / "live.pat";
+    write(file, patch(0.25f));
+    GraphFileWatch watch(file);
+    for (int poll = 0; poll != 4; ++poll)
+        REQUIRE(watch.poll().code == GraphFileChange::Code::Unchanged);
+    // Restoring the starting contents after an edit is a change again only if
+    // the edit was acknowledged; returning to the baseline before that is not.
+    write(file, patch(0.75f));
+    REQUIRE(watch.poll().code == GraphFileChange::Code::Pending);
+    write(file, patch(0.25f));
+    REQUIRE(watch.poll().code == GraphFileChange::Code::Unchanged);
+}
+
+TEST_CASE("Graph file watch re-offers a change until it is acknowledged",
+          "[host][graph-file-reload][watch]") {
+    pulp::test::ScopedTempDir directory("pulp-graph-watch-ack");
+    const auto file = directory.path / "live.pat";
+    write(file, patch(0.25f));
+    GraphFileWatch watch(file);
+    REQUIRE(watch.poll().code == GraphFileChange::Code::Unchanged);
+    write(file, patch(0.75f));
+    REQUIRE(watch.poll().code == GraphFileChange::Code::Pending);
+    REQUIRE(watch.poll().code == GraphFileChange::Code::Changed);
+    // No terminal outcome yet: the same contents are offered again.
+    REQUIRE(watch.poll().code == GraphFileChange::Code::Pending);
+    const auto again = watch.poll();
+    REQUIRE(again.code == GraphFileChange::Code::Changed);
+    REQUIRE(again.text == patch(0.75f));
+    watch.acknowledge();
+    for (int poll = 0; poll != 3; ++poll)
+        REQUIRE(watch.poll().code == GraphFileChange::Code::Unchanged);
+}
+
+TEST_CASE("Graph file watch refuses an oversize file without reading it",
+          "[host][graph-file-reload][watch]") {
+    pulp::test::ScopedTempDir directory("pulp-graph-watch-size");
+    const auto file = directory.path / "live.pulpgraph";
+    write(file, std::string(1024 * 1024, ' '));
+    GraphFileWatch watch(file);
+    REQUIRE(watch.poll().code == GraphFileChange::Code::Unchanged);
+    write(file, std::string(1024 * 1024 + 1, ' '));
+    REQUIRE(watch.poll().code == GraphFileChange::Code::TooLarge);
+    REQUIRE(watch.poll().code == GraphFileChange::Code::Unchanged);
 }
 
 TEST_CASE("Public graph file reload bounds both formats before staging",
@@ -366,8 +419,10 @@ TEST_CASE("Replacement retains old processor audio until last snapshot retires o
         pinned_audio = std::all_of(output.channel(0).begin(), output.channel(0).end(),
                                    [](float value) { return value == 0.125f; });
     });
-    audio_is(graph, 0.375f);
+    // One graph has one audio thread: the pinned snapshot renders off the
+    // test thread, but not concurrently with the live graph's own process().
     reader.join();
+    audio_is(graph, 0.375f);
     REQUIRE(pinned_audio);
     audio_is(retained, 0.125f);
     REQUIRE(old_counts.releases == 0);
@@ -573,6 +628,7 @@ TEST_CASE("Graph file executor shares typed refusal and numeric publication with
     REQUIRE_FALSE(api);
     const auto refused = executor(plan, request(invalid, 0), context);
     REQUIRE(refused.terminal_state == pulp::inspect::ControlReceiptState::Failed);
+    REQUIRE(refused.result.result_code == pulp::inspect::ControlResultCode::InvalidRequest);
     const auto refused_detail = choc::json::parse(refused.result.detail_json);
     const auto diagnostic = refused_detail["diagnostic"];
     REQUIRE(choc::json::toString(diagnostic, false) ==
@@ -622,12 +678,87 @@ TEST_CASE("Graph file executor shares typed refusal and numeric publication with
         REQUIRE(authority.generation() == 1);
         audio_is(*graph, 0.375f);
         const auto committed = GraphSerializer::to_json(*graph);
-        REQUIRE(executor(plan, request(patch(0.25f), 0), context).terminal_state ==
-                pulp::inspect::ControlReceiptState::Failed);
+        const auto stale = executor(plan, request(patch(0.25f), 0), context);
+        REQUIRE(stale.terminal_state == pulp::inspect::ControlReceiptState::Failed);
+        REQUIRE(stale.result.result_code == pulp::inspect::ControlResultCode::StateConflict);
+        REQUIRE(stale.result.retry == pulp::inspect::ControlRetryClassification::AfterRefresh);
+        REQUIRE(choc::json::parse(stale.result.detail_json)["generation"].getInt64() == 1);
         REQUIRE(GraphSerializer::to_json(*graph) == committed);
         REQUIRE(authority.generation() == 1);
         audio_is(*graph, 0.375f);
     }
+}
+
+TEST_CASE("Graph file reload and a route edit on one authority serialize",
+          "[host][graph-file-reload][concurrency]") {
+    GraphPatchCatalog catalog;
+    auto graph = live(catalog);
+    SignalGraphControlAuthority authority(*graph, 48000, 64);
+    // A reload catalog whose processor factory blocks until released, so the
+    // route edit below starts while the reload is mid-preparation.
+    std::atomic<bool> factory_entered{false}, factory_release{false};
+    GraphPatchCatalog slow;
+    {
+        pulp::host::ProcessorRestoreDescriptor descriptor;
+        descriptor.type = {"com.example.PatchGain", 1};
+        descriptor.input_channels = 1;
+        descriptor.output_channels = 1;
+        descriptor.create = [&] {
+            factory_entered.store(true);
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+            while (!factory_release.load() && std::chrono::steady_clock::now() < deadline)
+                std::this_thread::yield();
+            return pulp::format::ProcessorNodeInstance::create(std::make_unique<PatchGain>());
+        };
+        REQUIRE(slow.register_processor(std::move(descriptor)) ==
+                pulp::host::ProcessorRestoreCode::Restored);
+    }
+    authority.set_graph_file_catalog(slow);
+    NodeId input = 0, voice = 0;
+    for (const auto& node : graph->nodes()) {
+        if (node.type == NodeType::AudioInput)
+            input = node.id;
+        if (node.type == NodeType::Plugin)
+            voice = node.id;
+    }
+    REQUIRE(input != 0);
+    REQUIRE(voice != 0);
+    SignalGraphRouteCommand insert;
+    insert.kind = SignalGraphRouteCommand::Kind::Insert;
+    insert.source = input;
+    insert.destination = voice;
+    insert.parameter_id = 7;
+
+    GraphFileReloadResult reloaded;
+    std::thread reloader([&] {
+        reloaded = authority.reload_graph_file(patch(0.75f), GraphFileFormat::Notation, 0);
+    });
+    const auto entered_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (!factory_entered.load() && std::chrono::steady_clock::now() < entered_deadline)
+        std::this_thread::yield();
+    REQUIRE(factory_entered.load());
+    std::atomic<bool> applied_done{false};
+    SignalGraphRouteResult applied;
+    std::thread editor([&] {
+        applied = authority.apply({&insert, 1});
+        applied_done.store(true);
+    });
+    // Serialized, the edit waits for the reload; give an unserialized edit
+    // ample time to publish first before letting the reload continue.
+    const auto edit_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(300);
+    while (!applied_done.load() && std::chrono::steady_clock::now() < edit_deadline)
+        std::this_thread::yield();
+    factory_release.store(true);
+    reloader.join();
+    editor.join();
+    INFO(graph_file_reload_code_name(reloaded.code));
+    // The reload started against generation 0 and nothing else may publish
+    // until it finishes, so it commits; the edit then sees the reloaded graph.
+    REQUIRE(reloaded.code == GraphFileReloadCode::Committed);
+    REQUIRE(applied.generation == authority.generation());
+    REQUIRE(authority.generation() == (applied ? 2u : 1u));
+    if (!applied)
+        audio_is(*graph, 0.375f);
 }
 
 TEST_CASE("Baseline alias defenses preserve lifecycle across both preparation modes",
@@ -654,10 +785,8 @@ TEST_CASE("Baseline alias defenses preserve lifecycle across both preparation mo
         SECTION("quiesced preparation") {
             result = edit->prepare_quiesced(48000, 64);
         }
-        REQUIRE(result ==
-                (alias == 0
-                     ? SignalGraph::PreparedTopologyEdit::Result::InvalidMutation
-                     : SignalGraph::PreparedTopologyEdit::Result::ExternalPluginReprepareRequired));
+        REQUIRE(alias == 0);
+        REQUIRE(result == SignalGraph::PreparedTopologyEdit::Result::InvalidMutation);
         REQUIRE(fresh.prepares == 0);
         REQUIRE(baseline.prepares == 1);
         REQUIRE(baseline.releases == 0);
