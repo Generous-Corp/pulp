@@ -36,6 +36,9 @@ recorded in the receipt). Every new control has a planted input mutation that
 fails with that control's rule name. The receipt stays **NOT_QUALIFIED**: UMP
 and MPE sidecars through `inject_midi` in this fixture, mailbox overflow
 telemetry, reset applied to all four families at once, callback allocation
-freedom as a measured property, routed/reference executor parity, and voice
-intent as a graph node are **NOT_CHECKED**; runtime, realtime,
+freedom as a measured property, and voice intent as a graph node are
+**NOT_CHECKED**; routed/reference executor parity is closed (the combined
+control matches on the reference walk and the routed executor across all five
+schedules; parallel routing is refused once the graph-event lane is bound and
+stays NOT_CHECKED); runtime, realtime,
 provider-parity, and non-Darwin lanes remain **NOT_CHECKED**.

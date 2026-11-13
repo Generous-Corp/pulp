@@ -2,7 +2,7 @@
   "schema": "pulp.graph.p1-event-admission-consumer.v1",
   "consumer": "examples/p1-event-admission-consumer",
   "status": "NOT_QUALIFIED",
-  "source_head": "e6503a81163a",
+  "source_head": "e6503a81163a2f1f6e4957f4ed31028796532721",
   "source_head_note": "fixture commit with the executor parity control; the receipt itself lands in the following docs commit",
   "qualification_scope": "PARTIAL: all four families PASS individually and together under one test-owned epoch and absolute sample origin from an installed SDK (MIDI host ingress into SignalGraph::inject_midi, graph-authored trigger lane, PluginSlot parameter mailbox, VoiceBankBinding voice intent); NOT_QUALIFIED because the remaining admission-contract rows are NOT_CHECKED",
   "controls": {

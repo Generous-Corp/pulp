@@ -131,8 +131,9 @@ node, and voice intent through `VoiceBankBinding`. A combined control also
 coordinates the four families through one test-owned epoch and absolute sample
 origin on one block grid across five schedules, with an explainable sequence
 mutation. UMP/MPE sidecars in this fixture, mailbox overflow telemetry,
-all-family reset, measured callback allocation freedom, executor parity, and
-voice intent as a graph node remain NOT_CHECKED. The evidence is recorded at
+all-family reset, measured callback allocation freedom, parallel-routing
+parity, and voice intent as a graph node remain NOT_CHECKED; routed/reference
+executor parity is now closed by the combined control. The evidence is recorded at
 `docs/evidence/p1-event-admission-consumer-20261112.md:93-364`, with the exact
 qualification result in
 `docs/evidence/p1-event-admission-consumer-20261112/receipt.json:8-156`; no
