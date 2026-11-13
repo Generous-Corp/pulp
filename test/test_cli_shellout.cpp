@@ -266,6 +266,60 @@ TEST_CASE("pulp graph probe refuses incomplete options without opening files",
     REQUIRE(duplicate.stdout_output.find("invalid_option") != std::string::npos);
 }
 
+TEST_CASE("pulp graph probe refusals name the cause and the fix", "[cli][shellout][graph]") {
+    if (!binary_exists())
+        SKIP("pulp not built");
+    const auto project = unique_temp_dir("pulp-graph-probe-refusals");
+    const auto graph = project / "chain.pulpgraph";
+    const auto input = project / "input.wav";
+    write_text(
+        graph,
+        R"({"format_version":1,"nodes":[{"id":1,"type":"audio_in","name":"in","num_input_ports":0,"num_output_ports":2,"gain":1},{"id":2,"type":"gain","name":"trim","num_input_ports":2,"num_output_ports":2,"gain":0.5},{"id":3,"type":"audio_out","name":"out","num_input_ports":2,"num_output_ports":0,"gain":1}],"connections":[{"source_node":1,"source_port":0,"dest_node":2,"dest_port":0,"feedback":false,"midi":false,"automation":false,"audio_rate_modulation":false,"sidechain":false},{"source_node":2,"source_port":0,"dest_node":3,"dest_port":0,"feedback":false,"midi":false,"automation":false,"audio_rate_modulation":false,"sidechain":false}]})");
+    const auto rendered =
+        run_pulp({"graph", "render", graph.string(), "--output", input.string(), "--json"});
+    REQUIRE(rendered.exit_code == 0);
+    const auto probe = [&](std::vector<std::string> extra) {
+        std::vector<std::string> args{"graph",   "probe",        graph.string(),  "--json",
+                                      "--input", input.string(), "--source-node", "in"};
+        args.insert(args.end(), extra.begin(), extra.end());
+        return run_pulp(args);
+    };
+
+    const auto missing = probe(
+        {"--source-port", "audio", "--destination-node", "out", "--destination-port", "audio"});
+    REQUIRE(missing.exit_code == 2);
+    REQUIRE(missing.stdout_output.find("\"code\": \"MissingEdge\"") != std::string::npos);
+    REQUIRE(missing.stdout_output.find(
+                "no connection joins the named source and destination ports; pick a pair from "
+                "the graph file's connections array") != std::string::npos);
+
+    const auto control = probe({"--source-port", "audio", "--destination-node", "trim",
+                                "--edge-kind", "control", "--destination-param", "7"});
+    REQUIRE(control.exit_code == 2);
+    REQUIRE(control.stdout_output.find("\"code\": \"MissingEdge\"") != std::string::npos);
+    REQUIRE(control.stdout_output.find(
+                "graphs loaded by the CLI cannot contain automation edges, so control probes "
+                "are available only through the C++ API") != std::string::npos);
+
+    const auto unknown = probe(
+        {"--source-port", "absent", "--destination-node", "trim", "--destination-port", "audio"});
+    REQUIRE(unknown.exit_code == 2);
+    REQUIRE(unknown.stdout_output.find("\"code\": \"UnknownPort\"") != std::string::npos);
+    REQUIRE(unknown.stdout_output.find(
+                "no such port: --source-port must name an output port of --source-node and "
+                "--destination-port an input port of --destination-node") != std::string::npos);
+
+    const auto control_port = probe({"--source-port", "absent", "--destination-node", "trim",
+                                     "--edge-kind", "control", "--destination-param", "7"});
+    REQUIRE(control_port.exit_code == 2);
+    REQUIRE(control_port.stdout_output.find("\"code\": \"UnknownPort\"") != std::string::npos);
+    REQUIRE(control_port.stdout_output.find(
+                "no such port: --source-port must name an output port of --source-node; a "
+                "control edge is selected by --destination-node and --destination-param, not by "
+                "a destination port") != std::string::npos);
+    REQUIRE(control_port.stdout_output.find("--destination-port") == std::string::npos);
+}
+
 TEST_CASE("pulp graph report prints the realtime report and refuses bad options",
           "[cli][shellout][graph]") {
     if (!binary_exists())

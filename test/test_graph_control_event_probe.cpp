@@ -162,6 +162,11 @@ TEST_CASE("G7 control probes cover lifecycle refusals, dense attachment, and res
     REQUIRE(unprepared.graph.attach_control_edge_probe(wrong_kind, unprepared.plugin,
                                                        ProbeSlot::kParam) ==
             pulp::host::SignalGraph::EdgeProbeStatus::UnsupportedKind);
+    unprepared.graph.set_parallel_routing_enabled(true);
+    REQUIRE(
+        unprepared.graph.attach_control_edge_probe(source, unprepared.plugin, ProbeSlot::kParam) ==
+        pulp::host::SignalGraph::EdgeProbeStatus::UnsupportedExecution);
+    unprepared.graph.set_parallel_routing_enabled(false);
     REQUIRE(
         unprepared.graph.attach_control_edge_probe(source, unprepared.plugin, ProbeSlot::kParam) ==
         pulp::host::SignalGraph::EdgeProbeStatus::Attached);
@@ -229,6 +234,10 @@ TEST_CASE("G7 event probes cover lifecycle, identity, reset detach, and publicat
             pulp::host::SignalGraph::EdgeProbeStatus::UnsupportedKind);
     REQUIRE(graph.attach_event_edge_probe(source, graph.node(other)->in("audio")) ==
             pulp::host::SignalGraph::EdgeProbeStatus::MissingEdge);
+    graph.set_parallel_routing_enabled(true);
+    REQUIRE(graph.attach_event_edge_probe(source, destination) ==
+            pulp::host::SignalGraph::EdgeProbeStatus::UnsupportedExecution);
+    graph.set_parallel_routing_enabled(false);
     REQUIRE(graph.attach_event_edge_probe(source, destination) ==
             pulp::host::SignalGraph::EdgeProbeStatus::Attached);
     const auto identity = graph.event_edge_probe_identity();

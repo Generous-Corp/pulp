@@ -431,6 +431,12 @@ commands:
       - name: --block-frames
         kind: option
         description: Probe block size from 1 to 4096 frames (default 64)
+      - name: --edge-kind
+        kind: option
+        description: Probe kind audio, control or event (default audio); event seeds one fixed note-on, control always refuses MissingEdge because CLI graphs have no automation edges
+      - name: --destination-param
+        kind: option
+        description: Destination parameter id for --edge-kind control (replaces --destination-port)
       - name: --sample-rate
         kind: option
         description: Report preparation sample rate (default 48000)

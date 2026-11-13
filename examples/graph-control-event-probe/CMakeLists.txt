@@ -10,9 +10,14 @@ enable_testing()
 add_test(NAME graph-control-event-probe-consumer COMMAND pulp-graph-control-event-probe)
 add_test(NAME graph-control-event-probe-planted-negative
          COMMAND pulp-graph-control-event-probe --planted-missing-publication)
+# Refusal-message controls: the planted flag skips process_routed, so the run
+# must stop at the publication rule. PASS_REGULAR_EXPRESSION pins that exact
+# rule instead of accepting any non-zero exit.
 set_tests_properties(graph-control-event-probe-planted-negative
-                     PROPERTIES WILL_FAIL TRUE LABELS "graph;negative;mutation")
+                     PROPERTIES PASS_REGULAR_EXPRESSION "FAIL rule=control-publication[\r\n]"
+                                LABELS "graph;negative")
 add_test(NAME graph-control-event-probe-event-planted-negative
          COMMAND pulp-graph-control-event-probe --planted-missing-event-publication)
 set_tests_properties(graph-control-event-probe-event-planted-negative
-                     PROPERTIES WILL_FAIL TRUE LABELS "graph;negative;mutation")
+                     PROPERTIES PASS_REGULAR_EXPRESSION "FAIL rule=event-publication[\r\n]"
+                                LABELS "graph;negative")

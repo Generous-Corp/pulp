@@ -23,4 +23,5 @@ endif()
 
 pulp_add_test_suite(pulp-test-graph-control-event-probe
     SOURCES test_graph_control_event_probe.cpp
-    LIBRARIES pulp::host)
+    LIBRARIES pulp::host
+    PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
