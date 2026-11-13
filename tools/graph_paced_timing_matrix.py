@@ -240,8 +240,14 @@ def parse_g12_output(stdout: str) -> dict[str, Any]:
     import graph_performance_qualification as gpq  # noqa: PLC0415  (lazy: avoids import cycle)
     oracle_ok = True
     try:
-        cell = gpq.parse_activation_output(stdout)
-        meta_in, callbacks = cell["metadata"], cell["callbacks"]
+        # The build stamp is recorded and disqualified separately (stale_binary);
+        # neutralise it here so a dirty or non-Release stamp is never reported
+        # as an audio/transition oracle failure.
+        stamp = re.compile(r"^(G12_CELL .*?)\bbuild_type=\S+(.*?)\bbuild_dirty=\S+", re.M)
+        cell = gpq.parse_activation_output(stamp.sub(r"\1build_type=Release\2build_dirty=0", stdout))
+        callbacks = cell["callbacks"]
+        meta_in = dict(_TOKEN.findall(next(line for line in stdout.splitlines()
+                                           if line.startswith("G12_CELL "))))
     except gpq.ReceiptError:
         # The audio/transition oracle failed; still read the raw timing rows so
         # the failure is reported against the same cell instead of dropped.
@@ -270,6 +276,41 @@ def parse_g12_output(stdout: str) -> dict[str, Any]:
             "build_type": str(meta_in["build_type"]), "extras": {"first_new": str(meta_in["first_new"])}}
     _require(len(rows) == meta["callbacks"], "G12 callback row count mismatch")
     return {"meta": meta, "rows": rows}
+
+
+PROCESS_TRAILER = "PACED_PROCESS"
+CATCH_PASS_MARKER = "All tests passed"
+
+
+def parse_process_trailer(stdout: str) -> int:
+    """Return the runner-recorded exit status appended after the fixture's output."""
+    lines = [line for line in stdout.splitlines() if line.startswith(PROCESS_TRAILER + " ")]
+    _require(len(lines) == 1, "raw output must carry exactly one process trailer")
+    fields = dict(_TOKEN.findall(lines[0]))
+    _require(set(fields) == {"returncode"} and re.fullmatch(r"-?[0-9]+", fields["returncode"]) is not None,
+             "malformed process trailer")
+    return int(fields["returncode"])
+
+
+def raw_cell_view(fixture: Fixture, stdout: str) -> dict[str, Any]:
+    """Every cell field the receipt records that the retained raw output determines."""
+    parsed = parse_raw(fixture, stdout)
+    meta = parsed["meta"]
+    returncode = parse_process_trailer(stdout)
+    if fixture.row_format != "reference":
+        # Catch2's own summary must agree with the recorded exit status.
+        _require((CATCH_PASS_MARKER in stdout) == (returncode == 0),
+                 "raw process trailer disagrees with the Catch2 summary")
+    view = {key: meta[key] for key in ("fixture", "variant", "rate", "frames", "callbacks",
+                                        "compiled_source", "build_type", "build_dirty", "extras")}
+    view.update(returncode=returncode, planted_sleep_us=meta["planted_sleep_us"],
+                planted_every=meta["planted_every"],
+                metrics=compute_metrics(parsed["rows"], meta["rate"], meta["frames"]))
+    return view
+
+
+RAW_BOUND_CELL_FIELDS = ("fixture", "variant", "rate", "frames", "callbacks", "compiled_source",
+                         "build_type", "build_dirty", "extras", "returncode", "metrics")
 
 
 def compute_metrics(rows: list[tuple[int, int, int, int]], rate: int, frames: int) -> dict[str, Any]:
@@ -505,6 +546,11 @@ def record_matrix(*, mode: str, source_root: Path, build_dir: Path, output_dir: 
             stdout, returncode = result.stdout, result.returncode
             # A rebuild during the run would silently mix binaries.
             _require(sha256_file(executable) == exe_sha, f"executable changed during run: {executable}")
+        # The runner, not the fixture, appends the exit status so the raw file
+        # (bound by its digest) is the authority for every recorded cell field.
+        if stdout and not stdout.endswith("\n"):
+            stdout += "\n"
+        stdout += f"{PROCESS_TRAILER} returncode={returncode}\n"
         raw_path.write_text(stdout, encoding="utf-8")
         parsed = parse_raw(fixture, stdout)
         meta = parsed["meta"]
@@ -557,6 +603,7 @@ def validate_receipt(path: Path) -> dict[str, Any]:
         _require(not receipt["cells"] and not receipt["admission"]["before"]["admitted"],
                  "refused receipt must have no cells and a refused admission")
     seen = set()
+    raw_cells: list[dict[str, Any]] = []
     for cell in receipt["cells"]:
         _require(set(cell) == REQUIRED_CELL, "cell fields mismatch")
         fixture = FIXTURES.get(cell["fixture"])
@@ -570,16 +617,22 @@ def validate_receipt(path: Path) -> dict[str, Any]:
         _require(Path(cell["raw_stdout"]["path"]).name == cell["raw_stdout"]["path"] and raw.is_file(),
                  "raw output missing or outside the receipt directory")
         _require(sha256_file(raw) == cell["raw_stdout"]["sha256"], "raw output digest mismatch")
-        parsed = parse_raw(fixture, raw.read_text(encoding="utf-8"))
-        _require(parsed["meta"]["callbacks"] == cell["callbacks"], "cell callback count mismatch")
-        _require(compute_metrics(parsed["rows"], cell["rate"], cell["frames"]) == cell["metrics"],
-                 "cell metrics disagree with raw rows")
+        view = raw_cell_view(fixture, raw.read_text(encoding="utf-8"))
+        for field in RAW_BOUND_CELL_FIELDS:
+            _require(cell[field] == view[field] and type(cell[field]) is type(view[field]),
+                     f"cell {field} disagrees with raw output")
+        _require((view["planted_sleep_us"], view["planted_every"] if view["planted_sleep_us"] else 1) ==
+                 (receipt["planted"]["sleep_us"],
+                  receipt["planted"]["every"] if receipt["planted"]["sleep_us"] else 1),
+                 "cell planted fault disagrees with raw output")
+        raw_cells.append({**cell, **{f: view[f] for f in RAW_BOUND_CELL_FIELDS}})
     if receipt["status"] == "COMPLETE":
         expected = {(f.name, v, r, fr) for f, v, r, fr in matrix_cells(
             receipt["requested"]["fixtures"],
             set(receipt["requested"]["frames_filter"]) if receipt["requested"]["frames_filter"] else None)}
         _require(seen == expected, "matrix incomplete")
-    recomputed = disqualifiers_for(receipt)
+    # Qualification is derived from the raw-parsed cell values only.
+    recomputed = disqualifiers_for({**receipt, "cells": raw_cells})
     _require(receipt["disqualifiers"] == recomputed, "disqualifiers disagree with receipt")
     _require(receipt["timing_qualified"] is (not recomputed), "timing_qualified disagrees with rule")
     return receipt

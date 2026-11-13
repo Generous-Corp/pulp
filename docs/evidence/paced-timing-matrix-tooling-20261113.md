@@ -119,9 +119,19 @@ Qualification mode refuses before any cell runs: it writes a `REFUSED` receipt
 and exits with code 3. A post-run sample above the threshold disqualifies the
 run. Short mode only records the verdict.
 
-`validate` re-hashes each raw file and re-parses it. It recomputes every
-metric, the matrix completeness and the disqualifier list, and rejects any
-mismatch.
+`validate` re-hashes each raw file and re-parses it. The raw file is the
+authority for every cell field it determines: fixture, variant, rate, frames,
+callbacks, compiled source, build type, build dirty flag, extras, exit status
+(a `PACED_PROCESS returncode=N` trailer the runner appends, cross-checked
+against Catch2's own summary) and the planted fault. A receipt field that
+disagrees with its raw file is rejected by name, even when the receipt is
+re-signed, and the disqualifier list and `timing_qualified` are recomputed
+from the raw-parsed values only. Matrix completeness is also rechecked.
+
+For `g12-activation`, the build stamp is recorded and disqualified as
+`stale_binary`; it is neutralised before the typed G-12 audio/transition
+validator runs, so a dirty or non-Release stamp is not misreported as an
+oracle failure, while a corrupted output sample still fails every callback.
 
 ## Results on this host (m3, loaded dedicated builder)
 

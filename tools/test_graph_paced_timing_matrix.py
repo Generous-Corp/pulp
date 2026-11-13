@@ -90,6 +90,84 @@ class ReceiptSchemaTest(unittest.TestCase):
             matrix.validate_receipt(path)
 
 
+class RawBindingTest(unittest.TestCase):
+    """Every recorded cell field must agree with the digest-bound raw output."""
+
+    def assert_resigned_tamper_rejected(self, path, original, mutate, message):
+        changed = json.loads(original)
+        mutate(changed)
+        changed["receipt_sha256"] = matrix.receipt_digest(changed)
+        path.write_text(json.dumps(changed), encoding="utf-8")
+        try:
+            with self.assertRaisesRegex(matrix.MatrixError, message):
+                matrix.validate_receipt(path)
+        finally:
+            path.write_text(original, encoding="utf-8")
+
+    def test_resigned_cell_metadata_tamper_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            record(out)
+            path = out / "receipt.json"
+            original = path.read_text(encoding="utf-8")
+            cell = lambda r: r["cells"][0]  # noqa: E731
+            tampers = {
+                "compiled_source": lambda r: cell(r).__setitem__("compiled_source", "a" * 40),
+                "build_dirty": lambda r: cell(r).__setitem__("build_dirty", 1),
+                "build_type": lambda r: cell(r).__setitem__("build_type", "Release"),
+                "returncode": lambda r: cell(r).__setitem__("returncode", 1),
+                "extras": lambda r: cell(r).__setitem__("extras", {"walk_fallbacks": "0"}),
+                "variant": lambda r: cell(r).__setitem__("variant", "other"),
+            }
+            for field, mutate in tampers.items():
+                with self.subTest(field=field):
+                    message = "unexpected matrix cell" if field == "variant" else \
+                        f"cell {field} disagrees with raw output"
+                    self.assert_resigned_tamper_rejected(path, original, mutate, message)
+            matrix.validate_receipt(path)
+
+    def test_stale_or_dirty_disqualifier_cannot_be_erased(self):
+        # A raw cell built from a dirty tree at another commit stays disqualified
+        # even when the receipt claims the clean head.
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            receipt, _ = record(out)
+            path = out / "receipt.json"
+            original = path.read_text(encoding="utf-8")
+            self.assertTrue(any(r.startswith("stale_binary:") for r in receipt["disqualifiers"]))
+            self.assert_resigned_tamper_rejected(
+                path, original,
+                lambda r: (r["cells"][0].__setitem__("compiled_source", r["source"]["sha"]),
+                           r["disqualifiers"].remove(next(d for d in r["disqualifiers"]
+                                                          if d.startswith("stale_binary:")))),
+                "cell compiled_source disagrees with raw output")
+
+    def test_planted_fault_cannot_be_erased_from_the_receipt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            record(out, planted_sleep_us=1000, planted_every=4)
+            path = out / "receipt.json"
+            original = path.read_text(encoding="utf-8")
+            self.assert_resigned_tamper_rejected(
+                path, original,
+                lambda r: (r["planted"].__setitem__("sleep_us", 0),
+                           r["disqualifiers"].remove("planted_fault")),
+                "planted fault disagrees with raw output")
+
+    def test_process_trailer_must_agree_with_catch2_summary(self):
+        fixture = matrix.FIXTURES["g5-graph-event"]
+        body = matrix.reference_cell_output("routed", 48000, 128, 8, 0, 1).replace(
+            "fixture=python-reference", "fixture=g5-graph-event")
+        passing = body + "All tests passed (10 assertions in 1 test case)\n"
+        self.assertEqual(matrix.raw_cell_view(fixture, passing + "PACED_PROCESS returncode=0\n")["returncode"], 0)
+        with self.assertRaisesRegex(matrix.MatrixError, "Catch2 summary"):
+            matrix.raw_cell_view(fixture, passing + "PACED_PROCESS returncode=1\n")
+        with self.assertRaisesRegex(matrix.MatrixError, "Catch2 summary"):
+            matrix.raw_cell_view(fixture, body + "PACED_PROCESS returncode=0\n")
+        with self.assertRaisesRegex(matrix.MatrixError, "process trailer"):
+            matrix.raw_cell_view(fixture, passing)
+
+
 class AdmissionTest(unittest.TestCase):
     def test_qualification_refuses_loaded_host_before_any_cell(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -200,6 +278,25 @@ class CompiledPlantedNegativeTest(unittest.TestCase):
         for cell in receipt["cells"]:
             self.assertGreaterEqual(cell["metrics"]["deadline_misses"], 4)
             self.assertEqual(cell["metrics"]["oracle_failures"], 0)
+
+    def test_g12_build_stamp_is_not_an_oracle_failure_but_audio_is(self):
+        build = Path(os.environ["PULP_PACED_MATRIX_BUILD_DIR"]).resolve()
+        with tempfile.TemporaryDirectory() as tmp:
+            receipt, _ = matrix.record_matrix(
+                mode="short", source_root=ROOT, build_dir=build, output_dir=Path(tmp),
+                fixtures=["g12-activation"], callbacks=16, frames_filter={128},
+                planted_sleep_us=0, planted_every=1, max_load_per_cpu=0.25, timeout_seconds=300)
+            fixture = matrix.FIXTURES["g12-activation"]
+            for cell in receipt["cells"]:
+                self.assertEqual(cell["metrics"]["oracle_failures"], 0)
+                raw = (Path(tmp) / cell["raw_stdout"]["path"]).read_text(encoding="utf-8")
+                for stamp in ("build_dirty=0", "build_dirty=1"):
+                    view = matrix.raw_cell_view(fixture, raw.replace(
+                        f"build_dirty={cell['build_dirty']}", stamp, 1))
+                    self.assertEqual(view["metrics"]["oracle_failures"], 0)
+                corrupted = raw.replace("bits=3f000000:", "bits=3ec00000:", 1)
+                self.assertEqual(matrix.raw_cell_view(fixture, corrupted)["metrics"]["oracle_failures"],
+                                 cell["callbacks"])
 
 
 if __name__ == "__main__":
