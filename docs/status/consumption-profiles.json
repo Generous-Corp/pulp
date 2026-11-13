@@ -1285,7 +1285,8 @@
       "pulp/state/state_tree_sync.hpp",
       "pulp/state/step_edit_reducer.hpp",
       "pulp/state/store.hpp",
-      "pulp/state/undo_manager.hpp"
+      "pulp/state/undo_manager.hpp",
+      "pulp/state/xml_properties_file.hpp"
     ],
     "core/timebase/include": [
       "pulp/timebase/beat_division.hpp",
