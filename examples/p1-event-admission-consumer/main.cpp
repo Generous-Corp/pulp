@@ -947,7 +947,20 @@ struct CombinedRun {
     // mailbox is block-relative and has no epoch, so its entry is 0.
     std::array<std::uint64_t, 4> native_epoch{};
     std::array<float, kCombinedFrames> voice_audio{};
+    // Graph output across the whole run; the input is a deterministic ramp, so
+    // this is a non-silent audio comparison for the routed executor.
+    std::vector<float> graph_audio;
+    // Executor telemetry read after the run: blocks the serial executor took,
+    // and blocks that were eligible yet fell back to the legacy walk.
+    std::uint64_t executor_blocks = 0;
+    std::uint64_t parallel_levels = 0;
+    std::uint64_t routing_fallbacks = 0;
+    bool parallel_requested_accepted = false;
 };
+
+enum class Backend { Reference, Routed, ParallelAfterBind };
+constexpr std::array<const char*, 3> kBackendNames{"reference-walk", "routed-executor",
+                                                   "parallel-after-bind"};
 
 // Callback-side state. The audio callbacks write only into these fixed
 // arrays; nothing in the callback path grows a container.
@@ -971,7 +984,8 @@ struct CombinedCallbackState {
     bool dropped = false;
 };
 
-CombinedRun render_combined(const std::vector<std::size_t>& schedule) {
+CombinedRun render_combined(const std::vector<std::size_t>& schedule,
+                            Backend backend = Backend::Routed) {
     using namespace pulp::host;
     auto state = std::make_shared<CombinedCallbackState>();
     SignalGraph graph;
@@ -1035,6 +1049,15 @@ CombinedRun render_combined(const std::vector<std::size_t>& schedule) {
               graph.connect(consumer, 0, output, 0) && graph.connect_midi(midi_input, consumer) &&
               graph.connect_graph_event({producer, consumer}) == GraphEventBindingResult::Accepted,
           "combined-admission");
+    // Backend selection happens before prepare(). Parallel routing is
+    // requested after the graph-authored lane is bound; the runtime refuses it
+    // there, so the request is recorded rather than forced.
+    graph.set_canonical_executor_routing_enabled(backend != Backend::Reference);
+    graph.set_parallel_routing_enabled(backend == Backend::ParallelAfterBind);
+    CombinedRun run;
+    run.parallel_requested_accepted = graph.parallel_routing_enabled();
+    check(graph.canonical_executor_routing_enabled() == (backend != Backend::Reference),
+          "combined-backend-selected");
     check(graph.prepare(48000.0, static_cast<int>(kCombinedMaxBlock)), "combined-prepare");
     auto bank = make_voice_bank<P1HeldVoice>(static_cast<int>(kCombinedMaxBlock));
     const auto voice_epoch = bank->epoch();
@@ -1063,7 +1086,6 @@ CombinedRun render_combined(const std::vector<std::size_t>& schedule) {
     std::size_t next_voice = 0;
     std::uint64_t voice_sequence = 1;
     std::uint64_t start = 0;
-    CombinedRun run;
     for (const auto frames : schedule) {
         check(frames > 0 && frames <= kCombinedMaxBlock, "combined-block-size");
         const auto end = start + frames;
@@ -1114,7 +1136,11 @@ CombinedRun render_combined(const std::vector<std::size_t>& schedule) {
 
         pulp::audio::BufferView<const float> in(&source_ptr, 1, frames);
         pulp::audio::BufferView<float> out(&destination_ptr, 1, frames);
+        for (std::size_t i = 0; i < frames; ++i)
+            source[i] = 0.001f * static_cast<float>((start + i) % 977);
         graph.process(out, in, static_cast<int>(frames));
+        run.graph_audio.insert(run.graph_audio.end(), destination.begin(),
+                               destination.begin() + static_cast<std::ptrdiff_t>(frames));
 
         // Voice intent on the same block boundaries.
         check(bank->epoch() == voice_epoch, "combined-epoch-map");
@@ -1160,6 +1186,12 @@ CombinedRun render_combined(const std::vector<std::size_t>& schedule) {
         ++run.blocks;
     }
     check(start == kCombinedFrames, "combined-schedule-length");
+    {
+        const auto stats = graph.routing_executor_stats();
+        run.executor_blocks = stats.blocks_processed;
+        run.parallel_levels = stats.parallel_levels_dispatched;
+        run.routing_fallbacks = graph.routed_walk_fallbacks();
+    }
 
     const auto& s = *state;
     check(!s.dropped && !probe->dropped(), "combined-observation-capacity");
@@ -1345,6 +1377,94 @@ MutationReceipt sequence_mutation_controls(const std::vector<TraceRecord>& trace
     return receipt;
 }
 
+// Names the first channel on which two backends disagree, or "" when the
+// canonical trace, per-family digests, voice audio, graph audio and epoch map
+// are all identical.
+const char* backend_parity_diff(const CombinedRun& a, const CombinedRun& b) {
+    if (!(a.trace == b.trace))
+        return "backend-trace";
+    if (family_digests(a.trace) != family_digests(b.trace))
+        return "backend-digest";
+    if (!(a.voice_audio == b.voice_audio))
+        return "backend-voice-audio";
+    if (!(a.graph_audio == b.graph_audio))
+        return "backend-graph-audio";
+    if (!(a.native_epoch == b.native_epoch))
+        return "backend-epoch-map";
+    return "";
+}
+
+struct ParityReceipt {
+    std::size_t comparisons = 0;
+    std::uint64_t reference_executor_blocks = 0;
+    std::uint64_t routed_executor_blocks = 0;
+    std::uint64_t routed_blocks_total = 0;
+    std::uint64_t routing_fallbacks = 0;
+    bool parallel_refused = false;
+    std::uint64_t parallel_levels = 0;
+    std::array<std::uint64_t, 4> perturbed_digests{};
+    std::size_t audio_perturbed_index = 0;
+};
+
+// Runs every schedule on the reference walk and the routed executor (and the
+// parallel request) and requires identical output. Planted negatives perturb
+// one record, then one audio sample, on the routed side only; the comparator
+// must name each.
+ParityReceipt executor_parity_controls(const std::vector<std::vector<std::size_t>>& schedules) {
+    ParityReceipt receipt;
+    for (const auto& schedule : schedules) {
+        const auto reference = render_combined(schedule, Backend::Reference);
+        const auto routed = render_combined(schedule, Backend::Routed);
+        const auto parallel = render_combined(schedule, Backend::ParallelAfterBind);
+        check(reference.executor_blocks == 0, "parity-reference-walk-only");
+        check(routed.executor_blocks == schedule.size(), "parity-routed-executor-dispatched");
+        check(routed.routing_fallbacks == 0 && parallel.routing_fallbacks == 0,
+              "parity-no-routed-fallback");
+        check(!parallel.parallel_requested_accepted, "parity-parallel-refused-after-bind");
+        check(parallel.parallel_levels == 0, "parity-parallel-not-dispatched");
+        check(std::string(backend_parity_diff(reference, routed)).empty(),
+              "parity-reference-vs-routed");
+        check(std::string(backend_parity_diff(reference, parallel)).empty(),
+              "parity-reference-vs-parallel-request");
+        check(std::string(backend_parity_diff(routed, parallel)).empty(),
+              "parity-routed-vs-parallel-request");
+        receipt.comparisons += 3;
+        receipt.reference_executor_blocks += reference.executor_blocks;
+        receipt.routed_executor_blocks += routed.executor_blocks;
+        receipt.routed_blocks_total += schedule.size();
+        receipt.routing_fallbacks += routed.routing_fallbacks + parallel.routing_fallbacks;
+        receipt.parallel_refused = !parallel.parallel_requested_accepted;
+        receipt.parallel_levels += parallel.parallel_levels;
+    }
+    const auto reference = render_combined(schedules[0], Backend::Reference);
+    const auto routed = render_combined(schedules[0], Backend::Routed);
+    check(std::string(backend_parity_diff(reference, routed)).empty(), "parity-control-baseline");
+    auto record_perturbed = routed;
+    const auto target = std::find_if(record_perturbed.trace.begin(), record_perturbed.trace.end(),
+                                     [](const auto& r) { return r.family == Family::Parameter; });
+    check(target != record_perturbed.trace.end(), "parity-perturb-target");
+    target->key[kOrderKey[1]] += 1;
+    check(std::string(backend_parity_diff(reference, record_perturbed)) == "backend-trace",
+          "parity-planted-record-detected");
+    receipt.perturbed_digests = family_digests(record_perturbed.trace);
+    const auto base_digests = family_digests(reference.trace);
+    check(receipt.perturbed_digests[1] != base_digests[1] &&
+              receipt.perturbed_digests[0] == base_digests[0] &&
+              receipt.perturbed_digests[2] == base_digests[2] &&
+              receipt.perturbed_digests[3] == base_digests[3],
+          "parity-planted-record-isolated");
+    auto audio_perturbed = routed;
+    receipt.audio_perturbed_index = audio_perturbed.graph_audio.size() / 2;
+    audio_perturbed.graph_audio[receipt.audio_perturbed_index] += 1.0f;
+    check(std::string(backend_parity_diff(reference, audio_perturbed)) == "backend-graph-audio",
+          "parity-planted-audio-detected");
+    auto voice_perturbed = routed;
+    voice_perturbed.voice_audio[7] += 1.0f;
+    check(std::string(backend_parity_diff(reference, voice_perturbed)) == "backend-voice-audio",
+          "parity-planted-voice-audio-detected");
+    return receipt;
+}
+
 std::string hex(std::uint64_t value) {
     char buffer[17];
     std::snprintf(buffer, sizeof buffer, "%016llx", static_cast<unsigned long long>(value));
@@ -1440,6 +1560,8 @@ int main(int argc, char** argv) {
         }
         check(future_staged > 0 && current_block > 0, "combined-trigger-current-and-future");
         const auto receipt = sequence_mutation_controls(combined.trace);
+        const auto parity = executor_parity_controls(combined_schedules);
+        check(parity.comparisons == 3 * combined_schedules.size(), "parity-comparison-count");
         for (int i = 1; i + 1 < argc; ++i)
             if (std::string(argv[i]) == "--trace")
                 write_trace(argv[i + 1], combined, receipt);
@@ -1452,7 +1574,12 @@ int main(int argc, char** argv) {
                   << ",parameter:" << hex(receipt.baseline[1])
                   << ",trigger:" << hex(receipt.baseline[2])
                   << ",voice:" << hex(receipt.baseline[3])
-                  << " sequence_mutations=5 consumer_gate=NOT_QUALIFIED\n";
+                  << " sequence_mutations=5 executor_parity=reference-walk,routed-executor"
+                  << " parity_comparisons=" << parity.comparisons
+                  << " routed_executor_blocks=" << parity.routed_executor_blocks << "/"
+                  << parity.routed_blocks_total << " routing_fallbacks=" << parity.routing_fallbacks
+                  << " parallel_after_bind=" << (parity.parallel_refused ? "refused" : "accepted")
+                  << " parity_planted_negatives=3 consumer_gate=NOT_QUALIFIED\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "p1-event-admission FAIL rule=" << error.what() << '\n';
