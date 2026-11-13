@@ -28,6 +28,7 @@
    "tools/cmake/PulpDependencies.cmake",
    "tools/cmake/PulpTestData.cmake",
    "tools/mcp",
+   "tools/scripts/configure_only.py",
    "tools/scripts/gate_common.py",
    "tools/scripts/script_inputs_offline.py",
    "tools/scripts/script_inputs_store.py",

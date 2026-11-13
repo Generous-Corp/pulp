@@ -956,11 +956,7 @@ if [ -f "$SURFACE_FAMILIES" ]; then
     run_gate_captured "$PYTHON" "$SURFACE_FAMILIES" --repo-root "$ROOT" --static --base "$BASE"
     gate_rc=$?; case $gate_rc in
         0) ;;
-        1) if [ "$_prepush_gate_host" -eq 1 ]; then
-               echo "[pre-push] changed-surface families: regenerate .shipyard/changed-surface-families.toml from a configured build — on a TARTCI_ROLE=light host (m1) or a VM, \`tools/scripts/gates.sh $BASE\` configures build-gate and prints the exact --write command (this gate host refuses the configure)." >&2
-           else
-               echo "[pre-push] changed-surface families: regenerate .shipyard/changed-surface-families.toml from a configured build — \`tools/scripts/gates.sh $BASE\` configures build-gate and prints the exact --write command." >&2
-           fi
+        1) echo "[pre-push] changed-surface families: \`git add\` the new scripts, then regenerate .shipyard/changed-surface-families.toml on this host (gate and dev-overflow hosts included: a governed configure-only tree, no compile, removed afterwards) and commit it: \`python3 tools/scripts/changed_surface_script_families.py --configure-only --write\`." >&2
            prepush_fail ;;
         *) gate_could_not_run "changed_surface_script_families_static" "$gate_rc"; prepush_fail ;;
     esac
