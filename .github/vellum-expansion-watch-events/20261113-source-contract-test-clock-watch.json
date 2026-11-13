@@ -2,14 +2,13 @@
   "schema_version": 1,
   "kind": "authority-expansion-watch-change",
   "event_id": "20261113-source-contract-test-clock-watch",
-  "created_at": "2026-11-13T00:56:24Z",
+  "created_at": "2026-11-13T01:06:52Z",
   "acceptance_id": "full-design-import-render-v1-pulp-watch",
   "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
   "capability_families": [
-    "design-output-and-packaging",
-    "visual-proof-harness"
+    "design-source-ingest"
   ],
-  "rationale": "Adds a --today date override to the source-contract checker and pins it in the checker's tests so date literals cannot expire; test and advisory-checker change only, no design-import, Chromium, rendering, or packaging authority moves.",
+  "rationale": "Adds a --today date override to the source-contract checker, pins it in the checker's tests, and documents the rule in the import-design skill; test and advisory-checker change only, no design-import, Chromium, rendering, or packaging authority moves.",
   "tests": [
     "python3 tools/import-validation/test_source_contracts.py",
     "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
