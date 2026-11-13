@@ -59,7 +59,7 @@ renderer does.
 The opt-in `PULP_ENABLE_RMLUI_ADAPTER` package adds
 `pulp::rmlui-native-metal` when the Vellum main SDK and the optional
 `vellum-rmlui-sdk-<version>-darwin-arm64` prefix export
-`VellumRmlUi::Native` and `VellumRmlUi::Metal`. Put both prefixes in
+`VellumRmlUiNative::Native` and `VellumRmlUiNative::Metal`. Put both prefixes in
 `CMAKE_PREFIX_PATH` (the RmlUi prefix alongside the main Vellum prefix).
 Construct
 `vellum::rmlui::MetalRenderInterface` with the device returned by the surface,

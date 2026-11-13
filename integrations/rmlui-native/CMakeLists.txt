@@ -1,8 +1,8 @@
 # rmlui-native: RmlUi on a pulp-native Metal surface. It brings no renderer
 # and no RmlUi build of its own: RmlUi comes from Vellum's installed
-# VellumRmlUi::Native, and the caller supplies an Rml::RenderInterface.
+# VellumRmlUiNative::Native, and the caller supplies an Rml::RenderInterface.
 
-find_package(VellumRmlUi CONFIG REQUIRED COMPONENTS Native OPTIONAL_COMPONENTS Metal)
+find_package(VellumRmlUiNative CONFIG REQUIRED COMPONENTS Native Metal)
 
 add_library(pulp-rmlui-native STATIC src/rmlui_surface_mac.mm)
 add_library(pulp::rmlui-native ALIAS pulp-rmlui-native)
