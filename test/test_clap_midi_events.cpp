@@ -5832,9 +5832,6 @@ struct Rig {
     // The adapter may warm up for a block or two before running the Processor.
     Captured run_block() {
         Captured captured;
-        // The host's try_push runs inside clap_process, under the adapter's
-        // real-time allocation trap; reserve so recording an event never grows.
-        captured.midi.reserve(16);
         clap_input_events_t in{};
         in.ctx = nullptr;
         in.size = [](const clap_input_events_t*) -> uint32_t { return 0; };
