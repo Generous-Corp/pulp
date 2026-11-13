@@ -2,7 +2,7 @@
 
 Date: 2026-10-15  
 Baseline: `e86ed199bad9eabe55a22fe6fa877342115613b8`  
-Worktree: `/Users/danielraffel/Code/pulp-neural-cpu-fixture-20261015`  
+Worktree: `<code-root>/pulp-neural-cpu-fixture-20261015`  
 Scope: private CPU contract evidence only
 
 The protected baseline already contains the smallest bounded recurrent seam in

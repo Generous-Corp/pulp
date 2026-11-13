@@ -50,7 +50,7 @@ than a change to this slice's registration.
   `visual-python-deps-present`, and `cli-gpu-clean-agent-preparer-contract`.
   No split test failed, and the prior NOT_BUILT targets are gone.
 - Forge seam structural receipt with a fresh Forge validation worktree:
-  `FORGE_SRC=/Users/danielraffel/Code/forge-c5-agent8-validation
+  `FORGE_SRC=<code-root>/forge-c5-agent8-validation
   bash forge-seam/test_seam_patch.sh` — passed; `forge-seam/populate.sh`
   copied the new private support header and all test files.
 - `git diff --check`: passed.

@@ -7,11 +7,11 @@ retirement decisions. No production or test source was edited.
 
 ## Provenance and commands
 
-- Worktree: `/Users/danielraffel/Code/pulp-phase5-inventory-20261004`
+- Worktree: `<code-root>/pulp-phase5-inventory-20261004`
 - Branch: `codex/phase5-inventory-20261004`
 - `origin/main` and `HEAD`: `dcee90cce925d42dca420284f22da7d279369c30`
 - Lineage: `tools/scripts/worktree_lineage.sh show --path .`; marked active with the Phase 5 inventory note.
-- Guidance read: `/Users/danielraffel/Code/pulp-phase5-inventory-20261004/CLAUDE.md`.
+- Guidance read: `<code-root>/pulp-phase5-inventory-20261004/CLAUDE.md`.
 - Baseline commands:
   - `python3 tools/scripts/header_fanout_guard.py --top 40`
   - `wc -l` over Forge catalog headers, SignalGraph headers/sources, `tools/cmake/*.cmake`, and test sources.

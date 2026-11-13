@@ -1,5 +1,15 @@
 # P0 — layered inspection and replay
 
+## Close-out (2026-11-13)
+
+Final status: PARTIAL / tooling experiment (unchanged).
+
+The layered replay receipt tooling is on main (PR 12147). Parser/replay acceptance remains NOT_CHECKED.
+
+PR pointers below are historical; all PRs cited in this file that were queried (checked 2026-11-13) are merged, none remain open.
+
+Remaining work is deferred to https://github.com/Generous-Corp/pulp/issues/12177.
+
 Status: **PARTIAL / tooling experiment**
 
 The bounded receipt tooling is in

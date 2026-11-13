@@ -49,7 +49,11 @@
     },
     {
       "path": "docs/graph-program-status/P-0-layered-inspection-replay.md",
-      "needles": ["receipt-installed-sdk-20261113.json", "Both consumers PASS at 64 and 128"]
+      "needles": ["receipt-installed-sdk-20261113.json", "Both consumers PASS at 64 and 128", "Close-out (2026-11-13)"]
+    },
+    {
+      "path": "docs/graph-program-status/G-3.md",
+      "needles": ["Close-out (2026-11-13)", "P0 layered inspection/replay follow-up"]
     }
   ],
   "surfaces": {

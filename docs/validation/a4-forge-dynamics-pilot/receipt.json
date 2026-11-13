@@ -56,7 +56,7 @@
     "result": "improved"
   },
   "roadmap_changed": false,
-  "excluded_worktree": "/Users/danielraffel/Code/pulp-dsp-next-20261001",
+  "excluded_worktree": "<code-root>/pulp-dsp-next-20261001",
   "status": "green",
   "projection_equivalence": {
     "pre_pilot_source": "5ea08fd824",

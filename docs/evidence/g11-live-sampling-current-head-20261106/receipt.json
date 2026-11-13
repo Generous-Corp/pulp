@@ -55,7 +55,7 @@
   },
   "sdk_inventory_sha256": "eee279a3fa3772c2ad81808572efa61fad45ee2ee6fb541b15c9f5a864a4a366",
   "sdk_platform": "darwin-arm64",
-  "sdk_prefix": "/Users/danielraffel/.pulp/sdk-dev/forge-v1/darwin-arm64/633825f7af3d4c8d0fee7e4ec139588282bdf0a1/3b617cf352bb",
+  "sdk_prefix": "~/.pulp/sdk-dev/forge-v1/darwin-arm64/633825f7af3d4c8d0fee7e4ec139588282bdf0a1/3b617cf352bb",
   "selected_binding_proofs": {
     "aggregates": 2,
     "bindings": 48,

@@ -8,7 +8,7 @@ public header, test source, or CTest manifest was changed for this packet.
 
 - Protected base: `origin/main` at
   [`c4ed69529c9df393d65475ff9790d4eb4067fb38`](https://github.com/Generous-Corp/pulp/commit/c4ed69529c9df393d65475ff9790d4eb4067fb38)
-- Worktree: `/Users/danielraffel/Code/pulp-signalgraph-next-20261007`
+- Worktree: `<code-root>/pulp-signalgraph-next-20261007`
 - Configure directory: `build-tsan-d1-current`
 - Configuration: `Debug`, `PULP_SANITIZER=thread`, tests enabled, examples and
   GPU disabled.
