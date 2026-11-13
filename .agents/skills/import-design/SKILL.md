@@ -5151,6 +5151,10 @@ tests that passed, which roundtrip scripts, upstream URL rechecks and reference
 screenshots were not run, and the date. Move `last_verified` only together with
 a note that names its evidence; an entry you cannot evidence stays stale.
 
+The checker takes `--today YYYY-MM-DD`. Any test that runs it as a subprocess against
+a hard-coded `last_verified` must pass a fixed `--today`; otherwise the case flips from
+"due" to "overdue" on the real clock and fails every PR (it did on 2026-11-13).
+
 When cleaning Catch2 tags in source-contract test files, update the matching
 `validation.test_tags` entry in `source-contracts.json` in the same change.
 Scheduled provider recheck dates are advisory: an overdue
