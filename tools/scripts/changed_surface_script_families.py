@@ -34,6 +34,9 @@ script can reach without naming it.
 
     changed_surface_script_families.py --build-dir <dir> --write   # rewrite the block
     changed_surface_script_families.py --build-dir <dir> --check   # drift check
+    changed_surface_script_families.py --configure-only --write    # no build dir at hand: a
+        # temporary, governed, configure-only tree under the checkout, removed
+        # afterwards; allowed on the gate and dev-overflow hosts (configure_only.py)
     changed_surface_script_families.py --static --base origin/main # no build: map flips only
 
 The families live in `.shipyard/changed-surface-families.toml`, which the
@@ -639,9 +642,10 @@ def static_main(root: Path, base: str | None, head: str = "HEAD") -> int:
           f"{len(blocking)} script(s) this change maps or unmaps:", file=sys.stderr)
     for line in blocking[:12]:
         print(f"  {line}", file=sys.stderr)
-    print("  regenerate from a configured build (`tools/scripts/gates.sh` configures build-gate "
-          "and prints the exact command), then commit the file:\n"
-          "  python3 tools/scripts/changed_surface_script_families.py --build-dir <dir> --write",
+    print("  `git add` the new scripts first (the generator maps tracked files only), then "
+          "regenerate on any fleet host, gate hosts included, and commit the file:\n"
+          "  python3 tools/scripts/changed_surface_script_families.py --configure-only --write\n"
+          "  (or --build-dir <configured dir> --write)",
           file=sys.stderr)
     if script_test_inputs.advisory_here():
         return 0
@@ -651,8 +655,14 @@ def static_main(root: Path, base: str | None, head: str = "HEAD") -> int:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--repo-root", type=Path, default=HERE.parents[1])
-    parser.add_argument("--build-dir", type=Path,
-                        help="a configured build with a codemodel reply (required except with --static)")
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument("--build-dir", type=Path,
+                        help="a configured build with a codemodel reply (required except with "
+                             "--static or --configure-only)")
+    source.add_argument("--configure-only", action="store_true",
+                        help="configure the gate's tree in a temporary directory under the "
+                             "checkout (governed, no compile; allowed on gate and dev-overflow "
+                             "hosts), run against it, and remove it")
     parser.add_argument("--base", default=None,
                         help="diff-scope --check to changes since this ref (default: as "
                              "script_test_inputs.py --check resolves it; none means a full check)")
@@ -667,8 +677,22 @@ def main(argv: list[str]) -> int:
     root = args.repo_root.resolve()
     if args.static:
         return static_main(root, script_test_inputs.resolve_base(root, args.base), args.head)
+    if args.configure_only:
+        import configure_only  # noqa: PLC0415  (only this path needs it)
+        with configure_only.configured(root) as (build, why, code):
+            if build is None:
+                print(f"changed-surface script families: configure-only build failed: {why}",
+                      file=sys.stderr)
+                return code
+            return run_against(root, build, args)
     if args.build_dir is None:
-        parser.error("--build-dir is required with --write and --check")
+        parser.error("--build-dir or --configure-only is required with --write and --check")
+    return run_against(root, args.build_dir, args)
+
+
+def run_against(root: Path, build_dir: Path, args: argparse.Namespace) -> int:
+    """--write or --check against the configured build ``build_dir``."""
+    args.build_dir = build_dir
     families_path = root / FAMILIES_FILE
     if not inventory.codemodel_reply_available(args.build_dir):
         # Without the file-API reply the producer targets cannot be read. The
@@ -717,7 +741,7 @@ def main(argv: list[str]) -> int:
               f"generated families checked against {args.build_dir}")
         return 0
     fix = ("regenerate with\n  python3 tools/scripts/changed_surface_script_families.py "
-           "--build-dir <dir> --write")
+           "--configure-only --write   (or --build-dir <configured dir> --write)")
     base = script_test_inputs.resolve_base(root, args.base)
     removed = globally_removed_registered_tests(root, base, current, updated)
     if removed:

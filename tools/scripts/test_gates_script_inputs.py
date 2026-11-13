@@ -14,6 +14,11 @@ What must hold:
   build-gate (configure only) and runs the check;
 - a diff touching no declared input does not configure;
 - a current configured build is reused, not reconfigured;
+- on a gate host (dedicated-builder, dev-overflow) the lane configures once,
+  governed as a background one-core lease, into a temporary
+  build-configure-only.* tree that is gone afterwards, and never compiles: a
+  configure that leaves an object file is refused, and the heavy lanes stay
+  refused;
 - PULP_GATES_NO_CONFIGURE=1 does not configure and says NOT CHECKED loudly,
   except that a change to a surface the families check blocks FAILS: the
   build-free prediction runs first, and the required gate would check it;
@@ -48,6 +53,7 @@ REPO = HERE.parents[1]
 COPIED = [
     "tools/scripts/gates.sh",
     "tools/scripts/gates_script_inputs.py",
+    "tools/scripts/configure_only.py",
     "tools/scripts/script_test_inputs.py",
     "tools/scripts/script_inputs_store.py",
     "tools/scripts/hotspot_edit_guard.py",
@@ -91,6 +97,19 @@ done
 mkdir -p "$dir"
 printf 'CMAKE_GENERATOR:INTERNAL=Ninja\nCMAKE_BUILD_TYPE:STRING=Release\n' > "$dir/CMakeCache.txt"
 echo "# fake" > "$dir/CTestTestfile.cmake"
+# CMake's own configure-time probe objects are allowed; a target object is not.
+mkdir -p "$dir/CMakeFiles/_CMakeLTOTest-CXX/bin/CMakeFiles/foo.dir"
+: > "$dir/CMakeFiles/_CMakeLTOTest-CXX/bin/CMakeFiles/foo.dir/foo.cpp.o"
+if [ -n "$FAKE_CMAKE_COMPILES" ]; then
+    mkdir -p "$dir/core/CMakeFiles/pulp-core.dir"
+    : > "$dir/core/CMakeFiles/pulp-core.dir/a.cpp.o"
+fi
+"""
+
+# Stands in for tools/ci/governed-build.sh: records the share it was asked for.
+FAKE_GOVERNOR = r"""#!/bin/sh
+echo "class=$PULP_BUILD_CLASS jobs=$PULP_BUILD_JOBS" >> "$FAKE_GOVERNOR_LOG"
+exec "$@"
 """
 
 FAKE_CTEST = r"""#!/bin/sh
@@ -241,6 +260,16 @@ class GatesScriptInputsTests(unittest.TestCase):
     def configures(self) -> list[str]:
         return self.cmake_log.read_text().splitlines() if self.cmake_log.exists() else []
 
+    def temp_trees(self) -> list[str]:
+        return sorted(p.name for p in self.root.glob("build-configure-only.*"))
+
+    def install_governor(self) -> Path:
+        governor = self.root / "tools/ci/governed-build.sh"
+        governor.parent.mkdir(parents=True, exist_ok=True)
+        governor.write_text(FAKE_GOVERNOR, encoding="utf-8")
+        governor.chmod(0o755)
+        return self.tmp / "governor.log"
+
     def test_fixture_matches_the_shard_plan(self) -> None:
         sys.path.insert(0, str(REPO / "tools/ci"))
         import source_selftests  # noqa: PLC0415
@@ -271,20 +300,32 @@ class GatesScriptInputsTests(unittest.TestCase):
         self.assertEqual(self.configures(), [])
         self.assertIn("nothing to check", r.stderr)
 
-    def test_gate_host_refuses_heavy_lanes_and_says_where_to_run_them(self) -> None:
+    def test_gate_host_refuses_heavy_lanes_and_configures_only_a_temporary_tree(self) -> None:
         self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
         self.commit()
+        governor_log = self.install_governor()
         for role in ("dedicated-builder", "dev-overflow", "a-role-tartci-adds-later"):
             with self.subTest(role=role):
                 self.cmake_log.write_text("", encoding="utf-8")
+                governor_log.write_text("", encoding="utf-8")
                 # Source selftests left enabled: the refusal, not the opt-out, must stop them.
                 r = self.gates(FAKE_SERVES_GATE="1", FAKE_TARTCI_ROLE=role,
-                               PULP_SKIP_SOURCE_SELFTESTS="")
-                self.assertEqual(self.configures(), [])
-                # The manifest lane still runs, build-free: its static families
-                # prediction is a cheap gate that can fail.
-                self.assertIn("gate host: build-free checks only, never configures", r.stderr)
+                               PULP_SKIP_SOURCE_SELFTESTS="", FAKE_GOVERNOR_LOG=str(governor_log))
+                # The one allowance: a single configure, into a temporary tree
+                # under the checkout, governed as one background core, never a build.
+                calls = self.configures()
+                self.assertEqual(len(calls), 1, r.stderr)
+                self.assertIn(f"-B {self.root.resolve() / 'build-configure-only.'}", calls[0])
+                self.assertIn("-DPULP_BUILD_EXAMPLES=OFF", calls[0])
+                self.assertNotIn("--build", calls[0])
+                self.assertEqual(governor_log.read_text().split("\n")[0], "class=background jobs=1")
+                self.assertEqual(self.temp_trees(), [], "the temporary tree must be removed")
+                self.assertFalse((self.root / "build-gate").exists())
+                self.assertIn("[gate-host] ALLOWED configure-only", r.stderr)
                 self.assertIn("changed-surface script families (static): OK", r.stderr)
+                self.assertIn("changed-surface script families: OK", r.stderr)
+                self.assertIn("script-test-inputs: OK", r.stderr)
+                # Every compiling or suite lane stays refused.
                 self.assertNotIn("▸ source-only selftests", r.stderr)
                 self.assertNotIn("▸ ctest pr-fast tier", r.stderr)
                 self.assertIn("[gate-host] REFUSED", r.stderr)
@@ -297,11 +338,37 @@ class GatesScriptInputsTests(unittest.TestCase):
                 self.assertIn("[gate-host] NOT CHECKED", r.stderr)
                 self.assertNotIn("all gates pass — safe to push", r.stderr)
 
-    def test_gate_host_still_fails_a_families_flip_without_configuring(self) -> None:
+    def test_dev_overflow_refuses_a_configure_that_compiles(self) -> None:
+        self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
+        self.commit()
+        r = self.gates(FAKE_SERVES_GATE="1", FAKE_TARTCI_ROLE="dev-overflow", FAKE_CMAKE_COMPILES="1",
+                       FAKE_FAMILIES_SAYS="families check must not run on a compiled tree")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("the configure compiled core/CMakeFiles/pulp-core.dir/a.cpp.o", r.stderr)
+        self.assertNotIn("families check must not run", r.stderr)
+        self.assertIn("changed-surface script families: FAILED, not verified", r.stderr)
+        self.assertEqual(self.temp_trees(), [])
+
+    def test_gate_host_family_drift_prints_the_configure_only_write_command(self) -> None:
+        self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
+        self.commit()
+        r = self.gates(FAKE_SERVES_GATE="1", FAKE_TARTCI_ROLE="dev-overflow", FAKE_FAMILIES_RC="1",
+                       FAKE_FAMILIES_SAYS="  tools/scripts/test_alpha.py: newly mapped",
+                       FAKE_STATIC_RC="1",
+                       FAKE_STATIC_SAYS="  tools/scripts/test_alpha.py: newly mapped")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertEqual(len(self.configures()), 1)
+        self.assertIn("python3 tools/scripts/changed_surface_script_families.py --configure-only --write",
+                      r.stderr)
+        # The temporary tree is gone, so no command may name it.
+        self.assertNotIn("--build-dir build-configure-only", r.stderr)
+        self.assertEqual(self.temp_trees(), [])
+
+    def test_gate_host_opt_out_still_fails_a_families_flip_without_configuring(self) -> None:
         self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
         self.commit()
         r = self.gates(FAKE_SERVES_GATE="1", FAKE_TARTCI_ROLE="dedicated-builder",
-                       FAKE_STATIC_RC="1",
+                       PULP_GATES_NO_CONFIGURE="1", FAKE_STATIC_RC="1",
                        FAKE_STATIC_SAYS="  tools/scripts/test_alpha.py: newly mapped")
         self.assertEqual(r.returncode, 1, r.stderr)
         self.assertEqual(self.configures(), [])
@@ -402,7 +469,7 @@ class GatesScriptInputsTests(unittest.TestCase):
         self.assertEqual(self.configures(), [])
         self.assertIn("changed-surface script families (static): OK", r.stderr)
         self.assertIn("changed-surface script families: FAILED, not verified", r.stderr)
-        self.assertIn("python3 tools/scripts/changed_surface_script_families.py --build-dir <dir> --write",
+        self.assertIn("python3 tools/scripts/changed_surface_script_families.py --configure-only --write",
                       r.stderr)
         self.assertNotIn("NOT CHECKED locally: changed-surface-script-families-drift", r.stderr)
         for test in ("script-test-inputs-drift", "source-selftest-lane-contract"):
