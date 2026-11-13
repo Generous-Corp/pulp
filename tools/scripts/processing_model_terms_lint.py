@@ -50,6 +50,27 @@ FORBIDDEN = [
         'generated DSP reaches the graph as a Processor (NativeCoreProcessor + '
         'ProcessorNode); there is no separate "generated-DSP runtime"',
     ),
+    (
+        re.compile(r"\bedge\s+taps?\b", re.IGNORECASE),
+        'graph edge observers are edge probes (attach_*_edge_probe), not "edge taps"',
+    ),
+    (
+        re.compile(r"\b(?:SignalGraph|graph)\s+(?:(?:audio|control|event)\s+)?taps?\b", re.IGNORECASE),
+        'observing a graph edge is an edge probe (EdgeProbeStatus), not a "tap"',
+    ),
+    (
+        re.compile(r"\b(?:SignalGraph|graph)\s+bus\s+ports?\b", re.IGNORECASE),
+        'graph connection points are ports (PortKind, PortHandle); "bus" is a '
+        'plugin/format channel group',
+    ),
+    (
+        re.compile(r"\bsidechain\s+is\s+(?:just\s+)?an?\s+(?:ordinary\s+)?audio\s+port\b", re.IGNORECASE),
+        "Sidechain is its own PortKind, distinct from Audio",
+    ),
+    (
+        re.compile(r"\bzero[\s\-]delay\s+feedback\s+edge\b", re.IGNORECASE),
+        "connect_feedback edges carry a block-sized delay; they are never zero-delay",
+    ),
 ]
 
 SCAN_DIRS = ("docs", "core", "examples")
@@ -107,6 +128,17 @@ def selftest() -> int:
         ("the generated DSP runtime owns its own scheduler", 1),
         ("generated-dsp runtime  # terms-lint: allow", 0),
         ("a generated DSP core runs as a Processor node", 0),
+        ("attach an edge tap to the graph", 1),
+        ("attach a SignalGraph audio tap", 1),
+        ("Control and event taps in a CoreAudio route", 0),
+                ("attach_audio_edge_probe observes an edge probe", 0),
+        ("CoreAudio process tap  # terms-lint: allow", 0),
+        ("route it to the SignalGraph bus port", 1),
+        ("a sidechain bus port on the plugin", 0),
+        ("sidechain is just an audio port", 1),
+        ("Sidechain is its own PortKind", 0),
+        ("add a zero-delay feedback edge", 1),
+        ("connect_feedback adds a block-delay feedback edge", 0),
     ]
     failures = 0
     for text, expected in cases:
