@@ -49,3 +49,41 @@ owned by the private topology-edit path
 projection has no public mailbox or dispatch seam. Therefore the four-family,
 two-block P1 gate remains **NOT_QUALIFIED / HOLD**; no runtime/API seam,
 universal queue, or voice-intent API is introduced.
+
+## Installed-SDK run — 2026-11-13
+
+The consumer now builds and runs from a complete installed SDK. The prefix is
+a clean Release source install of `4c69e183387017c47d048b477218a6d0a4947bcc`
+(`sdk-provenance.json`: `kind=source-install`, `build_profile=release`,
+`source_git_dirty=false`, `platform=darwin-arm64`). Its installed
+`graph_event_contract.hpp` and `signal_graph_runtime.hpp` are byte-identical
+to the same files at `origin/main` `5b904b8712667b87d2ecd43f9315c574fc37ec68`;
+`core/` and `tools/cmake/` do not differ between the two heads. The digests are
+in the receipt's `build.sdk` block.
+
+The first complete run failed on two fixture controls, and both were fixture
+defects rather than runtime defects:
+
+* `midi-duplicate-sequence-refusal` published the duplicate after `project()`.
+  `HostEventIngress` detects a duplicate producer sequence only among staged
+  records, and `project()` removes the records it delivers, so the refusal is
+  observable only before projection. The control now publishes the duplicate
+  before projecting.
+* `trigger-cross-block-samples` expected `trigger_trace()` to hold both blocks.
+  That view covers only the most recent block and expires at the next render
+  boundary, so the control now copies each block's record after that block.
+
+After the correction the positive run prints
+`p1-event-admission PASS checks=48 partitions=4,8 planted_negative=5 consumer_gate=NOT_QUALIFIED`
+and CTest passes 1/1. Two input mutations show that the corrected controls
+discriminate. Giving the duplicate a unique sequence fails
+`midi-duplicate-sequence-refusal`, and moving the second-block impulse fails
+`trigger-cross-block-samples`.
+
+The gate stays **NOT_QUALIFIED**. This run closes only the installed-SDK lane
+for the MIDI and trigger-graph controls. Parameter-mailbox projection for a
+public `Processor` and public `TriggerContext` current/future delivery remain
+**UNAVAILABLE** through the public API, and voice projection remains
+**NOT_CHECKED**. Those two unavailable rows are the binding gaps that a P1
+runtime admission would have to address. They are recorded here as evidence
+and do not authorize an API change.
