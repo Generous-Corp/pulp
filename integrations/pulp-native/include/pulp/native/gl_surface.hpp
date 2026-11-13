@@ -113,6 +113,18 @@ std::optional<std::size_t> first_honoured_request(const std::vector<GlContextReq
                                                   int major, int minor, GlProfile profile,
                                                   int samples);
 
+/// The profiles to ask the platform for, in order, when creating a context
+/// for a request with `profile`, on an API that takes one explicit profile per
+/// creation call (WGL_ARB_create_context_profile). `core` and `compatibility`
+/// are tried alone; `any` tries core and then compatibility, so a driver that
+/// offers only one of them still honours it. Pure.
+std::vector<GlProfile> context_profile_attempts(GlProfile profile);
+
+/// Whether a value `wglGetProcAddress` returned is a usable entry point. Some
+/// drivers return 1, 2, 3 or -1 instead of null for a name they lack, and
+/// calling one of those crashes. Pure.
+bool is_usable_wgl_proc(std::intptr_t address) noexcept;
+
 /// Whether a `GL_RENDERER` string names a software rasterizer.
 bool is_software_renderer(const std::string& renderer);
 

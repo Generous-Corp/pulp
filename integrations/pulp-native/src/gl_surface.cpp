@@ -43,6 +43,16 @@ std::optional<std::size_t> first_honoured_request(const std::vector<GlContextReq
     return first_honoured(requests, major, minor, profile, samples);
 }
 
+std::vector<GlProfile> context_profile_attempts(GlProfile profile) {
+    if (profile == GlProfile::any)
+        return {GlProfile::core, GlProfile::compatibility};
+    return {profile};
+}
+
+bool is_usable_wgl_proc(std::intptr_t address) noexcept {
+    return address != 0 && address != 1 && address != 2 && address != 3 && address != -1;
+}
+
 bool is_software_renderer(const std::string& renderer) {
     std::string lower(renderer);
     std::transform(lower.begin(), lower.end(), lower.begin(),

@@ -13,6 +13,7 @@
 
 #include <GL/gl.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <mutex>
 #include <string>
@@ -100,6 +101,13 @@ void release_class() {
 std::string gl_string(GLenum name) {
     const auto* s = reinterpret_cast<const char*>(glGetString(name));
     return s != nullptr ? std::string(s) : std::string();
+}
+
+// An extension entry point from the context current on this thread, or null
+// when the driver lacks it (including its non-null sentinel values).
+template <typename Fn> Fn wgl_extension(const char* name) {
+    const auto address = reinterpret_cast<std::intptr_t>(wglGetProcAddress(name));
+    return is_usable_wgl_proc(address) ? reinterpret_cast<Fn>(address) : nullptr;
 }
 
 double window_scale(HWND hwnd) {
@@ -224,8 +232,7 @@ struct WglWindow final : GlSurface::Impl {
         report.request_index = index;
         context = candidate;
         out = report;
-        if (auto swap_interval =
-                reinterpret_cast<SwapInterval>(wglGetProcAddress("wglSwapIntervalEXT")))
+        if (auto swap_interval = wgl_extension<SwapInterval>("wglSwapIntervalEXT"))
             swap_interval(options.swap_interval);
         return true;
     }
@@ -244,7 +251,7 @@ struct WglWindow final : GlSurface::Impl {
             return false;
         }
         const auto create_attribs =
-            reinterpret_cast<CreateContextAttribs>(wglGetProcAddress("wglCreateContextAttribsARB"));
+            wgl_extension<CreateContextAttribs>("wglCreateContextAttribsARB");
 
         for (std::size_t i = 0; i < options.requests.size(); ++i) {
             const GlContextRequest& request = options.requests[i];
@@ -255,28 +262,30 @@ struct WglWindow final : GlSurface::Impl {
                     return true;
                 continue;
             }
-            const int profile = request.profile == GlProfile::core
-                                    ? kWglContextCoreProfileBit
-                                    : kWglContextCompatibilityProfileBit;
-            const int attribs[] = {
-                kWglContextMajorVersion,
-                request.major,
-                kWglContextMinorVersion,
-                request.minor,
-                kWglContextProfileMask,
-                profile,
-                kWglContextFlags,
-                request.profile == GlProfile::core ? kWglContextForwardCompatibleBit : 0,
-                0};
-            HGLRC modern = create_attribs(hdc, nullptr, attribs);
-            if (modern == nullptr)
-                continue;
-            if (wglMakeCurrent(hdc, modern) && accept(modern, options, i, out)) {
-                wglDeleteContext(legacy);
-                return true;
+            // `any` tries core and then compatibility, so a core-only driver
+            // still honours it.
+            for (const GlProfile attempt : context_profile_attempts(request.profile)) {
+                const bool core = attempt == GlProfile::core;
+                const int attribs[] = {
+                    kWglContextMajorVersion,
+                    request.major,
+                    kWglContextMinorVersion,
+                    request.minor,
+                    kWglContextProfileMask,
+                    core ? kWglContextCoreProfileBit : kWglContextCompatibilityProfileBit,
+                    kWglContextFlags,
+                    request.profile == GlProfile::core ? kWglContextForwardCompatibleBit : 0,
+                    0};
+                HGLRC modern = create_attribs(hdc, nullptr, attribs);
+                if (modern == nullptr)
+                    continue;
+                if (wglMakeCurrent(hdc, modern) && accept(modern, options, i, out)) {
+                    wglDeleteContext(legacy);
+                    return true;
+                }
+                wglMakeCurrent(hdc, legacy);
+                wglDeleteContext(modern);
             }
-            wglMakeCurrent(hdc, legacy);
-            wglDeleteContext(modern);
         }
         wglMakeCurrent(previous_dc, previous_context);
         wglDeleteContext(legacy);
@@ -297,8 +306,7 @@ struct WglWindow final : GlSurface::Impl {
     }
 
     bool set_interval(int interval) override {
-        auto swap_interval =
-            reinterpret_cast<SwapInterval>(wglGetProcAddress("wglSwapIntervalEXT"));
+        auto swap_interval = wgl_extension<SwapInterval>("wglSwapIntervalEXT");
         return swap_interval != nullptr && swap_interval(interval) == TRUE;
     }
 
@@ -306,7 +314,7 @@ struct WglWindow final : GlSurface::Impl {
         // wglGetProcAddress returns small sentinel values, not null, for
         // entry points it does not know; OpenGL 1.1 ones come from the DLL.
         auto p = reinterpret_cast<std::intptr_t>(wglGetProcAddress(name));
-        if (p == 0 || p == 1 || p == 2 || p == 3 || p == -1)
+        if (!is_usable_wgl_proc(p))
             return reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"opengl32.dll"), name));
         return reinterpret_cast<void*>(p);
     }
