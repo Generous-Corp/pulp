@@ -45,14 +45,16 @@ std::array<int, 4> host_and_parameter_controls(std::size_t partition) {
     check(ingress.publish(note) == HostEventResult::Accepted &&
               ingress.publish(tie) == HostEventResult::Accepted,
           "midi-publish");
+    // Duplicate detection covers staged records only: project() removes the
+    // records it delivers, so the refusal must be observed before projection.
+    check(ingress.publish(midi_record(7, 2, 1, 3, pulp::midi::MidiEvent::note_on(1, 62, 100))) ==
+              HostEventResult::InvalidSequence,
+          "midi-duplicate-sequence-refusal");
     std::array<HostEventRecord, 8> projected{};
     std::size_t count = 0;
     check(ingress.project(projected, count) == HostEventResult::Accepted && count == 2,
           "midi-project");
     check(projected[0].producer == 3 && projected[1].producer == 4, "midi-stable-producer-order");
-    check(ingress.publish(midi_record(7, 2, 1, 3, pulp::midi::MidiEvent::note_on(1, 62, 100))) ==
-              HostEventResult::InvalidSequence,
-          "midi-duplicate-sequence-refusal");
     check(ingress.publish(midi_record(6, 2, 3, 1, pulp::midi::MidiEvent::note_on(1, 62, 100))) ==
               HostEventResult::StaleEpoch,
           "midi-stale-epoch-refusal");
@@ -122,13 +124,19 @@ void trigger_two_block_controls() {
     pulp::audio::BufferView<float> output_view(&output_ptr, 1, output_samples.size());
     check(graph.process_checked(output_view, input_view, 4) == TriggerGraphResult::Accepted,
           "trigger-first-block");
+    // trigger_trace() is a view of the most recent block only; it expires at
+    // the next render boundary, so each block's record is copied out here.
+    const auto first_trace = graph.trigger_trace();
+    check(first_trace.size() == 1, "trigger-first-block-trace");
+    const TriggerRecord first = first_trace[0];
     source = {0.0f, 0.0f, 1.0f, 0.0f};
     check(graph.process_checked(output_view, input_view, 4) == TriggerGraphResult::Accepted,
           "trigger-second-block");
-    const auto trace = graph.trigger_trace();
-    check(trace.size() == 2 && trace[0].sample == 1 && trace[1].sample == 6,
-          "trigger-cross-block-samples");
-    check(trace[0].sequence == 0 && trace[1].sequence == 1 && trace[0].epoch == trace[1].epoch,
+    const auto second_trace = graph.trigger_trace();
+    check(second_trace.size() == 1, "trigger-second-block-trace");
+    const TriggerRecord second = second_trace[0];
+    check(first.sample == 1 && second.sample == 6, "trigger-cross-block-samples");
+    check(first.sequence == 0 && second.sequence == 1 && first.epoch == second.epoch,
           "trigger-sequence-epoch");
     check(graph.try_reset_events() == TriggerGraphResult::Accepted, "trigger-reset");
 }

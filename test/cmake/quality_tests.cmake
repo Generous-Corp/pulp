@@ -529,6 +529,14 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME unbounded-wait-lint-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_unbounded_wait_lint.py")
 
+    # Patched-os.name lint: a concrete pathlib.Path built while a test patches
+    # os.name to "nt" is a WindowsPath, which Python 3.11 refuses to build off
+    # Windows, so the test passes on newer Pythons and errors on 3.11 hosts.
+    # The selftest plants the bad shape next to its safe twins and also scans
+    # the tracked tree.
+    add_test(NAME patched-os-name-path-lint-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_patched_os_name_path_lint.py")
+
     # Forced-restore lint: a forced worktree restore used as a repair has to say
     # which state it repairs. `checkout --force -- .` restores nothing when git
     # already believes the worktree matches the index, and exits 0 while doing
