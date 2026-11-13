@@ -13,8 +13,10 @@
 #include <dispatch/dispatch.h>
 
 #include <atomic>
+#include <charconv>
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <mutex>
 #include <vector>
 
@@ -44,6 +46,23 @@ double host_ticks_to_seconds(MIDITimeStamp ticks) {
                                static_cast<long double>(timebase.numer) /
                                static_cast<long double>(timebase.denom) /
                                1.0e9L);
+}
+
+// Strict decimal SInt32: optional leading '-', digits only, whole string
+// consumed, value in range. "12abc", " 12", "12 " and 2147483648 all fail.
+bool parse_endpoint_id(const std::string& text, SInt32& out) {
+    if (text.empty())
+        return false;
+    const char* first = text.data();
+    const char* last = first + text.size();
+    long long value = 0;
+    const auto result = std::from_chars(first, last, value);
+    if (result.ec != std::errc() || result.ptr != last)
+        return false;
+    if (value < INT32_MIN || value > INT32_MAX)
+        return false;
+    out = static_cast<SInt32>(value);
+    return true;
 }
 
 std::string cf_string_property(MIDIObjectRef object, CFStringRef property) {
@@ -229,9 +248,7 @@ public:
         }
 
         SInt32 source_id = 0;
-        try {
-            source_id = static_cast<SInt32>(std::stol(port_id));
-        } catch (...) {
+        if (!parse_endpoint_id(port_id, source_id)) {
             close();
             return false;
         }
@@ -320,9 +337,7 @@ public:
                 dest_ = MIDIGetDestination(0);
             } else {
                 SInt32 target_id = 0;
-                try {
-                    target_id = static_cast<SInt32>(std::stol(port_id));
-                } catch (...) {
+                if (!parse_endpoint_id(port_id, target_id)) {
                     close();
                     return false;
                 }

@@ -116,6 +116,21 @@ struct VirtualPair {
     }
 };
 
+// Includes prefix-parsable ids: a stol-style parser would read the endpoint
+// id out of "<id>abc", "<id> " and " <id>".
+std::vector<std::string> malformed_ids() {
+    const std::string real = std::to_string(kSourceId);
+    const std::string real_out = std::to_string(kDestId);
+    return {"2147483000",   "-5",
+            "not-a-number", "12abc",
+            real + "abc",   real_out + "abc",
+            real + " ",     " " + real,
+            real_out + " ", " " + real_out,
+            real + "x1",    "2147483648",
+            "-2147483649",  "99999999999999999999",
+            "+" + real,     "0x" + real};
+}
+
 const MidiPortInfo* find(const std::vector<MidiPortInfo>& ports, const std::string& id) {
     for (const auto& p : ports)
         if (p.id == id)
@@ -176,8 +191,8 @@ TEST_CASE("CoreMIDI open takes the enumerated id and fails on an unknown one",
     REQUIRE(in->open(std::to_string(kSourceId), [](const pulp::midi::MidiEvent&) {}));
     in->close();
 
-    for (const char* bad : {"2147483000", "-5", "not-a-number", "12abc"}) {
-        INFO("input id " << bad);
+    for (const std::string& bad : malformed_ids()) {
+        INFO("input id [" << bad << "]");
         CHECK_FALSE(in->open(bad, [](const pulp::midi::MidiEvent&) {}));
         CHECK_FALSE(in->is_open());
     }
@@ -185,8 +200,8 @@ TEST_CASE("CoreMIDI open takes the enumerated id and fails on an unknown one",
     auto out = system->create_output();
     REQUIRE(out->open(std::to_string(kDestId)));
     out->close();
-    for (const char* bad : {"2147483000", "-5", "not-a-number", "12abc"}) {
-        INFO("output id " << bad);
+    for (const std::string& bad : malformed_ids()) {
+        INFO("output id [" << bad << "]");
         CHECK_FALSE(out->open(bad));
         CHECK_FALSE(out->is_open());
     }
