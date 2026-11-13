@@ -167,31 +167,64 @@ def _signal_group(proc: subprocess.Popen, sig: int) -> None:
         pass
 
 
+# Signals whose default action kills this process outright, skipping the
+# group TERM below and orphaning the child's whole group (governor, its
+# foreground `taskpolicy -b` command, the lease heartbeat) in its own session.
+_FATAL_SIGNALS = tuple(getattr(signal, name) for name in ("SIGTERM", "SIGHUP") if hasattr(signal, name))
+
+
+def _raise_exit(signum, frame):  # noqa: ARG001
+    raise SystemExit(128 + signum)
+
+
+@contextlib.contextmanager
+def _signals_raise_exit() -> Iterator[None]:
+    """While the child runs, turn a default-action SIGTERM/SIGHUP into
+    SystemExit so run_child's cleanup runs whoever called it. A handler the
+    caller installed (temporary_build's) or an ignored signal is left alone."""
+    restore = []
+    for sig in _FATAL_SIGNALS:
+        try:
+            if signal.getsignal(sig) == signal.SIG_DFL:
+                signal.signal(sig, _raise_exit)
+                restore.append(sig)
+        except ValueError:  # not the main thread: signals are the main thread's
+            break
+    try:
+        yield
+    finally:
+        for sig in restore:
+            signal.signal(sig, signal.SIG_DFL)
+
+
 def run_child(cmd: list[str], root: Path, env: dict[str, str] | None = None,
               capture: bool = True) -> tuple[int, str]:
-    """Run ``cmd`` in its own process group. On any interruption (SIGTERM
-    arrives as SystemExit) TERM the whole group and wait TERM_GRACE_S before
-    KILL. The group matters: governed-build.sh runs its command in the
-    foreground, and bash defers a trapped TERM until that foreground child
-    exits, so TERM to the governor alone would wait out the grace and be
-    KILLed with its lease held. TERM to the group stops cmake too, then the
-    governor's EXIT trap releases the lease and its live-build marker.
-    Returns (returncode, combined output when captured)."""
+    """Run ``cmd`` in its own process group. On any interruption (SIGTERM or
+    SIGHUP arrive as SystemExit, whether or not the caller installed a handler)
+    TERM the whole group and wait TERM_GRACE_S before KILL. The group matters:
+    governed-build.sh runs its command in the foreground, and bash defers a
+    trapped TERM until that foreground child exits, so TERM to the governor
+    alone would wait out the grace and be KILLed with its lease held. TERM to
+    the group stops cmake too, then the governor's EXIT trap releases the lease
+    and its live-build marker. Without the handler a default-action TERM would
+    kill only this process: the child is in its own session, so nothing else
+    would ever signal it. Returns (returncode, combined output when captured)."""
     out = subprocess.PIPE if capture else None
-    proc = subprocess.Popen(cmd, cwd=root, env=env, stdout=out,
-                            stderr=subprocess.STDOUT if capture else None,
-                            text=True, encoding="utf-8", errors="replace",
-                            start_new_session=hasattr(os, "killpg"))
-    try:
-        text, _ = proc.communicate()
-    except BaseException:
-        _signal_group(proc, signal.SIGTERM)
+    with _signals_raise_exit():
+        proc = subprocess.Popen(cmd, cwd=root, env=env, stdout=out,
+                                stderr=subprocess.STDOUT if capture else None,
+                                text=True, encoding="utf-8", errors="replace",
+                                start_new_session=hasattr(os, "killpg"))
         try:
-            proc.wait(timeout=TERM_GRACE_S)
-        except subprocess.TimeoutExpired:
-            _signal_group(proc, signal.SIGKILL if hasattr(signal, "SIGKILL") else signal.SIGTERM)
-            proc.wait()
-        raise
+            text, _ = proc.communicate()
+        except BaseException:
+            _signal_group(proc, signal.SIGTERM)
+            try:
+                proc.wait(timeout=TERM_GRACE_S)
+            except subprocess.TimeoutExpired:
+                _signal_group(proc, signal.SIGKILL if hasattr(signal, "SIGKILL") else signal.SIGTERM)
+                proc.wait()
+            raise
     return proc.returncode, text or ""
 
 

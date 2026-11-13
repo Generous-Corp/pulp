@@ -14,7 +14,11 @@ What must hold:
   as a background one-core lease, at nice 10, and the granted lease is shown;
 - a build hidden in a wrapper command is caught after the command;
 - SIGTERM sends TERM to the governor (whose trap releases the lease) and
-  removes the tree; a stale tree is swept at the next start and a live one is
+  removes the tree; against the REAL governed-build.sh, with a lease whose
+  background QoS puts the command under `taskpolicy -b`, TERM (or HUP) to the
+  CLI or to a bare run_child caller with no handler of its own reaches the
+  governor's foreground child, the lease is released and the live-build
+  marker removed, and nothing in the group survives; a stale tree is swept at the next start and a live one is
   kept; no other lane adopts a temporary tree as its build;
 - `changed_surface_script_families.py --configure-only` takes this path.
 
@@ -37,6 +41,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import configure_only  # noqa: E402
+from process_liveness import pid_alive  # noqa: E402
 
 SCRIPT = HERE / "configure_only.py"
 
@@ -403,6 +408,151 @@ class FamiliesGeneratorFlagTests(unittest.TestCase):
                     generator.main(["--configure-only", "--build-dir", "b", "--write"])
                 finally:
                     sys.stderr = stderr
+
+
+# A tartci stand-in for the real governor: a profile that makes the configure
+# a one-core background-QoS lease (so the command runs under `taskpolicy -b`
+# on macOS), and a log of every lease call with the governor's pid.
+FAKE_TARTCI = r"""#!/bin/sh
+echo "$*" >> "$FAKE_TARTCI_LOG"
+case "$1 $2" in
+  "host-profile "*) printf 'PULP_BUILD_JOBS=1\nTARTCI_AGENT_QOS=background\n' ;;
+  "leases acquire") echo '{"ok": true, "lease_size_cores": 1}' ;;
+  "leases status") echo '{"leases": []}' ;;
+  *) echo '{"ok": true}' ;;
+esac
+"""
+
+# The governed command: records its pid, then sleeps until TERM.
+TERM_CHILD = ("import os, pathlib, signal, sys, time\n"
+              "out = pathlib.Path(sys.argv[1])\n"
+              "def on_term(*_):\n"
+              "    (out / 'child-term').write_text('x', encoding='utf-8'); sys.exit(143)\n"
+              "signal.signal(signal.SIGTERM, on_term)\n"
+              "(out / 'child-pid').write_text(str(os.getpid()), encoding='utf-8')\n"
+              "time.sleep(120)\n")
+
+# A caller that imports run_child and installs no SIGTERM handler of its own.
+BARE_CALLER = ("import os, sys\n"
+               "from pathlib import Path\n"
+               "sys.path.insert(0, sys.argv[1])\n"
+               "import configure_only as co\n"
+               "root = Path(sys.argv[2])\n"
+               "co.run_child(co.governor_prefix(root) + [sys.executable, '-c', sys.argv[3], sys.argv[4]],\n"
+               "             root, {**os.environ, **co.GOVERNED_ENV}, capture=False)\n")
+
+
+def _alive(pid: int) -> bool:
+    return pid_alive(pid) is not False
+
+
+@unittest.skipUnless(hasattr(os, "killpg") and shutil.which("git") and shutil.which("bash"),
+                     "POSIX process groups, git and bash are required")
+class RealGovernorTermTests(unittest.TestCase):
+    """TERM against tools/ci/governed-build.sh itself, not a stand-in."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="configure-only-gov-"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.root = self.tmp / "repo"
+        self.root.mkdir()
+        subprocess.run(["git", "init", "-q", str(self.root)], check=True)
+        self.out = self.tmp / "out"
+        self.out.mkdir()
+        self.tartci = self.tmp / "tartci"
+        self.tartci.write_text(FAKE_TARTCI, encoding="utf-8")
+        self.tartci.chmod(0o755)
+        self.tartci_log = self.tmp / "tartci.log"
+        self.cmake = self.tmp / "cmake"
+        self.cmake.write_text(FAKE_CMAKE, encoding="utf-8")
+        self.cmake.chmod(0o755)
+
+    def env(self) -> dict[str, str]:
+        env = {k: v for k, v in os.environ.items()
+               if not k.startswith(("PULP_", "FAKE_", "TARTCI_", "GITHUB_"))}
+        env.update(PULP_TARTCI_BIN=str(self.tartci), FAKE_TARTCI_LOG=str(self.tartci_log),
+                   CMAKE=str(self.cmake), FAKE_CMAKE_LOG=str(self.tmp / "cmake.log"),
+                   PULP_GATES_SETUP="", PULP_CONFIGURE_ONLY_NPM="0", PULP_BUILD_METRICS="0",
+                   PULP_CONFIGURE_ONLY_TERM_GRACE="20",
+                   PULP_CONFIGURE_ONLY_GOVERNOR=str(HERE.parents[1] / "tools/ci/governed-build.sh"))
+        return env
+
+    def lease_calls(self, verb: str) -> list[str]:
+        lines = self.tartci_log.read_text(encoding="utf-8").splitlines() if self.tartci_log.exists() else []
+        return [line for line in lines if line.startswith(f"leases {verb}")]
+
+    def interrupt(self, argv: list[str], sig: int) -> str:
+        # Output goes to a file, not a pipe: an orphaned child would hold a
+        # pipe open and turn the failure below into a hang.
+        log = self.tmp / "stderr.log"
+        with open(log, "w", encoding="utf-8") as sink:
+            proc = subprocess.Popen(argv, cwd=self.root, env=self.env(), stdout=sink, stderr=sink)
+
+        def stderr() -> str:
+            return log.read_text(encoding="utf-8", errors="replace")
+
+        pid_file = self.out / "child-pid"
+        deadline = time.monotonic() + 60
+        while not pid_file.exists() and time.monotonic() < deadline and proc.poll() is None:
+            time.sleep(0.1)
+        if not pid_file.exists():
+            proc.kill()
+            proc.wait()
+            self.fail("the governed command never started: " + stderr())
+        child = int(pid_file.read_text(encoding="utf-8"))
+        self.addCleanup(lambda: _alive(child) and os.kill(child, signal.SIGKILL))
+        marker = self.root / ".pulp-build-active"
+        self.assertTrue(marker.exists(), "the real governor writes its live-build marker")
+        acquired = self.lease_calls("acquire")
+        self.assertEqual(len(acquired), len(self.lease_calls("release")) + 1, acquired)
+        lease_id = acquired[-1].split("--id ", 1)[1].split()[0]
+        governor = int(acquired[-1].split("--pid ", 1)[1].split()[0])
+        self.addCleanup(lambda: _alive(governor) and os.kill(governor, signal.SIGKILL))
+        proc.send_signal(sig)
+        t0 = time.monotonic()
+        try:
+            proc.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            self.fail("the interrupted caller did not exit: " + stderr())
+        waited = time.monotonic() - t0
+        err = stderr()
+        deadline = time.monotonic() + 10
+        while (_alive(child) or _alive(governor)) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        self.assertEqual(proc.returncode, 128 + sig, err)
+        self.assertFalse(_alive(child), "the governor's foreground child was orphaned\n" + err)
+        self.assertFalse(_alive(governor), "the governor was orphaned\n" + err)
+        self.assertTrue((self.out / "child-term").exists(), "the foreground child must get TERM\n" + err)
+        self.assertLess(waited, 15, "TERM reached the group; it did not wait out the grace for KILL")
+        self.assertTrue(any(f"--id {lease_id}" in r for r in self.lease_calls("release")),
+                        f"lease {lease_id} was not released\n{err}")
+        self.assertFalse(marker.exists(), "the live-build marker outlived the build\n" + err)
+        return err
+
+    def test_sigterm_to_the_cli_stops_the_real_governor_group(self) -> None:
+        err = self.interrupt([sys.executable, str(SCRIPT), "--repo-root", str(self.root), "--",
+                              sys.executable, "-c", TERM_CHILD, str(self.out)], signal.SIGTERM)
+        # The profile's background QoS is what puts the command under
+        # `taskpolicy -b` (where the host has it): the lease must be granted.
+        self.assertIn("lease acquired id=", err)
+        self.assertEqual(sorted(self.root.glob("build-configure-only.*")), [])
+
+    def test_sigterm_to_a_bare_run_child_caller_stops_the_real_governor_group(self) -> None:
+        self.interrupt([sys.executable, "-c", BARE_CALLER, str(HERE), str(self.root), TERM_CHILD,
+                        str(self.out)], signal.SIGTERM)
+
+    @unittest.skipUnless(hasattr(signal, "SIGHUP"), "SIGHUP is POSIX")
+    def test_sighup_to_a_bare_run_child_caller_stops_the_real_governor_group(self) -> None:
+        self.interrupt([sys.executable, "-c", BARE_CALLER, str(HERE), str(self.root), TERM_CHILD,
+                        str(self.out)], signal.SIGHUP)
+
+    def test_run_child_restores_the_default_handlers(self) -> None:
+        before = {sig: signal.getsignal(sig) for sig in configure_only._FATAL_SIGNALS}
+        rc, _ = configure_only.run_child([sys.executable, "-c", "pass"], self.root)
+        self.assertEqual(rc, 0)
+        self.assertEqual({sig: signal.getsignal(sig) for sig in configure_only._FATAL_SIGNALS}, before)
 
 
 if __name__ == "__main__":
