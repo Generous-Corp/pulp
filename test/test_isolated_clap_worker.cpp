@@ -265,6 +265,127 @@ TEST_CASE("Isolated CLAP graph fault preserves hosted and built-in siblings with
     REQUIRE(healthy.control->stop() == IsolationCleanup::complete);
 }
 
+namespace {
+// One parallel pair: an isolated worker on outputs 0-1 and an in-process
+// built-in gain sibling on outputs 2-3, both fed by the same graph input.
+struct SiblingRender {
+    std::vector<float> isolated, sibling;
+    std::chrono::nanoseconds worst_post_kill_callback{0};
+    IsolationReason observed_reason = IsolationReason::none;
+    IsolationStatus before_release;
+};
+constexpr int kSiblingBlocks = 16;
+constexpr int kKillAfterBlock = 6;
+// The callback period of MacClapStereo64V1 (64 frames at 48 kHz). The guide
+// promises a callback without waits, so a fault must never stretch a block.
+constexpr auto kBlockPeriod = std::chrono::microseconds(64'000'000 / 48'000);
+
+SiblingRender render_with_sibling(IsolatedClapResult& isolated, bool kill_worker) {
+    REQUIRE(isolated);
+    SignalGraph graph;
+    const auto input = graph.add_input_node(2, "input");
+    const auto worker = graph.add_plugin_node(std::move(isolated.slot), 2, 2, "isolated");
+    const auto gain = graph.add_gain_node("in-process sibling");
+    REQUIRE(graph.set_node_gain(gain, 0.25f));
+    const auto output = graph.add_output_node(4, "isolated and sibling");
+    for (PortIndex channel = 0; channel < 2; ++channel) {
+        REQUIRE(graph.connect(input, channel, worker, channel));
+        REQUIRE(graph.connect(input, channel, gain, channel));
+        REQUIRE(graph.connect(worker, channel, output, channel));
+        REQUIRE(graph.connect(gain, channel, output, channel + 2));
+    }
+    REQUIRE(graph.prepare(48000, 64));
+    REQUIRE(graph.latency_samples() == 64);
+    SiblingRender result;
+    audio::Buffer<float> source(2, 64), rendered(4, 64);
+    for (int block = 0; block < kSiblingBlocks; ++block) {
+        for (std::size_t c = 0; c < 2; ++c)
+            for (std::size_t n = 0; n < 64; ++n)
+                source.channel(c)[n] = static_cast<float>(block + 1 + n + 64 * c) / 256;
+        if (block)
+            std::this_thread::sleep_for(10ms);
+        if (kill_worker && block == kKillAfterBlock) {
+            const int pid = isolated.control->status().worker_pid;
+            REQUIRE(pid > 0);
+            REQUIRE(pid != ::getpid());
+            REQUIRE(::kill(pid, SIGKILL) == 0);
+            // Wait for the supervisor rather than racing the callback, so the
+            // first terminal reason is the observed worker exit.
+            const auto deadline = std::chrono::steady_clock::now() + 2s;
+            while (isolated.control->status().reason == IsolationReason::none &&
+                   std::chrono::steady_clock::now() < deadline)
+                std::this_thread::sleep_for(1ms);
+            result.observed_reason = isolated.control->status().reason;
+        }
+        auto in = static_cast<const audio::Buffer<float>&>(source).view();
+        auto out = rendered.view();
+        std::chrono::nanoseconds elapsed{};
+        {
+            // The trap build aborts on callback allocation, locks, poll,
+            // send/recv or kill, so the probe covers the post-fault blocks.
+            test::ScopedRtProcessProbe probe;
+            const auto begin = std::chrono::steady_clock::now();
+            graph.process(out, in, 64);
+            elapsed = std::chrono::steady_clock::now() - begin;
+        }
+        if (kill_worker && block >= kKillAfterBlock)
+            result.worst_post_kill_callback = std::max(result.worst_post_kill_callback, elapsed);
+        for (std::size_t c = 0; c < 2; ++c)
+            for (std::size_t n = 0; n < 64; ++n) {
+                result.isolated.push_back(rendered.channel(c)[n]);
+                result.sibling.push_back(rendered.channel(c + 2)[n]);
+            }
+    }
+    // Releasing the graph stops a healthy worker, so read the render outcome first.
+    result.before_release = isolated.control->status();
+    graph.release();
+    return result;
+}
+} // namespace
+
+TEST_CASE("Isolated CLAP killed worker keeps in-process sibling bit-exact", "[host][isolation]") {
+    auto healthy = load_isolated_clap(options());
+    const auto reference = render_with_sibling(healthy, false);
+    REQUIRE(reference.before_release.reason == IsolationReason::none);
+    REQUIRE(healthy.control->stop() == IsolationCleanup::complete);
+
+    auto faulted = load_isolated_clap(options());
+    const auto killed = render_with_sibling(faulted, true);
+    const auto status = killed.before_release;
+    INFO("reason=" << static_cast<int>(status.reason));
+    REQUIRE(killed.observed_reason == IsolationReason::worker_exited);
+    REQUIRE(status.reason == IsolationReason::worker_exited);
+    REQUIRE(status.lifecycle == IsolationLifecycle::terminal);
+    // The first terminal reason never clears, including after graph release.
+    REQUIRE(faulted.control->status().reason == IsolationReason::worker_exited);
+
+    // The sibling path never observes the fault: every sample of every block,
+    // before and after the kill, matches the fault-free reference exactly.
+    REQUIRE(killed.sibling.size() == reference.sibling.size());
+    for (std::size_t i = 0; i < reference.sibling.size(); ++i) {
+        INFO("sample=" << i);
+        REQUIRE(killed.sibling[i] == reference.sibling[i]);
+    }
+    // The isolated path matches the reference until the kill and then latches
+    // silence instead of holding or repeating its last completion.
+    const std::size_t kill_sample = static_cast<std::size_t>(kKillAfterBlock) * 128;
+    bool reference_nonzero_after_kill = false;
+    for (std::size_t i = 0; i < reference.isolated.size(); ++i) {
+        INFO("sample=" << i);
+        if (i < kill_sample) {
+            REQUIRE(killed.isolated[i] == reference.isolated[i]);
+        } else {
+            REQUIRE(killed.isolated[i] == 0.0f);
+            reference_nonzero_after_kill |= reference.isolated[i] != 0.0f;
+        }
+    }
+    REQUIRE(reference_nonzero_after_kill);
+
+    INFO("worst post-kill callback ns=" << killed.worst_post_kill_callback.count());
+    REQUIRE(killed.worst_post_kill_callback < kBlockPeriod);
+    REQUIRE(faulted.control->stop() == IsolationCleanup::complete);
+}
+
 TEST_CASE("Isolated CLAP finite registry reserves before spawn", "[host][isolation]") {
     auto first = load_isolated_clap(options());
     auto second = load_isolated_clap(options());
