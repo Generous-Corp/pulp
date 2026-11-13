@@ -199,9 +199,26 @@ _prepush_static_floor() {
     fi
     return "$rc"
 }
+# The floor judges HEAD, so it runs only when the push sends HEAD to a
+# non-tag ref (not a deletion, a tag, or another branch's commit); the full
+# pushed-ref guard below does not run under PULP_SKIP_PREPUSH. The base is the
+# local origin/main: a stale one widens the diff, so refresh it when a push is
+# refused on lines the branch did not change.
+_prepush_sends_head() {
+    local head lref lsha rref rsha
+    head="$(git rev-parse HEAD 2>/dev/null)" || return 1
+    while read -r lref lsha rref rsha; do
+        case "${rref:-}" in refs/tags/*|refs/notes/*|"") continue ;; esac
+        [ "${lsha:-}" = "$head" ] && return 0
+    done <<EOF_SENDS_HEAD
+$PREPUSH_UPDATE_RECORDS
+EOF_SENDS_HEAD
+    return 1
+}
 _prepush_static_floor_ran=0
 if [ -n "${SHIPYARD_AGENT_ID:-}" ] \
-    && { [ "${PULP_SKIP_PREPUSH:-0}" = "1" ] || [ "${PULP_DISABLE_PREPUSH_GATES:-0}" = "1" ]; }; then
+    && { [ "${PULP_SKIP_PREPUSH:-0}" = "1" ] || [ "${PULP_DISABLE_PREPUSH_GATES:-0}" = "1" ]; } \
+    && _prepush_sends_head; then
     _prepush_static_floor_ran=1
     _prepush_static_floor "${PULP_PREPUSH_BASE:-origin/main}"
     _agent_sf_rc=$?

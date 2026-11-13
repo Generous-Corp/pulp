@@ -176,7 +176,7 @@ class Fixture:
             input=self.records(remote_sha), capture_output=True, text=True, env=self.env(**extra), timeout=60,
         )
 
-    def run_hook(self, remote_sha: str, **extra: str) -> subprocess.CompletedProcess:
+    def run_hook(self, remote_sha: str, records: str | None = None, **extra: str) -> subprocess.CompletedProcess:
         # The hook resolves helpers relative to the repo it runs in. Mirror
         # only what this path needs; the fixture has no versioning config, so
         # the hook stops after its pushed-ref guard, as on an old checkout.
@@ -187,7 +187,8 @@ class Fixture:
         env = self.env(**extra)
         return subprocess.run(
             ["bash", str(self.repo / ".githooks/pre-push"), "origin", "git@github.com:Generous-Corp/pulp.git"],
-            cwd=self.repo, input=self.records(remote_sha), capture_output=True, text=True, env=env, timeout=60,
+            cwd=self.repo, input=self.records(remote_sha) if records is None else records, capture_output=True, text=True,
+            encoding="utf-8", env=env, timeout=60,
         )
 
     def entries(self) -> list[dict]:
@@ -460,6 +461,14 @@ def case_agent_skip_and_disable_still_run_the_static_floor(fx: Fixture) -> None:
     # A base override reaches both checks.
     push(PULP_SKIP_PREPUSH="1", SHIPYARD_AGENT_ID="repair-lane", PULP_PREPUSH_BASE="origin/feat")
     assert all(line.endswith("--changed-from origin/feat") for line in ran()), ran()
+
+    # A push that does not send HEAD (a branch deletion, a tag) is not judged by HEAD's diff.
+    head = fx.git("rev-parse", "HEAD")
+    for records in (f"(delete) {ZERO} refs/heads/feat {feat}\n", f"refs/tags/v1 {head} refs/tags/v1 {ZERO}\n"):
+        marker.unlink(missing_ok=True)
+        res = fx.run_hook(feat, records=records, STUB_SF_MARKER=str(marker), PULP_SKIP_PREPUSH="1",
+                          SHIPYARD_AGENT_ID="repair-lane", STUB_SF_RC_PYTHON="1")
+        assert res.returncode == 0 and ran() == [], (records, res.returncode, ran(), res.stderr[-2000:])
 
     # A human skip is unchanged: the floor does not run.
     res = push(PULP_SKIP_PREPUSH="1", STUB_SF_RC_PYTHON="1")

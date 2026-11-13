@@ -127,7 +127,7 @@ def _git(repo: Path, *args: str) -> str:
            "GIT_COMMITTER_EMAIL": "t@t", "GIT_CONFIG_NOSYSTEM": "1", "HOME": str(repo),
            "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"}
     return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True,
-                          env=env).stdout.strip()
+                          encoding="utf-8", env=env).stdout.strip()
 
 
 class ChangedFromTests(unittest.TestCase):

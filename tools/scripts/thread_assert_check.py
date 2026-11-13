@@ -477,7 +477,11 @@ def main() -> int:
                          "read from the commit (the pre-push hook's form)")
     a = ap.parse_args()
     if a.changed_from:
-        return run_changed(a.changed_from)
+        try:
+            return run_changed(a.changed_from)
+        except Exception as exc:  # an internal error is "could not run" (2), never a violation (1)
+            print(f"thread_assert_check: could not run: {exc!r}", file=sys.stderr)
+            return 2
     return run(a.wide)
 
 

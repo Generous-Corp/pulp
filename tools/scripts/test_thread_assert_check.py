@@ -300,7 +300,7 @@ class ChangedFromTests(unittest.TestCase):
                 self.git(repo, "checkout", "-qb", "feat")
             for rel, text in files.items():
                 (repo / rel).parent.mkdir(parents=True, exist_ok=True)
-                (repo / rel).write_text(text)
+                (repo / rel).write_text(text, encoding="utf-8")
                 self.git(repo, "add", rel)
             self.git(repo, "commit", "-q", "--allow-empty", "-m", msg)
         return repo

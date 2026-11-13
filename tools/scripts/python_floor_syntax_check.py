@@ -152,11 +152,20 @@ def main(argv: list[str]) -> int:
         if len(argv) != 2:
             print("python-floor-syntax: --changed-from takes exactly one ref", file=sys.stderr)
             return 2
-        files = changed_python(REPO_ROOT, argv[1])
-        if files is None:
-            print(f"python-floor-syntax: no merge-base with {argv[1]}; nothing was checked", file=sys.stderr)
+        if sys.version_info < FLOOR:
+            # Below the floor, "parses" would mean "parses on this older interpreter".
+            print(f"python-floor-syntax: Python {sys.version_info.major}.{sys.version_info.minor} is below the "
+                  f"{FLOOR_TEXT} floor; nothing was checked", file=sys.stderr)
             return 2
-        problems = [p for name, text in files for p in floor_violations(text, name)]
+        try:
+            files = changed_python(REPO_ROOT, argv[1])
+            if files is None:
+                print(f"python-floor-syntax: no merge-base with {argv[1]}; nothing was checked", file=sys.stderr)
+                return 2
+            problems = [p for name, text in files for p in floor_violations(text, name)]
+        except Exception as exc:  # an internal error is "could not run" (2), never a violation (1)
+            print(f"python-floor-syntax: could not run: {exc!r}", file=sys.stderr)
+            return 2
         return report(problems, len(files))
     paths = [Path(a) for a in argv] or tracked_python(REPO_ROOT)
     if not paths:
