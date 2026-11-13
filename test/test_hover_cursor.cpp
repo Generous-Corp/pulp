@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/view/hover_cursor.hpp>
+#include <pulp/view/overlay_dismissal.hpp>
 #include <pulp/view/view.hpp>
 
 using pulp::view::HoverCursorTracker;
@@ -111,4 +112,42 @@ TEST_CASE("a host-resolved style routes through the same change gate",
     REQUIRE(*first == View::CursorStyle::grab);
     REQUIRE_FALSE(tracker.poll_resolved(View::CursorStyle::grab).has_value());
     REQUIRE(tracker.poll_resolved(View::CursorStyle::grabbing).has_value());
+}
+
+TEST_CASE("a disabled painted view hides the cursor of the view beneath it", "[view][cursor]") {
+    StubView root;
+    root.set_bounds({0, 0, 200, 200});
+
+    auto under_owned = std::make_unique<StubView>();
+    under_owned->set_bounds({0, 0, 100, 100});
+    under_owned->set_cursor(View::CursorStyle::pointer);
+    auto* under = under_owned.get();
+    root.add_child(std::move(under_owned));
+
+    auto over_owned = std::make_unique<StubView>();
+    over_owned->set_bounds({0, 0, 100, 100});
+    over_owned->set_enabled(false);
+    root.add_child(std::move(over_owned));
+
+    // Control: reading the ordinary hover target's cursor directly, as a host
+    // once did, answers the view beneath because a disabled view is
+    // transparent to hit testing. The assertions below are meaningful only
+    // because this one holds.
+    REQUIRE(pulp::view::hover_target_at(root, {50, 50}) == under);
+    REQUIRE(pulp::view::hover_target_at(root, {50, 50})->cursor() == View::CursorStyle::pointer);
+
+    REQUIRE(pulp::view::hover_cursor_at(root, {50, 50}) == View::CursorStyle::default_);
+    REQUIRE(pulp::view::hover_cursor_under(root, {50, 50}) == View::CursorStyle::default_);
+}
+
+TEST_CASE("hover_cursor_under leaves the cursor alone when nothing is painted", "[view][cursor]") {
+    StubView root;
+    root.set_bounds({0, 0, 200, 200});
+    REQUIRE_FALSE(pulp::view::hover_cursor_under(root, {500, 500}).has_value());
+
+    auto child = std::make_unique<StubView>();
+    child->set_bounds({0, 0, 100, 100});
+    child->set_cursor(View::CursorStyle::text);
+    root.add_child(std::move(child));
+    REQUIRE(pulp::view::hover_cursor_under(root, {50, 50}) == View::CursorStyle::text);
 }
