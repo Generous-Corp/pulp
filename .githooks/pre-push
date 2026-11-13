@@ -188,16 +188,28 @@ fi
 # with those knobs. Diff-scoped, so a violation already on the base never
 # blocks an unrelated push.
 _prepush_static_floor() {
-    local base="$1" rc=0 one
+    local base="$1" violation=0 error=0 one
     if [ -f "$ROOT/tools/scripts/python_floor_syntax_check.py" ]; then
         "$PULP_PYTHON" "$ROOT/tools/scripts/python_floor_syntax_check.py" --changed-from "$base"
-        one=$?; [ "$one" -gt "$rc" ] && rc=$one
+        one=$?
+        case "$one" in
+            0) ;;
+            1) violation=1 ;;
+            *) [ "$error" -eq 0 ] && error="$one" ;;
+        esac
     fi
     if [ -f "$ROOT/tools/scripts/thread_assert_check.py" ]; then
         "$PULP_PYTHON" "$ROOT/tools/scripts/thread_assert_check.py" --changed-from "$base"
-        one=$?; [ "$one" -gt "$rc" ] && rc=$one
+        one=$?
+        case "$one" in
+            0) ;;
+            1) violation=1 ;;
+            *) [ "$error" -eq 0 ] && error="$one" ;;
+        esac
     fi
-    return "$rc"
+    [ "$violation" -eq 1 ] && return 1
+    [ "$error" -ne 0 ] && return "$error"
+    return 0
 }
 # The floor judges HEAD, so it runs only when the push sends HEAD to a
 # non-tag ref (not a deletion, a tag, or another branch's commit); the full

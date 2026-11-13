@@ -442,6 +442,11 @@ def case_agent_skip_and_disable_still_run_the_static_floor(fx: Fixture) -> None:
         return marker.read_text(encoding="utf-8").splitlines() if marker.exists() else []
 
     for knob in ("PULP_SKIP_PREPUSH", "PULP_DISABLE_PREPUSH_GATES"):
+        for python_rc, thread_rc in (("1", "2"), ("2", "1")):
+            res = push(**{knob: "1"}, SHIPYARD_AGENT_ID="repair-lane",
+                       STUB_SF_RC_PYTHON=python_rc, STUB_SF_RC_THREAD=thread_rc)
+            assert res.returncode == 1, (knob, python_rc, thread_rc, res.returncode, res.stderr)
+
         res = push(**{knob: "1"}, SHIPYARD_AGENT_ID="repair-lane", STUB_SF_RC_PYTHON="1")
         assert res.returncode == 1, (knob, res.returncode, res.stderr)
         assert "do not skip the static floor for an agent push" in res.stderr, res.stderr

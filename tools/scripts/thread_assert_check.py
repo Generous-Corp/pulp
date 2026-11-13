@@ -439,16 +439,30 @@ def changed_test_sources(root: Path, base: str, head: str = "HEAD") -> list[tupl
     mb = git("merge-base", base, head)
     if mb.returncode != 0:
         return None
-    diff = git("diff", "--name-only", "--diff-filter=AMR", "-z", mb.stdout.decode().strip(), head,
-               "--", "test/*.cpp", "test/*.mm")
+    try:
+        merge_base = mb.stdout.decode("utf-8").strip()
+        diff = git("diff", "--name-only", "--diff-filter=AMR", "-z", merge_base, head,
+                   "--", "test/*.cpp", "test/*.mm")
+    except UnicodeDecodeError:
+        return None
     if diff.returncode != 0:
         return None
     out = []
-    for name in diff.stdout.decode("utf-8", "replace").split("\0"):
-        if name:
-            shown = git("show", f"{head}:{name}")
-            if shown.returncode == 0:
-                out.append((name, shown.stdout.decode("utf-8", "replace")))
+    try:
+        names = diff.stdout.decode("utf-8").split("\0")
+    except UnicodeDecodeError:
+        return None
+    for name in names:
+        if not name:
+            continue
+        shown = git("show", f"{head}:{name}")
+        if shown.returncode != 0:
+            return None
+        try:
+            text = shown.stdout.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+        out.append((name, text))
     return out
 
 

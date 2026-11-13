@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import python_floor_syntax_check as floor  # noqa: E402
@@ -183,6 +184,33 @@ class ChangedFromTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             repo = self.make_repo(tmp)
             self.assertIsNone(floor.changed_python(repo, "no-such-ref"))
+
+    def test_a_failed_blob_read_is_not_a_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.make_repo(tmp)
+            self.commit(repo, "new.py", ACCEPTED["other quote in a field"])
+            original = floor.subprocess.run
+
+            def deny_show(cmd, *args, **kwargs):
+                if "show" in cmd:
+                    return subprocess.CompletedProcess(cmd, 1, stdout=b"", stderr=b"denied")
+                return original(cmd, *args, **kwargs)
+
+            with mock.patch.object(floor.subprocess, "run", side_effect=deny_show):
+                self.assertIsNone(floor.changed_python(repo, "main"))
+
+    def test_an_unsupported_git_path_is_not_a_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.make_repo(tmp)
+            original = floor.subprocess.run
+
+            def bad_path_diff(cmd, *args, **kwargs):
+                if "diff" in cmd:
+                    return subprocess.CompletedProcess(cmd, 0, stdout=b"bad_\xff.py\0", stderr=b"")
+                return original(cmd, *args, **kwargs)
+
+            with mock.patch.object(floor.subprocess, "run", side_effect=bad_path_diff):
+                self.assertIsNone(floor.changed_python(repo, "main"))
 
     def test_the_cli_exits_1_on_a_changed_bad_file_and_2_without_a_base(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -18,9 +18,11 @@ not.
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 _spec = importlib.util.spec_from_file_location(
@@ -326,6 +328,32 @@ class ChangedFromTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             repo = self.repo_with(tmp, {}, {"test/new.cpp": DIRECT_UNSAFE})
             self.assertEqual(guard.run_changed("no-such-ref", root=repo), 2)
+
+    def test_a_failed_blob_read_is_not_a_pass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.repo_with(tmp, {}, {"test/new.cpp": DIRECT_SAFE})
+            original = guard.subprocess.run
+
+            def deny_show(cmd, *args, **kwargs):
+                if "show" in cmd:
+                    return subprocess.CompletedProcess(cmd, 1, stdout=b"", stderr=b"denied")
+                return original(cmd, *args, **kwargs)
+
+            with mock.patch.object(guard.subprocess, "run", side_effect=deny_show):
+                self.assertIsNone(guard.changed_test_sources(repo, "main"))
+
+    def test_an_unsupported_git_path_is_not_a_pass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.repo_with(tmp, {}, {})
+            original = guard.subprocess.run
+
+            def bad_path_diff(cmd, *args, **kwargs):
+                if "diff" in cmd:
+                    return subprocess.CompletedProcess(cmd, 0, stdout=b"test/bad_\xff.cpp\0", stderr=b"")
+                return original(cmd, *args, **kwargs)
+
+            with mock.patch.object(guard.subprocess, "run", side_effect=bad_path_diff):
+                self.assertIsNone(guard.changed_test_sources(repo, "main"))
 
 
 if __name__ == "__main__":
