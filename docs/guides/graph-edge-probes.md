@@ -130,6 +130,6 @@ zero-cost audio path. The installed MCP `pulp_graph` operation mirrors these
 three booleans and invokes the matching sibling CLI, so its JSON sections and
 refusals stay identical to the CLI surface.
 
-Control and event edge probes through the CLI and MCP remain deferred until a prepared producer/consumer
+Control and event taps remain deferred until a prepared producer/consumer
 contract exists. Requests for those lanes must fail closed rather than being
 represented as audio measurements or fabricated zero values.
