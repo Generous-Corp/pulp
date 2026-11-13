@@ -31,9 +31,6 @@ if(TARGET VellumRmlUi::Metal)
         PRIVATE
             "-framework Metal")
     message(STATUS "rmlui-native: VellumRmlUi::Metal found; building pulp::rmlui-native-metal")
-    if(PULP_BUILD_EXAMPLES)
-        add_subdirectory(examples/rmlui-metal-demo)
-    endif()
 else()
     message(STATUS "rmlui-native: VellumRmlUi::Metal not in this Vellum install; "
                    "pulp::rmlui-native-metal is not built")
