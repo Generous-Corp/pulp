@@ -372,8 +372,9 @@ TEST_CASE("Spectral handles from a cleared authoring incarnation are refused",
             REQUIRE(stale.code == GraphResult::Code::UnknownPort);
             REQUIRE_FALSE(stale.rule.empty());
             REQUIRE((edit ? edit->connections() : graph.connections()).empty());
-            const auto current = edit ? edit->connect(analysis.frames.handle, synthesis.frames.handle)
-                                      : graph.connect(analysis.frames.handle, synthesis.frames.handle);
+            const auto current =
+                edit ? edit->connect(analysis.frames.handle, synthesis.frames.handle)
+                     : graph.connect(analysis.frames.handle, synthesis.frames.handle);
             REQUIRE(current);
         }
     }
