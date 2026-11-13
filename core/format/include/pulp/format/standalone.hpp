@@ -36,7 +36,14 @@ class AudioInspectorWindow;
 class CommandRegistry;
 }  // namespace pulp::view
 
+namespace pulp::state {
+class PresetManager;
+class PresetLibrary;
+} // namespace pulp::state
+
 namespace pulp::format {
+
+class PresetProgramRouter;
 
 namespace detail {
 class StandaloneMusicalTyping;
@@ -446,6 +453,16 @@ public:
     void service_state_persistence(
         std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
 
+    /// Main thread only. When the plug-in's descriptor sets
+    /// `supports_program_change`, loads the preset a Bank Select + Program
+    /// Change selected since the last call. The audio callback only latches the
+    /// request; the preset is read and applied here. The built-in editors call
+    /// this from their idle loop (throttled to about 30 Hz); a host that runs
+    /// its own loop calls it a few times a second. Cheap when nothing is
+    /// pending. `now` is a test seam.
+    void service_program_changes(
+        std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
+
     /// Main thread only. Saves the plug-in state now when persistence is active.
     /// Returns true when it wrote the file. Called on quit.
     bool save_plugin_state_now();
@@ -526,6 +543,14 @@ public:
     // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store_;
     std::unique_ptr<Processor> processor_;
+    // Present only when the descriptor sets supports_program_change. Declared
+    // after processor_ so they are destroyed first; the library holds a
+    // reference to the manager, which holds one to store_.
+    std::unique_ptr<state::PresetManager> preset_manager_;
+    std::unique_ptr<state::PresetLibrary> preset_library_;
+    std::unique_ptr<PresetProgramRouter> program_router_;
+    std::chrono::steady_clock::time_point program_change_polled_{};
+    void init_program_change();
     // Panic requests (Processor::request_panic), serviced before each block.
     std::shared_ptr<PanicState> panic_state_;
     // Present in every StandaloneApp, but populated only by an executable that

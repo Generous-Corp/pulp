@@ -33,6 +33,22 @@
 
 namespace pulp::view {
 
+/// The per-mapping settings the menu can change. Values index the choice lists
+/// below, which `midi_learn_menu_items()` shows in this order.
+struct MidiLearnMappingOptions {
+    /// 0 absolute, 1 two's complement, 2 signed bit, 3 offset 64 (relative encoders).
+    int relative_mode = 0;
+    /// 0 jump, 1 pickup, 2 scale.
+    int takeover = 0;
+    /// Flip the response: a control turned up lowers the parameter.
+    bool invert = false;
+    /// Send the parameter's value back to the controller.
+    bool feedback = false;
+
+    friend bool operator==(const MidiLearnMappingOptions&,
+                           const MidiLearnMappingOptions&) = default;
+};
+
 /// What MIDI Learn shows for one parameter.
 struct MidiLearnParamState {
     enum class Phase : std::uint8_t {
@@ -45,6 +61,15 @@ struct MidiLearnParamState {
     std::string mapping_label;
     /// True for a short time after a learn binds, so the overlay can confirm it.
     bool just_bound = false;
+    /// The mapping's settings; meaningful only when mapped.
+    MidiLearnMappingOptions options;
+    /// Whether this plug-in's format can send feedback to a controller. The
+    /// feedback row is shown only when it can.
+    bool feedback_supported = false;
+    /// Why the last learn for this parameter was refused (for example the
+    /// controller is reserved by the plug-in), for a short time afterwards.
+    /// Empty otherwise. The menu shows it as a disabled row.
+    std::string refused_reason;
 };
 
 /// The calls the menu and overlay need. Any member may be empty; an empty
@@ -55,6 +80,9 @@ struct MidiLearnTarget {
     std::function<void(state::ParamID)> begin;
     std::function<void()> cancel;
     std::function<void(state::ParamID)> clear;
+    /// Apply new settings to the mapping of a parameter. Empty hides the
+    /// settings rows.
+    std::function<void(state::ParamID, const MidiLearnMappingOptions&)> set_options;
 
     bool is_available() const {
         return available && available();
@@ -66,9 +94,19 @@ enum MidiLearnMenuCommand : int {
     kMidiLearnCommandBegin = 0x4D4C01,
     kMidiLearnCommandCancel = 0x4D4C02,
     kMidiLearnCommandClear = 0x4D4C03,
+    kMidiLearnCommandInvert = 0x4D4C04,
+    kMidiLearnCommandRelativeMode = 0x4D4C05,
+    kMidiLearnCommandTakeover = 0x4D4C06,
+    kMidiLearnCommandFeedback = 0x4D4C07,
 };
 
-/// The menu rows for `param`: "MIDI Learn" (or "Cancel MIDI Learn" while this
+/// The menu rows for `param`, in order, when it is mapped and the target can
+/// change settings: toggles for "Invert" and (where supported) "Send feedback",
+/// and choices for "Relative mode" and "Takeover". Each control applies its change
+/// through `target.set_options` as it is changed and leaves the menu open.
+///
+/// The menu rows for `param`: a disabled "Cannot learn: <reason>" row while a
+/// refusal is being reported, "MIDI Learn" (or "Cancel MIDI Learn" while this
 /// parameter is listening), a disabled "Mapped to CC 74 ch 1" label and
 /// "Clear MIDI Mapping" when it is mapped. Empty when MIDI Learn is not
 /// available, so a parameter menu can append the result unconditionally.

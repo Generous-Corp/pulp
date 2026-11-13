@@ -256,6 +256,14 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME doxygen-installed-header-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_doxygen_installed_header_check.py")
+    # docs/status/modules.yaml entries resolve to a source directory: core/<name>
+    # or the entry's path under integrations/ (tools/check-docs.sh runs the check).
+    add_test(NAME modules-yaml-dirs-check
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/modules_yaml_dirs_check.py")
+    add_test(NAME modules-yaml-dirs-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_modules_yaml_dirs_check.py")
     add_test(NAME transient-interaction-trace-budget-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_transient_interaction_trace.py")
@@ -507,6 +515,14 @@ if(Python3_Interpreter_FOUND)
     # gate is proven to distinguish them rather than proven to be quiet.
     add_test(NAME unbounded-wait-lint-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_unbounded_wait_lint.py")
+
+    # Patched-os.name lint: a concrete pathlib.Path built while a test patches
+    # os.name to "nt" is a WindowsPath, which Python 3.11 refuses to build off
+    # Windows, so the test passes on newer Pythons and errors on 3.11 hosts.
+    # The selftest plants the bad shape next to its safe twins and also scans
+    # the tracked tree.
+    add_test(NAME patched-os-name-path-lint-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_patched_os_name_path_lint.py")
 
     # Forced-restore lint: a forced worktree restore used as a repair has to say
     # which state it repairs. `checkout --force -- .` restores nothing when git
@@ -868,6 +884,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME vellum-trusted-merge-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_vellum_trusted_merge.py")
     set_tests_properties(vellum-trusted-merge-selftest PROPERTIES TIMEOUT 120)
+
+    # Advisory drift report over transferred UI paths: planted-change control,
+    # non-UI and frozen exclusions, and the exit-2 contract for missing records.
+    add_test(NAME vellum-ui-drift-report-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_vellum_ui_drift_report.py")
+    set_tests_properties(vellum-ui-drift-report-selftest PROPERTIES TIMEOUT 120)
 
     # Development-inspector truth gate: mutation tests prove capability/profile
     # and user-facing runtime claims fail when either side drifts.
@@ -1536,6 +1558,15 @@ if(Python3_Interpreter_FOUND)
     endif()
     add_test(NAME gpu-dpr-inconclusive-receipt-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_verify_gpu_dpr_inconclusive_receipt.py")
+    if(APPLE AND PROJECT_IS_TOP_LEVEL)
+        add_test(NAME configure-tests-and-examples-both-on
+            COMMAND bash
+                "${CMAKE_SOURCE_DIR}/test/cmake/test_tests_and_examples_configure.sh"
+                "${CMAKE_SOURCE_DIR}")
+        set_tests_properties(configure-tests-and-examples-both-on PROPERTIES
+            LABELS "cmake;configure"
+            TIMEOUT 900)
+    endif()
     if(UNIX AND PROJECT_IS_TOP_LEVEL)
         add_test(NAME gpu-health-cpu-only-configure
             COMMAND bash

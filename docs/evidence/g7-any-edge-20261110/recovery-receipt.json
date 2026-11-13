@@ -1,0 +1,101 @@
+{
+  "source_producer": "f4b78c63b0da1300315ced95d0e8ea29d308524a",
+  "previous_sdk_producer": "2e299b27b3b854ef5d4f8228fb32668e7e2ba6e8",
+  "previous_docs_tip": "161422352da06bc3fcf221d10cd4ff78106835af",
+  "sdk_provenance": {
+    "schema": "pulp.sdk-provenance.v1",
+    "kind": "source-install",
+    "distribution_eligible": false,
+    "source_git_sha": "f4b78c63b0da1300315ced95d0e8ea29d308524a",
+    "source_git_dirty": false,
+    "bridge_exec": true,
+    "platform": "darwin-arm64",
+    "build_profile": "dev"
+  },
+  "installed_header_equals_source": true,
+  "header_sha256": "bea991feb1239383af77b3b8d842c056ada8d5bce4df0bcb297aa89ca576d461",
+  "runtime_and_test_source_unchanged": true,
+  "retained_mutations_confirmed": 5,
+  "tests": {
+    "control_assertions": 1900,
+    "control_cases": 4,
+    "executor_assertions": 50394,
+    "executor_cases": 74,
+    "installed_consumer_passed": 3
+  },
+  "gate_host": "m5s",
+  "gate_exit": 0,
+  "gate_status": "PARTIAL: PASSED WITH 1 NOT CHECKED",
+  "configured_families": 217,
+  "configure_helper": "gates_script_inputs.configure(root, root / \"build-gate\")",
+  "configure_only": true,
+  "examples": false,
+  "VST3_pin": "3cdf9ca5d1f5b1b21e0a86832aa4abe55607bd96",
+  "AU_pin": "e789bc83ddc07cbf80e7bfaf84f1ade975287400",
+  "jsx": "npm ci using committed lockfile",
+  "omitted": [
+    "source-only selftests",
+    "workflow-lint selftests",
+    "pr-fast CTest",
+    "CTest-registered Python",
+    "diff coverage"
+  ],
+  "unrelated_manifest_drift": "Pulp UI Script Fixture advisory; untouched",
+  "logs": [
+    {
+      "path": "docs/evidence/g7-any-edge-20261110/publication-normal-gates.log",
+      "bytes": 23826,
+      "sha256": "aa9cfe45d34ee6e03532b5f3eb1cd7bdb36b66b3accb51bd194c709247c71c1d"
+    },
+    {
+      "path": "docs/evidence/g7-any-edge-20261110/publication-repaired-gates.log",
+      "bytes": 25549,
+      "sha256": "39ab9fc7aa49bdcf1c7c7f54a2bb05febeb4bc788653604addf4a5c9e9e6e0c6"
+    },
+    {
+      "path": "docs/evidence/g7-any-edge-20261110/publication-shipyard-pr.log",
+      "bytes": 20965,
+      "sha256": "9f86aa83256d6abcb8960c05428bb979ba25f34a636922f4738cca0addbfe038"
+    },
+    {
+      "path": "docs/evidence/g7-any-edge-20261110/publication-stop-receipt.json",
+      "bytes": 2522,
+      "sha256": "78256f4585147f12b698f29188462c1eba9ca5ace168c00bbee3750fc94151b1"
+    },
+    {
+      "path": "docs/evidence/g7-any-edge-20261110/recovery-fingerprint.log",
+      "bytes": 1389,
+      "sha256": "e71ee35977bd108bd5b2938347b76b9494253e65634ac2096ca83fe6b52e1641"
+    },
+    {
+      "path": "docs/evidence/g7-any-edge-20261110/recovery-hotspot.log",
+      "bytes": 5928,
+      "sha256": "a1cac1abb67b0f8164d34556531ca1dafe5cd7be97b5859bd23349645102dd79"
+    },
+    {
+      "path": "docs/evidence/g7-any-edge-20261110/recovery-m5s-gates.log",
+      "bytes": 23051,
+      "sha256": "4f3bbef046319b51922326359fc40975bc75946179eb5aa4c10709ccebed0359"
+    },
+    {
+      "path": "docs/evidence/g7-any-edge-20261110/recovery-m5s-configure.log",
+      "bytes": 701,
+      "sha256": "2dbaa4af0217bd8ad4ef268e44f114c6e9cf7645fc6c97ef4182ded78926688e"
+    },
+    {
+      "path": "docs/evidence/g7-any-edge-20261110/recovery-consumer-tests.log",
+      "bytes": 707,
+      "sha256": "cd350a961cb114b2a906bcbca7075d725e022d2ba5eafab1da2f0fcd5574ce3b"
+    },
+    {
+      "path": "docs/evidence/g7-any-edge-20261110/recovery-control-tests.log",
+      "bytes": 165,
+      "sha256": "1e2e9c805eedbd1dcfc9a69b689c433e08a1cdb9dff263ceea7f04666398417c"
+    },
+    {
+      "path": "docs/evidence/g7-any-edge-20261110/recovery-executor-tests.log",
+      "bytes": 166,
+      "sha256": "1f403e560be7514d4b2fd3486118208c077c1694909c0da8f87073ff1f37f06a"
+    }
+  ]
+}

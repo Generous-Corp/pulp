@@ -99,9 +99,11 @@ bool SignalGraph::inject_parameter_events_into_snapshot_(
     if (runtime_it == snapshot.runtime.end())
         return false;
     const auto shape_it = snapshot.shapes.find(id);
+    // Only PluginSlot nodes drain the live mailbox. A Processor node receives
+    // parameter events solely through its owner-claimed exact mailbox, so live
+    // injection into one is refused rather than accepted and never delivered.
     if (shape_it == snapshot.shapes.end() || shape_it->second.type != NodeType::Plugin ||
-        (snapshot.plugins.find(id) == snapshot.plugins.end() &&
-         snapshot.processors.find(id) == snapshot.processors.end()) ||
+        snapshot.plugins.find(id) == snapshot.plugins.end() ||
         !runtime_it->second.parameter_input_mailbox) {
         return false;
     }

@@ -1,0 +1,104 @@
+{
+  "id": "g3-d5-saved-document-inspection",
+  "title": "Bounded saved-document identity and P0 replay inspection are ledgered",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "g3-d5-saved-document-inspection-p0-replay-20261112",
+  "owned_paths": [
+    "core/host/include/pulp/host/graph_serializer.hpp",
+    "core/host/src/graph_serializer.cpp",
+    "test/test_graph_serializer.cpp",
+    "examples/g3-resolved-identity-consumer/main.cpp",
+    "docs/evidence/g3-d5-saved-identity-20261111.md",
+    "docs/evidence/p0-layered-inspection-replay-20261112.md",
+    "docs/evidence/p0-layered-inspection-replay-20261112/receipt-installed-sdk-20261113.json",
+    "tools/scripts/p0_layered_replay_receipt.py",
+    "tools/scripts/test_p0_layered_replay_receipt.py",
+    "docs/graph-program-status/P-0-layered-inspection-replay.md",
+    "docs/graph-program-status/G-3.md",
+    "docs/status/sequencer-exposure/rows/g3-d5-saved-document-inspection.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/host/include/pulp/host/graph_serializer.hpp",
+      "needles": ["GraphDocumentInspection", "inspect_document(std::string_view json)"]
+    },
+    {
+      "path": "core/host/src/graph_serializer.cpp",
+      "needles": ["GraphSerializer::inspect_document", "GraphDocumentRefusal::NestingLimitExceeded", "pulp.graph.semantic.v6"]
+    },
+    {
+      "path": "test/test_graph_serializer.cpp",
+      "needles": ["[g3][d5]", "DuplicateJsonKey", "pulp.graph.saved-identity.v6"]
+    },
+    {
+      "path": "examples/g3-resolved-identity-consumer/main.cpp",
+      "needles": ["inspect_document", "semantic_digest", "kP0ProtocolAttestation"]
+    },
+    {
+      "path": "tools/scripts/p0_layered_replay_receipt.py",
+      "needles": ["pulp.graph.layered-replay-receipt.v1", "canonical_bytes_sha256", "PARTITIONS"]
+    },
+    {
+      "path": "docs/evidence/p0-layered-inspection-replay-20261112.md",
+      "needles": ["64 and 128", "planted-negative", "NOT_QUALIFIED"]
+    },
+    {
+      "path": "docs/evidence/p0-layered-inspection-replay-20261112/receipt-installed-sdk-20261113.json",
+      "needles": ["g3-installed-public-consumer", "spectral-installed-public-consumer", "NOT_QUALIFIED"]
+    },
+    {
+      "path": "docs/graph-program-status/P-0-layered-inspection-replay.md",
+      "needles": ["receipt-installed-sdk-20261113.json", "Both consumers PASS at 64 and 128", "Close-out (2026-11-13)"]
+    },
+    {
+      "path": "docs/graph-program-status/G-3.md",
+      "needles": ["Close-out (2026-11-13)", "P0 layered inspection/replay follow-up"]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "GraphDocumentInspection and GraphSerializer::inspect_document are public, read-only, bounded host APIs. The P0 receipt composes those existing identity primitives with the installed consumers, retaining separate canonical-byte layer digests and fail-closed partition/mutation evidence without adding a runtime seam.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/graph_serializer.hpp",
+          "needles": ["GraphDocumentInspection", "inspect_document"]
+        },
+        {
+          "kind": "test",
+          "path": "examples/g3-resolved-identity-consumer/main.cpp",
+          "needles": ["inspect_document", "semantic_digest"]
+        },
+        {
+          "kind": "doc",
+          "path": "docs/evidence/p0-layered-inspection-replay-20261112.md",
+          "needles": ["layered-replay-receipt.v1", "64 and 128"]
+        }
+      ],
+      "authority": {
+        "admission": "read_only",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "The slice adds no CLI command, flag, or offline writer; it only exposes a library inspection API."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation, schema, or handler is added."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "Inspection is data-only and read-only; it adds no runtime operation or executor authority."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No design-time capability or agent manifest entry is added."
+    }
+  }
+}

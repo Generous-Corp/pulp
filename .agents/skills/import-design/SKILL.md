@@ -585,6 +585,11 @@ pulp-design-ir-observe --input p.pulp.json --render r.png --layout obs.json --wi
 python3 tools/import-design/layout_parity.py --capture p.pulp-browser-capture --observer-layout obs.json
 ```
 
+`--json` also writes a `boxes` list: every matched node's Chromium box, native box
+and delta, so a node that was checked and fine is distinguishable from one never
+compared. A 4px move of a small element leaves the pixel similarity score near
+1.0 and still fails here with the node id.
+
 Three things that are not obvious. Parents come from the DOM, not the IR: a
 native panel is lowered FLAT under `browser:root`, so IR parents would cluster
 the whole page into one finding. The DOM parent is the nearest ancestor the
@@ -5141,8 +5146,29 @@ python3 tools/import-validation/check-source-contracts.py --format markdown
 python3 -m pytest tools/import-validation/test_source_contracts.py -v
 ```
 
+Each entry's `verification_note` records what a recheck actually ran: the
+tests that passed, which roundtrip scripts, upstream URL rechecks and reference
+screenshots were not run, and the date. Move `last_verified` only together with
+a note that names its evidence; an entry you cannot evidence stays stale.
+
+The checker takes `--today YYYY-MM-DD`. Any test that runs it as a subprocess against
+a hard-coded `last_verified` must pass a fixed `--today`; otherwise the case flips from
+"due" to "overdue" on the real clock and fails every PR (it did on 2026-11-13).
+
 When cleaning Catch2 tags in source-contract test files, update the matching
 `validation.test_tags` entry in `source-contracts.json` in the same change.
+Scheduled provider recheck dates are advisory: an overdue
+`stale-source-contract` finding is reported as informational and does not make
+the strict registry check fail. Keep strict failures for an `unverified` or
+malformed contract and for schema, parser, path, referential, or roundtrip
+drift. A recheck due within `--warn-days` (default 7) is reported ahead of
+time as `source-contract-recheck-due`, and under GitHub Actions both cadence
+findings are also printed as `::warning` annotations, so an upcoming or
+overdue recheck shows on every pull request without failing any check on a
+date alone. The warning is the prompt to do the recheck (re-run the parser and
+runtime-import tests for that source, then record the result); never rewrite
+`last_verified` dates to silence cadence reminders; verify the behavior with
+the focused source-contract self-tests.
 Prefer broad stable tags such as `[view][import][designmd]` when the registry row
 represents a full validation surface; do not narrow it to one subarea tag if the
 roundtrip/contract expects parser, lint, diff, export, and recovery coverage.

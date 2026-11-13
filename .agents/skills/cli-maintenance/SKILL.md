@@ -4297,3 +4297,12 @@ A bounded watch must own and join its exact launched process group on return.
 Name-based `pkill` can kill another session and leaves child ownership ambiguous.
 Test readiness-to-return time as well as PID exit: a leaked sleeper can otherwise
 exit naturally while inherited pipes keep the test waiting, producing false proof.
+
+## Standalone drains Program Change from the idle loop
+
+`StandaloneApp` creates a preset library and router when the processor sets
+`supports_program_change` (`init_program_change`, called from `start()`). The
+render callback only latches a request; `service_program_changes()` loads it on
+the main thread. Both built-in editors call it beside `service_state_persistence`
+from their idle hook. A standalone built without an editor must call it itself,
+or a Program Change is latched and never applied.

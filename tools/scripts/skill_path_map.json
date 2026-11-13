@@ -501,6 +501,20 @@
         "test/test_motion_android_bridge.cpp"
       ]
     },
+    "midi-learn": {
+      "paths": [
+        "core/state/include/**/midi_learn*",
+        "core/state/include/**/midi_feedback.hpp",
+        "core/state/include/**/midi_mapping.hpp",
+        "core/state/include/**/midi_decode.hpp",
+        "core/state/include/**/midi_source.hpp",
+        "core/state/src/midi_learn*",
+        "core/format/include/**/midi_learn_support.hpp",
+        "core/view/include/**/midi_learn*",
+        "core/view/src/midi_learn*",
+        "examples/midi-learn-demo/**"
+      ]
+    },
     "mpe": {
       "paths": [
         "core/midi/include/**/*mpe*",

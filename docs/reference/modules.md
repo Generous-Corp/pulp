@@ -32,6 +32,10 @@ use without hard-coding macOS, Windows, Linux, iOS, or Web behavior.
 
 ---
 
+## native
+
+`pulp::native` (`integrations/pulp-native`, macOS) gives an editor that brings its own renderer a native surface: a child `NSView` backed by a `CAMetalLayer` (`metal_surface.hpp`), a display-linked frame pump (`frame_pump.hpp`) and pointer and key input (`input.hpp`). It links Pulp's platform layer and system frameworks only, with no view, canvas, render or GPU-runtime target and no Skia, Dawn, Vellum or RmlUi.
+
 ## simd
 
 Portable block kernels for DSP: elementwise buffer arithmetic (`add`, `sub`,
@@ -1440,6 +1444,16 @@ in `pulp::format-core`), the default `VisualPort` over a processor's
 Parameters, state trees, presets, and settings.
 
 **Link:** `pulp::state` · **Include prefix:** `<pulp/state/...>`
+
+### MIDI Learn
+
+`<pulp/state/midi_learn_engine.hpp>` maps hardware controllers (7-bit and 14-bit
+CC, NRPN/RPN, pitch bend, pressure) to parameters, learns a mapping from a burst
+of messages, saves it with the plug-in state, records edits for undo, and sends
+parameter values back to the controller. The pure decoders and the learn
+classifier are in `midi_decode.hpp` and `midi_learn.hpp`. See the
+[MIDI Learn guide](../guides/midi-learn.md); `MidiParameterMap` is superseded
+but still available.
 
 ### Plugin parameters — the core state system
 

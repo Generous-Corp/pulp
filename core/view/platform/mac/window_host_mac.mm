@@ -236,7 +236,7 @@ extern "C" void pulp_mac_text_input_client_category_anchor();
     // THIS window's root, never the process-wide `active_popup_` mirror, which
     // can name another window's (or a hosted plugin editor's) open menu.
     if (!self.rootView) return NO;
-    auto* combo = pulp::view::ComboBox::active_popup_in(*self.rootView);
+    auto* combo = pulp::view::enabled_open_popup_in(*self.rootView);
     if (!combo) return NO;
     float ddx = 0, ddy = 0, ddw = 0, ddh = 0;
     if (!combo->dropdown_window_rect(ddx, ddy, ddw, ddh)) return NO;
@@ -1046,8 +1046,7 @@ extern "C" void pulp_mac_text_input_client_category_anchor();
     }
     if (inspector_cursor >= 0)
         return static_cast<pulp::view::View::CursorStyle>(inspector_cursor);
-    if (auto* target = pulp::view::hover_target_at(*self.rootView, pt)) return target->cursor();
-    return std::nullopt;
+    return pulp::view::hover_cursor_under(*self.rootView, pt);
 }
 
 // AppKit asks the owner of a NSTrackingCursorUpdate area what cursor to show
@@ -1117,9 +1116,8 @@ extern "C" void pulp_mac_text_input_client_category_anchor();
                 // Don't consume — let normal hover handling continue for cursor changes
             }
 
-            if (auto* combo = self.rootView
-                    ? pulp::view::ComboBox::active_popup_in(*self.rootView)
-                    : nullptr) {
+            if (auto* combo =
+                    self.rootView ? pulp::view::enabled_open_popup_in(*self.rootView) : nullptr) {
                 float cx = 0, cy = 0;
                 auto* v = static_cast<pulp::view::View*>(combo);
                 while (v) { cx += v->bounds().x; cy += v->bounds().y; v = v->parent(); }

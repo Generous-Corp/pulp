@@ -1,0 +1,11 @@
+{
+ "name": "patched-os-name-path-lint-selftest",
+ "record": {
+  "entry": "tools/scripts/test_patched_os_name_path_lint.py",
+  "inputs": [
+   "tools/scripts/patched_os_name_path_lint.py",
+   "tools/scripts/test_patched_os_name_path_lint.py"
+  ],
+  "kind": "python"
+ }
+}

@@ -1,0 +1,422 @@
+Checking docs-index completeness...
+[1;33mWARN:  docs/agent-integrations.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/analysis/coverage-continuation-plan-20260526-142336-PDT.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/analysis/coverage-handoff-20260526-132145-PDT.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/analysis/downstream-capability-plan-2026-07.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/analysis/gpu-ux-baseline.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/analysis/threejs-gltf-bake-native-slice.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/contracts/g3-identity-contract.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/contracts/g4-voice-binding-schema.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/contracts/g6-voice-template-contract.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/contracts/patch-language-v1.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/contracts/vellum-activation-readiness.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/contracts/vellum-extraction-freeze.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/contracts/vellum-inheritance-ledger.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/dev/code-rules.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/dev/testing.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/a1-audio-oracle-gap-20261110.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/a10-routing-hosting-api-audit-20261106.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/a3-fused-asset-morph-20261110.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/a9-edit-replay-evidence-20261109.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/a9-qualification-hold-20261110.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/advanced-graph-gpu-resident-spectral-chain-2026-11-06.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/advanced-graph-multirate-2026-11-06.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/g10-a3-runtime-composition-followup-20261109.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/g10-runtime-adapter-design-hold-20261110.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/g10-runtime-composition-audit-20261110.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/g11-qualification-audit-20261110-live.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/g11-remainder-audit-20261110.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/g12-flagship-readiness-audit-20261106.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/g3-identity-contract-qualification-hold-20261110.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/g3-identity-qualification-hold-20261110.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/g4-g5-qualification-hold-20261110.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/g4-processor-voice-binding-hold-20261110.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/g4-voice-binding-persistence-receipt-20261106.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/g5-event-transport-readiness-20261106.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/g5-events-sample-timing-contract.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/g5-graph-authored-event-followup-contract-20261109.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/g5-host-event-installed-consumer.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/g5-host-event-projection-20261106.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/g5-host-ingress-audit-20261104.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/g5-qualification-audit-20261110.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/g5-trigger-runtime-installed-consumer.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/g5-typed-event-next-slice-audit-20261105.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/g5-wave2-runtime-20261106.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/g6-audio-tail-audit-20261110-live.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/g6-audio-tail-qualification-hold-20261110.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/g6-polyphony-implementation-hold-20261106.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/g6-remaining-runtime-hold-20261109.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/g7-realtime-qualification-hold-20261110.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/g7-residual-qualification-20261109.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/g9-production-isolation-followup-20261110.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/g9-production-isolation-next-20261110.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/evidence/x9-flagship-audit-20261106.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/examples/bendr.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/examples/gpu-nam.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/examples/spectr-gpu-nam-forge-controls.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/examples/spectral-lab.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/examples/super-convolver.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/getting-started/ios-deployment.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/graph-program-status/A10-routing-hosting.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/graph-program-status/A9-agent-design-loop.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/graph-program-status/G-10-routed-acceptance.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/graph-program-status/G-10-routed.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/graph-program-status/G-10.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/graph-program-status/G-11-tuning.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/graph-program-status/G-11.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/graph-program-status/G-2.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/graph-program-status/G-3.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/graph-program-status/G-4.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/graph-program-status/G-5-event-fixture.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/graph-program-status/G-5.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/graph-program-status/G-6.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/graph-program-status/G-7-any-edge-20261110.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/graph-program-status/G-7-latency-pdc.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/graph-program-status/G-7-residual-qualification-20261107.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/graph-program-status/G-7.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/graph-program-status/G-8.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/graph-program-status/G-9.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/agent-efficiency-audits.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/ara.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/audio-quality-lab.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/coming-from-juce.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/compat-sync.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/copyright-protection.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/coreaudio-callback-lifetime.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/daw-smoke.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/development-inspector-shipping.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/downstream-validation.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/dsp-hot-reload.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/dsp-threading.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/dspx01-descriptor-registry.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/dspx09-independent-validation.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/editor-host-contract.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/evidence-archive.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/faust.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/focus-mode.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/g11-live-retune-cookbook.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/g11-live-sampling-cookbook.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/g11-recording-publication.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/gpu-audio-p4-raw-campaign-handoff.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/gpu-audio-paced-probe.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/gpu-audio-same-device-storage.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/gpu-audio-sdk.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/gpu-audio-shared-spectral.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/gpu-audio-tracing.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/gpu-audio-wavenet-realtime.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/gpu-pass.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/graph-hello.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/graph-voice-binding.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/hosting.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/import-ir.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/intel-support.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/interaction-cost.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/ios-auv3-guidance.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/ios-dev-signing.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/iwyu.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/latency-proof.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/mac-ci-host-setup.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/minimum-os-support.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/mpe.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/multi-bus-audio.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/native-surface-editors.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/native-web-projection.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/packages/REMOVAL.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/packages/cycfi-q.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/packages/daisysp.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/packages/dr-libs.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/packages/fontaudio.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/packages/index.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/packages/libsamplerate.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/packages/mts-esp.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/packages/pffft.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/packages/r8brain-free-src.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/packages/rtneural.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/packages/scala-tuning.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/packages/signalsmith-dsp.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/packages/signalsmith-stretch.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/platforms/android.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/plugin-bundles.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/plugin-interrogation.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/release-pipeline.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/release-watchdog.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/reload-trust.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/retained-history-live-swaps.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/routed-spectral-ports.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/self-hosted-runner.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/serialization.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/signal-graph-workflow.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/spectral-effective-frame-observer.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/test-lanes.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/time-stretch.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/version-at-land-cutover.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/versioning.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/view-bridge.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/windows-gpu-build.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/guides/windows-plugin-delivery.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/index.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v0.1002.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v0.1011.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v0.1014.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v0.24.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v0.25.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v0.26.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v0.27.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v0.28.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v0.29.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v0.666.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v0.773.1.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v0.807.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v0.943.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v0.945.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v0.945.2.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v0.946.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v0.947.1.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v0.948.1.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v0.949.1.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v0.950.1.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v0.956.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v0.957.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v0.960.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v0.968.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v0.972.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v0.979.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v0.997.2.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v1.0.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v1.102.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v1.12.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v1.13.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v1.15.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v1.16.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v1.18.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v1.25.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v1.3.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v1.30.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v1.67.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/migrations/v1.85.0.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/policies/capability-control-threat-model.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/policies/working-with-pulp-review.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/receipts/2026-10-02-dawn-generalized-convolution-proof.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/receipts/2026-10-02-dawn-phase-e-direct-executables.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/receipts/2026-10-02-dawn-wavenet-depth-comparison.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/receipts/2026-10-04-dawn-wavenet-depth-gate-audit.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/receipts/2026-10-07-forge-product-neutral-boundary.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/receipts/2026-10-07-governed-import-validation-receipt.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/receipts/2026-10-16-three-project-scorecard.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/receipts/forge-wave2b-space-baseline.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/2026-11-10-post-roadmap-audio-graph-opportunities.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/authoring-capsule.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/compat/canvas2d.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/compat/css.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/compat/html.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/compat/imports.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/compat/react.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/compat/rn.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/compat/yoga.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/consumer-dsp-delivery.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/control-evidence-and-telemetry.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/desktop-video-proofs.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/early-reflections.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/editor-bridge.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/extending-pulp.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/framework-importer-packaging.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/generated-editor-bridge-contract.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/host-quirks-policy.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/host-thread-rules.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/identity-lock.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/imports/index.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/layout-model.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/linux-rt-thread-strategy.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/live-swap-cpu-gpu.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/meter-value-channel.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/midi-1-backends.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/opinionated-defaults.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/pulp-react.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/rendering.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/reverse-buffer.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/rt-retirement-patterns.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/scripted-ui-inspector.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/sdf-text.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/shaders.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/signal-graph-capabilities.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/signal-graph.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/skills.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/spectral-frame-codec.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/stochastic-sources.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/streams.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/style-props.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/text-emoji.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/text-shaping.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/versioning.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/view-lifecycle.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reference/vst3-bundle-layout.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/2026-10-02-pulputils-b4-receipt.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/2026-10-03-wave2e-pulputils-receipt.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/2026-10-04-design-import-framework-comparison.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/b2-design-import-html-css-receipt-20261003.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/beadsy-delivery-reconciliation-20261028.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/compat-audit-2026-04-30.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/control-standalone-author-catalog-checkpoint.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/dawn-exact-provider-gate-20261007.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/development-inspector-phase3-friction-2026-08-02.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/fdn-reverb-gap-analysis-2026-07-25.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/g10-spectral-evidence-20261102.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/g10-typed-frame-contract-design-20261103.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/g11-cookbook-evidence-20261103.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/g11-evidence-20261109.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/g11-live-sampling-evidence-20261105.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/g11-live-sampling-evidence-20261106.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/g12-closeout-20261106.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/g9-hostile-containment-verdict-20261102.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/graph-multirate-capability-audit-2026-11-02.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/harness-coverage.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/importer-reset-20261019-handoff.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/modulation-toolkit-gap-analysis-2026-07-25.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/modulation-toolkit-post-merge-missing-items-2026-07-26.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/neural-competitive-proof-plan-20261003.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/neural-cpu-family-implementation-packet-20261005.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/neural-dawn-wavenet-depth-receipt-20261007.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/neural-evidence-closeout-20261007.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/neural-mlx-execution-receipt-20261002.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/neural-mlx-named-model-gate-20261004.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/neural-mlx-named-model-worker-receipt-20261005.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/neural-mlx-packaging-control-receipt-20261002.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/neural-mlx-provenance-audit-20261003.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/neural-mlx-worker-receipt-20261002.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/neural-modelstore-installer-layout-receipt-20261004.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/neural-modelstore-sidecar-receipt-20261002.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/neural-package-a-modelstore-audit-20261004.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/neural-package-b-cold-reload-receipt-20261003.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/neural-package-b-cpu-rt-receipt-20261005.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/parameter-state-host-hardening-plan.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/platform-capability-closure-plan.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/pulp-modular-runtime-spec-2026-05-21.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/sampler-suite-hardening-plan.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/signal-graph-authoring-d1-tsan-20261015.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/signal-graph-lifecycle-a3-receipt-20261002.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/signal-graph-lifecycle-d1-tsan-20261007.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/signal-graph-lifecycle-wave2c-baseline-20261003.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/software-gpu-advisory-plan-2026-09-25.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/wave2d-claude-fixture-readiness-20261003.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/wave5-css-audit.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reports/wgpu-native-neural-audio-portability-analysis-20261012.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/reviews/repo-readability-small-wins-2026-05-14.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/status/diff-cover-selector-artifact-closure-20261107.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/status/dsp-readiness/dspx07-au-installed-receipt-20261008.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/status/dsp-readiness/dspx09-independent-validation-receipt-20261007.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/status/g5-host-ingress-wip-20261107.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/status/gpu-8448-linux-scheduling-boundary.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/status/gpu-wavenet-provider-plan-20260925.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/status/gpu-wavenet-shared-provider-boundary-20260925.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/status/graph-program-status/G-3-wave3-audit-20261106.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/status/graph-program-status/G-3.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/status/native-metal-comparator-boundary-20260925.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/status/native-metal-comparator-matched-20261002.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/status/neural-audio-production-admission-20261008.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/status/neural-audio-program-status-20261002.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/status/neural-audio-program-status-20261004.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/status/neural-compact-ssm-cpu-contract-receipt-20261017.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/status/neural-nam-cpu-oracle-parity-receipt-20261002.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/status/neural-nam-tcn-artifact-bridge-receipt-20261003.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/status/neural-recurrent-cpu-fixture-receipt-20261015.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/status/shipyard-merge-gate-evidence-blocker-20261016.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/status/shipyard-pr-overlap-poka-yoke-20260925.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/status/spectr-forge-magenta-metadata-audit-20261003.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/status/spectr-gpu-nam-forge-controls.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/tools/importer-differential-lab.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/validation/c5-test-decomposition-receipt.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/validation/daw-bench/01-logic-pro-au.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/validation/daw-bench/02-cubase-12-vst3.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/validation/daw-bench/03-cubase-9-vst3.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/validation/daw-bench/04-live-vst3.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/validation/daw-bench/05-bitwig-vst3.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/validation/daw-bench/06-reaper-vst3.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/validation/daw-bench/07-reaper-clap.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/validation/daw-bench/08-aum-auv3.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/validation/daw-bench/09-studio-one-vst3.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/validation/daw-bench/10-wavelab-vst3.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/validation/daw-bench/11-fl-studio-vst3.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/validation/daw-bench/results/2026-06-12/06-reaper-vst3.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/validation/daw-bench/results/2026-06-12/07-reaper-clap.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/validation/daw-bench/results/2026-06-15/06-reaper-vst3.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/validation/daw-bench/results/2026-06-15/07-reaper-clap.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/validation/g5-graph-event-rt.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/validation/gpu-audio-comparator-v2.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/validation/gpu-audio-p2-host-preflight-producer.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/validation/gpu-audio-p2-host-preflight.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/validation/gpu-audio-p4-evidence.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/validation/gpu-audio-p4-stress-audit-20261004.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/validation/p2-campaign-provenance-ownership-20261006.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/validation/phase5-a2-a5-inventory-20261004/receipt.md not indexed in docs/status/docs-index.yaml[0m
+[1;33mWARN:  docs/validation/real-plugins-developer-lane.md not indexed in docs/status/docs-index.yaml[0m
+Checking docs-index path resolution...
+Checking manifest doc links...
+Checking status vocabulary...
+Checking module dependencies against CMake...
+[1;33mWARN:  module 'playback': CMake links pulp-android but modules.yaml doesn't list it[0m
+[1;33mWARN:  module 'timeline_editor': CMake links pulp-test but modules.yaml doesn't list it[0m
+[1;33mWARN:  module 'interchange': CMake links pulp-fixture but modules.yaml doesn't list it[0m
+[1;33mWARN:  module 'host': CMake links pulp-view but modules.yaml doesn't list it[0m
+[1;33mWARN:  module 'simd': CMake links pulp-runtime but modules.yaml doesn't list it[0m
+[1;33mWARN:  module 'runtime': CMake links pulp-cpp but modules.yaml doesn't list it[0m
+[1;33mWARN:  module 'runtime': CMake links pulp-foundation but modules.yaml doesn't list it[0m
+[1;33mWARN:  module 'runtime': CMake links pulp-perfetto but modules.yaml doesn't list it[0m
+[1;33mWARN:  module 'runtime': CMake links pulp-tracing but modules.yaml doesn't list it[0m
+[1;33mWARN:  module 'midi': CMake links pulp-android but modules.yaml doesn't list it[0m
+[1;33mWARN:  module 'midi': CMake links pulp-ios but modules.yaml doesn't list it[0m
+[1;33mWARN:  module 'format': CMake links pulp-test but modules.yaml doesn't list it[0m
+[1;33mWARN:  module 'format': CMake links pulp-view but modules.yaml doesn't list it[0m
+[1;33mWARN:  module 'canvas': CMake links pulp-arm but modules.yaml doesn't list it[0m
+[1;33mWARN:  module 'canvas': CMake links pulp-bundled but modules.yaml doesn't list it[0m
+[1;33mWARN:  module 'canvas': CMake links pulp-cli but modules.yaml doesn't list it[0m
+[1;33mWARN:  module 'canvas': CMake links pulp-cpp but modules.yaml doesn't list it[0m
+[1;33mWARN:  module 'canvas': CMake links pulp-import but modules.yaml doesn't list it[0m
+[1;33mWARN:  module 'render': CMake links pulp-gpu but modules.yaml doesn't list it[0m
+[1;33mWARN:  module 'render': CMake links pulp-renderer but modules.yaml doesn't list it[0m
+[1;33mWARN:  module 'render': CMake links pulp-scene but modules.yaml doesn't list it[0m
+[1;33mWARN:  module 'render': CMake links pulp-wgsl but modules.yaml doesn't list it[0m
+[1;33mWARN:  module 'view': CMake links pulp-design but modules.yaml doesn't list it[0m
+[1;33mWARN:  module 'view': CMake links pulp-format but modules.yaml doesn't list it[0m
+[1;33mWARN:  module 'view': CMake links pulp-host but modules.yaml doesn't list it[0m
+[1;33mWARN:  module 'view': CMake links pulp-render but modules.yaml doesn't list it[0m
+Checking format adapter source files...
+Checking subsystem directories...
+Checking for reintroduced test-count statements...
+Checking VISION.md status claims...
+Checking docs consistency (support-matrix ↔ capabilities)...
+docs-consistency: OK
+  platform_maturity.accessibility platforms checked: 5
+  status values scanned: 179
+Checking advanced DSP public-method coverage...
+advanced DSP API reference covers public methods for 41 Round 2 types
+Checking status ladder (usable ⇒ validation evidence)...
+status-ladder: checked 118 `usable` entries, 83 waived, 4 violations (mode=warn)
+  - platform_maturity.disabled_input_contract: no validation evidence in notes → 'A disabled view, or one inside a disabled ancestor, receives no key,'
+  - platform_maturity.focus_cause: no validation evidence in notes → 'Focus changes carry a FocusCause (pointer, keyboard, programmatic).'
+  - state_tree.transactions: no validation evidence in notes → 'RAII StateTree::Transaction groups edits on one tree. Edits apply at once, coale…'
+  - state_tree.undo: no validation evidence in notes → 'begin_transaction(UndoManager*, name) records set, remove, add, insert, remove-c…'
+Checking generated-table drift in capabilities.md...
+docs-generate: OK
+Checking Processor vs SignalGraph terminology...
+Checking development-inspector capability and runtime truth...
+inspector-truth: capability docs and client claims are in sync
+Checking Product B capability-control absence boundary...
+product_b_absence_verified=true
+Checking widget catalog (docs/reference/widgets.md) is in sync...
+widgets.md in sync: 98 primitives (10 excluded as internal/tooling).
+Checking web-plugin docs match the tree...
+check_web_plugin_docs: OK — web-plugin docs match the tree
+Checking tool registry (docs/status/tools.yaml) is complete and in sync...
+tools registry OK (83 tools; coverage sweep clean; digest in sync)
+Checking DSP capability registry is free of collisions and in sync...
+dsp-capabilities: no collisions — 115 type ids unique, 403 baked params unique per node
+dsp-capabilities: docs/status/dsp-capabilities.json is fresh
+Checking installed agent capability manifest is valid and in sync...
+agent-capabilities: fresh; 115 keys and 543 public headers checked
+agent-capabilities: comparison receipt={"comparison_anchor":"6c3ff80830797c201931a63b893c512686329e3e","comparison_mode":"merge_base","requested_base":"origin/main","requested_head":"HEAD","resolved_base_tip":"ebded6b0a98e7353a13c4e74d1e9bc138dd6b342","resolved_head":"2e299b27b3b854ef5d4f8228fb32668e7e2ba6e8","source":"local_ref","status":"available","stderr":""}
+Checking authority navigation registry and native source routes...
+authority-navigation: OK: revision 1, 9 routes
+Checking skills catalogs (docs/reference/skills.md + CLAUDE.md) are in sync...
+docs/reference/skills.md and the CLAUDE.md skills-digest block in sync (71 skills)
+
+[1;33mPASSED with 376 warning(s)[0m

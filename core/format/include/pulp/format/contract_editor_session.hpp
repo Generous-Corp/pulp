@@ -208,6 +208,7 @@ class ContractEditorSession : public std::enable_shared_from_this<ContractEditor
     IdleSource idle_source_;
     // Declared in dependency order so the editor is destroyed first, then the
     // context it was created with, then the port the context hands out.
+    state::StateStore& store_;
     std::unique_ptr<StateStoreParamPort> port_;
     std::unique_ptr<Context> context_;
     std::unique_ptr<Editor> editor_;

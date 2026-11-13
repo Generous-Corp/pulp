@@ -1,4 +1,5 @@
 #include <pulp/format/process_context.hpp>
+#include <pulp/format/processor.hpp>
 #include <pulp/host/graph_event_contract.hpp>
 #include <pulp/host/signal_graph_runtime.hpp>
 #include <pulp/host/trigger_graph.hpp>
@@ -27,6 +28,100 @@ void check(bool condition, const char* rule) {
     if (!condition)
         throw std::runtime_error(rule);
 }
+
+class ProcessorProjectionProbe final : public pulp::format::Processor {
+  public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        pulp::format::PluginDescriptor descriptor;
+        descriptor.name = "G5 Processor Projection Probe";
+        descriptor.manufacturer = "Pulp";
+        descriptor.bundle_id = "dev.pulp.g5.processor-projection-probe";
+        descriptor.version = "1.0.0";
+        descriptor.category = pulp::format::PluginCategory::Effect;
+        descriptor.input_buses = {{"Main In", 1, false}};
+        descriptor.output_buses = {{"Main Out", 1, false}};
+        descriptor.accepts_midi = true;
+        descriptor.supports_mpe = true;
+        descriptor.supports_ump = true;
+        return descriptor;
+    }
+
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+
+    void process(pulp::audio::BufferView<float>& output,
+                 const pulp::audio::BufferView<const float>& input, pulp::midi::MidiBuffer& midi_in,
+                 pulp::midi::MidiBuffer&, const pulp::format::ProcessContext&) override {
+        midi_count = static_cast<int>(midi_in.size());
+        ump_count = 0;
+        ump_word_count = 0;
+        ump_sample_offset = 0;
+        ump_words = {};
+        if (const auto* ump = ump_input(); ump != nullptr) {
+            ump_count = static_cast<int>(ump->size());
+            if (!ump->empty()) {
+                ump_word_count = (*ump)[0].packet.word_count;
+                ump_sample_offset = (*ump)[0].sample_offset;
+                for (int i = 0; i < ump_word_count && i < static_cast<int>(ump_words.size()); ++i)
+                    ump_words[static_cast<std::size_t>(i)] =
+                        (*ump)[0].packet.words[static_cast<std::size_t>(i)];
+            }
+        }
+        mpe_count = 0;
+        mpe_offsets = {};
+        mpe_kinds = {};
+        if (const auto* mpe = mpe_input(); mpe != nullptr) {
+            mpe_count = static_cast<int>(mpe->size());
+            for (int i = 0; i < mpe_count && i < static_cast<int>(mpe_offsets.size()); ++i) {
+                mpe_offsets[static_cast<std::size_t>(i)] =
+                    (*mpe)[static_cast<std::size_t>(i)].sample_offset;
+                mpe_kinds[static_cast<std::size_t>(i)] =
+                    static_cast<int>((*mpe)[static_cast<std::size_t>(i)].kind);
+            }
+        }
+        note_count = 0;
+        offset_count = 0;
+        for (const auto& event : midi_in) {
+            if (note_count < static_cast<int>(notes.size()))
+                notes[static_cast<std::size_t>(note_count++)] = event.note();
+            if (offset_count < static_cast<int>(offsets.size()))
+                offsets[static_cast<std::size_t>(offset_count++)] = event.sample_offset;
+        }
+        for (std::size_t channel = 0; channel < output.num_channels(); ++channel)
+            for (std::size_t frame = 0; frame < output.num_samples(); ++frame)
+                output.channel_ptr(channel)[frame] =
+                    input.num_channels() > channel ? input.channel_ptr(channel)[frame] : 0.0f;
+    }
+
+    int midi_count = 0;
+    int ump_count = 0;
+    int ump_word_count = 0;
+    int ump_sample_offset = 0;
+    int mpe_count = 0;
+    int note_count = 0;
+    int offset_count = 0;
+    std::array<int, 8> notes{};
+    std::array<int, 8> offsets{};
+    std::array<std::uint32_t, 2> ump_words{};
+    std::array<int, 8> mpe_offsets{};
+    std::array<int, 8> mpe_kinds{};
+};
+
+struct ProcessorProjectionObservation {
+    std::array<int, 8> notes{};
+    std::array<int, 8> offsets{};
+    int note_count = 0;
+    int offset_count = 0;
+    int midi_count = 0;
+    int ump_count = 0;
+    int ump_word_count = 0;
+    int ump_sample_offset = 0;
+    int mpe_count = 0;
+    std::array<std::uint32_t, 2> ump_words{};
+    std::array<int, 8> mpe_offsets{};
+    std::array<int, 8> mpe_kinds{};
+    std::array<float, 8> audio{};
+};
 
 HostEventRecord record(std::uint64_t epoch, std::int64_t sample, std::uint64_t sequence,
                        std::uint32_t producer, pulp::midi::MidiEvent event) {
@@ -98,6 +193,104 @@ void host_ingress_controls() {
               future[0].absolute_sample == 104,
           "host-future-delivery");
     check(ingress.end_block() == HostEventResult::Accepted, "host-future-end");
+}
+
+void projection_queue_lifecycle_controls() {
+    using pulp::midi::MidiEvent;
+
+    // The staging queue is transactional: overflow and a too-small projection
+    // do not consume records, while reset retires the old epoch completely.
+    HostEventIngress<2> ingress;
+    check(ingress.begin_block(3, 10, 2) == HostEventResult::Accepted, "queue-begin");
+    check(ingress.publish(record(3, 10, 1, 1, MidiEvent::note_on(1, 60, 100))) ==
+              HostEventResult::Accepted,
+          "queue-first");
+    check(ingress.publish(record(3, 11, 2, 1, MidiEvent::note_off(1, 60))) ==
+              HostEventResult::Accepted,
+          "queue-second");
+    check(ingress.publish(record(3, 11, 3, 1, MidiEvent::note_on(1, 61, 100))) ==
+              HostEventResult::Overflow,
+          "queue-overflow-negative");
+    std::array<HostEventRecord, 1> too_small{};
+    std::size_t count = 0;
+    check(ingress.project(too_small, count) == HostEventResult::OutputCapacity && count == 0 &&
+              ingress.pending() == 2,
+          "queue-capacity-transaction");
+    std::array<HostEventRecord, 2> projected{};
+    check(ingress.project(projected, count) == HostEventResult::Accepted && count == 2,
+          "queue-project");
+    check(projected[0].absolute_sample == 10 && projected[1].absolute_sample == 11, "queue-order");
+    check(ingress.end_block() == HostEventResult::Accepted, "queue-end");
+
+    check(ingress.begin_block(3, 12, 1) == HostEventResult::Accepted, "queue-next-block");
+    check(ingress.publish(record(3, 11, 4, 1, MidiEvent::note_on(1, 62, 100))) ==
+              HostEventResult::Late,
+          "queue-late-negative");
+    check(ingress.end_block() == HostEventResult::Accepted, "queue-next-end");
+    ingress.reset(4);
+    check(ingress.epoch() == 4 && ingress.pending() == 0 && !ingress.active(),
+          "queue-reset-clears");
+    check(ingress.begin_block(4, 0, 1) == HostEventResult::Accepted, "queue-reset-epoch");
+    check(ingress.publish(record(3, 0, 5, 1, MidiEvent::note_on(1, 63, 100))) ==
+              HostEventResult::StaleEpoch,
+          "queue-stale-epoch-negative");
+    check(ingress.end_block() == HostEventResult::Accepted, "queue-reset-end");
+
+    // A queued look-ahead event is delivered exactly once under either legal
+    // partition, then a reset refuses the retired epoch.
+    auto render_lane = [](std::span<const std::size_t> partitions) {
+        GraphAuthoredEventLane<4, 4> lane;
+        std::vector<GraphAuthoredEvent> events;
+        check(lane.reset(1) == GraphEventResult::Accepted, "queue-lane-reset");
+        std::uint64_t cursor = 0;
+        for (const auto frames : partitions) {
+            check(lane.begin_block(1, cursor, frames) == GraphEventResult::Accepted,
+                  "queue-lane-begin");
+            for (std::size_t offset = 0; offset < frames; ++offset) {
+                check(lane.begin_sample(offset) == GraphEventResult::Accepted, "queue-lane-sample");
+                if (cursor + offset == 0) {
+                    check(lane.emit_at(1, 1, 42, 1) == GraphEventResult::Accepted,
+                          "queue-lane-lookahead");
+                    for (std::uint16_t payload = 0; payload < 4; ++payload)
+                        check(lane.emit_at(1, 2, payload, 2) == GraphEventResult::Accepted,
+                              "queue-lane-accepted");
+                    check(lane.emit_at(1, 2, 100, 2) == GraphEventResult::Overflow,
+                          "queue-lane-overflow-negative");
+                }
+                check(lane.begin_consumer() == GraphEventResult::Accepted, "queue-lane-consumer");
+                for (const auto& event : lane.received())
+                    events.push_back(event);
+                check(lane.end_sample() == GraphEventResult::Accepted, "queue-lane-end-sample");
+            }
+            check(lane.end_block() == GraphEventResult::Accepted, "queue-lane-end-block");
+            cursor += frames;
+        }
+        // Advance the consumed frontier before exercising the late refusal.
+        // A target equal to the current sample is valid look-ahead until the
+        // sample is consumed; only the following block makes sample one
+        // unambiguously late.
+        check(lane.begin_block(1, cursor, 1) == GraphEventResult::Accepted,
+              "queue-lane-late-block");
+        check(lane.begin_sample(0) == GraphEventResult::Accepted, "queue-lane-late-sample");
+        check(lane.emit_at(1, 1, 99, 1) == GraphEventResult::Late, "queue-lane-late-negative");
+        check(lane.begin_consumer() == GraphEventResult::Accepted, "queue-lane-late-consumer");
+        for (const auto& event : lane.received())
+            events.push_back(event);
+        check(lane.end_sample() == GraphEventResult::Accepted, "queue-lane-late-end-sample");
+        check(lane.end_block() == GraphEventResult::Accepted, "queue-lane-late-end-block");
+        check(lane.reset(2) == GraphEventResult::Accepted, "queue-lane-reset-next");
+        check(lane.begin_block(1, 0, 1) == GraphEventResult::OutOfRange,
+              "queue-lane-retired-epoch-negative");
+        return events;
+    };
+    constexpr std::array<std::size_t, 1> one{2};
+    constexpr std::array<std::size_t, 2> split{1, 1};
+    const auto one_block = render_lane(one);
+    const auto two_blocks = render_lane(split);
+    check(one_block == two_blocks && one_block.size() == 5 && one_block.front().sample == 1 &&
+              one_block.front().payload == 42 && one_block.back().sample == 2 &&
+              one_block.back().payload == 3,
+          "queue-lane-partition-invariance");
 }
 
 struct Observation {
@@ -330,6 +523,151 @@ void graph_partition_controls() {
           "graph-counters");
 }
 
+ProcessorProjectionObservation render_processor_projection() {
+    using namespace pulp::host;
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1);
+    const auto output = graph.add_output_node(1);
+    const auto midi_input = graph.add_midi_input_node("G5 processor host input");
+    auto processor = std::make_unique<ProcessorProjectionProbe>();
+    auto* probe = processor.get();
+    const auto processor_node = graph.add_processor_node(std::move(processor), "G5 projection");
+    check(input != 0 && output != 0 && midi_input != 0 && processor_node != 0,
+          "processor-node-admission");
+    check(graph.connect(input, 0, processor_node, 0) &&
+              graph.connect(processor_node, 0, output, 0) &&
+              graph.connect_midi(midi_input, processor_node),
+          "processor-node-routing");
+    graph.set_canonical_executor_routing_enabled(true);
+    check(graph.prepare(48000.0, 8), "processor-node-prepare");
+
+    HostEventIngress<8> ingress;
+    check(ingress.begin_block(7, 100, 8) == HostEventResult::Accepted, "processor-ingress-begin");
+    auto first = record(7, 102, 1, 2, pulp::midi::MidiEvent::note_on(1, 60, 100));
+    auto tie = record(7, 102, 1, 1, pulp::midi::MidiEvent::note_on(1, 61, 100));
+    auto bend = record(7, 105, 2, 1, pulp::midi::MidiEvent::pitch_bend(1, 10'000));
+    first.has_ump = true;
+    first.ump.word_count = 2;
+    first.ump.words[0] = 0x4091'3C00u;
+    first.ump.words[1] = 0xFFFF'0000u;
+    check(ingress.publish(first) == HostEventResult::Accepted &&
+              ingress.publish(tie) == HostEventResult::Accepted &&
+              ingress.publish(bend) == HostEventResult::Accepted,
+          "processor-ingress-publish");
+    std::array<HostEventRecord, 8> projected{};
+    std::size_t projected_count = 0;
+    check(ingress.project(projected, projected_count) == HostEventResult::Accepted &&
+              projected_count == 3 && projected[0].producer == 1 && projected[1].producer == 2,
+          "processor-ingress-tie-order");
+    pulp::midi::MidiBuffer midi;
+    midi.reserve(8, 128, 8);
+    midi.set_realtime_capacity_limit(true);
+    pulp::midi::UmpBuffer ump;
+    ump.reserve(8);
+    ump.set_realtime_capacity_limit(true);
+    midi.attach_ump(&ump);
+    pulp::midi::MpeVoiceTracker tracker;
+    pulp::midi::MpeBuffer mpe;
+    mpe.reserve(512);
+    mpe.set_realtime_capacity_limit(true);
+    check(project_host_event_block(
+              std::span<const HostEventRecord>(projected.data(), projected_count), 100, 8, midi,
+              &tracker, &mpe) == HostEventResult::Accepted,
+          "processor-ingress-project");
+    check(graph.inject_midi(midi_input, midi, mpe), "processor-ingress-mailbox");
+    std::array<float, 8> source{};
+    std::array<float, 8> destination{};
+    const float* source_ptr = source.data();
+    float* destination_ptr = destination.data();
+    pulp::audio::BufferView<const float> in(&source_ptr, 1, source.size());
+    pulp::audio::BufferView<float> out(&destination_ptr, 1, destination.size());
+    graph.process(out, in, static_cast<int>(source.size()));
+
+    ProcessorProjectionObservation observation;
+    observation.notes = probe->notes;
+    observation.offsets = probe->offsets;
+    observation.note_count = probe->note_count;
+    observation.offset_count = probe->offset_count;
+    observation.midi_count = probe->midi_count;
+    observation.ump_count = probe->ump_count;
+    observation.ump_word_count = probe->ump_word_count;
+    observation.ump_sample_offset = probe->ump_sample_offset;
+    observation.mpe_count = probe->mpe_count;
+    observation.ump_words = probe->ump_words;
+    observation.mpe_offsets = probe->mpe_offsets;
+    observation.mpe_kinds = probe->mpe_kinds;
+    observation.audio = destination;
+    return observation;
+}
+
+void processor_projection_controls() {
+    const auto observation = render_processor_projection();
+    check(observation.note_count == 3 && observation.notes[0] == 61 && observation.notes[1] == 60 &&
+              observation.offsets[0] == 2 && observation.offsets[1] == 2 &&
+              observation.offsets[2] == 5 && observation.midi_count == 3,
+          "processor-event-trace");
+    check(observation.ump_count == 1 && observation.ump_word_count == 2 &&
+              observation.ump_sample_offset == 2 && observation.ump_words[0] == 0x4091'3C00u &&
+              observation.ump_words[1] == 0xFFFF'0000u,
+          "processor-ump-sidecar-trace");
+    check(observation.mpe_count == 4 && observation.mpe_offsets[0] == 2 &&
+              observation.mpe_offsets[1] == 2 && observation.mpe_offsets[2] == 5 &&
+              observation.mpe_offsets[3] == 5 &&
+              observation.mpe_kinds[0] ==
+                  static_cast<int>(pulp::midi::MpeExpressionEvent::Kind::NoteOn) &&
+              observation.mpe_kinds[1] ==
+                  static_cast<int>(pulp::midi::MpeExpressionEvent::Kind::NoteOn) &&
+              observation.mpe_kinds[2] ==
+                  static_cast<int>(pulp::midi::MpeExpressionEvent::Kind::PitchBend) &&
+              observation.mpe_kinds[3] ==
+                  static_cast<int>(pulp::midi::MpeExpressionEvent::Kind::PitchBend),
+          "processor-mpe-sidecar-trace");
+
+    HostEventIngress<2> ingress;
+    check(ingress.begin_block(9, 20, 4) == HostEventResult::Accepted, "processor-negative-begin");
+    check(ingress.publish(record(8, 20, 1, 1, pulp::midi::MidiEvent::note_on(1, 60, 100))) ==
+              HostEventResult::StaleEpoch,
+          "processor-stale-epoch-negative");
+    check(ingress.publish(record(9, 19, 2, 1, pulp::midi::MidiEvent::note_off(1, 60))) ==
+              HostEventResult::Late,
+          "processor-late-negative");
+    check(ingress.publish(record(9, 24, 3, 1, pulp::midi::MidiEvent::note_on(1, 61, 100))) ==
+              HostEventResult::Accepted,
+          "processor-future-stage");
+    std::array<HostEventRecord, 2> projected{};
+    std::size_t count = 0;
+    check(ingress.project(projected, count) == HostEventResult::Accepted && count == 0,
+          "processor-future-not-early");
+    check(ingress.end_block() == HostEventResult::Accepted &&
+              ingress.begin_block(9, 24, 1) == HostEventResult::Accepted &&
+              ingress.project(projected, count) == HostEventResult::Accepted && count == 1,
+          "processor-future-delivery");
+    check(ingress.end_block() == HostEventResult::Accepted, "processor-future-end");
+
+    check(ingress.begin_block(10, 0, 1) == HostEventResult::Accepted, "processor-reset-begin");
+    ingress.reset(11);
+    check(ingress.epoch() == 11 && ingress.pending() == 0, "processor-reset");
+
+    std::array<HostEventRecord, 2> records{
+        record(1, 0, 1, 1, pulp::midi::MidiEvent::note_on(1, 60, 100)),
+        record(1, 0, 2, 1, pulp::midi::MidiEvent::note_on(1, 61, 100)),
+    };
+    pulp::midi::MidiBuffer one_byte_short;
+    one_byte_short.reserve(1, 128, 1);
+    one_byte_short.set_realtime_capacity_limit(true);
+    check(project_host_event_block(records, 0, 1, one_byte_short) ==
+                  HostEventResult::OutputCapacity &&
+              one_byte_short.empty(),
+          "processor-one-byte-capacity-negative");
+    HostEventIngress<2> queue;
+    check(queue.begin_block(1, 0, 1) == HostEventResult::Accepted &&
+              queue.publish(records[0]) == HostEventResult::Accepted &&
+              queue.publish(records[1]) == HostEventResult::Accepted &&
+              queue.publish(record(1, 0, 3, 1, pulp::midi::MidiEvent::note_on(1, 62, 100))) ==
+                  HostEventResult::Overflow,
+          "processor-ingress-capacity-negative");
+}
+
 struct AuthoredGraphObservation {
     std::vector<GraphAuthoredEvent> events;
     std::vector<float> audio;
@@ -492,6 +830,8 @@ void graph_callback_wiring_controls() {
 int main() {
     try {
         host_ingress_controls();
+        projection_queue_lifecycle_controls();
+        processor_projection_controls();
         graph_partition_controls();
         graph_authored_runtime_controls();
         graph_authored_reset_controls();

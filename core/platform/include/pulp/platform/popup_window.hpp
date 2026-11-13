@@ -38,7 +38,11 @@ enum class PopupDismissReason {
     client,        ///< PopupWindow::close()
     outside_click, ///< a click outside the popup, in this or another app
     escape,        ///< Escape while the popup has keyboard focus
-    focus_lost,    ///< the popup or the application lost focus
+    /// Key moved to a window other than the editor's, or the application
+    /// lost focus. Key handed back to the editor's own window with no click
+    /// (which activating the application can do) does not count: the popup
+    /// takes key again.
+    focus_lost,
     parent_closed, ///< the editor's window is closing
 };
 
@@ -63,6 +67,23 @@ struct PopupWindowOptions {
 /// Pure arithmetic, exposed for tests and for clients that pre-size content.
 PopupRect place_popup(const PopupRect& anchor, float width, float height, const PopupRect& visible,
                       PopupPlacement placement);
+
+/// What a popup does once it has stopped being key and the key window has
+/// settled.
+enum class PopupResignAction {
+    /// It is key again; nothing to do.
+    stay_open,
+    /// Key went back to the popup's own editor window with no click (which
+    /// activating the application can do): take key again.
+    take_key_back,
+    /// Key went elsewhere, or the popup has already taken key back too many
+    /// times: close with PopupDismissReason::focus_lost.
+    close_focus_lost,
+};
+
+/// The decision behind focus_lost, as a pure function: `reclaims` is how many
+/// times this popup has already taken key back.
+PopupResignAction popup_resign_action(bool popup_is_key, bool parent_is_key, int reclaims);
 
 class PopupWindow {
   public:

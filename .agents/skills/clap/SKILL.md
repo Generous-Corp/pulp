@@ -793,6 +793,19 @@ the end is what the adapter emits as `PARAM_VALUE` out-events. If you
 optimise this into a persisted snapshot you will drop plugin-side
 param edits that happen at block boundaries.
 
+### The per-block sync is counted, and a quiet block must count nothing
+
+The snapshot refresh and the post-process diff run only when the store
+generation moved, so a block with no write costs nothing per parameter and a
+block after a write costs one pass. `adapter_boundary.hpp` counts that work
+(`param_sync_counts()`: values read, values compared, `find_param_index`
+steps) when `PULP_RT_WORK_COUNTERS` is on, and
+`test_scale_param_sync_ops.cpp` holds it at 2,000 parameters: zero for a quiet
+block, at most one pass plus a little for an automated one. A change that
+makes every block re-scan, or scans inside a per-parameter loop, fails there
+without any timing. Counting is per binary, so the gate drives the adapter in
+process, not a loaded bundle.
+
 ### Secondary output buses must be zero-filled
 
 Multi-out instruments that don't route to bus ≥ 1 leave those output
@@ -1400,3 +1413,18 @@ processor and wraps `process()` with `service_panic()` before and
 `midi_out` claim (`docs/guides/midi-panic.md`). Keep both calls on any new
 process path (including f64) or `Processor::request_panic()` silently stops
 working there. Tests: test_clap_midi_events.cpp (emitted note-offs and channel messages on out_events).
+
+## Program Change selects a preset only on opt-in
+
+A descriptor with `supports_program_change = true` makes the adapter create a
+`PresetLibrary` and a `PresetProgramRouter` at `clap_init`. The audio thread only
+scans `midi_in` for Bank Select + Program Change and stores one atomic request
+(`clap_phase_prepare_sidecars`); the block then asks the host for
+`request_callback` and `clap_on_main_thread` resolves the position and loads the
+preset. Nothing loads inside `process()`, so a note in the same block as the
+Program Change plays with the old values. The library's factory folder is read
+at init, so a harness that sets `set_factory_presets_dir` afterwards must call
+`preset_library->refresh()`. `clap.preset-load` at
+`CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN` loads a library key. The test harness
+`Harness` does not set `plugin.get_extension`; call
+`clap_adapter::clap_get_extension` instead of the vtable slot.

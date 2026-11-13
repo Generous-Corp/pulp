@@ -106,6 +106,7 @@ jobs:
     # merge_group. Reuse the existing MacPro Linux/X64 pool when configured, but
     # preserve ubuntu-latest as the zero-configuration rollback.
     runs-on: ${{ fromJSON(vars.PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON || vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    timeout-minutes: 30
     outputs:
       # Kept for the Namespace-profile step below, which still asks "did the macOS
       # leg resolve to a Namespace runner?".
@@ -298,8 +299,14 @@ jobs:
     # label — which is the only reason Linux/Windows releases could not use the
     # self-hosted VMs that were already running and idle.
     runs-on: ${{ fromJSON(needs.resolve-macos-runner.outputs.map)[matrix.platform] }}
-    # Every current leg is required. GitHub's 360-min default cap applies.
-    timeout-minutes: 360
+    # Every current leg is required. Job and long-step timeouts are derived
+    # from history (max(floor, 4 x p95 of the slowest leg) over recent
+    # successful runs) and recorded in tools/ci/release_step_timeouts.json,
+    # which `release_step_timeouts.py check` enforces. A hung step fails at its
+    # own timeout instead of holding the release for GitHub's 6-hour default;
+    # release-reconcile.yml re-runs a timed-out leg once (rerun-failed-jobs).
+    # Re-derive the values rather than editing one by hand.
+    timeout-minutes: 243
     # Empty for non-container cells (mac/win/linux-arm64) = run directly on the runner.
     container: ${{ matrix.container }}
     name: CLI ${{ matrix.platform }}
@@ -481,6 +488,7 @@ jobs:
           echo "PULP_CONFIGURE_CHECK_CACHE_DIR=$root/cc" >> "$GITHUB_ENV"
 
       - name: Bootstrap dependencies
+        timeout-minutes: 72
         run: ./setup.sh --ci --deps-only
         shell: bash
 
@@ -881,6 +889,7 @@ jobs:
       # reconfigures with WebView=ON so plugin authors still get the
       # WebView code in the SDK tarball.
       - name: Configure (CLI, no WebView on Linux)
+        timeout-minutes: 15
         # PULP_REQUIRE_GPU_FOR_SDK is an SDK-release safety net that turns the
         # silent "no Skia → CG fallback" SDK build into a hard configure-time
         # failure. Only enable it for platforms whose Skia binaries we just
@@ -942,6 +951,7 @@ jobs:
         shell: bash
 
       - name: Build
+        timeout-minutes: 221
         # Build everything (CLI binary + all libs needed for the SDK tarball).
         # On Linux this is built WITHOUT WebView so the CLI binary stays
         # portable; the SDK reconfigure step below adds WebView back so the
@@ -1158,6 +1168,7 @@ jobs:
       # so every separate SDK build keeps Scene3D OFF rather than advertising
       # an incomplete Pulp::render link interface to consumers.
       - name: Prepare SDK build dir (Linux)
+        timeout-minutes: 108
         if: runner.os == 'Linux'
         # Same PULP_REQUIRE_GPU_FOR_SDK gating as the CLI configure above —
         # the SDK lib must contain the Skia path for platforms where it's
@@ -1210,6 +1221,7 @@ jobs:
           fi
 
       - name: Prepare SDK build dir (macOS)
+        timeout-minutes: 68
         if: runner.os == 'macOS'
         env:
           RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
@@ -1462,6 +1474,7 @@ jobs:
           retention-days: 7
 
       - name: Upload SDK artifact
+        timeout-minutes: 15
         uses: actions/upload-artifact@v7.0.2
         with:
           name: pulp-sdk-${{ matrix.platform }}
@@ -1508,11 +1521,12 @@ jobs:
     # than the builder, not a build slot, and on the gate pool it waited
     # 16-29 minutes (p50) for under 1.5 minutes of work.
     runs-on: ${{ fromJSON(needs.resolve-macos-runner.outputs.smoke_map)[matrix.platform] }}
-    timeout-minutes: 360
+    timeout-minutes: 30
     name: Smoke ${{ matrix.platform }}
 
     steps:
       - name: Download CLI artifact for this platform
+        timeout-minutes: 15
         uses: actions/download-artifact@v8
         with:
           name: pulp-${{ matrix.platform }}
@@ -1823,7 +1837,7 @@ jobs:
     name: iOS compile gate — ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
     needs: resolve-macos-runner
     runs-on: ${{ fromJSON(needs.resolve-macos-runner.outputs.map)['darwin-arm64'] }}
-    timeout-minutes: 90
+    timeout-minutes: 76
     env:
       CCACHE_COMPILERCHECK: content
       CCACHE_NODEPEND: "true"
@@ -1840,6 +1854,7 @@ jobs:
         shell: bash
 
       - name: iOS compile gate
+        timeout-minutes: 65
         shell: bash
         run: |
           set -uo pipefail
@@ -1876,6 +1891,7 @@ jobs:
     # An advisory gate must not be able to hold the release hostage.
     needs: [build-cli, smoke-cli, ios-compile-gate]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # ONE release may be in its publish transaction at a time, repo-wide.
     #
     # The latest-pointer decision below is a read-then-write: "am I the greatest
@@ -2027,7 +2043,7 @@ jobs:
 
       - name: Create release
         if: steps.existing.outputs.published != 'true'
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           # Bare tag name (owner: drop the "Pulp CLI" prefix — one product, one
@@ -2077,6 +2093,7 @@ jobs:
       # recovery dispatch is held to the same asset contract as an automatic
       # release rather than publishing straight past the checks.
       - name: Verify assets, generate SHA256SUMS, publish
+        timeout-minutes: 15
         if: steps.existing.outputs.published != 'true'
         env:
           GH_TOKEN: ${{ github.token }}

@@ -5,9 +5,9 @@
 // Only standard C++ types cross it. The Vellum side (knob_panel.cpp) is built
 // into its own shared library against the installed Vellum SDK and nothing
 // from Pulp's tree; the Pulp side (vellum_editor.cpp) sees this header and
-// nothing from Vellum. While Vellum's mirrored units still use `pulp::`
-// namespaces, keeping the two in separate images is what stops one definition
-// from binding to the other.
+// nothing from Vellum. An SDK whose mirrored units are spelled `pulp::` (0.1.10
+// and older) defines the same names as Pulp's own view and canvas; keeping the
+// two in separate images is what stops one definition from binding to the other.
 
 #include <cstdint>
 #include <functional>

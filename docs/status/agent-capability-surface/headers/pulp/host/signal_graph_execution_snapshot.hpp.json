@@ -1,0 +1,9 @@
+{
+  "domain": "host",
+  "source": "core/host/include/pulp/host/signal_graph_execution_snapshot.hpp",
+  "fingerprint": "sha256:fb2d9b56aadf50517075a3d915de0685cb9e08ec0be44b1af10d6288b774fbec",
+  "include": "pulp/host/signal_graph_execution_snapshot.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Pinned graph execution handle; refuses isolated proxies before capture. No additional generator capability."
+}

@@ -305,6 +305,24 @@ def _run_one(
     return result
 
 
+def default_workers(env=None, cpus: int | None = None) -> int:
+    """Worker count drawn from the host build share, never the whole machine.
+
+    PULP_BUILD_JOBS (exported by the tartci lease / host profile and honoured
+    by the pulp CLI and governed-build.sh) wins; otherwise a quarter of the
+    cores, at least 2, so concurrent agent builds on a shared host divide it.
+    """
+    env = os.environ if env is None else env
+    try:
+        share = int(env.get("PULP_BUILD_JOBS", "") or 0)
+    except ValueError:
+        share = 0
+    if share > 0:
+        return share
+    cores = cpus if cpus is not None else (os.cpu_count() or 2)
+    return max(2, cores // 4)
+
+
 def run(
     entries: list[dict[str, Any]],
     *,
@@ -318,7 +336,7 @@ def run(
         for entry in entries
         for name in (entry.get("resource_lock") or [])
     }
-    workers = jobs or max(2, (os.cpu_count() or 2))
+    workers = jobs or default_workers()
     slots = _Slots(workers)
     # Longest first, so a heavy selftest does not start last and set the wall;
     # entries that need every slot go after the rest, as ctest defers them, so
@@ -592,7 +610,8 @@ def wiring_errors(lane_workflow_text: str) -> list[str]:
 
 
 # --------------------------------------------------------------------------
-# diff-scoped selection (local only; the required lane always runs everything)
+# diff-scoped selection (local pre-push use, and the required lane's docs-only
+# impact scope; every other class on the required lane runs everything)
 
 # Changing either of these changes how every entry runs.
 LANE_FILES = ("tools/ci/source_selftests.py", "tools/ci/source_selftests.json")
@@ -721,7 +740,8 @@ def select_for_changes(
     changed, otherwise each entry whose own script changed, that loads a
     changed module through its repo imports, or whose source names a changed
     file. A textual reference is a heuristic that over-selects rather than
-    under-selects; the required lane still runs all.
+    under-selects; the required lane runs all unless the diff is docs-only
+    (``impact_scope``).
     """
     if any(path in lane_files for path in changed):
         return list(entries)
@@ -766,6 +786,99 @@ def select_for_changes(
             if walked and any(path.startswith(tuple(walked)) for path in changed):
                 selected.append(entry)
     return selected
+
+
+# A scan of the whole tree reads files it never names, so the textual and
+# walked-directory rules above cannot see it. For a docs-only diff an entry
+# that scans the tree and mentions documentation at all is selected as well.
+_WHOLE_TREE = re.compile(r"ls-files|rglob\(|os\.walk\(|glob\(")
+_DOCS_TOKEN = re.compile(r"\.md\b|\bdocs\b|\bplanning\b|markdown", re.IGNORECASE)
+
+
+def _entry_text(entry: dict[str, Any], repo: pathlib.Path) -> str:
+    text = ""
+    for src in entry_sources(entry, repo):
+        try:
+            text += src.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            pass
+    return text
+
+
+def select_for_docs_only(
+    entries: list[dict[str, Any]], changed: list[str], repo: pathlib.Path = REPO_ROOT,
+) -> list[dict[str, Any]]:
+    """Entries a documentation-only diff can break.
+
+    ``select_for_changes`` plus every entry that scans the tree and mentions
+    documentation (Markdown, ``docs``, ``planning``). Only
+    sound for a diff ``classify_changes.impact_class`` calls docs-only: such a
+    diff changes no script, module or build input, so an entry can observe it
+    only by reading a changed file, and reading needs a name, a walked
+    directory or a whole-tree scan.
+    """
+    picked = {e["name"] for e in select_for_changes(entries, changed, repo)}
+    selected = []
+    for entry in entries:
+        if entry["name"] in picked:
+            selected.append(entry)
+            continue
+        if any(_scans_docs(src) for src in entry_sources(entry, repo)):
+            selected.append(entry)
+    return selected
+
+
+def _scans_docs(path: pathlib.Path) -> bool:
+    """One executed source both scans the tree and mentions documentation."""
+    if path.suffix not in (".py", ".sh", ".mjs", ".js", ""):
+        return False
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return True
+    return bool(_WHOLE_TREE.search(text) and _DOCS_TOKEN.search(text))
+
+
+def _load_classifier(repo: pathlib.Path = REPO_ROOT):
+    import importlib.util
+    path = repo / "tools" / "scripts" / "classify_changes.py"
+    spec = importlib.util.spec_from_file_location("classify_changes", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def diff_names(base: str, repo: pathlib.Path = REPO_ROOT) -> list[str] | None:
+    """Files changed between the exact ``base`` commit and HEAD; None on error."""
+    proc = subprocess.run(
+        ["git", "diff", "--no-renames", "--name-only", base, "HEAD"],
+        cwd=repo, capture_output=True, text=True, encoding="utf-8", check=False,
+    )
+    if proc.returncode != 0:
+        return None
+    return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+
+
+def impact_scope(
+    entries: list[dict[str, Any]], base: str, repo: pathlib.Path = REPO_ROOT,
+    files: list[str] | None = None,
+) -> tuple[list[dict[str, Any]], str]:
+    """Narrow ``entries`` for a docs-only diff against ``base``; else keep all.
+
+    Fail-closed: an unreadable diff, a classifier error, or any class other
+    than docs-only keeps every entry. Returns (entries, impact class).
+    """
+    try:
+        if files is None:
+            files = diff_names(base, repo)
+        change_class = _load_classifier(repo).impact_class(files)
+        if change_class != "docs-only":
+            return list(entries), change_class
+        return select_for_docs_only(entries, files, repo), change_class
+    except Exception as exc:  # noqa: BLE001 - any doubt runs everything
+        print(f"source-selftests: impact scope unavailable ({exc}); every entry runs",
+              flush=True)
+        return list(entries), "code:unknown"
 
 
 # --------------------------------------------------------------------------
@@ -1526,7 +1639,15 @@ def main(argv: list[str] | None = None) -> int:
         "--changed-from",
         metavar="BASE",
         help="run only entries a diff against BASE can plausibly break (local "
-        "pre-push use; the required lane runs every entry)",
+        "pre-push use; the required lane uses --impact-scope)",
+    )
+    p_run.add_argument(
+        "--impact-scope",
+        metavar="BASE",
+        help="when the diff from the exact BASE commit to HEAD is docs-only "
+        "(tools/scripts/classify_changes.py impact_class), run only the entries "
+        "that diff can reach; any other class runs every entry. Composes with "
+        "--part/--shard",
     )
     p_check = sub.add_parser("check", help="verify manifest, labels and wiring")
     p_check.add_argument("--manifest", type=pathlib.Path, default=MANIFEST)
@@ -1585,6 +1706,8 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 1
+        if args.impact_scope and (args.workflow or args.ctest_python or args.changed_from):
+            parser.error("--impact-scope selects from the manifest; it takes no other selector")
         if args.part != "all" or args.shard:
             if args.workflow or args.ctest_python or args.changed_from:
                 parser.error("--part/--shard split the manifest; they take no other selector")
@@ -1600,6 +1723,15 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"source-selftests: lane part {label} is empty; the split no longer "
                       "matches the workflow", file=sys.stderr)
                 return 1
+        if args.impact_scope:
+            total = len(entries)
+            entries, change_class = impact_scope(entries, args.impact_scope)
+            print(f"source-selftests: impact class {change_class} against "
+                  f"{args.impact_scope}: {len(entries)} of {total} entries run", flush=True)
+            if not entries:
+                print("source-selftests: no entry can read a file this docs-only diff "
+                      "changes; main pushes and the nightly run every entry", flush=True)
+                return 0
         if args.workflow or args.ctest_python:
             for entry in [e for e in entries if e["name"] in WORKFLOW_LOCAL_SKIPS]:
                 entries.remove(entry)

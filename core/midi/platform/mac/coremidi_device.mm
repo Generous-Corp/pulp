@@ -1,4 +1,5 @@
 #include <pulp/midi/device.hpp>
+#include <pulp/midi/sysex_send_gate.hpp>
 #include <pulp/midi/ump.hpp>
 #include <pulp/midi/ump_conversion.hpp>
 #include <pulp/midi/ump_sysex7_reassembler.hpp>
@@ -11,8 +12,13 @@
 #endif
 #include <dispatch/dispatch.h>
 
+#include <atomic>
+#include <charconv>
+#include <cstdint>
 #include <memory>
+#include <string>
 #include <mutex>
+#include <vector>
 
 #include "coremidi_shared_client.h"
 
@@ -40,6 +46,63 @@ double host_ticks_to_seconds(MIDITimeStamp ticks) {
                                static_cast<long double>(timebase.numer) /
                                static_cast<long double>(timebase.denom) /
                                1.0e9L);
+}
+
+// Strict decimal SInt32: optional leading '-', digits only, whole string
+// consumed, value in range. "12abc", " 12", "12 " and 2147483648 all fail.
+bool parse_endpoint_id(const std::string& text, SInt32& out) {
+    if (text.empty())
+        return false;
+    const char* first = text.data();
+    const char* last = first + text.size();
+    long long value = 0;
+    const auto result = std::from_chars(first, last, value);
+    if (result.ec != std::errc() || result.ptr != last)
+        return false;
+    if (value < INT32_MIN || value > INT32_MAX)
+        return false;
+    out = static_cast<SInt32>(value);
+    return true;
+}
+
+std::string cf_string_property(MIDIObjectRef object, CFStringRef property) {
+    CFStringRef value = nullptr;
+    std::string out;
+    if (MIDIObjectGetStringProperty(object, property, &value) == noErr && value) {
+        char buf[256];
+        if (CFStringGetCString(value, buf, sizeof(buf), kCFStringEncodingUTF8))
+            out = buf;
+        CFRelease(value);
+    }
+    return out;
+}
+
+// Fills every identity field of a MidiPortInfo from an endpoint. A virtual
+// endpoint has no entity, so its device and entity names stay empty.
+MidiPortInfo describe_endpoint(MIDIEndpointRef endpoint, bool is_input) {
+    MidiPortInfo info;
+    SInt32 unique_id = 0;
+    MIDIObjectGetIntegerProperty(endpoint, kMIDIPropertyUniqueID, &unique_id);
+    info.id = std::to_string(unique_id);
+    info.name = cf_string_property(endpoint, kMIDIPropertyDisplayName);
+    info.endpoint_name = cf_string_property(endpoint, kMIDIPropertyName);
+
+    MIDIEntityRef entity = 0;
+    if (MIDIEndpointGetEntity(endpoint, &entity) == noErr && entity != 0) {
+        info.entity_name = cf_string_property(entity, kMIDIPropertyName);
+        MIDIDeviceRef device = 0;
+        if (MIDIEntityGetDevice(entity, &device) == noErr && device != 0)
+            info.device_name = cf_string_property(device, kMIDIPropertyName);
+    }
+    if (!info.device_name.empty())
+        info.stable_key = info.device_name + "|" + info.entity_name + "|" + info.endpoint_name;
+
+    SInt32 offline = 0;
+    if (MIDIObjectGetIntegerProperty(endpoint, kMIDIPropertyOffline, &offline) == noErr)
+        info.online = (offline == 0);
+    info.is_input = is_input;
+    info.is_output = !is_input;
+    return info;
 }
 
 // True while `endpoint` is still the live object registered under
@@ -185,9 +248,7 @@ public:
         }
 
         SInt32 source_id = 0;
-        try {
-            source_id = static_cast<SInt32>(std::stol(port_id));
-        } catch (...) {
+        if (!parse_endpoint_id(port_id, source_id)) {
             close();
             return false;
         }
@@ -276,9 +337,7 @@ public:
                 dest_ = MIDIGetDestination(0);
             } else {
                 SInt32 target_id = 0;
-                try {
-                    target_id = static_cast<SInt32>(std::stol(port_id));
-                } catch (...) {
+                if (!parse_endpoint_id(port_id, target_id)) {
                     close();
                     return false;
                 }
@@ -317,6 +376,34 @@ public:
         return is_open_ && endpoint_is_current(dest_, dest_unique_id_);
     }
 
+    // MIDISendSysex hands the message to CoreMIDI asynchronously and reads the
+    // bytes until its completion proc runs, so the request and its copy of the
+    // data live on the heap and the completion proc frees them. The in-flight
+    // count is shared with each job so it outlives this port.
+    bool send_sysex(std::span<const std::uint8_t> bytes) override {
+        if (!is_open_ || !dest_ || !endpoint_is_current(dest_, dest_unique_id_))
+            return false;
+        if (!is_valid_sysex_message(bytes))
+            return false;
+        if (!gate_->try_acquire())
+            return false;
+        auto* job = new SysexJob;
+        job->data.assign(bytes.begin(), bytes.end());
+        job->gate = gate_;
+        job->request.destination = dest_;
+        job->request.data = job->data.data();
+        job->request.bytesToSend = static_cast<UInt32>(job->data.size());
+        job->request.complete = false;
+        job->request.completionProc = &CoreMidiOutput::sysex_done;
+        job->request.completionRefCon = job;
+        if (MIDISendSysex(&job->request) != noErr) {
+            gate_->release();
+            delete job;
+            return false;
+        }
+        return true;
+    }
+
     void send(const MidiEvent& event) override {
         if (!is_open_ || !dest_ || !endpoint_is_current(dest_, dest_unique_id_))
             return;
@@ -335,11 +422,27 @@ public:
         MIDISendEventList(port_, dest_, &list);
     }
 
-private:
+  private:
+    // More than this many messages waiting in CoreMIDI is a runaway caller.
+    static constexpr int kMaxSysexInFlight = 16;
+
+    struct SysexJob {
+        MIDISysexSendRequest request{};
+        std::vector<std::uint8_t> data;
+        std::shared_ptr<SysexSendGate> gate;
+    };
+
+    static void sysex_done(MIDISysexSendRequest* request) {
+        auto* job = static_cast<SysexJob*>(request->completionRefCon);
+        job->gate->release();
+        delete job;
+    }
+
     MIDIPortRef port_ = 0;
     MIDIEndpointRef dest_ = 0;
     SInt32 dest_unique_id_ = 0;
     bool is_open_ = false;
+    std::shared_ptr<SysexSendGate> gate_ = std::make_shared<SysexSendGate>(kMaxSysexInFlight);
 };
 
 class CoreMidiSystem : public MidiSystem {
@@ -389,22 +492,7 @@ class CoreMidiSystem : public MidiSystem {
         std::vector<MidiPortInfo> ports;
         ItemCount count = MIDIGetNumberOfSources();
         for (ItemCount i = 0; i < count; ++i) {
-            MIDIEndpointRef src = MIDIGetSource(i);
-            MidiPortInfo info;
-
-            SInt32 unique_id = 0;
-            MIDIObjectGetIntegerProperty(src, kMIDIPropertyUniqueID, &unique_id);
-            info.id = std::to_string(unique_id);
-
-            CFStringRef name = nullptr;
-            MIDIObjectGetStringProperty(src, kMIDIPropertyDisplayName, &name);
-            if (name) {
-                char buf[256];
-                CFStringGetCString(name, buf, sizeof(buf), kCFStringEncodingUTF8);
-                info.name = buf;
-                CFRelease(name);
-            }
-            info.is_input = true;
+            MidiPortInfo info = describe_endpoint(MIDIGetSource(i), true);
             ports.push_back(std::move(info));
         }
         return ports;
@@ -414,22 +502,7 @@ class CoreMidiSystem : public MidiSystem {
         std::vector<MidiPortInfo> ports;
         ItemCount count = MIDIGetNumberOfDestinations();
         for (ItemCount i = 0; i < count; ++i) {
-            MIDIEndpointRef dest = MIDIGetDestination(i);
-            MidiPortInfo info;
-
-            SInt32 unique_id = 0;
-            MIDIObjectGetIntegerProperty(dest, kMIDIPropertyUniqueID, &unique_id);
-            info.id = std::to_string(unique_id);
-
-            CFStringRef name = nullptr;
-            MIDIObjectGetStringProperty(dest, kMIDIPropertyDisplayName, &name);
-            if (name) {
-                char buf[256];
-                CFStringGetCString(name, buf, sizeof(buf), kCFStringEncodingUTF8);
-                info.name = buf;
-                CFRelease(name);
-            }
-            info.is_output = true;
+            MidiPortInfo info = describe_endpoint(MIDIGetDestination(i), false);
             ports.push_back(std::move(info));
         }
         return ports;
