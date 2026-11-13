@@ -169,7 +169,9 @@ def host_identity_class() -> dict[str, Any]:
 
 def read_load() -> tuple[list[float], int]:
     try:
-        load = [round(value, 2) for value in os.getloadavg()]
+        # Keep full precision: admission compares this exact value with the
+        # limit, so rounding could admit a load just above the threshold.
+        load = [float(value) for value in os.getloadavg()]
     except (AttributeError, OSError):
         load = []
     return load, os.cpu_count() or 0

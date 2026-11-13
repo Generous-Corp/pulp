@@ -231,6 +231,18 @@ class AdmissionTest(unittest.TestCase):
         self.assertFalse(matrix.admission_verdict([2.01, 0, 0], 8, 0.25)["admitted"])
         self.assertEqual(matrix.admission_verdict([], 8, 0.25)["verdict"], "unknown")
 
+    def test_read_load_keeps_full_precision_at_the_boundary(self):
+        # 7.004 on 28 CPUs exceeds the 0.25 x 28 = 7.0 limit; a rounded sample
+        # (7.0) would be admitted.
+        from unittest import mock
+        with mock.patch.object(matrix.os, "getloadavg", return_value=(7.004, 1.0, 1.0)), \
+                mock.patch.object(matrix.os, "cpu_count", return_value=28):
+            load, ncpu = matrix.read_load()
+        self.assertEqual(load[0], 7.004)
+        verdict = matrix.admission_verdict(load, ncpu, 0.25)
+        self.assertFalse(verdict["admitted"])
+        self.assertEqual(verdict["verdict"], "refuse")
+
     def test_short_mode_flags_but_still_runs_on_loaded_host(self):
         with tempfile.TemporaryDirectory() as tmp:
             receipt, code = record(Path(tmp), load_reader=LOADED)
