@@ -716,6 +716,11 @@ void deliver_mouse_cancel(View& root, View* target, Point root_pt,
                              PointerTerminalKind::cancel);
 }
 
+ComboBox* enabled_open_popup_in(View& root) {
+    auto* combo = ComboBox::active_popup_in(root);
+    return combo && combo->effectively_enabled() ? combo : nullptr;
+}
+
 void deliver_mouse_wheel(View& root, Point root_pt,
                          float scroll_delta_x, float scroll_delta_y,
                          const WheelHost& host) {
@@ -736,7 +741,7 @@ void deliver_mouse_wheel(View& root, Point root_pt,
     // THIS root's popup, never the process-wide mirror: a second editor in the
     // same host process must not eat this one's wheel just because it opened a
     // dropdown whose rect happens to overlap the pointer.
-    if (auto* combo = ComboBox::active_popup_in(root); combo && combo->effectively_enabled()) {
+    if (auto* combo = enabled_open_popup_in(root)) {
         float ddx = 0, ddy = 0, ddw = 0, ddh = 0;
         if (combo->dropdown_window_rect(ddx, ddy, ddw, ddh) &&
             root_pt.x >= ddx && root_pt.x <= ddx + ddw &&

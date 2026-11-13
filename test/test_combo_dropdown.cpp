@@ -1109,3 +1109,14 @@ TEST_CASE("ComboBox: a disabled open dropdown takes no routed wheel", "[combo]")
     disabled.combo->set_enabled(false);
     REQUIRE(disabled.selected_after_wheel() == 0);
 }
+
+// The hosts route press, wheel and hover to an open dropdown ahead of hit
+// testing through this lookup, so a disabled combo has to disappear from it.
+TEST_CASE("ComboBox: hosts find an open dropdown only while its combo is enabled", "[combo]") {
+    OpenCombo open;
+    REQUIRE(enabled_open_popup_in(*open.root) == open.combo);
+
+    open.combo->set_enabled(false);
+    REQUIRE(ComboBox::active_popup_in(*open.root) == open.combo); // control: still open
+    REQUIRE(enabled_open_popup_in(*open.root) == nullptr);
+}
