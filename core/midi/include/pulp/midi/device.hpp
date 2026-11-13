@@ -12,16 +12,17 @@ namespace pulp::midi {
 ///
 /// Identity contract (CoreMIDI; other backends fill what they have):
 ///  - `id` is the key to pass back to `open()`. On CoreMIDI it is the
-///    decimal `kMIDIPropertyUniqueID` of the endpoint, which the system
-///    assigns when the endpoint is created and keeps. Two `MidiSystem`
-///    instances, and two processes, report the same `id` for the same
-///    endpoint. Across restart, reboot and replug of the same device CoreMIDI
-///    keeps the id; it can change when a driver is reinstalled, when the
-///    system treats a device moved to another USB port as new, or when
-///    identical devices swap. Treat it as a strong hint, not a guarantee.
+///    decimal `kMIDIPropertyUniqueID` of the endpoint. CoreMIDI documents
+///    unique IDs as persistent for an endpoint, and says they can change
+///    when a driver is reinstalled or a device is treated as new. Measured
+///    here: two `MidiSystem` instances, and two processes, report the same
+///    `id` for the same endpoint. Not measured here: reboot, replug and
+///    moving a device to another USB port.
 ///  - `stable_key` is a second form built from names (`device|entity|endpoint`).
-///    It survives a changed `id` but is ambiguous when two identical devices
-///    are attached. Use `resolve_port()` to combine both.
+///    It can match after an `id` change but is ambiguous when two identical
+///    devices are attached. `resolve_port()` uses it only when exactly one
+///    port carries it. This fallback is a Pulp policy, not a documented
+///    CoreMIDI guarantee and not a copy of any other host's behaviour.
 ///  - Virtual endpoints (IAC bus, other apps' ports) have an `id` like any
 ///    other port and an empty `device_name`; their `id` lives as long as the
 ///    creating process keeps the endpoint, and may be reassigned if it
