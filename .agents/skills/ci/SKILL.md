@@ -2383,6 +2383,17 @@ is in `gates.sh` only). So adding a gate to one adds it to neither the other nor
 the push path. **Wire a new local gate into both files, and check the other list
 rather than assuming it inherits.**
 
+The f-string floor (`python_floor_syntax_check.py`) and the worker-thread
+assertion check (`thread_assert_check.py`) were in `gates.sh` only, and each
+reddened a required check on a PR head that skipped `gates.sh`. The hook now
+runs both with `--changed-from <base>` (only the files the pushed commit
+changed, read from the commit), and its agent skip floor keeps them blocking
+when an agent (`SHIPYARD_AGENT_ID` set) pushes with `PULP_SKIP_PREPUSH=1` or
+`PULP_DISABLE_PREPUSH_GATES=1`. Diff scope is deliberate: a whole-tree check in
+the agent floor would block every agent push the moment `main` itself went red
+on it. `git push --no-verify` still skips everything; CI is the only backstop
+for that.
+
 The sequencer registries are wired into both:
 
 - **`sequencer_exposure_check.py`** — the cross-surface exposure ledger at
