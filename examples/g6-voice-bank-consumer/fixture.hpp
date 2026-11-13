@@ -291,6 +291,26 @@ std::unique_ptr<VoiceBankBinding> make_a1_bank(const a1::Case& fixture,
                                      48000, 256, status);
 }
 
+// VoiceBankBinding has no parameter getter, so the consumer keeps the value
+// copy it persists. Only declared per-slot parameter values are captured;
+// notes, generations, pedals, epochs and release tails are not state.
+VoiceBankState capture_levels(const VoiceBankBinding& bank, const std::array<float, 8>& levels) {
+    VoiceBankState state;
+    state.manifest_sha256 = bank.manifest().sha256;
+    for (std::uint32_t slot = 0; slot < levels.size(); ++slot)
+        state.parameters.push_back({slot, {"voice"}, "level", levels[slot]});
+    return state;
+}
+
+// Replays restored values onto a freshly prepared bank. A refused value means
+// the caller must discard that bank; the published bank is never edited.
+bool reapply_state(VoiceBankBinding& bank, const VoiceBankState& state) {
+    for (const auto& value : state.parameters)
+        if (!bank.set_slot_parameter(value.slot_ordinal, value.target, value.value))
+            return false;
+    return true;
+}
+
 HostEventRecord event(std::uint64_t epoch, std::uint64_t sample, std::uint64_t sequence,
                       midi::MidiEvent message) {
     HostEventRecord result;

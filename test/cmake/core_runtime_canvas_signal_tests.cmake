@@ -215,6 +215,11 @@ pulp_add_test_suite(pulp-test-code-editor-tokenizer GROUP pulp-test-group-core-v
 pulp_add_test_suite(pulp-test-properties GROUP pulp-test-group-core-state
     SOURCES test_properties_file.cpp LIBRARIES pulp::state pulp::runtime)
 
+# XmlPropertiesFile: canonical bytes, tolerant reads, fail-closed loads,
+# atomic save and no-change-no-write.
+pulp_add_test_suite(pulp-test-xml-properties-file GROUP pulp-test-group-core-state
+    SOURCES test_xml_properties_file.cpp LIBRARIES pulp::state pulp::runtime)
+
 # AudioDeviceManager persistence + MIDI hub.
 pulp_add_test_suite(pulp-test-audio-device-manager
     SOURCES test_audio_device_manager.cpp harness/rt_allocation_probe.cpp

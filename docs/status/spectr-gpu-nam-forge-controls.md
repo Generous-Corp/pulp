@@ -34,7 +34,7 @@ fallback case. A passing receipt still does not register Forge automatically:
 the public neural adapter and installed-SDK/host acceptance proof must be
 reviewed first.
 
-The 2026-10-02 local probe found no `/Users/danielraffel/.pulp/magenta` or
+The 2026-10-02 local probe found no `~/.pulp/magenta` or
 `models` directory and no `.mlxfn`, `.safetensors`, `.ckpt`, `.tflite`, or
 `.onnx` artifact under the checked Pulp/Code roots. The `mrt2.mlxfn` and
 `mrt2_state.safetensors` strings in `test/test_model_download.cpp` are generated
