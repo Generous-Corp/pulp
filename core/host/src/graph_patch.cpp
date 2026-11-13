@@ -158,7 +158,8 @@ PortHandle resolve_port(const SignalGraph& graph, NodeId id, const std::string& 
         const std::string side = output ? "output" : "input";
         refuse(Code::UnknownPort,
                "ambiguous port: node '" + node_name + "' has " + std::to_string(available.size()) +
-                   " " + side + " ports and a chain hop infers a port only when the node has exactly one " +
+                   " " + side +
+                   " ports and a chain hop infers a port only when the node has exactly one " +
                    side,
                "write the port explicitly, e.g. " + node_name + "." + available.front().name +
                    (output ? " >> next.audio" : " as the destination") + "; use one of: " + choices,
