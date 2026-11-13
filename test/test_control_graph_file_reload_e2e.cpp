@@ -589,6 +589,7 @@ static void require_watch_signal_cleanup(bool during_shellout) {
                     std::this_thread::sleep_for(20ms);
                 }
             });
+            // unbounded-wait: allow options.timeout_ms (150 s) bounds this child process
             const auto result = watch.wait();
             const auto returned_at = std::chrono::steady_clock::now();
             finished.store(true, std::memory_order_relaxed);
@@ -620,6 +621,7 @@ static void require_watch_signal_cleanup(bool during_shellout) {
         }
     }
     unrelated.cancel();
+    // unbounded-wait: allow cancel() has already terminated and reaped this process group
     (void)unrelated.wait();
 #else
     (void)during_shellout;
