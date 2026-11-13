@@ -542,7 +542,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     };
     // Begin a transactional topology edit that MAY publish with no silence. Between
     // begin_swap_edit() and prepare_swap()/abort_swap_edit(), the CALLING thread's graph mutations
-    // (connect/disconnect/gain/add/remove) do NOT invalidate the live snapshot — it keeps playing
+    // (connect/disconnect/gain/add/remove) do NOT invalidate the live snapshot; it keeps playing
     // the old compiled graph until prepare_swap atomically publishes the new one. A mutation from
     // any OTHER thread, or a lifecycle/limits/registry mutation from any thread, cancels the
     // no-silence attempt (the live snapshot is invalidated as usual). Single-owner: nesting is
@@ -576,7 +576,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // plugin that opts into live swap must make save_state()/get_parameter() safe to call
     // concurrently with process() (they are read-only snapshots for most plugins). Parameter
     // capture goes through the cached contract + atomic get_parameter; full-state capture is
-    // best-effort — a plugin whose getState is strictly main-thread-only may capture a torn
+    // best-effort: a plugin whose getState is strictly main-thread-only may capture a torn
     // state, so keep it concurrency-tolerant or rely on parameter re-sync alone.
     SwapResult stage_plugin_replacement(NodeId id, PluginCatalogToken token);
     // (node, terminal, replacement): publish an unprepared proxy with the same descriptor and SHA
