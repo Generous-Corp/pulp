@@ -176,6 +176,10 @@ std::unique_ptr<GlSurface::Impl> make_windowed_gl_impl(const GlSurfaceOptions&) 
     return nullptr;
 }
 
+std::string windowed_gl_class_name() {
+    return {};
+}
+
 std::unique_ptr<GlSurface::Impl> make_offscreen_gl_impl(std::uint32_t width, std::uint32_t height,
                                                         const GlSurfaceOptions& options) {
     auto impl = std::make_unique<OffscreenCgl>();

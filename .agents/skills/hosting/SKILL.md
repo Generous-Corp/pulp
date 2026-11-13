@@ -172,6 +172,14 @@ accessor that traverses the prepared `CompiledGraph` while `prepare()` or
 Keep concurrent lifecycle tests on a fixed authored topology; racing graph
 authoring against preparation tests a separate mutation contract.
 
+A live spectral controller publishes into `spectral_slots_`, not
+`live_slot_`, so `live_slot_` is empty while it renders. Do not treat an empty
+legacy slot as "nothing to protect". Every new authoring entry that reaches
+`invalidate_live_locked_()` must call `refuse_spectral_mutation_()` under the
+mutation lock first. Otherwise it bumps the authoring generation and zeroes
+the reported latency under the running controller. `connect_graph_event` once
+missed this; `[spectral-graph-event-refusal]` covers it.
+
 ## CLAP reference backend
 
 `plugin_slot_clap.cpp` is the simplest backend to study for dlopen,
@@ -3199,6 +3207,12 @@ append named `midi` ports without changing audio counts; named connect must set
 the MIDI edge flag. Keep strict patch validation additive: the legacy serializer
 may drop bad edges, while strict validation must check every original edge.
 Opaque state and richer edge kinds need explicit contracts before formatting.
+Diagnostics must name the real reason and the fix. The default catalog lists
+`pulp/gain`'s `gain` as a node setting, which `name = value` sets but `~>`
+cannot automate (it is not a Processor parameter); a chain hop infers a port
+only when the node has exactly one output, so stereo built-ins need explicit
+`node.audio` and `node.out1` ports. User-facing walkthroughs live in
+`docs/guides/graph-first-steps.md` and `docs/guides/graph-notation-cookbook.md`.
 
 ### Vendored lilv/zix on Android
 

@@ -6,6 +6,7 @@
 #include <iterator>
 #include <pulp/host/graph_patch.hpp>
 #include <pulp/host/offline_signal_graph_host.hpp>
+#include <pulp/host/spectral_graph.hpp>
 
 using namespace pulp::host;
 using Code = GraphPatchDiagnostic::Code;
@@ -121,6 +122,35 @@ TEST_CASE("Notation refuses wrong ports kinds cycles and parameter ranges",
             REQUIRE(result.diagnostic.message().find(bad.fix) != std::string::npos);
         }
     }
+}
+TEST_CASE("Notation explains built-in gain automation and chain port inference",
+          "[host][patch][controls]") {
+    GraphPatchCatalog c;
+    register_patch_gain(c);
+    const auto gain_route = parse_graph_patch("# flow 1\n"
+                                              "input : pulp/audio_in\n"
+                                              "g : pulp/gain\n"
+                                              "input.audio ~> g.gain @ 0.5\n",
+                                              c);
+    REQUIRE_FALSE(gain_route);
+    REQUIRE(gain_route.diagnostic.code == Code::UnknownPort);
+    REQUIRE(gain_route.diagnostic.rule ==
+            "built-in pulp/gain exposes 'gain' as a node setting, not an automatable parameter");
+    REQUIRE(gain_route.diagnostic.suggested_fix ==
+            "set it with g.gain = <value>, or automate a registered Processor parameter");
+
+    const auto chain = parse_graph_patch("# flow 1\n"
+                                         "input : pulp/audio_in\n"
+                                         "voice : \"com.example.PatchGain\"\n"
+                                         "out : pulp/audio_out\n"
+                                         "input.audio >> voice.audio >> out.audio\n",
+                                         c);
+    REQUIRE_FALSE(chain);
+    REQUIRE(chain.diagnostic.rule ==
+            "ambiguous port: node 'voice' has 2 output ports and a chain hop infers a port only "
+            "when the node has exactly one output");
+    REQUIRE(chain.diagnostic.suggested_fix ==
+            "write the port explicitly, e.g. voice.audio >> next.audio; use one of: audio, midi");
 }
 TEST_CASE("Strict JSON never certifies connections the legacy loader drops",
           "[host][patch][strict]") {
@@ -299,4 +329,45 @@ TEST_CASE("Formatting refuses unrepresentable node scalars and shapes", "[host][
     nodes.addArrayElement(node);
     json.setMember("nodes", nodes);
     REQUIRE_FALSE(load_graph_patch_json(choc::json::toString(json)));
+}
+
+TEST_CASE("Spectral nodes and frame edges are explicit notation refusals",
+          "[host][patch][strict][spectral-notation]") {
+    const auto identity = *SpectralIdentity::make(256, 64, 1, 48000).value;
+    SignalGraph spectral;
+    const auto analysis = *spectral.add_spectral_analysis(identity, "analysis").value;
+    const auto synthesis = *spectral.add_spectral_synthesis(identity, "synthesis").value;
+    REQUIRE(spectral.connect(analysis.frames, synthesis.frames));
+    const auto formatted = format_graph_patch(spectral);
+    REQUIRE_FALSE(formatted);
+    REQUIRE(formatted.diagnostic.code == Code::UnsupportedContract);
+    REQUIRE(formatted.diagnostic.rule.find("spectral") != std::string::npos);
+
+    SignalGraph gains;
+    const auto a = gains.add_gain_node("a");
+    const auto b = gains.add_gain_node("b");
+    REQUIRE(gains.connect(a, 0, b, 0));
+    const auto ordinary = GraphSerializer::to_json(gains);
+    REQUIRE(load_graph_patch_json(ordinary));
+
+    auto typed = choc::json::parse(ordinary);
+    auto node = choc::value::Value(typed["nodes"][0]);
+    node.setMember("type", "spectral_analysis");
+    auto nodes = choc::value::createEmptyArray();
+    nodes.addArrayElement(node);
+    nodes.addArrayElement(typed["nodes"][1]);
+    typed.setMember("nodes", nodes);
+    const auto typed_result = load_graph_patch_json(choc::json::toString(typed));
+    REQUIRE_FALSE(typed_result);
+    REQUIRE(typed_result.diagnostic.code == Code::UnsupportedContract);
+
+    auto edged = choc::json::parse(ordinary);
+    auto edge = choc::value::Value(edged["connections"][0]);
+    edge.setMember("spectral", true);
+    auto edges = choc::value::createEmptyArray();
+    edges.addArrayElement(edge);
+    edged.setMember("connections", edges);
+    const auto edge_result = load_graph_patch_json(choc::json::toString(edged));
+    REQUIRE_FALSE(edge_result);
+    REQUIRE(edge_result.diagnostic.code == Code::UnsupportedContract);
 }
