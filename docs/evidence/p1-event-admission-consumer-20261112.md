@@ -7,8 +7,9 @@ The source fixture is an installed-SDK consumer at
 through public seams across at least two blocks and two partition schedules:
 MIDI host ingress, the graph-authored event lane for triggers, the parameter
 mailbox into a `PluginSlot` node, and voice intent through the installed
-`VoiceBankBinding`. Each family runs in its own graph or binding. No runtime
-API or queue is added.
+`VoiceBankBinding`. A combined control also drives all four families through
+one test-owned epoch and absolute sample origin on the same block boundaries.
+No runtime API or queue is added.
 
 The gate remains `NOT_QUALIFIED`: the admission-contract rows listed under
 "Remaining rows" below are `NOT_CHECKED`, and the runtime, provider parity,
@@ -158,25 +159,145 @@ against the same installed SDK, and restored with `git checkout`:
 | voice note-off moved past the release checkpoint | `FAIL rule=voice-bank-release-intent` |
 | retired-generation record replaced by the live generation | `FAIL rule=voice-bank-stale-generation-refusal` |
 
-### Remaining rows
+## Combined epoch and sequence-mutation controls — 2026-11-13
 
-The gate stays **NOT_QUALIFIED**. These admission-contract rows are
-`NOT_CHECKED` by this fixture:
+The fixture now drives all four families through one test-owned epoch
+(`kCombinedEpoch = 7`) and one absolute sample origin, on the same block
+boundaries, in one control loop over 256 samples. Source commit
+`59fff62c0d355677bd5f44c87535988db87730d8`, built from the same clean Release
+source install of `4c69e183387017c47d048b477218a6d0a4947bcc`.
 
-* one shared epoch and absolute sample origin coordinating all four families
-  in a single consumer projection; each family runs in its own graph or
-  binding;
-* MIDI/UMP/MPE projection through `SignalGraph::inject_midi` inside this
-  fixture (the G-5 consumer covers it separately);
+Per block, in this order:
+
+* **MIDI.** A control-side `HostEventIngress<32>` stages eight absolute
+  note-on records in block 0 (including two producers at sample 2), projects
+  the block window, converts each absolute sample to a block-relative
+  `sample_offset`, and calls `SignalGraph::inject_midi` on a MIDI input node.
+  That node is joined with `connect_midi` to the graph-authored lane consumer,
+  which reads `CustomNodeEventBlock::in`. A stale test epoch is refused with
+  `StaleEpoch`. This closes the `inject_midi` row for MIDI 1.0 note events; the
+  UMP and MPE expression sidecars are not exercised here.
+* **Parameter.** Absolute parameter records are converted to block-relative
+  offsets in a `ParameterEventQueue` and injected with
+  `inject_parameter_events` into a `PluginSlot` node in the same graph,
+  including two records at the same sample in push order.
+* **Trigger.** A `CustomNodeType` producer in the same graph emits each
+  trigger with `GraphEventWriter::emit_at` three samples before its absolute
+  target. Small blocks stage the record as bounded-future; large blocks deliver
+  it in the producer's own block. Every delivery lands in the consumer block
+  whose window contains its sample.
+* **Voice intent.** Note-on and note-off records are published to a
+  `VoiceBankBinding` (`MpeVoiceBankOwner`, release held past the run) with the
+  same `begin_block`/`render` boundaries. Slot and generation are read after
+  each render, the release keeps the note-on's slot and generation, rendered
+  audio places each intent at its absolute sample, and a generation from
+  another slot is refused with `StaleGeneration`. The binding renders its own
+  prepared graph on the shared block grid; it is not a node of the
+  `SignalGraph`.
+
+The runtime has no shared epoch, so the adapter maps each native epoch to the
+test epoch and requires it to stay constant: MIDI ingress uses the test epoch
+directly, the graph-authored lane reports epoch 1, the voice bank reports
+epoch 1, and the block-relative parameter mailbox has no epoch (recorded as 0).
+
+The canonical trace is the list of (family, test epoch, absolute sample, order
+key) records stably sorted by absolute sample and family, so records of one
+family keep their delivery order. It is identical, together with the voice
+audio and the native epoch map, across five schedules: 256 blocks of 1, 8 of
+32, 4 of 64, 127+127+2, and 3+61+1+127+64. The 27 records and the per-family
+FNV-1a digests are in
+[combined-trace.jsonl](p1-event-admission-consumer-20261112/combined-trace.jsonl)
+(`80d08295b8321e279f8ec04914edc9d42866bf3ee6edb621fecdde86125bff92`), written
+by `pulp-p1-event-admission-consumer --trace <path>`.
+
+**Sequence mutation.** In the same binary, five planted negatives run against
+the canonical trace. For each family, adding one to a single record's order key
+(MIDI producer sequence, parameter push index, trigger lane sequence, voice
+generation) changes that family's digest, leaves the other three digests
+identical, and a record-by-record diff names only that record. Swapping the two
+equal-sample MIDI records changes only the MIDI digest, and the diff names only
+those two records. The mutated digests are recorded in the trace file and the
+receipt.
+
+**Callback observation.** The graph-lane, reset and combined consumers and
+the `PluginSlot` probe now record into preallocated fixed arrays with a count
+and an overflow flag, which is asserted after rendering; no container grows in
+those callbacks. The block loop calls only `inject_midi`,
+`inject_parameter_events`, `process`, and the voice bank's
+`begin_block`/`publish`/`render`; it makes no topology call. This is a
+construction property of the fixture, not an allocation or realtime proof of
+the runtime or of `VoiceBankBinding::render`.
+
+The installed `graph_event_contract.hpp`, `voice_bank_binding.hpp`,
+`custom_node_type.hpp`, `custom_node_events.hpp`, `plugin_slot.hpp`,
+`parameter_event_queue.hpp`, `trigger_graph.hpp`,
+`signal_graph_execution_snapshot.hpp`, `midi/buffer.hpp`, and
+`midi/message.hpp` are byte-identical to `origin/main`
+`d486ff70c6b02c59acdeac504af747724d1fb906`. `signal_graph_runtime.hpp`
+differs only in the `inject_parameter_events` comment: `origin/main` adds
+`a91f5681944c`, which refuses live parameter injection into a `Processor` node
+in `core/host/src/signal_graph_mailbox.cpp` and leaves `PluginSlot` nodes
+unchanged. The fixture injects only into a `PluginSlot` node. The other
+`core/` differences between the SDK source and `origin/main` are in the
+CoreMIDI device layer, which the fixture does not use.
+
+The positive run prints
+
+```text
+p1-event-admission PASS checks=2763 partitions=4,8 graph_event_schedules=2+2+4,3+5 graph_events=9 voice_slot_reuse=1 combined_schedules=1,32,64,127+127+2,3+61+1+127+64 combined_records=27 digests=midi:349d8d9cbaead7ac,parameter:21c6a5a653826137,trigger:79300472c428c8e4,voice:76096164fc3782a6 sequence_mutations=5 consumer_gate=NOT_QUALIFIED
+```
+
+and CTest passes 1/1. With `--trace` the count is 2765 (two file-write checks).
+
+Each new control was checked with a planted input mutation, rebuilt against
+the same installed SDK, run, and restored with `git checkout`; the restored
+build passes again:
+
+| Mutation | Result |
+|---|---|
+| producer adds one late `emit_at` per block after the first, shifting lane sequences by block count | `FAIL rule=combined-partition-invariance` |
+| producer of the sample-2 note-on changed from 4 to 2 | `FAIL rule=combined-midi-tie-order` |
+| stale-epoch probe published with the live test epoch | `FAIL rule=combined-midi-stale-epoch-refusal` |
+| MIDI adapter offset forced to 0 | `FAIL rule=combined-midi-absolute` |
+| parameter adapter offset forced to 0 | `FAIL rule=combined-parameter-order` |
+| trigger emitted one sample after its target | `FAIL rule=combined-trigger-order` |
+| voice note-off sent on another MIDI channel | `FAIL rule=combined-voice-release-intent` |
+| voice records published at the block start instead of their sample | `FAIL rule=combined-voice-onset-sample` |
+| voice note-off published as a note-on | `FAIL rule=combined-voice-onset-sample` |
+| stale-generation probe uses the slot's own generation | `FAIL rule=combined-voice-stale-generation-refusal` |
+| graph reset requested at sample 200 | `FAIL rule=combined-epoch-map` |
+| consumer trigger array shrunk to 4 entries | `FAIL rule=combined-observation-capacity` |
+| digest ignores the order key | `FAIL rule=sequence-mutation-detected` |
+| digest also mixes each record's order key into the next family | `FAIL rule=sequence-mutation-isolated` |
+| planted negative also changes a second record | `FAIL rule=sequence-mutation-explained` |
+| digest made order-insensitive (sum of record hashes) | `FAIL rule=order-mutation-detected` |
+
+A note-off published as a note-on retriggers the note: the allocator releases
+the old generation, so the release-intent rule still sees a releasing slot.
+The onset rule is what catches it.
+
+## Remaining rows
+
+The gate stays **NOT_QUALIFIED**. Closed by the combined control: one
+test-owned epoch and absolute sample origin across all four families, MIDI 1.0
+projection through `SignalGraph::inject_midi` inside this fixture, more than
+two partition schedules (five, for the combined control), and the explainable
+sequence mutation. These admission-contract rows remain `NOT_CHECKED`:
+
+* UMP and MPE expression sidecars through `inject_midi(node, midi, mpe)`
+  inside this fixture (the G-5 consumer covers them separately);
 * parameter overflow telemetry counters through the graph mailbox; only the
   `false` return and the retained prefix are asserted;
-* a sequence mutation that fails while the unaffected records remain
-  explainable;
-* callback allocation and topology-mutation freedom; the probe `PluginSlot`
-  records events into a vector;
-* more than two partition schedules per family;
-* routed versus reference executor parity for the graph-authored lane and the
-  parameter mailbox.
+* reset and epoch cancellation applied to all four families at once; reset is
+  checked per family (graph-authored lane reset, MIDI and voice stale-epoch
+  refusal);
+* callback allocation freedom as a measured or realtime property; the fixture
+  callbacks write only into fixed arrays, but the runtime and
+  `VoiceBankBinding::render` are not instrumented;
+* routed versus reference executor parity for the graph-authored lane, the
+  MIDI input, and the parameter mailbox;
+* voice intent inside the `SignalGraph`; the voice bank runs its own prepared
+  graph on the shared block grid.
 
 Parameter delivery to a plain `Processor` node and public `TriggerContext`
 delivery remain unavailable and are not used.
