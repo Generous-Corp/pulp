@@ -13,7 +13,7 @@ head `e777deef` (an ancestor of this documentation repair):
 - historical reviewed documentation head (not current): `ebd86425f62e544d91bdfad2e342ad1de7140ee8`
 - current reviewed PR head (documentation only): `975f95f78b723cb75c9eff34a9339a7134768a2c`
 - branch: `codex/g6-voice-fixture-audit-20261112`
-- worktree: `/Users/danielraffel/agent-worktrees/pulp-g6-voice-fixture-audit-20261112`
+- worktree: `<code-root>/pulp-g6-voice-fixture-audit-20261112`
 - lineage: active, owner `g6-voice-fixture-audit`
 
 No runtime, public API, queue, scheduler, or graph-owned voice lifecycle was
@@ -27,7 +27,7 @@ configured installed-SDK example `examples/g6-voice-bank-consumer` was built
 under governed build lease `pulp-shipyard-local-73300-1794505590` against this
 development SDK:
 
-- SDK: `/Users/danielraffel/.pulp/sdk-dev/forge-v1/darwin-arm64/e777deef9dea919aa00ddafdea86e75e32f2a8dc/b5d7d23fc155`
+- SDK: `~/.pulp/sdk-dev/forge-v1/darwin-arm64/e777deef9dea919aa00ddafdea86e75e32f2a8dc/b5d7d23fc155`
 - provenance: `sdk-provenance.json`, SHA-256
   `58d40f39e7352613870194b194045de4494a84df4052365e28e1460f4b780759`;
   `source_git_sha=e777deef9dea919aa00ddafdea86e75e32f2a8dc` (recorded SDK/source

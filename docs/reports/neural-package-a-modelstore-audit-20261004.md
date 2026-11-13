@@ -2,7 +2,7 @@
 
 Date: 2026-10-04
 Protected base: `origin/main` at `ff83c0e9fd147dc143af7228eac0e3298e84b35f`
-Worktree: `/Users/danielraffel/Code/pulp-neural-package-a-modelstore-audit-20261004`
+Worktree: `<code-root>/pulp-neural-package-a-modelstore-audit-20261004`
 
 > **Historical audit snapshot.** This report records the package-A audit at the
 > protected base above; it is not a current-head status receipt. For current
