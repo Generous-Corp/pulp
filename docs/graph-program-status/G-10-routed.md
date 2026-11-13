@@ -1,5 +1,15 @@
 # Routed spectral ports
 
+## Close-out (2026-11-13)
+
+Final status: PARTIAL, full qualification remains open (unchanged).
+
+The routed spectral runtime and focused controls are on main. Where the text below calls the work "unmerged" it is describing an earlier snapshot.
+
+PR pointers below are historical; all PRs cited in this file that were queried (checked 2026-11-13) are merged, none remain open.
+
+Remaining work is deferred to https://github.com/Generous-Corp/pulp/issues/12177.
+
 Status: **PARTIAL — executable routed runtime and focused controls; full qualification remains open.**
 
 Authority: [admission](https://github.com/danielraffel/pulp-planning/blob/3920bf5bfa24f1ec9cd030a43dac13c212ca7a76/graph-program-status/G-10.md)

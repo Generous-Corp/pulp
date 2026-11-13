@@ -1,5 +1,15 @@
 # A10 — routing and hosting environment
 
+## Close-out (2026-11-13)
+
+Final status: PARTIAL; hostile containment remains HOLD (unchanged).
+
+The bounded installed routing/hosting consumer passes on main (PRs 11926, 11428, 11667, 11679, 11680, 11682). Hostile containment, callback safety and recovery are not qualified.
+
+PR pointers below are historical; all PRs cited in this file that were queried (checked 2026-11-13) are merged, none remain open.
+
+Remaining work is deferred to https://github.com/Generous-Corp/pulp/issues/12177.
+
 Status: **PARTIAL — exact-current-head installed consumer passes bounded routing/hosting controls; hostile containment remains HOLD**
 
 Current source authority for this refreshed receipt is exact live `origin/main=4c69e183387017c47d048b477218a6d0a4947bcc` (2026-11-12). The governed Release install and consumer were rebuilt from this merge head; `source_tree_archive_sha256=7b47eed1d4dcca572452610e439e3343b807d291c198d67b598df85427f73ced` binds the installed source tree.
