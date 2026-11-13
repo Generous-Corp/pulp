@@ -406,6 +406,44 @@ TEST_CASE("Named spectral ports reject forged kinds before recording an edge",
     }
 }
 
+TEST_CASE("Spectral handles from a cleared authoring incarnation are refused",
+          "[host][spectral-ports][spectral-stale-handle]") {
+    using namespace pulp::host;
+    const auto identity = *SpectralIdentity::make(256, 64, 1, 48000).value;
+    for (bool prepared_edit : {false, true}) {
+        for (bool stale_source : {true, false}) {
+            CAPTURE(prepared_edit, stale_source);
+            SignalGraph graph;
+            const auto old_analysis = *graph.add_spectral_analysis(identity, "analysis").value;
+            const auto old_synthesis = *graph.add_spectral_synthesis(identity, "synthesis").value;
+            const auto gain = graph.add_gain_node("generation");
+            REQUIRE(graph.set_node_gain(gain, 0.5f));
+            graph.clear();
+            // Node ids restart after clear, so only the incarnation separates
+            // the retained handles from the current ports of the same name.
+            const auto analysis = *graph.add_spectral_analysis(identity, "analysis").value;
+            const auto synthesis = *graph.add_spectral_synthesis(identity, "synthesis").value;
+            REQUIRE(analysis.node == old_analysis.node);
+            REQUIRE(synthesis.node == old_synthesis.node);
+            REQUIRE(analysis.frames.handle.owner == old_analysis.frames.handle.owner);
+            REQUIRE(analysis.frames.handle.incarnation != old_analysis.frames.handle.incarnation);
+            auto edit = prepared_edit ? graph.begin_prepared_topology_edit() : nullptr;
+            const auto source = stale_source ? old_analysis.frames.handle : analysis.frames.handle;
+            const auto destination =
+                stale_source ? synthesis.frames.handle : old_synthesis.frames.handle;
+            const auto stale =
+                edit ? edit->connect(source, destination) : graph.connect(source, destination);
+            REQUIRE(stale.code == GraphResult::Code::UnknownPort);
+            REQUIRE_FALSE(stale.rule.empty());
+            REQUIRE((edit ? edit->connections() : graph.connections()).empty());
+            const auto current =
+                edit ? edit->connect(analysis.frames.handle, synthesis.frames.handle)
+                     : graph.connect(analysis.frames.handle, synthesis.frames.handle);
+            REQUIRE(current);
+        }
+    }
+}
+
 TEST_CASE("Frequency selective masks preserve finite tails through the complete drain",
           "[host][spectral-ports][spectral-mask-tail]") {
     using namespace pulp::host;
