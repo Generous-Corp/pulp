@@ -36,6 +36,7 @@ jobs:
     # Tag-push-only trusted control-plane work may use the MacPro Linux/X64
     # pool. Unset both variables to fall back to GitHub-hosted Ubuntu.
     runs-on: ${{ fromJSON(vars.PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON || vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    timeout-minutes: 30
     outputs:
       runs_on_json: ${{ steps.resolve.outputs.runs_on_json }}
       build: ${{ steps.preflight.outputs.build }}
@@ -112,6 +113,7 @@ jobs:
     needs: resolve-macos-runner
     if: needs.resolve-macos-runner.outputs.build == 'true'
     runs-on: ${{ fromJSON(needs.resolve-macos-runner.outputs.runs_on_json) }}
+    timeout-minutes: 240
     name: Build, Sign, Notarize (macOS)
     # READ-ONLY on contents, deliberately. This workflow no longer writes to the
     # GitHub Release — release-cli.yml's `release` job is the sole writer. Taking
