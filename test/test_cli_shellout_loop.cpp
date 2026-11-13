@@ -175,6 +175,15 @@ TEST_CASE("pulp loop validates value options before focus state changes",
         {{"loop", "--run", "--target", "pulp-format"}, "--run requires a value"},
         {{"loop", "--target"}, "--target requires a value"},
         {{"loop", "--target", "--no-watch"}, "--target requires a value"},
+        {{"loop", "--graph-file", "--no-watch"}, "--graph-file requires a value"},
+        {{"loop", "--graph-file", "live.pat", "--no-watch"},
+         "--graph-file requires --graph-instance, --graph-grant and --graph-generation"},
+        {{"loop", "--graph-generation", "1", "--no-watch"}, "graph options require --graph-file"},
+        {{"loop", "--graph-watch-polls", "0", "--no-watch"},
+         "--graph-watch-polls requires a bounded unsigned integer"},
+        {{"loop", "--graph-file", "live.txt", "--graph-instance", "i", "--graph-grant", "g",
+          "--graph-generation", "0", "--no-watch"},
+         "--graph-file requires .pat or .pulpgraph"},
     };
 
     for (const auto& c : cases) {

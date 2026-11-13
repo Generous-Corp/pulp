@@ -163,6 +163,10 @@ int cmd_dev(const std::vector<std::string>& args) {
         }
     }
 
+    if (!validate_graph_reload_options(graph_reload, graph_error)) {
+        std::cerr << graph_error << '\n';
+        return 2;
+    }
     if (!enforce_project_cli_compatibility(project_root, "pulp dev", allow_unsupported_sdk)) {
         return 1;
     }
@@ -171,10 +175,6 @@ int cmd_dev(const std::vector<std::string>& args) {
         return 2;
     }
 
-    if (!validate_graph_reload_options(graph_reload, graph_error)) {
-        std::cerr << graph_error << '\n';
-        return 2;
-    }
     BuildPlan plan({project_root, build_dir, standalone_mode, examples, build_all, build_args,
                     "pulp dev", dev_shared_ui_default(no_dev_shared, standalone_mode)});
     if (!plan.ok()) {

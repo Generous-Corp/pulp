@@ -217,6 +217,12 @@ int cmd_loop(const std::vector<std::string>& args) {
         }
     }
 
+    // Reject incomplete graph options before any focus state changes.
+    if (!validate_graph_reload_options(graph_reload, graph_error)) {
+        std::cerr << graph_error << '\n';
+        return 2;
+    }
+
     // ── --status: just print and exit ───────────────────────────────────────
     if (status_only) {
         auto current = read_focus_state();
@@ -330,10 +336,6 @@ int cmd_loop(const std::vector<std::string>& args) {
 
     auto build_dir = project_root / "build";
 
-    if (!validate_graph_reload_options(graph_reload, graph_error)) {
-        std::cerr << graph_error << '\n';
-        return 2;
-    }
     BuildPlan plan({project_root, build_dir, standalone_mode, examples, build_all, build_args,
                     "pulp loop", dev_shared_ui_default(no_dev_shared, standalone_mode)});
     if (!plan.ok()) {
