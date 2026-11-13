@@ -3,11 +3,6 @@
  "record": {
   "entry": "tools/scripts/test_cutover_trial.py",
   "inputs": [
-   "core/view/include/pulp/view/motion.hpp",
-   "core/view/src/js_jsc_engine.mm",
-   "tools/ci/governed-build.sh",
-   "tools/mcp",
-   "tools/scripts/cutover_trial.py",
    "tools/scripts/test_cutover_trial.py"
   ],
   "kind": "python"
