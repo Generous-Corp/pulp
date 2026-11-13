@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261112-release-step-timeouts-watch",
+  "created_at": "2026-11-12T18:53:21Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Adds history-derived timeout-minutes to release-cli.yml, sign-and-release.yml and auto-release.yml jobs and long steps, a lint that enforces them, and a one-time in-place rerun of a timed-out leg in the release reconciler. Step names, commands, build inputs, artifacts and packaging are unchanged; only how long a hung step may run and how the reconciler retries it change, so no design-import, Chromium, rendering or packaging authority moves.",
+  "tests": [
+    "python3 tools/scripts/test_release_reconcile.py",
+    "python3 tools/scripts/test_release_step_timeouts.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

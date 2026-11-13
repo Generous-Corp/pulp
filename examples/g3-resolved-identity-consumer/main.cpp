@@ -7,9 +7,27 @@
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 #include <tuple>
 #include <string_view>
+#include <charconv>
+#include <cstdint>
+#include <system_error>
 
 namespace {
 constexpr std::string_view kP0ProtocolAttestation = "pulp.graph.g3-resolved-identity-consumer.v1";
+
+std::uint32_t requested_partition(int argc, char** argv) {
+    for (int i = 1; i + 1 < argc; ++i) {
+        if (std::string_view(argv[i]) == "--partition") {
+            std::uint32_t value = 0;
+            const auto text = std::string_view(argv[i + 1]);
+            const auto result = std::from_chars(text.data(), text.data() + text.size(), value);
+            if (result.ec == std::errc{} && result.ptr == text.data() + text.size() &&
+                (value == 64 || value == 128))
+                return value;
+            return 0;
+        }
+    }
+    return 0;
+}
 }
 
 static std::string stereo_payload() {
@@ -62,7 +80,10 @@ int run_stereo() {
     return 0;
 }
 
-int main() {
+int main(int argc, char** argv) {
+    const auto partition = requested_partition(argc, argv);
+    if (argc > 1 && partition == 0)
+        return 15;
     const auto inspected = pulp::host::GraphSerializer::inspect_document(
         R"({"nodes":{"b":2,"a":1},"document_schema":"pulp.graph.authored-io-gain.v1"})");
     if (!inspected.ok() || inspected.document.profile() != "pulp.graph.authored-io-gain.v1" ||
@@ -98,6 +119,9 @@ int main() {
     std::cout << receipt.value().canonical_bytes().size() << '\n';
     // Bind the evidence receipt to this named installed consumer. This is
     // fixture output metadata and does not change the public/runtime contract.
-    std::cout << kP0ProtocolAttestation << '\n';
+    std::cout << kP0ProtocolAttestation;
+    if (partition != 0)
+        std::cout << " partition_frames=" << partition;
+    std::cout << '\n';
     return run_stereo();
 }
