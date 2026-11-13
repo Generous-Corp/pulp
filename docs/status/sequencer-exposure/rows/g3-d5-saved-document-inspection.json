@@ -27,7 +27,7 @@
     },
     {
       "path": "examples/g3-resolved-identity-consumer/main.cpp",
-      "needles": ["inspect_document", "semantic_digest"]
+      "needles": ["inspect_document", "semantic_digest", "kP0ProtocolAttestation"]
     }
   ],
   "surfaces": {

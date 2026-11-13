@@ -26,6 +26,7 @@
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/midi_learn_menu.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -51,6 +52,9 @@ class MidiLearnSession {
         t.state = [this](state::ParamID id) { return state_of(id); };
         t.begin = [this](state::ParamID id) { engine_.begin_learn(id, now()); };
         t.cancel = [this] { engine_.cancel_learn(); };
+        t.set_options = [this](state::ParamID id, const MidiLearnMappingOptions& options) {
+            apply_options(id, options);
+        };
         t.clear = [this](state::ParamID id) {
             if (editor_)
                 editor_->clear(id);
@@ -86,6 +90,12 @@ class MidiLearnSession {
         return true;
     }
 
+    /// Whether this plug-in's format can send feedback; the menu shows the
+    /// "Send feedback" row only when it can (see `format::midi_feedback_capabilities`).
+    void set_feedback_supported(bool supported) {
+        feedback_supported_ = supported;
+    }
+
     /// Escape cancels a listening learn and consumes the key. Returns false for
     /// any other key, for a key-up, or when nothing is listening.
     bool handle_key(const KeyEvent& event) {
@@ -96,6 +106,24 @@ class MidiLearnSession {
     }
 
   private:
+    // The menu's choice lists are in enum order: absolute, two's complement,
+    // signed bit, offset 64; and jump, pickup, scale.
+    void apply_options(state::ParamID id, const MidiLearnMappingOptions& options) {
+        auto mapping = engine_.mapping_for(id);
+        if (!mapping)
+            return;
+        state::MidiMapping next = *mapping;
+        next.mode = static_cast<state::RelativeMode>(std::clamp(options.relative_mode, 0, 3));
+        next.takeover = static_cast<state::TakeoverMode>(std::clamp(options.takeover, 0, 2));
+        next.feedback = options.feedback;
+        if (options.invert != (next.scale.min > next.scale.max))
+            std::swap(next.scale.min, next.scale.max);
+        if (editor_)
+            editor_->set_mapping(next, "Edit MIDI mapping");
+        else
+            engine_.set_mapping(next);
+    }
+
     std::uint64_t now() const {
         return now_ms_ ? now_ms_() : 0;
     }
@@ -112,6 +140,11 @@ class MidiLearnSession {
         if (const auto m = engine_.mapping_for(id)) {
             s.phase = MidiLearnParamState::Phase::mapped;
             s.mapping_label = state::label(m->source);
+            s.options.relative_mode = static_cast<int>(m->mode);
+            s.options.takeover = static_cast<int>(m->takeover);
+            s.options.invert = m->scale.min > m->scale.max;
+            s.options.feedback = m->feedback;
+            s.feedback_supported = feedback_supported_;
             s.just_bound =
                 has_bound_ && bound_param_ == id && now() - bound_at_ms_ < kBoundConfirmMs;
         }
@@ -128,6 +161,7 @@ class MidiLearnSession {
     std::string refused_reason_;
     std::uint64_t refused_at_ms_ = 0;
     bool has_refused_ = false;
+    bool feedback_supported_ = false;
 };
 
 } // namespace pulp::view

@@ -45,6 +45,18 @@ including voice intent.
   runtime and lifecycle qualification open (`docs/graph-program-status/G-4.md:5-7,78-86`;
   `docs/graph-program-status/G-6.md:1-30,126-143`).
 
+* The parameter mailbox row is currently **NOT_CHECKED / UNAVAILABLE** for a
+  public `Processor` consumer. `SignalGraph::inject_parameter_events()` may
+  accept a queue while a plain `add_processor_node()` receives no parameter
+  events; routed delivery requires the private exact-parameter claim path. See
+  `docs/evidence/p1-event-admission-consumer-20261112.md:5-14` and the receipt's
+  control disposition at
+  `docs/evidence/p1-event-admission-consumer-20261112/receipt.json:10-24`.
+* Public TriggerContext delivery is also **NOT_CHECKED / UNAVAILABLE** for
+  the installed consumer: ordinary public CustomNode callbacks do not receive
+  a trigger context, whose construction is private. Existing trigger-graph
+  traces therefore do not satisfy the TriggerContext current/future row.
+
 ## Admission contract
 
 The smallest defensible P1 experiment is a single installed-SDK consumer that
@@ -104,8 +116,14 @@ packet and names the exact consumer worktree and file claim.
 
 ## Recommended next action
 
-Admit one public-consumer fixture expansion, limited to `examples/g5-host-event-consumer`
-and its evidence/CTest registration. First prove the four typed records with
-existing APIs and a test-owned voice-intent identity adapter. If that fixture
-cannot honestly satisfy the voice-intent row, stop and promote the failure as
-the P2 voice-lifecycle architectural decision rather than widening P1.
+Keep P-1 **CONDITIONAL HOLD**. The existing
+`examples/p1-event-admission-consumer` is the authoritative partial fixture:
+its MIDI and trigger-graph checks run across blocks, while parameter ordering,
+overflow, and the test-owned voice-identity adapter remain standalone evidence.
+Do not admit a G-5 fixture expansion until an exact installed-SDK consumer can
+prove parameter-mailbox projection and public TriggerContext current/future
+delivery across two blocks. The projection seam is recorded at
+`docs/evidence/p1-event-admission-consumer-20261112.md:5-14`, with the exact
+qualification result in
+`docs/evidence/p1-event-admission-consumer-20261112/receipt.json:21-31`; no
+runtime/API change or second queue is authorized by this packet.

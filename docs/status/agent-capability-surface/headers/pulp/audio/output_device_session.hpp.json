@@ -1,0 +1,9 @@
+{
+  "domain": "audio",
+  "source": "core/audio/include/pulp/audio/output_device_session.hpp",
+  "fingerprint": "sha256:b1535a471e5e3531a8bacb5fa55ffb109190dda2f340982d143d6ee53aa878fa",
+  "include": "pulp/audio/output_device_session.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Host-side output device session: keeps one output device open on the system default or a named device across unplug and replug; application plumbing, not a generator-facing capability."
+}
