@@ -14,6 +14,7 @@ import copy
 import json
 import os
 import platform
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -28,10 +29,25 @@ QUIET = lambda: ([0.1, 0.1, 0.1], 8)  # noqa: E731
 LOADED = lambda: ([40.0, 30.0, 20.0], 8)  # noqa: E731
 
 
+def clean_repo(parent: Path) -> Path:
+    """A committed throwaway git repository whose working tree starts clean."""
+    repo = parent / "repo"
+    repo.mkdir()
+    git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+           "-c", "commit.gpgsign=false"]
+    subprocess.run(git + ["init", "-q"], check=True)
+    (repo / ".gitignore").write_text("ignored/\n", encoding="utf-8")
+    (repo / "source.cpp").write_text("int main() {}\n", encoding="utf-8")
+    subprocess.run(git + ["add", "."], check=True)
+    subprocess.run(git + ["commit", "-q", "-m", "fixture"], check=True)
+    return repo
+
+
 def record(output: Path, *, mode="short", fixtures=("python-reference",), callbacks=8,
-           planted_sleep_us=0, planted_every=1, load_reader=QUIET, build_dir=None):
+           planted_sleep_us=0, planted_every=1, load_reader=QUIET, build_dir=None,
+           source_root=ROOT):
     return matrix.record_matrix(
-        mode=mode, source_root=ROOT, build_dir=build_dir or (output / "no-build"),
+        mode=mode, source_root=source_root, build_dir=build_dir or (output / "no-build"),
         output_dir=output, fixtures=list(fixtures), callbacks=callbacks, frames_filter=None,
         planted_sleep_us=planted_sleep_us, planted_every=planted_every,
         max_load_per_cpu=matrix.DEFAULT_MAX_LOAD_PER_CPU, timeout_seconds=600,
@@ -158,7 +174,8 @@ class RawBindingTest(unittest.TestCase):
         fixture = matrix.FIXTURES["g5-graph-event"]
         body = matrix.reference_cell_output("routed", 48000, 128, 8, 0, 1).replace(
             "fixture=python-reference", "fixture=g5-graph-event")
-        trailers = ("PACED_SOURCE sha=" + "a" * 40 + " dirty=0\n"
+        trailers = ("PACED_SOURCE sha=" + "a" * 40 + " dirty=0 tracked_changes=0 untracked_count=0 "
+                    "untracked_digest=" + "0" * 64 + "\n"
                     "PACED_BUILD cmake_build_type=python pulp_sanitizer=none\n")
         passing = body + "All tests passed (10 assertions in 1 test case)\n"
         self.assertEqual(matrix.raw_cell_view(
@@ -193,16 +210,18 @@ class RawBindingTest(unittest.TestCase):
 class AdmissionTest(unittest.TestCase):
     def test_qualification_refuses_loaded_host_before_any_cell(self):
         with tempfile.TemporaryDirectory() as tmp:
-            receipt, code = record(Path(tmp), mode="qualification",
+            # A clean source isolates the admission refusal from the clean-source refusal.
+            receipt, code = record(Path(tmp) / "out", mode="qualification",
                                    fixtures=matrix.QUALIFYING_FIXTURES,
-                                   callbacks=matrix.QUALIFICATION_CALLBACKS, load_reader=LOADED)
+                                   callbacks=matrix.QUALIFICATION_CALLBACKS, load_reader=LOADED,
+                                   source_root=clean_repo(Path(tmp)))
             self.assertEqual(code, matrix.REFUSED_EXIT)
             self.assertEqual(receipt["status"], "REFUSED")
             self.assertEqual(receipt["cells"], [])
             self.assertEqual(receipt["admission"]["before"]["verdict"], "refuse")
             self.assertIs(receipt["timing_qualified"], False)
             self.assertIn("admission_before_failed", receipt["disqualifiers"])
-            matrix.validate_receipt(Path(tmp) / "receipt.json")
+            matrix.validate_receipt(Path(tmp) / "out" / "receipt.json")
 
     def test_admission_threshold_boundary_and_unknown_load(self):
         self.assertTrue(matrix.admission_verdict([2.0, 0, 0], 8, 0.25)["admitted"])
@@ -224,6 +243,61 @@ class AdmissionTest(unittest.TestCase):
                 args = {"callbacks": matrix.QUALIFICATION_CALLBACKS, **kwargs}
                 with self.assertRaises(matrix.MatrixError):
                     record(Path(tmp), mode="qualification", **args)
+
+
+class SourceStateTest(unittest.TestCase):
+    """An untracked, non-ignored file can be compiled in, so it makes the source dirty."""
+
+    def test_untracked_file_marks_source_dirty_and_refuses_qualification(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = clean_repo(Path(tmp))
+            build, out = repo / "build", repo / "receipts"
+            build.mkdir()
+            (build / "CMakeCache.txt").write_text("CMAKE_BUILD_TYPE:STRING=Release\n", encoding="utf-8")
+            (repo / "ignored").mkdir()
+            (repo / "ignored" / "scratch.o").write_text("x", encoding="utf-8")
+            clean = matrix._source_state(repo, (build, out))
+            self.assertFalse(clean["dirty"], clean)  # ignored + run-owned dirs do not count
+            self.assertEqual((clean["tracked_changes"], clean["untracked_count"]), (0, 0))
+            (repo / "planted_input.hpp").write_text("#define PLANTED 1\n", encoding="utf-8")
+            dirty = matrix._source_state(repo, (build, out))
+            self.assertTrue(dirty["dirty"])
+            self.assertEqual(dirty["tracked_changes"], 0)
+            self.assertEqual(dirty["untracked_paths"], ["planted_input.hpp"])
+            with self.assertRaisesRegex(matrix.MatrixError, "clean source.*1 untracked"):
+                record(out, mode="qualification", fixtures=matrix.QUALIFYING_FIXTURES,
+                       callbacks=matrix.QUALIFICATION_CALLBACKS, source_root=repo, build_dir=build)
+
+    def test_short_receipt_records_untracked_files_and_validation_binds_them(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = clean_repo(Path(tmp))
+            (repo / "planted_input.hpp").write_text("x\n", encoding="utf-8")
+            out = Path(tmp) / "out"
+            receipt, _ = record(out, source_root=repo)
+            self.assertTrue(receipt["source"]["dirty"])
+            self.assertEqual(receipt["source"]["untracked_count"], 1)
+            self.assertIn("dirty_source", receipt["disqualifiers"])
+            path = out / "receipt.json"
+            matrix.validate_receipt(path)
+            original = path.read_text(encoding="utf-8")
+            for mutate, message in (
+                (lambda r: r["source"].update(dirty=False), "marked clean"),
+                (lambda r: r["source"].update(untracked_count=0, untracked_paths=[]),
+                 "untracked file digest"),
+                (lambda r: r["source"].update(untracked_paths=["other.hpp"],
+                                              untracked_digest=matrix.hashlib.sha256(
+                                                  b"other.hpp").hexdigest()),
+                 "source state disagrees with raw output"),
+            ):
+                changed = json.loads(original)
+                mutate(changed)
+                changed["disqualifiers"] = matrix.disqualifiers_for(changed)
+                changed["timing_qualified"] = not changed["disqualifiers"]
+                changed["receipt_sha256"] = matrix.receipt_digest(changed)
+                path.write_text(json.dumps(changed), encoding="utf-8")
+                with self.assertRaisesRegex(matrix.MatrixError, message):
+                    matrix.validate_receipt(path)
+            path.write_text(original, encoding="utf-8")
 
 
 class MissCounterTest(unittest.TestCase):

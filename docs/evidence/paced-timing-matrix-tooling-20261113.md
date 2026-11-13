@@ -75,7 +75,16 @@ python3 tools/graph_paced_timing_matrix.py record --mode qualification --output-
 One `receipt.json` is written per run, next to one raw stdout file per cell.
 
 - `mode`: `short` or `qualification`. `status`: `COMPLETE` or `REFUSED`.
-- `source`: `{sha, dirty}`. `build_profile`: `{CMAKE_BUILD_TYPE, PULP_SANITIZER}`.
+- `source`: `{sha, dirty, tracked_changes, untracked_count, untracked_digest,
+  untracked_paths}`. Dirty means any tracked change or any untracked file that
+  is not ignored (`git status --porcelain --untracked-files=all`), because an
+  untracked source or build input can be compiled into the measured binary.
+  The build directory and the receipt output directory are owned by the run
+  and excluded even when not ignored; the binaries are bound by digest.
+  `untracked_paths` keeps the first 100 sorted paths and the digest covers all
+  of them. Qualification refuses to start on a dirty source, and every raw
+  file's `PACED_SOURCE` trailer must match these fields.
+  `build_profile`: `{CMAKE_BUILD_TYPE, PULP_SANITIZER}`.
 - `host_identity_class`: OS, release, machine, CPU model, hardware model,
   logical CPUs and rounded memory in GiB. It never includes the hostname or a
   user name; the self-test checks that `platform.node()` does not appear.

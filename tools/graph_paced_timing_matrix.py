@@ -301,11 +301,17 @@ def parse_provenance_trailers(stdout: str) -> dict[str, Any]:
              "raw output must carry exactly one source and build trailer")
     source = dict(_TOKEN.findall(source_lines[0]))
     build = dict(_TOKEN.findall(build_lines[0]))
-    _require(set(source) == {"sha", "dirty"} and re.fullmatch(r"[0-9a-f]{40}", source["sha"]),
+    _require(set(source) == {"sha", "dirty", "tracked_changes", "untracked_count", "untracked_digest"} and
+             re.fullmatch(r"[0-9a-f]{40}", source["sha"]) is not None and
+             re.fullmatch(r"[0-9a-f]{64}", source["untracked_digest"]) is not None and
+             source["tracked_changes"].isdigit() and source["untracked_count"].isdigit(),
              "malformed source trailer")
     _require(source["dirty"] in ("0", "1"), "malformed source dirty flag")
     _require(set(build) == {"cmake_build_type", "pulp_sanitizer"}, "malformed build trailer")
     return {"source_sha": source["sha"], "source_dirty": source["dirty"] == "1",
+            "source_tracked_changes": int(source["tracked_changes"]),
+            "source_untracked_count": int(source["untracked_count"]),
+            "source_untracked_digest": source["untracked_digest"],
             "cmake_build_type": _provenance_value(build["cmake_build_type"]),
             "pulp_sanitizer": _provenance_value(build["pulp_sanitizer"])}
 
@@ -445,11 +451,54 @@ def matrix_cells(fixtures: Iterable[str], frames_filter: set[int] | None) -> lis
     return cells
 
 
-def _source_state(root: Path) -> dict[str, Any]:
+UNTRACKED_PATHS_RECORDED = 100
+
+
+def _source_state(root: Path, excluded: Iterable[Path] = ()) -> dict[str, Any]:
+    """HEAD plus every tracked change and every untracked, non-ignored file.
+
+    ``git diff HEAD`` alone misses untracked files, yet an untracked source or
+    build input can be compiled into the measured binary. Ignored files do not
+    count. ``excluded`` names directories the run itself owns (the build
+    directory and the receipt output directory); they are left out even when
+    a checkout does not ignore them, because the binaries are bound by digest
+    and the outputs are written by this run.
+    """
+    root = root.resolve()
     sha = _run_text(["git", "-C", str(root), "rev-parse", "HEAD"])
-    dirty = subprocess.run(["git", "-C", str(root), "diff", "--quiet", "HEAD", "--"],
-                           capture_output=True).returncode != 0 if sha else True
-    return {"sha": sha, "dirty": dirty}
+    owned = []
+    for directory in excluded:
+        try:
+            owned.append(directory.resolve().relative_to(root).as_posix().rstrip("/") + "/")
+        except ValueError:
+            continue
+    tracked, untracked, ok = 0, [], False
+    if sha:
+        try:
+            status = subprocess.run(
+                ["git", "-C", str(root), "status", "--porcelain=v1", "-z", "--untracked-files=all",
+                 "--ignore-submodules=none"],
+                check=True, capture_output=True, timeout=120).stdout.decode("utf-8", "replace")
+            ok = True
+        except (OSError, subprocess.SubprocessError):
+            status = ""
+        entries = iter(status.split("\0"))
+        for entry in entries:
+            if not entry:
+                continue
+            code, path = entry[:2], entry[3:]
+            if code[0] in "RC":
+                next(entries, None)  # rename/copy source path follows
+            if code == "??":
+                if not any(path == o.rstrip("/") or path.startswith(o) for o in owned):
+                    untracked.append(path)
+            else:
+                tracked += 1
+    untracked.sort()
+    digest = hashlib.sha256("\0".join(untracked).encode()).hexdigest()
+    return {"sha": sha, "dirty": (not ok) or tracked > 0 or bool(untracked),
+            "tracked_changes": tracked, "untracked_count": len(untracked),
+            "untracked_digest": digest, "untracked_paths": untracked[:UNTRACKED_PATHS_RECORDED]}
 
 
 def _build_profile(build: Path) -> dict[str, str]:
@@ -538,7 +587,12 @@ def record_matrix(*, mode: str, source_root: Path, build_dir: Path, output_dir: 
 
     load, ncpu = load_reader()
     before = admission_verdict(load, ncpu, max_load_per_cpu)
-    source_state = _source_state(source_root)
+    source_state = _source_state(source_root, (build_dir, output_dir))
+    if mode == "qualification":
+        _require(not source_state["dirty"],
+                 f"qualification requires a clean source: {source_state['tracked_changes']} tracked "
+                 f"change(s), {source_state['untracked_count']} untracked file(s) "
+                 f"{source_state['untracked_paths'][:5]}")
     build_profile = _build_profile(build_dir)
     receipt: dict[str, Any] = {
         "schema": SCHEMA, "tool": "tools/graph_paced_timing_matrix.py", "mode": mode,
@@ -583,7 +637,10 @@ def record_matrix(*, mode: str, source_root: Path, build_dir: Path, output_dir: 
         if stdout and not stdout.endswith("\n"):
             stdout += "\n"
         stdout += f"{PROCESS_TRAILER} returncode={returncode}\n"
-        stdout += f"{SOURCE_TRAILER} sha={source_state['sha']} dirty={int(source_state['dirty'])}\n"
+        stdout += (f"{SOURCE_TRAILER} sha={source_state['sha']} dirty={int(source_state['dirty'])} "
+                   f"tracked_changes={source_state['tracked_changes']} "
+                   f"untracked_count={source_state['untracked_count']} "
+                   f"untracked_digest={source_state['untracked_digest']}\n")
         stdout += (f"{BUILD_TRAILER} cmake_build_type={_provenance_token(build_profile['CMAKE_BUILD_TYPE'])} "
                    f"pulp_sanitizer={_provenance_token(build_profile['PULP_SANITIZER'])}\n")
         raw_path.write_text(stdout, encoding="utf-8")
@@ -616,6 +673,8 @@ def _write(output_dir: Path, receipt: dict[str, Any]) -> Path:
 
 # --------------------------------------------------------------------------- validation
 
+SOURCE_FIELDS = {"sha", "dirty", "tracked_changes", "untracked_count", "untracked_digest",
+                 "untracked_paths"}
 REQUIRED_TOP = {"schema", "tool", "mode", "status", "timing_rule", "source", "build_profile",
                 "host_identity_class", "admission", "requested", "planted", "cells", "totals",
                 "disqualifiers", "timing_qualified", "receipt_sha256"}
@@ -629,6 +688,19 @@ def validate_receipt(path: Path) -> dict[str, Any]:
     receipt = json.loads(path.read_text(encoding="utf-8"))
     _require(receipt.get("schema") == SCHEMA, "not a paced timing matrix receipt")
     _require(set(receipt) == REQUIRED_TOP, "receipt top-level fields mismatch")
+    source = receipt["source"]
+    _require(isinstance(source, dict) and set(source) == SOURCE_FIELDS, "source fields mismatch")
+    paths = source["untracked_paths"]
+    _require(type(source["tracked_changes"]) is int and type(source["untracked_count"]) is int and
+             isinstance(paths, list) and paths == sorted(paths) and
+             len(paths) == min(source["untracked_count"], UNTRACKED_PATHS_RECORDED),
+             "untracked file record is inconsistent")
+    if source["untracked_count"] <= UNTRACKED_PATHS_RECORDED:
+        _require(hashlib.sha256("\0".join(paths).encode()).hexdigest() == source["untracked_digest"],
+                 "untracked file digest disagrees with the recorded paths")
+    _require(source["dirty"] is True or
+             (source["tracked_changes"] == 0 and source["untracked_count"] == 0),
+             "source marked clean despite tracked changes or untracked files")
     _require(receipt["receipt_sha256"] == receipt_digest(receipt), "receipt digest mismatch")
     _require(receipt["timing_rule"] == TIMING_RULE, "timing rule text changed")
     _require("hostname" not in json.dumps(receipt["host_identity_class"]).lower(),
@@ -660,8 +732,11 @@ def validate_receipt(path: Path) -> dict[str, Any]:
                  (receipt["planted"]["sleep_us"],
                   receipt["planted"]["every"] if receipt["planted"]["sleep_us"] else 1),
                  "cell planted fault disagrees with raw output")
-        _require(view["source_sha"] == receipt["source"]["sha"] and
-                 view["source_dirty"] is receipt["source"]["dirty"],
+        source = receipt["source"]
+        _require(view["source_sha"] == source["sha"] and view["source_dirty"] is source["dirty"] and
+                 view["source_tracked_changes"] == source["tracked_changes"] and
+                 view["source_untracked_count"] == source["untracked_count"] and
+                 view["source_untracked_digest"] == source["untracked_digest"],
                  "source state disagrees with raw output")
         _require(view["cmake_build_type"] == receipt["build_profile"]["CMAKE_BUILD_TYPE"] and
                  view["pulp_sanitizer"] == receipt["build_profile"]["PULP_SANITIZER"],
