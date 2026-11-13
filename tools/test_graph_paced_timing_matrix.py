@@ -158,14 +158,36 @@ class RawBindingTest(unittest.TestCase):
         fixture = matrix.FIXTURES["g5-graph-event"]
         body = matrix.reference_cell_output("routed", 48000, 128, 8, 0, 1).replace(
             "fixture=python-reference", "fixture=g5-graph-event")
+        trailers = ("PACED_SOURCE sha=" + "a" * 40 + " dirty=0\n"
+                    "PACED_BUILD cmake_build_type=python pulp_sanitizer=none\n")
         passing = body + "All tests passed (10 assertions in 1 test case)\n"
-        self.assertEqual(matrix.raw_cell_view(fixture, passing + "PACED_PROCESS returncode=0\n")["returncode"], 0)
+        self.assertEqual(matrix.raw_cell_view(
+            fixture, passing + "PACED_PROCESS returncode=0\n" + trailers)["returncode"], 0)
         with self.assertRaisesRegex(matrix.MatrixError, "Catch2 summary"):
-            matrix.raw_cell_view(fixture, passing + "PACED_PROCESS returncode=1\n")
+            matrix.raw_cell_view(fixture, passing + "PACED_PROCESS returncode=1\n" + trailers)
         with self.assertRaisesRegex(matrix.MatrixError, "Catch2 summary"):
-            matrix.raw_cell_view(fixture, body + "PACED_PROCESS returncode=0\n")
+            matrix.raw_cell_view(fixture, body + "PACED_PROCESS returncode=0\n" + trailers)
         with self.assertRaisesRegex(matrix.MatrixError, "process trailer"):
-            matrix.raw_cell_view(fixture, passing)
+            matrix.raw_cell_view(fixture, passing + trailers)
+
+    def test_receipt_source_and_build_profile_are_bound_to_raw_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            record(out)
+            path = out / "receipt.json"
+            original = path.read_text(encoding="utf-8")
+            self.assert_resigned_tamper_rejected(
+                path, original, lambda r: r["source"].__setitem__("sha", "a" * 40),
+                "source state disagrees with raw output")
+            self.assert_resigned_tamper_rejected(
+                path, original,
+                lambda r: r["build_profile"].__setitem__("CMAKE_BUILD_TYPE", "Release"),
+                "build profile disagrees with raw output")
+            self.assert_resigned_tamper_rejected(
+                path, original,
+                lambda r: r["build_profile"].__setitem__("PULP_SANITIZER", "address"),
+                "build profile disagrees with raw output")
+            matrix.validate_receipt(path)
 
 
 class AdmissionTest(unittest.TestCase):

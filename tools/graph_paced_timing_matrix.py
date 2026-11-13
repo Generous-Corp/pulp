@@ -279,7 +279,35 @@ def parse_g12_output(stdout: str) -> dict[str, Any]:
 
 
 PROCESS_TRAILER = "PACED_PROCESS"
+SOURCE_TRAILER = "PACED_SOURCE"
+BUILD_TRAILER = "PACED_BUILD"
 CATCH_PASS_MARKER = "All tests passed"
+
+
+def _provenance_token(value: str) -> str:
+    """Encode an optional CMake value as one token in a raw-output trailer."""
+    return value if value else "none"
+
+
+def _provenance_value(value: str) -> str:
+    return "" if value == "none" else value
+
+
+def parse_provenance_trailers(stdout: str) -> dict[str, Any]:
+    """Read the runner-owned source and build profile bound to the raw output."""
+    source_lines = [line for line in stdout.splitlines() if line.startswith(SOURCE_TRAILER + " ")]
+    build_lines = [line for line in stdout.splitlines() if line.startswith(BUILD_TRAILER + " ")]
+    _require(len(source_lines) == 1 and len(build_lines) == 1,
+             "raw output must carry exactly one source and build trailer")
+    source = dict(_TOKEN.findall(source_lines[0]))
+    build = dict(_TOKEN.findall(build_lines[0]))
+    _require(set(source) == {"sha", "dirty"} and re.fullmatch(r"[0-9a-f]{40}", source["sha"]),
+             "malformed source trailer")
+    _require(source["dirty"] in ("0", "1"), "malformed source dirty flag")
+    _require(set(build) == {"cmake_build_type", "pulp_sanitizer"}, "malformed build trailer")
+    return {"source_sha": source["sha"], "source_dirty": source["dirty"] == "1",
+            "cmake_build_type": _provenance_value(build["cmake_build_type"]),
+            "pulp_sanitizer": _provenance_value(build["pulp_sanitizer"])}
 
 
 def parse_process_trailer(stdout: str) -> int:
@@ -297,6 +325,7 @@ def raw_cell_view(fixture: Fixture, stdout: str) -> dict[str, Any]:
     parsed = parse_raw(fixture, stdout)
     meta = parsed["meta"]
     returncode = parse_process_trailer(stdout)
+    provenance = parse_provenance_trailers(stdout)
     if fixture.row_format != "reference":
         # Catch2's own summary must agree with the recorded exit status.
         _require((CATCH_PASS_MARKER in stdout) == (returncode == 0),
@@ -306,6 +335,7 @@ def raw_cell_view(fixture: Fixture, stdout: str) -> dict[str, Any]:
     view.update(returncode=returncode, planted_sleep_us=meta["planted_sleep_us"],
                 planted_every=meta["planted_every"],
                 metrics=compute_metrics(parsed["rows"], meta["rate"], meta["frames"]))
+    view.update(provenance)
     return view
 
 
@@ -508,10 +538,12 @@ def record_matrix(*, mode: str, source_root: Path, build_dir: Path, output_dir: 
 
     load, ncpu = load_reader()
     before = admission_verdict(load, ncpu, max_load_per_cpu)
+    source_state = _source_state(source_root)
+    build_profile = _build_profile(build_dir)
     receipt: dict[str, Any] = {
         "schema": SCHEMA, "tool": "tools/graph_paced_timing_matrix.py", "mode": mode,
         "status": "RUNNING", "timing_rule": TIMING_RULE,
-        "source": _source_state(source_root), "build_profile": _build_profile(build_dir),
+        "source": source_state, "build_profile": build_profile,
         "host_identity_class": host_identity_class(),
         "admission": {"rule": ADMISSION_RULE, "max_load_per_cpu": max_load_per_cpu,
                       "logical_cpus": ncpu, "before": before, "after": None},
@@ -551,6 +583,9 @@ def record_matrix(*, mode: str, source_root: Path, build_dir: Path, output_dir: 
         if stdout and not stdout.endswith("\n"):
             stdout += "\n"
         stdout += f"{PROCESS_TRAILER} returncode={returncode}\n"
+        stdout += f"{SOURCE_TRAILER} sha={source_state['sha']} dirty={int(source_state['dirty'])}\n"
+        stdout += (f"{BUILD_TRAILER} cmake_build_type={_provenance_token(build_profile['CMAKE_BUILD_TYPE'])} "
+                   f"pulp_sanitizer={_provenance_token(build_profile['PULP_SANITIZER'])}\n")
         raw_path.write_text(stdout, encoding="utf-8")
         parsed = parse_raw(fixture, stdout)
         meta = parsed["meta"]
@@ -625,6 +660,15 @@ def validate_receipt(path: Path) -> dict[str, Any]:
                  (receipt["planted"]["sleep_us"],
                   receipt["planted"]["every"] if receipt["planted"]["sleep_us"] else 1),
                  "cell planted fault disagrees with raw output")
+        _require(view["source_sha"] == receipt["source"]["sha"] and
+                 view["source_dirty"] is receipt["source"]["dirty"],
+                 "source state disagrees with raw output")
+        _require(view["cmake_build_type"] == receipt["build_profile"]["CMAKE_BUILD_TYPE"] and
+                 view["pulp_sanitizer"] == receipt["build_profile"]["PULP_SANITIZER"],
+                 "build profile disagrees with raw output")
+        if fixture.row_format != "reference":
+            _require(view["cmake_build_type"] == view["build_type"],
+                     "build type disagrees with CMake build profile")
         raw_cells.append({**cell, **{f: view[f] for f in RAW_BOUND_CELL_FIELDS}})
     if receipt["status"] == "COMPLETE":
         expected = {(f.name, v, r, fr) for f, v, r, fr in matrix_cells(
