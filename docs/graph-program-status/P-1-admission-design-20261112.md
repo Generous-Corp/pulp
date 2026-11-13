@@ -53,9 +53,9 @@ including voice intent.
   `add_processor_node()` `Processor`, which receives no parameter events
   without the private exact-parameter claim path. It is checked instead
   through a `PluginSlot` node added with `add_plugin_node`. See
-  `docs/evidence/p1-event-admission-consumer-20261112.md:92-182` and the
+  `docs/evidence/p1-event-admission-consumer-20261112.md:93-303` and the
   receipt's control disposition at
-  `docs/evidence/p1-event-admission-consumer-20261112/receipt.json:8-66`.
+  `docs/evidence/p1-event-admission-consumer-20261112/receipt.json:8-144`.
 * Public `TriggerContext` delivery is **UNAVAILABLE** and was refused as a
   seam: ordinary public custom-node callbacks do not receive a trigger
   context, whose construction is private. The trigger row is satisfied
@@ -127,10 +127,13 @@ Keep P-1 **CONDITIONAL HOLD**. The existing
 `examples/p1-event-admission-consumer` is the authoritative partial fixture.
 It now proves each family across blocks from an installed SDK: MIDI ingress,
 the graph-authored trigger lane, the parameter mailbox into a `PluginSlot`
-node, and voice intent through `VoiceBankBinding`. It does not yet coordinate
-the four families through one shared epoch and sample origin, and the other
-rows listed in the receipt remain NOT_CHECKED. The evidence is recorded at
-`docs/evidence/p1-event-admission-consumer-20261112.md:92-182`, with the exact
+node, and voice intent through `VoiceBankBinding`. A combined control also
+coordinates the four families through one test-owned epoch and absolute sample
+origin on one block grid across five schedules, with an explainable sequence
+mutation. UMP/MPE sidecars in this fixture, mailbox overflow telemetry,
+all-family reset, measured callback allocation freedom, executor parity, and
+voice intent as a graph node remain NOT_CHECKED. The evidence is recorded at
+`docs/evidence/p1-event-admission-consumer-20261112.md:93-303`, with the exact
 qualification result in
-`docs/evidence/p1-event-admission-consumer-20261112/receipt.json:8-66`; no
+`docs/evidence/p1-event-admission-consumer-20261112/receipt.json:8-144`; no
 runtime/API change or second queue is authorized by this packet.

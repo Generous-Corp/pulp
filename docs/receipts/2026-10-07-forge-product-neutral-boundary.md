@@ -40,11 +40,11 @@ current Pulp headers expose both layers together.
 The Forge repository consumes Pulp family headers for stable IDs and factories
 in generated effect rows and graph loading, including:
 
-- `/Users/danielraffel/Code/forge/include/forge/gen/effect_node_registry_core_rows.hpp`
-- `/Users/danielraffel/Code/forge/include/forge/gen/effect_node_registry_round2_rows.hpp`
-- `/Users/danielraffel/Code/forge/include/forge/gen/effect_node_registry_spectral_dynamics_rows.hpp`
-- `/Users/danielraffel/Code/forge/src/gen/graph_loader.cpp`
-- `/Users/danielraffel/Code/forge/src/gen/live_graph_processor.cpp`
+- `<code-root>/forge/include/forge/gen/effect_node_registry_core_rows.hpp`
+- `<code-root>/forge/include/forge/gen/effect_node_registry_round2_rows.hpp`
+- `<code-root>/forge/include/forge/gen/effect_node_registry_spectral_dynamics_rows.hpp`
+- `<code-root>/forge/src/gen/graph_loader.cpp`
+- `<code-root>/forge/src/gen/live_graph_processor.cpp`
 
 Forge also loads the installed snapshot at
 `share/pulp/forge-catalog.json` and validates its schema, node keys, realization

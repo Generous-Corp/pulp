@@ -10,14 +10,14 @@ merge, release, or safe-merge claim.
 - Pulp protected head: `3c2334da9151e68e3040cd54de78c8da59d776e5`
 - TartCI protected head: `0ed9da98c044eea117ddc390f247c586f6e5b637`
 - Shipyard protected head: `100d3bbabbe784fdbfd381350d401b2aad9fd916`
-- Shipyard checkout: `/Users/danielraffel/Code/Shipyard-baseline-refresh`
-- Shipyard executable: `/Users/danielraffel/Code/Shipyard-baseline-refresh/target/debug/shipyard`
-- Metrics database: `/Users/danielraffel/Library/Application Support/shipyard-dev/metrics/metrics.db`
+- Shipyard checkout: `<code-root>/Shipyard-baseline-refresh`
+- Shipyard executable: `<code-root>/Shipyard-baseline-refresh/target/debug/shipyard`
+- Metrics database: `~/Library/Application Support/shipyard-dev/metrics/metrics.db`
 - Database size at capture: `1,105,920` bytes
 - Database mtime at capture: `2026-10-16 07:39:28 -0700`
 - Database ingest provenance: not captured in the existing snapshot; this refresh did not mutate or re-import the database. No ingest command or completion time can be claimed.
 - Raw JSON: [`2026-10-16-three-project-scorecard.json`](2026-10-16-three-project-scorecard.json)
-- Shipyard binary: `/Users/danielraffel/Code/Shipyard-baseline-refresh/target/debug/shipyard`, version `0.343.0`, dev profile (`unoptimized + debuginfo`), exact checkout head `100d3bbabbe784fdbfd381350d401b2aad9fd916`
+- Shipyard binary: `<code-root>/Shipyard-baseline-refresh/target/debug/shipyard`, version `0.343.0`, dev profile (`unoptimized + debuginfo`), exact checkout head `100d3bbabbe784fdbfd381350d401b2aad9fd916`
 
 The exact command was run once per project in one sequential capture interval (`2026-10-16T15:23:23.498711Z` through `2026-10-16T15:23:23.849107Z`). Each command wrote stdout to an individual temporary capture, parsed that JSON, and exited `0`; the committed JSON is an assembled envelope containing those parsed per-command objects plus provenance metadata. Exit codes are explicitly operator-asserted from subprocess return codes; the temporary stdout captures are not committed.
 

@@ -14,3 +14,6 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/examples/g11-recording-publication/CMakeLists.txt
         LABELS "examples;installed-sdk;graph;g11;slow"
         TIMEOUT 1800)
 endif()
+
+# The graph cookbooks reuse this manifest's installed-SDK consumer driver.
+include("${CMAKE_CURRENT_LIST_DIR}/g11_cookbook_tests.cmake")
