@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 1.117.0
+    VERSION 1.120.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -669,6 +669,8 @@ add_subdirectory(ship)
 # fails the iPhoneSimulator configure on a missing pulp::host.
 if(PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/audio)
+    # The RT allocation probe for SDK consumers' tests (Pulp::rt-allocation-probe).
+    add_subdirectory(tools/testing/rt_allocation_probe)
     add_subdirectory(tools/design-ab)
     # Offline driver that asks a built LV2 module to describe itself into its
     # bundle. Host-side, so it is useless when the modules it would run are

@@ -543,6 +543,72 @@ class TestCaptureJoin(CaptureTestCase):
         self.assertTrue(layout_parity.report_fails(report))
 
 
+class TestChromeBoxListing(CaptureTestCase):
+    """The per-node record against Chromium's getBoundingClientRect boxes."""
+
+    def test_clean_fixture_lists_every_node_within_tolerance(self):
+        report = self.fixture().compare()
+        self.assertEqual([b["node_id"] for b in report["boxes"]],
+                         sorted(["html", "html/body", "card", "card/label", "card/icon"]))
+        self.assertTrue(all(b["within_tolerance"] for b in report["boxes"]))
+        self.assertEqual(report["findings"], [])
+        self.assertFalse(layout_parity.report_fails(report))
+
+    def test_planted_move_names_node_and_pixel_delta(self):
+        report = self.fixture(views=panel_views(dx_label=7)).compare()
+        by_id = {b["node_id"]: b for b in report["boxes"]}
+        label = by_id["card/label"]
+        self.assertEqual(label["reference"], {"x": 30.0, "y": 40.0, "w": 80.0, "h": 20.0})
+        self.assertEqual(label["native"], {"x": 37.0, "y": 40.0, "w": 80.0, "h": 20.0})
+        self.assertEqual(label["delta"]["dx"], 7.0)
+        self.assertFalse(label["within_tolerance"])
+        self.assertEqual([b["node_id"] for b in report["boxes"] if not b["within_tolerance"]],
+                         ["card/label"])
+        self.assertTrue(layout_parity.report_fails(report))
+
+    def test_planted_resize_is_caught(self):
+        views = [v if v[0] != "card/icon" else (v[0], v[1], v[2], v[3] + 6, v[4])
+                 for v in panel_views()]
+        report = self.fixture(views=views).compare()
+        icon = {b["node_id"]: b for b in report["boxes"]}["card/icon"]
+        self.assertEqual(icon["delta"]["dw"], 6.0)
+        self.assertTrue(layout_parity.report_fails(report))
+
+    def test_sub_tolerance_drift_stays_silent(self):
+        # Negative control for the tolerance: a 1px rounding difference passes.
+        report = self.fixture(views=panel_views(dx_label=1)).compare()
+        self.assertFalse(layout_parity.report_fails(report))
+
+    def test_a_shift_the_pixel_score_cannot_see_is_caught_by_boxes(self):
+        # The pixel comparison is a histogram plus mean distance. A 4px move of
+        # a small element changes a handful of pixels: the score stays above
+        # its pass threshold while the box check fails with the node id.
+        try:
+            from PIL import Image, ImageDraw
+        except ImportError:
+            self.skipTest("Pillow not installed")
+        spec = importlib.util.spec_from_file_location(
+            "diff_against_reference",
+            TOOL.parents[1] / "import-validation" / "diff_against_reference.py")
+        dar = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(dar)
+
+        def render(label_x: int) -> "Image.Image":
+            img = Image.new("RGB", (400, 300), (24, 24, 28))
+            d = ImageDraw.Draw(img)
+            d.rectangle([20, 30, 220, 130], fill=(60, 60, 70))
+            d.rectangle([label_x, 40, label_x + 80, 60], fill=(200, 200, 200))
+            return img
+
+        self.assertEqual(dar.similarity_score(render(30), render(30)), 1.0)
+        pixel_score = dar.similarity_score(render(30), render(34))
+        self.assertGreater(pixel_score, 0.95, "pixel score should not notice 4px")
+
+        report = self.fixture(views=panel_views(dx_label=4)).compare()
+        self.assertTrue(layout_parity.report_fails(report))
+        self.assertEqual(report["findings"][0]["node_id"], "card/label")
+
+
 class TestCaptureCli(CaptureTestCase):
     def run_tool(self, *args) -> subprocess.CompletedProcess:
         return subprocess.run([sys.executable, str(TOOL), *map(str, args)],

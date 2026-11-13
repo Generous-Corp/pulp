@@ -65,6 +65,7 @@
       "pulp/audio/mmap_reader.hpp",
       "pulp/audio/offline_processor.hpp",
       "pulp/audio/onset_detector.hpp",
+      "pulp/audio/output_device_session.hpp",
       "pulp/audio/pcm_capabilities.hpp",
       "pulp/audio/planar_audio_ring_buffer.hpp",
       "pulp/audio/published_sample_store.hpp",
@@ -622,6 +623,7 @@
       "pulp/midi/synthesiser.hpp",
       "pulp/midi/sysex_accumulator.hpp",
       "pulp/midi/sysex_chunk_assembler.hpp",
+      "pulp/midi/sysex_send_gate.hpp",
       "pulp/midi/tuning.hpp",
       "pulp/midi/ump.hpp",
       "pulp/midi/ump_buffer.hpp",
@@ -869,6 +871,7 @@
       "pulp/audio/mmap_reader.hpp",
       "pulp/audio/offline_processor.hpp",
       "pulp/audio/onset_detector.hpp",
+      "pulp/audio/output_device_session.hpp",
       "pulp/audio/pcm_capabilities.hpp",
       "pulp/audio/planar_audio_ring_buffer.hpp",
       "pulp/audio/published_sample_store.hpp",
@@ -1709,6 +1712,9 @@
       "pulp_tooling/gpu_health/health_provider.hpp",
       "pulp_tooling/gpu_health/health_read_result.hpp",
       "pulp_tooling/gpu_health/health_result.hpp"
+    ],
+    "tools/testing/rt_allocation_probe/include": [
+      "pulp/test/rt_allocation_probe.hpp"
     ]
   },
   "profiles": {
@@ -1733,7 +1739,7 @@
         "PULP_BUILD_EXAMPLES": "OFF"
       },
       "summary": {
-        "installed_target_count": 89,
+        "installed_target_count": 90,
         "ranked_by_closure": [
           {
             "exported_as": "Pulp::inspect-standalone-runtime",
@@ -2069,6 +2075,10 @@
           },
           {
             "exported_as": "Pulp::p256m",
+            "closure_node_count": 1
+          },
+          {
+            "exported_as": "Pulp::rt-allocation-probe",
             "closure_node_count": 1
           },
           {
@@ -7016,6 +7026,34 @@
             "pulp-runtime",
             "skia::skia"
           ]
+        },
+        "rt-allocation-probe": {
+          "target": "pulp-rt-allocation-probe",
+          "exported_as": "Pulp::rt-allocation-probe",
+          "type": "STATIC_LIBRARY",
+          "source_dir": "tools/testing/rt_allocation_probe",
+          "closure": {
+            "node_count": 1,
+            "pulp_targets": [
+              "pulp-rt-allocation-probe"
+            ],
+            "third_party_targets": []
+          },
+          "external_dependencies": {
+            "count": 0,
+            "third_party_targets": [],
+            "prebuilt_archives": [],
+            "imported_targets": [],
+            "frameworks": [],
+            "system_libraries": []
+          },
+          "public_headers": {
+            "roots": [
+              "tools/testing/rt_allocation_probe/include"
+            ],
+            "generated_include_roots": 0
+          },
+          "direct_dependencies": []
         },
         "runtime": {
           "target": "pulp-runtime",
@@ -22732,7 +22770,7 @@
         "PULP_BUILD_EXAMPLES": "OFF"
       },
       "summary": {
-        "installed_target_count": 87,
+        "installed_target_count": 88,
         "ranked_by_closure": [
           {
             "exported_as": "Pulp::inspect-standalone-runtime",
@@ -22984,7 +23022,7 @@
           },
           {
             "exported_as": "Pulp::native",
-            "closure_node_count": 10
+            "closure_node_count": 11
           },
           {
             "exported_as": "Pulp::signal-fft-backend",
@@ -23064,6 +23102,10 @@
           },
           {
             "exported_as": "Pulp::p256m",
+            "closure_node_count": 1
+          },
+          {
+            "exported_as": "Pulp::rt-allocation-probe",
             "closure_node_count": 1
           },
           {
@@ -27440,7 +27482,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "integrations/pulp-native",
           "closure": {
-            "node_count": 10,
+            "node_count": 11,
             "pulp_targets": [
               "pulp-platform"
             ],
@@ -27450,7 +27492,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 9,
+            "count": 10,
             "third_party_targets": [
               "gpu-runtime-device-api",
               "pulp-native"
@@ -27463,6 +27505,7 @@
               "CoreFoundation",
               "CoreVideo",
               "Metal",
+              "OpenGL",
               "QuartzCore",
               "UniformTypeIdentifiers"
             ],
@@ -27478,6 +27521,7 @@
             "framework:AppKit",
             "framework:CoreVideo",
             "framework:Metal",
+            "framework:OpenGL",
             "framework:QuartzCore",
             "pulp-platform"
           ]
@@ -27920,6 +27964,34 @@
             "pulp-runtime",
             "skia::skia"
           ]
+        },
+        "rt-allocation-probe": {
+          "target": "pulp-rt-allocation-probe",
+          "exported_as": "Pulp::rt-allocation-probe",
+          "type": "STATIC_LIBRARY",
+          "source_dir": "tools/testing/rt_allocation_probe",
+          "closure": {
+            "node_count": 1,
+            "pulp_targets": [
+              "pulp-rt-allocation-probe"
+            ],
+            "third_party_targets": []
+          },
+          "external_dependencies": {
+            "count": 0,
+            "third_party_targets": [],
+            "prebuilt_archives": [],
+            "imported_targets": [],
+            "frameworks": [],
+            "system_libraries": []
+          },
+          "public_headers": {
+            "roots": [
+              "tools/testing/rt_allocation_probe/include"
+            ],
+            "generated_include_roots": 0
+          },
+          "direct_dependencies": []
         },
         "runtime": {
           "target": "pulp-runtime",

@@ -114,6 +114,7 @@
         "pulp-playback",
         "pulp-project-package",
         "pulp-render",
+        "pulp-rt-allocation-probe",
         "pulp-runtime",
         "pulp-sample-bank-manifest",
         "pulp-sequence",

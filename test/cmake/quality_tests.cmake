@@ -256,6 +256,14 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME doxygen-installed-header-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_doxygen_installed_header_check.py")
+    # docs/status/modules.yaml entries resolve to a source directory: core/<name>
+    # or the entry's path under integrations/ (tools/check-docs.sh runs the check).
+    add_test(NAME modules-yaml-dirs-check
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/modules_yaml_dirs_check.py")
+    add_test(NAME modules-yaml-dirs-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_modules_yaml_dirs_check.py")
     add_test(NAME transient-interaction-trace-budget-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_transient_interaction_trace.py")
@@ -507,6 +515,14 @@ if(Python3_Interpreter_FOUND)
     # gate is proven to distinguish them rather than proven to be quiet.
     add_test(NAME unbounded-wait-lint-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_unbounded_wait_lint.py")
+
+    # Patched-os.name lint: a concrete pathlib.Path built while a test patches
+    # os.name to "nt" is a WindowsPath, which Python 3.11 refuses to build off
+    # Windows, so the test passes on newer Pythons and errors on 3.11 hosts.
+    # The selftest plants the bad shape next to its safe twins and also scans
+    # the tracked tree.
+    add_test(NAME patched-os-name-path-lint-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_patched_os_name_path_lint.py")
 
     # Forced-restore lint: a forced worktree restore used as a repair has to say
     # which state it repairs. `checkout --force -- .` restores nothing when git

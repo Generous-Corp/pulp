@@ -17,6 +17,7 @@
    "core/view/include/pulp/view/view.hpp",
    "core/view/js/web-compat-element.js",
    "core/view/platform/ios/window_host_ios.mm",
+   "core/view/src/widgets.cpp",
    "docs/status/agent-capabilities.json",
    "docs/status/agent-capability-surface.schema.json",
    "docs/status/agent-capability-surface/headers/pulp/midi/strum.hpp.json",

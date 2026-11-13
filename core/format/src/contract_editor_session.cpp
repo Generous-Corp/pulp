@@ -5,6 +5,7 @@
 
 #include <pulp/format/processor.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/trace.hpp>
 #include <pulp/state/store.hpp>
 
 #include <algorithm>
@@ -145,7 +146,7 @@ ContractEditorSession::create(Processor& processor, state::StateStore& store,
 
 ContractEditorSession::ContractEditorSession(Processor& processor, state::StateStore& store,
                                              HostHooks hooks, IdleSource idle)
-    : idle_source_(idle), port_(std::make_unique<StateStoreParamPort>(store)),
+    : idle_source_(idle), store_(store), port_(std::make_unique<StateStoreParamPort>(store)),
       context_(std::make_unique<Context>(*port_, processor.editor_host_kind(), std::move(hooks))) {}
 
 ContractEditorSession::~ContractEditorSession() {
@@ -226,8 +227,16 @@ void ContractEditorSession::destroy_editor() {
 void ContractEditorSession::tick() {
     // Once the owner is gone, draw nothing until the main thread closes the
     // editor: its ports are cut, and a frame would show nothing true.
-    if (editor_ && attached_ && !owner_gone_.load())
-        editor_->idle();
+    if (!editor_ || !attached_ || owner_gone_.load())
+        return;
+    // Audio-thread writes and state restores reach the port's listeners only
+    // when the main thread drains them.
+    {
+        PULP_TRACE_SCOPE_NAMED("state", "editor_pump_listeners");
+        store_.pump_listeners();
+        store_.reconcile_restore_listeners();
+    }
+    editor_->idle();
 }
 
 EditorSize ContractEditorSession::size() const {

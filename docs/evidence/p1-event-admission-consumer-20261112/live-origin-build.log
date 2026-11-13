@@ -1,0 +1,14 @@
+[governed-build] applying requested lower parallelism cap before lease admission -j1
+[governed-build] interactive lease acquired id=pulp-shipyard-local-3315-1794522286 cores=1 (asked 1, normal QoS)
+[governed-build] heartbeat every 60s for lease id=pulp-shipyard-local-3315-1794522286
+[1/3] Building CXX object CMakeFiles/pulp-p1-event-admission-consumer.dir/main.cpp.o
+FAILED: [code=1] CMakeFiles/pulp-p1-event-admission-consumer.dir/main.cpp.o 
+/usr/bin/c++ -DPULP_ENABLE_AUDIO_PROBES=0 -DPULP_ENABLE_JS=1 -DPULP_HAS_DAWN=1 -DPULP_HAS_DESIGN_IMPORT=1 -DPULP_HAS_SKIA=1 -DPULP_HAS_SKRESOURCES=1 -DPULP_HAS_WEBGPU=1 -DPULP_HOST_ENABLE_GPU_CONVOLUTION=1 -DPULP_HOST_HAS_AU=1 -DPULP_HOST_HAS_EDITOR_CONTAINER=1 -DPULP_HOST_HAS_LV2=1 -DPULP_HOST_HAS_VST3=1 -DPULP_HOST_QUIRKS_DEFAULT_POLICY_VALIDATED_ONLY=1 -DPULP_SIMD_DEFAULT_BACKEND_ACCELERATE=1 -DPULP_SIMD_HAS_ACCELERATE=1 -DPULP_SIMD_HAS_HIGHWAY=1 -DPULP_VIEW_HAS_AUDIO_WIDGETS=1 -DRELEASE=1 -DSK_DAWN -DSK_GRAPHITE -DSK_RELEASE -isystem /Users/danielraffel/.pulp/sdk/1.54.0/include -isystem /Users/danielraffel/.pulp/sdk/1.54.0/external/vst3sdk -isystem /Users/danielraffel/.pulp/sdk/1.54.0/external/lv2/include -isystem /Users/danielraffel/.pulp/sdk/1.54.0/external/skia-build/build/include -isystem /Users/danielraffel/.pulp/sdk/1.54.0/external/skia-build/build -isystem /Users/danielraffel/.pulp/sdk/1.54.0/external/skia-build/modules/skparagraph/include -isystem /Users/danielraffel/.pulp/sdk/1.54.0/external/skia-build/modules/skshaper/include -isystem /Users/danielraffel/.pulp/sdk/1.54.0/external/skia-build/modules/skunicode/include -isystem /Users/danielraffel/.pulp/sdk/1.54.0/external/skia-build/modules/svg/include -isystem /Users/danielraffel/.pulp/sdk/1.54.0/external/skia-build/modules/skottie/include -isystem /Users/danielraffel/.pulp/sdk/1.54.0/external/skia-build/build/include/third_party/externals/dawn/include -isystem /Users/danielraffel/.pulp/sdk/1.54.0/external/clap/include -O3 -DNDEBUG -std=gnu++23 -arch arm64 -mmacosx-version-min=13.4 -MD -MT CMakeFiles/pulp-p1-event-admission-consumer.dir/main.cpp.o -MF CMakeFiles/pulp-p1-event-admission-consumer.dir/main.cpp.o.d -o CMakeFiles/pulp-p1-event-admission-consumer.dir/main.cpp.o -c /Volumes/Workshop/Code/agent-worktrees/pulp-p1-event-projection-20261112/examples/p1-event-admission-consumer/main.cpp
+/Volumes/Workshop/Code/agent-worktrees/pulp-p1-event-projection-20261112/examples/p1-event-admission-consumer/main.cpp:2:10: fatal error: 'pulp/host/graph_event_contract.hpp' file not found
+    2 | #include <pulp/host/graph_event_contract.hpp>
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+1 error generated.
+ninja: build stopped: subcommand failed.
+[governed-build] build failed rc=1 after 1s
+[governed-build]   host: cores=28 load(start)=[16.73 17.61 20.27] load(now)=[16.73 17.61 20.27]
+[governed-build]   build: -j1 (floor=2) lease=pulp-shipyard-local-3315-1794522286

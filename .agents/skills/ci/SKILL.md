@@ -19,6 +19,14 @@ historical GPU-probe acceptance test from a depth-2 checkout. Keep its bounded
 removing it produces a deterministic shallow-history failure unrelated to the
 source change.
 
+Docs-only pull requests take a fast path that still reports every required
+context: CodeQL does not run (`paths-ignore`), `drift-fast` runs only its
+readers from source, and the source selftests run only the entries that can
+read the change. The class comes from `classify_changes.impact_class`; never
+add `paths`/`paths-ignore` or a job-level `if:` to a required workflow to get
+the same effect, and never extend `drift_fast.json`'s `prose_not_readers`
+without a reviewed reason. See `docs/guides/local-ci.md` "Impact-scoped jobs".
+
 ## Landing a Pulp PR fast — the checklist
 
 Every step below exists because skipping it cost a CI round trip (20-40 min)
@@ -119,6 +127,17 @@ on a real PR. Do them in order.
    gate's self-test until `tools/ci/release_configure_matrix.py` classifies it
    (replayed, mirrored or skipped with a reason). See `docs/guides/local-ci.md`
    § `release-configure`.
+
+   **Release jobs and long release steps carry derived `timeout-minutes`.**
+   `tools/ci/release_step_timeouts.json` holds `max(floor, 4 x p95)` of each
+   step's slowest leg over recent successful `Release CLI` runs, and
+   `release_step_timeouts.py check` (workflow-lint) fails a release job with no
+   timeout or a long step without its recorded value. When a long step is
+   renamed or a release step gets slower, re-run
+   `release_step_timeouts.py derive` and update the policy and workflow
+   together; do not hand-raise one number. A timed-out leg is re-run once by
+   the release reconciler (`rerun-failed-jobs`), so a hang no longer waits for
+   the drought alarm. See `docs/guides/release-watchdog.md`.
 3. **Open with `shipyard pr` and leave auto-merge armed.** Before you start,
    `shipyard ship-state list` shows whether someone is already landing it.
 4. **Read `mergeStateStatus` correctly:**
@@ -1007,6 +1026,13 @@ A wait on CI or a PR belongs in one blocking call: `shipyard wait run|job|pr|rel
 when the condition holds. A loop that reads the same state every few seconds
 costs an agent turn per read and changes nothing: in one week of agent sessions
 on one host, poll turns were a fifth of all tool calls.
+
+A queued or in-progress required check is never "blocked". The fleet has a fixed
+number of macOS VM slots (2 per Mac), so a required `macos` job can sit queued for
+capacity for an hour or more; that is normal. Run one background
+`shipyard wait pr <n> --state actionable --timeout 3600 --json`, then take the next
+independent item or hand off. Do not mark the goal blocked or stop. Call a PR
+blocked only when `shipyard wait` returns a `next_action` that needs someone else.
 
 ## One push per fix round: read the head's `macos` job before pushing
 
@@ -3484,6 +3510,12 @@ a configured build: `script_test_inputs.py --build-dir B --write`,
 `source_selftests.py write --build-dir B` (`--add <name>` for a new entry), and
 `changed_surface_script_families.py --build-dir B --write` (the build needs a
 codemodel reply: touch `B/.cmake/api/v1/query/codemodel-v2` and reconfigure).
+No configure available (a gate host at its ceiling)? When `script-test-inputs`
+fails in `drift-fast`, the run uploads the `script-inputs-expected` artifact:
+the exact fragments `--write` would produce for the drifted entries
+(`--emit-expected DIR`, default `$RUNNER_TEMP/script-inputs-expected`). Download
+it and `cp -R <artifact-dir>/. test/ctest_script_inputs/`, then commit; the
+failure log prints this recipe.
 `gates.sh` runs all three checks in one lane (`gates_script_inputs.py`) whenever
 the diff touches a Python file under `tools/`, `test/cmake/`, a skill doc or one
 of the generated files, configuring `build-gate` without compiling if no current

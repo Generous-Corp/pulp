@@ -220,6 +220,11 @@ pulp_add_test_suite(pulp-test-audio-device-manager
     SOURCES test_audio_device_manager.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio pulp::midi pulp::state pulp::runtime)
 
+# OutputDeviceSession: follow-default, named choice, unplug/replug.
+pulp_add_test_suite(pulp-test-output-device-session
+    SOURCES test_output_device_session.cpp
+    LIBRARIES pulp::audio pulp::runtime)
+
 # DSP enhancement tests (dry/wet mixer, processor duplicator, matrix, special functions)
 pulp_add_test_suite(pulp-test-dsp-enhancements GROUP pulp-test-group-core-signal
     LIBRARIES pulp::signal)

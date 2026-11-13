@@ -1368,7 +1368,20 @@ and only some of them run in `gates.sh`:
 - `docs/status/consumption-profiles.json`, regenerated per profile with
   `consumption_census.py --write` from a configure of each feature set it
   records;
-- `docs/status/modules.yaml` and `docs/reference/modules.md`.
+- `docs/status/modules.yaml` and `docs/reference/modules.md`. A package
+  outside `core/` (`integrations/pulp-native`) gives its entry a `path:`
+  (`path: integrations/pulp-native`); without one, `tools/check-docs.sh`
+  looks for `core/<name>/` and fails. `modules_yaml_dirs_check.py` owns that
+  rule and accepts only paths under `core/` or `integrations/`.
+
+`docs/status/consumption-profiles.json` is a serialized hotspot: the commit
+that regenerates it needs a `Serialized-Hotspot:
+docs/status/consumption-profiles.json reason="..."` line, or
+`hotspot-edit-guard` ejects the PR in the merge queue. Regenerate it from the
+gate profile (the configure with `external/vst3sdk`, `external/AudioUnitSDK` and
+`npm ci` in `tools/import-design/jsx-runtime`): a plainer configure writes a
+different profile, and `consumption-census-drift` still reports the new target
+missing from the gate's.
 
 Keep one include root per module. The Doxygen parity check accepts a second
 public install root only by name, so a module that installs `audio/include`
@@ -2113,3 +2126,13 @@ Changes to the isolated CLAP host headers, including
 Run rederive, fingerprint acceptance, manifest write, and installed-consumer
 checks together; do not hand-edit generated fragments or treat a passing worker
 test as sufficient provenance evidence.
+
+## A new host-side header with no generator-facing capability
+
+Application plumbing (for example a device session class under `pulp/audio/`)
+still trips `unclassified public header`. Add an `infrastructure` entry to
+`REVIEWED_HEADERS` in `agent_capability_registry.py` with a placeholder
+fingerprint, run `agent_capability_manifest.py --check`, copy the digest it
+prints as `got sha256:...` into the entry, then run `--write`. Stage the new
+`docs/status/agent-capability-surface/headers/...json` fragment, which `--write`
+creates untracked.
