@@ -123,6 +123,8 @@ class StepContractTests(unittest.TestCase):
         self.assertIn("rulesets?targets=branch&includes_parents=true", self.script)
         self.assertIn('rule.get("type") == "merge_queue"', self.script)
         self.assertIn('"~DEFAULT_BRANCH" not in', self.script)
+        self.assertIn('ref_name.get("exclude")', self.script)
+        self.assertIn("DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}", self.block)
         self.assertIn("grouping_strategy", self.script)
         # Read before the lone-group exit, so every notice carries it.
         self.assertLess(self.script.index("rulesets?targets"), self.script.index("report not_applicable"))
@@ -189,9 +191,10 @@ class _Rulesets(http.server.BaseHTTPRequestHandler):
         pass
 
 
-def queue_ruleset(rid: int, strategy: str, include: tuple[str, ...] = ("~DEFAULT_BRANCH",)) -> dict:
+def queue_ruleset(rid: int, strategy: str, include: tuple[str, ...] = ("~DEFAULT_BRANCH",),
+                  exclude: tuple[str, ...] = ()) -> dict:
     return {"id": rid, "enforcement": "active",
-            "conditions": {"ref_name": {"include": list(include), "exclude": []}},
+            "conditions": {"ref_name": {"include": list(include), "exclude": list(exclude)}},
             "rules": [{"type": "merge_queue", "parameters": {"grouping_strategy": strategy}}]}
 
 
@@ -250,11 +253,13 @@ class StepBehaviourTests(unittest.TestCase):
         _Rulesets.rulesets = {r["id"]: r for r in rulesets}
 
     def run_step(self, event: str = "merge_group", base: str | None = None, head: str | None = None,
-                 main: str | None = None, mode: str = "") -> tuple[dict, str]:
+                 main: str | None = None, mode: str = "", default_branch: str = "main") -> tuple[dict, str]:
         out = Path(self.tmp.name) / "output"
         out.write_text("", encoding="utf-8")
-        env = {k: v for k, v in os.environ.items() if not k.startswith(("GITHUB_", "MERGE_GROUP_", "DOCS_"))}
+        env = {k: v for k, v in os.environ.items()
+               if not k.startswith(("GITHUB_", "MERGE_GROUP_", "DOCS_", "DEFAULT_BRANCH"))}
         env.update({
+            "DEFAULT_BRANCH": default_branch,
             "GITHUB_EVENT_NAME": event, "GITHUB_REPOSITORY": "O/R", "GITHUB_OUTPUT": str(out),
             "GITHUB_API_URL": f"http://127.0.0.1:{self.server.server_address[1]}",
             "DOCS_ENTRY_DELTA_MODE": mode,
@@ -293,6 +298,36 @@ class StepBehaviourTests(unittest.TestCase):
             outputs, notice = self.run_step(mode="enforce")
             self.assertEqual((outputs["skip"], outputs["verdict"]), ("false", "kept"), expected)
             self.assertIn(f"strategy={expected} ", notice)
+
+    def test_a_queue_rule_that_excludes_the_default_branch_keeps_the_build(self) -> None:
+        # Excluded wins over included, so the queue is not ALLGREEN on main.
+        for exclude in (("~DEFAULT_BRANCH",), ("~ALL",), ("refs/heads/main",), ("refs/heads/ma*",),
+                        ("refs/heads/release", "refs/heads/main")):
+            self.serve(queue_ruleset(7, "ALLGREEN", exclude=exclude))
+            outputs, notice = self.run_step(mode="enforce")
+            self.assertEqual((outputs["skip"], outputs["verdict"]), ("false", "kept"), exclude)
+            self.assertIn("strategy=default_branch_excluded ", notice, exclude)
+
+    def test_an_exclusion_of_another_branch_still_skips(self) -> None:
+        # Control: an exclusion that cannot match the default branch changes nothing.
+        self.serve(queue_ruleset(7, "ALLGREEN", exclude=("refs/heads/release", "refs/heads/main-*")))
+        outputs, notice = self.run_step(mode="enforce")
+        self.assertEqual((outputs["skip"], outputs["verdict"]), ("true", "skipped"))
+        self.assertIn("strategy=ALLGREEN ", notice)
+
+    def test_an_exclusion_without_the_default_branch_name_or_unreadable_is_unreadable(self) -> None:
+        self.serve(queue_ruleset(7, "ALLGREEN", exclude=("refs/heads/release",)))
+        outputs, notice = self.run_step(mode="enforce", default_branch="")
+        self.assertEqual((outputs["skip"], outputs["verdict"]), ("false", "kept"))
+        self.assertIn("strategy=unreadable ", notice)
+        for conditions in ({"include": ["~DEFAULT_BRANCH"], "exclude": "refs/heads/main"},
+                           {"include": ["~DEFAULT_BRANCH"], "exclude": [{"pattern": "main"}]}):
+            ruleset = queue_ruleset(7, "ALLGREEN")
+            ruleset["conditions"]["ref_name"] = conditions
+            self.serve(ruleset)
+            outputs, notice = self.run_step(mode="enforce")
+            self.assertEqual((outputs["skip"], outputs["verdict"]), ("false", "kept"), conditions)
+            self.assertRegex(notice, r"strategy=(unreadable|default_branch_excluded) ", conditions)
 
     def test_an_unreadable_strategy_keeps_the_build(self) -> None:
         _Rulesets.status = 500

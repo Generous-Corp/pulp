@@ -1375,7 +1375,9 @@ jobs:
       # PROTECTED BASE's copy of classify_changes.py (main's tip, from the
       # resolver step above; never the group's tree), and reads the live
       # merge-queue rule on every run: exactly one merge_queue rule, on the
-      # default branch, with grouping_strategy ALLGREEN. Only `docs-only` and
+      # default branch and not excluded from it (an exclusion of the default
+      # branch, ~ALL, or a pattern matching it reads as
+      # default_branch_excluded), with grouping_strategy ALLGREEN. Only `docs-only` and
       # `ALLGREEN` together, in mode `enforce` (repository variable
       # PULP_DOCS_ENTRY_DELTA), write skip=true; any other mode reports
       # `would_skip` and changes nothing. Everything else is `kept`: an
@@ -1400,6 +1402,7 @@ jobs:
           EVENT_HEAD_SHA: ${{ github.sha }}
           MERGE_GROUP_MAIN_BASE: ${{ steps.merge_group_base.outputs.base }}
           DOCS_ENTRY_DELTA_MODE: ${{ vars.PULP_DOCS_ENTRY_DELTA }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set +e
           title="docs-entry-delta"
@@ -1411,7 +1414,7 @@ jobs:
           # Read on every run, never cached. The token reaches only this
           # inline reader, never code from the checkout.
           strategy=$(GH_TOKEN="${{ github.token }}" python3 - <<'PY' 2>/dev/null
-          import json, os, re, urllib.request
+          import fnmatch, json, os, re, urllib.request
           api = os.environ.get("GITHUB_API_URL", "https://api.github.com")
           repo = os.environ["GITHUB_REPOSITORY"]
           def get(path):
@@ -1431,10 +1434,14 @@ jobs:
                   ruleset = get(f"rulesets/{int(summary['id'])}")
                   if ruleset.get("enforcement") != "active":
                       continue
-                  include = ((ruleset.get("conditions") or {}).get("ref_name") or {}).get("include") or []
+                  ref_name = (ruleset.get("conditions") or {}).get("ref_name") or {}
+                  include = ref_name.get("include") or []
+                  exclude = ref_name.get("exclude") or []
+                  if not isinstance(include, list) or not isinstance(exclude, list):
+                      raise ValueError("ref_name conditions unreadable")
                   for rule in ruleset.get("rules") or []:
                       if rule.get("type") == "merge_queue":
-                          rules.append((include, (rule.get("parameters") or {}).get("grouping_strategy")))
+                          rules.append((include, exclude, (rule.get("parameters") or {}).get("grouping_strategy")))
           except Exception:
               print("unreadable")
               raise SystemExit(0)
@@ -1444,8 +1451,16 @@ jobs:
               print("multiple")
           elif "~DEFAULT_BRANCH" not in rules[0][0]:
               print("not_default_branch")
+          elif rules[0][1] and not os.environ.get("DEFAULT_BRANCH"):
+              # An exclusion cannot be ruled out without the branch's name.
+              print("unreadable")
+          elif any(p in ("~DEFAULT_BRANCH", "~ALL") or not isinstance(p, str)
+                   or fnmatch.fnmatchcase(f"refs/heads/{os.environ['DEFAULT_BRANCH']}", p)
+                   for p in rules[0][1]):
+              # Excluded wins over included: the queue does not run on main.
+              print("default_branch_excluded")
           else:
-              value = str(rules[0][1] or "")
+              value = str(rules[0][2] or "")
               print(value if re.fullmatch(r"[A-Z_]+", value) else "unreadable")
           PY
           )
