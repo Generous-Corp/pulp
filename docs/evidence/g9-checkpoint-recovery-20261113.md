@@ -48,13 +48,13 @@ The chosen shape keeps the live-swap path unchanged for ordinary plugins:
   checks and the worker spawn. It runs on the control thread, pins the live
   snapshot, and returns a typed `IsolatedNodeRecovery`.
 - `SignalGraph::publish_isolated_recovery()` (`signal_graph_runtime.hpp:584`,
-  `signal_graph_live_swap.cpp:698`) prepares the fresh proxy and publishes
+  `signal_graph_live_swap.cpp:793`) prepares the fresh proxy and publishes
   it. It reuses the live-swap reinit-free predicate, the `SwapNoAnticipation`
   compile and one `live_slot_.publish()`. Every refusal only records
   `last_swap_diagnostics()` and leaves the live snapshot published.
 - The post-compile latency/feedback/routed-domain/PDC adoption checks moved out
   of `prepare_swap()` into `adopt_live_snapshot_state()`
-  (`signal_graph_live_swap_detail.hpp:147`). Both paths call it. It is a
+  (`signal_graph_live_swap.cpp:60`, file-local). Both paths call it. It is a
   template over the private snapshot type, so `signal_graph_runtime.hpp` gains
   no private declaration and stays line-neutral (2133 lines before and after;
   one public declaration, with comments reflowed to make room).

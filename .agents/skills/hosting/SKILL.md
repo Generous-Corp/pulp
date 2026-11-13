@@ -35,7 +35,7 @@ An isolated graph refuses a second eager `prepare()`, `begin_swap_edit()` and
 prepared topology edits, so `recover_isolated_graph_node()` publishes the fresh
 generation through `SignalGraph::publish_isolated_recovery()`. That path shares
 the post-compile PDC adoption (`adopt_live_snapshot_state` in
-`signal_graph_live_swap_detail.hpp`) with `prepare_swap()`. Skipping the
+`signal_graph_live_swap.cpp`) with `prepare_swap()`. Skipping the
 adoption restarts every sibling's PDC ring at zero, and the bit-exact sibling
 check in `test_isolated_clap_worker.cpp` fails. A refusal must keep the live
 snapshot; `fail_swap_edit_locked_` would silence the whole graph. Checkpoint
