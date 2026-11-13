@@ -585,6 +585,11 @@ pulp-design-ir-observe --input p.pulp.json --render r.png --layout obs.json --wi
 python3 tools/import-design/layout_parity.py --capture p.pulp-browser-capture --observer-layout obs.json
 ```
 
+`--json` also writes a `boxes` list: every matched node's Chromium box, native box
+and delta, so a node that was checked and fine is distinguishable from one never
+compared. A 4px move of a small element leaves the pixel similarity score near
+1.0 and still fails here with the node id.
+
 Three things that are not obvious. Parents come from the DOM, not the IR: a
 native panel is lowered FLAT under `browser:root`, so IR parents would cluster
 the whole page into one finding. The DOM parent is the nearest ancestor the
@@ -5145,6 +5150,10 @@ Each entry's `verification_note` records what a recheck actually ran: the
 tests that passed, which roundtrip scripts, upstream URL rechecks and reference
 screenshots were not run, and the date. Move `last_verified` only together with
 a note that names its evidence; an entry you cannot evidence stays stale.
+
+The checker takes `--today YYYY-MM-DD`. Any test that runs it as a subprocess against
+a hard-coded `last_verified` must pass a fixed `--today`; otherwise the case flips from
+"due" to "overdue" on the real clock and fails every PR (it did on 2026-11-13).
 
 When cleaning Catch2 tags in source-contract test files, update the matching
 `validation.test_tags` entry in `source-contracts.json` in the same change.

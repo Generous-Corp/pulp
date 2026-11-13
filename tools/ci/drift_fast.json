@@ -63,5 +63,9 @@
       "name": "wide-non-native-selftest",
       "why": "wide non-native classification replay; the most frequent merge-group-only failure"
     }
-  ]
+  ],
+  "docs_only": {
+    "_comment": "Docs fast path (tools/ci/drift_fast.py scope). The policy is intentionally empty until each configure-needing reader has a separate review. With no reviewed exemption, a docs-only diff that a configured test could read fails closed to the full lane.",
+    "prose_not_readers": []
+  }
 }

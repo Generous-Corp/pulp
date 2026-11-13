@@ -3,13 +3,34 @@
 #include <algorithm>
 #include <iostream>
 #include <string_view>
+#include <charconv>
+#include <cstdint>
+#include <system_error>
 
 namespace {
 constexpr std::string_view kP0ProtocolAttestation = "pulp.signal.spectral-frame-codec-consumer.v1";
+
+std::uint32_t requested_partition(int argc, char** argv) {
+    for (int i = 1; i + 1 < argc; ++i) {
+        if (std::string_view(argv[i]) == "--partition") {
+            std::uint32_t value = 0;
+            const auto text = std::string_view(argv[i + 1]);
+            const auto result = std::from_chars(text.data(), text.data() + text.size(), value);
+            if (result.ec == std::errc{} && result.ptr == text.data() + text.size() &&
+                (value == 64 || value == 128))
+                return value;
+            return 0;
+        }
+    }
+    return 0;
+}
 }
 
 int main(int argc, char** argv) {
     using namespace pulp::signal;
+    const auto partition = requested_partition(argc, argv);
+    if (argc > 1 && partition == 0 && std::string_view(argv[1]) == "--partition")
+        return 5;
     auto stream = make_spectral_stream({256, 64, 2, 48000}, 2);
     if (!stream)
         return 1;
@@ -48,5 +69,8 @@ int main(int argc, char** argv) {
                  "exact roundtrip and strict rejection passed\n";
     // Bind the evidence receipt to this named installed consumer. This is
     // fixture output metadata and does not change the public/runtime contract.
-    std::cout << kP0ProtocolAttestation << '\n';
+    std::cout << kP0ProtocolAttestation;
+    if (partition != 0)
+        std::cout << " partition_frames=" << partition;
+    std::cout << '\n';
 }

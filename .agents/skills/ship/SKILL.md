@@ -50,6 +50,18 @@ window — that one is already immutable by the time the issue opens.
 - To recover a stuck release when the tag already exists but no run published: the successful matrix legs' CLI+SDK artifacts persist on the (even cancelled) run — `gh run download <run> -R Generous-Corp/pulp`, then `gh release create <tag> --latest --notes-file <composed>` with `compose_release_notes.py` for the body. On `workflow_dispatch` the pipeline itself publishes directly (draft only on tag-push), so a hand-published backfill matches its semantics.
 - `sign-and-release.yml` and `release-cli.yml` both fire on the SAME `v*` tag and race. sign-and-release notarizes, then its "Attach appcast.xml" step POLLS `gh release view <tag>` for the draft that release-cli's `release` job creates at the very end of its build chain. Since the Intel `darwin-x64` cross-compile leg landed, that chain runs 60-90 min (the leg queues for a hosted macos-15 runner, then builds), so a too-short poll times out and the release ships without the Sparkle appcast → someone has to hand-publish. The poll window is bumped to 100 min (`seq 1 300`, 20s each). The deeper fix (not yet done — needs a real-tag validation): the poll runs ON the macOS notarize VM, holding a scarce self-hosted release VM for the whole wait, which also starves the lane; emit `appcast.xml` as an artifact and move the wait+attach to a cheap ubuntu job so the macOS VM frees right after notarization.
 
+**Every release job and long release step has a derived `timeout-minutes`. Re-derive, do not hand-edit.**
+A hung leg does not fail; before these timeouts v1.119.0's `CLI darwin-x64` sat
+110 minutes in `Prepare SDK build dir (macOS)` (p95 15 min) until a human
+cancelled it. The values are `max(floor, 4 x p95)` of the slowest leg over
+recent successful runs, recorded in `tools/ci/release_step_timeouts.json` and
+enforced by `tools/scripts/release_step_timeouts.py check` (workflow-lint). A
+timed-out leg is re-run once by the release reconciler with `rerun-failed-jobs`
+on the same run, which cannot double-publish because the `release` finalizer
+no-ops on a published tag. If a release step legitimately gets slower, run
+`release_step_timeouts.py derive` and update the policy and the workflow in one
+change. See `docs/guides/release-watchdog.md`.
+
 **Release builds carry an explicit `--parallel` count — do not "simplify" it away.**
 `release-cli.yml`'s CLI and SDK build steps (and `release-dry-run.yml`'s mirror)
 compute `jobs` from the runner's visible cores and pass
