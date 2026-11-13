@@ -7,6 +7,7 @@
 // eligibility gating and that a post-prepare set_node_gain() is honored on the
 // routed path (the binding reads the live snapshot's atomic).
 
+#include "harness/paced_timing_cell.hpp"
 #include "harness/rt_allocation_probe.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -4081,4 +4082,70 @@ TEST_CASE("G5 evidence: existing Custom MIDI lane delivers a bounded same-block 
     REQUIRE(overflow.count == overflow.capacity);
     REQUIRE(overflow.same_block);
     REQUIRE(overflow.legal_offsets);
+}
+
+// Paced-timing matrix cell for the named audio edge probe: the observed gain
+// chain runs with the probe attached (drained by one concurrent reader, as a
+// diagnostics client would) or detached. The oracle is every output sample.
+TEST_CASE("G7 edge probe paced matrix cell", "[.][signal-graph][edge-probe][g7][paced-matrix]") {
+    using Status = SignalGraph::EdgeProbeStatus;
+    const auto config = pulp::test::paced::read_config("attached", 64);
+    REQUIRE((config.variant == "attached" || config.variant == "detached"));
+    REQUIRE(config.rate == 48000);
+    REQUIRE(config.frames <= 4096);
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "input");
+    const auto gain = graph.add_gain_node("observed");
+    const auto downstream = graph.add_gain_node("downstream");
+    const auto output = graph.add_output_node(1, "output");
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, downstream, 0));
+    REQUIRE(graph.connect(downstream, 0, output, 0));
+    graph.set_node_gain(gain, 0.5f);
+    graph.set_node_gain(downstream, 0.25f);
+    REQUIRE(graph.prepare(48000, static_cast<int>(config.frames)));
+    const bool attached = config.variant == "attached";
+    if (attached)
+        REQUIRE(graph.attach_audio_edge_probe(graph.node(gain)->out("audio"),
+                                              graph.node(downstream)->in("audio")) ==
+                Status::Attached);
+    std::vector<float> in(config.frames, 0.5f), out(config.frames, 0.0f);
+    const float* ip = in.data();
+    float* op = out.data();
+    pulp::audio::BufferView<const float> iv(&ip, 1, config.frames);
+    pulp::audio::BufferView<float> ov(&op, 1, config.frames);
+    std::atomic<bool> done{false};
+    std::uint64_t read = 0;
+    std::thread reader;
+    if (attached)
+        reader = std::thread([&] {
+            pulp::graph::GraphRuntimeProbeSample sample;
+            while (!done.load(std::memory_order_acquire)) {
+                while (graph.read_audio_edge_probe(sample))
+                    ++read;
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+        });
+    const auto frames = static_cast<int>(config.frames);
+    const auto rows = pulp::test::paced::run_cell(
+        config, [&](std::size_t, std::uint64_t) { graph.process(ov, iv, frames); },
+        [&](std::size_t, std::uint64_t) {
+            bool ok = true;
+            for (const float value : out)
+                ok = ok && value == 0.0625f;
+            return ok;
+        });
+    done.store(true, std::memory_order_release);
+    if (reader.joinable())
+        reader.join();
+    pulp::graph::GraphRuntimeProbeSample sample;
+    while (attached && graph.read_audio_edge_probe(sample))
+        ++read;
+    const auto dropped = attached ? graph.audio_edge_probe_dropped() : 0;
+    const auto failures =
+        pulp::test::paced::print_cell("g7-edge-probe", config, rows,
+                                      "probe_read=" + std::to_string(read) +
+                                          " probe_dropped=" + std::to_string(dropped));
+    CHECK(failures == 0);
+    CHECK(read + dropped == (attached ? config.callbacks : 0));
 }

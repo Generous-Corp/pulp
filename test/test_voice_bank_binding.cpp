@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "../examples/g6-voice-bank-consumer/fixture.hpp"
+#include "harness/paced_timing_cell.hpp"
 
 #include <algorithm>
 #include <array>
@@ -755,4 +756,53 @@ TEST_CASE("G6 manager expression refuses before dispatch until scoped audio sema
         CHECK(buffer.channel(0)[0] == 7.0f);
         CHECK(buffer.channel(1)[0] == 7.0f);
     }
+}
+
+// Paced-timing matrix cell: the authored eight-slot bank with all eight slots
+// held from the first callback, so every paced block renders full polyphony.
+// The per-block oracle is the authored stereo law (right == 0.5 * left), a
+// finite bounded mix, and non-silence once the chord is sounding.
+TEST_CASE("G6 voice bank paced matrix cell", "[.][host][graph][g6][paced-matrix]") {
+    const auto config = pulp::test::paced::read_config("eight-slot", 128);
+    REQUIRE(config.variant == "eight-slot");
+    REQUIRE(config.rate == 48000);
+    REQUIRE(config.frames <= 256);
+    VoiceBankBindingResult status;
+    auto bank = make_bank(schema(), status);
+    REQUIRE(bank);
+    audio::Buffer<float> buffer(2, config.frames);
+    const auto frames = static_cast<std::size_t>(config.frames);
+    bool dispatched = false;
+    const auto rows = pulp::test::paced::run_cell(
+        config,
+        [&](std::size_t index, std::uint64_t sample) {
+            dispatched = false;
+            if (bank->begin_block(sample, frames) != HostEventResult::Accepted)
+                return;
+            if (index == 0)
+                for (std::uint8_t slot = 0; slot < 8; ++slot)
+                    if (bank->publish(event(bank->epoch(), 0, slot + 1,
+                                            midi::MidiEvent::note_on(slot + 1, 60 + slot,
+                                                                     100 - slot * 10))) !=
+                        HostEventResult::Accepted)
+                        return;
+            auto view = buffer.view();
+            dispatched = bank->render(view, sample, frames) == VoiceBankBindingCode::Ok;
+        },
+        [&](std::size_t, std::uint64_t) {
+            if (!dispatched)
+                return false;
+            auto view = buffer.view();
+            float energy = 0.0f;
+            for (std::size_t i = 0; i < frames; ++i) {
+                const float left = view.channel(0)[i];
+                const float right = view.channel(1)[i];
+                if (!std::isfinite(left) || std::abs(left) > 8.0f * kBankGain ||
+                    std::abs(right - 0.5f * left) > 2e-6f)
+                    return false;
+                energy += left * left;
+            }
+            return energy > 0.0f;
+        });
+    CHECK(pulp::test::paced::print_cell("g6-voice-bank", config, rows) == 0);
 }

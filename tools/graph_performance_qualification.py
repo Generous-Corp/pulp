@@ -1066,6 +1066,9 @@ def parser() -> argparse.ArgumentParser:
     validate_parser = sub.add_parser("validate", help="validate a receipt and its artifacts")
     validate_parser.add_argument("receipt", type=Path)
     validate_parser.add_argument("--source-root", type=Path, help="also verify fixture bytes in the recorded Git commit")
+    sub.add_parser("matrix", add_help=False,
+                   help="shared paced timing matrix over G-5/G-6/G-7/G-10/G-12 fixtures "
+                        "(see tools/graph_paced_timing_matrix.py)")
     controls_parser = sub.add_parser("controls", help="run positive and planted-negative controls")
     controls_parser.add_argument("receipt", type=Path)
     controls_parser.add_argument("--source-root", type=Path)
@@ -1073,7 +1076,13 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Iterable[str] | None = None) -> int:
-    args = parser().parse_args(list(argv) if argv is not None else None)
+    argv = list(argv) if argv is not None else sys.argv[1:]
+    if argv[:1] == ["matrix"]:
+        # The shared paced matrix owns its own CLI and receipt schema.
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import graph_paced_timing_matrix as matrix
+        return matrix.main(argv[1:])
+    args = parser().parse_args(argv)
     try:
         if args.command == "record-activation":
             return record_activation(args)

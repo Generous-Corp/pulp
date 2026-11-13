@@ -1,0 +1,206 @@
+#!/usr/bin/env python3
+"""Self-test for the shared graph paced-timing matrix runner.
+
+Runs without a C++ build: the in-process ``python-reference`` fixture emits the
+same raw cell format as the C++ harness, so the parser, deadline-miss counter,
+admission gate, receipt schema and validator are all exercised end to end. Set
+PULP_PACED_MATRIX_BUILD_DIR to a Release build to also run the planted negative
+through a real C++ fixture.
+"""
+
+from __future__ import annotations
+
+import copy
+import json
+import os
+import platform
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import graph_paced_timing_matrix as matrix  # noqa: E402
+
+ROOT = Path(__file__).resolve().parents[1]
+QUIET = lambda: ([0.1, 0.1, 0.1], 8)  # noqa: E731
+LOADED = lambda: ([40.0, 30.0, 20.0], 8)  # noqa: E731
+
+
+def record(output: Path, *, mode="short", fixtures=("python-reference",), callbacks=8,
+           planted_sleep_us=0, planted_every=1, load_reader=QUIET, build_dir=None):
+    return matrix.record_matrix(
+        mode=mode, source_root=ROOT, build_dir=build_dir or (output / "no-build"),
+        output_dir=output, fixtures=list(fixtures), callbacks=callbacks, frames_filter=None,
+        planted_sleep_us=planted_sleep_us, planted_every=planted_every,
+        max_load_per_cpu=matrix.DEFAULT_MAX_LOAD_PER_CPU, timeout_seconds=600,
+        load_reader=load_reader)
+
+
+class ReceiptSchemaTest(unittest.TestCase):
+    def test_short_receipt_schema_and_validation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            receipt, code = record(Path(tmp))
+            self.assertEqual(code, 0)
+            self.assertEqual(set(receipt), matrix.REQUIRED_TOP)
+            self.assertEqual(receipt["schema"], matrix.SCHEMA)
+            self.assertEqual(receipt["status"], "COMPLETE")
+            self.assertIs(receipt["timing_qualified"], False)
+            self.assertIn("short_mode", receipt["disqualifiers"])
+            self.assertEqual(len(receipt["cells"]), 1)
+            cell = receipt["cells"][0]
+            self.assertEqual(set(cell), matrix.REQUIRED_CELL)
+            self.assertEqual(cell["callbacks"], 8)
+            for key in ("p50", "p99", "max"):
+                self.assertIn(key, cell["metrics"]["duration_ns"])
+            self.assertEqual(set(receipt["admission"]["before"]), {"load", "verdict", "admitted", "reason"})
+            self.assertIsNotNone(receipt["admission"]["after"])
+            identity = json.dumps(receipt["host_identity_class"])
+            node = platform.node()
+            if node:
+                self.assertNotIn(node, identity, "receipt must not carry the hostname")
+            matrix.validate_receipt(Path(tmp) / "receipt.json")
+
+    def test_validator_rejects_tampered_raw_and_resigned_metrics(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            receipt, _ = record(out)
+            path = out / "receipt.json"
+            original = path.read_text()
+            raw = out / receipt["cells"][0]["raw_stdout"]["path"]
+            saved = raw.read_text()
+            raw.write_text(saved.replace("P 0 0 ", "P 0 1 ", 1))
+            with self.assertRaises(matrix.MatrixError):
+                matrix.validate_receipt(path)
+            raw.write_text(saved)
+            for mutate in (
+                lambda r: r["cells"][0]["metrics"].__setitem__("deadline_misses", 3),
+                lambda r: r.__setitem__("timing_qualified", True),
+                lambda r: r["cells"].append(copy.deepcopy(r["cells"][0])),
+                lambda r: r["disqualifiers"].remove("short_mode"),
+            ):
+                changed = json.loads(original)
+                mutate(changed)
+                changed["receipt_sha256"] = matrix.receipt_digest(changed)
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(matrix.MatrixError):
+                    matrix.validate_receipt(path)
+            path.write_text(original)
+            matrix.validate_receipt(path)
+
+
+class AdmissionTest(unittest.TestCase):
+    def test_qualification_refuses_loaded_host_before_any_cell(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            receipt, code = record(Path(tmp), mode="qualification",
+                                   fixtures=matrix.QUALIFYING_FIXTURES,
+                                   callbacks=matrix.QUALIFICATION_CALLBACKS, load_reader=LOADED)
+            self.assertEqual(code, matrix.REFUSED_EXIT)
+            self.assertEqual(receipt["status"], "REFUSED")
+            self.assertEqual(receipt["cells"], [])
+            self.assertEqual(receipt["admission"]["before"]["verdict"], "refuse")
+            self.assertIs(receipt["timing_qualified"], False)
+            self.assertIn("admission_before_failed", receipt["disqualifiers"])
+            matrix.validate_receipt(Path(tmp) / "receipt.json")
+
+    def test_admission_threshold_boundary_and_unknown_load(self):
+        self.assertTrue(matrix.admission_verdict([2.0, 0, 0], 8, 0.25)["admitted"])
+        self.assertFalse(matrix.admission_verdict([2.01, 0, 0], 8, 0.25)["admitted"])
+        self.assertEqual(matrix.admission_verdict([], 8, 0.25)["verdict"], "unknown")
+
+    def test_short_mode_flags_but_still_runs_on_loaded_host(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            receipt, code = record(Path(tmp), load_reader=LOADED)
+            self.assertEqual(code, 0)
+            self.assertEqual(len(receipt["cells"]), 1)
+            self.assertIn("admission_before_failed", receipt["disqualifiers"])
+
+    def test_qualification_refuses_reference_fixture_short_counts_and_planted_faults(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for kwargs in ({"fixtures": ("python-reference",)},
+                           {"fixtures": matrix.QUALIFYING_FIXTURES, "callbacks": 64},
+                           {"fixtures": matrix.QUALIFYING_FIXTURES, "planted_sleep_us": 10}):
+                args = {"callbacks": matrix.QUALIFICATION_CALLBACKS, **kwargs}
+                with self.assertRaises(matrix.MatrixError):
+                    record(Path(tmp), mode="qualification", **args)
+
+
+class MissCounterTest(unittest.TestCase):
+    def test_deadline_rule_boundary(self):
+        period = 4096 * 1_000_000_000 // 48000
+        exact = [(0, 0, 4096 * 1_000_000_000 // 48000, 1)]
+        # end - target == one block (rounded down to ns) is on time ...
+        self.assertEqual(matrix.compute_metrics(exact, 48000, 4096)["deadline_misses"], 0)
+        # ... one nanosecond past the exact block boundary is a miss.
+        late = [(0, 0, period + 1, 1)]
+        self.assertEqual(matrix.compute_metrics(late, 48000, 4096)["deadline_misses"], 1)
+
+    def test_planted_sleep_must_register_misses_and_control_must_not(self):
+        # 4096 frames at 48 kHz is an 85.3 ms period; a 90 ms planted sleep on
+        # every second callback overruns exactly those callbacks.
+        with tempfile.TemporaryDirectory() as tmp:
+            planted, _ = record(Path(tmp) / "planted", planted_sleep_us=90_000, planted_every=2)
+            control, _ = record(Path(tmp) / "control")
+        misses = planted["cells"][0]["metrics"]["deadline_misses"]
+        self.assertGreaterEqual(misses, 4, "instrument failed to see a planted overrun")
+        self.assertIn("planted_fault", planted["disqualifiers"])
+        self.assertGreater(planted["cells"][0]["metrics"]["duration_ns"]["max"], 90_000_000)
+        self.assertEqual(control["cells"][0]["metrics"]["deadline_misses"], 0,
+                         "negative control: the unplanted run must be clean")
+
+
+class QualificationRuleTest(unittest.TestCase):
+    """The rule must be satisfiable; otherwise timing_qualified=false proves nothing."""
+
+    def ideal(self):
+        cells = []
+        for fixture, variant, rate, frames in matrix.matrix_cells(matrix.QUALIFYING_FIXTURES, None):
+            cells.append({"fixture": fixture.name, "variant": variant, "rate": rate, "frames": frames,
+                          "callbacks": matrix.QUALIFICATION_CALLBACKS, "returncode": 0,
+                          "compiled_source": "a" * 40, "build_dirty": 0,
+                          "metrics": {"thresholds_met": True}})
+        return {"mode": "qualification", "status": "COMPLETE",
+                "requested": {"callbacks": matrix.QUALIFICATION_CALLBACKS,
+                              "fixtures": list(matrix.QUALIFYING_FIXTURES), "frames_filter": None},
+                "planted": {"sleep_us": 0, "every": 1},
+                "admission": {"before": {"admitted": True}, "after": {"admitted": True}},
+                "build_profile": {"CMAKE_BUILD_TYPE": "Release", "PULP_SANITIZER": ""},
+                "source": {"sha": "a" * 40, "dirty": False}, "cells": cells}
+
+    def test_ideal_run_qualifies_and_each_single_defect_disqualifies(self):
+        self.assertEqual(matrix.disqualifiers_for(self.ideal()), [])
+        defects = {
+            "admission_after_failed": lambda r: r["admission"]["after"].__setitem__("admitted", False),
+            "dirty_source": lambda r: r["source"].__setitem__("dirty", True),
+            "not_plain_release": lambda r: r["build_profile"].__setitem__("PULP_SANITIZER", "address"),
+            "thresholds_failed:": lambda r: r["cells"][3]["metrics"].__setitem__("thresholds_met", False),
+            "stale_binary:": lambda r: r["cells"][0].__setitem__("compiled_source", "b" * 40),
+            "short_cell:": lambda r: r["cells"][1].__setitem__("callbacks", 99999),
+        }
+        for reason, mutate in defects.items():
+            receipt = self.ideal()
+            mutate(receipt)
+            reasons = matrix.disqualifiers_for(receipt)
+            self.assertTrue(any(r.startswith(reason) for r in reasons), (reason, reasons))
+
+
+@unittest.skipUnless(os.environ.get("PULP_PACED_MATRIX_BUILD_DIR"),
+                     "set PULP_PACED_MATRIX_BUILD_DIR to a Release build to run the C++ planted negative")
+class CompiledPlantedNegativeTest(unittest.TestCase):
+    def test_compiled_fixture_sees_planted_overrun(self):
+        build = Path(os.environ["PULP_PACED_MATRIX_BUILD_DIR"]).resolve()
+        with tempfile.TemporaryDirectory() as tmp:
+            receipt, code = matrix.record_matrix(
+                mode="short", source_root=ROOT, build_dir=build, output_dir=Path(tmp),
+                fixtures=["g5-graph-event"], callbacks=8, frames_filter={4096},
+                planted_sleep_us=90_000, planted_every=2, max_load_per_cpu=0.25,
+                timeout_seconds=300)
+        self.assertEqual(code, 0)
+        for cell in receipt["cells"]:
+            self.assertGreaterEqual(cell["metrics"]["deadline_misses"], 4)
+            self.assertEqual(cell["metrics"]["oracle_failures"], 0)
+
+
+if __name__ == "__main__":
+    unittest.main()
