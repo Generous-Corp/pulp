@@ -737,6 +737,12 @@
       "timeout": 60.0
     },
     {
+      "name": "patched-os-name-path-lint-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_patched_os_name_path_lint.py"
+      ]
+    },
+    {
       "name": "planning-gitlink-guard-selftest",
       "argv": [
         "{repo}/tools/scripts/test_planning_gitlink_guard.py"
@@ -1228,12 +1234,6 @@
       "name": "unbounded-wait-lint-selftest",
       "argv": [
         "{repo}/tools/scripts/test_unbounded_wait_lint.py"
-      ]
-    },
-    {
-      "name": "patched-os-name-path-lint-selftest",
-      "argv": [
-        "{repo}/tools/scripts/test_patched_os_name_path_lint.py"
       ]
     },
     {
