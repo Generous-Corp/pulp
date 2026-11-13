@@ -186,18 +186,20 @@ TEST_CASE("CoreMIDI open takes the enumerated id and fails on an unknown one",
     }
 }
 
-TEST_CASE("CoreMIDI reports an offline endpoint as not online",
+TEST_CASE("CoreMIDI does not list an offline endpoint as online",
           "[midi][coremidi][port-identity]") {
     VirtualPair vp;
     if (!vp.create())
         SKIP("CoreMIDI server not reachable; skipping");
 
+    // CoreMIDI drops an offline endpoint from its source list; if a future
+    // system keeps it, it must read as not online.
     MIDIObjectSetIntegerProperty(vp.source, kMIDIPropertyOffline, 1);
     auto system = pulp::midi::create_midi_system();
     const auto inputs = system->enumerate_inputs();
     const MidiPortInfo* src = find(inputs, std::to_string(kSourceId));
-    REQUIRE(src != nullptr);
-    CHECK_FALSE(src->online);
+    if (src != nullptr)
+        CHECK_FALSE(src->online);
 
     MIDIObjectSetIntegerProperty(vp.source, kMIDIPropertyOffline, 0);
     const auto again = system->enumerate_inputs();
