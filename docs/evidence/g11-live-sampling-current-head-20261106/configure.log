@@ -14,10 +14,10 @@
 -- Performing Test CMAKE_HAVE_LIBC_PTHREAD
 -- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
 -- Found Threads: TRUE
--- Pulp macOS archive floor: 13.0 <= 13.4 (/Users/danielraffel/.pulp/sdk-dev/forge-v1/darwin-arm64/633825f7af3d4c8d0fee7e4ec139588282bdf0a1/3b617cf352bb/external/skia-build/build/mac-gpu/lib/Release/libskia.a)
--- Pulp macOS archive floor: 13.0 <= 13.4 (/Users/danielraffel/.pulp/sdk-dev/forge-v1/darwin-arm64/633825f7af3d4c8d0fee7e4ec139588282bdf0a1/3b617cf352bb/external/skia-build/build/mac-gpu/lib/Release/libdawn_combined.a)
+-- Pulp macOS archive floor: 13.0 <= 13.4 (~/.pulp/sdk-dev/forge-v1/darwin-arm64/633825f7af3d4c8d0fee7e4ec139588282bdf0a1/3b617cf352bb/external/skia-build/build/mac-gpu/lib/Release/libskia.a)
+-- Pulp macOS archive floor: 13.0 <= 13.4 (~/.pulp/sdk-dev/forge-v1/darwin-arm64/633825f7af3d4c8d0fee7e4ec139588282bdf0a1/3b617cf352bb/external/skia-build/build/mac-gpu/lib/Release/libdawn_combined.a)
 -- Skia ICU data subset: icu_data_subset: arm64: 10876560 -> 4847120 bytes (717/2361 items)
--- Skia: found at /Users/danielraffel/.pulp/sdk-dev/forge-v1/darwin-arm64/633825f7af3d4c8d0fee7e4ec139588282bdf0a1/3b617cf352bb/external/skia-build (mac)
+-- Skia: found at ~/.pulp/sdk-dev/forge-v1/darwin-arm64/633825f7af3d4c8d0fee7e4ec139588282bdf0a1/3b617cf352bb/external/skia-build (mac)
 -- Configuring done (1.9s)
 -- Generating done (0.0s)
 CMake Warning:

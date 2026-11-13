@@ -88,6 +88,7 @@ pulp_test_data(pulp-test-cli-create-shellout NO_DEFINE PATHS
     fixtures/packages/simple-plugin-template
     fixtures/packages/gain-dsp-kit
     tools/templates/gain
+    tools/templates/agent-toolkit
     tools/templates/effect
     tools/templates/standalone
     tools/packages/registry.json

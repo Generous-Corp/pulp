@@ -20,3 +20,18 @@ This is a static, one-note, offline tuning recipe. It does not establish Scala
 or MTS-ESP availability in the installed SDK, MIDI/MPE ingress, sample-timed
 retuning, voice allocation, realtime safety, or graph save/load of Processor
 nodes. Those remain separate G-11/G-5/G-6 work.
+
+## Notation
+
+`graph.pat` spells this fixture's graph in SignalGraph patch notation as far as
+the notation profile allows. It cannot be accepted: the fixture's nodes are
+application code or constructs outside the default catalog, so the real
+validator refuses it, and that refusal is the recorded result:
+
+```sh
+pulp graph validate graph.pat --json
+# exit 1, "code": "UnsupportedContract", "rule": "unregistered type/version '<id>'"
+```
+
+The `g11-tuning-cookbook-notation-refusal` ctest runs the validator and pins the exit code,
+code, node and type. See docs/guides/graph-patch-notation.md for the profile.

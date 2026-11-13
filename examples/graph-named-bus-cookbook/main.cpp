@@ -153,8 +153,15 @@ bool run_layout(std::size_t index, bool swap_names) {
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc == 2 && std::string_view(argv[1]) == "--planted-swap")
-        return run_layout(1, true) ? 0 : 1;
+    if (argc == 2 && std::string_view(argv[1]) == "--planted-swap") {
+        // Exit 0 only when the oracle rejects the swapped bus names, and say so.
+        if (run_layout(1, true)) {
+            std::cerr << "planted swap was not detected\n";
+            return 1;
+        }
+        std::cout << "named-bus planted defect detected: swapped-names\n";
+        return 0;
+    }
     NamedBusPlacement processor;
     if (!run_layout(0, false) || !run_layout(1, false) || run_layout(1, true) ||
         processor.is_bus_layout_supported({{1}, {0, 2}})) {

@@ -1,0 +1,38 @@
+# {{PLUGIN_NAME}} — Instrument with agent operations
+
+add_executable({{TARGET_NAME}}-test test_{{LOWER_NAME}}.cpp)
+target_link_libraries({{TARGET_NAME}}-test PRIVATE pulp::format Catch2::Catch2WithMain {{TARGET_NAME}}_Core)
+target_include_directories({{TARGET_NAME}}-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+catch_discover_tests({{TARGET_NAME}}-test)
+
+# The agent tool kit's operation declaration uses the generated bundle ID as
+# its vendor id. Every operation group is bound, so nothing is excluded; pass
+# EXCLUDE presets (or another group) to leave one out.
+pulp_control_agent_toolkit_declaration(_agent_toolkit_operations VENDOR {{BUNDLE_ID}})
+
+pulp_add_plugin({{TARGET_NAME}}
+    SOURCES         {{SOURCE_NAME}}
+    FORMATS         Standalone
+    PLUGIN_NAME     "{{PLUGIN_NAME}}"
+    BUNDLE_ID       "{{BUNDLE_ID}}"
+    MANUFACTURER    "{{MANUFACTURER}}"
+    VERSION         "{{VERSION}}"
+    CATEGORY        Instrument
+    ACCEPTS_MIDI
+    NO_EDITOR
+    PLUGIN_CODE     "{{PLUGIN_CODE}}"
+    MANUFACTURER_CODE "{{MANUFACTURER_CODE}}"
+    PROCESSOR_FACTORY create_{{LOWER_NAME}}
+    # A development-only build that a local agent can reach through the
+    # capability broker. Do not ship it to end users.
+    CONTROL_PROFILE developer-local
+    CONTROL_CAPABILITIES
+        dev.pulp.instance/read@1
+        dev.pulp.session/control@1
+        dev.pulp.vendor/read@1
+        dev.pulp.vendor/gesture@1
+        dev.pulp.vendor/render@1
+        dev.pulp.vendor/destructive@1
+    CONTROL_VENDOR_OPERATIONS "${_agent_toolkit_operations}"
+    CONTROL_VENDOR_SOURCES agent_operations.cpp
+)

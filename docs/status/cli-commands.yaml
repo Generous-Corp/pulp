@@ -689,7 +689,7 @@ commands:
         description: "Manufacturer name (default: Pulp)"
       - name: --template
         kind: option
-        description: Built-in template name or explicit local template kit directory. Local kits are validated, must declare kind `template`, and do not implicitly install dependency packages.
+        description: Built-in template name (for example gain or agent-toolkit) or explicit local template kit directory. Local kits are validated, must declare kind `template`, and do not implicitly install dependency packages.
       - name: --output
         kind: option
         description: Output directory override (otherwise uses PULP_PROJECTS_DIR, ~/.pulp/config.toml, repo sibling, or ./<name>)
