@@ -13634,3 +13634,16 @@ about that path are not obvious:
   Vellum main's head equals the head recorded in the last *successful* run's
   receipt artifact, and it uploads that receipt only when the whole run is
   green, so a red night is retried on the next one rather than forgotten.
+
+### Cutover trial deletion build
+
+`cutover-trial.yml` (manual dispatch only, GitHub-hosted `macos-15`, advisory)
+runs `tools/scripts/cutover_trial.py`: it deletes the cutover paths listed in
+`tools/scripts/cutover_trial_inputs.json` inside a scratch git worktree, builds
+with `-k 0`, and uploads a JSON report grouped by capability-ledger row. Notes:
+
+- The script always exits 0 on a build failure; read the report, not the job
+  status. Exit 2 means the inputs could not be read.
+- The scratch worktree must sit under the worktree root, never `/tmp`;
+  configure refuses it there.
+- It is not a required check and does not run on a schedule or pull request.
