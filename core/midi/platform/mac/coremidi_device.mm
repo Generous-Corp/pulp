@@ -42,6 +42,47 @@ double host_ticks_to_seconds(MIDITimeStamp ticks) {
                                1.0e9L);
 }
 
+std::string cf_string_property(MIDIObjectRef object, CFStringRef property) {
+    CFStringRef value = nullptr;
+    std::string out;
+    if (MIDIObjectGetStringProperty(object, property, &value) == noErr && value) {
+        char buf[256];
+        if (CFStringGetCString(value, buf, sizeof(buf), kCFStringEncodingUTF8))
+            out = buf;
+        CFRelease(value);
+    }
+    return out;
+}
+
+// Fills every identity field of a MidiPortInfo from an endpoint. A virtual
+// endpoint has no entity, so its device and entity names stay empty.
+MidiPortInfo describe_endpoint(MIDIEndpointRef endpoint, bool is_input) {
+    MidiPortInfo info;
+    SInt32 unique_id = 0;
+    MIDIObjectGetIntegerProperty(endpoint, kMIDIPropertyUniqueID, &unique_id);
+    info.id = std::to_string(unique_id);
+    info.name = cf_string_property(endpoint, kMIDIPropertyDisplayName);
+    info.endpoint_name = cf_string_property(endpoint, kMIDIPropertyName);
+
+    MIDIEntityRef entity = 0;
+    if (MIDIEndpointGetEntity(endpoint, &entity) == noErr && entity != 0) {
+        info.entity_name = cf_string_property(entity, kMIDIPropertyName);
+        MIDIDeviceRef device = 0;
+        if (MIDIEntityGetDevice(entity, &device) == noErr && device != 0)
+            info.device_name = cf_string_property(device, kMIDIPropertyName);
+    }
+    if (!info.device_name.empty())
+        info.stable_key = info.device_name + "|" + info.entity_name + "|" + info.endpoint_name;
+
+    SInt32 offline = 0;
+    if (MIDIObjectGetIntegerProperty(endpoint, kMIDIPropertyOffline, &offline) == noErr)
+        info.online = (offline == 0);
+    info.is_input = is_input;
+    info.is_output = !is_input;
+    return info;
+}
+
+
 // True while `endpoint` is still the live object registered under
 // `unique_id`. A device that is unplugged, or that disappears across a system
 // sleep, takes its endpoint object with it; when it comes back it is a new
@@ -389,22 +430,7 @@ class CoreMidiSystem : public MidiSystem {
         std::vector<MidiPortInfo> ports;
         ItemCount count = MIDIGetNumberOfSources();
         for (ItemCount i = 0; i < count; ++i) {
-            MIDIEndpointRef src = MIDIGetSource(i);
-            MidiPortInfo info;
-
-            SInt32 unique_id = 0;
-            MIDIObjectGetIntegerProperty(src, kMIDIPropertyUniqueID, &unique_id);
-            info.id = std::to_string(unique_id);
-
-            CFStringRef name = nullptr;
-            MIDIObjectGetStringProperty(src, kMIDIPropertyDisplayName, &name);
-            if (name) {
-                char buf[256];
-                CFStringGetCString(name, buf, sizeof(buf), kCFStringEncodingUTF8);
-                info.name = buf;
-                CFRelease(name);
-            }
-            info.is_input = true;
+            MidiPortInfo info = describe_endpoint(MIDIGetSource(i), true);
             ports.push_back(std::move(info));
         }
         return ports;
@@ -414,22 +440,7 @@ class CoreMidiSystem : public MidiSystem {
         std::vector<MidiPortInfo> ports;
         ItemCount count = MIDIGetNumberOfDestinations();
         for (ItemCount i = 0; i < count; ++i) {
-            MIDIEndpointRef dest = MIDIGetDestination(i);
-            MidiPortInfo info;
-
-            SInt32 unique_id = 0;
-            MIDIObjectGetIntegerProperty(dest, kMIDIPropertyUniqueID, &unique_id);
-            info.id = std::to_string(unique_id);
-
-            CFStringRef name = nullptr;
-            MIDIObjectGetStringProperty(dest, kMIDIPropertyDisplayName, &name);
-            if (name) {
-                char buf[256];
-                CFStringGetCString(name, buf, sizeof(buf), kCFStringEncodingUTF8);
-                info.name = buf;
-                CFRelease(name);
-            }
-            info.is_output = true;
+            MidiPortInfo info = describe_endpoint(MIDIGetDestination(i), false);
             ports.push_back(std::move(info));
         }
         return ports;

@@ -8,12 +8,47 @@
 
 namespace pulp::midi {
 
+/// One enumerated MIDI port.
+///
+/// Identity contract (CoreMIDI; other backends fill what they have):
+///  - `id` is the key to pass back to `open()`. On CoreMIDI it is the
+///    decimal `kMIDIPropertyUniqueID` of the endpoint, which the system
+///    assigns when the endpoint is created and keeps. Two `MidiSystem`
+///    instances, and two processes, report the same `id` for the same
+///    endpoint. Across restart, reboot and replug of the same device CoreMIDI
+///    keeps the id; it can change when a driver is reinstalled, when the
+///    system treats a device moved to another USB port as new, or when
+///    identical devices swap. Treat it as a strong hint, not a guarantee.
+///  - `stable_key` is a second form built from names (`device|entity|endpoint`).
+///    It survives a changed `id` but is ambiguous when two identical devices
+///    are attached. Use `resolve_port()` to combine both.
+///  - Virtual endpoints (IAC bus, other apps' ports) have an `id` like any
+///    other port and an empty `device_name`; their `id` lives as long as the
+///    creating process keeps the endpoint, and may be reassigned if it
+///    restarts.
+///  - `open()` takes an `id`. An unknown or malformed `id` fails; it never
+///    falls back to another port. The two exceptions are the empty string and
+///    "0", which select the first port and are not stable identifiers.
 struct MidiPortInfo {
     std::string id;
-    std::string name;
+    std::string name;   // display name (device plus endpoint where the OS joins them)
     bool is_input = false;
     bool is_output = false;
+
+    std::string device_name;    // owning device, empty for virtual endpoints
+    std::string entity_name;    // owning entity within the device
+    std::string endpoint_name;  // the endpoint's own name
+    std::string stable_key;     // "device|entity|endpoint", empty when unknown
+    bool online = true;         // false when the OS lists the port but its device is offline
 };
+
+/// Pick the port an app saved earlier. `id` wins when present and the port is
+/// online. Otherwise `stable_key` is used, but only when exactly one port
+/// carries it, so identical devices never get confused. Returns the index into
+/// `ports`, or -1 when nothing matches unambiguously.
+int resolve_port(const std::vector<MidiPortInfo>& ports,
+                 const std::string& saved_id,
+                 const std::string& saved_stable_key);
 
 // Callback for received MIDI short (channel-voice / system-realtime)
 // messages. SysEx is delivered via MidiSysexCallback registered
