@@ -541,6 +541,28 @@ def compare_capture(capture_dir: pathlib.Path, ir_path: pathlib.Path,
     return report
 
 
+def _box_listing(design: dict[str, Rect], pulp: dict[str, Rect],
+                 deltas: dict[str, Delta], tol: float) -> list[dict]:
+    """Every matched node's reference box, native box and raw delta.
+
+    ``findings`` only names what is out of tolerance, so a reader cannot tell
+    "checked and fine" from "never compared". The listing is the full per-node
+    record; ``own_*`` is the delta with the parent's contribution removed, and
+    ``within_tolerance`` is judged on that, the same way findings are.
+    """
+    def box(r: Rect) -> dict:
+        return {"x": r.x, "y": r.y, "w": r.width, "h": r.height}
+
+    return [{
+        "node_id": n,
+        "reference": box(design[n]),
+        "native": box(pulp[n]),
+        "delta": {"dx": d.dx, "dy": d.dy, "dw": d.dw, "dh": d.dh},
+        "own_delta": {"dx": d.own_dx, "dy": d.own_dy},
+        "within_tolerance": not d.offends(tol),
+    } for n, d in sorted(deltas.items())]
+
+
 def compare_rects(design: dict[str, Rect], meta: dict[str, dict],
                   pulp: dict[str, Rect], tol: float = DEFAULT_TOLERANCE,
                   gate_px: float = DEFAULT_GATE_PX,
@@ -569,6 +591,7 @@ def compare_rects(design: dict[str, Rect], meta: dict[str, dict],
     return {
         "tolerance_px": tol,
         "gate_px": gate_px,
+        "boxes": _box_listing(design, pulp, deltas, tol),
         "design_nodes": len(design),
         "pulp_nodes": len(pulp),
         "matched": len(deltas),

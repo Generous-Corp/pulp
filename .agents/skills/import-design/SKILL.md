@@ -585,6 +585,11 @@ pulp-design-ir-observe --input p.pulp.json --render r.png --layout obs.json --wi
 python3 tools/import-design/layout_parity.py --capture p.pulp-browser-capture --observer-layout obs.json
 ```
 
+`--json` also writes a `boxes` list: every matched node's Chromium box, native box
+and delta, so a node that was checked and fine is distinguishable from one never
+compared. A 4px move of a small element leaves the pixel similarity score near
+1.0 and still fails here with the node id.
+
 Three things that are not obvious. Parents come from the DOM, not the IR: a
 native panel is lowered FLAT under `browser:root`, so IR parents would cluster
 the whole page into one finding. The DOM parent is the nearest ancestor the
