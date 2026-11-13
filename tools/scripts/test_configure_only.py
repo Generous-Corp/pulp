@@ -59,15 +59,17 @@ if [ -n "$FAKE_CMAKE_NINJA_LOG" ]; then
 fi
 """
 
-# Like governed-build.sh: runs the command as a child and releases its lease in
-# a TERM/EXIT trap, which a SIGKILL would skip.
+# Like governed-build.sh: runs the command in the FOREGROUND (as its
+# `taskpolicy -b "$@"` does) and releases its lease in an EXIT/TERM trap. bash
+# defers a trapped TERM until a foreground child exits, so TERM to this shell
+# alone is not enough; a SIGKILL skips the trap entirely.
 FAKE_GOVERNOR = r"""#!/bin/bash
 echo "class=$PULP_BUILD_CLASS jobs=$PULP_BUILD_JOBS cmd=$*" >> "$FAKE_GOVERNOR_LOG"
 echo "[governed-build] background lease acquired id=fake cores=1 (asked 1)" >&2
-trap 'echo "lease released" >> "$FAKE_GOVERNOR_LOG"; [ -n "$child" ] && kill "$child" 2>/dev/null; exit 143' TERM
-"$@" &
-child=$!
-wait "$child"
+released() { echo "lease released" >> "$FAKE_GOVERNOR_LOG"; }
+trap released EXIT
+trap 'exit 143' TERM
+"$@"
 """
 
 
@@ -126,8 +128,10 @@ class ConfigureOnlyTests(unittest.TestCase):
     def test_the_configure_and_the_command_are_governed_and_niced(self) -> None:
         r = self.run_tool("true")
         self.assertEqual(r.returncode, 0, r.stderr)
-        lines = self.governor_log.read_text(encoding="utf-8").splitlines()
-        self.assertEqual(len(lines), 2, lines)  # the configure, then the command
+        log = self.governor_log.read_text(encoding="utf-8").splitlines()
+        lines = [line for line in log if line.startswith("class=")]
+        self.assertEqual(len(lines), 2, log)  # the configure, then the command
+        self.assertEqual(log.count("lease released"), 2, log)
         for line in lines:
             self.assertTrue(line.startswith("class=background jobs=1 cmd="), line)
             if shutil.which("nice"):
@@ -146,10 +150,15 @@ class ConfigureOnlyTests(unittest.TestCase):
 
     def test_sigterm_releases_the_governor_lease_and_removes_the_tree(self) -> None:
         started = self.tmp / "started"
+        child_term = self.tmp / "child-term"
         proc = subprocess.Popen(
             [sys.executable, str(SCRIPT), "--repo-root", str(self.root), "--", sys.executable, "-c",
-             "import pathlib, sys, time; pathlib.Path(sys.argv[1]).write_text('x', encoding='utf-8'); "
-             "time.sleep(120)", str(started)],
+             "import pathlib, signal, sys, time\n"
+             "def on_term(*_):\n"
+             "    pathlib.Path(sys.argv[2]).write_text('x', encoding='utf-8'); sys.exit(143)\n"
+             "signal.signal(signal.SIGTERM, on_term)\n"
+             "pathlib.Path(sys.argv[1]).write_text('x', encoding='utf-8')\n"
+             "time.sleep(120)\n", str(started), str(child_term)],
             env=self.env(PULP_CONFIGURE_ONLY_TERM_GRACE="20"), stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, encoding="utf-8")
         deadline = time.monotonic() + 60
@@ -158,8 +167,13 @@ class ConfigureOnlyTests(unittest.TestCase):
         self.assertTrue(started.exists(), proc.stderr.read() if proc.poll() is not None else "")
         self.assertEqual(len(self.temp_trees()), 1)
         proc.send_signal(signal.SIGTERM)
+        t0 = time.monotonic()
         _, err = proc.communicate(timeout=60)
         self.assertEqual(proc.returncode, 128 + signal.SIGTERM, err)
+        # Well inside the 20 s grace: TERM reached the foreground child, which
+        # let the governor's trap run, rather than waiting out the grace for KILL.
+        self.assertLess(time.monotonic() - t0, 15, err)
+        self.assertTrue(child_term.exists(), "the governor's foreground child must get TERM too")
         # The governor got TERM (not KILL), so its trap released the lease.
         self.assertIn("lease released", self.governor_log.read_text(encoding="utf-8"))
         self.assertEqual(self.temp_trees(), [])
@@ -179,6 +193,34 @@ class ConfigureOnlyTests(unittest.TestCase):
         self.assertFalse(stale.exists())
         self.assertTrue(live.exists())
         self.assertIn("swept 1 stale temporary tree", r.stderr)
+
+    def test_the_sweep_never_touches_an_ordinary_build_tree(self) -> None:
+        ordinary = self.root / "build-gate"
+        ordinary.mkdir()
+        (ordinary / configure_only.LOCK_NAME).write_text("", encoding="utf-8")
+        (ordinary / "CMakeCache.txt").write_text("x\n", encoding="utf-8")
+        old = time.time() - 2 * configure_only.STALE_WITHOUT_LOCK_S
+        os.utime(ordinary, (old, old))
+        r = self.run_tool("true")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue((ordinary / "CMakeCache.txt").is_file())
+        self.assertNotIn("swept", r.stderr)
+
+    def test_the_run_holds_the_lock_on_its_own_tree(self) -> None:
+        verdict = self.tmp / "lock-verdict"
+        r = self.run_tool(sys.executable, "-c",
+                          "import pathlib, sys\n"
+                          f"sys.path.insert(0, {str(HERE)!r})\n"
+                          "import configure_only as c\n"
+                          "held = c._try_lock(pathlib.Path(sys.argv[1]) / c.LOCK_NAME)\n"
+                          "pathlib.Path(sys.argv[2]).write_text("
+                          "'unavailable' if held is False else 'free' if held else 'held', encoding='utf-8')\n",
+                          "{build}", str(verdict))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        result = verdict.read_text(encoding="utf-8")
+        if result == "unavailable":
+            self.skipTest("no fcntl locks on this platform")
+        self.assertEqual(result, "held")
 
     def test_other_lanes_never_adopt_a_temporary_tree(self) -> None:
         sys.path.insert(0, str(HERE.parent / "ci"))

@@ -24,8 +24,9 @@ The bounds, which gate_host_policy.sh names as the configure-only allowance:
   after the fact.
 - a temporary `build-configure-only.*` directory under the checkout (ignored by
   git, never under /tmp, which the root configure refuses), removed afterwards
-  on success, failure or SIGTERM. On SIGTERM the running child (the governor)
-  gets TERM and a grace period before KILL, so its EXIT trap releases its lease.
+  on success, failure or SIGTERM. The child runs in its own process group; on
+  SIGTERM the whole group (governor and cmake) gets TERM and a grace period
+  before KILL, so the governor's EXIT trap releases its lease.
   A tree whose owner is gone (its lock is free) is swept at the next start.
 - governed: the configure and the command both run under
   tools/ci/governed-build.sh as a background one-core lease
@@ -134,23 +135,42 @@ def governor_prefix(root: Path) -> list[str]:
     return prefix
 
 
+def _signal_group(proc: subprocess.Popen, sig: int) -> None:
+    """Send ``sig`` to the child's whole process group (POSIX), else to the child."""
+    try:
+        if hasattr(os, "killpg"):
+            os.killpg(proc.pid, sig)
+        elif sig == signal.SIGTERM:
+            proc.terminate()
+        else:
+            proc.kill()
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
 def run_child(cmd: list[str], root: Path, env: dict[str, str] | None = None,
               capture: bool = True) -> tuple[int, str]:
-    """Run ``cmd``; on any interruption (SIGTERM arrives as SystemExit) send it
-    TERM and wait TERM_GRACE_S before KILL, so a governor's EXIT trap can
-    release its lease. Returns (returncode, combined output when captured)."""
+    """Run ``cmd`` in its own process group. On any interruption (SIGTERM
+    arrives as SystemExit) TERM the whole group and wait TERM_GRACE_S before
+    KILL. The group matters: governed-build.sh runs its command in the
+    foreground, and bash defers a trapped TERM until that foreground child
+    exits, so TERM to the governor alone would wait out the grace and be
+    KILLed with its lease held. TERM to the group stops cmake too, then the
+    governor's EXIT trap releases the lease and its live-build marker.
+    Returns (returncode, combined output when captured)."""
     out = subprocess.PIPE if capture else None
     proc = subprocess.Popen(cmd, cwd=root, env=env, stdout=out,
                             stderr=subprocess.STDOUT if capture else None,
-                            text=True, encoding="utf-8", errors="replace")
+                            text=True, encoding="utf-8", errors="replace",
+                            start_new_session=hasattr(os, "killpg"))
     try:
         text, _ = proc.communicate()
     except BaseException:
-        proc.terminate()
+        _signal_group(proc, signal.SIGTERM)
         try:
             proc.wait(timeout=TERM_GRACE_S)
         except subprocess.TimeoutExpired:
-            proc.kill()
+            _signal_group(proc, signal.SIGKILL if hasattr(signal, "SIGKILL") else signal.SIGTERM)
             proc.wait()
         raise
     return proc.returncode, text or ""
