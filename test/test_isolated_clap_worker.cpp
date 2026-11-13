@@ -1010,13 +1010,15 @@ TEST_CASE("Isolated CLAP concurrent recoveries of one node publish exactly once"
         REQUIRE(loser.control == nullptr);
         saw_publication_refused |= loser.outcome == IsolatedNodeRecovery::publication_refused;
 
-        REQUIRE(rig.step() == 0.0f);
-        REQUIRE(rig.step() == 0.75f);
-        // The winner holds one reservation; the loser must have released its own.
+        // Immediately after the race: the winner holds one reservation, and a
+        // loser without a control must already have released its own
+        // synchronously rather than leaving it to its supervisor.
         auto next = load_isolated_clap(options());
         INFO("next load error=" << static_cast<int>(next.error));
         REQUIRE(next);
         REQUIRE(next.control->stop() == IsolationCleanup::complete);
+        REQUIRE(rig.step() == 0.0f);
+        REQUIRE(rig.step() == 0.75f);
         rig.graph.release();
         REQUIRE(winner.control->stop() == IsolationCleanup::complete);
     }
