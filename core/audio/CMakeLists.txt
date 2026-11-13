@@ -95,6 +95,7 @@ target_sources(pulp-audio PRIVATE
     src/wav_metadata.cpp
     src/wavetable_authoring.cpp
     src/audio_device_manager.cpp
+    src/output_device_session.cpp
     src/audio_io_timing.cpp
     src/audio_probe.cpp
     src/audio_boundary_report.cpp

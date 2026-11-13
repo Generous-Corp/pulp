@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261112-rt-allocation-probe-sdk-watch",
+  "created_at": "2026-11-12T20:21:39Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "test/harness/rt_allocation_probe.{hpp,cpp} (matched by the test/harness/** selector) become one-line forwarders to tools/testing/rt_allocation_probe, which the SDK now exports as Pulp::rt-allocation-probe. The probe counts heap allocations in DSP tests; it is not a visual-proof, screenshot, golden, capture or render surface. No design-import, Chromium, rendering or packaging authority moves.",
+  "tests": [
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
