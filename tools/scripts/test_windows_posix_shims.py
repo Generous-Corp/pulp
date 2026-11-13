@@ -53,11 +53,15 @@ class DirectoryFsyncTests(unittest.TestCase):
     MODULES = (qualify_scenes, journey)
 
     def test_windows_skips_the_directory_descriptor(self) -> None:
+        # A pure path: with os.name patched to "nt", pathlib.Path() would build
+        # a WindowsPath, which Python 3.11 refuses to instantiate off Windows.
+        # The Windows route returns before using the path at all.
+        here = pathlib.PurePosixPath(".")
         for module in self.MODULES:
             with self.subTest(module=module.__name__), \
                     mock.patch.object(module.os, "name", "nt"), \
                     mock.patch.object(module.os, "open", side_effect=_tripwire):
-                module._fsync_directory(pathlib.Path("."))
+                module._fsync_directory(here)
 
     def test_posix_still_fsyncs_the_directory(self) -> None:
         if sys.platform == "win32":
