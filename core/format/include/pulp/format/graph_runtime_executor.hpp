@@ -31,8 +31,8 @@ namespace pulp::format {
 // One source-side ordinary/sidechain audio observation before downstream
 // mixing/PDC and serial scratch reuse. Feedback observes the retained slot read
 // in this block, before current output is captured for the next block.
-// Configure only while processing is stopped. The ring has one audio-thread
-// producer and one control-thread reader.
+// Configured before publication through an EdgeProbeCell. The ring has one
+// audio-thread producer and one control-thread reader.
 struct GraphRuntimeAudioEdgeProbe {
     static_assert(std::atomic<std::uint64_t>::is_always_lock_free &&
                   std::atomic<bool>::is_always_lock_free);
@@ -76,6 +76,68 @@ struct GraphRuntimeEdgeProbeSet {
     GraphRuntimeAudioEdgeProbe* audio = nullptr;
     GraphRuntimeControlEdgeProbe* control = nullptr;
     GraphRuntimeEventEdgeProbe* event = nullptr;
+};
+
+// Publication cell for one edge probe that a control thread attaches and
+// detaches while the audio thread may be reading it.
+//
+// The audio thread calls load() once per block and uses only that pointer. The
+// control thread (one at a time, serialized by its owner) calls publish() with
+// a fully configured probe. A displaced probe is never freed in place: it is
+// parked, and the owner calls reclaim_parked() only after proving no reader can
+// still hold the old pointer. Anything still parked is destroyed with the cell,
+// so a cell embedded in an RCU-published snapshot inherits that snapshot's
+// reader-drained reclamation. The audio side never allocates, locks or frees.
+//
+// publish() stores and load() reads with seq_cst so the owner's later
+// reader-count check cannot be reordered before the store: a reader that
+// pinned before that check is counted, and one that pins after it sees the new
+// pointer.
+template <typename Probe> class EdgeProbeCell {
+  public:
+    EdgeProbeCell() = default;
+    EdgeProbeCell(const EdgeProbeCell&) = delete;
+    EdgeProbeCell& operator=(const EdgeProbeCell&) = delete;
+
+    // Audio thread (or any pinned reader).
+    Probe* load() const noexcept {
+        return live_.load(std::memory_order_seq_cst);
+    }
+
+    // Owner thread only: the currently published probe.
+    Probe* owned() const noexcept {
+        return owner_.get();
+    }
+    explicit operator bool() const noexcept {
+        return owner_ != nullptr;
+    }
+
+    // Owner thread only. Allocates (the parking slot) before the pointer
+    // changes, so an allocation failure leaves the published probe untouched.
+    void publish(std::unique_ptr<Probe> next) {
+        if (owner_)
+            parked_.reserve(parked_.size() + 1);
+        live_.store(next.get(), std::memory_order_seq_cst);
+        if (owner_)
+            parked_.push_back(std::move(owner_));
+        owner_ = std::move(next);
+    }
+    void reset() {
+        publish(nullptr);
+    }
+
+    // Owner thread only, and only once no reader can hold a parked pointer.
+    void reclaim_parked() noexcept {
+        parked_.clear();
+    }
+    std::size_t parked_count() const noexcept {
+        return parked_.size();
+    }
+
+  private:
+    std::atomic<Probe*> live_{nullptr};
+    std::unique_ptr<Probe> owner_;
+    std::vector<std::unique_ptr<Probe>> parked_;
 };
 
 enum class AudioRateModulationDelivery : std::uint8_t {

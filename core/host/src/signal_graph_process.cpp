@@ -132,20 +132,23 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
         cg->spectral->begin_block();
 
     SampleRegionExecutionDomain::Admission sample_region_admission;
+    // Edge probes are attached and detached concurrently with this block, so
+    // load each published pointer exactly once and use only that copy. The
+    // pinned snapshot keeps a displaced probe parked until this reader leaves.
+    auto* const audio_edge_probe = cg->audio_edge_probe.load();
+    auto* const control_edge_probe = cg->control_edge_probe.load();
+    auto* const event_edge_probe = cg->event_edge_probe.load();
     // Snapshot-owned instrumentation never survives a transport discontinuity
     // or a switch to a backend this source-side serial tap does not observe.
-    if (cg->audio_edge_probe &&
-        ((transport && transport->reset_requested) || !canonical_executor_routing_enabled() ||
-         parallel_routing_enabled() || anticipation_enabled()))
-        cg->audio_edge_probe->samples.detach();
-    if (cg->control_edge_probe &&
-        ((transport && transport->reset_requested) || !canonical_executor_routing_enabled() ||
-         parallel_routing_enabled() || anticipation_enabled()))
-        cg->control_edge_probe->samples.detach();
-    if (cg->event_edge_probe &&
-        ((transport && transport->reset_requested) || !canonical_executor_routing_enabled() ||
-         parallel_routing_enabled() || anticipation_enabled()))
-        cg->event_edge_probe->samples.detach();
+    const bool probe_epoch_broken = (transport && transport->reset_requested) ||
+                                    !canonical_executor_routing_enabled() ||
+                                    parallel_routing_enabled() || anticipation_enabled();
+    if (audio_edge_probe && probe_epoch_broken)
+        audio_edge_probe->samples.detach();
+    if (control_edge_probe && probe_epoch_broken)
+        control_edge_probe->samples.detach();
+    if (event_edge_probe && probe_epoch_broken)
+        event_edge_probe->samples.detach();
     if (cg->sample_region_bank) {
         sample_region_admission = cg->sample_region_bank->domain().try_admit(
             cg->sample_region_bank->binding_generation());
@@ -504,16 +507,16 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
             if (use_serial && cg->routed.serial.valid &&
                 cg->routed.serial.pool.fits(cg->routed.serial.snapshot, frames32)) {
                 format::GraphRuntimeEdgeProbeSet edge_probes{
-                    cg->audio_edge_probe.get(),
-                    cg->control_edge_probe.get(),
-                    cg->event_edge_probe.get(),
+                    audio_edge_probe,
+                    control_edge_probe,
+                    event_edge_probe,
                 };
                 const auto dispatch = dispatch_routed([&] {
                     return executor_.process_routed(
                         block, cg->routed.serial.snapshot, cg->routed.serial.pool,
                         has_midi ? &cg->routed.midi : nullptr,
                         has_automation ? &cg->routed.automation : nullptr, {}, {}, {}, {}, {},
-                        cg->audio_edge_probe.get(), &edge_probes);
+                        audio_edge_probe, &edge_probes);
                 });
                 if (dispatch == RoutedDispatchResult::success) {
                     return;

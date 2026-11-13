@@ -7,10 +7,13 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -20,6 +23,10 @@ class ProbeSlot final : public pulp::host::PluginSlot {
     static constexpr std::uint32_t kParam = 7;
     std::array<float, 8> delivered{};
     std::size_t delivered_count = 0;
+    // When set to kArmed, the next process() call reports kHeld and spins until
+    // the test clears it, holding the audio thread inside the pinned snapshot.
+    static constexpr int kOpen = 0, kArmed = 1, kHeld = 2;
+    std::atomic<int>* gate = nullptr;
 
     explicit ProbeSlot(pulp::host::ParamRate rate, int latency = 0)
         : rate_(rate), latency_(latency) {
@@ -43,6 +50,11 @@ class ProbeSlot final : public pulp::host::PluginSlot {
                  const pulp::audio::BufferView<const float>&, const pulp::midi::MidiBuffer&,
                  pulp::midi::MidiBuffer&, const pulp::host::ParameterEventQueue& events,
                  int frames) override {
+        int armed = kArmed;
+        if (gate && gate->compare_exchange_strong(armed, kHeld)) {
+            while (gate->load() == kHeld)
+                std::this_thread::yield();
+        }
         delivered_count = 0;
         for (const auto& event : events) {
             if (event.param_id == kParam && delivered_count < delivered.size())
@@ -410,4 +422,118 @@ TEST_CASE("G7 dense control probe observes PDC history rather than current sourc
             REQUIRE(receiver->delivered[f] == expected[f]);
         timestamp += frames;
     }
+}
+
+TEST_CASE("Edge probe detach while process() is pinned parks the probe until the reader leaves",
+          "[host][graph][g7][probe][rt-safety]") {
+    using Status = pulp::host::SignalGraph::EdgeProbeStatus;
+    pulp::host::SignalGraph graph;
+    const auto input = graph.add_input_node(1);
+    auto slot = std::make_unique<ProbeSlot>(pulp::host::ParamRate::ControlRate);
+    std::atomic<int> gate{ProbeSlot::kOpen};
+    slot->gate = &gate;
+    const auto plugin = graph.add_plugin_node(std::move(slot), 1, 1);
+    const auto output = graph.add_output_node(1);
+    REQUIRE(graph.connect(input, 0, plugin, 0));
+    REQUIRE(graph.connect(plugin, 0, output, 0));
+    graph.set_canonical_executor_routing_enabled(true);
+    REQUIRE(graph.prepare(48000.0, 8));
+    const auto source = graph.node(input)->out("audio");
+    const auto destination = graph.node(plugin)->in("audio");
+    REQUIRE(graph.attach_audio_edge_probe(source, destination) == Status::Attached);
+    REQUIRE(graph.parked_edge_probe_count() == 0);
+
+    gate.store(ProbeSlot::kArmed);
+    std::thread audio([&] { process_audio(graph); });
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (gate.load() != ProbeSlot::kHeld && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::yield();
+    const bool held = gate.load() == ProbeSlot::kHeld;
+    if (held) {
+        // The block in flight loaded the first probe; freeing it here would be
+        // a use-after-free when the block resumes and advances its clock.
+        graph.detach_audio_edge_probe();
+        CHECK(graph.audio_edge_probe_status() == Status::Detached);
+        CHECK(graph.parked_edge_probe_count() == 1);
+        CHECK(graph.attach_audio_edge_probe(source, destination) == Status::Attached);
+        CHECK(graph.parked_edge_probe_count() == 1);
+    }
+    gate.store(ProbeSlot::kOpen);
+    audio.join();
+    REQUIRE(held);
+
+    // The resumed block wrote only the probe it loaded, never the new one.
+    pulp::graph::GraphRuntimeProbeSample sample;
+    REQUIRE_FALSE(graph.read_audio_edge_probe(sample));
+    process_audio(graph);
+    REQUIRE(graph.read_audio_edge_probe(sample));
+    REQUIRE(sample.sequence == 0);
+    REQUIRE(sample.timestamp_samples == 0);
+
+    // With no reader inside the snapshot, the next publication frees every
+    // parked probe, including the one it displaces.
+    graph.detach_audio_edge_probe();
+    REQUIRE(graph.parked_edge_probe_count() == 0);
+}
+
+TEST_CASE("Edge probe attach/detach hammered against a running process() stays coherent",
+          "[host][graph][g7][probe][rt-safety]") {
+    using Status = pulp::host::SignalGraph::EdgeProbeStatus;
+    AudioGraph fixture(pulp::host::ParamRate::ControlRate);
+    auto& graph = fixture.graph;
+    REQUIRE(graph.prepare(48000.0, 8));
+    const auto source = fixture.source_port();
+    const auto destination = fixture.destination_port();
+
+    std::atomic<bool> stop{false};
+    std::atomic<std::uint64_t> blocks{0};
+    std::thread audio([&] {
+        while (!stop.load(std::memory_order_acquire)) {
+            process_audio(graph);
+            blocks.fetch_add(1, std::memory_order_relaxed);
+        }
+    });
+
+    constexpr int kCycles = 2000;
+    int attached = 0;
+    bool coherent = true;
+    for (int cycle = 0; cycle < kCycles; ++cycle) {
+        if (graph.attach_audio_edge_probe(source, destination) == Status::Attached)
+            ++attached;
+        if (graph.attach_control_edge_probe(source, fixture.plugin, ProbeSlot::kParam) ==
+            Status::Attached)
+            ++attached;
+        pulp::graph::GraphRuntimeProbeSample sample;
+        while (graph.read_audio_edge_probe(sample))
+            coherent = coherent && sample.kind == pulp::graph::GraphRuntimeProbeKind::Audio &&
+                       sample.frames == 8 && sample.timestamp_samples % 8 == 0;
+        while (graph.read_control_edge_probe(sample))
+            coherent = coherent && sample.kind == pulp::graph::GraphRuntimeProbeKind::Control &&
+                       sample.frames == 8 && sample.timestamp_samples % 8 == 0;
+        if (cycle % 2 == 0)
+            graph.detach_audio_edge_probe();
+        if (cycle % 3 == 0)
+            graph.detach_control_edge_probe();
+    }
+    stop.store(true, std::memory_order_release);
+    audio.join();
+    REQUIRE(coherent);
+    REQUIRE(attached == 2 * kCycles);
+    REQUIRE(blocks.load() > 0);
+
+    // Quiescent again: the next publications reclaim everything still parked,
+    // and a fresh attachment numbers its records from zero.
+    graph.detach_audio_edge_probe();
+    graph.detach_control_edge_probe();
+    REQUIRE(graph.parked_edge_probe_count() == 0);
+    REQUIRE(graph.attach_audio_edge_probe(source, destination) == Status::Attached);
+    for (int block = 0; block < 3; ++block)
+        process_audio(graph);
+    pulp::graph::GraphRuntimeProbeSample sample;
+    for (std::uint64_t record = 0; record < 3; ++record) {
+        REQUIRE(graph.read_audio_edge_probe(sample));
+        REQUIRE(sample.sequence == record);
+        REQUIRE(sample.timestamp_samples == record * 8);
+    }
+    REQUIRE_FALSE(graph.read_audio_edge_probe(sample));
 }

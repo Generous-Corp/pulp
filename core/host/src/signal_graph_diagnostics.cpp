@@ -2,6 +2,7 @@
 #include <pulp/host/signal_graph_runtime.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <limits>
 
 namespace pulp::host {
@@ -18,6 +19,24 @@ bool valid_probe_port(const SignalGraph& graph, const PortHandle& handle, bool o
     });
 }
 
+// Free probes displaced from the live snapshot once nothing can still hold
+// them. process() pins through the slot reader count; ExecutionSnapshot renders
+// and other keepalives hold the snapshot itself, so a use count above the
+// slot's own reference also defers. Deferred probes stay parked on the
+// snapshot and die with it after its readers drain. Called with the graph
+// mutation lock held and no pin of our own.
+template <typename Graph>
+void reclaim_parked_edge_probes(const runtime::Slot<Graph>& slot) noexcept {
+    const auto& live = slot.live();
+    if (!live || live.use_count() != 1 || !slot.quiescent())
+        return;
+    // Pairs with the release half of a keepalive holder's final decrement.
+    std::atomic_thread_fence(std::memory_order_acquire);
+    live->audio_edge_probe.reclaim_parked();
+    live->control_edge_probe.reclaim_parked();
+    live->event_edge_probe.reclaim_parked();
+}
+
 } // namespace
 
 SignalGraph::EdgeProbeStatus SignalGraph::attach_audio_edge_probe(const PortHandle& source,
@@ -27,7 +46,9 @@ SignalGraph::EdgeProbeStatus SignalGraph::attach_audio_edge_probe(const PortHand
         return EdgeProbeStatus::UnsupportedExecution;
     if (in_swap_edit_)
         return EdgeProbeStatus::Busy;
-    const auto cg = read_snapshot_(true);
+    // Publisher-side access: holding no pin of our own lets the reclaim below
+    // observe whether process() is still inside the snapshot.
+    const auto& cg = live_slot_.live();
     if (!cg)
         return EdgeProbeStatus::Unprepared;
     if (!canonical_executor_routing_enabled() || parallel_routing_enabled() ||
@@ -73,7 +94,8 @@ SignalGraph::EdgeProbeStatus SignalGraph::attach_audio_edge_probe(const PortHand
                                              destination.node,
                                              source.index,
                                              destination.index};
-            cg->audio_edge_probe = std::move(probe);
+            cg->audio_edge_probe.publish(std::move(probe));
+            reclaim_parked_edge_probes(live_slot_);
             return EdgeProbeStatus::Attached;
         }
         return EdgeProbeStatus::UnsupportedExecution;
@@ -85,22 +107,23 @@ void SignalGraph::detach_audio_edge_probe() {
     GraphMutationLock lock(*this);
     if (refuse_spectral_mutation_())
         return;
-    if (const auto cg = read_snapshot_(true)) {
+    if (const auto& cg = live_slot_.live()) {
         cg->audio_edge_probe.reset();
         cg->audio_edge_probe_identity = {};
+        reclaim_parked_edge_probes(live_slot_);
     }
 }
 
 bool SignalGraph::read_audio_edge_probe(graph::GraphRuntimeProbeSample& sample) {
     GraphMutationLock lock(*this);
     const auto cg = read_snapshot_(true);
-    return cg && cg->audio_edge_probe && cg->audio_edge_probe->samples.try_pop(sample);
+    return cg && cg->audio_edge_probe && cg->audio_edge_probe.owned()->samples.try_pop(sample);
 }
 
 std::uint64_t SignalGraph::audio_edge_probe_dropped() const {
     GraphMutationLock lock(*this);
     const auto cg = read_snapshot_(true);
-    return cg && cg->audio_edge_probe ? cg->audio_edge_probe->samples.dropped() : 0;
+    return cg && cg->audio_edge_probe ? cg->audio_edge_probe.owned()->samples.dropped() : 0;
 }
 
 SignalGraph::EdgeProbeStatus SignalGraph::audio_edge_probe_status() const {
@@ -108,7 +131,7 @@ SignalGraph::EdgeProbeStatus SignalGraph::audio_edge_probe_status() const {
     const auto cg = read_snapshot_(true);
     if (!cg)
         return EdgeProbeStatus::Unprepared;
-    return cg->audio_edge_probe && cg->audio_edge_probe->samples.attached()
+    return cg->audio_edge_probe && cg->audio_edge_probe.owned()->samples.attached()
                ? EdgeProbeStatus::Attached
                : EdgeProbeStatus::Detached;
 }
@@ -119,6 +142,14 @@ SignalGraph::EdgeProbeIdentity SignalGraph::audio_edge_probe_identity() const {
     return cg && cg->audio_edge_probe ? cg->audio_edge_probe_identity : EdgeProbeIdentity{};
 }
 
+std::size_t SignalGraph::parked_edge_probe_count() const {
+    GraphMutationLock lock(*this);
+    const auto& cg = live_slot_.live();
+    return cg ? cg->audio_edge_probe.parked_count() + cg->control_edge_probe.parked_count() +
+                    cg->event_edge_probe.parked_count()
+              : 0;
+}
+
 SignalGraph::EdgeProbeStatus SignalGraph::attach_control_edge_probe(const PortHandle& source,
                                                                     NodeId destination,
                                                                     std::uint32_t parameter_id) {
@@ -127,7 +158,9 @@ SignalGraph::EdgeProbeStatus SignalGraph::attach_control_edge_probe(const PortHa
         return EdgeProbeStatus::UnsupportedExecution;
     if (in_swap_edit_)
         return EdgeProbeStatus::Busy;
-    const auto cg = read_snapshot_(true);
+    // Publisher-side access: holding no pin of our own lets the reclaim below
+    // observe whether process() is still inside the snapshot.
+    const auto& cg = live_slot_.live();
     if (!cg)
         return EdgeProbeStatus::Unprepared;
     if (!canonical_executor_routing_enabled() || parallel_routing_enabled() ||
@@ -168,7 +201,8 @@ SignalGraph::EdgeProbeStatus SignalGraph::attach_control_edge_probe(const PortHa
                                                source.index,
                                                0,
                                                parameter_id};
-            cg->control_edge_probe = std::move(probe);
+            cg->control_edge_probe.publish(std::move(probe));
+            reclaim_parked_edge_probes(live_slot_);
             return EdgeProbeStatus::Attached;
         }
         return EdgeProbeStatus::UnsupportedExecution;
@@ -180,22 +214,23 @@ void SignalGraph::detach_control_edge_probe() {
     GraphMutationLock lock(*this);
     if (refuse_spectral_mutation_())
         return;
-    if (const auto cg = read_snapshot_(true)) {
+    if (const auto& cg = live_slot_.live()) {
         cg->control_edge_probe.reset();
         cg->control_edge_probe_identity = {};
+        reclaim_parked_edge_probes(live_slot_);
     }
 }
 
 bool SignalGraph::read_control_edge_probe(graph::GraphRuntimeProbeSample& sample) {
     GraphMutationLock lock(*this);
     const auto cg = read_snapshot_(true);
-    return cg && cg->control_edge_probe && cg->control_edge_probe->samples.try_pop(sample);
+    return cg && cg->control_edge_probe && cg->control_edge_probe.owned()->samples.try_pop(sample);
 }
 
 std::uint64_t SignalGraph::control_edge_probe_dropped() const {
     GraphMutationLock lock(*this);
     const auto cg = read_snapshot_(true);
-    return cg && cg->control_edge_probe ? cg->control_edge_probe->samples.dropped() : 0;
+    return cg && cg->control_edge_probe ? cg->control_edge_probe.owned()->samples.dropped() : 0;
 }
 
 SignalGraph::EdgeProbeStatus SignalGraph::control_edge_probe_status() const {
@@ -203,7 +238,7 @@ SignalGraph::EdgeProbeStatus SignalGraph::control_edge_probe_status() const {
     const auto cg = read_snapshot_(true);
     if (!cg)
         return EdgeProbeStatus::Unprepared;
-    return cg->control_edge_probe && cg->control_edge_probe->samples.attached()
+    return cg->control_edge_probe && cg->control_edge_probe.owned()->samples.attached()
                ? EdgeProbeStatus::Attached
                : EdgeProbeStatus::Detached;
 }
@@ -221,7 +256,9 @@ SignalGraph::EdgeProbeStatus SignalGraph::attach_event_edge_probe(const PortHand
         return EdgeProbeStatus::UnsupportedExecution;
     if (in_swap_edit_)
         return EdgeProbeStatus::Busy;
-    const auto cg = read_snapshot_(true);
+    // Publisher-side access: holding no pin of our own lets the reclaim below
+    // observe whether process() is still inside the snapshot.
+    const auto& cg = live_slot_.live();
     if (!cg)
         return EdgeProbeStatus::Unprepared;
     if (!canonical_executor_routing_enabled() || parallel_routing_enabled() ||
@@ -255,7 +292,8 @@ SignalGraph::EdgeProbeStatus SignalGraph::attach_event_edge_probe(const PortHand
                                              source.index,
                                              destination.index,
                                              0};
-            cg->event_edge_probe = std::move(probe);
+            cg->event_edge_probe.publish(std::move(probe));
+            reclaim_parked_edge_probes(live_slot_);
             return EdgeProbeStatus::Attached;
         }
         return EdgeProbeStatus::UnsupportedExecution;
@@ -267,22 +305,23 @@ void SignalGraph::detach_event_edge_probe() {
     GraphMutationLock lock(*this);
     if (refuse_spectral_mutation_())
         return;
-    if (const auto cg = read_snapshot_(true)) {
+    if (const auto& cg = live_slot_.live()) {
         cg->event_edge_probe.reset();
         cg->event_edge_probe_identity = {};
+        reclaim_parked_edge_probes(live_slot_);
     }
 }
 
 bool SignalGraph::read_event_edge_probe(graph::GraphRuntimeProbeSample& sample) {
     GraphMutationLock lock(*this);
     const auto cg = read_snapshot_(true);
-    return cg && cg->event_edge_probe && cg->event_edge_probe->samples.try_pop(sample);
+    return cg && cg->event_edge_probe && cg->event_edge_probe.owned()->samples.try_pop(sample);
 }
 
 std::uint64_t SignalGraph::event_edge_probe_dropped() const {
     GraphMutationLock lock(*this);
     const auto cg = read_snapshot_(true);
-    return cg && cg->event_edge_probe ? cg->event_edge_probe->samples.dropped() : 0;
+    return cg && cg->event_edge_probe ? cg->event_edge_probe.owned()->samples.dropped() : 0;
 }
 
 SignalGraph::EdgeProbeStatus SignalGraph::event_edge_probe_status() const {
@@ -290,7 +329,7 @@ SignalGraph::EdgeProbeStatus SignalGraph::event_edge_probe_status() const {
     const auto cg = read_snapshot_(true);
     if (!cg)
         return EdgeProbeStatus::Unprepared;
-    return cg->event_edge_probe && cg->event_edge_probe->samples.attached()
+    return cg->event_edge_probe && cg->event_edge_probe.owned()->samples.attached()
                ? EdgeProbeStatus::Attached
                : EdgeProbeStatus::Detached;
 }
