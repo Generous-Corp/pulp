@@ -88,7 +88,7 @@ class CommandTests(unittest.TestCase):
             good.write_text("import pathlib\np = pathlib.Path('.')\n", encoding="utf-8")
             script = HERE / "patched_os_name_path_lint.py"
             run = lambda p: subprocess.run([sys.executable, str(script), str(p)],
-                                           capture_output=True, text=True)
+                                           capture_output=True, text=True, encoding="utf-8")
             self.assertEqual(run(bad).returncode, 1)
             self.assertEqual(run(good).returncode, 0)
 
