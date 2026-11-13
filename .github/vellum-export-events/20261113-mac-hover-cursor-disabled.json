@@ -7,8 +7,10 @@
   "paths": [
     "core/view/include/pulp/view/hover_cursor.hpp",
     "core/view/platform/mac/window_host_mac.mm",
-    "core/view/src/hover_cursor.cpp"
+    "core/view/src/hover_cursor.cpp",
+    "core/view/src/pointer_dispatch.cpp",
+    "core/view/src/ui_components.cpp"
   ],
   "vellum_inherits": false,
-  "rationale": "The macOS host resolves its hover cursor through a new hover_cursor_under, built on hover_cursor_at, so a disabled view shows the default cursor and the host logic is testable without a window. Vellum carries the same behaviour in its own copy of the host, with the logic inline, so nothing flows back through the export."
+  "rationale": "The macOS host resolves its hover cursor through a new hover_cursor_under so a disabled view shows the default cursor, and an open ComboBox dropdown no longer claims hover or routed wheel input while the combo is disabled. Vellum carries the same behaviour in its own copy of these files, so nothing flows back through the export."
 }

@@ -736,7 +736,7 @@ void deliver_mouse_wheel(View& root, Point root_pt,
     // THIS root's popup, never the process-wide mirror: a second editor in the
     // same host process must not eat this one's wheel just because it opened a
     // dropdown whose rect happens to overlap the pointer.
-    if (auto* combo = ComboBox::active_popup_in(root)) {
+    if (auto* combo = ComboBox::active_popup_in(root); combo && combo->effectively_enabled()) {
         float ddx = 0, ddy = 0, ddw = 0, ddh = 0;
         if (combo->dropdown_window_rect(ddx, ddy, ddw, ddh) &&
             root_pt.x >= ddx && root_pt.x <= ddx + ddw &&

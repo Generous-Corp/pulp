@@ -1038,3 +1038,74 @@ TEST_CASE("ComboBox: an outside click routed through the view tree cancels the m
 
     ComboBox::close_active_popup();
 }
+
+// A disabled ComboBox whose dropdown is open must not stay the hover target or
+// take routed wheel input. The enabled run is the control: the same sequence
+// does claim the dropdown and scroll it.
+namespace {
+
+struct OpenCombo {
+    std::unique_ptr<View> root = std::make_unique<View>();
+    ComboBox* combo = nullptr;
+    float dd_x = 0, dd_y = 0, dd_w = 0, dd_h = 0;
+
+    OpenCombo() {
+        root->set_bounds({0, 0, 200, 100});
+        auto owned = std::make_unique<ComboBox>();
+        combo = owned.get();
+        combo->set_bounds({0, 0, 120, 24});
+        std::vector<std::string> items;
+        for (int i = 0; i < 12; ++i)
+            items.push_back("Item" + std::to_string(i));
+        combo->set_items(items);
+        combo->set_selected(0);
+        root->add_child(std::move(owned));
+        MouseEvent open_click;
+        open_click.position = {60, 12};
+        open_click.is_down = true;
+        combo->on_mouse_event(open_click);
+        REQUIRE(combo->is_open());
+        REQUIRE(combo->dropdown_window_rect(dd_x, dd_y, dd_w, dd_h));
+    }
+
+    Point in_dropdown() const {
+        return {dd_x + dd_w * 0.5f, dd_y + 36.0f};
+    }
+
+    // Scrolls the open menu with the wheel, then reports which item the first
+    // visible row selects.
+    int selected_after_wheel() {
+        for (int k = 0; k < 6; ++k)
+            deliver_mouse_wheel(*root, in_dropdown(), 0.0f, 1.0f, WheelHost{});
+        combo->set_enabled(true);
+        float x, y, w, h;
+        combo->dropdown_window_rect(x, y, w, h);
+        MouseEvent pick;
+        pick.position = {60, y + 12.0f};
+        pick.is_down = true;
+        combo->on_mouse_event(pick);
+        return combo->selected();
+    }
+};
+
+} // namespace
+
+TEST_CASE("ComboBox: an open dropdown claims hover only while the combo is enabled", "[combo]") {
+    OpenCombo enabled;
+    REQUIRE(hover_target_at(*enabled.root, enabled.in_dropdown()) == enabled.combo);
+
+    OpenCombo disabled;
+    disabled.combo->set_enabled(false);
+    REQUIRE(hover_target_at(*disabled.root, disabled.in_dropdown()) != disabled.combo);
+    REQUIRE(disabled.root->hit_test(disabled.in_dropdown()) != disabled.combo);
+}
+
+TEST_CASE("ComboBox: a disabled open dropdown takes no routed wheel", "[combo]") {
+    OpenCombo enabled;
+    const int first_page_rows = static_cast<int>(enabled.dd_h / 24.0f);
+    REQUIRE(enabled.selected_after_wheel() >= first_page_rows);
+
+    OpenCombo disabled;
+    disabled.combo->set_enabled(false);
+    REQUIRE(disabled.selected_after_wheel() == 0);
+}
