@@ -3184,7 +3184,8 @@ coverage or realtime qualification.
 `pulp/host/host_event_timestamps.hpp` (`HostBlockTimeline`) is the only path
 from a format's block-relative event time (CLAP `header.time`) to the ingress's
 epoch-local `absolute_sample`. Feed `HostBlockWindow` straight into
-`begin_block`. Gotchas: CLAP `steady_time` is monotonic and does NOT move on a
+`begin_block`. Gotchas: CLAP `steady_time` is a monotonic sample counter and
+does NOT move on a
 seek or loop, so a loop is only visible through the transport position or an
 explicit `discontinuity`; a stopped transport's position is ignored (it does
 not advance). A steady-clock forward gap stays in the epoch; a backwards clock

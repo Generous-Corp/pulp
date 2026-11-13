@@ -42,7 +42,9 @@ namespace pulp::host {
 struct HostBlockClock {
     /// Host monotonic sample counter at the first frame of the block, or a
     /// negative value when the host does not provide one (CLAP reports -1).
-    std::int64_t steady_time = -1;
+    /// CLAP calls this sample-domain value `clap_process_t::steady_time`; it
+    /// is not a wall-clock duration and must not be converted from nanoseconds.
+    std::int64_t steady_sample = -1;
     /// Frames in the block. Must be in `[1, kHostBlockMaxFrames]`.
     std::size_t frames = 0;
     /// Transport position, in samples, at the first frame of the block.
@@ -96,7 +98,7 @@ class HostBlockTimeline final {
     HostEventResult advance(const HostBlockClock& clock, HostBlockWindow& out) noexcept {
         if (clock.frames == 0 || clock.frames > kHostBlockMaxFrames)
             return HostEventResult::OutOfRange;
-        const bool has_steady = clock.steady_time >= 0;
+        const bool has_steady = clock.steady_sample >= 0;
 
         HostBlockBoundary boundary = HostBlockBoundary::First;
         std::uint64_t epoch = 0;
@@ -115,7 +117,7 @@ class HostBlockTimeline final {
                 break;
             case HostBlockBoundary::Gap:
                 epoch = window_.epoch;
-                start = static_cast<std::uint64_t>(clock.steady_time - epoch_origin_steady_);
+                start = static_cast<std::uint64_t>(clock.steady_sample - epoch_origin_steady_);
                 break;
             case HostBlockBoundary::NewEpoch:
             case HostBlockBoundary::First:
@@ -134,11 +136,11 @@ class HostBlockTimeline final {
             return HostEventResult::Overflow;
 
         if (boundary == HostBlockBoundary::First || boundary == HostBlockBoundary::NewEpoch)
-            epoch_origin_steady_ = has_steady ? clock.steady_time : 0;
+            epoch_origin_steady_ = has_steady ? clock.steady_sample : 0;
         window_ = HostBlockWindow{epoch, start, clock.frames};
         boundary_ = boundary;
         has_block_ = true;
-        prev_steady_ = has_steady ? clock.steady_time : -1;
+        prev_steady_ = has_steady ? clock.steady_sample : -1;
         prev_transport_valid_ = clock.has_transport_sample && clock.transport_playing;
         prev_transport_sample_ = clock.transport_sample;
         out = window_;
@@ -210,10 +212,10 @@ class HostBlockTimeline final {
         if (prev_steady_ > std::numeric_limits<std::int64_t>::max() - step)
             return HostBlockBoundary::NewEpoch;
         const auto expected = prev_steady_ + step;
-        if (clock.steady_time == expected)
+        if (clock.steady_sample == expected)
             return HostBlockBoundary::Continuous;
         // A backwards clock would retime samples that were already delivered.
-        if (clock.steady_time < expected)
+        if (clock.steady_sample < expected)
             return HostBlockBoundary::NewEpoch;
         return HostBlockBoundary::Gap;
     }

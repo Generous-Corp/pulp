@@ -45,7 +45,7 @@ pulp::midi::MidiEvent to_midi(const clap_event_note_t& ev) {
 
 HostBlockClock steady_block(std::int64_t steady, std::size_t frames) {
     HostBlockClock clock;
-    clock.steady_time = steady;
+    clock.steady_sample = steady;
     clock.frames = frames;
     return clock;
 }
@@ -113,6 +113,23 @@ TEST_CASE("CLAP block times project to contiguous absolute samples", "[graph][g5
     CHECK(record.epoch == 1);
     CHECK(record.absolute_sample == 71);
     CHECK(record.midi.sample_offset == 7);
+}
+
+TEST_CASE("CLAP steady_time is consumed as a sample counter", "[graph][g5][clap]") {
+    HostBlockTimeline timeline;
+    HostBlockWindow window;
+
+    // CLAP 1.2.10 defines steady_time as the sample counter at block start.
+    // Use a nonzero host value so a wall-clock interpretation cannot pass by
+    // accident; a 128-frame block advances the counter by exactly 128.
+    REQUIRE(timeline.advance(steady_block(12'345'600, 128), window) == HostEventResult::Accepted);
+    REQUIRE(timeline.advance(steady_block(12'345'728, 128), window) == HostEventResult::Accepted);
+    CHECK(timeline.last_boundary() == HostBlockBoundary::Continuous);
+    CHECK(window.sample_start == 128);
+
+    std::int64_t absolute = -1;
+    CHECK(timeline.project(window, 127, absolute) == HostEventResult::Accepted);
+    CHECK(absolute == 255);
 }
 
 TEST_CASE("Hosts without a steady clock still advance contiguously", "[graph][g5][clap]") {
