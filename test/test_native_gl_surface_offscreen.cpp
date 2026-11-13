@@ -62,6 +62,41 @@ TEST_CASE("the first request a context honours is chosen", "[native][gl-surface]
     REQUIRE_FALSE(is_software_renderer("Apple M1 Pro"));
 }
 
+TEST_CASE("a request for more samples than the pixel format has is not honoured",
+          "[native][gl-surface]") {
+    const std::vector<GlContextRequest> list{
+        {3, 3, GlProfile::core, 4},
+        {3, 3, GlProfile::core, 0},
+    };
+    // A single-sampled format (the Windows child window's) skips the sampled
+    // entry instead of reporting it honoured with no multisampling.
+    REQUIRE(first_honoured_request(list, 4, 1, GlProfile::core, 0) == 1u);
+    REQUIRE(first_honoured_request(list, 4, 1, GlProfile::core, 2) == 1u);
+    REQUIRE(first_honoured_request(list, 4, 1, GlProfile::core, 4) == 0u);
+    REQUIRE(first_honoured_request(list, 4, 1, GlProfile::core, 8) == 0u);
+    REQUIRE_FALSE(first_honoured_request({list[0]}, 4, 1, GlProfile::core, 0).has_value());
+    // The sample count does not loosen the version or profile checks.
+    REQUIRE_FALSE(first_honoured_request(list, 3, 2, GlProfile::core, 8).has_value());
+    REQUIRE_FALSE(first_honoured_request(list, 4, 1, GlProfile::compatibility, 8).has_value());
+}
+
+TEST_CASE("a request for any profile tries core and then compatibility", "[native][gl-surface]") {
+    // A driver that offers only core contexts at 3.2+ still honours `any`.
+    REQUIRE(context_profile_attempts(GlProfile::any) ==
+            std::vector<GlProfile>{GlProfile::core, GlProfile::compatibility});
+    REQUIRE(context_profile_attempts(GlProfile::core) == std::vector<GlProfile>{GlProfile::core});
+    REQUIRE(context_profile_attempts(GlProfile::compatibility) ==
+            std::vector<GlProfile>{GlProfile::compatibility});
+}
+
+TEST_CASE("wglGetProcAddress sentinel values are not usable entry points", "[native][gl-surface]") {
+    for (const std::intptr_t sentinel : {std::intptr_t{0}, std::intptr_t{1}, std::intptr_t{2},
+                                         std::intptr_t{3}, std::intptr_t{-1}})
+        REQUIRE_FALSE(is_usable_wgl_proc(sentinel));
+    REQUIRE(is_usable_wgl_proc(4));
+    REQUIRE(is_usable_wgl_proc(0x7ffe1000));
+}
+
 TEST_CASE("a windowed GL surface is not offered on macOS", "[native][gl-surface]") {
     REQUIRE(GlSurface::create() == nullptr);
     REQUIRE(GlSurface::create_offscreen(0, 16) == nullptr);

@@ -1224,6 +1224,19 @@ class BuildDirChoiceTests(unittest.TestCase):
             env = {lane.GATES_BUILD_DIR_ENV: str(mine)}
             self.assertEqual(lane.choose_build_dir(root, env), (mine, "from PULP_GATES_BUILD_DIR"))
 
+    def test_a_declared_temporary_configure_only_tree_is_never_adopted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            self._tree(root)
+            temp = self._build(root, lane.CONFIGURE_ONLY_PREFIX + "abc123", "Ninja", 4000)
+            alias = root / "mine"
+            alias.symlink_to(temp)
+            for declared in (str(temp), temp.name, str(alias)):
+                with self.subTest(declared=declared):
+                    chosen, why = lane.choose_build_dir(root, {lane.GATES_BUILD_DIR_ENV: declared})
+                    self.assertIsNone(chosen)
+                    self.assertIn("temporary configure_only.py tree", why)
+
     def test_no_build_says_so(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             chosen, why = lane.choose_build_dir(pathlib.Path(tmp), {})

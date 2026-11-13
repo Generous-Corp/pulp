@@ -17,9 +17,9 @@
 ///   framebuffer object of a fixed size. On macOS it uses CGL, for tests and
 ///   offline capture only (OpenGL is deprecated there; editors use
 ///   `MetalSurface`).
-/// - `create`: a child window of the host's window. It is null where no
-///   windowed backend exists yet (macOS, and Windows and X11 until those
-///   backends land).
+/// - `create`: a child window of the host's window: WGL on Windows. It is
+///   null where no windowed backend exists (macOS, and X11 until that backend
+///   lands).
 ///
 /// Threading:
 /// - Construction, `attach`, `detach`, `invalidate`, the setters and
@@ -59,7 +59,11 @@ struct GlContextRequest {
     int major = 3;
     int minor = 3;
     GlProfile profile = GlProfile::core;
-    /// Samples per pixel for multisampling; 0 turns it off.
+    /// Samples per pixel for multisampling; 0 turns it off. A context with
+    /// fewer samples than this does not honour the request, which then falls
+    /// through to the next entry. The Windows backend's child window has a
+    /// single-sampled pixel format, so there a request above 0 is never
+    /// honoured.
     int samples = 0;
 };
 
@@ -101,6 +105,25 @@ struct GlSurfaceOptions {
 /// choice can be checked without a GL driver.
 std::optional<std::size_t> first_honoured_request(const std::vector<GlContextRequest>& requests,
                                                   int major, int minor, GlProfile profile);
+
+/// As above, for a context whose pixel format has `samples` samples per pixel
+/// (0 when it is not multisampled): a request also needs at least its own
+/// `samples`. Pure.
+std::optional<std::size_t> first_honoured_request(const std::vector<GlContextRequest>& requests,
+                                                  int major, int minor, GlProfile profile,
+                                                  int samples);
+
+/// The profiles to ask the platform for, in order, when creating a context
+/// for a request with `profile`, on an API that takes one explicit profile per
+/// creation call (WGL_ARB_create_context_profile). `core` and `compatibility`
+/// are tried alone; `any` tries core and then compatibility, so a driver that
+/// offers only one of them still honours it. Pure.
+std::vector<GlProfile> context_profile_attempts(GlProfile profile);
+
+/// Whether a value `wglGetProcAddress` returned is a usable entry point. Some
+/// drivers return 1, 2, 3 or -1 instead of null for a name they lack, and
+/// calling one of those crashes. Pure.
+bool is_usable_wgl_proc(std::intptr_t address) noexcept;
 
 /// Whether a `GL_RENDERER` string names a software rasterizer.
 bool is_software_renderer(const std::string& renderer);
@@ -165,6 +188,13 @@ class GlSurface {
     void invalidate();
     bool attached() const noexcept;
     bool offscreen() const noexcept;
+    /// The child window (an `HWND`, or an X `Window` id cast to a pointer)
+    /// while attached; null otherwise.
+    void* native_window() const noexcept;
+    /// The window class the child windows use. It is unique to the binary
+    /// that contains this library, so two plug-ins never share one. Empty
+    /// where there is no windowed backend.
+    static std::string window_class_name();
 
     /// The context the client renders with.
     GlContext& context() noexcept;

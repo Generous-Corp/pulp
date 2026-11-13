@@ -48,6 +48,7 @@
    "tools/scripts",
    "tools/scripts/changed_surface_inventory.py",
    "tools/scripts/changed_surface_script_families.py",
+   "tools/scripts/configure_only.py",
    "tools/scripts/dsp_capability_registry.py",
    "tools/scripts/gate_common.py",
    "tools/scripts/generate_widget_bridge_api.py",
