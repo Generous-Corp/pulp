@@ -1,7 +1,9 @@
 #include "../core/host/src/spectral_graph_internal.hpp"
 #include "support/thread_progress.hpp"
 #include "../examples/g10-routed-consumer/asset_morph_oracle.hpp"
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/host/graph_serializer.hpp>
@@ -1119,5 +1121,208 @@ TEST_CASE("Candidate preparation revalidates owned mask values independently of 
         REQUIRE(result == ((std::isfinite(gain) && gain >= 0 && gain <= 1)
                                ? SpectralError::None
                                : SpectralError::InvalidMask));
+    }
+}
+
+TEST_CASE("Candidate preparation revalidates spectral joins independently of authoring",
+          "[host][spectral-fault][spectral-join-revalidation]") {
+    using namespace pulp::host;
+    const auto identity = *SpectralIdentity::make(256, 64, 1, 48000).value;
+    SignalGraph graph;
+    const auto first = *graph.add_spectral_analysis(identity, "first").value;
+    const auto second = *graph.add_spectral_analysis(identity, "second").value;
+    const auto synthesis = *graph.add_spectral_synthesis(identity, "synthesis").value;
+    REQUIRE(graph.connect(first.frames, synthesis.frames));
+    const auto join = graph.connect(second.frames, synthesis.frames);
+    REQUIRE(join.code == GraphResult::Code::Duplicate);
+    // Forge the join the authoring layer refused, as a corrupted candidate
+    // connection list would present it to the preparation validator.
+    std::vector<Connection> forged{graph.connections().front(), graph.connections().front()};
+    forged[1].source_node = second.node;
+    SpectralRuntimeBank bank;
+    REQUIRE(bank.prepare(graph.nodes(), forged, 48000, 64) == SpectralError::InvalidConnection);
+    forged.pop_back();
+    REQUIRE(bank.prepare(graph.nodes(), forged, 48000, 64) == SpectralError::InvalidConnection);
+    REQUIRE(graph.remove_node(second.node));
+    REQUIRE(bank.prepare(graph.nodes(), forged, 48000, 64) == SpectralError::None);
+}
+
+TEST_CASE("A duplicated record neither overwrites the accepted payload nor adds a replacement",
+          "[host][spectral-fault][spectral-duplicate-payload]") {
+    using pulp::host::SpectralError;
+    FaultGraph f;
+    std::array<float, 512> input{}, output{};
+    for (int i = 0; i < 512; ++i)
+        input[i] = std::sin(0.05f * i) + 0.3f * std::sin(0.71f * i + 0.2f);
+    f.bank.begin_block();
+    f.process(f.analysis, input, output);
+    auto* edge = f.bank.find(f.stage)->input;
+    REQUIRE(edge->count == 8);
+    const auto width = edge->bins_per_frame;
+    const std::vector<std::complex<float>> original(edge->bins.begin(),
+                                                    edge->bins.begin() + 8 * width);
+    const auto frame = [&](std::span<const std::complex<float>> bins, std::size_t index) {
+        return bins.subspan(index * width, width);
+    };
+    REQUIRE_FALSE(std::ranges::equal(frame(original, 2), frame(original, 5)));
+    // Slot 3 repeats slot 2's descriptor while carrying a different valid
+    // payload, so slot 3 has no record of its own.
+    edge->stamps[3] = edge->stamps[2];
+    std::ranges::copy(frame(original, 5), edge->bins.begin() + 3 * width);
+    f.process(f.stage, input, output);
+    const auto* stage = f.bank.find(f.stage);
+    REQUIRE(stage->sequence == 8);
+    REQUIRE(stage->errors == 2);
+    REQUIRE(stage->first_error == SpectralError::InvalidFrame);
+    const auto* published = stage->outputs.front();
+    REQUIRE(published->count == 8);
+    for (std::uint32_t i = 0; i < published->count; ++i) {
+        CAPTURE(i);
+        REQUIRE(published->stamps[i].sequence == i);
+        const auto bins = frame(published->bins, i);
+        if (i == 3)
+            REQUIRE(std::ranges::all_of(bins, [](auto v) { return v == std::complex<float>{}; }));
+        else
+            REQUIRE(std::ranges::equal(bins, frame(original, i)));
+    }
+}
+
+TEST_CASE("An active spectral controller refuses reprepare without disturbing rendering",
+          "[host][spectral-transition][spectral-reprepare-refusal]") {
+    using namespace pulp::host;
+    ControllerGraph target, control;
+    const auto serial = SpectralControllerTestAccess::epoch(target.graph);
+    for (int block : {64, 32})
+        REQUIRE_FALSE(target.graph.prepare(48000, block));
+    REQUIRE(target.graph.spectral_error() == SpectralError::UnsupportedOperation);
+    REQUIRE(SpectralControllerTestAccess::epoch(target.graph) == serial);
+    for (int block = 0; block < 12; ++block) {
+        target.process();
+        control.process();
+        REQUIRE(target.output == control.output);
+        REQUIRE(SpectralControllerTestAccess::epoch(target.graph) == serial);
+    }
+}
+
+TEST_CASE("Controller frame tuples restart exactly at seek and replacement boundaries",
+          "[host][spectral-transition][spectral-controller-tuples]") {
+    using namespace pulp::host;
+    ControllerGraph target;
+    for (int i = 0; i < 64; ++i)
+        target.input[i] = 0.25f * std::sin(0.37f * static_cast<float>(i));
+    const auto first = pulp::signal::spectral_frame_engine_first_frame_start(256, 64, true);
+    std::uint32_t serial = SpectralControllerTestAccess::epoch(target.graph);
+    std::uint64_t name_space = 0, next = 0;
+    std::int64_t clock = 0;
+    std::size_t frames = 0;
+    // Independent tuple arithmetic: after a restart, frame k is
+    // {epoch, k, first + k*H, first + k*H + N} and is published in the callback
+    // whose end first reaches that frame's end, never earlier or later.
+    const auto render_block = [&](const pulp::format::ProcessContext* transport, bool restarts) {
+        target.process(transport);
+        if (restarts) {
+            ++serial;
+            clock = 0;
+            next = 0;
+        }
+        clock += 64;
+        REQUIRE(SpectralControllerTestAccess::epoch(target.graph) == serial);
+        auto reader = SpectralControllerTestAccess::reader(target.graph);
+        REQUIRE(reader);
+        const auto& analysis = *reader->spectral->nodes.front();
+        REQUIRE(analysis.type == NodeType::SpectralAnalysis);
+        REQUIRE((analysis.epoch & 0xffffffffu) == serial);
+        if (name_space == 0)
+            name_space = analysis.epoch >> 32;
+        REQUIRE((analysis.epoch >> 32) == name_space);
+        const auto* batch = analysis.outputs.front();
+        for (std::uint32_t i = 0; i < batch->count; ++i, ++next, ++frames) {
+            const auto origin = first + static_cast<std::int64_t>(next) * 64;
+            const pulp::graph::SpectralFrameStamp expected{analysis.epoch, next, origin,
+                                                           origin + 256};
+            REQUIRE(batch->stamps[i] == expected);
+            REQUIRE(expected.completion <= clock);
+        }
+        REQUIRE(first + static_cast<std::int64_t>(next) * 64 + 256 > clock);
+    };
+    pulp::format::ProcessContext seek, reset;
+    seek.transport_jump = true;
+    reset.reset_requested = true;
+    render_block(&seek, true);
+    for (int block = 0; block < 6; ++block)
+        render_block(nullptr, false);
+    auto rejected = target.edit(32);
+    REQUIRE(rejected->commit() == SignalGraph::PreparedTopologyEdit::Result::Staged);
+    render_block(nullptr, false);
+    REQUIRE(target.graph.finalize_spectral_transition() == SpectralError::CapacityExceeded);
+    auto replacement = target.edit();
+    REQUIRE(replacement->commit() == SignalGraph::PreparedTopologyEdit::Result::Staged);
+    render_block(nullptr, true);
+    REQUIRE(target.graph.finalize_spectral_transition() == SpectralError::None);
+    for (int block = 0; block < 5; ++block)
+        render_block(nullptr, false);
+    render_block(&reset, true);
+    for (int block = 0; block < 5; ++block)
+        render_block(nullptr, false);
+    replacement = target.edit();
+    REQUIRE(replacement->commit() == SignalGraph::PreparedTopologyEdit::Result::Staged);
+    render_block(&seek, true);
+    REQUIRE(target.graph.finalize_spectral_transition() == SpectralError::None);
+    for (int block = 0; block < 5; ++block)
+        render_block(nullptr, false);
+    REQUIRE(frames == 26);
+}
+
+TEST_CASE("A live spectral graph refuses graph event binding without changing its controller",
+          "[host][spectral-transition][spectral-graph-event-refusal]") {
+    using namespace pulp::host;
+    struct EventGraph {
+        SignalGraph graph;
+        NodeId producer = 0, consumer = 0;
+        std::array<float, 64> input{}, output{};
+        const float* ip[1] = {input.data()};
+        float* op[1] = {output.data()};
+        pulp::audio::BufferView<const float> iv{ip, 1, 64};
+        pulp::audio::BufferView<float> ov{op, 1, 64};
+        EventGraph() {
+            CustomNodeType type;
+            type.type_id = "spectral.test.event";
+            type.num_input_ports = type.num_output_ports = 1;
+            type.process_events = [](auto& out, const auto& in, int frames,
+                                     const CustomNodeEventBlock&) {
+                std::copy_n(in.channel_ptr(0), frames, out.channel_ptr(0));
+            };
+            REQUIRE(graph.register_custom_node_type(type));
+            const auto shape = *SpectralIdentity::make(256, 64, 1, 48000).value;
+            const auto in = graph.add_input_node(1), out = graph.add_output_node(1);
+            producer = graph.add_custom_node(type.type_id);
+            consumer = graph.add_custom_node(type.type_id);
+            REQUIRE(producer != 0);
+            REQUIRE(consumer != 0);
+            const auto a = *graph.add_spectral_analysis(shape, "analysis").value;
+            const auto s = *graph.add_spectral_synthesis(shape, "synthesis").value;
+            REQUIRE(graph.connect(in, 0, producer, 0));
+            REQUIRE(graph.connect(producer, 0, consumer, 0));
+            REQUIRE(graph.connect(graph.node(consumer)->out("audio"), a.audio[0]));
+            REQUIRE(graph.connect(a.frames, s.frames));
+            REQUIRE(graph.connect(s.audio[0], graph.node(out)->in("audio")));
+            REQUIRE(graph.prepare(48000, 64));
+            input.fill(0.25f);
+            for (int i = 0; i < 12; ++i)
+                graph.process(ov, iv, 64);
+        }
+    };
+    EventGraph target, control;
+    const auto latency = target.graph.latency_samples();
+    REQUIRE(latency == 320);
+    REQUIRE(target.graph.connect_graph_event({target.producer, target.consumer}) ==
+            GraphEventBindingResult::Mode);
+    REQUIRE_FALSE(target.graph.graph_event_edge());
+    REQUIRE(target.graph.spectral_error() == SpectralError::UnsupportedOperation);
+    REQUIRE(target.graph.latency_samples() == latency);
+    for (int block = 0; block < 12; ++block) {
+        target.graph.process(target.ov, target.iv, 64);
+        control.graph.process(control.ov, control.iv, 64);
+        REQUIRE(target.output == control.output);
     }
 }
