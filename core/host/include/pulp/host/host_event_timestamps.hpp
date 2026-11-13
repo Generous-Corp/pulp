@@ -165,8 +165,7 @@ class HostBlockTimeline final {
     /// written only on success.
     HostEventResult make_record(const HostBlockWindow& window, std::uint32_t block_time,
                                 std::uint32_t producer, std::uint64_t producer_sequence,
-                                const midi::MidiEvent& event,
-                                HostEventRecord& out) const noexcept {
+                                const midi::MidiEvent& event, HostEventRecord& out) const noexcept {
         std::int64_t absolute = 0;
         const auto result = project(window, block_time, absolute);
         if (result != HostEventResult::Accepted)

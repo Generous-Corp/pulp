@@ -70,8 +70,8 @@ std::vector<std::int64_t> run_block(HostBlockTimeline& timeline, HostEventIngres
             HostEventResult::Accepted);
     for (const auto& ev : events) {
         HostEventRecord record;
-        REQUIRE(timeline.make_record(window, ev.header.time, kClapProducer, sequence++,
-                                     to_midi(ev), record) == HostEventResult::Accepted);
+        REQUIRE(timeline.make_record(window, ev.header.time, kClapProducer, sequence++, to_midi(ev),
+                                     record) == HostEventResult::Accepted);
         REQUIRE(ingress.publish(record) == HostEventResult::Accepted);
     }
     std::array<HostEventRecord, 64> out{};
@@ -99,8 +99,8 @@ TEST_CASE("CLAP block times project to contiguous absolute samples", "[graph][g5
     CHECK(timeline.current().sample_start == 0);
     CHECK(first == std::vector<std::int64_t>{0, 63});
 
-    const auto second = run_block(timeline, ingress, steady_block(48064, 64),
-                                  {clap_note_on(5, 64)}, sequence);
+    const auto second =
+        run_block(timeline, ingress, steady_block(48064, 64), {clap_note_on(5, 64)}, sequence);
     CHECK(timeline.last_boundary() == HostBlockBoundary::Continuous);
     CHECK(timeline.current().epoch == 1);
     CHECK(timeline.current().sample_start == 64);
@@ -108,8 +108,8 @@ TEST_CASE("CLAP block times project to contiguous absolute samples", "[graph][g5
 
     HostEventRecord record;
     REQUIRE(timeline.make_record(timeline.current(), 7, kClapProducer, 99,
-                                 to_midi(clap_note_on(7, 65)), record) ==
-            HostEventResult::Accepted);
+                                 to_midi(clap_note_on(7, 65)),
+                                 record) == HostEventResult::Accepted);
     CHECK(record.epoch == 1);
     CHECK(record.absolute_sample == 71);
     CHECK(record.midi.sample_offset == 7);
@@ -136,10 +136,8 @@ TEST_CASE("Seek and loop discontinuities open a new epoch", "[graph][g5][clap]")
     HostBlockWindow window;
 
     SECTION("a loop wrap in the transport position") {
-        REQUIRE(timeline.advance(playing_block(0, 64, 1000), window) ==
-                HostEventResult::Accepted);
-        REQUIRE(timeline.advance(playing_block(64, 64, 1064), window) ==
-                HostEventResult::Accepted);
+        REQUIRE(timeline.advance(playing_block(0, 64, 1000), window) == HostEventResult::Accepted);
+        REQUIRE(timeline.advance(playing_block(64, 64, 1064), window) == HostEventResult::Accepted);
         CHECK(timeline.last_boundary() == HostBlockBoundary::Continuous);
         const auto old_window = window;
         // Steady clock continues; the transport wrapped back to the loop start.
@@ -206,8 +204,8 @@ TEST_CASE("Event times outside the block are refused, never clamped", "[graph][g
         CHECK(absolute == -7);
         HostEventRecord record;
         record.absolute_sample = -11;
-        CHECK(timeline.make_record(window, ev.header.time, kClapProducer, 1, to_midi(ev),
-                                   record) == HostEventResult::OutOfRange);
+        CHECK(timeline.make_record(window, ev.header.time, kClapProducer, 1, to_midi(ev), record) ==
+              HostEventResult::OutOfRange);
         CHECK(record.absolute_sample == -11);
     }
 
@@ -258,8 +256,8 @@ TEST_CASE("Events projected against a previous block are late", "[graph][g5][cla
 TEST_CASE("Absolute samples are invariant to host block partitioning", "[graph][g5][clap]") {
     constexpr std::int64_t kOrigin = 96000;
     constexpr std::int64_t kTotal = 1024;
-    const std::vector<std::int64_t> event_positions{0, 1, 31, 32, 63, 64, 126, 127,
-                                                    128, 255, 500, 777, 1023};
+    const std::vector<std::int64_t> event_positions{0,   1,   31,  32,  63,  64,  126,
+                                                    127, 128, 255, 500, 777, 1023};
 
     auto render = [&](std::size_t block) {
         HostBlockTimeline timeline;
@@ -276,9 +274,8 @@ TEST_CASE("Absolute samples are invariant to host block partitioning", "[graph][
                     events.push_back(clap_note_on(static_cast<std::uint32_t>(pos - steady),
                                                   static_cast<std::int16_t>(pos % 128)));
             }
-            const auto samples = run_block(timeline, ingress,
-                                           steady_block(kOrigin + steady, frames), events,
-                                           sequence);
+            const auto samples = run_block(
+                timeline, ingress, steady_block(kOrigin + steady, frames), events, sequence);
             CHECK(timeline.current().epoch == 1);
             projected.insert(projected.end(), samples.begin(), samples.end());
             steady += static_cast<std::int64_t>(frames);
