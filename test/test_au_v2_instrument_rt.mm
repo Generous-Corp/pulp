@@ -811,7 +811,7 @@ UInt32 element_count(format::au::PulpAUInstrument& instrument, AudioUnitScope sc
     return count;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("AU v2 instrument constructs its processor exactly once",
           "[au][au-v2][instrument][construction]") {

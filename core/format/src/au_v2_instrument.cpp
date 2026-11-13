@@ -30,7 +30,8 @@ namespace {
 // the processor is created first and its descriptor read here. Falls back to a
 // single output bus if no processor exists.
 UInt32 output_element_count(const Processor* processor) {
-    if (!processor) return 1;
+    if (!processor)
+        return 1;
     const auto desc = processor->descriptor();
     const std::size_t declared = desc.output_buses.size();
     const std::size_t count = instrument_output_element_count(desc);
@@ -66,12 +67,10 @@ PulpAUInstrument::PulpAUInstrument(AudioComponentInstance ci)
 }
 
 PulpAUInstrument::PulpAUInstrument(AudioComponentInstance ci, ProcessorFactory factory)
-    : PulpAUInstrument(ci, factory ? factory() : nullptr, static_cast<bool>(factory))
-{
-}
+    : PulpAUInstrument(ci, factory ? factory() : nullptr, static_cast<bool>(factory)) {}
 
-PulpAUInstrument::PulpAUInstrument(AudioComponentInstance ci,
-                                   std::unique_ptr<Processor> processor, bool has_factory)
+PulpAUInstrument::PulpAUInstrument(AudioComponentInstance ci, std::unique_ptr<Processor> processor,
+                                   bool has_factory)
     : MusicDeviceBase(ci, /*numInputs=*/input_element_count(processor.get()),
                       /*numOutputs=*/output_element_count(processor.get()),
                       /*numGroups=*/0) {
