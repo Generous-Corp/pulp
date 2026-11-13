@@ -22,7 +22,8 @@
 //
 // Reading accepts single or double quotes, entities, character references and
 // literal UTF-8. Leading and trailing spaces in names and values are kept, and
-// a literal tab, line feed or other control byte in a value reads as itself.
+// a literal tab, line feed, carriage return (alone or in a CRLF pair) or other
+// control byte in a value reads as itself.
 // Anything after the first root element (another root, text, a comment) is
 // ignored; text before it is a parse error.
 // Comments, blank lines, extra attributes, a VALUE without a name and any other
@@ -40,8 +41,10 @@
 //   returned, so the file is never wiped by the next save.
 // - save() replaces the file atomically and leaves no temporary file behind,
 //   whether it succeeds or fails, and reports failure.
-// - A save when no entry changed since the load or last save writes nothing:
-//   the file's bytes, modification time and inode are untouched.
+// - A save when no entry changed since the load, construction or last save
+//   writes nothing: the file's bytes, modification time and inode are
+//   untouched, and a missing file stays missing until it has an entry (or an
+//   entry is removed) to write.
 
 #include <cstddef>
 #include <filesystem>
@@ -66,7 +69,10 @@ class XmlPropertiesFile {
   public:
     using Entry = std::pair<std::string, std::string>;
 
-    /// An empty file bound to `path`; save() creates it.
+    /// An empty file bound to `path`, without reading it. Nothing is written
+    /// until an entry is set: save() on an unchanged object leaves `path` as
+    /// it is (absent if it was absent), and the first save after a set()
+    /// replaces whatever `path` held with only this object's entries.
     explicit XmlPropertiesFile(std::filesystem::path path);
 
     /// Reads `path`. A missing file loads empty. A file that does not parse
@@ -103,8 +109,9 @@ class XmlPropertiesFile {
     /// Where a file that fails to parse is copied: `<path>.bak`.
     [[nodiscard]] static std::filesystem::path backup_path_for(const std::filesystem::path& path);
 
-    /// Writes the canonical bytes atomically if anything changed. True when the
-    /// file holds the current entries afterwards.
+    /// Writes the canonical bytes atomically if any entry changed since the
+    /// load, construction or last save; otherwise writes nothing, not even a
+    /// missing file. True when nothing needed writing or the write succeeded.
     bool save(XmlPropertiesError* error = nullptr);
 
   private:

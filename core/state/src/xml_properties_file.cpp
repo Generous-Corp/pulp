@@ -161,9 +161,11 @@ XmlPropertiesFile::parse(std::string_view bytes, XmlPropertiesError* error) {
     // parse_fragment keeps text at the document level as nodes, so text before
     // the root can be refused (without it pugixml drops that text silently).
     // parse_wconv_attribute is off so a literal tab or line feed in a value
-    // reads as itself rather than as a space.
-    constexpr unsigned options =
-        (pugi::parse_default | pugi::parse_fragment) & ~pugi::parse_wconv_attribute;
+    // reads as itself rather than as a space, and parse_eol is off so a
+    // literal carriage return (alone or before a line feed) reads as itself
+    // rather than being folded into a line feed.
+    constexpr unsigned options = (pugi::parse_default | pugi::parse_fragment) &
+                                 ~(pugi::parse_wconv_attribute | pugi::parse_eol);
     pugi::xml_document doc;
     const auto result = doc.load_buffer(bytes.data(), bytes.size(), options, pugi::encoding_utf8);
     if (!result) {

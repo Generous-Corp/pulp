@@ -280,6 +280,42 @@ TEST_CASE("XmlPropertiesFile reads literal control bytes in a value as themselve
           canonical("  <VALUE name=\"a\" val=\"x&#9;y&#10;z&#1;w\"/>\r\n"));
 }
 
+TEST_CASE("XmlPropertiesFile reads a literal carriage return in a value as itself",
+          "[state][xml-properties]") {
+    // A lone CR and a CRLF pair inside the quotes are not folded into a line
+    // feed, and the next save writes each CR as a reference.
+    const auto entries = XmlPropertiesFile::parse(std::string(
+        "<PROPERTIES>\r\n  <VALUE name=\"a\" val=\"x\ry\r\nz\"/>\r\n</PROPERTIES>\r\n"));
+    REQUIRE(entries.has_value());
+    REQUIRE(entries->size() == 1);
+    CHECK(entries->at(0).second == std::string("x\ry\r\nz"));
+    CHECK(XmlPropertiesFile::serialize(*entries) ==
+          canonical("  <VALUE name=\"a\" val=\"x&#13;y&#13;&#10;z\"/>\r\n"));
+}
+
+TEST_CASE("XmlPropertiesFile bound by the constructor writes nothing until an entry is set",
+          "[state][xml-properties]") {
+    Scratch dir;
+    const auto path = dir.root / "Product.xml";
+    XmlPropertiesFile file(path);
+    CHECK_FALSE(file.dirty());
+    REQUIRE(file.save());
+    CHECK_FALSE(std::filesystem::exists(path));
+    CHECK(entries_in(dir.root) == 0);
+
+    // An existing file is not read, and an unchanged save leaves it alone.
+    spit(path, canonical("  <VALUE name=\"old\" val=\"1\"/>\r\n"));
+    XmlPropertiesFile bound(path);
+    REQUIRE(bound.save());
+    CHECK(slurp(path) == canonical("  <VALUE name=\"old\" val=\"1\"/>\r\n"));
+
+    // The first save after a set replaces it with only this object's entries.
+    bound.set("a", "1");
+    REQUIRE(bound.save());
+    CHECK(slurp(path) == canonical("  <VALUE name=\"a\" val=\"1\"/>\r\n"));
+    CHECK(entries_in(dir.root) == 1);
+}
+
 TEST_CASE("XmlPropertiesFile ignores everything after the first root", "[state][xml-properties]") {
     const std::vector<std::string> trailers = {
         "<PROPERTIES>\n  <VALUE name=\"z\" val=\"9\"/>\n</PROPERTIES>\n", // a second root
