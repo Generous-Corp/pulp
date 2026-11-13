@@ -255,10 +255,11 @@ class GatesScriptInputsTests(unittest.TestCase):
 
     def gates(self, **extra: str) -> subprocess.CompletedProcess:
         return subprocess.run(["bash", str(self.root / "tools/scripts/gates.sh"), "main"], cwd=self.root,
-                              env=self.env(**extra), capture_output=True, text=True, timeout=300)
+                              env=self.env(**extra), capture_output=True, text=True, encoding="utf-8",
+                              timeout=300)
 
     def configures(self) -> list[str]:
-        return self.cmake_log.read_text().splitlines() if self.cmake_log.exists() else []
+        return self.cmake_log.read_text(encoding="utf-8").splitlines() if self.cmake_log.exists() else []
 
     def temp_trees(self) -> list[str]:
         return sorted(p.name for p in self.root.glob("build-configure-only.*"))
@@ -318,7 +319,7 @@ class GatesScriptInputsTests(unittest.TestCase):
                 self.assertIn(f"-B {self.root.resolve() / 'build-configure-only.'}", calls[0])
                 self.assertIn("-DPULP_BUILD_EXAMPLES=OFF", calls[0])
                 self.assertNotIn("--build", calls[0])
-                self.assertEqual(governor_log.read_text().split("\n")[0], "class=background jobs=1")
+                self.assertEqual(governor_log.read_text(encoding="utf-8").split("\n")[0], "class=background jobs=1")
                 self.assertEqual(self.temp_trees(), [], "the temporary tree must be removed")
                 self.assertFalse((self.root / "build-gate").exists())
                 self.assertIn("[gate-host] ALLOWED configure-only", r.stderr)
@@ -518,7 +519,7 @@ class GatesScriptInputsTests(unittest.TestCase):
 
     def test_selftest_added_without_regenerating_the_manifest_fails(self) -> None:
         # The registration gains TIMEOUT 300; the hand-kept manifest still says 120.
-        inventory = json.loads(self.inventory.read_text())
+        inventory = json.loads(self.inventory.read_text(encoding="utf-8"))
         inventory["tests"][1]["properties"][1]["value"] = 300.0
         self.inventory.write_text(json.dumps(inventory), encoding="utf-8")
         self.write("tools/ci/test_beta.py", "print('beta, slower')\n")
@@ -622,11 +623,11 @@ class TouchReasonsTests(unittest.TestCase):
                           "core/CMakeLists.txt": "add_library(x)\n",
                           "tools/CMakeLists.txt": "add_test(NAME a COMMAND a)\n"}.items():
             (root / rel).parent.mkdir(parents=True, exist_ok=True)
-            (root / rel).write_text(text)
+            (root / rel).write_text(text, encoding="utf-8")
         lst = {"tests": {"a": {"entry": "tools/test_a.py", "inputs": ["tools/lib", "tools/test_a.py"],
                                "kind": "python"}}}
         (root / "test").mkdir()
-        (root / "test/ctest_script_inputs.json").write_text(json.dumps(lst))
+        (root / "test/ctest_script_inputs.json").write_text(json.dumps(lst), encoding="utf-8")
         git(root, "init", "-q", "-b", "main")
         git(root, "config", "user.email", "t@example.com")
         git(root, "config", "user.name", "t")
@@ -634,7 +635,8 @@ class TouchReasonsTests(unittest.TestCase):
         git(root, "commit", "-q", "-m", "base")
 
     def reasons_after(self, rel: str) -> list[str]:
-        (self.root / rel).write_text("changed\n" + ("add_test(\n" if rel == "tools/CMakeLists.txt" else ""))
+        (self.root / rel).write_text("changed\n" + ("add_test(\n" if rel == "tools/CMakeLists.txt" else ""),
+                                     encoding="utf-8")
         return self.sti.touch_reasons(self.root, "main")
 
     def test_each_path_class(self) -> None:

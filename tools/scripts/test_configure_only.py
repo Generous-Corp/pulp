@@ -103,12 +103,12 @@ class ConfigureOnlyTests(unittest.TestCase):
                           "str((b / '.cmake/api/v1/query/codemodel-v2').is_file()))",
                           "{build}", str(seen))
         self.assertEqual(r.returncode, 0, r.stderr)
-        build, testfile, query = seen.read_text().splitlines()
+        build, testfile, query = seen.read_text(encoding="utf-8").splitlines()
         self.assertEqual(Path(build).parent, self.root.resolve())
         self.assertTrue(Path(build).name.startswith("build-configure-only."))
         self.assertEqual((testfile, query), ("True", "True"))
         self.assertEqual(self.temp_trees(), [])
-        call = self.cmake_log.read_text()
+        call = self.cmake_log.read_text(encoding="utf-8")
         self.assertIn("-G Ninja -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=OFF",
                       call)
         self.assertNotIn("--build", call)
@@ -116,7 +116,7 @@ class ConfigureOnlyTests(unittest.TestCase):
     def test_the_configure_is_governed_as_one_background_core(self) -> None:
         r = self.run_tool("true")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(self.governor_log.read_text().strip(), "class=background jobs=1")
+        self.assertEqual(self.governor_log.read_text(encoding="utf-8").strip(), "class=background jobs=1")
 
     def test_a_failing_command_keeps_its_exit_code_and_still_cleans_up(self) -> None:
         r = self.run_tool(sys.executable, "-c", "raise SystemExit(5)")
@@ -170,7 +170,7 @@ class ConfigureOnlyTests(unittest.TestCase):
         path = f"{self.bin}{os.pathsep}{os.environ.get('PATH', '')}"
         r = self.run_tool("true", PULP_CONFIGURE_ONLY_NPM="1", PATH=path)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn(f"ci --prefix {jsx.resolve()}", npm_log.read_text())
+        self.assertIn(f"ci --prefix {jsx.resolve()}", npm_log.read_text(encoding="utf-8"))
         for module in configure_only.JSX_RUNTIME_MODULES:
             (jsx / "node_modules" / module).parent.mkdir(parents=True, exist_ok=True)
             (jsx / "node_modules" / module).write_text("{}\n", encoding="utf-8")

@@ -281,7 +281,8 @@ def check_script_inputs(root: Path, build: Path, shown: str, base: str) -> int:
 
 def run_tool(cmd: list[str], root: Path) -> tuple[int, str]:
     try:
-        proc = subprocess.run(cmd, cwd=root, capture_output=True, text=True)
+        proc = subprocess.run(cmd, cwd=root, capture_output=True, text=True, encoding="utf-8",
+                              errors="replace")
     except OSError as exc:
         return 2, f"{cmd[1]} could not run: {exc}"
     return proc.returncode, (proc.stdout + proc.stderr).strip()
