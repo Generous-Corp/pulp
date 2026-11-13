@@ -2875,7 +2875,13 @@ change touching a script, a skill doc, the script-inputs list, the generator or
 the config, reports otherwise, and never fails a merge group. Regenerate with
 `python3 tools/scripts/changed_surface_script_families.py --build-dir <dir> --write`
 after the script-inputs list. The build directory needs a CMake file-API
-codemodel reply; without one the check reports a skip.
+codemodel reply; without one the check reports a skip. With no configured
+build, or on a gate or dev-overflow host whose heavy local lanes
+`gate_host_policy.sh` refuses, use `--configure-only --write` instead: it
+configures the gate's tree in a temporary `build-configure-only.*` directory
+under the checkout, governed as one background core, refuses any compile, and
+removes the directory afterwards (`tools/scripts/configure_only.py`, which takes
+any generator command with `{build}` in place of the directory).
 
 The pre-push hook runs the build-free half,
 `changed_surface_script_families.py --static --base origin/main`: it predicts

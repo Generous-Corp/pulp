@@ -51,6 +51,9 @@ struct GlSurface::Impl {
     virtual bool attached() const {
         return false;
     }
+    virtual void* native_window() const {
+        return nullptr;
+    }
     virtual void detach_window() {}
     virtual void forget_window() {}
     virtual void destroy_window() {}
@@ -59,6 +62,7 @@ struct GlSurface::Impl {
 // Defined by the backend files built for this platform; null where there is
 // no such backend.
 std::unique_ptr<GlSurface::Impl> make_windowed_gl_impl(const GlSurfaceOptions& options);
+std::string windowed_gl_class_name();
 std::unique_ptr<GlSurface::Impl> make_offscreen_gl_impl(std::uint32_t width, std::uint32_t height,
                                                         const GlSurfaceOptions& options);
 

@@ -1344,6 +1344,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME gate-common-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gate_common.py")
 
+    # The configure-only allowance gate hosts keep for the generated test
+    # manifests: a governed configure in a temporary tree under the checkout,
+    # removed afterwards, that refuses any compile.
+    add_test(NAME configure-only-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_configure_only.py")
+
     # Every enforcing lint block in gates.sh must set the failure flag: a block
     # that reports and falls through lets a red lint pass the whole gate.
     add_test(NAME gates-sh-fail-flag-selftest COMMAND ${Python3_EXECUTABLE}
