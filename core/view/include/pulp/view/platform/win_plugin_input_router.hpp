@@ -543,7 +543,7 @@ public:
 private:
     static bool route_press_to_open_combo(View& root, Point pt,
                                           std::uint16_t modifiers) {
-        auto* combo = ComboBox::active_popup_in(root);
+        auto* combo = enabled_open_popup_in(root);
         if (!combo) return false;
         float x = 0, y = 0, width = 0, height = 0;
         if (!combo->dropdown_window_rect(x, y, width, height) ||

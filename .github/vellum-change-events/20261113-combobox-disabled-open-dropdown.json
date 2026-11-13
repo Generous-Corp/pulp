@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "event_id": "20261113-combobox-disabled-open-dropdown",
+  "kind": "change",
+  "created_at": "2026-11-13T03:35:58Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "An open ComboBox dropdown no longer takes routed wheel input while the combo is disabled; a one-condition change in pointer_dispatch.cpp that moves no API or authority boundary. Pulp-only because Vellum applies the same gate directly to its own copy of the file.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R pulp-test-combo-dropdown"
+  ],
+  "disposition": "pulp-only"
+}

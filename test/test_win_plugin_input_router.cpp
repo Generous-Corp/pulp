@@ -877,3 +877,37 @@ TEST_CASE("cancelling twice does not double-release capture",
 
     REQUIRE(host.count("release") == 1);
 }
+
+// ── Open dropdown routing ───────────────────────────────────────────────────
+
+TEST_CASE("a press inside an open dropdown reaches only an enabled combo",
+          "[win-input-router][combo]") {
+    auto run = [](bool enabled) {
+        View root;
+        root.set_bounds({0, 0, 200, 100});
+        auto owned = std::make_unique<ComboBox>();
+        auto* combo = owned.get();
+        combo->set_bounds({0, 0, 120, 24});
+        combo->set_items({"A", "B", "C", "D"});
+        root.add_child(std::move(owned));
+
+        MouseEvent open_click;
+        open_click.position = {60, 12};
+        open_click.is_down = true;
+        combo->on_mouse_event(open_click);
+        REQUIRE(combo->is_open());
+        combo->set_enabled(enabled);
+
+        float x = 0, y = 0, w = 0, h = 0;
+        REQUIRE(combo->dropdown_window_rect(x, y, w, h));
+        RecordingHost host(root);
+        PluginInputRouter router(host);
+        router.on_mouse_down({x + w * 0.5f, y + 36.0f}, MouseButton::left, 0);
+        router.on_mouse_up({x + w * 0.5f, y + 36.0f}, MouseButton::left, 0);
+        return combo->selected();
+    };
+    // Control: an enabled combo takes the press and selects the row.
+    REQUIRE(run(true) > 0);
+    // A disabled one takes nothing, so the selection stays at the default.
+    REQUIRE(run(false) <= 0);
+}
