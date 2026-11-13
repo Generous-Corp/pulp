@@ -2212,6 +2212,10 @@
             "kind": "option"
           },
           {
+            "name": "--frames",
+            "kind": "option"
+          },
+          {
             "name": "--source-node",
             "kind": "option"
           },
