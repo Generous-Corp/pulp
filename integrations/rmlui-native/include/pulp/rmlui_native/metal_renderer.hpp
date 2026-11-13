@@ -43,9 +43,8 @@ RendererHooks metal_renderer_hooks(vellum::rmlui::MetalRenderInterface& renderer
 namespace pulp::rmlui_native {
 
 /// The renderer's view of one surface frame: the whole drawable as the
-/// viewport, one target pixel per RmlUi context unit (the surface sizes the
-/// context in drawable pixels and scales dp through RmlUi's density ratio),
-/// and a cleared target (a drawable's previous contents are undefined).
+/// viewport, the surface's backing scale, and a cleared target (a drawable's
+/// previous contents are undefined).
 vellum::rmlui::MetalFrameTarget metal_frame_target(const FrameTarget& frame);
 
 } // namespace pulp::rmlui_native

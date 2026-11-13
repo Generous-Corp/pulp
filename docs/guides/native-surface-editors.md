@@ -54,6 +54,19 @@ An RmlUi renderer, or any other renderer that takes a `MTLDevice` and a target
 texture, draws into the drawable's texture the same way the metal-probe
 renderer does.
 
+## RmlUi on Metal
+
+The opt-in `PULP_ENABLE_RMLUI_ADAPTER` package adds
+`pulp::rmlui-native-metal` when the installed Vellum SDK exports both
+`VellumRmlUi::Native` and `VellumRmlUi::Metal`. Construct
+`vellum::rmlui::MetalRenderInterface` with the device returned by the surface,
+then pass `metal_renderer_hooks(renderer)` to `RmlUiSurface`. The hooks give
+Vellum the drawable's whole viewport, its backing scale, and a clear request on
+every frame. The drawable is BGRA8Unorm and the surface's device must be the
+renderer's device. The `rmlui-metal-demo` example is a small plug-in using this
+path; it remains unavailable when the adapter option or the Vellum Metal
+component is off.
+
 ## Proof
 
 - `pulp-test-native-metal-surface`, `-frame-pump`, `-input` and

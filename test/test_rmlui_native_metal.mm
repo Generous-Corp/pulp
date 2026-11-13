@@ -150,6 +150,11 @@ bool draw(const char* document, CGFloat scale, Drawn& out, std::string& failure)
         if (!ui.attach((__bridge void*)window.contentView)) {
             failure = "attach failed";
         } else {
+            if (ui.surface()->device() != (__bridge void*)device) {
+                failure = "surface and renderer use different Metal devices";
+                ui.detach();
+                return false;
+            }
             // The surface draws on demand. Two frames first, as the reference
             // renders twice, so layout has settled; then the captured one.
             if (!wait_for([&] { return ui.frames() >= 1; })) {
@@ -264,9 +269,7 @@ TEST_CASE("the renderer is handed the whole drawable in context pixels, cleared"
         REQUIRE(target.viewport.height == 480.0);
         REQUIRE(target.viewport.znear == 0.0);
         REQUIRE(target.viewport.zfar == 1.0);
-        // The context is already in drawable pixels; a backing scale of 2
-        // must not reach the renderer as a second scale.
-        REQUIRE(target.scale == 1.0f);
+        REQUIRE(target.scale == 2.0f);
         REQUIRE(target.clear);
     }
 }
