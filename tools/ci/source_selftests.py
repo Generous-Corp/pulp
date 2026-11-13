@@ -1023,6 +1023,9 @@ def set_aside_census_tests(entries: list[dict[str, Any]], build: pathlib.Path,
     return aside
 
 
+CONFIGURE_ONLY_PREFIX = "build-configure-only."  # tools/scripts/configure_only.py TEMP_PREFIX
+
+
 def choose_build_dir(repo: pathlib.Path = REPO_ROOT,
                      env: dict[str, str] | os._Environ[str] = os.environ,
                      ) -> tuple[pathlib.Path | None, str]:
@@ -1038,11 +1041,22 @@ def choose_build_dir(repo: pathlib.Path = REPO_ROOT,
     if declared:
         path = pathlib.Path(declared).expanduser()
         path = path if path.is_absolute() else repo / path
+        # A configure_only.py tree belongs to one run, which may delete it at
+        # any moment (or a later run sweeps it), so an override cannot adopt
+        # one either. Judged on the resolved path, so a symlink to one counts.
+        if path.resolve().name.startswith(CONFIGURE_ONLY_PREFIX) \
+                or path.name.startswith(CONFIGURE_ONLY_PREFIX):
+            return None, (f"{GATES_BUILD_DIR_ENV}={declared} is a temporary configure_only.py "
+                          f"tree ({CONFIGURE_ONLY_PREFIX}*), which its run may delete")
         if (path / "CTestTestfile.cmake").is_file():
             return path.resolve(), f"from {GATES_BUILD_DIR_ENV}"
         return None, f"{GATES_BUILD_DIR_ENV}={declared} is not a configured build"
     usable, rejected = [], []
     for candidate in sorted(repo.glob("build*")):
+        # configure_only.py's temporary trees belong to one live run (or are
+        # leftovers it sweeps); another lane must never adopt one.
+        if candidate.name.startswith(CONFIGURE_ONLY_PREFIX):
+            continue
         if not (candidate / "CMakeCache.txt").is_file():
             continue
         why = unusable_build_reason(candidate, repo)
