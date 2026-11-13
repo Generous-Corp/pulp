@@ -24,9 +24,9 @@ renders on the same blocks. The canonical (family, absolute sample, order key)
 trace is identical across five schedules, and an in-binary sequence mutation
 changes only the touched family's digest while a record diff names only the
 touched records. See
-`docs/evidence/p1-event-admission-consumer-20261112.md:93-303` and the control
+`docs/evidence/p1-event-admission-consumer-20261112.md:93-364` and the control
 disposition in
-`docs/evidence/p1-event-admission-consumer-20261112/receipt.json:8-144`.
+`docs/evidence/p1-event-admission-consumer-20261112/receipt.json:8-156`.
 
 It intentionally adds no runtime queue, voice-intent API, universal event bus,
 second scheduler, or graph seam. The fixture builds and passes from a complete

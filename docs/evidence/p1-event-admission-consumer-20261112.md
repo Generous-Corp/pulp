@@ -276,13 +276,74 @@ A note-off published as a note-on retriggers the note: the allocator releases
 the old generation, so the release-intent rule still sees a releasing slot.
 The onset rule is what catches it.
 
+## Executor parity — 2026-11-13
+
+The combined control now renders the same 256-sample schedule on the legacy
+reference walk (`set_canonical_executor_routing_enabled(false)`) and on the
+routed serial executor (`true`, set before `prepare()`), for each of the five
+partition schedules, and requires identical output. The graph input is a
+deterministic ramp, so the graph output is a non-silent audio comparison, and
+the voice bank audio is compared as well. Per backend and schedule the
+comparator requires equality of the canonical (family, epoch, absolute sample,
+order key) trace, the four per-family digests, the voice audio, the graph audio
+and the native-epoch map.
+
+Backend dispatch is proved from telemetry, not assumed:
+`routing_executor_stats().blocks_processed` is 0 on the reference walk and
+equals the block count on the routed executor (276 of 276 blocks across the
+five schedules), and `routed_walk_fallbacks()` is 0, so the routed result is not
+a silent fallback to the walk.
+
+Parallel routing is **refused** for this fixture, and the refusal is recorded
+rather than forced: `set_parallel_routing_enabled(true)` is a no-op once
+`connect_graph_event` has bound the graph-authored lane, because one shared
+ordered lane cannot be dispatched with the consumer possibly before the
+producer. The fixture requests it after the bind, asserts
+`parallel_routing_enabled()` stays `false` and `parallel_levels_dispatched`
+stays 0, and still compares that run (which executes on the routed serial path)
+to both other backends. A parallel-versus-reference comparison on this graph is
+therefore **NOT_CHECKED**; enabling parallel before the bind would bypass the
+runtime guard and is not done. Fifteen backend comparisons pass (three per
+schedule).
+
+Planted negatives sit inside the fixture, on the routed side only: one
+parameter record's order key is bumped (the comparator must name
+`backend-trace`, and only the parameter digest may change), one graph-output
+sample is shifted by 1.0 (`backend-graph-audio`), and one voice-audio sample is
+shifted by 1.0 (`backend-voice-audio`).
+
+The SDK prefix is the one used above (`signal_graph_runtime.hpp`
+sha256 `9527c8e5...`, `graph_event_contract.hpp` sha256 `1364609e...`).
+`graph_event_contract.hpp` is byte-identical to `origin/main`
+`333b37effe57`; `signal_graph_runtime.hpp` differs from it only in comments (the
+non-comment lines are identical), and the executor routing setters, stats and
+`routed_walk_fallbacks()` the control uses are the same on both.
+
+The positive run now prints
+
+```text
+p1-event-admission PASS checks=14135 partitions=4,8 graph_event_schedules=2+2+4,3+5 graph_events=9 voice_slot_reuse=1 combined_schedules=1,32,64,127+127+2,3+61+1+127+64 combined_records=27 digests=midi:349d8d9cbaead7ac,parameter:21c6a5a653826137,trigger:79300472c428c8e4,voice:76096164fc3782a6 sequence_mutations=5 executor_parity=reference-walk,routed-executor parity_comparisons=15 routed_executor_blocks=276/276 routing_fallbacks=0 parallel_after_bind=refused parity_planted_negatives=3 consumer_gate=NOT_QUALIFIED
+```
+
+The digests and `--trace` output are unchanged (trace sha256 `80d08295...`).
+Each change was committed first, mutated, rebuilt, run, restored with
+`git checkout --`, and rebuilt to PASS:
+
+| Mutation | Result |
+|---|---|
+| reference backend also enables canonical executor routing | `FAIL rule=parity-reference-walk-only` |
+| routed backend's trace shifted by one sample after rendering | `FAIL rule=parity-reference-vs-routed` |
+| routed backend's graph output sample shifted by 0.5 | `FAIL rule=parity-reference-vs-routed` |
+| parallel request asserted accepted instead of refused | `FAIL rule=parity-parallel-refused-after-bind` |
+
 ## Remaining rows
 
 The gate stays **NOT_QUALIFIED**. Closed by the combined control: one
 test-owned epoch and absolute sample origin across all four families, MIDI 1.0
 projection through `SignalGraph::inject_midi` inside this fixture, more than
-two partition schedules (five, for the combined control), and the explainable
-sequence mutation. These admission-contract rows remain `NOT_CHECKED`:
+two partition schedules (five, for the combined control), the explainable
+sequence mutation, and routed-executor versus reference-walk parity for the
+graph-authored lane, the MIDI input and the parameter mailbox. These admission-contract rows remain `NOT_CHECKED`:
 
 * UMP and MPE expression sidecars through `inject_midi(node, midi, mpe)`
   inside this fixture (the G-5 consumer covers them separately);
@@ -294,8 +355,8 @@ sequence mutation. These admission-contract rows remain `NOT_CHECKED`:
 * callback allocation freedom as a measured or realtime property; the fixture
   callbacks write only into fixed arrays, but the runtime and
   `VoiceBankBinding::render` are not instrumented;
-* routed versus reference executor parity for the graph-authored lane, the
-  MIDI input, and the parameter mailbox;
+* parallel-routed versus reference parity: parallel routing is refused once the
+  graph-authored lane is bound (see "Executor parity");
 * voice intent inside the `SignalGraph`; the voice bank runs its own prepared
   graph on the shared block grid.
 
