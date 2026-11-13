@@ -472,14 +472,14 @@ class SignalGraph : public format::AudioWorkgroupClient {
     bool inject_midi(NodeId midi_input_node, const midi::MidiBuffer& events,
                      const midi::MpeBuffer& mpe) noexcept;
 
-    // Inject sample-accurate parameter events into a Plugin node. Call before
-    // process(); the latest published batch is consumed exactly once by that
-    // node on the next block it processes. Events use block-relative sample
-    // offsets and are delivered after graph-generated automation, so an
-    // injected event wins an equal-offset tie while existing automation keeps
-    // capacity priority. Returns false for an unprepared/non-Plugin/unresolved
-    // node or when `events` already reports source-side overflow; the retained
-    // prefix is still published in the overflow case.
+    // Inject sample-accurate parameter events into a PluginSlot node before
+    // process(); the latest batch is consumed once on that node's next block.
+    // Offsets are block-relative; events follow graph automation, so injection
+    // wins an equal-offset tie while automation keeps capacity priority.
+    // Returns false for an unprepared/unresolved/non-PluginSlot node (a
+    // Processor node takes events only via connect_automation or an exact
+    // stream) or when `events` reports source-side overflow, in which case
+    // the retained prefix is still published.
     bool inject_parameter_events(NodeId plugin_node, const state::ParameterEventQueue& events);
 
     // Drain queued nonempty MIDI blocks from a MidiOutput sink node in process

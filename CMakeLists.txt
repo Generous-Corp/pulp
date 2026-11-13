@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 1.120.0
+    VERSION 1.122.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -1111,6 +1111,11 @@ endif()
 # ── Screenshot Tool ────────────────────────────────────────────────────────
 if(PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/screenshot)
+endif()
+
+# ── MIDI port listing probe ──────────────────────────────────────────────
+if(NOT IOS AND NOT ANDROID AND PROJECT_IS_TOP_LEVEL)
+    add_subdirectory(tools/midi-ports)
 endif()
 
 # ── Editor-open probe (out-of-process AU editor stages) ───────────────────
