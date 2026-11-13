@@ -8253,6 +8253,7 @@ tests = [
   "build-governance-paths-selftest",
   "build-parallelism-guard",
   "build-parallelism-guard-selftest",
+  "build-yml-docs-entry-delta-selftest",
   "capability-contract-gate-wiring",
   "changed-surface-policy-inventory",
   "changed-surface-policy-selftest",
