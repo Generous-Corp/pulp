@@ -48,6 +48,11 @@ std::pair<std::string, std::string> probe_refusal(pulp::host::SignalGraph::EdgeP
         return {"Unprepared", "the graph is not prepared, so no edge can be probed; check that "
                               "`pulp graph validate` accepts the file"};
     case Status::UnknownPort:
+        if (edge_kind == "control")
+            return {"UnknownPort",
+                    "no such port: --source-port must name an output port of --source-node; a "
+                    "control edge is selected by --destination-node and --destination-param, "
+                    "not by a destination port"};
         return {"UnknownPort",
                 "no such port: --source-port must name an output port of --source-node and "
                 "--destination-port an input port of --destination-node"};

@@ -308,6 +308,16 @@ TEST_CASE("pulp graph probe refusals name the cause and the fix", "[cli][shellou
     REQUIRE(unknown.stdout_output.find(
                 "no such port: --source-port must name an output port of --source-node and "
                 "--destination-port an input port of --destination-node") != std::string::npos);
+
+    const auto control_port = probe({"--source-port", "absent", "--destination-node", "trim",
+                                     "--edge-kind", "control", "--destination-param", "7"});
+    REQUIRE(control_port.exit_code == 2);
+    REQUIRE(control_port.stdout_output.find("\"code\": \"UnknownPort\"") != std::string::npos);
+    REQUIRE(control_port.stdout_output.find(
+                "no such port: --source-port must name an output port of --source-node; a "
+                "control edge is selected by --destination-node and --destination-param, not by "
+                "a destination port") != std::string::npos);
+    REQUIRE(control_port.stdout_output.find("--destination-port") == std::string::npos);
 }
 
 TEST_CASE("pulp graph report prints the realtime report and refuses bad options",
