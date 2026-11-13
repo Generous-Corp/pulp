@@ -401,10 +401,20 @@ class SourceContractsTest(unittest.TestCase):
 
     def test_due_or_overdue_rechecks_never_fail_strict_and_annotate_on_actions(self) -> None:
         registry = _load_registry()
-        for source, verified in (("stitch", "2020-01-01"), ("figma", "2026-11-09")):
+        # Keep the second fixture due (rather than overdue) in every timezone and
+        # after date rollover: a verification two days ago is due today or soon
+        # with the three-day interval, regardless of whether ``date.today()`` is
+        # one day ahead in UTC.
+        fixtures = (
+            ("stitch", "2020-01-01"),
+            ("figma", (dt.date.today() - dt.timedelta(days=2)).isoformat()),
+        )
+        for source, verified in fixtures:
             entry = _contract(registry, source)
             entry["recheck_interval_days"] = 3
             entry["last_verified"] = verified
+            if source == "figma":
+                entry["verification_note"] = f"{verified}: deterministic cadence fixture"
         with tempfile.TemporaryDirectory() as td:
             registry_path = _write_registry(Path(td), registry)
             cmd = [
