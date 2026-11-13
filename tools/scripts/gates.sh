@@ -1198,10 +1198,12 @@ fi
 # baseline; a new script-driven add_test() with no test/ctest_script_inputs/
 # entry fails script-test-inputs-drift, which needs a configured build and so ran
 # only in CI. Each went red there on a push the local gates had called clean.
+# script_inputs_offline recomputes the fragments the diff can reach with no
+# configure, so a stale entry fails here too (NOT CHECKED where it cannot).
 # hotspot_edit_guard refuses a direct edit to a registered shared aggregate
 # (tools/scripts/hotspot_edit_guard.json) and names the fragment to write.
 for local_gate in migration_note_guard.py text_encoding_lint.py script_inputs_precheck.py \
-        hotspot_edit_guard.py; do
+        script_inputs_offline.py hotspot_edit_guard.py; do
     local_path="$ROOT/tools/scripts/$local_gate"
     [ -f "$local_path" ] || continue
     echo "" >&2
