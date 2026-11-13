@@ -980,7 +980,9 @@ tools:
     --observer-layout <json>` instead takes Chromium's DOM-snapshot boxes as the design side, joined to the
     pulp-design-ir-observe --layout views through the IR's backend_node_id (--ir defaults to the capture's
     x.pulp.json sibling); an IR from a different capture session is refused, exit 2.
-  outputs: Per-node dx/dy/dw/dh in design px, clustered by parent so one dropped alignment reports ONCE
+  outputs: A `boxes` list in the --json report with every matched node's reference (Chromium getBoundingClientRect
+    in capture mode) box, native box, delta and within_tolerance, so checked-and-fine is distinguishable from
+    never-compared. Findings carry per-node dx/dy/dw/dh in design px, clustered by parent so one dropped alignment reports ONCE
     naming the parent; unmatched ids listed as dropped/extra (the import's synthetic `/mask-scope` clip
     wrappers are tallied separately as synthetic_extra, never as EXTRA). Exit 1 on findings; --gate-px
     N blocks only above N px and reports the rest as advisory.
