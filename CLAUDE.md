@@ -1125,6 +1125,10 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 **import-validation**
 - Validate a Chromium DevTools Protocol browser-render receipt before comparing an imported native render. → `tools/import-validation/verify_browser_fidelity_receipt.py`
 
+**midi**
+- You need the exact id Pulp passes to MidiInput/MidiOutput open() for every MIDI source and destination, plus the device, entity and endpoint names that identify it, before saving or resolving a port choice. → `tools/midi-ports/midi_ports.sh`
+  - ⚠ **Cannot see:** Lists what the OS reports now. It says nothing about whether an id survives a reboot, replug or USB-port change, and device, entity and endpoint names are filled on CoreMIDI only.
+
 **test-evidence**
 - Explain which CTest cases did not execute, or compare two CTest JUnit artifacts to find new skips, recoveries, and population drift. → `tools/scripts/ctest_nonruns.py`
   - ⚠ **Cannot see:** Artifact observation only. It does not run tests, decide whether a skip is allowed, prove source or binary provenance, or distinguish filtering/configuration changes from code changes. Exit 2 means the evidence could not be interpreted, not that CTest failed.
