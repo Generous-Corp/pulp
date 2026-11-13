@@ -29,6 +29,10 @@ on:
     paths:
       - 'test/editor_host_slice/**'
       - 'integrations/pulp-vellum/**'
+      # The bridge's PULP_ENABLE_PULP_VELLUM option and test-directory
+      # registration live in these two files, not under the package.
+      - 'integrations/CMakeLists.txt'
+      - 'CMakeLists.txt'
       - 'test/test_pulp_vellum_param_bridge.cpp'
       - 'test/cmake/editor_host_slice_tests.cmake'
       - 'tools/scripts/editor_host_acceptance.py'

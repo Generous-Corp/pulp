@@ -241,7 +241,9 @@ stopped compiling and no Pulp check noticed.
 - **Parameter bridge.** The same SDK also builds `integrations/pulp-vellum` in a
   separate configure (`PULP_ENABLE_PULP_VELLUM=ON`) and runs its `pulp-vellum`
   ctest label, so a Vellum change that breaks the bridge shows up here. Pull
-  requests that touch the package or its test run the lane.
+  requests that touch the package, its test, or the two CMake files that own its
+  option and test registration (`integrations/CMakeLists.txt` and the root
+  `CMakeLists.txt`) run the lane.
 - **Negative control.** Every full run recompiles one Vellum-side translation
   unit (`knob_panel.cpp`) with `-fsyntax-only`, once against the SDK as
   published, which must succeed, and once against a copy of its mirror headers
