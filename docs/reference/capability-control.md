@@ -481,7 +481,8 @@ pulp_add_plugin(AcmeSynth ...
 
 An editor screenshot needs no tool kit operation: declare
 `dev.pulp.ui/capture@1` and use it. `examples/agent-toolkit-synth` is a
-complete plugin that binds every tool kit operation.
+complete plugin that binds every tool kit operation, and
+`pulp create "My Synth" --template agent-toolkit` scaffolds a new one.
 
 ### Discovery and contract history
 
