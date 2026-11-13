@@ -435,6 +435,32 @@ class GatesScriptInputsTests(unittest.TestCase):
         self.assertIn(str(elsewhere), out)
         self.assertIn("script-test-inputs: OK", out)
 
+    def test_a_declared_temporary_configure_only_tree_is_neither_used_nor_configured(self) -> None:
+        # A build-configure-only.* tree belongs to one configure_only.py run,
+        # which deletes it; an override naming one must not check against it
+        # or configure into it. Control: the build-elsewhere test above.
+        self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
+        self.commit()
+        temp = self.root / "build-configure-only.abc123"
+        subprocess.run([str(self.bin / "cmake"), "-S", str(self.root), "-B", str(temp)],
+                       check=True, env=self.env(FAKE_CMAKE_LOG=str(self.tmp / "pre.log")))
+        query = temp / ".cmake/api/v1/query/codemodel-v2"
+        query.parent.mkdir(parents=True)
+        query.touch()
+        for how in ("flag", "env"):
+            with self.subTest(how=how):
+                args = ["--build-dir", str(temp)] if how == "flag" else []
+                env = self.env() if how == "flag" else self.env(PULP_GATES_BUILD_DIR=str(temp))
+                r = subprocess.run([sys.executable, str(self.root / "tools/scripts/gates_script_inputs.py"),
+                                    "--base", "main", "--repo-root", str(self.root), *args],
+                                   cwd=self.root, env=env, capture_output=True, text=True,
+                                   encoding="utf-8", timeout=300)
+                out = r.stdout + r.stderr
+                self.assertEqual(self.configures(), [], out)
+                self.assertNotIn("script-test-inputs: OK", out)
+                self.assertIn("temporary configure_only.py tree", out)
+                self.assertIn("NOT CHECKED locally", out)
+
     def test_a_reused_build_without_a_codemodel_query_is_reconfigured_once(self) -> None:
         self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
         self.commit()

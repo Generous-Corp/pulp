@@ -267,6 +267,25 @@ class ConfigureOnlyTests(unittest.TestCase):
         r = self.run_tool("true")
         self.assertEqual(r.returncode, 0, r.stderr)
 
+    def test_only_exact_probe_directories_are_exempt(self) -> None:
+        build = self.tmp / "evidence"
+        exempt = ("CMakeFiles/3.31.0/CompilerIdCXX/CMakeCXXCompilerId.o",
+                  "CMakeFiles/CMakeScratch/TryCompile-abc/CMakeFiles/cmTC.dir/src.c.o",
+                  "CMakeFiles/CMakeTmp/CMakeFiles/cmTC.dir/src.c.o",
+                  "_deps/yoga-build/CMakeFiles/_CMakeLTOTest-CXX/bin/CMakeFiles/foo.dir/foo.cpp.o")
+        # Real targets and source directories whose names merely contain a
+        # probe word: their objects are a compile and must be found.
+        planted = ("CompilerIdTools/CMakeFiles/tools.dir/a.cpp.o",
+                   "CMakeFiles/CMakeTmpLib.dir/b.cpp.o",
+                   "CMakeTmp/CMakeFiles/t.dir/c.cpp.o",
+                   "core/CMakeScratch/CMakeFiles/s.dir/d.cpp.o",
+                   "CMakeFiles/_CMakeHelpers.dir/e.cpp.o",
+                   "CMakeFiles/CompilerIdCXX/f.cpp.o")
+        for rel in exempt + planted:
+            (build / rel).parent.mkdir(parents=True, exist_ok=True)
+            (build / rel).write_bytes(b"")
+        self.assertEqual(configure_only.compile_evidence(build), sorted(planted))
+
     def test_a_build_command_is_refused_before_configuring(self) -> None:
         for command in (["cmake", "--build", "{build}"], ["/usr/bin/ninja", "-C", "{build}"],
                         ["make", "-C", "{build}"]):

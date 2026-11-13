@@ -233,6 +233,12 @@ def main(argv: list[str]) -> int:
         declared = os.environ.get(sst.GATES_BUILD_DIR_ENV, "").strip()
         build = Path(declared).expanduser() if declared else root / GATE_DIR
         build = build if build.is_absolute() else root / build
+        if declared and (build.name.startswith(sst.CONFIGURE_ONLY_PREFIX)
+                         or build.resolve().name.startswith(sst.CONFIGURE_ONLY_PREFIX)):
+            # Another run's temporary configure-only tree: never configure into it.
+            for test in (TEST, LANE_TEST) + ((CENSUS_TEST,) if census else ()):
+                say(f"NOT CHECKED locally: {test} ({why})")
+            return families_unverified(families_paths, static_rc, why)
         say(f"  script-test-inputs: no usable configured build ({why}); configuring {build} "
             "(configure only, no compile)")
         failed = configure(root, build)

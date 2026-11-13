@@ -1041,6 +1041,13 @@ def choose_build_dir(repo: pathlib.Path = REPO_ROOT,
     if declared:
         path = pathlib.Path(declared).expanduser()
         path = path if path.is_absolute() else repo / path
+        # A configure_only.py tree belongs to one run, which may delete it at
+        # any moment (or a later run sweeps it), so an override cannot adopt
+        # one either. Judged on the resolved path, so a symlink to one counts.
+        if path.resolve().name.startswith(CONFIGURE_ONLY_PREFIX) \
+                or path.name.startswith(CONFIGURE_ONLY_PREFIX):
+            return None, (f"{GATES_BUILD_DIR_ENV}={declared} is a temporary configure_only.py "
+                          f"tree ({CONFIGURE_ONLY_PREFIX}*), which its run may delete")
         if (path / "CTestTestfile.cmake").is_file():
             return path.resolve(), f"from {GATES_BUILD_DIR_ENV}"
         return None, f"{GATES_BUILD_DIR_ENV}={declared} is not a configured build"

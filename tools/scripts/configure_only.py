@@ -55,6 +55,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -73,10 +74,15 @@ GATE_CONFIGURE_ARGS = ("-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release", "-DPULP_BUIL
 JSX_RUNTIME = Path("tools") / "import-design" / "jsx-runtime"
 JSX_RUNTIME_MODULES = ("esbuild/package.json", "@babel/parser/package.json")
 OBJECT_SUFFIXES = (".o", ".obj")
-# Directories CMake itself compiles probes into while configuring: compiler
-# identification (CompilerIdC/CXX), try_compile scratch (CMakeScratch, CMakeTmp)
-# and the check_ipo_supported() test project (_CMakeLTOTest-*).
-PROBE_DIR_MARKERS = ("CompilerId", "CMakeScratch", "CMakeTmp", "_CMake")
+# Directories CMake itself compiles probes into while configuring, matched by
+# their exact place under a `CMakeFiles` directory so a target or source
+# directory that merely contains one of these words is never exempt:
+#   CMakeFiles/<version>/CompilerId<LANG>   compiler identification
+#   CMakeFiles/CMakeScratch, CMakeFiles/CMakeTmp   try_compile scratch
+#   CMakeFiles/_CMakeLTOTest-<LANG>   the check_ipo_supported() test project
+PROBE_UNDER_CMAKEFILES = re.compile(r"CMakeScratch|CMakeTmp|_CMakeLTOTest-[A-Za-z]+")
+PROBE_COMPILER_ID = re.compile(r"CompilerId[A-Z][A-Za-z]*")
+CMAKE_VERSION_DIR = re.compile(r"\d+\.\d+(\.\d+)*(-[A-Za-z0-9.]+)?")
 BUILD_TOOLS = ("ninja", "make", "gmake", "xcodebuild", "msbuild")
 
 GOVERNED_ENV = {"PULP_BUILD_CLASS": "background", "PULP_BUILD_JOBS": "1"}
@@ -103,6 +109,19 @@ def is_build_command(argv: list[str]) -> bool:
     return tool.startswith("cmake") and "--build" in argv[1:]
 
 
+def is_probe_dir(parts: tuple[str, ...]) -> bool:
+    """Whether the build-relative directory ``parts`` is, or is inside, one of
+    CMake's configure-time probe directories (PROBE_UNDER_CMAKEFILES,
+    PROBE_COMPILER_ID), judged by exact names at their exact place."""
+    for i, part in enumerate(parts):
+        if i >= 1 and parts[i - 1] == "CMakeFiles" and PROBE_UNDER_CMAKEFILES.fullmatch(part):
+            return True
+        if (i >= 2 and parts[i - 2] == "CMakeFiles" and CMAKE_VERSION_DIR.fullmatch(parts[i - 1])
+                and PROBE_COMPILER_ID.fullmatch(part)):
+            return True
+    return False
+
+
 def compile_evidence(build: Path) -> list[str]:
     """What in ``build`` shows a compile ran: a `.ninja_log`, or an object file
     outside CMake's configure-time probe directories. Empty after a pure configure."""
@@ -111,7 +130,7 @@ def compile_evidence(build: Path) -> list[str]:
         found.append(".ninja_log (ninja ran a build step)")
     for dirpath, dirnames, filenames in os.walk(build):
         rel = Path(dirpath).relative_to(build)
-        if any(marker in part for part in rel.parts for marker in PROBE_DIR_MARKERS):
+        if is_probe_dir(rel.parts):
             dirnames[:] = []
             continue
         for name in filenames:
