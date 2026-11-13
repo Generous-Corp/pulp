@@ -1524,9 +1524,14 @@ See [Signal Graph: latency semantics](signal-graph.md#latency-semantics).
 
 `pulp graph probe FILE --input INPUT.wav --source-node source --source-port audio
 --destination-node downstream --destination-port audio --block-frames 64 --json`
-observes one ordinary serial audio edge offline. The JSON report preserves the
+observes one serial audio edge offline. The JSON report preserves the
 public probe identity, sequence, sample-relative timestamps, frame counts,
 peak/RMS and loss count. Measurements precede downstream mixing and PDC.
+`--edge-kind event` observes a MIDI edge after seeding one fixed note-on;
+`--edge-kind control --destination-param ID` accepts the control schema but
+always refuses with `MissingEdge`, because CLI-loaded graphs cannot contain
+automation edges (control probes are C++ API only). Each attach refusal's
+`message` names the cause and the fix.
 See [edge probe limits and lifecycle](../guides/graph-edge-probes.md).
 
 ### SignalGraph notation
