@@ -57,8 +57,11 @@ renderer does.
 ## RmlUi on Metal
 
 The opt-in `PULP_ENABLE_RMLUI_ADAPTER` package adds
-`pulp::rmlui-native-metal` when the installed Vellum SDK exports both
-`VellumRmlUi::Native` and `VellumRmlUi::Metal`. Construct
+`pulp::rmlui-native-metal` when the Vellum main SDK and the optional
+`vellum-rmlui-sdk-<version>-darwin-arm64` prefix export
+`VellumRmlUi::Native` and `VellumRmlUi::Metal`. Put both prefixes in
+`CMAKE_PREFIX_PATH` (the RmlUi prefix alongside the main Vellum prefix).
+Construct
 `vellum::rmlui::MetalRenderInterface` with the device returned by the surface,
 then pass `metal_renderer_hooks(renderer)` to `RmlUiSurface`. The hooks give
 Vellum the drawable's whole viewport, its backing scale, and a clear request on

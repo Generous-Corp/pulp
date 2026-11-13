@@ -63,8 +63,10 @@ A product may supply its own RmlUi build, including a fork, and its own
 - Keep `Rml::Initialise` process-scoped. Two RmlUi copies in one process (a
   shared-library build plus a product's own) must not interpose on each other.
 
-For Pulp's native Metal adapter, enable `PULP_ENABLE_RMLUI_ADAPTER` only with a
-Vellum install exporting `VellumRmlUi::Native` and `VellumRmlUi::Metal`. Build a
+For Pulp's native Metal adapter, enable `PULP_ENABLE_RMLUI_ADAPTER` only with
+the main Vellum SDK and the matching optional RmlUi SDK prefix in
+`CMAKE_PREFIX_PATH`, exporting `VellumRmlUi::Native` and `VellumRmlUi::Metal`.
+Build a
 `MetalRenderInterface` on the `MetalSurface::device()` and pass
 `metal_renderer_hooks(renderer)` to `RmlUiSurface`; the hooks preserve the
 drawable viewport and backing scale and clear each drawable before RmlUi draws.
