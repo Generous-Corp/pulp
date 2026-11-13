@@ -357,7 +357,9 @@ mod tests {
         assert_eq!(args.graph_option.as_deref(), Some("--graph-file"));
         assert_eq!(args.build_args, vec!["--target", "proof"]);
         let err = run(td.path(), &args, &rec, &mut buf).unwrap_err();
-        assert!(err.to_string().contains("--graph-file needs the C++ delegate"));
+        assert!(err
+            .to_string()
+            .contains("--graph-file needs the C++ delegate"));
         assert!(rec.calls.borrow().is_empty());
     }
 
