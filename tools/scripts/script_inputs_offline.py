@@ -10,7 +10,8 @@ wrong, with no configure:
 
 1. It lists the files the range changes (``--base...--head`` plus uncommitted
    edits) and selects the fragments those files can reach: a script test whose
-   entry or recorded inputs changed, or whose registering CMake file changed;
+   entry, recorded or newly resolved imports changed, or whose registering
+   CMake file changed;
    and a compiled test executable whose recorded sources changed, which gained
    a new source next to one it already records, or which is new.
 2. It rebuilds each selected record offline. A script test's ctest command is
@@ -414,11 +415,16 @@ def check_script_tests(root: Path, changed: set[str], doc: dict, report: Report,
                        regs: dict[str, list[Registration]]) -> None:
     tests = doc.get("tests") or {}
     changed_cmake = {f for f in changed if f.endswith((".cmake", "CMakeLists.txt"))}
+    changed_python = any(f.endswith(".py") for f in changed)
     walker, tracked = sti.Walker(root), sti.tracked_paths(root)
     for name, rec in sorted(tests.items()):
         mine = regs.get(name) or []
         via_cmake = {r.path for r in mine} & changed_cmake
-        if not (sti.touched_by(changed, _paths(rec)) or via_cmake):
+        selected = bool(sti.touched_by(changed, _paths(rec)) or via_cmake)
+        # A formerly missing module is absent from the recorded inputs. Use
+        # the generator's import resolution, including transitive imports and
+        # search paths, before deciding that a Python change cannot reach us.
+        if not (selected or (changed_python and rec.get("kind") == "python")):
             continue
         where = f"tests/{store.slug(name)}.json"
         if (rec.get("entry") or "").startswith(sti.BINARY_DIR_TOKEN):
@@ -442,7 +448,7 @@ def check_script_tests(root: Path, changed: set[str], doc: dict, report: Report,
             report.not_checked.append(f"{name}: the generator records no entry for its "
                                       "reconstructed command")
             continue
-        if new != rec:
+        if new != rec and (selected or sti.touched_by(changed, _paths(new))):
             text = fragment_text("tests", name, new)
             report.stale.append(unified(where, fragment_text("tests", name, rec), text))
             report.writes[where] = text
@@ -590,8 +596,8 @@ def list_siblings(root: Path, base: str, head: str, changed: set[str]) -> dict[s
 
 def _compiles(root: Path, exe: str, target: str, rec: dict | None,
               static: dict[str, set[str]], siblings: dict[str, list[set[str]]],
-              src: str) -> bool:
-    """Whether ``exe`` provably compiles (or, for a test/ header, includes) ``src``."""
+              src: str) -> bool | None:
+    """Whether ``exe`` compiles ``src``; None means shared-list membership is uncertain."""
     rec = rec or {}
     if src in set(rec.get("spawning_sources") or []) | set(rec.get("detected_sources") or []):
         return True
@@ -599,11 +605,11 @@ def _compiles(root: Path, exe: str, target: str, rec: dict | None,
         return True
     spawning = set(rec.get("spawning_sources") or [])
     for members in siblings.get(src, []):
-        # The executable compiles the whole list only if every other member
-        # that calls a process API is among its spawning sources.
+        # Shared sources suggest membership, but do not prove this target
+        # consumes the list: even an unused set() can name those sources.
         callers = {m for m in members if _spawns(root, m)}
         if callers and callers <= spawning:
-            return True
+            return None
     return False
 
 
@@ -639,7 +645,11 @@ def check_executables(root: Path, base: str, head: str, changed: set[str], doc: 
                 if listed:
                     reasons.append(f"{src} is deleted, and the entry still lists it")
                 continue
-            if not _compiles(root, exe, target, rec, static, siblings, src):
+            compiles = _compiles(root, exe, target, rec, static, siblings, src)
+            if compiles is None:
+                report.not_checked.append(f"{exe}: {src} shares a source list with recorded "
+                                          "sources, but target consumption is not proven")
+            if not compiles:
                 continue
             report.checked += 1
             spawns = _spawns(root, src)

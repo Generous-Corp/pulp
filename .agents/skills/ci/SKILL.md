@@ -1849,7 +1849,11 @@ generator's own functions and fails with the exact fragment diff plus a
 `--write` fix, or the configure command when only a configure can write the
 record. A command that names a configure-only variable, a registration in a
 function or foreach body, or a suite under an unevaluable guard is printed as
-NOT CHECKED; the configured check stays the authority for those. Three PRs on 2026-10-22
+NOT CHECKED; the configured check stays the authority for those. A new Python
+module can resolve an import without changing the importer, so selection also
+checks the generator's newly resolved inputs. Shared spawning sources in a
+CMake list do not prove a target consumes that list; uncertain membership is
+NOT CHECKED, never grounds for declaring a fragment stale. Three PRs on 2026-10-22
 went red here on the encoding lint after the local gates reported clean,
 because only CI ran it. A new lint in this job that needs no build belongs in
 the hook too.

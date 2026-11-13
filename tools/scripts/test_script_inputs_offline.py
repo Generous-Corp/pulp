@@ -121,6 +121,57 @@ class OfflineTests(unittest.TestCase):
         return (self.root / store.FRAGMENT_DIR / rel).read_text(encoding="utf-8")
 
     # -- regressions -------------------------------------------------------
+    def test_newly_resolved_import_selects_unchanged_importer(self) -> None:
+        self.append(SELFTEST, "import newly_available\n")
+        self.commit("test: unresolved import")
+        self.git("branch", "-f", "main", "HEAD")
+        rc, _, err = self.run_main()
+        self.assertEqual(rc, 0, err)
+        self.write("tools/scripts/newly_available.py", "VALUE = 1\n")
+        self.commit("test: add the imported module")
+        rc, _, err = self.run_main()
+        self.assertEqual(rc, 1, err)
+        self.assertIn('+   "tools/scripts/newly_available.py",', err)
+        rc, _, err = self.run_main("--write")
+        self.assertEqual(rc, 0, err)
+        self.commit("test: record the new import")
+        rc, _, err = self.run_main()
+        self.assertEqual(rc, 0, err)
+
+    def test_unused_source_list_does_not_prove_target_membership(self) -> None:
+        rc, _, err = self.run_main()
+        self.assertEqual(rc, 0, err)
+        self.append(CLI, "set(_unused cli_sdk.cpp new_spawn.cpp)\n")
+        self.write("tools/cli/new_spawn.cpp", "void run() { ChildProcess child; }\n")
+        self.commit("test: unused source list")
+        rc, _, err = self.run_main()
+        self.assertEqual(rc, 0, err)
+        self.assertIn("NOT CHECKED pulp-cpp: tools/cli/new_spawn.cpp", err)
+        self.assertNotIn("fragment(s) this push makes stale", err)
+
+    def test_unrelated_module_does_not_blame_existing_stale_imports(self) -> None:
+        self.append(SELFTEST, "import cutover_trial\n")
+        self.commit("test: existing stale import")
+        self.git("branch", "-f", "main", "HEAD")
+        self.write("tools/scripts/unrelated.py", "VALUE = 1\n")
+        self.commit("test: unrelated module")
+        rc, _, err = self.run_main()
+        self.assertEqual(rc, 0, err)
+
+    def test_newly_resolved_transitive_import_selects_unchanged_importer(self) -> None:
+        self.append(SELFTEST, "import cutover_trial\n")
+        self.append("tools/scripts/cutover_trial.py", "from . import newly_available\n")
+        self.commit("test: unresolved transitive relative import")
+        rc, _, err = self.run_main("--write")
+        self.assertEqual(rc, 0, err)
+        self.commit("test: record existing imports")
+        self.git("branch", "-f", "main", "HEAD")
+        self.write("tools/scripts/newly_available.py", "VALUE = 1\n")
+        self.commit("test: resolve transitive import")
+        rc, _, err = self.run_main()
+        self.assertEqual(rc, 1, err)
+        self.assertIn('+   "tools/scripts/newly_available.py",', err)
+
     def test_selftest_that_starts_importing_its_module_is_stale(self) -> None:
         self.write(SELFTEST, SELFTEST_SEED + "import cutover_trial\n"
                    'GOVERNOR = "tools/ci/governed-build.sh"\nMCP = "tools/mcp"\n')
