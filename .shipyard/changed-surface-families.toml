@@ -5132,6 +5132,42 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-70bfe2b2323d"
+paths = ["tools/scripts/test_patched_os_name_path_lint.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "flake-exoneration-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "patched-os-name-path-lint-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-73946f9cb4bf"
 paths = ["tools/scripts/test_pch_wiring_check.py"]
 tests = [
@@ -8625,6 +8661,7 @@ paths = [
   "tools/scripts/test_p0_layered_replay_receipt.py",
   "tools/scripts/test_package_cli_extra.py",
   "tools/scripts/test_param_designator_order.py",
+  "tools/scripts/test_patched_os_name_path_lint.py",
   "tools/scripts/test_pch_wiring_check.py",
   "tools/scripts/test_pending_intent_liveness.py",
   "tools/scripts/test_planning_gitlink_guard.py",
@@ -8872,6 +8909,7 @@ tests = [
   "migration-note-guard-selftest",
   "minos-registry-absent-selftest",
   "msvc-string-literal-guard",
+  "patched-os-name-path-lint-selftest",
   "planning-gitlink-guard-selftest",
   "pulp-ui-clean-output-lint",
   "pulp-ui-clean-output-lint-negative-contract",
@@ -9236,6 +9274,7 @@ paths = [
   "tools/scripts/test_p0_layered_replay_receipt.py",
   "tools/scripts/test_package_cli_extra.py",
   "tools/scripts/test_param_designator_order.py",
+  "tools/scripts/test_patched_os_name_path_lint.py",
   "tools/scripts/test_pch_wiring_check.py",
   "tools/scripts/test_pending_intent_liveness.py",
   "tools/scripts/test_planning_gitlink_guard.py",
