@@ -6,6 +6,8 @@
 
 #include <pulp/format/processor.hpp>
 #include <pulp/host/signal_graph.hpp>
+#include "signal_graph_ports_internal.hpp"
+
 #include <pulp/host/control_index_nodes.hpp>
 #include <pulp/host/isolated_plugin_slot.hpp>
 #include <pulp/runtime/log.hpp>
@@ -225,28 +227,17 @@ bool has_output_port(const GraphNode& node, PortIndex port) {
     return node.num_output_ports > 0 && port < static_cast<PortIndex>(node.num_output_ports);
 }
 
-void populate_named_ports(GraphNode& node, std::uint64_t owner, std::uint64_t incarnation) {
-    node.input_ports.clear();
-    node.output_ports.clear();
-    const auto kind = (node.type == NodeType::MidiInput || node.type == NodeType::MidiOutput)
-                          ? PortKind::Midi
-                          : PortKind::Audio;
-    for (int i = 0; i < node.num_input_ports; ++i)
-        node.input_ports.push_back({node.id, static_cast<PortIndex>(i), false,
-                                    i == 0 ? "audio" : "in" + std::to_string(i), kind, owner,
-                                    incarnation});
-    for (int i = 0; i < node.num_output_ports; ++i)
-        node.output_ports.push_back({node.id, static_cast<PortIndex>(i), true,
-                                     i == 0 ? "audio" : "out" + std::to_string(i), kind, owner,
-                                     incarnation});
-}
-
 // The numeric connection overloads predate typed ports, so they carry only the
 // kinds they always carried: audio ports and the single port of a MIDI
 // input/output node. A typed port (Control, Event, Param, Spectral, or a
 // Custom node's declared MIDI port) must use the named overload so its kind is
-// validated instead of being coerced into an audio edge.
-bool numeric_overload_carries(const GraphNode& node, const PortHandle& port) noexcept {
+// validated instead of being coerced into an audio edge. A port number with no
+// handle (a node built without named ports) is a legacy audio port.
+bool numeric_overload_carries(const GraphNode& node, PortIndex index, bool output) noexcept {
+    const auto& ports = output ? node.output_ports : node.input_ports;
+    if (index >= ports.size())
+        return true;
+    const auto& port = ports[index];
     if (port.kind == PortKind::Audio)
         return true;
     return port.kind == PortKind::Midi &&
@@ -268,6 +259,26 @@ void apply_custom_port_descriptors(GraphNode& node,
 
 } // namespace
 
+namespace detail {
+
+void populate_named_ports(GraphNode& node, std::uint64_t owner, std::uint64_t incarnation) {
+    node.input_ports.clear();
+    node.output_ports.clear();
+    const auto kind = (node.type == NodeType::MidiInput || node.type == NodeType::MidiOutput)
+                          ? PortKind::Midi
+                          : PortKind::Audio;
+    for (int i = 0; i < node.num_input_ports; ++i)
+        node.input_ports.push_back({node.id, static_cast<PortIndex>(i), false,
+                                    i == 0 ? "audio" : "in" + std::to_string(i), kind, owner,
+                                    incarnation});
+    for (int i = 0; i < node.num_output_ports; ++i)
+        node.output_ports.push_back({node.id, static_cast<PortIndex>(i), true,
+                                     i == 0 ? "audio" : "out" + std::to_string(i), kind, owner,
+                                     incarnation});
+}
+
+} // namespace detail
+
 // All add_*/connect/remove mutators below take graph_mutation_mutex_ for the
 // duration of the nodes_/connections_ mutation + invalidate_live_locked_(). The lock is
 // safe to hold across invalidate_live_locked_() because that drives only the
@@ -283,7 +294,7 @@ NodeId SignalGraph::add_input_node(int channels, const std::string& name) {
     node.type = NodeType::AudioInput;
     node.name = name;
     node.num_output_ports = channels;
-    populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
+    detail::populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
     nodes_.push_back(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
@@ -298,7 +309,7 @@ NodeId SignalGraph::add_output_node(int channels, const std::string& name) {
     node.type = NodeType::AudioOutput;
     node.name = name;
     node.num_input_ports = channels;
-    populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
+    detail::populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
     nodes_.push_back(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
@@ -316,7 +327,7 @@ NodeId SignalGraph::add_plugin_node(const PluginInfo& info) {
     node.num_output_ports = info.num_outputs;
     node.plugin = std::shared_ptr<PluginSlot>(PluginSlot::load(info));
     node.plugin_info = info; // preserve identity even if load failed
-    populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
+    detail::populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
     nodes_.push_back(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
@@ -336,7 +347,7 @@ NodeId SignalGraph::add_unresolved_plugin_node(const PluginInfo& info, int num_i
     node.plugin_info = info;
     node.plugin_info.num_inputs = num_inputs;
     node.plugin_info.num_outputs = num_outputs;
-    populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
+    detail::populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
     nodes_.push_back(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
@@ -361,7 +372,7 @@ NodeId SignalGraph::add_plugin_node(std::unique_ptr<PluginSlot> slot, int num_in
         node.plugin_info.num_inputs = num_inputs;
         node.plugin_info.num_outputs = num_outputs;
     }
-    populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
+    detail::populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
     nodes_.push_back(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
@@ -399,7 +410,7 @@ NodeId SignalGraph::add_processor_node(std::shared_ptr<format::ProcessorNodeInst
     const NodeId id = node.id;
     try {
         processor_nodes_.emplace(id, std::make_shared<ProcessorNodeLifetime>(std::move(instance)));
-        populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
+        detail::populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
         // MIDI is node-scoped; these handles do not consume or renumber audio buses.
         if (descriptor.accepts_midi)
             node.input_ports.push_back({id, 0, false, "midi", PortKind::Midi,
@@ -462,7 +473,7 @@ NodeId SignalGraph::add_gain_node(const std::string& name) {
     node.name = name;
     node.num_input_ports = 2;
     node.num_output_ports = 2;
-    populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
+    detail::populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
     nodes_.push_back(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
@@ -477,7 +488,7 @@ NodeId SignalGraph::add_midi_input_node(const std::string& name) {
     node.type = NodeType::MidiInput;
     node.name = name;
     node.num_output_ports = 1;
-    populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
+    detail::populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
     nodes_.push_back(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
@@ -492,7 +503,7 @@ NodeId SignalGraph::add_midi_output_node(const std::string& name) {
     node.type = NodeType::MidiOutput;
     node.name = name;
     node.num_input_ports = 1;
-    populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
+    detail::populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
     nodes_.push_back(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
@@ -581,7 +592,7 @@ SignalGraph::add_unresolved_custom_node(std::string_view type_id, int version, i
     node.num_output_ports = num_outputs;
     node.custom_type_id = std::move(type.type_id);
     node.custom_type_version = version;
-    populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
+    detail::populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
     apply_custom_port_descriptors(node, input_ports, output_ports);
     nodes_.push_back(std::move(node));
     invalidate_live_locked_();
@@ -645,8 +656,8 @@ bool SignalGraph::connect(NodeId source, PortIndex source_port, NodeId dest, Por
         return false;
     if (!has_input_port(*dst_n, dest_port))
         return false;
-    if (!numeric_overload_carries(*src_n, src_n->output_ports[source_port]) ||
-        !numeric_overload_carries(*dst_n, dst_n->input_ports[dest_port]))
+    if (!numeric_overload_carries(*src_n, source_port, true) ||
+        !numeric_overload_carries(*dst_n, dest_port, false))
         return false;
     if (would_create_cycle(source, dest))
         return false;
@@ -709,8 +720,8 @@ bool SignalGraph::connect_sidechain(NodeId source, PortIndex source_port, NodeId
         return false;
     if (!has_input_port(*dst_n, dest_sidechain_port))
         return false;
-    if (!numeric_overload_carries(*src_n, src_n->output_ports[source_port]) ||
-        !numeric_overload_carries(*dst_n, dst_n->input_ports[dest_sidechain_port]))
+    if (!numeric_overload_carries(*src_n, source_port, true) ||
+        !numeric_overload_carries(*dst_n, dest_sidechain_port, false))
         return false;
     if (would_create_cycle(source, dest))
         return false;
@@ -746,7 +757,7 @@ bool SignalGraph::connect_automation(NodeId src, PortIndex src_audio_port, NodeI
         return false;
     if (!has_output_port(*src_n, src_audio_port))
         return false;
-    if (!numeric_overload_carries(*src_n, src_n->output_ports[src_audio_port]))
+    if (!numeric_overload_carries(*src_n, src_audio_port, true))
         return false;
 
     // Reject automation edges that would introduce a cycle. Automation
@@ -836,12 +847,18 @@ bool SignalGraph::connect_audio_rate_modulation_impl_(NodeId src, PortIndex src_
         return false;
     if (!has_output_port(*src_n, src_audio_port))
         return false;
-    const auto& port = src_n->output_ports[src_audio_port];
-    if ((expected_kind == PortKind::Control ? port.kind != PortKind::Control
-                                            : !numeric_overload_carries(*src_n, port)) ||
-        (source_handle && (port.name != source_handle->name || port.owner != source_handle->owner ||
-                           port.incarnation != source_handle->incarnation)))
+    if (expected_kind == PortKind::Control) {
+        if (src_audio_port >= src_n->output_ports.size())
+            return false;
+        const auto& port = src_n->output_ports[src_audio_port];
+        if (port.kind != PortKind::Control ||
+            (source_handle &&
+             (port.name != source_handle->name || port.owner != source_handle->owner ||
+              port.incarnation != source_handle->incarnation)))
+            return false;
+    } else if (!numeric_overload_carries(*src_n, src_audio_port, true)) {
         return false;
+    }
     if (would_create_cycle(src, dest))
         return false;
 
@@ -959,8 +976,8 @@ bool SignalGraph::connect_feedback(NodeId source, PortIndex source_port, NodeId 
         return false;
     if (!has_input_port(*dst_n, dest_port))
         return false;
-    if (!numeric_overload_carries(*src_n, src_n->output_ports[source_port]) ||
-        !numeric_overload_carries(*dst_n, dst_n->input_ports[dest_port]))
+    if (!numeric_overload_carries(*src_n, source_port, true) ||
+        !numeric_overload_carries(*dst_n, dest_port, false))
         return false;
     Connection conn{source, source_port, dest, dest_port, true};
     for (auto& c : connections_)

@@ -7,6 +7,7 @@
 #include <pulp/host/signal_graph_executor_contract.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
+#include <pulp/host/trigger_graph.hpp>
 #include <pulp/signal/control_math.hpp>
 #include <pulp/state/param_cursor.hpp>
 
@@ -332,6 +333,38 @@ TEST_CASE("numeric connections refuse typed ports but keep legacy MIDI node edge
     const auto midi_out = graph.add_midi_output_node("Out");
     REQUIRE(graph.connect(midi_in, 0, midi_out, 0));
     CHECK_FALSE(graph.connect(midi_in, 0, b, 0));
+}
+
+TEST_CASE("numeric connections and persistence keep working on trigger nodes",
+          "[graph][control-index][trigger]") {
+    SignalGraph graph;
+    const auto in = graph.add_input_node(2);
+    const auto out = graph.add_output_node(1);
+    TriggerProducerConfig config;
+    const auto onset = graph.add_trigger_producer(config);
+    const auto envelope = graph.add_trigger_envelope({0.5f});
+    const auto modulation = graph.add_trigger_modulation();
+    const auto lowpass = graph.add_trigger_lowpass(0.25f);
+    REQUIRE((onset && envelope && modulation && lowpass));
+    for (const auto id : {onset, envelope, modulation, lowpass}) {
+        const auto* node = graph.node(id);
+        REQUIRE(node != nullptr);
+        CHECK(node->input_ports.size() == static_cast<std::size_t>(node->num_input_ports));
+        CHECK(node->output_ports.size() == static_cast<std::size_t>(node->num_output_ports));
+    }
+    CHECK(graph.connect(in, 0, onset, 0));
+    CHECK(graph.connect(envelope, 0, modulation, 0));
+    CHECK(graph.connect(in, 1, modulation, 1));
+    CHECK(graph.connect(modulation, 0, lowpass, 0));
+    CHECK(graph.connect(lowpass, 0, out, 0));
+
+    const auto json = GraphSerializer::to_json(graph);
+    REQUIRE_FALSE(json.empty());
+    CHECK(json.find("\"input_ports\"") == std::string::npos);
+    SignalGraph restored;
+    const auto loaded = GraphSerializer::from_json(restored, json);
+    REQUIRE(loaded.ok);
+    CHECK(GraphSerializer::to_json(restored) == json);
 }
 
 TEST_CASE("graph format v4 documents still load and keep their bytes",

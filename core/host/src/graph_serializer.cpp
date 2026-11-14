@@ -1308,8 +1308,14 @@ std::string GraphSerializer::to_json(
             return {};
         has_processors |= graph.is_processor_node(node.id);
         if (node.type == NodeType::Custom) {
-            if (node.input_ports.size() != static_cast<std::size_t>(node.num_input_ports) ||
-                node.output_ports.size() != static_cast<std::size_t>(node.num_output_ports))
+            // A node may carry fewer handles than ports (none at all for a
+            // node built without named ports); a missing handle is a legacy
+            // audio port and needs no typed record. More handles than ports
+            // is a corrupt node.
+            if (node.input_ports.size() >
+                    static_cast<std::size_t>(std::max(0, node.num_input_ports)) ||
+                node.output_ports.size() >
+                    static_cast<std::size_t>(std::max(0, node.num_output_ports)))
                 return {};
             const auto non_default = [](const auto& ports, bool output) {
                 for (std::size_t i = 0; i < ports.size(); ++i) {
@@ -1432,18 +1438,28 @@ std::string GraphSerializer::to_json(
                 "version",
                 (int64_t)(n.custom_type_version > 0 ? n.custom_type_version : 1));
             if (has_typed_ports) {
-                const auto port_array = [](const auto& ports) {
+                const auto port_array = [](const auto& ports, int count, bool output) {
                     auto array = choc::value::createEmptyArray();
-                    for (const auto& port : ports) {
+                    for (int i = 0; i < count; ++i) {
                         auto item = choc::value::createObject("Port");
-                        item.addMember("name", port.name);
-                        item.addMember("kind", (int64_t)port.kind);
+                        if (static_cast<std::size_t>(i) < ports.size()) {
+                            item.addMember("name", ports[static_cast<std::size_t>(i)].name);
+                            item.addMember("kind",
+                                           (int64_t)ports[static_cast<std::size_t>(i)].kind);
+                        } else {
+                            item.addMember("name", i == 0 ? std::string("audio")
+                                                          : std::string(output ? "out" : "in") +
+                                                                std::to_string(i));
+                            item.addMember("kind", (int64_t)PortKind::Audio);
+                        }
                         array.addArrayElement(item);
                     }
                     return array;
                 };
-                custom_obj.addMember("input_ports", port_array(n.input_ports));
-                custom_obj.addMember("output_ports", port_array(n.output_ports));
+                custom_obj.addMember("input_ports",
+                                     port_array(n.input_ports, n.num_input_ports, false));
+                custom_obj.addMember("output_ports",
+                                     port_array(n.output_ports, n.num_output_ports, true));
             }
             // Opaque custom-node state: the live instance's save_state(), or
             // the preserved blob for unresolved nodes. Omitted when empty so
