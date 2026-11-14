@@ -655,6 +655,13 @@ add_executable(pulp-test-routed-spectral-ports test_routed_spectral_ports.cpp te
 target_link_libraries(pulp-test-routed-spectral-ports PRIVATE pulp::host Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-routed-spectral-ports
     PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
+# A forged spectral cycle must fail closed; a non-terminating root walk would
+# otherwise hang the discovered case until the global ctest timeout.
+add_test(NAME pulp-test-routed-spectral-forged-cycle-bounded
+    COMMAND pulp-test-routed-spectral-ports
+        "Spectral preparation refuses a forged stage cycle with no root")
+set_tests_properties(pulp-test-routed-spectral-forged-cycle-bounded PROPERTIES
+    LABELS "host;spectral" TIMEOUT 30 RESOURCE_LOCK pulp_realtime_worker_pool)
 target_link_libraries(pulp-test-spectral-stream-start PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-spectral-stream-start)
 
