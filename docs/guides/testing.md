@@ -173,6 +173,13 @@ captures through MCP, call `pulp_validate` with `screenshot=true`, or run the
 CLI screenshot command through the normal shell surface. Live inspector
 screenshots stay unavailable until host capture wiring lands.
 
+## Texture Upload Recording
+
+To prove two editors upload byte-identical textures, record every texture
+upload in a test process and compare the runs. See
+[Texture upload recorder](texture-upload-recorder.md). It is test-only tooling
+and is never linked into a shipped target.
+
 ## Design Tool Debugging
 
 The design tool has its own headless harness:
