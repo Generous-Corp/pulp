@@ -215,6 +215,20 @@ bool custom_types_equal_for_idempotency(const CustomNodeType& lhs,
         lhs.lowerable != rhs.lowerable || lhs.baked_params.size() != rhs.baked_params.size()) {
         return false;
     }
+    // Declared port names and kinds are part of the type's graph contract; a
+    // re-registration that changes them is a different type, not a no-op.
+    const auto same_ports = [](const std::vector<CustomNodePortDescriptor>& a,
+                               const std::vector<CustomNodePortDescriptor>& b) {
+        if (a.size() != b.size())
+            return false;
+        for (std::size_t i = 0; i < a.size(); ++i)
+            if (a[i].name != b[i].name || a[i].kind != b[i].kind)
+                return false;
+        return true;
+    };
+    if (!same_ports(lhs.input_ports, rhs.input_ports) ||
+        !same_ports(lhs.output_ports, rhs.output_ports))
+        return false;
     // std::function erases arbitrary functor state, so only empty callbacks and
     // identical raw function-pointer targets can be proven equal. Conservatively
     // refuse to call captured or otherwise opaque functors idempotent.

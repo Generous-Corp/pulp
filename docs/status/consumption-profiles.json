@@ -468,6 +468,7 @@
       "pulp/host/baked_graph_processor.hpp",
       "pulp/host/bounded_delay_descriptor.hpp",
       "pulp/host/catalog_descriptor.hpp",
+      "pulp/host/control_index_nodes.hpp",
       "pulp/host/crossfade_plugin_slot.hpp",
       "pulp/host/custom_node_diagnostics.hpp",
       "pulp/host/custom_node_events.hpp",
@@ -990,6 +991,7 @@
       "pulp/signal/comb_filter.hpp",
       "pulp/signal/commuted_string_excitation.hpp",
       "pulp/signal/compressor.hpp",
+      "pulp/signal/control_math.hpp",
       "pulp/signal/convolver.hpp",
       "pulp/signal/convolver_messages.hpp",
       "pulp/signal/convolver_non_uniform.hpp",
@@ -10185,7 +10187,7 @@
         "PULP_BUILD_EXAMPLES": "OFF"
       },
       "summary": {
-        "installed_target_count": 84,
+        "installed_target_count": 85,
         "ranked_by_closure": [
           {
             "exported_as": "Pulp::inspect-standalone-runtime",
@@ -10421,7 +10423,7 @@
           },
           {
             "exported_as": "Pulp::native",
-            "closure_node_count": 9
+            "closure_node_count": 10
           },
           {
             "exported_as": "Pulp::signal-fft-backend",
@@ -10501,6 +10503,10 @@
           },
           {
             "exported_as": "Pulp::p256m",
+            "closure_node_count": 1
+          },
+          {
+            "exported_as": "Pulp::rt-allocation-probe",
             "closure_node_count": 1
           },
           {
@@ -14050,7 +14056,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "integrations/pulp-native",
           "closure": {
-            "node_count": 9,
+            "node_count": 10,
             "pulp_targets": [
               "pulp-platform"
             ],
@@ -14059,7 +14065,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 8,
+            "count": 9,
             "third_party_targets": [
               "pulp-native"
             ],
@@ -14071,6 +14077,7 @@
               "CoreFoundation",
               "CoreVideo",
               "Metal",
+              "OpenGL",
               "QuartzCore",
               "UniformTypeIdentifiers"
             ],
@@ -14086,6 +14093,7 @@
             "framework:AppKit",
             "framework:CoreVideo",
             "framework:Metal",
+            "framework:OpenGL",
             "framework:QuartzCore",
             "pulp-platform"
           ]
@@ -14393,6 +14401,34 @@
             "pulp-runtime",
             "pulp-timeline"
           ]
+        },
+        "rt-allocation-probe": {
+          "target": "pulp-rt-allocation-probe",
+          "exported_as": "Pulp::rt-allocation-probe",
+          "type": "STATIC_LIBRARY",
+          "source_dir": "tools/testing/rt_allocation_probe",
+          "closure": {
+            "node_count": 1,
+            "pulp_targets": [
+              "pulp-rt-allocation-probe"
+            ],
+            "third_party_targets": []
+          },
+          "external_dependencies": {
+            "count": 0,
+            "third_party_targets": [],
+            "prebuilt_archives": [],
+            "imported_targets": [],
+            "frameworks": [],
+            "system_libraries": []
+          },
+          "public_headers": {
+            "roots": [
+              "tools/testing/rt_allocation_probe/include"
+            ],
+            "generated_include_roots": 0
+          },
+          "direct_dependencies": []
         },
         "runtime": {
           "target": "pulp-runtime",

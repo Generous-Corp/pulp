@@ -10059,6 +10059,20 @@
             "enums": []
           }
         ],
+        "control_math.hpp": [
+          {
+            "class": "ControlIntegratorT",
+            "qualified_name": "pulp::signal::ControlIntegratorT",
+            "template": "std::floating_point SampleType = float",
+            "methods": [
+              "reset()",
+              "process(SampleType increment)",
+              "configure(SampleType minimum, SampleType maximum, SampleType initial = SampleType{0})",
+              "value()"
+            ],
+            "enums": []
+          }
+        ],
         "convolver.hpp": [
           {
             "class": "PartitionedConvolverT",

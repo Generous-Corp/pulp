@@ -78,6 +78,7 @@ PUBLIC_ROOTS = (
 # named here — which means a new installed host header is UNTRACKED until it is
 # added, and `--check` stays green while it is.
 REVIEWED_HOST_HEADERS = (
+    'pulp/host/control_index_nodes.hpp',
     'pulp/host/graph_patch.hpp',
     'pulp/host/graph_file_reload.hpp',
     'pulp/host/signal_graph_control.hpp',

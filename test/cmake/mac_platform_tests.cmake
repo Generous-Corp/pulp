@@ -124,7 +124,8 @@ if(APPLE AND NOT PULP_IOS)
         Catch2::Catch2WithMain
         "-framework CoreMIDI"
     )
-    catch_discover_tests(pulp-test-coremidi-shared-client)
+    catch_discover_tests(pulp-test-coremidi-shared-client
+        PROPERTIES RESOURCE_LOCK pulp_coremidi)
 
     # A port connected to an endpoint that was replaced (host sleep, unplug)
     # must report closed so its owner reopens it. In-process virtual endpoints
@@ -138,7 +139,8 @@ if(APPLE AND NOT PULP_IOS)
         "-framework CoreMIDI"
         "-framework CoreFoundation"
     )
-    catch_discover_tests(pulp-test-coremidi-reconnect)
+    catch_discover_tests(pulp-test-coremidi-reconnect
+        PROPERTIES RESOURCE_LOCK pulp_coremidi)
 endif()
 if(APPLE AND NOT PULP_IOS)
     # AppKit re-asks which cursor to show when the pointer MOVES and never
@@ -364,4 +366,18 @@ if(TARGET pulp-native)
         LABELS "cmake;sdk;native-surface"
         COST 60
         TIMEOUT 600)
+endif()
+
+# TextureUploadRecorder (test-only tooling): Metal uploads recorded byte for
+# byte, a one-byte control, and the repository-path refusal. Headless: Metal
+# needs a device, not a window.
+if(APPLE AND NOT PULP_IOS AND TARGET pulp::texture-upload-recorder)
+    pulp_add_test_suite(pulp-test-texture-upload-recorder
+        SOURCES test_texture_upload_recorder_mac.mm
+        LIBRARIES pulp::texture-upload-recorder)
+    # The recorder's internal header, for its hook seam.
+    target_include_directories(pulp-test-texture-upload-recorder PRIVATE
+        "${CMAKE_SOURCE_DIR}/tools/testing/texture_upload_recorder/src")
+    set_source_files_properties(test_texture_upload_recorder_mac.mm PROPERTIES COMPILE_OPTIONS -fobjc-arc)
+    target_link_libraries(pulp-test-texture-upload-recorder PRIVATE "-framework Metal" "-framework Foundation")
 endif()

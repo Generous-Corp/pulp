@@ -71,6 +71,11 @@ worked example is `examples/midi-learn-demo/`.
   stem>`; a `.cpp` edit must not pass `--object` (the default is the source's own
   object, and the wrong name reads as INCONCLUSIVE). A break pattern must match
   the file as clang-format left it, so check the real text first.
+- Never call `descriptor()` inside `process()` to get feedback capabilities:
+  it builds strings and bus lists. Resolve `midi_feedback_capabilities()` in
+  `prepare()` and pass the stored value. Only the Debug real-time allocation
+  trap catches this (the ASan lane), so the Release gate stays green while
+  every sanitizer run aborts the CLAP MIDI Learn tests.
 - Vellum routing: new headers under `core/state`, `core/format` or `core/view`
   need a `vellum_inherits` decision in `.github/vellum-export-events/`, committed
   before the check can see it. Anything under `core/view` also needs a watch

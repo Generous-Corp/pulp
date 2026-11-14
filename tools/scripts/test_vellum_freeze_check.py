@@ -245,6 +245,90 @@ class FreezeUnitTests(unittest.TestCase):
             freeze._public_github_json(url, "app-token", "run-token")
         self.assertEqual(len(seen), 2)
 
+    def test_transient_5xx_repeats_the_same_read_then_succeeds(self):
+        url = "https://api.github.com/repos/Generous-Corp/vellum/commits/abc/pulls"
+        seen = []
+
+        def urlopen(request, timeout=0):
+            seen.append((request.full_url, request.get_header("Authorization")))
+            if len(seen) == 1:
+                raise self._http_error(502)
+            return self._fake_response([{"number": 1}])
+
+        with mock.patch.object(freeze.urllib.request, "urlopen", urlopen), \
+                mock.patch.object(freeze.time, "sleep") as sleep:
+            value = freeze._github_json(url, "app-token", expected=list)
+        self.assertEqual(value, [{"number": 1}])
+        self.assertEqual(seen, [(url, "Bearer app-token")] * 2)
+        sleep.assert_called_once_with(freeze._TRANSIENT_RETRY_DELAYS[0])
+
+    def test_dropped_connection_is_retried(self):
+        seen = []
+
+        def urlopen(request, timeout=0):
+            seen.append(1)
+            if len(seen) == 1:
+                raise freeze.urllib.error.URLError(ConnectionResetError(54, "reset"))
+            return self._fake_response({"sha": "abc"})
+
+        with mock.patch.object(freeze.urllib.request, "urlopen", urlopen), \
+                mock.patch.object(freeze.time, "sleep"):
+            self.assertEqual(
+                freeze._github_json("https://api.github.com/x", "t"), {"sha": "abc"}
+            )
+        self.assertEqual(len(seen), 2)
+
+    def test_persistent_5xx_fails_closed_after_bounded_retries(self):
+        calls = []
+
+        def urlopen(request, timeout=0):
+            calls.append(1)
+            raise self._http_error(503)
+
+        with mock.patch.object(freeze.urllib.request, "urlopen", urlopen), \
+                mock.patch.object(freeze.time, "sleep") as sleep, \
+                self.assertRaisesRegex(freeze.FreezeError, "HTTP Error 503"):
+            freeze._github_json("https://api.github.com/x", "t")
+        self.assertEqual(len(calls), len(freeze._TRANSIENT_RETRY_DELAYS) + 1)
+        self.assertEqual(
+            [c.args[0] for c in sleep.call_args_list],
+            list(freeze._TRANSIENT_RETRY_DELAYS),
+        )
+
+    def test_authority_answers_are_not_retried(self):
+        for code in (401, 403, 404, 422, 429):
+            calls = []
+
+            def urlopen(request, timeout=0):
+                calls.append(1)
+                raise self._http_error(code)
+
+            with mock.patch.object(freeze.urllib.request, "urlopen", urlopen), \
+                    mock.patch.object(freeze.time, "sleep") as sleep, \
+                    self.assertRaises(freeze.FreezeError):
+                freeze._github_json("https://api.github.com/x", "t")
+            self.assertEqual(len(calls), 1, code)
+            sleep.assert_not_called()
+
+    def test_malformed_json_is_not_retried(self):
+        import io
+
+        calls = []
+
+        def urlopen(request, timeout=0):
+            calls.append(1)
+            response = io.BytesIO(b"not json")
+            response.__enter__ = lambda self_: self_
+            response.__exit__ = lambda *a: None
+            return response
+
+        with mock.patch.object(freeze.urllib.request, "urlopen", urlopen), \
+                mock.patch.object(freeze.time, "sleep") as sleep, \
+                self.assertRaises(freeze.FreezeError):
+            freeze._github_json("https://api.github.com/x", "t")
+        self.assertEqual(len(calls), 1)
+        sleep.assert_not_called()
+
     def test_empty_token_is_not_anonymous_by_default(self):
         seen = []
 

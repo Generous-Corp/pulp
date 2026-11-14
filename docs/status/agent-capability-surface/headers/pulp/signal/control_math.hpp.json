@@ -1,0 +1,9 @@
+{
+  "domain": "signal",
+  "source": "core/signal/include/pulp/signal/control_math.hpp",
+  "fingerprint": "sha256:51948a38e0ccfa2804f44fa2a344fcd17d51cac71951163f64d78f169ea8da33",
+  "include": "pulp/signal/control_math.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Finite scalar math and bounded integrator primitives support the G-5 graph Control nodes; they do not establish an independent generator-facing capability contract."
+}

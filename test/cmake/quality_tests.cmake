@@ -277,6 +277,10 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME modules-yaml-dirs-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_modules_yaml_dirs_check.py")
+    # The texture-upload recorder's run comparison (multiset, no pixels in the report).
+    add_test(NAME texture-upload-compare-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/testing/texture_upload_recorder/test_texture_upload_compare.py")
     add_test(NAME transient-interaction-trace-budget-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_transient_interaction_trace.py")
@@ -1279,6 +1283,14 @@ if(Python3_Interpreter_FOUND)
         --build-dir "${CMAKE_BINARY_DIR}")
     set_tests_properties(ctest-scheduling-contract PROPERTIES TIMEOUT 120)
 
+    # CoreMIDI endpoints are server-global, so every suite that creates them
+    # must hold the shared pulp_coremidi lock or two of them race in parallel
+    # ctest. Reads an already-configured build.
+    add_test(NAME ctest-coremidi-lock-contract COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_ctest_coremidi_lock.py"
+        --build-dir "${CMAKE_BINARY_DIR}")
+    set_tests_properties(ctest-coremidi-lock-contract PROPERTIES TIMEOUT 120)
+
     # Live-build check: reports a governed build running in THIS checkout, which
     # Shipyard's local mac backend does by design. Its one job is to tell a live
     # marker from the one a killed build necessarily leaves behind, so the test
@@ -1870,6 +1882,13 @@ if(Python3_Interpreter_FOUND)
             COMMAND ${Python3_EXECUTABLE} -m unittest test_clean_build_cov
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
         set_tests_properties(clean-build-cov-selftest PROPERTIES TIMEOUT 300)
+
+        # The cutover trial report parser: a planted missing header must land in
+        # its capability row, and a log without it must hit no row.
+        add_test(NAME cutover-trial-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_cutover_trial
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(cutover-trial-selftest PROPERTIES TIMEOUT 120)
 
         # Build-speed measurement. Each suite carries a negative control: a blind
         # dry run must refuse (exit 3) rather than report zero edges, and a value

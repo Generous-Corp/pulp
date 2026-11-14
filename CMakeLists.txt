@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 1.125.0
+    VERSION 1.126.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -671,6 +671,8 @@ if(PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/audio)
     # The RT allocation probe for SDK consumers' tests (Pulp::rt-allocation-probe).
     add_subdirectory(tools/testing/rt_allocation_probe)
+    # Test-only texture-upload recorder (HARN-5); never linked into a shipped target.
+    add_subdirectory(tools/testing/texture_upload_recorder)
     add_subdirectory(tools/design-ab)
     # Offline driver that asks a built LV2 module to describe itself into its
     # bundle. Host-side, so it is useless when the modules it would run are
