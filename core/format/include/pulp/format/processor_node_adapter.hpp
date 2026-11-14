@@ -77,7 +77,12 @@ public:
     /// node is skipped only after it has run while idle and produced an
     /// all-zero-bits block, repeated until the declared latency plus tail has
     /// elapsed; any non-zero sample, any inbound event or audio, a failed
-    /// block, or reset_idle_confirmation() starts the confirmation over.
+    /// block, or reset_idle_confirmation() starts the confirmation over. A block
+    /// is also never skipped, and restarts the confirmation, when any event
+    /// buffer (MIDI, SysEx, UMP, MPE, parameter) holds an event or reports a
+    /// dropped one, when the graph marks the node's inbound events incomplete,
+    /// or when the block asks for a reset or follows a transport jump (the
+    /// processor must see those blocks).
     ///
     /// Contract the caller takes on: at every point the probe flips from idle
     /// to busy, the processor's output must not depend on how many blocks it

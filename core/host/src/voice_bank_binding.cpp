@@ -156,6 +156,10 @@ struct VoiceBankBinding::Impl {
     bool suppress_note_off = false;
     bool idle_skip = false;
     std::array<IdleProbeContext, kSlots> idle_probes{};
+    // The slots' voice nodes, fetched once while preparing. Looking a node up in
+    // the graph takes the graph mutation lock, which the audio thread must not
+    // take, so the counter reads go through these.
+    std::array<std::shared_ptr<format::ProcessorNodeInstance>, kSlots> voice_nodes{};
     std::string stereo_port;
 
     Scope scope_for(std::uint8_t channel) const noexcept {
@@ -431,11 +435,13 @@ VoiceBankBinding::prepare(const VoiceTemplateSchema& schema, SubgraphTemplate de
                   "prepared graph rejected the eight-slot candidate"};
         return {};
     }
+    for (std::uint32_t slot = 0; slot < kSlots; ++slot)
+        bank->impl_->voice_nodes[slot] =
+            bank->impl_->graph.processor_node_instance(bank->impl_->slots[slot].nodes.front());
     if (idle_skip == VoiceBankIdleSkip::SkipInactiveSlots) {
         // Refuse loudly rather than quietly running without the option.
         for (std::uint32_t slot = 0; slot < kSlots; ++slot) {
-            const auto voice =
-                bank->impl_->graph.processor_node_instance(bank->impl_->slots[slot].nodes.front());
+            const auto& voice = bank->impl_->voice_nodes[slot];
             if (!voice || !voice->idle_skip_armed()) {
                 result = {VoiceBankBindingCode::InvalidManifest, slot, "voice",
                           "idle skip needs a voice processor with no audio or modulation input "
@@ -666,23 +672,18 @@ bool VoiceBankBinding::set_slot_parameter(std::uint32_t slot, std::string_view p
 }
 
 std::uint64_t VoiceBankBinding::idle_skipped_blocks() const noexcept {
+    // Lock-free: reads cached node handles and relaxed atomic counters.
     std::uint64_t total = 0;
-    for (const auto& slot : impl_->slots) {
-        if (slot.nodes.empty())
-            continue;
-        if (const auto voice = impl_->graph.processor_node_instance(slot.nodes.front()))
+    for (const auto& voice : impl_->voice_nodes)
+        if (voice)
             total += voice->idle_skipped_blocks();
-    }
     return total;
 }
 
 void VoiceBankBinding::reset_idle_confirmations() noexcept {
-    for (const auto& slot : impl_->slots) {
-        if (slot.nodes.empty())
-            continue;
-        if (const auto voice = impl_->graph.processor_node_instance(slot.nodes.front()))
+    for (const auto& voice : impl_->voice_nodes)
+        if (voice)
             voice->reset_idle_confirmation();
-    }
 }
 
 } // namespace pulp::host

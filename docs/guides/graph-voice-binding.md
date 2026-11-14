@@ -92,6 +92,12 @@ as a rendered one, at any block size.
   (`latency_samples()` plus `PluginDescriptor::tail_samples`). Any non-zero
   sample, including `-0.0f` and a decaying denormal, starts the count again, so
   a voice that never reaches exact zero is simply never skipped.
+- **Blocks that carry something are never skipped.** A slot is rendered, and
+  its silence confirmation starts over, on any block where an event buffer
+  (MIDI, SysEx, UMP, MPE or parameter) holds an event or has dropped one, where
+  the graph reports the slot's inbound events as incomplete, or where the host
+  asks for a reset or reports a transport jump. A processor therefore always
+  sees its reset blocks.
 - **Changing a slot parameter** with `set_slot_parameter` makes that slot
   render at least once more before it can be skipped again, and `activate`
   does the same for every slot.
@@ -120,7 +126,7 @@ after a rendered one.
 
 `VoiceBankBinding::idle_skipped_blocks()` returns how many voice-blocks were
 skipped since `prepare`, summed over the eight slots (always 0 when the option
-is off). A bank holding one note for N blocks with no other events skips
+is off). It takes no lock, so it is safe to call from the audio thread. A bank holding one note for N blocks with no other events skips
 `7 * (N - 1)` voice-blocks: each idle slot renders once to confirm silence and
 is skipped afterwards.
 

@@ -143,16 +143,27 @@ bool ProcessorNode::process_binding(ProcessBlock& block, const GraphRuntimeNodeP
     // Idle skipping. The skip needs the probe to report idle now, silence to
     // have been confirmed on earlier blocks, and nothing inbound this block.
     const bool idle_at_entry = self->idle_probe_.is_idle(self->idle_probe_.context);
+    // A buffer counts as empty only if it holds nothing and dropped nothing: a
+    // buffer that overflowed is an incomplete view of what arrived.
     const auto empty_midi = [](const midi::MidiBuffer* buffer) noexcept {
         // The executor attaches its (usually empty) UMP buffer to every routed
         // MIDI buffer, so a non-null UMP pointer is not an inbound event.
         return buffer == nullptr || (buffer->empty() && buffer->sysex_size() == 0 &&
-                                     (buffer->ump() == nullptr || buffer->ump()->empty()));
+                                     (buffer->ump() == nullptr || buffer->ump()->empty()) &&
+                                     !midi::midi_block_has_drops(*buffer));
     };
+    // Blocks that ask the processor to reset or that follow a timeline jump
+    // must reach it, whatever the voice state says.
+    const bool reset_or_jump = block.flags.reset || block.flags.transport_jump ||
+                               (block.transport != nullptr && (block.transport->reset_requested ||
+                                                               block.transport->transport_jump));
     const bool nothing_inbound =
-        ctx.node_inputs.num_channels() == 0 && empty_midi(ctx.node_midi_in) &&
-        (ctx.node_mpe_in == nullptr || ctx.node_mpe_in->empty()) &&
-        (ctx.node_param_events == nullptr || ctx.node_param_events->empty()) &&
+        !reset_or_jump && !ctx.node_events_incomplete && ctx.node_inputs.num_channels() == 0 &&
+        empty_midi(ctx.node_midi_in) &&
+        (ctx.node_mpe_in == nullptr ||
+         (ctx.node_mpe_in->empty() && ctx.node_mpe_in->dropped_event_count() == 0)) &&
+        (ctx.node_param_events == nullptr ||
+         (ctx.node_param_events->empty() && ctx.node_param_events->dropped_event_count() == 0)) &&
         ctx.node_audio_rate_modulations.empty();
     if (idle_at_entry && self->idle_confirmed_ && nothing_inbound) {
         auto outputs = ctx.node_outputs;

@@ -199,6 +199,7 @@ class VoiceBankBinding final {
     bool set_slot_parameter(std::uint32_t slot, std::string_view path, float value);
     // Voice-blocks not rendered because of VoiceBankIdleSkip, summed over the
     // eight slots. Always 0 when the option is Off. Counts since prepare().
+    // Lock-free; safe to call from any thread, including the audio thread.
     std::uint64_t idle_skipped_blocks() const noexcept;
 
   private:

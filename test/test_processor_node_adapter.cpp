@@ -26,6 +26,7 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/format/processor_node_adapter.hpp>
 #include <pulp/graph/graph_runtime_plan.hpp>
+#include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
 #include <pulp/state/store.hpp>
 
@@ -1401,4 +1402,114 @@ TEST_CASE("Processor node idle skip is only armed for an eligible processor",
         REQUIRE(node.prepare(prepare));
         CHECK_FALSE(node.idle_skip_armed());
     }
+}
+
+TEST_CASE("Processor node idle skip renders blocks that reset, jump or carry lost events",
+          "[format][graph][processor-node][idle-skip]") {
+    enum class Case {
+        ResetFlag,
+        JumpFlag,
+        TransportReset,
+        TransportJump,
+        IncompleteEvents,
+        DroppedUmp,
+        MidiEvent,
+        MpeEvent,
+        ParameterEvent
+    };
+    for (const auto kind : {Case::ResetFlag, Case::JumpFlag, Case::TransportReset,
+                            Case::TransportJump, Case::IncompleteEvents, Case::DroppedUmp,
+                            Case::MidiEvent, Case::MpeEvent, Case::ParameterEvent}) {
+        INFO("case=" << static_cast<int>(kind));
+        IdleSourceRig rig;
+        pulp::midi::MidiBuffer midi_in;
+        pulp::midi::UmpBuffer ump;
+        pulp::midi::MpeBuffer mpe;
+        pulp::state::ParameterEventQueue params;
+        ProcessContext transport;
+        transport.sample_rate = kSr;
+        transport.num_samples = IdleSourceRig::kFrames;
+        rig.context.node_midi_in = &midi_in;
+        rig.context.node_mpe_in = &mpe;
+        rig.context.node_param_events = &params;
+        midi_in.attach_ump(&ump);
+        // Confirm silence, then skip one block.
+        REQUIRE(rig.run());
+        REQUIRE(rig.run());
+        REQUIRE(rig.processor.calls == 1);
+        REQUIRE(rig.node.idle_skipped_blocks() == 1);
+
+        switch (kind) {
+        case Case::ResetFlag:
+            rig.block.flags.reset = true;
+            break;
+        case Case::JumpFlag:
+            rig.block.flags.transport_jump = true;
+            break;
+        case Case::TransportReset:
+            transport.reset_requested = true;
+            rig.block.transport = &transport;
+            break;
+        case Case::TransportJump:
+            transport.transport_jump = true;
+            rig.block.transport = &transport;
+            break;
+        case Case::IncompleteEvents:
+            rig.context.node_events_incomplete = true;
+            break;
+        case Case::DroppedUmp:
+            // A UMP buffer that filled up and dropped the next message.
+            ump.set_realtime_capacity_limit(true);
+            while (ump.add(pulp::midi::UmpPacket{})) {
+            }
+            REQUIRE(ump.dropped_event_count() > 0);
+            break;
+        case Case::MidiEvent:
+            midi_in.add(pulp::midi::MidiEvent::note_on(1, 60, 100));
+            break;
+        case Case::MpeEvent:
+            mpe.add(pulp::midi::MpeExpressionEvent{});
+            break;
+        case Case::ParameterEvent:
+            params.push(pulp::state::ParameterEvent{});
+            break;
+        }
+        // The block reaches the processor and restarts the confirmation.
+        REQUIRE(rig.run());
+        CHECK(rig.processor.calls == 2);
+        CHECK(rig.node.idle_skipped_blocks() == 1);
+        // Back to a clean block: processed once to confirm, then skipped.
+        rig.block.flags = {};
+        rig.block.transport = nullptr;
+        rig.context.node_events_incomplete = false;
+        midi_in.clear();
+        ump.clear();
+        mpe.clear();
+        params.clear();
+        REQUIRE(rig.run());
+        CHECK(rig.processor.calls == 3);
+        REQUIRE(rig.run());
+        CHECK(rig.processor.calls == 3);
+        CHECK(rig.node.idle_skipped_blocks() == 2);
+    }
+}
+
+TEST_CASE("Processor node idle skip starts over when the node is prepared again",
+          "[format][graph][processor-node][idle-skip]") {
+    IdleSourceRig rig;
+    REQUIRE(rig.run());
+    REQUIRE(rig.run());
+    REQUIRE(rig.node.idle_skipped_blocks() == 1);
+    REQUIRE(rig.node.release());
+    PrepareContext prepare;
+    prepare.sample_rate = 96000.0;
+    prepare.max_buffer_size = 64;
+    prepare.output_channels = 1;
+    REQUIRE(rig.node.prepare(prepare));
+    CHECK(rig.node.idle_skipped_blocks() == 0);
+    const int calls = rig.processor.calls;
+    REQUIRE(rig.run());
+    CHECK(rig.processor.calls == calls + 1);
+    REQUIRE(rig.run());
+    CHECK(rig.processor.calls == calls + 1);
 }

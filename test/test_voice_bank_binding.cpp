@@ -888,15 +888,20 @@ class IdleVoice final : public midi::MpeSynthVoice {
             float l = 0.0f;
             float r = 0.0f;
             if (active()) {
+                advance_smoothers();
+                const double frequency =
+                    440.0 *
+                    std::exp2((static_cast<double>(note_number()) - 69.0 + pitch_bend()) / 12.0);
                 const float triangle = phase_ < 0.5 ? static_cast<float>(4.0 * phase_ - 1.0)
                                                     : static_cast<float>(3.0 - 4.0 * phase_);
                 const float fade =
                     releasing() ? (static_cast<float>(knobs_->release_frames - release_frame_)) /
                                       static_cast<float>(knobs_->release_frames)
                                 : 1.0f;
-                l = triangle * (static_cast<float>(velocity()) / 127.0f) * fade;
-                r = l * 0.5f;
-                phase_ += 440.0 / 48000.0;
+                const float shaped = triangle * (static_cast<float>(velocity()) / 127.0f) * fade;
+                l = shaped * (1.0f + 0.25f * pressure());
+                r = shaped * (0.5f + 0.25f * timbre());
+                phase_ += frequency / 48000.0;
                 if (phase_ >= 1.0)
                     phase_ -= 1.0;
                 if (releasing() && ++release_frame_ == knobs_->release_frames)
@@ -1104,6 +1109,22 @@ TEST_CASE("Voice bank idle skip renders identical audio with skipping on and off
         on(4010, 5, 64),   cc(4500, 4, 120, 0), cc(4800, 5, 120, 0)};
     require_on_off_identical(basic, 6000, knobs, midi::MpeVoiceStealMode::Oldest);
 
+    // Expression and channel-mode events: pitch bend, pressure, timbre, the
+    // scoped and manager all-notes-off and the reset-all-controllers message,
+    // each arriving while a voice sounds, is held, or is releasing.
+    const midi::MidiEvent pressure{choc::midi::ShortMessage(0xd1, 127, 0), 0, 0.0};
+    const std::vector<ScriptedEvent> expression{
+        on(10, 1, 69, 127),  {100, midi::MidiEvent::pitch_bend(1, 12288)},
+        {150, pressure},     cc(200, 1, 74, 127),
+        cc(300, 1, 64, 127), off(400, 1, 69),
+        cc(600, 1, 121, 0),  cc(900, 1, 64, 0),
+        on(1100, 2, 62),     on(1110, 3, 64),
+        cc(1300, 2, 123, 0), cc(1600, 0, 123, 0),
+        on(2000, 4, 65),     cc(2200, 0, 121, 0),
+        cc(2400, 4, 120, 0), on(2600, 5, 67),
+        off(2700, 5, 67)};
+    require_on_off_identical(expression, 4000, knobs, midi::MpeVoiceStealMode::Oldest);
+
     // Nine notes force a steal; repeat for every steal policy.
     std::vector<ScriptedEvent> steal;
     for (std::uint8_t k = 0; k < 9; ++k)
@@ -1305,4 +1326,99 @@ TEST_CASE("Idle skip changes a voice that keeps free-running state, which is why
         render_idle(skip_knobs, script, 4000, 64, VoiceBankIdleSkip::SkipInactiveSlots);
     CHECK(with.skipped > 0);
     CHECK_FALSE(same_bytes(without.audio, with.audio));
+}
+
+TEST_CASE("Idle skip waits for the declared latency plus tail and skips on the exact next block",
+          "[host][graph][voice-bank][idle-skip]") {
+    constexpr std::size_t kBlock = 64;
+    IdleKnobs knobs;
+    knobs.latency_samples = 96;
+    knobs.tail_samples = 96;
+    // Hold is 192 frames: silent blocks 0, 1 and 2 reach 192 and confirm, so
+    // block 3 is the first one skipped (eight slots, nothing playing).
+    const auto result =
+        render_idle(knobs, {}, 8 * kBlock, kBlock, VoiceBankIdleSkip::SkipInactiveSlots);
+    for (std::size_t block = 0; block < 8; ++block) {
+        INFO("block=" << block);
+        CHECK(result.skipped_after_block[block] == (block < 3 ? 0u : 8u * (block - 2)));
+    }
+    for (const auto calls : knobs.calls)
+        CHECK(calls == 3);
+}
+
+TEST_CASE("Idle skip confirmation restarts when a click lands in its last block",
+          "[host][graph][voice-bank][idle-skip]") {
+    constexpr std::size_t kBlock = 64;
+    constexpr std::size_t kTotal = 20 * kBlock;
+    // The voice is inactive from sample 68 and, with a 300 sample tail, would be
+    // confirmed silent at the end of block 6 (samples 384 to 447). Its click
+    // arrives on sample 447, the very last sample of that window. The count
+    // restarts, the click is rendered, and the slot is first skipped in block 12.
+    // A confirmation that ended one block early would skip block 6 and lose it.
+    const std::vector<ScriptedEvent> script{on(0, 1, 69, 127), off(64, 1, 69)};
+    IdleKnobs off_knobs;
+    off_knobs.tail_samples = 300;
+    off_knobs.idle_output = IdleOutput::DelayedClick;
+    off_knobs.click_delay = 380;
+    auto skip_knobs = off_knobs;
+    const auto without = render_idle(off_knobs, script, kTotal, kBlock, VoiceBankIdleSkip::Off);
+    const auto with =
+        render_idle(skip_knobs, script, kTotal, kBlock, VoiceBankIdleSkip::SkipInactiveSlots);
+    CHECK(with.audio.left[447] != 0.0f);
+    CHECK(same_bytes(without.audio, with.audio));
+    // The seven slots that never played are skipped from block 5. Slot 0 is
+    // processed through block 11 and skipped from block 12.
+    CHECK(with.skipped_after_block[11] == 7 * 7);
+    CHECK(with.skipped_after_block[12] == 7 * 8 + 1);
+    CHECK(with.calls_after_block[11][0] == 12);
+    CHECK(with.calls_after_block[19][0] == 12);
+}
+
+TEST_CASE("Idle skip stays identical on one bank across changing block sizes and activation",
+          "[host][graph][voice-bank][idle-skip]") {
+    const std::array<std::size_t, 9> cycle{64, 1, 37, 256, 5, 128, 3, 200, 17};
+    const std::vector<ScriptedEvent> script{
+        on(100, 1, 69, 127), off(900, 1, 69), on(1500, 2, 60), on(1510, 3, 64),
+        // activate() runs at sample 2000 while these are still sounding.
+        on(2400, 4, 62), off(3000, 4, 62), on(3500, 5, 67)};
+    constexpr std::size_t kTotal = 5000;
+    constexpr std::size_t kActivateAt = 2000;
+    std::array<IdleRender, 2> renders;
+    for (const bool skip : {false, true}) {
+        IdleKnobs knobs;
+        knobs.release_frames = 150;
+        VoiceBankBindingResult status;
+        auto bank = make_idle_bank(
+            knobs, skip ? VoiceBankIdleSkip::SkipInactiveSlots : VoiceBankIdleSkip::Off, status);
+        REQUIRE(bank);
+        auto& result = renders[skip ? 1 : 0];
+        std::uint64_t sequence = 1;
+        std::size_t index = 0;
+        for (std::size_t start = 0; start < kTotal;) {
+            if (start == kActivateAt) {
+                VoiceBankBindingResult activation;
+                REQUIRE(bank->activate(activation));
+            }
+            auto frames = std::min(cycle[index++ % cycle.size()], kTotal - start);
+            if (start < kActivateAt)
+                frames = std::min(frames, kActivateAt - start);
+            REQUIRE(bank->begin_block(start, frames) == HostEventResult::Accepted);
+            for (const auto& scripted : script)
+                if (scripted.sample >= start && scripted.sample < start + frames)
+                    REQUIRE(bank->publish(event(bank->epoch(), scripted.sample, sequence++,
+                                                scripted.message)) == HostEventResult::Accepted);
+            audio::Buffer<float> buffer(2, frames);
+            auto view = buffer.view();
+            REQUIRE(bank->render(view, start, frames) == VoiceBankBindingCode::Ok);
+            result.audio.left.insert(result.audio.left.end(), view.channel(0).begin(),
+                                     view.channel(0).end());
+            result.audio.right.insert(result.audio.right.end(), view.channel(1).begin(),
+                                      view.channel(1).end());
+            start += frames;
+        }
+        result.skipped = bank->idle_skipped_blocks();
+    }
+    CHECK(renders[0].skipped == 0);
+    CHECK(renders[1].skipped > 0);
+    CHECK(same_bytes(renders[0].audio, renders[1].audio));
 }
