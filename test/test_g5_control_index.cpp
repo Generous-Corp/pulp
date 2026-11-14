@@ -202,6 +202,50 @@ TEST_CASE("Control index checked admission refuses without changing output or cu
           ControlProcessResult::StaleEpoch);
 }
 
+TEST_CASE("Control index refusals are named and each names its fix", "[graph][control-index]") {
+    std::array<float, 4> audio{1, 2, 3, 4};
+    std::array<float, 4> indices{0, 1, 2, 3};
+    std::array<float, 4> result{9, 9, 9, 9};
+    const float* in_ptr[] = {audio.data()};
+    float* out_ptr[] = {result.data()};
+    pulp::audio::BufferView<const float> input(in_ptr, 1, 4);
+    pulp::audio::BufferView<float> output(out_ptr, 1, 4);
+
+    SignalGraph plain;
+    REQUIRE(plain.add_input_node(1) != 0);
+    REQUIRE(plain.prepare(48000, 4));
+    CHECK(plain.process_control_checked(output, input, {1, 0, indices}) ==
+          ControlProcessResult::Unbound);
+
+    SignalGraph graph;
+    REQUIRE(graph.add_control_index_input_node() != 0);
+    REQUIRE(graph.prepare(48000, 4));
+    CHECK(graph.process_control_checked(output, input, {1, 0, {}}) ==
+          ControlProcessResult::OutOfRange);
+    CHECK((result == std::array<float, 4>{9, 9, 9, 9}));
+
+    const std::array all{ControlProcessResult::Accepted,       ControlProcessResult::Unbound,
+                         ControlProcessResult::OutOfRange,     ControlProcessResult::StaleEpoch,
+                         ControlProcessResult::WrongStart,     ControlProcessResult::ClockExhausted,
+                         ControlProcessResult::Busy,           ControlProcessResult::UnsupportedMode,
+                         ControlProcessResult::RenderFailed};
+    std::vector<std::string> names;
+    for (const auto result_code : all) {
+        const std::string name = control_process_result_name(result_code);
+        const std::string fix = control_process_result_fix(result_code);
+        CHECK(name != "unknown");
+        CHECK(fix != "unknown result");
+        CHECK_FALSE(fix.empty());
+        for (const auto& prior : names)
+            CHECK(prior != name);
+        names.push_back(name);
+    }
+    CHECK(std::string(control_process_result_fix(ControlProcessResult::UnsupportedMode))
+              .find("parallel routing") != std::string::npos);
+    CHECK(std::string(control_process_result_fix(ControlProcessResult::WrongStart))
+              .find("absolute_start") != std::string::npos);
+}
+
 TEST_CASE("Control scalar rules pin zero division, finite extremes, and reset",
           "[signal][control-index]") {
     CHECK(pulp::signal::safe_control_divide(1.0f, 0.0f) == 0.0f);

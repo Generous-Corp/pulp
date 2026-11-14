@@ -13,6 +13,61 @@
 
 namespace pulp::host {
 
+const char* control_process_result_name(ControlProcessResult result) noexcept {
+    switch (result) {
+    case ControlProcessResult::Accepted:
+        return "accepted";
+    case ControlProcessResult::Unbound:
+        return "unbound";
+    case ControlProcessResult::OutOfRange:
+        return "out_of_range";
+    case ControlProcessResult::StaleEpoch:
+        return "stale_epoch";
+    case ControlProcessResult::WrongStart:
+        return "wrong_start";
+    case ControlProcessResult::ClockExhausted:
+        return "clock_exhausted";
+    case ControlProcessResult::Busy:
+        return "busy";
+    case ControlProcessResult::UnsupportedMode:
+        return "unsupported_mode";
+    case ControlProcessResult::RenderFailed:
+        return "render_failed";
+    }
+    return "unknown";
+}
+
+const char* control_process_result_fix(ControlProcessResult result) noexcept {
+    switch (result) {
+    case ControlProcessResult::Accepted:
+        return "none";
+    case ControlProcessResult::Unbound:
+        return "prepare a graph that holds exactly one Control index input and no trigger "
+               "graph before calling process_control_checked()";
+    case ControlProcessResult::OutOfRange:
+        return "submit between 1 and the prepared block size (at most kControlIndexMaxFrames) "
+               "indices, with input and output buffers of the same frame count";
+    case ControlProcessResult::StaleEpoch:
+        return "use the current epoch, or the next one when the transport requests a "
+               "stream-history reset";
+    case ControlProcessResult::WrongStart:
+        return "set absolute_start to the graph cursor (the previous start plus its frames), "
+               "or to the transport position on a reset";
+    case ControlProcessResult::ClockExhausted:
+        return "reset the stream with a non-negative transport position before the 64-bit "
+               "sample clock or epoch overflows";
+    case ControlProcessResult::Busy:
+        return "call process_control_checked() from one audio thread at a time and do not "
+               "nest it inside a graph-event block";
+    case ControlProcessResult::UnsupportedMode:
+        return "disable parallel routing and anticipation on a graph with a Control index input";
+    case ControlProcessResult::RenderFailed:
+        return "the block was consumed and silenced; fix the failing node and continue at the "
+               "next absolute start";
+    }
+    return "unknown result";
+}
+
 CustomNodeType make_control_index_input_type() {
     CustomNodeType type;
     type.type_id = std::string(kControlIndexInputTypeId);

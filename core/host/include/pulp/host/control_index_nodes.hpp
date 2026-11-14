@@ -33,6 +33,11 @@ enum class ControlProcessResult : std::uint8_t {
     RenderFailed,
 };
 
+/// Stable lowercase identifier for a result, for logs and agent surfaces.
+const char* control_process_result_name(ControlProcessResult result) noexcept;
+/// One sentence that names what the caller must change to get Accepted.
+const char* control_process_result_fix(ControlProcessResult result) noexcept;
+
 /// Registered graph-owned source for an external per-sample table index.
 CustomNodeType make_control_index_input_type();
 
