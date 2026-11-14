@@ -155,6 +155,18 @@ struct VoiceBankBindingResult {
     }
 };
 
+// Optional audio-thread saving. With SkipInactiveSlots, a voice slot whose
+// voice is not active is not rendered once it has already produced a block of
+// exact silence (all sample bits zero) for at least its declared latency plus
+// tail. Skipping gives the same samples as rendering, provided the voice meets
+// this contract: at every note start, the voice's output must not depend on how
+// many blocks it was rendered while inactive. A voice with free-running state
+// (an LFO or noise source that keeps running, a parameter smoother that keeps
+// moving, anything that follows the transport while silent) breaks it and must
+// use Off. prepare() refuses the option with InvalidManifest when a voice
+// declares an audio input, audio-rate modulation or an unbounded tail.
+enum class VoiceBankIdleSkip : std::uint8_t { Off, SkipInactiveSlots };
+
 // One prepared graph and one eight-voice allocator. Construction, activation,
 // and parameter edits are control-thread operations while audio is stopped.
 // begin_block/publish/render and deferred dispatch belong to one audio owner.
@@ -164,7 +176,8 @@ class VoiceBankBinding final {
     prepare(const VoiceTemplateSchema& schema, SubgraphTemplate definition,
             std::unique_ptr<VoiceBankOwner> owner, std::string stereo_port, double sample_rate,
             int max_frames, VoiceBankBindingResult& result,
-            midi::MpeConfig mpe_config = midi::MpeConfig::standard_lower());
+            midi::MpeConfig mpe_config = midi::MpeConfig::standard_lower(),
+            VoiceBankIdleSkip idle_skip = VoiceBankIdleSkip::Off);
     ~VoiceBankBinding();
     VoiceBankBinding(const VoiceBankBinding&) = delete;
     VoiceBankBinding& operator=(const VoiceBankBinding&) = delete;
@@ -184,8 +197,13 @@ class VoiceBankBinding final {
                                            midi::MpeExpressionEvent::Kind kind,
                                            const midi::MpeNoteState& state) noexcept;
     bool set_slot_parameter(std::uint32_t slot, std::string_view path, float value);
+    // Voice-blocks not rendered because of VoiceBankIdleSkip, summed over the
+    // eight slots. Always 0 when the option is Off. Counts since prepare().
+    // Lock-free; safe to call from any thread, including the audio thread.
+    std::uint64_t idle_skipped_blocks() const noexcept;
 
   private:
+    void reset_idle_confirmations() noexcept;
     VoiceBankBinding();
     struct Impl;
     std::unique_ptr<Impl> impl_;

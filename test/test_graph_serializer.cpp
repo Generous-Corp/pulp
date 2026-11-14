@@ -85,6 +85,15 @@ TEST_CASE("GraphSerializer inspection refuses identity and parser hazards",
         R"({"document_schema":"pulp.graph.authored-io-gain.v1","value":NaN})");
     CHECK(nonfinite.refusal == GraphDocumentRefusal::InvalidJson);
 
+    // An overflowing literal is valid JSON but parses to infinity, which has
+    // no canonical form; it reaches the canonicalizer rather than the parser.
+    const auto overflow = GraphSerializer::inspect_document(
+        R"({"document_schema":"pulp.graph.authored-io-gain.v1","value":1e999})");
+    CHECK(overflow.refusal == GraphDocumentRefusal::NonFiniteNumber);
+    const auto nested_overflow = GraphSerializer::inspect_document(
+        R"({"document_schema":"pulp.graph.authored-io-gain.v1","nodes":[{"gain":-1e999}]})");
+    CHECK(nested_overflow.refusal == GraphDocumentRefusal::NonFiniteNumber);
+
     const auto brackets_in_string = GraphSerializer::inspect_document(
         R"({"document_schema":"pulp.graph.authored-io-gain.v1","text":"[[[[not nesting]]]]"})");
     CHECK(brackets_in_string.ok());

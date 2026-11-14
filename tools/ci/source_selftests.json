@@ -1045,6 +1045,12 @@
       "timeout": 120.0
     },
     {
+      "name": "script-inputs-offline-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_script_inputs_offline.py"
+      ]
+    },
+    {
       "name": "script-inputs-precheck-selftest",
       "argv": [
         "{repo}/tools/scripts/test_script_inputs_precheck.py"

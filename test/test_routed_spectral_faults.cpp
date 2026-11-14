@@ -582,6 +582,49 @@ TEST_CASE("A mutated canonical frame encoding fails before payload consumption",
     REQUIRE(stage->sequence == 0);
 }
 
+// ctest runs this case again on its own with a short TIMEOUT, so a guard that
+// stops terminating the root walk fails the run rather than hanging it.
+TEST_CASE("Spectral preparation refuses a forged stage cycle with no root",
+          "[host][spectral-fault][spectral-contract][forged-cycle]") {
+    using namespace pulp::host;
+    const auto identity = *SpectralIdentity::make(256, 64, 1, 48000).value;
+    SignalGraph graph;
+    const auto analysis = *graph.add_spectral_analysis(identity, "analysis").value;
+    const auto a = *graph
+                        .add_spectral_stage(
+                            identity, *QualifiedSpectralStage::identity_v1(identity).value, "a")
+                        .value;
+    const auto b = *graph
+                        .add_spectral_stage(
+                            identity, *QualifiedSpectralStage::identity_v1(identity).value, "b")
+                        .value;
+    const auto synthesis = *graph.add_spectral_synthesis(identity, "synthesis").value;
+    REQUIRE(graph.connect(analysis.frames, a.frames_in));
+    REQUIRE(graph.connect(a.frames_out, b.frames_in));
+    REQUIRE(graph.connect(b.frames_out, synthesis.frames));
+
+    // The legal chain prepares, which proves the stages and edges are valid.
+    SpectralRuntimeBank bank;
+    REQUIRE(bank.prepare(graph.nodes(), graph.connections(), 48000, 64) == SpectralError::None);
+
+    // Keep only the two stages and close A -> B -> A: every node has an input
+    // and an output, so only the root walk can see that no analysis feeds it.
+    std::vector<GraphNode> stages;
+    for (const auto& node : graph.nodes())
+        if (node.id == a.node || node.id == b.node)
+            stages.push_back(node);
+    REQUIRE(stages.size() == 2);
+    const auto forward = std::find_if(
+        graph.connections().begin(), graph.connections().end(),
+        [&](const Connection& c) { return c.source_node == a.node && c.dest_node == b.node; });
+    REQUIRE(forward != graph.connections().end());
+    auto back = *forward;
+    back.source_node = b.node;
+    back.dest_node = a.node;
+    const std::array<Connection, 2> cycle{*forward, back};
+    REQUIRE(bank.prepare(stages, cycle, 48000, 64) == SpectralError::InvalidConnection);
+}
+
 TEST_CASE("Spectral frame edges reject automation and dense modulation",
           "[host][spectral-fault][spectral-contract][automation]") {
     using namespace pulp::host;

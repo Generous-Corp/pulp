@@ -1868,9 +1868,22 @@ both.
 pre-push hook and `gates.sh` as well as in this job, and
 `script_inputs_precheck.py --base` runs there as a build-free stand-in for the
 `script-test-inputs-drift` ctest: a new script-driven `add_test()` must have a
-`test/ctest_script_inputs/` entry. It cannot see a stale entry (a script
-that gained an import) or a computed test name; those still need the
-configured check. Three PRs on 2026-10-22
+`test/ctest_script_inputs/` entry. `script_inputs_offline.py --base` runs
+beside it for the stale half: it rebuilds each fragment the diff reaches (a
+script test whose entry, imports or registration changed; a new suite; a
+source that starts spawning in a target an entry compiles) with the
+generator's own functions and fails with the exact fragment diff plus a
+`--write` fix, or the configure command when only a configure can write the
+record. A command that names a configure-only variable, a registration in a
+function or foreach body, or a suite under an unevaluable guard is printed as
+NOT CHECKED; the configured check stays the authority for those. A new Python
+module can resolve an import without changing the importer, so selection also
+checks the generator's newly resolved inputs. Shared spawning sources in a
+CMake list do not prove a target consumes that list; uncertain membership is
+NOT CHECKED, never grounds for declaring a fragment stale. CMake diff lines
+are not source removals: subtract sources added back in the same file, then
+check whether the recorded target still names them before flagging removal
+(another target can drop a shared source independently). Three PRs on 2026-10-22
 went red here on the encoding lint after the local gates reported clean,
 because only CI ran it. A new lint in this job that needs no build belongs in
 the hook too.

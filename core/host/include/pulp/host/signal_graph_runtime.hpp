@@ -667,14 +667,14 @@ class SignalGraph : public format::AudioWorkgroupClient {
         std::uint32_t parameter_id = 0;
     };
     // Ordinary/sidechain audio: source before PDC/mixing; feedback: retained input before
-    // current capture, timestamped at receiving block. Attach/detach: stop process() and
-    // pinned-snapshot rendering on the control thread, as for prepare(). Reattachment starts
-    // a fresh 256-record ring and a zero-based sample clock. Reprepare/topology
-    // publication retires the attachment; transport reset detaches it. Serial
-    // routing only; execution-mode changes detach at the next process call.
+    // current capture, stamped at receiving block. Attach/detach may race process(): a displaced
+    // probe is parked (8 per kind; then attach is Busy and detach stops it in place) until no
+    // process() pin or snapshot handle remains, else until reprepare/topology publication.
+    // Fresh 256-record ring at sample 0; transport reset/mode change detaches. Serial only.
     EdgeProbeStatus attach_audio_edge_probe(const PortHandle& source,
                                             const PortHandle& destination);
     void detach_audio_edge_probe();
+    std::size_t parked_edge_probe_count() const; // displaced, not yet reclaimed
     // One control-thread consumer may read concurrently with process(). These
     // methods serialize with other control-thread lifecycle operations.
     bool read_audio_edge_probe(graph::GraphRuntimeProbeSample& sample);
@@ -1289,17 +1289,26 @@ class SignalGraph : public format::AudioWorkgroupClient {
         RoutedParallel,
     };
 
-    // Private graph-ownership token. Public shared ProcessorNodeInstance handles
-    // may outlive node removal, but they do not extend its prepared lifecycle.
-    // Authoring state and every executable snapshot share this token, so its
-    // final destruction releases only after both ownership domains are gone.
+    // Private graph-ownership token, reserved process-wide per instance: a token
+    // for an already-reserved instance does not own its lifecycle. Authoring state
+    // and every executable snapshot share it, so final destruction releases only
+    // after both domains are gone. Public instance handles never extend it.
     struct ProcessorNodeLifetime {
-        explicit ProcessorNodeLifetime(
-            std::shared_ptr<format::ProcessorNodeInstance> value) noexcept;
+        explicit ProcessorNodeLifetime(std::shared_ptr<format::ProcessorNodeInstance> value);
 
         ~ProcessorNodeLifetime();
+        ProcessorNodeLifetime(const ProcessorNodeLifetime&) = delete;
+        ProcessorNodeLifetime& operator=(const ProcessorNodeLifetime&) = delete;
 
         std::shared_ptr<format::ProcessorNodeInstance> instance;
+        bool owns_lifecycle() const noexcept {
+            return owns_lifecycle_;
+        }
+
+      private:
+        struct Registry;
+        static Registry& registry_();
+        bool owns_lifecycle_ = false;
     };
 
     struct CompiledGraph {
@@ -1515,11 +1524,11 @@ class SignalGraph : public format::AudioWorkgroupClient {
             // only ONE path runs per block.
         };
         RoutedPaths routed;
-        std::unique_ptr<format::GraphRuntimeAudioEdgeProbe> audio_edge_probe;
+        format::EdgeProbeCell<format::GraphRuntimeAudioEdgeProbe> audio_edge_probe;
         EdgeProbeIdentity audio_edge_probe_identity;
-        std::unique_ptr<format::GraphRuntimeControlEdgeProbe> control_edge_probe;
+        format::EdgeProbeCell<format::GraphRuntimeControlEdgeProbe> control_edge_probe;
         EdgeProbeIdentity control_edge_probe_identity;
-        std::unique_ptr<format::GraphRuntimeEventEdgeProbe> event_edge_probe;
+        format::EdgeProbeCell<format::GraphRuntimeEventEdgeProbe> event_edge_probe;
         EdgeProbeIdentity event_edge_probe_identity;
 
         // Anticipative rendering for this snapshot (built only when anticipation is
