@@ -3269,6 +3269,17 @@ fixed-capacity publication and explicit refusal in unsupported execution modes.
 Host lifecycle changes must preserve detach-on-reset and the source-edge event
 observation boundary.
 
+Gotcha: probes live on the published `CompiledGraph`, which `process()` reads
+under a `runtime::Slot` pin, so attach/detach race the audio thread. Each probe
+sits in a `format::EdgeProbeCell`: `process_snapshot_impl` loads the pointer
+once per block and uses that copy, and a displaced probe is parked rather than
+freed. Parked probes are freed only when the slot is `quiescent()` and the
+snapshot's `use_count()` is 1 (an `ExecutionSnapshot` render holds the snapshot
+by `shared_ptr`, outside the slot's reader count); otherwise they die with the
+snapshot. Attach/detach must therefore take the snapshot via
+`live_slot_.live()`, not `read_snapshot_()`: their own pin would keep the
+reader count above zero and nothing would ever be reclaimed.
+
 ### Catalog-derived graph notation
 
 `pulp/host/graph_patch.hpp` projects registered Processor descriptors and actual
