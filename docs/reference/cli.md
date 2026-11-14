@@ -1492,10 +1492,45 @@ Remaining limitation:
 
 `pulp graph validate FILE --json` checks a saved `.pulpgraph` and returns
 `valid`, a stable `code`, and graph counts. Invalid input exits nonzero with
-`code: invalid_graph` and a diagnostic `message`. `inspect` and `explain`
+a typed `code` and a diagnostic `message`. `inspect` and `explain`
 report the graph shape without running plugin code. `fmt` rewrites the file in
 canonical JSON form and is byte stable on repeated runs; `canonicalize` remains
 an alias. Formatting refuses unresolved plugin nodes or rejected plugin state.
+
+#### Graph `--json` codes
+
+For graph and notation files the CLI reports the same code name the C++ API
+returns for the same file (`GraphPatchDiagnostic::Code`, spelled by
+`graph_patch_code_name`); it never renames them. The success code is `Ok` for
+`validate`, `fmt` and `render`. A test feeds one set of bad inputs to the C++
+loader and to the CLI and requires identical names.
+
+| Code | Meaning |
+|------|---------|
+| `Ok` | Loaded and valid |
+| `SyntaxError` | Malformed notation |
+| `UnknownNode`, `UnknownPort` | Edge names a node or port that does not exist |
+| `KindMismatch`, `IllegalCycle`, `Duplicate` | Edge or declaration violates the graph rules |
+| `InvalidDocument` | Not a valid `.pulpgraph` document (bad JSON, wrong shape) |
+| `UnsupportedContract` | Unregistered type or version, or an unsupported contract |
+| `ParameterOutOfRange`, `RestoreFailed`, `ResourceLimit` | Value, state restore or size limit refusal |
+| `FileUnreadable` | The file is missing or cannot be read |
+
+CLI-only codes (no C++ diagnostic equivalent) cover option handling, probe and
+render preconditions, and saving: `missing_option`, `invalid_option`,
+`missing_input`, `missing_output`, `unknown_operation`, `invalid_block_frames`,
+`graph_file_limit`, `graph_limit`, `unsupported_node`, `unresolved_node`,
+`ambiguous_node`, `prepare_failed`, `render_failed`, `non_finite_output`,
+`output_failed`, and `saved`. The probe adds `invalid_edge_kind`, `unknown_node`
+(a probe source or destination name that does not exist; distinct from the
+typed `UnknownNode`), `invalid_destination_param`, `event_injection_failed`,
+`non_finite_sample` and `unprepared_latency`. A test requires every code the
+CLI source emits to appear in this list. Save failures use
+`GraphSerializer::save_code_name` (`serialization_refused`, `file_too_large`,
+`parent_unavailable`, `temporary_unavailable`, `write_failed`, `replace_failed`,
+`directory_sync_failed`). The earlier CLI-only spellings `invalid_graph`,
+`file_unreadable` and lowercase `ok` for graph files are retired: the in-tree
+consumers (this repository's tests) moved to the typed names.
 
 `pulp graph save INPUT --output OUTPUT --json` loads a graph through the same
 bounded serializer and writes a canonical copy without modifying the input.

@@ -164,7 +164,7 @@ def main():
     compare(dict(base, path=str(ambiguous)), 'ambiguous_node')
     malformed = directory / 'malformed.pulpgraph'
     malformed.write_text('{broken', encoding="utf-8")
-    compare(dict(base, path=str(malformed)), 'invalid_graph')
+    compare(dict(base, path=str(malformed)), 'InvalidDocument')
     document = json.loads((directory / 'graph.pulpgraph').read_text(encoding="utf-8"))
     for node in document['nodes']:
         if node['name'] == 'source':

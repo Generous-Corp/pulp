@@ -258,7 +258,7 @@ TEST_CASE("pulp graph JSON validation reports a stable error code", "[cli][shell
     write_text(graph, "{broken");
     const auto result = run_pulp({"graph", "validate", graph.string(), "--json"});
     REQUIRE(result.exit_code != 0);
-    REQUIRE(result.stdout_output.find("\"code\": \"invalid_graph\"") != std::string::npos);
+    REQUIRE(result.stdout_output.find("\"code\": \"InvalidDocument\"") != std::string::npos);
     REQUIRE(result.stdout_output.find("\"valid\": false") != std::string::npos);
 }
 
@@ -372,7 +372,7 @@ TEST_CASE("pulp graph fmt is byte stable and render produces a WAV", "[cli][shel
     REQUIRE(read_file(graph) == once);
     const auto valid = run_pulp({"graph", "validate", graph.string(), "--json"});
     REQUIRE(valid.exit_code == 0);
-    REQUIRE(valid.stdout_output.find("\"code\":\"ok\"") != std::string::npos);
+    REQUIRE(valid.stdout_output.find("\"code\":\"Ok\"") != std::string::npos);
     const auto input = project / "input.wav";
     write_constant_wav(input, 2, 48000, 48000, 0.5f);
     const auto rendered = run_pulp({"graph", "render", graph.string(), "--input", input.string(),
@@ -406,7 +406,7 @@ TEST_CASE("pulp graph render drives audio_in from --input and refuses silent ren
     pulp::cli::pkg::JsonParser parser{rendered.stdout_output, 0};
     const auto report = parser.parse();
     REQUIRE(report.get("code") != nullptr);
-    REQUIRE(report.get("code")->as_string() == "ok");
+    REQUIRE(report.get("code")->as_string() == "Ok");
     REQUIRE(report.get("frames")->num_val == static_cast<double>(frames));
     REQUIRE(report.get("sample_rate")->num_val == static_cast<double>(sample_rate));
     REQUIRE(report.get("peak") != nullptr);
