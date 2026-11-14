@@ -331,7 +331,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/indexed_control.hpp",
-        "fingerprint": "sha256:c25979e2e1c3b30cef33b022b908411bed087824f1407777e68d0809ed27632a",
+        "fingerprint": "sha256:12d9cc5bf40f7faae409b300a020caeac564930454da60ef7356e92e46d7c6b3",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

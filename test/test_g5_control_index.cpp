@@ -10,6 +10,7 @@
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 #include <pulp/host/trigger_graph.hpp>
 #include <pulp/signal/control_math.hpp>
+#include <pulp/signal/indexed_control.hpp>
 #include <pulp/state/param_cursor.hpp>
 
 #include <array>
@@ -338,6 +339,63 @@ TEST_CASE("Control scalar rules pin zero division, finite extremes, and reset",
     CHECK(integrator.value() == 0.25f);
 }
 
+TEST_CASE("Control stages expose pure and stateful finite partition-stable forms",
+          "[signal][control-index]") {
+    using pulp::signal::control_clamp;
+    using pulp::signal::control_maximum;
+    using pulp::signal::control_minimum;
+    using pulp::signal::control_safe_divide;
+    CHECK(control_minimum(std::numeric_limits<float>::infinity(), 2.0f) == 0.0f);
+    CHECK(control_maximum(-std::numeric_limits<float>::infinity(), 2.0f) == 2.0f);
+    CHECK(control_clamp(std::numeric_limits<float>::quiet_NaN(), -1.0f, 1.0f) == 0.0f);
+    CHECK(control_safe_divide(1.0f, 0.0f) == 0.0f);
+    CHECK(pulp::signal::map_clip(0.5f, 0.0f, 1.0f, 10.0f, 20.0f) == 15.0f);
+
+    CHECK_FALSE(
+        pulp::signal::hysteresis_step(std::numeric_limits<float>::infinity(), 0.5f, 0.25f, false));
+    pulp::signal::Hysteresis hysteresis;
+    REQUIRE(hysteresis.configure(0.5f, 0.25f));
+    CHECK_FALSE(hysteresis.process(0.49f));
+    CHECK(hysteresis.process(0.5f));
+    CHECK(hysteresis.process(std::numeric_limits<float>::quiet_NaN()));
+    CHECK(hysteresis.process(0.25f) == false);
+
+    const std::array<float, 7> increments{
+        0.2f, 0.2f, std::numeric_limits<float>::infinity(), 0.2f, -0.1f, 0.2f, 0.2f};
+    const auto run_integrator = [&](std::span<const float> input,
+                                    std::span<const std::size_t> partitions) {
+        float state = 0.0f;
+        std::size_t offset = 0;
+        for (const auto count : partitions) {
+            for (std::size_t i = 0; i < count; ++i)
+                state = pulp::signal::integrator_step(state, input[offset + i], -1.0f, 1.0f);
+            offset += count;
+        }
+        return state;
+    };
+    const std::array<std::size_t, 1> whole{increments.size()};
+    const std::array<std::size_t, 3> split{2, 1, 4};
+    CHECK(run_integrator(increments, whole) == run_integrator(increments, split));
+
+    const std::array<float, 6> targets{1.0f, 1.0f, std::numeric_limits<float>::quiet_NaN(),
+                                       0.0f, 0.0f, 1.0f};
+    const auto run_slew = [&](std::span<const float> input,
+                              std::span<const std::size_t> partitions) {
+        pulp::signal::Slew slew;
+        slew.set_rates(0.25f, 0.5f);
+        std::size_t offset = 0;
+        for (const auto count : partitions) {
+            for (std::size_t i = 0; i < count; ++i)
+                (void)slew.process(input[offset + i]);
+            offset += count;
+        }
+        return slew.value();
+    };
+    const std::array<std::size_t, 1> all_targets{targets.size()};
+    const std::array<std::size_t, 3> target_split{1, 2, 3};
+    CHECK(run_slew(targets, all_targets) == run_slew(targets, target_split));
+}
+
 TEST_CASE("Control port kind and canonical persistence reject coercion", "[graph][control-index]") {
     SignalGraph graph;
     REQUIRE(graph.register_custom_node_type(make_control_map_clip_type()));
@@ -439,6 +497,83 @@ TEST_CASE("numeric connections and persistence keep working on trigger nodes",
     const auto loaded = GraphSerializer::from_json(restored, json);
     REQUIRE(loaded.ok);
     CHECK(GraphSerializer::to_json(restored) == json);
+}
+
+TEST_CASE("G-5 trigger chain uses a real feedback edge across block partitions",
+          "[g5][trigger][feedback]") {
+    const auto render = [](std::span<const int> partitions) {
+        SignalGraph graph;
+        const auto input = graph.add_input_node(1);
+        const auto output = graph.add_output_node(1);
+        TriggerProducerConfig producer_config;
+        producer_config.lane_count = 1;
+        producer_config.lanes[0].threshold = 0.5f;
+        const auto onset = graph.add_trigger_producer(producer_config);
+        const auto envelope = graph.add_trigger_envelope({0.5f});
+        const auto modulation = graph.add_trigger_modulation();
+        const auto filter = graph.add_trigger_lowpass(0.25f);
+        REQUIRE(((input && output && onset && envelope && modulation && filter)));
+        REQUIRE(graph.connect(input, 0, onset, 0));
+        REQUIRE(graph.connect(envelope, 0, modulation, 0));
+        REQUIRE(graph.connect(onset, 0, modulation, 1));
+        REQUIRE(graph.connect(modulation, 0, filter, 0));
+        REQUIRE(graph.connect_feedback(filter, 0, filter, 0));
+        REQUIRE(graph.connect(filter, 0, output, 0));
+        REQUIRE(graph.connect_trigger({onset, envelope}) == TriggerGraphResult::Accepted);
+        auto plan = graph.prepare_trigger_plan(48000, 16);
+        REQUIRE(plan.result == TriggerGraphResult::Accepted);
+        REQUIRE(graph.try_install_prepared_trigger_plan(plan.plan) == TriggerGraphResult::Accepted);
+
+        std::array<float, 8> source{0, 1, 0, 0, 0, 0, 0, 0};
+        std::array<float, 8> rendered{};
+        std::size_t cursor = 0;
+        std::vector<std::int64_t> trigger_samples;
+        for (const auto frames : partitions) {
+            REQUIRE(frames > 0);
+            REQUIRE(cursor + static_cast<std::size_t>(frames) <= source.size());
+            const float* input_ptr[] = {source.data() + cursor};
+            float* output_ptr[] = {rendered.data() + cursor};
+            pulp::audio::BufferView<const float> input_view(input_ptr, 1, frames);
+            pulp::audio::BufferView<float> output_view(output_ptr, 1, frames);
+            REQUIRE(graph.process_checked(output_view, input_view, frames) ==
+                    TriggerGraphResult::Accepted);
+            for (const auto& record : graph.trigger_trace())
+                trigger_samples.push_back(static_cast<std::int64_t>(record.sample));
+            cursor += static_cast<std::size_t>(frames);
+        }
+        REQUIRE(cursor == source.size());
+        REQUIRE(trigger_samples.size() == 1);
+        CHECK(trigger_samples.front() == 1);
+        CHECK(rendered[0] == 0.0f);
+        CHECK(rendered[1] > 0.0f);
+        CHECK(rendered[2] > 0.0f);
+        return rendered;
+    };
+
+    const std::array<int, 1> whole{8};
+    const std::array<int, 3> split{1, 3, 4};
+    // A feedback edge carries the previous block's output, so the loop has a
+    // block-sized delay: partitions agree until the first block boundary after
+    // the trigger, and the delayed feedback shows up exactly there.
+    const auto whole_out = render(whole);
+    const auto split_out = render(split);
+    for (std::size_t i = 0; i < 4; ++i)
+        CHECK(whole_out[i] == split_out[i]);
+    CHECK(split_out[4] > whole_out[4]);
+
+    SignalGraph negative;
+    const auto in = negative.add_input_node(1);
+    const auto out = negative.add_output_node(1);
+    const auto onset = negative.add_trigger_producer({});
+    const auto envelope = negative.add_trigger_envelope();
+    const auto filter = negative.add_trigger_lowpass();
+    REQUIRE(((in && out && onset && envelope && filter)));
+    REQUIRE(negative.connect(in, 0, onset, 0));
+    REQUIRE(negative.connect(envelope, 0, filter, 0));
+    REQUIRE(negative.connect_feedback(filter, 0, filter, 0));
+    REQUIRE(negative.connect(filter, 0, out, 0));
+    REQUIRE(negative.connect_trigger({onset, envelope}) == TriggerGraphResult::Accepted);
+    CHECK_FALSE(negative.connect_feedback(filter, 0, filter, 0));
 }
 
 TEST_CASE("restored Control index graphs prepare and future formats name the fix",
