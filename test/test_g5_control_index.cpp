@@ -224,10 +224,10 @@ TEST_CASE("Control index refusals are named and each names its fix", "[graph][co
           ControlProcessResult::OutOfRange);
     CHECK((result == std::array<float, 4>{9, 9, 9, 9}));
 
-    const std::array all{ControlProcessResult::Accepted,       ControlProcessResult::Unbound,
-                         ControlProcessResult::OutOfRange,     ControlProcessResult::StaleEpoch,
-                         ControlProcessResult::WrongStart,     ControlProcessResult::ClockExhausted,
-                         ControlProcessResult::Busy,           ControlProcessResult::UnsupportedMode,
+    const std::array all{ControlProcessResult::Accepted,    ControlProcessResult::Unbound,
+                         ControlProcessResult::OutOfRange,  ControlProcessResult::StaleEpoch,
+                         ControlProcessResult::WrongStart,  ControlProcessResult::ClockExhausted,
+                         ControlProcessResult::Busy,        ControlProcessResult::UnsupportedMode,
                          ControlProcessResult::RenderFailed};
     std::vector<std::string> names;
     for (const auto result_code : all) {

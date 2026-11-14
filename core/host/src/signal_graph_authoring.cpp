@@ -838,7 +838,7 @@ bool SignalGraph::connect_audio_rate_modulation_impl_(NodeId src, PortIndex src_
         return false;
     const auto& port = src_n->output_ports[src_audio_port];
     if ((expected_kind == PortKind::Control ? port.kind != PortKind::Control
-                                             : !numeric_overload_carries(*src_n, port)) ||
+                                            : !numeric_overload_carries(*src_n, port)) ||
         (source_handle && (port.name != source_handle->name || port.owner != source_handle->owner ||
                            port.incarnation != source_handle->incarnation)))
         return false;
