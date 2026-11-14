@@ -1253,9 +1253,9 @@ class IdleSource final : public Processor {
     }
     void define_parameters(pulp::state::StateStore&) override {}
     void prepare(const PrepareContext&) override {}
-    void process(pulp::audio::BufferView<float>& output, const pulp::audio::BufferView<const float>&,
-                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer& midi_out,
-                 const ProcessContext&) override {
+    void process(pulp::audio::BufferView<float>& output,
+                 const pulp::audio::BufferView<const float>&, pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer& midi_out, const ProcessContext&) override {
         ++calls;
         midi_out.clear();
         if (emit_note)

@@ -146,9 +146,8 @@ bool ProcessorNode::process_binding(ProcessBlock& block, const GraphRuntimeNodeP
     const auto empty_midi = [](const midi::MidiBuffer* buffer) noexcept {
         // The executor attaches its (usually empty) UMP buffer to every routed
         // MIDI buffer, so a non-null UMP pointer is not an inbound event.
-        return buffer == nullptr ||
-               (buffer->empty() && buffer->sysex_size() == 0 &&
-                (buffer->ump() == nullptr || buffer->ump()->empty()));
+        return buffer == nullptr || (buffer->empty() && buffer->sysex_size() == 0 &&
+                                     (buffer->ump() == nullptr || buffer->ump()->empty()));
     };
     const bool nothing_inbound =
         ctx.node_inputs.num_channels() == 0 && empty_midi(ctx.node_midi_in) &&

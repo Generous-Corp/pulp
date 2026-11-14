@@ -1098,10 +1098,10 @@ TEST_CASE("Voice bank idle skip renders identical audio with skipping on and off
     // a retrigger of the same key, a sustain pedal hold and release, and the
     // scoped all-sound-off. Long gaps between them let slots go idle.
     const std::vector<ScriptedEvent> basic{
-        on(3, 1, 69, 127),   off(600, 1, 69),     on(1500, 1, 69),    on(1700, 1, 69, 90),
-        off(1900, 1, 69),    on(2400, 2, 60),     off(2550, 2, 60),   cc(3000, 1, 64, 127),
-        on(3010, 3, 62),     off(3100, 3, 62),    cc(3500, 1, 64, 0), on(4000, 4, 62),
-        on(4010, 5, 64),     cc(4500, 4, 120, 0), cc(4800, 5, 120, 0)};
+        on(3, 1, 69, 127), off(600, 1, 69),     on(1500, 1, 69),    on(1700, 1, 69, 90),
+        off(1900, 1, 69),  on(2400, 2, 60),     off(2550, 2, 60),   cc(3000, 1, 64, 127),
+        on(3010, 3, 62),   off(3100, 3, 62),    cc(3500, 1, 64, 0), on(4000, 4, 62),
+        on(4010, 5, 64),   cc(4500, 4, 120, 0), cc(4800, 5, 120, 0)};
     require_on_off_identical(basic, 6000, knobs, midi::MpeVoiceStealMode::Oldest);
 
     // Nine notes force a steal; repeat for every steal policy.
@@ -1126,8 +1126,8 @@ TEST_CASE("A note arriving mid-block wakes a skipped voice on its exact sample",
     IdleKnobs off_knobs;
     IdleKnobs skip_knobs;
     const auto without = render_idle(off_knobs, script, 8 * kBlock, kBlock, VoiceBankIdleSkip::Off);
-    const auto with = render_idle(skip_knobs, script, 8 * kBlock, kBlock,
-                                  VoiceBankIdleSkip::SkipInactiveSlots);
+    const auto with =
+        render_idle(skip_knobs, script, 8 * kBlock, kBlock, VoiceBankIdleSkip::SkipInactiveSlots);
     REQUIRE(with.skipped_after_block[kNoteBlock - 1] > 0);
     const auto base = kNoteBlock * kBlock;
     for (std::size_t i = 0; i < 3; ++i)
@@ -1185,8 +1185,8 @@ TEST_CASE("Idle skip waits out declared latency and tail", "[host][graph][voice-
     off_knobs.idle_output = IdleOutput::DelayedClick;
     auto skip_knobs = off_knobs;
     const auto without = render_idle(off_knobs, script, kTotal, kBlock, VoiceBankIdleSkip::Off);
-    const auto with = render_idle(skip_knobs, script, kTotal, kBlock,
-                                  VoiceBankIdleSkip::SkipInactiveSlots);
+    const auto with =
+        render_idle(skip_knobs, script, kTotal, kBlock, VoiceBankIdleSkip::SkipInactiveSlots);
     bool click = false;
     for (std::size_t i = 256; i < 320; ++i)
         click = click || with.audio.left[i] != 0.0f;
@@ -1198,8 +1198,8 @@ TEST_CASE("Idle skip waits out declared latency and tail", "[host][graph][voice-
     // click, which is what the hold exists to prevent.
     auto short_knobs = off_knobs;
     short_knobs.tail_samples = 0;
-    const auto unprotected = render_idle(short_knobs, script, kTotal, kBlock,
-                                         VoiceBankIdleSkip::SkipInactiveSlots);
+    const auto unprotected =
+        render_idle(short_knobs, script, kTotal, kBlock, VoiceBankIdleSkip::SkipInactiveSlots);
     CHECK_FALSE(same_bytes(without.audio, unprotected.audio));
 }
 
@@ -1238,12 +1238,12 @@ TEST_CASE("A voice that is not silent when inactive is never skipped",
 TEST_CASE("Changing a slot parameter clears the idle confirmation",
           "[host][graph][voice-bank][idle-skip]") {
     IdleKnobs knobs;
-    const auto result = render_idle(
-        knobs, {}, 10 * 64, 64, VoiceBankIdleSkip::SkipInactiveSlots,
-        midi::MpeVoiceStealMode::Oldest, [](std::size_t block, VoiceBankBinding& bank) {
-            if (block == 5)
-                REQUIRE(bank.set_slot_parameter(3, "level", 0.5f));
-        });
+    const auto result =
+        render_idle(knobs, {}, 10 * 64, 64, VoiceBankIdleSkip::SkipInactiveSlots,
+                    midi::MpeVoiceStealMode::Oldest, [](std::size_t block, VoiceBankBinding& bank) {
+                        if (block == 5)
+                            REQUIRE(bank.set_slot_parameter(3, "level", 0.5f));
+                    });
     // Every slot ran once to confirm silence. Slot 3 ran once more after its
     // parameter changed, and then went back to being skipped.
     for (std::size_t slot = 0; slot < 8; ++slot)
