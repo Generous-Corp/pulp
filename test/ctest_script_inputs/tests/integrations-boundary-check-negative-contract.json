@@ -1,0 +1,13 @@
+{
+ "name": "integrations-boundary-check-negative-contract",
+ "record": {
+  "entry": "tools/scripts/test_integrations_boundary_check.py",
+  "inputs": [
+   "core/format/CMakeLists.txt",
+   "core/render/CMakeLists.txt",
+   "core/state/CMakeLists.txt",
+   "tools/scripts/test_integrations_boundary_check.py"
+  ],
+  "kind": "python"
+ }
+}

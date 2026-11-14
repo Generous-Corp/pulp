@@ -2,6 +2,7 @@
 // included there, so this fixture adds no redundant heavy-header consumer.
 #include "../harness/rt_allocation_probe.hpp"
 #include "../harness/rt_contract_probe.hpp"
+#include "../harness/paced_timing_cell.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/format/process_context.hpp>
@@ -174,14 +175,17 @@ Observation render(std::size_t block_frames, bool routed) {
     return observed;
 }
 
-PacedObservation render_paced(std::size_t block_frames, bool routed) {
-    struct PacedState {
-        std::uint64_t producer_cursor = 0;
-        std::uint64_t consumer_cursor = 0;
-        std::size_t delivered = 0;
-        std::size_t bad = 0;
-    } state;
-    SignalGraph graph;
+struct PacedState {
+    std::uint64_t producer_cursor = 0;
+    std::uint64_t consumer_cursor = 0;
+    std::size_t delivered = 0;
+    std::size_t bad = 0;
+};
+
+// Producer -> consumer graph-event chain shared by the paced measurement and
+// the paced-timing matrix cell. Every block emits one event at its first
+// sample; the consumer writes the payload (17) to output sample zero.
+void build_paced_graph(SignalGraph& graph, PacedState& state, bool routed) {
     CustomNodeType type;
     type.type_id = "test.g5.graph-event.rt-paced";
     type.num_input_ports = type.num_output_ports = 1;
@@ -219,6 +223,12 @@ PacedObservation render_paced(std::size_t block_frames, bool routed) {
     REQUIRE(graph.connect_graph_event({producer, consumer}) == GraphEventBindingResult::Accepted);
     graph.set_canonical_executor_routing_enabled(routed);
     REQUIRE(graph.prepare(48000.0, 4096));
+}
+
+PacedObservation render_paced(std::size_t block_frames, bool routed) {
+    PacedState state;
+    SignalGraph graph;
+    build_paced_graph(graph, state, routed);
 
     std::array<float, 4096> source{};
     std::array<float, 4096> destination{};
@@ -417,6 +427,39 @@ TEST_CASE("G5 graph event callback paced measurement", "[.][host][graph][g5][eve
                       << " missed_deadlines=" << measured.missed_deadlines << '\n';
         }
     }
+}
+
+// Paced-timing matrix cell: the same producer/consumer graph-event chain under
+// a configurable fixed-origin callback count. Timing runs carry no scoped
+// resource probes; the oracle is the delivered payload on every block.
+TEST_CASE("G5 graph event paced matrix cell", "[.][host][graph][g5][events][paced-matrix]") {
+    const auto config = pulp::test::paced::read_config("routed", 128);
+    REQUIRE((config.variant == "direct" || config.variant == "routed"));
+    REQUIRE(config.rate == 48000);
+    REQUIRE(config.frames <= 4096);
+    PacedState state;
+    SignalGraph graph;
+    build_paced_graph(graph, state, config.variant == "routed");
+    std::array<float, 4096> source{};
+    std::array<float, 4096> destination{};
+    const auto frames = static_cast<int>(config.frames);
+    const float* source_ptr = source.data();
+    float* destination_ptr = destination.data();
+    pulp::audio::BufferView<const float> in(&source_ptr, 1, config.frames);
+    pulp::audio::BufferView<float> out(&destination_ptr, 1, config.frames);
+    std::size_t bad_before = 0;
+    const auto rows = pulp::test::paced::run_cell(
+        config,
+        [&](std::size_t, std::uint64_t) {
+            bad_before = state.bad;
+            graph.process(out, in, frames);
+        },
+        [&](std::size_t index, std::uint64_t) {
+            return destination[0] == 17.0f && state.bad == bad_before &&
+                   state.delivered == index + 1;
+        });
+    CHECK(pulp::test::paced::print_cell("g5-graph-event", config, rows) == 0);
+    CHECK(state.delivered == config.callbacks);
 }
 
 namespace g12_activation_fixture {

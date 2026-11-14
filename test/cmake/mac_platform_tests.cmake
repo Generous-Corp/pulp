@@ -124,7 +124,8 @@ if(APPLE AND NOT PULP_IOS)
         Catch2::Catch2WithMain
         "-framework CoreMIDI"
     )
-    catch_discover_tests(pulp-test-coremidi-shared-client)
+    catch_discover_tests(pulp-test-coremidi-shared-client
+        PROPERTIES RESOURCE_LOCK pulp_coremidi)
 
     # A port connected to an endpoint that was replaced (host sleep, unplug)
     # must report closed so its owner reopens it. In-process virtual endpoints
@@ -138,7 +139,8 @@ if(APPLE AND NOT PULP_IOS)
         "-framework CoreMIDI"
         "-framework CoreFoundation"
     )
-    catch_discover_tests(pulp-test-coremidi-reconnect)
+    catch_discover_tests(pulp-test-coremidi-reconnect
+        PROPERTIES RESOURCE_LOCK pulp_coremidi)
 endif()
 if(APPLE AND NOT PULP_IOS)
     # AppKit re-asks which cursor to show when the pointer MOVES and never

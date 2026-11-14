@@ -227,6 +227,13 @@ std::string handle_graph(const std::string& params_json) {
     }
     if (op == "fmt")
         command += " --notation";
+    // A graph that reads audio_in refuses to render without a source, so the
+    // read-only render forwards the input WAV; the output WAV stays CLI-only.
+    if (op == "render") {
+        const auto input = extract_string(params_json, "input");
+        if (!input.empty())
+            command += " --input " + shell_quote(input);
+    }
     const auto result = exec_with_status(command + " 2>&1");
     return "{\"isError\":" + std::string(result.failed() ? "true" : "false") +
            ",\"content\":[{\"type\":\"text\",\"text\":" + json_string(result.output) + "}]}";
