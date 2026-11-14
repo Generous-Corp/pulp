@@ -23,3 +23,6 @@ if(UNIX AND NOT CMAKE_CROSSCOMPILING AND TARGET pulp-host)
         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_graph_patch_sdk_consumer.cmake")
     set_tests_properties(cmake-graph-patch-sdk-consumer PROPERTIES LABELS "cmake;sdk;graph;g2" TIMEOUT 600)
 endif()
+
+# Whole-file graph reload is the graph-patch document format applied live.
+include("${CMAKE_CURRENT_LIST_DIR}/graph_file_reload_tests.cmake")

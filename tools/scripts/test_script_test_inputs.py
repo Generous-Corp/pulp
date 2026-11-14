@@ -957,11 +957,12 @@ class SpawnScanTests(unittest.TestCase):
         root = HERE.parents[1]
         host = "\n".join((root / "core/host/include/pulp/host" / name).read_text(encoding="utf-8")
                          for name in ("plugin_slot.hpp", "scanner.hpp", "dl_shim.hpp", "node_pack.hpp",
-                                      "signal_graph_runtime.hpp", "graph_serializer.hpp", "graph_patch.hpp"))
+                                      "signal_graph_runtime.hpp", "graph_serializer.hpp", "graph_patch.hpp",
+                                      "graph_file_reload.hpp", "signal_graph_control.hpp"))
         host += "\n" + "\n".join((root / "core/host/src" / name).read_text(encoding="utf-8")
                                   for name in ("plugin_slot.cpp", "plugin_slot_clap.cpp", "scanner_clap.cpp"))
         for api in sti.LOAD_APIS:
-            name = re.sub(r"\\s\*\\\($", "", api).split("::")[-1]
+            name = re.sub(r"\\s\*\\\($", "", api).removesuffix(r"\b").split("::")[-1]
             self.assertRegex(host, r"\b%s\s*\(" % re.escape(name), api)
 
 
@@ -1057,6 +1058,33 @@ class LoaderCoverageTests(unittest.TestCase):
                 with mock.patch.object(sti, "LOAD_APIS", remaining):
                     missing = sti.loader_coverage(HERE.parents[1])
                 self.assertEqual([item.split(" ")[0] for item in missing], [name])
+
+    def test_reload_transaction_declarations_are_spawn_signals(self) -> None:
+        # Object method calls omit the class qualifier, so detect the type at
+        # construction instead of registering only an unreachable call spelling.
+        for text in ("GraphFileReloadTransaction reload(graph); reload.prepare(text, format, catalog, 48000, 64);",
+                     "pulp::host::GraphFileReloadTransaction reload{graph};",
+                     "GraphFileReloadTransaction::prepare(text)"):
+            with self.subTest(source=text):
+                self.assertIsNotNone(sti.SPAWN_SIGNAL.search(text))
+        self.assertIsNone(sti.SPAWN_SIGNAL.search("GraphFileReloadTransactionOther reload(graph);"))
+
+    def test_deleted_reload_transaction_registration_reports_live_wrapper(self) -> None:
+        remaining = tuple(api for api in sti.LOAD_APIS if not api.startswith("GraphFileReloadTransaction"))
+        self.assertEqual(len(remaining), len(sti.LOAD_APIS) - 1)
+        with mock.patch.object(sti, "LOAD_APIS", remaining):
+            missing = sti.loader_coverage(HERE.parents[1])
+        self.assertEqual(missing, ["GraphFileReloadTransaction::prepare (core/host/src/graph_file_reload.cpp)"])
+
+    def test_authority_reload_wrapper_is_registered_and_detected(self) -> None:
+        for call in ("authority.reload_graph_file(text)",
+                     "SignalGraphControlAuthority::reload_graph_file(text)"):
+            self.assertIsNotNone(sti.SPAWN_SIGNAL.search(call))
+        remaining = tuple(api for api in sti.LOAD_APIS if not api.startswith("reload_graph_file"))
+        self.assertEqual(len(remaining), len(sti.LOAD_APIS) - 1)
+        with mock.patch.object(sti, "LOAD_APIS", remaining):
+            missing = sti.loader_coverage(HERE.parents[1])
+        self.assertEqual(missing, ["SignalGraphControlAuthority::reload_graph_file (core/host/src/signal_graph_control.cpp)"])
 
     def test_a_public_loader_outside_load_apis_is_reported(self) -> None:
         missing = self.host({"core/host/src/a.cpp": "int public_load(const char* p) { return dlopen(p, 0) != 0; }\n"})

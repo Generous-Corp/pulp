@@ -223,6 +223,8 @@ if(TARGET pulp-host)
         pulp::host pulp::platform Catch2::Catch2WithMain)
     target_compile_definitions(pulp-test-cli-graph-code-parity PRIVATE
         PULP_CLI_SOURCE_ROOT="${CMAKE_SOURCE_DIR}")
+    pulp_test_data(pulp-test-cli-graph-code-parity
+        PATHS test/test_cli_graph_code_parity.cpp)
     pulp_bind_cli_shellout_target(pulp-test-cli-graph-code-parity)
     pulp_test_spawns(pulp-test-cli-graph-code-parity pulp-cli)
     catch_discover_tests(pulp-test-cli-graph-code-parity)
@@ -329,6 +331,7 @@ catch_discover_tests(pulp-test-cli-tweaks-shellout)
 add_library(pulp-test-cli-support-objects OBJECT EXCLUDE_FROM_ALL
     ${CMAKE_SOURCE_DIR}/tools/cli/tartci_lease.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_watch_shell.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/focused_build.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/shell_redirect.cpp
