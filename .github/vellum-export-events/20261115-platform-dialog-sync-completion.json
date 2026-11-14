@@ -5,9 +5,9 @@
   "created_at": "2026-11-15T00:00:00Z",
   "receipt_export_id": "20261107-f0ac0a4ff392",
   "paths": [
+    "core/platform/platform/mac/file_dialog_async_mac.mm",
     "core/platform/src/dialog_internal.hpp",
-    "core/platform/src/platform_dialogs_stub.cpp",
-    "core/platform/platform/mac/file_dialog_async_mac.mm"
+    "core/platform/src/platform_dialogs_stub.cpp"
   ],
   "vellum_inherits": true,
   "rationale": "A dialog that completes inside the call that opens it is no longer cancelled by scope teardown, the unsupported-platform stubs are not compiled on macOS, and a filter whose extensions are all invalid shows no panel instead of allowing every file. Host-neutral, with no view or render dependency; the Vellum port carries the same bytes."
