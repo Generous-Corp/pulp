@@ -62,6 +62,10 @@ class OfflineTests(unittest.TestCase):
         self.write(CLI, "add_executable(pulp-cli\n    cli_main.cpp\n    cli_sdk.cpp\n)\n")
         self.write("tools/cli/cli_main.cpp", "int main() { return 0; }\n")
         self.write("tools/cli/cli_sdk.cpp", "void run() { ChildProcess p; }\n")
+        # This source is present on the base branch but is not in the target;
+        # a later CMake-only list edit must still inspect its spawn signal.
+        self.write("tools/cli/cli_watch_shell.cpp",
+                   "void watch() { ChildProcess shell; }\n")
         self.write(CLI_TESTS, "add_executable(pulp-test-cli-shellout-loop "
                               "test_cli_shellout_loop.cpp)\n")
         self.write("test/test_cli_shellout_loop.cpp", "int y = 0;\n")
@@ -155,8 +159,38 @@ class OfflineTests(unittest.TestCase):
         self.git("branch", "-f", "main", "HEAD")
         self.write("tools/scripts/unrelated.py", "VALUE = 1\n")
         self.commit("test: unrelated module")
+        report = offline.check(self.root, "main")
+        self.assertEqual(report.checked, 0)
         rc, _, err = self.run_main()
         self.assertEqual(rc, 0, err)
+
+    def test_cmake_only_source_list_addition_needs_configure(self) -> None:
+        self.write(CLI, "add_executable(pulp-cli\n    cli_main.cpp\n    cli_sdk.cpp\n"
+                       "    cli_watch_shell.cpp\n)\n")
+        self.commit("test: add existing spawner to target")
+        rc, _, err = self.run_main()
+        self.assertEqual(rc, 1, err)
+        self.assertIn("executables/pulp-cpp.json (pulp-cpp)", err)
+        self.assertIn("tools/cli/cli_watch_shell.cpp calls a process", err)
+
+    def test_cmake_only_source_list_removal_needs_configure(self) -> None:
+        self.write(CLI, "add_executable(pulp-cli\n    cli_main.cpp\n)\n")
+        self.commit("test: remove recorded spawner from target")
+        rc, _, err = self.run_main()
+        self.assertEqual(rc, 1, err)
+        self.assertIn("executables/pulp-cpp.json (pulp-cpp)", err)
+        self.assertIn("tools/cli/cli_sdk.cpp was removed from a CMake source list", err)
+
+    def test_cmake_list_variable_is_not_silently_truncated(self) -> None:
+        self.write(QUALITY,
+                   "set(_trial_args \"tools/ci/governed-build.sh;tools/mcp/server.py\")\n"
+                   "add_test(NAME cutover-trial-selftest COMMAND ${Python3_EXECUTABLE}\n"
+                   f"    ${{CMAKE_SOURCE_DIR}}/{SELFTEST} ${{_trial_args}})\n")
+        self.commit("test: use a multi-value CMake list")
+        rc, _, err = self.run_main()
+        self.assertEqual(rc, 0, err)
+        self.assertIn("NOT CHECKED cutover-trial-selftest", err)
+        self.assertIn("multi-value CMake list", err)
 
     def test_newly_resolved_transitive_import_selects_unchanged_importer(self) -> None:
         self.append(SELFTEST, "import cutover_trial\n")
