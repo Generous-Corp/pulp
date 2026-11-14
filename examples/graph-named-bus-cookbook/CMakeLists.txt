@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.24)
 project(PulpGraphNamedBusCookbook LANGUAGES CXX)
 
-find_package(Pulp CONFIG REQUIRED COMPONENTS format)
+find_package(Pulp CONFIG REQUIRED COMPONENTS format host)
 
 add_executable(pulp-graph-named-bus-cookbook main.cpp)
 target_compile_features(pulp-graph-named-bus-cookbook PRIVATE cxx_std_20)
-target_link_libraries(pulp-graph-named-bus-cookbook PRIVATE Pulp::format)
+target_link_libraries(pulp-graph-named-bus-cookbook PRIVATE Pulp::format Pulp::host)
 
 enable_testing()
 add_test(NAME graph-named-bus-cookbook COMMAND pulp-graph-named-bus-cookbook)
@@ -15,3 +15,9 @@ add_test(NAME graph-named-bus-planted-swap
 set_tests_properties(graph-named-bus-planted-swap PROPERTIES
                      LABELS "examples;installed-sdk;graph;negative"
                      PASS_REGULAR_EXPRESSION "named-bus planted defect detected: swapped-names")
+add_test(NAME graph-named-bus-planted-graph-swap
+         COMMAND pulp-graph-named-bus-cookbook --planted-graph-swap)
+set_tests_properties(graph-named-bus-planted-graph-swap PROPERTIES
+                     LABELS "examples;installed-sdk;graph;negative"
+                     PASS_REGULAR_EXPRESSION
+                     "named-bus graph planted defect detected: swapped-names")
