@@ -101,6 +101,7 @@ TEST_CASE("Inspector profiles separate observation, typed control, and runtime e
         InspectorCapability::GraphSampleRegionRead,
         InspectorCapability::GraphSampleRegionEdit,
         InspectorCapability::ModulationRouteEdit,
+        InspectorCapability::GraphFileReload,
         InspectorCapability::VendorRead,
         InspectorCapability::VendorGesture,
     });
