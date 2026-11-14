@@ -113,23 +113,16 @@ TEST_CASE("GraphSerializer inspection refuses identity and parser hazards",
     CHECK(hostile_depth.refusal == GraphDocumentRefusal::NestingLimitExceeded);
 }
 
-TEST_CASE("GraphSerializer admits the reserved saved identity envelope",
+TEST_CASE("GraphSerializer refuses an incomplete saved identity envelope",
           "[host][serializer][g3][d5]") {
-    const auto inspected = GraphSerializer::inspect_document(
-        R"({"identity_schema":"pulp.graph.saved-identity.v6","bindings":{},"format_version":4})");
-    REQUIRE(inspected.ok());
-    CHECK(inspected.document.profile() == "pulp.graph.saved-identity.v6");
-    CHECK(inspected.document.semantic_digest().starts_with("sha256:"));
-
-    // The envelope is format-independent: a v4 document stays inspectable
-    // after the writer advances, and the current writer format is admitted.
+    // identity_schema without logical_identities/nodes is not a complete envelope.
+    for (const int version : {4, 5}) {
+        const auto doc = std::string(R"({"identity_schema":"pulp.graph.saved-identity.v6",)") +
+                         R"("bindings":{},"format_version":)" + std::to_string(version) + "}";
+        const auto refused = GraphSerializer::inspect_document(doc);
+        CHECK(refused.refusal == GraphDocumentRefusal::IdentityEnvelopeInvalid);
+    }
     REQUIRE(GraphSerializer::current_format_version() == 5);
-    const auto current = GraphSerializer::inspect_document(
-        R"({"identity_schema":"pulp.graph.saved-identity.v6","bindings":{},"format_version":5})");
-    REQUIRE(current.ok());
-    CHECK(current.document.format_version() == 5);
-    CHECK(inspected.document.format_version() == 4);
-    CHECK(current.document.semantic_digest() != inspected.document.semantic_digest());
 
     const auto next = GraphSerializer::inspect_document(
         R"({"identity_schema":"pulp.graph.saved-identity.v6","bindings":{},"format_version":6})");
@@ -207,6 +200,50 @@ TEST_CASE("GraphSerializer saved identity requires an exact identity to node bij
     SignalGraph untouched;
     CHECK_FALSE(GraphSerializer::from_saved_document(untouched, missing).ok);
     CHECK(untouched.nodes().empty());
+
+    // Envelope with identity_schema but no logical_identities is refused whole.
+    {
+        auto copy = choc::json::parse(saved);
+        auto stripped = choc::value::createObject("doc");
+        for (std::uint32_t i = 0; i < copy.size(); ++i) {
+            const auto member = copy.getObjectMemberAt(i);
+            if (std::string(member.name) != "logical_identities")
+                stripped.addMember(member.name, member.value);
+        }
+        const auto text = choc::json::toString(stripped, true);
+        CHECK_FALSE(GraphSerializer::inspect_document(text).ok());
+        SignalGraph intact;
+        CHECK_FALSE(GraphSerializer::from_saved_document(intact, text).ok);
+        CHECK(intact.nodes().empty());
+    }
+
+    // A serialized node with no identity or binding (consistent omission) is refused.
+    {
+        auto copy = choc::json::parse(saved);
+        auto identities = choc::value::createEmptyArray();
+        const auto& original = copy["logical_identities"]["identities"];
+        REQUIRE(original.size() == 2);
+        identities.addArrayElement(original[0]);
+        auto logical = choc::value::createObject("logical");
+        const auto& source = copy["logical_identities"];
+        for (std::uint32_t i = 0; i < source.size(); ++i) {
+            const auto member = source.getObjectMemberAt(i);
+            if (std::string(member.name) == "identities")
+                logical.addMember("identities", identities);
+            else
+                logical.addMember(member.name, member.value);
+        }
+        const std::string kept(original[0]["id"].getString());
+        copy.setMember("logical_identities", logical);
+        auto one = choc::value::createObject("bindings");
+        one.addMember(kept, bindings[kept].getInt64());
+        copy.setMember("bindings", one);
+        const auto text = choc::json::toString(copy, true);
+        CHECK_FALSE(GraphSerializer::inspect_document(text).ok());
+        SignalGraph intact;
+        CHECK_FALSE(GraphSerializer::from_saved_document(intact, text).ok);
+        CHECK(intact.nodes().empty());
+    }
 }
 
 TEST_CASE("GraphSerializer semantic digest excludes editor layout", "[host][serializer][g3]") {
