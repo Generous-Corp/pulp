@@ -1279,6 +1279,14 @@ if(Python3_Interpreter_FOUND)
         --build-dir "${CMAKE_BINARY_DIR}")
     set_tests_properties(ctest-scheduling-contract PROPERTIES TIMEOUT 120)
 
+    # CoreMIDI endpoints are server-global, so every suite that creates them
+    # must hold the shared pulp_coremidi lock or two of them race in parallel
+    # ctest. Reads an already-configured build.
+    add_test(NAME ctest-coremidi-lock-contract COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_ctest_coremidi_lock.py"
+        --build-dir "${CMAKE_BINARY_DIR}")
+    set_tests_properties(ctest-coremidi-lock-contract PROPERTIES TIMEOUT 120)
+
     # Live-build check: reports a governed build running in THIS checkout, which
     # Shipyard's local mac backend does by design. Its one job is to tell a live
     # marker from the one a killed build necessarily leaves behind, so the test

@@ -3046,6 +3046,43 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-97b12c5f4883"
+paths = ["tools/scripts/test_ctest_coremidi_lock.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "configure-only-selftest",
+  "ctest-coremidi-lock-contract",
+  "flake-exoneration-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-9f03d2863eaf"
 paths = ["tools/scripts/test_ctest_label_exclusion_guard.py"]
 tests = [
@@ -8840,6 +8877,7 @@ paths = [
   "tools/scripts/test_coverage_tier_check.py",
   "tools/scripts/test_coverage_tier_check_extra.py",
   "tools/scripts/test_cross_platform_check_concurrency.py",
+  "tools/scripts/test_ctest_coremidi_lock.py",
   "tools/scripts/test_ctest_label_exclusion_guard.py",
   "tools/scripts/test_ctest_nonruns.py",
   "tools/scripts/test_ctest_unique_names_check.py",
@@ -9458,6 +9496,7 @@ paths = [
   "tools/scripts/test_coverage_tier_check.py",
   "tools/scripts/test_coverage_tier_check_extra.py",
   "tools/scripts/test_cross_platform_check_concurrency.py",
+  "tools/scripts/test_ctest_coremidi_lock.py",
   "tools/scripts/test_ctest_label_exclusion_guard.py",
   "tools/scripts/test_ctest_nonruns.py",
   "tools/scripts/test_ctest_unique_names_check.py",
