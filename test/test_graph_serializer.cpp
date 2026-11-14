@@ -110,6 +110,20 @@ TEST_CASE("GraphSerializer admits the reserved saved identity envelope",
     REQUIRE(inspected.ok());
     CHECK(inspected.document.profile() == "pulp.graph.saved-identity.v6");
     CHECK(inspected.document.semantic_digest().starts_with("sha256:"));
+
+    // The envelope is format-independent: a v4 document stays inspectable
+    // after the writer advances, and the current writer format is admitted.
+    REQUIRE(GraphSerializer::current_format_version() == 5);
+    const auto current = GraphSerializer::inspect_document(
+        R"({"identity_schema":"pulp.graph.saved-identity.v6","bindings":{},"format_version":5})");
+    REQUIRE(current.ok());
+    CHECK(current.document.format_version() == 5);
+    CHECK(inspected.document.format_version() == 4);
+    CHECK(current.document.semantic_digest() != inspected.document.semantic_digest());
+
+    const auto next = GraphSerializer::inspect_document(
+        R"({"identity_schema":"pulp.graph.saved-identity.v6","bindings":{},"format_version":6})");
+    CHECK(next.refusal == GraphDocumentRefusal::UnsupportedFutureVersion);
 }
 
 namespace {

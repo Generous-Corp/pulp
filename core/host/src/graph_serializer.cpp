@@ -146,6 +146,10 @@ inline double get_double(const V& v) {
 // v5 is emitted only when a graph needs typed ports or Control edges. Older
 // readers refuse the envelope before they could reinterpret those as Audio.
 constexpr int kFormatVersion = 5;
+// The saved-identity envelope is format-independent and first shipped on v4,
+// so inspection admits every format from v4 through the current writer. A v4
+// envelope keeps its semantic digest when the writer advances to v5.
+constexpr int kMinInspectedFormatVersion = 4;
 constexpr std::size_t kMaxSerializedSampleRegionConnections = 2'048;
 constexpr std::size_t kMaxSerializedNodes = 512;
 constexpr std::size_t kMaxSerializedConnections = 16'384;
@@ -1084,7 +1088,7 @@ GraphDocumentInspection GraphSerializer::inspect_document(std::string_view json)
                 return result;
             }
             format_version = *version;
-            if (format_version < kFormatVersion) {
+            if (format_version < kMinInspectedFormatVersion) {
                 result.refusal = GraphDocumentRefusal::InvalidFormatVersion;
                 result.detail = "saved document format is older than this inspector supports";
                 return result;
