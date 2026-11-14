@@ -318,6 +318,43 @@ TEST_CASE("G6 binding refuses wrong shape and stale deferred generations",
                                   state) == VoiceBankBindingCode::StaleEpoch);
 }
 
+TEST_CASE("G6 retired bank's deferred token is a stale epoch on a replacement bank",
+          "[host][graph][g6][swap]") {
+    VoiceBankBindingResult status;
+    auto retired = make_bank(schema(), status);
+    REQUIRE(retired);
+    REQUIRE(step(*retired, 0, {midi::MidiEvent::note_on(1, 69, 127)}) == VoiceBankBindingCode::Ok);
+    midi::MpeNoteState note{};
+    bool releasing = true;
+    REQUIRE(retired->owner().slot_note(0, note, releasing));
+    const auto retired_epoch = retired->epoch();
+
+    // The replacement plays the same note, so its tracker hands out the same
+    // generation in the same slot: only the epoch can tell the tokens apart.
+    auto replacement = make_bank(schema(), status);
+    REQUIRE(replacement);
+    CHECK(replacement->epoch() != retired_epoch);
+    REQUIRE(step(*replacement, 0, {midi::MidiEvent::note_on(1, 69, 127)}) ==
+            VoiceBankBindingCode::Ok);
+    midi::MpeNoteState replacement_note{};
+    REQUIRE(replacement->owner().slot_note(0, replacement_note, releasing));
+    REQUIRE(replacement_note.note_id == note.note_id);
+    CHECK(replacement->dispatch_deferred(retired_epoch, 0, note.note_id,
+                                         midi::MpeExpressionEvent::Kind::NoteOff,
+                                         note) == VoiceBankBindingCode::StaleEpoch);
+
+    // Activation also draws from the shared sequence: the retired bank's next
+    // epoch cannot land on the replacement's live one.
+    REQUIRE(retired->activate(status));
+    CHECK(retired->epoch() != replacement->epoch());
+    CHECK(replacement->dispatch_deferred(retired->epoch(), 0, note.note_id,
+                                         midi::MpeExpressionEvent::Kind::NoteOff,
+                                         note) == VoiceBankBindingCode::StaleEpoch);
+    CHECK(replacement->dispatch_deferred(replacement->epoch(), 0, replacement_note.note_id,
+                                         midi::MpeExpressionEvent::Kind::NoteOff,
+                                         replacement_note) == VoiceBankBindingCode::Ok);
+}
+
 TEST_CASE("G6 deferred expression rejects non-finite and out-of-range state before dispatch",
           "[host][graph][g6][expression][validation]") {
     struct Case {

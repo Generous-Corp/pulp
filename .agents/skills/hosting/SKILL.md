@@ -108,7 +108,12 @@ consumers.
 ## Mental model
 
 The bounded G6 in-process voice bank is `voice_bank_binding.hpp` plus one
-authored `SubgraphTemplate` Processor per slot. Its owner retains the existing
+authored `SubgraphTemplate` Processor per slot. Its epochs come from one
+process-wide counter claimed at `prepare()` and every `activate()`, never a
+per-bank `++epoch`: each bank's tracker restarts note generations at 1, so a
+per-bank epoch lets a retired bank's deferred `(epoch, generation)` token
+release the same note in a replacement bank. Never assume a fresh bank is at
+epoch 1; read `epoch()`. Its owner retains the existing
 MPE allocator; factories and named parameter binding run during control-thread
 preparation. When rendering a graph interval for an instrument, pass a
 zero-channel input `BufferView` with that interval's exact frame count. A
@@ -3190,6 +3195,17 @@ processor-provider mutation must refuse in spectral mode even when the legacy
 `live_slot_` is empty. Query prepared geometry from the active snapshot.
 Keep graph persistence and arbitrary stage registration refused; PARTIAL status
 does not establish notation coverage or realtime timing qualification.
+
+`SpectralRuntimeBank::prepare` walks each node's input chain to its analysis or
+asset-morph root. A forged connection list (stage A to B to A) passes every
+per-edge predicate, so only that walk sees the missing root; it fails closed
+through a visited set sized for the node count. Any guard on that walk turns a
+mutation into a spin, not a wrong answer: the discovered case
+`Spectral preparation refuses a forged stage cycle with no root` fails only when
+the lane's ctest timeout kills it, and a `confirm_failure.sh` break of the guard
+hangs until then. Do not register a second ctest entry for the same case under a
+shorter `TIMEOUT`: the duplicate-registration check refuses two budgets for one
+command.
 
 ## Bounded typed trigger runtime
 

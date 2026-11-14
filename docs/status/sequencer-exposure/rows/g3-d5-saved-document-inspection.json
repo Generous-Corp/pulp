@@ -53,7 +53,7 @@
     },
     {
       "path": "docs/graph-program-status/G-3.md",
-      "needles": ["Close-out (2026-11-13)", "P0 layered inspection/replay follow-up"]
+      "needles": ["Close-out (2026-11-13)", "P0 layered inspection/replay follow-up", "Installed consumers (2026-11-14)"]
     }
   ],
   "surfaces": {
