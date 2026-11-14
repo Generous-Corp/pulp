@@ -7,3 +7,7 @@ if(TARGET pulp-host)
     set_tests_properties(g5-host-event-public-consumer PROPERTIES
         LABELS "graph;unit" TIMEOUT 10)
 endif()
+
+# The P1 event-admission consumer's RTSan lane; registers nothing unless the
+# tree is configured with PULP_SANITIZER=realtime.
+include("${CMAKE_CURRENT_LIST_DIR}/p1_event_admission_rtsan_tests.cmake")

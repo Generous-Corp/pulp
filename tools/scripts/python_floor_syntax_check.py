@@ -23,6 +23,10 @@ it compiles the file, which applies that version's own rules.
 
     python3 tools/scripts/python_floor_syntax_check.py            # every tracked *.py
     python3 tools/scripts/python_floor_syntax_check.py FILE ...   # just these
+    python3 tools/scripts/python_floor_syntax_check.py --changed-from origin/main
+        # only the *.py files HEAD changed against its merge-base with the
+        # ref, read from the commit (what a push sends); the pre-push hook
+        # runs this form, so a violation already on the base never blocks it
 """
 
 from __future__ import annotations
@@ -112,7 +116,71 @@ def tracked_python(root: Path) -> list[Path]:
     return [root / name for name in out.decode("utf-8").split("\0") if name]
 
 
+def changed_python(root: Path, base: str, head: str = "HEAD") -> list[tuple[str, str]] | None:
+    """(path, committed text) for each *.py added, modified or renamed between merge-base(base, head) and head.
+    None when there is no merge-base."""
+    def git(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", "-C", str(root), *args], capture_output=True)
+    mb = git("merge-base", base, head)
+    if mb.returncode != 0:
+        return None
+    try:
+        merge_base = mb.stdout.decode("utf-8").strip()
+        diff = git("diff", "--name-only", "--diff-filter=AMR", "-z", merge_base, head, "--", "*.py")
+    except UnicodeDecodeError:
+        return None
+    if diff.returncode != 0:
+        return None
+    out = []
+    try:
+        names = diff.stdout.decode("utf-8").split("\0")
+    except UnicodeDecodeError:
+        return None
+    for name in names:
+        if not name:
+            continue
+        shown = git("show", f"{head}:{name}")
+        if shown.returncode != 0:
+            return None
+        try:
+            text = shown.stdout.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+        out.append((name, text))
+    return out
+
+
+def report(problems: list[str], checked: int) -> int:
+    if problems:
+        print(f"python-floor-syntax: {len(problems)} construct(s) Python {FLOOR_TEXT} "
+              "cannot parse:", file=sys.stderr)
+        for problem in problems:
+            print(f"  {problem}", file=sys.stderr)
+        return 1
+    print(f"python-floor-syntax: ok ({checked} file(s) parse on Python {FLOOR_TEXT})")
+    return 0
+
+
 def main(argv: list[str]) -> int:
+    if argv[:1] == ["--changed-from"]:
+        if len(argv) != 2:
+            print("python-floor-syntax: --changed-from takes exactly one ref", file=sys.stderr)
+            return 2
+        if sys.version_info < FLOOR:
+            # Below the floor, "parses" would mean "parses on this older interpreter".
+            print(f"python-floor-syntax: Python {sys.version_info.major}.{sys.version_info.minor} is below the "
+                  f"{FLOOR_TEXT} floor; nothing was checked", file=sys.stderr)
+            return 2
+        try:
+            files = changed_python(REPO_ROOT, argv[1])
+            if files is None:
+                print(f"python-floor-syntax: no merge-base with {argv[1]}; nothing was checked", file=sys.stderr)
+                return 2
+            problems = [p for name, text in files for p in floor_violations(text, name)]
+        except Exception as exc:  # an internal error is "could not run" (2), never a violation (1)
+            print(f"python-floor-syntax: could not run: {exc!r}", file=sys.stderr)
+            return 2
+        return report(problems, len(files))
     paths = [Path(a) for a in argv] or tracked_python(REPO_ROOT)
     if not paths:
         print("python-floor-syntax: no Python files found; nothing was checked", file=sys.stderr)
@@ -129,14 +197,7 @@ def main(argv: list[str]) -> int:
         except ValueError:
             shown = str(path)
         problems.extend(floor_violations(source, shown))
-    if problems:
-        print(f"python-floor-syntax: {len(problems)} construct(s) Python {FLOOR_TEXT} "
-              "cannot parse:", file=sys.stderr)
-        for problem in problems:
-            print(f"  {problem}", file=sys.stderr)
-        return 1
-    print(f"python-floor-syntax: ok ({len(paths)} file(s) parse on Python {FLOOR_TEXT})")
-    return 0
+    return report(problems, len(paths))
 
 
 if __name__ == "__main__":

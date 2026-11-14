@@ -66,11 +66,24 @@ if(PULP_BUILD_TESTS AND APPLE AND PULP_HAS_CLAP AND CMAKE_SYSTEM_PROCESSOR MATCH
             "$<TARGET_FILE:pulp-clap-worker>"
             "$<TARGET_FILE:pulp-isolated-clap-fixture>" complete)
     set_tests_properties(isolated-clap-construction-recovery PROPERTIES TIMEOUT 20 LABELS "host")
+    # An instrumented producer (a sanitizer or coverage lane) installs static
+    # libraries that reference its runtime, so the consumer is built with the
+    # producer's configuration and instrumentation.
+    string(JOIN " " _pulp_g9_instrumentation_compile_flags
+        ${PULP_SANITIZER_COMPILE_FLAGS} ${PULP_COVERAGE_COMPILE_FLAGS})
+    string(JOIN " " _pulp_g9_instrumentation_link_flags
+        ${PULP_SANITIZER_LINK_FLAGS} ${PULP_COVERAGE_LINK_FLAGS})
     add_test(NAME cmake-g9-isolated-clap-sdk-consumer
         COMMAND "${CMAKE_COMMAND}"
             "-DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}"
             "-DPULP_SOURCE_DIR=${PULP_ROOT_DIR}"
             "-DPULP_FIXTURE=$<TARGET_FILE:pulp-isolated-clap-fixture>"
+            "-DPULP_PARENT_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+            "-DPULP_PARENT_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+            "-DPULP_PARENT_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}"
+            "-DPULP_PARENT_SANITIZER=${PULP_SANITIZER}"
+            "-DPULP_PARENT_CXX_FLAGS=${CMAKE_CXX_FLAGS} ${_pulp_g9_instrumentation_compile_flags}"
+            "-DPULP_PARENT_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS} ${_pulp_g9_instrumentation_link_flags}"
             -P "${PULP_ROOT_DIR}/test/cmake/test_g9_isolated_clap_sdk_consumer.cmake")
     set_tests_properties(cmake-g9-isolated-clap-sdk-consumer PROPERTIES TIMEOUT 600 LABELS "installed-sdk;host")
 endif()

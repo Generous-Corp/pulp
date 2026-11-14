@@ -722,6 +722,67 @@ counts for the group that lands it. When the base does not resolve, classify
 builds natively, the HOLD check fails the group, and a live breaker fails the
 group too, rather than narrowing either scan back to `base_sha`.
 
+### Docs-only entry delta under ALLGREEN
+
+The main-tip rule above is what makes a batch safe under HEADGREEN, where a
+group ahead may be red and still land behind a green head. Under ALLGREEN
+every group in a batch must pass its own required checks, so a group whose own
+entry changes only documentation lands no build input that a green group ahead
+of it did not already build and test. The `classify` job's "Docs-only entry
+delta (merge groups)" step uses that:
+
+- It lists the entry's own delta, `git diff --name-only --no-renames
+  merge_group.base_sha..head_sha` (a rename is two paths), and classifies it
+  with the protected base's copy of `tools/scripts/classify_changes.py` (read
+  with `git show` from main's tip, never the group's tree). Only
+  `impact_class` `docs-only` qualifies; `code:docs` (a migration note, the
+  consumption census, the capability JSON), `ci-only` and every `code:*`
+  build.
+- It reads the live merge-queue rule on every run: exactly one active
+  `merge_queue` rule on `~DEFAULT_BRANCH`, with `grouping_strategy` ALLGREEN.
+  Two rules, none, a read error or HEADGREEN keep the build. The read is
+  never cached; a flip back to HEADGREEN disables the path on the next run.
+- The repository variable `PULP_DOCS_ENTRY_DELTA` sets the mode. Only the
+  exact value `enforce` skips; unset, `shadow` or anything else reports
+  `would_skip` and changes nothing.
+- A lone group (`base_sha` is main's tip) is `not_applicable`: `classify`
+  already judges exactly that delta.
+- It changes `native_build_required` alone, after `classify`'s own
+  classification and before the version-bump fast path. The HOLD check, the
+  queue breaker, A2T receipt verification and the bump path keep their
+  main-tip checks, and an A2T receipt change keeps the build.
+- Every run prints one `docs-entry-delta` notice: `skipped`, `would_skip`,
+  `kept`, `not_applicable`, or, on a pull request, `control` (the strategy
+  read alone, as the daily positive control), with `class=`, `strategy=` and
+  `mode=` fields. Count verdicts from those annotations, not job logs. A day
+  whose notices read `strategy=ALLGREEN` on fewer than 99% of runs means the
+  read is broken: report nothing from it.
+
+The step is `continue-on-error`: if it breaks, `skip` is unset and the group
+builds. `tools/scripts/reuse_policy_replay.py score --policy
+entry-delta-docs` replays the rule over merge-queue history (`collect
+--groups-only` is enough). A failure behind a red predecessor group is a
+neighbour failure. Every other failure in a group the rule would skip is
+attributed per failing test, failing closed at every fact it cannot read:
+
+- `docs_caused`: the test is in the deterministic tier (`pr-fast` or
+  `tools/ci/drift_fast.json`), its declared inputs meet the delta or are
+  missing, its executable or sources are unknown or name a delta path, or a
+  delta path is a `FORCE_BUILD_PREFIXES` input or named by non-test CMake;
+- `exonerated`, a replay-only hindsight class that never decides a live run:
+  the same head later landed through a green group and main's first push run
+  holding it was green, or the test failed in at least two other pull
+  requests' non-docs groups of other batches within 7 days and passed later
+  in a landed group;
+- `unexplained`: neither.
+
+The rule ships only with `docs_caused` 0, `unexplained` 0, and exonerated
+groups per skipped native group at or below the window's merge-group `macos`
+red rate. The raw false-skip count stays in the report, each exoneration
+prints its evidence runs, and a test exonerated in three or more docs groups
+is listed as a quarantine candidate. Decision 11 in `.agents/contract.toml`
+records the guard; do not disable or cache the strategy read.
+
 ### The preamble slot
 
 `build.yml`'s preamble jobs (`resolve-provider`, `classify`,
@@ -4781,6 +4842,66 @@ VM, and the pushes that cancelled a claimed VM in a 140-run sample arrived 4
 to 27 minutes apart, so a window long enough to catch them would add that
 latency to every native pull-request run to save a few VM-minutes a day.
 `tools/scripts/test_build_workflow.py` (`NoPrGateSettleTest`) keeps it out.
+The `cheap-first` wait below is not a settle window: it waits on the cheap
+required checks' verdict, not on a clock.
+
+## Cheap checks run first
+
+The native matrix in `build.yml` (the ~40-minute required `macos` gate VM) does
+not start on a head whose `drift-fast` or `Enforce version & skill sync` check
+is already red. Both are required checks in their own workflows, so `needs:`
+cannot reach them; the `cheap-first` job (`tools/ci/cheap_first_gate.py`) reads
+their newest GitHub Actions check runs on the head the build tests (the pull
+request's head sha, the `pr_number` dispatch commit, or the merge group's own
+commit) and publishes a verdict:
+
+- `pass`: every cheap check is green, skipped, neutral or cancelled, or never
+  appeared within 10 minutes. The matrix starts.
+- `block`: a cheap check concluded red. `build` is skipped and
+  `macos-cheap-first-blocked` reports a red `macos` naming the red check. It
+  owns `macos` only when `build` would otherwise have started, so a head with
+  nothing native to build, or a group whose `macos` comes from a reused
+  receipt, used no gate VM and keeps its own verdict.
+- `unknown`: the 30-minute deadline passed or the API could not be read. The
+  matrix starts.
+
+Only `block` withholds anything, and `build` reads the verdict, never the
+job's result, so a skipped, crashed or timed-out gate starts the matrix. Only
+the native path waits for the gate: the skip-safe `macos` aliases (`macos` on
+pull requests and dispatches, `macos-merge-group` in the queue) do not need
+`cheap-first`, so a docs-only head or a receipt-reused group still reports
+`macos` in seconds rather than at the gate's deadline. The
+gate never weakens a check: the red cheap check is required, so the head could
+not merge either way. A push run, a plain dispatch and a pull request into a
+base other than `main` pass at once. `PULP_CHEAP_FIRST_MODE=off` (repository
+variable) turns the wait off without a change.
+
+After fixing a flaky cheap check by re-running it, re-run the Build run's
+failed jobs: `cheap-first` and everything it withheld run again.
+
+The cost was measured before it shipped (2026-11-10..13), because the PR gate
+settle window above was removed for adding latency that bought too little:
+
+- The job runs beside the preamble, so the native leg waits only for what is
+  still running when the preamble ends. Over 41 recent pull-request and 8
+  merge-group native runs, the cheap checks finished after the native `macos`
+  job had started by a median of 1.0 minute (p90 5.3, max 9.4; mean 2.3) on
+  pull requests and 0.3 minutes (p90 4.0, max 4.3) in merge groups, and before
+  it in 19 and 4 of them. That is an estimate: the native start includes
+  gate-VM queueing that the wait may overlap.
+- On their own the cheap checks take longer (pull request p50: `drift-fast`
+  6.0 minutes, version & skill sync 9.7, p90 17.2), which is why the wait
+  starts at the run's start rather than after `classify`.
+- In the same window 44 heads had a red cheap check, and their native `macos`
+  jobs spent 578 gate-VM minutes (428 on pull-request heads, 150 in merge
+  groups), about 200 a day at most, where a 600-second settle window would
+  have saved 20.5 a day. Not all of it is saved: a cheap check that is red,
+  re-run and green delays the native leg rather than sparing it.
+
+A red version & skill sync alone now also withholds the macOS result for that
+head, so fix the bump before expecting one. `tools/ci/test_cheap_first_gate.py`
+(the `cheap-first-gate-selftest` ctest) covers the verdicts and
+`tools/scripts/test_build_workflow.py` (`CheapFirstGateTest`) the wiring.
 
 ## The preamble and alias lanes run GitHub-hosted, and a persistent runner may not own them
 

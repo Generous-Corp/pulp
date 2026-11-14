@@ -1,0 +1,78 @@
+#pragma once
+
+#include <pulp/host/custom_node_type.hpp>
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <span>
+#include <string_view>
+#include <vector>
+
+namespace pulp::host {
+
+inline constexpr std::string_view kControlIndexInputTypeId = "pulp.control.index-input";
+inline constexpr int kControlIndexInputVersion = 1;
+inline constexpr std::size_t kControlIndexMaxFrames = 4096;
+
+struct ControlIndexBlock {
+    std::uint64_t epoch = 0;
+    std::uint64_t absolute_start = 0;
+    std::span<const float> indices;
+};
+
+/// The checked Control clock: the epoch and absolute start the next
+/// process_control_checked() block must carry. `bound` is false when the
+/// prepared graph has no Control index input. Prepare and a prepared-edit
+/// commit compile a fresh lane, so both reset the clock to epoch 1, cursor 0.
+/// Read it on the thread that calls process_control_checked().
+struct ControlIndexPosition {
+    bool bound = false;
+    std::uint64_t epoch = 0;
+    std::uint64_t cursor = 0;
+};
+
+enum class ControlProcessResult : std::uint8_t {
+    Accepted,
+    Unbound,
+    OutOfRange,
+    StaleEpoch,
+    WrongStart,
+    ClockExhausted,
+    Busy,
+    UnsupportedMode,
+    RenderFailed,
+};
+
+/// Stable lowercase identifier for a result, for logs and agent surfaces.
+const char* control_process_result_name(ControlProcessResult result) noexcept;
+/// One sentence that names what the caller must change to get Accepted.
+const char* control_process_result_fix(ControlProcessResult result) noexcept;
+
+/// Registered graph-owned source for an external per-sample table index.
+CustomNodeType make_control_index_input_type();
+
+CustomNodeType make_control_min_type();
+CustomNodeType make_control_max_type();
+CustomNodeType make_control_safe_divide_type();
+CustomNodeType make_control_map_clip_type();
+CustomNodeType make_control_hysteresis_type();
+CustomNodeType make_control_integrator_type();
+CustomNodeType make_control_slew_type();
+CustomNodeType make_control_indexed_table_type();
+
+/// Versioned state encoders for set_custom_node_state(). Scalar value order:
+/// map: input min/max, output min/max; hysteresis: high, low;
+/// integrator: min, max, initial; slew: rise ms, fall ms.
+std::vector<std::uint8_t> make_control_scalar_state(std::span<const float> values);
+std::vector<std::uint8_t> make_control_table_state(std::span<const float> samples);
+bool validate_control_node_state(std::string_view type_id, const std::vector<std::uint8_t>& bytes);
+
+namespace detail {
+struct ControlIndexInputState {
+    std::array<float, kControlIndexMaxFrames> indices{};
+    std::size_t frames = 0;
+};
+} // namespace detail
+
+} // namespace pulp::host

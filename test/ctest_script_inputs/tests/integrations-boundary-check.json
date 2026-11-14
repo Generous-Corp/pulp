@@ -1,0 +1,10 @@
+{
+ "name": "integrations-boundary-check",
+ "record": {
+  "entry": "tools/scripts/integrations_boundary_check.py",
+  "inputs": [
+   "tools/scripts/integrations_boundary_check.py"
+  ],
+  "kind": "python"
+ }
+}

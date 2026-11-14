@@ -565,6 +565,10 @@ class TrustAndIsolationTest(unittest.TestCase):
         collect = (ROOT / "tools/scripts/reuse_replay_collect.py").read_text(encoding="utf-8")
         self.assertEqual(sorted(set(__import__("re").findall(r'self\.list_runs\("([a-z_]+)"', collect))),
                          ["merge_group", "pull_request"])
+        # The `push` event is listed only by main_push_runs, for run metadata
+        # (ids, shas, conclusions); no artifact reader may name it.
+        self.assertEqual(collect.count("PUSH_METADATA_EVENT"), 2)
+        self.assertNotIn("download", collect.split("def main_push_runs")[1].split("def first_push_containing")[0])
 
     def test_a_pr_dispatch_has_its_own_concurrency_group(self) -> None:
         # The group's discriminator is github.ref: refs/heads/<branch> for the

@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 92,
+  "manifest_revision": 93,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -10055,6 +10055,20 @@
               "set_release_ms(SampleType ms)",
               "set_sample_rate(SampleType sr)",
               "gain_reduction()"
+            ],
+            "enums": []
+          }
+        ],
+        "control_math.hpp": [
+          {
+            "class": "ControlIntegratorT",
+            "qualified_name": "pulp::signal::ControlIntegratorT",
+            "template": "std::floating_point SampleType = float",
+            "methods": [
+              "reset()",
+              "process(SampleType increment)",
+              "configure(SampleType minimum, SampleType maximum, SampleType initial = SampleType{0})",
+              "value()"
             ],
             "enums": []
           }

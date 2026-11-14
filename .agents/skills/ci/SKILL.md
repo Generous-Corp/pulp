@@ -622,6 +622,23 @@ fails the HOLD check and a live breaker closed. A group failing with "main's
 tip could not be resolved" is that fallback: read the step's `merge-group base:`
 line, then re-run classify or re-queue.
 
+One deliberate exception narrows only `native_build_required`: the "Docs-only
+entry delta (merge groups)" step skips the native build for a group whose OWN
+entry (`base_sha..head_sha --no-renames`, classified by the protected base's
+`classify_changes.py`) is `docs-only`. It is sound only under ALLGREEN, so the
+step reads the rulesets live on every run and keeps the build unless exactly
+one active `merge_queue` rule on the default branch says ALLGREEN, and it
+skips only when `PULP_DOCS_ENTRY_DELTA` is exactly `enforce` (otherwise it
+reports `would_skip`). Read its `docs-entry-delta` notice before assuming a
+skip-safe group was misclassified. Never cache or remove the strategy read
+(decision 11), never let it change another output, and never move the HOLD
+check, breaker, A2T or bump path onto the entry delta. A new entry-delta rule
+ships only when `reuse_policy_replay.py score` reads `docs_caused` 0 and
+`unexplained` 0 for it, with exonerated groups at or below the window's
+`macos` red rate. Its "exonerated" class is replay-only hindsight (the same
+head landed green, or the failure recurs in other batches' non-docs groups),
+never a reason to pass a live run.
+
 ## Diff-scoped gates on merge_group use the entry's own base
 
 `Enforce version & skill sync` diffs against `merge_group.base_sha` on a queued
@@ -1060,6 +1077,16 @@ how soon you push:
 macOS fast deterministic tier, so a running `macos` job on that head mostly
 repeats it. A version-skill red says nothing about the build or the tests, so
 the running job still carries signal you would otherwise wait another round for.
+
+A native `macos` job only starts on a head whose cheap required checks did not
+fail first: `build.yml`'s `cheap-first` job holds the native matrix until
+`drift-fast` and `Enforce version & skill sync` report, and on a red one
+`macos-cheap-first-blocked` reports a red `macos` that names it instead of
+starting a gate VM. The skip-safe `macos` aliases never wait for the gate. So a head whose cheap check is red usually has no `in_progress` native job
+at all, and a version-skill red now costs you that head's macOS result: fix the
+bump first. After re-running a flaky cheap check to green, re-run the Build
+run's failed jobs. Mechanism, fail-open rules and the measured latency:
+`docs/guides/local-ci.md`, "Cheap checks run first".
 
 Read the newest `macos` run in one call. A commit can carry several (re-runs,
 an older cancelled run, a `workflow_dispatch` full-lane run); on a head that
@@ -2389,6 +2416,21 @@ is in `gates.sh` only). So adding a gate to one adds it to neither the other nor
 the push path. **Wire a new local gate into both files, and check the other list
 rather than assuming it inherits.**
 
+The f-string floor (`python_floor_syntax_check.py`) and the worker-thread
+assertion check (`thread_assert_check.py`) were in `gates.sh` only, and each
+reddened a required check on a PR head that skipped `gates.sh`. The hook now
+runs both with `--changed-from <base>` (only the files the pushed commit
+changed, read from the commit), and its agent skip floor keeps them blocking
+when an agent (`SHIPYARD_AGENT_ID` set) pushes with `PULP_SKIP_PREPUSH=1` or
+`PULP_DISABLE_PREPUSH_GATES=1`. Diff scope is deliberate: a whole-tree check in
+the agent floor would block every agent push the moment `main` itself went red
+on it. The agent floor runs only when the push sends HEAD (not a deletion,
+tag or other branch), and diffs against the LOCAL `origin/main`: a stale one
+widens the diff, so `git fetch origin main` before blaming a refusal on lines
+the branch never touched. Exit 2 (no merge-base, interpreter below 3.11, an
+internal error) is "could not run", never a violation. `git push --no-verify`
+still skips everything; CI is the only backstop for that.
+
 The sequencer registries are wired into both:
 
 - **`sequencer_exposure_check.py`** — the cross-surface exposure ledger at
@@ -3444,6 +3486,14 @@ a differing path names the linker input to normalise (embedded path, UUID,
 timestamp) before any per-binary reuse is proposed.
 
 ## Per-test replay history lives in `reuse-record-macos`, not `ctest-logs-macos`
+
+Entry-delta attribution uses main-push observations made before each merge
+group's creation and recorded predecessor links to recover its historical batch
+base. Today's main ancestry does not establish that base. Missing history stays
+unknown. Input declarations, source scans, and deterministic tiers come only
+from the tested checkout; an unavailable checkout cannot use its parent or
+today's main as a substitute.
+
 
 `ctest-logs-macos` expires in 7 days, and its `LastTest.log` is NOT the suite's:
 every ctest call after the run (the `--show-only` listing, the GPU-adapter
@@ -5896,6 +5946,11 @@ bisectable.
   gains a NEW colour literal that is not a `resolve_color(...)` fallback. Mark a
   deliberate material-effect literal `// token-lint:allow`; after intentionally
   lowering a file's count, re-freeze with `--update-baseline`.
+- **Graph vocabulary in the terminology lint.** `processing_model_terms_lint.py`
+  also flags "edge tap" / "SignalGraph tap" (the API says edge probe), "graph
+  bus port" (graph points are ports; a bus is a plugin channel group), a
+  sidechain described as a plain audio port, and "zero-delay feedback edge".
+  Add a rule only if the tree already satisfies it, with selftest cases.
 - **SignalGraph single-backend governance (`single_backend_guard.py` +
   `processing_model_terms_lint.py`).** Whole-tree structural guards (not
   diff-scoped) that keep the DSP runtime convergence from regrowing a second
@@ -13661,3 +13716,22 @@ about that path are not obvious:
   Vellum main's head equals the head recorded in the last *successful* run's
   receipt artifact, and it uploads that receipt only when the whole run is
   green, so a red night is retried on the next one rather than forgotten.
+### Cutover trial deletion build
+
+`cutover-trial.yml` (manual dispatch only, GitHub-hosted `macos-15`, advisory)
+runs `tools/scripts/cutover_trial.py`: it deletes the cutover paths listed in
+`tools/scripts/cutover_trial_inputs.json` inside a scratch git worktree, builds
+with `-k 0`, and uploads a JSON report grouped by capability-ledger row. Notes:
+
+- The script always exits 0 on a build failure; read the report, not the job
+  status. Exit 2 means the inputs could not be read.
+- The scratch worktree must sit under the worktree root, never `/tmp`;
+  configure refuses it there.
+- It is not a required check and does not run on a schedule or pull request.
+
+- **Pin the Vellum commit a consumer needs.** The lane resolves Vellum main's
+  newest green SDK, which is not necessarily one that carries an API a Pulp
+  consumer was written against. `resolve --min-vellum-sha <sha>` refuses a run
+  whose head does not contain that commit (checked with Vellum's compare
+  endpoint before anything is downloaded); the workflow sets it to the commit
+  that introduced the `ParamModel` surface `integrations/pulp-vellum` builds on.

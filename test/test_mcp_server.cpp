@@ -675,6 +675,13 @@ TEST_CASE("MCP graph exposes read-only operations and refuses edits", "[mcp][too
                                        "] [graph.pulpgraph] [--json]");
     }
 
+    const auto render_input = handle_request(tool_call(
+        "73", "pulp_graph",
+        R"JSON({"path":"graph.pulpgraph","operation":"render","input":"in put.wav"})JSON"));
+    require_contains(
+        render_input,
+        "fake-pulp [graph] [render] [graph.pulpgraph] [--json] [--input] [in put.wav]");
+
     for (const auto& operation : {"save", "canonicalize"}) {
         const auto response = handle_request(
             tool_call("72", "pulp_graph",

@@ -150,10 +150,13 @@ pulp_add_test_suite(pulp-test-midi-expansion GROUP pulp-test-group-app-midi
 
 # MidiOutput::send_sysex: framing, the mock backend, large messages, the default
 # for a backend without SysEx output, and (macOS) real CoreMIDI delivery to an
-# in-process virtual destination.
+# in-process virtual destination. Every suite that registers CoreMIDI endpoints
+# holds RESOURCE_LOCK pulp_coremidi: endpoints are server-global, so two suites
+# running at once see each other's.
 pulp_add_test_suite(pulp-test-midi-output-sysex
     SOURCES test_midi_output_sysex.cpp
-    LIBRARIES pulp::midi)
+    LIBRARIES pulp::midi
+    PROPERTIES RESOURCE_LOCK pulp_coremidi)
 if(APPLE)
     target_link_libraries(pulp-test-midi-output-sysex PRIVATE
         "-framework CoreMIDI" "-framework CoreFoundation")
@@ -173,7 +176,8 @@ pulp_add_test_suite(pulp-test-live-dsp-telemetry
 # systems and processes; unknown ids fail; resolve_port() rebinds a saved port.
 pulp_add_test_suite(pulp-test-midi-port-identity
     SOURCES test_midi_port_identity.cpp
-    LIBRARIES pulp::midi)
+    LIBRARIES pulp::midi
+    PROPERTIES RESOURCE_LOCK pulp_coremidi)
 target_include_directories(pulp-test-midi-port-identity PRIVATE
     ${PROJECT_SOURCE_DIR}/tools/midi-ports)
 if(APPLE)

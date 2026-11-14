@@ -1,0 +1,11 @@
+{
+ "name": "texture-upload-compare-selftest",
+ "record": {
+  "entry": "tools/testing/texture_upload_recorder/test_texture_upload_compare.py",
+  "inputs": [
+   "tools/testing/texture_upload_recorder/test_texture_upload_compare.py",
+   "tools/testing/texture_upload_recorder/texture_upload_compare.py"
+  ],
+  "kind": "python"
+ }
+}

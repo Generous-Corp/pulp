@@ -13,7 +13,8 @@ What must hold:
   retry lines ctest prints without a counter, and reads the receipt verdict
   from the rendered notice, never from the step script that echoes it;
 - registered seams without a decision function refuse to score;
-- `collect` exits 1 when it finds no merge groups or no PR-head pairs.
+- `collect` exits 1 when it finds no merge groups or no PR-head pairs
+  (`--groups-only` needs no PR-head pairs);
 
 Run:
     python3 tools/scripts/test_reuse_policy_replay.py
@@ -27,6 +28,7 @@ import datetime as dt
 import os
 import subprocess
 import urllib.error
+import urllib.parse
 import sys
 import tempfile
 import unittest
@@ -577,6 +579,293 @@ class ScoreTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
 
 
+class EntryDeltaAttributionUnitTests(unittest.TestCase):
+    """Rule-level checks that do not depend on replay corpus fixtures."""
+
+    def test_docs_caused_reasons_fail_closed(self):
+        group = {"first_parent_delta_files": ["docs/a.md"], "delta_cmake_named": [],
+                 "entry_test_facts": {"t": {"kind": "compiled", "deterministic": False, "declared_inputs": None,
+                                            "executable": "test/x", "sources_naming_delta": []}}}
+        self.assertIsNone(rpr.docs_caused(group, "t"))
+        for change, reason in (
+                ({"first_parent_delta_files": ["docs/migrations/v.md"]}, "FORCE_BUILD"),
+                ({"delta_cmake_named": None}, "not scanned"),
+                ({"delta_cmake_named": ["tools/cli/CMakeLists.txt"]}, "non-test CMake"),
+                ({"entry_test_facts": {}}, "no facts"),
+                ({"entry_test_facts": {"t": {"kind": "compiled", "deterministic": None}}}, "tier unknown"),
+                ({"entry_test_facts": {"t": {"kind": "compiled", "deterministic": False}}}, "executable unknown"),
+                ({"entry_test_facts": {"t": {"kind": "compiled", "deterministic": False, "executable": "x",
+                                             "sources_naming_delta": None}}}, "sources unknown"),
+                ({"entry_test_facts": {"t": {"kind": "compiled", "deterministic": False, "executable": "x",
+                                             "sources_naming_delta": ["test/t.cpp"]}}}, "names a delta"),
+                ({"entry_test_facts": {"t": {"kind": "compiled", "deterministic": False, "executable": "x",
+                                             "declared_inputs": ["docs"], "sources_naming_delta": []}}},
+                 "data inputs"),
+                ({"entry_test_facts": {"t": {"kind": "script", "deterministic": False}}}, "without a declared"),
+                ({"entry_test_facts": {"t": {"kind": "unknown", "deterministic": False}}}, "kind unknown")):
+            self.assertIn(reason, rpr.docs_caused(dict(group, **change), "t"), change)
+
+    def test_quarantine_candidates_need_three_docs_groups(self):
+        rows = []
+        corpus_runs = []
+        for i in range(3):
+            corpus_runs.append({"run_id": f"g{i}", "run_kind": "merge_group", "macos_conclusion": "failure",
+                                "first_parent_delta_files": ["docs/a.md"], "delta_cmake_named": [],
+                                "entry_test_facts": {"t": {"kind": "script", "deterministic": False,
+                                                           "declared_inputs": ["tools/x.py"]}},
+                                "head_sha": "h", "pr_merge": {"merged_at": "x", "merge_commit_sha": f"m{i}",
+                                                              "head_sha": "h"},
+                                "landing_group_run_id": f"l{i}", "landing_contains_merge": True,
+                                "main_push_run": {"conclusion": "success"}, "created_at": "2026-11-01T10:00:00Z"})
+            corpus_runs.append({"run_id": f"l{i}", "run_kind": "merge_group", "group_sha": f"m{i}",
+                                "macos_conclusion": "success", "landed": True})
+            rows.append({"pr": i, "group_run_id": f"g{i}", "test_id": "t"})
+        result = rpr.attribute_failures(rpr.Corpus(corpus_runs, []), rows, 3)
+        self.assertEqual((result["exonerated"], result["quarantine_candidates"]), (3, ["t"]))
+        result = rpr.attribute_failures(rpr.Corpus(corpus_runs, []), rows[:2], 3)
+        self.assertEqual(result["quarantine_candidates"], [])
+
+
+class EntryDeltaCollectTests(unittest.TestCase):
+    def collector(self, doc=None, local=False, error=None) -> rrc.Collector:
+        c = rrc.Collector.__new__(rrc.Collector)
+        c.commit = lambda sha: {"tree": "t", "parents": [], "local": local}
+        c.diff_files = lambda a, b: ["docs/a.md"]
+        c._cached = lambda name, fetch, keep=True: fetch()
+        gh = mock.Mock(repository="O/R")
+        if error is not None:
+            gh.json.side_effect = error
+        else:
+            gh.json.return_value = doc
+        c.gh = gh
+        return c
+
+    def test_local_commits_diff_without_the_api(self):
+        c = self.collector(local=True)
+        self.assertEqual(c.entry_delta("b", "m"), ["docs/a.md"])
+        c.gh.json.assert_not_called()
+
+    def test_compare_lists_both_sides_of_a_rename(self):
+        doc = {"status": "ahead", "files": [{"filename": "docs/new.md", "previous_filename": "core/old.cpp"}]}
+        self.assertEqual(self.collector(doc).entry_delta("b", "m"), ["core/old.cpp", "docs/new.md"])
+
+    def test_a_capped_diverged_or_failed_compare_is_unreadable(self):
+        capped = {"status": "ahead", "files": [{"filename": f"docs/{i}.md"} for i in range(300)]}
+        for doc in (capped, {"status": "diverged", "files": [{"filename": "docs/a.md"}]},
+                    {"status": "ahead", "files": []}):
+            self.assertIsNone(self.collector(doc).entry_delta("b", "m"))
+        err = urllib.error.HTTPError("u", 404, "gone", {}, None)
+        self.assertIsNone(self.collector(error=err).entry_delta("b", "m"))
+
+    @staticmethod
+    def paged(pages: dict[int, list[str]], status="ahead"):
+        def json(path):
+            page = int(urllib.parse.parse_qs(urllib.parse.urlsplit(path).query).get("page", ["1"])[0])
+            return {"status": status, "files": [{"filename": f} for f in pages.get(page, [])]}
+        return json
+
+    def test_a_compare_past_one_page_reads_every_page(self):
+        # A 150-file delta: page 1 is all docs, the code file is on page 2.
+        # Reading page 1 alone would call this entry docs-only.
+        docs = [f"docs/{i:03}.md" for i in range(100)]
+        rest = [f"docs/{i:03}.md" for i in range(100, 149)] + ["core/a.cpp"]
+        c = self.collector()
+        c.gh.json.side_effect = self.paged({1: docs, 2: rest})
+        self.assertEqual(c.entry_delta("b", "m"), sorted(docs + rest))
+        self.assertEqual(c.gh.json.call_count, 2)
+
+    def test_a_compare_whose_end_is_never_seen_is_unreadable(self):
+        full = {p: [f"docs/{p}-{i}.md" for i in range(100)] for p in (1, 2, 3, 4)}
+        c = self.collector()
+        c.gh.json.side_effect = self.paged(full)
+        self.assertIsNone(c.entry_delta("b", "m"))
+        c = self.collector()
+        pages = {1: [f"docs/{i}.md" for i in range(100)]}
+        def failing(path):
+            if "page=2" in path:
+                raise urllib.error.HTTPError("u", 502, "bad", {}, None)
+            return self.paged(pages)(path)
+        c.gh.json.side_effect = failing
+        self.assertIsNone(c.entry_delta("b", "m"))
+
+    def test_a_compare_listing_every_file_on_page_one_ends_at_an_empty_page(self):
+        files = [f"docs/{i:03}.md" for i in range(150)]
+        c = self.collector()
+        c.gh.json.side_effect = self.paged({1: files})
+        self.assertEqual(c.entry_delta("b", "m"), files)
+
+    def test_a_malformed_later_page_is_unreadable(self):
+        # Page 1 is a full page of docs; page 2 is malformed. Treating it as
+        # an empty last page would end a truncated delta as docs-only.
+        page1 = {"status": "ahead", "files": [{"filename": f"docs/{i:03}.md"} for i in range(100)]}
+        for bad in ({}, {"files": []}, {"status": "ahead"}, {"status": "ahead", "files": None},
+                    {"status": "ahead", "files": {}}, {"status": "behind", "files": []},
+                    {"status": "ahead", "files": ["core/a.cpp"]}, [], None):
+            c = self.collector()
+            c.gh.json.side_effect = lambda path, bad=bad: bad if "page=2" in path else page1
+            self.assertIsNone(c.entry_delta("b", "m"), bad)
+
+    def test_a_group_record_carries_its_macos_check_and_entry_delta(self):
+        c = rrc.Collector.__new__(rrc.Collector)
+        jobs = [{"id": 5, "name": "macos", "runner_name": "gate-vm-1", "conclusion": "success",
+                 "started_at": "2026-11-01T10:00:00Z", "completed_at": "2026-11-01T10:21:00Z"}]
+        c.jobs = lambda run_id: jobs
+        c.parsed_log = lambda job_id: {"checkout_sha": "m1", "ctest": {"ran": True, "complete": True, "failed": 0},
+                                       "tests": [], "receipt_issued": None}
+        c.commit = lambda sha: {"tree": "t", "parents": ["b", "h"], "local": True}
+        seen = []
+        c.entry_delta = lambda base, sha: seen.append((base, sha)) or ["docs/a.md"]
+        run = {"id": 1, "head_sha": "m1", "created_at": "2026-11-01T10:00:00Z", "updated_at": None,
+               "conclusion": "success"}
+        rec = c.run_record(run, "merge_group", 7, "h")[0]
+        self.assertEqual((rec["macos_conclusion"], rec["macos_minutes"]), ("success", 21.0))
+        self.assertEqual(rec["first_parent_delta_files"], ["docs/a.md"])
+        self.assertEqual(seen, [("b", "m1")])
+
+    def test_executable_sources_come_from_link_members_and_object_reads(self):
+        link = {"test/x": {"objects": ["a.o"], "members": {"lib.a": ["b.o"]}}}
+        deps = {"objects": {"a.o": ["test/x.cpp"], "b.o": ["core/b.cpp", "core/b.hpp"]},
+                "members": {"lib.a": {"b.o": ["b.o"]}}}
+        self.assertEqual(rrc.Collector._executable_sources("test/x", link, deps),
+                         {"test/x.cpp", "core/b.cpp", "core/b.hpp"})
+        # Any object without recorded reads makes the source list unknown.
+        missing = {"objects": {"a.o": ["test/x.cpp"]}, "members": {"lib.a": {"b.o": ["b.o"]}}}
+        self.assertIsNone(rrc.Collector._executable_sources("test/x", link, missing))
+        self.assertIsNone(rrc.Collector._executable_sources("test/y", link, deps))
+        # A prebuilt archive outside the build tree compiles from no checkout file.
+        prebuilt = {"test/x": {"objects": ["a.o"], "members": {"lib.a": ["b.o"], "/opt/sdk/libdawn.a": ["c.o"]}}}
+        self.assertEqual(rrc.Collector._executable_sources("test/x", prebuilt, deps),
+                         {"test/x.cpp", "core/b.cpp", "core/b.hpp"})
+
+    def test_failing_test_facts_name_tier_inputs_and_sources(self):
+        c = rrc.Collector.__new__(rrc.Collector)
+        c.reuse_record = lambda run_id: {
+            "executables": {"Case A": "test/x"},
+            "link": {"test/x": {"objects": ["a.o"], "members": {}}},
+            "deps": {"objects": {"a.o": ["test/x.cpp"]}, "members": {}}}
+        c.registrations = lambda run_id: {
+            "Case A": {"labels": [], "command": ["${CMAKE_BINARY_DIR}/test/x", "Case A"]},
+            "fast-one": {"labels": ["pr-fast"], "command": ["${PYTHON}", "t.py"]},
+            "bare-script": {"labels": [], "command": ["${PYTHON}", "u.py"]}}
+        docs = {"tools/ci/drift_fast.json": {"ctest_labels": ["pr-fast"], "tests": [{"name": "listed"}]},
+                "test/ctest_script_inputs/tests/fast-one.json": {"record": {"entry": "t.py",
+                                                                            "inputs": ["docs/a.md"]}}}
+        c._json_in_clone = lambda rev, path: docs.get(path)
+        c._grep_naming = lambda rev, needles, specs: ["test/x.cpp"] if "test/x.cpp" in specs else []
+        facts = c.test_facts({"run_id": "1"}, ["Case A", "fast-one", "bare-script", "gone"], "rev", ["docs/a.md"])
+        self.assertEqual(facts["Case A"]["kind"], "compiled")
+        self.assertEqual(facts["Case A"]["sources_naming_delta"], ["test/x.cpp"])
+        self.assertIs(facts["Case A"]["deterministic"], False)
+        self.assertEqual((facts["fast-one"]["kind"], facts["fast-one"]["deterministic"]), ("script", True))
+        self.assertEqual(facts["fast-one"]["declared_inputs"], ["docs/a.md", "t.py"])
+        self.assertEqual((facts["bare-script"]["kind"], facts["bare-script"]["declared_inputs"]), ("script", None))
+        self.assertEqual(facts["gone"]["kind"], "unknown")
+
+    def test_landed_predecessors_keep_their_historical_batch_identity(self):
+        c = rrc.Collector.__new__(rrc.Collector)
+        # All speculative predecessors are on today's main. Only b was on
+        # protected main when this batch started; m1 lands during the batch.
+        ancestors = {"b": {"b"}, "m1": {"b", "m1"},
+                     "m3": {"b", "m1", "m2", "m3"}}
+        c._is_ancestor = lambda sha, ref="origin/main": sha in ancestors.get(ref, ancestors["m3"])
+        groups = [group(run_id=f"g{i}", pr=i, group_sha=f"m{i}",
+                        base_sha="b" if i == 1 else f"m{i - 1}",
+                        created_at=f"2026-11-01T10:0{i}:00Z",
+                        first_parent_delta_files=["docs/a.md"] if i == 1 else ["core/a.cpp"])
+                  for i in range(1, 4)]
+        queue = {g["group_sha"]: g for g in groups}
+        pushes = [{"head_sha": "b", "created_at": "2026-11-01T09:00:00Z"},
+                  {"head_sha": "m1", "created_at": "2026-11-01T10:02:30Z"},
+                  {"head_sha": "m3", "created_at": "2026-11-01T11:00:00Z"}]
+        for g in groups:
+            g["main_base"] = c.main_base(g, queue, pushes)
+        later = group(run_id="later", landed=True, created_at="2026-11-01T12:00:00Z")
+        outcomes = {"t": [(g, "fail") for g in groups] + [(later, "pass")]}
+        self.assertIsNone(rpr._corroborated(groups[0], "t", outcomes))
+        self.assertEqual([g["main_base"] for g in groups], ["b"] * 3)
+        # Once a push witnessed m3 on main, a new group may use it as its base.
+        self.assertEqual(c.main_base(dict(later, base_sha="m3"), queue, pushes), "m3")
+        # Independent batches remain usable corroboration (positive control).
+        for i, g in enumerate(groups[1:], 1):
+            g["main_base"] = f"independent-{i}"
+        self.assertEqual(rpr._corroborated(groups[0], "t", outcomes)["rule"], "B")
+
+    def test_unwitnessed_or_incomplete_batch_history_is_unknown(self):
+        c = rrc.Collector.__new__(rrc.Collector)
+        c._is_ancestor = lambda sha, ref="origin/main": True if ref == "origin/main" else None
+        g = group(base_sha="missing")
+        push = {"head_sha": "b", "created_at": "2026-09-29T10:00:00Z"}
+        self.assertIsNone(c.main_base(g, {}, []))
+        self.assertIsNone(c.main_base(g, {}, [push]))
+        self.assertIsNone(c.main_base(g, {"missing": g}, [push], max_steps=2))
+        # A push in the same timestamp cannot prove it preceded the group.
+        c._is_ancestor = lambda sha, ref: True
+        self.assertIsNone(c.main_base(g, {}, [dict(push, created_at=g["created_at"])]))
+
+    def test_missing_checkout_does_not_substitute_parent_or_current_declarations(self):
+        c = rrc.Collector.__new__(rrc.Collector)
+        c.commit = lambda sha: {"local": sha in ("base", "origin/main")}
+        record = {"run_id": "1", "checkout_sha": "missing", "base_sha": "base"}
+        # Current declarations have removed both the docs input and fast tier.
+        docs = {"tools/ci/drift_fast.json": {"tests": [], "ctest_labels": []},
+                "test/ctest_script_inputs/tests/t.json": {"record": {"entry": "t.py", "inputs": []}}}
+        c._json_in_clone = mock.Mock(side_effect=lambda rev, path: docs.get(path))
+        c.reuse_record = mock.Mock(return_value={})
+        c.registrations = mock.Mock(return_value={"t": {"labels": [], "command": ["python", "t.py"]}})
+        rev = c.facts_rev(record)
+        facts = c.test_facts(record, ["t"], rev, ["docs/a.md"])
+        self.assertIsNone(rev)
+        self.assertIsNone(facts["t"]["deterministic"])
+        self.assertIsNone(facts["t"]["declared_inputs"])
+        c._json_in_clone.assert_not_called()
+        self.assertIsNotNone(rpr.docs_caused({"first_parent_delta_files": ["docs/a.md"],
+                                            "delta_cmake_named": [], "entry_test_facts": facts}, "t"))
+        # With the tested checkout available, declarations can be read normally.
+        c.commit = lambda sha: {"local": True}
+        self.assertEqual(c.facts_rev(record), "missing")
+        facts = c.test_facts(record, ["t"], "missing", ["docs/a.md"])
+        self.assertIs(facts["t"]["deterministic"], False)
+        self.assertEqual(facts["t"]["declared_inputs"], ["t.py"])
+
+    def test_record_attribution_preserves_unknown_historical_facts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            c = rrc.Collector.__new__(rrc.Collector)
+            c.out = Path(tmp)
+            c._is_ancestor = lambda sha, ref="origin/main": False
+            c.main_push_runs = lambda since: []
+            c.commit = lambda sha: None
+            c._grep_naming = mock.Mock(return_value=[])
+            c.pr_merge = lambda pr: None
+            g = group(first_parent_delta_files=["docs/a.md"], macos_conclusion="failure")
+            rpr.write_jsonl(c.out / "tests" / "g1.jsonl.gz", [{"test_id": "t", "outcome": "fail"}])
+            since = dt.datetime(2026, 9, 29, tzinfo=dt.timezone.utc)
+            c.record_attribution([g], since, since + dt.timedelta(days=1))
+            self.assertIsNone(g["facts_rev"])
+            self.assertIsNone(g["delta_cmake_named"])
+            self.assertEqual(g["entry_test_facts"]["t"]["kind"], "unknown")
+            c._grep_naming.assert_not_called()
+
+    def test_first_push_run_must_contain_the_merge(self):
+        c = rrc.Collector.__new__(rrc.Collector)
+        c._is_ancestor = lambda sha, ref: ref == "p2"
+        pushes = [{"id": 1, "head_sha": "p0", "created_at": "2026-11-01T09:00:00Z", "conclusion": "success"},
+                  {"id": 9, "head_sha": "p2", "created_at": "2026-11-01T10:30:00Z", "conclusion": "cancelled"},
+                  {"id": 2, "head_sha": "p1", "created_at": "2026-11-01T11:00:00Z", "conclusion": "failure"},
+                  {"id": 3, "head_sha": "p2", "created_at": "2026-11-01T11:30:00Z", "conclusion": "success"}]
+        merge = {"merged_at": "2026-11-01T10:00:00Z", "merge_commit_sha": "m"}
+        self.assertEqual(c.first_push_containing(merge, pushes)["run_id"], "3")
+        self.assertIsNone(c.first_push_containing({"merged_at": None, "merge_commit_sha": "m"}, pushes))
+
+    def test_groups_only_collect_needs_no_head_pairs(self):
+        manifest = {"merge_groups": 5, "pairs_with_head_run": 0}
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(rrc.Collector, "collect", return_value=manifest) as collect, \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            rc = rpr.main(["collect", "--since", "2026-10-15", "--out", tmp, "--token", "x", "--groups-only"])
+        self.assertEqual(rc, 0)
+        self.assertTrue(collect.call_args.kwargs["groups_only"])
+
+
 class ValidateTests(unittest.TestCase):
     def test_bound_records_pass(self):
         self.assertIsNone(rpr.validate_run(group()))
@@ -701,6 +990,7 @@ class RunRecordTests(unittest.TestCase):
         c.jobs = lambda run_id: [job]
         c.parsed_log = lambda job_id: parsed
         c.commit = lambda sha: {"tree": "t", "parents": ["b", "h"], "local": True}
+        c.entry_delta = lambda base, sha: ["docs/a.md"]
         run = {"id": 1, "head_sha": "m1", "created_at": "2026-09-01T00:00:00Z", "updated_at": None, "conclusion": "failure"}
         return c.run_record(run, "merge_group", 7, "h")[0]
 

@@ -351,8 +351,11 @@ class MergeGroupHoldCheck(unittest.TestCase):
     def test_build_yml_runs_it_in_the_merge_group_preamble(self) -> None:
         workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
         classify = workflow[workflow.index("\n  classify:\n"):workflow.index("\n  protected-receipt-reuse:\n")]
-        step = classify[classify.index("- name: Refuse a merge group whose pull request is held"):
-                        classify.index("- id: classify")]
+        # The HOLD step alone: it ends where the next step begins, so a step
+        # added after it (the queue breaker, the docs-only entry delta) is
+        # never judged as part of it.
+        start = classify.index("- name: Refuse a merge group whose pull request is held")
+        step = classify[start:classify.index("\n      - ", start)]
         self.assertIn("if: ${{ github.event_name == 'merge_group' }}", step)
         # main's tip, never base_sha: base_sha is the previous speculative
         # group when entries are queued ahead.

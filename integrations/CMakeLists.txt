@@ -34,3 +34,15 @@ if(PULP_ENABLE_RMLUI_ADAPTER)
     endif()
     add_subdirectory(rmlui-native)
 endif()
+
+# The parameter bridge between Pulp's editor-host contract and Vellum's value
+# interfaces, over an installed Vellum SDK (Vellum::Value). Off by default:
+# nothing finds or fetches Vellum unless this is ON. Point CMAKE_PREFIX_PATH
+# at an installed Vellum SDK.
+option(PULP_ENABLE_PULP_VELLUM
+    "Build integrations/pulp-vellum (ParamPort/VisualPort as Vellum ParamModel/ValueFeed, needs an installed Vellum SDK)" OFF)
+if(PULP_ENABLE_PULP_VELLUM)
+    add_subdirectory(pulp-vellum)
+    set_property(GLOBAL APPEND PROPERTY PULP_INTEGRATION_TEST_DIRS
+        "${CMAKE_CURRENT_SOURCE_DIR}/pulp-vellum/tests")
+endif()

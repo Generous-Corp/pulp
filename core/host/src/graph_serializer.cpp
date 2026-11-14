@@ -1,6 +1,7 @@
 // GraphSerializer implementation: SignalGraph <-> .pulpgraph JSON.
 
 #include <pulp/host/graph_serializer.hpp>
+#include <pulp/host/control_index_nodes.hpp>
 #include <pulp/host/processor_restore.hpp>
 #include <pulp/host/sample_region_parameters.hpp>
 #include <pulp/runtime/crypto.hpp>
@@ -143,7 +144,13 @@ inline double get_double(const V& v) {
 // keeps the v2/v3 writers byte stable and teaches the reader the explicit
 // v3 -> v4 migration; Processor emission is added by the follow-on runtime
 // lane once the public registry contract is available.
-constexpr int kFormatVersion = 4;
+// v5 is emitted only when a graph needs typed ports or Control edges. Older
+// readers refuse the envelope before they could reinterpret those as Audio.
+constexpr int kFormatVersion = 5;
+// The saved-identity envelope is format-independent and first shipped on v4,
+// so inspection admits every format from v4 through the current writer. A v4
+// envelope keeps its semantic digest when the writer advances to v5.
+constexpr int kMinInspectedFormatVersion = 4;
 constexpr std::size_t kMaxSerializedSampleRegionConnections = 2'048;
 constexpr std::size_t kMaxSerializedNodes = 512;
 constexpr std::size_t kMaxSerializedConnections = 16'384;
@@ -158,12 +165,14 @@ bool migrate_graph_v1_to_v2(const std::string& source_json,
                             std::string& migrated_json);
 bool migrate_graph_v2_to_v3(const std::string& source_json, std::string& migrated_json);
 bool migrate_graph_v3_to_v4(const std::string& source_json, std::string& migrated_json);
+bool migrate_graph_v4_to_v5(const std::string& source_json, std::string& migrated_json);
 
 std::vector<GraphMigrationEntry>& graph_migrations() {
     static std::vector<GraphMigrationEntry> migrations = {
         {1, 2, migrate_graph_v1_to_v2},
         {2, 3, migrate_graph_v2_to_v3},
         {3, 4, migrate_graph_v3_to_v4},
+        {4, 5, migrate_graph_v4_to_v5},
     };
     return migrations;
 }
@@ -269,6 +278,11 @@ bool migrate_graph_v3_to_v4(const std::string& source_json, std::string& migrate
     return replace_format_version(migrated_json, 3, 4);
 }
 
+bool migrate_graph_v4_to_v5(const std::string& source_json, std::string& migrated_json) {
+    migrated_json = source_json;
+    return replace_format_version(migrated_json, 4, 5);
+}
+
 const GraphMigrationEntry* find_graph_migration(int from_version) {
     for (const auto& entry : graph_migrations()) {
         if (entry.from_version == from_version) {
@@ -307,8 +321,9 @@ bool migrate_graph_json(std::string& json, std::string& error) {
             return true;
         }
         if (*version > kFormatVersion) {
-            error = "unsupported graph format_version "
-                    + std::to_string(*version);
+            error = "unsupported graph format_version " + std::to_string(*version) +
+                    "; upgrade Pulp, or re-export the graph at format " +
+                    std::to_string(kFormatVersion) + " or lower";
             return false;
         }
 
@@ -1075,14 +1090,16 @@ GraphDocumentInspection GraphSerializer::inspect_document(std::string_view json)
                 return result;
             }
             format_version = *version;
-            if (format_version < kFormatVersion) {
+            if (format_version < kMinInspectedFormatVersion) {
                 result.refusal = GraphDocumentRefusal::InvalidFormatVersion;
                 result.detail = "saved document format is older than this inspector supports";
                 return result;
             }
             if (format_version > kFormatVersion) {
                 result.refusal = GraphDocumentRefusal::UnsupportedFutureVersion;
-                result.detail = "saved document format is newer than this reader";
+                result.detail = "saved document format is newer than this reader; upgrade Pulp, "
+                                "or re-export at format " +
+                                std::to_string(kFormatVersion) + " or lower";
                 return result;
             }
             if (!root.hasObjectMember("identity_schema") &&
@@ -1289,11 +1306,37 @@ std::string GraphSerializer::to_json(
     const SignalGraph& graph,
     const std::unordered_map<NodeId, std::pair<float,float>>& editor_layout) {
     bool has_processors = false;
+    bool has_typed_ports = false;
     for (const auto& node : graph.nodes()) {
         if (node.spectral_identity)
             return {};
         has_processors |= graph.is_processor_node(node.id);
+        if (node.type == NodeType::Custom) {
+            // A node may carry fewer handles than ports (none at all for a
+            // node built without named ports); a missing handle is a legacy
+            // audio port and needs no typed record. More handles than ports
+            // is a corrupt node.
+            if (node.input_ports.size() >
+                    static_cast<std::size_t>(std::max(0, node.num_input_ports)) ||
+                node.output_ports.size() >
+                    static_cast<std::size_t>(std::max(0, node.num_output_ports)))
+                return {};
+            const auto non_default = [](const auto& ports, bool output) {
+                for (std::size_t i = 0; i < ports.size(); ++i) {
+                    const auto name = i == 0
+                                          ? std::string("audio")
+                                          : std::string(output ? "out" : "in") + std::to_string(i);
+                    if (ports[i].name != name || ports[i].kind != PortKind::Audio)
+                        return true;
+                }
+                return false;
+            };
+            has_typed_ports |=
+                non_default(node.input_ports, false) || non_default(node.output_ports, true);
+        }
     }
+    for (const auto& connection : graph.connections())
+        has_typed_ports |= connection.control_signal;
     auto root = choc::value::createObject("PulpGraph");
     const auto regions = graph.sample_regions();
     if (graph.nodes().size() > kMaxSerializedNodes ||
@@ -1320,15 +1363,15 @@ std::string GraphSerializer::to_json(
                       return std::tie(lhs->source_node, lhs->source_port, lhs->dest_node,
                                       lhs->dest_port, lhs->feedback, lhs->midi, lhs->automation,
                                       lhs->audio_rate_modulation, lhs->sidechain,
-                                      lhs->automation_param_id, lhs->automation_range_lo,
-                                      lhs->automation_range_hi, lhs->automation_smoothing_ms,
-                                      lhs->automation_mix) <
+                                      lhs->control_signal, lhs->automation_param_id,
+                                      lhs->automation_range_lo, lhs->automation_range_hi,
+                                      lhs->automation_smoothing_ms, lhs->automation_mix) <
                              std::tie(rhs->source_node, rhs->source_port, rhs->dest_node,
                                       rhs->dest_port, rhs->feedback, rhs->midi, rhs->automation,
                                       rhs->audio_rate_modulation, rhs->sidechain,
-                                      rhs->automation_param_id, rhs->automation_range_lo,
-                                      rhs->automation_range_hi, rhs->automation_smoothing_ms,
-                                      rhs->automation_mix);
+                                      rhs->control_signal, rhs->automation_param_id,
+                                      rhs->automation_range_lo, rhs->automation_range_hi,
+                                      rhs->automation_smoothing_ms, rhs->automation_mix);
                   });
     std::vector<SampleRegionDefinition> canonical_regions(regions.begin(), regions.end());
     // Region records and their nested members remain authored sequences: their
@@ -1360,7 +1403,7 @@ std::string GraphSerializer::to_json(
     // Preserve canonical bytes for existing ordinary and sample-region files;
     // v4 is selected by the future Processor writer, while the reader accepts
     // region-bearing v4 files through the migration above.
-    const int version = has_processors ? 4 : (regions.empty() ? 2 : 3);
+    const int version = has_typed_ports ? 5 : (has_processors ? 4 : (regions.empty() ? 2 : 3));
     root.addMember("format_version", (int64_t)version);
 
     // Nodes
@@ -1398,6 +1441,30 @@ std::string GraphSerializer::to_json(
             custom_obj.addMember(
                 "version",
                 (int64_t)(n.custom_type_version > 0 ? n.custom_type_version : 1));
+            if (has_typed_ports) {
+                const auto port_array = [](const auto& ports, int count, bool output) {
+                    auto array = choc::value::createEmptyArray();
+                    for (int i = 0; i < count; ++i) {
+                        auto item = choc::value::createObject("Port");
+                        if (static_cast<std::size_t>(i) < ports.size()) {
+                            item.addMember("name", ports[static_cast<std::size_t>(i)].name);
+                            item.addMember("kind",
+                                           (int64_t)ports[static_cast<std::size_t>(i)].kind);
+                        } else {
+                            item.addMember("name", i == 0 ? std::string("audio")
+                                                          : std::string(output ? "out" : "in") +
+                                                                std::to_string(i));
+                            item.addMember("kind", (int64_t)PortKind::Audio);
+                        }
+                        array.addArrayElement(item);
+                    }
+                    return array;
+                };
+                custom_obj.addMember("input_ports",
+                                     port_array(n.input_ports, n.num_input_ports, false));
+                custom_obj.addMember("output_ports",
+                                     port_array(n.output_ports, n.num_output_ports, true));
+            }
             // Opaque custom-node state: the live instance's save_state(), or
             // the preserved blob for unresolved nodes. Omitted when empty so
             // stateless process-only nodes serialize byte-for-byte as before.
@@ -1457,6 +1524,8 @@ std::string GraphSerializer::to_json(
         co.addMember("audio_rate_modulation", c.audio_rate_modulation);
         // Sidechain flag is additive; absent in older blobs.
         co.addMember("sidechain",   c.sidechain);
+        if (has_typed_ports)
+            co.addMember("control_signal", c.control_signal);
         if (c.automation || c.audio_rate_modulation) {
             co.addMember("auto_param_id",  (int64_t)c.automation_param_id);
             co.addMember("auto_range_lo",  (double)c.automation_range_lo);
@@ -1757,6 +1826,14 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
     graph.clear();
     PluginNodeResolver plugin_resolver(options);
 
+    int source_format_version = 0;
+    try {
+        const auto original = choc::json::parse(json);
+        if (original.isObject() && original.hasObjectMember("format_version"))
+            source_format_version = graph_format_version(original).value_or(0);
+    } catch (...) {
+        // migrate_graph_json reports the parser error below.
+    }
     std::string readable_json = json;
     if (!migrate_graph_json(readable_json, result.error)) {
         return result;
@@ -1779,6 +1856,7 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
     };
     std::vector<ParsedRegion> parsed_regions;
     std::vector<Connection> parsed_connections;
+    bool has_typed_custom_port_payload = false;
     const bool has_region_records = root.hasObjectMember("sample_regions") &&
                                     root["sample_regions"].isArray() &&
                                     root["sample_regions"].size() != 0;
@@ -1826,7 +1904,8 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                 c.automation = cv["automation"].getBool();
                 if ((cv.hasObjectMember("audio_rate_modulation") &&
                      !cv["audio_rate_modulation"].isBool()) ||
-                    (cv.hasObjectMember("sidechain") && !cv["sidechain"].isBool())) {
+                    (cv.hasObjectMember("sidechain") && !cv["sidechain"].isBool()) ||
+                    (cv.hasObjectMember("control_signal") && !cv["control_signal"].isBool())) {
                     result.error = "invalid connection flags";
                     return result;
                 }
@@ -1834,6 +1913,16 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                                               ? cv["audio_rate_modulation"].getBool()
                                               : false;
                 c.sidechain = cv.hasObjectMember("sidechain") ? cv["sidechain"].getBool() : false;
+                c.control_signal =
+                    cv.hasObjectMember("control_signal") ? cv["control_signal"].getBool() : false;
+                if (c.control_signal && source_format_version < 5) {
+                    result.error = "Control connection requires graph format v5";
+                    return result;
+                }
+                if (c.control_signal && (c.feedback || c.midi || c.automation || c.sidechain)) {
+                    result.error = "Control connection has conflicting lane flags";
+                    return result;
+                }
                 if (c.automation || c.audio_rate_modulation) {
                     if (!json_u64(cv["auto_param_id"], std::numeric_limits<std::uint32_t>::max(),
                                   n)) {
@@ -2226,16 +2315,95 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                             version = (int)cv["version"].getInt64();
                         }
                     }
+                    // The Control index input is built in: register it on
+                    // demand, exactly as add_control_index_input_node() does,
+                    // so a restored graph prepares without a caller step.
+                    if (type_id == kControlIndexInputTypeId &&
+                        version == kControlIndexInputVersion &&
+                        graph.custom_node_type(type_id, version) == nullptr)
+                        (void)graph.register_custom_node_type(make_control_index_input_type());
                     const auto* registered = graph.custom_node_type(type_id, version);
-                    if (registered
-                        && registered->num_input_ports == in_ch
-                        && registered->num_output_ports == out_ch) {
+                    const bool has_custom = nv.hasObjectMember("custom");
+                    const auto parse_ports = [&](const char* key, int count, bool output,
+                                                 std::vector<CustomNodePortDescriptor>& ports) {
+                        if (count < 0 || count > static_cast<int>(kMaxSerializedConnections))
+                            return false;
+                        const auto& cv = nv["custom"];
+                        const bool present = has_custom && cv.hasObjectMember(key);
+                        if (present && (!cv[key].isArray() ||
+                                        cv[key].size() != static_cast<std::uint32_t>(count)))
+                            return false;
+                        ports.reserve(static_cast<std::size_t>(count));
+                        for (int i = 0; i < count; ++i) {
+                            CustomNodePortDescriptor port;
+                            if (present) {
+                                const auto& item = cv[key][static_cast<std::uint32_t>(i)];
+                                std::uint64_t kind = 0;
+                                if (!item.isObject() || !item.hasObjectMember("name") ||
+                                    !item["name"].isString() ||
+                                    !json_u64(item["kind"],
+                                              static_cast<unsigned>(PortKind::Spectral), kind))
+                                    return false;
+                                port.name = std::string(item["name"].getString());
+                                port.kind = static_cast<PortKind>(kind);
+                            } else {
+                                port.name =
+                                    i == 0 ? "audio"
+                                           : std::string(output ? "out" : "in") + std::to_string(i);
+                            }
+                            if (port.name.empty() || port.name.size() > 128 ||
+                                std::any_of(ports.begin(), ports.end(), [&](const auto& prior) {
+                                    return prior.name == port.name;
+                                }))
+                                return false;
+                            ports.push_back(std::move(port));
+                        }
+                        return true;
+                    };
+                    std::vector<CustomNodePortDescriptor> input_ports;
+                    std::vector<CustomNodePortDescriptor> output_ports;
+                    const bool has_input_descriptors =
+                        has_custom && nv["custom"].hasObjectMember("input_ports");
+                    const bool has_output_descriptors =
+                        has_custom && nv["custom"].hasObjectMember("output_ports");
+                    has_typed_custom_port_payload |= has_input_descriptors;
+                    if (has_input_descriptors && source_format_version < 5) {
+                        graph.clear();
+                        result.error = "typed Custom ports require graph format v5";
+                        return result;
+                    }
+                    if (has_input_descriptors != has_output_descriptors ||
+                        !parse_ports("input_ports", in_ch, false, input_ports) ||
+                        !parse_ports("output_ports", out_ch, true, output_ports)) {
+                        graph.clear();
+                        result.error = "invalid Custom port descriptors";
+                        return result;
+                    }
+                    if (registered && (has_input_descriptors || has_output_descriptors)) {
+                        GraphNode persisted_shape{};
+                        persisted_shape.num_input_ports = in_ch;
+                        persisted_shape.num_output_ports = out_ch;
+                        for (const auto& port : input_ports)
+                            persisted_shape.input_ports.push_back(
+                                {0, 0, false, port.name, port.kind});
+                        for (const auto& port : output_ports)
+                            persisted_shape.output_ports.push_back(
+                                {0, 0, true, port.name, port.kind});
+                        if (!registered->matches_ports(persisted_shape)) {
+                            graph.clear();
+                            result.error =
+                                "registered Custom port descriptors differ from persisted graph";
+                            return result;
+                        }
+                    }
+                    if (registered && registered->num_input_ports == in_ch &&
+                        registered->num_output_ports == out_ch) {
                         new_id = graph.add_custom_node(type_id, version, name);
                     } else {
                         result.missing_custom_node_types.push_back(
                             custom_type_label(type_id, version));
-                        new_id = graph.add_unresolved_custom_node(
-                            type_id, version, in_ch, out_ch, name);
+                        new_id = graph.add_unresolved_custom_node(type_id, version, in_ch, out_ch,
+                                                                  name, input_ports, output_ports);
                     }
                     // Restore opaque custom-node state. Applied to a resolved
                     // node's instance on its next prepare(); for an unresolved
@@ -2339,7 +2507,9 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
     }
 
     // v3 region-bearing graphs are installed as one locked authoring mutation.
-    if (!parsed_regions.empty()) {
+    if (!parsed_regions.empty() || has_typed_custom_port_payload ||
+        std::any_of(parsed_connections.begin(), parsed_connections.end(),
+                    [](const auto& edge) { return edge.control_signal; })) {
         std::vector<SampleRegionDefinition> definitions;
         definitions.reserve(parsed_regions.size());
         const auto remap_node = [&](const char* context, NodeId persisted, NodeId& remapped) {
@@ -2464,7 +2634,7 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                 if (!region_internal(connection)) {
                     if ((node_region(connection.source_node) != 0 ||
                          node_region(connection.dest_node) != 0) &&
-                        (lane_count != 0 || connection.feedback)) {
+                        (lane_count != 0 || connection.feedback || connection.control_signal)) {
                         connection_error = "sample region boundary connection is not plain audio";
                         break;
                     }
@@ -2473,8 +2643,8 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                 const auto* source = graph.node(connection.source_node);
                 const auto* destination = graph.node(connection.dest_node);
                 if (source == nullptr || destination == nullptr || lane_count != 0 ||
-                    connection.feedback || source->num_output_ports <= 0 ||
-                    destination->num_input_ports <= 0 ||
+                    connection.feedback || connection.control_signal ||
+                    source->num_output_ports <= 0 || destination->num_input_ports <= 0 ||
                     connection.source_port >= static_cast<PortIndex>(source->num_output_ports) ||
                     connection.dest_port >= static_cast<PortIndex>(destination->num_input_ports)) {
                     connection_error = "sample region connection has an invalid shape";
@@ -2496,11 +2666,21 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                 continue;
             bool accepted = false;
             if (connection.audio_rate_modulation) {
-                accepted = graph.connect_audio_rate_modulation(
-                    connection.source_node, connection.source_port, connection.dest_node,
-                    connection.automation_param_id, connection.automation_range_lo,
-                    connection.automation_range_hi, connection.automation_smoothing_ms,
-                    connection.automation_mix);
+                const auto* source = graph.node(connection.source_node);
+                if (connection.control_signal && source != nullptr &&
+                    connection.source_port < source->output_ports.size()) {
+                    accepted = graph.connect_control_modulation(
+                        source->output_ports[connection.source_port], connection.dest_node,
+                        connection.automation_param_id, connection.automation_range_lo,
+                        connection.automation_range_hi, connection.automation_smoothing_ms,
+                        connection.automation_mix);
+                } else if (!connection.control_signal) {
+                    accepted = graph.connect_audio_rate_modulation(
+                        connection.source_node, connection.source_port, connection.dest_node,
+                        connection.automation_param_id, connection.automation_range_lo,
+                        connection.automation_range_hi, connection.automation_smoothing_ms,
+                        connection.automation_mix);
+                }
             } else if (connection.automation) {
                 accepted = graph.connect_automation(
                     connection.source_node, connection.source_port, connection.dest_node,
@@ -2515,6 +2695,15 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
             } else if (connection.feedback) {
                 accepted = graph.connect_feedback(connection.source_node, connection.source_port,
                                                   connection.dest_node, connection.dest_port);
+            } else if (connection.control_signal) {
+                const auto* source = graph.node(connection.source_node);
+                const auto* destination = graph.node(connection.dest_node);
+                if (source != nullptr && destination != nullptr &&
+                    connection.source_port < source->output_ports.size() &&
+                    connection.dest_port < destination->input_ports.size())
+                    accepted = static_cast<bool>(
+                        graph.connect(source->output_ports[connection.source_port],
+                                      destination->input_ports[connection.dest_port]));
             } else {
                 accepted = graph.connect(connection.source_node, connection.source_port,
                                          connection.dest_node, connection.dest_port);

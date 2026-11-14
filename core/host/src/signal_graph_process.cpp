@@ -7,6 +7,7 @@
 #include "spectral_graph_internal.hpp"
 
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/host/control_index_nodes.hpp>
 #include <pulp/host/signal_graph_execution_snapshot.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
 #include <pulp/runtime/log.hpp>
@@ -17,6 +18,89 @@
 #include <span>
 
 namespace pulp::host {
+
+ControlProcessResult SignalGraph::process_control_checked(
+    audio::BufferView<float>& output, const audio::BufferView<const float>& input,
+    const ControlIndexBlock& block, const format::ProcessContext* transport) noexcept {
+    const auto refuse = [this](ControlProcessResult result) noexcept {
+        control_index_refusals_.fetch_add(1, std::memory_order_relaxed);
+        return result;
+    };
+    auto read_guard = read_snapshot_();
+    auto* cg = read_guard.get();
+    if (!cg || !cg->control_index_state || !cg->graph_event_lane || cg->trigger_state)
+        return refuse(ControlProcessResult::Unbound);
+    bool expected = false;
+    if (!cg->control_index_busy.compare_exchange_strong(expected, true, std::memory_order_acquire,
+                                                        std::memory_order_relaxed))
+        return refuse(ControlProcessResult::Busy);
+    struct ReleaseBusy {
+        std::atomic<bool>& busy;
+        ~ReleaseBusy() {
+            busy.store(false, std::memory_order_release);
+        }
+    } release_busy{cg->control_index_busy};
+    const auto frames = block.indices.size();
+    if (parallel_routing_enabled() || anticipation_enabled())
+        return refuse(ControlProcessResult::UnsupportedMode);
+    if (frames == 0 || frames > kControlIndexMaxFrames ||
+        frames > static_cast<std::size_t>(cg->max_block_size) || output.num_samples() != frames ||
+        input.num_samples() != frames || output.num_channels() == 0 || input.num_channels() == 0)
+        return refuse(ControlProcessResult::OutOfRange);
+    const bool reset = transport && transport->should_reset_stream_history();
+    if (cg->graph_event_lane->active())
+        return refuse(ControlProcessResult::Busy);
+    std::uint64_t expected_epoch = cg->graph_event_epoch;
+    std::uint64_t expected_start = cg->graph_event_lane->counters().cursor;
+    if (reset) {
+        if (expected_epoch == std::numeric_limits<std::uint64_t>::max() ||
+            transport->position_samples < 0)
+            return refuse(ControlProcessResult::ClockExhausted);
+        ++expected_epoch;
+        expected_start = static_cast<std::uint64_t>(transport->position_samples);
+    }
+    if (block.epoch != expected_epoch)
+        return refuse(ControlProcessResult::StaleEpoch);
+    if (block.absolute_start != expected_start)
+        return refuse(ControlProcessResult::WrongStart);
+    if (block.absolute_start > std::numeric_limits<std::uint64_t>::max() - frames)
+        return refuse(ControlProcessResult::ClockExhausted);
+    if (reset) {
+        if (cg->graph_event_lane->reset(expected_epoch, expected_start) !=
+            GraphEventResult::Accepted)
+            return refuse(ControlProcessResult::StaleEpoch);
+        cg->graph_event_epoch = expected_epoch;
+        for (auto& context : cg->routed.serial.custom_ctx)
+            context.graph_event_epoch = expected_epoch;
+        for (auto& context : cg->routed.parallel.custom_ctx)
+            context.graph_event_epoch = expected_epoch;
+    }
+    // Publish the index block only once every admission check has passed, so
+    // a refused call leaves the previously admitted block in place.
+    auto& state = *cg->control_index_state;
+    std::copy(block.indices.begin(), block.indices.end(), state.indices.begin());
+    state.frames = frames;
+    bool rendered = false;
+    process_snapshot_impl(output, input, static_cast<int>(frames), transport, cg, false, nullptr,
+                          true, &rendered);
+    if (!rendered) {
+        // A block the lane never opened was not consumed: the cursor did not
+        // move, so the caller may resubmit it at the same absolute start.
+        if (cg->graph_event_lane->counters().cursor == expected_start)
+            return refuse(ControlProcessResult::Busy);
+        output.clear();
+        return ControlProcessResult::RenderFailed;
+    }
+    return ControlProcessResult::Accepted;
+}
+
+ControlIndexPosition SignalGraph::control_index_position() const noexcept {
+    auto read_guard = read_snapshot_();
+    const auto* cg = read_guard.get();
+    if (!cg || !cg->control_index_state || !cg->graph_event_lane)
+        return {};
+    return {true, cg->graph_event_epoch, cg->graph_event_lane->counters().cursor};
+}
 
 void SignalGraph::process(audio::BufferView<float>& output,
                           const audio::BufferView<const float>& input, int num_samples) {
@@ -59,13 +143,26 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                                         const audio::BufferView<const float>& input,
                                         int num_samples, const format::ProcessContext* transport,
                                         CompiledGraph* cg, bool trigger_admitted,
-                                        HostEventResult* host_event_result) {
+                                        HostEventResult* host_event_result, bool control_admitted,
+                                        bool* control_rendered) {
+    if (control_rendered != nullptr)
+        *control_rendered = false;
     if (host_event_result != nullptr)
         *host_event_result = HostEventResult::Accepted;
     // Only the controller entry may advance a typed clock. In particular a
     // copied ExecutionSnapshot cannot render even the current generation.
     if (cg && cg->trigger_state && !trigger_admitted)
         return;
+    if (cg && cg->control_index_state && !control_admitted) {
+        control_index_refusals_.fetch_add(1, std::memory_order_relaxed);
+        if (num_samples > 0) {
+            for (std::size_t c = 0; c < output.num_channels(); ++c)
+                std::fill_n(output.channel_ptr(c),
+                            std::min(output.num_samples(), static_cast<std::size_t>(num_samples)),
+                            0.0f);
+        }
+        return;
+    }
     // Negative or zero block sizes mean "nothing to do" — return without
     // touching output (a memset with size_t(negative) wraps to a huge size).
     if (num_samples <= 0)
@@ -86,19 +183,26 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
     struct GraphEventBlockGuard {
         std::shared_ptr<GraphAuthoredEventLane<>> lane;
         bool active = false;
+        bool clock_only = false;
         ~GraphEventBlockGuard() {
             if (!active)
                 return;
+            if (clock_only && (lane->begin_producer_block() != GraphEventResult::Accepted ||
+                               lane->begin_consumer_block() != GraphEventResult::Accepted)) {
+                lane->abort_block();
+                return;
+            }
             if (lane->end_block() != GraphEventResult::Accepted)
                 lane->abort_block();
         }
-    } graph_event_guard{cg->graph_event_lane};
+    } graph_event_guard{cg->graph_event_lane, false,
+                        cg->control_index_state && cg->graph_event_edge.producer == 0};
     if (cg->graph_event_lane) {
         // A host seek/discontinuity retires the old pending ring before the
         // next callback. Keep the event clock in the host's absolute sample
         // domain when the transport supplies one, and advance the activation
         // epoch so borrowed writers from the retired block become stale.
-        if (transport && transport->should_reset_stream_history()) {
+        if (transport && transport->should_reset_stream_history() && !control_admitted) {
             if (transport->position_samples < 0 ||
                 cg->graph_event_epoch == std::numeric_limits<std::uint64_t>::max()) {
                 for (std::size_t c = 0; c < output.num_channels(); ++c)
@@ -491,6 +595,8 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                         has_automation ? &cg->routed.automation : nullptr);
                 });
                 if (dispatch == RoutedDispatchResult::success) {
+                    if (control_rendered != nullptr)
+                        *control_rendered = true;
                     return;
                 }
                 if (dispatch == RoutedDispatchResult::processing_failure) {
@@ -516,6 +622,8 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                         cg->audio_edge_probe.get(), &edge_probes);
                 });
                 if (dispatch == RoutedDispatchResult::success) {
+                    if (control_rendered != nullptr)
+                        *control_rendered = true;
                     return;
                 }
                 if (dispatch == RoutedDispatchResult::processing_failure) {
@@ -569,6 +677,11 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
     // the hand-maintained bit-exact oracle/fallback (see
     // signal_graph_reference_walk.cpp).
     run_reference_walk_(output, input, num_samples, cg, time_nodes);
+    // The reference walk reads the same snapshot-owned index block through the
+    // Control index callback, so a checked Control block it renders is a
+    // rendered block, bit-identical to the serial routed backend.
+    if (control_rendered != nullptr)
+        *control_rendered = true;
 }
 
 void SignalGraph::ExecutionSnapshot::process(audio::BufferView<float>& output,

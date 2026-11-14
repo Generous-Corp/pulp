@@ -81,7 +81,7 @@ class WindowsRunnerPolicyTests(unittest.TestCase):
 
         consumer = job(self.build, "build")
         self.assertIn(
-            "needs: [resolve-provider, classify, protected-receipt-reuse]",
+            "needs: [resolve-provider, classify, protected-receipt-reuse, cheap-first]",
             consumer,
         )
         self.assertIn(

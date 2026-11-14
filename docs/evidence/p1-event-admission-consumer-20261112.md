@@ -13,7 +13,8 @@ No runtime API or queue is added.
 
 The gate remains `NOT_QUALIFIED`: the admission-contract rows listed under
 "Remaining rows" below are `NOT_CHECKED`, and the runtime, provider parity,
-realtime, and non-Darwin lanes remain `NOT_CHECKED`.
+realtime timing, and non-Darwin lanes remain `NOT_CHECKED`. The combined audio
+path is RealtimeSanitizer-clean (see `p1-rtsan-consumer-20261113.md`).
 
 ## Exact live-origin recheck — 2026-11-12
 
@@ -225,8 +226,9 @@ and an overflow flag, which is asserted after rendering; no container grows in
 those callbacks. The block loop calls only `inject_midi`,
 `inject_parameter_events`, `process`, and the voice bank's
 `begin_block`/`publish`/`render`; it makes no topology call. This is a
-construction property of the fixture, not an allocation or realtime proof of
-the runtime or of `VoiceBankBinding::render`.
+construction property of the fixture. The RealtimeSanitizer proof of the
+runtime and of `VoiceBankBinding::render` on this path is recorded in
+`docs/evidence/p1-rtsan-consumer-20261113.md`.
 
 The installed `graph_event_contract.hpp`, `voice_bank_binding.hpp`,
 `custom_node_type.hpp`, `custom_node_events.hpp`, `plugin_slot.hpp`,
@@ -343,7 +345,14 @@ test-owned epoch and absolute sample origin across all four families, MIDI 1.0
 projection through `SignalGraph::inject_midi` inside this fixture, more than
 two partition schedules (five, for the combined control), the explainable
 sequence mutation, and routed-executor versus reference-walk parity for the
-graph-authored lane, the MIDI input and the parameter mailbox. These admission-contract rows remain `NOT_CHECKED`:
+graph-authored lane, the MIDI input and the parameter mailbox. Closed by
+`docs/evidence/p1-rtsan-consumer-20261113.md`: the combined audio path
+(MIDI projection and `inject_midi`, `inject_parameter_events`, `process` with
+the graph-authored lane on both serial backends, and `VoiceBankBinding`
+publish and render) makes no allocation, lock or blocking call under
+RealtimeSanitizer, with planted malloc, mutex and sleep controls detected at
+the boundary and inside the graph and voice-bank callees. These
+admission-contract rows remain `NOT_CHECKED`:
 
 * UMP and MPE expression sidecars through `inject_midi(node, midi, mpe)`
   inside this fixture (the G-5 consumer covers them separately);
@@ -352,9 +361,6 @@ graph-authored lane, the MIDI input and the parameter mailbox. These admission-c
 * reset and epoch cancellation applied to all four families at once; reset is
   checked per family (graph-authored lane reset, MIDI and voice stale-epoch
   refusal);
-* callback allocation freedom as a measured or realtime property; the fixture
-  callbacks write only into fixed arrays, but the runtime and
-  `VoiceBankBinding::render` are not instrumented;
 * parallel-routed versus reference parity: parallel routing is refused once the
   graph-authored lane is bound (see "Executor parity");
 * voice intent inside the `SignalGraph`; the voice bank runs its own prepared

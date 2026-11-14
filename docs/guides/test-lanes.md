@@ -9,7 +9,7 @@ single source of truth for that model.
 
 | Lane | Trigger | Gates the PR? | Builds examples? | What it runs |
 |------|---------|---------------|------------------|--------------|
-| **Required core gate** (`macos`) | every PR + every merge group | **yes** (blocking) | Actions: no; Shipyard opt-in `mac` lane (`--target mac`): yes | merge group: all core tests **except** the `validation`, `slow`, `performance`, `bench`, and `quality-lab` labels; PR head: the build plus only the `pr-fast` tier (see below), plus a non-gating full run on a head that is armed for auto-merge on the current `main` so it can issue a receipt; an unchanged exact PR merge tree may reuse that artifact-bound result after protected-base verification |
+| **Required core gate** (`macos`) | every PR + every merge group | **yes** (blocking) | Actions: no; Shipyard opt-in `mac` lane (`--target mac`): yes | merge group: all core tests **except** the `validation`, `slow`, `performance`, `bench`, and `quality-lab` labels; PR head: the build plus only the `pr-fast` tier (see below), plus a non-gating full run on a head that is armed for auto-merge on the current `main` so it can issue a receipt; an unchanged exact PR merge tree may reuse that artifact-bound result after protected-base verification; a merge group whose own entry is `docs-only` skips the native build when the live queue rule is ALLGREEN and `PULP_DOCS_ENTRY_DELTA` is `enforce` (local CI guide, "Docs-only entry delta under ALLGREEN") |
 | **Source selftests** (`Enforce version & skill sync`, which needs the *Source-only selftests* step and the two *Exclusive source selftests* shards) | every PR + every merge group | **yes** (blocking) | no build at all | the ~140 Python registrations in `tools/ci/source_selftests.json` (label `source-selftest`), which the `macos` gate excludes on gate events; see [below](#the-source-selftest-lane) |
 | **Example-validation** (`example-validation`) | PRs touching `examples/**`, state/format headers, core CMake, or shared dependency infrastructure | advisory pending promotion (see status below) | yes — Linux + macOS | Linux compiles every example artifact; hosted macOS runs auval + built-in CLAP dlopen checks; pluginval/clap-validator require an operator-dispatched advisory image |
 | **API contracts** (`api-contracts`) | every PR + every merge group | advisory pending promotion (see below) | no | the Doxygen strict pass over the catalogued public headers, ~3 s of work |
@@ -234,6 +234,16 @@ stopped compiling and no Pulp check noticed.
   the artifact's `SHA256SUMS`, and records the run id, head sha, artifact id and
   archive sha256 in the step summary and a `vellum-sdk-consumer-receipt`
   artifact. Any lookup or digest failure fails the step; nothing falls back.
+- **Pinned minimum.** `resolve --min-vellum-sha` refuses a run whose head does
+  not contain the given Vellum commit (checked through Vellum's compare endpoint
+  before any download). The workflow sets it to the commit that introduced the
+  `ParamModel` surface that `integrations/pulp-vellum` builds on.
+- **Parameter bridge.** The same SDK also builds `integrations/pulp-vellum` in a
+  separate configure (`PULP_ENABLE_PULP_VELLUM=ON`) and runs its `pulp-vellum`
+  ctest label, so a Vellum change that breaks the bridge shows up here. Pull
+  requests that touch the package, its test, or the two CMake files that own its
+  option and test registration (`integrations/CMakeLists.txt` and the root
+  `CMakeLists.txt`) run the lane.
 - **Negative control.** Every full run recompiles one Vellum-side translation
   unit (`knob_panel.cpp`) with `-fsyntax-only`, once against the SDK as
   published, which must succeed, and once against a copy of its mirror headers

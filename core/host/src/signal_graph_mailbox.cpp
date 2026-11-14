@@ -279,7 +279,8 @@ SignalGraph::PreparedLatencySnapshot::connection_delay(const Connection& query) 
             candidate.audio_rate_modulation != query.audio_rate_modulation ||
             candidate.sidechain != query.sidechain ||
             candidate.automation_param_id != query.automation_param_id ||
-            candidate.spectral != query.spectral) {
+            candidate.spectral != query.spectral ||
+            candidate.control_signal != query.control_signal) {
             continue;
         }
         return value.delay_samples;

@@ -16,7 +16,13 @@ function(run_step label)
         message(FATAL_ERROR "G9 ${label}: ${_out}\n${_err}\nfixture=${_fixture}")
     endif()
 endfunction()
-run_step(install "${CMAKE_COMMAND}" --install "${PULP_BUILD_DIR}" --prefix "${_prefix}" --config Release)
+# The installed export files exist only for the configuration the producer
+# built, so stage and consume that one (Release when the producer names none).
+set(_config Release)
+if(PULP_PARENT_BUILD_TYPE)
+    set(_config "${PULP_PARENT_BUILD_TYPE}")
+endif()
+run_step(install "${CMAKE_COMMAND}" --install "${PULP_BUILD_DIR}" --prefix "${_prefix}" --config "${_config}")
 foreach(_header isolated_plugin_slot.hpp signal_graph_runtime.hpp)
     file(SHA256 "${PULP_SOURCE_DIR}/core/host/include/pulp/host/${_header}" _expected)
     file(SHA256 "${_prefix}/include/pulp/host/${_header}" _actual)
@@ -28,9 +34,26 @@ endforeach()
 foreach(_file CMakeLists.txt main.cpp)
     configure_file("${PULP_SOURCE_DIR}/examples/g9-isolated-clap-consumer/${_file}" "${_source}/${_file}" COPYONLY)
 endforeach()
-run_step(configure "${CMAKE_COMMAND}" -S "${_source}" -B "${_build}" -G Ninja
+set(_args -S "${_source}" -B "${_build}" -G Ninja
     "-DPulp_DIR=${_prefix}/lib/cmake/Pulp" "-DCMAKE_PREFIX_PATH=${_prefix}"
-    -DCMAKE_BUILD_TYPE=Release "-DPULP_WORKER=${_prefix}/bin/pulp-clap-worker" "-DPULP_FIXTURE=${PULP_FIXTURE}")
+    "-DCMAKE_BUILD_TYPE=${_config}" "-DPULP_WORKER=${_prefix}/bin/pulp-clap-worker"
+    "-DPULP_FIXTURE=${PULP_FIXTURE}"
+    "-DCMAKE_CXX_FLAGS=${PULP_PARENT_CXX_FLAGS}"
+    "-DCMAKE_EXE_LINKER_FLAGS=${PULP_PARENT_EXE_LINKER_FLAGS}")
+string(TOLOWER "${_config}" _config_lower)
+if(_config_lower STREQUAL "debug")
+    list(APPEND _args -DPULP_ALLOW_DEBUG_SDK=ON)
+endif()
+if(PULP_PARENT_SANITIZER)
+    list(APPEND _args "-DPULP_SANITIZER=${PULP_PARENT_SANITIZER}")
+endif()
+if(PULP_PARENT_CXX_COMPILER)
+    list(APPEND _args "-DCMAKE_CXX_COMPILER=${PULP_PARENT_CXX_COMPILER}")
+endif()
+if(PULP_PARENT_OSX_ARCHITECTURES)
+    list(APPEND _args "-DCMAKE_OSX_ARCHITECTURES=${PULP_PARENT_OSX_ARCHITECTURES}")
+endif()
+run_step(configure "${CMAKE_COMMAND}" ${_args})
 run_step(build bash "${PULP_SOURCE_DIR}/tools/ci/governed-build.sh" "${CMAKE_COMMAND}" --build "${_build}")
 run_step(consumer "${_build}/pulp-isolated-clap-consumer" "${_prefix}/bin/pulp-clap-worker" "${PULP_FIXTURE}")
 file(READ "${_prefix}/sdk-provenance.json" _provenance)

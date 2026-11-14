@@ -118,6 +118,12 @@ class SignalGraph::PreparedTopologyEdit {
                                        uint32_t dest_param_id, float range_lo, float range_hi,
                                        float smoothing_ms = 0.0f,
                                        AutomationMix mix = AutomationMix::Replace);
+    bool connect_control_modulation(const PortHandle& source, NodeId dest, uint32_t dest_param_id,
+                                    float range_lo, float range_hi, float smoothing_ms = 0.0f,
+                                    AutomationMix mix = AutomationMix::Replace);
+    /// Only newly added Control nodes may stage state in a candidate. Baseline
+    /// instances remain shared with the live graph until commit.
+    bool set_control_node_state(NodeId id, const std::vector<std::uint8_t>& bytes);
     bool connect_feedback(NodeId source, PortIndex source_port, NodeId dest,
                           PortIndex dest_port);
     bool connect_midi(NodeId source, NodeId dest);

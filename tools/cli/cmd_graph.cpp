@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/host/graph_patch.hpp>
 #include <pulp/host/graph_rt_report.hpp>
@@ -17,12 +18,15 @@
 #include <pulp/host/signal_graph.hpp>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace {
 void usage() {
     std::cout << "Usage: pulp graph "
                  "<catalog|inspect|validate|explain|render|probe|report|fmt|canonicalize|save> "
                  "<file.pulpgraph|file.pat> [--json] [--notation] [--output path]\n";
+    std::cout << "render: --input file.wav (required when the graph has audio_in) "
+                 "[--output out.wav] [--frames N]; reports frames, sample_rate and peak\n";
     std::cout << "report: [--sample-rate 48000] [--max-block-size 512] [--block-size N] "
                  "[--measure-blocks 16] (always JSON)\n";
     std::cout << "probe: --input file.wav --source-node NAME --source-port NAME "
@@ -472,6 +476,173 @@ int report_graph(const std::vector<std::string>& args) {
     std::cout << pulp::host::graph_rt_report_to_json(report) << '\n';
     return 0;
 }
+// Render admission: the input decodes once, through the same bounded probe
+// as `graph probe`, and its length bounds the output allocation as well.
+constexpr std::uint64_t kRenderMaxFrames = 28800000;       // 10 minutes at 48 kHz
+constexpr std::uint64_t kRenderMaxInputSamples = 57600000; // frames x channels
+constexpr std::uint64_t kRenderDefaultFrames = 48000;
+
+struct RenderOptions {
+    std::string input;
+    std::string output;
+    std::uint64_t frames = 0; // 0 = input length, or kRenderDefaultFrames without input
+};
+
+std::optional<RenderOptions> parse_render_options(const std::vector<std::string>& args,
+                                                  std::string& code, std::string& message) {
+    RenderOptions options;
+    bool seen_input = false;
+    bool seen_output = false;
+    bool seen_frames = false;
+    for (std::size_t i = 2; i < args.size(); ++i) {
+        const auto& key = args[i];
+        if (key == "--json")
+            continue;
+        bool* seen = key == "--input"    ? &seen_input
+                     : key == "--output" ? &seen_output
+                     : key == "--frames" ? &seen_frames
+                                         : nullptr;
+        if (seen == nullptr) {
+            code = "invalid_option";
+            message = "unknown render option: " + key +
+                      " (render accepts --input WAV, --output WAV, --frames N and --json)";
+            return std::nullopt;
+        }
+        if (*seen) {
+            code = "invalid_option";
+            message = key + " may be given only once";
+            return std::nullopt;
+        }
+        *seen = true;
+        if (++i == args.size() || args[i].empty()) {
+            code = key == "--output" ? "missing_output" : "invalid_option";
+            message = key == "--output"  ? "--output requires a WAV path"
+                      : key == "--input" ? "--input requires a WAV path"
+                                         : "--frames requires an integer";
+            return std::nullopt;
+        }
+        if (key == "--input") {
+            options.input = args[i];
+        } else if (key == "--output") {
+            options.output = args[i];
+        } else {
+            const auto& value = args[i];
+            std::uint64_t frames = 0;
+            const auto parsed = std::from_chars(value.data(), value.data() + value.size(), frames);
+            if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() ||
+                frames < 1 || frames > kRenderMaxFrames) {
+                code = "invalid_option";
+                message =
+                    "--frames requires an integer from 1 to " + std::to_string(kRenderMaxFrames);
+                return std::nullopt;
+            }
+            options.frames = frames;
+        }
+    }
+    return options;
+}
+
+// `pulp graph render`: drive the graph offline with the decoded --input (or
+// with silence when the graph has no audio_in node) and report what came out.
+int render_graph(pulp::host::SignalGraph& graph,
+                 const pulp::host::GraphSerializer::LoadResult& loaded,
+                 const RenderOptions& options, bool json) {
+    const auto fail = [json](const std::string& code, const std::string& message, int status) {
+        if (json)
+            json_error(code, message);
+        else
+            std::cerr << "pulp graph: " << message << '\n';
+        return status;
+    };
+    if (!loaded.missing_plugins.empty() || !loaded.missing_custom_node_types.empty())
+        return fail("unresolved_node", "cannot render with unresolved node types", 1);
+    const bool has_audio_in =
+        std::any_of(graph.nodes().begin(), graph.nodes().end(),
+                    [](const auto& node) { return node.type == pulp::host::NodeType::AudioInput; });
+    // Without this refusal an audio_in graph renders the host's zero padding
+    // and reports success, which reads as a working graph that outputs silence.
+    if (has_audio_in && options.input.empty())
+        return fail("missing_input",
+                    "the graph reads audio from an audio_in node, so render needs a source: pass "
+                    "--input file.wav (its sample rate, channel count and length drive the render)",
+                    2);
+    std::optional<pulp::audio::AudioFileData> input;
+    if (!options.input.empty()) {
+        input = pulp::audio::read_audio_file(options.input, [](const auto& info) {
+            return info.sample_rate >= 8000 && info.sample_rate <= 192000 &&
+                   info.num_channels >= 1 && info.num_channels <= 8 && info.num_frames >= 1 &&
+                   info.num_frames <= kRenderMaxFrames &&
+                   info.num_frames * info.num_channels <= kRenderMaxInputSamples;
+        });
+        if (!input || input->empty())
+            return fail("input_limit",
+                        "input must decode to 1..8 channels, 8000..192000 Hz, 1.." +
+                            std::to_string(kRenderMaxFrames) + " frames and at most " +
+                            std::to_string(kRenderMaxInputSamples) + " samples in total",
+                        2);
+        for (const auto& channel : input->channels)
+            for (const auto sample : channel)
+                if (!std::isfinite(sample))
+                    return fail("non_finite_input", "input samples must be finite", 2);
+    }
+    pulp::host::OfflineSignalGraphConfig config;
+    if (input) {
+        config.sample_rate = static_cast<double>(input->sample_rate);
+        config.input_channels = static_cast<int>(input->num_channels());
+        config.output_channels = std::max(2, config.input_channels);
+    }
+    pulp::host::OfflineSignalGraphHost host(graph);
+    if (!host.prepare(config))
+        return fail("prepare_failed", "graph preparation failed", 1);
+    const std::uint64_t frames = options.frames != 0 ? options.frames
+                                 : input             ? input->num_frames()
+                                                     : kRenderDefaultFrames;
+    std::vector<const float*> pointers;
+    pulp::host::OfflineSignalGraphOptions render_options;
+    render_options.frame_count = frames;
+    if (input) {
+        for (const auto& channel : input->channels)
+            pointers.push_back(channel.data());
+        render_options.input = {pointers.data(), pointers.size(),
+                                static_cast<std::size_t>(input->num_frames())};
+    }
+    const auto rendered = host.render(render_options);
+    if (!rendered.ok)
+        return fail("render_failed", "offline render failed", 1);
+    float peak = 0.0f;
+    for (std::size_t channel = 0; channel < rendered.audio.num_channels(); ++channel)
+        for (const auto sample : rendered.audio.channel(channel)) {
+            if (!std::isfinite(sample))
+                return fail("non_finite_output", "the graph produced non-finite samples", 1);
+            peak = std::max(peak, std::abs(sample));
+        }
+    const auto sample_rate = static_cast<std::int64_t>(config.sample_rate);
+    if (!options.output.empty()) {
+        pulp::audio::AudioFileData file;
+        file.sample_rate = static_cast<std::uint32_t>(sample_rate);
+        for (std::size_t channel = 0; channel < rendered.audio.num_channels(); ++channel) {
+            const auto samples = rendered.audio.channel(channel);
+            file.channels.emplace_back(samples.begin(), samples.end());
+        }
+        if (!pulp::audio::write_wav_file(options.output, file, pulp::audio::WavBitDepth::Float32))
+            return fail("output_failed", "could not write WAV output", 1);
+    }
+    if (json) {
+        auto result = choc::value::createObject("GraphRender");
+        result.addMember("valid", true);
+        result.addMember("code", "ok");
+        result.addMember("frames", static_cast<std::int64_t>(frames));
+        result.addMember("sample_rate", sample_rate);
+        result.addMember("channels", static_cast<std::int64_t>(rendered.audio.num_channels()));
+        result.addMember("blocks", static_cast<std::int64_t>(rendered.blocks_rendered));
+        result.addMember("peak", static_cast<double>(peak));
+        std::cout << choc::json::toString(result) << '\n';
+    } else {
+        std::cout << "rendered " << frames << " frames at " << sample_rate << " Hz in "
+                  << rendered.blocks_rendered << " blocks (peak " << peak << ")\n";
+    }
+    return 0;
+}
 } // namespace
 int cmd_graph(const std::vector<std::string>& args) {
     if (args.empty() || args[0] == "help" || args[0] == "--help" || args[0] == "-h") {
@@ -509,6 +680,19 @@ int cmd_graph(const std::vector<std::string>& args) {
         else
             std::cerr << "pulp graph: unknown subcommand '" << op << "'\n";
         return 2;
+    }
+    std::optional<RenderOptions> render_options;
+    if (op == "render") {
+        std::string code;
+        std::string message;
+        render_options = parse_render_options(args, code, message);
+        if (!render_options) {
+            if (json)
+                json_error(code, message);
+            else
+                std::cerr << "pulp graph: " << message << '\n';
+            return 2;
+        }
     }
     auto graph_ptr = std::make_unique<pulp::host::SignalGraph>();
     pulp::host::GraphLoadOptions opts;
@@ -595,65 +779,8 @@ int cmd_graph(const std::vector<std::string>& args) {
                       << "\nmissing_plugins: " << loaded.missing_plugins.size() << "\n";
         return 0;
     }
-    if (op == "render") {
-        if (!loaded.missing_plugins.empty() || !loaded.missing_custom_node_types.empty()) {
-            if (json)
-                json_error("unresolved_node", "cannot render with unresolved node types");
-            else
-                std::cerr << "pulp graph: cannot render with unresolved node types\n";
-            return 1;
-        }
-        pulp::host::OfflineSignalGraphHost host(graph);
-        pulp::host::OfflineSignalGraphConfig config;
-        if (!host.prepare(config)) {
-            if (json)
-                json_error("prepare_failed", "graph preparation failed");
-            else
-                std::cerr << "pulp graph: graph preparation failed\n";
-            return 1;
-        }
-        pulp::host::OfflineSignalGraphOptions options;
-        options.frame_count = 48000;
-        const auto rendered = host.render(options);
-        if (!rendered.ok) {
-            if (json)
-                json_error("render_failed", "offline render failed");
-            else
-                std::cerr << "pulp graph: offline render failed\n";
-            return 1;
-        }
-        const auto output_arg = std::find(args.begin() + 2, args.end(), "--output");
-        if (output_arg != args.end()) {
-            if (output_arg + 1 == args.end()) {
-                if (json)
-                    json_error("missing_output", "--output requires a WAV path");
-                else
-                    std::cerr << "pulp graph: --output requires a WAV path\n";
-                return 2;
-            }
-            pulp::audio::AudioFileData file;
-            file.sample_rate = 48000;
-            for (std::size_t channel = 0; channel < rendered.audio.num_channels(); ++channel) {
-                const auto samples = rendered.audio.channel(channel);
-                file.channels.emplace_back(samples.begin(), samples.end());
-            }
-            if (!pulp::audio::write_wav_file(*(output_arg + 1), file,
-                                             pulp::audio::WavBitDepth::Float32)) {
-                if (json)
-                    json_error("output_failed", "could not write WAV output");
-                else
-                    std::cerr << "pulp graph: could not write WAV output\n";
-                return 1;
-            }
-        }
-        if (json)
-            std::cout << "{\"valid\":true,\"code\":\"ok\",\"frames\":48000,\"sample_rate\":48000,"
-                         "\"blocks\":"
-                      << rendered.blocks_rendered << "}\n";
-        else
-            std::cout << "rendered 48000 frames in " << rendered.blocks_rendered << " blocks\n";
-        return 0;
-    }
+    if (op == "render")
+        return render_graph(graph, loaded, *render_options, json);
     if (op == "save") {
         const auto output_arg = std::find(args.begin() + 2, args.end(), "--output");
         if (output_arg == args.end() || output_arg + 1 == args.end() ||

@@ -53,7 +53,7 @@ automatable parameter, so `input.audio ~> gain1.gain @ 0.5` is refused; see the
 ```sh
 pulp graph validate first.pat
 # valid: true
-# format_version: 4
+# format_version: 5
 # nodes: 3
 # connections: 4
 
@@ -139,13 +139,24 @@ channels, rate, samples = read_float_wav("out.wav")
 print(channels, rate, len(samples), max(abs(x) for x in samples))
 ```
 
-## Known limitation: render takes no input audio
+## Render the graph over the input
 
-`pulp graph render` does not currently accept input audio. It ignores
-`--input` without an error and renders the graph with silent input, so a graph
-that processes `audio_in` writes an all-silent file. A fix is pending. Until it
-lands, use `probe` (above) to measure a graph against a real input file, and do
-not treat a `render` of an input-driven graph as evidence that it passes audio.
+`render` runs the whole graph over the input file and writes the output:
+
+```sh
+pulp graph render first.pulpgraph --input in.wav --output out.wav --json
+```
+
+The render takes its sample rate, channel count and length from `in.wav`, and
+writes `out.wav` at the same sample rate. The JSON reports `frames`,
+`sample_rate`, `channels`, `blocks` and `peak`, the largest absolute output
+sample; for the sine above through the 0.5 gain `peak` is about 0.25. A `peak`
+of 0 means the graph rendered silence. Add `--frames N` to render a different
+length (a longer render zero-pads the input, which captures a tail).
+
+A graph with an `audio_in` node refuses to render without `--input` (code
+`missing_input`, exit 2) rather than writing a silent file, and an unknown
+option is refused with `invalid_option`.
 
 ## Next
 

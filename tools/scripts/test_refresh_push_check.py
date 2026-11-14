@@ -176,7 +176,7 @@ class Fixture:
             input=self.records(remote_sha), capture_output=True, text=True, env=self.env(**extra), timeout=60,
         )
 
-    def run_hook(self, remote_sha: str, **extra: str) -> subprocess.CompletedProcess:
+    def run_hook(self, remote_sha: str, records: str | None = None, **extra: str) -> subprocess.CompletedProcess:
         # The hook resolves helpers relative to the repo it runs in. Mirror
         # only what this path needs; the fixture has no versioning config, so
         # the hook stops after its pushed-ref guard, as on an old checkout.
@@ -187,7 +187,8 @@ class Fixture:
         env = self.env(**extra)
         return subprocess.run(
             ["bash", str(self.repo / ".githooks/pre-push"), "origin", "git@github.com:Generous-Corp/pulp.git"],
-            cwd=self.repo, input=self.records(remote_sha), capture_output=True, text=True, env=env, timeout=60,
+            cwd=self.repo, input=self.records(remote_sha) if records is None else records, capture_output=True, text=True,
+            encoding="utf-8", env=env, timeout=60,
         )
 
     def entries(self) -> list[dict]:
@@ -411,6 +412,111 @@ def case_agent_skip_still_runs_skill_sync(fx: Fixture) -> None:
     res = push(STUB_SSC_RC="1")
     assert res.returncode == 0 and "skipping gates" in res.stderr, res.stderr
     assert not marker.exists(), "skill-sync ran for a non-agent skip"
+
+
+STUB_STATIC = """import os, sys
+from pathlib import Path
+name = Path(sys.argv[0]).name
+with open(os.environ["STUB_SF_MARKER"], "a") as f:
+    f.write(name + " " + " ".join(sys.argv[1:]) + "\\n")
+rc = int(os.environ.get("STUB_SF_RC_" + name.split("_")[0].upper(), "0"))
+print(f"stub {name} exit {rc}", file=sys.stderr)
+raise SystemExit(rc)
+"""
+
+
+def case_agent_skip_and_disable_still_run_the_static_floor(fx: Fixture) -> None:
+    """PULP_SKIP_PREPUSH / PULP_DISABLE_PREPUSH_GATES keep the static floor blocking for an agent push only."""
+    feat = fx.setup()
+    marker = fx.tmp / "static-floor-ran"
+    scripts = fx.repo / "tools/scripts"
+    scripts.mkdir(parents=True, exist_ok=True)
+    for name in ("python_floor_syntax_check.py", "thread_assert_check.py"):
+        (scripts / name).write_text(STUB_STATIC, encoding="utf-8")
+
+    def push(**extra: str) -> subprocess.CompletedProcess:
+        marker.unlink(missing_ok=True)
+        return fx.run_hook(feat, STUB_SF_MARKER=str(marker), **extra)
+
+    def ran() -> list[str]:
+        return marker.read_text(encoding="utf-8").splitlines() if marker.exists() else []
+
+    for knob in ("PULP_SKIP_PREPUSH", "PULP_DISABLE_PREPUSH_GATES"):
+        for python_rc, thread_rc in (("1", "2"), ("2", "1")):
+            res = push(**{knob: "1"}, SHIPYARD_AGENT_ID="repair-lane",
+                       STUB_SF_RC_PYTHON=python_rc, STUB_SF_RC_THREAD=thread_rc)
+            assert res.returncode == 1, (knob, python_rc, thread_rc, res.returncode, res.stderr)
+
+        res = push(**{knob: "1"}, SHIPYARD_AGENT_ID="repair-lane", STUB_SF_RC_PYTHON="1")
+        assert res.returncode == 1, (knob, res.returncode, res.stderr)
+        assert "do not skip the static floor for an agent push" in res.stderr, res.stderr
+        assert ran() == ["python_floor_syntax_check.py --changed-from origin/main",
+                         "thread_assert_check.py --changed-from origin/main"], ran()
+
+        res = push(**{knob: "1"}, SHIPYARD_AGENT_ID="repair-lane", STUB_SF_RC_THREAD="1")
+        assert res.returncode == 1, (knob, res.returncode, res.stderr)
+
+        res = push(**{knob: "1"}, SHIPYARD_AGENT_ID="repair-lane", STUB_SF_RC_PYTHON="2")
+        assert res.returncode == 0 and "static floor could not run" in res.stderr, (knob, res.stderr)
+
+    res = push(PULP_SKIP_PREPUSH="1", SHIPYARD_AGENT_ID="repair-lane")
+    assert res.returncode == 0 and "skipping gates" in res.stderr, res.stderr
+    assert len(ran()) == 2, ran()
+
+    # A base override reaches both checks.
+    push(PULP_SKIP_PREPUSH="1", SHIPYARD_AGENT_ID="repair-lane", PULP_PREPUSH_BASE="origin/feat")
+    assert all(line.endswith("--changed-from origin/feat") for line in ran()), ran()
+
+    # A push that does not send HEAD (a branch deletion, a tag) is not judged by HEAD's diff.
+    head = fx.git("rev-parse", "HEAD")
+    for records in (f"(delete) {ZERO} refs/heads/feat {feat}\n", f"refs/tags/v1 {head} refs/tags/v1 {ZERO}\n"):
+        marker.unlink(missing_ok=True)
+        res = fx.run_hook(feat, records=records, STUB_SF_MARKER=str(marker), PULP_SKIP_PREPUSH="1",
+                          SHIPYARD_AGENT_ID="repair-lane", STUB_SF_RC_PYTHON="1")
+        assert res.returncode == 0 and ran() == [], (records, res.returncode, ran(), res.stderr[-2000:])
+
+    # A human skip is unchanged: the floor does not run.
+    res = push(PULP_SKIP_PREPUSH="1", STUB_SF_RC_PYTHON="1")
+    assert res.returncode == 0 and "skipping gates" in res.stderr, res.stderr
+    assert ran() == [], ran()
+
+
+STUB_OK = "raise SystemExit(0)\n"
+
+
+def case_normal_push_runs_the_static_floor_as_a_gate(fx: Fixture) -> None:
+    """Without a skip, the floor is an ordinary gate: blocking, and demoted by PULP_DISABLE_PREPUSH_GATES for a human."""
+    feat = fx.setup()
+    marker = fx.tmp / "static-floor-ran"
+    scripts = fx.repo / "tools/scripts"
+    scripts.mkdir(parents=True, exist_ok=True)
+    for name in ("python_floor_syntax_check.py", "thread_assert_check.py"):
+        (scripts / name).write_text(STUB_STATIC, encoding="utf-8")
+    # The hook runs its gates only on a checkout that has the versioning gates.
+    for name in ("skill_sync_check.py", "version_bump_check.py"):
+        (scripts / name).write_text(STUB_OK, encoding="utf-8")
+    (scripts / "versioning.json").write_text("{}\n", encoding="utf-8")
+
+    def push(**extra: str) -> subprocess.CompletedProcess:
+        marker.unlink(missing_ok=True)
+        return fx.run_hook(feat, STUB_SF_MARKER=str(marker), PULP_SKIP_DIFF_COVER="1", **extra)
+
+    def ran() -> list[str]:
+        return marker.read_text(encoding="utf-8").splitlines() if marker.exists() else []
+
+    res = push(STUB_SF_RC_THREAD="1")
+    assert res.returncode == 1, (res.returncode, res.stderr[-3000:])
+    assert ran() == ["python_floor_syntax_check.py --changed-from origin/main",
+                     "thread_assert_check.py --changed-from origin/main"], ran()
+
+    res = push(STUB_SF_RC_THREAD="1", PULP_DISABLE_PREPUSH_GATES="1")
+    assert len(ran()) == 2, ran()
+    assert "stub thread_assert_check.py exit 1" in res.stderr, res.stderr[-3000:]
+    assert res.returncode == 0, (res.returncode, res.stderr[-3000:])
+
+    # An agent under PULP_DISABLE_PREPUSH_GATES runs the floor once (blocking, above), not twice.
+    res = push(PULP_DISABLE_PREPUSH_GATES="1", SHIPYARD_AGENT_ID="repair-lane")
+    assert len(ran()) == 2, ran()
 
 
 def case_script_failure_is_not_masked_by_not_checked(fx: Fixture) -> None:

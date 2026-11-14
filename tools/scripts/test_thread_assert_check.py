@@ -18,9 +18,11 @@ not.
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 _spec = importlib.util.spec_from_file_location(
@@ -277,6 +279,81 @@ class ThreadAssertCheck(unittest.TestCase):
 
     def test_wide_pass_is_silent_without_any_thread(self):
         self.assertEqual(scan_source(NO_THREAD_HELPER, wide=True), [])
+
+
+class ChangedFromTests(unittest.TestCase):
+    """--changed-from: the pre-push form. Only test sources the push changed, read from the commit."""
+
+    def git(self, repo: Path, *args: str) -> None:
+        import os
+        import subprocess
+        env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
+                   GIT_COMMITTER_EMAIL="t@t", GIT_CONFIG_NOSYSTEM="1", HOME=str(repo))
+        for k in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+            env.pop(k, None)
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, env=env)
+
+    def repo_with(self, tmp: str, base: dict, change: dict) -> Path:
+        repo = Path(tmp) / "repo"
+        repo.mkdir()
+        self.git(repo, "init", "-q", "-b", "main")
+        for files, msg in ((base, "base"), (change, "change")):
+            if msg == "change":
+                self.git(repo, "checkout", "-qb", "feat")
+            for rel, text in files.items():
+                (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+                (repo / rel).write_text(text, encoding="utf-8")
+                self.git(repo, "add", rel)
+            self.git(repo, "commit", "-q", "--allow-empty", "-m", msg)
+        return repo
+
+    def test_a_changed_unsafe_test_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.repo_with(tmp, {"test/keep.cpp": DIRECT_SAFE}, {"test/sub/new.cpp": DIRECT_UNSAFE})
+            self.assertEqual(guard.run_changed("main", root=repo), 1)
+
+    def test_an_unsafe_test_only_on_the_base_does_not_block(self):
+        # Negative control: the same unsafe source, but on main and untouched by the push.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.repo_with(tmp, {"test/old.cpp": DIRECT_UNSAFE}, {"test/new.cpp": DIRECT_SAFE})
+            self.assertEqual(guard.run_changed("main", root=repo), 0)
+
+    def test_sources_outside_test_are_not_scanned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.repo_with(tmp, {}, {"core/x.cpp": DIRECT_UNSAFE})
+            self.assertEqual(guard.run_changed("main", root=repo), 0)
+            self.assertEqual(guard.changed_test_sources(repo, "main"), [])
+
+    def test_no_merge_base_is_not_a_pass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.repo_with(tmp, {}, {"test/new.cpp": DIRECT_UNSAFE})
+            self.assertEqual(guard.run_changed("no-such-ref", root=repo), 2)
+
+    def test_a_failed_blob_read_is_not_a_pass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.repo_with(tmp, {}, {"test/new.cpp": DIRECT_SAFE})
+            original = guard.subprocess.run
+
+            def deny_show(cmd, *args, **kwargs):
+                if "show" in cmd:
+                    return subprocess.CompletedProcess(cmd, 1, stdout=b"", stderr=b"denied")
+                return original(cmd, *args, **kwargs)
+
+            with mock.patch.object(guard.subprocess, "run", side_effect=deny_show):
+                self.assertIsNone(guard.changed_test_sources(repo, "main"))
+
+    def test_an_unsupported_git_path_is_not_a_pass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.repo_with(tmp, {}, {})
+            original = guard.subprocess.run
+
+            def bad_path_diff(cmd, *args, **kwargs):
+                if "diff" in cmd:
+                    return subprocess.CompletedProcess(cmd, 0, stdout=b"test/bad_\xff.cpp\0", stderr=b"")
+                return original(cmd, *args, **kwargs)
+
+            with mock.patch.object(guard.subprocess, "run", side_effect=bad_path_diff):
+                self.assertIsNone(guard.changed_test_sources(repo, "main"))
 
 
 if __name__ == "__main__":

@@ -208,10 +208,12 @@ std::string compare(const std::vector<std::complex<double>>& got, const std::uin
             if (a == b)
                 continue;
             ++differing;
+            // Distance between the two patterns read as signed integers, taken
+            // in unsigned arithmetic: a NaN against a negative golden spans more
+            // than INT64_MAX, and a signed subtraction would overflow.
             const auto ia = static_cast<std::int64_t>(a);
             const auto ib = static_cast<std::int64_t>(b);
-            max_ulp = std::max<std::uint64_t>(
-                max_ulp, static_cast<std::uint64_t>(ia > ib ? ia - ib : ib - ia));
+            max_ulp = std::max<std::uint64_t>(max_ulp, ia > ib ? a - b : b - a);
             max_abs = std::max(max_abs, std::abs(parts[p] - std::bit_cast<double>(b)));
         }
     }

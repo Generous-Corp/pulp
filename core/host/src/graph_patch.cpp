@@ -737,6 +737,9 @@ GraphPatchText format_graph_patch(const SignalGraph& graph, const GraphPatchCata
         }
         std::vector<std::string> edge_lines;
         for (const auto& c : graph.connections()) {
+            if (c.control_signal)
+                refuse(Code::UnsupportedContract, "Control edge has no notation spelling",
+                       "use GraphSerializer (format v5) to save Control edges");
             if (c.feedback || c.sidechain || c.spectral || c.audio_rate_modulation)
                 refuse(Code::UnsupportedContract, "edge contract has no lossless notation spelling",
                        "use GraphSerializer for feedback, sidechain, spectral or dense modulation");

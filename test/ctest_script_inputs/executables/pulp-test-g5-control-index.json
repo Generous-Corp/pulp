@@ -1,0 +1,16 @@
+{
+ "name": "pulp-test-g5-control-index",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [],
+  "spawning_sources": [
+   "test/test_g5_control_index.cpp"
+  ],
+  "spawns": "undeclared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

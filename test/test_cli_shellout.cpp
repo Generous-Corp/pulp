@@ -13,6 +13,9 @@
 #include "support/unique_temp_dir.hpp"
 #include "test_cli_shellout_helpers.hpp"
 
+#include <pulp/audio/audio_file.hpp>
+
+#include <cmath>
 #include <optional>
 #include <thread>
 
@@ -21,6 +24,16 @@ namespace fs = std::filesystem;
 using namespace pulp_test_cli;
 
 namespace {
+
+// Writes a float WAV holding `value` on every channel, so a graph render can
+// be checked sample by sample against an exact expected level.
+void write_constant_wav(const fs::path& path, std::size_t channels, std::uint32_t sample_rate,
+                        std::size_t frames, float value) {
+    pulp::audio::AudioFileData data;
+    data.sample_rate = sample_rate;
+    data.channels.assign(channels, std::vector<float>(frames, value));
+    REQUIRE(pulp::audio::write_wav_file(path.string(), data, pulp::audio::WavBitDepth::Float32));
+}
 
 std::string standalone_artifact_marker() {
     std::string marker = "PULP_STANDALONE_";
@@ -275,9 +288,7 @@ TEST_CASE("pulp graph probe refusals name the cause and the fix", "[cli][shellou
     write_text(
         graph,
         R"({"format_version":1,"nodes":[{"id":1,"type":"audio_in","name":"in","num_input_ports":0,"num_output_ports":2,"gain":1},{"id":2,"type":"gain","name":"trim","num_input_ports":2,"num_output_ports":2,"gain":0.5},{"id":3,"type":"audio_out","name":"out","num_input_ports":2,"num_output_ports":0,"gain":1}],"connections":[{"source_node":1,"source_port":0,"dest_node":2,"dest_port":0,"feedback":false,"midi":false,"automation":false,"audio_rate_modulation":false,"sidechain":false},{"source_node":2,"source_port":0,"dest_node":3,"dest_port":0,"feedback":false,"midi":false,"automation":false,"audio_rate_modulation":false,"sidechain":false}]})");
-    const auto rendered =
-        run_pulp({"graph", "render", graph.string(), "--output", input.string(), "--json"});
-    REQUIRE(rendered.exit_code == 0);
+    write_constant_wav(input, 2, 48000, 4800, 0.5f);
     const auto probe = [&](std::vector<std::string> extra) {
         std::vector<std::string> args{"graph",   "probe",        graph.string(),  "--json",
                                       "--input", input.string(), "--source-node", "in"};
@@ -362,11 +373,63 @@ TEST_CASE("pulp graph fmt is byte stable and render produces a WAV", "[cli][shel
     const auto valid = run_pulp({"graph", "validate", graph.string(), "--json"});
     REQUIRE(valid.exit_code == 0);
     REQUIRE(valid.stdout_output.find("\"code\":\"ok\"") != std::string::npos);
-    const auto rendered =
-        run_pulp({"graph", "render", graph.string(), "--output", output.string(), "--json"});
+    const auto input = project / "input.wav";
+    write_constant_wav(input, 2, 48000, 48000, 0.5f);
+    const auto rendered = run_pulp({"graph", "render", graph.string(), "--input", input.string(),
+                                    "--output", output.string(), "--json"});
     REQUIRE(rendered.exit_code == 0);
-    REQUIRE(rendered.stdout_output.find("\"frames\":48000") != std::string::npos);
+    REQUIRE(rendered.stdout_output.find("\"frames\": 48000") != std::string::npos);
     REQUIRE(std::filesystem::file_size(output) > 48000);
+}
+
+TEST_CASE("pulp graph render drives audio_in from --input and refuses silent renders",
+          "[cli][shellout][graph]") {
+    if (!binary_exists())
+        SKIP("pulp not built");
+    const auto project = unique_temp_dir("pulp-graph-render-input");
+    const auto graph = project / "unity_half.pulpgraph";
+    const auto input = project / "input.wav";
+    const auto output = project / "output.wav";
+    write_text(
+        graph,
+        R"({"format_version":1,"nodes":[{"id":1,"type":"audio_in","name":"in","num_input_ports":0,"num_output_ports":2,"gain":1},{"id":2,"type":"gain","name":"trim","num_input_ports":2,"num_output_ports":2,"gain":0.5},{"id":3,"type":"audio_out","name":"out","num_input_ports":2,"num_output_ports":0,"gain":1}],"connections":[{"source_node":1,"source_port":0,"dest_node":2,"dest_port":0,"feedback":false,"midi":false,"automation":false,"audio_rate_modulation":false,"sidechain":false},{"source_node":1,"source_port":1,"dest_node":2,"dest_port":1,"feedback":false,"midi":false,"automation":false,"audio_rate_modulation":false,"sidechain":false},{"source_node":2,"source_port":0,"dest_node":3,"dest_port":0,"feedback":false,"midi":false,"automation":false,"audio_rate_modulation":false,"sidechain":false},{"source_node":2,"source_port":1,"dest_node":3,"dest_port":1,"feedback":false,"midi":false,"automation":false,"audio_rate_modulation":false,"sidechain":false}]})");
+    // 44.1 kHz and an uneven length prove the render follows the input file
+    // rather than the old fixed one second at 48 kHz.
+    constexpr std::uint32_t sample_rate = 44100;
+    constexpr std::size_t frames = 12345;
+    write_constant_wav(input, 2, sample_rate, frames, 0.5f);
+
+    const auto rendered = run_pulp({"graph", "render", graph.string(), "--input", input.string(),
+                                    "--output", output.string(), "--json"});
+    INFO(rendered.stdout_output << rendered.stderr_output);
+    REQUIRE(rendered.exit_code == 0);
+    pulp::cli::pkg::JsonParser parser{rendered.stdout_output, 0};
+    const auto report = parser.parse();
+    REQUIRE(report.get("code") != nullptr);
+    REQUIRE(report.get("code")->as_string() == "ok");
+    REQUIRE(report.get("frames")->num_val == static_cast<double>(frames));
+    REQUIRE(report.get("sample_rate")->num_val == static_cast<double>(sample_rate));
+    REQUIRE(report.get("peak") != nullptr);
+    REQUIRE(std::abs(report.get("peak")->num_val - 0.25) < 1e-6);
+
+    const auto audio = pulp::audio::read_audio_file(output.string());
+    REQUIRE(audio.has_value());
+    REQUIRE(audio->sample_rate == sample_rate);
+    REQUIRE(audio->num_frames() == frames);
+    REQUIRE(audio->num_channels() >= 2);
+    for (std::size_t channel = 0; channel < 2; ++channel)
+        for (const auto sample : audio->channels[channel])
+            REQUIRE(std::abs(sample - 0.25f) < 1e-6f);
+
+    const auto missing = run_pulp({"graph", "render", graph.string(), "--json"});
+    REQUIRE(missing.exit_code == 2);
+    REQUIRE(missing.stdout_output.find("\"code\": \"missing_input\"") != std::string::npos);
+    REQUIRE(missing.stdout_output.find("--input file.wav") != std::string::npos);
+
+    const auto bogus = run_pulp({"graph", "render", graph.string(), "--bogus", "--json"});
+    REQUIRE(bogus.exit_code == 2);
+    REQUIRE(bogus.stdout_output.find("\"code\": \"invalid_option\"") != std::string::npos);
+    REQUIRE(bogus.stdout_output.find("--bogus") != std::string::npos);
 }
 
 TEST_CASE("pulp graph save writes a separate canonical file and requires an output",
