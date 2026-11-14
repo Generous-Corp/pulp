@@ -663,8 +663,10 @@ catch_discover_tests(pulp-test-routed-spectral-ports
     PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
 target_link_libraries(pulp-test-routed-spectral-allocation-failure PRIVATE
     pulp::host Catch2::Catch2WithMain)
+pulp_scaled_test_timeout(_pulp_routed_spectral_allocation_failure_timeout 120)
 catch_discover_tests(pulp-test-routed-spectral-allocation-failure
-    PROPERTIES TIMEOUT 120 RESOURCE_LOCK pulp_realtime_worker_pool)
+    PROPERTIES TIMEOUT "${_pulp_routed_spectral_allocation_failure_timeout}"
+               RESOURCE_LOCK pulp_realtime_worker_pool)
 target_link_libraries(pulp-test-spectral-stream-start PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-spectral-stream-start)
 

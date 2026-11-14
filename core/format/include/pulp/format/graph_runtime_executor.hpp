@@ -31,8 +31,8 @@ namespace pulp::format {
 // One source-side ordinary/sidechain audio observation before downstream
 // mixing/PDC and serial scratch reuse. Feedback observes the retained slot read
 // in this block, before current output is captured for the next block.
-// Configure only while processing is stopped. The ring has one audio-thread
-// producer and one control-thread reader.
+// Configured before publication through an EdgeProbeCell. The ring has one
+// audio-thread producer and one control-thread reader.
 struct GraphRuntimeAudioEdgeProbe {
     static_assert(std::atomic<std::uint64_t>::is_always_lock_free &&
                   std::atomic<bool>::is_always_lock_free);
@@ -76,6 +76,113 @@ struct GraphRuntimeEdgeProbeSet {
     GraphRuntimeAudioEdgeProbe* audio = nullptr;
     GraphRuntimeControlEdgeProbe* control = nullptr;
     GraphRuntimeEventEdgeProbe* event = nullptr;
+};
+
+// Publication cell for one edge probe that a control thread attaches and
+// detaches while the audio thread may be reading it.
+//
+// The audio thread calls load() once per block and uses only that pointer. The
+// control thread (one at a time, serialized by its owner) calls publish() with
+// a fully configured probe. A displaced probe is never freed in place: it is
+// parked, and the owner calls reclaim_parked() only after proving no reader can
+// still hold the old pointer. Anything still parked is destroyed with the cell,
+// so a cell embedded in an RCU-published snapshot inherits that snapshot's
+// reader-drained reclamation. The audio side never allocates, locks or frees.
+//
+// The cell is one pointer wide, the same as the unique_ptr it replaces, so the
+// snapshot types that embed it (and resource budgets that charge their sizeof)
+// do not grow. The published pointer, its owner and the fixed-capacity parked
+// array live in a control-side State allocated by the first publish() on the
+// control thread and kept until the cell is destroyed, so a pinned reader that
+// loaded the State can always dereference it.
+//
+// publish() stores and load() reads the probe pointer with seq_cst so the
+// owner's later reader-count check cannot be reordered before the store: a
+// reader that pinned before that check is counted, and one that pins after it
+// sees the new pointer.
+template <typename Probe> class EdgeProbeCell {
+  public:
+    // At most kParkCapacity displaced probes wait for reclamation; while a
+    // long-lived snapshot holder blocks reclamation the owner must refuse
+    // further displacement once can_park() is false rather than grow the list.
+    static constexpr std::size_t kParkCapacity = 8;
+
+    EdgeProbeCell() = default;
+    EdgeProbeCell(const EdgeProbeCell&) = delete;
+    EdgeProbeCell& operator=(const EdgeProbeCell&) = delete;
+    ~EdgeProbeCell() {
+        delete state_.load(std::memory_order_relaxed);
+    }
+
+    // Audio thread (or any pinned reader).
+    Probe* load() const noexcept {
+        const auto* state = state_.load(std::memory_order_acquire);
+        return state ? state->live.load(std::memory_order_seq_cst) : nullptr;
+    }
+
+    // Owner thread only: the currently published probe.
+    Probe* owned() const noexcept {
+        const auto* state = owner_state_();
+        return state ? state->owner.get() : nullptr;
+    }
+    explicit operator bool() const noexcept {
+        return owned() != nullptr;
+    }
+
+    // Owner thread only. The only allocation (the State, on first use) happens
+    // before the pointer changes, so a failure leaves the published probe
+    // untouched. Returns false, changing nothing, when displacing the current
+    // probe would exceed kParkCapacity; callers check can_park() first.
+    bool publish(std::unique_ptr<Probe> next) {
+        if (!can_park())
+            return false;
+        auto* state = owner_state_();
+        if (!state) {
+            if (!next)
+                return true;
+            state = new State;
+            state_.store(state, std::memory_order_release);
+        }
+        state->live.store(next.get(), std::memory_order_seq_cst);
+        if (state->owner)
+            state->parked[state->parked_count++] = std::move(state->owner);
+        state->owner = std::move(next);
+        return true;
+    }
+    bool reset() {
+        return publish(nullptr);
+    }
+
+    bool can_park() const noexcept {
+        const auto* state = owner_state_();
+        return !state || !state->owner || state->parked_count < kParkCapacity;
+    }
+
+    // Owner thread only, and only once no reader can hold a parked pointer.
+    void reclaim_parked() noexcept {
+        if (auto* state = owner_state_()) {
+            for (std::size_t i = 0; i < state->parked_count; ++i)
+                state->parked[i].reset();
+            state->parked_count = 0;
+        }
+    }
+    std::size_t parked_count() const noexcept {
+        const auto* state = owner_state_();
+        return state ? state->parked_count : 0;
+    }
+
+  private:
+    struct State {
+        std::atomic<Probe*> live{nullptr};
+        std::unique_ptr<Probe> owner;
+        std::array<std::unique_ptr<Probe>, kParkCapacity> parked;
+        std::size_t parked_count = 0;
+    };
+    State* owner_state_() const noexcept {
+        return state_.load(std::memory_order_relaxed);
+    }
+
+    std::atomic<State*> state_{nullptr};
 };
 
 enum class AudioRateModulationDelivery : std::uint8_t {

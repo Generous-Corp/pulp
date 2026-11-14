@@ -4,12 +4,7 @@
   "data": "none",
   "inputs": [],
   "kind": "compiled",
-  "runtime_targets": [],
   "sources": [],
-  "spawning_sources": [
-   "test/test_routed_spectral_allocation_failure.cpp"
-  ],
-  "spawns": "undeclared",
   "undeclared_sources": []
  },
  "scanned": true

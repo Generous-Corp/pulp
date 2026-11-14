@@ -80,6 +80,8 @@ PUBLIC_ROOTS = (
 REVIEWED_HOST_HEADERS = (
     'pulp/host/control_index_nodes.hpp',
     'pulp/host/graph_patch.hpp',
+    'pulp/host/graph_file_reload.hpp',
+    'pulp/host/signal_graph_control.hpp',
     'pulp/host/graph_event_contract.hpp',
     'pulp/host/plugin_identity.hpp',
     'pulp/host/plugin_slot.hpp',
@@ -95,6 +97,7 @@ REVIEWED_HOST_HEADERS = (
     'pulp/host/signal_graph_prepared_topology_edit.hpp',
     'pulp/host/custom_node_type.hpp',
     'pulp/host/custom_node_events.hpp',
+    'pulp/host/custom_node_oversampling.hpp',
     'pulp/host/sample_region_authoring.hpp',
     'pulp/host/sample_region_proof.hpp',
     'pulp/host/sample_region_parameters.hpp',

@@ -6,6 +6,7 @@
   "claim_id": "graph-latency-semantics-rt-report-20261106",
   "owned_paths": [
     "core/host/include/pulp/host/custom_node_type.hpp",
+    "core/host/include/pulp/host/custom_node_oversampling.hpp",
     "core/host/include/pulp/host/graph_rt_report.hpp",
     "core/host/src/graph_rt_report.cpp",
     "core/host/src/signal_graph_port_equaliser.hpp",
@@ -21,6 +22,12 @@
         "std::function<int(double /*sample_rate*/)> intentional_delay_samples;",
         "output_port_latency_samples;",
         "CustomNodeRtContract rt_contract;"
+      ]
+    },
+    {
+      "path": "core/host/include/pulp/host/custom_node_oversampling.hpp",
+      "needles": [
+        "inline bool declare_oversampling_latency("
       ]
     },
     {
@@ -40,12 +47,18 @@
       "needles": [
         "Graph realtime report measures counted work without allocating"
       ]
+    },
+    {
+      "path": "test/test_signal_graph_latency_semantics.cpp",
+      "needles": [
+        "Oversampling with a frequency-dependent delay cannot be declared as node latency"
+      ]
     }
   ],
   "surfaces": {
     "installed_sdk": {
       "disposition": "exposed",
-      "rationale": "CustomNodeType gains appended intentional-delay, per-output-port latency and declared realtime-contract members after every historical field, so positional aggregate initializers keep compiling and an unset member preserves prior behaviour. graph_rt_report.hpp is a new control-thread-only header under the installed host include root.",
+      "rationale": "CustomNodeType gains appended intentional-delay, per-output-port latency and declared realtime-contract members after every historical field, so positional aggregate initializers keep compiling and an unset member preserves prior behaviour. graph_rt_report.hpp is a new control-thread-only header under the installed host include root. custom_node_oversampling.hpp is a header-only helper that derives a node's declared latency and its oversampler setup from one spec and refuses filter kinds whose delay is not constant; it adds no member to CustomNodeType.",
       "evidence": [
         {
           "kind": "sdk_header",
@@ -59,6 +72,13 @@
           "path": "core/host/include/pulp/host/graph_rt_report.hpp",
           "needles": [
             "std::string graph_rt_report_to_json(const GraphRtReport& report);"
+          ]
+        },
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/custom_node_oversampling.hpp",
+          "needles": [
+            "inline bool declare_oversampling_latency("
           ]
         }
       ],
