@@ -1,5 +1,6 @@
 #include <pulp/view/midi_learn_menu.hpp>
 
+#include <algorithm>
 #include <utility>
 
 namespace pulp::view {
@@ -14,6 +15,13 @@ std::vector<ContextMenu::Item> midi_learn_menu_items(const MidiLearnTarget& targ
     const bool listening = state.phase == MidiLearnParamState::Phase::listening;
     const bool mapped = state.phase == MidiLearnParamState::Phase::mapped;
 
+    if (!state.refused_reason.empty() && !listening) {
+        ContextMenu::Item refused;
+        refused.label = "Cannot learn: " + state.refused_reason;
+        refused.enabled = false;
+        items.push_back(std::move(refused));
+    }
+
     ContextMenu::Item learn;
     learn.id = listening ? kMidiLearnCommandCancel : kMidiLearnCommandBegin;
     learn.label = listening ? "Cancel MIDI Learn" : "MIDI Learn";
@@ -25,6 +33,43 @@ std::vector<ContextMenu::Item> midi_learn_menu_items(const MidiLearnTarget& targ
         label.label = "Mapped to " + state.mapping_label;
         label.enabled = false;
         items.push_back(std::move(label));
+
+        if (target.set_options) {
+            // Each control sends the full settings with its own field changed, so
+            // a stale menu cannot undo a change made elsewhere to another field.
+            auto apply = [target, param, current = state.options](auto change) {
+                return [target, param, current, change](const ContextMenu::Item& item) {
+                    auto next = target.state ? target.state(param).options : current;
+                    change(next, item);
+                    target.set_options(param, next);
+                };
+            };
+            items.push_back(ContextMenu::Item::make_toggle(
+                kMidiLearnCommandInvert, "Invert", state.options.invert,
+                apply([](MidiLearnMappingOptions& o, const ContextMenu::Item& i) {
+                    o.invert = i.checked;
+                })));
+            items.push_back(ContextMenu::Item::make_choice(
+                kMidiLearnCommandRelativeMode, "Relative mode",
+                {"Absolute", "Two's complement", "Signed bit", "Offset 64"},
+                static_cast<std::size_t>(std::clamp(state.options.relative_mode, 0, 3)),
+                apply([](MidiLearnMappingOptions& o, const ContextMenu::Item& i) {
+                    o.relative_mode = static_cast<int>(i.choice_index);
+                })));
+            items.push_back(ContextMenu::Item::make_choice(
+                kMidiLearnCommandTakeover, "Takeover", {"Jump", "Pickup", "Scale"},
+                static_cast<std::size_t>(std::clamp(state.options.takeover, 0, 2)),
+                apply([](MidiLearnMappingOptions& o, const ContextMenu::Item& i) {
+                    o.takeover = static_cast<int>(i.choice_index);
+                })));
+            if (state.feedback_supported) {
+                items.push_back(ContextMenu::Item::make_toggle(
+                    kMidiLearnCommandFeedback, "Send feedback", state.options.feedback,
+                    apply([](MidiLearnMappingOptions& o, const ContextMenu::Item& i) {
+                        o.feedback = i.checked;
+                    })));
+            }
+        }
 
         ContextMenu::Item clear;
         clear.id = kMidiLearnCommandClear;
@@ -107,7 +152,7 @@ void MidiLearnOverlay::refresh() {
     if (target_.is_available() && target_.state)
         next = target_.state(param_);
     if (next.phase == state_.phase && next.mapping_label == state_.mapping_label &&
-        next.just_bound == state_.just_bound)
+        next.just_bound == state_.just_bound && next.refused_reason == state_.refused_reason)
         return;
     state_ = std::move(next);
     request_repaint();

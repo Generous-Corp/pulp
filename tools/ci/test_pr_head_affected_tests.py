@@ -11,6 +11,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -268,6 +269,17 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(sorted(plan["merge_only"]), sorted(merge_only))
         self.assertEqual(sorted(plan["tests"][:len(merge_only)]), sorted(merge_only))
         self.assertEqual(sorted(plan["tests"][len(merge_only):]), ["unit-a", "unit-b"])
+        self.assertEqual(plan["priority_tests"], plan["tests"][:len(merge_only)])
+
+    def test_priority_count_requires_an_intact_prefix(self) -> None:
+        priority = ["sample-region-compat-baseline", "cmake-install-layout"]
+        plan = {"priority_tests": priority, "merge_only": []}
+        self.assertEqual(step.priority_count(plan, priority + ["ordinary-a"]), 2)
+        self.assertEqual(step.priority_count(plan, ["ordinary-a"] + priority), 0)
+
+    def test_priority_count_filters_passed_priority_tests_after_admission(self) -> None:
+        plan = {"priority_tests": ["p1", "p2"], "merge_only": []}
+        self.assertEqual(step.priority_count(plan, ["p2", "ordinary-a"]), 1)
 
     def test_a_registration_the_diff_adds_is_a_merge_only_check(self) -> None:
         # A brand-new test has no declared inputs yet; its registration is the
@@ -295,6 +307,8 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(plan["tests"],
                          ["sample-region-compat-baseline", "unit-b", "unit-a", "other"])
         self.assertEqual(plan["edited_cases"], 1)
+        self.assertEqual(plan["priority_tests"],
+                         ["sample-region-compat-baseline", "unit-b"])
 
     def test_control_a_plan_without_merge_only_checks_keeps_its_order(self) -> None:
         plan = self.plan(["core/x/a.cpp"], selection("focused", ["unit-a"]), rebuilt=["unit-b"])
@@ -974,8 +988,8 @@ class BudgetTests(unittest.TestCase):
             "a = sys.argv\n"
             "names = open(a[a.index('--tests-from-file') + 1]).read().split()\n"
             "time.sleep(float(__import__('os').environ.get('FAKE_CTEST_SLEEP', '0')))\n"
-            "cases = ''.join(f'<testcase name=\"{n}\" status=\"{\"fail\" if n.startswith(\"bad\") else \"notrun\" if n.startswith(\"skip\") else \"run\"}\">'\n"
-            "                + ('<failure/>' if n.startswith('bad') else '<skipped/>' if n.startswith('skip') else '') + '</testcase>' for n in names)\n"
+            "cases = ''.join(f'<testcase name=\"{n}\" time=\"{__import__(\"os\").environ.get(\"FAKE_CTEST_SLEEP\", \"0\")}\" status=\"{\"fail\" if n.startswith(\"bad\") else \"notrun\" if n.startswith(\"skip\") else \"run\"}\">'\n"
+            "                + ('<failure message=\"Timeout\"/>' if n.startswith('timeout') else '<failure/>' if n.startswith('bad') else '<skipped/>' if n.startswith('skip') else '') + '</testcase>' for n in names)\n"
             "open(a[a.index('--output-junit') + 1], 'w').write(f'<testsuite>{cases}</testsuite>')\n")
         (self.bin / "ctest").chmod(0o755)
         self.env = mock.patch.dict(os.environ, {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"})
@@ -1024,10 +1038,73 @@ class BudgetTests(unittest.TestCase):
         self.assertEqual(sorted(results["passed"]), family)
         self.assertEqual(results["skipped"], ["unit-a", "unit-b"])
 
+    def test_early_timeout_is_not_erased_by_later_budget_expiry(self) -> None:
+        calls = 0
+        def fake_ctest(command, check=False):
+            nonlocal calls
+            calls += 1
+            junit = Path(command[command.index("--output-junit") + 1])
+            if calls == 1:
+                time.sleep(0.01)
+                junit.write_text("<testsuite><testcase name=\"early\" time=\"120\" status=\"fail\"><failure message=\"Timeout\"/></testcase></testsuite>", encoding="utf-8")
+            else:
+                time.sleep(0.16)
+                junit.write_text("<testsuite><testcase name=\"late\" time=\"0.16\" status=\"run\"/></testsuite>", encoding="utf-8")
+        with mock.patch.object(step.subprocess, "run", side_effect=fake_ctest):
+            results = step.run_budgeted(self.tmp, ["early", "late"], 0.15, 1, "", self.tmp, 1,
+                                        priority_count=1)
+        self.assertEqual(results["failed"], ["early"])
+        self.assertEqual(results["passed"], ["late"])
+
+    def test_late_started_timeout_at_batch_end_is_budget_skipped(self) -> None:
+        def fake_ctest(command, check=False):
+            junit = Path(command[command.index("--output-junit") + 1])
+            junit.write_text(
+                "<testsuite><testcase name=\"late-timeout\" time=\"3.96\" "
+                "status=\"fail\"><failure message=\"Timeout\"/></testcase></testsuite>",
+                encoding="utf-8",
+            )
+
+        # The test started about four seconds before the batch stopped at its
+        # eight-second deadline, so it was queued behind earlier work rather
+        # than reaching its own 120-second ctest timeout.
+        with mock.patch.object(step.subprocess, "run", side_effect=fake_ctest), \
+                mock.patch.object(step.time, "monotonic", side_effect=[0.0, 0.0, 0.0, 8.0, 8.0]):
+            results = step.run_budgeted(self.tmp, ["late-timeout"], 8.0, 1, "", self.tmp, 1)
+        self.assertEqual(results["failed"], [])
+        self.assertEqual(results["skipped"], ["late-timeout"])
+
+    def test_missing_junit_is_not_budget_skipped(self) -> None:
+        def no_junit(*args, **kwargs):
+            time.sleep(0.1)
+        with mock.patch.object(step.subprocess, "run", side_effect=no_junit):
+            results = step.run_budgeted(self.tmp, ["missing-junit"], 0.05, 1, "", self.tmp, 1)
+        self.assertEqual(results["skipped"], [])
+        self.assertEqual(results["excluded_or_absent"], ["missing-junit"])
+
+    def test_ctest_deadline_timeout_is_budget_skipped(self) -> None:
+        with mock.patch.dict(os.environ, {"FAKE_CTEST_SLEEP": "0.1"}):
+            results = step.run_budgeted(self.tmp, ["timeout-self"], 0.05, 1, "", self.tmp, 1)
+        self.assertEqual(results["failed"], [])
+        self.assertEqual(results["skipped"], ["timeout-self"])
+
     def test_ctest_self_skips_are_reported_notrun_not_budget_skipped(self) -> None:
         results = step.run_budgeted(self.tmp, ["skip-self"], 60, 1, "", self.tmp, 1)
         self.assertEqual(results["notrun"], ["skip-self"])
         self.assertEqual(results["skipped"], [])
+
+    def test_priority_batch_is_separate_from_fixed_ordinary_batches(self) -> None:
+        tests = ["bad-priority-a", "priority-b", "priority-c"] + [
+            f"ordinary-{i}" for i in range(6)]
+        with mock.patch.dict(os.environ, {"FAKE_CTEST_SLEEP": "0.1"}):
+            results = step.run_budgeted(self.tmp, tests, 0.05, 1, "", self.tmp, 2,
+                                       priority_count=3)
+        self.assertEqual((self.tmp / "batch-0.txt").read_text(encoding="utf-8").split(),
+                         ["bad-priority-a", "priority-b", "priority-c"])
+        self.assertEqual(results["failed"], ["bad-priority-a"])
+        self.assertEqual(sorted(results["passed"]), ["priority-b", "priority-c"])
+        self.assertEqual(results["skipped"], [f"ordinary-{i}" for i in range(6)])
+        self.assertFalse((self.tmp / "batch-1.txt").exists())
 
 
 class WorkflowWiringTests(unittest.TestCase):
@@ -1406,6 +1483,14 @@ class AdmissionTests(unittest.TestCase):
         self.assertEqual(step.admission_tests(["a"], [], ["gone"], {"a": set()}), ["a"])
         self.assertEqual(step.admission_tests(["a", "b"], ["a"], ["b", "c"], {"a": set(), "b": set(), "c": set()}),
                          ["b", "c"])
+
+    def test_admission_restores_priority_prefix_before_deferred_ordinary_tests(self) -> None:
+        self.assertEqual(
+            step.admission_tests(["priority-a", "ordinary-a"], [], ["priority-b", "ordinary-b"],
+                                 {"priority-a": set(), "priority-b": set(),
+                                  "ordinary-a": set(), "ordinary-b": set()},
+                                 ["priority-a", "priority-b"]),
+            ["priority-a", "priority-b", "ordinary-a", "ordinary-b"])
 
     def test_an_admission_run_that_still_runs_out_of_time_defers_not_fails(self) -> None:
         # Past the admission budget the rest goes to the merge queue as before:

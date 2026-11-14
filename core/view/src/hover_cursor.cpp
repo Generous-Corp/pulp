@@ -18,6 +18,15 @@ View::CursorStyle hover_cursor_at(View& root, Point p) {
     return target ? target->cursor() : View::CursorStyle::default_;
 }
 
+std::optional<View::CursorStyle> hover_cursor_under(View& root, Point p) {
+    {
+        View::DisabledHitTestScope include_disabled;
+        if (!hover_target_at(root, p))
+            return std::nullopt;
+    }
+    return hover_cursor_at(root, p);
+}
+
 std::optional<View::CursorStyle> HoverCursorTracker::poll_resolved(
     View::CursorStyle style) {
     if (published_ && style == last_) return std::nullopt;

@@ -215,10 +215,20 @@ pulp_add_test_suite(pulp-test-code-editor-tokenizer GROUP pulp-test-group-core-v
 pulp_add_test_suite(pulp-test-properties GROUP pulp-test-group-core-state
     SOURCES test_properties_file.cpp LIBRARIES pulp::state pulp::runtime)
 
+# XmlPropertiesFile: canonical bytes, tolerant reads, fail-closed loads,
+# atomic save and no-change-no-write.
+pulp_add_test_suite(pulp-test-xml-properties-file GROUP pulp-test-group-core-state
+    SOURCES test_xml_properties_file.cpp LIBRARIES pulp::state pulp::runtime)
+
 # AudioDeviceManager persistence + MIDI hub.
 pulp_add_test_suite(pulp-test-audio-device-manager
     SOURCES test_audio_device_manager.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio pulp::midi pulp::state pulp::runtime)
+
+# OutputDeviceSession: follow-default, named choice, unplug/replug.
+pulp_add_test_suite(pulp-test-output-device-session
+    SOURCES test_output_device_session.cpp
+    LIBRARIES pulp::audio pulp::runtime)
 
 # DSP enhancement tests (dry/wet mixer, processor duplicator, matrix, special functions)
 pulp_add_test_suite(pulp-test-dsp-enhancements GROUP pulp-test-group-core-signal
@@ -1306,6 +1316,10 @@ pulp_add_test_suite(pulp-test-clipboard GROUP pulp-test-group-core-platform
 
 # FileDialog backend-registration tests
 pulp_add_test_suite(pulp-test-file-dialog GROUP pulp-test-group-core-platform
+    LIBRARIES pulp::platform)
+
+# binary_unique_name: names unique to the binary that holds the code.
+pulp_add_test_suite(pulp-test-binary-unique-name GROUP pulp-test-group-core-platform
     LIBRARIES pulp::platform)
 
 # How asynchronous dialogs deliver their completion: posted with a main-thread

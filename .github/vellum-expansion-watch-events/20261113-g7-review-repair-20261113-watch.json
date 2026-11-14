@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261113-g7-review-repair-20261113-watch",
+  "created_at": "2026-11-13T10:55:20Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Graph edge-probe documentation and CLI manifest updates only: the pulp graph probe command manifest, CLI reference and tooling disposition gain the existing --edge-kind and --destination-param options, and probe refusal messages now name cause and fix. No design-import, Chromium, rendering, or packaging behaviour or authority changes.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-cli-shellout",
+    "ctest --test-dir build -R pulp-test-graph-control-event-probe",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

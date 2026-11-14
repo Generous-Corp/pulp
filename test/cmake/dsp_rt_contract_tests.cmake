@@ -422,3 +422,8 @@ pulp_add_test_suite(pulp-test-tempo-delay GROUP pulp-test-group-dsp-rt-signal
     SOURCES test_tempo_delay.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal
     TIMEOUT 300)
+
+# The RT allocation probe's own tests, including the positive control other
+# suites can call before asserting an absence of allocations.
+pulp_add_test_suite(pulp-test-rt-allocation-probe-self-check
+    SOURCES test_rt_allocation_probe.cpp harness/rt_allocation_probe.cpp)

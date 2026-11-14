@@ -28,6 +28,7 @@ from resolve_classify_base import (  # noqa: E402
     DEFAULT_BASE,
     MAX_QUEUE_WALK,
     ZERO_SHA,
+    entry_delta_base,
     merge_group_main_base,
     resolve_base,
 )
@@ -152,12 +153,24 @@ class ResolveBaseTests(unittest.TestCase):
         )
 
 
+class EntryDeltaBaseTests(unittest.TestCase):
+    """`merge_group.base_sha` is the base of a group's own entry delta."""
+
+    def test_a_usable_sha_is_returned_lowercased(self) -> None:
+        self.assertEqual(entry_delta_base(BASE_SHA), BASE_SHA)
+        self.assertEqual(entry_delta_base(f"  {'AB' * 20}\n"), "ab" * 20)
+
+    def test_zero_malformed_and_empty_shas_are_unusable(self) -> None:
+        for raw in (ZERO_SHA, "a" * 39, "g" * 40, "", None, "origin/main"):
+            self.assertIsNone(entry_delta_base(raw), raw)
+
+
 class CliTests(unittest.TestCase):
-    def _run(self, **env: str) -> str:
-        environ = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
+    def _run(self, *args: str, **env: str) -> str:
+        environ = {k: v for k, v in os.environ.items() if not k.startswith(("GITHUB_", "MERGE_GROUP_"))}
         environ.update(env)
         proc = subprocess.run(
-            [sys.executable, str(SCRIPT)],
+            [sys.executable, str(SCRIPT), *args],
             capture_output=True,
             text=True, encoding="utf-8",
             check=False,
@@ -192,6 +205,17 @@ class CliTests(unittest.TestCase):
 
     def test_cli_defaults_with_no_context(self) -> None:
         self.assertEqual(self._run(GITHUB_EVENT_NAME=""), DEFAULT_BASE)
+
+    def test_cli_entry_delta_prints_the_group_base_or_nothing(self) -> None:
+        # Never main's tip: the entry delta is base_sha..head_sha alone.
+        self.assertEqual(self._run("--entry-delta", MERGE_GROUP_BASE_SHA=BASE_SHA), BASE_SHA)
+        self.assertEqual(self._run("--entry-delta", MERGE_GROUP_BASE_SHA=ZERO_SHA), "")
+        self.assertEqual(self._run("--entry-delta"), "")
+
+    def test_cli_rejects_unknown_arguments(self) -> None:
+        proc = subprocess.run([sys.executable, str(SCRIPT), "--bogus"], capture_output=True,
+                              text=True, encoding="utf-8", check=False)
+        self.assertEqual(proc.returncode, 2)
 
 
 class WorkflowWiringTests(unittest.TestCase):

@@ -7,6 +7,8 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/control_index_nodes.hpp>
+#include <pulp/host/isolated_plugin_slot.hpp>
+#include <pulp/runtime/log.hpp>
 
 #include <algorithm>
 #include <cassert>
@@ -147,8 +149,48 @@ bool CustomNodeType::is_valid_registration() const noexcept {
     return true;
 }
 
+bool SignalGraph::snapshot_has_isolated_plugins_(const CompiledGraph& snapshot) noexcept {
+    for (const auto& [id, plugin] : snapshot.plugins)
+        if (plugin && is_isolated_plugin_slot(*plugin))
+            return true;
+    return false;
+}
+
+bool SignalGraph::has_isolated_plugins_locked_() const noexcept {
+    for (const auto& node : nodes_)
+        if (node.plugin && is_isolated_plugin_slot(*node.plugin))
+            return true;
+    const auto& live = live_slot_.live();
+    return live && snapshot_has_isolated_plugins_(*live);
+}
+
+bool SignalGraph::refuse_isolated_mode_locked_(const char* operation) const noexcept {
+    if (!has_isolated_plugins_locked_())
+        return false;
+    runtime::log_error("SignalGraph: {} refused for MacClapStereo64V1", operation);
+    return true;
+}
+
+void SignalGraph::set_canonical_executor_routing_enabled(bool enabled) noexcept {
+    GraphMutationLock lock(*this);
+    if (!enabled && refuse_isolated_mode_locked_("legacy executor"))
+        return;
+    canonical_executor_routing_enabled_.store(enabled, std::memory_order_relaxed);
+    detail::advance_execution_selection_generation(execution_selection_generation_);
+}
+
+void SignalGraph::set_anticipation_enabled(bool enabled) noexcept {
+    GraphMutationLock lock(*this);
+    if (enabled && refuse_isolated_mode_locked_("anticipation"))
+        return;
+    anticipation_enabled_.store(enabled, std::memory_order_relaxed);
+    detail::advance_execution_selection_generation(execution_selection_generation_);
+}
+
 void SignalGraph::set_parallel_routing_enabled(bool enabled) noexcept {
     GraphMutationLock mutation_lock(*this);
+    if (enabled && refuse_isolated_mode_locked_("parallel routing"))
+        return;
     // Graph-authored callbacks use one shared, ordered lane.  Parallel
     // dispatch could invoke the consumer before the producer (or concurrently
     // with it), so enabling it after the event edge is bound is refused.
@@ -346,6 +388,13 @@ NodeId SignalGraph::add_processor_node(std::shared_ptr<format::ProcessorNodeInst
     try {
         processor_nodes_.emplace(id, std::make_shared<ProcessorNodeLifetime>(std::move(instance)));
         populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
+        // MIDI is node-scoped; these handles do not consume or renumber audio buses.
+        if (descriptor.accepts_midi)
+            node.input_ports.push_back({id, 0, false, "midi", PortKind::Midi,
+                                        diagnostic_graph_identity_, authoring_generation_ + 1});
+        if (descriptor.produces_midi)
+            node.output_ports.push_back({id, 0, true, "midi", PortKind::Midi,
+                                         diagnostic_graph_identity_, authoring_generation_ + 1});
         nodes_.push_back(std::move(node));
     } catch (...) {
         processor_nodes_.erase(id);
@@ -1174,8 +1223,9 @@ GraphResult SignalGraph::connect(const PortHandle& source, const PortHandle& des
     Connection c{source.node, sp->index, dest.node, dp->index};
     c.spectral = sp->kind == PortKind::Spectral;
     c.control_signal = sp->kind == PortKind::Control;
+    c.midi = sp->kind == PortKind::Midi;
     for (const auto& existing : connections_)
-        if (existing == c)
+        if (existing == c && existing.midi == c.midi)
             return {GraphResult::Code::Duplicate, dest.node, dp->index, "duplicate connection",
                     "remove the existing connection"};
     append_connection_locked_(c);

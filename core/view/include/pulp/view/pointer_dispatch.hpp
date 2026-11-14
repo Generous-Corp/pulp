@@ -261,6 +261,11 @@ struct HoverDamage {
 /// was delivered.
 bool reevaluate_stationary_hover(View& root, const HoverDamage& damage = HoverDamage{});
 
+/// The open ComboBox dropdown in `root` while its combo is effectively enabled,
+/// else null. Hosts route press, wheel and hover straight to an open dropdown
+/// ahead of hit testing; a disabled combo must not take them.
+ComboBox* enabled_open_popup_in(View& root);
+
 /// Host hooks the portable wheel router calls back into. Kept as a struct so
 /// a new hook can be threaded in without re-touching every call site.
 struct WheelHost {

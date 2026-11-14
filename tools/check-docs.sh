@@ -83,12 +83,17 @@ echo "Checking module dependencies against CMake..."
 while IFS= read -r line; do
     if echo "$line" | grep -q '^ *- name:'; then
         mod_name=$(echo "$line" | sed 's/.*name: *//')
+        mod_dir="core/$mod_name"
+    fi
+    # An entry outside core/ names its directory (integrations/<pkg>).
+    if echo "$line" | grep -q '^ *path:'; then
+        mod_dir=$(echo "$line" | sed 's/.*path: *//')
     fi
     if echo "$line" | grep -q '^ *dependencies:'; then
         declared_deps=$(echo "$line" | sed 's/.*dependencies: *\[//' | sed 's/\]//' | tr ',' '\n' | tr -d ' ' | sort)
 
         # Find the module's CMakeLists.txt
-        cmake_file="$ROOT/core/$mod_name/CMakeLists.txt"
+        cmake_file="$ROOT/$mod_dir/CMakeLists.txt"
         if [ -f "$cmake_file" ]; then
             # Extract pulp- prefixed link deps, strip the prefix. This regex
             # truncates a hyphenated target at its first segment (e.g.
@@ -134,14 +139,11 @@ done
 # ── 7. Subsystem directories exist ───────────────────────────────────────────
 echo "Checking subsystem directories..."
 
-while IFS= read -r line; do
-    if echo "$line" | grep -q '^ *- name:'; then
-        mod_name=$(echo "$line" | sed 's/.*name: *//')
-        if [ ! -d "$ROOT/core/$mod_name" ]; then
-            error "modules.yaml lists '$mod_name' but core/$mod_name/ does not exist"
-        fi
-    fi
-done < "$STATUS/modules.yaml"
+# A module's directory is core/<name>, or the entry's `path:` (under core/ or
+# integrations/); modules_yaml_dirs_check.py owns the rule and its tests.
+while IFS= read -r problem; do
+    error "$problem"
+done < <(python3 "$ROOT/tools/scripts/modules_yaml_dirs_check.py" --root "$ROOT" | grep -v '^modules-yaml-dirs: OK')
 
 # ── 8. No hardcoded test-count statements ────────────────────────────────────
 # Historically this section validated that README/index/testing kept a

@@ -22,6 +22,7 @@
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/signal_graph.hpp>
 #ifdef PULP_TEST_HOST_PROBE_AU
+#include "support/au_component_registration.hpp"
 #include <pulp/host/plugin_slot_auv3.hpp>
 
 #include <AudioToolbox/AudioToolbox.h>
@@ -34,10 +35,10 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <map>
 #include <memory>
-#include <cstring>
 #include <string>
 #include <thread>
 #include <vector>
@@ -65,70 +66,13 @@ bool au_probe_out_of_process() {
     return v && std::string(v) == "1";
 }
 
-std::string cf_string(CFStringRef s) {
-    if (!s)
-        return {};
-    char buf[256] = {};
-    CFStringGetCString(s, buf, sizeof(buf), kCFStringEncodingUTF8);
-    return buf;
-}
-
-OSType four_cc(CFStringRef s) {
-    const auto text = cf_string(s);
-    if (text.size() != 4)
-        return 0;
-    return OSType(std::uint8_t(text[0])) << 24 | OSType(std::uint8_t(text[1])) << 16 |
-           OSType(std::uint8_t(text[2])) << 8 | OSType(std::uint8_t(text[3]));
-}
-
 /// "TYPE:SUBT:MANU" of the probe component, read from its Info.plist. Unless
 /// the run is out of process, the component is also registered with this
 /// process (once) through the factory the plist names, so in-process
 /// AUAudioUnit instantiation finds it without an install.
 std::string register_au_component(const char* bundle_path) {
-    {
-        std::string out;
-        CFURLRef url = CFURLCreateFromFileSystemRepresentation(
-            nullptr, reinterpret_cast<const UInt8*>(bundle_path), (CFIndex)std::strlen(bundle_path),
-            true);
-        CFBundleRef bundle = url ? CFBundleCreate(nullptr, url) : nullptr;
-        if (url)
-            CFRelease(url);
-        if (!bundle)
-            return out;
-        auto components =
-            (CFArrayRef)CFBundleGetValueForInfoDictionaryKey(bundle, CFSTR("AudioComponents"));
-        if (!components || CFArrayGetCount(components) < 1)
-            return out;
-        auto entry = (CFDictionaryRef)CFArrayGetValueAtIndex(components, 0);
-        AudioComponentDescription desc{};
-        desc.componentType = four_cc((CFStringRef)CFDictionaryGetValue(entry, CFSTR("type")));
-        desc.componentSubType = four_cc((CFStringRef)CFDictionaryGetValue(entry, CFSTR("subtype")));
-        desc.componentManufacturer =
-            four_cc((CFStringRef)CFDictionaryGetValue(entry, CFSTR("manufacturer")));
-        if (!au_probe_out_of_process()) {
-            auto factory_name = (CFStringRef)CFDictionaryGetValue(entry, CFSTR("factoryFunction"));
-            UInt32 version = 0;
-            if (auto v = (CFNumberRef)CFDictionaryGetValue(entry, CFSTR("version")))
-                CFNumberGetValue(v, kCFNumberSInt32Type, &version);
-            if (!CFBundleLoadExecutable(bundle))
-                return out;
-            auto factory = (AudioComponentFactoryFunction)CFBundleGetFunctionPointerForName(
-                bundle, factory_name);
-            if (!factory ||
-                !AudioComponentRegister(&desc,
-                                        (CFStringRef)CFDictionaryGetValue(entry, CFSTR("name"))
-                                            ?: CFSTR("Pulp probe"),
-                                        version, factory))
-                return out;
-        }
-        auto code = [](OSType v) {
-            return std::string{char(v >> 24), char(v >> 16), char(v >> 8), char(v)};
-        };
-        out = code(desc.componentType) + ":" + code(desc.componentSubType) + ":" +
-              code(desc.componentManufacturer);
-        return out;
-    }
+    const auto desc = pulp::test::au_component_description(bundle_path, !au_probe_out_of_process());
+    return desc ? pulp::test::au_component_id(*desc) : std::string{};
 }
 
 /// The component's id, registered with this process once per bundle unless

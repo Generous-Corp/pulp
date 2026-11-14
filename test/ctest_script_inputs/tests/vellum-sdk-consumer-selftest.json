@@ -1,0 +1,14 @@
+{
+ "name": "vellum-sdk-consumer-selftest",
+ "record": {
+  "entry": "tools/ci/test_vellum_sdk_consumer.py",
+  "inputs": [
+   ".github/workflows/vellum-sdk-consumer.yml",
+   "test/editor_host_slice/vellum_ui/knob_panel.cpp",
+   "test/test_pulp_vellum_param_bridge.cpp",
+   "tools/ci/test_vellum_sdk_consumer.py",
+   "tools/ci/vellum_sdk_consumer.py"
+  ],
+  "kind": "python"
+ }
+}

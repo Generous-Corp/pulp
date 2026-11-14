@@ -28,9 +28,18 @@ use without hard-coding macOS, Windows, Linux, iOS, or Web behavior.
 | Popup windows | `popup_window.hpp` | `PopupWindow::open` gives a borderless child window anchored to a rectangle in an editor view, placed below or above it on that view's screen, with a layer-backed content view to draw into (combo lists that must look like the product). It closes on an outside click (consumed, so it never reaches the editor), Escape, focus loss or the parent closing, and silently when its `MainThreadScope` dies |
 | Popup menus | `popup_menu.hpp` | Native menus. `show_menu_async` (preferred in editors) opens an anchored NSMenu at least as wide as its anchor, with submenus, check marks and per-row text colour, without blocking the caller; the choice arrives once on the main thread and is dropped if the `MainThreadScope` dies. The synchronous `PopupMenu::show` / `show_at_view` block until the menu closes and return the chosen id |
 | Main-thread work | `main_thread.hpp` | `MainThreadScope` posts work to the main thread from any thread, and `MainThreadTimer` gives one-shot or repeating millisecond timers. Both run in the common run-loop modes, so they keep running during menu tracking, live resize and modal panels, and nothing runs after the scope is destroyed. macOS and iOS; other platforms report `main_thread_supported() == false` |
+| Binary-unique names | `binary_unique_name.hpp` | `binary_unique_name(base)` returns `<base>_<image token>`, where the token is the load address of the binary holding the code, so process-wide registrations (Win32 window classes, for example) differ between two Pulp plug-ins in one host |
 | Unique Objective-C classes | `objc_unique_class.hpp` | Registers Objective-C classes at run time under `<base>_<image token>`, so two Pulp binaries in one host process never share a class name and run each other's code. It adds methods from C functions and gives each instance a context slot. Apple platforms |
 
 ---
+
+## native
+
+`pulp::native` (`integrations/pulp-native`, macOS) gives an editor that brings its own renderer a native surface: a child `NSView` backed by a `CAMetalLayer` (`metal_surface.hpp`), a display-linked frame pump (`frame_pump.hpp`) and pointer and key input (`input.hpp`). It links Pulp's platform layer and system frameworks only, with no view, canvas, render or GPU-runtime target and no Skia, Dawn, Vellum or RmlUi.
+
+## pulp_vellum
+
+`pulp::vellum` (`integrations/pulp-vellum`, optional, off unless `PULP_ENABLE_PULP_VELLUM=ON`) presents Pulp's editor-host ports in Vellum's value interfaces, so a Vellum widget binds to a processor's parameters without either side naming the other's types. `ParamPortModel` is a `vellum::value::ParamModel` over a `format::ParamPort`: parameters resolve by name or decimal id (or a plug-in's own resolver), gestures nest and reach the port once, a host change a subscriber echoes back is not written as an edit, and restored state replays through the port's listener. `mapping.hpp` holds the pure value mapping (`to_normalized`, `to_plain`, text parse and format) over Pulp's own `ParamRange`, callable without a model. `VisualPortFeed` presents a `format::VisualPort` as a `vellum::value::ValueFeed`. Modulation readout takes a reader the caller supplies over `StateStore::displayed_modulation`. It needs an installed Vellum SDK on `CMAKE_PREFIX_PATH`, nothing in `core/` links it (`integrations_boundary_check.py`), and its tests run in the Vellum SDK consumer workflow against the newest green Vellum main SDK.
 
 ## simd
 
@@ -1441,6 +1450,16 @@ Parameters, state trees, presets, and settings.
 
 **Link:** `pulp::state` · **Include prefix:** `<pulp/state/...>`
 
+### MIDI Learn
+
+`<pulp/state/midi_learn_engine.hpp>` maps hardware controllers (7-bit and 14-bit
+CC, NRPN/RPN, pitch bend, pressure) to parameters, learns a mapping from a burst
+of messages, saves it with the plug-in state, records edits for undo, and sends
+parameter values back to the controller. The pure decoders and the learn
+classifier are in `midi_decode.hpp` and `midi_learn.hpp`. See the
+[MIDI Learn guide](../guides/midi-learn.md); `MidiParameterMap` is superseded
+but still available.
+
 ### Plugin parameters — the core state system
 
 ```cpp
@@ -1565,6 +1584,26 @@ ApplicationProperties app("MyPlugin");
 app.load();
 app.user_settings().set_bool("first_run", false);
 app.save();
+```
+
+`PropertiesFile` stores JSON. To share a settings file with programs that use
+the flat XML properties format (a `<PROPERTIES>` root holding one
+`<VALUE name="..." val="..."/>` per entry), use `XmlPropertiesFile` from
+`xml_properties_file.hpp`. It writes that format's canonical bytes (CRLF line
+endings, two-space indent, ASCII-only escaping) and reads it tolerantly. It
+differs from the format's usual handling in two ways: a file that does not
+parse is never written over (it is copied once to `<path>.bak` and the load
+returns the error), and a save replaces the file atomically without leaving a
+temporary file. A save with no changed entries writes nothing.
+
+```cpp
+#include <pulp/state/xml_properties_file.hpp>
+
+pulp::state::XmlPropertiesError error;
+if (auto file = pulp::state::XmlPropertiesFile::load(path, &error)) {
+    file->set("volume", "8");
+    file->save(&error);
+}
 ```
 
 ### Other state features

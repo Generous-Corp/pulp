@@ -4,6 +4,7 @@
   "scanners": {
     "tools/ci/source_selftests.py": "walks test/**/*.cmake for ctest registrations; test/ routes to the native build",
     "tools/ci/test_source_selftests.py": "walks temporary trees",
+    "tools/scripts/test_configure_only.py": "walks the temporary build trees it configures",
     "tools/scripts/test_check_apple_bundle_signing.py": "walks the temporary bundles it builds",
     "tools/ci/test_drift_fast.py": "walks test/ for registration names; tools/ci routes to the native build",
     "tools/scripts/gate_python_imports_check.py": "reads the configured ctest inventory; runs in the pr-fast tier on the native gate",
@@ -45,6 +46,7 @@
     "tools/scripts/include_boundary.py": "walks the core/ roots each boundary names; its only tools/scripts content is vellum_policy.json, read through the vellum_policy import, which the reference search follows by stem",
     "tools/scripts/design_unit_boundary_check.py": "walks the include roots of the configured design targets under core/; its only tools/scripts content is vellum_policy.json, read through the vellum_policy import, which the reference search follows by stem",
     "tools/scripts/core_vellum_direction.py": "walks the core/ roots (CMake files and the GPU forward-declaration roots), the root CMakeLists.txt and tools/cmake/** for Vellum references; it reads no tools/scripts, tools/testing or tools/import-validation content",
-    "tools/scripts/test_agent_capability_store.py": "globs tools/scripts/agent_capability_catalog_*.py and walks the capability record directories (or temporary copies); every one of those inputs, and this file, routes to the native build through AGENT_CAPABILITY_INSTALLED_SDK_PATTERNS"
+    "tools/scripts/test_agent_capability_store.py": "globs tools/scripts/agent_capability_catalog_*.py and walks the capability record directories (or temporary copies); every one of those inputs, and this file, routes to the native build through AGENT_CAPABILITY_INSTALLED_SDK_PATTERNS",
+    "tools/scripts/test_script_test_inputs.py": "walks the temporary trees it writes its fixtures into; its live-tree reads are the configured ctest inventory and test/ctest_script_inputs/, as for script_test_inputs.py"
   }
 }

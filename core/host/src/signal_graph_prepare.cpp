@@ -19,6 +19,7 @@
 #include <pulp/host/anticipation_subgraph.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/control_index_nodes.hpp>
+#include <pulp/host/isolated_plugin_slot.hpp>
 #include <pulp/host/signal_graph_execution_snapshot.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
 #include <pulp/runtime/log.hpp>
@@ -1591,6 +1592,33 @@ bool SignalGraph::prepare_impl_(double sample_rate, int max_block_size,
     // mutex — set_node_gain() — releases the mutex before pinning, so this lock can
     // never invert order with the reader-drain handshake.
     GraphMutationLock mutation_lock(*this);
+    for (const auto& node : nodes_) {
+        if (!node.plugin || !is_isolated_plugin_slot(*node.plugin))
+            continue;
+        if (node.num_input_ports != 2 || node.num_output_ports != 2) {
+            runtime::log_error("SignalGraph: isolated CLAP requires stereo node ports");
+            return false;
+        }
+        for (const auto& connection : connections_) {
+            if ((connection.source_node == node.id || connection.dest_node == node.id) &&
+                (connection.midi || connection.automation || connection.audio_rate_modulation ||
+                 connection.sidechain)) {
+                runtime::log_error("SignalGraph: isolated CLAP refuses event and sidechain edges");
+                return false;
+            }
+        }
+    }
+    // Refuse before unpublishing or invoking any slot lifecycle method.
+    if (has_isolated_plugins_locked_() &&
+        (sample_rate != 48000.0 || max_block_size != 64 || !canonical_executor_routing_enabled() ||
+         parallel_routing_enabled() || anticipation_enabled() ||
+         hosted_plugin_process_mode_ != format::ProcessMode::Realtime || live_slot_.has_value() ||
+         processing_handle_lifetime_.use_count() != 1)) {
+        runtime::log_error(
+            "SignalGraph: isolated CLAP requires a fresh serial canonical 48k/64 graph");
+        return false;
+    }
+
     if ((!trigger_producers_.empty() || !trigger_envelopes_.empty() || !trigger_audio_.empty() ||
          !trigger_edges_.empty()) &&
         !compiling_trigger_state_)

@@ -12,6 +12,8 @@
 #include <pulp/midi/device.hpp>
 
 #include <algorithm>
+#include <cstdint>
+#include <span>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -103,6 +105,18 @@ class MockMidiSystem : public MidiSystem {
         return n;
     }
 
+    /// Every System Exclusive message sent through an output of this system, in
+    /// order. An output that is closed, or a malformed message, records nothing.
+    std::vector<std::vector<std::uint8_t>> sent_sysex() const {
+        std::lock_guard<std::mutex> lk(mu_);
+        return sent_sysex_;
+    }
+
+    void clear_sent_sysex() {
+        std::lock_guard<std::mutex> lk(mu_);
+        sent_sysex_.clear();
+    }
+
     /// Total successful input opens since construction.
     int total_opens() const {
         std::lock_guard<std::mutex> lk(mu_);
@@ -127,7 +141,7 @@ class MockMidiSystem : public MidiSystem {
     }
 
     std::unique_ptr<MidiOutput> create_output() override {
-        return std::make_unique<Output>();
+        return std::make_unique<Output>(this);
     }
 
     void set_port_change_callback(PortChangeCallback cb) override {
@@ -190,6 +204,7 @@ class MockMidiSystem : public MidiSystem {
 
     class Output : public MidiOutput {
       public:
+        explicit Output(MockMidiSystem* owner) : owner_(owner) {}
         bool open(const std::string&) override {
             open_ = true;
             return true;
@@ -201,8 +216,16 @@ class MockMidiSystem : public MidiSystem {
             return open_;
         }
         void send(const MidiEvent&) override {}
+        bool send_sysex(std::span<const std::uint8_t> bytes) override {
+            if (!open_ || !is_valid_sysex_message(bytes))
+                return false;
+            std::lock_guard<std::mutex> lk(owner_->mu_);
+            owner_->sent_sysex_.emplace_back(bytes.begin(), bytes.end());
+            return true;
+        }
 
       private:
+        MockMidiSystem* owner_;
         bool open_ = false;
     };
 
@@ -226,6 +249,7 @@ class MockMidiSystem : public MidiSystem {
     mutable std::mutex mu_;
     std::vector<MidiPortInfo> ports_;
     std::vector<std::shared_ptr<InputState>> inputs_;
+    std::vector<std::vector<std::uint8_t>> sent_sysex_;
     PortChangeCallback port_change_cb_;
     int total_opens_ = 0;
     int failing_opens_ = 0;

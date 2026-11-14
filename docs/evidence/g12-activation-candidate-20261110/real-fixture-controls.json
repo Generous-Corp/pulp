@@ -1,0 +1,66 @@
+[
+  {
+    "backend": "direct",
+    "fault": "",
+    "label": "direct-positive",
+    "returncode": 0,
+    "independent_validator_rejection": null,
+    "raw_sha256": "a254b9d76886248b731cf2342727231cdc44700322087809e719b250cccada31"
+  },
+  {
+    "backend": "direct",
+    "fault": "omit_commit",
+    "label": "direct-omit_commit",
+    "returncode": 42,
+    "independent_validator_rejection": "missing commit or audio activation",
+    "raw_sha256": "df75e40eca96c46834a25a11571e4b981ad6746605256636e41cd4559143924d"
+  },
+  {
+    "backend": "direct",
+    "fault": "wrong_gain",
+    "label": "direct-wrong_gain",
+    "returncode": 42,
+    "independent_validator_rejection": "missing commit or audio activation",
+    "raw_sha256": "3635548674026ca56756c5bcc532750299754fca290fa33434b1f272b17b8953"
+  },
+  {
+    "backend": "direct",
+    "fault": "",
+    "label": "direct-restored",
+    "returncode": 0,
+    "independent_validator_rejection": null,
+    "raw_sha256": "3b8a50f067c875c0052acfdb9f178f4c52109d81fd781f48eb68ffb8373bf9f4"
+  },
+  {
+    "backend": "routed",
+    "fault": "",
+    "label": "routed-positive",
+    "returncode": 0,
+    "independent_validator_rejection": null,
+    "raw_sha256": "f6913bc91e58d7a332278f616897fefa03b0498afb2e5bdc281453975d1d3011"
+  },
+  {
+    "backend": "routed",
+    "fault": "omit_commit",
+    "label": "routed-omit_commit",
+    "returncode": 42,
+    "independent_validator_rejection": "missing commit or audio activation",
+    "raw_sha256": "eaf136eae5a4f58c8fa961ba7fdf33da3e838d92aca2b844d6963b8627145029"
+  },
+  {
+    "backend": "routed",
+    "fault": "wrong_gain",
+    "label": "routed-wrong_gain",
+    "returncode": 42,
+    "independent_validator_rejection": "missing commit or audio activation",
+    "raw_sha256": "f75e956ae714f62b941aad2366d0f699ee2ed74a8d86af82d1cf6535024e3a61"
+  },
+  {
+    "backend": "routed",
+    "fault": "",
+    "label": "routed-restored",
+    "returncode": 0,
+    "independent_validator_rejection": null,
+    "raw_sha256": "383ad2928149136bf58e4d08bad3d2bfa7d6765eec5091f0b50432e0d72ed130"
+  }
+]

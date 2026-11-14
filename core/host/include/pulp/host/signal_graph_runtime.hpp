@@ -498,14 +498,14 @@ class SignalGraph : public format::AudioWorkgroupClient {
     bool inject_midi(NodeId midi_input_node, const midi::MidiBuffer& events,
                      const midi::MpeBuffer& mpe) noexcept;
 
-    // Inject sample-accurate parameter events into a Plugin node. Call before
-    // process(); the latest published batch is consumed exactly once by that
-    // node on the next block it processes. Events use block-relative sample
-    // offsets and are delivered after graph-generated automation, so an
-    // injected event wins an equal-offset tie while existing automation keeps
-    // capacity priority. Returns false for an unprepared/non-Plugin/unresolved
-    // node or when `events` already reports source-side overflow; the retained
-    // prefix is still published in the overflow case.
+    // Inject sample-accurate parameter events into a PluginSlot node before
+    // process(); the latest batch is consumed once on that node's next block.
+    // Offsets are block-relative; events follow graph automation, so injection
+    // wins an equal-offset tie while automation keeps capacity priority.
+    // Returns false for an unprepared/unresolved/non-PluginSlot node (a
+    // Processor node takes events only via connect_automation or an exact
+    // stream) or when `events` reports source-side overflow, in which case
+    // the retained prefix is still published.
     bool inject_parameter_events(NodeId plugin_node, const state::ParameterEventQueue& events);
 
     // Drain queued nonempty MIDI blocks from a MidiOutput sink node in process
@@ -665,9 +665,9 @@ class SignalGraph : public format::AudioWorkgroupClient {
         PortIndex destination_port = 0;
         std::uint32_t parameter_id = 0;
     };
-    // One ordinary audio edge, observed at its source before PDC/mixing. Attach
-    // and detach are control-thread lifecycle operations: stop process() and
-    // any pinned-snapshot rendering first, as for prepare(). Reattachment starts
+    // Ordinary/sidechain audio: source before PDC/mixing; feedback: retained input before
+    // current capture, timestamped at receiving block. Attach/detach: stop process() and
+    // pinned-snapshot rendering on the control thread, as for prepare(). Reattachment starts
     // a fresh 256-record ring and a zero-based sample clock. Reprepare/topology
     // publication retires the attachment; transport reset detaches it. Serial
     // routing only; execution-mode changes detach at the next process call.
@@ -680,8 +680,8 @@ class SignalGraph : public format::AudioWorkgroupClient {
     std::uint64_t audio_edge_probe_dropped() const;
     EdgeProbeStatus audio_edge_probe_status() const;
     EdgeProbeIdentity audio_edge_probe_identity() const;
-    // Control probes observe one prepared sparse automation edge after its
-    // per-edge source mapping and slew, before destination mixing and bounds
+    // Control probes observe one prepared sparse or dense automation edge after
+    // per-edge PDC (dense only), source mapping and slew, before mixing and bounds
     // clamping. The destination is identified by NodeId + public parameter id
     // because automation edges do not have a destination audio port.
     EdgeProbeStatus attach_control_edge_probe(const PortHandle& source, NodeId destination,
@@ -833,10 +833,8 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // mid-stream switch resets feedback history to whatever the destination path
     // last wrote — a one-block transient, not a crash or a permanent divergence.
     // Pick a path before starting a feedback graph and keep it for the stream.
-    void set_canonical_executor_routing_enabled(bool enabled) noexcept {
-        canonical_executor_routing_enabled_.store(enabled, std::memory_order_relaxed);
-        detail::advance_execution_selection_generation(execution_selection_generation_);
-    }
+    // Unsupported changes with an isolated slot are refused and logged off RT.
+    void set_canonical_executor_routing_enabled(bool enabled) noexcept;
     // Returns the requested opt-in flag, not a promise that the current block
     // is taking the executor path. Actual dispatch also requires an eligible
     // prepared snapshot and a scratch pool sized for the block.
@@ -941,10 +939,7 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // exclusion replaces the former blanket transport suppression under
     // anticipation; transport_suppressed_for_anticipation() now counts the
     // transport-sensitive nodes that anticipation forced exterior.
-    void set_anticipation_enabled(bool enabled) noexcept {
-        anticipation_enabled_.store(enabled, std::memory_order_relaxed);
-        detail::advance_execution_selection_generation(execution_selection_generation_);
-    }
+    void set_anticipation_enabled(bool enabled) noexcept;
     bool anticipation_enabled() const noexcept {
         return anticipation_enabled_.load(std::memory_order_relaxed);
     }
@@ -2060,6 +2055,10 @@ class SignalGraph : public format::AudioWorkgroupClient {
     enum class CompileMode { Normal, SwapNoAnticipation };
     std::shared_ptr<CompiledGraph> compile_(double sample_rate, int max_block_size,
                                             CompileMode mode = CompileMode::Normal);
+    // Caller holds GraphMutationLock. Includes the live generation after source edits.
+    static bool snapshot_has_isolated_plugins_(const CompiledGraph&) noexcept;
+    bool has_isolated_plugins_locked_() const noexcept;
+    bool refuse_isolated_mode_locked_(const char* operation) const noexcept;
     bool prepare_impl_(double sample_rate, int max_block_size,
                        const PrepareLifecycleObserver* lifecycle_observer);
     // Build one routed-executor snapshot for compile_, defining the live-value

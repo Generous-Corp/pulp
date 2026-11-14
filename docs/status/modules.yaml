@@ -2,6 +2,20 @@
 # Vocabulary: stable, usable, experimental, partial, planned, unsupported
 
 modules:
+  - name: native
+    path: integrations/pulp-native
+    summary: A native surface for an editor that brings its own renderer a child NSView backed by a CAMetalLayer with a display-linked frame pump and pointer and key input linking only the platform layer and system frameworks with no view canvas render GPU runtime Skia Dawn Vellum or RmlUi
+    status: experimental
+    dependencies: [platform]
+    docs: reference/modules.md#native
+
+  - name: pulp_vellum
+    path: integrations/pulp-vellum
+    summary: The parameter bridge between the editor-host contract and Vellum value interfaces presenting a ParamPort as a Vellum ParamModel with nested gestures echo suppression restore replay text parsing and modulation readout and a VisualPort as a ValueFeed built only against an installed Vellum SDK
+    status: experimental
+    dependencies: [format]
+    docs: reference/modules.md#pulp_vellum
+
   - name: playback
     summary: Master transport optional session-tempo sync immutable incrementally compiled track and automation programs bounded deterministic cursors WAV-backed arrangement audio rendering block-coherent publication and stable renderer shells
     status: experimental
@@ -155,7 +169,7 @@ modules:
     docs: reference/modules.md#signal
 
   - name: state
-    summary: Thread-safe parameters, reactive StateTree with JSON sync, transactions (coalesced notifications, abort, nesting) and undo steps, PresetManager, PropertiesFile (JSON settings), EditHistory (global undo/redo with coalescing, Binding integration)
+    summary: Thread-safe parameters, reactive StateTree with JSON sync, transactions (coalesced notifications, abort, nesting) and undo steps, PresetManager, PropertiesFile (JSON settings), XmlPropertiesFile (flat XML settings with canonical bytes, fail-closed loads and atomic save), EditHistory (global undo/redo with coalescing, Binding integration), MIDI Learn (controller mapping, learn flow, feedback, saved mappings, undo)
     status: stable
     dependencies: [runtime]
     docs: reference/modules.md#state

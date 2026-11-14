@@ -14,10 +14,12 @@ target_sources(pulp-state PRIVATE
     src/preset_manager.cpp
     src/preset_metadata_store.cpp
     src/preset_library.cpp
+    src/preset_program_map.cpp
     src/content_capability_manifest.cpp
     src/state_tree.cpp
     src/state_tree_sync.cpp
     src/properties_file.cpp
+    src/xml_properties_file.cpp
     src/midi_learn_persistence.cpp
 )
 
@@ -28,6 +30,9 @@ target_link_libraries(pulp-state PRIVATE pulp::events)
 target_include_directories(pulp-state PRIVATE
     $<BUILD_INTERFACE:${choc_SOURCE_DIR}>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../external/miniz>
+    # pugixml is compiled into pulp-runtime; XmlPropertiesFile parses with it
+    # privately, so the installed target exposes no pugixml types.
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../external/pugixml>
 )
 
 # Configure a CTest that checks the concrete archive's direct link closure.

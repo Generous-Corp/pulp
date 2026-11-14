@@ -269,13 +269,13 @@ WebView host.
 Current proven local recipe:
 
 ```bash
-cd /Users/danielraffel/Code/monaco-editor
+cd <code-root>/monaco-editor
 npm install
 npm run build-monaco-editor
 
 cd /path/to/pulp
 node examples/webview-monaco/build_monaco_bundle.mjs \
-  --monaco-root /Users/danielraffel/Code/monaco-editor \
+  --monaco-root <code-root>/monaco-editor \
   --out-dir /path/to/pulp/build/examples/webview-monaco/dist
 
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_WEBVIEW=ON \

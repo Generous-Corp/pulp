@@ -60,9 +60,13 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: danielraffel/Shipyard
-          # Shipyard v0.384.0: counts an App APPROVE only from a session listed in
-          # `[auto_merge] reviewer_stamp_sessions` (a HOLD from any session still counts).
-          ref: 67aa53c534eeded02e5a1b0bc83892903fe8ab22
+          # Shipyard v0.407.0: the same approval rule as v0.384.0 (an App APPROVE
+          # counts only from a session listed in `[auto_merge]
+          # reviewer_stamp_sessions`; a HOLD from any session still counts; the
+          # author's own approval never counts; nothing carries to a new head). The
+          # commit status is `pending`, not `failure`, while a head only awaits its
+          # reviewer; the job still fails until the head is allowed.
+          ref: 44721a9f214e7836073165f66aa7bd9d26ec014d
           persist-credentials: false
       - name: Set up Python
         id: python
@@ -94,7 +98,7 @@ jobs:
         with:
           repository: danielraffel/Shipyard
           # Same pinned commit as the review-verdict job.
-          ref: 67aa53c534eeded02e5a1b0bc83892903fe8ab22
+          ref: 44721a9f214e7836073165f66aa7bd9d26ec014d
           persist-credentials: false
       - name: Set up Python
         id: python

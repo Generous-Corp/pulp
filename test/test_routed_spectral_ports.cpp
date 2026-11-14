@@ -1,4 +1,5 @@
 #include "../examples/g10-routed-consumer/asset_morph_oracle.hpp"
+#include "harness/paced_timing_cell.hpp"
 #include "harness/rt_allocation_probe.hpp"
 #include <array>
 #include <catch2/catch_test_macros.hpp>
@@ -20,7 +21,9 @@ TEST_CASE("Public spectral lowering exposes no callable constructor",
 }
 
 namespace {
-std::vector<float> render(int partition, float gain) {
+// Builds the analysis -> identity -> real-mask -> synthesis spectral graph and
+// hands it to `use` while every stage it was authored from is still alive.
+template <class Use> void with_spectral_graph(float gain, Use&& use) {
     using namespace pulp::host;
     auto identity = SpectralIdentity::make(256, 63, 1, 48000);
     REQUIRE(identity);
@@ -48,6 +51,10 @@ std::vector<float> render(int partition, float gain) {
     REQUIRE(graph.prepare(48000, 4096));
     REQUIRE(graph.latency_samples() == 319);
     graph.set_canonical_executor_routing_enabled(false);
+    use(graph);
+}
+
+std::vector<float> render_graph(pulp::host::SignalGraph& graph, int partition, float gain) {
     constexpr int total = 8192;
     std::vector<float> input(total), output(total);
     for (int t = 0; t < 6000; ++t)
@@ -76,7 +83,64 @@ std::vector<float> render(int partition, float gain) {
     REQUIRE(graph.routed_walk_fallbacks() == 0);
     return output;
 }
+
+std::vector<float> render(int partition, float gain) {
+    std::vector<float> output;
+    with_spectral_graph(gain, [&](pulp::host::SignalGraph& graph) {
+        output = render_graph(graph, partition, gain);
+    });
+    return output;
+}
 } // namespace
+
+// Paced-timing matrix cell for the routed spectral graph (analysis -> identity
+// -> real mask 0.5 -> synthesis, 319 samples of latency). The stimulus repeats
+// every 4096 samples so the per-block oracle is a table lookup of the delayed,
+// masked input rather than per-sample transcendental math.
+TEST_CASE("G10 routed spectral paced matrix cell", "[.][host][spectral-ports][paced-matrix]") {
+    const auto config = pulp::test::paced::read_config("identity-mask", 128);
+    REQUIRE(config.variant == "identity-mask");
+    REQUIRE(config.rate == 48000);
+    REQUIRE(config.frames <= 4096);
+    constexpr std::uint64_t period = 4096;
+    constexpr std::uint64_t latency = 319;
+    constexpr float gain = 0.5f;
+    constexpr double two_pi = 6.283185307179586;
+    std::vector<float> table(period);
+    for (std::uint64_t t = 0; t < period; ++t)
+        table[t] = static_cast<float>(0.2 * std::sin(two_pi * 37.0 * t / period) +
+                                      0.1 * std::sin(two_pi * 5.0 * t / period));
+    const auto frames = static_cast<std::size_t>(config.frames);
+    std::vector<float> input(frames), output(frames);
+    const auto fill = [&](std::uint64_t first) {
+        for (std::size_t i = 0; i < frames; ++i)
+            input[i] = table[(first + i) % period];
+    };
+    fill(0);
+    with_spectral_graph(gain, [&](pulp::host::SignalGraph& graph) {
+        const float* ip[] = {input.data()};
+        float* op[] = {output.data()};
+        pulp::audio::BufferView<const float> iv(ip, 1, frames);
+        pulp::audio::BufferView<float> ov(op, 1, frames);
+        const auto rows = pulp::test::paced::run_cell(
+            config,
+            [&](std::size_t, std::uint64_t) { graph.process(ov, iv, static_cast<int>(frames)); },
+            [&](std::size_t, std::uint64_t first) {
+                bool ok = true;
+                for (std::size_t i = 0; i < frames; ++i) {
+                    const auto t = first + i;
+                    const float wanted = t < latency ? 0.0f : gain * table[(t - latency) % period];
+                    ok = ok && std::isfinite(output[i]) && std::abs(output[i] - wanted) <= 1e-4f;
+                }
+                fill(first + frames);
+                return ok;
+            });
+        CHECK(pulp::test::paced::print_cell(
+                  "g10-routed-spectral", config, rows,
+                  "walk_fallbacks=" + std::to_string(graph.routed_walk_fallbacks())) == 0);
+        CHECK(graph.routed_walk_fallbacks() == 0);
+    });
+}
 
 TEST_CASE("Named spectral stages execute independently in the serial graph plan",
           "[host][spectral-ports]") {
@@ -339,6 +403,44 @@ TEST_CASE("Named spectral ports reject forged kinds before recording an edge",
         }
         source.kind = destination.kind = PortKind::Spectral;
         REQUIRE((edit ? edit->connect(source, destination) : graph.connect(source, destination)));
+    }
+}
+
+TEST_CASE("Spectral handles from a cleared authoring incarnation are refused",
+          "[host][spectral-ports][spectral-stale-handle]") {
+    using namespace pulp::host;
+    const auto identity = *SpectralIdentity::make(256, 64, 1, 48000).value;
+    for (bool prepared_edit : {false, true}) {
+        for (bool stale_source : {true, false}) {
+            CAPTURE(prepared_edit, stale_source);
+            SignalGraph graph;
+            const auto old_analysis = *graph.add_spectral_analysis(identity, "analysis").value;
+            const auto old_synthesis = *graph.add_spectral_synthesis(identity, "synthesis").value;
+            const auto gain = graph.add_gain_node("generation");
+            REQUIRE(graph.set_node_gain(gain, 0.5f));
+            graph.clear();
+            // Node ids restart after clear, so only the incarnation separates
+            // the retained handles from the current ports of the same name.
+            const auto analysis = *graph.add_spectral_analysis(identity, "analysis").value;
+            const auto synthesis = *graph.add_spectral_synthesis(identity, "synthesis").value;
+            REQUIRE(analysis.node == old_analysis.node);
+            REQUIRE(synthesis.node == old_synthesis.node);
+            REQUIRE(analysis.frames.handle.owner == old_analysis.frames.handle.owner);
+            REQUIRE(analysis.frames.handle.incarnation != old_analysis.frames.handle.incarnation);
+            auto edit = prepared_edit ? graph.begin_prepared_topology_edit() : nullptr;
+            const auto source = stale_source ? old_analysis.frames.handle : analysis.frames.handle;
+            const auto destination =
+                stale_source ? synthesis.frames.handle : old_synthesis.frames.handle;
+            const auto stale =
+                edit ? edit->connect(source, destination) : graph.connect(source, destination);
+            REQUIRE(stale.code == GraphResult::Code::UnknownPort);
+            REQUIRE_FALSE(stale.rule.empty());
+            REQUIRE((edit ? edit->connections() : graph.connections()).empty());
+            const auto current =
+                edit ? edit->connect(analysis.frames.handle, synthesis.frames.handle)
+                     : graph.connect(analysis.frames.handle, synthesis.frames.handle);
+            REQUIRE(current);
+        }
     }
 }
 

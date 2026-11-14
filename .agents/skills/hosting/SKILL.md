@@ -26,6 +26,28 @@ one block with a partitioned render and an independent sample recurrence, and
 plants missing-edge and swapped-index failures. Its v4 and v5 emit modes also
 exercise the graph persistence boundary.
 
+## Opt-in isolated CLAP processing
+
+`pulp/host/isolated_plugin_slot.hpp` supplies experimental MacClapStereo64V1
+and a separate retained lifecycle handle. Use the ordinary `add_plugin_node`
+ownership path. Never load the vendor in the parent or replace the fixed shared
+mapping callback with synchronous RPC. Read `docs/guides/isolated-clap-worker.md`
+for mode, refusal, custody, checkpoint and terminal-silence contracts. Keep real
+hostile-fixture, endpoint, sibling/PDC and production-mutation controls together.
+Functional callback traps do not establish full realtime or A10 qualification;
+host death and deliberate group escape are outside first-mode custody.
+
+**Graph code that calls an isolation helper must also link on the web.** The
+WAM / WebCLAP sample-region profile compiles a curated source list
+(`tools/cmake/PulpSampleRegionWebSources.cmake`), not `pulp-host`, and
+`isolated_plugin_slot.cpp` is deliberately absent because it needs a child
+process. A new call from `signal_graph_*.cpp` into that file fails only at
+`wasm-ld` (an advisory job that still ejects ALLGREEN queue batches). Give the
+web list a wasm-safe definition, as `isolated_plugin_slot_web.cpp` does for
+`is_isolated_plugin_slot`, and add the symbol to the closure selftest in
+`tools/scripts/test_sample_region_compat_baseline.py`.
+
+
 ## Live retuning at a callback boundary
 
 For a graph-owned in-process instrument, retain its public
@@ -71,8 +93,14 @@ preparation. When rendering a graph interval for an instrument, pass a
 zero-channel input `BufferView` with that interval's exact frame count. A
 default-constructed empty view has zero frames and makes routed execution fail
 closed. Keep both the between-event and final-tail branches covered by the
-installed SDK consumer and its independent planted mutations. This surface
-does not add CC64/120/121/123 sustain or saved-bank activation.
+installed SDK consumer and its independent planted mutations. The bounded
+bank now handles member and manager CC64 sustain, scoped CC120/121/123,
+generation-scoped release, and member-channel pitch, pressure, and CC74
+expression. Manager expression returns `UnsupportedExpression`. Its A1 scalar
+fixture uses a fixed `1/sqrt(8)` eight-slot stereo sum and four in-slot linear
+release frames. Saved-bank activation, edit/undo, DAW adapters, and paced
+realtime qualification remain open; do not infer them from the source-installed
+consumer.
 
 `PluginSlot` is the uniform interface. Each format backend is a single
 free function — `load_<format>_plugin(info)` — that returns a
@@ -160,6 +188,14 @@ accessor that traverses the prepared `CompiledGraph` while `prepare()` or
 `release()` may run must hold `live_slot_.read()` for the entire traversal.
 Keep concurrent lifecycle tests on a fixed authored topology; racing graph
 authoring against preparation tests a separate mutation contract.
+
+A live spectral controller publishes into `spectral_slots_`, not
+`live_slot_`, so `live_slot_` is empty while it renders. Do not treat an empty
+legacy slot as "nothing to protect". Every new authoring entry that reaches
+`invalidate_live_locked_()` must call `refuse_spectral_mutation_()` under the
+mutation lock first. Otherwise it bumps the authoring generation and zeroes
+the reported latency under the running controller. `connect_graph_event` once
+missed this; `[spectral-graph-event-refusal]` covers it.
 
 ## CLAP reference backend
 
@@ -1738,8 +1774,13 @@ rules:
 - **External parameter-event mailbox.** Hosts publish per-block events with
   `SignalGraph::inject_parameter_events()` before `process()`. The API is
   additive on `SignalGraph`; do not add a `Processor` or `PluginSlot` virtual.
-  Sample offsets are block-relative. A `false` return reports an invalid or
-  unavailable node, or a source queue that already overflowed; a retained
+  Sample offsets are block-relative. Only PluginSlot nodes drain this
+  mailbox: a `Processor` node added with `add_processor_node()` is refused
+  (`false`), because it takes parameter events only from `connect_automation`
+  or an owner-claimed exact timeline stream. Before this was enforced, the
+  injection returned true and the events were silently dropped. A `false`
+  return reports an invalid, unavailable or Processor node, or a source queue
+  that already overflowed; a retained
   source prefix can still be published and consumed. Destination overflow is
   observed later when the audio-thread merge fills the fixed queue. The live
   API rejects a node while a timeline binding owns its exact-generation writer
@@ -1921,6 +1962,12 @@ Apple's units and the host probe:
   `PULP_TEST_AUV3_PROBE_OUT_OF_PROCESS=1` with the component installed; remove
   it afterwards. Confirm the process boundary by finding the component mapped
   in the `AUHostingService` process with `lsof`.
+  Getting this wrong does not fail the load: the system hands back an
+  `AUAudioUnit_RemoteV2` with zero input and zero output buses, and the error
+  only surfaces at `prepare()` as -10875 from `allocateRenderResources`.
+  `AuV3LoadOptions::out_of_process` defaults to true, so a test that registers
+  in process must set it false. The slot logs `kRemoteUnitWithoutBuses` at
+  load when an instrument, effect or generator arrives this way.
 - **A unit republishes its parameter tree after a bus format change.** About
   2 ms after `setFormat:` (AUDelay, AUPeakLimiter; not DLSMusicDevice or the
   mixer), and only if the host has already read `parameterTree`. A warm
@@ -3123,17 +3170,6 @@ processor-provider mutation must refuse in spectral mode even when the legacy
 Keep graph persistence and arbitrary stage registration refused; PARTIAL status
 does not establish notation coverage or realtime timing qualification.
 
-For the finite two-asset source, use `add_spectral_asset_morph_v1` and a direct
-host `AudioInput` connection to its named `morph` input. A persistent 64-sample
-mean is part of stream history: never substitute a callback mean or reset it at
-host partition boundaries. Finite extent propagates at preparation through
-existing stages and synthesis; four zero frames contribute normalization, then
-rendering stops at the returned exclusive `render_frames` cutoff. EOF must not
-look like missing frames. Reset restarts assets independently of host playhead
-position. Keep codec decode/copy/hash and shared ownership operations off the
-callback, and test through the installed public consumer's independent DFT
-oracle as well as the callback allocation probe.
-
 ## Bounded typed trigger runtime
 
 Use `prepare_trigger_plan()` and `try_install_prepared_trigger_plan()` for the
@@ -3162,9 +3198,45 @@ its public fingerprints or receipts. Validate the focused trigger-graph group
 and installed consumer; this seam does not establish hosted-plugin voice
 coverage or realtime qualification.
 
+`pulp/host/host_event_timestamps.hpp` (`HostBlockTimeline`) is the only path
+from a format's block-relative event time (CLAP `header.time`) to the ingress's
+epoch-local `absolute_sample`. Feed `HostBlockWindow` straight into
+`begin_block`. Gotchas: CLAP `steady_time` is a monotonic sample counter and
+does NOT move on a
+seek or loop, so a loop is only visible through the transport position or an
+explicit `discontinuity`; a stopped transport's position is ignored (it does
+not advance). A steady-clock forward gap stays in the epoch; a backwards clock
+or a steady/no-steady flip opens a new epoch. Out-of-block times are refused,
+never clamped. The CLAP adapter still feeds the Processor `MidiBuffer`, not this
+projection.
+
 # G-7 edge diagnostics
 
 SignalGraph control and event edge probes are serial routed diagnostics with
 fixed-capacity publication and explicit refusal in unsupported execution modes.
 Host lifecycle changes must preserve detach-on-reset and the source-edge event
 observation boundary.
+
+### Catalog-derived graph notation
+
+`pulp/host/graph_patch.hpp` projects registered Processor descriptors and actual
+named GraphNode ports into a control-thread catalog. Processor MIDI capabilities
+append named `midi` ports without changing audio counts; named connect must set
+the MIDI edge flag. Keep strict patch validation additive: the legacy serializer
+may drop bad edges, while strict validation must check every original edge.
+Opaque state and richer edge kinds need explicit contracts before formatting.
+Diagnostics must name the real reason and the fix. The default catalog lists
+`pulp/gain`'s `gain` as a node setting, which `name = value` sets but `~>`
+cannot automate (it is not a Processor parameter); a chain hop infers a port
+only when the node has exactly one output, so stereo built-ins need explicit
+`node.audio` and `node.out1` ports. User-facing walkthroughs live in
+`docs/guides/graph-first-steps.md` and `docs/guides/graph-notation-cookbook.md`.
+
+### Vendored lilv/zix on Android
+
+`pulp-host-lilv` (external/lilv) compiles into `pulp-host` on every platform,
+including the Android NDK build. zix assumes any `__linux__` target has
+`copy_file_range`, but bionic only declares it from API 34 (minSdk is 26), so the
+Android branch in `core/host/CMakeLists.txt` defines `HAVE_COPY_FILE_RANGE=0`.
+The `android-build` job runs only on main pushes (it is skipped for
+`pull_request` and `merge_group`), so a host-side C break shows up only there.

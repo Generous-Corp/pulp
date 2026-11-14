@@ -146,11 +146,15 @@ These directories prove a contract and are exercised by CI. Do not copy them as 
 | `faust-rt-sdk-consumer` | Faust runtime builds against the installed SDK (**SDK project**) | `ctest -R cmake-faust-rt-sdk-consumer` | `test/consumers/faust-rt-sdk-consumer` |
 | `g10-routed-consumer` | Routed spectral ports work from an installed SDK (**SDK project**) | Configure as an SDK project | `test/consumers/g10-routed-consumer` |
 | `a10-routing-hosting-consumer` | Installed SDK host route-registration and preparation acceptance checks, prepared latency, and planted refusal controls (**SDK project**) | `ctest -R a10-routing-hosting-public-consumer` | `test/consumers/a10-routing-hosting-consumer` |
+| `graph-patch-consumer` | Catalog-derived notation, typed diagnostics and numeric MIDI/modulation from an installed SDK (**SDK project**) | `ctest -R cmake-graph-patch-sdk-consumer` | `test/consumers/graph-patch-consumer` |
 | `g2-processor-restore-consumer` | A registered processor restores its state from an installed SDK (**SDK project**) | `ctest -R cmake-g2-processor-restore-sdk-consumer` | `test/consumers/g2-processor-restore-consumer` |
+| `g9-isolated-clap-consumer` | Real isolated CLAP state recovery and 64-sample PDC from an installed SDK (**SDK project**) | `ctest -R cmake-g9-isolated-clap-sdk-consumer` | `test/consumers/g9-isolated-clap-consumer` |
 | `g3-d4-prepared-export-consumer` | Prepared serial I/O + Gain export and provenance from an installed SDK (**SDK project**) | Configure as an SDK project, then run `ctest` | `test/consumers/g3-d4-prepared-export-consumer` |
+| `g3-resolved-identity-consumer` | Bounded resolved graph identity and receipt from an installed SDK (**SDK project**) | Configure as an SDK project, then run `ctest` | `test/consumers/g3-resolved-identity-consumer` |
 | `g3-io-gain-consumer` | Identity of an input and output gain graph, checked by a Python script | `python3 test/test_g3_io_gain_identity.py` | `test/consumers/g3-io-gain-consumer` |
 | `g5-event-consumer` | Reference event trace for two legal partitions | `python3 examples/g5-event-consumer/test_check_trace.py` | `test/consumers/g5-event-consumer` |
 | `g5-host-event-consumer` | Public host event boundary from an external program (**SDK project**) | `ctest -R g5-host-event-public-consumer` | `test/consumers/g5-host-event-consumer` |
+| `p1-event-admission-consumer` | Cross-block MIDI, parameter, trigger, and test-owned voice-intent admission controls (**SDK project**) | `ctest -R p1-event-admission-public-consumer` | `test/consumers/p1-event-admission-consumer` |
 | `g5-trigger-admission-consumer` | Graph planner admits trigger edges in a release build (**SDK project**) | `ctest -R trigger-admission-public-consumer` | `test/consumers/g5-trigger-admission-consumer` |
 | `g5-trigger-runtime-consumer` | Graph-produced onsets render through a typed trigger edge (**SDK project**) | `ctest -R trigger-runtime-public-consumer` | `test/consumers/g5-trigger-runtime-consumer` |
 | `g4-voice-bank-consumer` | Voice-bank persistence save/load/edit/undo/redo and binding refusal from an installed SDK (**SDK project**) | `ctest -R cmake-g4-voice-bank-sdk-consumer` | `test/consumers/g4-voice-bank-consumer` |
@@ -158,11 +162,12 @@ These directories prove a contract and are exercised by CI. Do not copy them as 
 | `g6-voice-bank-consumer` | Eight authored graph voices, scalar audio oracle, binding and stale refusals (**SDK project**) | `ctest -R cmake-g6-voice-bank-sdk-consumer` | `test/consumers/g6-voice-bank-consumer` |
 | `g7-latency-pdc-consumer` | Public latency reporting on a graph (**SDK project**) | Configure as an SDK project | `test/consumers/g7-latency-pdc-consumer` |
 | `spectral-frame-codec-consumer` | Spectral frame codec from an installed SDK (**SDK project**) | `ctest -R cmake-spectral-frame-codec-consumer` | `test/consumers/spectral-frame-codec-consumer` |
+| `spectral-resynthesis-consumer` | Routed analysis, stage and resynthesis with geometry, latency, tail, partition and planted-mutation checks from an installed SDK (**SDK project**) | `ctest -R cmake-spectral-resynthesis-consumer` | `test/consumers/spectral-resynthesis-consumer` |
 | `timeline-sdk-consumer` | Timeline SDK closure, cookbook and chord renderer from an installed SDK (**SDK project**) | `ctest -R cmake-timeline-sdk-consumer` | `test/consumers/timeline-sdk-consumer` |
 | `graph-agent-loop` | Bounded agent loop over the public graph API (**SDK project**) | Configure as an SDK project | `test/consumers/graph-agent-loop` |
 | `graph-agent-loop-replay` | Save, edit, and replay a prepared stereo graph with planted refusal controls (**SDK project**) | Configure as an SDK project | `test/consumers/graph-agent-loop-replay` |
 | `graph-edge-probe` | Graph edge kinds from an installed SDK (**SDK project**) | Configure as an SDK project | `test/consumers/graph-edge-probe` |
-| `graph-control-event-probe` | Bounded control/event edge publication and planted mutation (**SDK project**) | Configure as an SDK project | `test/consumers/graph-control-event-probe` |
+| `graph-control-event-probe` | Bounded control/event edge publication and planted refusal-message controls (**SDK project**) | Configure as an SDK project | `test/consumers/graph-control-event-probe` |
 | `g5-control-index-filter` | Graph-authored Control index to dense Processor lowpass modulation (**SDK project**) | Configure as an SDK project | `examples/g5-control-index-filter` |
 | `gpu-fault-continuity` | Plugin that injects GPU faults for the host smoke test; needs `PULP_GPU_AUDIO_FAULT_HOOKS` | `pulp build --examples --target PulpGpuFaultContinuity_CLAP` | `test/consumers/gpu-fault-continuity` |
 | `text-input-test` | Text editor widget in a window | `pulp build --examples --target pulp-text-input-test` | `test/consumers/text-input-test` |

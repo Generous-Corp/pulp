@@ -67,3 +67,5 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/g3_d4_prepared_description_tests.cmak
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/g4_voice_binding_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/g11_recording_publication_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/g11_live_retune_tests.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/graph_patch_tests.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/native_gl_surface_tests.cmake")

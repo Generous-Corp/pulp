@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261113-w5e-paced-timing-matrix-20261113-watch",
+  "created_at": "2026-11-13T15:01:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "Adds a test-side paced-timing cell harness (test/harness/paced_timing_cell.hpp) and hidden Catch2 matrix cells in graph fixture tests, plus a Python runner that times graph callbacks and writes a timing receipt. It measures audio-graph callback timing only; it captures no screenshots, renders no UI, and touches no design-import, Chromium, rendering, packaging or visual-proof authority.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-routed-spectral-ports",
+    "ctest --test-dir build -R pulp-test-signal-graph-executor-parity",
+    "ctest --test-dir build -R pulp-test-voice-bank-binding",
+    "python3 tools/test_graph_paced_timing_matrix.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

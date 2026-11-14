@@ -1,5 +1,10 @@
 # Hosting Plugins in Pulp
 
+For opt-in macOS arm64 hosted CLAP isolation, see the
+[isolated CLAP worker](isolated-clap-worker.md). Its first mode requires stereo
+48 kHz/64-frame callbacks and adds one-block latency. Retained process custody
+and terminal slot silence preserve healthy graph siblings after worker faults.
+
 > **Looking to analyze or compare a plugin?** Use the
 > [Plugin Interrogation guide](plugin-interrogation.md) for the ready-to-use
 > CLI and MCP workflow. This guide covers embedding the C++ hosting APIs.

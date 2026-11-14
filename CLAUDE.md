@@ -1125,6 +1125,10 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 **import-validation**
 - Validate a Chromium DevTools Protocol browser-render receipt before comparing an imported native render. → `tools/import-validation/verify_browser_fidelity_receipt.py`
 
+**midi**
+- You need the exact id Pulp passes to MidiInput/MidiOutput open() for every MIDI source and destination, plus the device, entity and endpoint names that identify it, before saving or resolving a port choice. → `tools/midi-ports/midi_ports.sh`
+  - ⚠ **Cannot see:** Lists what the OS reports now. It says nothing about whether an id survives a reboot, replug or USB-port change, and device, entity and endpoint names are filled on CoreMIDI only.
+
 **test-evidence**
 - Explain which CTest cases did not execute, or compare two CTest JUnit artifacts to find new skips, recoveries, and population drift. → `tools/scripts/ctest_nonruns.py`
   - ⚠ **Cannot see:** Artifact observation only. It does not run tests, decide whether a skip is allowed, prove source or binary provenance, or distinguish filtering/configuration changes from code changes. Exit 2 means the evidence could not be interpreted, not that CTest failed.
@@ -2006,6 +2010,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `jsfx-subset` | Work in Pulp's bounded JSFX lane using source-only examples, subset validation, and explicit exclusions like no `@gfx`. |
 | `kits` | Search, inspect, plan, apply, remove, pack, and scaffold local Pulp package manifests. |
 | `lv2` | LV2 format adapter for Pulp — the Turtle manifest the build emits by asking the module to describe itself, port indices as a saved-session wire format with one shared layout, host transport arriving as a time:Position atom on the MIDI port, the optional buf-size feature that is a hint and not a guarantee, state:interface versus control ports, and the real-time rules run() has to keep. |
+| `midi-learn` | Add or change MIDI Learn in a Pulp plug-in or in the SDK itself. |
 | `mise` | Use Pulp's locked mise toolchain consistently across macOS, Linux, and Windows. |
 | `moonbase` | Optional Moonbase license-activation integration for Pulp — load-bearing compile settings, OpenSSL-at-configure caveat, the moonbase-pulp User-Agent contract, audio-thread gating + click-free fade, async start/pump, the interactive native (no-WebView) activation editor (frame-tick polling + the don't-rebuild-mid-event trap), loadable plugin/standalone formats, and headless screenshots. |
 | `motion` | Debug or validate Pulp animations / transitions / scroll behavior using in-process motion fixtures and offline visual analysis. |
@@ -2044,7 +2049,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `web-plugins` | Pulp in the browser — the WAM v2 and WebCLAP adapters, the wasm runtime, the Skia/WebGL2 browser window host, and the WebGPU (emdawnwebgpu) GPU-audio lane. |
 | `webview-ui` | Build or iterate on a Pulp WebView UI using the native WebView bridge, embedded assets, directory-backed dev resources, and focused WebView validation. |
 
-This table of 71 skills is GENERATED from each
+This table of 72 skills is GENERATED from each
 `.agents/skills/<name>/SKILL.md` frontmatter by
 `tools/scripts/skills_doc_check.py --write`. Do not edit it by hand.
 <!-- generated:end id=skills-digest -->
@@ -2059,7 +2064,7 @@ Pulp ships as a Claude Code plugin with slash commands (`/build`, `/test`, `/cre
 
 - **Open the PR and stop.** `shipyard pr --base main --no-arm`. Never arm, enqueue, auto-merge or merge: admission has exactly one writer.
 - **Review:** a standing reviewer posts an exact-head APPROVE or a HOLD once required checks are green. Never approve your own team's work.
-- **Admission:** the m3 steward tick (every 5 minutes) enqueues approved green heads into GitHub's native merge queue, which batches up to 5.
+- **Admission:** the m3 steward tick (every 5 minutes) enqueues approved green heads into GitHub's native merge queue, which batches up to 5 (grouping ALLGREEN; see decisions contract row 11).
 - **On a HOLD:** fix what it names, with a test. Merge `origin/main` (never rebase or force-push). Push once and comment `repaired: ... at <sha>`; the PR re-enters review on its own.
 - **macOS first.** A Windows- or Linux-only failure gets a `PARKED/<platform>` issue with evidence and never blocks a macOS landing.
 - **Labels the pipeline skips:** `superseded`, `owner-decision`, `PARKED/<platform>`.

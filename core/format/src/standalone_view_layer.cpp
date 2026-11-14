@@ -288,6 +288,7 @@ bool StandaloneApp::run_view_editor(bool use_gpu, const StandaloneConfig& effect
         if (settings_ptr)
             settings_ptr->poll();
         service_state_persistence();
+        service_program_changes();
     };
 #if PULP_STANDALONE_INSPECTOR
     if (inspector_runtime) {

@@ -25,6 +25,15 @@ tools:
   availability: always
   skill: prototype-loop
   docs: reference/cli.md#affected
+- name: midi-ports
+  path: tools/midi-ports/midi_ports.sh
+  category: midi
+  use_when: You need the exact id Pulp passes to MidiInput/MidiOutput open() for every MIDI source and destination, plus the device, entity and endpoint names that identify it, before saving or resolving a port choice.
+  invocation: bash tools/midi-ports/midi_ports.sh --json
+  inputs: A built pulp-midi-ports target (not built on iOS or Android). No arguments for a text listing, --json for JSON.
+  outputs: For each source and destination, the Pulp id (on CoreMIDI the endpoint's unique id), display name, device, entity and endpoint names, a stable_key built from them, and whether the port is online.
+  availability: always
+  caveat: Lists what the OS reports now. It says nothing about whether an id survives a reboot, replug or USB-port change, and device, entity and endpoint names are filled on CoreMIDI only.
 - name: editor-open-oop-probe
   path: tools/editor-open/editor_open_oop_probe.sh
   category: editor-open
@@ -980,7 +989,9 @@ tools:
     --observer-layout <json>` instead takes Chromium's DOM-snapshot boxes as the design side, joined to the
     pulp-design-ir-observe --layout views through the IR's backend_node_id (--ir defaults to the capture's
     x.pulp.json sibling); an IR from a different capture session is refused, exit 2.
-  outputs: Per-node dx/dy/dw/dh in design px, clustered by parent so one dropped alignment reports ONCE
+  outputs: A `boxes` list in the --json report with every matched node's reference (Chromium getBoundingClientRect
+    in capture mode) box, native box, delta and within_tolerance, so checked-and-fine is distinguishable from
+    never-compared. Findings carry per-node dx/dy/dw/dh in design px, clustered by parent so one dropped alignment reports ONCE
     naming the parent; unmatched ids listed as dropped/extra (the import's synthetic `/mask-scope` clip
     wrappers are tallied separately as synthetic_extra, never as EXTRA). Exit 1 on findings; --gate-px
     N blocks only above N px and reports the rest as advisory.

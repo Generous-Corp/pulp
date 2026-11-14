@@ -10,16 +10,19 @@
 #include <iostream>
 #include <map>
 #include <pulp/audio/audio_file.hpp>
+#include <pulp/host/graph_patch.hpp>
 #include <pulp/host/graph_rt_report.hpp>
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/offline_signal_graph_host.hpp>
 #include <pulp/host/signal_graph.hpp>
+#include <string>
+#include <utility>
 
 namespace {
 void usage() {
     std::cout << "Usage: pulp graph "
-                 "<inspect|validate|explain|render|probe|report|fmt|canonicalize|save> "
-                 "<file.pulpgraph> [--json] [--output path]\n";
+                 "<catalog|inspect|validate|explain|render|probe|report|fmt|canonicalize|save> "
+                 "<file.pulpgraph|file.pat> [--json] [--notation] [--output path]\n";
     std::cout << "report: [--sample-rate 48000] [--max-block-size 512] [--block-size N] "
                  "[--measure-blocks 16] (always JSON)\n";
     std::cout << "probe: --input file.wav --source-node NAME --source-port NAME "
@@ -33,6 +36,51 @@ void json_error(const std::string& code, const std::string& message) {
     value.addMember("code", code);
     value.addMember("message", message);
     std::cout << choc::json::toString(value) << '\n';
+}
+
+// Each attach refusal names its cause and the change that clears it, so a
+// caller can act on the message without reading the probe implementation.
+std::pair<std::string, std::string> probe_refusal(pulp::host::SignalGraph::EdgeProbeStatus status,
+                                                  const std::string& edge_kind) {
+    using Status = pulp::host::SignalGraph::EdgeProbeStatus;
+    switch (status) {
+    case Status::Unprepared:
+        return {"Unprepared", "the graph is not prepared, so no edge can be probed; check that "
+                              "`pulp graph validate` accepts the file"};
+    case Status::UnknownPort:
+        if (edge_kind == "control")
+            return {"UnknownPort",
+                    "no such port: --source-port must name an output port of --source-node; a "
+                    "control edge is selected by --destination-node and --destination-param, "
+                    "not by a destination port"};
+        return {"UnknownPort",
+                "no such port: --source-port must name an output port of --source-node and "
+                "--destination-port an input port of --destination-node"};
+    case Status::MissingEdge:
+        if (edge_kind == "control")
+            return {"MissingEdge",
+                    "no automation edge reaches --destination-param on --destination-node; graphs "
+                    "loaded by the CLI cannot contain automation edges, so control probes are "
+                    "available only through the C++ API (SignalGraph::attach_control_edge_probe)"};
+        return {"MissingEdge", "no connection joins the named source and destination ports; pick "
+                               "a pair from the graph file's connections array"};
+    case Status::UnsupportedKind:
+        return {"UnsupportedKind",
+                "the selected ports do not carry a " + edge_kind +
+                    " edge; use --edge-kind audio for audio connections, event for MIDI "
+                    "connections and control for automation connections"};
+    case Status::UnsupportedExecution:
+        return {"UnsupportedExecution",
+                "edge probes attach only to the serial routed executor; disable parallel routing "
+                "and anticipation, then prepare the graph again"};
+    case Status::Busy:
+        return {"Busy", "a prepared topology edit is in progress; retry after it commits or is "
+                        "cancelled"};
+    case Status::Attached:
+    case Status::Detached:
+        break;
+    }
+    return {"Detached", "the probe did not attach"};
 }
 
 int probe_graph(const std::vector<std::string>& args) {
@@ -197,34 +245,10 @@ int probe_graph(const std::vector<std::string>& args) {
             return fail("invalid_destination_param", "destination-param must be an integer");
         status = graph.attach_control_edge_probe(source_port, destination->id, parameter);
     }
-    const char* status_name = "Busy";
-    switch (status) {
-    case Graph::EdgeProbeStatus::Attached:
-        status_name = "Attached";
-        break;
-    case Graph::EdgeProbeStatus::Detached:
-        status_name = "Detached";
-        break;
-    case Graph::EdgeProbeStatus::Unprepared:
-        status_name = "Unprepared";
-        break;
-    case Graph::EdgeProbeStatus::UnknownPort:
-        status_name = "UnknownPort";
-        break;
-    case Graph::EdgeProbeStatus::MissingEdge:
-        status_name = "MissingEdge";
-        break;
-    case Graph::EdgeProbeStatus::UnsupportedKind:
-        status_name = "UnsupportedKind";
-        break;
-    case Graph::EdgeProbeStatus::UnsupportedExecution:
-        status_name = "UnsupportedExecution";
-        break;
-    case Graph::EdgeProbeStatus::Busy:
-        break;
+    if (status != Graph::EdgeProbeStatus::Attached) {
+        const auto [code, message] = probe_refusal(status, edge_kind);
+        return fail(code, message);
     }
-    if (status != Graph::EdgeProbeStatus::Attached)
-        return fail(status_name, "cannot attach the requested prepared control/event edge");
     const auto identity = edge_kind == "audio"     ? graph.audio_edge_probe_identity()
                           : edge_kind == "control" ? graph.control_edge_probe_identity()
                                                    : graph.event_edge_probe_identity();
@@ -455,6 +479,10 @@ int cmd_graph(const std::vector<std::string>& args) {
         return 0;
     }
     const std::string op = args[0];
+    if (op == "catalog") {
+        std::cout << pulp::host::GraphPatchCatalog{}.to_json() << '\n';
+        return 0;
+    }
     if (args.size() < 2) {
         usage();
         return 2;
@@ -482,22 +510,67 @@ int cmd_graph(const std::vector<std::string>& args) {
             std::cerr << "pulp graph: unknown subcommand '" << op << "'\n";
         return 2;
     }
-    pulp::host::SignalGraph graph;
+    auto graph_ptr = std::make_unique<pulp::host::SignalGraph>();
     pulp::host::GraphLoadOptions opts;
     opts.load_plugins = false;
-    auto loaded = pulp::host::GraphSerializer::from_file(graph, path, opts);
-    if (!loaded.ok) {
-        const auto file_error = loaded.error.starts_with("graph file ");
-        if (json)
-            json_error(file_error ? "file_unreadable" : "invalid_graph", loaded.error);
-        else
-            std::cerr << "pulp graph: " << (file_error ? "cannot read: " : "invalid graph: ")
-                      << loaded.error << "\n";
-        return 1;
+    pulp::host::GraphSerializer::LoadResult loaded;
+    const bool notation = std::filesystem::path(path).extension() == ".pat";
+    if (op == "validate" || notation ||
+        (op == "fmt" && std::find(args.begin() + 2, args.end(), "--notation") != args.end())) {
+        auto strict = pulp::host::load_graph_patch_file(path);
+        if (!strict) {
+            if (json) {
+                // Keep the saved-graph JSON envelope stable.  The notation
+                // loader exposes its typed diagnostic contract, while the
+                // long-standing .pulpgraph CLI surface reports invalid input
+                // with the generic invalid_graph code.
+                if (!notation && strict.diagnostic.code ==
+                                     pulp::host::GraphPatchDiagnostic::Code::InvalidDocument)
+                    json_error("invalid_graph", strict.diagnostic.message());
+                else
+                    std::cout << pulp::host::graph_patch_diagnostic_json(strict.diagnostic) << '\n';
+            } else
+                std::cerr << "pulp graph: " << strict.diagnostic.message() << '\n';
+            return 1;
+        }
+        graph_ptr = std::move(strict.graph);
+        loaded.ok = true;
+    } else {
+        loaded = pulp::host::GraphSerializer::from_file(*graph_ptr, path, opts);
+        if (!loaded.ok) {
+            const auto file_error = loaded.error.starts_with("graph file ");
+            if (json)
+                json_error(file_error ? "file_unreadable" : "invalid_graph", loaded.error);
+            else
+                std::cerr << "pulp graph: " << loaded.error << '\n';
+            return 1;
+        }
+    }
+    auto& graph = *graph_ptr;
+    const bool as_notation = std::find(args.begin() + 2, args.end(), "--notation") != args.end();
+    if (op == "fmt" && (notation || as_notation)) {
+        const auto formatted = pulp::host::format_graph_patch(graph);
+        if (!formatted) {
+            if (json)
+                std::cout << pulp::host::graph_patch_diagnostic_json(formatted.diagnostic) << '\n';
+            else
+                std::cerr << formatted.diagnostic.message() << '\n';
+            return 1;
+        }
+        if (json) {
+            auto result = choc::value::createObject("GraphNotation");
+            result.addMember("valid", true);
+            result.addMember("code", "Ok");
+            result.addMember("notation", formatted.text);
+            std::cout << choc::json::toString(result) << '\n';
+        } else
+            std::cout << formatted.text;
+        return 0;
     }
     if (op == "validate") {
         if (json) {
-            std::cout << "{\"valid\":true,\"code\":\"ok\",\"format_version\":"
+            std::cout << "{\"valid\":true,\"code\":\"" << (notation ? "Ok" : "ok")
+                      << "\",\"format_version\":"
                       << pulp::host::GraphSerializer::current_format_version()
                       << ",\"nodes\":" << graph.nodes().size()
                       << ",\"connections\":" << graph.connections().size() << "}\n";

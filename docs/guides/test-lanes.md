@@ -9,7 +9,7 @@ single source of truth for that model.
 
 | Lane | Trigger | Gates the PR? | Builds examples? | What it runs |
 |------|---------|---------------|------------------|--------------|
-| **Required core gate** (`macos`) | every PR + every merge group | **yes** (blocking) | Actions: no; Shipyard opt-in `mac` lane (`--target mac`): yes | merge group: all core tests **except** the `validation`, `slow`, `performance`, `bench`, and `quality-lab` labels; PR head: the build plus only the `pr-fast` tier (see below), plus a non-gating full run on a head that is armed for auto-merge on the current `main` so it can issue a receipt; an unchanged exact PR merge tree may reuse that artifact-bound result after protected-base verification |
+| **Required core gate** (`macos`) | every PR + every merge group | **yes** (blocking) | Actions: no; Shipyard opt-in `mac` lane (`--target mac`): yes | merge group: all core tests **except** the `validation`, `slow`, `performance`, `bench`, and `quality-lab` labels; PR head: the build plus only the `pr-fast` tier (see below), plus a non-gating full run on a head that is armed for auto-merge on the current `main` so it can issue a receipt; an unchanged exact PR merge tree may reuse that artifact-bound result after protected-base verification; a merge group whose own entry is `docs-only` skips the native build when the live queue rule is ALLGREEN and `PULP_DOCS_ENTRY_DELTA` is `enforce` (local CI guide, "Docs-only entry delta under ALLGREEN") |
 | **Source selftests** (`Enforce version & skill sync`, which needs the *Source-only selftests* step and the two *Exclusive source selftests* shards) | every PR + every merge group | **yes** (blocking) | no build at all | the ~140 Python registrations in `tools/ci/source_selftests.json` (label `source-selftest`), which the `macos` gate excludes on gate events; see [below](#the-source-selftest-lane) |
 | **Example-validation** (`example-validation`) | PRs touching `examples/**`, state/format headers, core CMake, or shared dependency infrastructure | advisory pending promotion (see status below) | yes — Linux + macOS | Linux compiles every example artifact; hosted macOS runs auval + built-in CLAP dlopen checks; pluginval/clap-validator require an operator-dispatched advisory image |
 | **API contracts** (`api-contracts`) | every PR + every merge group | advisory pending promotion (see below) | no | the Doxygen strict pass over the catalogued public headers, ~3 s of work |
@@ -214,6 +214,47 @@ projects (`cmake-clean-consumer-fixture`) or every exported capability
 (`agent-capability-installed-sdk`) stays `slow`, the latter restored per change
 as described below. Measure a new consumer against this table before choosing.
 
+### The Vellum SDK consumer lane
+
+`vellum-sdk-consumer.yml` builds the editor-host slice (`test/editor_host_slice/`)
+against the SDK archive from Vellum main's newest green "Locked macOS GPU proof"
+run and runs `tools/scripts/editor_host_acceptance.py` against it. It exists
+because a Vellum change can break a Pulp consumer with nothing in Pulp changing:
+when Vellum renamed its mirrored headers from `pulp/` to `vellum/`, the slice
+stopped compiling and no Pulp check noticed.
+
+- **Triggers.** Nightly, which is the run that catches a Vellum change; pull
+  requests that touch the slice, the acceptance runner or the lane; and manual
+  dispatch, optionally pinned to one Vellum run id. A nightly run stops after the
+  resolve step when Vellum main's head equals the head the last green run
+  checked, so it costs a few API calls when Vellum has not moved.
+- **Inputs.** `tools/ci/vellum_sdk_consumer.py resolve` downloads the
+  `vellum-gpu-macos-arm64-evidence` artifact with `github.token` (Vellum is
+  public, but artifact downloads still need a token), checks the archive against
+  the artifact's `SHA256SUMS`, and records the run id, head sha, artifact id and
+  archive sha256 in the step summary and a `vellum-sdk-consumer-receipt`
+  artifact. Any lookup or digest failure fails the step; nothing falls back.
+- **Pinned minimum.** `resolve --min-vellum-sha` refuses a run whose head does
+  not contain the given Vellum commit (checked through Vellum's compare endpoint
+  before any download). The workflow sets it to the commit that introduced the
+  `ParamModel` surface that `integrations/pulp-vellum` builds on.
+- **Parameter bridge.** The same SDK also builds `integrations/pulp-vellum` in a
+  separate configure (`PULP_ENABLE_PULP_VELLUM=ON`) and runs its `pulp-vellum`
+  ctest label, so a Vellum change that breaks the bridge shows up here. Pull
+  requests that touch the package, its test, or the two CMake files that own its
+  option and test registration (`integrations/CMakeLists.txt` and the root
+  `CMakeLists.txt`) run the lane.
+- **Negative control.** Every full run recompiles one Vellum-side translation
+  unit (`knob_panel.cpp`) with `-fsyntax-only`, once against the SDK as
+  published, which must succeed, and once against a copy of its mirror headers
+  with `vellum/canvas/canvas.hpp` renamed, which must fail naming that header. A
+  failure for any other reason is INCONCLUSIVE and fails the job. It costs one
+  compile, not a second build.
+- **Runner.** Advisory and not a required check. Its macOS job takes its runner
+  from `resolve_advisory_macos_runner.py`, so it never claims a runner the
+  required `macos` gate needs, and the acceptance runner builds through
+  `tools/ci/governed-build.sh`.
+
 ### Affected slow proofs
 
 `agent-capability-installed-sdk` installs Pulp and builds an independent
@@ -332,6 +373,15 @@ manifest, `tools/ci/source_selftests.json`:
   anything sharing its resource lock, runs alone on a shard job of its own. The
   required `Enforce version & skill sync` job needs every part and passes only
   when all of them succeeded.
+
+**Docs-only impact scope.** On a pull request both parts run with
+`--impact-scope HEAD^1` (the merge ref's first parent); a merge group runs
+every entry, because it lands every entry queued ahead of it. When `tools/scripts/classify_changes.py` calls
+that diff `docs-only`, only the entries that can read a changed file run
+(`select_for_docs_only`: the entry's script names the path or its basename,
+walks a directory holding it, or scans the tree and mentions documentation);
+any other class, an unreadable diff, or a classifier error runs every entry.
+Pushes to main run every entry on the Linux build leg, which is the backstop.
 
 `source-selftest-lane-contract` (a ctest that stays on the gate, because it
 needs the configured tree) runs `source_selftests.py check`. It fails when a

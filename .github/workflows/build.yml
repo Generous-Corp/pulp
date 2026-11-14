@@ -1366,6 +1366,170 @@ jobs:
             GH_TOKEN="${{ github.token }}" python3 "$breaker" check-group \
               --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --report-only
           fi
+      # Docs-only entry delta (merge groups). Under the ALLGREEN merge-queue
+      # strategy every group in a batch must pass its own required checks, so
+      # a group whose OWN entry (`merge_group.base_sha..head_sha`) changes only
+      # documentation lands no build input that a green group ahead of it did
+      # not already build and test. Such a group may skip the native build.
+      # The step lists that delta with --no-renames, classifies it with the
+      # PROTECTED BASE's copy of classify_changes.py (main's tip, from the
+      # resolver step above; never the group's tree), and reads the live
+      # merge-queue rule on every run: exactly one merge_queue rule, on the
+      # default branch and not excluded from it (an exclusion of the default
+      # branch, ~ALL, or a pattern matching it reads as
+      # default_branch_excluded), with grouping_strategy ALLGREEN. Only `docs-only` and
+      # `ALLGREEN` together, in mode `enforce` (repository variable
+      # PULP_DOCS_ENTRY_DELTA), write skip=true; any other mode reports
+      # `would_skip` and changes nothing. Everything else is `kept`: an
+      # unreadable delta, a missing or failing base classifier, any other
+      # class, a strategy that is not ALLGREEN or cannot be read. A lone group
+      # (base_sha is main's tip) is `not_applicable`: classify below already
+      # judges exactly that delta. The step never forces a build and writes
+      # nothing but `skip`; classify applies it to native_build_required
+      # alone, after its own classification and before the bump fast path.
+      # The HOLD check and the queue breaker above run first and fail the job
+      # on their own. On a pull request the strategy read alone runs, report
+      # only, as the positive control that the read works. Every run prints
+      # one `docs-entry-delta` notice. continue-on-error: a broken step leaves
+      # `skip` unset, which builds, and never blocks the queue.
+      # See docs/guides/local-ci.md and contract row 11.
+      - name: Docs-only entry delta (merge groups)
+        id: docs_entry_delta
+        if: ${{ github.event_name == 'merge_group' || github.event_name == 'pull_request' }}
+        continue-on-error: true
+        env:
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          EVENT_HEAD_SHA: ${{ github.sha }}
+          MERGE_GROUP_MAIN_BASE: ${{ steps.merge_group_base.outputs.base }}
+          DOCS_ENTRY_DELTA_MODE: ${{ vars.PULP_DOCS_ENTRY_DELTA }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set +e
+          title="docs-entry-delta"
+          mode=shadow
+          [ "${DOCS_ENTRY_DELTA_MODE:-}" = enforce ] && mode=enforce
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
+          # The live merge-queue rule. Exactly one active merge_queue rule on
+          # the default branch; its grouping_strategy, or why there is none.
+          # Read on every run, never cached. The token reaches only this
+          # inline reader, never code from the checkout.
+          strategy=$(GH_TOKEN="${{ github.token }}" python3 - <<'PY' 2>/dev/null
+          import fnmatch, json, os, re, urllib.request
+          api = os.environ.get("GITHUB_API_URL", "https://api.github.com")
+          repo = os.environ["GITHUB_REPOSITORY"]
+          def get(path):
+              req = urllib.request.Request(f"{api}/repos/{repo}/{path}", headers={
+                  "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+                  "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"})
+              with urllib.request.urlopen(req, timeout=20) as resp:
+                  return json.load(resp)
+          try:
+              listed = get("rulesets?targets=branch&includes_parents=true&per_page=100")
+              if not isinstance(listed, list) or len(listed) >= 100:
+                  raise ValueError("ruleset listing unreadable or paged")
+              rules = []
+              for summary in listed:
+                  if summary.get("enforcement") != "active":
+                      continue
+                  ruleset = get(f"rulesets/{int(summary['id'])}")
+                  if ruleset.get("enforcement") != "active":
+                      continue
+                  ref_name = (ruleset.get("conditions") or {}).get("ref_name") or {}
+                  include = ref_name.get("include") or []
+                  exclude = ref_name.get("exclude") or []
+                  if not isinstance(include, list) or not isinstance(exclude, list):
+                      raise ValueError("ref_name conditions unreadable")
+                  for rule in ruleset.get("rules") or []:
+                      if rule.get("type") == "merge_queue":
+                          rules.append((include, exclude, (rule.get("parameters") or {}).get("grouping_strategy")))
+          except Exception:
+              print("unreadable")
+              raise SystemExit(0)
+          if not rules:
+              print("none")
+          elif len(rules) > 1:
+              print("multiple")
+          elif "~DEFAULT_BRANCH" not in rules[0][0]:
+              print("not_default_branch")
+          elif rules[0][1] and not os.environ.get("DEFAULT_BRANCH"):
+              # An exclusion cannot be ruled out without the branch's name.
+              print("unreadable")
+          elif any(p in ("~DEFAULT_BRANCH", "~ALL") or not isinstance(p, str)
+                   or fnmatch.fnmatchcase(f"refs/heads/{os.environ['DEFAULT_BRANCH']}", p)
+                   for p in rules[0][1]):
+              # Excluded wins over included: the queue does not run on main.
+              print("default_branch_excluded")
+          else:
+              value = str(rules[0][2] or "")
+              print(value if re.fullmatch(r"[A-Z_]+", value) else "unreadable")
+          PY
+          )
+          [[ "$strategy" =~ ^[A-Za-z_]+$ ]] || strategy=unreadable
+          skip=false
+          report() {
+            # report <verdict> <class>
+            printf '::notice title=%s::%s class=%s strategy=%s mode=%s base=%s head=%s\n' \
+              "$title" "$1" "$2" "$strategy" "$mode" "${MERGE_GROUP_BASE_SHA:0:12}" "${EVENT_HEAD_SHA:0:12}"
+            printf 'docs entry delta (%s): %s class=%s strategy=%s mode=%s\n' \
+              "$GITHUB_EVENT_NAME" "$1" "$2" "$strategy" "$mode" >>"${GITHUB_STEP_SUMMARY:-/dev/null}"
+            printf 'verdict=%s\nskip=%s\n' "$1" "$skip" >>"$GITHUB_OUTPUT"
+          }
+          if [ "$GITHUB_EVENT_NAME" != merge_group ]; then
+            report control not_read
+            exit 0
+          fi
+          if [ "${MERGE_GROUP_MAIN_BASE:-}" = "${MERGE_GROUP_BASE_SHA:-}" ]; then
+            report not_applicable not_read
+            exit 0
+          fi
+          if ! [[ "${MERGE_GROUP_MAIN_BASE:-}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            report kept main_base_unresolved
+            exit 0
+          fi
+          if ! [[ "${MERGE_GROUP_BASE_SHA:-}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            report kept delta_unreadable
+            exit 0
+          fi
+          git cat-file -e "$MERGE_GROUP_BASE_SHA^{commit}" 2>/dev/null \
+            || git fetch --no-tags --depth=1 origin "$MERGE_GROUP_BASE_SHA" >/dev/null 2>&1
+          files=()
+          while IFS= read -r -d '' path; do
+            files+=("$path")
+          done < <(git diff --name-only --no-renames -z "$MERGE_GROUP_BASE_SHA" "$EVENT_HEAD_SHA" 2>/dev/null \
+            || printf 'docs-entry-delta-git-error\0')
+          if [ "${#files[@]}" -eq 0 ] || [ "${files[*]}" = docs-entry-delta-git-error ] \
+              || printf '%s\n' "${files[@]}" | grep -qx docs-entry-delta-git-error; then
+            report kept delta_unreadable
+            exit 0
+          fi
+          classifier=$(mktemp)
+          finder=$(mktemp)
+          trap 'rm -f "$classifier" "$finder"' EXIT
+          if ! git show "$MERGE_GROUP_MAIN_BASE:tools/scripts/classify_changes.py" >"$classifier" 2>/dev/null \
+              || ! git show "$MERGE_GROUP_MAIN_BASE:tools/ci/find_python311.py" >"$finder" 2>/dev/null; then
+            report kept classifier_missing
+            exit 0
+          fi
+          ci_python=$(python3 -I "$finder" 2>/dev/null) || ci_python=
+          if [ -z "$ci_python" ]; then
+            report kept python311_missing
+            exit 0
+          fi
+          change_class=$(
+            env GITHUB_OUTPUT='' "$ci_python" -I "$classifier" --mode=files --json -- "${files[@]}" 2>/dev/null \
+              | "$ci_python" -c 'import json,sys; print(json.load(sys.stdin)["impact_class"])' 2>/dev/null
+          ) || change_class=
+          [[ "$change_class" =~ ^[A-Za-z0-9_.,:-]+$ ]] || change_class=classifier_failed
+          if [ "$change_class" = docs-only ] && [ "$strategy" = ALLGREEN ]; then
+            if [ "$mode" = enforce ]; then
+              skip=true
+              report skipped "$change_class"
+            else
+              report would_skip "$change_class"
+            fi
+          else
+            report kept "$change_class"
+          fi
       - id: classify
         # The base is event-dependent: a PR diffs its pinned target-branch sha,
         # a push diffs the tip it moved away from. `origin/main` is correct for
@@ -1398,6 +1562,9 @@ jobs:
           # skill sync` context runs the checks that do observe them. See
           # tools/scripts/wide_non_native.py.
           WIDE_NON_NATIVE: ${{ vars.PULP_CLASSIFY_WIDE_NON_NATIVE }}
+          # `true` only from the docs entry-delta step in enforce mode, on a
+          # merge group whose own entry is docs-only under ALLGREEN.
+          DOCS_ENTRY_DELTA_SKIP: ${{ steps.docs_entry_delta.outputs.skip }}
         run: |
           set -euo pipefail
           # LaunchAgents inherit macOS's stripped /usr/bin-only PATH. That made
@@ -1472,6 +1639,20 @@ jobs:
               if [ "$candidate_ios_compile_required" = false ]; then
                 ios_compile_required=false
               fi
+            fi
+
+            # The docs entry-delta step's verdict, a second route to `false`
+            # for native_build_required alone: the group's own entry is
+            # docs-only and the live queue rule is ALLGREEN (see that step).
+            # It runs after this job's own classification, so it can only
+            # lower the answer, and before the bump fast path below, which
+            # keeps its main-tip shape checks. The HOLD check and the queue
+            # breaker have already passed: either one failing fails this job
+            # before this step. An A2T receipt change keeps the build.
+            if [ "$EVENT_NAME" = merge_group ] && [ "${DOCS_ENTRY_DELTA_SKIP:-}" = true ] \
+                && [ "$a2t_receipt_verification_required" != true ]; then
+              native_build_required=false
+              echo "Docs-only entry delta under ALLGREEN: native build matrix skipped."
             fi
 
             # The fixed release/version-bump branch changes version-bearing
@@ -3585,11 +3766,15 @@ jobs:
 
       # SHADOW instruments for the merge group, one step (tools/ci/
       # merge_group_shadows.py): binary identity vs the PR head's receipt,
-      # the graph's affected-test set, flake exoneration of a failed ctest,
-      # and per-test content-hash receipts. Each annotates and changes no
-      # outcome; the runner isolates every instrument and always exits 0. What each measures, and the
-      # proxies read from its annotation, are documented in
-      # docs/guides/local-ci.md and the `ci` skill.
+      # the graph's affected-test set, and per-test content-hash receipts.
+      # Each annotates and changes no outcome; the runner isolates every
+      # instrument and always exits 0. What each measures, and the proxies
+      # read from its annotation, are documented in docs/guides/local-ci.md
+      # and the `ci` skill. The flake-exoneration shadow is deferred to the
+      # advisory flake-exoneration-shadow job: it runs only on a red ctest,
+      # needs nothing but the uploaded JUnit and the GitHub API, and took
+      # about 95 s of every failed gate job while the verdict was already
+      # known. The instruments that stay read the build tree.
       - name: Merge-group shadow instruments
         if: >-
           always() && github.event_name == 'merge_group' && runner.os == 'macOS'
@@ -3605,7 +3790,7 @@ jobs:
             --repository "$GITHUB_REPOSITORY" --merge-sha "$GITHUB_SHA" --token "$GH_TOKEN" \
             --junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml" \
             --selected-json "$RUNNER_TEMP/ctest-evidence/selected.json" \
-            --ctest-outcome "${{ steps.ctest.outcome }}" --hours 24 \
+            --ctest-outcome "${{ steps.ctest.outcome }}" --hours 24 --exoneration deferred \
             --work-dir "$RUNNER_TEMP/merge-group-shadows" || true
 
       # The per-test receipts the shadow step above wrote (keys of the tests
@@ -4798,6 +4983,60 @@ jobs:
         run: >-
           python3 tools/ci/a2t_headroom_annotation.py --reconcile-issue
           --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/a2t/a2t-scope-headroom.json"
+
+  # The flake-exoneration SHADOW (tools/ci/flake_exoneration_shadow.py) for a
+  # failed merge group, off the required job's critical path. It reads only
+  # the macOS leg's uploaded JUnit and other runs' artifacts through the API,
+  # so it runs here after `build` finishes instead of holding the red `macos`
+  # verdict (and the queue's ejection of the group) for its API reads. It
+  # annotates and changes no outcome; the enforced rule is the gate inside
+  # the ctest step (decisions contract row 34), which is unaffected.
+  flake-exoneration-shadow:
+    name: flake-exoneration-shadow (advisory)
+    needs: [build]
+    if: >-
+      (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true'))
+      && !cancelled()
+      && github.event_name == 'merge_group'
+      && needs.build.result == 'failure'
+    # GitHub-hosted: the shadow shells out to the gh CLI, which hosted images
+    # carry, and it must never take a self-hosted gate slot.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 1
+          lfs: false
+          persist-credentials: false
+          # The shadow imports tools/scripts helpers and reads the required
+          # contexts main's tip is judged on from .shipyard/config.toml.
+          sparse-checkout: |
+            tools/ci
+            tools/scripts
+            .shipyard
+          sparse-checkout-cone-mode: true
+      - name: Download the macOS ctest JUnit report
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: ctest-logs-macos
+          path: ${{ runner.temp }}/ctest-logs-macos
+      - name: Flake exoneration (shadow)
+        continue-on-error: true
+        shell: bash
+        env:
+          PULP_GH_CLI: gh
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          junit="$RUNNER_TEMP/ctest-logs-macos/ctest.junit.xml"
+          if [ ! -s "$junit" ]; then
+            echo "::notice title=flake-exoneration-shadow::no macOS full-suite JUnit in this run; nothing to decide"
+            exit 0
+          fi
+          python3 tools/ci/flake_exoneration_shadow.py --repo "$GITHUB_REPOSITORY" \
+            --junit "$junit" --head "$GITHUB_SHA" --hours 24 || true
 
   # Names the cause of each failed job in this run as a `ci.cause/v1` record,
   # printed as a `::notice title=ci-cause::` annotation. A job's own log can be

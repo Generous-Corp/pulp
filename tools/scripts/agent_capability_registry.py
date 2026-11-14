@@ -182,6 +182,21 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # Public headers can leave the frozen legacy bucket only through one of these
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
+    {'include': 'pulp/host/graph_patch.hpp', 'fingerprint': 'sha256:017cd6e433918b371a9d37b48698bf392fc3d8879fff19eff7f0572bff82f368', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Control-thread catalog-derived graph notation and strict diagnostics transport over existing SignalGraph and restore contracts; bounded profile, not a DSP algorithm or full G2 completion.'},
+    {
+        'include': 'pulp/host/signal_graph_execution_snapshot.hpp',
+        'fingerprint': 'sha256:fb2d9b56aadf50517075a3d915de0685cb9e08ec0be44b1af10d6288b774fbec',
+        'disposition': 'infrastructure',
+        'capability_keys': [],
+        'rationale': 'Pinned graph execution handle; refuses isolated proxies before capture. No additional generator capability.',
+    },
+    {
+        'include': 'pulp/host/isolated_plugin_slot.hpp',
+        'fingerprint': 'sha256:89e0eae24caedce120023b6fa6ec23766d8af54f0d2b01051fa0538b0907afa9',
+        'disposition': 'infrastructure',
+        'capability_keys': [],
+        'rationale': 'Opt-in MacClapStereo64V1 hosted worker and bounded lifecycle control; no generator capability or full realtime qualification claim.',
+    },
     {
         "include": "pulp/signal/spectrum_analyzer.hpp",
         "fingerprint": "sha256:f9b372d037fc8a698cd4e7d36805422a3bf2037aeaeb2e600ceb6892e6350f58",
@@ -241,10 +256,10 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         'include': 'pulp/host/voice_bank_binding.hpp',
-        'fingerprint': 'sha256:421676961c308c12521087267a79fbc5d063dabbd1ed36aae1c931678191685c',
+        'fingerprint': 'sha256:d622f444c145ccced476407b97bc62f59912601d4804dc557e4d022882d503a4',
         'disposition': 'infrastructure',
         'capability_keys': [],
-        'rationale': 'Bounded eight-slot graph voice-bank runtime; sustain, saved activation, and paced realtime qualification remain open.',
+        'rationale': 'Bounded eight-slot graph voice-bank runtime with sustain; saved activation and paced realtime qualification remain open.',
     },
     {
         'include': 'pulp/audio/buffer.hpp',
@@ -272,9 +287,12 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     {'include': 'pulp/midi/synthesiser.hpp', 'fingerprint': 'sha256:2611124e14f31cf1481b9605e99d6bdff7c46fe751073ff1922b01e73e97522c', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Polyphonic voice allocator used by instrument processors; reviewed when panic() was added. Not a generator-facing capability.'},
     {'include': 'pulp/midi/panic.hpp', 'fingerprint': 'sha256:5de1b463081d7a2bb4c01c83886bc2b341d54b492c43259dace4a944b67e5495', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Pure MIDI 1.0 panic message generation and held-note offs used by processors and adapters; not a generator-facing capability.'},
     {'include': 'pulp/audio/audio_device_manager.hpp', 'fingerprint': 'sha256:f6a0109662da123a56a199f8581b5a3d8160b1c44701a283ecb4665c5eabdb6b', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Application-level audio and MIDI device manager: persistence, enabled-input reconnection and hotplug policy used by hosts; not a generator-facing capability.'},
+    {'include': 'pulp/audio/output_device_session.hpp', 'fingerprint': 'sha256:b1535a471e5e3531a8bacb5fa55ffb109190dda2f340982d143d6ee53aa878fa', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Host-side output device session: keeps one output device open on the system default or a named device across unplug and replug; application plumbing, not a generator-facing capability.'},
     {'include': 'pulp/audio/pcm_capabilities.hpp', 'fingerprint': 'sha256:d52260fa3447b8c4b48ca1a52e2113cf9c6a3b37b73f2ec0e7ebd43da78d6ed3', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Pure conversion of driver-reported PCM ranges into DeviceInfo lists for the ALSA backend; not a generator-facing capability.'},
     {'include': 'pulp/midi/keyboard_state.hpp', 'fingerprint': 'sha256:34651c7b16a73f0fcc14469e5652039d8350319f4907febad08db449fea8cc34', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Held-key tracker for on-screen keyboards; now also honours All Sound Off and All Notes Off. Not a generator-facing capability.'},
-    {'include': 'pulp/midi/mock_midi_system.hpp', 'fingerprint': 'sha256:45e2079efb6edb3f45f592dfd85b59e8b41c3499dfaf29d00135ffda83ef297c', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Scriptable in-memory MIDI backend for headless tests and hosts; not a generator-facing capability.'},
+    {'include': 'pulp/midi/device.hpp', 'fingerprint': 'sha256:116ddc66314b5d2927fc44937df8f4a8871a6bcfeaf26ba786e9bc998059e9b3', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'MIDI port interfaces (MidiInput, MidiOutput, MidiSystem), the SysEx framing check, and port identity (MidiPortInfo, resolve_port); platform device I/O, not a generator-facing capability.'},
+    {'include': 'pulp/midi/sysex_send_gate.hpp', 'fingerprint': 'sha256:e5e080bf93cb5a8e178f624a591bf0ce458cca03bdb3c03df3de532615183699', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Lock-free bound on queued SysEx sends used by a MIDI output backend; not a generator-facing capability.'},
+    {'include': 'pulp/midi/mock_midi_system.hpp', 'fingerprint': 'sha256:c64ffa4ac0e996dd3756a739754ae56968f801248f0b2ef846a6f2914d307223', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Scriptable in-memory MIDI backend for headless tests and hosts; not a generator-facing capability.'},
     {'include': 'pulp/midi/mpe_config_messages.hpp', 'fingerprint': 'sha256:f08204a4069ba5246daaee14bd9da3373a7a5c6cd50eeee7f4f709780f6ae1b7', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Allocation-free builders for MPE zone layout and pitch-bend-range messages sent to a device; not a generator-facing capability.'},
     {'include': 'pulp/midi/port_change_watcher.hpp', 'fingerprint': 'sha256:dd44aa22142690a6a679adcce7dbdc386128fa381381268ba3c813d0d95398a0', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Port-list diffing and polling notifier for backends without native hotplug events; not a generator-facing capability.'},
     {'include': 'pulp/midi/sysex_chunk_assembler.hpp', 'fingerprint': 'sha256:01c367d4c8c832ec83ca837901b08da9b4a8195a3caa8d06cc37f03113bc6c08', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Joins driver receive buffers of one long SysEx message for the Windows multimedia backend; not a generator-facing capability.'},
@@ -906,7 +924,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/midi/mpe_synth_voice.hpp",
-        "fingerprint": "sha256:2426bb49591fb4510aaab4a70931899c4928793f34b23935f14b6af19c918db4",
+        "fingerprint": "sha256:d1f0721725aece5c13976d039d131baea39436f4191df8c0de1ec5606c31be5a",
         "disposition": "capability_support",
         "capability_keys": ["midi.mpe-voice-tracker"],
         "rationale": (

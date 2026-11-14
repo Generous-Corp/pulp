@@ -1,0 +1,3 @@
+[gate-host] REFUSED full source gates and coverage: tartci host-profile says this host serves the required gate (TARTCI_ROLE=dedicated-builder), and a local suite here starves its gate VMs. Run tools/scripts/gates.sh origin/main from a Pulp worktree on a TARTCI_ROLE=light host (m1) or a disposable VM; CI runs these suites on the PR either way.
+
+exit_code=4

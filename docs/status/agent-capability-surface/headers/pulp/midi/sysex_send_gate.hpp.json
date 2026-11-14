@@ -1,0 +1,9 @@
+{
+  "domain": "midi",
+  "source": "core/midi/include/pulp/midi/sysex_send_gate.hpp",
+  "fingerprint": "sha256:e5e080bf93cb5a8e178f624a591bf0ce458cca03bdb3c03df3de532615183699",
+  "include": "pulp/midi/sysex_send_gate.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Lock-free bound on queued SysEx sends used by a MIDI output backend; not a generator-facing capability."
+}

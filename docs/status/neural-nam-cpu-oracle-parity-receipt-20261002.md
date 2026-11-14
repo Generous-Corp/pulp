@@ -15,7 +15,7 @@ The model-neutral private contract is ready for a CPU adapter:
 - The Pulp tree intentionally does not vendor GPU-NAM. The shipped
   documentation routes the plugin to `danielraffel/pulp-gpu-nam`, where the
   choc-only CPU oracle and `.nam` loaders are owned. A sibling checkout for
-  investigation is pinned at `/Users/danielraffel/Code/pulp-gpu-nam` revision
+  investigation is pinned at `<code-root>/pulp-gpu-nam` revision
   `014f24325a7f4211ee5052993badd9c90151b414`.
 
 Pulp now has `detail::NamTcnStreamingAdapter`, a private callback-table bridge

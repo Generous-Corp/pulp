@@ -1,30 +1,4 @@
 #pragma once
-
-#include <cstddef>
-
-namespace pulp::test {
-
-class RtAllocationProbe {
-public:
-    RtAllocationProbe() noexcept;
-    ~RtAllocationProbe() noexcept;
-
-    RtAllocationProbe(const RtAllocationProbe&) = delete;
-    RtAllocationProbe& operator=(const RtAllocationProbe&) = delete;
-
-    std::size_t allocation_count() const noexcept { return allocation_count_; }
-    std::size_t allocated_bytes() const noexcept { return allocated_bytes_; }
-    bool saw_allocation() const noexcept { return allocation_count_ != 0; }
-
-private:
-    friend void rt_allocation_probe_record(std::size_t bytes) noexcept;
-
-    RtAllocationProbe* previous_ = nullptr;
-    std::size_t allocation_count_ = 0;
-    std::size_t allocated_bytes_ = 0;
-};
-
-void rt_allocation_probe_record(std::size_t bytes) noexcept;
-bool rt_allocation_probe_active() noexcept;
-
-}  // namespace pulp::test
+// The probe lives in tools/testing/rt_allocation_probe, where the SDK exports
+// it as Pulp::rt-allocation-probe; in-tree tests keep including it from here.
+#include "../../tools/testing/rt_allocation_probe/include/pulp/test/rt_allocation_probe.hpp"

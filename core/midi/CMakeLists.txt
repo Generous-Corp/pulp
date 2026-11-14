@@ -22,6 +22,7 @@ target_sources(pulp-midi PRIVATE
     src/midi_ci_pe.cpp
     src/mcoded7.cpp
     src/mpe_voice_tracker.cpp
+    src/port_identity.cpp
     src/running_status.cpp
     src/tuning.cpp
     # macOS plan 8.1 — UMP Session + Endpoint + VirtualEndpoint.

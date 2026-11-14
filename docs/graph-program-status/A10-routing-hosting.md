@@ -1,8 +1,18 @@
 # A10 — routing and hosting environment
 
+## Close-out (2026-11-13)
+
+Final status: PARTIAL; hostile containment remains HOLD (unchanged).
+
+The bounded installed routing/hosting consumer passes on main (PRs 11926, 11428, 11667, 11679, 11680, 11682). Hostile containment, callback safety and recovery are not qualified.
+
+PR pointers below are historical; all PRs cited in this file that were queried (checked 2026-11-13) are merged, none remain open.
+
+Remaining work is deferred to https://github.com/Generous-Corp/pulp/issues/12177.
+
 Status: **PARTIAL — exact-current-head installed consumer passes bounded routing/hosting controls; hostile containment remains HOLD**
 
-Current source authority for this refreshed receipt is merge head `5f7af2409a8eec8c07ace7d19da0f935b8e9b9e0`, based on live `origin/main=b4fb59b2128b8846c8d4597cad2c972c84c75d57` at build time. The governed Release install and consumer were rebuilt from this merge head; `source_tree_archive_sha256=b4b00a01ad8586f5cc62c1bd5b2ff45abd13c97261e65466ba8d3562e185f0da` binds the installed source tree.
+Current source authority for this refreshed receipt is exact live `origin/main=4c69e183387017c47d048b477218a6d0a4947bcc` (2026-11-12). The governed Release install and consumer were rebuilt from this merge head; `source_tree_archive_sha256=7b47eed1d4dcca572452610e439e3343b807d291c198d67b598df85427f73ced` binds the installed source tree.
 The required graph dependencies are present at exact merged heads:
 
 - G-1 named typed ports: PR [#11428](https://github.com/Generous-Corp/pulp/pull/11428), source head `be70e3c44836605ac1279c65a572e833699e1fbb`, merge `e19f556e67129117ef3a4587bff11fdee16ebf44`.
@@ -28,29 +38,30 @@ an installed consumer once an exact-head SDK is available:
 | Hosted nodes | public `PluginSlot` lifecycle, `SignalGraph::add_plugin_node`, and typed hosted-editor methods | An in-process test slot can prove host wiring; arbitrary installed plugin loading requires an exact SDK and fixture artifact. |
 | Hostile-plugin policy | `GraphLoadOptions` with plugin loading disabled, `IsolatedPluginScanner`, and G-9 process-group helper | The current evidence does **not** prove arbitrary hosted-plugin containment, descendant cleanup on every platform, callback IPC, restart/state recovery, or sibling continuity. Keep this policy HOLD/N/A. |
 
-## Exact current-main installed-SDK consumer (2026-11-10)
+## Exact current-main installed-SDK consumer (2026-11-12)
 
 The former SDK-availability blocker is cleared for a bounded public-host
-consumer. A clean checkout at merge source head `5f7af2409a8eec8c07ace7d19da0f935b8e9b9e0` (based on live `origin/main=b4fb59b2128b8846c8d4597cad2c972c84c75d57`)
-was configured as a Pulp `release` profile and CMake Release source install with GPU disabled (the consumer
-does not exercise rendering), and `tools/ci/governed-build.sh cmake --build
-build-a10-sdk-release --target install` completed. The installed
-`sdk-provenance.json` reports `kind=source-install`, `source_git_dirty=false`,
-that exact source SHA, `platform=darwin-arm64`, and `build_profile=release`; the
-source and consumer CMake builds use `CMAKE_BUILD_TYPE=Release`.
+consumer at the current exact main head. A clean checkout at merge source head
+`4c69e183387017c47d048b477218a6d0a4947bcc` was configured as a Pulp
+`release` profile and CMake Release source install with GPU audio disabled. The
+installed `sdk-provenance.json` reports `kind=source-install`,
+`source_git_dirty=false`, that exact source SHA, `platform=darwin-arm64`, and
+`build_profile=release`; the source and consumer CMake builds use
+`CMAKE_BUILD_TYPE=Release`.
 
 An installed-prefix consumer configured solely with
 `Pulp_DIR=<prefix>/lib/cmake/Pulp`, built in Release with the governed build
-wrapper, and passed CTest 1/1. The executable reports
+wrapper, passed CTest 1/1. The executable reports
 `a10-routing-hosting PASS sidechain_route_accepted=1 automation_route_accepted=1 pdc=4 transactional_prepare_accepted=1`.
-The receipt is [`receipt.json`](../evidence/a10-routing-hosting-installed-20261110/receipt.json).
-It records accepted named sidechain and automation route registration, prepared
-latency introspection, and transactional topology preparation plus planted
-refusals for a non-plugin sidechain destination and an unknown parameter. The
-consumer does not call `SignalGraph::process`, so these are graph wiring and
-preparation acceptance checks rather than audio or parameter-value behavior.
+The receipt is [`receipt.json`](../evidence/a10-routing-hosting-installed-20261110/receipt.json)
+and is bound to the current exact head. It records accepted named sidechain and
+automation route registration, prepared latency introspection, and transactional
+topology preparation plus planted refusals for a non-plugin sidechain destination
+and an unknown parameter. The consumer does not call `SignalGraph::process`, so
+these are graph wiring and preparation acceptance checks rather than audio or
+parameter-value behavior.
 
-This closes the exact-head installed-consumer configuration gap for the
+This refresh closes the exact-head installed-consumer configuration gap for the
 bounded host API. The fixture uses a caller-owned deterministic in-process
 `PluginSlot`; it intentionally does not claim arbitrary third-party plugin
 execution, process isolation, descendant cleanup, callback safety, recovery,
@@ -79,3 +90,8 @@ This snapshot is bound to origin/main=b4fb59b2128b8846c8d4597cad2c972c84c75d57 a
 ## Live admission snapshot — 2026-11-10 (ledger refresh)
 
 This snapshot is bound to `origin/main=910501973960060a19d056ec9fb190a283eacf08` and records live admission state without promoting any lane beyond its evidence scope. Merged evidence PRs include #11941 (A1/G-6), #11958 (G-9), and #11963 (G-7). Remaining graph evidence heads are open and unarmed: #11926 (A10) `120352d88d64b79b7ccd7c39899f1e49c74c7cfa`, #11957 (G-6) `df57e1b74f88eea4e4ff4033987162a888147931`, #11964 (G-11) `063675df7246c133d6205be7146f976c9d84641f`, #11965 (G-4) `77d2a27cacea3a34f86095ba5615b102be4c4f2d`, #11966 (G-5) `c38fa39382f5c524fe51110db6caa2446a54353f`, #11969 (G-3) `5030f677fcca09878f7037f06be482d1609a3b90`, #11970 (G-6) `0fd41853575e8a668fb040a5562859455d6754f8`, and #11971 (G-10) `05dcbef351cb37bdbcd844b5439595a2196b49fc`. These heads still require current exact-head review/admission. All runtime, realtime, cross-platform, containment, serialization, and installed-consumer limits remain PARTIAL/HOLD/NOT CHECKED.
+
+
+## Live admission snapshot — 2026-11-12
+
+This snapshot is bound to exact `origin/main=4c69e183387017c47d048b477218a6d0a4947bcc`. The A10 bounded installed consumer is PASS at this head; hostile containment, callback safety, recovery, sibling continuity, hard realtime, and cross-platform coverage remain PARTIAL/HOLD/NOT CHECKED. Open graph PRs observed in the live API are #12147 (`codex/p0-layered-receipt-20261112`, head `663b64e9e80055eaeb266c419dd25f364b96faa7`) and #12161 (`feature/midi-port-identity`, head `dc12ccefb71413eea661557070a8c5931bcfe474`); neither owns this A10 receipt refresh.

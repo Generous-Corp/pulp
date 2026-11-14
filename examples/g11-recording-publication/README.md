@@ -26,6 +26,30 @@ planted controls feed a wrong buffer, a one-frame timing shift, and a stale
 generation view to the same oracle; each passes only when the oracle rejects
 it and prints the `G11 planted defect detected:` marker CTest requires.
 
+The `--two-take` case keeps one prepared graph alive while it captures and
+publishes a 440 Hz take, loops voice A, captures a 660 Hz take under an
+irregular schedule, and publishes voice B while A remains held. It then
+releases and acknowledges A's retired generation before checking B alone under
+a regular schedule. Slot exhaustion, stale-generation reads, and idle-command
+refusal are negative controls; exact scalar 440/660 Hz oracles check the
+captured and sounding samples. Before the admitted sequence, a one-hertz input
+mutation is captured and must be rejected by the independent oracle.
+
 This is a bounded offline graph fixture. It does not claim device capture,
 callback file I/O, realtime deadline qualification, graph serialization of
 processor-owned recorder state, or a complete sampler UI.
+
+## Notation
+
+`graph.pat` spells this fixture's graph in SignalGraph patch notation as far as
+the notation profile allows. It cannot be accepted: the fixture's nodes are
+application code or constructs outside the default catalog, so the real
+validator refuses it, and that refusal is the recorded result:
+
+```sh
+pulp graph validate graph.pat --json
+# exit 1, "code": "UnsupportedContract", "rule": "unregistered type/version '<id>'"
+```
+
+The `g11-recording-publication-notation-refusal` ctest runs the validator and pins the exit code,
+code, node and type. See docs/guides/graph-patch-notation.md for the profile.
