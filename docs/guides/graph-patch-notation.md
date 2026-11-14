@@ -58,8 +58,12 @@ Check each typed mutation result in application error handling. The consumer
 uses the parser's shared diagnostics for the same mutations.
 
 The MIDI boundary's existing named port is `audio` with kind `midi`; the
-name comes from the runtime's first-port naming, so notation addresses it as
-`midi.audio` and an alias such as `midi.midi` is not available.
+name comes from the runtime's first-port naming, and the formatter writes it as
+`midi.audio`. The port name `midi` is also accepted as an alias for a node's
+single MIDI port, so `midi.midi >> voice.midi` parses to the same edge (and
+`node->out("midi")` returns the same handle in C++). An exact port name always
+wins; a node with no MIDI port, or with more than one, has no alias and the
+name is refused as an unknown port.
 Registered Processors expose `midi` alongside their existing audio channel
 ports. Audio bus counts and port indexes retain their existing meaning.
 

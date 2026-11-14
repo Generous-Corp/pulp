@@ -71,6 +71,73 @@ TEST_CASE("Named MIDI ports preserve audio buses and true routing", "[host][patc
     g->remove_node(v);
     REQUIRE(g->connect(source, sink).code == GraphResult::Code::UnknownNode);
 }
+TEST_CASE("Port alias midi names a node's single MIDI port", "[host][patch][named-midi]") {
+    GraphPatchCatalog c;
+    register_patch_gain(c);
+    auto g = c.make_graph();
+    const auto m = g->add_midi_input_node("m");
+    const auto v = c.instantiate(*g, "com.example.PatchGain", 1, "v");
+    const auto out = g->add_midi_output_node("out");
+    const auto in = g->add_input_node(2, "in");
+
+    // The MIDI boundary's real port keeps its name; the alias resolves to it.
+    const auto alias_source = g->node(m)->out("midi");
+    REQUIRE(alias_source.name == "audio");
+    REQUIRE(alias_source.kind == PortKind::Midi);
+    REQUIRE(g->connect(alias_source, g->node(v)->in("midi")));
+    REQUIRE(g->connections().back().midi);
+    REQUIRE(g->connect(g->node(m)->out("audio"), g->node(v)->in("midi")).code ==
+            GraphResult::Code::Duplicate);
+    REQUIRE(g->connect(g->node(v)->out("midi"), g->node(out)->in("midi")));
+
+    // Refusal: a node without a MIDI port has no alias.
+    REQUIRE(g->node(in)->out("midi").kind == PortKind::Audio);
+    REQUIRE(g->connect(g->node(in)->out("midi"), g->node(v)->in("audio")).code ==
+            GraphResult::Code::UnknownPort);
+
+    // Refusal: two MIDI ports make the alias ambiguous, so it resolves to neither.
+    CustomNodeType two;
+    two.type_id = "pulp.test.two-midi";
+    two.num_input_ports = 2;
+    two.num_output_ports = 1;
+    two.input_ports = {{"notes", PortKind::Midi}, {"clock", PortKind::Midi}};
+    two.output_ports = {{"audio", PortKind::Audio}};
+    two.process = [](pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                     int) {};
+    REQUIRE(g->register_custom_node_type(two));
+    const auto both = g->add_custom_node("pulp.test.two-midi");
+    REQUIRE(both != 0);
+    REQUIRE(g->node(both)->in("notes").kind == PortKind::Midi);
+    REQUIRE(g->node(both)->in("midi").kind == PortKind::Audio);
+    REQUIRE(g->connect(g->node(m)->out("midi"), g->node(both)->in("midi")).code ==
+            GraphResult::Code::KindMismatch);
+}
+TEST_CASE("Notation accepts the midi port alias and keeps the canonical spelling",
+          "[host][patch][named-midi]") {
+    GraphPatchCatalog c;
+    register_patch_gain(c);
+    const auto canonical = parse_graph_patch(hello(), c);
+    REQUIRE(canonical);
+    const auto aliased = parse_graph_patch(
+        replaced(hello(), "midi.audio >> voice.midi", "midi.midi >> voice.midi"), c);
+    INFO(aliased.diagnostic.message());
+    REQUIRE(aliased);
+    REQUIRE(aliased.graph->connections().size() == canonical.graph->connections().size());
+    REQUIRE(aliased.graph->connections()[0].midi);
+    const auto formatted = format_graph_patch(*aliased.graph, c);
+    REQUIRE(formatted);
+    REQUIRE(formatted.text == format_graph_patch(*canonical.graph, c).text);
+    REQUIRE(formatted.text.find("midi.audio >> voice.midi") != std::string::npos);
+
+    // Refusal: an audio input boundary has no MIDI port, so the alias is unknown.
+    const auto refused = parse_graph_patch(
+        replaced(hello(), "midi.audio >> voice.midi", "input.midi >> voice.midi"), c);
+    REQUIRE_FALSE(refused);
+    REQUIRE_FALSE(refused.graph);
+    REQUIRE(refused.diagnostic.code == Code::UnknownPort);
+    REQUIRE(refused.diagnostic.rule == "unknown port 'midi'");
+    REQUIRE(refused.diagnostic.suggested_fix == "use one of: audio, out1");
+}
 TEST_CASE("Notation graph serialization roundtrip is deterministic", "[host][patch][roundtrip]") {
     GraphPatchCatalog c;
     register_patch_gain(c);
