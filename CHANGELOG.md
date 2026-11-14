@@ -9,6 +9,19 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11300"></a>
+## [1.130.0] - 2026-11-14
+
+- release/version bump ([#12247](https://github.com/Generous-Corp/pulp/pull/12247))
+- graph/g10 row16 alloc fail 20261114 ([#12244](https://github.com/Generous-Corp/pulp/pull/12244))
+- graph/g2 cli code parity 20261114 ([#12242](https://github.com/Generous-Corp/pulp/pull/12242))
+- graph/w2a g2 reload revival 20261113 ([#12198](https://github.com/Generous-Corp/pulp/pull/12198))
+- feature/custom node oversampling helper 20261114 ([#12240](https://github.com/Generous-Corp/pulp/pull/12240))
+- graph/g7 probe quiesce 20261113 ([#12192](https://github.com/Generous-Corp/pulp/pull/12192))
+- feature/voice bank idle skip 20261114 ([#12241](https://github.com/Generous-Corp/pulp/pull/12241))
+- fix/script inputs stale fragment precheck ([#12210](https://github.com/Generous-Corp/pulp/pull/12210))
+- graph/phase review repairs 20261114 ([#12235](https://github.com/Generous-Corp/pulp/pull/12235))
+
 <a id="v11290"></a>
 ## [1.129.0] - 2026-11-14
 
@@ -12993,6 +13006,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.130.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.130.0
 [1.129.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.129.0
 [1.128.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.128.0
 [1.126.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.126.0
