@@ -15,6 +15,8 @@
 // expansion of its template (member count, node type and name, nested child
 // identities, internal edges, declared parameter set and bounds), and any
 // mismatch refuses the whole document and leaves the graph empty.
+// That expansion runs on a scratch graph, so any Processor factory in a
+// template is invoked during restore, on the calling (control) thread.
 
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/signal_graph_subgraph.hpp>
