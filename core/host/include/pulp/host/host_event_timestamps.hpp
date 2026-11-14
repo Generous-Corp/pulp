@@ -31,10 +31,11 @@
 ///  * An event projected against a window older than the current block is
 ///    refused with `Late`, and one from a retired epoch with `StaleEpoch`.
 ///
-/// `clock_from_vst3()` and `clock_from_au()` map VST3 and Audio Unit block
-/// timing (given as plain fields, so no SDK is needed) onto `HostBlockClock`;
-/// `host_block_time_from_offset()` and `au_event_block_time()` convert their
-/// event times to block-relative times without clamping.
+/// `clock_from_vst3()`, `clock_from_au()`, and `clock_from_lv2()` map VST3,
+/// Audio Unit, and LV2 block timing (given as plain fields, so no SDK is
+/// needed) onto `HostBlockClock`; `host_block_time_from_offset()`,
+/// `au_event_block_time()`, and `lv2_event_block_time()` convert their event
+/// times to block-relative times without clamping.
 ///
 /// Everything here is fixed-size, `noexcept`, and allocation-free, so it may
 /// run on the audio thread. It owns no queue and schedules nothing.
@@ -432,6 +433,70 @@ inline HostEventResult au_event_block_time(std::int64_t event_sample_time,
         return HostEventResult::OutOfRange;
     block_time = static_cast<std::uint32_t>(offset);
     return HostEventResult::Accepted;
+}
+
+/// One LV2 `run()` call's timing facts.
+///
+/// | field           | LV2 source                                                  |
+/// |-----------------|-------------------------------------------------------------|
+/// | `sample_count`  | `run(instance, sample_count)`                               |
+/// | `has_frame`     | a `time:Position` carrying `time:frame` has been received   |
+/// | `frame`         | `time:frame` at the first frame of this block               |
+/// | `has_speed`     | that `time:Position` carried `time:speed`                   |
+/// | `speed`         | `time:speed` (0 = stopped, 1 = normal-rate playback)        |
+/// | `discontinuity` | adapter-owned (e.g. the first `run()` after `activate()`)   |
+///
+/// LV2 hosts are not required to send a `time:Position` every cycle, so
+/// `frame` is normally the adapter's latched position advanced by the
+/// previous block's length while the transport rolls. A `time:Position`
+/// event at time `t` describes the transport at frame `t` of the block; the
+/// caller converts it to the block start before filling `frame`.
+struct Lv2BlockTiming {
+    std::uint32_t sample_count = 0;
+    bool has_frame = false;
+    std::int64_t frame = 0;
+    bool has_speed = false;
+    double speed = 0.0;
+    bool discontinuity = false;
+};
+
+/// Map an LV2 `run()` call onto `HostBlockClock`.
+///
+/// LV2 defines no monotonic sample counter, so the clock never has a steady
+/// sample and a skipped block cannot be told from a contiguous one; the
+/// timeline classifies LV2 blocks on the transport alone. `time:frame` is the
+/// transport position whenever one is known. Only normal-rate playback
+/// (`time:speed` exactly 1) counts as playing: at any other non-zero speed the
+/// transport does not move one sample per frame, so its delta cannot be
+/// compared with the block length and a relocation at that speed is not
+/// detected unless the adapter sets `discontinuity`.
+inline constexpr HostBlockClock clock_from_lv2(const Lv2BlockTiming& timing) noexcept {
+    HostBlockClock clock;
+    clock.frames = timing.sample_count;
+    clock.discontinuity = timing.discontinuity;
+    if (!timing.has_frame)
+        return clock;
+    clock.has_transport_sample = true;
+    clock.transport_sample = timing.frame;
+    clock.transport_playing = timing.has_speed && timing.speed == 1.0;
+    return clock;
+}
+
+/// Convert an LV2 atom event's time stamp to a block-relative time.
+///
+/// `sequence_unit` is `LV2_Atom_Sequence_Body::unit`: 0 or the host's URID
+/// for `atom:frameTime` (`frame_time_urid`) mean `event_frames` is
+/// `LV2_Atom_Event::time.frames`, a frame offset into the block. A sequence in
+/// any other unit (`atom:beatTime` stores a beat count in the same bytes) is
+/// refused with `OutOfRange` rather than reinterpreted as frames. A negative
+/// offset is refused too; the upper bound is enforced by `project()`.
+inline HostEventResult lv2_event_block_time(std::uint32_t sequence_unit,
+                                            std::uint32_t frame_time_urid,
+                                            std::int64_t event_frames,
+                                            std::uint32_t& block_time) noexcept {
+    if (sequence_unit != 0 && (frame_time_urid == 0 || sequence_unit != frame_time_urid))
+        return HostEventResult::OutOfRange;
+    return host_block_time_from_offset(event_frames, block_time);
 }
 
 } // namespace pulp::host
