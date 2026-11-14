@@ -55,8 +55,8 @@ if(PULP_ENABLE_INSPECTOR AND APPLE AND NOT IOS AND NOT PULP_IOS AND
         VERBATIM)
     pulp_scaled_test_timeout(_pulp_dspx04_graph_product_timeout 180)
     catch_discover_tests(pulp-test-control-dspx04-graph-product-e2e
-        PROPERTIES TIMEOUT "${_pulp_dspx04_graph_product_timeout}"
-                  LABELS "inspect;control;dspx-04;e2e;product")
+        LABELS inspect control dspx-04 e2e product
+        PROPERTIES TIMEOUT "${_pulp_dspx04_graph_product_timeout}")
 endif()
 
 # Keep the product contract discoverable on non-Apple builders.  The fixture
@@ -72,8 +72,8 @@ if(PULP_ENABLE_INSPECTOR AND NOT APPLE AND NOT IOS AND NOT PULP_IOS AND
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test/dspx04-control")
     pulp_scaled_test_timeout(_pulp_dspx04_graph_product_nonapple_timeout 30)
     catch_discover_tests(pulp-test-control-dspx04-graph-product-e2e
-        PROPERTIES TIMEOUT "${_pulp_dspx04_graph_product_nonapple_timeout}"
-                  LABELS "inspect;control;dspx-04;e2e;product;typed-skip")
+        LABELS inspect control dspx-04 e2e product typed-skip
+        PROPERTIES TIMEOUT "${_pulp_dspx04_graph_product_nonapple_timeout}")
 endif()
 
 # Keep the typed-skip product contract discoverable when a platform configure
@@ -88,8 +88,8 @@ if(PULP_BUILD_TESTS AND NOT TARGET pulp-test-control-dspx04-graph-product-e2e AN
         Catch2::Catch2WithMain)
     pulp_scaled_test_timeout(_pulp_dspx04_graph_product_fallback_timeout 30)
     catch_discover_tests(pulp-test-control-dspx04-graph-product-e2e
-        PROPERTIES TIMEOUT "${_pulp_dspx04_graph_product_fallback_timeout}"
-                  LABELS "inspect;control;dspx-04;e2e;product;typed-skip")
+        LABELS inspect control dspx-04 e2e product typed-skip
+        PROPERTIES TIMEOUT "${_pulp_dspx04_graph_product_fallback_timeout}")
 endif()
 
 endfunction()

@@ -40,6 +40,13 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME graph-stall-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/graph/test_graph_stall_guard.py")
     set_tests_properties(graph-stall-guard-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
+    # graph_paced_timing_matrix.py: receipt schema, quiet-host refusal before
+    # any cell runs, and a planted 90 ms sleep that must register deadline
+    # misses against an 85 ms block while the unplanted control stays clean.
+    # Uses the in-process reference fixture; needs no C++ build.
+    add_test(NAME graph-paced-timing-matrix-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/test_graph_paced_timing_matrix.py")
+    set_tests_properties(graph-paced-timing-matrix-selftest PROPERTIES LABELS "tools;selftest;graph" TIMEOUT 120)
     # macos_merge_group_bootstrap.sh: the merge-group `macos` verdict. A failed
     # or missing dependency fails closed; a cancelled classify (never given a
     # runner) is classified in-job, and the verdict proceeds on that answer.

@@ -63,7 +63,11 @@ class MidiLearnDemoProcessor : public format::Processor {
         });
     }
 
-    void prepare(const format::PrepareContext&) override {}
+    // descriptor() allocates, so the capability claim is resolved here and the
+    // audio thread reads the stored value.
+    void prepare(const format::PrepareContext&) override {
+        feedback_ = format::midi_feedback_capabilities(host_format_, descriptor());
+    }
 
     void process(audio::BufferView<float>& output, const audio::BufferView<const float>& input,
                  midi::MidiBuffer& midi_in, midi::MidiBuffer& midi_out,
@@ -71,9 +75,7 @@ class MidiLearnDemoProcessor : public format::Processor {
         // The format is fixed by the host that loaded the plug-in; a VST3 build
         // would pass MidiLearnFormat::vst3. Passing the format an entry point
         // knows keeps the capability claim honest for that host.
-        format::midi_learn_process_block(
-            learn_, state(), midi_in, midi_out,
-            format::midi_feedback_capabilities(host_format_, descriptor()));
+        format::midi_learn_process_block(learn_, state(), midi_in, midi_out, feedback_);
 
         const float gain = std::pow(10.0f, state().get_value(kDemoLevel) / 20.0f);
         const float pan = state().get_value(kDemoPan);
@@ -110,6 +112,7 @@ class MidiLearnDemoProcessor : public format::Processor {
     state::MidiLearnEngine learn_;
     format::MidiLearnHandle learn_handle_; // declared after learn_
     format::MidiLearnFormat host_format_ = format::MidiLearnFormat::vst3;
+    format::MidiFeedbackCapabilities feedback_{};
 };
 
 inline std::unique_ptr<format::Processor>

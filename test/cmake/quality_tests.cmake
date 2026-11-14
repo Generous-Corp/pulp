@@ -125,6 +125,19 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(vellum-boundary-lint vellum-boundary-lint-negative-contract
         PROPERTIES LABELS "pr;design-import" TIMEOUT 60)
 
+    # Nothing under core/ may link, include or name an optional integration
+    # package (integrations/*). Lexical and build-free; the self-test plants
+    # each crossing kind and a blind scan, and must turn red on every one.
+    add_test(NAME integrations-boundary-check
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/integrations_boundary_check.py"
+            --root "${CMAKE_SOURCE_DIR}")
+    add_test(NAME integrations-boundary-check-negative-contract
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_integrations_boundary_check.py")
+    set_tests_properties(integrations-boundary-check integrations-boundary-check-negative-contract
+        PROPERTIES LABELS "pr" TIMEOUT 60)
+
     # The foundation layer (core/platform, core/runtime, core/simd) must not
     # include audio, view, format or any other upper-layer header. Lexical and
     # build-free; the self-test plants each crossing kind and must turn red.
@@ -1266,6 +1279,14 @@ if(Python3_Interpreter_FOUND)
         --build-dir "${CMAKE_BINARY_DIR}")
     set_tests_properties(ctest-scheduling-contract PROPERTIES TIMEOUT 120)
 
+    # CoreMIDI endpoints are server-global, so every suite that creates them
+    # must hold the shared pulp_coremidi lock or two of them race in parallel
+    # ctest. Reads an already-configured build.
+    add_test(NAME ctest-coremidi-lock-contract COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_ctest_coremidi_lock.py"
+        --build-dir "${CMAKE_BINARY_DIR}")
+    set_tests_properties(ctest-coremidi-lock-contract PROPERTIES TIMEOUT 120)
+
     # Live-build check: reports a governed build running in THIS checkout, which
     # Shipyard's local mac backend does by design. Its one job is to tell a live
     # marker from the one a killed build necessarily leaves behind, so the test
@@ -1857,6 +1878,13 @@ if(Python3_Interpreter_FOUND)
             COMMAND ${Python3_EXECUTABLE} -m unittest test_clean_build_cov
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
         set_tests_properties(clean-build-cov-selftest PROPERTIES TIMEOUT 300)
+
+        # The cutover trial report parser: a planted missing header must land in
+        # its capability row, and a log without it must hit no row.
+        add_test(NAME cutover-trial-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_cutover_trial
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(cutover-trial-selftest PROPERTIES TIMEOUT 120)
 
         # Build-speed measurement. Each suite carries a negative control: a blind
         # dry run must refuse (exit 3) rather than report zero edges, and a value
