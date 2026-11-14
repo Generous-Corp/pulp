@@ -2252,6 +2252,14 @@
             "kind": "option"
           },
           {
+            "name": "--edge-kind",
+            "kind": "option"
+          },
+          {
+            "name": "--destination-param",
+            "kind": "option"
+          },
+          {
             "name": "--sample-rate",
             "kind": "option"
           },
@@ -5335,7 +5343,7 @@
       {
         "name": "claude-marketplace:pulp",
         "disposition": "pulp-owned",
-        "version": "0.522.5",
+        "version": "0.522.6",
         "source": "./",
         "min_cli_version": "0.31.0",
         "registration_keys": [
@@ -5350,13 +5358,13 @@
           "version"
         ],
         "catalog_name": "pulp",
-        "catalog_version": "0.522.5",
+        "catalog_version": "0.522.6",
         "catalog_metadata_version": "1.0.0"
       },
       {
         "name": "claude-plugin:pulp",
         "disposition": "pulp-owned",
-        "version": "0.522.5",
+        "version": "0.522.6",
         "commands": "./.claude/commands",
         "skills": "./.agents/skills",
         "registration_keys": [

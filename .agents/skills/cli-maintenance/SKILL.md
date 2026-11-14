@@ -469,6 +469,24 @@ staged `browser_capture-v1/` copy, the capability probe hits
 `ERR_MODULE_NOT_FOUND`, and discovery reports that the system Chrome "does not
 provide the required headless/CDP capture capabilities".
 
+### `pulp graph probe` refusals must name the cause and the fix
+
+Every `EdgeProbeStatus` refusal from `pulp graph probe` maps, in
+`probe_refusal()` in `tools/cli/cmd_graph.cpp`, to the enum spelling as `code`
+plus a `message` that says what is wrong and what to change. One generic
+"cannot attach" string for every refusal left an agent with no next step. When
+the host adds an `EdgeProbeStatus` value, add its message there; the switch has
+no `default`, so the compiler flags the gap. Keep the hints truthful: `pulp graph
+inspect --json` prints only node/connection counts, so point at the graph
+file's `connections` array rather than at `inspect`, and `--plan` is emitted
+only after a successful attach, so it cannot help with a refusal. The offline
+probe admits only built-in input/output/gain/MIDI nodes, so `--edge-kind
+control` can never find an automation edge and always refuses `MissingEdge`;
+its message says control probes are C++ API only. The MCP `pulp_graph probe`
+runs the sibling CLI, so these messages reach MCP unchanged. The shell-out test
+is `pulp graph probe refusals name the cause and the fix` in
+`test/test_cli_shellout.cpp`.
+
 ## Adding a CLI Command — Full Checklist
 
 ### 1. Implement in CLI source
