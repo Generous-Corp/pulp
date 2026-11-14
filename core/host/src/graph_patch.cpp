@@ -147,13 +147,18 @@ PortHandle resolve_port(const SignalGraph& graph, NodeId id, const std::string& 
     const auto available = ports(graph, id, output);
     if (name.empty() && available.size() == 1)
         return available.front();
+    // GraphNode owns the name rules, including the "midi" alias for a node's
+    // single MIDI port; an unresolved name comes back as a placeholder that
+    // matches none of the node's ports.
+    const auto* n = graph.node(id);
+    const auto handle = output ? n->out(name) : n->in(name);
     std::string choices;
     for (const auto& p : available) {
-        if (p.name == name)
+        if (p.name == handle.name && p.kind == handle.kind)
             return p;
         choices += (choices.empty() ? "" : ", ") + p.name;
     }
-    const auto& node_name = graph.node(id)->name;
+    const auto& node_name = n->name;
     if (name.empty() && !available.empty()) {
         const std::string side = output ? "output" : "input";
         refuse(Code::UnknownPort,
