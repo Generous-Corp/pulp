@@ -114,11 +114,27 @@ TEST_CASE("G3 aliases reject empty names and one-hop chains") {
     CHECK_FALSE(validate_port_identities(ports, chain).valid);
 }
 
-TEST_CASE("G3 identity undo is value-owned") {
+TEST_CASE("G3 identity snapshot is value-owned") {
+    const std::array before{PortHandle{2, 3, true, "drive", PortKind::Audio}};
+    const auto snapshot = snapshot_port_identity(before);
+    REQUIRE(snapshot.valid);
+    REQUIRE(snapshot.before.size() == 1);
+    CHECK(snapshot.before.front().name == "drive");
+    CHECK(snapshot.before.front().index == 3);
+}
+
+TEST_CASE("G3 deprecated undo spelling still returns the snapshot") {
     const std::array before{PortHandle{2, 3, true, "drive", PortKind::Audio}};
     const auto undo = capture_port_identity_undo(before);
     REQUIRE(undo.valid);
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
     const auto restored = undo_port_identity(undo);
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
     REQUIRE(restored.size() == 1);
     CHECK(restored.front().name == "drive");
     CHECK(restored.front().index == 3);

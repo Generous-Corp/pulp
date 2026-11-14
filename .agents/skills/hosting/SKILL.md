@@ -3309,3 +3309,14 @@ including the Android NDK build. zix assumes any `__linux__` target has
 Android branch in `core/host/CMakeLists.txt` defines `HAVE_COPY_FILE_RANGE=0`.
 The `android-build` job runs only on main pushes (it is skipped for
 `pull_request` and `merge_group`), so a host-side C break shows up only there.
+
+## Saved identity documents
+
+`GraphSerializer::to_saved_document` wraps the normal graph payload (format
+version unchanged) in the saved-identity envelope; `from_saved_document` checks
+every binding (duplicate, unknown, dangling node id) before it mutates the
+graph. The envelope name `pulp.graph.saved-identity.v6` is not a graph format
+version: the payload stays at the current format, and a v6+ graph is still
+refused. The semantic digest ignores editor layout, so moving a node changes
+the canonical bytes but not the digest. `snapshot_port_identity` replaces the
+old `undo_port_identity` spelling, which returned a snapshot and not an undo.

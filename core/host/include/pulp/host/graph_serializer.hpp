@@ -44,6 +44,10 @@ enum class GraphDocumentRefusal : std::uint8_t {
     UnsupportedFutureVersion,
     LogicalIdentityMissing,
     UnsupportedDocumentProfile,
+    IdentityEnvelopeInvalid,
+    IdentityBindingDangling,
+    IdentityBindingDuplicate,
+    IdentityBindingUnknown,
     DuplicateJsonKey,
     NestingLimitExceeded,
     NonFiniteNumber,
@@ -166,6 +170,13 @@ class GraphSerializer {
     /// refused with LogicalIdentityMissing.
     static GraphDocumentInspection inspect_document(std::string_view json);
 
+    /// Add the saved-identity v6 envelope to the existing graph document.
+    /// The graph payload and its format version are byte-compatible with
+    /// to_json; the envelope binds deterministic authored identities to nodes.
+    static std::string to_saved_document(
+        const SignalGraph& graph,
+        const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout = {});
+
     using MigrationFn =
         std::function<bool(const std::string& source_json,
                            std::string& destination_json)>;
@@ -230,6 +241,11 @@ class GraphSerializer {
     static LoadResult from_json(SignalGraph& graph, const std::string& json);
     static LoadResult from_json(SignalGraph& graph, const std::string& json,
                                 const GraphLoadOptions& options);
+
+    /// Validate and restore a saved-identity v6 document. Identity bindings
+    /// are checked before graph mutation and are verified after restoration.
+    static LoadResult from_saved_document(SignalGraph& graph, const std::string& json,
+                                          const GraphLoadOptions& options = {});
 
     // Read one bounded graph file, then apply the same migration and restore
     // rules as from_json. A read or size failure leaves graph untouched.
