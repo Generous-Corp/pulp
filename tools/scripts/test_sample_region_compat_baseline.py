@@ -68,6 +68,7 @@ class BaselineTests(unittest.TestCase):
         texts = {path: (repo / path).read_text(encoding="utf-8") for path in closure}
         for symbol, native_only in (
             ("is_isolated_plugin_slot", "core/host/src/isolated_plugin_slot.cpp"),
+            ("same_isolated_plugin_binary", "core/host/src/isolated_plugin_slot.cpp"),
         ):
             with self.subTest(symbol=symbol):
                 call = re.compile(r"\b" + symbol + r"\s*\(")
