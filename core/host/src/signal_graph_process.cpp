@@ -22,14 +22,18 @@ namespace pulp::host {
 ControlProcessResult SignalGraph::process_control_checked(
     audio::BufferView<float>& output, const audio::BufferView<const float>& input,
     const ControlIndexBlock& block, const format::ProcessContext* transport) noexcept {
+    const auto refuse = [this](ControlProcessResult result) noexcept {
+        control_index_refusals_.fetch_add(1, std::memory_order_relaxed);
+        return result;
+    };
     auto read_guard = read_snapshot_();
     auto* cg = read_guard.get();
     if (!cg || !cg->control_index_state || !cg->graph_event_lane || cg->trigger_state)
-        return ControlProcessResult::Unbound;
+        return refuse(ControlProcessResult::Unbound);
     bool expected = false;
     if (!cg->control_index_busy.compare_exchange_strong(expected, true, std::memory_order_acquire,
                                                         std::memory_order_relaxed))
-        return ControlProcessResult::Busy;
+        return refuse(ControlProcessResult::Busy);
     struct ReleaseBusy {
         std::atomic<bool>& busy;
         ~ReleaseBusy() {
@@ -38,50 +42,64 @@ ControlProcessResult SignalGraph::process_control_checked(
     } release_busy{cg->control_index_busy};
     const auto frames = block.indices.size();
     if (parallel_routing_enabled() || anticipation_enabled())
-        return ControlProcessResult::UnsupportedMode;
+        return refuse(ControlProcessResult::UnsupportedMode);
     if (frames == 0 || frames > kControlIndexMaxFrames ||
         frames > static_cast<std::size_t>(cg->max_block_size) || output.num_samples() != frames ||
         input.num_samples() != frames || output.num_channels() == 0 || input.num_channels() == 0)
-        return ControlProcessResult::OutOfRange;
+        return refuse(ControlProcessResult::OutOfRange);
     const bool reset = transport && transport->should_reset_stream_history();
     if (cg->graph_event_lane->active())
-        return ControlProcessResult::Busy;
+        return refuse(ControlProcessResult::Busy);
     std::uint64_t expected_epoch = cg->graph_event_epoch;
     std::uint64_t expected_start = cg->graph_event_lane->counters().cursor;
     if (reset) {
         if (expected_epoch == std::numeric_limits<std::uint64_t>::max() ||
             transport->position_samples < 0)
-            return ControlProcessResult::ClockExhausted;
+            return refuse(ControlProcessResult::ClockExhausted);
         ++expected_epoch;
         expected_start = static_cast<std::uint64_t>(transport->position_samples);
     }
     if (block.epoch != expected_epoch)
-        return ControlProcessResult::StaleEpoch;
+        return refuse(ControlProcessResult::StaleEpoch);
     if (block.absolute_start != expected_start)
-        return ControlProcessResult::WrongStart;
+        return refuse(ControlProcessResult::WrongStart);
     if (block.absolute_start > std::numeric_limits<std::uint64_t>::max() - frames)
-        return ControlProcessResult::ClockExhausted;
-    auto& state = *cg->control_index_state;
-    std::copy(block.indices.begin(), block.indices.end(), state.indices.begin());
-    state.frames = frames;
+        return refuse(ControlProcessResult::ClockExhausted);
     if (reset) {
         if (cg->graph_event_lane->reset(expected_epoch, expected_start) !=
             GraphEventResult::Accepted)
-            return ControlProcessResult::StaleEpoch;
+            return refuse(ControlProcessResult::StaleEpoch);
         cg->graph_event_epoch = expected_epoch;
         for (auto& context : cg->routed.serial.custom_ctx)
             context.graph_event_epoch = expected_epoch;
         for (auto& context : cg->routed.parallel.custom_ctx)
             context.graph_event_epoch = expected_epoch;
     }
+    // Publish the index block only once every admission check has passed, so
+    // a refused call leaves the previously admitted block in place.
+    auto& state = *cg->control_index_state;
+    std::copy(block.indices.begin(), block.indices.end(), state.indices.begin());
+    state.frames = frames;
     bool rendered = false;
     process_snapshot_impl(output, input, static_cast<int>(frames), transport, cg, false, nullptr,
                           true, &rendered);
     if (!rendered) {
+        // A block the lane never opened was not consumed: the cursor did not
+        // move, so the caller may resubmit it at the same absolute start.
+        if (cg->graph_event_lane->counters().cursor == expected_start)
+            return refuse(ControlProcessResult::Busy);
         output.clear();
         return ControlProcessResult::RenderFailed;
     }
     return ControlProcessResult::Accepted;
+}
+
+ControlIndexPosition SignalGraph::control_index_position() const noexcept {
+    auto read_guard = read_snapshot_();
+    const auto* cg = read_guard.get();
+    if (!cg || !cg->control_index_state || !cg->graph_event_lane)
+        return {};
+    return {true, cg->graph_event_epoch, cg->graph_event_lane->counters().cursor};
 }
 
 void SignalGraph::process(audio::BufferView<float>& output,

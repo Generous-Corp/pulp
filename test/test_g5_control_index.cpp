@@ -194,7 +194,8 @@ TEST_CASE("Control index checked admission refuses without changing output or cu
     result.fill(9);
     graph.process(output, input, 4);
     CHECK((result == std::array<float, 4>{0, 0, 0, 0}));
-    CHECK(graph.control_index_refusals() == 1);
+    // Two WrongStart, one StaleEpoch, and the unchecked process() call.
+    CHECK(graph.control_index_refusals() == 4);
 
     pulp::format::ProcessContext seek;
     seek.reset_requested = true;
@@ -206,6 +207,73 @@ TEST_CASE("Control index checked admission refuses without changing output or cu
           ControlProcessResult::Accepted);
     CHECK(graph.process_control_checked(output, input, {1, 108, indices}) ==
           ControlProcessResult::StaleEpoch);
+}
+
+TEST_CASE("Control index position reports the clock and resets on prepare and commit",
+          "[graph][control-index]") {
+    SignalGraph unbound;
+    REQUIRE(unbound.add_input_node(1) != 0);
+    REQUIRE(unbound.prepare(48000, 4));
+    CHECK_FALSE(unbound.control_index_position().bound);
+
+    SignalGraph graph;
+    REQUIRE(graph.add_control_index_input_node() != 0);
+    REQUIRE(graph.prepare(48000, 4));
+    auto position = graph.control_index_position();
+    REQUIRE(position.bound);
+    CHECK(position.epoch == 1);
+    CHECK(position.cursor == 0);
+
+    std::array<float, 4> audio{1, 2, 3, 4};
+    std::array<float, 4> indices{0, 1, 2, 3};
+    std::array<float, 4> result{};
+    const float* in_ptr[] = {audio.data()};
+    float* out_ptr[] = {result.data()};
+    pulp::audio::BufferView<const float> input(in_ptr, 1, 4);
+    pulp::audio::BufferView<float> output(out_ptr, 1, 4);
+    const auto submit = [&](std::uint64_t epoch, std::uint64_t start) {
+        return graph.process_control_checked(output, input, {epoch, start, indices});
+    };
+    CHECK(submit(position.epoch, position.cursor) == ControlProcessResult::Accepted);
+    position = graph.control_index_position();
+    CHECK(position.epoch == 1);
+    CHECK(position.cursor == 4);
+
+    // Every admission refusal is counted and leaves the clock where it was.
+    const auto before = graph.control_index_refusals();
+    CHECK(submit(1, 0) == ControlProcessResult::WrongStart);
+    CHECK(submit(2, 4) == ControlProcessResult::StaleEpoch);
+    CHECK(graph.process_control_checked(output, input, {1, 4, {}}) ==
+          ControlProcessResult::OutOfRange);
+    CHECK(graph.control_index_refusals() == before + 3);
+    CHECK(graph.control_index_position().cursor == 4);
+    CHECK(submit(1, 4) == ControlProcessResult::Accepted);
+
+    pulp::format::ProcessContext seek;
+    seek.reset_requested = true;
+    seek.position_samples = 1000;
+    CHECK(graph.process_control_checked(output, input, {2, 1000, indices}, &seek) ==
+          ControlProcessResult::Accepted);
+    position = graph.control_index_position();
+    CHECK(position.epoch == 2);
+    CHECK(position.cursor == 1004);
+
+    // Re-prepare compiles a fresh lane.
+    REQUIRE(graph.prepare(48000, 4));
+    position = graph.control_index_position();
+    CHECK(position.epoch == 1);
+    CHECK(position.cursor == 0);
+    CHECK(submit(1, 0) == ControlProcessResult::Accepted);
+
+    // So does committing a prepared edit.
+    auto edit = graph.begin_prepared_topology_edit();
+    REQUIRE(edit);
+    REQUIRE(edit->add_input_node(1) != 0);
+    REQUIRE(edit->prepare(48000, 4) == SignalGraph::PreparedTopologyEdit::Result::Prepared);
+    REQUIRE(edit->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
+    position = graph.control_index_position();
+    CHECK(position.epoch == 1);
+    CHECK(position.cursor == 0);
 }
 
 TEST_CASE("Control index refusals are named and each names its fix", "[graph][control-index]") {
@@ -249,7 +317,7 @@ TEST_CASE("Control index refusals are named and each names its fix", "[graph][co
     CHECK(std::string(control_process_result_fix(ControlProcessResult::UnsupportedMode))
               .find("parallel routing") != std::string::npos);
     CHECK(std::string(control_process_result_fix(ControlProcessResult::WrongStart))
-              .find("absolute_start") != std::string::npos);
+              .find("control_index_position()") != std::string::npos);
 }
 
 TEST_CASE("Control scalar rules pin zero division, finite extremes, and reset",

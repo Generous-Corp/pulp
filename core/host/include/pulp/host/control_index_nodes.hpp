@@ -21,6 +21,17 @@ struct ControlIndexBlock {
     std::span<const float> indices;
 };
 
+/// The checked Control clock: the epoch and absolute start the next
+/// process_control_checked() block must carry. `bound` is false when the
+/// prepared graph has no Control index input. Prepare and a prepared-edit
+/// commit compile a fresh lane, so both reset the clock to epoch 1, cursor 0.
+/// Read it on the thread that calls process_control_checked().
+struct ControlIndexPosition {
+    bool bound = false;
+    std::uint64_t epoch = 0;
+    std::uint64_t cursor = 0;
+};
+
 enum class ControlProcessResult : std::uint8_t {
     Accepted,
     Unbound,

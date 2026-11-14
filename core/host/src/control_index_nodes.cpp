@@ -48,17 +48,18 @@ const char* control_process_result_fix(ControlProcessResult result) noexcept {
         return "submit between 1 and the prepared block size (at most kControlIndexMaxFrames) "
                "indices, with input and output buffers of the same frame count";
     case ControlProcessResult::StaleEpoch:
-        return "use the current epoch, or the next one when the transport requests a "
-               "stream-history reset";
+        return "use control_index_position().epoch, or the next epoch when the transport "
+               "requests a stream-history reset";
     case ControlProcessResult::WrongStart:
-        return "set absolute_start to the graph cursor (the previous start plus its frames), "
-               "or to the transport position on a reset";
+        return "set absolute_start to control_index_position().cursor (the previous start "
+               "plus its frames), or to the transport position on a reset";
     case ControlProcessResult::ClockExhausted:
         return "reset the stream with a non-negative transport position before the 64-bit "
                "sample clock or epoch overflows";
     case ControlProcessResult::Busy:
         return "call process_control_checked() from one audio thread at a time and do not "
-               "nest it inside a graph-event block";
+               "nest it inside a graph-event block; a Busy block was not consumed, so resubmit "
+               "it at the same absolute start";
     case ControlProcessResult::UnsupportedMode:
         return "disable parallel routing and anticipation on a graph with a Control index input";
     case ControlProcessResult::RenderFailed:

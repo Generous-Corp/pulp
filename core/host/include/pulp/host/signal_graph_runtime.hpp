@@ -296,13 +296,14 @@ class SignalGraph : public format::AudioWorkgroupClient {
     TriggerGraphResult try_reset_events() noexcept;
     TriggerGraphResult process_checked(audio::BufferView<float>& output,
                                        const audio::BufferView<const float>& input, int frames);
-    /// Atomically admit one external table-index block and render the matching
-    /// audio block. Admission refusal leaves output and the graph clock
-    /// unchanged. RenderFailed silences output and consumes the admitted block
-    /// position; the next call must use the following absolute start.
+    /// Admit one external table-index block at control_index_position() and
+    /// render it. Every refusal leaves output and clock unchanged and is counted
+    /// by control_index_refusals(), as is an unchecked process() call. Only
+    /// RenderFailed consumes the block (silenced); prepare/commit reset the clock.
     ControlProcessResult process_control_checked(
         audio::BufferView<float>& output, const audio::BufferView<const float>& input,
         const ControlIndexBlock& block, const format::ProcessContext* transport = nullptr) noexcept;
+    ControlIndexPosition control_index_position() const noexcept;
     std::uint64_t control_index_refusals() const noexcept {
         return control_index_refusals_.load(std::memory_order_relaxed);
     }
