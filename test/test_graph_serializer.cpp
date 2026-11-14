@@ -126,6 +126,57 @@ TEST_CASE("GraphSerializer admits the reserved saved identity envelope",
     CHECK(next.refusal == GraphDocumentRefusal::UnsupportedFutureVersion);
 }
 
+TEST_CASE("GraphSerializer saved identity writer validates and restores",
+          "[host][serializer][g3]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "Input");
+    const auto gain = graph.add_gain_node("Gain");
+    const auto output = graph.add_output_node(1, "Output");
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+    const auto saved = GraphSerializer::to_saved_document(graph, {{gain, {12.0f, 4.0f}}});
+    REQUIRE_FALSE(saved.empty());
+    const auto inspected = GraphSerializer::inspect_document(saved);
+    REQUIRE(inspected.ok());
+    CHECK(inspected.document.profile() == "pulp.graph.saved-identity.v6");
+    CHECK(saved.find("identity_schema") != std::string::npos);
+
+    SignalGraph restored;
+    const auto loaded = GraphSerializer::from_saved_document(restored, saved);
+    INFO(loaded.error);
+    REQUIRE(loaded.ok);
+    CHECK(restored.nodes().size() == graph.nodes().size());
+
+    auto dangling = saved;
+    const auto binding = dangling.find("node:");
+    REQUIRE(binding != std::string::npos);
+    const auto node_id = dangling.find("\"node_id\":", binding);
+    REQUIRE(node_id != std::string::npos);
+    const auto value = dangling.find_first_of("0123456789", node_id);
+    REQUIRE(value != std::string::npos);
+    dangling.replace(value, 1, "9");
+    const auto refused = GraphSerializer::inspect_document(dangling);
+    CHECK(refused.refusal == GraphDocumentRefusal::IdentityBindingDangling);
+}
+
+TEST_CASE("GraphSerializer semantic digest excludes editor layout", "[host][serializer][g3]") {
+    SignalGraph graph;
+    const auto node = graph.add_gain_node("Gain");
+    const auto first = GraphSerializer::inspect_document(
+        GraphSerializer::to_saved_document(graph, {{node, {1.0f, 2.0f}}}));
+    const auto second = GraphSerializer::inspect_document(
+        GraphSerializer::to_saved_document(graph, {{node, {9.0f, 8.0f}}}));
+    REQUIRE(first.ok());
+    REQUIRE(second.ok());
+    CHECK(first.document.semantic_digest() == second.document.semantic_digest());
+    CHECK(first.document.canonical_bytes() != second.document.canonical_bytes());
+    REQUIRE(graph.set_node_gain(node, 0.25f));
+    const auto changed =
+        GraphSerializer::inspect_document(GraphSerializer::to_saved_document(graph));
+    REQUIRE(changed.ok());
+    CHECK(changed.document.semantic_digest() != first.document.semantic_digest());
+}
+
 namespace {
 
 PluginInfo make_fake_plugin_info(const std::string& name,

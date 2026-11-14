@@ -381,6 +381,11 @@ PortIdentityUndo capture_port_identity_undo(std::span<const PortHandle> before,
     return undo;
 }
 
+PortIdentityUndo snapshot_port_identity(std::span<const PortHandle> before,
+                                        std::span<const PortIdentityAlias> aliases) {
+    return capture_port_identity_undo(before, aliases);
+}
+
 std::vector<PortHandle> undo_port_identity(const PortIdentityUndo& undo) {
     return undo.valid ? undo.before : std::vector<PortHandle>{};
 }
