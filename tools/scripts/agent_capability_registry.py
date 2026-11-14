@@ -247,7 +247,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         'include': 'pulp/host/signal_graph_subgraph.hpp',
-        'fingerprint': 'sha256:81103ef7f256181918a1e4b60c254451192f492be5959e10a88e63858b6063c0',
+        'fingerprint': 'sha256:2aed03e2e63370d4a8c2af2b7f41d28375a3a70de891ef4e09b692b1b87dca02',
         'disposition': 'infrastructure',
         'capability_keys': [],
         'rationale': 'Control-thread authored subgraph expansion and exact Processor parameter binding; the bounded G6 runtime is still partial.',
