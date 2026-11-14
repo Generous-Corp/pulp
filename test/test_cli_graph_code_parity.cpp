@@ -10,6 +10,9 @@
 #include <pulp/host/graph_patch.hpp>
 
 #include <filesystem>
+#include <regex>
+#include <set>
+#include <sstream>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -112,4 +115,36 @@ TEST_CASE("graph CLI success code and fmt use the C++ spelling", "[cli][shellout
     const auto fmt = run_pulp({"graph", "fmt", path.string(), "--json"});
     REQUIRE(fmt.exit_code == 0);
     REQUIRE(cli_code(fmt) == ok);
+}
+
+namespace {
+std::string read_text(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    std::ostringstream out;
+    out << in.rdbuf();
+    return out.str();
+}
+} // namespace
+
+TEST_CASE("every CLI graph code the source emits is documented", "[cli][graph][docs]") {
+    const std::filesystem::path root = PULP_CLI_SOURCE_ROOT;
+    const auto source = read_text(root / "tools/cli/cmd_graph.cpp");
+    const auto doc = read_text(root / "docs/reference/cli.md");
+    REQUIRE_FALSE(source.empty());
+    REQUIRE_FALSE(doc.empty());
+
+    std::set<std::string> emitted;
+    const std::regex pattern(R"re((?:fail|json_error)\("([a-z_]+)"|code = "([a-z_]+)")re");
+    for (std::sregex_iterator it(source.begin(), source.end(), pattern), end; it != end; ++it)
+        emitted.insert((*it)[1].matched ? (*it)[1].str() : (*it)[2].str());
+
+    // Control: the scan must see codes this file is known to emit.
+    CHECK(emitted.size() >= 20);
+    CHECK(emitted.count("prepare_failed") == 1);
+    CHECK(emitted.count("unprepared_latency") == 1);
+
+    for (const auto& code : emitted) {
+        INFO(code);
+        CHECK(doc.find("`" + code + "`") != std::string::npos);
+    }
 }

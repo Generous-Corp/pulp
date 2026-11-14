@@ -221,6 +221,8 @@ if(TARGET pulp-host)
     add_executable(pulp-test-cli-graph-code-parity test_cli_graph_code_parity.cpp)
     target_link_libraries(pulp-test-cli-graph-code-parity PRIVATE
         pulp::host pulp::platform Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-cli-graph-code-parity PRIVATE
+        PULP_CLI_SOURCE_ROOT="${CMAKE_SOURCE_DIR}")
     pulp_bind_cli_shellout_target(pulp-test-cli-graph-code-parity)
     pulp_test_spawns(pulp-test-cli-graph-code-parity pulp-cli)
     catch_discover_tests(pulp-test-cli-graph-code-parity)
