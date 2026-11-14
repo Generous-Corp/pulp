@@ -187,6 +187,8 @@ class SignalGraph::PreparedTopologyEdit {
 
   private:
     friend class SignalGraph;
+    friend class GraphFileReloadTransaction;
+    bool reuse_or_register_custom_node_type_(const CustomNodeType& type);
     friend bool register_builtin_sample_region_types(PreparedTopologyEdit& edit);
     explicit PreparedTopologyEdit(SignalGraph& owner);
     bool base_is_current_locked_() const;

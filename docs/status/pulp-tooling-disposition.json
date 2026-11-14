@@ -1843,6 +1843,26 @@
         "disposition": "candidate-shared-later",
         "arguments": [
           {
+            "name": "--graph-file",
+            "kind": "option"
+          },
+          {
+            "name": "--graph-instance",
+            "kind": "option"
+          },
+          {
+            "name": "--graph-grant",
+            "kind": "option"
+          },
+          {
+            "name": "--graph-generation",
+            "kind": "option"
+          },
+          {
+            "name": "--graph-watch-polls",
+            "kind": "option"
+          },
+          {
             "name": "--all",
             "kind": "flag"
           },
@@ -2941,6 +2961,26 @@
         "name": "loop",
         "disposition": "pulp-owned",
         "arguments": [
+          {
+            "name": "--graph-file",
+            "kind": "option"
+          },
+          {
+            "name": "--graph-instance",
+            "kind": "option"
+          },
+          {
+            "name": "--graph-grant",
+            "kind": "option"
+          },
+          {
+            "name": "--graph-generation",
+            "kind": "option"
+          },
+          {
+            "name": "--graph-watch-polls",
+            "kind": "option"
+          },
           {
             "name": "--all",
             "kind": "flag"

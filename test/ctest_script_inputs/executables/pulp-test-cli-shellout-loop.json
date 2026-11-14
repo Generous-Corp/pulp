@@ -9,7 +9,8 @@
   ],
   "sources": [],
   "spawning_sources": [
-   "test/test_cli_shellout_helpers.hpp"
+   "test/test_cli_shellout_helpers.hpp",
+   "test/test_cli_shellout_loop.cpp"
   ],
   "spawns": "declared",
   "undeclared_sources": []

@@ -2790,6 +2790,21 @@ commands:
     status: usable
     summary: Unified development loop — the Rust front end delegates to `pulp-cpp` for the live watch/rebuild loop when the sibling delegate is available; the Rust-only fallback performs one build/test/run pass and prints a watch-loop stub notice. In a source checkout each build and test pass is focused on the working diff (see `affected`) unless `--all` is given.
     args:
+      - name: --graph-file
+        kind: option
+        description: "C++ delegate: transactionally reload changed .pat/.pulpgraph into an enrolled graph authority; requires graph-instance, graph-grant and graph-generation."
+      - name: --graph-instance
+        kind: option
+        description: Exact enrolled graph product instance
+      - name: --graph-grant
+        kind: option
+        description: Existing consent grant for graph file reload
+      - name: --graph-generation
+        kind: option
+        description: Expected graph authority generation from the last successful receipt
+      - name: --graph-watch-polls
+        kind: option
+        description: Stop after 1..120 graph watch polls of 500 ms each
       - name: --all
         kind: flag
         description: Build every target and run every test instead of the ones affected by the working diff
@@ -2832,6 +2847,21 @@ commands:
     status: experimental
     summary: Leveraged-prototype focus mode — explicit "single-platform iteration" marker. Persists a focus_platform marker in `~/.pulp/config.toml` under [loop] so subsequent invocations stay pinned, then runs the normal watch + rebuild loop using the current project's build configuration. Surrounding tooling may read the advisory marker for platform-specific behavior; `pulp loop` itself does not rewrite the build graph. Pair with `shipyard pr` / `pulp pr` at land time to restore full cross-platform validation.
     args:
+      - name: --graph-file
+        kind: option
+        description: "C++ delegate: transactionally reload changed .pat/.pulpgraph into an enrolled graph authority; requires graph-instance, graph-grant and graph-generation."
+      - name: --graph-instance
+        kind: option
+        description: Exact enrolled graph product instance
+      - name: --graph-grant
+        kind: option
+        description: Existing consent grant for graph file reload
+      - name: --graph-generation
+        kind: option
+        description: Expected graph authority generation from the last successful receipt
+      - name: --graph-watch-polls
+        kind: option
+        description: Stop after 1..120 graph watch polls of 500 ms each
       - name: --all
         kind: flag
         description: Build every target and run every test instead of the ones affected by the working diff (the watch loop re-selects before each rebuild)

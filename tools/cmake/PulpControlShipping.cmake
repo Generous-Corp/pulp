@@ -34,6 +34,7 @@ set(_PULP_INSPECTOR_SHIPPING_CAPABILITIES
     timeline.document.session
     graph.sample-region.read
     graph.sample-region.edit
+    graph.file.reload
     graph.modulation-route.edit
     vendor.read
     vendor.gesture
@@ -68,6 +69,7 @@ set(_PULP_CONTROL_CAPABILITIES
     dev.pulp.timeline/document-session@1
     dev.pulp.graph/sample-region.read@1
     dev.pulp.graph/sample-region.edit@1
+    dev.pulp.graph/file.reload@1
     dev.pulp.graph/modulation-route.edit@1
     dev.pulp.vendor/read@1
     dev.pulp.vendor/gesture@1
@@ -84,7 +86,7 @@ set(_PULP_CONTROL_UNWIRED_CAPABILITIES)
 # Installed copies of this helper cannot reach back into the source tree. The
 # truth checker pins this value to control_registry_digest.inc.
 set(_PULP_CONTROL_REGISTRY_DIGEST_V1
-    "acf2b27d74b0c8b2af83c9d13400438d66e65aa4fd3332397969b7b31ec0949b")
+    "02929f4004e5a7234fad4132a503fdaaf2dcd6196a20f3dca0a3351b826d6954")
 
 function(_pulp_cache_control_declarations target profile capabilities eval_ack)
     # A target's declarations are configure-time truth, not sticky user

@@ -1,0 +1,9 @@
+{
+  "domain": "host",
+  "source": "core/host/include/pulp/host/signal_graph_control.hpp",
+  "fingerprint": "sha256:a5ec96c0088ae008f86367e0a94cfc0de42e9e86ab66b3716606dcb9adf89fa4",
+  "include": "pulp/host/signal_graph_control.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Product graph authority over existing typed edits and strict graph-file reload; no independent executor or DSP capability."
+}
