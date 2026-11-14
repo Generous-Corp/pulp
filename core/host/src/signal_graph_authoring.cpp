@@ -997,8 +997,13 @@ bool SignalGraph::disconnect(NodeId source, PortIndex source_port, NodeId dest,
         (sample_region_for_node_locked_(source) != 0 || sample_region_for_node_locked_(dest) != 0))
         return false;
     Connection target{source, source_port, dest, dest_port};
-    if (const auto* n = node(source))
+    if (const auto* n = node(source)) {
         target.spectral = n->spectral_identity && n->type != NodeType::SpectralSynthesis;
+        // A Control edge carries its kind in its identity; derive it from the
+        // source port exactly as connect() recorded it.
+        target.control_signal = source_port < n->output_ports.size() &&
+                                n->output_ports[source_port].kind == PortKind::Control;
+    }
     auto it = std::find(connections_.begin(), connections_.end(), target);
     if (it == connections_.end())
         return false;

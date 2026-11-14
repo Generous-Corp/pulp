@@ -388,6 +388,33 @@ TEST_CASE("graph format v4 documents still load and keep their bytes",
     CHECK(json == legacy);
 }
 
+TEST_CASE("Control edges disconnect on the graph and in a prepared edit",
+          "[graph][control-index][edit]") {
+    SignalGraph graph;
+    REQUIRE(graph.register_custom_node_type(make_control_map_clip_type()));
+    const auto a = graph.add_custom_node("pulp.control.map-clip");
+    const auto b = graph.add_custom_node("pulp.control.map-clip");
+    REQUIRE(graph.connect(graph.node(a)->out("value"), graph.node(b)->in("value")));
+    REQUIRE(graph.connections().size() == 1);
+    CHECK(graph.disconnect(a, 0, b, 0));
+    CHECK(graph.connections().empty());
+    CHECK_FALSE(graph.disconnect(a, 0, b, 0));
+
+    REQUIRE(graph.connect(graph.node(a)->out("value"), graph.node(b)->in("value")));
+    REQUIRE(graph.prepare(48000, 8));
+    auto edit = graph.begin_prepared_topology_edit();
+    REQUIRE(edit);
+    CHECK(edit->disconnect(a, 0, b, 0));
+    CHECK(edit->prepare(48000, 8) == SignalGraph::PreparedTopologyEdit::Result::Prepared);
+    CHECK(edit->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
+    CHECK(graph.connections().empty());
+
+    auto reconnect = graph.begin_prepared_topology_edit();
+    REQUIRE(reconnect);
+    CHECK(reconnect->connect(reconnect->node(a)->out("value"), reconnect->node(b)->in("value")));
+    CHECK(reconnect->disconnect(a, 0, b, 0));
+}
+
 TEST_CASE("candidate Control state validates before mutation and keeps baseline state",
           "[graph][control-index][edit]") {
     SignalGraph graph;
