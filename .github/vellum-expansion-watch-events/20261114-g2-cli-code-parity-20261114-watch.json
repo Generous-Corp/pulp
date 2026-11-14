@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261114-g2-cli-code-parity-20261114-watch",
+  "created_at": "2026-11-14T06:53:19Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Graph CLI --json codes now print the C++ GraphPatchDiagnostic names, with a parity test, MCP passthrough test and docs. The edits are a graph CLI source file, its CLI manifest and reference docs, and tests; no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-cli-graph-code-parity",
+    "ctest --test-dir build -R pulp-test-cli-shellout",
+    "ctest --test-dir build -R pulp-test-mcp-server",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

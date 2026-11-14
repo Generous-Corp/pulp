@@ -21,6 +21,7 @@
 #include <vector>
 
 namespace {
+using Code = pulp::host::GraphPatchDiagnostic::Code;
 void usage() {
     std::cout << "Usage: pulp graph "
                  "<catalog|inspect|validate|explain|render|probe|report|fmt|canonicalize|save> "
@@ -34,6 +35,12 @@ void usage() {
                  "[--edge-kind audio|control|event] [--destination-param ID] "
                  "[--plan] [--latency] [--node-loads]\n";
 }
+// Failures that C++ callers also see (loading a graph or notation file) use
+// the GraphPatchDiagnostic code names verbatim; the CLI never renames them.
+std::string patch_code(pulp::host::GraphPatchDiagnostic::Code code) {
+    return pulp::host::graph_patch_code_name(code);
+}
+
 void json_error(const std::string& code, const std::string& message) {
     auto value = choc::value::createObject("GraphError");
     value.addMember("valid", false);
@@ -155,7 +162,8 @@ int probe_graph(const std::vector<std::string>& args) {
         const auto nodes = document["nodes"];
         const auto connections = document["connections"];
         if (!document.isObject() || !nodes.isArray() || !connections.isArray())
-            return fail("invalid_graph", "graph requires nodes and connections arrays");
+            return fail(patch_code(Code::InvalidDocument),
+                        "graph requires nodes and connections arrays");
         if (nodes.size() > 128 || connections.size() > 512)
             return fail("graph_limit", "probe admits at most 128 nodes and 512 connections");
         if (document.hasObjectMember("sample_regions") && document["sample_regions"].size() != 0)
@@ -177,14 +185,14 @@ int probe_graph(const std::vector<std::string>& args) {
                             "offline probe requires built-in input, output, gain or MIDI nodes");
         }
     } catch (const std::exception& error) {
-        return fail("invalid_graph", error.what());
+        return fail(patch_code(Code::InvalidDocument), error.what());
     }
     Graph graph;
     pulp::host::GraphLoadOptions load_options;
     load_options.load_plugins = false;
     const auto loaded = pulp::host::GraphSerializer::from_json(graph, text, load_options);
     if (!loaded.ok)
-        return fail("invalid_graph", loaded.error);
+        return fail(patch_code(Code::InvalidDocument), loaded.error);
     if (!loaded.missing_plugins.empty() || !loaded.missing_custom_node_types.empty())
         return fail("unresolved_node", "probe refuses unresolved node types");
     for (const auto& node : graph.nodes())
@@ -455,7 +463,8 @@ int report_graph(const std::vector<std::string>& args) {
     load_options.load_plugins = false;
     const auto loaded = pulp::host::GraphSerializer::from_file(graph, args[1], load_options);
     if (!loaded.ok) {
-        json_error(loaded.error.starts_with("graph file ") ? "file_unreadable" : "invalid_graph",
+        json_error(patch_code(loaded.error.starts_with("graph file ") ? Code::FileUnreadable
+                                                                      : Code::InvalidDocument),
                    loaded.error);
         return 1;
     }
@@ -630,7 +639,7 @@ int render_graph(pulp::host::SignalGraph& graph,
     if (json) {
         auto result = choc::value::createObject("GraphRender");
         result.addMember("valid", true);
-        result.addMember("code", "ok");
+        result.addMember("code", patch_code(Code::Ok));
         result.addMember("frames", static_cast<std::int64_t>(frames));
         result.addMember("sample_rate", sample_rate);
         result.addMember("channels", static_cast<std::int64_t>(rendered.audio.num_channels()));
@@ -704,15 +713,9 @@ int cmd_graph(const std::vector<std::string>& args) {
         auto strict = pulp::host::load_graph_patch_file(path);
         if (!strict) {
             if (json) {
-                // Keep the saved-graph JSON envelope stable.  The notation
-                // loader exposes its typed diagnostic contract, while the
-                // long-standing .pulpgraph CLI surface reports invalid input
-                // with the generic invalid_graph code.
-                if (!notation && strict.diagnostic.code ==
-                                     pulp::host::GraphPatchDiagnostic::Code::InvalidDocument)
-                    json_error("invalid_graph", strict.diagnostic.message());
-                else
-                    std::cout << pulp::host::graph_patch_diagnostic_json(strict.diagnostic) << '\n';
+                // The loader's typed diagnostic is the contract for notation
+                // and saved graphs alike, so the code matches the C++ API.
+                std::cout << pulp::host::graph_patch_diagnostic_json(strict.diagnostic) << '\n';
             } else
                 std::cerr << "pulp graph: " << strict.diagnostic.message() << '\n';
             return 1;
@@ -724,7 +727,8 @@ int cmd_graph(const std::vector<std::string>& args) {
         if (!loaded.ok) {
             const auto file_error = loaded.error.starts_with("graph file ");
             if (json)
-                json_error(file_error ? "file_unreadable" : "invalid_graph", loaded.error);
+                json_error(patch_code(file_error ? Code::FileUnreadable : Code::InvalidDocument),
+                           loaded.error);
             else
                 std::cerr << "pulp graph: " << loaded.error << '\n';
             return 1;
@@ -744,7 +748,7 @@ int cmd_graph(const std::vector<std::string>& args) {
         if (json) {
             auto result = choc::value::createObject("GraphNotation");
             result.addMember("valid", true);
-            result.addMember("code", "Ok");
+            result.addMember("code", patch_code(Code::Ok));
             result.addMember("notation", formatted.text);
             std::cout << choc::json::toString(result) << '\n';
         } else
@@ -753,7 +757,7 @@ int cmd_graph(const std::vector<std::string>& args) {
     }
     if (op == "validate") {
         if (json) {
-            std::cout << "{\"valid\":true,\"code\":\"" << (notation ? "Ok" : "ok")
+            std::cout << "{\"valid\":true,\"code\":\"" << patch_code(Code::Ok)
                       << "\",\"format_version\":"
                       << pulp::host::GraphSerializer::current_format_version()
                       << ",\"nodes\":" << graph.nodes().size()

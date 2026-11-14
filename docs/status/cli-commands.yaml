@@ -409,7 +409,7 @@ commands:
         description: Format a supported saved graph as canonical notation
       - name: --json
         kind: flag
-        description: Emit machine-readable result and error codes
+        description: "Emit machine-readable result and error codes. For graph and notation files the code is the C++ GraphPatchDiagnostic name (Ok, SyntaxError, UnknownNode, UnknownPort, KindMismatch, IllegalCycle, Duplicate, InvalidDocument, UnsupportedContract, ParameterOutOfRange, RestoreFailed, ResourceLimit, FileUnreadable); CLI-only codes (missing_option, invalid_option, missing_input, probe/render/save codes) are listed in reference/cli.md#graph"
       - name: --output
         kind: option
         description: Write the offline render to a float WAV file at the render's sample rate

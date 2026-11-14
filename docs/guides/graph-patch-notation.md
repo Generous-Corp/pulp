@@ -57,7 +57,9 @@ instance->state_store().set_value(level.id, 0.75f);
 Check each typed mutation result in application error handling. The consumer
 uses the parser's shared diagnostics for the same mutations.
 
-The MIDI boundary's existing named port is `audio` with kind `midi`.
+The MIDI boundary's existing named port is `audio` with kind `midi`; the
+name comes from the runtime's first-port naming, so notation addresses it as
+`midi.audio` and an alias such as `midi.midi` is not available.
 Registered Processors expose `midi` alongside their existing audio channel
 ports. Audio bus counts and port indexes retain their existing meaning.
 
