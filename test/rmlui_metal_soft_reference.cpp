@@ -31,7 +31,7 @@ class NoLua final : public LuaInterface {
 
 class ScaledSoftRenderer final : public RenderInterface {
   public:
-    explicit ScaledSoftRenderer(std::uint32_t scale) : scale_(scale) {}
+    explicit ScaledSoftRenderer(std::uint32_t) {}
 
     void begin_frame(std::uint32_t width, std::uint32_t height) override {
         renderer_.begin_frame(width, height);
@@ -54,7 +54,6 @@ class ScaledSoftRenderer final : public RenderInterface {
     }
 
   private:
-    std::uint32_t scale_;
     SoftRenderer renderer_{0x00000000u};
 };
 

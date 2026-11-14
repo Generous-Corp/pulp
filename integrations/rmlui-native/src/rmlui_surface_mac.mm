@@ -179,8 +179,8 @@ struct RmlUiSurface::Impl {
             vellum::rmlui::NativeContext::Scope scope(*context);
             g_pointer_surface = surface.get();
             const int mods = rml_modifiers_for(e.modifiers);
-            const int x = static_cast<int>(std::lround(e.x * d.scale));
-            const int y = static_cast<int>(std::lround(e.y * d.scale));
+            const int x = static_cast<int>(std::lround(e.x * scale));
+            const int y = static_cast<int>(std::lround(e.y * scale));
             switch (e.kind) {
             case PointerKind::move:
             case PointerKind::drag:
