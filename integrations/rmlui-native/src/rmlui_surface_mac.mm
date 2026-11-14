@@ -127,8 +127,6 @@ struct RmlUiSurface::Impl {
         height_px = h;
         scale = s;
         context->set_dimensions(w, h);
-        if (auto* ctx = context->context())
-            ctx->SetDensityIndependentPixelRatio(static_cast<float>(s));
     }
 
     // Main thread, rmlui_mutex() held: hold the host's keyboard only while an
@@ -340,7 +338,6 @@ bool RmlUiSurface::attach(void* parent) {
             d.width_px = w;
             d.height_px = h;
             d.scale = s;
-            d.context->context()->SetDensityIndependentPixelRatio(static_cast<float>(s));
         }
     }
     if (!d.context) {
