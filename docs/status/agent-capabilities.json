@@ -13090,6 +13090,30 @@
         ],
         "indexed_control.hpp": [
           {
+            "class": "HysteresisT",
+            "qualified_name": "pulp::signal::HysteresisT",
+            "template": "std::floating_point SampleType = float",
+            "methods": [
+              "reset(bool high = false)",
+              "process(SampleType input)",
+              "configure(SampleType high, SampleType low, bool initial = false)",
+              "high()"
+            ],
+            "enums": []
+          },
+          {
+            "class": "SlewT",
+            "qualified_name": "pulp::signal::SlewT",
+            "template": "std::floating_point SampleType = float",
+            "methods": [
+              "reset(SampleType value = SampleType{})",
+              "process(SampleType target)",
+              "set_rates(SampleType rise_per_sample, SampleType fall_per_sample)",
+              "value()"
+            ],
+            "enums": []
+          },
+          {
             "class": "MapClipT",
             "qualified_name": "pulp::signal::MapClipT",
             "template": "typename SampleType = float",
