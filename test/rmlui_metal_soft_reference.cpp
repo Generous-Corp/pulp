@@ -34,40 +34,11 @@ class ScaledSoftRenderer final : public RenderInterface {
     explicit ScaledSoftRenderer(std::uint32_t scale) : scale_(scale) {}
 
     void begin_frame(std::uint32_t width, std::uint32_t height) override {
-        renderer_.begin_frame(width * scale_, height * scale_);
+        renderer_.begin_frame(width, height);
     }
 
     void submit(const DrawCommand& input) override {
         auto command = input;
-        // Density-aware RmlUi already emits dp text geometry at device
-        // density. Px boxes remain logical points and need the reference's
-        // explicit backing-scale conversion.
-        {
-            command.x *= scale_;
-            command.y *= scale_;
-            command.width *= scale_;
-            command.height *= scale_;
-            command.translation_x *= scale_;
-            command.translation_y *= scale_;
-            if (command.scissor_enabled) {
-                command.scissor.x *= static_cast<int>(scale_);
-                command.scissor.y *= static_cast<int>(scale_);
-                command.scissor.width *= static_cast<int>(scale_);
-                command.scissor.height *= static_cast<int>(scale_);
-            }
-            if (command.transform_enabled) {
-                command.transform[12] *= scale_;
-                command.transform[13] *= scale_;
-            }
-        }
-        if (command.vertices) {
-            auto vertices = std::make_shared<std::vector<DrawVertex>>(*command.vertices);
-            for (auto& vertex : *vertices) {
-                vertex.x *= scale_;
-                vertex.y *= scale_;
-            }
-            command.vertices = std::move(vertices);
-        }
         renderer_.submit(command);
     }
 
@@ -109,10 +80,9 @@ int main(int argc, char** argv) {
             ScaledSoftRenderer renderer(scale);
             NoLua lua;
             Backend backend(assets, renderer, lua);
-            if (backend.open(pulp_rmlui_golden::kWidthPoints, pulp_rmlui_golden::kHeightPoints) !=
+            if (backend.open(width, height) !=
                 Status::ok) {
-                std::fprintf(stderr, "open failed at %ux%u\n", pulp_rmlui_golden::kWidthPoints,
-                             pulp_rmlui_golden::kHeightPoints);
+                std::fprintf(stderr, "open failed at %ux%u\n", width, height);
                 return 1;
             }
 #if defined(PULP_VELLUM_RMLUI_HAS_DENSITY_RATIO)

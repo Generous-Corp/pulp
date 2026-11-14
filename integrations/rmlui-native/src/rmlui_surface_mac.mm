@@ -126,9 +126,7 @@ struct RmlUiSurface::Impl {
         width_px = w;
         height_px = h;
         scale = s;
-        context->set_dimensions(
-            std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.width))),
-            std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.height))));
+        context->set_dimensions(w, h);
 #if defined(PULP_VELLUM_RMLUI_HAS_DENSITY_RATIO)
         context->set_density_ratio(static_cast<float>(s));
 #endif
@@ -181,8 +179,8 @@ struct RmlUiSurface::Impl {
             vellum::rmlui::NativeContext::Scope scope(*context);
             g_pointer_surface = surface.get();
             const int mods = rml_modifiers_for(e.modifiers);
-            const int x = static_cast<int>(std::lround(e.x));
-            const int y = static_cast<int>(std::lround(e.y));
+            const int x = static_cast<int>(std::lround(e.x * d.scale));
+            const int y = static_cast<int>(std::lround(e.y * d.scale));
             switch (e.kind) {
             case PointerKind::move:
             case PointerKind::drag:
@@ -327,9 +325,8 @@ bool RmlUiSurface::attach(void* parent) {
         d.context = std::make_unique<vellum::rmlui::NativeContext>(d.assets, d.renderer);
         const auto g = d.surface->geometry();
         const double s = g.scale > 0.0 ? g.scale : 1.0;
-        const auto w = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.width)));
-        const auto h =
-            std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.height)));
+        const auto w = static_cast<std::uint32_t>(std::lround(g.width * s));
+        const auto h = static_cast<std::uint32_t>(std::lround(g.height * s));
         bool ok = d.context->open(w, h) == vellum::rmlui::Status::ok;
         if (ok) {
             vellum::rmlui::NativeContext::Scope scope(*d.context);

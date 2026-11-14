@@ -70,12 +70,10 @@ renderer's device. The `rmlui-metal-demo` example is a small plug-in using this
 path; it remains unavailable when the adapter option or the Vellum Metal
 component is off.
 
-When the Vellum atlas-filter setter is available, the adapter selects nearest
-sampling for generated RmlUi atlases so 2x glyphs match the SoftRenderer. The
-Vellum default remains linear; in the experimental comparison its 2x residual
-was mean 1.0452/within 0.950117 for `panel.rml` and mean
-0.690828/within 0.971667 for `layout.rml`. Documents that need density-scaled
-text should use `font-size` in `dp` (the example does this) rather than `px`.
+The surface context is sized in drawable pixels, the Metal frame scale is 1,
+and the density ratio is the backing scale. Documents that need
+density-scaled text should use `font-size` in `dp` (the example does this)
+rather than `px`.
 
 ## Proof
 

@@ -32,7 +32,7 @@ struct Document {
 };
 
 // Text lengths use dp so the density ratio makes glyph rasterization follow the
-// backing scale; geometric lengths remain logical points on both sides.
+// backing scale. Both renderers use drawable-pixel context dimensions.
 inline constexpr Document kDocuments[] = {
     {"panel.rml", R"(<rml>
 <head>

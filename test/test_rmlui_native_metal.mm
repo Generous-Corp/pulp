@@ -281,7 +281,7 @@ TEST_CASE("the renderer is handed the whole drawable in context pixels, cleared"
         REQUIRE(target.viewport.height == 480.0);
         REQUIRE(target.viewport.znear == 0.0);
         REQUIRE(target.viewport.zfar == 1.0);
-        REQUIRE(target.scale == 2.0f);
+        REQUIRE(target.scale == 1.0f);
         REQUIRE(target.clear);
     }
 }

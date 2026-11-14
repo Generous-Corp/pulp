@@ -7,7 +7,6 @@ find_package(VellumRmlUiNative CONFIG REQUIRED COMPONENTS Native Metal)
 # Older Vellum RmlUi SDKs do not expose the density setter. Detect the method
 # at configure time so the adapter remains source-compatible with those SDKs.
 include(CheckCXXSourceCompiles)
-include(CheckOBJCXXSourceCompiles)
 get_target_property(_vellum_rmlui_native_includes VellumRmlUi::Native
     INTERFACE_INCLUDE_DIRECTORIES)
 set(CMAKE_REQUIRED_INCLUDES "${_vellum_rmlui_native_includes}")
@@ -21,23 +20,6 @@ check_cxx_source_compiles(
        return 0;
      }"
     PULP_VELLUM_RMLUI_HAS_DENSITY_RATIO)
-set(CMAKE_TRY_COMPILE_TARGET_TYPE "${_pulp_try_compile_target_type}")
-unset(_pulp_try_compile_target_type)
-unset(CMAKE_REQUIRED_INCLUDES)
-
-get_target_property(_vellum_rmlui_metal_includes VellumRmlUi::Metal
-    INTERFACE_INCLUDE_DIRECTORIES)
-set(CMAKE_REQUIRED_INCLUDES "${_vellum_rmlui_metal_includes}")
-set(_pulp_try_compile_target_type "${CMAKE_TRY_COMPILE_TARGET_TYPE}")
-set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
-check_objcxx_source_compiles(
-    "#import <vellum/rmlui/metal_render_interface.hpp>
-     int main() {
-       vellum::rmlui::MetalRenderInterface* renderer = nullptr;
-       renderer->set_atlas_filter(vellum::rmlui::MetalRenderInterface::AtlasFilter::nearest);
-       return 0;
-     }"
-    PULP_VELLUM_RMLUI_HAS_ATLAS_FILTER)
 set(CMAKE_TRY_COMPILE_TARGET_TYPE "${_pulp_try_compile_target_type}")
 unset(_pulp_try_compile_target_type)
 unset(CMAKE_REQUIRED_INCLUDES)
@@ -71,9 +53,6 @@ if(TARGET VellumRmlUi::Metal)
             VellumRmlUi::Metal
         PRIVATE
             "-framework Metal")
-    if(PULP_VELLUM_RMLUI_HAS_ATLAS_FILTER)
-        target_compile_definitions(pulp-rmlui-native-metal PRIVATE PULP_VELLUM_RMLUI_HAS_ATLAS_FILTER)
-    endif()
     message(STATUS "rmlui-native: VellumRmlUi::Metal found; building pulp::rmlui-native-metal")
 else()
     message(STATUS "rmlui-native: VellumRmlUi::Metal not in this Vellum install; "
