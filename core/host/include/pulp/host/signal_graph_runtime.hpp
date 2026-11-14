@@ -264,8 +264,11 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // PluginSlot implementations outside of PluginSlot::load().
     NodeId add_plugin_node(std::unique_ptr<PluginSlot> slot, int num_inputs, int num_outputs,
                            const std::string& name = "Plugin");
-    /// Add an owned in-process Processor. The main-bus channel counts and default
-    /// name come from its frozen descriptor. Processor nodes are runtime-only:
+    /// Add an owned in-process Processor. Port counts and the default name come
+    /// from its frozen descriptor: one input port per main-input channel, and
+    /// output ports for the main output bus followed by each declared aux
+    /// output bus (named "<bus>.<channel>"). The processor sees its buses under
+    /// their declared names. Processor nodes are runtime-only:
     /// graph serialization and baking refuse them explicitly.
     NodeId add_processor_node(std::shared_ptr<format::ProcessorNodeInstance> processor,
                               const std::string& name = {});

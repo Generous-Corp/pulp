@@ -38,7 +38,36 @@ bool ProcessorNode::prepare(const PrepareContext& context) {
             if (index > 0 && input_names_[index].empty())
                 input_names_[index] = "aux";
         }
-        processor_->prepare(context);
+        // The output bus cap leaves room for every routed input bus.
+        output_bus_count_ = std::min(descriptor.output_buses.size(),
+                                     output_roles_.size() - input_bus_count_);
+        std::size_t declared_output_channels = 0;
+        for (std::size_t index = 0; index < output_bus_count_; ++index) {
+            const auto& bus = descriptor.output_buses[index];
+            output_roles_[index] = index == 0 ? BusRole::Main : bus.role;
+            output_channels_[index] = std::max(0, bus.default_channels);
+            output_names_[index] = bus.name;
+            declared_output_channels += static_cast<std::size_t>(output_channels_[index]);
+        }
+        if (output_bus_count_ == 0 || output_names_[0].empty())
+            output_names_[0] = "main";
+        if (input_bus_count_ == 0 || input_names_[0].empty())
+            input_names_[0] = "main";
+        for (std::size_t index = 1; index < output_bus_count_; ++index) {
+            if (output_names_[index].empty())
+                output_names_[index] = "aux";
+        }
+        output_channel_ptrs_.assign(
+            std::max(declared_output_channels,
+                     static_cast<std::size_t>(std::max(0, context.output_channels))),
+            nullptr);
+        // A graph hands the node every declared output channel; the processor
+        // is prepared for its main bus, as a format host would prepare it.
+        PrepareContext processor_context = context;
+        if (output_bus_count_ > 1 && output_channels_[0] > 0)
+            processor_context.output_channels =
+                std::min(processor_context.output_channels, output_channels_[0]);
+        processor_->prepare(processor_context);
         // Idle skipping is armed only for a node that cannot be fed by anything
         // but its own events: no audio input, no audio-rate modulation, a
         // bounded tail and a known latency.
@@ -63,10 +92,10 @@ bool ProcessorNode::prepare(const PrepareContext& context) {
         // The main-bus views are fixed for the node's life; a block only points
         // them at its buffers. Their metadata matches what
         // process_processor_block() builds from the general bus set.
-        main_bus_fast_path_ =
-            !capabilities_.consumes_audio_rate_modulations && input_bus_count_ <= 1;
+        main_bus_fast_path_ = !capabilities_.consumes_audio_rate_modulations &&
+                              input_bus_count_ <= 1 && output_bus_count_ <= 1;
         scratch_.input_views[0] = {};
-        scratch_.input_views[0].info = {"main",
+        scratch_.input_views[0].info = {input_names_[0],
                                         0,
                                         BusDirection::Input,
                                         input_bus_count_ > 0 ? input_roles_[0] : BusRole::Main,
@@ -74,14 +103,15 @@ bool ProcessorNode::prepare(const PrepareContext& context) {
                                         false,
                                         true};
         scratch_.output_views[0] = {};
-        scratch_.output_views[0].info = {"main", 0,   BusDirection::Output, BusRole::Main, 0,
-                                         false,  true};
+        scratch_.output_views[0].info = {
+            output_names_[0], 0, BusDirection::Output, BusRole::Main, 0, false, true};
         block_context_ = {};
         block_context_from_transport_ = false;
     }
     PULP_CATCH_ALL {
         capabilities_ = {};
         input_bus_count_ = 0;
+        output_bus_count_ = 0;
         main_bus_fast_path_ = false;
         idle_armed_ = false;
         return false;
@@ -95,6 +125,7 @@ bool ProcessorNode::release() noexcept {
     main_bus_fast_path_ = false;
     capabilities_ = {};
     input_bus_count_ = 0;
+    output_bus_count_ = 0;
     idle_armed_ = false;
     reset_idle_confirmation();
     if (processor_ == nullptr)
@@ -221,7 +252,7 @@ bool ProcessorNode::process_routed_block(ProcessBlock& block,
     BusBufferSet& local_buses = self->buses_;
     local_buses.clear();
     const auto main_role = self->input_bus_count_ > 0 ? self->input_roles_[0] : BusRole::Main;
-    if (!local_buses.add_input("main", ctx.node_inputs, main_role, true))
+    if (!local_buses.add_input(self->input_names_[0], ctx.node_inputs, main_role, true))
         return false;
     for (std::size_t bus = 1; bus < self->input_bus_count_; ++bus) {
         audio::BufferView<const float> route_view;
@@ -240,7 +271,7 @@ bool ProcessorNode::process_routed_block(ProcessBlock& block,
                                    active))
             return false;
     }
-    if (!local_buses.add_output("main", ctx.node_outputs, BusRole::Main))
+    if (!self->add_output_buses(local_buses, ctx.node_outputs))
         return false;
 
     ProcessBlock local_block;
@@ -278,6 +309,55 @@ bool ProcessorNode::process_routed_block(ProcessBlock& block,
         return false;
     }
     return process_processor_block(*self->processor_, local_block, self->scratch_);
+}
+
+int ProcessorNode::routed_output_channels(const PluginDescriptor& descriptor) noexcept {
+    if (descriptor.output_buses.empty())
+        return 0;
+    // Mirror prepare(): the inputs the node routes cap how many output buses fit.
+    const std::size_t inputs =
+        std::min(descriptor.input_buses.size(), BusBufferSet::kMaxBuses - 1);
+    const std::size_t buses =
+        std::min(descriptor.output_buses.size(), BusBufferSet::kMaxBuses - inputs);
+    // A main bus that declares no channels takes the whole view, as it always has.
+    if (buses <= 1 || descriptor.output_buses[0].default_channels <= 0)
+        return descriptor.output_buses[0].default_channels;
+    int total = 0;
+    for (std::size_t index = 0; index < buses; ++index)
+        total += std::max(0, descriptor.output_buses[index].default_channels);
+    return total;
+}
+
+bool ProcessorNode::add_output_buses(BusBufferSet& buses,
+                                     audio::BufferView<float> outputs) noexcept {
+    if (output_bus_count_ <= 1 || output_channels_[0] <= 0)
+        return buses.add_output(output_names_[0], outputs, BusRole::Main);
+    // Split the node's output channels into the declared buses. The pointers
+    // are copied per block because the view may start at a sample offset.
+    const std::size_t available = std::min(outputs.num_channels(), output_channel_ptrs_.size());
+    for (std::size_t channel = 0; channel < available; ++channel)
+        output_channel_ptrs_[channel] = outputs.channel_ptr(channel);
+    const std::size_t frames = outputs.num_samples();
+    const std::size_t main_channels =
+        std::min(available, static_cast<std::size_t>(output_channels_[0]));
+    if (!buses.add_output(output_names_[0],
+                          audio::BufferView<float>(output_channel_ptrs_.data(), main_channels,
+                                                   frames),
+                          BusRole::Main))
+        return false;
+    std::size_t offset = main_channels;
+    for (std::size_t bus = 1; bus < output_bus_count_; ++bus) {
+        const auto channels = static_cast<std::size_t>(output_channels_[bus]);
+        const bool fits = channels > 0 && offset + channels <= available;
+        const auto view = fits ? audio::BufferView<float>(output_channel_ptrs_.data() + offset,
+                                                          channels, frames)
+                               : audio::BufferView<float>{};
+        if (!buses.add_output(output_names_[bus], view, output_roles_[bus], fits))
+            return false;
+        if (fits)
+            offset += channels;
+    }
+    return true;
 }
 
 // The same call process_processor_block() makes for a block with one main input

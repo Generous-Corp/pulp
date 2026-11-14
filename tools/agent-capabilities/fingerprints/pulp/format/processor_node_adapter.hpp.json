@@ -1,5 +1,5 @@
 {
   "schema": "pulp.agent-capability-fingerprint.v1",
   "include": "pulp/format/processor_node_adapter.hpp",
-  "fingerprint": "sha256:895a3b1dceb40c5b6bd17e6c39b6de67f2840c3055e7b90565ecdf7025bd64a6"
+  "fingerprint": "sha256:37d54d33d5feec0fbb6e2d74d5a01c86accbf411292a59bac594cd0dcc80472e"
 }
