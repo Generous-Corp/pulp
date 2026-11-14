@@ -39,8 +39,8 @@ bool ProcessorNode::prepare(const PrepareContext& context) {
                 input_names_[index] = "aux";
         }
         // The output bus cap leaves room for every routed input bus.
-        output_bus_count_ = std::min(descriptor.output_buses.size(),
-                                     output_roles_.size() - input_bus_count_);
+        output_bus_count_ =
+            std::min(descriptor.output_buses.size(), output_roles_.size() - input_bus_count_);
         std::size_t declared_output_channels = 0;
         for (std::size_t index = 0; index < output_bus_count_; ++index) {
             const auto& bus = descriptor.output_buses[index];
@@ -315,8 +315,7 @@ int ProcessorNode::routed_output_channels(const PluginDescriptor& descriptor) no
     if (descriptor.output_buses.empty())
         return 0;
     // Mirror prepare(): the inputs the node routes cap how many output buses fit.
-    const std::size_t inputs =
-        std::min(descriptor.input_buses.size(), BusBufferSet::kMaxBuses - 1);
+    const std::size_t inputs = std::min(descriptor.input_buses.size(), BusBufferSet::kMaxBuses - 1);
     const std::size_t buses =
         std::min(descriptor.output_buses.size(), BusBufferSet::kMaxBuses - inputs);
     // A main bus that declares no channels takes the whole view, as it always has.
@@ -340,18 +339,18 @@ bool ProcessorNode::add_output_buses(BusBufferSet& buses,
     const std::size_t frames = outputs.num_samples();
     const std::size_t main_channels =
         std::min(available, static_cast<std::size_t>(output_channels_[0]));
-    if (!buses.add_output(output_names_[0],
-                          audio::BufferView<float>(output_channel_ptrs_.data(), main_channels,
-                                                   frames),
-                          BusRole::Main))
+    if (!buses.add_output(
+            output_names_[0],
+            audio::BufferView<float>(output_channel_ptrs_.data(), main_channels, frames),
+            BusRole::Main))
         return false;
     std::size_t offset = main_channels;
     for (std::size_t bus = 1; bus < output_bus_count_; ++bus) {
         const auto channels = static_cast<std::size_t>(output_channels_[bus]);
         const bool fits = channels > 0 && offset + channels <= available;
-        const auto view = fits ? audio::BufferView<float>(output_channel_ptrs_.data() + offset,
-                                                          channels, frames)
-                               : audio::BufferView<float>{};
+        const auto view =
+            fits ? audio::BufferView<float>(output_channel_ptrs_.data() + offset, channels, frames)
+                 : audio::BufferView<float>{};
         if (!buses.add_output(output_names_[bus], view, output_roles_[bus], fits))
             return false;
         if (fits)

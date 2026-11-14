@@ -1590,7 +1590,8 @@ struct NamedBusObservation {
 // that renames them to "main" makes it render silence.
 class NamedBusProcessor final : public Processor {
   public:
-    explicit NamedBusProcessor(std::shared_ptr<NamedBusObservation> seen) : seen_(std::move(seen)) {}
+    explicit NamedBusProcessor(std::shared_ptr<NamedBusObservation> seen)
+        : seen_(std::move(seen)) {}
 
     PluginDescriptor descriptor() const override {
         PluginDescriptor d;
@@ -1624,9 +1625,8 @@ class NamedBusProcessor final : public Processor {
         if (front == nullptr || !front->active())
             return;
         for (std::size_t frame = 0; frame < front->num_samples(); ++frame) {
-            const float x = source != nullptr && source->active()
-                                ? source->buffer.channel_ptr(0)[frame]
-                                : 0.0f;
+            const float x =
+                source != nullptr && source->active() ? source->buffer.channel_ptr(0)[frame] : 0.0f;
             front->buffer.channel_ptr(0)[frame] = 0.75f * x;
             front->buffer.channel_ptr(1)[frame] = 0.25f * x;
             if (seen_->rear_active) {
