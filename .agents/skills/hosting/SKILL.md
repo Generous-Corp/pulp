@@ -3189,9 +3189,12 @@ does not establish notation coverage or realtime timing qualification.
 asset-morph root. A forged connection list (stage A to B to A) passes every
 per-edge predicate, so only that walk sees the missing root; it fails closed
 through a visited set sized for the node count. Any guard on that walk turns a
-mutation into a spin, not a wrong answer, so its test also runs as a ctest
-entry with a short `TIMEOUT` (`pulp-test-routed-spectral-forged-cycle-bounded`);
-a `confirm_failure.sh` break of the guard hangs until the test is killed.
+mutation into a spin, not a wrong answer: the discovered case
+`Spectral preparation refuses a forged stage cycle with no root` fails only when
+the lane's ctest timeout kills it, and a `confirm_failure.sh` break of the guard
+hangs until then. Do not register a second ctest entry for the same case under a
+shorter `TIMEOUT`: the duplicate-registration check refuses two budgets for one
+command.
 
 ## Bounded typed trigger runtime
 

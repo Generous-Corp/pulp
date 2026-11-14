@@ -64,9 +64,10 @@ Follow-up: the walk now fails closed through a visited set sized for the
 prepared node count (`9acc83d225f1`). `Spectral preparation refuses a forged
 stage cycle with no root` passes a forged A to B to A list to
 `SpectralRuntimeBank::prepare` and requires `InvalidConnection`. Removing the
-visited check still makes the walk spin, so the case also runs as the ctest
-entry `pulp-test-routed-spectral-forged-cycle-bounded` with a 30 s TIMEOUT,
-which reports that mutation as a failure. `confirm_failure.sh` returned
+visited check still makes the walk spin, so the discovered case is reported as
+a failure only when the lane's ctest timeout kills it (a separate short-TIMEOUT
+registration was dropped because the duplicate-registration check refuses two
+budgets for one command). `confirm_failure.sh` returned
 CONFIRMED; the broken run was observed spinning and was killed by hand, which
 the harness recorded as the failing outcome.
 
