@@ -1,7 +1,7 @@
 {
   "domain": "host",
   "source": "core/host/include/pulp/host/control_index_nodes.hpp",
-  "fingerprint": "sha256:ba4532dbe83e7078dc568b0e4e99c332444ec90c77e1b7e993c01bf2c8de6a1d",
+  "fingerprint": "sha256:bc280ff936706d00c25aebd8da2e1b5b7a27764a40358ff5caaa81c5db858a32",
   "include": "pulp/host/control_index_nodes.hpp",
   "disposition": "infrastructure",
   "capability_keys": [],
