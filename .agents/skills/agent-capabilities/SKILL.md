@@ -1096,6 +1096,18 @@ alone, so discard the history hunk unless the change is one whose lineage the
 history is meant to carry. Confirm with `--check` rather than assuming either
 way.
 
+### An infrastructure header has no `--accept-fingerprint` path
+
+`--accept-fingerprint <include>` refuses a header whose `REVIEWED_HEADERS` row
+is `disposition: infrastructure` with empty `capability_keys`, printing "no
+capability binding names <include>; add the binding first". Do not add a
+binding to get past it. Even a comment-only edit to such a header (for example
+`pulp/host/signal_graph_subgraph.hpp`) is refreshed by hand: replace the old
+digest in the registry row and in
+`docs/status/agent-capability-surface/headers/<include>.json`, then run
+`--check`. Both files are mapped to this skill, so the edit also needs a
+SKILL.md touch or a `Skill-Update:` trailer.
+
 ### Adding a function to an existing capability header costs NO contract bump
 
 A binding's identity is `(role, kind, include, qualified_name, target,
