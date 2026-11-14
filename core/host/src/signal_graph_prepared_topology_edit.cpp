@@ -7,6 +7,7 @@
 // compiled graph and control readers cannot observe a mixed authoring graph.
 
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
+#include <pulp/host/control_index_nodes.hpp>
 
 #include <algorithm>
 #include <array>
@@ -977,7 +978,7 @@ PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_ident
         for (const auto& connection : candidate_->connections_) {
             if (connection.feedback || connection.midi || connection.automation ||
                 connection.audio_rate_modulation || connection.sidechain || connection.spectral ||
-                connection.source_port > 1 || connection.dest_port > 1)
+                connection.control_signal || connection.source_port > 1 || connection.dest_port > 1)
                 return PreparedDescriptionResult::refused(
                     PreparedDescriptionRefusal::UnsupportedPreparedProfile);
             const auto source = find_node(connection.source_node);
@@ -1695,6 +1696,27 @@ bool SignalGraph::PreparedTopologyEdit::connect_audio_rate_modulation(
         return candidate_->connect_audio_rate_modulation(source, source_port, dest, dest_param_id,
                                                          range_lo, range_hi, smoothing_ms, mix);
     });
+}
+
+bool SignalGraph::PreparedTopologyEdit::connect_control_modulation(
+    const PortHandle& source, NodeId dest, uint32_t dest_param_id, float range_lo, float range_hi,
+    float smoothing_ms, AutomationMix mix) {
+    return mutate_([&] {
+        return candidate_->connect_control_modulation(source, dest, dest_param_id, range_lo,
+                                                      range_hi, smoothing_ms, mix);
+    });
+}
+
+bool SignalGraph::PreparedTopologyEdit::set_control_node_state(
+    NodeId id, const std::vector<std::uint8_t>& bytes) {
+    if (baseline_node_ids_.contains(id))
+        return false;
+    const auto* node = candidate_->node(id);
+    if (node == nullptr || node->type != NodeType::Custom || node->custom_instance ||
+        candidate_->custom_node_type(node->custom_type_id, node->custom_type_version) == nullptr ||
+        !validate_control_node_state(node->custom_type_id, bytes))
+        return false;
+    return mutate_([&] { return candidate_->set_custom_node_state(id, bytes); });
 }
 
 bool SignalGraph::PreparedTopologyEdit::connect_feedback(NodeId source, PortIndex source_port,
@@ -2628,7 +2650,8 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
                                             !connection.feedback && !connection.midi &&
                                             !connection.automation &&
                                             !connection.audio_rate_modulation &&
-                                            !connection.sidechain && !connection.spectral;
+                                            !connection.sidechain && !connection.spectral &&
+                                            !connection.control_signal;
                                  }))
                     return last_result_ = Result::PreflightFailed;
             }

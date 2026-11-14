@@ -22,11 +22,13 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/processing_switch_crossfade.hpp": "Pulp::signal",
     "pulp/signal/smoothed_value.hpp": "Pulp::signal",
     "pulp/signal/indexed_control.hpp": "Pulp::signal",
+    "pulp/signal/control_math.hpp": "Pulp::signal",
     "pulp/host/signal_graph_authoring.hpp": "Pulp::host",
     "pulp/host/signal_graph.hpp": "Pulp::host",
     "pulp/host/signal_graph_runtime.hpp": "Pulp::host",
     "pulp/host/signal_graph_prepared_topology_edit.hpp": "Pulp::host",
     "pulp/host/custom_node_type.hpp": "Pulp::host",
+    "pulp/host/control_index_nodes.hpp": "Pulp::host",
     "pulp/host/custom_node_events.hpp": "Pulp::host",
     "pulp/host/sample_region_authoring.hpp": "Pulp::host",
     "pulp/host/sample_region_proof.hpp": "Pulp::host",
@@ -335,6 +337,28 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         "rationale": (
             "Bounded scalar mapping and caller-indexed table reads support one G-5 "
             "workflow; they do not establish a graph event transport or independent "
+            "generator-facing capability contract."
+        ),
+    },
+    {
+        "include": "pulp/host/control_index_nodes.hpp",
+        "fingerprint": "sha256:bc280ff936706d00c25aebd8da2e1b5b7a27764a40358ff5caaa81c5db858a32",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Graph-owned ControlIndexInput and scalar Control node factories are "
+            "host graph infrastructure for the G-5 installed consumer, not an "
+            "independently advertised generator capability."
+        ),
+    },
+    {
+        "include": "pulp/signal/control_math.hpp",
+        "fingerprint": "sha256:51948a38e0ccfa2804f44fa2a344fcd17d51cac71951163f64d78f169ea8da33",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Finite scalar math and bounded integrator primitives support the G-5 "
+            "graph Control nodes; they do not establish an independent "
             "generator-facing capability contract."
         ),
     },

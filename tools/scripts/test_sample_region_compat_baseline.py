@@ -82,6 +82,30 @@ class BaselineTests(unittest.TestCase):
                                 f"{symbol} is called by {callers} but no web source defines it")
                 self.assertNotIn(native_only, closure)
 
+    def test_web_sources_define_the_control_index_factories_the_closure_calls(self):
+        # signal_graph_authoring.cpp registers the built-in Control index
+        # input and the prepared edit validates Control node state; both are
+        # defined in control_index_nodes.cpp, so the curated web closure must
+        # compile it or wasm-ld reports undefined symbols.
+        import re
+        repo = Path(__file__).resolve().parents[2]
+        listing = (repo / "tools" / "cmake" /
+                   "PulpSampleRegionWebSources.cmake").read_text(encoding="utf-8")
+        closure = re.findall(r'"\$\{ROOT\}/([^"]+\.cpp)"', listing)
+        texts = {path: (repo / path).read_text(encoding="utf-8") for path in closure}
+        for symbol in ("make_control_index_input_type", "validate_control_node_state",
+                       "populate_named_ports"):
+            with self.subTest(symbol=symbol):
+                call = re.compile(r"\b" + symbol + r"\s*\(")
+                definition = re.compile(
+                    r"^(?!\s)[^;\n]*\b" + symbol +
+                    r"\s*\([^;{]*\)\s*(?:const\s*)?(?:noexcept\s*)?\{", re.M)
+                callers = [p for p, text in texts.items() if call.search(text)]
+                definers = [p for p, text in texts.items() if definition.search(text)]
+                self.assertTrue(callers, f"no closure source calls {symbol}")
+                self.assertTrue(definers,
+                                f"{symbol} is called by {callers} but no web source defines it")
+
     def test_generator_reads_linked_source_closure_from_cmake_dependinfo(self):
         repo = Path(__file__).resolve().parents[2]
         with tempfile.TemporaryDirectory() as raw:

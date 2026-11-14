@@ -52,6 +52,16 @@ event names, because a merge-group checkout has no `origin/main`; a gate that
 hard-codes `--base origin/main` goes red on every merge group that runs the
 full suite.
 
+The trusted merge-group revalidation reads Vellum over the GitHub API, so
+GitHub's own outages reach the merge queue. `vellum_freeze_check.py` repeats
+the identical read (same URL, same credential) after a 500/502/503/504, a
+dropped connection or a timeout, then fails closed. Only 403/429 switch
+credentials. Never widen that retry set to an authority answer (401/403/404/422)
+or to a malformed body: those mean the evidence is wrong, not that the server
+hiccuped. A queue ejection whose log ends in `cannot verify Vellum authority
+... HTTP Error 5xx` after every retry is a GitHub outage. Re-enqueue it; do not
+change the PR.
+
 Run from the Pulp repository root. Treat the projection as authority; do not
 infer ownership from similar directory names or broad path prefixes.
 
