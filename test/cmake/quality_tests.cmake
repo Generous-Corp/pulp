@@ -125,6 +125,19 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(vellum-boundary-lint vellum-boundary-lint-negative-contract
         PROPERTIES LABELS "pr;design-import" TIMEOUT 60)
 
+    # Nothing under core/ may link, include or name an optional integration
+    # package (integrations/*). Lexical and build-free; the self-test plants
+    # each crossing kind and a blind scan, and must turn red on every one.
+    add_test(NAME integrations-boundary-check
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/integrations_boundary_check.py"
+            --root "${CMAKE_SOURCE_DIR}")
+    add_test(NAME integrations-boundary-check-negative-contract
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_integrations_boundary_check.py")
+    set_tests_properties(integrations-boundary-check integrations-boundary-check-negative-contract
+        PROPERTIES LABELS "pr" TIMEOUT 60)
+
     # The foundation layer (core/platform, core/runtime, core/simd) must not
     # include audio, view, format or any other upper-layer header. Lexical and
     # build-free; the self-test plants each crossing kind and must turn red.
@@ -979,6 +992,12 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME merge-group-hold-check-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_merge_group_hold_check.py")
         set_tests_properties(merge-group-hold-check-selftest PROPERTIES TIMEOUT 60)
+        # The merge-group docs entry-delta step (protected-base classifier,
+        # ALLGREEN strategy guard, enforce/shadow mode), run against a scratch
+        # repository and a local rulesets stand-in.
+        add_test(NAME build-yml-docs-entry-delta-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_build_yml_docs_entry_delta.py")
+        set_tests_properties(build-yml-docs-entry-delta-selftest PROPERTIES TIMEOUT 120)
         # The one merge-group step that runs all four shadow instruments.
         add_test(NAME merge-group-shadows-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_merge_group_shadows.py")

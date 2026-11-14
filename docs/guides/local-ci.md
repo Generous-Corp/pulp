@@ -722,6 +722,67 @@ counts for the group that lands it. When the base does not resolve, classify
 builds natively, the HOLD check fails the group, and a live breaker fails the
 group too, rather than narrowing either scan back to `base_sha`.
 
+### Docs-only entry delta under ALLGREEN
+
+The main-tip rule above is what makes a batch safe under HEADGREEN, where a
+group ahead may be red and still land behind a green head. Under ALLGREEN
+every group in a batch must pass its own required checks, so a group whose own
+entry changes only documentation lands no build input that a green group ahead
+of it did not already build and test. The `classify` job's "Docs-only entry
+delta (merge groups)" step uses that:
+
+- It lists the entry's own delta, `git diff --name-only --no-renames
+  merge_group.base_sha..head_sha` (a rename is two paths), and classifies it
+  with the protected base's copy of `tools/scripts/classify_changes.py` (read
+  with `git show` from main's tip, never the group's tree). Only
+  `impact_class` `docs-only` qualifies; `code:docs` (a migration note, the
+  consumption census, the capability JSON), `ci-only` and every `code:*`
+  build.
+- It reads the live merge-queue rule on every run: exactly one active
+  `merge_queue` rule on `~DEFAULT_BRANCH`, with `grouping_strategy` ALLGREEN.
+  Two rules, none, a read error or HEADGREEN keep the build. The read is
+  never cached; a flip back to HEADGREEN disables the path on the next run.
+- The repository variable `PULP_DOCS_ENTRY_DELTA` sets the mode. Only the
+  exact value `enforce` skips; unset, `shadow` or anything else reports
+  `would_skip` and changes nothing.
+- A lone group (`base_sha` is main's tip) is `not_applicable`: `classify`
+  already judges exactly that delta.
+- It changes `native_build_required` alone, after `classify`'s own
+  classification and before the version-bump fast path. The HOLD check, the
+  queue breaker, A2T receipt verification and the bump path keep their
+  main-tip checks, and an A2T receipt change keeps the build.
+- Every run prints one `docs-entry-delta` notice: `skipped`, `would_skip`,
+  `kept`, `not_applicable`, or, on a pull request, `control` (the strategy
+  read alone, as the daily positive control), with `class=`, `strategy=` and
+  `mode=` fields. Count verdicts from those annotations, not job logs. A day
+  whose notices read `strategy=ALLGREEN` on fewer than 99% of runs means the
+  read is broken: report nothing from it.
+
+The step is `continue-on-error`: if it breaks, `skip` is unset and the group
+builds. `tools/scripts/reuse_policy_replay.py score --policy
+entry-delta-docs` replays the rule over merge-queue history (`collect
+--groups-only` is enough). A failure behind a red predecessor group is a
+neighbour failure. Every other failure in a group the rule would skip is
+attributed per failing test, failing closed at every fact it cannot read:
+
+- `docs_caused`: the test is in the deterministic tier (`pr-fast` or
+  `tools/ci/drift_fast.json`), its declared inputs meet the delta or are
+  missing, its executable or sources are unknown or name a delta path, or a
+  delta path is a `FORCE_BUILD_PREFIXES` input or named by non-test CMake;
+- `exonerated`, a replay-only hindsight class that never decides a live run:
+  the same head later landed through a green group and main's first push run
+  holding it was green, or the test failed in at least two other pull
+  requests' non-docs groups of other batches within 7 days and passed later
+  in a landed group;
+- `unexplained`: neither.
+
+The rule ships only with `docs_caused` 0, `unexplained` 0, and exonerated
+groups per skipped native group at or below the window's merge-group `macos`
+red rate. The raw false-skip count stays in the report, each exoneration
+prints its evidence runs, and a test exonerated in three or more docs groups
+is listed as a quarantine candidate. Decision 11 in `.agents/contract.toml`
+records the guard; do not disable or cache the strategy read.
+
 ### The preamble slot
 
 `build.yml`'s preamble jobs (`resolve-provider`, `classify`,

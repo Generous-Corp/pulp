@@ -19,6 +19,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -991,6 +992,54 @@ class ImpactClassTests(unittest.TestCase):
                 mock.patch.dict(os.environ, {"GITHUB_OUTPUT": ""}):
             classify.main(["--mode=files", "--json", "docs/a.md"])
         self.assertEqual(json.loads(out.getvalue())["impact_class"], "docs-only")
+
+
+# A merge group's own entry delta (`base_sha..head_sha --no-renames`), as the
+# docs entry-delta step in build.yml lists it. Only `docs-only` skips there.
+ENTRY_DELTA_TABLE = (
+    (["docs/guides/local-ci.md"], "docs-only"),
+    ([".agents/skills/x/SKILL.md"], "docs-only"),
+    (["planning"], "docs-only"),
+    # Mixed: one build input among docs builds.
+    (["docs/guides/local-ci.md", "core/view/src/example.cpp"], "code:core"),
+    # A rename is two paths; one leaving a build input builds.
+    (["core/view/src/old.cpp", "docs/guides/old.md"], "code:core"),
+    (["docs/guides/a.md", "docs/guides/b.md"], "docs-only"),
+    (["docs/migrations/x.md"], "code:docs"),
+    (["docs/status/consumption-profiles.json"], "code:docs"),
+    (["docs/status/agent-capabilities.json"], "code:docs"),
+    ([], "code:unknown"),
+)
+
+
+class EntryDeltaClassTests(unittest.TestCase):
+    """The docs entry-delta step runs the protected base's copy of this file
+    from a temporary path, `python3 -I <copy> --mode=files --json -- <files>`,
+    and reads `impact_class`. It must work from outside the checkout."""
+
+    def run_copy(self, files: list[str]) -> str:
+        with tempfile.TemporaryDirectory() as tmp:
+            copy = Path(tmp) / "classifier.py"
+            copy.write_text(Path(classify.__file__).read_text(encoding="utf-8"), encoding="utf-8")
+            env = {k: v for k, v in os.environ.items() if k != "GITHUB_OUTPUT"}
+            proc = subprocess.run([sys.executable, "-I", str(copy), "--mode=files", "--json", "--", *files],
+                                  capture_output=True, text=True, encoding="utf-8", check=False,
+                                  cwd=tmp, env=env)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return json.loads(proc.stdout)["impact_class"]
+
+    def test_table(self) -> None:
+        for files, expected in ENTRY_DELTA_TABLE:
+            self.assertEqual(classify.impact_class(files), expected, files)
+
+    def test_a_copy_outside_the_checkout_classifies_the_same(self) -> None:
+        for files, expected in ENTRY_DELTA_TABLE:
+            self.assertEqual(self.run_copy(files), expected, files)
+
+    def test_docs_only_entries_never_name_a_native_build_input(self) -> None:
+        for files, expected in ENTRY_DELTA_TABLE:
+            if expected == "docs-only":
+                self.assertFalse(classify.native_build_required(files), files)
 
 
 class CodeqlDocsSkipTests(unittest.TestCase):
