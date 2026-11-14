@@ -95,6 +95,7 @@ REVIEWED_HOST_HEADERS = (
     'pulp/host/signal_graph_prepared_topology_edit.hpp',
     'pulp/host/custom_node_type.hpp',
     'pulp/host/custom_node_events.hpp',
+    'pulp/host/custom_node_oversampling.hpp',
     'pulp/host/sample_region_authoring.hpp',
     'pulp/host/sample_region_proof.hpp',
     'pulp/host/sample_region_parameters.hpp',
