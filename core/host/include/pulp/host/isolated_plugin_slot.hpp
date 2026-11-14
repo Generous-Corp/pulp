@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <pulp/host/graph_types.hpp>
 #include <pulp/host/plugin_slot.hpp>
 #include <string>
 #include <vector>
@@ -68,7 +69,8 @@ class IsolatedClapControl {
     /// An incomplete result retains the finite reservation. A later explicit
     /// call may finish cleanup; creation and recovery remain refused meanwhile.
     IsolationCleanup cleanup(std::chrono::steady_clock::time_point deadline);
-    /// Last accepted bounded checkpoint, empty until one has been accepted.
+    /// Last accepted bounded checkpoint, empty until one has been accepted. A
+    /// recovered generation starts with the checkpoint it was restored from.
     std::vector<std::uint8_t> accepted_checkpoint() const;
 
   private:
@@ -92,11 +94,60 @@ struct IsolatedClapResult {
 IsolatedClapResult load_isolated_clap(const IsolatedClapOptions&);
 
 /// Requires complete old custody cleanup and an accepted checkpoint. Constructs
-/// a fresh generation; the old proxy remains terminal and cannot be revived.
+/// a fresh generation; the old proxy remains terminal and cannot be revived. When
+/// the fresh worker rejects the checkpoint and its own cleanup does not complete,
+/// the failed result still carries `control` (with no slot) so the caller can
+/// finish cleanup() and release the reservation.
 IsolatedClapResult recover_isolated_clap(const IsolatedClapOptions&,
                                          const IsolatedClapControl& old);
 
+class SignalGraph;
+
+/// Typed outcome of restoring a terminal isolated graph node from its checkpoint.
+enum class IsolatedNodeRecovery : std::uint32_t {
+    recovered,
+    not_isolated_node,   ///< The node does not publish an isolated proxy.
+    control_mismatch,    ///< `old` does not control the node's published proxy.
+    not_terminal,        ///< The node is still healthy; recovery never preempts it.
+    identity_mismatch,   ///< Options name a different plugin type or plugin binary.
+    no_checkpoint,       ///< `old` never accepted a checkpoint.
+    cleanup_incomplete,  ///< Old worker custody is not released; no new worker spawns.
+    worker_failed,       ///< The fresh worker did not start or rejected the checkpoint.
+    publication_refused, ///< The graph refused publication; see last_swap_diagnostics().
+};
+
+struct IsolatedNodeRecoveryResult {
+    IsolatedNodeRecovery outcome = IsolatedNodeRecovery::not_isolated_node;
+    /// Worker-side reason when outcome is worker_failed.
+    IsolationReason worker_error = IsolationReason::none;
+    /// Control for the recovered generation. A failed result carries one only
+    /// when the fresh worker's cleanup did not complete: call cleanup() on it,
+    /// or its reservation keeps later loads refused as quarantine_active.
+    std::shared_ptr<IsolatedClapControl> control;
+    explicit operator bool() const noexcept {
+        return outcome == IsolatedNodeRecovery::recovered;
+    }
+};
+
+/// Control-thread recovery of a prepared graph's terminal isolated node: waits
+/// (bounded) for the old worker's custody cleanup, spawns a fresh generation
+/// restored from `old`'s accepted checkpoint, and publishes it through
+/// SignalGraph::publish_isolated_recovery(). The callback renders terminal
+/// silence until that publication and never allocates, locks or performs IPC for
+/// it; siblings keep rendering throughout. Every refusal leaves the old silent
+/// node published. The checkpoint is the one accepted while the node was not
+/// processing (pause() is terminal for a node a graph is still rendering).
+/// Each later recovery restores that same original checkpoint, because a
+/// recovered generation adopts the checkpoint it was restored from.
+IsolatedNodeRecoveryResult recover_isolated_graph_node(SignalGraph& graph, NodeId node,
+                                                       const IsolatedClapOptions& options,
+                                                       IsolatedClapControl& old);
+
 /// Graph integration identifies the opt-in proxy without changing PluginSlot ABI.
 bool is_isolated_plugin_slot(const PluginSlot&) noexcept;
+
+/// True when both slots are isolated proxies bound to the same plugin
+/// descriptor and plugin-byte SHA-256.
+bool same_isolated_plugin_binary(const PluginSlot&, const PluginSlot&) noexcept;
 
 } // namespace pulp::host
