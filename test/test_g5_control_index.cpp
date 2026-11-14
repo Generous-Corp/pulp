@@ -273,6 +273,44 @@ TEST_CASE("Control port kind and canonical persistence reject coercion", "[graph
     CHECK_FALSE(unresolved.prepare(48000, 16));
 }
 
+TEST_CASE("numeric connections refuse typed ports but keep legacy MIDI node edges",
+          "[graph][control-index]") {
+    SignalGraph graph;
+    REQUIRE(graph.register_custom_node_type(make_control_map_clip_type()));
+    const auto a = graph.add_custom_node("pulp.control.map-clip");
+    const auto b = graph.add_custom_node("pulp.control.map-clip");
+    CHECK_FALSE(graph.connect(a, 0, b, 0));
+    CHECK(graph.connections().empty());
+
+    // MIDI input/output nodes predate typed ports and have always been joined
+    // through the numeric overload; the Control guard must not refuse them.
+    const auto midi_in = graph.add_midi_input_node("Keys");
+    const auto midi_out = graph.add_midi_output_node("Out");
+    REQUIRE(graph.connect(midi_in, 0, midi_out, 0));
+    CHECK_FALSE(graph.connect(midi_in, 0, b, 0));
+}
+
+TEST_CASE("graph format v4 documents still load and keep their bytes",
+          "[graph][control-index][serializer]") {
+    SignalGraph source;
+    const auto in = source.add_input_node(2);
+    const auto out = source.add_output_node(2);
+    REQUIRE(source.connect(in, 0, out, 0));
+    const auto legacy = GraphSerializer::to_json(source);
+    REQUIRE(legacy.find("\"format_version\": 2") != std::string::npos);
+    auto v4 = legacy;
+    v4.replace(v4.find("\"format_version\": 2"), std::string("\"format_version\": 2").size(),
+               "\"format_version\": 4");
+    SignalGraph graph;
+    const auto loaded = GraphSerializer::from_json(graph, v4);
+    REQUIRE(loaded.ok);
+    REQUIRE(graph.connections().size() == 1);
+    CHECK_FALSE(graph.connections()[0].control_signal);
+    // A graph without typed ports keeps its pre-v5 writer version.
+    const auto json = GraphSerializer::to_json(graph);
+    CHECK(json == legacy);
+}
+
 TEST_CASE("candidate Control state validates before mutation and keeps baseline state",
           "[graph][control-index][edit]") {
     SignalGraph graph;

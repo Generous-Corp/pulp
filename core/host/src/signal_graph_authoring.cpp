@@ -241,6 +241,18 @@ void populate_named_ports(GraphNode& node, std::uint64_t owner, std::uint64_t in
                                      incarnation});
 }
 
+// The numeric connection overloads predate typed ports, so they carry only the
+// kinds they always carried: audio ports and the single port of a MIDI
+// input/output node. A typed port (Control, Event, Param, Spectral, or a
+// Custom node's declared MIDI port) must use the named overload so its kind is
+// validated instead of being coerced into an audio edge.
+bool numeric_overload_carries(const GraphNode& node, const PortHandle& port) noexcept {
+    if (port.kind == PortKind::Audio)
+        return true;
+    return port.kind == PortKind::Midi &&
+           (node.type == NodeType::MidiInput || node.type == NodeType::MidiOutput);
+}
+
 void apply_custom_port_descriptors(GraphNode& node,
                                    const std::vector<CustomNodePortDescriptor>& inputs,
                                    const std::vector<CustomNodePortDescriptor>& outputs) {
@@ -633,8 +645,8 @@ bool SignalGraph::connect(NodeId source, PortIndex source_port, NodeId dest, Por
         return false;
     if (!has_input_port(*dst_n, dest_port))
         return false;
-    if (src_n->output_ports[source_port].kind != PortKind::Audio ||
-        dst_n->input_ports[dest_port].kind != PortKind::Audio)
+    if (!numeric_overload_carries(*src_n, src_n->output_ports[source_port]) ||
+        !numeric_overload_carries(*dst_n, dst_n->input_ports[dest_port]))
         return false;
     if (would_create_cycle(source, dest))
         return false;
@@ -697,8 +709,8 @@ bool SignalGraph::connect_sidechain(NodeId source, PortIndex source_port, NodeId
         return false;
     if (!has_input_port(*dst_n, dest_sidechain_port))
         return false;
-    if (src_n->output_ports[source_port].kind != PortKind::Audio ||
-        dst_n->input_ports[dest_sidechain_port].kind != PortKind::Audio)
+    if (!numeric_overload_carries(*src_n, src_n->output_ports[source_port]) ||
+        !numeric_overload_carries(*dst_n, dst_n->input_ports[dest_sidechain_port]))
         return false;
     if (would_create_cycle(source, dest))
         return false;
@@ -734,7 +746,7 @@ bool SignalGraph::connect_automation(NodeId src, PortIndex src_audio_port, NodeI
         return false;
     if (!has_output_port(*src_n, src_audio_port))
         return false;
-    if (src_n->output_ports[src_audio_port].kind != PortKind::Audio)
+    if (!numeric_overload_carries(*src_n, src_n->output_ports[src_audio_port]))
         return false;
 
     // Reject automation edges that would introduce a cycle. Automation
@@ -825,7 +837,8 @@ bool SignalGraph::connect_audio_rate_modulation_impl_(NodeId src, PortIndex src_
     if (!has_output_port(*src_n, src_audio_port))
         return false;
     const auto& port = src_n->output_ports[src_audio_port];
-    if (port.kind != expected_kind ||
+    if ((expected_kind == PortKind::Control ? port.kind != PortKind::Control
+                                             : !numeric_overload_carries(*src_n, port)) ||
         (source_handle && (port.name != source_handle->name || port.owner != source_handle->owner ||
                            port.incarnation != source_handle->incarnation)))
         return false;
@@ -946,8 +959,8 @@ bool SignalGraph::connect_feedback(NodeId source, PortIndex source_port, NodeId 
         return false;
     if (!has_input_port(*dst_n, dest_port))
         return false;
-    if (src_n->output_ports[source_port].kind != PortKind::Audio ||
-        dst_n->input_ports[dest_port].kind != PortKind::Audio)
+    if (!numeric_overload_carries(*src_n, src_n->output_ports[source_port]) ||
+        !numeric_overload_carries(*dst_n, dst_n->input_ports[dest_port]))
         return false;
     Connection conn{source, source_port, dest, dest_port, true};
     for (auto& c : connections_)
