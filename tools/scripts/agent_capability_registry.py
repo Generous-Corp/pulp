@@ -264,7 +264,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         'include': 'pulp/host/custom_node_oversampling.hpp',
-        'fingerprint': 'sha256:f77dba89933b0909d5f0156e1c2aa5e6b1904935e9cfb5410920fbcdce1f049e',
+        'fingerprint': 'sha256:0b6b41116117486d4b2419a71d0025a3f5f6cfc1f6281203656031e69cbd3164',
         'disposition': 'infrastructure',
         'capability_keys': [],
         'rationale': 'Derives a custom node\'s declared latency and its oversampler setup from one spec; refuses the minimum-phase kinds whose delay cannot be compensated.',
