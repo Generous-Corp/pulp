@@ -1258,8 +1258,8 @@ GraphDocumentInspection GraphSerializer::inspect_document(std::string_view json)
                 }
                 if (!bound_nodes.insert(node_id).second) {
                     result.refusal = GraphDocumentRefusal::IdentityBindingDuplicate;
-                    result.detail = "two logical identities bind node_id " +
-                                    std::to_string(node_id);
+                    result.detail =
+                        "two logical identities bind node_id " + std::to_string(node_id);
                     return result;
                 }
                 identity_node.emplace(id, node_id);
