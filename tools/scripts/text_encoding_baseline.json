@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "comment": "Per-file count of text I/O calls without encoding=. Only ever lowered; regenerate with text_encoding_lint.py --write.",
-  "total": 4157,
+  "total": 4156,
   "files": {
     "test/cmake/test_forge_catalog_install.py": 22,
     "test/harness/test_canvas2d_adapter.py": 1,
@@ -612,7 +612,7 @@
     "tools/scripts/seed_build_dir.py": 11,
     "tools/scripts/setup_bootstrap_plan_guard.py": 3,
     "tools/scripts/shipyard_local_check.py": 2,
-    "tools/scripts/shipyard_pr_watchdog.py": 2,
+    "tools/scripts/shipyard_pr_watchdog.py": 1,
     "tools/scripts/silent_revert_guard.py": 2,
     "tools/scripts/single_backend_guard.py": 12,
     "tools/scripts/skill_path_map_lint.py": 6,
