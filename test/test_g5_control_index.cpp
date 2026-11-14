@@ -477,6 +477,48 @@ TEST_CASE("restored Control index graphs prepare and future formats name the fix
     CHECK(inspected.detail.find("upgrade Pulp") != std::string::npos);
 }
 
+namespace {
+void scalar_passthrough(void*, const pulp::host::PreparedSampleKernelConfig&,
+                        const pulp::host::SampleFrameContext&, const float* input,
+                        float* output) noexcept {
+    output[0] = input[0];
+}
+void block_passthrough(pulp::audio::BufferView<float>& out,
+                       const pulp::audio::BufferView<const float>& in, int frames) {
+    for (int i = 0; i < frames; ++i)
+        out.channel_ptr(0)[i] = in.channel_ptr(0)[i];
+}
+} // namespace
+
+TEST_CASE("re-registering a paired type with different typed ports is not a no-op",
+          "[graph][control-index]") {
+    CustomNodeType type;
+    type.type_id = "pulp.test.typed-pair";
+    type.num_input_ports = 1;
+    type.num_output_ports = 1;
+    type.input_ports = {{"value", PortKind::Control}};
+    type.output_ports = {{"value", PortKind::Control}};
+    type.process = block_passthrough;
+    SampleKernelDescriptor kernel;
+    kernel.type_id = type.type_id;
+    kernel.num_input_ports = 1;
+    kernel.num_output_ports = 1;
+    kernel.authored_config_kind = SampleKernelConfigKind::None;
+    kernel.process = scalar_passthrough;
+    kernel.metadata.category = "test";
+
+    SignalGraph graph;
+    REQUIRE(graph.register_custom_node_type(type, kernel));
+    CHECK(graph.register_custom_node_type(type, kernel));
+    auto renamed = type;
+    renamed.output_ports[0].name = "changed";
+    CHECK_FALSE(graph.register_custom_node_type(renamed, kernel));
+    auto audio_kind = type;
+    audio_kind.input_ports[0].kind = PortKind::Audio;
+    CHECK_FALSE(graph.register_custom_node_type(audio_kind, kernel));
+    CHECK(graph.custom_node_type(type.type_id, 1)->output_ports[0].name == "value");
+}
+
 TEST_CASE("graph format v4 documents still load and keep their bytes",
           "[graph][control-index][serializer]") {
     SignalGraph source;
