@@ -671,6 +671,8 @@ if(PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/audio)
     # The RT allocation probe for SDK consumers' tests (Pulp::rt-allocation-probe).
     add_subdirectory(tools/testing/rt_allocation_probe)
+    # Test-only texture-upload recorder (HARN-5); never linked into a shipped target.
+    add_subdirectory(tools/testing/texture_upload_recorder)
     add_subdirectory(tools/design-ab)
     # Offline driver that asks a built LV2 module to describe itself into its
     # bundle. Host-side, so it is useless when the modules it would run are
