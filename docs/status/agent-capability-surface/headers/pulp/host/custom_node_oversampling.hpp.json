@@ -1,0 +1,9 @@
+{
+  "domain": "host",
+  "source": "core/host/include/pulp/host/custom_node_oversampling.hpp",
+  "fingerprint": "sha256:f77dba89933b0909d5f0156e1c2aa5e6b1904935e9cfb5410920fbcdce1f049e",
+  "include": "pulp/host/custom_node_oversampling.hpp",
+  "disposition": "infrastructure",
+  "capability_keys": [],
+  "rationale": "Derives a custom node's declared latency and its oversampler setup from one spec; refuses the minimum-phase kinds whose delay cannot be compensated."
+}
