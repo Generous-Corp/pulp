@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <limits>
 #include <string_view>
@@ -109,6 +110,23 @@ bool valid_schema(const VoiceBankManifest& manifest, const SubgraphTemplate& def
     return true;
 }
 
+// Epochs come from one process-wide sequence, so no two prepared banks and no
+// two activations ever share an epoch. Every bank's tracker restarts its note
+// generations at 1, so a deferred (epoch, generation) token retired with one
+// bank would otherwise address an identical note in a replacement bank. Only
+// control-thread operations (prepare, activate) draw from it.
+std::atomic<std::uint64_t> g_next_bank_epoch{1};
+
+bool claim_bank_epoch(std::uint64_t& epoch) noexcept {
+    auto next = g_next_bank_epoch.load(std::memory_order_relaxed);
+    do {
+        if (next == std::numeric_limits<std::uint64_t>::max())
+            return false;
+    } while (!g_next_bank_epoch.compare_exchange_weak(next, next + 1, std::memory_order_relaxed));
+    epoch = next;
+    return true;
+}
+
 } // namespace
 
 struct VoiceBankBinding::Impl {
@@ -130,7 +148,7 @@ struct VoiceBankBinding::Impl {
     midi::MpeVoiceTracker tracker;
     HostEventIngress<SignalGraph::kHostEventIngressCapacity> ingress;
     std::array<HostEventRecord, SignalGraph::kHostEventIngressCapacity> projected{};
-    std::uint64_t epoch = 1;
+    std::uint64_t epoch = 0;
     std::size_t max_frames = 0;
     std::uint64_t block_start = 0;
     std::size_t block_frames = 0;
@@ -346,6 +364,11 @@ VoiceBankBinding::prepare(const VoiceTemplateSchema& schema, SubgraphTemplate de
             }
     }
     auto bank = std::unique_ptr<VoiceBankBinding>(new VoiceBankBinding);
+    if (!claim_bank_epoch(bank->impl_->epoch)) {
+        result = {VoiceBankBindingCode::EpochExhausted, 0, {}, "epoch exhausted"};
+        return {};
+    }
+    bank->impl_->ingress.reset(bank->impl_->epoch);
     bank->impl_->owner = std::move(owner);
     bank->impl_->tracker.set_config(mpe_config);
     bank->impl_->manifest = std::move(prepared.manifest);
@@ -423,7 +446,8 @@ bool VoiceBankBinding::activate(VoiceBankBindingResult& result) noexcept {
         result = {VoiceBankBindingCode::InvalidBlock, 0, {}, "cannot activate inside a block"};
         return false;
     }
-    if (impl_->epoch == std::numeric_limits<std::uint64_t>::max()) {
+    std::uint64_t next_epoch = 0;
+    if (!claim_bank_epoch(next_epoch)) {
         result = {VoiceBankBindingCode::EpochExhausted, 0, {}, "epoch exhausted"};
         return false;
     }
@@ -432,7 +456,7 @@ bool VoiceBankBinding::activate(VoiceBankBindingResult& result) noexcept {
     impl_->held.fill({});
     impl_->member_sustain.fill(false);
     impl_->zone_sustain.fill(false);
-    ++impl_->epoch;
+    impl_->epoch = next_epoch;
     impl_->ingress.reset(impl_->epoch);
     result = {};
     return true;
