@@ -214,6 +214,18 @@ pulp_bind_cli_shellout_target(pulp-test-cli-shellout)
 # open-ended set of documents, all through the spawned pulp-cpp.
 pulp_test_data(pulp-test-cli-shellout WHOLE_CHECKOUT)
 
+# The graph CLI's `--json` codes are compared with the C++ GraphPatch code
+# names for the same files, so this suite links the host library and drives
+# the built CLI.
+if(TARGET pulp-host)
+    add_executable(pulp-test-cli-graph-code-parity test_cli_graph_code_parity.cpp)
+    target_link_libraries(pulp-test-cli-graph-code-parity PRIVATE
+        pulp::host pulp::platform Catch2::Catch2WithMain)
+    pulp_bind_cli_shellout_target(pulp-test-cli-graph-code-parity)
+    pulp_test_spawns(pulp-test-cli-graph-code-parity pulp-cli)
+    catch_discover_tests(pulp-test-cli-graph-code-parity)
+endif()
+
 add_executable(pulp-test-cli-overflow-shellout test_cli_overflow_shellout.cpp)
 target_link_libraries(pulp-test-cli-overflow-shellout PRIVATE
     pulp::platform

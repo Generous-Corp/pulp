@@ -297,6 +297,7 @@ foreach(_cli_shellout_suite IN ITEMS
         pulp-test-cli-designmd-subcommands
         pulp-test-cli-shellout
         pulp-test-cli-overflow-shellout
+        pulp-test-cli-graph-code-parity
         pulp-test-cli-create-shellout
         pulp-test-cli-import
         pulp-test-cli-import-emit
