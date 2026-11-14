@@ -1,6 +1,10 @@
 #include "spectral_graph_internal.hpp"
 #include <pulp/host/signal_graph.hpp>
 
+#include <algorithm>
+#include <cstdint>
+#include <vector>
+
 namespace pulp::host {
 SpectralError SignalGraph::stop_spectral_controller() {
     GraphMutationLock lock(*this);
@@ -350,6 +354,10 @@ SpectralError SpectralRuntimeBank::prepare(std::span<const GraphNode> authored,
         source->outputs.push_back(&edge->view);
         edges.push_back(std::move(edge));
     }
+    // Root walk visited set, sized once for the prepared node count. A
+    // forged connection list can close a spectral cycle that never reaches a
+    // root; revisiting a node fails closed instead of walking forever.
+    std::vector<std::uint8_t> visited(nodes.size(), 0);
     for (const auto& n : nodes) {
         if (n->type == NodeType::SpectralAssetMorph &&
             std::none_of(connections.begin(), connections.end(), [&](const auto& edge) {
@@ -361,20 +369,19 @@ SpectralError SpectralRuntimeBank::prepare(std::span<const GraphNode> authored,
             return SpectralError::InvalidConnection;
         if (n->type != NodeType::SpectralSynthesis && n->outputs.empty())
             return SpectralError::InvalidConnection;
+        std::fill(visited.begin(), visited.end(), std::uint8_t{0});
         const Node* ancestor = n.get();
-        size_t steps = 0;
         while (ancestor->type != NodeType::SpectralAnalysis &&
                ancestor->type != NodeType::SpectralAssetMorph) {
-            if (++steps > nodes.size())
-                return SpectralError::InvalidConnection;
-            const Node* parent = nullptr;
-            for (const auto& candidate : nodes)
-                for (auto* output : candidate->outputs)
+            size_t parent = nodes.size();
+            for (size_t i = 0; i < nodes.size(); ++i)
+                for (auto* output : nodes[i]->outputs)
                     if (output == ancestor->input)
-                        parent = candidate.get();
-            if (!parent)
+                        parent = i;
+            if (parent == nodes.size() || visited[parent])
                 return SpectralError::InvalidConnection;
-            ancestor = parent;
+            visited[parent] = 1;
+            ancestor = nodes[parent].get();
         }
         n->root = ancestor->id;
         n->finite_frames = ancestor->finite_frames;
