@@ -32,6 +32,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <span>
 #include <stdexcept>
@@ -1227,4 +1228,177 @@ TEST_CASE("ProcessorNode dense binding applies automation delay compensation",
     REQUIRE(observed->last_lane[1] == 0.4f);
     for (int frame = 2; frame < kFrames; ++frame)
         REQUIRE(observed->last_lane[static_cast<std::size_t>(frame)] == 0.6f);
+}
+
+namespace {
+
+// A source with no audio input. It writes `level` to its mono output and counts
+// calls. A well-behaved processor clears its MIDI output at the start of a block;
+// when `emit_note` is set it then writes one note-on.
+class IdleSource final : public Processor {
+  public:
+    float level = 0.0f;
+    bool emit_note = false;
+    int calls = 0;
+    PluginDescriptor descriptor() const override {
+        PluginDescriptor d;
+        d.name = "IdleSource";
+        d.manufacturer = "Pulp";
+        d.bundle_id = "com.pulp.test.idlesource";
+        d.version = "1.0.0";
+        d.category = PluginCategory::Instrument;
+        d.input_buses.clear();
+        d.output_buses = {{"Main Out", 1, false}};
+        return d;
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>& output, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer& midi_out,
+                 const ProcessContext&) override {
+        ++calls;
+        midi_out.clear();
+        if (emit_note)
+            midi_out.add(pulp::midi::MidiEvent::note_on(1, 60, 100));
+        std::fill_n(output.channel_ptr(0), output.num_samples(), level);
+    }
+};
+
+struct IdleSourceRig {
+    static constexpr int kFrames = 32;
+    IdleSource processor;
+    pulp::state::StateStore store;
+    ProcessorNode node{processor};
+    bool idle = true;
+    std::array<float, kFrames> output{};
+    std::array<float*, 1> out_ch{output.data()};
+    pulp::midi::MidiBuffer midi_out;
+    pulp::format::GraphRuntimeNodeProcessContext context;
+    pulp::format::ProcessBlock block;
+
+    static bool is_idle(void* self) noexcept {
+        return static_cast<IdleSourceRig*>(self)->idle;
+    }
+    IdleSourceRig() {
+        bind_processor(processor, store);
+        node.set_idle_probe({&IdleSourceRig::is_idle, this});
+        PrepareContext prepare;
+        prepare.sample_rate = kSr;
+        prepare.max_buffer_size = kFrames;
+        prepare.output_channels = 1;
+        midi_out.reserve_events(8);
+        REQUIRE(node.prepare(prepare));
+        context.routed = true;
+        context.node_outputs = {out_ch.data(), 1, kFrames};
+        context.node_midi_out = &midi_out;
+        block.sample_rate = kSr;
+        block.frame_count = kFrames;
+    }
+    bool run() {
+        return ProcessorNode::process_binding(block, context, &node);
+    }
+    void fill_output(float value) {
+        output.fill(value);
+    }
+    bool output_all_zero_bits() const {
+        for (const float sample : output) {
+            std::uint32_t bits;
+            std::memcpy(&bits, &sample, sizeof(bits));
+            if (bits != 0)
+                return false;
+        }
+        return true;
+    }
+};
+
+} // namespace
+
+TEST_CASE("Processor node idle skip zeroes its output and does not allocate",
+          "[format][graph][processor-node][idle-skip][rt-safety]") {
+    IdleSourceRig rig;
+    REQUIRE(rig.node.idle_skip_armed());
+    // The first idle block runs the processor and confirms it is silent.
+    rig.fill_output(0.7f);
+    REQUIRE(rig.run());
+    CHECK(rig.processor.calls == 1);
+    CHECK(rig.output_all_zero_bits());
+    CHECK(rig.node.idle_skipped_blocks() == 0);
+    {
+        pulp::test::RtAllocationProbe probe;
+        for (int block = 0; block < 5; ++block) {
+            rig.fill_output(0.7f);
+            REQUIRE(rig.run());
+            REQUIRE(rig.output_all_zero_bits());
+        }
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+    CHECK(rig.processor.calls == 1);
+    CHECK(rig.node.idle_skipped_blocks() == 5);
+
+    // Busy again: the processor runs, and silence has to be confirmed anew.
+    rig.idle = false;
+    rig.processor.level = 0.25f;
+    REQUIRE(rig.run());
+    CHECK(rig.processor.calls == 2);
+    CHECK(rig.output[0] == 0.25f);
+    rig.idle = true;
+    rig.processor.level = 0.0f;
+    REQUIRE(rig.run());
+    CHECK(rig.processor.calls == 3);
+    REQUIRE(rig.run());
+    CHECK(rig.processor.calls == 3);
+}
+
+TEST_CASE("Processor node idle skip clears stale MIDI output",
+          "[format][graph][processor-node][idle-skip]") {
+    IdleSourceRig rig;
+    // A busy block leaves a note in the node's MIDI output.
+    rig.idle = false;
+    rig.processor.emit_note = true;
+    REQUIRE(rig.run());
+    REQUIRE_FALSE(rig.midi_out.empty());
+    // Idle blocks confirm silence (the processor clears its output when it runs).
+    rig.idle = true;
+    rig.processor.emit_note = false;
+    REQUIRE(rig.run());
+    CHECK(rig.midi_out.empty());
+    // Anything left in the buffer by an earlier block is gone after a skip.
+    rig.midi_out.add(pulp::midi::MidiEvent::note_on(1, 61, 100));
+    const int calls = rig.processor.calls;
+    REQUIRE(rig.run());
+    CHECK(rig.processor.calls == calls);
+    CHECK(rig.node.idle_skipped_blocks() == 1);
+    CHECK(rig.midi_out.empty());
+}
+
+TEST_CASE("Processor node idle skip is only armed for an eligible processor",
+          "[format][graph][processor-node][idle-skip]") {
+    // No probe installed: never armed, always processed.
+    {
+        IdleSource processor;
+        pulp::state::StateStore store;
+        bind_processor(processor, store);
+        ProcessorNode node(processor);
+        PrepareContext prepare;
+        prepare.sample_rate = kSr;
+        prepare.max_buffer_size = 32;
+        prepare.output_channels = 1;
+        REQUIRE(node.prepare(prepare));
+        CHECK_FALSE(node.idle_skip_armed());
+    }
+    // A processor with an audio input is refused even with a probe.
+    {
+        OnePoleMono processor;
+        pulp::state::StateStore store;
+        bind_processor(processor, store);
+        ProcessorNode node(processor);
+        node.set_idle_probe({[](void*) noexcept { return true; }, nullptr});
+        PrepareContext prepare;
+        prepare.sample_rate = kSr;
+        prepare.max_buffer_size = 32;
+        prepare.input_channels = 1;
+        prepare.output_channels = 1;
+        REQUIRE(node.prepare(prepare));
+        CHECK_FALSE(node.idle_skip_armed());
+    }
 }

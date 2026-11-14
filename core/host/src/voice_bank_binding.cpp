@@ -16,6 +16,21 @@ namespace {
 
 constexpr std::uint32_t kSlots = 8;
 
+// What a slot's idle probe reads. The owner's slot_note() is the same call the
+// bank already makes on the audio thread; a slot is idle when its voice is not
+// active (a releasing voice is still active).
+struct IdleProbeContext {
+    VoiceBankOwner* owner = nullptr;
+    std::uint32_t slot = 0;
+};
+
+bool slot_is_idle(void* context) noexcept {
+    const auto* probe = static_cast<const IdleProbeContext*>(context);
+    midi::MpeNoteState note{};
+    bool releasing = false;
+    return !probe->owner->slot_note(probe->slot, note, releasing);
+}
+
 bool valid_deferred_expression(midi::MpeExpressionEvent::Kind kind, const midi::MpeNoteState& state,
                                float member_bend_range) noexcept {
     switch (kind) {
@@ -139,6 +154,8 @@ struct VoiceBankBinding::Impl {
     std::array<bool, 16> member_sustain{};
     std::array<bool, 2> zone_sustain{};
     bool suppress_note_off = false;
+    bool idle_skip = false;
+    std::array<IdleProbeContext, kSlots> idle_probes{};
     std::string stereo_port;
 
     Scope scope_for(std::uint8_t channel) const noexcept {
@@ -302,7 +319,7 @@ std::unique_ptr<VoiceBankBinding>
 VoiceBankBinding::prepare(const VoiceTemplateSchema& schema, SubgraphTemplate definition,
                           std::unique_ptr<VoiceBankOwner> owner, std::string stereo_port,
                           double sample_rate, int max_frames, VoiceBankBindingResult& result,
-                          midi::MpeConfig mpe_config) {
+                          midi::MpeConfig mpe_config, VoiceBankIdleSkip idle_skip) {
     result = {};
     auto prepared = prepare_voice_bank(schema);
     if (!owner) {
@@ -397,11 +414,36 @@ VoiceBankBinding::prepare(const VoiceTemplateSchema& schema, SubgraphTemplate de
             return {};
         }
         bank->impl_->slots[slot] = std::move(instance.instance);
+        if (idle_skip == VoiceBankIdleSkip::SkipInactiveSlots) {
+            bank->impl_->idle_probes[slot] = {bank->impl_->owner.get(), slot};
+            const auto voice =
+                bank->impl_->graph.processor_node_instance(bank->impl_->slots[slot].nodes.front());
+            if (!voice) {
+                result = {VoiceBankBindingCode::FactoryFailure, slot, "voice",
+                          "voice processor is unavailable for idle skipping"};
+                return {};
+            }
+            voice->set_idle_probe({&slot_is_idle, &bank->impl_->idle_probes[slot]});
+        }
     }
     if (!bank->impl_->graph.prepare(sample_rate, max_frames)) {
         result = {VoiceBankBindingCode::GraphPrepareFailure, 0, "voice",
                   "prepared graph rejected the eight-slot candidate"};
         return {};
+    }
+    if (idle_skip == VoiceBankIdleSkip::SkipInactiveSlots) {
+        // Refuse loudly rather than quietly running without the option.
+        for (std::uint32_t slot = 0; slot < kSlots; ++slot) {
+            const auto voice =
+                bank->impl_->graph.processor_node_instance(bank->impl_->slots[slot].nodes.front());
+            if (!voice || !voice->idle_skip_armed()) {
+                result = {VoiceBankBindingCode::InvalidManifest, slot, "voice",
+                          "idle skip needs a voice processor with no audio or modulation input "
+                          "and a bounded tail"};
+                return {};
+            }
+        }
+        bank->impl_->idle_skip = true;
     }
     return bank;
 }
@@ -427,6 +469,7 @@ bool VoiceBankBinding::activate(VoiceBankBindingResult& result) noexcept {
         result = {VoiceBankBindingCode::EpochExhausted, 0, {}, "epoch exhausted"};
         return false;
     }
+    reset_idle_confirmations();
     impl_->tracker.reset();
     impl_->owner->reset();
     impl_->held.fill({});
@@ -617,7 +660,29 @@ bool VoiceBankBinding::set_slot_parameter(std::uint32_t slot, std::string_view p
         return false;
     processor->state_store().set_value(id->second, value);
     impl_->slots[slot].parameters.at(key) = value;
+    // The processor must run again with the new value before it can be skipped.
+    processor->reset_idle_confirmation();
     return true;
+}
+
+std::uint64_t VoiceBankBinding::idle_skipped_blocks() const noexcept {
+    std::uint64_t total = 0;
+    for (const auto& slot : impl_->slots) {
+        if (slot.nodes.empty())
+            continue;
+        if (const auto voice = impl_->graph.processor_node_instance(slot.nodes.front()))
+            total += voice->idle_skipped_blocks();
+    }
+    return total;
+}
+
+void VoiceBankBinding::reset_idle_confirmations() noexcept {
+    for (const auto& slot : impl_->slots) {
+        if (slot.nodes.empty())
+            continue;
+        if (const auto voice = impl_->graph.processor_node_instance(slot.nodes.front()))
+            voice->reset_idle_confirmation();
+    }
 }
 
 } // namespace pulp::host
