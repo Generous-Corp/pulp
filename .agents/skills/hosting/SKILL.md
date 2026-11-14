@@ -3268,6 +3268,16 @@ changed" flags fire on play/stop too, so never map them to `discontinuity`.
 Convert AUv3 event times with `au_event_block_time()`, not the adapter's
 `au_event_block_offset()`, which clamps out-of-block times into the block.
 
+LV2 enters through `clock_from_lv2()`. LV2 has no steady counter at all, so
+the clock is always counter-free: a skipped `run()` is indistinguishable from
+a contiguous one, and seeks are only visible from a playing `time:frame` whose
+delta is not the previous block's length. Only `time:speed == 1` counts as
+playing (varispeed moves the transport at a different rate). None of the four
+adapters can call these helpers yet: `pulp-host` links `pulp::format`, so an
+adapter using `HostBlockTimeline` would be a dependency cycle, and no
+`Processor` seam consumes `HostEventRecord`s (see
+`docs/graph-program-status/G-5.md`, "Adapter wiring assessment").
+
 # G-7 edge diagnostics
 
 SignalGraph control and event edge probes are serial routed diagnostics with
