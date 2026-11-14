@@ -20,7 +20,8 @@ bounded MIDI path does not route it; channel pressure remains supported.
 The numeric first-sample oracle observes `sample3=-0.353553`, `sample10=0`.
 
 State round trip: the consumer sets distinct per-slot levels on a live bank,
-keeps its own copy of those values (the binding has no parameter getter),
+keeps its own copy of those values (independent of the binding's own
+`capture_state()`),
 encodes them against the bank manifest, decodes and restores them onto a
 freshly prepared bank, and reapplies them with `set_slot_parameter`. The
 restored bank has no active voice, re-encodes to identical bytes, and renders
@@ -29,7 +30,8 @@ another template revision, a forged slot 8, an undeclared target, and NaN or
 infinite values are refused with the destination unchanged, both as structs
 and as forged wire bytes. The persisted schema carries no parameter bounds:
 a finite value above the authored maximum restores, and `set_slot_parameter`
-refuses it when it is applied.
+refuses it when it is applied. `VoiceBankBinding::restore_state` checks those
+bounds too and applies a whole state to a live bank all or nothing.
 
 Hard-cut swap: `activate()` inside an open block returns `InvalidBlock` and
 leaves the voice sounding. Between blocks it advances the epoch and retires

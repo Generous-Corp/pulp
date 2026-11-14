@@ -43,3 +43,14 @@ control matches on the reference walk and the routed executor across all five
 schedules; parallel routing is refused once the graph-event lane is bound and
 stays NOT_CHECKED); runtime, realtime timing,
 provider-parity, and non-Darwin lanes remain **NOT_CHECKED**.
+
+Mailbox overflow telemetry (2026-11-14): `SignalGraph::parameter_mailbox_counters`
+reports a `PluginSlot` node's published, overflowed and dropped-event counts,
+covered by `pulp-test-host-signal-graph`. The consumer source now asserts them
+(`parameter-mailbox-overflow-counters`, with a planted wrong expectation that
+fails under that rule in an in-tree build). The installed-SDK receipt has not
+been rerun, so that row stays **NOT_CHECKED** in the receipt. The same in-tree
+build of the unchanged `origin/main` consumer fails `combined-epoch-map`: voice
+bank epochs now come from one process-wide sequence, so the voice family's
+native epoch differs between the five combined renders. That control needs a
+rule that does not compare raw bank epochs across banks.

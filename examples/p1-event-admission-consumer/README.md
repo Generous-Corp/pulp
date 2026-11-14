@@ -17,7 +17,9 @@ and two partition schedules:
 * parameters through `SignalGraph::inject_parameter_events` into a small
   `PluginSlot` node added with `add_plugin_node`: latest-wins, sorted delivery
   with stable equal-offset order, one-shot delivery, and a source-side
-  overflow that returns `false` (block sizes 4 and 8). A standalone
+  overflow that returns `false` (block sizes 4 and 8), counted by
+  `SignalGraph::parameter_mailbox_counters` (four batches published, one
+  overflowed, one event dropped). A standalone
   `ParameterEventQueue` sort and overflow check is also kept;
 * voice intent through the installed `pulp::host::VoiceBankBinding`: note-on
   and note-off land across blocks on one slot and generation, and

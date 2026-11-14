@@ -136,7 +136,12 @@ fixture uses a fixed `1/sqrt(8)` eight-slot stereo sum and four in-slot linear
 release frames. `VoiceBankIdleSkip::SkipInactiveSlots` (last `prepare` argument, off
 by default) skips idle slots once they have produced confirmed silence; it is
 safe only for voices with no free-running state, see "Skipping idle voices" in
-`docs/guides/graph-voice-binding.md`. Saved-bank activation, edit/undo, DAW adapters, and paced
+`docs/guides/graph-voice-binding.md`. To restore saved slot parameters onto a
+live bank use `VoiceBankBinding::restore_state()`, not a loop of
+`set_slot_parameter()`: `restore_voice_bank_state()` knows no authored bounds,
+so a value-by-value replay can refuse halfway and leave the bank half-restored,
+while `restore_state()` checks every value (bounds included) before the first
+write. Saved-bank activation, edit/undo, DAW adapters, and paced
 realtime qualification remain open; do not infer them from the source-installed
 consumer.
 
@@ -1147,6 +1152,11 @@ save/reopen render proof beside the legacy caller-owned route controls.
   automation when the fixed queue is full and lets injected events win a
   same-offset tie. Reuse the mailbox across gap-free snapshots for the same
   plugin node so an edit cannot discard a publication made before the swap.
+  `parameter_mailbox_counters()` reads that mailbox's published, overflowed
+  and dropped-event counts; they live in the mailbox, so they survive
+  `prepare_swap()` and restart on an eager `prepare()`. They count only the
+  source side; a delivery-time drop into a full block queue is not counted,
+  because a refused delivery is retried and would be counted twice.
 - Keep plugin automation scratch preallocated by `SignalGraph::prepare()`.
   The audio-thread `process()` path must not create per-block containers for
   input pointer casts, sparse automation accumulation, or dense audio-rate

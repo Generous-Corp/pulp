@@ -11,6 +11,7 @@
 #include <limits>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace pulp::host {
 namespace {
@@ -692,6 +693,87 @@ bool VoiceBankBinding::set_slot_parameter(std::uint32_t slot, std::string_view p
     impl_->slots[slot].parameters.at(key) = value;
     // The processor must run again with the new value before it can be skipped.
     processor->reset_idle_confirmation();
+    return true;
+}
+
+std::optional<float> VoiceBankBinding::slot_parameter(std::uint32_t slot,
+                                                      std::string_view path) const {
+    if (slot >= kSlots)
+        return std::nullopt;
+    const auto& values = impl_->slots[slot].parameters;
+    const auto found = values.find(std::string(path));
+    if (found == values.end())
+        return std::nullopt;
+    return found->second;
+}
+
+VoiceBankState VoiceBankBinding::capture_state() const {
+    VoiceBankState state;
+    state.manifest_sha256 = impl_->manifest.sha256;
+    for (const auto& binding : impl_->manifest.bindings) {
+        if (binding.spec.target_kind != VoiceBindingTarget::Parameter ||
+            binding.slot_ordinal >= kSlots)
+            continue;
+        const auto& values = impl_->slots[binding.slot_ordinal].parameters;
+        const auto found = values.find(binding.spec.target);
+        if (found == values.end())
+            continue;
+        state.parameters.push_back(
+            {binding.slot_ordinal, binding.spec.path, binding.spec.target, found->second});
+    }
+    return state;
+}
+
+bool VoiceBankBinding::restore_state(const VoiceBankState& state, VoiceBankBindingResult& result) {
+    if (impl_->block_open) {
+        result = {VoiceBankBindingCode::InvalidBlock, 0, {}, "restore inside an open block"};
+        return false;
+    }
+    VoiceBankState canonical;
+    std::string error;
+    if (!restore_voice_bank_state(impl_->manifest, state, canonical, &error)) {
+        result = {VoiceBankBindingCode::InvalidState, 0, {}, std::move(error)};
+        return false;
+    }
+    struct Write {
+        std::shared_ptr<format::ProcessorNodeInstance> processor;
+        std::uint32_t slot = 0;
+        std::uint32_t id = 0;
+        const std::string* key = nullptr;
+        float value = 0.0f;
+    };
+    std::vector<Write> writes;
+    writes.reserve(canonical.parameters.size());
+    // Resolve and bound-check every value before the first write.
+    for (const auto& value : canonical.parameters) {
+        const auto refuse = [&](const char* detail) {
+            result = {VoiceBankBindingCode::InvalidState, value.slot_ordinal, value.target, detail};
+            return false;
+        };
+        if (value.slot_ordinal >= kSlots)
+            return refuse("slot is outside the bank");
+        auto& slot = impl_->slots[value.slot_ordinal];
+        const auto target = slot.parameter_nodes.find(value.target);
+        const auto bounds = slot.parameter_bounds.find(value.target);
+        const auto id = slot.processor_parameter_ids.find(value.target);
+        const auto current = slot.parameters.find(value.target);
+        if (target == slot.parameter_nodes.end() || bounds == slot.parameter_bounds.end() ||
+            id == slot.processor_parameter_ids.end() || current == slot.parameters.end())
+            return refuse("parameter is not bound in this slot");
+        if (!(value.value >= bounds->second.minimum && value.value <= bounds->second.maximum))
+            return refuse("value is outside the parameter's authored bounds");
+        auto processor = impl_->graph.processor_node_instance(target->second);
+        if (!processor || !processor->parameter(id->second))
+            return refuse("slot processor does not expose the parameter");
+        writes.push_back(
+            {std::move(processor), value.slot_ordinal, id->second, &current->first, value.value});
+    }
+    for (const auto& write : writes) {
+        write.processor->state_store().set_value(write.id, write.value);
+        impl_->slots[write.slot].parameters.at(*write.key) = write.value;
+        write.processor->reset_idle_confirmation();
+    }
+    result = {};
     return true;
 }
 
