@@ -1,0 +1,96 @@
+name: Cutover trial deletion build (manual)
+
+# Advisory report, never a gate. Builds Pulp in a scratch checkout with the
+# cutover deletion set (tools/scripts/cutover_trial_inputs.json) removed, then
+# uploads a JSON report of every target that failed to build, the first
+# missing header or symbol for each, and the capability-ledger rows they
+# belong to. It answers whether the code that stays in Pulp still builds once
+# the UI units it includes or links are gone.
+#
+# Manual dispatch only: it runs a full build, so it never runs on a schedule or
+# a pull request. Runner: GitHub-hosted macos-15, deliberately not the
+# self-hosted pool that hosts the required macos gate. The job succeeds when
+# the report is produced, whatever the build did; the report holds the verdict.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to trial-delete from (empty = the dispatched ref)
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cutover-trial-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  trial:
+    name: Trial deletion build (macOS, report only)
+    runs-on: macos-15
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          lfs: false
+          fetch-depth: 0
+
+      - name: Hydrate bounded GPU provenance commits
+        shell: bash
+        run: python3 tools/scripts/hydrate_gpu_provenance_commits.py
+
+      - name: Install build tools
+        shell: bash
+        run: |
+          brew install ccache ninja || { brew update; brew install ccache ninja; }
+
+      - name: Run the trial
+        shell: bash
+        env:
+          TRIAL_REF: ${{ inputs.ref }}
+          PREPARE_CMD: ./setup.sh --ci --deps-only && python3 tools/scripts/fetch_skia_for_release.py darwin-arm64 --cache-root "$HOME/.cache/pulp/skia"
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/cutover-report"
+          python3 tools/scripts/cutover_trial.py \
+            --source . \
+            --scratch "$GITHUB_WORKSPACE/../pulp-cutover-trial" \
+            --ref "${TRIAL_REF:-HEAD}" \
+            --report "$RUNNER_TEMP/cutover-report/cutover-trial-report.json" \
+            --log-dir "$RUNNER_TEMP/cutover-report" \
+            --prepare "$PREPARE_CMD"
+
+      - name: Summarize
+        if: always()
+        shell: bash
+        run: |
+          f="$RUNNER_TEMP/cutover-report/cutover-trial-report.json"
+          if [ -f "$f" ]; then
+            python3 - "$f" >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json, sys
+          r = json.load(open(sys.argv[1]))
+          print("## Cutover trial (advisory)")
+          print(f"- configure ok: {r['configure']['ok']}")
+          print(f"- build ran: {r['build']['ran']}")
+          print(f"- build ok: {r['build']['ok']}")
+          if r['build']['returncode'] is not None:
+              print(f"- build return code: {r['build']['returncode']}")
+          print(f"- failed targets: {len(r['build']['failed_targets'])}")
+          print(f"- stranded rows hit: {r['stranded_rows_hit']} of {r['stranded_rows_total']}")
+          for row, targets in sorted(r["by_row"].items()):
+              print(f"  - {row}: {len(targets)}")
+          PY
+          else
+            echo "No report was produced." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload report and logs
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: cutover-trial-report
+          path: ${{ runner.temp }}/cutover-report/
+          if-no-files-found: warn

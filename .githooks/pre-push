@@ -180,6 +180,72 @@ if [ "${PULP_SKIP_PREPUSH:-0}" = "1" ] && [ -n "${SHIPYARD_AGENT_ID:-}" ] \
     unset _agent_ssc_rc
 fi
 
+# The same floor keeps two diff-scoped static checks for an agent push under
+# PULP_SKIP_PREPUSH or PULP_DISABLE_PREPUSH_GATES: the Python 3.11 f-string
+# floor and Catch2 assertions in worker threads, on the files the pushed commit
+# changed (committed blobs, seconds). Each fails a required check on the PR
+# head (`Enforce version & skill sync`, `drift-fast`), and repair lanes push
+# with those knobs. Diff-scoped, so a violation already on the base never
+# blocks an unrelated push.
+_prepush_static_floor() {
+    local base="$1" violation=0 error=0 one
+    if [ -f "$ROOT/tools/scripts/python_floor_syntax_check.py" ]; then
+        "$PULP_PYTHON" "$ROOT/tools/scripts/python_floor_syntax_check.py" --changed-from "$base"
+        one=$?
+        case "$one" in
+            0) ;;
+            1) violation=1 ;;
+            *) [ "$error" -eq 0 ] && error="$one" ;;
+        esac
+    fi
+    if [ -f "$ROOT/tools/scripts/thread_assert_check.py" ]; then
+        "$PULP_PYTHON" "$ROOT/tools/scripts/thread_assert_check.py" --changed-from "$base"
+        one=$?
+        case "$one" in
+            0) ;;
+            1) violation=1 ;;
+            *) [ "$error" -eq 0 ] && error="$one" ;;
+        esac
+    fi
+    [ "$violation" -eq 1 ] && return 1
+    [ "$error" -ne 0 ] && return "$error"
+    return 0
+}
+# The floor judges HEAD, so it runs only when the push sends HEAD to a
+# non-tag ref (not a deletion, a tag, or another branch's commit); the full
+# pushed-ref guard below does not run under PULP_SKIP_PREPUSH. The base is the
+# local origin/main: a stale one widens the diff, so refresh it when a push is
+# refused on lines the branch did not change.
+_prepush_sends_head() {
+    local head lref lsha rref rsha
+    head="$(git rev-parse HEAD 2>/dev/null)" || return 1
+    while read -r lref lsha rref rsha; do
+        case "${rref:-}" in refs/tags/*|refs/notes/*|"") continue ;; esac
+        [ "${lsha:-}" = "$head" ] && return 0
+    done <<EOF_SENDS_HEAD
+$PREPUSH_UPDATE_RECORDS
+EOF_SENDS_HEAD
+    return 1
+}
+_prepush_static_floor_ran=0
+if [ -n "${SHIPYARD_AGENT_ID:-}" ] \
+    && { [ "${PULP_SKIP_PREPUSH:-0}" = "1" ] || [ "${PULP_DISABLE_PREPUSH_GATES:-0}" = "1" ]; } \
+    && _prepush_sends_head; then
+    _prepush_static_floor_ran=1
+    _prepush_static_floor "${PULP_PREPUSH_BASE:-origin/main}"
+    _agent_sf_rc=$?
+    case $_agent_sf_rc in
+        0) ;;
+        1)
+            echo "✗ pre-push: PULP_SKIP_PREPUSH / PULP_DISABLE_PREPUSH_GATES do not skip the static floor for an agent push (SHIPYARD_AGENT_ID=${SHIPYARD_AGENT_ID})." >&2
+            echo "  Fix the lines named above, then push again." >&2
+            exit 1
+            ;;
+        *) echo "[pre-push] WARNING: the static floor could not run (exit $_agent_sf_rc); CI will run it." >&2 ;;
+    esac
+    unset _agent_sf_rc
+fi
+
 if [ "${PULP_SKIP_PREPUSH:-0}" = "1" ]; then
     echo "[pre-push] PULP_SKIP_PREPUSH=1 — skipping gates." >&2
     exit 0
@@ -845,6 +911,22 @@ if [ -f "$SEQ_EXPOSURE" ]; then
         1) echo "[pre-push] sequencer-exposure ledger: the ledger is invalid or a delivery slice is unclassified — run \`python3 tools/scripts/sequencer_exposure_check.py --base $BASE\` for the offending row(s)." >&2; prepush_fail ;;
         *) gate_could_not_run "sequencer_exposure_check" "$gate_rc"; prepush_fail ;;
     esac
+fi
+
+# The static floor defined above (Python 3.11 f-string floor, Catch2
+# assertions in worker threads; diff-scoped). Skipped here when the agent floor
+# already ran it blocking.
+if [ "$_prepush_static_floor_ran" = "0" ]; then
+    for _sf_script in python_floor_syntax_check.py thread_assert_check.py; do
+        [ -f "$ROOT/tools/scripts/$_sf_script" ] || continue
+        run_gate_captured "$PYTHON" "$ROOT/tools/scripts/$_sf_script" --changed-from "$BASE"
+        gate_rc=$?; case $gate_rc in
+            0) ;;
+            1) prepush_fail ;;
+            *) gate_could_not_run "$_sf_script" "$gate_rc"; prepush_fail ;;
+        esac
+    done
+    unset _sf_script
 fi
 
 # A hand-written docs/migrations/vX.Y.Z.md guesses the version version-at-land

@@ -1,5 +1,5 @@
 {
   "schema": "pulp.agent-capability-fingerprint.v1",
   "include": "pulp/host/signal_graph_prepared_topology_edit.hpp",
-  "fingerprint": "sha256:2c4909390c39a83a2360a1dea23bf6ee1449276edf42949742e818dade300c8d"
+  "fingerprint": "sha256:59f06257951c72750485030d472e12fd6ed63716deae04662ea44438aee82b66"
 }

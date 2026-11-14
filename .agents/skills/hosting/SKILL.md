@@ -9,6 +9,33 @@ description: |
 
 # hosting
 
+## Graph-owned Control indexing
+
+Register `make_control_index_input_type()` and the needed scalar Control
+factories on the graph before adding their nodes. Connect typed Control ports
+from `ControlIndexInput.index` through an indexed table to a Processor Control
+input, then submit one finite index per frame with
+`SignalGraph::process_control_checked()`. Its checked result is part of the
+contract: a routed render failure returns `RenderFailed` and silences the
+output. Keep the table and scalar state bounded, validate it before the
+prepared edit is published, and consume the dense modulation inside the
+Processor's `process_block()`.
+
+`examples/g5-control-index-filter` is the installed SDK fixture. It compares
+one block with a partitioned render and an independent sample recurrence, and
+plants missing-edge and swapped-index failures. Its v4 and v5 emit modes also
+exercise the graph persistence boundary.
+Its installed-SDK test is labelled `slow`, so only the nightly full build runs
+it; it does not gate a PR.
+
+Gotchas: every node constructor must call `detail::populate_named_ports()`
+(`signal_graph_ports_internal.hpp`), because the numeric `connect()` kind guard
+and the serializer index `input_ports` / `output_ports` by port number; trigger
+nodes once skipped it and crashed numeric connect. Read the next block's epoch
+and start from `control_index_position()`, and expect prepare or a prepared-edit
+commit to reset it to epoch 1, cursor 0. `control_index_nodes.cpp` is part of
+the curated sample-region web source list, because authoring calls into it.
+
 ## Opt-in isolated CLAP processing
 
 `pulp/host/isolated_plugin_slot.hpp` supplies experimental MacClapStereo64V1
@@ -3205,6 +3232,18 @@ not advance). A steady-clock forward gap stays in the epoch; a backwards clock
 or a steady/no-steady flip opens a new epoch. Out-of-block times are refused,
 never clamped. The CLAP adapter still feeds the Processor `MidiBuffer`, not this
 projection.
+
+VST3 and AU enter the same timeline through `clock_from_vst3()` /
+`clock_from_au()` (plain fields, no SDK). Gotchas: VST3's steady counter is
+`continousTimeSamples` (SDK spelling) and is only valid under `kContTimeValid`,
+which the VST3 adapter's `kProcessContextRequirements` does NOT request today
+(`kNeedContinousTimeSamples`), so a strict host sends none and the projection
+falls back to "no steady clock". `kProjectTimeMusicValid` gates beats, not
+`projectTimeSamples`. AU's steady counter is `mSampleTime` (keeps running
+across loops; round it like the adapters do). The AU "transport state
+changed" flags fire on play/stop too, so never map them to `discontinuity`.
+Convert AUv3 event times with `au_event_block_time()`, not the adapter's
+`au_event_block_offset()`, which clamps out-of-block times into the block.
 
 # G-7 edge diagnostics
 

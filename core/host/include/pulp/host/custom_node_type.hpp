@@ -7,6 +7,7 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/rt_safety_contract.hpp>
 #include <pulp/host/custom_node_events.hpp>
+#include <pulp/host/signal_graph_node.hpp>
 #include <pulp/signal/rt_work_counter.hpp>
 #include <pulp/state/parameter.hpp>
 
@@ -107,6 +108,13 @@ struct CustomNodeRtContract {
     // "one FFT per 256-frame hop; ceil(block/256) hops". Free text, reported
     // verbatim; empty when the node does not declare one.
     std::string loop_bound;
+};
+
+/// A persistent named port on a Custom graph node. Empty descriptor lists on
+/// CustomNodeType preserve the historical all-Audio port shape.
+struct CustomNodePortDescriptor {
+    std::string name;
+    PortKind kind = PortKind::Audio;
 };
 
 struct CustomNodeType {
@@ -272,6 +280,12 @@ struct CustomNodeType {
     // Optional declared realtime contract for the static graph report.
     CustomNodeRtContract rt_contract;
 
+    // Appended to preserve existing positional aggregate initializers.
+    std::vector<CustomNodePortDescriptor> input_ports;
+    std::vector<CustomNodePortDescriptor> output_ports;
+
+    bool matches_ports(const GraphNode& node) const noexcept;
+
     // True when this type declares a usable event-aware execution path.
     // DERIVED from callback presence rather than stored as a flag, so it can
     // never disagree with the callbacks it describes.
@@ -280,93 +294,7 @@ struct CustomNodeType {
                (static_cast<bool>(create) && static_cast<bool>(process_instance_events));
     }
 
-    bool is_valid_registration() const noexcept {
-        const bool has_plain_callback =
-            static_cast<bool>(process) ||
-            (static_cast<bool>(create) && static_cast<bool>(process_instance));
-        const bool has_transport_callback =
-            static_cast<bool>(process_transport) ||
-            (static_cast<bool>(create) &&
-             static_cast<bool>(process_instance_transport));
-        // A latent transport-aware execution path must have a resolvable plain
-        // fallback: PDC is prepare-stable and cannot change when a block gains
-        // or loses a transport context. Declaring ANY latency callback is the
-        // registration-time stand-in for a non-zero fixed latency, since the
-        // value itself is not resolvable this early.
-        const bool declares_artifact_latency = static_cast<bool>(latency_samples) ||
-                                               static_cast<bool>(latency_samples_for_block) ||
-                                               static_cast<bool>(output_port_latency_samples);
-        if (type_id.empty() || version <= 0 || num_input_ports < 0 || num_output_ports < 0 ||
-            (declares_artifact_latency && has_transport_callback && !has_plain_callback)) {
-            return false;
-        }
-
-        // Per-port latency replaces the scalar declaration; accepting both would
-        // leave the node's latency ambiguous. The bake layer lowers one scalar
-        // latency per node and has no port equaliser, so a per-port node cannot
-        // be lowered without silently misaligning its outputs.
-        if (output_port_latency_samples &&
-            (latency_samples || latency_samples_for_block || lowerable)) {
-            return false;
-        }
-
-        // A stateful event callback needs a complete instance lifecycle, exactly
-        // as the stateful transport and baked-param callbacks do.
-        if (process_instance_events && (!create || !destroy)) return false;
-
-        // The bake layer carries no event plane, so a lowered event-aware node
-        // would run its audio silently MIDI-less instead of failing. Refuse the
-        // combination at registration, where it is still visible.
-        if (lowerable && consumes_events()) return false;
-
-        // Transport-aware and event-aware execution in one type would need a
-        // dispatch precedence the binding does not define. Carrying transport on
-        // the event block is what lifts this.
-        if (consumes_events() && has_transport_callback) return false;
-
-        // Bake-layer obligations live here too, so that every registrar — the
-        // direct one, the transactional edit, and the node-adding leaf — applies
-        // ONE rule. A descriptor that passes shape but declares an incoherent
-        // bake surface would otherwise stay `lowerable`, be accepted by baking,
-        // and silently degrade to passthrough.
-        const bool declares_baked_params = !baked_params.empty();
-        const bool has_baked_param_process =
-            static_cast<bool>(process_instance_baked_param);
-        if (declares_baked_params != has_baked_param_process) return false;
-
-        if (declares_baked_params) {
-            // The callback takes an instance pointer, so a parameter-aware baked
-            // type without a complete instance lifecycle can never produce the
-            // runnable binding that bake() promises.
-            if (!create || !destroy) return false;
-            for (std::size_t i = 0; i < baked_params.size(); ++i) {
-                const auto& param = baked_params[i];
-                if (param.id == 0
-                    || !std::isfinite(param.min_value)
-                    || !std::isfinite(param.max_value)
-                    || !std::isfinite(param.default_value)
-                    || param.min_value > param.max_value
-                    || param.default_value < param.min_value
-                    || param.default_value > param.max_value) {
-                    return false;
-                }
-                for (std::size_t j = 0; j < i; ++j) {
-                    if (baked_params[j].id == param.id) return false;
-                }
-            }
-        }
-
-        if (lowerable) {
-            if (create) {
-                if (!destroy || (!process_instance && !has_baked_param_process)) {
-                    return false;
-                }
-            } else if (!process) {
-                return false;
-            }
-        }
-        return true;
-    }
+    bool is_valid_registration() const noexcept;
 };
 
 // ── Sample-region scalar callback ABI ─────────────────────────────────
