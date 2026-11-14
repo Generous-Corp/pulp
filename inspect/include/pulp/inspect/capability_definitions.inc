@@ -30,6 +30,7 @@ PULP_INSPECT_CAPABILITY(TimelineDocumentSession, "timeline.document.session", "d
 PULP_INSPECT_CAPABILITY(GraphSampleRegionRead, "graph.sample-region.read", "dev.pulp.graph/sample-region.read@1", Sensitive, None, HostMain, Response, 1, 1, 1, 0)
 PULP_INSPECT_CAPABILITY(GraphSampleRegionEdit, "graph.sample-region.edit", "dev.pulp.graph/sample-region.edit@1", Control, Authoring, HostMain, Receipt, 0, 1, 1, 0)
 PULP_INSPECT_CAPABILITY(ModulationRouteEdit, "graph.modulation-route.edit", "dev.pulp.graph/modulation-route.edit@1", Control, Authoring, HostMain, Receipt, 0, 1, 1, 0)
+PULP_INSPECT_CAPABILITY(GraphFileReload, "graph.file.reload", "dev.pulp.graph/file.reload@1", Control, Authoring, HostMain, Receipt, 0, 1, 1, 0)
 PULP_INSPECT_CAPABILITY(VendorRead, "vendor.read", "dev.pulp.vendor/read@1", Sensitive, None, HostMain, Response, 1, 1, 1, 0)
 PULP_INSPECT_CAPABILITY(VendorGesture, "vendor.gesture", "dev.pulp.vendor/gesture@1", Control, State, HostMain, Receipt, 0, 1, 1, 0)
 PULP_INSPECT_CAPABILITY(VendorRender, "vendor.render", "dev.pulp.vendor/render@1", ResourceConsuming, Render, HostMain, Receipt, 0, 0, 1, 0)

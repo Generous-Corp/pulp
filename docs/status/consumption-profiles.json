@@ -518,6 +518,7 @@
       "pulp/host/forge_tape_catalog.hpp",
       "pulp/host/forge_wavetable_catalog.hpp",
       "pulp/host/graph_event_contract.hpp",
+      "pulp/host/graph_file_reload.hpp",
       "pulp/host/graph_identity.hpp",
       "pulp/host/graph_patch.hpp",
       "pulp/host/graph_rt_report.hpp",

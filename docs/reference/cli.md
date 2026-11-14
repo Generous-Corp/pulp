@@ -2634,6 +2634,9 @@ Flags:
 
 | Flag | Description |
 |------|-------------|
+| `--graph-file FILE` | Apply changed `.pat`/`.pulpgraph` through the existing controlled graph authority; see [graph-file reload](../guides/graph-file-reload.md). Requires the C++ delegate. |
+| `--graph-instance ID`, `--graph-grant ID`, `--graph-generation N` | Exact enrolled instance, consent grant and expected graph generation; all required with `--graph-file`. |
+| `--graph-watch-polls N` | Stop after 1..120 graph watch polls (500 ms each). |
 | `--test`, `-t` | Run tests after each successful watch build, or after the Rust fallback's one build pass |
 | `--test-filter=PATTERN` | Run only tests matching PATTERN (implies `--test`) |
 | `--validate` | Delegated C++ path: run quick plugin dlopen validation after build |
@@ -2669,6 +2672,9 @@ Flags:
 
 | Flag | Description |
 |------|-------------|
+| `--graph-file FILE` | Apply changed `.pat`/`.pulpgraph` through the existing controlled graph authority; see [graph-file reload](../guides/graph-file-reload.md). Requires the C++ delegate. |
+| `--graph-instance ID`, `--graph-grant ID`, `--graph-generation N` | Exact enrolled instance, consent grant and expected graph generation; all required with `--graph-file`. |
+| `--graph-watch-polls N` | Stop after 1..120 graph watch polls (500 ms each). |
 | `--platform=<macos\|linux\|windows>` | Override the auto-detected focus marker |
 | `--off` | Restore cross-platform mode by clearing the focus marker |
 | `--status` | Print the current focus state and exit |

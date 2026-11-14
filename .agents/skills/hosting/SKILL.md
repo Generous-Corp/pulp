@@ -3301,6 +3301,32 @@ only when the node has exactly one output, so stereo built-ins need explicit
 `node.audio` and `node.out1` ports. User-facing walkthroughs live in
 `docs/guides/graph-first-steps.md` and `docs/guides/graph-notation-cookbook.md`.
 
+### Transactional graph-file development reload
+
+The C++ dev/loop delegate accepts `--graph-file` with an existing enrolled
+`--graph-instance`, consent `--graph-grant` and `--graph-generation`. Reuse
+`SignalGraphControlAuthority`, the product catalog, strict shared parser and
+prepared-edit publication; no extension-only watcher or direct executor bypass.
+The serialized control request stays bounded at 512 KiB. See
+`docs/guides/graph-file-reload.md` for limitations and numeric installed proof.
+
+Retained snapshots can keep an instance alive after its node is replaced: a
+current-node scan cannot prevent A-to-B-to-A aliasing. Share its ownership token,
+reserve new ownership atomically across graphs, and keep the reservation visible
+until release returns. Custom callback compatibility cannot use `target_type` or
+shape: opaque captures are unprovable even when copied from the same catalog.
+
+Behaviour change to watch for: a `ProcessorNodeInstance` is reserved process-wide
+by the first graph that adds it. `add_processor_node` with that same instance on
+another graph, or on the same graph before every snapshot holding the old node
+has retired, now returns 0. Create a fresh instance per node instead of reusing
+one handle across graphs.
+
+`SignalGraphControlAuthority` serializes `apply`, `reload_graph_file` and `reset`
+on its own mutex. The standalone host runs file reload on the main thread but
+modulation-route edits on the RPC worker, so do not rely on caller threading to
+keep generation checks and publication atomic.
+
 ### Vendored lilv/zix on Android
 
 `pulp-host-lilv` (external/lilv) compiles into `pulp-host` on every platform,
