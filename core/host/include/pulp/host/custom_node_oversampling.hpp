@@ -119,8 +119,7 @@ inline int oversampling_latency_samples(const CustomNodeOversampling& spec) {
 /// `output_port_latency_samples`. Control thread only.
 inline bool declare_oversampling_latency(CustomNodeType& type, const CustomNodeOversampling& spec,
                                          int extra_latency_samples = 0) {
-    if (type.latency_samples || type.latency_samples_for_block ||
-        type.output_port_latency_samples)
+    if (type.latency_samples || type.latency_samples_for_block || type.output_port_latency_samples)
         return false;
     if (extra_latency_samples < 0)
         return false;

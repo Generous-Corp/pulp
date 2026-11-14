@@ -113,9 +113,8 @@ CustomNodeType make_distortion_node(Topology topology, OversampleTier tier) {
         s->loop_clipper.prepare(inner_rate);
         s->tone.prepare(inner_rate);
 
-        s->latency = configure_oversampler(s->oversampler, spec, sr)
-                         ? s->oversampler.latency_samples()
-                         : 0;
+        s->latency =
+            configure_oversampler(s->oversampler, spec, sr) ? s->oversampler.latency_samples() : 0;
     };
     t.reset = [](void* p) {
         auto* s = static_cast<DistortionInstance*>(p);

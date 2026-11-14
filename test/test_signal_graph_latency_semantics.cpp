@@ -642,8 +642,8 @@ TEST_CASE("Oversampling declaration refuses a type that already declares latency
     CustomNodeType fresh;
     CHECK_FALSE(pulp::host::declare_oversampling_latency(fresh, spec, -1));
     CHECK_FALSE(static_cast<bool>(fresh.latency_samples));
-    CHECK_FALSE(pulp::host::declare_oversampling_latency(
-        fresh, spec, CustomNodeType::kMaxLatencySamples));
+    CHECK_FALSE(
+        pulp::host::declare_oversampling_latency(fresh, spec, CustomNodeType::kMaxLatencySamples));
     CHECK_FALSE(static_cast<bool>(fresh.latency_samples));
 
     // Extra latency adds to the oversampler's own delay.
