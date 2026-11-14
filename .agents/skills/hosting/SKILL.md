@@ -36,6 +36,15 @@ and start from `control_index_position()`, and expect prepare or a prepared-edit
 commit to reset it to epoch 1, cursor 0. `control_index_nodes.cpp` is part of
 the curated sample-region web source list, because authoring calls into it.
 
+Port names: a MidiInput/MidiOutput node's single port is named `audio` (the
+first-port name from `populate_named_ports`) with kind MIDI, so do not rename
+it; `GraphNode::in` / `out` accept `midi` as an alias for a node's only MIDI
+port instead. Exact names win, and a node with zero or several MIDI ports has no
+alias. Port-name rules live in that one lookup: notation's `resolve_port`
+delegates to it, so a rule added only to the parser would let `.pat` files and
+the C++ API disagree. The formatter still writes `midi.audio`, so formatted
+text never changes when the alias is used.
+
 ## Opt-in isolated CLAP processing
 
 `pulp/host/isolated_plugin_slot.hpp` supplies experimental MacClapStereo64V1
@@ -127,7 +136,12 @@ fixture uses a fixed `1/sqrt(8)` eight-slot stereo sum and four in-slot linear
 release frames. `VoiceBankIdleSkip::SkipInactiveSlots` (last `prepare` argument, off
 by default) skips idle slots once they have produced confirmed silence; it is
 safe only for voices with no free-running state, see "Skipping idle voices" in
-`docs/guides/graph-voice-binding.md`. Saved-bank activation, edit/undo, DAW adapters, and paced
+`docs/guides/graph-voice-binding.md`. To restore saved slot parameters onto a
+live bank use `VoiceBankBinding::restore_state()`, not a loop of
+`set_slot_parameter()`: `restore_voice_bank_state()` knows no authored bounds,
+so a value-by-value replay can refuse halfway and leave the bank half-restored,
+while `restore_state()` checks every value (bounds included) before the first
+write. Saved-bank activation, edit/undo, DAW adapters, and paced
 realtime qualification remain open; do not infer them from the source-installed
 consumer.
 
@@ -1138,6 +1152,11 @@ save/reopen render proof beside the legacy caller-owned route controls.
   automation when the fixed queue is full and lets injected events win a
   same-offset tie. Reuse the mailbox across gap-free snapshots for the same
   plugin node so an edit cannot discard a publication made before the swap.
+  `parameter_mailbox_counters()` reads that mailbox's published, overflowed
+  and dropped-event counts; they live in the mailbox, so they survive
+  `prepare_swap()` and restart on an eager `prepare()`. They count only the
+  source side; a delivery-time drop into a full block queue is not counted,
+  because a refused delivery is retried and would be counted twice.
 - Keep plugin automation scratch preallocated by `SignalGraph::prepare()`.
   The audio-thread `process()` path must not create per-block containers for
   input pointer casts, sparse automation accumulation, or dense audio-rate
@@ -3268,6 +3287,16 @@ changed" flags fire on play/stop too, so never map them to `discontinuity`.
 Convert AUv3 event times with `au_event_block_time()`, not the adapter's
 `au_event_block_offset()`, which clamps out-of-block times into the block.
 
+LV2 enters through `clock_from_lv2()`. LV2 has no steady counter at all, so
+the clock is always counter-free: a skipped `run()` is indistinguishable from
+a contiguous one, and seeks are only visible from a playing `time:frame` whose
+delta is not the previous block's length. Only `time:speed == 1` counts as
+playing (varispeed moves the transport at a different rate). None of the four
+adapters can call these helpers yet: `pulp-host` links `pulp::format`, so an
+adapter using `HostBlockTimeline` would be a dependency cycle, and no
+`Processor` seam consumes `HostEventRecord`s (see
+`docs/graph-program-status/G-5.md`, "Adapter wiring assessment").
+
 # G-7 edge diagnostics
 
 SignalGraph control and event edge probes are serial routed diagnostics with
@@ -3300,6 +3329,14 @@ cannot automate (it is not a Processor parameter); a chain hop infers a port
 only when the node has exactly one output, so stereo built-ins need explicit
 `node.audio` and `node.out1` ports. User-facing walkthroughs live in
 `docs/guides/graph-first-steps.md` and `docs/guides/graph-notation-cookbook.md`.
+
+Spectral constructors appear in the catalog as `unsupported_typed_api_only`
+rows built at a fixed probe identity (FFT 256, hop 64, mono, 48 kHz), so their
+audio port counts are for that identity only. A catalog row is not proof a key
+is constructible from notation: `instantiate()` returns 0 for spectral keys and
+`parse_graph_patch` refuses them before instantiation. Never suggest
+`GraphSerializer` as the fix for a spectral refusal; `to_json` returns an empty
+string for any graph with a spectral node.
 
 ### Transactional graph-file development reload
 

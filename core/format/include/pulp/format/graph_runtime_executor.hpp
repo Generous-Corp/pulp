@@ -185,6 +185,10 @@ template <typename Probe> class EdgeProbeCell {
     std::atomic<State*> state_{nullptr};
 };
 
+// The cell stays one pointer wide so embedding it in a graph slot costs nothing
+// until a probe is first published; growing it fails here at compile time.
+static_assert(sizeof(EdgeProbeCell<int>) == sizeof(void*), "EdgeProbeCell must stay pointer-sized");
+
 enum class AudioRateModulationDelivery : std::uint8_t {
     LegacyParameterEvents = 0,
     DenseViews = 1,

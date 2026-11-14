@@ -259,7 +259,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         'include': 'pulp/host/voice_bank_binding.hpp',
-        'fingerprint': 'sha256:730ab6cc6654ae4e6e6d22a400e46518ae34bd726e9368859ea79b862e82c489',
+        'fingerprint': 'sha256:5aac3db19ba8cae73eb60ce09dc5a642a53e2a36841b12546e1ac173084a4f4c',
         'disposition': 'infrastructure',
         'capability_keys': [],
         'rationale': 'Bounded eight-slot graph voice-bank runtime with sustain; saved activation and paced realtime qualification remain open.',

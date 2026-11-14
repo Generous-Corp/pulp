@@ -601,10 +601,12 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
         // Project the latched transport onto this block, then let the shared
         // mapper derive the bar and the change flags. Extrapolate only when the
         // host sent nothing new this block — a Position that just arrived is
-        // already positioned at the block start.
+        // already positioned at the block start. The latch sits at the previous
+        // block's start, so it advances by the previous block's length.
         if (inst->has_transport) {
             if (!transport_received) {
-                advance_time_position(inst->transport, n_samples, inst->sample_rate);
+                advance_time_position(inst->transport, inst->previous_block_samples,
+                                      inst->sample_rate);
             }
             boundary::apply_host_transport(proc_ctx, to_host_transport(inst->transport),
                                            inst->playhead_prev);
@@ -614,6 +616,8 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
             boundary::apply_host_transport(proc_ctx, boundary::HostTransport{},
                                            inst->playhead_prev);
         }
+
+        inst->previous_block_samples = n_samples;
 
         inst->processor->process(process_buffers, inst->midi_in, inst->midi_out,
                                  proc_ctx);
