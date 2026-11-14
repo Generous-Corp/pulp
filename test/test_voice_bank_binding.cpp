@@ -466,6 +466,141 @@ TEST_CASE("G6 named Processor parameters remain independent between slots",
     CHECK(first_sample(0, 2.0f) == baseline * 2.0f);
 }
 
+TEST_CASE("G6 slot_parameter reads each slot's declared value", "[host][graph][g6][parameter]") {
+    VoiceBankBindingResult status;
+    auto bank = make_bank(schema(), status);
+    REQUIRE(bank);
+    for (std::uint32_t slot = 0; slot < 8; ++slot)
+        CHECK(bank->slot_parameter(slot, "level") == 1.0f);
+    REQUIRE(bank->set_slot_parameter(5, "level", 1.75f));
+    CHECK(bank->slot_parameter(5, "level") == 1.75f);
+    CHECK(bank->slot_parameter(4, "level") == 1.0f);
+    REQUIRE_FALSE(bank->set_slot_parameter(5, "level", 2.5f));
+    CHECK(bank->slot_parameter(5, "level") == 1.75f);
+    CHECK_FALSE(bank->slot_parameter(5, "cutoff").has_value());
+    CHECK_FALSE(bank->slot_parameter(8, "level").has_value());
+}
+
+namespace {
+float first_note_sample(VoiceBankBinding& bank, std::uint64_t sample) {
+    REQUIRE(bank.begin_block(sample, 1) == HostEventResult::Accepted);
+    REQUIRE(bank.publish(event(bank.epoch(), sample, 1, midi::MidiEvent::note_on(1, 69, 127))) ==
+            HostEventResult::Accepted);
+    audio::Buffer<float> buffer(2, 1);
+    auto view = buffer.view();
+    REQUIRE(bank.render(view, sample, 1) == VoiceBankBindingCode::Ok);
+    return view.channel(0)[0];
+}
+
+std::array<float, 8> slot_levels(const VoiceBankBinding& bank) {
+    std::array<float, 8> levels{};
+    for (std::uint32_t slot = 0; slot < 8; ++slot) {
+        const auto level = bank.slot_parameter(slot, "level");
+        REQUIRE(level.has_value());
+        levels[slot] = *level;
+    }
+    return levels;
+}
+} // namespace
+
+TEST_CASE("G6 captured slot state restores onto another live bank", "[host][graph][g6][state]") {
+    VoiceBankBindingResult status;
+    auto source = make_bank(schema(), status);
+    REQUIRE(source);
+    for (std::uint32_t slot = 0; slot < 8; ++slot)
+        REQUIRE(source->set_slot_parameter(slot, "level", 0.25f * static_cast<float>(slot + 1)));
+    const auto captured = source->capture_state();
+    CHECK(captured.manifest_sha256 == source->manifest().sha256);
+    REQUIRE(captured.parameters.size() == 8);
+    const auto encoded = encode_voice_bank_state(source->manifest(), captured);
+    REQUIRE(encoded.valid);
+
+    auto destination = make_bank(schema(), status);
+    REQUIRE(destination);
+    // A held note on the destination keeps sounding through the restore.
+    REQUIRE(destination->begin_block(0, 1) == HostEventResult::Accepted);
+    REQUIRE(destination->publish(
+                event(destination->epoch(), 0, 1, midi::MidiEvent::note_on(2, 60, 127))) ==
+            HostEventResult::Accepted);
+    audio::Buffer<float> held(2, 1);
+    auto held_view = held.view();
+    REQUIRE(destination->render(held_view, 0, 1) == VoiceBankBindingCode::Ok);
+    REQUIRE(owner(*destination).allocator().active_count() == 1);
+
+    VoiceBankBindingResult restored;
+    REQUIRE(destination->restore_state(captured, restored));
+    CHECK(restored.code == VoiceBankBindingCode::Ok);
+    CHECK(owner(*destination).allocator().active_count() == 1);
+    CHECK(slot_levels(*destination) == slot_levels(*source));
+    const auto reencoded =
+        encode_voice_bank_state(destination->manifest(), destination->capture_state());
+    REQUIRE(reencoded.valid);
+    CHECK(reencoded.sha256 == encoded.sha256);
+}
+
+TEST_CASE("G6 restore_state refuses a whole state when any value is invalid",
+          "[host][graph][g6][state]") {
+    VoiceBankBindingResult status;
+    auto bank = make_bank(schema(), status);
+    REQUIRE(bank);
+    for (std::uint32_t slot = 0; slot < 8; ++slot)
+        REQUIRE(bank->set_slot_parameter(slot, "level", 0.5f));
+    const auto before_levels = slot_levels(*bank);
+    const auto before_sample = first_note_sample(*bank, 0);
+    REQUIRE(before_sample != 0.0f);
+
+    auto candidate = bank->capture_state();
+    for (auto& value : candidate.parameters)
+        value.value = 1.5f;
+
+    SECTION("a finite value above the authored maximum, in the last slot") {
+        candidate.parameters.back().value = 5.0f;
+        VoiceBankBindingResult result;
+        REQUIRE_FALSE(bank->restore_state(candidate, result));
+        CHECK(result.code == VoiceBankBindingCode::InvalidState);
+        CHECK(result.failing_slot == 7);
+        CHECK(result.failing_path == "level");
+    }
+    SECTION("a value below the authored minimum, in the first slot") {
+        candidate.parameters.front().value = -0.5f;
+        VoiceBankBindingResult result;
+        REQUIRE_FALSE(bank->restore_state(candidate, result));
+        CHECK(result.code == VoiceBankBindingCode::InvalidState);
+        CHECK(result.failing_slot == 0);
+    }
+    SECTION("a non-finite value") {
+        candidate.parameters[3].value = std::numeric_limits<float>::quiet_NaN();
+        VoiceBankBindingResult result;
+        REQUIRE_FALSE(bank->restore_state(candidate, result));
+        CHECK(result.code == VoiceBankBindingCode::InvalidState);
+    }
+    SECTION("a different manifest identity") {
+        candidate.manifest_sha256.back() = candidate.manifest_sha256.back() == '0' ? '1' : '0';
+        VoiceBankBindingResult result;
+        REQUIRE_FALSE(bank->restore_state(candidate, result));
+        CHECK(result.code == VoiceBankBindingCode::InvalidState);
+    }
+    SECTION("an undeclared target") {
+        candidate.parameters[2].target = "cutoff";
+        VoiceBankBindingResult result;
+        REQUIRE_FALSE(bank->restore_state(candidate, result));
+        CHECK(result.code == VoiceBankBindingCode::InvalidState);
+    }
+    SECTION("inside an open block") {
+        REQUIRE(bank->begin_block(1, 1) == HostEventResult::Accepted);
+        VoiceBankBindingResult result;
+        REQUIRE_FALSE(bank->restore_state(candidate, result));
+        CHECK(result.code == VoiceBankBindingCode::InvalidBlock);
+        audio::Buffer<float> buffer(2, 1);
+        auto view = buffer.view();
+        REQUIRE(bank->render(view, 1, 1) == VoiceBankBindingCode::Ok);
+    }
+    // The refused restore left every slot exactly as it was.
+    CHECK(slot_levels(*bank) == before_levels);
+    REQUIRE(bank->activate(status));
+    CHECK(first_note_sample(*bank, 2) == before_sample);
+}
+
 TEST_CASE("G6 tracker capacity refuses 129th distinct start atomically and recovers",
           "[host][graph][g6][ingress][capacity]") {
     VoiceBankBindingResult status;

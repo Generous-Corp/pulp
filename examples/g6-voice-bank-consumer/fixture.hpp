@@ -291,9 +291,10 @@ std::unique_ptr<VoiceBankBinding> make_a1_bank(const a1::Case& fixture,
                                      48000, 256, status);
 }
 
-// VoiceBankBinding has no parameter getter, so the consumer keeps the value
-// copy it persists. Only declared per-slot parameter values are captured;
-// notes, generations, pedals, epochs and release tails are not state.
+// The consumer persists its own copy of the levels it set, so this round trip
+// does not depend on VoiceBankBinding::capture_state(). Only declared per-slot
+// parameter values are captured; notes, generations, pedals, epochs and
+// release tails are not state.
 VoiceBankState capture_levels(const VoiceBankBinding& bank, const std::array<float, 8>& levels) {
     VoiceBankState state;
     state.manifest_sha256 = bank.manifest().sha256;

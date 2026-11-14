@@ -115,6 +115,17 @@ class SignalGraph : public format::AudioWorkgroupClient {
         std::uint64_t refused = 0;
         std::uint64_t overflow = 0;
     };
+    // Source-side telemetry of one PluginSlot node's live parameter mailbox.
+    // `published` counts batches inject_parameter_events() published;
+    // `overflowed` counts those that kept only a prefix (the call returned
+    // false); `dropped_events` sums the events those batches lost. Counts run
+    // from the mailbox's creation: an eager prepare() creates a fresh mailbox,
+    // a prepare_swap() keeps the node's mailbox and its counts.
+    struct ParameterMailboxCounters {
+        std::uint64_t published = 0;
+        std::uint64_t overflowed = 0;
+        std::uint64_t dropped_events = 0;
+    };
     class PreparedTopologyEdit;
     class ExecutionSnapshot;
 
@@ -508,6 +519,12 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // stream) or when `events` reports source-side overflow, in which case
     // the retained prefix is still published.
     bool inject_parameter_events(NodeId plugin_node, const state::ParameterEventQueue& events);
+
+    // Read a PluginSlot node's live parameter-mailbox counters. Returns false,
+    // leaving `out` untouched, when the graph is unprepared or the node has no
+    // live parameter mailbox. Lock-free relaxed reads; safe from any thread.
+    bool parameter_mailbox_counters(NodeId plugin_node,
+                                    ParameterMailboxCounters& out) const noexcept;
 
     // Drain queued nonempty MIDI blocks from a MidiOutput sink node in process
     // order. Appends to `out`; returns false if bounded egress overflowed, a
@@ -1142,6 +1159,10 @@ class SignalGraph : public format::AudioWorkgroupClient {
         ParameterBlockSnapshot writer_scratch;
         std::atomic<std::uint64_t> next_sequence{0};
         std::atomic<std::uint64_t> sequence_seen{0};
+        // Written only by the single mailbox writer; read by telemetry.
+        std::atomic<std::uint64_t> published_batches{0};
+        std::atomic<std::uint64_t> overflowed_batches{0};
+        std::atomic<std::uint64_t> dropped_events{0};
     };
 
     struct NodeRuntime {
@@ -2040,6 +2061,9 @@ class SignalGraph : public format::AudioWorkgroupClient {
     static bool
     inject_parameter_events_into_snapshot_(CompiledGraph& snapshot, NodeId id,
                                            const state::ParameterEventQueue& events) noexcept;
+    static void record_parameter_mailbox_publication(ParameterInputMailbox& mailbox,
+                                                     const state::ParameterEventQueue& events,
+                                                     bool copied_all) noexcept;
     // Exact-generation injection into a claimed node's exact mailbox. Fails for
     // any node that is not currently owner-claimed for exact ingress.
     static bool

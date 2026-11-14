@@ -51,6 +51,31 @@ hosted plugin formats, Linux/Windows execution, and the paced callback
 allocation/lock/deadline matrix remain unqualified. Offline in-process audio
 and an installed SDK consumer do not prove those runtime or platform lanes.
 
+## Slot parameter state
+
+`set_slot_parameter(slot, path, value)` changes one declared parameter on one
+slot and refuses an undeclared path, a non-finite value or a value outside the
+parameter's authored bounds. `slot_parameter(slot, path)` reads the value a
+slot currently holds, or returns `std::nullopt` for an out-of-range slot or an
+undeclared path.
+
+`capture_state()` returns every declared slot parameter as a `VoiceBankState`
+bound to the bank's manifest digest; `encode_voice_bank_state` and
+`decode_voice_bank_state` carry it to and from bytes. Notes, generations,
+pedals, epochs and release tails are not part of the state.
+
+`restore_state(state, result)` applies a state to a live bank all or nothing.
+It checks the whole state before it writes anything: the manifest digest and
+schema version, declared slots and targets, duplicates, finite values, and each
+parameter's authored bounds (which `restore_voice_bank_state` does not know).
+On any refusal no slot changes, `result.code` is
+`VoiceBankBindingCode::InvalidState`, and `failing_slot` and `failing_path`
+name the value when one value is at fault. Inside an open block it refuses with
+`InvalidBlock`. Parameters the state does not name keep their current values,
+and sounding voices keep sounding. Like `set_slot_parameter`, it is a
+control-thread call made between blocks, and it makes each restored slot render
+again before idle skip can pass over it.
+
 ## Skipping idle voices
 
 An eight-voice bank renders every slot on every block, including the slots
