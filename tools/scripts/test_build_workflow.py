@@ -535,7 +535,10 @@ class NoPrGateSettleTest(unittest.TestCase):
     def test_no_settle_job_and_build_needs_only_the_preamble(self) -> None:
         jobs = _workflow()["jobs"]
         self.assertNotIn("pr-gate-settle", jobs)
-        self.assertEqual(jobs["build"]["needs"], ["resolve-provider", "classify", "protected-receipt-reuse"])
+        # `cheap-first` is no settle window: it waits on the cheap required
+        # checks' verdict, not a clock (CheapFirstGateTest).
+        self.assertEqual(jobs["build"]["needs"],
+                         ["resolve-provider", "classify", "protected-receipt-reuse", "cheap-first"])
         self.assertNotIn("PULP_PR_GATE_SETTLE_SECONDS", WORKFLOW)
         # A skipped `needs` entry (local_proof skips the reuse job) must not
         # skip the native matrix; the status function is what prevents it.
@@ -864,7 +867,7 @@ class MacosApprovalGateTest(unittest.TestCase):
         skipped = {**self.NOOP, "needs.resolve-provider.result": "skipped",
                    "needs.classify.result": "skipped"}
         approval = {**skipped, "github.event.label.name": "macos-ci"}
-        for name in ("resolve-provider", "classify", "macos", "linux", "windows"):
+        for name in ("resolve-provider", "classify", "cheap-first", "macos", "linux", "windows"):
             with self.subTest(job=name):
                 self.assertFalse(_evaluate_if(self.jobs[name]["if"], skipped))
                 for untrusted in ({"github.event.sender.login": "a-maintainer"},
@@ -873,14 +876,14 @@ class MacosApprovalGateTest(unittest.TestCase):
                                                   {**approval, **untrusted}))
         # The App's approval runs the preamble and the macOS alias; Linux and
         # Windows stay no-ops, because a label event's run is macOS-only.
-        for name in ("resolve-provider", "classify", "macos"):
+        for name in ("resolve-provider", "classify", "cheap-first", "macos"):
             with self.subTest(job=name):
                 self.assertTrue(_evaluate_if(self.jobs[name]["if"], approval))
         for name in ("linux", "windows"):
             with self.subTest(job=name):
                 self.assertFalse(_evaluate_if(self.jobs[name]["if"], approval))
         for name, job in self.jobs.items():
-            if name in ("local-proof", "resolve-provider", "classify"):
+            if name in ("local-proof", "resolve-provider", "classify", "cheap-first"):
                 continue
             with self.subTest(job=name):
                 self.assertTrue(job.get("needs"), f"{name} must hang off a root")
@@ -1511,6 +1514,132 @@ class MacosArmRefusalTest(unittest.TestCase):
         self.assertFalse(self._refused(self._run("5 completed success\n", tier="fast")))
         # A skip-safe head's green ran no macOS by design and is not deferred.
         self.assertFalse(self._refused(self._run("5 completed success\n", tier="not-required")))
+
+class CheapFirstGateTest(unittest.TestCase):
+    """The native matrix starts only after the cheap required checks pass.
+
+    `cheap-first` (tools/ci/cheap_first_gate.py) publishes `verdict`. Only an
+    explicit `block` withholds the matrix; an empty verdict (the job skipped,
+    crashed or timed out) starts it, so the gate can never hold `macos`. A
+    withheld native leg reports as a red `macos` from `macos-cheap-first-blocked`;
+    the skip-safe aliases never wait for the gate.
+    """
+
+    def setUp(self) -> None:
+        self.jobs = _workflow()["jobs"]
+
+    def _ctx(self, event: str, **extra: str) -> dict[str, object]:
+        return {
+            "github.event_name": event,
+            "needs.resolve-provider.result": "success",
+            "needs.classify.result": "success",
+            "needs.classify.outputs.native_build_required": "true",
+            "needs.protected-receipt-reuse.result": "success",
+            "needs.protected-receipt-reuse.outputs.build_required": "true",
+            "needs.protected-receipt-reuse.outputs.macos_reused": "false",
+            **extra,
+        }
+
+    def test_the_gate_runs_beside_the_preamble_and_reads_required_checks(self) -> None:
+        job = self.jobs["cheap-first"]
+        self.assertNotIn("needs", job, "a need would serialize the wait behind the preamble")
+        self.assertEqual(job["if"], self.jobs["classify"]["if"])
+        self.assertIn("PULP_PREAMBLE_RUNS_ON_JSON", job["runs-on"])
+        run = job["steps"][-1]["run"]
+        self.assertIn("cd /tmp", run)
+        self.assertIn("tools/ci/cheap_first_gate.py", run)
+        self.assertEqual(job["steps"][-1]["env"]["HEAD_SHA"],
+                         "${{ github.event.pull_request.head.sha || github.sha }}")
+        self.assertIn("vars.PULP_CHEAP_FIRST_MODE", job["steps"][-1]["env"]["CHEAP_FIRST_MODE"])
+
+    def test_build_starts_unless_the_verdict_is_block(self) -> None:
+        cond = self.jobs["build"]["if"]
+        for event in ("pull_request", "merge_group", "workflow_dispatch"):
+            for verdict, starts in (("", True), ("pass", True), ("unknown", True),
+                                    ("block", False)):
+                with self.subTest(event=event, verdict=verdict):
+                    ctx = self._ctx(event, **{"needs.cheap-first.outputs.verdict": verdict,
+                                              "needs.cheap-first.result": "failure"})
+                    self.assertEqual(_evaluate_if(cond, ctx), starts)
+        self.assertNotIn("needs.cheap-first.result", cond,
+                         "build must read the verdict, not the job result, to fail open")
+
+    def test_the_skip_safe_aliases_do_not_wait_for_the_gate(self) -> None:
+        # A job starts only after every `needs` entry finishes, so an alias
+        # that needed `cheap-first` would hold a docs-only head's or a
+        # receipt-reused group's `macos` until the gate's polling deadline.
+        for name in ("macos", "macos-merge-group"):
+            with self.subTest(job=name):
+                job = self.jobs[name]
+                self.assertNotIn("cheap-first", job["needs"])
+                for text in (job["name"], job["if"],
+                             *(str(step) for step in job["steps"])):
+                    self.assertNotIn("cheap-first", str(text))
+
+    def test_a_blocked_native_head_reports_a_red_macos(self) -> None:
+        job = self.jobs["macos-cheap-first-blocked"]
+        self.assertEqual(job["needs"], ["resolve-provider", "classify",
+                                        "protected-receipt-reuse", "cheap-first"])
+        self.assertNotIn("PULP_ALIAS_RUNS_ON_JSON", job["runs-on"])
+        for event in ("pull_request", "workflow_dispatch", "merge_group"):
+            with self.subTest(event=event):
+                ctx = self._ctx(event, **{"needs.cheap-first.outputs.verdict": "block"})
+                self.assertTrue(_evaluate_if(job["if"], ctx))
+                self.assertEqual(_evaluate(job["name"], ctx), "macos")
+        refuse = job["steps"][0]
+        self.assertIn("exit 1", refuse["run"])
+        self.assertIn("CHEAP_FIRST_REASON", refuse["run"])
+
+    def test_exactly_one_job_owns_macos(self) -> None:
+        # Every combination the preamble can produce: the native leg (`build`)
+        # or exactly one bootstrap owns `macos`, and a blocked native head is
+        # never left with no `macos` at all.
+        import itertools
+        owners = ("macos", "macos-merge-group", "macos-cheap-first-blocked")
+        for (event, provider, classify, native, reuse, build_req, reused,
+             verdict) in itertools.product(
+                ("pull_request", "workflow_dispatch", "merge_group"),
+                ("success", "failure"), ("success", "failure"), ("true", "false"),
+                ("success", "skipped"), ("true", "false"), ("true", "false"),
+                ("", "pass", "unknown", "block")):
+            # Only reachable preamble states: receipt reuse exists only in a
+            # merge group, a skipped reuse job publishes nothing, and a build
+            # with nothing left to run means macOS itself was reused.
+            if reuse != "success" and (build_req, reused) != ("true", "false"):
+                continue
+            if event != "merge_group" and (reused == "true" or build_req != native):
+                continue
+            if build_req == "false" and native == "true" and reused != "true":
+                continue
+            ctx = self._ctx(event, **{
+                "needs.resolve-provider.result": provider,
+                "needs.classify.result": classify,
+                "needs.classify.outputs.native_build_required": native,
+                "needs.protected-receipt-reuse.result": reuse,
+                "needs.protected-receipt-reuse.outputs.build_required": build_req,
+                "needs.protected-receipt-reuse.outputs.macos_reused": reused,
+                "needs.cheap-first.outputs.verdict": verdict,
+            })
+            with self.subTest(event=event, provider=provider, classify=classify,
+                              native=native, reuse=reuse, build_required=build_req,
+                              macos_reused=reused, verdict=verdict):
+                running = [name for name in owners
+                           if _evaluate_if(self.jobs[name]["if"], ctx)]
+                named = [name for name in owners
+                         if _evaluate(self.jobs[name]["name"], ctx) == "macos"]
+                self.assertEqual(running, named, "a skipped job must not own `macos`")
+                native = _evaluate_if(self.jobs["build"]["if"], ctx)
+                if reused == "true":
+                    # The receipt owns `macos`; `build` may still run Linux.
+                    self.assertEqual(running, ["macos-merge-group"])
+                    continue
+                self.assertEqual(len(running) + int(native), 1, (running, native))
+                blocked = running == ["macos-cheap-first-blocked"]
+                self.assertEqual(blocked, verdict == "block" and not native
+                                 and "macos" not in running
+                                 and "macos-merge-group" not in running)
+
+
 
 if __name__ == "__main__":
     unittest.main()
