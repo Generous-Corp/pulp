@@ -38,11 +38,11 @@ inline constexpr Document kDocuments[] = {
 <head>
 <style>
 body { width: 100%; height: 100%; margin: 0; background-color: #20242c;
-       font-family: Inter; font-size: 16px; color: #e8e8e8; }
+       font-family: Inter; font-size: 16dp; color: #e8e8e8; }
 #card { position: absolute; left: 16px; top: 16px; width: 200px; height: 110px;
         padding: 10px; background-color: #3a4150; border: 2px #8fb3ff;
         border-radius: 12px; }
-h1 { display: block; font-size: 22px; color: #ffffff; margin-bottom: 8px; }
+h1 { display: block; font-size: 22dp; color: #ffffff; margin-bottom: 8px; }
 #tint { position: absolute; left: 150px; top: 100px; width: 140px; height: 100px;
         background-color: rgba(255, 120, 40, 128); }
 </style>
@@ -53,7 +53,7 @@ h1 { display: block; font-size: 22px; color: #ffffff; margin-bottom: 8px; }
 <head>
 <style>
 body { width: 100%; height: 100%; margin: 0; background-color: #f4f1ea;
-       font-family: Inter; font-size: 14px; color: #202020; }
+       font-family: Inter; font-size: 14dp; color: #202020; }
 #row { display: flex; flex-direction: row; position: absolute; left: 10px; top: 20px; }
 .box { width: 60px; height: 60px; margin: 10px; }
 #a { background-color: #e04040; }

@@ -128,8 +128,8 @@ struct RmlUiSurface::Impl {
         scale = s;
         context->set_dimensions(std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.width))),
                                std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.height))));
-#if defined(VELLUM_RMLUI_HAS_DENSITY_INDEPENDENT_PIXEL_RATIO)
-        context->set_density_independent_pixel_ratio(static_cast<float>(s));
+#if defined(PULP_VELLUM_RMLUI_HAS_DENSITY_RATIO)
+        context->set_density_ratio(static_cast<float>(s));
 #endif
     }
 
@@ -342,8 +342,8 @@ bool RmlUiSurface::attach(void* parent) {
             d.width_px = w;
             d.height_px = h;
             d.scale = s;
-#if defined(VELLUM_RMLUI_HAS_DENSITY_INDEPENDENT_PIXEL_RATIO)
-            d.context->set_density_independent_pixel_ratio(static_cast<float>(s));
+#if defined(PULP_VELLUM_RMLUI_HAS_DENSITY_RATIO)
+            d.context->set_density_ratio(static_cast<float>(s));
 #endif
         }
     }

@@ -40,21 +40,26 @@ class ScaledSoftRenderer final : public RenderInterface {
 
     void submit(const DrawCommand& input) override {
         auto command = input;
-        command.x *= scale_;
-        command.y *= scale_;
-        command.width *= scale_;
-        command.height *= scale_;
-        command.translation_x *= scale_;
-        command.translation_y *= scale_;
-        if (command.scissor_enabled) {
-            command.scissor.x *= static_cast<int>(scale_);
-            command.scissor.y *= static_cast<int>(scale_);
-            command.scissor.width *= static_cast<int>(scale_);
-            command.scissor.height *= static_cast<int>(scale_);
-        }
-        if (command.transform_enabled) {
-            command.transform[12] *= scale_;
-            command.transform[13] *= scale_;
+        // Density-aware RmlUi already emits dp text geometry at device
+        // density. Px boxes remain logical points and need the reference's
+        // explicit backing-scale conversion.
+        {
+            command.x *= scale_;
+            command.y *= scale_;
+            command.width *= scale_;
+            command.height *= scale_;
+            command.translation_x *= scale_;
+            command.translation_y *= scale_;
+            if (command.scissor_enabled) {
+                command.scissor.x *= static_cast<int>(scale_);
+                command.scissor.y *= static_cast<int>(scale_);
+                command.scissor.width *= static_cast<int>(scale_);
+                command.scissor.height *= static_cast<int>(scale_);
+            }
+            if (command.transform_enabled) {
+                command.transform[12] *= scale_;
+                command.transform[13] *= scale_;
+            }
         }
         if (command.vertices) {
             auto vertices = std::make_shared<std::vector<DrawVertex>>(*command.vertices);
@@ -109,8 +114,8 @@ int main(int argc, char** argv) {
                              pulp_rmlui_golden::kHeightPoints);
                 return 1;
             }
-#if defined(VELLUM_RMLUI_HAS_DENSITY_INDEPENDENT_PIXEL_RATIO)
-            backend.set_density_independent_pixel_ratio(static_cast<float>(scale));
+#if defined(PULP_VELLUM_RMLUI_HAS_DENSITY_RATIO)
+            backend.set_density_ratio(static_cast<float>(scale));
 #endif
             FontFaceOptions face;
             face.style = FontStyle::normal;

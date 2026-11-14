@@ -4,6 +4,26 @@
 
 find_package(VellumRmlUiNative CONFIG REQUIRED COMPONENTS Native Metal)
 
+# Older Vellum RmlUi SDKs do not expose the density setter. Detect the method
+# at configure time so the adapter remains source-compatible with those SDKs.
+include(CheckCXXSourceCompiles)
+get_target_property(_vellum_rmlui_native_includes VellumRmlUi::Native
+    INTERFACE_INCLUDE_DIRECTORIES)
+set(CMAKE_REQUIRED_INCLUDES "${_vellum_rmlui_native_includes}")
+set(_pulp_try_compile_target_type "${CMAKE_TRY_COMPILE_TARGET_TYPE}")
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+check_cxx_source_compiles(
+    "#include <vellum/rmlui/native.hpp>
+     int main() {
+       vellum::rmlui::NativeContext* context = nullptr;
+       (void) context->set_density_ratio(1.0f);
+       return 0;
+     }"
+    PULP_VELLUM_RMLUI_HAS_DENSITY_RATIO)
+set(CMAKE_TRY_COMPILE_TARGET_TYPE "${_pulp_try_compile_target_type}")
+unset(_pulp_try_compile_target_type)
+unset(CMAKE_REQUIRED_INCLUDES)
+
 add_library(pulp-rmlui-native STATIC src/rmlui_surface_mac.mm)
 add_library(pulp::rmlui-native ALIAS pulp-rmlui-native)
 set_source_files_properties(src/rmlui_surface_mac.mm PROPERTIES COMPILE_OPTIONS -fobjc-arc)
@@ -17,6 +37,9 @@ target_link_libraries(pulp-rmlui-native
     PRIVATE
         "-framework AppKit"
         "-framework Metal")
+if(PULP_VELLUM_RMLUI_HAS_DENSITY_RATIO)
+    target_compile_definitions(pulp-rmlui-native PRIVATE PULP_VELLUM_RMLUI_HAS_DENSITY_RATIO)
+endif()
 
 # Vellum's Metal Rml::RenderInterface on the surface, when the Vellum install
 # was built with VELLUM_RMLUI_METAL=ON.
