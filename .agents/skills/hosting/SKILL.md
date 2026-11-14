@@ -3310,6 +3310,14 @@ only when the node has exactly one output, so stereo built-ins need explicit
 `node.audio` and `node.out1` ports. User-facing walkthroughs live in
 `docs/guides/graph-first-steps.md` and `docs/guides/graph-notation-cookbook.md`.
 
+Spectral constructors appear in the catalog as `unsupported_typed_api_only`
+rows built at a fixed probe identity (FFT 256, hop 64, mono, 48 kHz), so their
+audio port counts are for that identity only. A catalog row is not proof a key
+is constructible from notation: `instantiate()` returns 0 for spectral keys and
+`parse_graph_patch` refuses them before instantiation. Never suggest
+`GraphSerializer` as the fix for a spectral refusal; `to_json` returns an empty
+string for any graph with a spectral node.
+
 ### Transactional graph-file development reload
 
 The C++ dev/loop delegate accepts `--graph-file` with an existing enrolled

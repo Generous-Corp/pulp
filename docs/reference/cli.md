@@ -1600,7 +1600,8 @@ See [edge probe limits and lifecycle](../guides/graph-edge-probes.md).
 
 ### SignalGraph notation
 
-`pulp graph catalog --json` projects the default runtime node catalog.
+`pulp graph catalog --json` projects the default runtime node catalog,
+including typed-API-only spectral constructor rows that notation refuses.
 `pulp graph validate FILE.pat --json` uses shared typed strict diagnostics;
 `.pulpgraph` validation checks every original connection. `pulp graph fmt
 FILE.pat` prints canonical notation, and `pulp graph fmt FILE.pulpgraph

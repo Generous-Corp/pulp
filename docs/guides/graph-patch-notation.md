@@ -14,7 +14,13 @@ for actual named ports and Processor parameter ranges. This projection calls
 trusted factories on the control thread. Factories must return fresh instances;
 finish registration before use and do not access a catalog concurrently.
 The default CLI/MCP catalog contains audio input/output, gain and MIDI boundary
-constructors. Application Processor factories belong to the application's C++
+constructors. It also lists the four spectral constructors
+(`pulp/spectral_analysis`, `pulp/spectral_stage`, `pulp/spectral_synthesis`,
+`pulp/spectral_asset_morph`) with `notation_state` set to
+`unsupported_typed_api_only`, the owning `constructor` and the `probe_identity`
+(FFT 256, hop 64, mono, 48 kHz) their ports were read from. Audio port count
+follows the identity's channel count. These rows are for discovery: a patch
+that declares one is refused with the C++ constructor to use instead. Application Processor factories belong to the application's C++
 catalog; the tools do not load arbitrary plugin binaries or code from notation.
 
 The installed consumer uses the following ten-line patch. Its Processor's
@@ -121,6 +127,10 @@ bounds. Canonical output sorts declarations by name and connection spellings;
 numeric values use round-trippable float spellings. IDs are regenerated;
 notation preserves authored topology and supported values, not editor layout,
 prepared runtime history, publication policy or native DSP qualification.
+
+Spectral graphs have no notation or saved-graph contract yet:
+`GraphSerializer` also refuses them, so build them in C++ through the
+`SignalGraph::add_spectral_*` constructors.
 
 The notation profile refuses hosted binary plugins, spectral nodes, sample
 regions, opaque Processor/custom state, non-stereo audio boundaries,
