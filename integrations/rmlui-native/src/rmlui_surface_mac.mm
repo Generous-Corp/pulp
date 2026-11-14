@@ -9,6 +9,7 @@
 #import <AppKit/AppKit.h>
 #import <Metal/Metal.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -325,8 +326,8 @@ bool RmlUiSurface::attach(void* parent) {
         d.context = std::make_unique<vellum::rmlui::NativeContext>(d.assets, d.renderer);
         const auto g = d.surface->geometry();
         const double s = g.scale > 0.0 ? g.scale : 1.0;
-        const auto w = static_cast<std::uint32_t>(std::lround(g.width * s));
-        const auto h = static_cast<std::uint32_t>(std::lround(g.height * s));
+        const auto w = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.width * s)));
+        const auto h = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.height * s)));
         bool ok = d.context->open(w, h) == vellum::rmlui::Status::ok;
         if (ok) {
             vellum::rmlui::NativeContext::Scope scope(*d.context);

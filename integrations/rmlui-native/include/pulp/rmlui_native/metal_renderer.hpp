@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file metal_renderer.hpp
-/// Vellum's Metal `Rml::RenderInterface` (`VellumRmlUi::Metal`) on an
+/// Vellum's Metal `Rml::RenderInterface` (`VellumRmlUiNative::Metal`) on an
 /// `RmlUiSurface`: the hooks that hand it each frame's command buffer and
 /// drawable texture.
 ///
