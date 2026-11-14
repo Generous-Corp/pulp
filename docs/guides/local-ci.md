@@ -4857,16 +4857,20 @@ commit) and publishes a verdict:
 
 - `pass`: every cheap check is green, skipped, neutral or cancelled, or never
   appeared within 10 minutes. The matrix starts.
-- `block`: a cheap check concluded red. `build` is skipped and the `macos`
-  alias (`macos` on pull requests and dispatches, `macos-merge-group` in the
-  queue) reports a red `macos` naming the red check. A group with nothing
-  native to build, or whose `macos` comes from a reused receipt, used no gate
-  VM and keeps its own verdict.
+- `block`: a cheap check concluded red. `build` is skipped and
+  `macos-cheap-first-blocked` reports a red `macos` naming the red check. It
+  owns `macos` only when `build` would otherwise have started, so a head with
+  nothing native to build, or a group whose `macos` comes from a reused
+  receipt, used no gate VM and keeps its own verdict.
 - `unknown`: the 30-minute deadline passed or the API could not be read. The
   matrix starts.
 
 Only `block` withholds anything, and `build` reads the verdict, never the
-job's result, so a skipped, crashed or timed-out gate starts the matrix. The
+job's result, so a skipped, crashed or timed-out gate starts the matrix. Only
+the native path waits for the gate: the skip-safe `macos` aliases (`macos` on
+pull requests and dispatches, `macos-merge-group` in the queue) do not need
+`cheap-first`, so a docs-only head or a receipt-reused group still reports
+`macos` in seconds rather than at the gate's deadline. The
 gate never weakens a check: the red cheap check is required, so the head could
 not merge either way. A push run, a plain dispatch and a pull request into a
 base other than `main` pass at once. `PULP_CHEAP_FIRST_MODE=off` (repository

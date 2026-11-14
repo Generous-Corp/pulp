@@ -1080,9 +1080,9 @@ the running job still carries signal you would otherwise wait another round for.
 
 A native `macos` job only starts on a head whose cheap required checks did not
 fail first: `build.yml`'s `cheap-first` job holds the native matrix until
-`drift-fast` and `Enforce version & skill sync` report, and on a red one the
-`macos` alias reports a red `macos` that names it instead of starting a gate
-VM. So a head whose cheap check is red usually has no `in_progress` native job
+`drift-fast` and `Enforce version & skill sync` report, and on a red one
+`macos-cheap-first-blocked` reports a red `macos` that names it instead of
+starting a gate VM. The skip-safe `macos` aliases never wait for the gate. So a head whose cheap check is red usually has no `in_progress` native job
 at all, and a version-skill red now costs you that head's macOS result: fix the
 bump first. After re-running a flaky cheap check to green, re-run the Build
 run's failed jobs. Mechanism, fail-open rules and the measured latency:

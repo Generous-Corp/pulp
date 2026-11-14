@@ -40,7 +40,7 @@ if "tools/ci/macos_merge_group_bootstrap.sh" in merge_bootstrap:
 build = job_body(text, "build")
 
 require(
-    "needs: [resolve-provider, classify, cheap-first]" in pr_alias
+    "needs: [resolve-provider, classify]" in pr_alias
     and "needs: [build" not in pr_alias,
     "PR bootstrap must not depend on the advisory build matrix",
 )
@@ -91,7 +91,7 @@ require(
     "PR, dispatch, and merge-group macOS legs must own the required context",
 )
 require(
-    "needs: [resolve-provider, classify, protected-receipt-reuse, cheap-first]" in merge_bootstrap
+    "needs: [resolve-provider, classify, protected-receipt-reuse]" in merge_bootstrap
     and "needs: [build" not in merge_bootstrap,
     "merge bootstrap must not depend on the advisory build matrix",
 )

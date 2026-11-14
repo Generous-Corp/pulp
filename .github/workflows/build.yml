@@ -2067,9 +2067,12 @@ jobs:
   # failed (verdict `block`); a deadline, an unreadable API or a check that
   # never appears all start the matrix (verdict `unknown`), so a missing or
   # skipped cheap check can never hold the gate. `build` reads the verdict,
-  # not this job's result, so a crashed or cancelled gate fails open, and the
-  # `macos` aliases report a blocked native leg as a red `macos` that names
-  # the red check. PULP_CHEAP_FIRST_MODE=off turns the wait off.
+  # not this job's result, so a crashed or cancelled gate fails open, and
+  # `macos-cheap-first-blocked` reports a blocked native leg as a red `macos`
+  # that names the red check. Only jobs on the native path wait for this one:
+  # the skip-safe and receipt-reused `macos` aliases do not need it, so a
+  # docs-only head or a reused group still reports `macos` in seconds.
+  # PULP_CHEAP_FIRST_MODE=off turns the wait off.
   cheap-first:
     name: cheap-first
     if: ${{ (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true')) && (github.event.action != 'labeled' || (vars.PULP_MACOS_PR_GATING == 'true' && github.event.label.name == 'macos-ci' && github.event.sender.login == 'shipyard-local[bot]')) }}
@@ -4658,10 +4661,8 @@ jobs:
   # skips this job under the unused name, so it can never replace the head's
   # real `macos` result.
   macos:
-    name: ${{ (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && (github.event.action != 'labeled' || (vars.PULP_MACOS_PR_GATING == 'true' && github.event.label.name == 'macos-ci' && github.event.sender.login == 'shipyard-local[bot]')) && (needs.resolve-provider.result != 'success' || needs.classify.result != 'success' || needs.classify.outputs.native_build_required != 'true' || needs.cheap-first.outputs.verdict == 'block') && 'macos' || 'macos-pr-unused' }}
-    # `cheap-first` is read only for its explicit `block` verdict: a native
-    # leg it withheld reports here, red, instead of leaving `macos` expected.
-    needs: [resolve-provider, classify, cheap-first]
+    name: ${{ (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && (github.event.action != 'labeled' || (vars.PULP_MACOS_PR_GATING == 'true' && github.event.label.name == 'macos-ci' && github.event.sender.login == 'shipyard-local[bot]')) && (needs.resolve-provider.result != 'success' || needs.classify.result != 'success' || needs.classify.outputs.native_build_required != 'true') && 'macos' || 'macos-pr-unused' }}
+    needs: [resolve-provider, classify]
     runs-on: ${{ fromJSON(vars.PULP_ALIAS_RUNS_ON_JSON || '"ubuntu-latest"') }}
     if: >-
       (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true'))
@@ -4670,12 +4671,9 @@ jobs:
       && (github.event.action != 'labeled' || (vars.PULP_MACOS_PR_GATING == 'true' && github.event.label.name == 'macos-ci' && github.event.sender.login == 'shipyard-local[bot]'))
       && (needs.resolve-provider.result != 'success'
           || needs.classify.result != 'success'
-          || needs.classify.outputs.native_build_required != 'true'
-          || needs.cheap-first.outputs.verdict == 'block')
+          || needs.classify.outputs.native_build_required != 'true')
     steps:
       - name: macOS PR/dispatch bootstrap (required when native leg is absent)
-        env:
-          CHEAP_FIRST_REASON: ${{ needs.cheap-first.outputs.reason }}
         run: |
           set -euo pipefail
           if [ "${{ needs.resolve-provider.result }}" != "success" ]; then
@@ -4684,11 +4682,6 @@ jobs:
           fi
           if [ "${{ needs.classify.result }}" != "success" ]; then
             echo "classify did not succeed — failing macos gate closed"
-            exit 1
-          fi
-          if [ "${{ needs.classify.outputs.native_build_required }}" = "true" ] \
-              && [ "${{ needs.cheap-first.outputs.verdict }}" = "block" ]; then
-            echo "::error title=macos not started: a cheap required check is red::${CHEAP_FIRST_REASON}. The native macOS leg did not start on a head that cannot merge. Fix the red check and push, or re-run it and then this run's failed jobs."
             exit 1
           fi
           echo "Skip-safe PR/dispatch — macos gate ✓ (native matrix intentionally omitted)"
@@ -4787,13 +4780,38 @@ jobs:
         shell: bash
         run: echo "::warning title=reuse-record NOT written::checkout, record or upload did not succeed; this job's replay history is lost"
 
+  # ── macos for a native leg `cheap-first` withheld ─────────────────────────
+  # Owns `macos`, red, exactly when `build` would have started but for a
+  # `block` verdict: every other `build` condition holds, so the native leg
+  # is absent only because a cheap required check is already red. It is the
+  # only `macos` owner that waits for `cheap-first`; the skip-safe aliases
+  # above and below keep their seconds-fast path because their conditions
+  # exclude a native head, so the two can never both own the name.
+  macos-cheap-first-blocked:
+    name: ${{ (((github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && (github.event.action != 'labeled' || (vars.PULP_MACOS_PR_GATING == 'true' && github.event.label.name == 'macos-ci' && github.event.sender.login == 'shipyard-local[bot]'))) || github.event_name == 'merge_group') && (needs.resolve-provider.result == 'success' && needs.classify.result == 'success' && needs.classify.outputs.native_build_required == 'true' && (needs.protected-receipt-reuse.result != 'success' || needs.protected-receipt-reuse.outputs.build_required == 'true') && needs.protected-receipt-reuse.outputs.macos_reused != 'true' && needs.cheap-first.outputs.verdict == 'block') && 'macos' || 'macos-cheap-first-unused' }}
+    needs: [resolve-provider, classify, protected-receipt-reuse, cheap-first]
+    runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    if: >-
+      (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true'))
+      && !cancelled()
+      && (((github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && (github.event.action != 'labeled' || (vars.PULP_MACOS_PR_GATING == 'true' && github.event.label.name == 'macos-ci' && github.event.sender.login == 'shipyard-local[bot]'))) || github.event_name == 'merge_group')
+      && (needs.resolve-provider.result == 'success' && needs.classify.result == 'success' && needs.classify.outputs.native_build_required == 'true' && (needs.protected-receipt-reuse.result != 'success' || needs.protected-receipt-reuse.outputs.build_required == 'true') && needs.protected-receipt-reuse.outputs.macos_reused != 'true' && needs.cheap-first.outputs.verdict == 'block')
+    steps:
+      - name: Refuse a head whose cheap required check is red
+        shell: bash
+        env:
+          CHEAP_FIRST_REASON: ${{ needs.cheap-first.outputs.reason }}
+        run: |
+          echo "::error title=macos not started: a cheap required check is red::${CHEAP_FIRST_REASON}. The native macOS leg did not start on a head that cannot merge. Fix the red check and push, or re-run it and then this run's failed jobs."
+          exit 1
+
   macos-merge-group:
     # Native merge groups get `macos` directly from the macOS matrix leg. This
     # bootstrap owns the name only when that leg is intentionally absent or
     # cannot be trusted to start, preserving skip-safe green and fail-closed
     # dependency handling without waiting for advisory Linux.
-    name: ${{ github.event_name == 'merge_group' && (needs.resolve-provider.result != 'success' || needs.classify.result != 'success' || needs.classify.outputs.native_build_required != 'true' || needs.protected-receipt-reuse.outputs.macos_reused == 'true' || needs.cheap-first.outputs.verdict == 'block') && 'macos' || 'macos-merge-unused' }}
-    needs: [resolve-provider, classify, protected-receipt-reuse, cheap-first]
+    name: ${{ github.event_name == 'merge_group' && (needs.resolve-provider.result != 'success' || needs.classify.result != 'success' || needs.classify.outputs.native_build_required != 'true' || needs.protected-receipt-reuse.outputs.macos_reused == 'true') && 'macos' || 'macos-merge-unused' }}
+    needs: [resolve-provider, classify, protected-receipt-reuse]
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     if: >-
       (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true'))
@@ -4802,24 +4820,8 @@ jobs:
       && (needs.resolve-provider.result != 'success'
           || needs.classify.result != 'success'
           || needs.classify.outputs.native_build_required != 'true'
-          || needs.protected-receipt-reuse.outputs.macos_reused == 'true'
-          || needs.cheap-first.outputs.verdict == 'block')
+          || needs.protected-receipt-reuse.outputs.macos_reused == 'true')
     steps:
-      # A native leg `cheap-first` withheld because a cheap required check is
-      # red on the group reports red here. A group with nothing native to
-      # build, or whose `macos` comes from a reused receipt, used no gate VM
-      # and keeps the verdict below.
-      - name: Refuse a group whose cheap required check is red
-        if: >-
-          needs.cheap-first.outputs.verdict == 'block'
-          && needs.classify.outputs.native_build_required == 'true'
-          && needs.protected-receipt-reuse.outputs.macos_reused != 'true'
-        shell: bash
-        env:
-          CHEAP_FIRST_REASON: ${{ needs.cheap-first.outputs.reason }}
-        run: |
-          echo "::error title=macos not started: a cheap required check is red::${CHEAP_FIRST_REASON}. The native macOS leg did not start on a group that cannot land."
-          exit 1
       # The whole tree at depth 1, like the classify job: when classify was
       # never given a runner, the verdict classifies the group here.
       - name: Check out the bootstrap verdict and classifier
