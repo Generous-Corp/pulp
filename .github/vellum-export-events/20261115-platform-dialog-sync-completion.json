@@ -9,6 +9,6 @@
     "core/platform/src/dialog_internal.hpp",
     "core/platform/src/platform_dialogs_stub.cpp"
   ],
-  "vellum_inherits": true,
-  "rationale": "A dialog that completes inside the call that opens it is no longer cancelled by scope teardown, the unsupported-platform stubs are not compiled on macOS, and a filter whose extensions are all invalid shows no panel instead of allowing every file. Host-neutral, with no view or render dependency; the Vellum port carries the same bytes."
+  "vellum_inherits": false,
+  "rationale": "A dialog that completes inside the call that opens it is no longer cancelled by scope teardown, the unsupported-platform stubs are not compiled on macOS, and a filter whose extensions are all invalid shows no panel instead of allowing every file. Host-neutral, with no view or render dependency. A Pulp-only edit: Vellum's framework transfer is in effect, so Vellum adopts it only through its own framework/ port."
 }
