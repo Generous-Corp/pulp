@@ -12,7 +12,6 @@
 #include <vellum/rmlui/backend.hpp>
 #include <vellum/rmlui/soft_renderer.hpp>
 
-
 #include <cstdio>
 
 namespace {
@@ -72,7 +71,9 @@ class ScaledSoftRenderer final : public RenderInterface {
         renderer_.submit(command);
     }
 
-    void end_frame() override { renderer_.end_frame(); }
+    void end_frame() override {
+        renderer_.end_frame();
+    }
 
     [[nodiscard]] const std::vector<std::uint8_t>& pixels() const noexcept {
         return renderer_.pixels();
@@ -108,8 +109,8 @@ int main(int argc, char** argv) {
             ScaledSoftRenderer renderer(scale);
             NoLua lua;
             Backend backend(assets, renderer, lua);
-            if (backend.open(pulp_rmlui_golden::kWidthPoints,
-                             pulp_rmlui_golden::kHeightPoints) != Status::ok) {
+            if (backend.open(pulp_rmlui_golden::kWidthPoints, pulp_rmlui_golden::kHeightPoints) !=
+                Status::ok) {
                 std::fprintf(stderr, "open failed at %ux%u\n", pulp_rmlui_golden::kWidthPoints,
                              pulp_rmlui_golden::kHeightPoints);
                 return 1;

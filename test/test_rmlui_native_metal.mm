@@ -160,8 +160,8 @@ bool draw(const char* document, CGFloat scale, Drawn& out, std::string& failure,
             }
             if (leave_density_ratio_at_one && scale > 1.0) {
                 if (!ui.with_context([](Rml::Context& context) {
-                    context.SetDensityIndependentPixelRatio(1.0f);
-                })) {
+                        context.SetDensityIndependentPixelRatio(1.0f);
+                    })) {
                     failure = "could not set the control density ratio";
                     ui.detach();
                     return false;

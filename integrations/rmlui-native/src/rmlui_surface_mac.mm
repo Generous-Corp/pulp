@@ -126,8 +126,9 @@ struct RmlUiSurface::Impl {
         width_px = w;
         height_px = h;
         scale = s;
-        context->set_dimensions(std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.width))),
-                               std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.height))));
+        context->set_dimensions(
+            std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.width))),
+            std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.height))));
 #if defined(PULP_VELLUM_RMLUI_HAS_DENSITY_RATIO)
         context->set_density_ratio(static_cast<float>(s));
 #endif
@@ -326,8 +327,7 @@ bool RmlUiSurface::attach(void* parent) {
         d.context = std::make_unique<vellum::rmlui::NativeContext>(d.assets, d.renderer);
         const auto g = d.surface->geometry();
         const double s = g.scale > 0.0 ? g.scale : 1.0;
-        const auto w =
-            std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.width)));
+        const auto w = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.width)));
         const auto h =
             std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.height)));
         bool ok = d.context->open(w, h) == vellum::rmlui::Status::ok;
