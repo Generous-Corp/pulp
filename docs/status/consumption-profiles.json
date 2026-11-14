@@ -472,6 +472,7 @@
       "pulp/host/crossfade_plugin_slot.hpp",
       "pulp/host/custom_node_diagnostics.hpp",
       "pulp/host/custom_node_events.hpp",
+      "pulp/host/custom_node_oversampling.hpp",
       "pulp/host/custom_node_type.hpp",
       "pulp/host/detail/forge_compressor_ballistics.hpp",
       "pulp/host/detail/forge_drum_catalog_descriptor.hpp",
