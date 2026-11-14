@@ -620,6 +620,46 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-129a5ffb4fb5"
+paths = [
+  "tools/scripts/cutover_trial.py",
+  "tools/scripts/test_cutover_trial.py",
+]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "configure-only-selftest",
+  "cutover-trial-selftest",
+  "flake-exoneration-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-95a576b9d9a2"
 paths = ["tools/scripts/design_unit_boundary_check.py"]
 tests = [
@@ -3021,6 +3061,43 @@ tests = [
   "clean-worktree-planning-selftest",
   "configure-only-selftest",
   "core-vellum-direction-negative-contract",
+  "flake-exoneration-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-97b12c5f4883"
+paths = ["tools/scripts/test_ctest_coremidi_lock.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "configure-only-selftest",
+  "ctest-coremidi-lock-contract",
   "flake-exoneration-selftest",
   "gate-common-selftest",
   "gpu-audio-provider-identity-selftest",
@@ -8714,6 +8791,7 @@ paths = [
   "tools/scripts/ctest_inventory_parity.py",
   "tools/scripts/ctest_nonruns.py",
   "tools/scripts/ctest_unique_names_check.py",
+  "tools/scripts/cutover_trial.py",
   "tools/scripts/design_unit_boundary_check.py",
   "tools/scripts/docs_sync_check.py",
   "tools/scripts/dsp_provenance_audit.py",
@@ -8878,9 +8956,11 @@ paths = [
   "tools/scripts/test_coverage_tier_check.py",
   "tools/scripts/test_coverage_tier_check_extra.py",
   "tools/scripts/test_cross_platform_check_concurrency.py",
+  "tools/scripts/test_ctest_coremidi_lock.py",
   "tools/scripts/test_ctest_label_exclusion_guard.py",
   "tools/scripts/test_ctest_nonruns.py",
   "tools/scripts/test_ctest_unique_names_check.py",
+  "tools/scripts/test_cutover_trial.py",
   "tools/scripts/test_dawn_binding_census.py",
   "tools/scripts/test_dead_test_guard.py",
   "tools/scripts/test_design_unit_boundary_check.py",
@@ -9333,6 +9413,7 @@ paths = [
   "tools/scripts/ctest_inventory_parity.py",
   "tools/scripts/ctest_nonruns.py",
   "tools/scripts/ctest_unique_names_check.py",
+  "tools/scripts/cutover_trial.py",
   "tools/scripts/design_unit_boundary_check.py",
   "tools/scripts/docs_sync_check.py",
   "tools/scripts/dsp_provenance_audit.py",
@@ -9497,9 +9578,11 @@ paths = [
   "tools/scripts/test_coverage_tier_check.py",
   "tools/scripts/test_coverage_tier_check_extra.py",
   "tools/scripts/test_cross_platform_check_concurrency.py",
+  "tools/scripts/test_ctest_coremidi_lock.py",
   "tools/scripts/test_ctest_label_exclusion_guard.py",
   "tools/scripts/test_ctest_nonruns.py",
   "tools/scripts/test_ctest_unique_names_check.py",
+  "tools/scripts/test_cutover_trial.py",
   "tools/scripts/test_dawn_binding_census.py",
   "tools/scripts/test_dead_test_guard.py",
   "tools/scripts/test_design_unit_boundary_check.py",
