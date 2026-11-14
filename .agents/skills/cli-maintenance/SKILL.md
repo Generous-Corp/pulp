@@ -4319,6 +4319,12 @@ control, and event edge observations. Keep their `edge_kind` and
 fields and codes identical across the public C++ API, CLI and MCP. Application
 Processor registrations belong to the C++ catalog, not the default tool catalog.
 
+Graph and notation load failures print `graph_patch_code_name` verbatim (`Ok`,
+`InvalidDocument`, `FileUnreadable`, ...); never rewrite a code in
+`cmd_graph.cpp` (an earlier `invalid_graph` rewrite made the CLI disagree with
+the C++ API). New CLI-only codes go in the `docs/reference/cli.md` table, and a
+new C++ code needs a row in `test/test_cli_graph_code_parity.cpp`.
+
 ## Standalone drains Program Change from the idle loop
 
 `StandaloneApp` creates a preset library and router when the processor sets
