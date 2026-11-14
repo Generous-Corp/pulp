@@ -1870,7 +1870,10 @@ NOT CHECKED; the configured check stays the authority for those. A new Python
 module can resolve an import without changing the importer, so selection also
 checks the generator's newly resolved inputs. Shared spawning sources in a
 CMake list do not prove a target consumes that list; uncertain membership is
-NOT CHECKED, never grounds for declaring a fragment stale. Three PRs on 2026-10-22
+NOT CHECKED, never grounds for declaring a fragment stale. CMake diff lines
+are not source removals: subtract sources added back in the same file, then
+check whether the recorded target still names them before flagging removal
+(another target can drop a shared source independently). Three PRs on 2026-10-22
 went red here on the encoding lint after the local gates reported clean,
 because only CI ran it. A new lint in this job that needs no build belongs in
 the hook too.

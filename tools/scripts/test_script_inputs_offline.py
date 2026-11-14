@@ -181,6 +181,37 @@ class OfflineTests(unittest.TestCase):
         self.assertIn("executables/pulp-cpp.json (pulp-cpp)", err)
         self.assertIn("tools/cli/cli_sdk.cpp was removed from a CMake source list", err)
 
+    def test_modified_cmake_line_is_not_a_removal(self) -> None:
+        for line in ("        cli_sdk.cpp", "    cli_sdk.cpp # still compiled",
+                     "    cli_sdk.cpp cli_main.cpp"):
+            with self.subTest(line=line):
+                self.write(CLI, "add_executable(pulp-cli\n    cli_main.cpp\n"
+                           + line + "\n)\n")
+                self.commit("test: edit line without removing recorded source")
+                rc, _, err = self.run_main()
+                self.assertEqual(rc, 0, err)
+                self.assertNotIn("was removed", err)
+
+    def test_same_line_addition_still_detects_new_spawner(self) -> None:
+        self.write(CLI, "add_executable(pulp-cli\n    cli_main.cpp\n"
+                       "    cli_sdk.cpp cli_watch_shell.cpp\n)\n")
+        self.commit("test: append a spawner to an existing source line")
+        rc, _, err = self.run_main()
+        self.assertEqual(rc, 1, err)
+        self.assertIn("tools/cli/cli_watch_shell.cpp calls a process", err)
+        self.assertNotIn("was removed", err)
+
+    def test_removal_from_other_target_keeps_recorded_target_valid(self) -> None:
+        self.append(CLI, "add_executable(other cli_main.cpp cli_sdk.cpp)\n")
+        self.commit("test: two targets share a spawner")
+        self.git("branch", "-f", "main", "HEAD")
+        self.write(CLI, "add_executable(pulp-cli\n    cli_main.cpp\n    cli_sdk.cpp\n)\n"
+                       "add_executable(other cli_main.cpp)\n")
+        self.commit("test: remove spawner only from the other target")
+        rc, _, err = self.run_main()
+        self.assertEqual(rc, 0, err)
+        self.assertNotIn("was removed", err)
+
     def test_cmake_list_variable_is_not_silently_truncated(self) -> None:
         self.write(QUALITY,
                    "set(_trial_args \"tools/ci/governed-build.sh;tools/mcp/server.py\")\n"

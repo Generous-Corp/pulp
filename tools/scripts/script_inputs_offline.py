@@ -645,6 +645,8 @@ def cmake_source_changes(root: Path, base: str, head: str,
     added: set[str] = set()
     removed: set[str] = set()
     for path in sorted(f for f in changed if f.endswith((".cmake", "CMakeLists.txt"))):
+        file_added: set[str] = set()
+        file_removed: set[str] = set()
         diff = _git(root, "diff", "-U0", "--no-renames", f"{base}...{head}", "--", path)
         for line in diff.splitlines():
             if not line or line.startswith(("+++", "---")) or line[0] not in "+-":
@@ -652,11 +654,15 @@ def cmake_source_changes(root: Path, base: str, head: str,
             body = line[1:].lstrip()
             if body.startswith("#"):
                 continue
-            target = added if line[0] == "+" else removed
+            target = file_added if line[0] == "+" else file_removed
             for token in SOURCE_TOKEN.findall(body):
                 rel = _cmake_source_token(root, path, token)
                 if rel:
                     target.add(rel)
+        # A modified line appears on both sides of the diff. Keep additions
+        # for signal checks, but do not call its unchanged sources removals.
+        added.update(file_added)
+        removed.update(file_removed - file_added)
     return added, removed
 
 
@@ -709,6 +715,10 @@ def check_executables(root: Path, base: str, head: str, changed: set[str], doc: 
         detected = set((rec or {}).get("detected_sources") or [])
         reasons: list[str] = []
         for src in sorted(cmake_removed & sti.compiled_entry_paths(rec or {})):
+            # A shared source may have left another target's list while this
+            # executable still names it in add_executable/target_sources.
+            if src in static.get(target, set()) or src in static.get(exe, set()):
+                continue
             reasons.append(f"{src} was removed from a CMake source list, but the entry still "
                            "records it; configure is required to regenerate this fragment")
         for src in changed_src:
