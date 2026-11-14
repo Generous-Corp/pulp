@@ -3181,6 +3181,18 @@ its public fingerprints or receipts. Validate the focused trigger-graph group
 and installed consumer; this seam does not establish hosted-plugin voice
 coverage or realtime qualification.
 
+`pulp/host/host_event_timestamps.hpp` (`HostBlockTimeline`) is the only path
+from a format's block-relative event time (CLAP `header.time`) to the ingress's
+epoch-local `absolute_sample`. Feed `HostBlockWindow` straight into
+`begin_block`. Gotchas: CLAP `steady_time` is a monotonic sample counter and
+does NOT move on a
+seek or loop, so a loop is only visible through the transport position or an
+explicit `discontinuity`; a stopped transport's position is ignored (it does
+not advance). A steady-clock forward gap stays in the epoch; a backwards clock
+or a steady/no-steady flip opens a new epoch. Out-of-block times are refused,
+never clamped. The CLAP adapter still feeds the Processor `MidiBuffer`, not this
+projection.
+
 # G-7 edge diagnostics
 
 SignalGraph control and event edge probes are serial routed diagnostics with

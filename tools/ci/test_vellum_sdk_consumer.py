@@ -37,6 +37,47 @@ class PickRunTests(unittest.TestCase):
             vsc.pick_run([_run(1, conclusion="failure")])
 
 
+class MinimumCommitTests(unittest.TestCase):
+    """A run older than the required Vellum commit is refused, not downloaded."""
+
+    def setUp(self):
+        self.saved = vsc._api
+        self.paths = []
+
+    def tearDown(self):
+        vsc._api = self.saved
+
+    def _resolve(self, compare_status):
+        import argparse
+        import os
+
+        def fake(path, token, raw=False):
+            self.paths.append(path)
+            if path.startswith(f"repos/{vsc.VELLUM_REPO}/actions/runs?"):
+                return {"workflow_runs": [_run(1)]}
+            if path.startswith(f"repos/{vsc.VELLUM_REPO}/compare/"):
+                return {"status": compare_status}
+            raise vsc.ResolveError(f"unexpected {path}")
+
+        vsc._api = fake
+        os.environ["GH_TOKEN"] = "t"
+        args = argparse.Namespace(out_dir=tempfile.mkdtemp(), run_id=None, previous_receipt=None,
+                                  skip_if_unchanged=None, github_output=None, min_vellum_sha="abc")
+        return vsc.resolve(args)
+
+    def test_run_behind_the_minimum_is_refused_before_any_download(self):
+        self.assertEqual(self._resolve("behind"), vsc.INCONCLUSIVE)
+        self.assertFalse(any("artifacts" in p for p in self.paths))
+        self.assertTrue(any(p.endswith("compare/abc...sha1") for p in self.paths))
+
+    def test_run_at_or_ahead_of_the_minimum_goes_on_to_download(self):
+        for status in ("identical", "ahead"):
+            self.paths.clear()
+            # The fake has no artifact listing, so the download step fails loudly.
+            self.assertEqual(self._resolve(status), vsc.INCONCLUSIVE)
+            self.assertTrue(any("runs/1/artifacts" in p for p in self.paths), status)
+
+
 class PickArtifactTests(unittest.TestCase):
     def test_exactly_one_live_evidence_artifact(self):
         art = {"id": 9, "name": vsc.EVIDENCE_ARTIFACT, "expired": False}
@@ -276,6 +317,43 @@ class NegativeControlUnusedHeaderTests(_StandInSdk, unittest.TestCase):
 
     def test_a_tu_that_does_not_include_the_header_is_not_confirmed(self):
         self.assertEqual(vsc.main(self.args), vsc.NOT_CONFIRMED)
+
+
+class BridgeWiringTests(unittest.TestCase):
+    """The lane sees every file that wires the bridge, and the bridge's test
+    configure works when Pulp is embedded with add_subdirectory."""
+
+    ROOT = Path(__file__).resolve().parents[2]
+
+    def _pull_request_paths(self):
+        text = (self.ROOT / ".github/workflows/vellum-sdk-consumer.yml").read_text(encoding="utf-8")
+        lines = text.splitlines()
+        start = lines.index("  pull_request:")
+        paths = []
+        for line in lines[start + 1:]:
+            stripped = line.strip()
+            if line and not line.startswith("    "):
+                break
+            if stripped.startswith("- "):
+                paths.append(stripped[2:].strip("'\""))
+        return paths
+
+    def test_pull_request_trigger_watches_the_bridge_wiring(self):
+        paths = self._pull_request_paths()
+        for required in ("integrations/pulp-vellum/**", "test/test_pulp_vellum_param_bridge.cpp",
+                         "integrations/CMakeLists.txt", "CMakeLists.txt"):
+            self.assertIn(required, paths)
+
+    def test_bridge_cmake_does_not_root_paths_at_the_consumer_project(self):
+        files = sorted((self.ROOT / "integrations/pulp-vellum").rglob("CMakeLists.txt"))
+        self.assertTrue(files, "no pulp-vellum CMake files found; the check is blind")
+        for path in files:
+            text = path.read_text(encoding="utf-8")
+            code = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+            for variable in ("PROJECT_SOURCE_DIR", "CMAKE_SOURCE_DIR"):
+                self.assertNotIn("${%s}" % variable, code, f"{path.relative_to(self.ROOT)} uses ${{{variable}}}")
+        tests = (self.ROOT / "integrations/pulp-vellum/tests/CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn("${PULP_ROOT_DIR}/test/test_pulp_vellum_param_bridge.cpp", tests)
 
 
 if __name__ == "__main__":

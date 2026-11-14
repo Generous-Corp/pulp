@@ -1507,10 +1507,21 @@ failures use the typed codes `serialization_refused`, `file_too_large`,
 C++ API and CLI so callers do not need to parse diagnostic text. Save is a
 CLI-only write operation; the MCP `pulp_graph` tool remains read-only.
 
-`pulp graph render FILE --output OUTPUT.wav --json` prepares the saved graph
-and renders one second at 48 kHz to a float WAV. Its JSON result reports frame,
-sample rate, and block counts. Unresolved node types and prepare failures return
-nonzero errors. The MCP `pulp_graph` tool exposes the read-only `inspect`,
+`pulp graph render FILE --input INPUT.wav --output OUTPUT.wav --json` prepares
+the saved graph at the input's sample rate and channel count, feeds the decoded
+input to its `audio_in` node, and renders the input's length to a float WAV at
+the same sample rate. The input must decode to 1-8 channels, 8000-192000 Hz,
+1-28800000 frames and at most 57600000 samples in total, with finite samples
+(`input_limit` or `non_finite_input`, exit 2). `--frames N` overrides the length
+(input shorter than `N` is zero-padded, which renders a tail). A graph with an
+`audio_in` node and no `--input` is refused with `missing_input` (exit 2)
+rather than rendering silence; a graph without `audio_in` renders 48000 frames
+at 48 kHz when no input is given. Unknown or repeated options are refused with
+`invalid_option` (exit 2). The JSON result reports `frames`, `sample_rate`,
+`channels` (the input channel count, at least 2), `blocks`, and `peak`, the
+largest absolute output sample over all channels, so a silent render is visible
+without reading the WAV. Unresolved node types, prepare failures and non-finite
+output (`non_finite_output`) return exit 1. The MCP `pulp_graph` tool exposes the read-only `inspect`,
 `validate`, `explain`, `render`, `probe`, and `report` operations; file writing stays in the CLI.
 
 `pulp graph report FILE [--sample-rate 48000] [--max-block-size 512]
@@ -1527,9 +1538,29 @@ See [Signal Graph: latency semantics](signal-graph.md#latency-semantics).
 
 `pulp graph probe FILE --input INPUT.wav --source-node source --source-port audio
 --destination-node downstream --destination-port audio --block-frames 64 --json`
-observes one ordinary serial audio edge offline. The JSON report preserves the
+observes one serial audio edge offline. The JSON report preserves the
 public probe identity, sequence, sample-relative timestamps, frame counts,
 peak/RMS and loss count. Measurements precede downstream mixing and PDC.
+`--edge-kind audio|control|event` selects the probe (default `audio`).
+`--edge-kind event` observes a MIDI edge after seeding one fixed note-on.
+`--edge-kind control --destination-param ID` replaces `--destination-port` with
+an integer parameter id. A control edge ends on a parameter of a registered
+Processor node (an application type from the public C++ catalog); the offline
+probe admits only built-in input, output, gain and MIDI nodes, none of which
+has an automatable parameter, so through the CLI a control request always
+refuses with `MissingEdge` and control probes are C++ API only. Each attach
+refusal's `message` names the cause and the fix.
+
+`--plan` adds a `plan` object: `nodes` (`id`, `name`, `input_ports`,
+`output_ports`) and `connections` (`source_node`, `source_port`,
+`destination_node`, `destination_port`, and the booleans `feedback`, `midi`,
+`automation`, `audio_rate_modulation`, `sidechain`). `--latency` adds a
+`latency_pdc` object: `total_latency_samples`, `nodes` (`node_id`,
+`input_latency_samples`, `output_latency_samples`) and `connections`
+(`source_node`, `source_port`, `destination_node`, `destination_port`,
+`delay_samples`, the compensation delay inserted on that connection). Node and
+port values are numeric ids, not names. `--node-loads` adds `node_loads`
+(`node_id`, `load`, `callback_count`).
 See [edge probe limits and lifecycle](../guides/graph-edge-probes.md).
 
 ### SignalGraph notation

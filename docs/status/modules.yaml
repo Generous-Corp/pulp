@@ -9,6 +9,13 @@ modules:
     dependencies: [platform]
     docs: reference/modules.md#native
 
+  - name: pulp_vellum
+    path: integrations/pulp-vellum
+    summary: The parameter bridge between the editor-host contract and Vellum value interfaces presenting a ParamPort as a Vellum ParamModel with nested gestures echo suppression restore replay text parsing and modulation readout and a VisualPort as a ValueFeed built only against an installed Vellum SDK
+    status: experimental
+    dependencies: [format]
+    docs: reference/modules.md#pulp_vellum
+
   - name: playback
     summary: Master transport optional session-tempo sync immutable incrementally compiled track and automation programs bounded deterministic cursors WAV-backed arrangement audio rendering block-coherent publication and stable renderer shells
     status: experimental

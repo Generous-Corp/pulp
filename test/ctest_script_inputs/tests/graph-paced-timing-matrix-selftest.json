@@ -1,0 +1,17 @@
+{
+ "name": "graph-paced-timing-matrix-selftest",
+ "record": {
+  "entry": "tools/test_graph_paced_timing_matrix.py",
+  "inputs": [
+   "test/fixtures/g5_graph_event_rt_cases.inc",
+   "test/test_graph_r2_measurement.cpp",
+   "test/test_routed_spectral_ports.cpp",
+   "test/test_signal_graph_executor_parity.cpp",
+   "test/test_voice_bank_binding.cpp",
+   "tools/graph_paced_timing_matrix.py",
+   "tools/graph_performance_qualification.py",
+   "tools/test_graph_paced_timing_matrix.py"
+  ],
+  "kind": "python"
+ }
+}

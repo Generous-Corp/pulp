@@ -9,6 +9,23 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11240"></a>
+## [1.124.0] - 2026-11-13
+
+- release/version bump ([#12215](https://github.com/Generous-Corp/pulp/pull/12215))
+- graph/trial fixes notation 20261113 ([#12208](https://github.com/Generous-Corp/pulp/pull/12208))
+- feature/families configure only ([#12163](https://github.com/Generous-Corp/pulp/pull/12163))
+- feature/native gl surface win32 ([#12171](https://github.com/Generous-Corp/pulp/pull/12171))
+- graph/w2d p1 executor parity 20261113 ([#12196](https://github.com/Generous-Corp/pulp/pull/12196))
+
+<a id="v11232"></a>
+## [1.123.2] - 2026-11-13
+
+- release/version bump ([#12205](https://github.com/Generous-Corp/pulp/pull/12205))
+- ops/fix first on ([#12203](https://github.com/Generous-Corp/pulp/pull/12203))
+- feature/agent toolkit template 20261112 ([#12162](https://github.com/Generous-Corp/pulp/pull/12162))
+- graph/w4c g10 resynthesis consumer 20261113 ([#12199](https://github.com/Generous-Corp/pulp/pull/12199))
+
 <a id="v11231"></a>
 ## [1.123.1] - 2026-11-13
 
@@ -12934,6 +12951,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.124.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.124.0
+[1.123.2]: https://github.com/Generous-Corp/pulp/releases/tag/v1.123.2
 [1.123.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.123.1
 [1.123.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.123.0
 [1.122.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.122.0
