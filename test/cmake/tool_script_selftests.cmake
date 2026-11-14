@@ -53,6 +53,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME macos-merge-group-bootstrap-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_macos_merge_group_bootstrap.py")
     set_tests_properties(macos-merge-group-bootstrap-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
+    # cheap_first_gate.py: build.yml's native matrix starts only after the
+    # cheap required checks pass at the head. Only a red check blocks; a
+    # pending one waits, and a deadline or unreadable API fails open.
+    add_test(NAME cheap-first-gate-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_cheap_first_gate.py")
+    set_tests_properties(cheap-first-gate-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
     # clock_only_temp_key_guard.py: a test temp path named from a clock reading
     # alone is shared by two concurrent cases that read the same tick. The
     # selftest proves the scan reads real sources (an empty scan is an error).
