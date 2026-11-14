@@ -1,0 +1,26 @@
+{
+ "name": "pulp-test-cli-graph-code-parity",
+ "record": {
+  "data": "declared",
+  "detected_sources": [
+   "test/test_cli_graph_code_parity.cpp"
+  ],
+  "inputs": [
+   "test/test_cli_graph_code_parity.cpp"
+  ],
+  "kind": "compiled",
+  "runtime_targets": [
+   "pulp-cli"
+  ],
+  "sources": [
+   "test/test_cli_graph_code_parity.cpp"
+  ],
+  "spawning_sources": [
+   "test/test_cli_graph_code_parity.cpp",
+   "test/test_cli_shellout_helpers.hpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

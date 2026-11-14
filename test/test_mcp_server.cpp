@@ -694,6 +694,38 @@ TEST_CASE("MCP graph exposes read-only operations and refuses edits", "[mcp][too
 #endif
 }
 
+TEST_CASE("MCP graph passes the CLI diagnostic codes through unchanged", "[mcp][tools][graph]") {
+#if defined(_WIN32)
+    SKIP("fake extensionless pulp CLI is only executable through popen on POSIX");
+#else
+    TempDir project;
+    std::ofstream(project.path / "CMakeLists.txt") << "project(FakePulp VERSION 1.2.3)\n";
+    std::filesystem::create_directories(project.path / "core");
+    const auto cli = make_fake_pulp_cli(project.path);
+    // The stand-in CLI reports a typed C++ code name; the tool must neither
+    // rename nor wrap it, for failures and for success.
+    struct Case {
+        const char* code;
+        int exit_code;
+    };
+    for (const auto& item : {Case{"InvalidDocument", 1}, Case{"FileUnreadable", 1},
+                             Case{"UnknownPort", 1}, Case{"Ok", 0}}) {
+        {
+            std::ofstream script(cli, std::ios::trunc);
+            script << "#!/bin/sh\nprintf '{\"valid\":" << (item.exit_code == 0 ? "true" : "false")
+                   << ",\"code\":\"" << item.code << "\"}'\nexit " << item.exit_code << "\n";
+        }
+        ScopedCurrentPath cwd(project.path);
+        const auto response = handle_request(tool_call(
+            "74", "pulp_graph", R"JSON({"path":"graph.pulpgraph","operation":"validate"})JSON"));
+        require_contains(response, std::string("\\\"code\\\":\\\"") + item.code + "\\\"");
+        REQUIRE(response.find("invalid_graph") == std::string::npos);
+        REQUIRE(response.find(item.exit_code == 0 ? "\"isError\":false" : "\"isError\":true") !=
+                std::string::npos);
+    }
+#endif
+}
+
 TEST_CASE("pulp-mcp flag-only invocations do not enter the JSON-RPC loop", "[mcp][main]") {
     std::ostringstream out;
     std::ostringstream err;
