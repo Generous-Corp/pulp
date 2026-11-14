@@ -12,6 +12,7 @@
 #include <vellum/rmlui/backend.hpp>
 #include <vellum/rmlui/soft_renderer.hpp>
 
+
 #include <cstdio>
 
 namespace {
@@ -27,6 +28,57 @@ class NoLua final : public LuaInterface {
     Status dispatch(std::string_view) override {
         return Status::ok;
     }
+};
+
+class ScaledSoftRenderer final : public RenderInterface {
+  public:
+    explicit ScaledSoftRenderer(std::uint32_t scale) : scale_(scale) {}
+
+    void begin_frame(std::uint32_t width, std::uint32_t height) override {
+        renderer_.begin_frame(width * scale_, height * scale_);
+    }
+
+    void submit(const DrawCommand& input) override {
+        auto command = input;
+        command.x *= scale_;
+        command.y *= scale_;
+        command.width *= scale_;
+        command.height *= scale_;
+        command.translation_x *= scale_;
+        command.translation_y *= scale_;
+        if (command.scissor_enabled) {
+            command.scissor.x *= static_cast<int>(scale_);
+            command.scissor.y *= static_cast<int>(scale_);
+            command.scissor.width *= static_cast<int>(scale_);
+            command.scissor.height *= static_cast<int>(scale_);
+        }
+        if (command.transform_enabled) {
+            command.transform[12] *= scale_;
+            command.transform[13] *= scale_;
+        }
+        if (command.vertices) {
+            auto vertices = std::make_shared<std::vector<DrawVertex>>(*command.vertices);
+            for (auto& vertex : *vertices) {
+                vertex.x *= scale_;
+                vertex.y *= scale_;
+            }
+            command.vertices = std::move(vertices);
+        }
+        renderer_.submit(command);
+    }
+
+    void end_frame() override { renderer_.end_frame(); }
+
+    [[nodiscard]] const std::vector<std::uint8_t>& pixels() const noexcept {
+        return renderer_.pixels();
+    }
+    [[nodiscard]] std::size_t skipped_draws() const noexcept {
+        return renderer_.skipped_draws();
+    }
+
+  private:
+    std::uint32_t scale_;
+    SoftRenderer renderer_{0x00000000u};
 };
 
 } // namespace
@@ -48,13 +100,18 @@ int main(int argc, char** argv) {
         for (const auto scale : pulp_rmlui_golden::kScales) {
             const std::uint32_t width = pulp_rmlui_golden::kWidthPoints * scale;
             const std::uint32_t height = pulp_rmlui_golden::kHeightPoints * scale;
-            SoftRenderer renderer(0x00000000u); // transparent, as a cleared Metal frame
+            ScaledSoftRenderer renderer(scale);
             NoLua lua;
             Backend backend(assets, renderer, lua);
-            if (backend.open(width, height) != Status::ok) {
-                std::fprintf(stderr, "open failed at %ux%u\n", width, height);
+            if (backend.open(pulp_rmlui_golden::kWidthPoints,
+                             pulp_rmlui_golden::kHeightPoints) != Status::ok) {
+                std::fprintf(stderr, "open failed at %ux%u\n", pulp_rmlui_golden::kWidthPoints,
+                             pulp_rmlui_golden::kHeightPoints);
                 return 1;
             }
+#if defined(VELLUM_RMLUI_HAS_DENSITY_INDEPENDENT_PIXEL_RATIO)
+            backend.set_density_independent_pixel_ratio(static_cast<float>(scale));
+#endif
             FontFaceOptions face;
             face.style = FontStyle::normal;
             face.weight = 400;

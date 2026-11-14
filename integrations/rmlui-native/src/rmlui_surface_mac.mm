@@ -126,7 +126,11 @@ struct RmlUiSurface::Impl {
         width_px = w;
         height_px = h;
         scale = s;
-        context->set_dimensions(w, h);
+        context->set_dimensions(std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.width))),
+                               std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.height))));
+#if defined(VELLUM_RMLUI_HAS_DENSITY_INDEPENDENT_PIXEL_RATIO)
+        context->set_density_independent_pixel_ratio(static_cast<float>(s));
+#endif
     }
 
     // Main thread, rmlui_mutex() held: hold the host's keyboard only while an
@@ -176,8 +180,8 @@ struct RmlUiSurface::Impl {
             vellum::rmlui::NativeContext::Scope scope(*context);
             g_pointer_surface = surface.get();
             const int mods = rml_modifiers_for(e.modifiers);
-            const int x = static_cast<int>(std::lround(e.x * scale));
-            const int y = static_cast<int>(std::lround(e.y * scale));
+            const int x = static_cast<int>(std::lround(e.x));
+            const int y = static_cast<int>(std::lround(e.y));
             switch (e.kind) {
             case PointerKind::move:
             case PointerKind::drag:
@@ -323,9 +327,9 @@ bool RmlUiSurface::attach(void* parent) {
         const auto g = d.surface->geometry();
         const double s = g.scale > 0.0 ? g.scale : 1.0;
         const auto w =
-            std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.width * s)));
+            std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.width)));
         const auto h =
-            std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.height * s)));
+            std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.height)));
         bool ok = d.context->open(w, h) == vellum::rmlui::Status::ok;
         if (ok) {
             vellum::rmlui::NativeContext::Scope scope(*d.context);
@@ -338,6 +342,9 @@ bool RmlUiSurface::attach(void* parent) {
             d.width_px = w;
             d.height_px = h;
             d.scale = s;
+#if defined(VELLUM_RMLUI_HAS_DENSITY_INDEPENDENT_PIXEL_RATIO)
+            d.context->set_density_independent_pixel_ratio(static_cast<float>(s));
+#endif
         }
     }
     if (!d.context) {
