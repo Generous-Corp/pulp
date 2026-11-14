@@ -80,8 +80,7 @@ int main(int argc, char** argv) {
             ScaledSoftRenderer renderer(scale);
             NoLua lua;
             Backend backend(assets, renderer, lua);
-            if (backend.open(width, height) !=
-                Status::ok) {
+            if (backend.open(width, height) != Status::ok) {
                 std::fprintf(stderr, "open failed at %ux%u\n", width, height);
                 return 1;
             }
