@@ -92,8 +92,9 @@ class ControlModulatedProcessor final : public pulp::format::Processor {
     }
 };
 
-std::vector<float> render_index_program(const std::vector<int>& partitions) {
+std::vector<float> render_index_program(const std::vector<int>& partitions, bool routed = true) {
     SignalGraph graph;
+    graph.set_canonical_executor_routing_enabled(routed);
     REQUIRE(graph.register_custom_node_type(make_control_indexed_table_type()));
     REQUIRE(graph.register_custom_node_type(make_audio_probe()));
     const auto audio = graph.add_input_node(1);
@@ -160,6 +161,10 @@ TEST_CASE("graph Control index samples are distinct from audio and partition sta
     }
     CHECK(render_index_program(uneven) == whole);
     CHECK(render_index_program({32, 64}) == whole);
+    // With canonical routing off the legacy reference walk renders the same
+    // checked blocks and reports them Accepted, not RenderFailed.
+    CHECK(render_index_program({96}, false) == whole);
+    CHECK(render_index_program(uneven, false) == whole);
 }
 
 TEST_CASE("Control index checked admission refuses without changing output or cursor",

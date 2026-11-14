@@ -659,6 +659,11 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
     // the hand-maintained bit-exact oracle/fallback (see
     // signal_graph_reference_walk.cpp).
     run_reference_walk_(output, input, num_samples, cg, time_nodes);
+    // The reference walk reads the same snapshot-owned index block through the
+    // Control index callback, so a checked Control block it renders is a
+    // rendered block, bit-identical to the serial routed backend.
+    if (control_rendered != nullptr)
+        *control_rendered = true;
 }
 
 void SignalGraph::ExecutionSnapshot::process(audio::BufferView<float>& output,
