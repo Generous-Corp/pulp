@@ -52,6 +52,9 @@ enum class GraphDocumentRefusal : std::uint8_t {
     NestingLimitExceeded,
     NonFiniteNumber,
     AllocationFailed,
+    SubgraphRecordInvalid,
+    SubgraphBindingDangling,
+    SubgraphBindingDuplicate,
 };
 
 const char* graph_document_refusal_name(GraphDocumentRefusal) noexcept;
@@ -176,6 +179,11 @@ class GraphSerializer {
     static std::string to_saved_document(
         const SignalGraph& graph,
         const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout = {});
+
+    /// Deterministic authored identity for every current node, the same
+    /// values to_saved_document records. NodeIds are lookup keys only and
+    /// never enter an identity string.
+    static std::unordered_map<NodeId, std::string> saved_node_identities(const SignalGraph& graph);
 
     using MigrationFn =
         std::function<bool(const std::string& source_json,

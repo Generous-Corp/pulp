@@ -439,6 +439,101 @@ bool append_semantic_canonical(const V& value, std::string& output, GraphDocumen
     return true;
 }
 
+template <typename V> bool is_json_integer(const V& value) {
+    return value.isInt32() || value.isInt64();
+}
+
+template <typename V> bool is_finite_json_number(const V& value) {
+    if (is_json_integer(value))
+        return true;
+    return (value.isFloat32() || value.isFloat64()) && std::isfinite(value.getFloat64());
+}
+
+template <typename V> bool is_instance_index(const V& value) {
+    return is_json_integer(value) && value.getInt64() >= 0 &&
+           value.getInt64() <= static_cast<std::int64_t>(std::numeric_limits<std::uint32_t>::max());
+}
+
+template <typename V> bool is_nonempty_string(const V& value) {
+    return value.isString() && !value.getString().empty();
+}
+
+// Authored subgraph instance records ride in the saved-identity envelope.
+// Each record names logical node identities, never runtime NodeIds, and no
+// node may belong to two instances. Values are data only here; template
+// conformance is checked by the subgraph restore path.
+template <typename V>
+GraphDocumentRefusal validate_subgraph_records(const V& records,
+                                               const std::unordered_set<std::string>& identities,
+                                               std::string& detail) {
+    if (!records.isArray()) {
+        detail = "subgraphs must be an array of instance records";
+        return GraphDocumentRefusal::SubgraphRecordInvalid;
+    }
+    std::unordered_set<std::string> instances;
+    std::unordered_set<std::string> claimed;
+    for (std::uint32_t i = 0; i < records.size(); ++i) {
+        const auto& record = records[i];
+        if (!record.isObject() || !record.hasObjectMember("template_identity") ||
+            !is_nonempty_string(record["template_identity"]) ||
+            !record.hasObjectMember("instance_identity") ||
+            !is_nonempty_string(record["instance_identity"]) ||
+            !record.hasObjectMember("instance_index") ||
+            !is_instance_index(record["instance_index"]) || !record.hasObjectMember("members") ||
+            !record["members"].isArray() || record["members"].size() == 0 ||
+            !record.hasObjectMember("parameters") || !record["parameters"].isObject() ||
+            !record.hasObjectMember("children") || !record["children"].isObject()) {
+            detail = "subgraph record " + std::to_string(i) +
+                     " requires template_identity, instance_identity, instance_index, members, "
+                     "parameters, and children";
+            return GraphDocumentRefusal::SubgraphRecordInvalid;
+        }
+        const auto instance = std::string(record["instance_identity"].getString());
+        if (!instances.insert(instance).second) {
+            detail = "duplicate subgraph instance identity: " + instance;
+            return GraphDocumentRefusal::SubgraphBindingDuplicate;
+        }
+        const auto& members = record["members"];
+        for (std::uint32_t m = 0; m < members.size(); ++m) {
+            if (!is_nonempty_string(members[m])) {
+                detail = "subgraph " + instance + " member must be a logical identity string";
+                return GraphDocumentRefusal::SubgraphRecordInvalid;
+            }
+            const auto member = std::string(members[m].getString());
+            if (!identities.contains(member)) {
+                detail = "subgraph " + instance + " names unknown logical identity " + member;
+                return GraphDocumentRefusal::SubgraphBindingDangling;
+            }
+            if (!claimed.insert(member).second) {
+                detail = "logical identity " + member + " belongs to two subgraph instances";
+                return GraphDocumentRefusal::SubgraphBindingDuplicate;
+            }
+        }
+        const auto& parameters = record["parameters"];
+        for (std::uint32_t p = 0; p < parameters.size(); ++p) {
+            const auto member = parameters.getObjectMemberAt(p);
+            if (std::string_view(member.name).empty() || !is_finite_json_number(member.value)) {
+                detail = "subgraph " + instance + " parameter values must be finite numbers";
+                return GraphDocumentRefusal::SubgraphRecordInvalid;
+            }
+        }
+        const auto& children = record["children"];
+        for (std::uint32_t c = 0; c < children.size(); ++c) {
+            const auto child = children.getObjectMemberAt(c);
+            if (std::string_view(child.name).empty() || !child.value.isObject() ||
+                !child.value.hasObjectMember("template_identity") ||
+                !is_nonempty_string(child.value["template_identity"]) ||
+                !child.value.hasObjectMember("instance_index") ||
+                !is_instance_index(child.value["instance_index"])) {
+                detail = "subgraph " + instance +
+                         " child records require template_identity and instance_index";
+                return GraphDocumentRefusal::SubgraphRecordInvalid;
+            }
+        }
+    }
+    return GraphDocumentRefusal::None;
+}
+
 const char* format_str(PluginFormat f) {
     switch (f) {
         case PluginFormat::VST3:        return "vst3";
@@ -1111,6 +1206,12 @@ const char* graph_document_refusal_name(GraphDocumentRefusal refusal) noexcept {
         return "nesting_limit_exceeded";
     case GraphDocumentRefusal::NonFiniteNumber:
         return "non_finite_number";
+    case GraphDocumentRefusal::SubgraphRecordInvalid:
+        return "subgraph_record_invalid";
+    case GraphDocumentRefusal::SubgraphBindingDangling:
+        return "subgraph_binding_dangling";
+    case GraphDocumentRefusal::SubgraphBindingDuplicate:
+        return "subgraph_binding_duplicate";
     case GraphDocumentRefusal::AllocationFailed:
         return "allocation_failed";
     }
@@ -1292,6 +1393,15 @@ GraphDocumentInspection GraphSerializer::inspect_document(std::string_view json)
                     return result;
                 }
             }
+            if (root.hasObjectMember("subgraphs")) {
+                result.refusal = validate_subgraph_records(root["subgraphs"], known, result.detail);
+                if (result.refusal != GraphDocumentRefusal::None)
+                    return result;
+            }
+        } else if (root.hasObjectMember("subgraphs")) {
+            result.refusal = GraphDocumentRefusal::SubgraphRecordInvalid;
+            result.detail = "subgraph records require the saved-identity v6 envelope";
+            return result;
         }
         if (format_version == 0 && profile.empty()) {
             result.refusal = GraphDocumentRefusal::LogicalIdentityMissing;
@@ -1758,6 +1868,20 @@ std::string GraphSerializer::to_json(
     }
 
     return choc::json::toString(root, true);
+}
+
+std::unordered_map<NodeId, std::string>
+GraphSerializer::saved_node_identities(const SignalGraph& graph) {
+    std::unordered_map<std::string, std::size_t> ordinals;
+    std::vector<const GraphNode*> nodes;
+    for (const auto& node : graph.nodes())
+        nodes.push_back(&node);
+    std::sort(nodes.begin(), nodes.end(),
+              [](const auto* a, const auto* b) { return a->id < b->id; });
+    std::unordered_map<NodeId, std::string> identities;
+    for (const auto* node : nodes)
+        identities.emplace(node->id, authored_node_identity(*node, ordinals));
+    return identities;
 }
 
 std::string GraphSerializer::to_saved_document(

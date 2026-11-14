@@ -3320,3 +3320,14 @@ version: the payload stays at the current format, and a v6+ graph is still
 refused. The semantic digest ignores editor layout, so moving a node changes
 the canonical bytes but not the digest. `snapshot_port_identity` replaces the
 old `undo_port_identity` spelling, which returned a snapshot and not an undo.
+
+Subgraph instances flatten into ordinary nodes, so a plain saved document
+loses which nodes form which instance. `to_saved_subgraph_document` and
+`from_saved_subgraph_document` (`subgraph_persistence.hpp`) add a `subgraphs`
+record list that names members by logical identity, never NodeId. Restore
+needs the caller's templates: each record is checked against a fresh scratch
+expansion of its template (member type and nested name, child identities and
+indices, internal edges, parameter set and bounds), and any mismatch clears
+the graph. Bounds and Processor targets always come from the template, so a
+document cannot widen them. `inspect_document` refuses dangling or shared
+members and records outside the v6 envelope, without needing templates.
