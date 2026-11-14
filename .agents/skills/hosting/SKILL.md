@@ -36,6 +36,15 @@ and start from `control_index_position()`, and expect prepare or a prepared-edit
 commit to reset it to epoch 1, cursor 0. `control_index_nodes.cpp` is part of
 the curated sample-region web source list, because authoring calls into it.
 
+Port names: a MidiInput/MidiOutput node's single port is named `audio` (the
+first-port name from `populate_named_ports`) with kind MIDI, so do not rename
+it; `GraphNode::in` / `out` accept `midi` as an alias for a node's only MIDI
+port instead. Exact names win, and a node with zero or several MIDI ports has no
+alias. Port-name rules live in that one lookup: notation's `resolve_port`
+delegates to it, so a rule added only to the parser would let `.pat` files and
+the C++ API disagree. The formatter still writes `midi.audio`, so formatted
+text never changes when the alias is used.
+
 ## Opt-in isolated CLAP processing
 
 `pulp/host/isolated_plugin_slot.hpp` supplies experimental MacClapStereo64V1
@@ -3300,6 +3309,14 @@ cannot automate (it is not a Processor parameter); a chain hop infers a port
 only when the node has exactly one output, so stereo built-ins need explicit
 `node.audio` and `node.out1` ports. User-facing walkthroughs live in
 `docs/guides/graph-first-steps.md` and `docs/guides/graph-notation-cookbook.md`.
+
+Spectral constructors appear in the catalog as `unsupported_typed_api_only`
+rows built at a fixed probe identity (FFT 256, hop 64, mono, 48 kHz), so their
+audio port counts are for that identity only. A catalog row is not proof a key
+is constructible from notation: `instantiate()` returns 0 for spectral keys and
+`parse_graph_patch` refuses them before instantiation. Never suggest
+`GraphSerializer` as the fix for a spectral refusal; `to_json` returns an empty
+string for any graph with a spectral node.
 
 ### Transactional graph-file development reload
 
