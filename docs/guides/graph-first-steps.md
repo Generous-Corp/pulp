@@ -20,7 +20,8 @@ tools/ci/governed-build.sh cmake --build build --target pulp-cli pulp-rust-cli
 
 Save this as `first.pat`. The first line must be `# flow 1`. The default
 catalog (`pulp graph catalog --json`) has audio in/out, `pulp/gain` and MIDI
-in/out. The audio boundaries and `pulp/gain` are stereo, so their two channels
+in/out. It also lists spectral constructors marked
+`unsupported_typed_api_only`; those are built in C++, not in a patch. The audio boundaries and `pulp/gain` are stereo, so their two channels
 are the ports `audio` and `out1` (outputs) or `audio` and `in1` (inputs).
 
 ```text

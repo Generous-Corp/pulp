@@ -2,6 +2,8 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/format/processor_node_adapter.hpp>
 #include <pulp/host/graph_patch.hpp>
+#include <pulp/host/spectral_graph.hpp>
+#include <pulp/signal/spectral_frame_codec.hpp>
 
 #include "graph_patch_grammar.hpp"
 
@@ -286,6 +288,59 @@ const Factory builtins[] = {
     +[](SignalGraph& g, const std::string& n) { return g.add_gain_node(n); },
     +[](SignalGraph& g, const std::string& n) { return g.add_midi_input_node(n); },
     +[](SignalGraph& g, const std::string& n) { return g.add_midi_output_node(n); }};
+// Spectral constructors are typed C++ APIs only: identity, closed stage values
+// and owned codec assets have no notation or saved-graph spelling. The catalog
+// projects their ports from real constructions at one probe identity so tools
+// can discover them; notation refuses each key with its owning constructor.
+struct SpectralConstructor {
+    const char* key;
+    const char* constructor;
+    NodeId (*make)(SignalGraph&);
+};
+constexpr int spectral_probe_fft = 256, spectral_probe_hop = 64, spectral_probe_channels = 1;
+constexpr double spectral_probe_rate = 48000;
+SpectralIdentity spectral_probe_identity() {
+    return *SpectralIdentity::make(spectral_probe_fft, spectral_probe_hop, spectral_probe_channels,
+                                   spectral_probe_rate)
+                .value;
+}
+template <typename Ports> NodeId spectral_node_id(const SpectralResult<Ports>& result) {
+    return result ? result.value->node : NodeId{0};
+}
+const SpectralConstructor spectral_constructors[] = {
+    {"pulp/spectral_analysis", "SignalGraph::add_spectral_analysis",
+     +[](SignalGraph& g) {
+         return spectral_node_id(g.add_spectral_analysis(spectral_probe_identity(), "probe"));
+     }},
+    {"pulp/spectral_stage", "SignalGraph::add_spectral_stage",
+     +[](SignalGraph& g) {
+         const auto identity = spectral_probe_identity();
+         auto stage = QualifiedSpectralStage::identity_v1(identity);
+         if (!stage)
+             return NodeId{0};
+         return spectral_node_id(g.add_spectral_stage(identity, std::move(*stage.value), "probe"));
+     }},
+    {"pulp/spectral_synthesis", "SignalGraph::add_spectral_synthesis",
+     +[](SignalGraph& g) {
+         return spectral_node_id(g.add_spectral_synthesis(spectral_probe_identity(), "probe"));
+     }},
+    {"pulp/spectral_asset_morph", "SignalGraph::add_spectral_asset_morph_v1", +[](SignalGraph& g) {
+         // One source sample covers four profile-one frames of silence.
+         auto stream = signal::make_spectral_stream({}, 4);
+         if (!stream)
+             return NodeId{0};
+         auto encoded = signal::encode_spectral_stream(*stream.value);
+         if (!encoded)
+             return NodeId{0};
+         const auto bytes = encoded.value->view();
+         return spectral_node_id(g.add_spectral_asset_morph_v1(bytes, bytes, 1, "probe"));
+     }}};
+const SpectralConstructor* spectral_constructor(std::string_view key) {
+    for (const auto& c : spectral_constructors)
+        if (key == c.key)
+            return &c;
+    return nullptr;
+}
 std::string serialized_type(const SignalGraph& g) {
     const auto text = GraphSerializer::to_json(g);
     if (text.empty())
@@ -510,24 +565,40 @@ std::string GraphPatchCatalog::to_json() const {
             (processor && !processor->processor().serialize_plugin_state().empty()) ||
             (custom_type && bool(custom_type->save_state));
         row.addMember("notation_state", opaque ? "unsupported_opaque_state" : "parameters_only");
-        rows.addArrayElement(row);
+        return row;
     };
     for (const auto factory : builtins) {
         SignalGraph g;
         const auto id = factory(g, "probe");
-        add(g, id, "pulp/" + serialized_type(g), 1);
+        rows.addArrayElement(add(g, id, "pulp/" + serialized_type(g), 1));
+    }
+    for (const auto& c : spectral_constructors) {
+        SignalGraph g;
+        const auto id = c.make(g);
+        if (!id)
+            continue;
+        auto row = add(g, id, c.key, 1);
+        row.setMember("notation_state", "unsupported_typed_api_only");
+        row.setMember("constructor", c.constructor);
+        auto identity = choc::value::createObject("SpectralProbeIdentity");
+        identity.addMember("fft_size", spectral_probe_fft);
+        identity.addMember("hop", spectral_probe_hop);
+        identity.addMember("channels", spectral_probe_channels);
+        identity.addMember("sample_rate", spectral_probe_rate);
+        row.setMember("probe_identity", identity);
+        rows.addArrayElement(row);
     }
     for (const auto& d : descriptors_) {
         auto g = make_graph();
         auto id = instantiate(*g, d.type.type_id, d.type.type_version, "probe");
         if (id)
-            add(*g, id, d.type.type_id, d.type.type_version);
+            rows.addArrayElement(add(*g, id, d.type.type_id, d.type.type_version));
     }
     for (const auto& t : custom_) {
         auto g = make_graph();
         auto id = g->add_custom_node(t.type_id, t.version, "probe");
         if (id)
-            add(*g, id, t.type_id, t.version);
+            rows.addArrayElement(add(*g, id, t.type_id, t.version));
     }
     root.addMember("types", rows);
     return choc::json::toString(root);
@@ -600,6 +671,13 @@ GraphPatchResult parse_graph_patch(std::string_view text, const GraphPatchCatalo
                     !std::regex_match(name + " : " + key, declaration))
                     refuse(Code::SyntaxError, "invalid type key",
                            "use Plugin/Module or quote the exact catalog type id");
+                if (const auto* spectral = spectral_constructor(key))
+                    refuse(Code::UnsupportedContract,
+                           "spectral node '" + key + "' has no notation contract",
+                           std::string("construct it with ") + spectral->constructor +
+                               " in C++; spectral identity, stage and asset state are not "
+                               "persisted",
+                           name);
                 const auto id = catalog.instantiate(*graph, key, version, name);
                 if (!id)
                     refuse(Code::UnsupportedContract, "unregistered type/version '" + key + "'",
@@ -702,10 +780,14 @@ GraphPatchText format_graph_patch(const SignalGraph& graph, const GraphPatchCata
                 refuse(Code::UnsupportedContract,
                        "hosted plugin identity/state is not a registered Processor",
                        "use GraphSerializer for hosted plugin state", n.name);
-            if (n.spectral_identity ||
-                (n.type == NodeType::Custom && !graph.custom_node_state(n.id).empty()))
+            if (n.spectral_identity)
                 refuse(Code::UnsupportedContract,
-                       "spectral or opaque custom state has no notation contract",
+                       "spectral node has no notation or saved-graph contract",
+                       "keep spectral graphs in C++ through the SignalGraph::add_spectral_* "
+                       "constructors listed by the catalog",
+                       n.name);
+            if (n.type == NodeType::Custom && !graph.custom_node_state(n.id).empty())
+                refuse(Code::UnsupportedContract, "opaque custom state has no notation contract",
                        "use GraphSerializer and the owning typed API", n.name);
             const auto key = type_key(graph, n);
             int version = n.type == NodeType::Custom ? n.custom_type_version : 1;

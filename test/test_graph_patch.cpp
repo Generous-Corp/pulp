@@ -342,6 +342,10 @@ TEST_CASE("Spectral nodes and frame edges are explicit notation refusals",
     REQUIRE_FALSE(formatted);
     REQUIRE(formatted.diagnostic.code == Code::UnsupportedContract);
     REQUIRE(formatted.diagnostic.rule.find("spectral") != std::string::npos);
+    // GraphSerializer cannot save spectral nodes either, so the fix must not
+    // send the author there.
+    REQUIRE(formatted.diagnostic.suggested_fix.find("GraphSerializer") == std::string::npos);
+    REQUIRE(formatted.diagnostic.suggested_fix.find("add_spectral_") != std::string::npos);
 
     SignalGraph gains;
     const auto a = gains.add_gain_node("a");
@@ -370,4 +374,52 @@ TEST_CASE("Spectral nodes and frame edges are explicit notation refusals",
     const auto edge_result = load_graph_patch_json(choc::json::toString(edged));
     REQUIRE_FALSE(edge_result);
     REQUIRE(edge_result.diagnostic.code == Code::UnsupportedContract);
+}
+
+TEST_CASE("Patch catalog lists spectral constructors as typed-API-only rows",
+          "[host][patch][spectral-notation]") {
+    const auto json = choc::json::parse(GraphPatchCatalog{}.to_json());
+    const struct {
+        const char* key;
+        const char* constructor;
+        const char* input;
+        const char* input_kind;
+    } expected[] = {
+        {"pulp/spectral_analysis", "SignalGraph::add_spectral_analysis", "audio", "audio"},
+        {"pulp/spectral_stage", "SignalGraph::add_spectral_stage", "frames_in", "spectral"},
+        {"pulp/spectral_synthesis", "SignalGraph::add_spectral_synthesis", "frames", "spectral"},
+        {"pulp/spectral_asset_morph", "SignalGraph::add_spectral_asset_morph_v1", "morph",
+         "audio"}};
+    for (const auto& e : expected) {
+        INFO(e.key);
+        bool found = false;
+        for (const auto row : json["types"]) {
+            if (row["type_id"].getString() != e.key)
+                continue;
+            REQUIRE_FALSE(found);
+            found = true;
+            REQUIRE(row["notation_state"].getString() == "unsupported_typed_api_only");
+            REQUIRE(row["constructor"].getString() == e.constructor);
+            REQUIRE(row["probe_identity"]["fft_size"].getInt64() == 256);
+            REQUIRE(row["probe_identity"]["hop"].getInt64() == 64);
+            REQUIRE(row["probe_identity"]["channels"].getInt64() == 1);
+            REQUIRE(row["inputs"].size() == 1);
+            REQUIRE(row["inputs"][0]["name"].getString() == e.input);
+            REQUIRE(row["inputs"][0]["kind"].getString() == e.input_kind);
+            REQUIRE(row["outputs"].size() == 1);
+            const bool synthesis = std::string_view(e.key) == "pulp/spectral_synthesis";
+            REQUIRE(row["outputs"][0]["kind"].getString() ==
+                    std::string(synthesis ? "audio" : "spectral"));
+        }
+        REQUIRE(found);
+
+        // The listed key is discoverable but not constructible from notation;
+        // the refusal names the owning constructor instead of registration.
+        const auto parsed = parse_graph_patch(std::string("# flow 1\nx : \"") + e.key + "\"\n");
+        REQUIRE_FALSE(parsed);
+        REQUIRE(parsed.diagnostic.code == Code::UnsupportedContract);
+        REQUIRE(parsed.diagnostic.line == 2);
+        REQUIRE(parsed.diagnostic.node == "x");
+        REQUIRE(parsed.diagnostic.suggested_fix.find(e.constructor) != std::string::npos);
+    }
 }
