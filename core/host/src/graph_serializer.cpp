@@ -1,6 +1,7 @@
 // GraphSerializer implementation: SignalGraph <-> .pulpgraph JSON.
 
 #include <pulp/host/graph_serializer.hpp>
+#include <pulp/host/control_index_nodes.hpp>
 #include <pulp/host/processor_restore.hpp>
 #include <pulp/host/sample_region_parameters.hpp>
 #include <pulp/runtime/crypto.hpp>
@@ -320,8 +321,9 @@ bool migrate_graph_json(std::string& json, std::string& error) {
             return true;
         }
         if (*version > kFormatVersion) {
-            error = "unsupported graph format_version "
-                    + std::to_string(*version);
+            error = "unsupported graph format_version " + std::to_string(*version) +
+                    "; upgrade Pulp, or re-export the graph at format " +
+                    std::to_string(kFormatVersion) + " or lower";
             return false;
         }
 
@@ -1095,7 +1097,9 @@ GraphDocumentInspection GraphSerializer::inspect_document(std::string_view json)
             }
             if (format_version > kFormatVersion) {
                 result.refusal = GraphDocumentRefusal::UnsupportedFutureVersion;
-                result.detail = "saved document format is newer than this reader";
+                result.detail = "saved document format is newer than this reader; upgrade Pulp, "
+                                "or re-export at format " +
+                                std::to_string(kFormatVersion) + " or lower";
                 return result;
             }
             if (!root.hasObjectMember("identity_schema") &&
@@ -2311,6 +2315,13 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                             version = (int)cv["version"].getInt64();
                         }
                     }
+                    // The Control index input is built in: register it on
+                    // demand, exactly as add_control_index_input_node() does,
+                    // so a restored graph prepares without a caller step.
+                    if (type_id == kControlIndexInputTypeId &&
+                        version == kControlIndexInputVersion &&
+                        graph.custom_node_type(type_id, version) == nullptr)
+                        (void)graph.register_custom_node_type(make_control_index_input_type());
                     const auto* registered = graph.custom_node_type(type_id, version);
                     const bool has_custom = nv.hasObjectMember("custom");
                     const auto parse_ports = [&](const char* key, int count, bool output,

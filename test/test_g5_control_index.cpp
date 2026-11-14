@@ -441,6 +441,42 @@ TEST_CASE("numeric connections and persistence keep working on trigger nodes",
     CHECK(GraphSerializer::to_json(restored) == json);
 }
 
+TEST_CASE("restored Control index graphs prepare and future formats name the fix",
+          "[graph][control-index][serializer]") {
+    SignalGraph source;
+    REQUIRE(source.register_custom_node_type(make_control_indexed_table_type()));
+    const auto index = source.add_control_index_input_node();
+    const auto table = source.add_custom_node("pulp.control.indexed-table");
+    REQUIRE(source.connect(source.node(index)->out("index"), source.node(table)->in("index")));
+    const auto json = GraphSerializer::to_json(source);
+    REQUIRE_FALSE(json.empty());
+
+    // Only the table is registered; the built-in index input registers itself.
+    SignalGraph restored;
+    REQUIRE(restored.register_custom_node_type(make_control_indexed_table_type()));
+    const auto loaded = GraphSerializer::from_json(restored, json);
+    REQUIRE(loaded.ok);
+    CHECK(loaded.missing_custom_node_types.empty());
+    REQUIRE(restored.prepare(48000, 4));
+    CHECK(restored.control_index_position().bound);
+
+    auto future = json;
+    const auto at = future.find("\"format_version\": 5");
+    REQUIRE(at != std::string::npos);
+    future.replace(at, std::string("\"format_version\": 5").size(), "\"format_version\": 6");
+    SignalGraph refused;
+    const auto newer = GraphSerializer::from_json(refused, future);
+    REQUIRE_FALSE(newer.ok);
+    CHECK(newer.error.find("unsupported graph format_version 6") != std::string::npos);
+    CHECK(newer.error.find("upgrade Pulp, or re-export the graph at format 5 or lower") !=
+          std::string::npos);
+
+    const auto inspected = GraphSerializer::inspect_document(
+        R"({"identity_schema":"pulp.graph.saved-identity.v6","format_version":6})");
+    CHECK(inspected.refusal == GraphDocumentRefusal::UnsupportedFutureVersion);
+    CHECK(inspected.detail.find("upgrade Pulp") != std::string::npos);
+}
+
 TEST_CASE("graph format v4 documents still load and keep their bytes",
           "[graph][control-index][serializer]") {
     SignalGraph source;
