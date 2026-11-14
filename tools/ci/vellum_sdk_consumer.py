@@ -121,6 +121,12 @@ def pick_run(runs: list[dict]) -> dict:
     return max(candidates, key=lambda run: (run.get("created_at") or "", run.get("id") or 0))
 
 
+def run_contains_commit(token: str, minimum: str, head: str) -> bool:
+    """Whether `head` is `minimum` or descends from it, by Vellum's own history."""
+    status = _api(f"repos/{VELLUM_REPO}/compare/{minimum}...{head}", token).get("status")
+    return status in ("identical", "ahead")
+
+
 def pick_artifact(artifacts: list[dict]) -> dict:
     matches = [a for a in artifacts if a.get("name") == EVIDENCE_ARTIFACT]
     if len(matches) != 1:
@@ -202,6 +208,9 @@ def resolve(args: argparse.Namespace) -> int:
                            token)
             run = pick_run(listing.get("workflow_runs", []))
         head = run["head_sha"]
+        minimum = getattr(args, "min_vellum_sha", None)
+        if minimum and not run_contains_commit(token, minimum, head):
+            raise ResolveError(f"run {run['id']} (head {head}) does not contain required Vellum commit {minimum}")
         previous = None
         if args.previous_receipt and Path(args.previous_receipt).is_file():
             previous = json.loads(Path(args.previous_receipt).read_text(encoding="utf-8")).get("vellum_head_sha")
@@ -248,6 +257,7 @@ def resolve(args: argparse.Namespace) -> int:
         "artifact_id": artifact["id"],
         "archive": archive.name,
         "archive_sha256": digest,
+        "min_vellum_sha": minimum,
         "prefix": str(prefix),
     }
     (out / "receipt.json").write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -384,6 +394,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--previous-receipt", help="receipt of the last successful run; report unchanged if its head matches")
     r.add_argument("--skip-if-unchanged", metavar="OWNER/REPO:WORKFLOW_FILE",
                    help="report unchanged when the last successful run of this workflow checked the same head")
+    r.add_argument("--min-vellum-sha", help="refuse a run whose head does not contain this Vellum commit")
     r.add_argument("--github-output", default=os.environ.get("GITHUB_OUTPUT"))
     n = sub.add_parser("negative-control", help="prove a renamed SDK header fails one consumer compile")
     n.add_argument("--build-dir", required=True)

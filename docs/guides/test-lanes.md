@@ -234,6 +234,16 @@ stopped compiling and no Pulp check noticed.
   the artifact's `SHA256SUMS`, and records the run id, head sha, artifact id and
   archive sha256 in the step summary and a `vellum-sdk-consumer-receipt`
   artifact. Any lookup or digest failure fails the step; nothing falls back.
+- **Pinned minimum.** `resolve --min-vellum-sha` refuses a run whose head does
+  not contain the given Vellum commit (checked through Vellum's compare endpoint
+  before any download). The workflow sets it to the commit that introduced the
+  `ParamModel` surface that `integrations/pulp-vellum` builds on.
+- **Parameter bridge.** The same SDK also builds `integrations/pulp-vellum` in a
+  separate configure (`PULP_ENABLE_PULP_VELLUM=ON`) and runs its `pulp-vellum`
+  ctest label, so a Vellum change that breaks the bridge shows up here. Pull
+  requests that touch the package, its test, or the two CMake files that own its
+  option and test registration (`integrations/CMakeLists.txt` and the root
+  `CMakeLists.txt`) run the lane.
 - **Negative control.** Every full run recompiles one Vellum-side translation
   unit (`knob_panel.cpp`) with `-fsyntax-only`, once against the SDK as
   published, which must succeed, and once against a copy of its mirror headers

@@ -5,7 +5,11 @@
 # changing, so this lane takes the SDK archive from Vellum main's newest green
 # "Locked macOS GPU proof" run, verifies it against the artifact's SHA256SUMS,
 # builds the slice and runs the acceptance runner
-# (tools/scripts/editor_host_acceptance.py) against it.
+# (tools/scripts/editor_host_acceptance.py) against it. The same SDK also
+# builds integrations/pulp-vellum (the ParamPort / VisualPort bridge to
+# Vellum's ParamModel / ValueFeed) and runs its tests; the resolver refuses a
+# run that does not contain the Vellum commit that introduced the ParamModel
+# surface the bridge needs.
 #
 # Every full run also proves the lane can see a break: a negative control
 # recompiles one Vellum-side translation unit against a copy of the SDK's
@@ -24,6 +28,12 @@ on:
   pull_request:
     paths:
       - 'test/editor_host_slice/**'
+      - 'integrations/pulp-vellum/**'
+      # The bridge's PULP_ENABLE_PULP_VELLUM option and test-directory
+      # registration live in these two files, not under the package.
+      - 'integrations/CMakeLists.txt'
+      - 'CMakeLists.txt'
+      - 'test/test_pulp_vellum_param_bridge.cpp'
       - 'test/cmake/editor_host_slice_tests.cmake'
       - 'tools/scripts/editor_host_acceptance.py'
       - 'tools/ci/vellum_sdk_consumer.py'
@@ -82,7 +92,9 @@ jobs:
           RUN_ID: ${{ inputs.vellum_run_id }}
         run: |
           set -euo pipefail
-          args=(resolve --out-dir "$RUNNER_TEMP/vellum-sdk")
+          # 6f76e3e6ea45 is the first Vellum main commit with ParamModel's
+          # info/plain/parse/modulation surface.
+          args=(resolve --out-dir "$RUNNER_TEMP/vellum-sdk" --min-vellum-sha 6f76e3e6ea453554df40b0844bc94f524337487f)
           if [ -n "${RUN_ID:-}" ]; then
             args+=(--run-id "$RUN_ID")
           elif [ "${{ github.event_name }}" = schedule ]; then
@@ -122,6 +134,21 @@ jobs:
           python3 tools/scripts/editor_host_acceptance.py \
             --vellum-prefix "${{ steps.sdk.outputs.prefix }}" \
             --json "$RUNNER_TEMP/vellum-sdk/acceptance.json" 2>&1 | tee "$RUNNER_TEMP/vellum-sdk/acceptance.log"
+
+      # A separate configure: the bridge package is off in every other build,
+      # so it is built only here, from the SDK this run resolved.
+      - name: Build and test the Pulp-Vellum parameter bridge
+        if: steps.sdk.outputs.unchanged != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B build-vellum-bridge -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_BUILD_EXAMPLES=OFF -DPULP_BUILD_TESTS=ON \
+            -DPULP_ENABLE_PULP_VELLUM=ON \
+            -DCMAKE_PREFIX_PATH="${{ steps.sdk.outputs.prefix }}"
+          tools/ci/governed-build.sh cmake --build build-vellum-bridge --target pulp-test-pulp-vellum
+          ctest --test-dir build-vellum-bridge -L pulp-vellum --output-on-failure \
+            | tee "$RUNNER_TEMP/vellum-sdk/bridge.log"
 
       - name: Negative control (a renamed SDK header must fail the build)
         if: steps.sdk.outputs.unchanged != 'true'

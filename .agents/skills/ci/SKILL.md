@@ -13691,3 +13691,9 @@ about that path are not obvious:
   Vellum main's head equals the head recorded in the last *successful* run's
   receipt artifact, and it uploads that receipt only when the whole run is
   green, so a red night is retried on the next one rather than forgotten.
+- **Pin the Vellum commit a consumer needs.** The lane resolves Vellum main's
+  newest green SDK, which is not necessarily one that carries an API a Pulp
+  consumer was written against. `resolve --min-vellum-sha <sha>` refuses a run
+  whose head does not contain that commit (checked with Vellum's compare
+  endpoint before anything is downloaded); the workflow sets it to the commit
+  that introduced the `ParamModel` surface `integrations/pulp-vellum` builds on.
