@@ -896,9 +896,10 @@ void check_hard_cut_swap() {
           "swap-new-epoch-deferred");
 }
 
-// Swapping to a second prepared bank. Both bindings start at epoch 1 and
-// generation 1, so a retired token only stays dead in the replacement if the
-// host advances the replacement past the retired epoch before routing to it.
+// Swapping to a second prepared bank. Each bank restarts note generations at
+// 1, so the replacement hands the same note the same (slot, generation) as the
+// retired bank. Epochs come from one process-wide sequence, so the retired
+// bank's token is a stale epoch on the replacement without host bookkeeping.
 void check_cross_bank_swap() {
     VoiceBankBindingResult status;
     auto retired = make_bank(schema(), status);
@@ -910,30 +911,19 @@ void check_cross_bank_swap() {
     check(retired->owner().slot_note(0, note, releasing), "cross-bank-retired-sounding");
     const auto retired_epoch = retired->epoch();
 
-    auto collided = make_bank(schema(), status);
-    check(static_cast<bool>(collided), "cross-bank-prepare-collided");
-    check(collided->epoch() == retired_epoch, "cross-bank-epochs-start-equal");
-    check(collided->dispatch_deferred(retired_epoch, 0, note.note_id,
-                                      midi::MpeExpressionEvent::Kind::NoteOff,
-                                      note) == VoiceBankBindingCode::StaleGeneration,
-          "cross-bank-idle-token-not-live");
-    check(step(*collided, 0, {midi::MidiEvent::note_on(1, 69, 127)}) == VoiceBankBindingCode::Ok,
-          "cross-bank-collided-note");
-    midi::MpeNoteState collided_note{};
-    check(collided->owner().slot_note(0, collided_note, releasing) &&
-              collided_note.note_id == note.note_id,
-          "cross-bank-generation-collides");
-    const auto unguarded = collided->dispatch_deferred(
-        retired_epoch, 0, note.note_id, midi::MpeExpressionEvent::Kind::NoteOff, note);
-    std::cout << "cross-bank unguarded retired token on colliding replacement: code="
-              << static_cast<unsigned>(unguarded) << '\n';
-
     auto replacement = make_bank(schema(), status);
     check(static_cast<bool>(replacement), "cross-bank-prepare-replacement");
-    while (replacement->epoch() <= retired_epoch)
-        check(replacement->activate(status), "cross-bank-advance-epoch");
+    check(replacement->epoch() != retired_epoch, "cross-bank-epochs-distinct");
+    check(replacement->dispatch_deferred(retired_epoch, 0, note.note_id,
+                                         midi::MpeExpressionEvent::Kind::NoteOff,
+                                         note) == VoiceBankBindingCode::StaleEpoch,
+          "cross-bank-idle-token-stale-epoch");
     check(step(*replacement, 0, {midi::MidiEvent::note_on(1, 69, 127)}) == VoiceBankBindingCode::Ok,
           "cross-bank-replacement-note");
+    midi::MpeNoteState replacement_note{};
+    check(replacement->owner().slot_note(0, replacement_note, releasing) &&
+              replacement_note.note_id == note.note_id,
+          "cross-bank-generation-collides");
     check(replacement->dispatch_deferred(retired_epoch, 0, note.note_id,
                                          midi::MpeExpressionEvent::Kind::NoteOff,
                                          note) == VoiceBankBindingCode::StaleEpoch,

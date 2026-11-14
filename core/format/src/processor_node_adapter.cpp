@@ -3,8 +3,12 @@
 #include <pulp/runtime/exceptions.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 
+#include <pulp/midi/block_ops.hpp>
+
 #include <algorithm>
 #include <cassert>
+#include <cstring>
+#include <limits>
 #include <unordered_set>
 
 namespace pulp::format {
@@ -35,6 +39,21 @@ bool ProcessorNode::prepare(const PrepareContext& context) {
                 input_names_[index] = "aux";
         }
         processor_->prepare(context);
+        // Idle skipping is armed only for a node that cannot be fed by anything
+        // but its own events: no audio input, no audio-rate modulation, a
+        // bounded tail and a known latency.
+        idle_armed_ = false;
+        idle_confirmed_ = false;
+        idle_silent_frames_ = 0;
+        idle_hold_frames_ = 0;
+        idle_skipped_blocks_.store(0, std::memory_order_relaxed);
+        if (idle_probe_ && descriptor.input_buses.empty() &&
+            !capabilities_.consumes_audio_rate_modulations && descriptor.tail_samples >= 0 &&
+            processor_->latency_samples() >= 0) {
+            idle_armed_ = true;
+            idle_hold_frames_ = static_cast<std::uint64_t>(processor_->latency_samples()) +
+                                static_cast<std::uint64_t>(descriptor.tail_samples);
+        }
         // Pre-size the discard MIDI sinks so the per-block clear() the bridge runs
         // on the unused fallback buffers never reallocates on the RT thread.
         const int midi_hint = context.resource_limits.max_midi_events;
@@ -64,6 +83,7 @@ bool ProcessorNode::prepare(const PrepareContext& context) {
         capabilities_ = {};
         input_bus_count_ = 0;
         main_bus_fast_path_ = false;
+        idle_armed_ = false;
         return false;
     }
     prepared_ = true;
@@ -75,6 +95,8 @@ bool ProcessorNode::release() noexcept {
     main_bus_fast_path_ = false;
     capabilities_ = {};
     input_bus_count_ = 0;
+    idle_armed_ = false;
+    reset_idle_confirmation();
     if (processor_ == nullptr)
         return false;
     PULP_TRY {
@@ -115,7 +137,80 @@ bool ProcessorNode::process_binding(ProcessBlock& block, const GraphRuntimeNodeP
     // block's buses.
     if (!ctx.routed)
         return false;
-    if (self->main_bus_fast_path_)
+    if (!self->idle_armed_)
+        return self->process_routed_block(block, ctx);
+
+    // Idle skipping. The skip needs the probe to report idle now, silence to
+    // have been confirmed on earlier blocks, and nothing inbound this block.
+    const bool idle_at_entry = self->idle_probe_.is_idle(self->idle_probe_.context);
+    // A buffer counts as empty only if it holds nothing and dropped nothing: a
+    // buffer that overflowed is an incomplete view of what arrived.
+    const auto empty_midi = [](const midi::MidiBuffer* buffer) noexcept {
+        // The executor attaches its (usually empty) UMP buffer to every routed
+        // MIDI buffer, so a non-null UMP pointer is not an inbound event.
+        return buffer == nullptr || (buffer->empty() && buffer->sysex_size() == 0 &&
+                                     (buffer->ump() == nullptr || buffer->ump()->empty()) &&
+                                     !midi::midi_block_has_drops(*buffer));
+    };
+    // Blocks that ask the processor to reset or that follow a timeline jump
+    // must reach it, whatever the voice state says.
+    const bool reset_or_jump = block.flags.reset || block.flags.transport_jump ||
+                               (block.transport != nullptr && (block.transport->reset_requested ||
+                                                               block.transport->transport_jump));
+    const bool nothing_inbound =
+        !reset_or_jump && !ctx.node_events_incomplete && ctx.node_inputs.num_channels() == 0 &&
+        empty_midi(ctx.node_midi_in) &&
+        (ctx.node_mpe_in == nullptr ||
+         (ctx.node_mpe_in->empty() && ctx.node_mpe_in->dropped_event_count() == 0)) &&
+        (ctx.node_param_events == nullptr ||
+         (ctx.node_param_events->empty() && ctx.node_param_events->dropped_event_count() == 0)) &&
+        ctx.node_audio_rate_modulations.empty();
+    if (idle_at_entry && self->idle_confirmed_ && nothing_inbound) {
+        auto outputs = ctx.node_outputs;
+        for (std::size_t channel = 0; channel < outputs.num_channels(); ++channel)
+            std::fill_n(outputs.channel_ptr(channel), outputs.num_samples(), 0.0f);
+        if (ctx.node_midi_out != nullptr)
+            midi::clear_midi_block(*ctx.node_midi_out);
+        self->idle_skipped_blocks_.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    }
+
+    const bool ok = self->process_routed_block(block, ctx);
+    bool silent = false;
+    if (ok && idle_at_entry && nothing_inbound &&
+        self->idle_probe_.is_idle(self->idle_probe_.context) &&
+        (ctx.node_midi_out == nullptr || empty_midi(ctx.node_midi_out))) {
+        // Compare bits, not values: -0.0f and subnormals are not silence.
+        silent = true;
+        const auto outputs = ctx.node_outputs;
+        for (std::size_t channel = 0; silent && channel < outputs.num_channels(); ++channel) {
+            const float* data = outputs.channel_ptr(channel);
+            for (std::size_t i = 0; i < outputs.num_samples(); ++i) {
+                std::uint32_t bits;
+                std::memcpy(&bits, data + i, sizeof(bits));
+                if (bits != 0) {
+                    silent = false;
+                    break;
+                }
+            }
+        }
+    }
+    if (silent) {
+        const auto frames = static_cast<std::uint64_t>(block.frame_count);
+        const auto room = std::numeric_limits<std::uint64_t>::max() - self->idle_silent_frames_;
+        self->idle_silent_frames_ += frames < room ? frames : room;
+        if (self->idle_silent_frames_ >= self->idle_hold_frames_)
+            self->idle_confirmed_ = true;
+    } else {
+        self->reset_idle_confirmation();
+    }
+    return ok;
+}
+
+bool ProcessorNode::process_routed_block(ProcessBlock& block,
+                                         const GraphRuntimeNodeProcessContext& ctx) noexcept {
+    ProcessorNode* const self = this;
+    if (main_bus_fast_path_)
         return self->process_main_bus_block(block, ctx);
 
     // The node's bus set aliases the executor's routed main view and any
