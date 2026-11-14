@@ -4,7 +4,7 @@
 # system frameworks, by default on the platforms it supports). Nothing in core
 # links a package.
 
-if(APPLE AND NOT IOS AND NOT PULP_IOS)
+if((APPLE AND NOT IOS AND NOT PULP_IOS) OR WIN32)
     set(_pulp_native_default ON)
 else()
     set(_pulp_native_default OFF)
@@ -15,9 +15,9 @@ option(PULP_ENABLE_PULP_NATIVE
 unset(_pulp_native_default)
 
 if(PULP_ENABLE_PULP_NATIVE)
-    if(NOT APPLE OR IOS OR PULP_IOS)
+    if(NOT ((APPLE AND NOT IOS AND NOT PULP_IOS) OR WIN32))
         message(FATAL_ERROR
-            "PULP_ENABLE_PULP_NATIVE=ON: pulp-native supports macOS only so far")
+            "PULP_ENABLE_PULP_NATIVE=ON: pulp-native supports macOS and Windows so far")
     endif()
     add_subdirectory(pulp-native)
 endif()
@@ -33,4 +33,16 @@ if(PULP_ENABLE_RMLUI_ADAPTER)
         message(FATAL_ERROR "PULP_ENABLE_RMLUI_ADAPTER=ON needs PULP_ENABLE_PULP_NATIVE=ON")
     endif()
     add_subdirectory(rmlui-native)
+endif()
+
+# The parameter bridge between Pulp's editor-host contract and Vellum's value
+# interfaces, over an installed Vellum SDK (Vellum::Value). Off by default:
+# nothing finds or fetches Vellum unless this is ON. Point CMAKE_PREFIX_PATH
+# at an installed Vellum SDK.
+option(PULP_ENABLE_PULP_VELLUM
+    "Build integrations/pulp-vellum (ParamPort/VisualPort as Vellum ParamModel/ValueFeed, needs an installed Vellum SDK)" OFF)
+if(PULP_ENABLE_PULP_VELLUM)
+    add_subdirectory(pulp-vellum)
+    set_property(GLOBAL APPEND PROPERTY PULP_INTEGRATION_TEST_DIRS
+        "${CMAKE_CURRENT_SOURCE_DIR}/pulp-vellum/tests")
 endif()

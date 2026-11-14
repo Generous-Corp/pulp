@@ -412,10 +412,13 @@ commands:
         description: Emit machine-readable result and error codes
       - name: --output
         kind: option
-        description: Write the offline render to a float WAV file
+        description: Write the offline render to a float WAV file at the render's sample rate
       - name: --input
         kind: option
-        description: Required audio input file for probe
+        description: Audio input WAV for probe (required) and render (required when the graph has an audio_in node, otherwise refused with missing_input); render takes its sample rate, channel count and length from this file
+      - name: --frames
+        kind: option
+        description: Render length override from 1 to 28800000 frames (default the input length, or 48000 without input); input shorter than this is zero-padded
       - name: --source-node
         kind: option
         description: Unique source node name for probe
@@ -431,6 +434,12 @@ commands:
       - name: --block-frames
         kind: option
         description: Probe block size from 1 to 4096 frames (default 64)
+      - name: --edge-kind
+        kind: option
+        description: Probe kind audio, control or event (default audio); event seeds one fixed note-on; control needs a registered Processor destination with parameters, which the CLI probe never loads, so through the CLI it always refuses MissingEdge
+      - name: --destination-param
+        kind: option
+        description: Destination parameter id for --edge-kind control (replaces --destination-port)
       - name: --sample-rate
         kind: option
         description: Report preparation sample rate (default 48000)
@@ -683,7 +692,7 @@ commands:
         description: "Manufacturer name (default: Pulp)"
       - name: --template
         kind: option
-        description: Built-in template name or explicit local template kit directory. Local kits are validated, must declare kind `template`, and do not implicitly install dependency packages.
+        description: Built-in template name (for example gain or agent-toolkit) or explicit local template kit directory. Local kits are validated, must declare kind `template`, and do not implicitly install dependency packages.
       - name: --output
         kind: option
         description: Output directory override (otherwise uses PULP_PROJECTS_DIR, ~/.pulp/config.toml, repo sibling, or ./<name>)

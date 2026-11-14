@@ -13,14 +13,19 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -48,6 +53,97 @@ HostEventRecord midi_record(std::uint64_t epoch, std::int64_t sample, std::uint6
     record.midi = midi;
     return record;
 }
+
+// ── Realtime boundary for the combined audio callback ─────────────────────
+//
+// Under RealtimeSanitizer (-fsanitize=realtime) the per-block audio-side
+// calls run inside a [[clang::nonblocking]] function, so any allocation, lock
+// or blocking call reached from them aborts with a report. Staging MIDI into
+// the ingress, building the parameter batch and the voice records, filling the
+// input ramp and every check() stay outside the boundary. P1_RTSAN_CONTROL
+// plants a real malloc, mutex or sleep inside the boundary; the analyzer must
+// report each one. node-malloc and voice-malloc plant the allocation inside the
+// graph's custom-node callback and inside the voice render, proving the
+// realtime context reaches through SignalGraph::process and
+// VoiceBankBinding::render rather than only the boundary entry. Without RTSan the boundary is a plain function and the
+// planted controls are not compiled.
+#if defined(__has_feature)
+#if __has_feature(realtime_sanitizer)
+#define P1_RTSAN_BOUNDARY [[clang::nonblocking]]
+#define P1_HAS_RTSAN 1
+#endif
+#endif
+#ifndef P1_RTSAN_BOUNDARY
+#define P1_RTSAN_BOUNDARY
+#endif
+
+#if defined(P1_HAS_RTSAN)
+constexpr const char* kRealtimeBoundary = "nonblocking";
+enum class AnalyzerControl { Clean, Malloc, Mutex, Sleep, NodeMalloc, VoiceMalloc };
+
+AnalyzerControl analyzer_control() {
+    const char* requested = std::getenv("P1_RTSAN_CONTROL");
+    if (requested == nullptr)
+        return AnalyzerControl::Clean;
+    const std::string_view name(requested);
+    if (name == "malloc")
+        return AnalyzerControl::Malloc;
+    if (name == "mutex")
+        return AnalyzerControl::Mutex;
+    if (name == "sleep")
+        return AnalyzerControl::Sleep;
+    if (name == "node-malloc")
+        return AnalyzerControl::NodeMalloc;
+    if (name == "voice-malloc")
+        return AnalyzerControl::VoiceMalloc;
+    check(name == "clean", "rtsan-control-name");
+    return AnalyzerControl::Clean;
+}
+
+// Real intercepted operations. The volatile function pointer keeps Release
+// optimization from deleting the malloc/free pair.
+void inject_analyzer_control(AnalyzerControl control) {
+    switch (control) {
+    case AnalyzerControl::Clean:
+    case AnalyzerControl::NodeMalloc:
+    case AnalyzerControl::VoiceMalloc:
+        break;
+    case AnalyzerControl::Malloc: {
+        void* (*volatile allocate)(std::size_t) = &std::malloc;
+        std::free(allocate(16));
+        break;
+    }
+    case AnalyzerControl::Mutex: {
+        std::mutex mutex;
+        mutex.lock();
+        mutex.unlock();
+        break;
+    }
+    case AnalyzerControl::Sleep:
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        break;
+    }
+}
+#else
+constexpr const char* kRealtimeBoundary = "none";
+enum class AnalyzerControl { Clean, NodeMalloc, VoiceMalloc };
+AnalyzerControl analyzer_control() {
+    return AnalyzerControl::Clean;
+}
+#endif
+
+AnalyzerControl planted_control = AnalyzerControl::Clean;
+
+// A planted allocation reached from a callee of the boundary.
+void inject_callee_control([[maybe_unused]] AnalyzerControl site) {
+#if defined(P1_HAS_RTSAN)
+    if (planted_control == site) {
+        void* (*volatile allocate)(std::size_t) = &std::malloc;
+        std::free(allocate(16));
+    }
+#endif
+}
+std::size_t realtime_boundary_blocks = 0;
 
 std::array<int, 4> host_and_parameter_controls(std::size_t partition) {
     HostEventIngress<8> ingress;
@@ -579,6 +675,7 @@ template <unsigned ReleaseFrames> class P1VoiceT final : public pulp::midi::MpeS
         render_stereo(out, nullptr, frames);
     }
     void render_stereo(float* left, float* right, int frames) {
+        inject_callee_control(AnalyzerControl::VoiceMalloc);
         for (int i = 0; i < frames; ++i) {
             float sample = 0.0f;
             if (active()) {
@@ -947,7 +1044,20 @@ struct CombinedRun {
     // mailbox is block-relative and has no epoch, so its entry is 0.
     std::array<std::uint64_t, 4> native_epoch{};
     std::array<float, kCombinedFrames> voice_audio{};
+    // Graph output across the whole run; the input is a deterministic ramp, so
+    // this is a non-silent audio comparison for the routed executor.
+    std::vector<float> graph_audio;
+    // Executor telemetry read after the run: blocks the serial executor took,
+    // and blocks that were eligible yet fell back to the legacy walk.
+    std::uint64_t executor_blocks = 0;
+    std::uint64_t parallel_levels = 0;
+    std::uint64_t routing_fallbacks = 0;
+    bool parallel_requested_accepted = false;
 };
+
+enum class Backend { Reference, Routed, ParallelAfterBind };
+constexpr std::array<const char*, 3> kBackendNames{"reference-walk", "routed-executor",
+                                                   "parallel-after-bind"};
 
 // Callback-side state. The audio callbacks write only into these fixed
 // arrays; nothing in the callback path grows a container.
@@ -971,7 +1081,75 @@ struct CombinedCallbackState {
     bool dropped = false;
 };
 
-CombinedRun render_combined(const std::vector<std::size_t>& schedule) {
+// Everything one combined audio block touches. Spans and buffers are owned and
+// preallocated by the caller before the first block.
+struct CombinedBlockIo {
+    pulp::host::SignalGraph& graph;
+    HostEventIngress<32>& ingress;
+    std::span<HostEventRecord> projected;
+    pulp::midi::MidiBuffer& block_midi;
+    pulp::host::NodeId midi_input;
+    pulp::host::NodeId plugin;
+    const pulp::state::ParameterEventQueue& parameters;
+    pulp::audio::BufferView<float>& out;
+    const pulp::audio::BufferView<const float>& in;
+    pulp::host::VoiceBankBinding& bank;
+    std::span<const HostEventRecord> voice_records;
+    pulp::audio::BufferView<float>& voice_out;
+    std::uint64_t start = 0;
+    std::size_t frames = 0;
+};
+
+// Result codes recorded inside the boundary and checked after it returns.
+struct CombinedBlockResult {
+    HostEventResult midi_project = HostEventResult::Accepted;
+    HostEventResult midi_end = HostEventResult::Accepted;
+    bool midi_adapter_capacity = true;
+    bool midi_injected = true;
+    bool parameters_injected = true;
+    HostEventResult voice_begin = HostEventResult::Accepted;
+    std::size_t voice_published = 0;
+    pulp::host::VoiceBankBindingCode voice_render = pulp::host::VoiceBankBindingCode::Ok;
+};
+
+// The audio side of one combined block: MIDI projection and injection, the
+// parameter mailbox, the graph callback (which runs the graph-authored lane),
+// and the voice-bank publish and render.
+CombinedBlockResult combined_audio_block(const CombinedBlockIo& io,
+                                         AnalyzerControl control) noexcept P1_RTSAN_BOUNDARY {
+#if defined(P1_HAS_RTSAN)
+    inject_analyzer_control(control);
+#else
+    (void)control;
+#endif
+    CombinedBlockResult result;
+    std::size_t count = 0;
+    result.midi_project = io.ingress.project(io.projected, count);
+    io.block_midi.clear();
+    for (std::size_t i = 0; i < count; ++i) {
+        auto event = io.projected[i].midi;
+        event.sample_offset = static_cast<std::int32_t>(
+            static_cast<std::uint64_t>(io.projected[i].absolute_sample) - io.start);
+        result.midi_adapter_capacity &= io.block_midi.add(event);
+    }
+    if (count > 0)
+        result.midi_injected = io.graph.inject_midi(io.midi_input, io.block_midi);
+    result.midi_end = io.ingress.end_block();
+
+    if (!io.parameters.empty())
+        result.parameters_injected = io.graph.inject_parameter_events(io.plugin, io.parameters);
+
+    io.graph.process(io.out, io.in, static_cast<int>(io.frames));
+
+    result.voice_begin = io.bank.begin_block(io.start, io.frames);
+    for (const auto& record : io.voice_records)
+        result.voice_published += io.bank.publish(record) == HostEventResult::Accepted ? 1u : 0u;
+    result.voice_render = io.bank.render(io.voice_out, io.start, io.frames);
+    return result;
+}
+
+CombinedRun render_combined(const std::vector<std::size_t>& schedule,
+                            Backend backend = Backend::Routed) {
     using namespace pulp::host;
     auto state = std::make_shared<CombinedCallbackState>();
     SignalGraph graph;
@@ -980,6 +1158,7 @@ CombinedRun render_combined(const std::vector<std::size_t>& schedule) {
     type.num_input_ports = type.num_output_ports = 1;
     type.process_events = [state](auto& out, const auto& in, int frames,
                                   const CustomNodeEventBlock& events) {
+        inject_callee_control(AnalyzerControl::NodeMalloc);
         for (int i = 0; i < frames; ++i)
             out.channel_ptr(0)[i] = in.channel_ptr(0)[i];
         auto& s = *state;
@@ -1035,6 +1214,15 @@ CombinedRun render_combined(const std::vector<std::size_t>& schedule) {
               graph.connect(consumer, 0, output, 0) && graph.connect_midi(midi_input, consumer) &&
               graph.connect_graph_event({producer, consumer}) == GraphEventBindingResult::Accepted,
           "combined-admission");
+    // Backend selection happens before prepare(). Parallel routing is
+    // requested after the graph-authored lane is bound; the runtime refuses it
+    // there, so the request is recorded rather than forced.
+    graph.set_canonical_executor_routing_enabled(backend != Backend::Reference);
+    graph.set_parallel_routing_enabled(backend == Backend::ParallelAfterBind);
+    CombinedRun run;
+    run.parallel_requested_accepted = graph.parallel_routing_enabled();
+    check(graph.canonical_executor_routing_enabled() == (backend != Backend::Reference),
+          "combined-backend-selected");
     check(graph.prepare(48000.0, static_cast<int>(kCombinedMaxBlock)), "combined-prepare");
     auto bank = make_voice_bank<P1HeldVoice>(static_cast<int>(kCombinedMaxBlock));
     const auto voice_epoch = bank->epoch();
@@ -1050,6 +1238,7 @@ CombinedRun render_combined(const std::vector<std::size_t>& schedule) {
     const float* source_ptr = source.data();
     float* destination_ptr = destination.data();
     std::array<float*, 2> voice_ptrs{left.data(), right.data()};
+    std::array<HostEventRecord, kVoiceSchedule.size()> voice_records{};
 
     // Slot state is read after each block's render, so a note-on whose
     // release lands in the same block is already releasing when observed.
@@ -1063,7 +1252,6 @@ CombinedRun render_combined(const std::vector<std::size_t>& schedule) {
     std::size_t next_voice = 0;
     std::uint64_t voice_sequence = 1;
     std::uint64_t start = 0;
-    CombinedRun run;
     for (const auto frames : schedule) {
         check(frames > 0 && frames <= kCombinedMaxBlock, "combined-block-size");
         const auto end = start + frames;
@@ -1084,20 +1272,6 @@ CombinedRun render_combined(const std::vector<std::size_t>& schedule) {
                       HostEventResult::StaleEpoch,
                   "combined-midi-stale-epoch-refusal");
         }
-        std::size_t count = 0;
-        check(ingress.project(projected, count) == HostEventResult::Accepted,
-              "combined-midi-project");
-        block_midi.clear();
-        for (std::size_t i = 0; i < count; ++i) {
-            auto event = projected[i].midi;
-            event.sample_offset = static_cast<std::int32_t>(
-                static_cast<std::uint64_t>(projected[i].absolute_sample) - start);
-            check(block_midi.add(event), "combined-midi-adapter-capacity");
-        }
-        if (count > 0)
-            check(graph.inject_midi(midi_input, block_midi), "combined-midi-inject");
-        check(ingress.end_block() == HostEventResult::Accepted, "combined-midi-end");
-
         // Parameter: absolute records converted to block-relative offsets.
         parameters.clear();
         while (next_parameter < kParameterSchedule.size() &&
@@ -1109,32 +1283,56 @@ CombinedRun render_combined(const std::vector<std::size_t>& schedule) {
                                  .value = static_cast<float>(entry.index) * kParameterStep}),
                 "combined-parameter-push");
         }
-        if (!parameters.empty())
-            check(graph.inject_parameter_events(plugin, parameters), "combined-parameter-inject");
-
         pulp::audio::BufferView<const float> in(&source_ptr, 1, frames);
         pulp::audio::BufferView<float> out(&destination_ptr, 1, frames);
-        graph.process(out, in, static_cast<int>(frames));
+        for (std::size_t i = 0; i < frames; ++i)
+            source[i] = 0.001f * static_cast<float>((start + i) % 977);
 
-        // Voice intent on the same block boundaries.
+        // Voice intent on the same block boundaries, published by the audio
+        // owner inside the boundary below.
         check(bank->epoch() == voice_epoch, "combined-epoch-map");
-        check(bank->begin_block(start, frames) == HostEventResult::Accepted,
-              "combined-voice-begin");
         const auto first_voice = next_voice;
+        std::size_t voice_count = 0;
         while (next_voice < kVoiceSchedule.size() && kVoiceSchedule[next_voice].absolute < end) {
             const auto& entry = kVoiceSchedule[next_voice++];
-            HostEventRecord record;
+            auto& record = voice_records[voice_count++];
+            record = HostEventRecord{};
             record.epoch = voice_epoch;
             record.absolute_sample = static_cast<std::int64_t>(entry.absolute);
             record.producer = 1;
             record.producer_sequence = voice_sequence++;
             record.midi = entry.note_on ? pulp::midi::MidiEvent::note_on(1, entry.note, 100)
                                         : pulp::midi::MidiEvent::note_off(1, entry.note);
-            check(bank->publish(record) == HostEventResult::Accepted, "combined-voice-publish");
         }
         pulp::audio::BufferView<float> voice_view(voice_ptrs.data(), 2, frames);
-        check(bank->render(voice_view, start, frames) == VoiceBankBindingCode::Ok,
-              "combined-voice-render");
+
+        const CombinedBlockIo io{graph,
+                                 ingress,
+                                 projected,
+                                 block_midi,
+                                 midi_input,
+                                 plugin,
+                                 parameters,
+                                 out,
+                                 in,
+                                 *bank,
+                                 {voice_records.data(), voice_count},
+                                 voice_view,
+                                 start,
+                                 frames};
+        const auto block = combined_audio_block(io, planted_control);
+        ++realtime_boundary_blocks;
+
+        check(block.midi_project == HostEventResult::Accepted, "combined-midi-project");
+        check(block.midi_adapter_capacity, "combined-midi-adapter-capacity");
+        check(block.midi_injected, "combined-midi-inject");
+        check(block.midi_end == HostEventResult::Accepted, "combined-midi-end");
+        check(block.parameters_injected, "combined-parameter-inject");
+        check(block.voice_begin == HostEventResult::Accepted, "combined-voice-begin");
+        check(block.voice_published == voice_count, "combined-voice-publish");
+        check(block.voice_render == VoiceBankBindingCode::Ok, "combined-voice-render");
+        run.graph_audio.insert(run.graph_audio.end(), destination.begin(),
+                               destination.begin() + static_cast<std::ptrdiff_t>(frames));
         std::copy_n(left.begin(), frames,
                     run.voice_audio.begin() + static_cast<std::ptrdiff_t>(start));
         for (std::size_t k = first_voice; k < next_voice; ++k) {
@@ -1160,6 +1358,12 @@ CombinedRun render_combined(const std::vector<std::size_t>& schedule) {
         ++run.blocks;
     }
     check(start == kCombinedFrames, "combined-schedule-length");
+    {
+        const auto stats = graph.routing_executor_stats();
+        run.executor_blocks = stats.blocks_processed;
+        run.parallel_levels = stats.parallel_levels_dispatched;
+        run.routing_fallbacks = graph.routed_walk_fallbacks();
+    }
 
     const auto& s = *state;
     check(!s.dropped && !probe->dropped(), "combined-observation-capacity");
@@ -1345,6 +1549,94 @@ MutationReceipt sequence_mutation_controls(const std::vector<TraceRecord>& trace
     return receipt;
 }
 
+// Names the first channel on which two backends disagree, or "" when the
+// canonical trace, per-family digests, voice audio, graph audio and epoch map
+// are all identical.
+const char* backend_parity_diff(const CombinedRun& a, const CombinedRun& b) {
+    if (!(a.trace == b.trace))
+        return "backend-trace";
+    if (family_digests(a.trace) != family_digests(b.trace))
+        return "backend-digest";
+    if (!(a.voice_audio == b.voice_audio))
+        return "backend-voice-audio";
+    if (!(a.graph_audio == b.graph_audio))
+        return "backend-graph-audio";
+    if (!(a.native_epoch == b.native_epoch))
+        return "backend-epoch-map";
+    return "";
+}
+
+struct ParityReceipt {
+    std::size_t comparisons = 0;
+    std::uint64_t reference_executor_blocks = 0;
+    std::uint64_t routed_executor_blocks = 0;
+    std::uint64_t routed_blocks_total = 0;
+    std::uint64_t routing_fallbacks = 0;
+    bool parallel_refused = false;
+    std::uint64_t parallel_levels = 0;
+    std::array<std::uint64_t, 4> perturbed_digests{};
+    std::size_t audio_perturbed_index = 0;
+};
+
+// Runs every schedule on the reference walk and the routed executor (and the
+// parallel request) and requires identical output. Planted negatives perturb
+// one record, then one audio sample, on the routed side only; the comparator
+// must name each.
+ParityReceipt executor_parity_controls(const std::vector<std::vector<std::size_t>>& schedules) {
+    ParityReceipt receipt;
+    for (const auto& schedule : schedules) {
+        const auto reference = render_combined(schedule, Backend::Reference);
+        const auto routed = render_combined(schedule, Backend::Routed);
+        const auto parallel = render_combined(schedule, Backend::ParallelAfterBind);
+        check(reference.executor_blocks == 0, "parity-reference-walk-only");
+        check(routed.executor_blocks == schedule.size(), "parity-routed-executor-dispatched");
+        check(routed.routing_fallbacks == 0 && parallel.routing_fallbacks == 0,
+              "parity-no-routed-fallback");
+        check(!parallel.parallel_requested_accepted, "parity-parallel-refused-after-bind");
+        check(parallel.parallel_levels == 0, "parity-parallel-not-dispatched");
+        check(std::string(backend_parity_diff(reference, routed)).empty(),
+              "parity-reference-vs-routed");
+        check(std::string(backend_parity_diff(reference, parallel)).empty(),
+              "parity-reference-vs-parallel-request");
+        check(std::string(backend_parity_diff(routed, parallel)).empty(),
+              "parity-routed-vs-parallel-request");
+        receipt.comparisons += 3;
+        receipt.reference_executor_blocks += reference.executor_blocks;
+        receipt.routed_executor_blocks += routed.executor_blocks;
+        receipt.routed_blocks_total += schedule.size();
+        receipt.routing_fallbacks += routed.routing_fallbacks + parallel.routing_fallbacks;
+        receipt.parallel_refused = !parallel.parallel_requested_accepted;
+        receipt.parallel_levels += parallel.parallel_levels;
+    }
+    const auto reference = render_combined(schedules[0], Backend::Reference);
+    const auto routed = render_combined(schedules[0], Backend::Routed);
+    check(std::string(backend_parity_diff(reference, routed)).empty(), "parity-control-baseline");
+    auto record_perturbed = routed;
+    const auto target = std::find_if(record_perturbed.trace.begin(), record_perturbed.trace.end(),
+                                     [](const auto& r) { return r.family == Family::Parameter; });
+    check(target != record_perturbed.trace.end(), "parity-perturb-target");
+    target->key[kOrderKey[1]] += 1;
+    check(std::string(backend_parity_diff(reference, record_perturbed)) == "backend-trace",
+          "parity-planted-record-detected");
+    receipt.perturbed_digests = family_digests(record_perturbed.trace);
+    const auto base_digests = family_digests(reference.trace);
+    check(receipt.perturbed_digests[1] != base_digests[1] &&
+              receipt.perturbed_digests[0] == base_digests[0] &&
+              receipt.perturbed_digests[2] == base_digests[2] &&
+              receipt.perturbed_digests[3] == base_digests[3],
+          "parity-planted-record-isolated");
+    auto audio_perturbed = routed;
+    receipt.audio_perturbed_index = audio_perturbed.graph_audio.size() / 2;
+    audio_perturbed.graph_audio[receipt.audio_perturbed_index] += 1.0f;
+    check(std::string(backend_parity_diff(reference, audio_perturbed)) == "backend-graph-audio",
+          "parity-planted-audio-detected");
+    auto voice_perturbed = routed;
+    voice_perturbed.voice_audio[7] += 1.0f;
+    check(std::string(backend_parity_diff(reference, voice_perturbed)) == "backend-voice-audio",
+          "parity-planted-voice-audio-detected");
+    return receipt;
+}
+
 std::string hex(std::uint64_t value) {
     char buffer[17];
     std::snprintf(buffer, sizeof buffer, "%016llx", static_cast<unsigned long long>(value));
@@ -1388,6 +1680,7 @@ void write_trace(const std::string& path, const CombinedRun& run, const Mutation
 
 int main(int argc, char** argv) {
     try {
+        planted_control = analyzer_control();
         const auto partition4 = host_and_parameter_controls(4);
         const auto partition8 = host_and_parameter_controls(8);
         check(partition4 == partition8, "partition-invariant-event-output");
@@ -1440,6 +1733,8 @@ int main(int argc, char** argv) {
         }
         check(future_staged > 0 && current_block > 0, "combined-trigger-current-and-future");
         const auto receipt = sequence_mutation_controls(combined.trace);
+        const auto parity = executor_parity_controls(combined_schedules);
+        check(parity.comparisons == 3 * combined_schedules.size(), "parity-comparison-count");
         for (int i = 1; i + 1 < argc; ++i)
             if (std::string(argv[i]) == "--trace")
                 write_trace(argv[i + 1], combined, receipt);
@@ -1452,7 +1747,14 @@ int main(int argc, char** argv) {
                   << ",parameter:" << hex(receipt.baseline[1])
                   << ",trigger:" << hex(receipt.baseline[2])
                   << ",voice:" << hex(receipt.baseline[3])
-                  << " sequence_mutations=5 consumer_gate=NOT_QUALIFIED\n";
+                  << " sequence_mutations=5 executor_parity=reference-walk,routed-executor"
+                  << " parity_comparisons=" << parity.comparisons
+                  << " routed_executor_blocks=" << parity.routed_executor_blocks << "/"
+                  << parity.routed_blocks_total << " routing_fallbacks=" << parity.routing_fallbacks
+                  << " parallel_after_bind=" << (parity.parallel_refused ? "refused" : "accepted")
+                  << " parity_planted_negatives=3 realtime_boundary=" << kRealtimeBoundary
+                  << " realtime_boundary_blocks=" << realtime_boundary_blocks
+                  << " consumer_gate=NOT_QUALIFIED\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "p1-event-admission FAIL rule=" << error.what() << '\n';

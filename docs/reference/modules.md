@@ -28,6 +28,7 @@ use without hard-coding macOS, Windows, Linux, iOS, or Web behavior.
 | Popup windows | `popup_window.hpp` | `PopupWindow::open` gives a borderless child window anchored to a rectangle in an editor view, placed below or above it on that view's screen, with a layer-backed content view to draw into (combo lists that must look like the product). It closes on an outside click (consumed, so it never reaches the editor), Escape, focus loss or the parent closing, and silently when its `MainThreadScope` dies |
 | Popup menus | `popup_menu.hpp` | Native menus. `show_menu_async` (preferred in editors) opens an anchored NSMenu at least as wide as its anchor, with submenus, check marks and per-row text colour, without blocking the caller; the choice arrives once on the main thread and is dropped if the `MainThreadScope` dies. The synchronous `PopupMenu::show` / `show_at_view` block until the menu closes and return the chosen id |
 | Main-thread work | `main_thread.hpp` | `MainThreadScope` posts work to the main thread from any thread, and `MainThreadTimer` gives one-shot or repeating millisecond timers. Both run in the common run-loop modes, so they keep running during menu tracking, live resize and modal panels, and nothing runs after the scope is destroyed. macOS and iOS; other platforms report `main_thread_supported() == false` |
+| Binary-unique names | `binary_unique_name.hpp` | `binary_unique_name(base)` returns `<base>_<image token>`, where the token is the load address of the binary holding the code, so process-wide registrations (Win32 window classes, for example) differ between two Pulp plug-ins in one host |
 | Unique Objective-C classes | `objc_unique_class.hpp` | Registers Objective-C classes at run time under `<base>_<image token>`, so two Pulp binaries in one host process never share a class name and run each other's code. It adds methods from C functions and gives each instance a context slot. Apple platforms |
 
 ---
@@ -35,6 +36,10 @@ use without hard-coding macOS, Windows, Linux, iOS, or Web behavior.
 ## native
 
 `pulp::native` (`integrations/pulp-native`, macOS) gives an editor that brings its own renderer a native surface: a child `NSView` backed by a `CAMetalLayer` (`metal_surface.hpp`), a display-linked frame pump (`frame_pump.hpp`) and pointer and key input (`input.hpp`). It links Pulp's platform layer and system frameworks only, with no view, canvas, render or GPU-runtime target and no Skia, Dawn, Vellum or RmlUi.
+
+## pulp_vellum
+
+`pulp::vellum` (`integrations/pulp-vellum`, optional, off unless `PULP_ENABLE_PULP_VELLUM=ON`) presents Pulp's editor-host ports in Vellum's value interfaces, so a Vellum widget binds to a processor's parameters without either side naming the other's types. `ParamPortModel` is a `vellum::value::ParamModel` over a `format::ParamPort`: parameters resolve by name or decimal id (or a plug-in's own resolver), gestures nest and reach the port once, a host change a subscriber echoes back is not written as an edit, and restored state replays through the port's listener. `mapping.hpp` holds the pure value mapping (`to_normalized`, `to_plain`, text parse and format) over Pulp's own `ParamRange`, callable without a model. `VisualPortFeed` presents a `format::VisualPort` as a `vellum::value::ValueFeed`. Modulation readout takes a reader the caller supplies over `StateStore::displayed_modulation`. It needs an installed Vellum SDK on `CMAKE_PREFIX_PATH`, nothing in `core/` links it (`integrations_boundary_check.py`), and its tests run in the Vellum SDK consumer workflow against the newest green Vellum main SDK.
 
 ## simd
 

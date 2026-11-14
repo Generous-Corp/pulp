@@ -121,6 +121,16 @@ REQUIRED_FILES_BY_TYPE = {
         "processor.hpp.template",
         "test.cpp.template",
     },
+    # `agent-toolkit` is a named template (--template agent-toolkit): a
+    # controlled instrument built as Standalone only, with the agent tool kit's
+    # operations bound in agent_operations.cpp.
+    "agent-toolkit": {
+        "CMakeLists.txt.template",
+        "processor.hpp.template",
+        "processor.cpp.template",
+        "agent_operations.cpp.template",
+        "test.cpp.template",
+    },
 }
 
 _VAR_PATTERN = re.compile(r"\{\{([A-Z_][A-Z0-9_]*)\}\}")

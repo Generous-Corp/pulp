@@ -88,6 +88,7 @@ pulp_test_data(pulp-test-cli-create-shellout NO_DEFINE PATHS
     fixtures/packages/simple-plugin-template
     fixtures/packages/gain-dsp-kit
     tools/templates/gain
+    tools/templates/agent-toolkit
     tools/templates/effect
     tools/templates/standalone
     tools/packages/registry.json
@@ -205,7 +206,7 @@ endfunction()
 
 add_executable(pulp-test-cli-shellout test_cli_shellout.cpp test_cli_fmt_shellout.cpp
     test_cli_audio_heritage.cpp test_cli_timeline_render_shellout.cpp)
-target_link_libraries(pulp-test-cli-shellout PRIVATE pulp::platform Catch2::Catch2WithMain)
+target_link_libraries(pulp-test-cli-shellout PRIVATE pulp::platform pulp::audio Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-cli-shellout PRIVATE
     PULP_TEST_INSPECTOR_ENABLED=$<BOOL:${PULP_ENABLE_INSPECTOR}>)
 pulp_bind_cli_shellout_target(pulp-test-cli-shellout)

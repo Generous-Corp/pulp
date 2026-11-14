@@ -351,6 +351,9 @@ class Wiring(unittest.TestCase):
 
     def test_classify_runs_the_protected_copy_with_the_variable(self):
         step = self.build.split("- name: Merge-queue circuit breaker", 1)[1].split("\n      - ", 1)[0]
+        # The comment block that introduces the next step is not this step.
+        step = "\n".join(line for line in step.splitlines()
+                         if not line.startswith("      #"))
         self.assertIn("id: queue_breaker", step)
         self.assertIn("vars.PULP_QUEUE_BREAKER ||", step)
         self.assertIn("vars.PULP_QUEUE_BREAKER_CONTROL", step)

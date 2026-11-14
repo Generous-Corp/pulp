@@ -62,13 +62,22 @@ gives up after `timeout_ms`.
 ## Feedback to the controller
 
 A mapping with `feedback = true` sends its parameter's value back to the
-controller (a motorised fader, an LED ring, a display). The processor makes one
-call per block:
+controller (a motorised fader, an LED ring, a display). The processor resolves
+its feedback capabilities once in `prepare()` and makes one call per block:
 
 ```cpp
-format::midi_learn_process_block(learn_, state(), midi_in, midi_out,
-    format::midi_feedback_capabilities(format::MidiLearnFormat::vst3, descriptor()));
+void prepare(const format::PrepareContext&) override {
+    feedback_ = format::midi_feedback_capabilities(format::MidiLearnFormat::vst3, descriptor());
+}
+
+void process(/* ... */) override {
+    format::midi_learn_process_block(learn_, state(), midi_in, midi_out, feedback_);
+}
 ```
+
+Do not call `descriptor()` from `process()`: it builds the descriptor's strings
+and bus lists, which allocates on the audio thread, and Pulp's real-time
+allocation trap aborts a Debug build that does it.
 
 It adopts new mappings, routes the block's input, and writes feedback into
 `midi_out`. A mapping sends when its parameter has moved by at least half a step

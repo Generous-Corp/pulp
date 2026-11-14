@@ -21,7 +21,7 @@ full G-7 completion.
 
 - **Source head:** `8ecb5db3c9c0323ed065d7b9055e217ba715b292`.
 - **Receipt package head:** `da24589115dee2326152c92eb97087655ec44812`.
-- **Installed SDK:** `/Users/danielraffel/.pulp/sdk-dev/forge-v1/darwin-arm64/8ecb5db3c9c0323ed065d7b9055e217ba715b292/11a0d651ba9e`.
+- **Installed SDK:** `<sdk-dev-root>/forge-v1/darwin-arm64/8ecb5db3c9c0323ed065d7b9055e217ba715b292/11a0d651ba9e`.
 - **SDK provenance:** SHA-256
   `4335a1fb583b56590a34253bcbe6564189942b9f59ef27cbc46429f43012cb4f`.
 - **Consumer receipt:** SHA-256
@@ -49,7 +49,7 @@ full G-7 completion.
 - **Source base:** `571ea4f74e53f51cea37b506d81e4989a07103af` (the follow-on
   worktree adds only the consumer and documentation changes).
 - **Installed SDK:** the exact existing SDK at
-  `/Users/danielraffel/.pulp/sdk-dev/forge-v1/darwin-arm64/8ecb5db3c9c0323ed065d7b9055e217ba715b292/11a0d651ba9e`.
+  `<sdk-dev-root>/forge-v1/darwin-arm64/8ecb5db3c9c0323ed065d7b9055e217ba715b292/11a0d651ba9e`.
 - **Command:** Release CMake configure with `Pulp_DIR`, governed build of
   `pulp-g7-latency-pdc-consumer`, CTest, then direct execution.
 - **Result:** CTest `1/1` passed; direct output was
@@ -66,10 +66,12 @@ does not add a CLI/MCP surface.
 and installed MCP sibling now accept opt-in `--plan`, `--latency`, and
 `--node-loads` sections. Plan output is authored topology, latency output is
 copied from the prepared snapshot's deterministic node/PDC map, and node loads
-use the existing opt-in latest-value measurers. The default probe remains
-audio-only and does no per-node clock reads. Control/event taps remain
-deferred until a prepared lock-free producer/consumer contract exists;
-unsupported or unknown requests fail closed. The installed consumer parity
+use the existing opt-in latest-value measurers. The default probe is audio
+and does no per-node clock reads. Control and event taps now exist in the C++
+API on the serial routed executor; the CLI/MCP select them with `--edge-kind`.
+The CLI event path seeds one fixed note-on, and a CLI control request always
+refuses `MissingEdge` because CLI-loaded graphs cannot contain automation edges.
+Unsupported or unknown requests fail closed. The installed consumer parity
 fixture and planted unknown-option control are the acceptance evidence for
 this tooling slice; this status does not claim realtime qualification or full
 G-7 completion.

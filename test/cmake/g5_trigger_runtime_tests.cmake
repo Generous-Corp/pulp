@@ -12,3 +12,7 @@ if(TARGET pulp-host)
                 harness/rt_allocation_probe.cpp LIBRARIES pulp::host
         PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
 endif()
+if(TARGET pulp-host AND TARGET clap)
+    pulp_add_test_suite(pulp-test-g5-host-event-timestamps
+        SOURCES test_g5_host_event_timestamps.cpp LIBRARIES pulp::host clap)
+endif()
