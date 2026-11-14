@@ -72,6 +72,8 @@ Build a
 `metal_renderer_hooks(renderer)` to `RmlUiSurface`; the hooks preserve the
 drawable viewport and backing scale and clear each drawable before RmlUi draws.
 The `rmlui-metal-demo` example is the smoke path for this wiring.
+Use `dp` units for text sizes when a document is rendered at multiple backing
+scales; `px` text is intentionally density-independent in RmlUi.
 
 ## Licence line
 

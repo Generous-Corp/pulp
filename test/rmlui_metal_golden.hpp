@@ -31,8 +31,8 @@ struct Document {
     const char* rml;
 };
 
-// Lengths are in px, so a frame at backing scale 2 lays out the same content
-// in the same pixels as the reference opened at that pixel size.
+// Text lengths use dp so the density ratio makes glyph rasterization follow the
+// backing scale; geometric lengths remain logical points on both sides.
 inline constexpr Document kDocuments[] = {
     {"panel.rml", R"(<rml>
 <head>

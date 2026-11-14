@@ -14,6 +14,8 @@
 
 #include <vellum/rmlui/image_compare.hpp>
 
+#include <RmlUi/Core/Context.h>
+
 #import <AppKit/AppKit.h>
 #import <Metal/Metal.h>
 
@@ -121,7 +123,8 @@ struct Drawn {
 
 /// Opens `document` in an editor window at `scale`, lets layout settle, and
 /// captures one frame drawn by Vellum's Metal renderer through the surface.
-bool draw(const char* document, CGFloat scale, Drawn& out, std::string& failure) {
+bool draw(const char* document, CGFloat scale, Drawn& out, std::string& failure,
+          bool leave_density_ratio_at_one = false) {
     [NSApplication sharedApplication];
     PulpRmlMetalTestWindow* window = [[PulpRmlMetalTestWindow alloc]
         initWithContentRect:NSMakeRect(0, 0, golden::kWidthPoints, golden::kHeightPoints)
@@ -154,6 +157,15 @@ bool draw(const char* document, CGFloat scale, Drawn& out, std::string& failure)
                 failure = "surface and renderer use different Metal devices";
                 ui.detach();
                 return false;
+            }
+            if (leave_density_ratio_at_one && scale > 1.0) {
+                if (!ui.with_context([](Rml::Context& context) {
+                    context.SetDensityIndependentPixelRatio(1.0f);
+                })) {
+                    failure = "could not set the control density ratio";
+                    ui.detach();
+                    return false;
+                }
             }
             // The surface draws on demand. Two frames first, as the reference
             // renders twice, so layout has settled; then the captured one.
@@ -271,5 +283,21 @@ TEST_CASE("the renderer is handed the whole drawable in context pixels, cleared"
         REQUIRE(target.viewport.zfar == 1.0);
         REQUIRE(target.scale == 2.0f);
         REQUIRE(target.clear);
+    }
+}
+
+TEST_CASE("a 2x context left at a 1x density ratio fails the parity check",
+          "[native-surface][rmlui][metal]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        Drawn drawn;
+        std::string failure;
+        const auto& document = golden::kDocuments[0];
+        REQUIRE(draw(document.name, 2, drawn, failure, true));
+        const auto expected = reference(document.name, drawn.width, drawn.height);
+        REQUIRE_FALSE(expected.empty());
+        const auto difference = vellum::rmlui::compare_rgba(drawn.rgba, expected);
+        INFO("mean " << difference.mean << ", within " << difference.within);
+        REQUIRE_FALSE(vellum::rmlui::within_renderer_tolerance(difference));
     }
 }

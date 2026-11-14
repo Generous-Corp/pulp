@@ -19,6 +19,9 @@ vellum::rmlui::MetalFrameTarget metal_frame_target(const FrameTarget& frame) {
 }
 
 RendererHooks metal_renderer_hooks(vellum::rmlui::MetalRenderInterface& renderer) {
+#if defined(PULP_VELLUM_RMLUI_HAS_ATLAS_FILTER)
+    renderer.set_atlas_filter(vellum::rmlui::MetalRenderInterface::AtlasFilter::nearest);
+#endif
     RendererHooks hooks;
     hooks.begin_frame = [&renderer](const FrameTarget& frame) {
         renderer.begin_frame(metal_frame_target(frame));

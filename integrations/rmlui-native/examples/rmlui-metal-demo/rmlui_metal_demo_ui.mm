@@ -26,13 +26,15 @@ class Assets final : public vellum::rmlui::AssetProvider {
         asset.path = std::string(path);
         asset.bytes = R"(<rml><head><style>
 body { width: 100%; height: 100%; margin: 0; background: #111827; }
+#title { position: absolute; left: 20px; top: 20px; font-family: Inter;
+         font-size: 24dp; color: #ffffff; }
 #card { position: absolute; left: 24px; top: 24px; width: 272px; height: 168px;
         padding: 12px; background: linear-gradient(135deg, #2563eb, #7c3aed);
         border: 2px #93c5fd; border-radius: 16px; }
 #bar { position: absolute; left: 20px; top: 96px; width: 232px; height: 18px;
        background: #111827; border-radius: 9px; }
 #fill { width: 68%; height: 100%; background: #fbbf24; border-radius: 9px; }
-</style></head><body><div id="card"><div id="bar"><div id="fill"/></div></div></body></rml>)";
+</style></head><body><div id="title">Pulp + RmlUi + Metal</div><div id="card"><div id="bar"><div id="fill"/></div></div></body></rml>)";
         return vellum::rmlui::Status::ok;
     }
 };
