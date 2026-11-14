@@ -620,7 +620,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-129a5ffb4fb5"
+name = "script-readers-23992698ae35"
 paths = [
   "tools/scripts/cutover_trial.py",
   "tools/scripts/test_cutover_trial.py",
@@ -649,6 +649,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
+  "script-inputs-offline-selftest",
   "vellum-watch-preflight-selftest",
   "wide-non-native-selftest",
 ]
