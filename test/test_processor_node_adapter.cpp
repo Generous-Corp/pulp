@@ -1413,18 +1413,24 @@ TEST_CASE("Processor node idle skip renders blocks that reset, jump or carry los
         TransportJump,
         IncompleteEvents,
         DroppedUmp,
+        DroppedMidi,
+        DroppedSysex,
+        DroppedMpe,
+        ParameterOverflow,
         MidiEvent,
         MpeEvent,
         ParameterEvent
     };
-    for (const auto kind : {Case::ResetFlag, Case::JumpFlag, Case::TransportReset,
-                            Case::TransportJump, Case::IncompleteEvents, Case::DroppedUmp,
-                            Case::MidiEvent, Case::MpeEvent, Case::ParameterEvent}) {
+    for (const auto kind :
+         {Case::ResetFlag, Case::JumpFlag, Case::TransportReset, Case::TransportJump,
+          Case::IncompleteEvents, Case::DroppedUmp, Case::DroppedMidi, Case::DroppedSysex,
+          Case::DroppedMpe, Case::ParameterOverflow, Case::MidiEvent, Case::MpeEvent,
+          Case::ParameterEvent}) {
         INFO("case=" << static_cast<int>(kind));
         IdleSourceRig rig;
         pulp::midi::MidiBuffer midi_in;
         pulp::midi::UmpBuffer ump;
-        pulp::midi::MpeBuffer mpe;
+        pulp::midi::MpeBuffer mpe{false};
         pulp::state::ParameterEventQueue params;
         ProcessContext transport;
         transport.sample_rate = kSr;
@@ -1464,6 +1470,33 @@ TEST_CASE("Processor node idle skip renders blocks that reset, jump or carry los
             }
             REQUIRE(ump.dropped_event_count() > 0);
             break;
+        case Case::DroppedMidi:
+            // A zero-capacity, capacity-limited buffer: the event is dropped
+            // and the buffer stays empty.
+            midi_in.set_realtime_capacity_limit(true);
+            REQUIRE_FALSE(midi_in.add(pulp::midi::MidiEvent::note_on(1, 60, 100)));
+            REQUIRE(midi_in.empty());
+            REQUIRE(midi_in.dropped_event_count() > 0);
+            break;
+        case Case::DroppedSysex: {
+            midi_in.set_realtime_capacity_limit(true);
+            const std::vector<std::uint8_t> payload{0xF0, 0x7D, 0xF7};
+            REQUIRE_FALSE(midi_in.add_sysex(payload));
+            REQUIRE(midi_in.sysex_size() == 0);
+            REQUIRE(midi_in.dropped_sysex_count() > 0);
+            break;
+        }
+        case Case::DroppedMpe:
+            mpe.set_realtime_capacity_limit(true);
+            REQUIRE_FALSE(mpe.add(pulp::midi::MpeExpressionEvent{}));
+            REQUIRE(mpe.empty());
+            REQUIRE(mpe.dropped_event_count() > 0);
+            break;
+        case Case::ParameterOverflow:
+            for (std::size_t i = 0; i <= pulp::state::ParameterEventQueue::kCapacity; ++i)
+                params.push(pulp::state::ParameterEvent{});
+            REQUIRE(params.dropped_event_count() > 0);
+            break;
         case Case::MidiEvent:
             midi_in.add(pulp::midi::MidiEvent::note_on(1, 60, 100));
             break;
@@ -1482,8 +1515,11 @@ TEST_CASE("Processor node idle skip renders blocks that reset, jump or carry los
         rig.block.flags = {};
         rig.block.transport = nullptr;
         rig.context.node_events_incomplete = false;
+        midi_in.set_realtime_capacity_limit(false);
         midi_in.clear();
+        midi_in.clear_sysex();
         ump.clear();
+        mpe.set_realtime_capacity_limit(false);
         mpe.clear();
         params.clear();
         REQUIRE(rig.run());
@@ -1512,4 +1548,24 @@ TEST_CASE("Processor node idle skip starts over when the node is prepared again"
     CHECK(rig.processor.calls == calls + 1);
     REQUIRE(rig.run());
     CHECK(rig.processor.calls == calls + 1);
+}
+
+TEST_CASE("Processor node idle skip never confirms silence while its MIDI output drops events",
+          "[format][graph][processor-node][idle-skip]") {
+    IdleSourceRig rig;
+    // The processor writes a note into a MIDI output with no room: the note is
+    // dropped, the buffer stays empty and its drop counter is set. Audio is
+    // silent, but the node is not quiet, so it is never skipped.
+    pulp::midi::MidiBuffer no_room;
+    no_room.set_realtime_capacity_limit(true);
+    rig.context.node_midi_out = &no_room;
+    rig.processor.emit_note = true;
+    for (int block = 0; block < 4; ++block) {
+        REQUIRE(rig.run());
+        REQUIRE(rig.output_all_zero_bits());
+        REQUIRE(no_room.empty());
+        REQUIRE(no_room.dropped_event_count() > 0);
+    }
+    CHECK(rig.processor.calls == 4);
+    CHECK(rig.node.idle_skipped_blocks() == 0);
 }

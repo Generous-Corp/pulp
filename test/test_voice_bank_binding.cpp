@@ -1422,3 +1422,32 @@ TEST_CASE("Idle skip stays identical on one bank across changing block sizes and
     CHECK(renders[1].skipped > 0);
     CHECK(same_bytes(renders[0].audio, renders[1].audio));
 }
+
+TEST_CASE("Activating a bank whose slots are all idle makes each slot render once before skipping",
+          "[host][graph][voice-bank][idle-skip]") {
+    constexpr std::size_t kBlock = 64;
+    IdleKnobs knobs;
+    const std::vector<ScriptedEvent> script{on(0, 1, 69, 127), on(0, 2, 64, 100), off(64, 1, 69),
+                                            off(64, 2, 64)};
+    // Blocks 0 to 9 let every slot go idle and be skipped; the bank is
+    // reactivated before block 10.
+    const auto result =
+        render_idle(knobs, script, 12 * kBlock, kBlock, VoiceBankIdleSkip::SkipInactiveSlots,
+                    midi::MpeVoiceStealMode::Oldest, [](std::size_t block, VoiceBankBinding& bank) {
+                        if (block == 10) {
+                            VoiceBankBindingResult activation;
+                            REQUIRE(bank.activate(activation));
+                        }
+                    });
+    // Before activation every slot is being skipped.
+    CHECK(result.skipped_after_block[9] == result.skipped_after_block[8] + 8);
+    // The reactivated block renders each slot once and skips none.
+    CHECK(result.skipped_after_block[10] == result.skipped_after_block[9]);
+    for (std::size_t slot = 0; slot < 8; ++slot) {
+        INFO("slot=" << slot);
+        CHECK(result.calls_after_block[10][slot] == result.calls_after_block[9][slot] + 1);
+        // The next block is skipped again.
+        CHECK(result.calls_after_block[11][slot] == result.calls_after_block[10][slot]);
+    }
+    CHECK(result.skipped_after_block[11] == result.skipped_after_block[10] + 8);
+}
