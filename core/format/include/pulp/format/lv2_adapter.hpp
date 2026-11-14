@@ -270,6 +270,12 @@ struct PulpLv2Instance {
     // as a seek on every block and reset tempo-synced DSP continuously.
     Lv2TimePosition transport{};
     bool has_transport = false;
+    // Frames the previous run() rendered. The latched position describes the
+    // previous block's first frame, so it advances by that block's length, not
+    // the current one's; advancing by the current length would put the
+    // position off by the difference whenever the host changes block size,
+    // which the playhead diff reads as a transport jump.
+    uint32_t previous_block_samples = 0;
 
     // Previous-block transport snapshot backing the shared change-flag diff
     // (`tempo_changed` / `transport_jump` / ...), exactly as the other format
