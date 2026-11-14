@@ -158,6 +158,7 @@ void GraphReloadWatch::poll() {
                      "live graph retained\n";
         return;
     }
+    retry_budget_.offer(change.text);
     // Use the same enrollment, grant, deadline, receipt and admission path as
     // `pulp control call`; the watch loop has no direct graph authority.
     std::ostringstream receipt;
@@ -178,11 +179,21 @@ void GraphReloadWatch::poll() {
     switch (outcome) {
     case GraphReloadOutcome::Published:
     case GraphReloadOutcome::Refused:
-        not_applied_ = 0;
+        retry_budget_.reset();
         watch_->acknowledge();
         return;
+    case GraphReloadOutcome::StaleGeneration:
+        // Not acknowledged: the file stays unconsumed, and resending with the
+        // same expected generation would repeat the refusal on every change.
+        halted_ = true;
+        std::cerr << "graph reload: the live graph moved past generation " << options_.generation
+                  << " (stale-base); graph reload is paused for this watch and the file was not "
+                     "applied. Read the current generation from detail.generation of the receipt "
+                     "above, then restart the watch with --graph-generation set to it\n"
+                  << std::flush;
+        return;
     case GraphReloadOutcome::NotApplied:
-        if (++not_applied_ < kMaxNotApplied) {
+        if (!retry_budget_.record_failure()) {
             std::cerr << "graph reload: request was not applied; the change will be retried\n";
             return;
         }

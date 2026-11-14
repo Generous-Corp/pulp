@@ -1,4 +1,5 @@
 #pragma once
+#include "cli_graph_reload_receipt.hpp"
 #include <memory>
 namespace pulp::host {
 class GraphFileWatch;
@@ -33,7 +34,7 @@ class GraphReloadWatch {
     bool renew();
     static constexpr unsigned kMaxNotApplied = 3;
     unsigned polls_ = 0;
-    unsigned not_applied_ = 0;
+    GraphReloadRetryBudget retry_budget_{kMaxNotApplied};
     bool lease_ready_ = false;
     bool halted_ = false;
     std::string last_renewal_refusal_;

@@ -25,6 +25,8 @@ GraphReloadOutcome classify_graph_reload_receipt(int exit_code, const std::strin
                 generation = static_cast<std::uint64_t>(detail["generation"].getInt64());
             return GraphReloadOutcome::Published;
         }
+        if (state == "failed" && typed && detail["code"].getString() == "stale-base")
+            return GraphReloadOutcome::StaleGeneration;
         if (state == "failed" && typed)
             return GraphReloadOutcome::Refused;
         if (state == "failed" || state == "cancelled")
