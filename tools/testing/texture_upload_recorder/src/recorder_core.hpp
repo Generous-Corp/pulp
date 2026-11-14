@@ -7,6 +7,10 @@
 #include <cstdint>
 #include <string>
 
+#ifdef __OBJC__
+#include <objc/runtime.h>
+#endif
+
 namespace pulp::testing::detail {
 
 struct UploadDescription {
@@ -38,5 +42,11 @@ bool install_platform_hooks(std::string* error);
 /// Copies the uploaded pixels without row or image padding. Returns false
 /// (leaving `out` holding the bytes as given) when the pixel size is unknown.
 bool pack_rows(const UploadDescription& upload, std::string& out);
+
+#ifdef __OBJC__
+/// Wraps the texture upload methods on `cls` as install() does for the
+/// device's texture classes, so a test can hook classes of its own.
+void hook_texture_class_for_testing(Class cls);
+#endif
 
 } // namespace pulp::testing::detail

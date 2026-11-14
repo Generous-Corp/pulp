@@ -375,6 +375,9 @@ if(APPLE AND NOT PULP_IOS AND TARGET pulp::texture-upload-recorder)
     pulp_add_test_suite(pulp-test-texture-upload-recorder
         SOURCES test_texture_upload_recorder_mac.mm
         LIBRARIES pulp::texture-upload-recorder)
+    # The recorder's internal header, for its hook seam.
+    target_include_directories(pulp-test-texture-upload-recorder PRIVATE
+        "${CMAKE_SOURCE_DIR}/tools/testing/texture_upload_recorder/src")
     set_source_files_properties(test_texture_upload_recorder_mac.mm PROPERTIES COMPILE_OPTIONS -fobjc-arc)
     target_link_libraries(pulp-test-texture-upload-recorder PRIVATE "-framework Metal" "-framework Foundation")
 endif()

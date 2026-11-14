@@ -74,7 +74,14 @@ class TextureUploadRecorder {
     /// Stops recording. The wrapped calls keep passing straight through.
     static void stop();
 
+    /// True from install() until stop(), or until a manifest write fails.
     [[nodiscard]] static bool recording();
+
+    /// Why recording stopped on its own, empty if it has not. A failed
+    /// manifest write stops recording and removes manifest.jsonl, so an
+    /// incomplete run cannot be compared as if it were whole; the upload
+    /// being written is not added to records().
+    [[nodiscard]] static std::string failure();
 
     /// The uploads recorded since the last install().
     [[nodiscard]] static std::vector<TextureUploadRecord> records();

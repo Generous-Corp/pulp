@@ -21,6 +21,7 @@
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace pulp::testing::detail {
 
@@ -93,20 +94,64 @@ Hooks& hooks() {
     return h;
 }
 
-// The original IMP for `self`'s class or the nearest hooked superclass.
-IMP original_for(id self, SEL sel) {
-    auto& h = hooks();
-    std::lock_guard lock(h.mutex);
-    for (Class cls = object_getClass(self); cls; cls = class_getSuperclass(cls)) {
-        const auto it = h.originals.find({cls, sel});
-        if (it != h.originals.end())
-            return it->second;
+// Each wrapped call running on this thread, innermost last: the object, the
+// selector and the class whose original implementation it dispatched to.
+struct Dispatch {
+    id self;
+    SEL sel;
+    Class cls;
+};
+thread_local std::vector<Dispatch> t_dispatch;
+
+// The original implementation a wrapped call runs: the one saved for `self`'s
+// class or its nearest hooked superclass. When the same object and selector are
+// already being dispatched on this thread, the running original called super,
+// so the search resumes above the class whose original is running; starting
+// again from `self`'s class would re-enter that original forever.
+//
+// Holds its place on the dispatch stack until destroyed, so construct it in the
+// wrapper's scope, around the call to the original.
+class Original {
+  public:
+    Original(id self, SEL sel) {
+        Class start = object_getClass(self);
+        for (auto it = t_dispatch.rbegin(); it != t_dispatch.rend(); ++it) {
+            if (it->self == self && it->sel == sel) {
+                start = class_getSuperclass(it->cls);
+                break;
+            }
+        }
+        auto& h = hooks();
+        std::lock_guard lock(h.mutex);
+        for (Class cls = start; cls; cls = class_getSuperclass(cls)) {
+            const auto found = h.originals.find({cls, sel});
+            if (found != h.originals.end()) {
+                imp_ = found->second;
+                t_dispatch.push_back({self, sel, cls});
+                break;
+            }
+        }
     }
-    return nullptr;
-}
+    ~Original() {
+        if (imp_)
+            t_dispatch.pop_back();
+    }
+    Original(const Original&) = delete;
+    Original& operator=(const Original&) = delete;
+
+    template <typename Fn> Fn get() const {
+        return reinterpret_cast<Fn>(imp_);
+    }
+
+  private:
+    IMP imp_ = nullptr;
+};
 
 // Replaces `sel` on `cls` with `replacement`, keeping the original for
-// original_for(). An inherited method is overridden on `cls` only.
+// Original. An inherited method is overridden on `cls` only. A class that
+// inherits the selector from an already hooked class already runs the wrapper,
+// whose dispatch reaches that class's original, so it is left as it is: saving
+// the inherited wrapper as this class's original would make it call itself.
 void hook(Class cls, SEL sel, IMP replacement) {
     if (!cls)
         return;
@@ -165,8 +210,12 @@ struct Nesting {
 // MTLDevice newTextureWithDescriptor:
 id hooked_new_texture(id self, SEL sel, MTLTextureDescriptor* descriptor) {
     using Fn = id (*)(id, SEL, MTLTextureDescriptor*);
-    const auto original = reinterpret_cast<Fn>(original_for(self, sel));
-    id texture = original ? original(self, sel, descriptor) : nil;
+    id texture = nil;
+    {
+        const Original original(self, sel);
+        if (const auto fn = original.get<Fn>())
+            texture = fn(self, sel, descriptor);
+    }
     if (texture) {
         hook_texture_class(object_getClass(texture));
         auto& h = hooks();
@@ -198,8 +247,9 @@ void hooked_replace_region(id self, SEL sel, MTLRegion region, NSUInteger level,
         record_upload(u);
     }
     using Fn = void (*)(id, SEL, MTLRegion, NSUInteger, const void*, NSUInteger);
-    if (const auto original = reinterpret_cast<Fn>(original_for(self, sel)))
-        original(self, sel, region, level, bytes, bytes_per_row);
+    const Original original(self, sel);
+    if (const auto fn = original.get<Fn>())
+        fn(self, sel, region, level, bytes, bytes_per_row);
 }
 
 // MTLTexture replaceRegion:mipmapLevel:slice:withBytes:bytesPerRow:bytesPerImage:
@@ -228,8 +278,9 @@ void hooked_replace_region_slice(id self, SEL sel, MTLRegion region, NSUInteger 
     }
     using Fn =
         void (*)(id, SEL, MTLRegion, NSUInteger, NSUInteger, const void*, NSUInteger, NSUInteger);
-    if (const auto original = reinterpret_cast<Fn>(original_for(self, sel)))
-        original(self, sel, region, level, slice, bytes, bytes_per_row, bytes_per_image);
+    const Original original(self, sel);
+    if (const auto fn = original.get<Fn>())
+        fn(self, sel, region, level, slice, bytes, bytes_per_row, bytes_per_image);
 }
 
 void record_blit(const char* entry, id<MTLBuffer> buffer, NSUInteger offset,
@@ -268,9 +319,10 @@ void hooked_blit(id self, SEL sel, id<MTLBuffer> buffer, NSUInteger offset,
                     slice, level, origin, __builtin_return_address(0));
     using Fn = void (*)(id, SEL, id<MTLBuffer>, NSUInteger, NSUInteger, NSUInteger, MTLSize,
                         id<MTLTexture>, NSUInteger, NSUInteger, MTLOrigin);
-    if (const auto original = reinterpret_cast<Fn>(original_for(self, sel)))
-        original(self, sel, buffer, offset, bytes_per_row, bytes_per_image, size, texture, slice,
-                 level, origin);
+    const Original original(self, sel);
+    if (const auto fn = original.get<Fn>())
+        fn(self, sel, buffer, offset, bytes_per_row, bytes_per_image, size, texture, slice, level,
+           origin);
 }
 
 // The same with an options: argument.
@@ -284,9 +336,10 @@ void hooked_blit_options(id self, SEL sel, id<MTLBuffer> buffer, NSUInteger offs
                     texture, slice, level, origin, __builtin_return_address(0));
     using Fn = void (*)(id, SEL, id<MTLBuffer>, NSUInteger, NSUInteger, NSUInteger, MTLSize,
                         id<MTLTexture>, NSUInteger, NSUInteger, MTLOrigin, MTLBlitOption);
-    if (const auto original = reinterpret_cast<Fn>(original_for(self, sel)))
-        original(self, sel, buffer, offset, bytes_per_row, bytes_per_image, size, texture, slice,
-                 level, origin, options);
+    const Original original(self, sel);
+    if (const auto fn = original.get<Fn>())
+        fn(self, sel, buffer, offset, bytes_per_row, bytes_per_image, size, texture, slice, level,
+           origin, options);
 }
 
 void hook_texture_class(Class cls) {
@@ -303,6 +356,10 @@ void hook_texture_class(Class cls) {
 }
 
 } // namespace
+
+void hook_texture_class_for_testing(Class cls) {
+    hook_texture_class(cls);
+}
 
 bool install_platform_hooks(std::string* error) {
     auto& h = hooks();

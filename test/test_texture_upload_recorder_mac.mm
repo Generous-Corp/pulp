@@ -2,8 +2,12 @@
 // sliced replaceRegion with padded rows, and a staging-buffer blit) are recorded
 // exactly, byte for byte, without changing what reaches the textures. A second
 // run with one byte changed in one texture records a different sha256 for that
-// texture only.
+// texture only. Hooked classes that inherit or call super reach the original
+// exactly once, and a failed manifest write stops recording and removes the
+// manifest.
 #include <pulp/testing/texture_upload_recorder.hpp>
+
+#include "recorder_core.hpp"
 
 #include "support/unique_temp_dir.hpp"
 
@@ -12,7 +16,10 @@
 #import <CommonCrypto/CommonDigest.h>
 #import <Metal/Metal.h>
 
+#include <sys/resource.h>
+
 #include <algorithm>
+#include <csignal>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -20,6 +27,89 @@
 #include <iterator>
 #include <string>
 #include <vector>
+
+// Stand-ins for a texture class hierarchy: a base that uploads, a subclass that
+// inherits the upload, and subclasses that override it and call super.
+// Each class counts its own entries; an override entered again while it is
+// still running would mean the dispatch re-entered it instead of reaching super.
+namespace {
+int g_base_calls = 0;
+int g_override_calls = 0;
+int g_override_depth = 0;
+bool g_override_reentered = false;
+
+void enter_override() {
+    ++g_override_calls;
+    if (++g_override_depth > 1)
+        g_override_reentered = true;
+}
+} // namespace
+
+@interface PulpRecorderFakeTexture : NSObject
+- (void)replaceRegion:(MTLRegion)region
+          mipmapLevel:(NSUInteger)level
+            withBytes:(const void*)bytes
+          bytesPerRow:(NSUInteger)bytesPerRow;
+@end
+
+@implementation PulpRecorderFakeTexture
+- (void)replaceRegion:(MTLRegion)region
+          mipmapLevel:(NSUInteger)level
+            withBytes:(const void*)bytes
+          bytesPerRow:(NSUInteger)bytesPerRow {
+    ++g_base_calls;
+}
+@end
+
+@interface PulpRecorderFakeTextureInherits : PulpRecorderFakeTexture
+@end
+@implementation PulpRecorderFakeTextureInherits
+@end
+
+@interface PulpRecorderFakeTextureCallsSuper : PulpRecorderFakeTexture
+@end
+@implementation PulpRecorderFakeTextureCallsSuper
+- (void)replaceRegion:(MTLRegion)region
+          mipmapLevel:(NSUInteger)level
+            withBytes:(const void*)bytes
+          bytesPerRow:(NSUInteger)bytesPerRow {
+    enter_override();
+    if (g_override_depth == 1)
+        [super replaceRegion:region mipmapLevel:level withBytes:bytes bytesPerRow:bytesPerRow];
+    --g_override_depth;
+}
+@end
+
+// The same shape again, hooked subclass first.
+@interface PulpRecorderFakeTexture2 : NSObject
+- (void)replaceRegion:(MTLRegion)region
+          mipmapLevel:(NSUInteger)level
+            withBytes:(const void*)bytes
+          bytesPerRow:(NSUInteger)bytesPerRow;
+@end
+
+@implementation PulpRecorderFakeTexture2
+- (void)replaceRegion:(MTLRegion)region
+          mipmapLevel:(NSUInteger)level
+            withBytes:(const void*)bytes
+          bytesPerRow:(NSUInteger)bytesPerRow {
+    ++g_base_calls;
+}
+@end
+
+@interface PulpRecorderFakeTexture2CallsSuper : PulpRecorderFakeTexture2
+@end
+@implementation PulpRecorderFakeTexture2CallsSuper
+- (void)replaceRegion:(MTLRegion)region
+          mipmapLevel:(NSUInteger)level
+            withBytes:(const void*)bytes
+          bytesPerRow:(NSUInteger)bytesPerRow {
+    enter_override();
+    if (g_override_depth == 1)
+        [super replaceRegion:region mipmapLevel:level withBytes:bytes bytesPerRow:bytesPerRow];
+    --g_override_depth;
+}
+@end
 
 using pulp::testing::TextureUploadRecord;
 using pulp::testing::TextureUploadRecorder;
@@ -280,4 +370,115 @@ TEST_CASE("TextureUploadRecorder refuses an output directory inside a repository
     std::filesystem::remove_all(scratch.root / ".git");
     CHECK(TextureUploadRecorder::install(options, &error));
     CHECK(std::filesystem::exists(dir / "manifest.jsonl"));
+}
+
+TEST_CASE("TextureUploadRecorder hooks reach each original once through subclasses",
+          "[texture-upload-recorder]") {
+    using pulp::testing::detail::hook_texture_class_for_testing;
+    TextureUploadRecorder::stop();
+    const char bytes[16] = {};
+
+    auto upload = [&](id texture) {
+        g_base_calls = 0;
+        g_override_calls = 0;
+        g_override_depth = 0;
+        g_override_reentered = false;
+        [texture replaceRegion:MTLRegionMake2D(0, 0, 1, 1)
+                   mipmapLevel:0
+                     withBytes:bytes
+                   bytesPerRow:4];
+    };
+
+    SECTION("base hooked before its subclasses") {
+        hook_texture_class_for_testing([PulpRecorderFakeTexture class]);
+        hook_texture_class_for_testing([PulpRecorderFakeTextureInherits class]);
+        hook_texture_class_for_testing([PulpRecorderFakeTextureCallsSuper class]);
+
+        upload([PulpRecorderFakeTexture new]);
+        CHECK(g_base_calls == 1);
+
+        // Inherits the wrapped method from an already hooked class.
+        upload([PulpRecorderFakeTextureInherits new]);
+        CHECK(g_base_calls == 1);
+
+        // Its own original calls super, which is wrapped too.
+        upload([PulpRecorderFakeTextureCallsSuper new]);
+        CHECK_FALSE(g_override_reentered);
+        CHECK(g_override_calls == 1);
+        CHECK(g_base_calls == 1);
+    }
+
+    SECTION("subclass hooked before its base") {
+        hook_texture_class_for_testing([PulpRecorderFakeTexture2CallsSuper class]);
+        hook_texture_class_for_testing([PulpRecorderFakeTexture2 class]);
+
+        upload([PulpRecorderFakeTexture2CallsSuper new]);
+        CHECK_FALSE(g_override_reentered);
+        CHECK(g_override_calls == 1);
+        CHECK(g_base_calls == 1);
+
+        upload([PulpRecorderFakeTexture2 new]);
+        CHECK(g_override_calls == 0);
+        CHECK(g_base_calls == 1);
+    }
+}
+
+TEST_CASE("TextureUploadRecorder stops and removes the manifest when a write fails",
+          "[texture-upload-recorder]") {
+    Scratch scratch;
+    const auto dir = scratch.root / "run";
+    TextureUploadRecorder::Options options;
+    options.output_dir = dir;
+    options.write_raw = false;
+    std::string error;
+    REQUIRE(TextureUploadRecorder::install(options, &error));
+    CHECK(TextureUploadRecorder::failure().empty());
+
+    const auto source = make_source(4 * 4, 3, 0, 9);
+    @autoreleasepool {
+        id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+        REQUIRE(device != nil);
+        MTLTextureDescriptor* d =
+            [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+                                                               width:4
+                                                              height:3
+                                                           mipmapped:NO];
+        d.storageMode = MTLStorageModeShared;
+        id<MTLTexture> texture = [device newTextureWithDescriptor:d];
+        REQUIRE(texture != nil);
+        auto upload = [&] {
+            [texture replaceRegion:MTLRegionMake2D(0, 0, 4, 3)
+                       mipmapLevel:0
+                         withBytes:source.packed.data()
+                       bytesPerRow:16];
+        };
+
+        // Control: the first upload is written whole.
+        upload();
+        REQUIRE(TextureUploadRecorder::records().size() == 1);
+        const auto written = std::filesystem::file_size(dir / "manifest.jsonl");
+        REQUIRE(written > 0);
+
+        // Let the manifest grow by only a few bytes, so the second line is cut
+        // short, as on a full disk. The limit makes the write fail with EFBIG
+        // instead of raising SIGXFSZ.
+        struct rlimit saved{};
+        REQUIRE(getrlimit(RLIMIT_FSIZE, &saved) == 0);
+        const auto previous_handler = std::signal(SIGXFSZ, SIG_IGN);
+        struct rlimit tight = saved;
+        tight.rlim_cur = static_cast<rlim_t>(written + 8);
+        REQUIRE(setrlimit(RLIMIT_FSIZE, &tight) == 0);
+        upload();
+        setrlimit(RLIMIT_FSIZE, &saved);
+        std::signal(SIGXFSZ, previous_handler);
+
+        // Later uploads are not recorded either.
+        upload();
+    }
+
+    CHECK_FALSE(TextureUploadRecorder::recording());
+    CHECK(TextureUploadRecorder::failure().find("cannot write") != std::string::npos);
+    CHECK(TextureUploadRecorder::records().size() == 1);
+    CHECK_FALSE(std::filesystem::exists(dir / "manifest.jsonl"));
+    TextureUploadRecorder::stop();
 }

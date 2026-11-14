@@ -18,6 +18,7 @@ struct State {
     TextureUploadRecorder::Options options;
     std::vector<TextureUploadRecord> records;
     std::ofstream manifest;
+    std::string failure;
 };
 
 State& state() {
@@ -144,6 +145,7 @@ bool TextureUploadRecorder::install(const Options& options, std::string* error) 
         return fail("cannot write " + (options.output_dir / "manifest.jsonl").string());
     s.options = options;
     s.records.clear();
+    s.failure.clear();
     s.recording.store(true);
     return true;
 }
@@ -157,6 +159,12 @@ void TextureUploadRecorder::stop() {
 
 bool TextureUploadRecorder::recording() {
     return state().recording.load();
+}
+
+std::string TextureUploadRecorder::failure() {
+    auto& s = state();
+    std::lock_guard lock(s.mutex);
+    return s.failure;
 }
 
 std::vector<TextureUploadRecord> TextureUploadRecorder::records() {
@@ -239,6 +247,18 @@ void record_upload(const UploadDescription& u) {
     }
     s.manifest << manifest_line(r);
     s.manifest.flush();
+    if (!s.manifest) {
+        // A manifest missing a line would read as a complete run. Stop, and
+        // remove it so nothing can compare against it.
+        s.recording.store(false);
+        s.manifest.close();
+        const auto manifest = s.options.output_dir / "manifest.jsonl";
+        std::error_code ec;
+        std::filesystem::remove(manifest, ec);
+        s.failure = "cannot write " + manifest.string() + " at upload " + std::to_string(r.seq) +
+                    "; recording stopped and the manifest removed";
+        return;
+    }
     s.records.push_back(std::move(r));
 }
 

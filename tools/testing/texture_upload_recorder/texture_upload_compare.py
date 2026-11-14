@@ -31,6 +31,24 @@ class RunError(Exception):
     pass
 
 
+def check_record(record: object, where: str) -> None:
+    """Raise RunError unless `record` has the fields the comparison keys on."""
+    if not isinstance(record, dict):
+        raise RunError(f"{where}: not a JSON object")
+    for field in ("width", "height", "depth"):
+        if field not in record:
+            raise RunError(f"{where}: missing {field}")
+        value = record[field]
+        # bool is an int subclass; true/false is not a size.
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise RunError(f"{where}: {field} must be a non-negative integer, not {value!r}")
+    for field in ("pixel_format", "sha256"):
+        if field not in record:
+            raise RunError(f"{where}: missing {field}")
+        if not isinstance(record[field], str):
+            raise RunError(f"{where}: {field} must be a string, not {record[field]!r}")
+
+
 def load_run(path: pathlib.Path) -> list[dict]:
     manifest = path / "manifest.jsonl"
     if not manifest.is_file():
@@ -44,9 +62,7 @@ def load_run(path: pathlib.Path) -> list[dict]:
                 record = json.loads(line)
             except json.JSONDecodeError as error:
                 raise RunError(f"{manifest}:{number}: {error}") from error
-            for field in ("width", "height", "depth", "pixel_format", "sha256"):
-                if field not in record:
-                    raise RunError(f"{manifest}:{number}: missing {field}")
+            check_record(record, f"{manifest}:{number}")
             records.append(record)
     return records
 

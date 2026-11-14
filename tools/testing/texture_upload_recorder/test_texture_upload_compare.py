@@ -97,6 +97,26 @@ class CompareTests(unittest.TestCase):
         (broken / "manifest.jsonl").write_text("{not json}\n", encoding="utf-8")
         self.assertEqual(self.main(str(a), str(broken))[0], 2)
 
+    def test_a_malformed_field_is_an_error_not_a_traceback(self) -> None:
+        a = self.run_dir("a", [record(4, 3, "aa")])
+        malformed = [
+            dict(record(4, 3, "aa"), width="wide"),
+            dict(record(4, 3, "aa"), height=None),
+            dict(record(4, 3, "aa"), depth=[1]),
+            dict(record(4, 3, "aa"), width=True),
+            dict(record(4, 3, "aa"), width=-1),
+            dict(record(4, 3, "aa"), sha256=7),
+            dict(record(4, 3, "aa"), pixel_format=None),
+        ]
+        for index, bad in enumerate(malformed):
+            with self.subTest(bad=bad):
+                b = self.run_dir(f"bad{index}", [bad])
+                self.assertEqual(self.main(str(a), str(b))[0], 2)
+        not_an_object = self.root / "list"
+        not_an_object.mkdir()
+        (not_an_object / "manifest.jsonl").write_text("[1, 2]\n", encoding="utf-8")
+        self.assertEqual(self.main(str(a), str(not_an_object))[0], 2)
+
 
 if __name__ == "__main__":
     unittest.main()
