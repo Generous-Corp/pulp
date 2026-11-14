@@ -3193,6 +3193,18 @@ or a steady/no-steady flip opens a new epoch. Out-of-block times are refused,
 never clamped. The CLAP adapter still feeds the Processor `MidiBuffer`, not this
 projection.
 
+VST3 and AU enter the same timeline through `clock_from_vst3()` /
+`clock_from_au()` (plain fields, no SDK). Gotchas: VST3's steady counter is
+`continousTimeSamples` (SDK spelling) and is only valid under `kContTimeValid`,
+which the VST3 adapter's `kProcessContextRequirements` does NOT request today
+(`kNeedContinousTimeSamples`), so a strict host sends none and the projection
+falls back to "no steady clock". `kProjectTimeMusicValid` gates beats, not
+`projectTimeSamples`. AU's steady counter is `mSampleTime` (keeps running
+across loops; round it like the adapters do). The AU "transport state
+changed" flags fire on play/stop too, so never map them to `discontinuity`.
+Convert AUv3 event times with `au_event_block_time()`, not the adapter's
+`au_event_block_offset()`, which clamps out-of-block times into the block.
+
 # G-7 edge diagnostics
 
 SignalGraph control and event edge probes are serial routed diagnostics with

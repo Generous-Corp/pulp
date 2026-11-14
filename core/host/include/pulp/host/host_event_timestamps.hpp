@@ -31,9 +31,15 @@
 ///  * An event projected against a window older than the current block is
 ///    refused with `Late`, and one from a retired epoch with `StaleEpoch`.
 ///
+/// `clock_from_vst3()` and `clock_from_au()` map VST3 and Audio Unit block
+/// timing (given as plain fields, so no SDK is needed) onto `HostBlockClock`;
+/// `host_block_time_from_offset()` and `au_event_block_time()` convert their
+/// event times to block-relative times without clamping.
+///
 /// Everything here is fixed-size, `noexcept`, and allocation-free, so it may
 /// run on the audio thread. It owns no queue and schedules nothing.
 
+#include <pulp/format/detail/host_sample_position.hpp>
 #include <pulp/host/graph_event_contract.hpp>
 
 #include <cstddef>
@@ -251,5 +257,181 @@ class HostBlockTimeline final {
     bool has_block_ = false;
     bool prev_transport_valid_ = false;
 };
+
+// ---------------------------------------------------------------------------
+// Format timing inputs
+//
+// The structs below carry the native per-block timing fields of VST3 and
+// Audio Unit hosts as plain values, so the mapping is usable and testable
+// without either SDK. The constants mirror the SDK values and are checked
+// against the real headers by the timestamp tests wherever those headers
+// exist.
+// ---------------------------------------------------------------------------
+
+/// Convert a signed block-relative event offset (VST3 `Event::sampleOffset`,
+/// AUv2 `inOffsetSampleFrame`) to the unsigned time `project()` takes. A
+/// negative offset is refused with `OutOfRange` rather than wrapped into a
+/// huge time or clamped to zero; the upper bound is enforced by `project()`.
+inline HostEventResult host_block_time_from_offset(std::int64_t offset,
+                                                   std::uint32_t& block_time) noexcept {
+    if (offset < 0 || offset > static_cast<std::int64_t>(std::numeric_limits<std::uint32_t>::max()))
+        return HostEventResult::OutOfRange;
+    block_time = static_cast<std::uint32_t>(offset);
+    return HostEventResult::Accepted;
+}
+
+/// `Steinberg::Vst::ProcessContext::StatesAndFlags::kPlaying`.
+inline constexpr std::uint32_t kVst3ContextPlaying = 1u << 1;
+/// `Steinberg::Vst::ProcessContext::StatesAndFlags::kContTimeValid`.
+inline constexpr std::uint32_t kVst3ContextContTimeValid = 1u << 17;
+
+/// One VST3 `process()` call's timing facts.
+///
+/// | field                     | VST3 source                                   |
+/// |---------------------------|-----------------------------------------------|
+/// | `has_process_context`     | `ProcessData::processContext != nullptr`      |
+/// | `state`                   | `ProcessContext::state`                       |
+/// | `project_time_samples`    | `ProcessContext::projectTimeSamples`          |
+/// | `continuous_time_samples` | `ProcessContext::continousTimeSamples`        |
+/// | `num_samples`             | `ProcessData::numSamples`                     |
+/// | `discontinuity`           | adapter-owned (no VST3 flag; e.g. the first   |
+/// |                           | block after `setProcessing(true)`)            |
+struct Vst3BlockTiming {
+    bool has_process_context = false;
+    std::uint32_t state = 0;
+    std::int64_t project_time_samples = 0;
+    std::int64_t continuous_time_samples = 0;
+    std::int32_t num_samples = 0;
+    bool discontinuity = false;
+};
+
+/// Map a VST3 block onto `HostBlockClock`.
+///
+/// `continousTimeSamples` is VST3's monotonic sample counter and becomes the
+/// steady clock only while `kContTimeValid` is set and the value is
+/// non-negative; otherwise the block has no steady clock, exactly like a CLAP
+/// host reporting `steady_time == -1`. `projectTimeSamples` has no validity
+/// bit of its own (`kProjectTimeMusicValid` covers `projectTimeMusic`, the
+/// beat position) and is required whenever a context is supplied, so it is the
+/// transport position for every block that has a context; `kPlaying` is the
+/// playing state. A missing context yields no counter and no transport. A
+/// non-positive `numSamples` maps to zero frames, which `advance()` refuses.
+inline constexpr HostBlockClock clock_from_vst3(const Vst3BlockTiming& timing) noexcept {
+    HostBlockClock clock;
+    clock.frames = timing.num_samples > 0 ? static_cast<std::size_t>(timing.num_samples) : 0;
+    clock.discontinuity = timing.discontinuity;
+    if (!timing.has_process_context)
+        return clock;
+    if ((timing.state & kVst3ContextContTimeValid) != 0 && timing.continuous_time_samples >= 0)
+        clock.steady_sample = timing.continuous_time_samples;
+    clock.has_transport_sample = true;
+    clock.transport_sample = timing.project_time_samples;
+    clock.transport_playing = (timing.state & kVst3ContextPlaying) != 0;
+    return clock;
+}
+
+/// `kAudioTimeStampSampleTimeValid` from CoreAudioTypes.
+inline constexpr std::uint32_t kAuTimeStampSampleTimeValid = 1u << 0;
+/// `AUEventSampleTimeImmediate` from AudioToolbox: event times in
+/// `[immediate, immediate + kAuImmediateWindow)` are already block offsets.
+inline constexpr std::int64_t kAuEventSampleTimeImmediate =
+    static_cast<std::int64_t>(0xffffffff00000000ULL);
+inline constexpr std::int64_t kAuImmediateWindow = 4096;
+
+/// One Audio Unit render call's timing facts (AUv2 `Render` / AUv3 render
+/// block).
+///
+/// | field                       | AU source                                              |
+/// |-----------------------------|--------------------------------------------------------|
+/// | `timestamp_flags`           | `AudioTimeStamp::mFlags`                               |
+/// | `sample_time`               | `AudioTimeStamp::mSampleTime`                          |
+/// | `frames`                    | render frame count (`frameCount` / `inNumberFrames`)   |
+/// | `has_transport`             | AUv3 `transportStateBlock` returned YES, or AUv2       |
+/// |                             | `CallHostTransportState` returned `noErr`              |
+/// | `transport_moving`          | `AUHostTransportStateMoving` / AUv2 `outIsPlaying`     |
+/// | `transport_sample_position` | AUv3 `currentSamplePosition` / AUv2                    |
+/// |                             | `outCurrentSampleInTimeLine`                           |
+/// | `discontinuity`             | adapter-owned (e.g. the first render after `reset`)    |
+///
+/// The hosts' `AUHostTransportStateChanged` / `outTransportStateChanged`
+/// flag is deliberately not a discontinuity: it also fires on play and stop,
+/// which are not seeks. A relocation while playing is detected from the
+/// transport delta instead.
+struct AuBlockTiming {
+    std::uint32_t timestamp_flags = 0;
+    double sample_time = 0.0;
+    std::uint32_t frames = 0;
+    bool has_transport = false;
+    bool transport_moving = false;
+    double transport_sample_position = 0.0;
+    bool discontinuity = false;
+};
+
+namespace detail {
+/// Nearest integer sample to a host double, using the same rounding the AU
+/// adapters apply to host positions (REAPER reports 13823.9999 for 13824).
+inline bool au_host_sample(double samples, std::int64_t& out) noexcept {
+    const auto rounded = format::detail::host_sample_position(samples);
+    if (!rounded)
+        return false;
+    out = *rounded;
+    return true;
+}
+} // namespace detail
+
+/// Map an Audio Unit render call onto `HostBlockClock`.
+///
+/// `mSampleTime` is the host's render sample counter, which keeps running
+/// across seeks and loops, so it is the steady clock when
+/// `kAudioTimeStampSampleTimeValid` is set and the rounded value is
+/// representable and non-negative; otherwise the block has no steady clock.
+/// The transport position is used only when the host's transport callback
+/// succeeded and the position is representable.
+inline HostBlockClock clock_from_au(const AuBlockTiming& timing) noexcept {
+    HostBlockClock clock;
+    clock.frames = timing.frames;
+    clock.discontinuity = timing.discontinuity;
+    std::int64_t sample = 0;
+    if ((timing.timestamp_flags & kAuTimeStampSampleTimeValid) != 0 &&
+        detail::au_host_sample(timing.sample_time, sample) && sample >= 0)
+        clock.steady_sample = sample;
+    if (timing.has_transport && detail::au_host_sample(timing.transport_sample_position, sample)) {
+        clock.has_transport_sample = true;
+        clock.transport_sample = sample;
+        clock.transport_playing = timing.transport_moving;
+    }
+    return clock;
+}
+
+/// Convert an AUv3 render event's `eventSampleTime` to a block-relative time.
+///
+/// A time inside the `AUEventSampleTimeImmediate` window is already an
+/// offset. Any other time is absolute on the `mSampleTime` axis and is placed
+/// relative to the block's rounded `mSampleTime`; without a valid block
+/// sample time such an event cannot be placed and is refused. Offsets before
+/// the block or at/after its frame count are refused with `OutOfRange`,
+/// never clamped.
+inline HostEventResult au_event_block_time(std::int64_t event_sample_time,
+                                           const AuBlockTiming& timing,
+                                           std::uint32_t& block_time) noexcept {
+    std::int64_t offset = 0;
+    if (event_sample_time >= kAuEventSampleTimeImmediate &&
+        event_sample_time < kAuEventSampleTimeImmediate + kAuImmediateWindow) {
+        offset = event_sample_time - kAuEventSampleTimeImmediate;
+    } else {
+        std::int64_t start = 0;
+        if ((timing.timestamp_flags & kAuTimeStampSampleTimeValid) == 0 ||
+            !detail::au_host_sample(timing.sample_time, start))
+            return HostEventResult::OutOfRange;
+        if ((start > 0 && event_sample_time < std::numeric_limits<std::int64_t>::min() + start) ||
+            (start < 0 && event_sample_time > std::numeric_limits<std::int64_t>::max() + start))
+            return HostEventResult::OutOfRange;
+        offset = event_sample_time - start;
+    }
+    if (offset < 0 || offset >= static_cast<std::int64_t>(timing.frames))
+        return HostEventResult::OutOfRange;
+    block_time = static_cast<std::uint32_t>(offset);
+    return HostEventResult::Accepted;
+}
 
 } // namespace pulp::host
