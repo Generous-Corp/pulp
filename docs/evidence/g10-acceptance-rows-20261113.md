@@ -60,6 +60,17 @@ refusal is the confirmed control. Qualifying the preparation-only cycle needs
 a bounded-walk design, for example a visited set that fails closed, before a
 mutation can produce an observable result.
 
+Follow-up: the walk now fails closed through a visited set sized for the
+prepared node count (`9acc83d225f1`). `Spectral preparation refuses a forged
+stage cycle with no root` passes a forged A to B to A list to
+`SpectralRuntimeBank::prepare` and requires `InvalidConnection`. Removing the
+visited check still makes the walk spin, so the discovered case is reported as
+a failure only when the lane's ctest timeout kills it (a separate short-TIMEOUT
+registration was dropped because the duplicate-registration check refuses two
+budgets for one command). `confirm_failure.sh` returned
+CONFIRMED; the broken run was observed spinning and was killed by hand, which
+the harness recorded as the failing outcome.
+
 ### Row 7: candidate isolation and reader lifetime
 
 New test: `An active spectral controller refuses reprepare without disturbing
@@ -272,4 +283,7 @@ Notation authoring stays PARTIAL, as the admission permits.
 
 ## Suite results
 
-See the closing section, written after the full runs.
+This pass recorded no full-suite totals. A later full run of
+`pulp-test-routed-spectral-ports` (Release, macOS arm64) at `9acc83d225f1`,
+which adds the forged-cycle case below, passed 58 test cases and 99532
+assertions.

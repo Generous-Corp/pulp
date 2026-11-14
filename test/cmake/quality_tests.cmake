@@ -1790,6 +1790,10 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME script-inputs-precheck-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_script_inputs_precheck.py")
 
+    # Its other half: a fragment the push makes stale, recomputed offline.
+    add_test(NAME script-inputs-offline-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_script_inputs_offline.py")
+
     # GitHub's itemTypes-filtered timelineItems connection reports totalCount
     # over EVERY timeline item, so a filtered totalCount reads a never-queued
     # PR as ejected. Fails if any tracked query selects it, and proves the scan

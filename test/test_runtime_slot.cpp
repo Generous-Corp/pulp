@@ -95,6 +95,27 @@ TEST_CASE("Slot does not reclaim while a reader is pinned", "[runtime][slot]") {
     REQUIRE(Tracked::destroyed().load() == 1);
 }
 
+TEST_CASE("Slot quiescent() reports whether any reader is pinned", "[runtime][slot]") {
+    Slot<int> slot;
+    REQUIRE(slot.quiescent());
+    {
+        auto empty = slot.read(); // nothing published: no pin is held
+        REQUIRE_FALSE(empty);
+        REQUIRE(slot.quiescent());
+    }
+    slot.publish(std::make_unique<int>(7));
+    {
+        auto first = slot.read();
+        REQUIRE_FALSE(slot.quiescent());
+        {
+            auto second = slot.read();
+            REQUIRE_FALSE(slot.quiescent());
+        }
+        REQUIRE_FALSE(slot.quiescent()); // one reader still inside
+    }
+    REQUIRE(slot.quiescent());
+}
+
 TEST_CASE("Slot prepared publish is nonthrowing after capacity preflight",
           "[runtime][slot]") {
     Tracked::reset();

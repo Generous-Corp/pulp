@@ -108,7 +108,12 @@ consumers.
 ## Mental model
 
 The bounded G6 in-process voice bank is `voice_bank_binding.hpp` plus one
-authored `SubgraphTemplate` Processor per slot. Its owner retains the existing
+authored `SubgraphTemplate` Processor per slot. Its epochs come from one
+process-wide counter claimed at `prepare()` and every `activate()`, never a
+per-bank `++epoch`: each bank's tracker restarts note generations at 1, so a
+per-bank epoch lets a retired bank's deferred `(epoch, generation)` token
+release the same note in a replacement bank. Never assume a fresh bank is at
+epoch 1; read `epoch()`. Its owner retains the existing
 MPE allocator; factories and named parameter binding run during control-thread
 preparation. When rendering a graph interval for an instrument, pass a
 zero-channel input `BufferView` with that interval's exact frame count. A
@@ -119,7 +124,10 @@ bank now handles member and manager CC64 sustain, scoped CC120/121/123,
 generation-scoped release, and member-channel pitch, pressure, and CC74
 expression. Manager expression returns `UnsupportedExpression`. Its A1 scalar
 fixture uses a fixed `1/sqrt(8)` eight-slot stereo sum and four in-slot linear
-release frames. Saved-bank activation, edit/undo, DAW adapters, and paced
+release frames. `VoiceBankIdleSkip::SkipInactiveSlots` (last `prepare` argument, off
+by default) skips idle slots once they have produced confirmed silence; it is
+safe only for voices with no free-running state, see "Skipping idle voices" in
+`docs/guides/graph-voice-binding.md`. Saved-bank activation, edit/undo, DAW adapters, and paced
 realtime qualification remain open; do not infer them from the source-installed
 consumer.
 
@@ -3191,6 +3199,17 @@ processor-provider mutation must refuse in spectral mode even when the legacy
 Keep graph persistence and arbitrary stage registration refused; PARTIAL status
 does not establish notation coverage or realtime timing qualification.
 
+`SpectralRuntimeBank::prepare` walks each node's input chain to its analysis or
+asset-morph root. A forged connection list (stage A to B to A) passes every
+per-edge predicate, so only that walk sees the missing root; it fails closed
+through a visited set sized for the node count. Any guard on that walk turns a
+mutation into a spin, not a wrong answer: the discovered case
+`Spectral preparation refuses a forged stage cycle with no root` fails only when
+the lane's ctest timeout kills it, and a `confirm_failure.sh` break of the guard
+hangs until then. Do not register a second ctest entry for the same case under a
+shorter `TIMEOUT`: the duplicate-registration check refuses two budgets for one
+command.
+
 ## Bounded typed trigger runtime
 
 Use `prepare_trigger_plan()` and `try_install_prepared_trigger_plan()` for the
@@ -3249,6 +3268,17 @@ SignalGraph control and event edge probes are serial routed diagnostics with
 fixed-capacity publication and explicit refusal in unsupported execution modes.
 Host lifecycle changes must preserve detach-on-reset and the source-edge event
 observation boundary.
+
+Gotcha: probes live on the published `CompiledGraph`, which `process()` reads
+under a `runtime::Slot` pin, so attach/detach race the audio thread. Each probe
+sits in a `format::EdgeProbeCell`: `process_snapshot_impl` loads the pointer
+once per block and uses that copy, and a displaced probe is parked rather than
+freed. Parked probes are freed only when the slot is `quiescent()` and the
+snapshot's `use_count()` is 1 (an `ExecutionSnapshot` render holds the snapshot
+by `shared_ptr`, outside the slot's reader count); otherwise they die with the
+snapshot. Attach/detach must therefore take the snapshot via
+`live_slot_.live()`, not `read_snapshot_()`: their own pin would keep the
+reader count above zero and nothing would ever be reclaimed.
 
 ### Catalog-derived graph notation
 

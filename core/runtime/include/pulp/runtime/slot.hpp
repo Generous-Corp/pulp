@@ -193,6 +193,21 @@ public:
             retired_.clear();
     }
 
+    /// Publisher thread. True when no reader is inside `read()` right now. A
+    /// publisher that swapped some pointer reachable only through a pin before
+    /// asking may free the displaced object on `true`: any reader that could
+    /// have loaded it has left, and any later reader sees the replacement.
+    ///
+    /// Preconditions for that guarantee: the swapped pointer is stored with
+    /// seq_cst before this call, and every reader loads it with seq_cst only
+    /// while holding a `read()` pin. It covers readers that go through
+    /// `read()` and nothing else: a holder of the published object by
+    /// `shared_ptr` (for example via `live()`) is invisible to this count and
+    /// must be ruled out separately, e.g. by the object's use count.
+    bool quiescent() const noexcept {
+        return readers_.load(std::memory_order_seq_cst) == 0;
+    }
+
     /// Publisher thread, teardown only. Spins until readers drain, then frees.
     /// Never call this from the audio thread.
     void wait_and_clear() {

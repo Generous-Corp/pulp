@@ -361,6 +361,7 @@ SEQ_EXPOSURE="$ROOT/tools/scripts/sequencer_exposure_check.py"
 MIGRATION_NOTE_GUARD="$ROOT/tools/scripts/migration_note_guard.py"
 TEXT_ENCODING_LINT="$ROOT/tools/scripts/text_encoding_lint.py"
 SCRIPT_INPUTS_PRECHECK="$ROOT/tools/scripts/script_inputs_precheck.py"
+SCRIPT_INPUTS_OFFLINE="$ROOT/tools/scripts/script_inputs_offline.py"
 HOTSPOT_EDIT_GUARD="$ROOT/tools/scripts/hotspot_edit_guard.py"
 SURFACE_FAMILIES="$ROOT/tools/scripts/changed_surface_script_families.py"
 NEG_CAPABILITY="$ROOT/tools/scripts/negative_capability_check.py"
@@ -964,6 +965,22 @@ if [ -f "$SCRIPT_INPUTS_PRECHECK" ]; then
         0) ;;
         1) echo "[pre-push] script inputs: regenerate test/ctest_script_inputs/ (commands above)." >&2; prepush_fail ;;
         *) gate_could_not_run "script_inputs_precheck" "$gate_rc"; prepush_fail ;;
+    esac
+fi
+
+# A test/ctest_script_inputs/ fragment the push makes stale: a script test
+# whose entry or imports changed, a compiled suite with no fragment, a source
+# that starts spawning in a target an entry records. Recomputed offline with
+# the generator's own functions, so it runs on a gate host; what only a
+# configure can resolve is printed as NOT CHECKED and left to CI. It reads the
+# working tree, so it judges a push of HEAD and reports any other as not checked.
+if [ -f "$SCRIPT_INPUTS_OFFLINE" ]; then
+    run_gate_captured "$PYTHON" "$SCRIPT_INPUTS_OFFLINE" --root "$ROOT" --base "$BASE" \
+        --head "${_prepush_pushed_head_sha:-HEAD}"
+    gate_rc=$?; case $gate_rc in
+        0) ;;
+        1) echo "[pre-push] script inputs: a fragment is stale; apply the fix printed above." >&2; prepush_fail ;;
+        *) gate_could_not_run "script_inputs_offline" "$gate_rc"; prepush_fail ;;
     esac
 fi
 

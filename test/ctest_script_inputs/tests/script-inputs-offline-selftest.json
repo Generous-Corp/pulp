@@ -1,0 +1,43 @@
+{
+ "name": "script-inputs-offline-selftest",
+ "record": {
+  "entry": "tools/scripts/test_script_inputs_offline.py",
+  "inputs": [
+   ".github/workflows",
+   "core/host",
+   "core/host/include",
+   "docs/status",
+   "inspect/src",
+   "test/CMakeLists.txt",
+   "test/cmake",
+   "test/cmake/cli_tests.cmake",
+   "test/cmake/quality_tests.cmake",
+   "test/ctest_script_inputs",
+   "test/fixtures",
+   "test/support",
+   "test/test_cli_shellout_loop.cpp",
+   "test/test_g5_host_event_timestamps.cpp",
+   "test/test_trigger_graph.cpp",
+   "tools/ci/cmake_registration_impact.py",
+   "tools/ci/governed-build.sh",
+   "tools/ci/load_api_exemptions.json",
+   "tools/ci/spawn_none_build_path_reviews.json",
+   "tools/cli/CMakeLists.txt",
+   "tools/cli/cli_sdk.cpp",
+   "tools/cmake",
+   "tools/cmake/PulpAndroid.cmake",
+   "tools/cmake/PulpDependencies.cmake",
+   "tools/cmake/PulpTestData.cmake",
+   "tools/mcp",
+   "tools/scripts/configure_only.py",
+   "tools/scripts/cutover_trial.py",
+   "tools/scripts/gate_common.py",
+   "tools/scripts/script_inputs_offline.py",
+   "tools/scripts/script_inputs_store.py",
+   "tools/scripts/script_test_inputs.py",
+   "tools/scripts/test_cutover_trial.py",
+   "tools/scripts/test_script_inputs_offline.py"
+  ],
+  "kind": "python"
+ }
+}

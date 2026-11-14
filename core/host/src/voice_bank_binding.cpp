@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <limits>
 #include <string_view>
@@ -15,6 +16,21 @@ namespace pulp::host {
 namespace {
 
 constexpr std::uint32_t kSlots = 8;
+
+// What a slot's idle probe reads. The owner's slot_note() is the same call the
+// bank already makes on the audio thread; a slot is idle when its voice is not
+// active (a releasing voice is still active).
+struct IdleProbeContext {
+    VoiceBankOwner* owner = nullptr;
+    std::uint32_t slot = 0;
+};
+
+bool slot_is_idle(void* context) noexcept {
+    const auto* probe = static_cast<const IdleProbeContext*>(context);
+    midi::MpeNoteState note{};
+    bool releasing = false;
+    return !probe->owner->slot_note(probe->slot, note, releasing);
+}
 
 bool valid_deferred_expression(midi::MpeExpressionEvent::Kind kind, const midi::MpeNoteState& state,
                                float member_bend_range) noexcept {
@@ -109,6 +125,23 @@ bool valid_schema(const VoiceBankManifest& manifest, const SubgraphTemplate& def
     return true;
 }
 
+// Epochs come from one process-wide sequence, so no two prepared banks and no
+// two activations ever share an epoch. Every bank's tracker restarts its note
+// generations at 1, so a deferred (epoch, generation) token retired with one
+// bank would otherwise address an identical note in a replacement bank. Only
+// control-thread operations (prepare, activate) draw from it.
+std::atomic<std::uint64_t> g_next_bank_epoch{1};
+
+bool claim_bank_epoch(std::uint64_t& epoch) noexcept {
+    auto next = g_next_bank_epoch.load(std::memory_order_relaxed);
+    do {
+        if (next == std::numeric_limits<std::uint64_t>::max())
+            return false;
+    } while (!g_next_bank_epoch.compare_exchange_weak(next, next + 1, std::memory_order_relaxed));
+    epoch = next;
+    return true;
+}
+
 } // namespace
 
 struct VoiceBankBinding::Impl {
@@ -130,7 +163,7 @@ struct VoiceBankBinding::Impl {
     midi::MpeVoiceTracker tracker;
     HostEventIngress<SignalGraph::kHostEventIngressCapacity> ingress;
     std::array<HostEventRecord, SignalGraph::kHostEventIngressCapacity> projected{};
-    std::uint64_t epoch = 1;
+    std::uint64_t epoch = 0;
     std::size_t max_frames = 0;
     std::uint64_t block_start = 0;
     std::size_t block_frames = 0;
@@ -139,6 +172,12 @@ struct VoiceBankBinding::Impl {
     std::array<bool, 16> member_sustain{};
     std::array<bool, 2> zone_sustain{};
     bool suppress_note_off = false;
+    bool idle_skip = false;
+    std::array<IdleProbeContext, kSlots> idle_probes{};
+    // The slots' voice nodes, fetched once while preparing. Looking a node up in
+    // the graph takes the graph mutation lock, which the audio thread must not
+    // take, so the counter reads go through these.
+    std::array<std::shared_ptr<format::ProcessorNodeInstance>, kSlots> voice_nodes{};
     std::string stereo_port;
 
     Scope scope_for(std::uint8_t channel) const noexcept {
@@ -302,7 +341,7 @@ std::unique_ptr<VoiceBankBinding>
 VoiceBankBinding::prepare(const VoiceTemplateSchema& schema, SubgraphTemplate definition,
                           std::unique_ptr<VoiceBankOwner> owner, std::string stereo_port,
                           double sample_rate, int max_frames, VoiceBankBindingResult& result,
-                          midi::MpeConfig mpe_config) {
+                          midi::MpeConfig mpe_config, VoiceBankIdleSkip idle_skip) {
     result = {};
     auto prepared = prepare_voice_bank(schema);
     if (!owner) {
@@ -346,6 +385,11 @@ VoiceBankBinding::prepare(const VoiceTemplateSchema& schema, SubgraphTemplate de
             }
     }
     auto bank = std::unique_ptr<VoiceBankBinding>(new VoiceBankBinding);
+    if (!claim_bank_epoch(bank->impl_->epoch)) {
+        result = {VoiceBankBindingCode::EpochExhausted, 0, {}, "epoch exhausted"};
+        return {};
+    }
+    bank->impl_->ingress.reset(bank->impl_->epoch);
     bank->impl_->owner = std::move(owner);
     bank->impl_->tracker.set_config(mpe_config);
     bank->impl_->manifest = std::move(prepared.manifest);
@@ -397,11 +441,38 @@ VoiceBankBinding::prepare(const VoiceTemplateSchema& schema, SubgraphTemplate de
             return {};
         }
         bank->impl_->slots[slot] = std::move(instance.instance);
+        if (idle_skip == VoiceBankIdleSkip::SkipInactiveSlots) {
+            bank->impl_->idle_probes[slot] = {bank->impl_->owner.get(), slot};
+            const auto voice =
+                bank->impl_->graph.processor_node_instance(bank->impl_->slots[slot].nodes.front());
+            if (!voice) {
+                result = {VoiceBankBindingCode::FactoryFailure, slot, "voice",
+                          "voice processor is unavailable for idle skipping"};
+                return {};
+            }
+            voice->set_idle_probe({&slot_is_idle, &bank->impl_->idle_probes[slot]});
+        }
     }
     if (!bank->impl_->graph.prepare(sample_rate, max_frames)) {
         result = {VoiceBankBindingCode::GraphPrepareFailure, 0, "voice",
                   "prepared graph rejected the eight-slot candidate"};
         return {};
+    }
+    for (std::uint32_t slot = 0; slot < kSlots; ++slot)
+        bank->impl_->voice_nodes[slot] =
+            bank->impl_->graph.processor_node_instance(bank->impl_->slots[slot].nodes.front());
+    if (idle_skip == VoiceBankIdleSkip::SkipInactiveSlots) {
+        // Refuse loudly rather than quietly running without the option.
+        for (std::uint32_t slot = 0; slot < kSlots; ++slot) {
+            const auto& voice = bank->impl_->voice_nodes[slot];
+            if (!voice || !voice->idle_skip_armed()) {
+                result = {VoiceBankBindingCode::InvalidManifest, slot, "voice",
+                          "idle skip needs a voice processor with no audio or modulation input "
+                          "and a bounded tail"};
+                return {};
+            }
+        }
+        bank->impl_->idle_skip = true;
     }
     return bank;
 }
@@ -423,16 +494,18 @@ bool VoiceBankBinding::activate(VoiceBankBindingResult& result) noexcept {
         result = {VoiceBankBindingCode::InvalidBlock, 0, {}, "cannot activate inside a block"};
         return false;
     }
-    if (impl_->epoch == std::numeric_limits<std::uint64_t>::max()) {
+    std::uint64_t next_epoch = 0;
+    if (!claim_bank_epoch(next_epoch)) {
         result = {VoiceBankBindingCode::EpochExhausted, 0, {}, "epoch exhausted"};
         return false;
     }
+    reset_idle_confirmations();
     impl_->tracker.reset();
     impl_->owner->reset();
     impl_->held.fill({});
     impl_->member_sustain.fill(false);
     impl_->zone_sustain.fill(false);
-    ++impl_->epoch;
+    impl_->epoch = next_epoch;
     impl_->ingress.reset(impl_->epoch);
     result = {};
     return true;
@@ -617,7 +690,24 @@ bool VoiceBankBinding::set_slot_parameter(std::uint32_t slot, std::string_view p
         return false;
     processor->state_store().set_value(id->second, value);
     impl_->slots[slot].parameters.at(key) = value;
+    // The processor must run again with the new value before it can be skipped.
+    processor->reset_idle_confirmation();
     return true;
+}
+
+std::uint64_t VoiceBankBinding::idle_skipped_blocks() const noexcept {
+    // Lock-free: reads cached node handles and relaxed atomic counters.
+    std::uint64_t total = 0;
+    for (const auto& voice : impl_->voice_nodes)
+        if (voice)
+            total += voice->idle_skipped_blocks();
+    return total;
+}
+
+void VoiceBankBinding::reset_idle_confirmations() noexcept {
+    for (const auto& voice : impl_->voice_nodes)
+        if (voice)
+            voice->reset_idle_confirmation();
 }
 
 } // namespace pulp::host
