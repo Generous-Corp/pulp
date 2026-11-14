@@ -129,6 +129,11 @@ struct GraphRuntimeNodeProcessContext {
     // to its own scratch.
     midi::MidiBuffer* node_midi_in = nullptr;
     midi::MidiBuffer* node_midi_out = nullptr;
+    // True when this node's gathered inbound events are an incomplete view: a
+    // source dropped events or the copy into `node_midi_in` dropped some. Lets
+    // a binding that skips work on "no events" refuse to treat a block that
+    // lost events as empty.
+    bool node_events_incomplete = false;
     // MPE expression sidecar gathered alongside node_midi_in. Null when the
     // graph carries no sidecar; bindings pass it to Processor::mpe_input().
     midi::MpeBuffer* node_mpe_in = nullptr;
