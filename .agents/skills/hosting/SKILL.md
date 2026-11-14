@@ -124,7 +124,10 @@ bank now handles member and manager CC64 sustain, scoped CC120/121/123,
 generation-scoped release, and member-channel pitch, pressure, and CC74
 expression. Manager expression returns `UnsupportedExpression`. Its A1 scalar
 fixture uses a fixed `1/sqrt(8)` eight-slot stereo sum and four in-slot linear
-release frames. Saved-bank activation, edit/undo, DAW adapters, and paced
+release frames. `VoiceBankIdleSkip::SkipInactiveSlots` (last `prepare` argument, off
+by default) skips idle slots once they have produced confirmed silence; it is
+safe only for voices with no free-running state, see "Skipping idle voices" in
+`docs/guides/graph-voice-binding.md`. Saved-bank activation, edit/undo, DAW adapters, and paced
 realtime qualification remain open; do not infer them from the source-installed
 consumer.
 
@@ -571,6 +574,12 @@ every `AudioOutput` is aligned to the one reported total because outputs sum
 into the same host buffer. Do not "fix" a dry path that stays undelayed beside
 an echo node; that is the contract. See `docs/reference/signal-graph.md`
 (latency semantics) and `pulp/host/graph_rt_report.hpp`.
+
+A custom node that oversamples its own work declares the oversampler's delay
+through `pulp/host/custom_node_oversampling.hpp`, which derives the declaration
+and the oversampler setup from one spec. Only the linear-phase kind has a
+constant delay to declare; the helper refuses the minimum-phase kinds, so do not
+declare a guessed number for them.
 
 The timeline binding builds on this to schedule compensated event streams; the
 contract, including why an event-to-audio device contributes nothing to the
@@ -3265,6 +3274,17 @@ SignalGraph control and event edge probes are serial routed diagnostics with
 fixed-capacity publication and explicit refusal in unsupported execution modes.
 Host lifecycle changes must preserve detach-on-reset and the source-edge event
 observation boundary.
+
+Gotcha: probes live on the published `CompiledGraph`, which `process()` reads
+under a `runtime::Slot` pin, so attach/detach race the audio thread. Each probe
+sits in a `format::EdgeProbeCell`: `process_snapshot_impl` loads the pointer
+once per block and uses that copy, and a displaced probe is parked rather than
+freed. Parked probes are freed only when the slot is `quiescent()` and the
+snapshot's `use_count()` is 1 (an `ExecutionSnapshot` render holds the snapshot
+by `shared_ptr`, outside the slot's reader count); otherwise they die with the
+snapshot. Attach/detach must therefore take the snapshot via
+`live_slot_.live()`, not `read_snapshot_()`: their own pin would keep the
+reader count above zero and nothing would ever be reclaimed.
 
 ### Catalog-derived graph notation
 

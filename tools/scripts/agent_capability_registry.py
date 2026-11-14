@@ -30,6 +30,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/host/custom_node_type.hpp": "Pulp::host",
     "pulp/host/control_index_nodes.hpp": "Pulp::host",
     "pulp/host/custom_node_events.hpp": "Pulp::host",
+    "pulp/host/custom_node_oversampling.hpp": "Pulp::host",
     "pulp/host/sample_region_authoring.hpp": "Pulp::host",
     "pulp/host/sample_region_proof.hpp": "Pulp::host",
     "pulp/host/sample_region_parameters.hpp": "Pulp::host",
@@ -256,10 +257,17 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         'include': 'pulp/host/voice_bank_binding.hpp',
-        'fingerprint': 'sha256:d622f444c145ccced476407b97bc62f59912601d4804dc557e4d022882d503a4',
+        'fingerprint': 'sha256:730ab6cc6654ae4e6e6d22a400e46518ae34bd726e9368859ea79b862e82c489',
         'disposition': 'infrastructure',
         'capability_keys': [],
         'rationale': 'Bounded eight-slot graph voice-bank runtime with sustain; saved activation and paced realtime qualification remain open.',
+    },
+    {
+        'include': 'pulp/host/custom_node_oversampling.hpp',
+        'fingerprint': 'sha256:0b6b41116117486d4b2419a71d0025a3f5f6cfc1f6281203656031e69cbd3164',
+        'disposition': 'infrastructure',
+        'capability_keys': [],
+        'rationale': 'Derives a custom node\'s declared latency and its oversampler setup from one spec; refuses the minimum-phase kinds whose delay cannot be compensated.',
     },
     {
         'include': 'pulp/audio/buffer.hpp',

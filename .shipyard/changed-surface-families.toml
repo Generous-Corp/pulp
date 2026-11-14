@@ -620,7 +620,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-129a5ffb4fb5"
+name = "script-readers-23992698ae35"
 paths = [
   "tools/scripts/cutover_trial.py",
   "tools/scripts/test_cutover_trial.py",
@@ -649,6 +649,7 @@ tests = [
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
+  "script-inputs-offline-selftest",
   "vellum-watch-preflight-selftest",
   "wide-non-native-selftest",
 ]
@@ -6496,6 +6497,43 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
+name = "script-readers-bff252659c49"
+paths = ["tools/scripts/test_script_inputs_offline.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-inventory",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "clean-worktree-planning-selftest",
+  "configure-only-selftest",
+  "flake-exoneration-selftest",
+  "gate-common-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "pr-head-affected-tests-selftest",
+  "pr-head-diff-scoped-registrations",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+  "sample-region-compat-baseline-selftest",
+  "script-inputs-offline-selftest",
+  "vellum-watch-preflight-selftest",
+  "wide-non-native-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
 name = "script-readers-a1c5759ae5e3"
 paths = ["tools/scripts/test_script_inputs_precheck.py"]
 tests = [
@@ -8696,6 +8734,7 @@ tests = [
   "sample-region-compat-baseline",
   "sample-region-compat-baseline-selftest",
   "script-argv-selftest",
+  "script-inputs-offline-selftest",
   "sequencer-control-skill-coverage",
   "sequencer-control-skill-coverage-selftest",
   "skills-doc-check-selftest",
@@ -9123,6 +9162,7 @@ paths = [
   "tools/scripts/test_schema_drift_check.py",
   "tools/scripts/test_screenshot_sync_check.py",
   "tools/scripts/test_script_argv.py",
+  "tools/scripts/test_script_inputs_offline.py",
   "tools/scripts/test_script_inputs_precheck.py",
   "tools/scripts/test_script_inputs_store.py",
   "tools/scripts/test_script_test_inputs.py",
@@ -9744,6 +9784,7 @@ paths = [
   "tools/scripts/test_schema_drift_check.py",
   "tools/scripts/test_screenshot_sync_check.py",
   "tools/scripts/test_script_argv.py",
+  "tools/scripts/test_script_inputs_offline.py",
   "tools/scripts/test_script_inputs_precheck.py",
   "tools/scripts/test_script_inputs_store.py",
   "tools/scripts/test_script_test_inputs.py",

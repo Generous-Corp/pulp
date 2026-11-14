@@ -667,14 +667,14 @@ class SignalGraph : public format::AudioWorkgroupClient {
         std::uint32_t parameter_id = 0;
     };
     // Ordinary/sidechain audio: source before PDC/mixing; feedback: retained input before
-    // current capture, timestamped at receiving block. Attach/detach: stop process() and
-    // pinned-snapshot rendering on the control thread, as for prepare(). Reattachment starts
-    // a fresh 256-record ring and a zero-based sample clock. Reprepare/topology
-    // publication retires the attachment; transport reset detaches it. Serial
-    // routing only; execution-mode changes detach at the next process call.
+    // current capture, stamped at receiving block. Attach/detach may race process(): a displaced
+    // probe is parked (8 per kind; then attach is Busy and detach stops it in place) until no
+    // process() pin or snapshot handle remains, else until reprepare/topology publication.
+    // Fresh 256-record ring at sample 0; transport reset/mode change detaches. Serial only.
     EdgeProbeStatus attach_audio_edge_probe(const PortHandle& source,
                                             const PortHandle& destination);
     void detach_audio_edge_probe();
+    std::size_t parked_edge_probe_count() const; // displaced, not yet reclaimed
     // One control-thread consumer may read concurrently with process(). These
     // methods serialize with other control-thread lifecycle operations.
     bool read_audio_edge_probe(graph::GraphRuntimeProbeSample& sample);
@@ -1515,11 +1515,11 @@ class SignalGraph : public format::AudioWorkgroupClient {
             // only ONE path runs per block.
         };
         RoutedPaths routed;
-        std::unique_ptr<format::GraphRuntimeAudioEdgeProbe> audio_edge_probe;
+        format::EdgeProbeCell<format::GraphRuntimeAudioEdgeProbe> audio_edge_probe;
         EdgeProbeIdentity audio_edge_probe_identity;
-        std::unique_ptr<format::GraphRuntimeControlEdgeProbe> control_edge_probe;
+        format::EdgeProbeCell<format::GraphRuntimeControlEdgeProbe> control_edge_probe;
         EdgeProbeIdentity control_edge_probe_identity;
-        std::unique_ptr<format::GraphRuntimeEventEdgeProbe> event_edge_probe;
+        format::EdgeProbeCell<format::GraphRuntimeEventEdgeProbe> event_edge_probe;
         EdgeProbeIdentity event_edge_probe_identity;
 
         // Anticipative rendering for this snapshot (built only when anticipation is

@@ -50,3 +50,92 @@ Saved bank activation, compatible edit, undo/redo, arbitrary graph shape,
 hosted plugin formats, Linux/Windows execution, and the paced callback
 allocation/lock/deadline matrix remain unqualified. Offline in-process audio
 and an installed SDK consumer do not prove those runtime or platform lanes.
+
+## Skipping idle voices
+
+An eight-voice bank renders every slot on every block, including the slots
+that have no note. For a bank that is mostly idle, that is wasted work. The
+bank can skip the slots that have nothing to play.
+
+The option is off by default. Pass it as the last argument of
+`VoiceBankBinding::prepare`:
+
+```cpp
+auto bank = VoiceBankBinding::prepare(schema, definition, std::move(owner), "audio_out",
+                                      48000, 256, status, midi::MpeConfig::standard_lower(),
+                                      VoiceBankIdleSkip::SkipInactiveSlots);
+```
+
+With `SkipInactiveSlots`, a slot whose voice is not active is not rendered. Its
+output is written as exact silence and its processor is not called. A voice in
+its release tail is still active, so it keeps rendering until the release
+ends. A note that arrives part-way through a block wakes its slot on the exact
+sample, because the bank already renders a block in pieces that end at each
+event.
+
+### The contract you take on
+
+The framework cannot prove that skipping a voice is harmless. You state it by
+turning the option on. The statement is:
+
+> At every note start, the voice's output must not depend on how many blocks
+> it was rendered while its voice was inactive.
+
+If that holds, a skipped slot produces exactly the same samples (bit for bit)
+as a rendered one, at any block size.
+
+### What the bank checks for you
+
+- **Silence is confirmed first.** A slot is skipped only after it has been
+  rendered while inactive and produced a block of all-zero samples, and has
+  stayed silent for at least its declared latency plus its declared tail
+  (`latency_samples()` plus `PluginDescriptor::tail_samples`). Any non-zero
+  sample, including `-0.0f` and a decaying denormal, starts the count again, so
+  a voice that never reaches exact zero is simply never skipped.
+- **Blocks that carry something are never skipped.** A slot is rendered, and
+  its silence confirmation starts over, on any block where an event buffer
+  (MIDI, SysEx, UMP, MPE or parameter) holds an event or has dropped one, where
+  the graph reports the slot's inbound events as incomplete, or where the host
+  asks for a reset or reports a transport jump. A processor therefore always
+  sees its reset blocks.
+- **Changing a slot parameter** with `set_slot_parameter` makes that slot
+  render at least once more before it can be skipped again, and `activate`
+  does the same for every slot.
+- **Unsafe shapes are refused.** `prepare` returns null with
+  `VoiceBankBindingCode::InvalidManifest` (naming the slot) if a voice declares
+  an audio input bus or audio-rate modulation, declares an unbounded tail
+  (`tail_samples == -1`), or reports a negative latency. Note that a
+  `PluginDescriptor` declares one stereo input bus by default, so an
+  instrument voice must clear `input_buses` in its descriptor to qualify. The
+  bank never turns the option off silently.
+
+### Voices that must not enable it
+
+Leave the option off if a voice keeps changing state while it is silent:
+
+- a free-running LFO or noise source whose phase or seed is used when the next
+  note starts;
+- parameter smoothing that keeps moving while the voice is silent;
+- anything that follows the transport or a clock while silent.
+
+For example, a voice that starts each note at a phase taken from a counter that
+runs on every rendered sample sounds different after a skipped stretch than
+after a rendered one.
+
+### Reading the saving
+
+`VoiceBankBinding::idle_skipped_blocks()` returns how many voice-blocks were
+skipped since `prepare`, summed over the eight slots (always 0 when the option
+is off). It takes no lock, so it is safe to call from the audio thread. A bank holding one note for N blocks with no other events skips
+`7 * (N - 1)` voice-blocks: each idle slot renders once to confirm silence and
+is skipped afterwards.
+
+### Check before enabling
+
+Render the same note script twice, once with `Off` and once with
+`SkipInactiveSlots`, at several block sizes, and compare the two buffers with
+`memcmp`. Include note on and off, a retrigger of the same key, a ninth note
+that steals a voice, a release that crosses a block boundary, the sustain
+pedal and all-sound-off. `test/test_voice_bank_binding.cpp` has such a test
+("Voice bank idle skip renders identical audio with skipping on and off") that
+you can copy for your own voice.

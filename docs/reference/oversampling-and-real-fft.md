@@ -64,6 +64,14 @@ A caller blending the oversampled path with a dry path can align the dry path
 with `group_delay_samples()`, or select `linear_phase_fir` for a constant,
 reportable latency.
 
+A graph custom node that runs one of these lanes beside a dry path is therefore
+not time-aligned: the graph can only compensate a constant delay, and these
+lanes have none to declare. A node that must stay aligned with parallel paths
+uses `linear_phase_fir` and declares its latency with
+`declare_oversampling_latency` (see "Oversampling inside a node" in the
+[signal graph reference](signal-graph.md)), which refuses the minimum-phase
+kinds.
+
 `polyphase_iir` became the default in v0.997.2; that
 [migration note](../migrations/v0.997.2.md) covers the consequences and how
 to keep `fir_biquad`. Both designs later narrowed their transition to
