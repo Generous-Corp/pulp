@@ -384,6 +384,156 @@ const char* node_type_str(NodeType t) {
     return "unknown";
 }
 
+std::string authored_node_identity(const GraphNode& node,
+                                   std::unordered_map<std::string, std::size_t>& ordinals) {
+    std::string key = std::string(node_type_str(node.type)) + ":" + node.name;
+    if (node.type == NodeType::Plugin)
+        key += ":" + node.plugin_info.unique_id;
+    if (node.type == NodeType::Custom)
+        key += ":" + node.custom_type_id + "@" + std::to_string(node.custom_type_version);
+    const auto ordinal = ordinals[key]++;
+    return "node:" + key + ":" + std::to_string(ordinal);
+}
+
+template <typename V>
+bool append_semantic_canonical(const V& value, std::string& output, GraphDocumentRefusal& refusal,
+                               std::size_t depth, bool in_node = false) {
+    if (depth > GraphSerializer::max_document_depth) {
+        refusal = GraphDocumentRefusal::NestingLimitExceeded;
+        return false;
+    }
+    if (value.isObject()) {
+        std::vector<std::string> names;
+        for (std::uint32_t i = 0; i < value.size(); ++i) {
+            const auto name = std::string(value.getObjectMemberAt(i).name);
+            if (in_node && name == "layout")
+                continue;
+            names.push_back(name);
+        }
+        std::sort(names.begin(), names.end());
+        output.push_back('{');
+        for (std::size_t i = 0; i < names.size(); ++i) {
+            if (i)
+                output.push_back(',');
+            output += choc::json::toString(choc::value::createString(names[i]), false);
+            output.push_back(':');
+            if (!append_semantic_canonical(value[names[i]], output, refusal, depth + 1,
+                                           in_node || names[i] == "nodes"))
+                return false;
+        }
+        output.push_back('}');
+        return true;
+    }
+    if (value.isArray()) {
+        output.push_back('[');
+        for (std::uint32_t i = 0; i < value.size(); ++i) {
+            if (i)
+                output.push_back(',');
+            if (!append_semantic_canonical(value[i], output, refusal, depth + 1, in_node))
+                return false;
+        }
+        output.push_back(']');
+        return true;
+    }
+    output += choc::json::toString(value, false);
+    return true;
+}
+
+template <typename V> bool is_json_integer(const V& value) {
+    return value.isInt32() || value.isInt64();
+}
+
+template <typename V> bool is_finite_json_number(const V& value) {
+    if (is_json_integer(value))
+        return true;
+    return (value.isFloat32() || value.isFloat64()) && std::isfinite(value.getFloat64());
+}
+
+template <typename V> bool is_instance_index(const V& value) {
+    return is_json_integer(value) && value.getInt64() >= 0 &&
+           value.getInt64() <= static_cast<std::int64_t>(std::numeric_limits<std::uint32_t>::max());
+}
+
+template <typename V> bool is_nonempty_string(const V& value) {
+    return value.isString() && !value.getString().empty();
+}
+
+// Authored subgraph instance records ride in the saved-identity envelope.
+// Each record names logical node identities, never runtime NodeIds, and no
+// node may belong to two instances. Values are data only here; template
+// conformance is checked by the subgraph restore path.
+template <typename V>
+GraphDocumentRefusal validate_subgraph_records(const V& records,
+                                               const std::unordered_set<std::string>& identities,
+                                               std::string& detail) {
+    if (!records.isArray()) {
+        detail = "subgraphs must be an array of instance records";
+        return GraphDocumentRefusal::SubgraphRecordInvalid;
+    }
+    std::unordered_set<std::string> instances;
+    std::unordered_set<std::string> claimed;
+    for (std::uint32_t i = 0; i < records.size(); ++i) {
+        const auto& record = records[i];
+        if (!record.isObject() || !record.hasObjectMember("template_identity") ||
+            !is_nonempty_string(record["template_identity"]) ||
+            !record.hasObjectMember("instance_identity") ||
+            !is_nonempty_string(record["instance_identity"]) ||
+            !record.hasObjectMember("instance_index") ||
+            !is_instance_index(record["instance_index"]) || !record.hasObjectMember("members") ||
+            !record["members"].isArray() || record["members"].size() == 0 ||
+            !record.hasObjectMember("parameters") || !record["parameters"].isObject() ||
+            !record.hasObjectMember("children") || !record["children"].isObject()) {
+            detail = "subgraph record " + std::to_string(i) +
+                     " requires template_identity, instance_identity, instance_index, members, "
+                     "parameters, and children";
+            return GraphDocumentRefusal::SubgraphRecordInvalid;
+        }
+        const auto instance = std::string(record["instance_identity"].getString());
+        if (!instances.insert(instance).second) {
+            detail = "duplicate subgraph instance identity: " + instance;
+            return GraphDocumentRefusal::SubgraphBindingDuplicate;
+        }
+        const auto& members = record["members"];
+        for (std::uint32_t m = 0; m < members.size(); ++m) {
+            if (!is_nonempty_string(members[m])) {
+                detail = "subgraph " + instance + " member must be a logical identity string";
+                return GraphDocumentRefusal::SubgraphRecordInvalid;
+            }
+            const auto member = std::string(members[m].getString());
+            if (!identities.contains(member)) {
+                detail = "subgraph " + instance + " names unknown logical identity " + member;
+                return GraphDocumentRefusal::SubgraphBindingDangling;
+            }
+            if (!claimed.insert(member).second) {
+                detail = "logical identity " + member + " belongs to two subgraph instances";
+                return GraphDocumentRefusal::SubgraphBindingDuplicate;
+            }
+        }
+        const auto& parameters = record["parameters"];
+        for (std::uint32_t p = 0; p < parameters.size(); ++p) {
+            const auto member = parameters.getObjectMemberAt(p);
+            if (std::string_view(member.name).empty() || !is_finite_json_number(member.value)) {
+                detail = "subgraph " + instance + " parameter values must be finite numbers";
+                return GraphDocumentRefusal::SubgraphRecordInvalid;
+            }
+        }
+        const auto& children = record["children"];
+        for (std::uint32_t c = 0; c < children.size(); ++c) {
+            const auto child = children.getObjectMemberAt(c);
+            if (std::string_view(child.name).empty() || !child.value.isObject() ||
+                !child.value.hasObjectMember("template_identity") ||
+                !is_nonempty_string(child.value["template_identity"]) ||
+                !child.value.hasObjectMember("instance_index") ||
+                !is_instance_index(child.value["instance_index"])) {
+                detail = "subgraph " + instance +
+                         " child records require template_identity and instance_index";
+                return GraphDocumentRefusal::SubgraphRecordInvalid;
+            }
+        }
+    }
+    return GraphDocumentRefusal::None;
+}
+
 const char* format_str(PluginFormat f) {
     switch (f) {
         case PluginFormat::VST3:        return "vst3";
@@ -1042,12 +1192,26 @@ const char* graph_document_refusal_name(GraphDocumentRefusal refusal) noexcept {
         return "logical_identity_missing";
     case GraphDocumentRefusal::UnsupportedDocumentProfile:
         return "unsupported_document_profile";
+    case GraphDocumentRefusal::IdentityEnvelopeInvalid:
+        return "identity_envelope_invalid";
+    case GraphDocumentRefusal::IdentityBindingDangling:
+        return "identity_binding_dangling";
+    case GraphDocumentRefusal::IdentityBindingDuplicate:
+        return "identity_binding_duplicate";
+    case GraphDocumentRefusal::IdentityBindingUnknown:
+        return "identity_binding_unknown";
     case GraphDocumentRefusal::DuplicateJsonKey:
         return "duplicate_json_key";
     case GraphDocumentRefusal::NestingLimitExceeded:
         return "nesting_limit_exceeded";
     case GraphDocumentRefusal::NonFiniteNumber:
         return "non_finite_number";
+    case GraphDocumentRefusal::SubgraphRecordInvalid:
+        return "subgraph_record_invalid";
+    case GraphDocumentRefusal::SubgraphBindingDangling:
+        return "subgraph_binding_dangling";
+    case GraphDocumentRefusal::SubgraphBindingDuplicate:
+        return "subgraph_binding_duplicate";
     case GraphDocumentRefusal::AllocationFailed:
         return "allocation_failed";
     }
@@ -1090,7 +1254,10 @@ GraphDocumentInspection GraphSerializer::inspect_document(std::string_view json)
                 return result;
             }
             format_version = *version;
-            if (format_version < kMinInspectedFormatVersion) {
+            const bool complete_saved_envelope = root.hasObjectMember("identity_schema") &&
+                                                 root.hasObjectMember("logical_identities") &&
+                                                 root.hasObjectMember("bindings");
+            if (format_version < kMinInspectedFormatVersion && !complete_saved_envelope) {
                 result.refusal = GraphDocumentRefusal::InvalidFormatVersion;
                 result.detail = "saved document format is older than this inspector supports";
                 return result;
@@ -1144,6 +1311,105 @@ GraphDocumentInspection GraphSerializer::inspect_document(std::string_view json)
             }
             profile = "pulp.graph.saved-identity.v6";
         }
+        if (root.hasObjectMember("identity_schema") || root.hasObjectMember("logical_identities")) {
+            if (!root.hasObjectMember("identity_schema") ||
+                !root.hasObjectMember("logical_identities") ||
+                !root["logical_identities"].isObject() ||
+                !root["logical_identities"].hasObjectMember("identities") ||
+                !root.hasObjectMember("bindings")) {
+                result.refusal = GraphDocumentRefusal::IdentityEnvelopeInvalid;
+                result.detail = "saved-identity v6 requires logical_identities and bindings";
+                return result;
+            }
+            const auto& identities = root["logical_identities"]["identities"];
+            const auto& bindings = root["bindings"];
+            if (!identities.isArray() || !bindings.isObject()) {
+                result.refusal = GraphDocumentRefusal::IdentityEnvelopeInvalid;
+                result.detail =
+                    "logical_identities.identities must be an array and bindings an object";
+                return result;
+            }
+            std::unordered_set<std::string> known;
+            std::unordered_map<std::string, NodeId> identity_node;
+            std::unordered_set<NodeId> bound_nodes;
+            std::unordered_set<NodeId> node_ids;
+            if (root.hasObjectMember("nodes") && root["nodes"].isArray()) {
+                for (std::uint32_t i = 0; i < root["nodes"].size(); ++i)
+                    if (root["nodes"][i].hasObjectMember("id"))
+                        node_ids.insert(static_cast<NodeId>(root["nodes"][i]["id"].getInt64()));
+            }
+            for (std::uint32_t i = 0; i < identities.size(); ++i) {
+                const auto& item = identities[i];
+                if (!item.isObject() || !item.hasObjectMember("id") || !item["id"].isString() ||
+                    !item.hasObjectMember("node_id")) {
+                    result.refusal = GraphDocumentRefusal::IdentityEnvelopeInvalid;
+                    result.detail = "identity entry requires string id and node_id";
+                    return result;
+                }
+                const auto id = std::string(item["id"].getString());
+                if (!known.insert(id).second) {
+                    result.refusal = GraphDocumentRefusal::IdentityBindingDuplicate;
+                    result.detail = "duplicate logical identity: " + id;
+                    return result;
+                }
+                const auto node_id = static_cast<NodeId>(item["node_id"].getInt64());
+                if (!node_ids.contains(node_id)) {
+                    result.refusal = GraphDocumentRefusal::IdentityBindingDangling;
+                    result.detail = "identity binds to unknown node_id " + std::to_string(node_id) +
+                                    "; re-export the graph with current node bindings";
+                    return result;
+                }
+                if (!bound_nodes.insert(node_id).second) {
+                    result.refusal = GraphDocumentRefusal::IdentityBindingDuplicate;
+                    result.detail =
+                        "two logical identities bind node_id " + std::to_string(node_id);
+                    return result;
+                }
+                identity_node.emplace(id, node_id);
+            }
+            if (bound_nodes.size() != node_ids.size()) {
+                result.refusal = GraphDocumentRefusal::IdentityEnvelopeInvalid;
+                result.detail = "every serialized node requires a logical identity and binding";
+                return result;
+            }
+            if (bindings.size() != identities.size()) {
+                result.refusal = GraphDocumentRefusal::IdentityEnvelopeInvalid;
+                result.detail = "bindings must name every logical identity exactly once";
+                return result;
+            }
+            for (std::uint32_t i = 0; i < bindings.size(); ++i) {
+                const auto name = std::string(bindings.getObjectMemberAt(i).name);
+                if (!known.contains(name)) {
+                    result.refusal = GraphDocumentRefusal::IdentityBindingUnknown;
+                    result.detail = "binding references unknown logical identity: " + name;
+                    return result;
+                }
+                const auto node_id = static_cast<NodeId>(bindings[name].getInt64());
+                if (!node_ids.contains(node_id)) {
+                    result.refusal = GraphDocumentRefusal::IdentityBindingDangling;
+                    result.detail = "binding references unknown node_id " +
+                                    std::to_string(node_id) +
+                                    "; re-export the graph with current node bindings";
+                    return result;
+                }
+                if (node_id != identity_node.at(name)) {
+                    result.refusal = GraphDocumentRefusal::IdentityEnvelopeInvalid;
+                    result.detail = "binding for " + name + " names node_id " +
+                                    std::to_string(node_id) +
+                                    " but the identity entry binds a different node";
+                    return result;
+                }
+            }
+            if (root.hasObjectMember("subgraphs")) {
+                result.refusal = validate_subgraph_records(root["subgraphs"], known, result.detail);
+                if (result.refusal != GraphDocumentRefusal::None)
+                    return result;
+            }
+        } else if (root.hasObjectMember("subgraphs")) {
+            result.refusal = GraphDocumentRefusal::SubgraphRecordInvalid;
+            result.detail = "subgraph records require the saved-identity v6 envelope";
+            return result;
+        }
         if (format_version == 0 && profile.empty()) {
             result.refusal = GraphDocumentRefusal::LogicalIdentityMissing;
             result.detail = "document has no explicit logical identity profile";
@@ -1160,9 +1426,15 @@ GraphDocumentInspection GraphSerializer::inspect_document(std::string_view json)
         result.document.format_version_ = format_version;
         result.document.profile_ = std::move(profile);
         result.document.canonical_bytes_ = std::move(canonical);
+        std::string semantic_canonical;
+        if (!append_semantic_canonical(root, semantic_canonical, canonical_refusal, 0)) {
+            result.refusal = canonical_refusal;
+            result.detail = graph_document_refusal_name(canonical_refusal);
+            return result;
+        }
         std::string semantic_preimage = "pulp.graph.semantic.v6";
         semantic_preimage.push_back('\0');
-        semantic_preimage += result.document.canonical_bytes_;
+        semantic_preimage += semantic_canonical;
         result.document.semantic_digest_ = "sha256:" + runtime::sha256_hex(semantic_preimage);
         return result;
     } catch (const std::bad_alloc&) {
@@ -1605,6 +1877,56 @@ std::string GraphSerializer::to_json(
     return choc::json::toString(root, true);
 }
 
+std::unordered_map<NodeId, std::string>
+GraphSerializer::saved_node_identities(const SignalGraph& graph) {
+    std::unordered_map<std::string, std::size_t> ordinals;
+    std::vector<const GraphNode*> nodes;
+    for (const auto& node : graph.nodes())
+        nodes.push_back(&node);
+    std::sort(nodes.begin(), nodes.end(),
+              [](const auto* a, const auto* b) { return a->id < b->id; });
+    std::unordered_map<NodeId, std::string> identities;
+    for (const auto* node : nodes)
+        identities.emplace(node->id, authored_node_identity(*node, ordinals));
+    return identities;
+}
+
+std::string GraphSerializer::to_saved_document(
+    const SignalGraph& graph,
+    const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout) {
+    const auto raw = to_json(graph, editor_layout);
+    if (raw.empty())
+        return {};
+    try {
+        auto root = choc::json::parse(raw);
+        auto identities = choc::value::createEmptyArray();
+        auto bindings = choc::value::createObject("Bindings");
+        std::unordered_map<std::string, std::size_t> ordinals;
+        std::vector<const GraphNode*> nodes;
+        for (const auto& node : graph.nodes())
+            nodes.push_back(&node);
+        std::sort(nodes.begin(), nodes.end(),
+                  [](const auto* a, const auto* b) { return a->id < b->id; });
+        for (const auto* node : nodes) {
+            const auto identity = authored_node_identity(*node, ordinals);
+            auto item = choc::value::createObject("Identity");
+            item.addMember("id", identity);
+            item.addMember("node_id", static_cast<int64_t>(node->id));
+            identities.addArrayElement(item);
+            bindings.addMember(identity, static_cast<int64_t>(node->id));
+        }
+        root.addMember("identity_schema", "pulp.graph.saved-identity.v6");
+        auto logical = choc::value::createObject("LogicalIdentities");
+        logical.addMember("profile", "pulp.graph.saved-identity.v6");
+        logical.addMember("identities", identities);
+        root.addMember("logical_identities", logical);
+        root.addMember("bindings", bindings);
+        return choc::json::toString(root, true);
+    } catch (...) {
+        return {};
+    }
+}
+
 namespace {
 
 #if defined(PULP_GRAPH_SERIALIZER_WITHOUT_PLUGIN_SCANNER)
@@ -1740,6 +2062,53 @@ class PluginNodeResolver {
 
 GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const std::string& json) {
     return from_json(graph, json, GraphLoadOptions{});
+}
+
+GraphSerializer::LoadResult GraphSerializer::from_saved_document(SignalGraph& graph,
+                                                                 const std::string& json,
+                                                                 const GraphLoadOptions& options) {
+    GraphSerializer::LoadResult result;
+    const auto inspection = inspect_document(json);
+    if (!inspection.ok()) {
+        result.error =
+            std::string(graph_document_refusal_name(inspection.refusal)) + ": " + inspection.detail;
+        return result;
+    }
+    try {
+        const auto root = choc::json::parse(json);
+        if (!root.hasObjectMember("identity_schema")) {
+            result.error = "identity_envelope_invalid: saved document has no v6 envelope";
+            return result;
+        }
+        result = from_json(graph, json, options);
+        if (!result.ok)
+            return result;
+        std::unordered_map<std::string, std::size_t> ordinals;
+        std::unordered_set<std::string> restored;
+        std::vector<const GraphNode*> nodes;
+        for (const auto& node : graph.nodes())
+            nodes.push_back(&node);
+        std::sort(nodes.begin(), nodes.end(),
+                  [](const auto* a, const auto* b) { return a->id < b->id; });
+        for (const auto* node : nodes)
+            restored.insert(authored_node_identity(*node, ordinals));
+        for (std::uint32_t i = 0; i < root["logical_identities"]["identities"].size(); ++i) {
+            const auto id =
+                std::string(root["logical_identities"]["identities"][i]["id"].getString());
+            if (!restored.contains(id)) {
+                graph.clear();
+                result.ok = false;
+                result.error =
+                    "identity_binding_unknown: restored graph is missing logical identity " + id;
+                return result;
+            }
+        }
+        return result;
+    } catch (const std::exception& error) {
+        result.ok = false;
+        result.error = std::string("identity_envelope_invalid: ") + error.what();
+        return result;
+    }
 }
 
 GraphSerializer::LoadResult GraphSerializer::from_file(SignalGraph& graph,

@@ -7,6 +7,7 @@
 // integration lane gated on PULP_TEST_CLAP_PATH.
 
 #include <catch2/catch_test_macros.hpp>
+#include <choc/text/choc_JSON.h>
 
 #include "../core/host/src/graph_serializer_test_access.hpp"
 
@@ -112,27 +113,155 @@ TEST_CASE("GraphSerializer inspection refuses identity and parser hazards",
     CHECK(hostile_depth.refusal == GraphDocumentRefusal::NestingLimitExceeded);
 }
 
-TEST_CASE("GraphSerializer admits the reserved saved identity envelope",
+TEST_CASE("GraphSerializer refuses an incomplete saved identity envelope",
           "[host][serializer][g3][d5]") {
-    const auto inspected = GraphSerializer::inspect_document(
-        R"({"identity_schema":"pulp.graph.saved-identity.v6","bindings":{},"format_version":4})");
-    REQUIRE(inspected.ok());
-    CHECK(inspected.document.profile() == "pulp.graph.saved-identity.v6");
-    CHECK(inspected.document.semantic_digest().starts_with("sha256:"));
-
-    // The envelope is format-independent: a v4 document stays inspectable
-    // after the writer advances, and the current writer format is admitted.
+    // identity_schema without logical_identities/nodes is not a complete envelope.
+    for (const int version : {4, 5}) {
+        const auto doc = std::string(R"({"identity_schema":"pulp.graph.saved-identity.v6",)") +
+                         R"("bindings":{},"format_version":)" + std::to_string(version) + "}";
+        const auto refused = GraphSerializer::inspect_document(doc);
+        CHECK(refused.refusal == GraphDocumentRefusal::IdentityEnvelopeInvalid);
+    }
     REQUIRE(GraphSerializer::current_format_version() == 5);
-    const auto current = GraphSerializer::inspect_document(
-        R"({"identity_schema":"pulp.graph.saved-identity.v6","bindings":{},"format_version":5})");
-    REQUIRE(current.ok());
-    CHECK(current.document.format_version() == 5);
-    CHECK(inspected.document.format_version() == 4);
-    CHECK(current.document.semantic_digest() != inspected.document.semantic_digest());
 
     const auto next = GraphSerializer::inspect_document(
         R"({"identity_schema":"pulp.graph.saved-identity.v6","bindings":{},"format_version":6})");
     CHECK(next.refusal == GraphDocumentRefusal::UnsupportedFutureVersion);
+}
+
+TEST_CASE("GraphSerializer saved identity writer validates and restores",
+          "[host][serializer][g3]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "Input");
+    const auto gain = graph.add_gain_node("Gain");
+    const auto output = graph.add_output_node(1, "Output");
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+    const auto saved = GraphSerializer::to_saved_document(graph, {{gain, {12.0f, 4.0f}}});
+    REQUIRE_FALSE(saved.empty());
+    const auto inspected = GraphSerializer::inspect_document(saved);
+    REQUIRE(inspected.ok());
+    CHECK(inspected.document.profile() == "pulp.graph.saved-identity.v6");
+    CHECK(saved.find("identity_schema") != std::string::npos);
+
+    SignalGraph restored;
+    const auto loaded = GraphSerializer::from_saved_document(restored, saved);
+    INFO(loaded.error);
+    REQUIRE(loaded.ok);
+    CHECK(restored.nodes().size() == graph.nodes().size());
+
+    auto dangling = saved;
+    const auto binding = dangling.find("node:");
+    REQUIRE(binding != std::string::npos);
+    const auto node_id = dangling.find("\"node_id\":", binding);
+    REQUIRE(node_id != std::string::npos);
+    const auto value = dangling.find_first_of("0123456789", node_id);
+    REQUIRE(value != std::string::npos);
+    dangling.replace(value, 1, "9");
+    const auto refused = GraphSerializer::inspect_document(dangling);
+    CHECK(refused.refusal == GraphDocumentRefusal::IdentityBindingDangling);
+}
+
+TEST_CASE("GraphSerializer saved identity requires an exact identity to node bijection",
+          "[host][serializer][g3]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "Input");
+    const auto output = graph.add_output_node(1, "Output");
+    REQUIRE(graph.connect(input, 0, output, 0));
+    const auto saved = GraphSerializer::to_saved_document(graph);
+    REQUIRE(GraphSerializer::inspect_document(saved).ok());
+
+    auto parsed = choc::json::parse(saved);
+    REQUIRE(parsed.hasObjectMember("bindings"));
+    const auto& bindings = parsed["bindings"];
+    REQUIRE(bindings.size() == 2);
+    const std::string first(bindings.getObjectMemberAt(0).name);
+    const std::string second(bindings.getObjectMemberAt(1).name);
+    const auto first_node = bindings[first].getInt64();
+    const auto second_node = bindings[second].getInt64();
+    REQUIRE(first_node != second_node);
+
+    const auto rebuilt = [&](const std::vector<std::pair<std::string, std::int64_t>>& entries) {
+        auto copy = choc::json::parse(saved);
+        auto object = choc::value::createObject("bindings");
+        for (const auto& [key, node] : entries)
+            object.addMember(key, node);
+        copy.setMember("bindings", object);
+        return choc::json::toString(copy, true);
+    };
+
+    // Swapped bindings: both keys known, both node ids exist, but they cross.
+    const auto swapped = rebuilt({{first, second_node}, {second, first_node}});
+    CHECK_FALSE(GraphSerializer::inspect_document(swapped).ok());
+
+    // One identity's binding dropped.
+    const auto missing = rebuilt({{first, first_node}});
+    CHECK_FALSE(GraphSerializer::inspect_document(missing).ok());
+    SignalGraph untouched;
+    CHECK_FALSE(GraphSerializer::from_saved_document(untouched, missing).ok);
+    CHECK(untouched.nodes().empty());
+
+    // Envelope with identity_schema but no logical_identities is refused whole.
+    {
+        auto copy = choc::json::parse(saved);
+        auto stripped = choc::value::createObject("doc");
+        for (std::uint32_t i = 0; i < copy.size(); ++i) {
+            const auto member = copy.getObjectMemberAt(i);
+            if (std::string(member.name) != "logical_identities")
+                stripped.addMember(member.name, member.value);
+        }
+        const auto text = choc::json::toString(stripped, true);
+        CHECK_FALSE(GraphSerializer::inspect_document(text).ok());
+        SignalGraph intact;
+        CHECK_FALSE(GraphSerializer::from_saved_document(intact, text).ok);
+        CHECK(intact.nodes().empty());
+    }
+
+    // A serialized node with no identity or binding (consistent omission) is refused.
+    {
+        auto copy = choc::json::parse(saved);
+        auto identities = choc::value::createEmptyArray();
+        const auto& original = copy["logical_identities"]["identities"];
+        REQUIRE(original.size() == 2);
+        identities.addArrayElement(original[0]);
+        auto logical = choc::value::createObject("logical");
+        const auto& source = copy["logical_identities"];
+        for (std::uint32_t i = 0; i < source.size(); ++i) {
+            const auto member = source.getObjectMemberAt(i);
+            if (std::string(member.name) == "identities")
+                logical.addMember("identities", identities);
+            else
+                logical.addMember(member.name, member.value);
+        }
+        const std::string kept(original[0]["id"].getString());
+        copy.setMember("logical_identities", logical);
+        auto one = choc::value::createObject("bindings");
+        one.addMember(kept, bindings[kept].getInt64());
+        copy.setMember("bindings", one);
+        const auto text = choc::json::toString(copy, true);
+        CHECK_FALSE(GraphSerializer::inspect_document(text).ok());
+        SignalGraph intact;
+        CHECK_FALSE(GraphSerializer::from_saved_document(intact, text).ok);
+        CHECK(intact.nodes().empty());
+    }
+}
+
+TEST_CASE("GraphSerializer semantic digest excludes editor layout", "[host][serializer][g3]") {
+    SignalGraph graph;
+    const auto node = graph.add_gain_node("Gain");
+    const auto first = GraphSerializer::inspect_document(
+        GraphSerializer::to_saved_document(graph, {{node, {1.0f, 2.0f}}}));
+    const auto second = GraphSerializer::inspect_document(
+        GraphSerializer::to_saved_document(graph, {{node, {9.0f, 8.0f}}}));
+    REQUIRE(first.ok());
+    REQUIRE(second.ok());
+    CHECK(first.document.semantic_digest() == second.document.semantic_digest());
+    CHECK(first.document.canonical_bytes() != second.document.canonical_bytes());
+    REQUIRE(graph.set_node_gain(node, 0.25f));
+    const auto changed =
+        GraphSerializer::inspect_document(GraphSerializer::to_saved_document(graph));
+    REQUIRE(changed.ok());
+    CHECK(changed.document.semantic_digest() != first.document.semantic_digest());
 }
 
 namespace {

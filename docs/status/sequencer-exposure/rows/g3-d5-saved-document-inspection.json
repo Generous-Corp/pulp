@@ -21,15 +21,15 @@
   "evidence": [
     {
       "path": "core/host/include/pulp/host/graph_serializer.hpp",
-      "needles": ["GraphDocumentInspection", "inspect_document(std::string_view json)"]
+      "needles": ["GraphDocumentInspection", "inspect_document(std::string_view json)", "to_saved_document", "from_saved_document"]
     },
     {
       "path": "core/host/src/graph_serializer.cpp",
-      "needles": ["GraphSerializer::inspect_document", "GraphDocumentRefusal::NestingLimitExceeded", "pulp.graph.semantic.v6"]
+      "needles": ["GraphSerializer::inspect_document", "GraphDocumentRefusal::NestingLimitExceeded", "pulp.graph.semantic.v6", "GraphSerializer::to_saved_document", "IdentityBindingDangling"]
     },
     {
       "path": "test/test_graph_serializer.cpp",
-      "needles": ["[g3][d5]", "DuplicateJsonKey", "pulp.graph.saved-identity.v6"]
+      "needles": ["[g3][d5]", "DuplicateJsonKey", "pulp.graph.saved-identity.v6", "saved identity writer validates and restores", "semantic digest excludes editor layout"]
     },
     {
       "path": "examples/g3-resolved-identity-consumer/main.cpp",
@@ -53,7 +53,7 @@
     },
     {
       "path": "docs/graph-program-status/G-3.md",
-      "needles": ["Close-out (2026-11-13)", "P0 layered inspection/replay follow-up", "Installed consumers (2026-11-14)"]
+      "needles": ["Close-out (2026-11-13)", "P0 layered inspection/replay follow-up", "Installed consumers (2026-11-14)", "Saved-identity writer slice"]
     }
   ],
   "surfaces": {
@@ -86,7 +86,7 @@
     },
     "offline_timeline_cli": {
       "disposition": "not_applicable",
-      "rationale": "The slice adds no CLI command, flag, or offline writer; it only exposes a library inspection API."
+      "rationale": "The slice adds no CLI command or flag; it exposes library inspection and an in-memory saved-document writer only."
     },
     "offline_timeline_mcp": {
       "disposition": "not_applicable",

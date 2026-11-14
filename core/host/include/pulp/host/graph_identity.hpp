@@ -67,8 +67,10 @@ PortIdentityDiff diff_port_identities(std::span<const PortHandle> before,
                                       std::span<const PortHandle> after,
                                       std::span<const PortIdentityAlias> aliases = {});
 
-// A compact value-owned undo record.  Applying undo is a caller-owned graph
-// mutation; this type intentionally has no access to SignalGraph internals.
+// A compact value-owned snapshot record. Applying the snapshot is a
+// caller-owned graph mutation; this type intentionally has no access to
+// SignalGraph internals. The historical undo name remains for source
+// compatibility and is deprecated.
 struct PortIdentityUndo {
     std::vector<PortHandle> before;
     bool valid = false;
@@ -77,6 +79,10 @@ struct PortIdentityUndo {
 PortIdentityUndo capture_port_identity_undo(std::span<const PortHandle> before,
                                             std::span<const PortIdentityAlias> aliases = {});
 
+PortIdentityUndo snapshot_port_identity(std::span<const PortHandle> before,
+                                        std::span<const PortIdentityAlias> aliases = {});
+
+[[deprecated("use snapshot_port_identity; this returns a snapshot, not an undo operation")]]
 std::vector<PortHandle> undo_port_identity(const PortIdentityUndo& undo);
 
 enum class GraphIdentityError : std::uint8_t {
