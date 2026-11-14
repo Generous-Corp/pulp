@@ -25,8 +25,7 @@ TEST_CASE("Graph reload receipts map to resend, stop or move on", "[cli][graph-f
     }
     SECTION("a stale-base refusal is its own outcome and keeps the generation") {
         REQUIRE(classify_graph_reload_receipt(
-                    1,
-                    R"({"state": "failed", "detail": {"code": "stale-base", "generation": 9}})",
+                    1, R"({"state": "failed", "detail": {"code": "stale-base", "generation": 9}})",
                     generation) == GraphReloadOutcome::StaleGeneration);
         REQUIRE(generation == 4);
     }

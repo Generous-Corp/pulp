@@ -50,9 +50,15 @@ class GraphReloadRetryBudget {
         }
     }
     // Records one not-applied failure; true when the limit is reached.
-    bool record_failure() { return ++failures_ >= limit_; }
-    void reset() { failures_ = 0; }
-    unsigned failures() const { return failures_; }
+    bool record_failure() {
+        return ++failures_ >= limit_;
+    }
+    void reset() {
+        failures_ = 0;
+    }
+    unsigned failures() const {
+        return failures_;
+    }
 
   private:
     unsigned limit_;

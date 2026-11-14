@@ -35,7 +35,10 @@ and refuses a file over 1 MiB without reading it. Two consecutive identical read
 coalesce a save; content changes are detected even with unchanged size and
 modification time. A change is recorded as handled only after a terminal receipt:
 a publication or a typed refusal is not resent, a request the product refused
-before it ran (deadline before start, cancelled) is retried up to three times, an
+before it ran (deadline before start, cancelled) is retried up to three times per
+distinct file content (a newly changed file starts a fresh count), a stale-base
+refusal (the live graph moved past the watch's generation) leaves the file
+unconsumed and pauses graph reload with a message naming the restart generation, an
 admission refusal of the grant stops graph reload for that watch with a message
 naming how to request a new grant, and an unknown outcome pauses graph reload with
 a message naming how to read the current generation. Refused files are reported by name (unreadable, too-large,
