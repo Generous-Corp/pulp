@@ -1,6 +1,23 @@
 #include <pulp/host/forge_distortion_catalog.hpp>
 
+#include <pulp/host/custom_node_oversampling.hpp>
+
+#include <cassert>
+
 namespace pulp::host::distortion {
+
+namespace {
+
+/// The one oversampling description for a tier. The latency the node declares
+/// and the oversampler it configures in `prepare` both come from this, so they
+/// cannot disagree.
+CustomNodeOversampling oversampling_spec(OversampleTier tier) {
+    CustomNodeOversampling spec;
+    spec.factor = oversample_factor(tier);
+    return spec;
+}
+
+} // namespace
 
 int oversample_factor(OversampleTier tier) {
     switch (tier) {
@@ -75,24 +92,13 @@ CustomNodeType make_distortion_node(Topology topology, OversampleTier tier) {
     t.num_output_ports = 1;
     t.default_name = distortion_default_name(topology);
     t.lowerable = true;
-    t.latency_samples = [tier](double sample_rate) {
-        if (tier == OversampleTier::x1)
-            return 0;
-        using Os = signal::OversamplerT<float>;
-        Os probe;
-        probe.set_kind(Os::Kind::linear_phase_fir);
-        probe.set_quality(Os::Quality::standard);
-        const int factor = oversample_factor(tier);
-        probe.set_factor(factor == 2   ? Os::Factor::x2
-                         : factor == 4 ? Os::Factor::x4
-                                       : Os::Factor::x8);
-        probe.set_sample_rate(static_cast<float>(sample_rate));
-        return probe.latency_samples();
-    };
+    const CustomNodeOversampling spec = oversampling_spec(tier);
+    [[maybe_unused]] const bool declared = declare_oversampling_latency(t, spec);
+    assert(declared);
 
     t.create = []() -> void* { return new DistortionInstance{}; };
     t.destroy = [](void* p) { delete static_cast<DistortionInstance*>(p); };
-    t.prepare = [tier](void* p, double sr, int /*max_block*/) {
+    t.prepare = [tier, spec](void* p, double sr, int /*max_block*/) {
         auto* s = static_cast<DistortionInstance*>(p);
         const int factor = oversample_factor(tier);
         const double inner_rate = sr * factor;
@@ -107,18 +113,9 @@ CustomNodeType make_distortion_node(Topology topology, OversampleTier tier) {
         s->loop_clipper.prepare(inner_rate);
         s->tone.prepare(inner_rate);
 
-        using Os = signal::OversamplerT<float>;
-        if (factor > 1) {
-            s->oversampler.set_kind(Os::Kind::linear_phase_fir);
-            s->oversampler.set_quality(Os::Quality::standard);
-            s->oversampler.set_factor(factor == 2   ? Os::Factor::x2
-                                      : factor == 4 ? Os::Factor::x4
-                                                    : Os::Factor::x8);
-            s->oversampler.set_sample_rate(static_cast<float>(sr));
-            s->latency = s->oversampler.latency_samples();
-        } else {
-            s->latency = 0;
-        }
+        s->latency = configure_oversampler(s->oversampler, spec, sr)
+                         ? s->oversampler.latency_samples()
+                         : 0;
     };
     t.reset = [](void* p) {
         auto* s = static_cast<DistortionInstance*>(p);
@@ -246,17 +243,8 @@ ForgeNodeDescriptor distortion_descriptor() {
 /// it. Zero at ×1 — the ADAA path has no filter — and the exact integer group
 /// delay of the cascaded half-band pairs above that. Reported, never estimated
 /// (series law 5).
-int distortion_latency_samples(OversampleTier tier, double sample_rate) {
-    if (tier == OversampleTier::x1)
-        return 0;
-    using Os = signal::OversamplerT<float>;
-    Os probe;
-    probe.set_kind(Os::Kind::linear_phase_fir);
-    probe.set_quality(Os::Quality::standard);
-    const int factor = oversample_factor(tier);
-    probe.set_factor(factor == 2 ? Os::Factor::x2 : factor == 4 ? Os::Factor::x4 : Os::Factor::x8);
-    probe.set_sample_rate(static_cast<float>(sample_rate));
-    return probe.latency_samples();
+int distortion_latency_samples(OversampleTier tier, double /*sample_rate*/) {
+    return oversampling_latency_samples(oversampling_spec(tier));
 }
 
 } // namespace pulp::host::distortion
