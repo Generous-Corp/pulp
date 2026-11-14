@@ -5931,6 +5931,11 @@ bisectable.
   gains a NEW colour literal that is not a `resolve_color(...)` fallback. Mark a
   deliberate material-effect literal `// token-lint:allow`; after intentionally
   lowering a file's count, re-freeze with `--update-baseline`.
+- **Graph vocabulary in the terminology lint.** `processing_model_terms_lint.py`
+  also flags "edge tap" / "SignalGraph tap" (the API says edge probe), "graph
+  bus port" (graph points are ports; a bus is a plugin channel group), a
+  sidechain described as a plain audio port, and "zero-delay feedback edge".
+  Add a rule only if the tree already satisfies it, with selftest cases.
 - **SignalGraph single-backend governance (`single_backend_guard.py` +
   `processing_model_terms_lint.py`).** Whole-tree structural guards (not
   diff-scoped) that keep the DSP runtime convergence from regrowing a second
@@ -13696,3 +13701,9 @@ about that path are not obvious:
   Vellum main's head equals the head recorded in the last *successful* run's
   receipt artifact, and it uploads that receipt only when the whole run is
   green, so a red night is retried on the next one rather than forgotten.
+- **Pin the Vellum commit a consumer needs.** The lane resolves Vellum main's
+  newest green SDK, which is not necessarily one that carries an API a Pulp
+  consumer was written against. `resolve --min-vellum-sha <sha>` refuses a run
+  whose head does not contain that commit (checked with Vellum's compare
+  endpoint before anything is downloaded); the workflow sets it to the commit
+  that introduced the `ParamModel` surface `integrations/pulp-vellum` builds on.

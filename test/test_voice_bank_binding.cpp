@@ -1,11 +1,13 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "../examples/g6-voice-bank-consumer/fixture.hpp"
+#include "harness/paced_timing_cell.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 namespace {
@@ -55,6 +57,21 @@ VoiceBankBindingCode step(VoiceBankBinding& bank, std::uint64_t sample,
     audio::Buffer<float> buffer(2, 1);
     auto view = buffer.view();
     return bank.render(view, sample, 1);
+}
+// Paced-cell oracle for the authored eight-slot chord: both channels finite,
+// the left mix bounded by eight full-gain slots, the authored stereo law
+// (right == 0.5 * left), and non-silence once the chord is sounding. Each
+// channel is checked for finiteness on its own: a NaN right sample makes the
+// stereo-law difference NaN, and a NaN comparison is false, not a failure.
+bool eight_slot_block_ok(const float* left, const float* right, std::size_t frames) {
+    float energy = 0.0f;
+    for (std::size_t i = 0; i < frames; ++i) {
+        if (!std::isfinite(left[i]) || !std::isfinite(right[i]) ||
+            std::abs(left[i]) > 8.0f * kBankGain || std::abs(right[i] - 0.5f * left[i]) > 2e-6f)
+            return false;
+        energy += left[i] * left[i];
+    }
+    return energy > 0.0f;
 }
 } // namespace
 
@@ -755,4 +772,62 @@ TEST_CASE("G6 manager expression refuses before dispatch until scoped audio sema
         CHECK(buffer.channel(0)[0] == 7.0f);
         CHECK(buffer.channel(1)[0] == 7.0f);
     }
+}
+
+// Paced-timing matrix cell: the authored eight-slot bank with all eight slots
+// held from the first callback, so every paced block renders full polyphony.
+// The per-block oracle is the authored stereo law (right == 0.5 * left), a
+// finite bounded mix, and non-silence once the chord is sounding.
+TEST_CASE("G6 voice bank paced matrix cell", "[.][host][graph][g6][paced-matrix]") {
+    const auto config = pulp::test::paced::read_config("eight-slot", 128);
+    REQUIRE(config.variant == "eight-slot");
+    REQUIRE(config.rate == 48000);
+    REQUIRE(config.frames <= 256);
+    VoiceBankBindingResult status;
+    auto bank = make_bank(schema(), status);
+    REQUIRE(bank);
+    audio::Buffer<float> buffer(2, config.frames);
+    const auto frames = static_cast<std::size_t>(config.frames);
+    bool dispatched = false;
+    const auto rows = pulp::test::paced::run_cell(
+        config,
+        [&](std::size_t index, std::uint64_t sample) {
+            dispatched = false;
+            if (bank->begin_block(sample, frames) != HostEventResult::Accepted)
+                return;
+            if (index == 0)
+                for (std::uint8_t slot = 0; slot < 8; ++slot)
+                    if (bank->publish(event(
+                            bank->epoch(), 0, slot + 1,
+                            midi::MidiEvent::note_on(slot + 1, 60 + slot, 100 - slot * 10))) !=
+                        HostEventResult::Accepted)
+                        return;
+            auto view = buffer.view();
+            dispatched = bank->render(view, sample, frames) == VoiceBankBindingCode::Ok;
+        },
+        [&](std::size_t, std::uint64_t) {
+            if (!dispatched)
+                return false;
+            auto view = buffer.view();
+            return eight_slot_block_ok(view.channel(0).data(), view.channel(1).data(), frames);
+        });
+    CHECK(pulp::test::paced::print_cell("g6-voice-bank", config, rows) == 0);
+}
+
+TEST_CASE("G6 paced cell oracle rejects a non-finite right channel beside a passing control",
+          "[host][graph][g6][paced-matrix]") {
+    std::array<float, 4> left{0.25f, -0.5f, 0.125f, 0.0f};
+    std::array<float, 4> right{};
+    for (std::size_t i = 0; i < left.size(); ++i)
+        right[i] = 0.5f * left[i];
+    CHECK(eight_slot_block_ok(left.data(), right.data(), left.size()));
+    for (const float planted :
+         {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity()}) {
+        auto broken = right;
+        broken[1] = planted;
+        CHECK_FALSE(eight_slot_block_ok(left.data(), broken.data(), left.size()));
+    }
+    auto broken_left = left;
+    broken_left[2] = std::numeric_limits<float>::quiet_NaN();
+    CHECK_FALSE(eight_slot_block_ok(broken_left.data(), right.data(), left.size()));
 }
