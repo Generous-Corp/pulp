@@ -5763,20 +5763,23 @@ class LearnClapProcessor : public format::Processor {
         store.add_parameter(
             {.id = kParam, .name = "P", .unit = "", .range = {0.0f, 1.0f, 0.5f, 0.0f}});
     }
-    void prepare(const format::PrepareContext&) override {}
+    // descriptor() allocates; the adapter runs process() under the real-time
+    // allocation trap, so the capabilities are resolved before it.
+    void prepare(const format::PrepareContext&) override {
+        feedback_ = format::midi_feedback_capabilities(format::MidiLearnFormat::clap, descriptor());
+    }
     void process(audio::BufferView<float>&, const audio::BufferView<const float>&,
                  midi::MidiBuffer& midi_in, midi::MidiBuffer& midi_out,
                  const format::ProcessContext&) override {
         ++process_calls;
-        format::midi_learn_process_block(
-            engine, state(), midi_in, midi_out,
-            format::midi_feedback_capabilities(format::MidiLearnFormat::clap, descriptor()));
+        format::midi_learn_process_block(engine, state(), midi_in, midi_out, feedback_);
     }
     int process_calls = 0;
     state::MidiLearnEngine engine;
 
   private:
     bool produces_midi_;
+    format::MidiFeedbackCapabilities feedback_{};
     format::MidiLearnHandle handle_;
 };
 
