@@ -2,6 +2,7 @@
 
 #include <pulp/format/processor.hpp>
 #include <pulp/host/control_index_nodes.hpp>
+#include <pulp/host/graph_patch.hpp>
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/signal_graph_executor_contract.hpp>
@@ -486,6 +487,31 @@ TEST_CASE("Control edges disconnect on the graph and in a prepared edit",
     REQUIRE(reconnect);
     CHECK(reconnect->connect(reconnect->node(a)->out("value"), reconnect->node(b)->in("value")));
     CHECK(reconnect->disconnect(a, 0, b, 0));
+}
+
+TEST_CASE("Control edges keep their kind in latency lookup and refuse notation",
+          "[graph][control-index]") {
+    SignalGraph graph;
+    REQUIRE(graph.register_custom_node_type(make_control_min_type()));
+    const auto a = graph.add_custom_node("pulp.control.min", "first");
+    const auto b = graph.add_custom_node("pulp.control.min", "second");
+    REQUIRE(graph.connect(graph.node(a)->out("value"), graph.node(b)->in("a")));
+    REQUIRE(graph.prepare(48000, 8));
+    const auto latency = graph.prepared_latency_snapshot();
+    REQUIRE(latency.has_value());
+    Connection query{a, 0, b, 0};
+    CHECK_FALSE(latency->connection_delay(query).has_value());
+    query.control_signal = true;
+    CHECK(latency->connection_delay(query).has_value());
+
+    GraphPatchCatalog catalog;
+    REQUIRE(catalog.register_custom(make_control_min_type()));
+    const auto text = format_graph_patch(graph, catalog);
+    CHECK_FALSE(static_cast<bool>(text));
+    CHECK(text.diagnostic.code == GraphPatchDiagnostic::Code::UnsupportedContract);
+    INFO(text.diagnostic.message());
+    CHECK(text.diagnostic.rule.find("Control edge") != std::string::npos);
+    CHECK(text.diagnostic.suggested_fix.find("GraphSerializer") != std::string::npos);
 }
 
 TEST_CASE("candidate Control state validates before mutation and keeps baseline state",

@@ -978,7 +978,7 @@ PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_ident
         for (const auto& connection : candidate_->connections_) {
             if (connection.feedback || connection.midi || connection.automation ||
                 connection.audio_rate_modulation || connection.sidechain || connection.spectral ||
-                connection.source_port > 1 || connection.dest_port > 1)
+                connection.control_signal || connection.source_port > 1 || connection.dest_port > 1)
                 return PreparedDescriptionResult::refused(
                     PreparedDescriptionRefusal::UnsupportedPreparedProfile);
             const auto source = find_node(connection.source_node);
@@ -2650,7 +2650,8 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
                                             !connection.feedback && !connection.midi &&
                                             !connection.automation &&
                                             !connection.audio_rate_modulation &&
-                                            !connection.sidechain && !connection.spectral;
+                                            !connection.sidechain && !connection.spectral &&
+                                            !connection.control_signal;
                                  }))
                     return last_result_ = Result::PreflightFailed;
             }
