@@ -1311,8 +1311,10 @@ GraphDocumentInspection GraphSerializer::inspect_document(std::string_view json)
             }
             profile = "pulp.graph.saved-identity.v6";
         }
-        if (root.hasObjectMember("identity_schema") && root.hasObjectMember("logical_identities")) {
-            if (!root["logical_identities"].isObject() ||
+        if (root.hasObjectMember("identity_schema") || root.hasObjectMember("logical_identities")) {
+            if (!root.hasObjectMember("identity_schema") ||
+                !root.hasObjectMember("logical_identities") ||
+                !root["logical_identities"].isObject() ||
                 !root["logical_identities"].hasObjectMember("identities") ||
                 !root.hasObjectMember("bindings")) {
                 result.refusal = GraphDocumentRefusal::IdentityEnvelopeInvalid;
@@ -1364,6 +1366,11 @@ GraphDocumentInspection GraphSerializer::inspect_document(std::string_view json)
                     return result;
                 }
                 identity_node.emplace(id, node_id);
+            }
+            if (bound_nodes.size() != node_ids.size()) {
+                result.refusal = GraphDocumentRefusal::IdentityEnvelopeInvalid;
+                result.detail = "every serialized node requires a logical identity and binding";
+                return result;
             }
             if (bindings.size() != identities.size()) {
                 result.refusal = GraphDocumentRefusal::IdentityEnvelopeInvalid;
