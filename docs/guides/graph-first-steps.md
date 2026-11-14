@@ -53,7 +53,7 @@ automatable parameter, so `input.audio ~> gain1.gain @ 0.5` is refused; see the
 ```sh
 pulp graph validate first.pat
 # valid: true
-# format_version: 4
+# format_version: 5
 # nodes: 3
 # connections: 4
 

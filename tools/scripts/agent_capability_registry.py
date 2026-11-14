@@ -342,7 +342,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/host/control_index_nodes.hpp",
-        "fingerprint": "sha256:0a15d66f6f084d6085075f4bcc861988f7345b2c761c52760a92124b160872c5",
+        "fingerprint": "sha256:ba4532dbe83e7078dc568b0e4e99c332444ec90c77e1b7e993c01bf2c8de6a1d",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
