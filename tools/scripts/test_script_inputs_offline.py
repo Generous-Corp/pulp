@@ -164,6 +164,16 @@ class OfflineTests(unittest.TestCase):
         rc, _, err = self.run_main()
         self.assertEqual(rc, 0, err)
 
+    def test_parent_include_change_is_not_checked(self) -> None:
+        self.write("test/CMakeLists.txt", "".join(
+            f'include("${{CMAKE_CURRENT_SOURCE_DIR}}/cmake/{Path(m).name}")\n'
+            for m in (SUITES, CLI_TESTS)))
+        self.commit("test: remove a suite include")
+        rc, _, err = self.run_main()
+        self.assertEqual(rc, 0, err)
+        self.assertIn("NOT CHECKED cutover-trial-selftest: its CMake include chain changed",
+                      err)
+
     def test_cmake_only_source_list_addition_needs_configure(self) -> None:
         self.write(CLI, "add_executable(pulp-cli\n    cli_main.cpp\n    cli_sdk.cpp\n"
                        "    cli_watch_shell.cpp\n)\n")

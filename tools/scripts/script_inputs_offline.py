@@ -146,14 +146,22 @@ _INCLUDE_ARG = re.compile(r"^\$\{(CMAKE_SOURCE_DIR|CMAKE_CURRENT_SOURCE_DIR|CMAK
 # Files the test tree includes (test/CMakeLists.txt and its include chain),
 # per checkout; set by check().
 _TEST_CHAIN: dict[Path, set[str]] = {}
+_INCLUDE_ANCESTORS: dict[tuple[Path, str | None], dict[str, set[str]]] = {}
 
 
-def _included(root: Path, path: str, top_level_only: bool) -> list[str]:
+def _included(root: Path, path: str, top_level_only: bool, ref: str | None = None) -> list[str]:
     """Repo paths ``path`` includes with a literal include() argument."""
-    try:
-        text = (root / path).read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return []
+    if ref is None:
+        try:
+            text = (root / path).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return []
+    else:
+        result = subprocess.run(["git", "-C", str(root), "show", f"{ref}:{path}"],
+                                capture_output=True, text=True, encoding="utf-8")
+        if result.returncode:
+            return []
+        text = result.stdout
     calls = registrations.calls(text)
     registrations._blocks(calls)
     here = os.path.dirname(path)
@@ -195,6 +203,43 @@ def source_dir_of(path: str, root: Path | None = None) -> str | None:
     if path.startswith("test/cmake/") and (root is None or path in test_chain(root)):
         return "test"
     return None
+
+
+def include_ancestor_map(root: Path, ref: str | None = None) -> dict[str, set[str]]:
+    """Map each test-tree CMake file to the files that include it."""
+    key = (root, ref)
+    if key in _INCLUDE_ANCESTORS:
+        return _INCLUDE_ANCESTORS[key]
+    parents: dict[str, set[str]] = {}
+    seen: set[str] = set()
+    stack = ["test/CMakeLists.txt"]
+    while stack:
+        path = stack.pop()
+        if path in seen:
+            continue
+        seen.add(path)
+        for child in _included(root, path, False, ref):
+            parents.setdefault(child, set()).add(path)
+            if child not in seen:
+                stack.append(child)
+
+    ancestors: dict[str, set[str]] = {}
+    for target in seen:
+        ancestors[target] = {target}
+        stack = [target]
+        while stack:
+            path = stack.pop()
+            for parent in parents.get(path, ()):
+                if parent not in ancestors[target]:
+                    ancestors[target].add(parent)
+                    stack.append(parent)
+    _INCLUDE_ANCESTORS[key] = ancestors
+    return ancestors
+
+
+def include_ancestors(root: Path, target: str, ref: str | None = None) -> set[str]:
+    """CMake files whose include chain reaches ``target`` in the test tree."""
+    return include_ancestor_map(root, ref).get(target, {target})
 
 
 def _file_sets(calls: list[registrations.Call]) -> dict[str, list[str]]:
@@ -422,7 +467,7 @@ def _paths(rec: dict) -> set[str]:
 
 # -- script tests ----------------------------------------------------------
 
-def check_script_tests(root: Path, changed: set[str], doc: dict, report: Report,
+def check_script_tests(root: Path, base: str, changed: set[str], doc: dict, report: Report,
                        regs: dict[str, list[Registration]]) -> None:
     tests = doc.get("tests") or {}
     changed_cmake = {f for f in changed if f.endswith((".cmake", "CMakeLists.txt"))}
@@ -431,6 +476,15 @@ def check_script_tests(root: Path, changed: set[str], doc: dict, report: Report,
     for name, rec in sorted(tests.items()):
         mine = regs.get(name) or []
         via_cmake = {r.path for r in mine} & changed_cmake
+        include_changes = set().union(*(
+            include_ancestors(root, r.path) | include_ancestors(root, r.path, base)
+            for r in mine))
+        include_changes &= changed_cmake
+        include_changes -= via_cmake
+        if include_changes:
+            report.not_checked.append(
+                f"{name}: its CMake include chain changed ({', '.join(sorted(include_changes))}); "
+                "the configure decides whether it is registered")
         selected = bool(sti.touched_by(changed, _paths(rec)) or via_cmake)
         where = f"tests/{store.slug(name)}.json"
         if (rec.get("entry") or "").startswith(sti.BINARY_DIR_TOKEN):
@@ -921,6 +975,8 @@ def check(root: Path, base: str, head: str = "HEAD") -> Report:
     # The tree may have moved since the last call.
     _PARSED.pop(root, None)
     _TEST_CHAIN.pop(root, None)
+    for key in [key for key in _INCLUDE_ANCESTORS if key[0] == root]:
+        _INCLUDE_ANCESTORS.pop(key, None)
     _SIGNALS.clear()
     if head != "HEAD":
         tip = _git(root, "rev-parse", "HEAD").strip()
@@ -948,7 +1004,7 @@ def check(root: Path, base: str, head: str = "HEAD") -> Report:
     test_chain(root)
     doc = (store.load_ref(root, head) if head != "HEAD" else store.load(root)) or {}
     regs = script_registrations(root)
-    check_script_tests(root, changed, doc, report, regs)
+    check_script_tests(root, base, changed, doc, report, regs)
     check_executables(root, base, head, changed, doc, report)
     check_new_executables(root, base, head, changed, doc, report)
     touched = sorted(f for f in changed if f in GENERATOR_FILES)
