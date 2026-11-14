@@ -556,6 +556,12 @@ into the same host buffer. Do not "fix" a dry path that stays undelayed beside
 an echo node; that is the contract. See `docs/reference/signal-graph.md`
 (latency semantics) and `pulp/host/graph_rt_report.hpp`.
 
+A custom node that oversamples its own work declares the oversampler's delay
+through `pulp/host/custom_node_oversampling.hpp`, which derives the declaration
+and the oversampler setup from one spec. Only the linear-phase kind has a
+constant delay to declare; the helper refuses the minimum-phase kinds, so do not
+declare a guessed number for them.
+
 The timeline binding builds on this to schedule compensated event streams; the
 contract, including why an event-to-audio device contributes nothing to the
 shift, is `docs/policies/event-stream-pdc.md`.

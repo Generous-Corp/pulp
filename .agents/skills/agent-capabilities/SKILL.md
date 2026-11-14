@@ -2142,3 +2142,10 @@ fingerprint, run `agent_capability_manifest.py --check`, copy the digest it
 prints as `got sha256:...` into the entry, then run `--write`. Stage the new
 `docs/status/agent-capability-surface/headers/...json` fragment, which `--write`
 creates untracked.
+
+A new `pulp/host/` header needs one more step: name it in
+`REVIEWED_HOST_HEADERS` (`agent_capability_surface.py`) and in the target table
+in `agent_capability_registry.py`, or it is never reviewed. Do not hand-bump
+`SURFACE_INVENTORY_VERSION`; run `agent_capability_rederive.py`, which leaves it
+at the base value for the post-merge assignment, and `--check` then reads fresh.
+`pulp/host/custom_node_oversampling.hpp` was added this way.
