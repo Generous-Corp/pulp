@@ -25,6 +25,16 @@ Processor's `process_block()`.
 one block with a partitioned render and an independent sample recurrence, and
 plants missing-edge and swapped-index failures. Its v4 and v5 emit modes also
 exercise the graph persistence boundary.
+Its installed-SDK test is labelled `slow`, so only the nightly full build runs
+it; it does not gate a PR.
+
+Gotchas: every node constructor must call `detail::populate_named_ports()`
+(`signal_graph_ports_internal.hpp`), because the numeric `connect()` kind guard
+and the serializer index `input_ports` / `output_ports` by port number; trigger
+nodes once skipped it and crashed numeric connect. Read the next block's epoch
+and start from `control_index_position()`, and expect prepare or a prepared-edit
+commit to reset it to epoch 1, cursor 0. `control_index_nodes.cpp` is part of
+the curated sample-region web source list, because authoring calls into it.
 
 ## Opt-in isolated CLAP processing
 
