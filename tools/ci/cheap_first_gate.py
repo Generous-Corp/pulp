@@ -76,7 +76,11 @@ def classify_run(name: str, runs: list[dict]) -> CheckState:
     ]
     if not own:
         return CheckState(name, "absent")
-    newest = max(own, key=lambda r: (r.get("started_at") or "", r.get("id") or 0))
+    # A queued rerun has no started_at yet.  created_at is present as soon as
+    # GitHub creates the run, so order by it first and use the monotonic run id
+    # as the tie breaker.
+    newest = max(own, key=lambda r: (r.get("created_at") or r.get("started_at") or "",
+                                     r.get("id") or 0))
     url = newest.get("html_url") or ""
     if newest.get("status") != "completed":
         return CheckState(name, "pending", url=url)
@@ -148,28 +152,23 @@ def run_gate(
 ) -> tuple[str, list[CheckState]]:
     """Poll until a decision; return (verdict, final states).
 
-    A check already seen terminal is not read again, so a run costs a handful
-    of API reads per check, not one per poll.
+    Every poll refreshes both check names. A terminal run can be superseded by
+    a rerun on the same head, and that newer result must be observed before the
+    native matrix starts.
     """
     start = clock()
-    final: dict[str, CheckState] = {}
     states: list[CheckState] = []
     while True:
         elapsed = clock() - start
         states = []
         read_failed = False
         for name in CHEAP_CHECKS:
-            if name in final:
-                states.append(final[name])
-                continue
             try:
                 state = classify_run(name, fetch(name))
             except (urllib.error.URLError, OSError, ValueError) as exc:
                 log(f"cheap-first: could not read {name!r}: {exc}")
                 read_failed = True
                 state = CheckState(name, "pending")
-            if state.state in ("red", "green", "void"):
-                final[name] = state
             states.append(state)
         verdict = decide(states, elapsed=elapsed, absent_grace=absent_grace)
         if verdict == "pass" and read_failed:

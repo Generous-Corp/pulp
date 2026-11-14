@@ -31,9 +31,12 @@ DRIFT, ENFORCE = gate.CHEAP_CHECKS
 
 def run(name: str, status: str = "completed", conclusion: str | None = "success", *,
         run_id: int = 1, started: str = "2026-11-13T10:00:00Z",
+        created: str | None = None,
         app: str = "github-actions") -> dict:
+    if created is None:
+        created = started
     return {"id": run_id, "name": name, "status": status, "conclusion": conclusion,
-            "started_at": started, "html_url": f"https://example/{run_id}",
+            "created_at": created, "started_at": started, "html_url": f"https://example/{run_id}",
             "app": {"slug": app}}
 
 
@@ -82,6 +85,13 @@ class ClassifyTests(unittest.TestCase):
         runs[1].update(status="completed", conclusion="success")
         self.assertEqual(gate.classify_run(DRIFT, runs).state, "green")
 
+    def test_newer_queued_run_wins_without_started_at(self) -> None:
+        runs = [run(DRIFT, conclusion="failure", run_id=1,
+                    created="2026-11-13T10:00:00Z", started="2026-11-13T10:00:01Z"),
+                run(DRIFT, status="queued", conclusion=None, run_id=2,
+                    created="2026-11-13T10:05:00Z", started=None)]
+        self.assertEqual(gate.classify_run(DRIFT, runs).state, "pending")
+
     def test_another_app_cannot_post_a_red_check(self) -> None:
         state = gate.classify_run(DRIFT, [run(DRIFT, conclusion="failure", app="impostor")])
         self.assertEqual(state.state, "absent")
@@ -107,7 +117,14 @@ class GateTests(unittest.TestCase):
         fetch = scripted({DRIFT: [[run(DRIFT)]], ENFORCE: [pending, pending, [run(ENFORCE)]]})
         verdict, _, waited = gate_run(fetch)
         self.assertEqual((verdict, waited), ("pass", 60))
-        self.assertEqual(fetch.calls[DRIFT], 1, "a terminal check is not read again")
+        self.assertEqual(fetch.calls[DRIFT], 3, "terminal checks are refreshed each poll")
+
+    def test_a_terminal_check_can_turn_red_after_first_poll(self) -> None:
+        pending = [run(ENFORCE, status="in_progress", conclusion=None)]
+        fetch = scripted({DRIFT: [[run(DRIFT)], [run(DRIFT, conclusion="failure", run_id=2,
+                                                       created="2026-11-13T10:01:00Z")]],
+                          ENFORCE: [pending]})
+        self.assertEqual(gate_run(fetch, deadline=60, grace=0)[0], "block")
 
     def test_a_red_check_blocks_without_waiting_for_the_other(self) -> None:
         pending = [run(ENFORCE, status="queued", conclusion=None)]
