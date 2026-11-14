@@ -124,7 +124,10 @@ bank now handles member and manager CC64 sustain, scoped CC120/121/123,
 generation-scoped release, and member-channel pitch, pressure, and CC74
 expression. Manager expression returns `UnsupportedExpression`. Its A1 scalar
 fixture uses a fixed `1/sqrt(8)` eight-slot stereo sum and four in-slot linear
-release frames. Saved-bank activation, edit/undo, DAW adapters, and paced
+release frames. `VoiceBankIdleSkip::SkipInactiveSlots` (last `prepare` argument, off
+by default) skips idle slots once they have produced confirmed silence; it is
+safe only for voices with no free-running state, see "Skipping idle voices" in
+`docs/guides/graph-voice-binding.md`. Saved-bank activation, edit/undo, DAW adapters, and paced
 realtime qualification remain open; do not infer them from the source-installed
 consumer.
 
