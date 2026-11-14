@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.24)
+project(GraphFileReloadConsumer LANGUAGES CXX)
+find_package(Pulp CONFIG REQUIRED COMPONENTS host)
+add_executable(graph-file-reload-consumer main.cpp)
+target_link_libraries(graph-file-reload-consumer PRIVATE Pulp::host)
+target_compile_features(graph-file-reload-consumer PRIVATE cxx_std_20)

@@ -397,7 +397,7 @@ NodeId SignalGraph::add_processor_node(std::shared_ptr<format::ProcessorNodeInst
         return 0;
     }
     GraphNode node;
-    node.id = next_id_++;
+    node.id = next_id_;
     node.type = NodeType::Plugin;
     node.name = name.empty() ? descriptor.name : name;
     node.num_input_ports = inputs;
@@ -409,7 +409,10 @@ NodeId SignalGraph::add_processor_node(std::shared_ptr<format::ProcessorNodeInst
     node.plugin_info.num_outputs = outputs;
     const NodeId id = node.id;
     try {
-        processor_nodes_.emplace(id, std::make_shared<ProcessorNodeLifetime>(std::move(instance)));
+        auto lifetime = std::make_shared<ProcessorNodeLifetime>(std::move(instance));
+        if (!lifetime->owns_lifecycle())
+            return 0;
+        processor_nodes_.emplace(id, std::move(lifetime));
         detail::populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
         // MIDI is node-scoped; these handles do not consume or renumber audio buses.
         if (descriptor.accepts_midi)
@@ -419,6 +422,7 @@ NodeId SignalGraph::add_processor_node(std::shared_ptr<format::ProcessorNodeInst
             node.output_ports.push_back({id, 0, true, "midi", PortKind::Midi,
                                          diagnostic_graph_identity_, authoring_generation_ + 1});
         nodes_.push_back(std::move(node));
+        ++next_id_;
     } catch (...) {
         processor_nodes_.erase(id);
         return 0;
@@ -1160,16 +1164,39 @@ std::vector<NodeId> SignalGraph::processing_order() const {
 
 namespace pulp::host {
 
-PortHandle GraphNode::in(std::string_view port) const {
-    for (const auto& p : input_ports)
+namespace {
+
+// An exact port name wins. Otherwise "midi" is an alias for the node's single
+// MIDI port, so a MIDI boundary (whose port keeps its first-port name "audio")
+// is addressable the same way as a Processor's "midi" port. A node with zero or
+// several MIDI ports has no alias; the lookup then fails as an unknown port.
+const PortHandle* find_named_port(const std::vector<PortHandle>& ports, std::string_view port) {
+    for (const auto& p : ports)
         if (p.name == port)
-            return p;
+            return &p;
+    if (port != "midi")
+        return nullptr;
+    const PortHandle* midi = nullptr;
+    for (const auto& p : ports) {
+        if (p.kind != PortKind::Midi)
+            continue;
+        if (midi)
+            return nullptr;
+        midi = &p;
+    }
+    return midi;
+}
+
+} // namespace
+
+PortHandle GraphNode::in(std::string_view port) const {
+    if (const auto* p = find_named_port(input_ports, port))
+        return *p;
     return PortHandle{id, 0, false, std::string(port), PortKind::Audio};
 }
 PortHandle GraphNode::out(std::string_view port) const {
-    for (const auto& p : output_ports)
-        if (p.name == port)
-            return p;
+    if (const auto* p = find_named_port(output_ports, port))
+        return *p;
     return PortHandle{id, 0, true, std::string(port), PortKind::Audio};
 }
 

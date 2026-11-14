@@ -127,8 +127,12 @@ the qualification scope described below.
 - Extend callback-resource evidence beyond the C++ `new` probe (activation,
   reset and 300 callbacks): it is not a malloc interposer, lock/I/O audit or
   timing receipt.
-- Add notation/catalog authoring coverage. Runtime infrastructure registry rows
-  deliberately do not claim a generator-facing spectral capability.
+- Add notation authoring coverage. The patch catalog now lists the spectral
+  constructors as typed-API-only rows and notation refuses them with the owning
+  constructor; persistence and notation spelling wait on the owner decisions in
+  [`G-10-notation-and-codec-source-proposal.md`](G-10-notation-and-codec-source-proposal.md).
+  Runtime infrastructure registry rows deliberately do not claim a
+  generator-facing spectral capability.
 - Preserve runtime-only save/load/bake refusal; offline codec work belongs to
   its separate admitted slice and never executes in the callback.
 

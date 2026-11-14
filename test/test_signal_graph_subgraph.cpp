@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/signal_graph_subgraph.hpp>
+#include <pulp/host/subgraph_persistence.hpp>
 #include <pulp/host/voice_identity.hpp>
 #include <pulp/format/processor.hpp>
 
@@ -482,4 +483,224 @@ TEST_CASE("G4 voice bank fixture expands eight slots with stable exposed identit
     stale.instance_identity = "voice-bank.other";
     CHECK_FALSE(restore_subgraph_state(graph, slots.at(3), stale));
     CHECK(graph.node_gain(slots.at(3).parameter_nodes.at("gain")) == 0.25f);
+}
+
+namespace {
+
+struct PersistedRack {
+    SignalGraph graph;
+    std::vector<SubgraphInstance> instances;
+    std::string document;
+};
+
+// Two top-level instances (one nested), a node outside any instance, and an
+// edge composed through exposed ports.
+void build_rack(PersistedRack& rack) {
+    auto voice = instantiate_subgraph(rack.graph, gain_template(), "voice.a", 1);
+    auto nested = instantiate_subgraph(rack.graph, nested_gain_template(), "rack.b", 2);
+    REQUIRE(voice);
+    REQUIRE(nested);
+    auto voice_state = voice.instance.save_state();
+    voice_state.parameters.at("gain") = 0.5f;
+    REQUIRE(restore_subgraph_state(rack.graph, voice.instance, voice_state));
+    auto nested_state = nested.instance.save_state();
+    nested_state.parameters.at("filter.gain") = 1.5f;
+    REQUIRE(restore_subgraph_state(rack.graph, nested.instance, nested_state));
+    REQUIRE(rack.graph.add_gain_node("loose") != 0);
+    rack.instances = {voice.instance, nested.instance};
+    rack.document = to_saved_subgraph_document(rack.graph, rack.instances);
+    REQUIRE_FALSE(rack.document.empty());
+}
+
+std::vector<SubgraphTemplate> rack_templates() {
+    return {gain_template(), nested_gain_template()};
+}
+
+// Tamper with the first match inside the subgraph records only, so a value
+// that also appears in the flattened graph payload is never touched.
+std::string replaced(std::string text, const std::string& from, const std::string& to) {
+    const auto records = text.find("\"subgraphs\"");
+    REQUIRE(records != std::string::npos);
+    const auto at = text.find(from, records);
+    REQUIRE(at != std::string::npos);
+    text.replace(at, from.size(), to);
+    return text;
+}
+
+// A refused load leaves no graph behind and no instance handles.
+void require_refused(const std::string& document, const std::string& rule) {
+    SignalGraph graph;
+    const auto templates = rack_templates();
+    const auto loaded = from_saved_subgraph_document(graph, document, templates);
+    INFO(loaded.load.error);
+    CHECK_FALSE(loaded.ok());
+    CHECK(loaded.load.error.find(rule) != std::string::npos);
+    CHECK(loaded.subgraphs.empty());
+    CHECK(graph.nodes().empty());
+}
+
+} // namespace
+
+TEST_CASE("saved subgraph document restores instances with stable identities") {
+    PersistedRack rack;
+    build_rack(rack);
+    const auto inspection = GraphSerializer::inspect_document(rack.document);
+    REQUIRE(inspection.ok());
+
+    SignalGraph restored;
+    const auto templates = rack_templates();
+    const auto loaded = from_saved_subgraph_document(restored, rack.document, templates);
+    REQUIRE(loaded.ok());
+    REQUIRE(loaded.subgraphs.size() == 2);
+    CHECK(restored.nodes().size() == rack.graph.nodes().size());
+
+    const auto& nested = loaded.subgraphs[0];
+    const auto& voice = loaded.subgraphs[1];
+    CHECK(nested.instance_identity == "rack.b");
+    CHECK(nested.template_identity == "test.rack");
+    CHECK(nested.instance_index == 2);
+    CHECK(nested.child_template_identities.at("filter") == "test.gain");
+    CHECK(nested.child_instance_indices.at("filter") == 4);
+    CHECK(nested.parameters.at("filter.gain") == 1.5f);
+    CHECK(restored.node(nested.parameter_nodes.at("filter.gain"))->gain == 1.5f);
+    CHECK(restored.node(nested.nodes.front())->name == "rack.b.filter.in");
+    CHECK(voice.instance_identity == "voice.a");
+    CHECK(voice.instance_index == 1);
+    CHECK(voice.parameters.at("gain") == 0.5f);
+    CHECK(restored.node(voice.parameter_nodes.at("gain"))->gain == 0.5f);
+    CHECK(voice.parameter_bounds.at("gain").maximum == 2.0f);
+
+    // Restored handles are live: ports compose and state restores in place.
+    REQUIRE(connect_subgraph_ports(restored, voice, "input", nested, "output"));
+    auto mutable_voice = voice;
+    auto state = mutable_voice.save_state();
+    state.parameters.at("gain") = 0.25f;
+    REQUIRE(restore_subgraph_state(restored, mutable_voice, state));
+    CHECK(restored.node(mutable_voice.parameter_nodes.at("gain"))->gain == 0.25f);
+
+    // Re-saving the untouched restore reproduces the same semantic identity.
+    SignalGraph again;
+    const auto reload = from_saved_subgraph_document(again, rack.document, templates);
+    REQUIRE(reload.ok());
+    const auto resaved = to_saved_subgraph_document(again, reload.subgraphs);
+    REQUIRE_FALSE(resaved.empty());
+    const auto reinspected = GraphSerializer::inspect_document(resaved);
+    REQUIRE(reinspected.ok());
+    CHECK(reinspected.document.semantic_digest() == inspection.document.semantic_digest());
+
+    // The flattened graph stays loadable by the plain saved-document reader.
+    SignalGraph flat;
+    CHECK(GraphSerializer::from_saved_document(flat, rack.document).ok);
+    CHECK(flat.nodes().size() == rack.graph.nodes().size());
+}
+
+TEST_CASE("saved subgraph document refuses unknown or duplicate templates before mutation") {
+    PersistedRack rack;
+    build_rack(rack);
+    SignalGraph graph;
+    const auto existing = graph.add_gain_node("existing");
+    REQUIRE(existing != 0);
+
+    const std::vector<SubgraphTemplate> missing = {gain_template()};
+    const auto unknown = from_saved_subgraph_document(graph, rack.document, missing);
+    CHECK_FALSE(unknown.ok());
+    CHECK(unknown.load.error.find("subgraph_template_unknown") != std::string::npos);
+    CHECK(graph.nodes().size() == 1);
+    CHECK(graph.node(existing) != nullptr);
+
+    const std::vector<SubgraphTemplate> duplicated = {gain_template(), gain_template(),
+                                                      nested_gain_template()};
+    const auto duplicate = from_saved_subgraph_document(graph, rack.document, duplicated);
+    CHECK_FALSE(duplicate.ok());
+    CHECK(duplicate.load.error.find("subgraph_template_duplicate") != std::string::npos);
+    CHECK(graph.nodes().size() == 1);
+}
+
+TEST_CASE("saved subgraph inspection refuses dangling, shared, and malformed records") {
+    PersistedRack rack;
+    build_rack(rack);
+    const auto dangling_member =
+        replaced(rack.document, "\"node:gain:voice.a.gain:0\"", "\"node:gain:voice.a.missing:0\"");
+    CHECK(GraphSerializer::inspect_document(dangling_member).refusal ==
+          GraphDocumentRefusal::SubgraphBindingDangling);
+    require_refused(dangling_member, "subgraph_binding_dangling");
+
+    const auto shared = replaced(rack.document, "\"node:audio_in:rack.b.filter.in:0\"",
+                                 "\"node:audio_in:voice.a.in:0\"");
+    CHECK(GraphSerializer::inspect_document(shared).refusal ==
+          GraphDocumentRefusal::SubgraphBindingDuplicate);
+    require_refused(shared, "subgraph_binding_duplicate");
+
+    const auto malformed = replaced(rack.document, "\"gain\": 0.5", "\"gain\": \"loud\"");
+    CHECK(GraphSerializer::inspect_document(malformed).refusal ==
+          GraphDocumentRefusal::SubgraphRecordInvalid);
+    require_refused(malformed, "subgraph_record_invalid");
+
+    const auto twin = replaced(rack.document, "\"instance_identity\": \"voice.a\"",
+                               "\"instance_identity\": \"rack.b\"");
+    CHECK(GraphSerializer::inspect_document(twin).refusal ==
+          GraphDocumentRefusal::SubgraphBindingDuplicate);
+}
+
+TEST_CASE("saved subgraph restore refuses records that do not match their template") {
+    PersistedRack rack;
+    build_rack(rack);
+
+    // A renamed instance no longer matches the nested node names it owns.
+    require_refused(replaced(rack.document, "\"instance_identity\": \"voice.a\"",
+                             "\"instance_identity\": \"voice.z\""),
+                    "subgraph_instance_mismatch");
+    // Nested child identity and index are bound, not advisory.
+    require_refused(replaced(rack.document, "\"template_identity\": \"test.gain\",\n",
+                             "\"template_identity\": \"test.other\",\n"),
+                    "subgraph_instance_mismatch");
+    require_refused(replaced(rack.document, "\"instance_index\": 4", "\"instance_index\": 5"),
+                    "subgraph_instance_mismatch");
+    // Restoring under a different template identity is a different expansion.
+    require_refused(replaced(rack.document, "\"template_identity\": \"test.rack\"",
+                             "\"template_identity\": \"test.gain\""),
+                    "subgraph_instance_mismatch");
+    // Declared values are bounded by the template, not by the document.
+    require_refused(replaced(rack.document, "\"gain\": 0.5", "\"gain\": 9.0"),
+                    "subgraph_state_rejected");
+    require_refused(replaced(rack.document, "\"gain\": 0.5", "\"gain\": 0.5,\n \"extra\": 1.0"),
+                    "subgraph_state_rejected");
+}
+
+TEST_CASE("saved subgraph restore refuses an instance whose internal edges changed") {
+    PersistedRack rack;
+    build_rack(rack);
+    const auto& voice = rack.instances[0];
+    REQUIRE(rack.graph.disconnect(voice.nodes[0], 0, voice.nodes[1], 0));
+    const auto edited = to_saved_subgraph_document(rack.graph, rack.instances);
+    REQUIRE_FALSE(edited.empty());
+    require_refused(edited, "internal edges");
+}
+
+TEST_CASE("saved subgraph writer refuses stale, foreign, and duplicate instances") {
+    PersistedRack rack;
+    build_rack(rack);
+    auto duplicate = rack.instances;
+    duplicate[1].instance_identity = duplicate[0].instance_identity;
+    CHECK(to_saved_subgraph_document(rack.graph, duplicate).empty());
+
+    auto shared = rack.instances;
+    shared[1].nodes.push_back(shared[0].nodes.front());
+    CHECK(to_saved_subgraph_document(rack.graph, shared).empty());
+
+    SignalGraph foreign;
+    CHECK(to_saved_subgraph_document(foreign, rack.instances).empty());
+
+    REQUIRE(rack.graph.remove_node(rack.instances[0].nodes.back()));
+    CHECK(to_saved_subgraph_document(rack.graph, rack.instances).empty());
+}
+
+TEST_CASE("subgraph records require the saved-identity envelope") {
+    // A legacy graph is already refused for its missing identity; a document
+    // admitted under another identity profile must not carry records either.
+    const std::string profile = R"({"document_schema": "pulp.graph.authored-io-gain.v1")";
+    REQUIRE(GraphSerializer::inspect_document(profile + "}").ok());
+    const auto inspection = GraphSerializer::inspect_document(profile + R"(, "subgraphs": []})");
+    CHECK_FALSE(inspection.ok());
+    CHECK(inspection.refusal == GraphDocumentRefusal::SubgraphRecordInvalid);
 }

@@ -577,6 +577,8 @@ struct ParameterObservation {
     std::vector<std::vector<std::pair<int, float>>> blocks;
     bool overflow_refused = false;
     std::size_t retained_prefix = 0;
+    bool counters_read = false;
+    pulp::host::SignalGraph::ParameterMailboxCounters counters;
 };
 
 ParameterObservation render_parameter_mailbox(std::size_t frames) {
@@ -621,6 +623,7 @@ ParameterObservation render_parameter_mailbox(std::size_t frames) {
     for (std::size_t i = 0; i <= overflowing.capacity(); ++i)
         (void)overflowing.push({.param_id = id, .sample_offset = 0, .value = 0.3f});
     observation.overflow_refused = !graph.inject_parameter_events(plugin, overflowing);
+    observation.counters_read = graph.parameter_mailbox_counters(plugin, observation.counters);
     graph.process(out, in, static_cast<int>(frames));
 
     check(probe->block_count() == 4 && !probe->dropped(), "parameter-mailbox-block-count");
@@ -648,6 +651,11 @@ void parameter_mailbox_controls(const ParameterObservation& obs) {
     check(obs.overflow_refused, "parameter-mailbox-source-overflow-refusal");
     check(obs.retained_prefix == pulp::host::ParameterEventQueue::kCapacity,
           "parameter-mailbox-retained-prefix");
+    // Four batches were published; only the last overflowed, losing the one
+    // push its source queue refused.
+    check(obs.counters_read && obs.counters.published == 4 && obs.counters.overflowed == 1 &&
+              obs.counters.dropped_events == 1,
+          "parameter-mailbox-overflow-counters");
 }
 
 // ── Voice intent through the installed voice-bank binding ──────────────────

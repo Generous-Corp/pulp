@@ -721,6 +721,7 @@ GraphRuntimeExecutorErrorCode run_routed_node(
     context.node_midi_in = midi != nullptr ? midi->in(node_index) : nullptr;
     context.node_midi_out = midi != nullptr ? midi->out(node_index) : nullptr;
     context.node_mpe_in = midi != nullptr ? midi->mpe_in(node_index) : nullptr;
+    context.node_events_incomplete = midi != nullptr && midi->in_incomplete(node_index);
     context.node_param_events = automation != nullptr ? automation->events(node_index) : nullptr;
     context.node_audio_rate_modulations = {};
     if (automation != nullptr &&

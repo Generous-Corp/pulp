@@ -71,6 +71,73 @@ TEST_CASE("Named MIDI ports preserve audio buses and true routing", "[host][patc
     g->remove_node(v);
     REQUIRE(g->connect(source, sink).code == GraphResult::Code::UnknownNode);
 }
+TEST_CASE("Port alias midi names a node's single MIDI port", "[host][patch][named-midi]") {
+    GraphPatchCatalog c;
+    register_patch_gain(c);
+    auto g = c.make_graph();
+    const auto m = g->add_midi_input_node("m");
+    const auto v = c.instantiate(*g, "com.example.PatchGain", 1, "v");
+    const auto out = g->add_midi_output_node("out");
+    const auto in = g->add_input_node(2, "in");
+
+    // The MIDI boundary's real port keeps its name; the alias resolves to it.
+    const auto alias_source = g->node(m)->out("midi");
+    REQUIRE(alias_source.name == "audio");
+    REQUIRE(alias_source.kind == PortKind::Midi);
+    REQUIRE(g->connect(alias_source, g->node(v)->in("midi")));
+    REQUIRE(g->connections().back().midi);
+    REQUIRE(g->connect(g->node(m)->out("audio"), g->node(v)->in("midi")).code ==
+            GraphResult::Code::Duplicate);
+    REQUIRE(g->connect(g->node(v)->out("midi"), g->node(out)->in("midi")));
+
+    // Refusal: a node without a MIDI port has no alias.
+    REQUIRE(g->node(in)->out("midi").kind == PortKind::Audio);
+    REQUIRE(g->connect(g->node(in)->out("midi"), g->node(v)->in("audio")).code ==
+            GraphResult::Code::UnknownPort);
+
+    // Refusal: two MIDI ports make the alias ambiguous, so it resolves to neither.
+    CustomNodeType two;
+    two.type_id = "pulp.test.two-midi";
+    two.num_input_ports = 2;
+    two.num_output_ports = 1;
+    two.input_ports = {{"notes", PortKind::Midi}, {"clock", PortKind::Midi}};
+    two.output_ports = {{"audio", PortKind::Audio}};
+    two.process = [](pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                     int) {};
+    REQUIRE(g->register_custom_node_type(two));
+    const auto both = g->add_custom_node("pulp.test.two-midi");
+    REQUIRE(both != 0);
+    REQUIRE(g->node(both)->in("notes").kind == PortKind::Midi);
+    REQUIRE(g->node(both)->in("midi").kind == PortKind::Audio);
+    REQUIRE(g->connect(g->node(m)->out("midi"), g->node(both)->in("midi")).code ==
+            GraphResult::Code::KindMismatch);
+}
+TEST_CASE("Notation accepts the midi port alias and keeps the canonical spelling",
+          "[host][patch][named-midi]") {
+    GraphPatchCatalog c;
+    register_patch_gain(c);
+    const auto canonical = parse_graph_patch(hello(), c);
+    REQUIRE(canonical);
+    const auto aliased = parse_graph_patch(
+        replaced(hello(), "midi.audio >> voice.midi", "midi.midi >> voice.midi"), c);
+    INFO(aliased.diagnostic.message());
+    REQUIRE(aliased);
+    REQUIRE(aliased.graph->connections().size() == canonical.graph->connections().size());
+    REQUIRE(aliased.graph->connections()[0].midi);
+    const auto formatted = format_graph_patch(*aliased.graph, c);
+    REQUIRE(formatted);
+    REQUIRE(formatted.text == format_graph_patch(*canonical.graph, c).text);
+    REQUIRE(formatted.text.find("midi.audio >> voice.midi") != std::string::npos);
+
+    // Refusal: an audio input boundary has no MIDI port, so the alias is unknown.
+    const auto refused = parse_graph_patch(
+        replaced(hello(), "midi.audio >> voice.midi", "input.midi >> voice.midi"), c);
+    REQUIRE_FALSE(refused);
+    REQUIRE_FALSE(refused.graph);
+    REQUIRE(refused.diagnostic.code == Code::UnknownPort);
+    REQUIRE(refused.diagnostic.rule == "unknown port 'midi'");
+    REQUIRE(refused.diagnostic.suggested_fix == "use one of: audio, out1");
+}
 TEST_CASE("Notation graph serialization roundtrip is deterministic", "[host][patch][roundtrip]") {
     GraphPatchCatalog c;
     register_patch_gain(c);
@@ -342,6 +409,10 @@ TEST_CASE("Spectral nodes and frame edges are explicit notation refusals",
     REQUIRE_FALSE(formatted);
     REQUIRE(formatted.diagnostic.code == Code::UnsupportedContract);
     REQUIRE(formatted.diagnostic.rule.find("spectral") != std::string::npos);
+    // GraphSerializer cannot save spectral nodes either, so the fix must not
+    // send the author there.
+    REQUIRE(formatted.diagnostic.suggested_fix.find("GraphSerializer") == std::string::npos);
+    REQUIRE(formatted.diagnostic.suggested_fix.find("add_spectral_") != std::string::npos);
 
     SignalGraph gains;
     const auto a = gains.add_gain_node("a");
@@ -370,4 +441,52 @@ TEST_CASE("Spectral nodes and frame edges are explicit notation refusals",
     const auto edge_result = load_graph_patch_json(choc::json::toString(edged));
     REQUIRE_FALSE(edge_result);
     REQUIRE(edge_result.diagnostic.code == Code::UnsupportedContract);
+}
+
+TEST_CASE("Patch catalog lists spectral constructors as typed-API-only rows",
+          "[host][patch][spectral-notation]") {
+    const auto json = choc::json::parse(GraphPatchCatalog{}.to_json());
+    const struct {
+        const char* key;
+        const char* constructor;
+        const char* input;
+        const char* input_kind;
+    } expected[] = {
+        {"pulp/spectral_analysis", "SignalGraph::add_spectral_analysis", "audio", "audio"},
+        {"pulp/spectral_stage", "SignalGraph::add_spectral_stage", "frames_in", "spectral"},
+        {"pulp/spectral_synthesis", "SignalGraph::add_spectral_synthesis", "frames", "spectral"},
+        {"pulp/spectral_asset_morph", "SignalGraph::add_spectral_asset_morph_v1", "morph",
+         "audio"}};
+    for (const auto& e : expected) {
+        INFO(e.key);
+        bool found = false;
+        for (const auto row : json["types"]) {
+            if (row["type_id"].getString() != e.key)
+                continue;
+            REQUIRE_FALSE(found);
+            found = true;
+            REQUIRE(row["notation_state"].getString() == "unsupported_typed_api_only");
+            REQUIRE(row["constructor"].getString() == e.constructor);
+            REQUIRE(row["probe_identity"]["fft_size"].getInt64() == 256);
+            REQUIRE(row["probe_identity"]["hop"].getInt64() == 64);
+            REQUIRE(row["probe_identity"]["channels"].getInt64() == 1);
+            REQUIRE(row["inputs"].size() == 1);
+            REQUIRE(row["inputs"][0]["name"].getString() == e.input);
+            REQUIRE(row["inputs"][0]["kind"].getString() == e.input_kind);
+            REQUIRE(row["outputs"].size() == 1);
+            const bool synthesis = std::string_view(e.key) == "pulp/spectral_synthesis";
+            REQUIRE(row["outputs"][0]["kind"].getString() ==
+                    std::string(synthesis ? "audio" : "spectral"));
+        }
+        REQUIRE(found);
+
+        // The listed key is discoverable but not constructible from notation;
+        // the refusal names the owning constructor instead of registration.
+        const auto parsed = parse_graph_patch(std::string("# flow 1\nx : \"") + e.key + "\"\n");
+        REQUIRE_FALSE(parsed);
+        REQUIRE(parsed.diagnostic.code == Code::UnsupportedContract);
+        REQUIRE(parsed.diagnostic.line == 2);
+        REQUIRE(parsed.diagnostic.node == "x");
+        REQUIRE(parsed.diagnostic.suggested_fix.find(e.constructor) != std::string::npos);
+    }
 }

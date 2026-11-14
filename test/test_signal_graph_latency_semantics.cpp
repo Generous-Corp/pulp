@@ -4,6 +4,7 @@
 // takes effect only through a re-prepare. Every rendering case runs on both the
 // legacy reference walk and the routed executor.
 
+#include <pulp/host/custom_node_oversampling.hpp>
 #include <pulp/host/graph_rt_report.hpp>
 #include <pulp/host/signal_graph.hpp>
 
@@ -19,6 +20,7 @@
 
 namespace {
 
+using pulp::host::CustomNodeOversampling;
 using pulp::host::CustomNodeType;
 using pulp::host::NodeId;
 using pulp::host::SignalGraph;
@@ -135,6 +137,45 @@ std::int64_t max_connection_delay(const SignalGraph& graph) {
     for (const auto& edge : snapshot->connections)
         worst = std::max(worst, edge.delay_samples);
     return worst;
+}
+
+// A node that runs a real oversampler around an identity callback and declares
+// its latency through the oversampling helper.
+struct OversampledInstance {
+    pulp::signal::OversamplerT<float> oversampler;
+};
+
+CustomNodeType oversampled_type(const char* id, const CustomNodeOversampling& spec) {
+    CustomNodeType t;
+    t.type_id = id;
+    t.version = 1;
+    t.num_input_ports = 1;
+    t.num_output_ports = 1;
+    t.default_name = id;
+    REQUIRE(pulp::host::declare_oversampling_latency(t, spec));
+    t.create = []() -> void* { return new OversampledInstance{}; };
+    t.destroy = [](void* p) { delete static_cast<OversampledInstance*>(p); };
+    t.prepare = [spec](void* p, double sample_rate, int) {
+        pulp::host::configure_oversampler(static_cast<OversampledInstance*>(p)->oversampler, spec,
+                                          sample_rate);
+    };
+    t.process_instance = [](void* p, pulp::audio::BufferView<float>& out,
+                            const pulp::audio::BufferView<const float>& in, int n) {
+        auto& os = static_cast<OversampledInstance*>(p)->oversampler;
+        const float* src = in.channel_ptr(0);
+        float* dst = out.channel_ptr(0);
+        for (int i = 0; i < n; ++i)
+            dst[i] = os.process(src[i], [](float x) { return x; });
+    };
+    return t;
+}
+
+std::size_t peak_index(const std::vector<float>& signal) {
+    std::size_t best = 0;
+    for (std::size_t i = 1; i < signal.size(); ++i)
+        if (std::fabs(signal[i]) > std::fabs(signal[best]))
+            best = i;
+    return best;
 }
 
 } // namespace
@@ -451,4 +492,200 @@ TEST_CASE("A gap-free swap keeps the port equaliser history of an unchanged node
     const auto hits = nonzero_positions(out_block);
     REQUIRE(hits.size() == 1);
     CHECK(hits[0] == static_cast<std::size_t>(kBand - kBlock));
+}
+
+TEST_CASE("Declared oversampling latency matches the oversampler for every factor and quality",
+          "[host][graph][pdc][latency-semantics][oversampling-helper]") {
+    using Quality = pulp::signal::OversamplerT<float>::Quality;
+    struct Row {
+        int factor;
+        Quality quality;
+        int latency;
+    };
+    const std::array<Row, 8> rows = {{{2, Quality::standard, 64},
+                                      {4, Quality::standard, 76},
+                                      {8, Quality::standard, 80},
+                                      {16, Quality::standard, 82},
+                                      {2, Quality::pristine, 192},
+                                      {4, Quality::pristine, 209},
+                                      {8, Quality::pristine, 216},
+                                      {16, Quality::pristine, 219}}};
+    for (const auto& row : rows) {
+        CAPTURE(row.factor, static_cast<int>(row.quality));
+        CustomNodeOversampling spec;
+        spec.factor = row.factor;
+        spec.quality = row.quality;
+        CHECK(pulp::host::oversampling_is_compensable(spec));
+        CHECK(pulp::host::oversampling_latency_samples(spec) == row.latency);
+
+        pulp::signal::OversamplerT<float> oversampler;
+        REQUIRE(pulp::host::configure_oversampler(oversampler, spec, kSampleRate));
+        CHECK(oversampler.latency_samples() == row.latency);
+        CHECK(oversampler.factor_value() == row.factor);
+
+        CustomNodeType type;
+        REQUIRE(pulp::host::declare_oversampling_latency(type, spec));
+        CHECK(type.latency_samples(kSampleRate) == row.latency);
+        CHECK(type.latency_samples(96000.0) == row.latency);
+    }
+}
+
+TEST_CASE("An oversampled node reports artifact latency equal to its measured impulse delay",
+          "[host][graph][pdc][latency-semantics][oversampling-helper]") {
+    for (const int factor : {2, 4}) {
+        for (const bool routed : {false, true}) {
+            CAPTURE(factor, routed);
+            CustomNodeOversampling spec;
+            spec.factor = factor;
+            SignalGraph graph;
+            REQUIRE(graph.register_custom_node_type(oversampled_type("pulp.test.os", spec)));
+            const auto in = graph.add_input_node(1, "In");
+            const auto node = graph.add_custom_node("pulp.test.os", "Oversampled");
+            const auto out = graph.add_output_node(1, "Out");
+            REQUIRE(graph.connect(in, 0, node, 0));
+            REQUIRE(graph.connect(node, 0, out, 0));
+            configure(graph, routed);
+            REQUIRE(graph.prepare(kSampleRate, kBlock));
+
+            const int expected = pulp::host::oversampling_latency_samples(spec);
+            CHECK(graph.latency_samples() == expected);
+            const auto snapshot = graph.prepared_latency_snapshot();
+            REQUIRE(snapshot.has_value());
+            const auto latency = snapshot->node(node);
+            REQUIRE(latency.has_value());
+            CHECK(latency->artifact_latency_samples == expected);
+            CHECK(latency->intentional_delay_samples == 0);
+
+            const auto rendered = render_impulse(graph, 2 * kBlock);
+            CHECK(peak_index(rendered) == static_cast<std::size_t>(expected));
+        }
+    }
+}
+
+TEST_CASE("An oversampled branch stays time-aligned with a parallel dry path",
+          "[host][graph][pdc][latency-semantics][oversampling-helper]") {
+    CustomNodeOversampling spec;
+    spec.factor = 4;
+    const int latency = pulp::host::oversampling_latency_samples(spec);
+    for (const bool routed : {false, true}) {
+        CAPTURE(routed);
+        SignalGraph graph;
+        REQUIRE(graph.register_custom_node_type(oversampled_type("pulp.test.os", spec)));
+        const auto in = graph.add_input_node(1, "In");
+        const auto wet = graph.add_custom_node("pulp.test.os", "Wet");
+        const auto dry = graph.add_gain_node("Dry");
+        const auto out = graph.add_output_node(1, "Out");
+        REQUIRE(graph.connect(in, 0, wet, 0));
+        REQUIRE(graph.connect(in, 0, dry, 0));
+        REQUIRE(graph.connect(wet, 0, out, 0));
+        REQUIRE(graph.connect(dry, 0, out, 0));
+        configure(graph, routed);
+        REQUIRE(graph.prepare(kSampleRate, kBlock));
+
+        CHECK(graph.latency_samples() == latency);
+        const auto snapshot = graph.prepared_latency_snapshot();
+        REQUIRE(snapshot.has_value());
+        pulp::host::Connection dry_edge{};
+        dry_edge.source_node = dry;
+        dry_edge.source_port = 0;
+        dry_edge.dest_node = out;
+        dry_edge.dest_port = 0;
+        CHECK(snapshot->connection_delay(dry_edge) == latency);
+
+        // Timing only: the round trip through the oversampler is a filter, so
+        // the two paths are not expected to null.
+        const auto rendered = render_impulse(graph, 2 * kBlock);
+        const auto peak = peak_index(rendered);
+        CHECK(peak == static_cast<std::size_t>(latency));
+        CHECK(rendered[peak] > 1.5f);
+    }
+}
+
+TEST_CASE("Oversampling with a frequency-dependent delay cannot be declared as node latency",
+          "[host][graph][pdc][latency-semantics][oversampling-helper]") {
+    using Kind = pulp::signal::OversamplerT<float>::Kind;
+    for (const Kind kind : {Kind::polyphase_iir, Kind::fir_biquad}) {
+        for (const int factor : {2, 4, 8, 16}) {
+            CAPTURE(static_cast<int>(kind), factor);
+            CustomNodeOversampling spec;
+            spec.kind = kind;
+            spec.factor = factor;
+            CHECK_FALSE(pulp::host::oversampling_is_compensable(spec));
+            CHECK(pulp::host::oversampling_latency_samples(spec) == -1);
+            CustomNodeType type;
+            CHECK_FALSE(pulp::host::declare_oversampling_latency(type, spec));
+            CHECK_FALSE(static_cast<bool>(type.latency_samples));
+        }
+    }
+}
+
+TEST_CASE("Oversampling declaration refuses a type that already declares latency",
+          "[host][graph][pdc][latency-semantics][oversampling-helper]") {
+    CustomNodeOversampling spec;
+    spec.factor = 2;
+
+    CustomNodeType has_latency;
+    has_latency.latency_samples = [](double) { return 5; };
+    CHECK_FALSE(pulp::host::declare_oversampling_latency(has_latency, spec));
+    CHECK(has_latency.latency_samples(kSampleRate) == 5);
+
+    CustomNodeType has_block;
+    has_block.latency_samples_for_block = [](double, int) { return 5; };
+    CHECK_FALSE(pulp::host::declare_oversampling_latency(has_block, spec));
+    CHECK_FALSE(static_cast<bool>(has_block.latency_samples));
+
+    CustomNodeType has_port;
+    has_port.output_port_latency_samples = [](double, int) { return 5; };
+    CHECK_FALSE(pulp::host::declare_oversampling_latency(has_port, spec));
+    CHECK_FALSE(static_cast<bool>(has_port.latency_samples));
+
+    CustomNodeType fresh;
+    CHECK_FALSE(pulp::host::declare_oversampling_latency(fresh, spec, -1));
+    CHECK_FALSE(static_cast<bool>(fresh.latency_samples));
+    CHECK_FALSE(
+        pulp::host::declare_oversampling_latency(fresh, spec, CustomNodeType::kMaxLatencySamples));
+    CHECK_FALSE(static_cast<bool>(fresh.latency_samples));
+
+    // Extra latency adds to the oversampler's own delay.
+    REQUIRE(pulp::host::declare_oversampling_latency(fresh, spec, 10));
+    CHECK(fresh.latency_samples(kSampleRate) == 64 + 10);
+}
+
+TEST_CASE("Factor one declares no latency and adds no alignment delay",
+          "[host][graph][pdc][latency-semantics][oversampling-helper]") {
+    CustomNodeOversampling spec;
+    spec.factor = 1;
+    CHECK(pulp::host::oversampling_is_compensable(spec));
+    CHECK(pulp::host::oversampling_latency_samples(spec) == 0);
+
+    pulp::signal::OversamplerT<float> untouched;
+    CHECK_FALSE(pulp::host::configure_oversampler(untouched, spec, kSampleRate));
+    CHECK(untouched.factor_value() == 2); // default left as it was
+
+    CustomNodeOversampling invalid;
+    invalid.factor = 3;
+    CHECK_FALSE(pulp::host::oversampling_is_compensable(invalid));
+    CHECK(pulp::host::oversampling_latency_samples(invalid) == -1);
+    CHECK_FALSE(pulp::host::configure_oversampler(untouched, invalid, kSampleRate));
+
+    for (const bool routed : {false, true}) {
+        CAPTURE(routed);
+        SignalGraph graph;
+        CustomNodeType type = delay_type("pulp.test.os1", 0, false);
+        type.latency_samples = nullptr;
+        REQUIRE(pulp::host::declare_oversampling_latency(type, spec));
+        REQUIRE(graph.register_custom_node_type(type));
+        const auto in = graph.add_input_node(1, "In");
+        const auto node = graph.add_custom_node("pulp.test.os1", "Factor one");
+        const auto dry = graph.add_gain_node("Dry");
+        const auto out = graph.add_output_node(1, "Out");
+        REQUIRE(graph.connect(in, 0, node, 0));
+        REQUIRE(graph.connect(in, 0, dry, 0));
+        REQUIRE(graph.connect(node, 0, out, 0));
+        REQUIRE(graph.connect(dry, 0, out, 0));
+        configure(graph, routed);
+        REQUIRE(graph.prepare(kSampleRate, kBlock));
+        CHECK(graph.latency_samples() == 0);
+        CHECK(max_connection_delay(graph) == 0);
+    }
 }

@@ -1,7 +1,7 @@
 {
   "domain": "host",
   "source": "core/host/include/pulp/host/signal_graph_runtime.hpp",
-  "fingerprint": "sha256:ec947bf2c739f8c41e28a35feb078a6e797132f4d485d8dc66668487cbd90de5",
+  "fingerprint": "sha256:c605c220032df5ff93a076608c2f7d65efd67ff9a96260741f7d3ade4b76145a",
   "include": "pulp/host/signal_graph_runtime.hpp",
   "disposition": "capability_entrypoint",
   "capability_keys": [

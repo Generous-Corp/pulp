@@ -1,0 +1,11 @@
+{
+ "name": "pulp-test-routed-spectral-allocation-failure",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "sources": [],
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

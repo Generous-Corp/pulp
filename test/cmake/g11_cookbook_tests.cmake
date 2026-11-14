@@ -3,7 +3,7 @@
 # consumer driver; the example's own CMakeLists.txt owns its positive and
 # marker-checked planted-control tests.
 foreach(_entry
-        "graph-named-bus-cookbook|2"
+        "graph-named-bus-cookbook|3"
         "graph-spatial-cookbook|1"
         "g11-tuning-cookbook|3")
     string(REPLACE "|" ";" _parts "${_entry}")

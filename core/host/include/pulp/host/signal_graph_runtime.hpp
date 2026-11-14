@@ -115,6 +115,17 @@ class SignalGraph : public format::AudioWorkgroupClient {
         std::uint64_t refused = 0;
         std::uint64_t overflow = 0;
     };
+    // Source-side telemetry of one PluginSlot node's live parameter mailbox.
+    // `published` counts batches inject_parameter_events() published;
+    // `overflowed` counts those that kept only a prefix (the call returned
+    // false); `dropped_events` sums the events those batches lost. Counts run
+    // from the mailbox's creation: an eager prepare() creates a fresh mailbox,
+    // a prepare_swap() keeps the node's mailbox and its counts.
+    struct ParameterMailboxCounters {
+        std::uint64_t published = 0;
+        std::uint64_t overflowed = 0;
+        std::uint64_t dropped_events = 0;
+    };
     class PreparedTopologyEdit;
     class ExecutionSnapshot;
 
@@ -509,6 +520,12 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // the retained prefix is still published.
     bool inject_parameter_events(NodeId plugin_node, const state::ParameterEventQueue& events);
 
+    // Read a PluginSlot node's live parameter-mailbox counters. Returns false,
+    // leaving `out` untouched, when the graph is unprepared or the node has no
+    // live parameter mailbox. Lock-free relaxed reads; safe from any thread.
+    bool parameter_mailbox_counters(NodeId plugin_node,
+                                    ParameterMailboxCounters& out) const noexcept;
+
     // Drain queued nonempty MIDI blocks from a MidiOutput sink node in process
     // order. Appends to `out`; returns false if bounded egress overflowed, a
     // queued block was already incomplete, or `out` lacks capacity/UMP sidecar
@@ -667,14 +684,14 @@ class SignalGraph : public format::AudioWorkgroupClient {
         std::uint32_t parameter_id = 0;
     };
     // Ordinary/sidechain audio: source before PDC/mixing; feedback: retained input before
-    // current capture, timestamped at receiving block. Attach/detach: stop process() and
-    // pinned-snapshot rendering on the control thread, as for prepare(). Reattachment starts
-    // a fresh 256-record ring and a zero-based sample clock. Reprepare/topology
-    // publication retires the attachment; transport reset detaches it. Serial
-    // routing only; execution-mode changes detach at the next process call.
+    // current capture, stamped at receiving block. Attach/detach may race process(): a displaced
+    // probe is parked (8 per kind; then attach is Busy and detach stops it in place) until no
+    // process() pin or snapshot handle remains, else until reprepare/topology publication.
+    // Fresh 256-record ring at sample 0; transport reset/mode change detaches. Serial only.
     EdgeProbeStatus attach_audio_edge_probe(const PortHandle& source,
                                             const PortHandle& destination);
     void detach_audio_edge_probe();
+    std::size_t parked_edge_probe_count() const; // displaced, not yet reclaimed
     // One control-thread consumer may read concurrently with process(). These
     // methods serialize with other control-thread lifecycle operations.
     bool read_audio_edge_probe(graph::GraphRuntimeProbeSample& sample);
@@ -1142,6 +1159,10 @@ class SignalGraph : public format::AudioWorkgroupClient {
         ParameterBlockSnapshot writer_scratch;
         std::atomic<std::uint64_t> next_sequence{0};
         std::atomic<std::uint64_t> sequence_seen{0};
+        // Written only by the single mailbox writer; read by telemetry.
+        std::atomic<std::uint64_t> published_batches{0};
+        std::atomic<std::uint64_t> overflowed_batches{0};
+        std::atomic<std::uint64_t> dropped_events{0};
     };
 
     struct NodeRuntime {
@@ -1289,17 +1310,26 @@ class SignalGraph : public format::AudioWorkgroupClient {
         RoutedParallel,
     };
 
-    // Private graph-ownership token. Public shared ProcessorNodeInstance handles
-    // may outlive node removal, but they do not extend its prepared lifecycle.
-    // Authoring state and every executable snapshot share this token, so its
-    // final destruction releases only after both ownership domains are gone.
+    // Private graph-ownership token, reserved process-wide per instance: a token
+    // for an already-reserved instance does not own its lifecycle. Authoring state
+    // and every executable snapshot share it, so final destruction releases only
+    // after both domains are gone. Public instance handles never extend it.
     struct ProcessorNodeLifetime {
-        explicit ProcessorNodeLifetime(
-            std::shared_ptr<format::ProcessorNodeInstance> value) noexcept;
+        explicit ProcessorNodeLifetime(std::shared_ptr<format::ProcessorNodeInstance> value);
 
         ~ProcessorNodeLifetime();
+        ProcessorNodeLifetime(const ProcessorNodeLifetime&) = delete;
+        ProcessorNodeLifetime& operator=(const ProcessorNodeLifetime&) = delete;
 
         std::shared_ptr<format::ProcessorNodeInstance> instance;
+        bool owns_lifecycle() const noexcept {
+            return owns_lifecycle_;
+        }
+
+      private:
+        struct Registry;
+        static Registry& registry_();
+        bool owns_lifecycle_ = false;
     };
 
     struct CompiledGraph {
@@ -1515,11 +1545,11 @@ class SignalGraph : public format::AudioWorkgroupClient {
             // only ONE path runs per block.
         };
         RoutedPaths routed;
-        std::unique_ptr<format::GraphRuntimeAudioEdgeProbe> audio_edge_probe;
+        format::EdgeProbeCell<format::GraphRuntimeAudioEdgeProbe> audio_edge_probe;
         EdgeProbeIdentity audio_edge_probe_identity;
-        std::unique_ptr<format::GraphRuntimeControlEdgeProbe> control_edge_probe;
+        format::EdgeProbeCell<format::GraphRuntimeControlEdgeProbe> control_edge_probe;
         EdgeProbeIdentity control_edge_probe_identity;
-        std::unique_ptr<format::GraphRuntimeEventEdgeProbe> event_edge_probe;
+        format::EdgeProbeCell<format::GraphRuntimeEventEdgeProbe> event_edge_probe;
         EdgeProbeIdentity event_edge_probe_identity;
 
         // Anticipative rendering for this snapshot (built only when anticipation is
@@ -2031,6 +2061,9 @@ class SignalGraph : public format::AudioWorkgroupClient {
     static bool
     inject_parameter_events_into_snapshot_(CompiledGraph& snapshot, NodeId id,
                                            const state::ParameterEventQueue& events) noexcept;
+    static void record_parameter_mailbox_publication(ParameterInputMailbox& mailbox,
+                                                     const state::ParameterEventQueue& events,
+                                                     bool copied_all) noexcept;
     // Exact-generation injection into a claimed node's exact mailbox. Fails for
     // any node that is not currently owner-claimed for exact ingress.
     static bool

@@ -35,7 +35,8 @@
       "needles": [
         "Output clock exhaustion stops publication before arithmetic overflows",
         "Routed late synthesis failure preserves prefix and independent sibling",
-        "Spectral render reset and activation allocate no callback storage"
+        "Spectral render reset and activation allocate no callback storage",
+        "Spectral preparation refuses a forged stage cycle with no root"
       ]
     },
     {

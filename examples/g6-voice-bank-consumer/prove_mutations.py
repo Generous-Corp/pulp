@@ -115,7 +115,7 @@ TARGETED_MUTATIONS = {
     ),
     "activate_keeps_epoch": (
         "binding",
-        "    ++impl_->epoch;\n    impl_->ingress.reset(impl_->epoch);",
+        "    impl_->epoch = next_epoch;\n    impl_->ingress.reset(impl_->epoch);",
         "    impl_->ingress.reset(impl_->epoch);",
         "swap-epoch-advanced",
     ),
@@ -162,12 +162,11 @@ TARGETED_MUTATIONS = {
         "VoiceBankBinding& target = *live;",
         "restore-no-active-voices",
     ),
-    "skip_replacement_epoch_advance": (
-        "main",
-        "    while (replacement->epoch() <= retired_epoch)\n"
-        "        check(replacement->activate(status), \"cross-bank-advance-epoch\");\n",
-        "",
-        "cross-bank-retired-token-stale-epoch",
+    "prepare_reuses_first_epoch": (
+        "binding",
+        "    if (!claim_bank_epoch(bank->impl_->epoch)) {",
+        "    bank->impl_->epoch = 1;\n    if (false) {",
+        "cross-bank-epochs-distinct",
     ),
 }
 

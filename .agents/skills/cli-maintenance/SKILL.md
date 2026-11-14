@@ -4319,6 +4319,26 @@ control, and event edge observations. Keep their `edge_kind` and
 fields and codes identical across the public C++ API, CLI and MCP. Application
 Processor registrations belong to the C++ catalog, not the default tool catalog.
 
+Graph and notation load failures print `graph_patch_code_name` verbatim (`Ok`,
+`InvalidDocument`, `FileUnreadable`, ...); never rewrite a code in
+`cmd_graph.cpp` (an earlier `invalid_graph` rewrite made the CLI disagree with
+the C++ API). New CLI-only codes go in the `docs/reference/cli.md` table, and a
+new C++ code needs a row in `test/test_cli_graph_code_parity.cpp`.
+
+### Transactional graph-file development reload
+
+The C++ dev/loop delegate accepts `--graph-file` with an existing enrolled
+`--graph-instance`, consent `--graph-grant` and `--graph-generation`. Reuse
+`SignalGraphControlAuthority`, the product catalog, strict shared parser and
+prepared-edit publication; no extension-only watcher or direct executor bypass.
+The serialized control request stays bounded at 512 KiB. See
+`docs/guides/graph-file-reload.md` for limitations and numeric installed proof.
+
+A bounded watch must own and join its exact launched process group on return.
+Name-based `pkill` can kill another session and leaves child ownership ambiguous.
+Test readiness-to-return time as well as PID exit: a leaked sleeper can otherwise
+exit naturally while inherited pipes keep the test waiting, producing false proof.
+
 ## Standalone drains Program Change from the idle loop
 
 `StandaloneApp` creates a preset library and router when the processor sets
