@@ -47,6 +47,22 @@ TEST_CASE("MapClip retains valid configuration after invalid input", "[signal][m
     REQUIRE(map.process(std::numeric_limits<float>::quiet_NaN()) == 100.0f);
 }
 
+TEST_CASE("MapClip maps non-finite input to the output minimum", "[signal][mod][g5]") {
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+    // Zero lies mid-interval, so zero-substitution would not return 100.
+    MapClip map;
+    REQUIRE(map.configure(-1.0f, 1.0f, 100.0f, 200.0f));
+    REQUIRE(map.process(nan) == 100.0f);
+    REQUIRE(map.process(inf) == 100.0f);
+    REQUIRE(map.process(-inf) == 100.0f);
+    // Zero at/above input_max would map to output_max under zero-substitution.
+    MapClip below;
+    REQUIRE(below.configure(-3.0f, -1.0f, 10.0f, 20.0f));
+    REQUIRE(below.process(nan) == 10.0f);
+    REQUIRE(pulp::signal::map_clip(nan, -1.0f, 1.0f, 100.0f, 200.0f) == 100.0f);
+}
+
 TEMPLATE_TEST_CASE("MapClip keeps extreme finite intervals bounded", "[signal][mod][g5]", float,
                    double) {
     using T = TestType;

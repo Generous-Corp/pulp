@@ -40,8 +40,9 @@ inline SampleType control_clamp(SampleType value, SampleType minimum, SampleType
     return std::clamp(input, std::min(lo, hi), std::max(lo, hi));
 }
 
-/// Pure interval mapping with endpoint clipping. An invalid input interval
-/// returns the finite output minimum, matching MapClipT's safe fallback.
+/// Pure interval mapping with endpoint clipping. An invalid input interval or
+/// a non-finite value returns the finite output minimum, matching MapClipT's
+/// safe fallback.
 template <std::floating_point SampleType>
 inline SampleType map_clip(SampleType value, SampleType input_min, SampleType input_max,
                            SampleType output_min, SampleType output_max) noexcept {
@@ -51,7 +52,9 @@ inline SampleType map_clip(SampleType value, SampleType input_min, SampleType in
     output_max = finite_control_sample(output_max);
     if (!(input_max > input_min))
         return output_min;
-    value = finite_control_sample(value);
+    // A non-finite value keeps MapClipT's historical contract: output minimum.
+    if (!std::isfinite(value))
+        return output_min;
     if (value <= input_min)
         return output_min;
     if (value >= input_max)
