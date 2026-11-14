@@ -243,6 +243,25 @@ TEST_CASE("filters map to content types, keeping extensions the system does not 
     REQUIRE(dynamic >= 1);
 }
 
+TEST_CASE("a filter of only invalid extensions shows no panel instead of allowing every file",
+          "[platform][file-dialog]") {
+    FileDialog::clear_async_backend();
+    MainThreadScope scope;
+    int calls = 0;
+    std::vector<std::string> got{"sentinel"};
+    FileDialog::OpenRequest request;
+    request.filters = {{"Bad", "a b;x/y"}};
+    FileDialog::open_async(scope, nullptr, request, [&](std::vector<std::string> paths) {
+        ++calls;
+        got = std::move(paths);
+    });
+    REQUIRE(pump_until([&] { return calls > 0; }, 1000ms));
+    REQUIRE(got.empty());
+    // Control: the same extensions are not dropped when valid ones accompany them.
+    REQUIRE(FileDialog::content_type_ids_for({{"Bad", "a b;wav"}}).size() == 1);
+    REQUIRE(FileDialog::content_type_ids_for({{"Bad", "a b;x/y"}}).empty());
+}
+
 TEST_CASE("a native open panel is configured from the request and cancels to empty",
           "[platform][file-dialog][native]") {
     OffscreenWindow host;

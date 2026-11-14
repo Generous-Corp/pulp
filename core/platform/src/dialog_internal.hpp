@@ -90,6 +90,13 @@ std::function<void(Result)> make_finisher(MainThreadScope& scope,
 // so the completion is dropped.
 inline void bind_to_scope(MainThreadScope& scope,
                           const std::shared_ptr<DialogSessionState>& state) {
+    // A backend may complete before its closer exists (the completion ran
+    // inline). Nothing is showing then, so there is nothing for scope teardown
+    // to cancel; the finisher's own task releases the rest.
+    if (state->finished.load()) {
+        state->close = nullptr;
+        return;
+    }
     std::weak_ptr<DialogSessionState> weak = state;
     state->teardown_id = scope.add_teardown([weak] {
         if (auto s = weak.lock()) {
