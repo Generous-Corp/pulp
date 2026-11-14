@@ -6,6 +6,7 @@
 #include "fetchcontent_cache.hpp"
 #include "tartci_lease.hpp"
 #include "version_diag.hpp"
+#include "cli_watch_shell.hpp"
 
 #include <algorithm>
 #include <array>
@@ -982,6 +983,13 @@ static std::map<fs::path, fs::file_time_type> snapshot_timestamps(const fs::path
 }
 
 int watch_loop(const WatchOptions& opts) {
+    // Handlers only request a return. Child cancellation, joining and lease
+    // retirement must run in ordinary control flow, never in a signal handler.
+    WatchSignalScope signals;
+    if (!signals.ok()) {
+        std::cerr << "pulp watch: could not install stop handlers\n";
+        return 1;
+    }
     auto loop_lease = TartciAgentBuildLease::acquire({
         opts.root,
         "pulp-watch",
@@ -1000,44 +1008,55 @@ int watch_loop(const WatchOptions& opts) {
     if (opts.run_tests) mode_label += " + test";
     if (opts.run_validate) mode_label += " + validate";
 
-    std::cout << color::cyan() << "Dev loop active" << color::reset()
-              << " (build" << mode_label << ") — Ctrl-C to stop\n";
+    std::cout << color::cyan() << "Dev loop active" << color::reset() << " (build" << mode_label
+              << ") — Ctrl-C to stop\n"
+              << std::flush;
 
     auto previous = snapshot_timestamps(opts.root);
 
-    // Launch the target process if requested
+    // Own the exact launched process group. Destruction cancels and joins it
+    // on bounded return or an exception, as well as during an explicit relaunch.
+    pulp::platform::ChildProcess launched_child;
     auto launch_child = [&]() {
-        if (opts.launch_target.empty()) return;
+        if (requested_watch_stop())
+            return;
+        if (opts.launch_target.empty())
+            return;
         auto binary = fs::path(opts.launch_target);
-        if (!binary.is_absolute()) binary = opts.build_dir / binary;
+        if (!binary.is_absolute())
+            binary = opts.build_dir / binary;
         if (!fs::exists(binary)) {
             std::cerr << "  " << color::yellow() << "Target not found: "
                       << binary.string() << color::reset() << "\n";
             return;
         }
-        std::string cmd = shell_quote(binary);
-        for (auto& arg : opts.launch_args) cmd += " " + shell_quote(arg);
-        cmd += " &";
         std::cout << "  " << color::dim() << "Launching "
                   << binary.filename().string() << "..." << color::reset() << "\n";
-        run(cmd);
+        pulp::platform::ProcessOptions options;
+        options.capture_stdout = false;
+        options.capture_stderr = false;
+        options.working_directory = opts.root.string();
+        if (!launched_child.start(binary.string(), opts.launch_args, options))
+            std::cerr << "  Could not launch " << binary.string() << "\n";
     };
 
-    auto kill_child = [&]() {
-        if (opts.launch_target.empty()) return;
-        auto binary_name = fs::path(opts.launch_target).filename().string();
-#ifdef _WIN32
-        run("taskkill /F /IM " + shell_quote(binary_name) + " 2>nul");
-#else
-        run("pkill -f " + shell_quote(binary_name) + " 2>/dev/null");
-#endif
-    };
+    auto kill_child = [&]() { launched_child.cancel(); };
 
     launch_child();
+    unsigned graph_polls = 0;
 
     for (;;) {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        if (const auto signal = requested_watch_stop())
+            return 128 + signal;
 
+        if (opts.graph_poll) {
+            opts.graph_poll();
+            if (const auto signal = requested_watch_stop())
+                return 128 + signal;
+            if (opts.graph_reload.watch_polls && ++graph_polls >= opts.graph_reload.watch_polls)
+                return 0;
+        }
         auto current = snapshot_timestamps(opts.root);
         bool changed = false;
         std::string first_changed;
@@ -1068,8 +1087,12 @@ int watch_loop(const WatchOptions& opts) {
         for (auto& arg : capped_build.args) build_cmd += " " + arg;
         build_cmd = apply_agent_build_qos(focused_build_command(build_cmd, selection), build_qos, opts.build_qos.empty() && loop_lease.floor());
         build_cmd = apply_agent_build_watchdog(build_cmd, build_jobs, opts.build_watchdog || loop_lease.active());
-        int rc = focused_nothing_to_build(selection) ? 0 : run_with_spinner(
-            apply_build_dir_lock(build_cmd, opts.root, opts.build_dir), "Rebuilding");
+        int rc = focused_nothing_to_build(selection)
+                     ? 0
+                     : run_watch_command(apply_build_dir_lock(build_cmd, opts.root, opts.build_dir),
+                                         "Rebuilding");
+        if (const auto signal = requested_watch_stop())
+            return 128 + signal;
 
         if (rc != 0) {
             std::cout << color::red() << "Build failed." << color::reset()
@@ -1082,7 +1105,7 @@ int watch_loop(const WatchOptions& opts) {
         if (opts.run_tests) {
             std::string test_cmd = "ctest --test-dir " + opts.build_dir.string() + " --output-on-failure";
             const bool run_ctest = focused_test_selection(test_cmd, opts.test_filter, selection, "  ");
-            int trc = run_ctest ? run_with_spinner(test_cmd, "Testing") : 0;
+            int trc = run_ctest ? run_watch_command(test_cmd, "Testing") : 0;
             if (trc != 0) {
                 std::cout << color::red() << "Tests failed." << color::reset()
                           << " Watching for more changes...\n";
@@ -1100,7 +1123,8 @@ int watch_loop(const WatchOptions& opts) {
                     auto name = entry.path().stem().string();
                     std::string dltest = "ctest --test-dir " + opts.build_dir.string()
                                        + " -R dlopen-" + name + " --output-on-failure 2>/dev/null";
-                    if (run(dltest) == 0) print_ok(std::string(dir_name) + ": " + name + " loads OK");
+                    if (run_watch_command(dltest) == 0)
+                        print_ok(std::string(dir_name) + ": " + name + " loads OK");
                     else print_fail(std::string(dir_name) + ": " + name + " failed to load");
                 }
             }
@@ -1109,6 +1133,8 @@ int watch_loop(const WatchOptions& opts) {
         // Relaunch target — UNLESS hot-dsp: there the app stays running and its
         // ReloadableShell watcher hot-swaps the rebuilt logic library live
         // (relaunching would kill the plugin and lose its audio/UI state).
+        if (const auto signal = requested_watch_stop())
+            return 128 + signal;
         if (!opts.launch_target.empty() && opts.hot_dsp) {
             std::cout << color::cyan()
                       << "hot-dsp: rebuilt — running plugin will hot-swap (not relaunching)"

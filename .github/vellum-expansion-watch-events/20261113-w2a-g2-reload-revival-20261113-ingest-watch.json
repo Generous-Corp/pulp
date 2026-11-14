@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261113-w2a-g2-reload-revival-20261113-ingest-watch",
+  "created_at": "2026-11-13T15:35:20Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest"
+  ],
+  "rationale": "The only design-source-ingest path touched is test/cmake/cli_import_tool_tests.cmake, which adds tools/cli/cli_watch_shell.cpp to the pulp-test-cli-project-command source list so the test links after the CLI watch loop moved its shell runner out of cli_common.cpp. No importer, Chromium, rendering, packaging or design-ingest authority or behavior changes.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-cli-project-command",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "authority_effect": "none",
+  "disposition": "watch-only-no-authority"
+}

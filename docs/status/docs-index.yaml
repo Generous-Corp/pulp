@@ -19,6 +19,11 @@ docs:
     summary: Subsystem dependencies, thread model, build system, GPU stack
 
   # Guides
+  - slug: graph-file-reload
+    path: guides/graph-file-reload.md
+    kind: guide
+    summary: Transactional graph-file dev and loop reload through existing catalog and controlled publication
+
   - slug: isolated-clap-worker
     path: guides/isolated-clap-worker.md
     kind: guide

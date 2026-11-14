@@ -24,6 +24,7 @@
    "tools/ci/spawn_none_build_path_reviews.json",
    "tools/cli/CMakeLists.txt",
    "tools/cli/cli_sdk.cpp",
+   "tools/cli/cli_watch_shell.cpp",
    "tools/cmake",
    "tools/cmake/PulpAndroid.cmake",
    "tools/cmake/PulpDependencies.cmake",

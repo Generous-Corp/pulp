@@ -301,6 +301,7 @@ TEST_CASE("control registry projects capability and operation metadata",
     INFO("registry digest: " << registry_digest);
     REQUIRE(registry_digest == kControlRegistryDigest);
     REQUIRE(registry.find("dev.pulp.state/parameter-gesture@1") != std::string::npos);
+    REQUIRE(registry.find("dev.pulp.graph/file.reload@1") != std::string::npos);
     REQUIRE(registry.find("dev.pulp.graph/sample-region.read@1") != std::string::npos);
     REQUIRE(registry.find("dev.pulp.graph/sample-region.edit@1") != std::string::npos);
     REQUIRE(registry.find("offending_connection") != std::string::npos);
@@ -350,7 +351,7 @@ TEST_CASE("control registry projects capability and operation metadata",
             CHECK(operation.receipt_binding.receipt_id_field == "receipt_id");
         }
     }
-    CHECK(receipt_binding_count == 13);
+    CHECK(receipt_binding_count == 14);
     std::set<std::string_view> operation_ids;
     std::set<std::string_view> schema_ids;
     for (const auto& operation : control_operation_registry()) {

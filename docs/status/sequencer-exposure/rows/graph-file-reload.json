@@ -1,0 +1,140 @@
+{
+  "id": "graph-file-reload",
+  "title": "Bounded transactional graph-file reload through existing product control",
+  "classification": "live_product_control",
+  "delivery_state": "pending",
+  "claim_id": "g2-reload-exposure-projections",
+  "owned_paths": [
+    "core/host/include/pulp/host/signal_graph_control.hpp",
+    "core/host/include/pulp/host/graph_file_reload.hpp",
+    "core/host/src/graph_file_reload.cpp",
+    "tools/cli/cli_graph_reload.cpp",
+    "docs/status/sequencer-exposure/rows/graph-file-reload.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/host/src/graph_file_reload.cpp",
+      "needles": [
+        "load_graph_patch_json",
+        "edit_->prepare",
+        "edit_->commit()"
+      ]
+    },
+    {
+      "path": "test/test_control_graph_file_reload_e2e.cpp",
+      "needles": [
+        "revoke_after_publication",
+        "renewal refused"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "The installed host API prepares strict catalog-representable graph replacements and commits through the existing prepared-edit publication boundary; arbitrary node/state contracts remain unsupported.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/graph_file_reload.hpp",
+          "needles": [
+            "GraphFileReloadTransaction"
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "test/cmake/test_graph_file_reload_sdk_consumer.cmake",
+          "needles": [
+            "Installed SDK must come from the clean current commit"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "This adds live graph-file control, not an offline timeline operation. Existing generic control projections use the canonical registry."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "This adds live graph-file control, not an offline timeline operation. Existing generic control projections use the canonical registry."
+    },
+    "live_product_control": {
+      "disposition": "exposed",
+      "rationale": "The existing standalone resolver dispatches strict file reload through the shared executor and main-thread fence. The dev/loop watch supplies an explicit caller grant, renews only its existing lease, and retains old live graph/audio on refusal; no writer profile or alternate executor is created.",
+      "evidence": [
+        {
+          "kind": "capability_definition",
+          "path": "inspect/include/pulp/inspect/capability_definitions.inc",
+          "needles": [
+            "PULP_INSPECT_CAPABILITY(GraphFileReload"
+          ]
+        },
+        {
+          "kind": "operation_definition",
+          "path": "inspect/src/control_manifest.cpp",
+          "needles": [
+            "PULP_RECEIPT_OPERATION(GraphFileReload"
+          ]
+        },
+        {
+          "kind": "executor_binding",
+          "path": "inspect/src/control_standalone_host.cpp",
+          "needles": [
+            "dev.pulp.graph/file.reload@1"
+          ]
+        },
+        {
+          "kind": "profile_policy",
+          "path": "inspect/include/pulp/inspect/capability_definitions.inc",
+          "needles": [
+            "\"graph.file.reload\", \"dev.pulp.graph/file.reload@1\", Control, Authoring, HostMain, Receipt, 0, 1, 1, 0"
+          ]
+        },
+        {
+          "kind": "cli_projection",
+          "path": "tools/cli/cli_graph_reload.cpp",
+          "needles": [
+            "cmd_control",
+            "\"--grant\", options_.grant"
+          ]
+        },
+        {
+          "kind": "mcp_projection",
+          "path": "tools/mcp/mcp_control_tool_catalog.cpp",
+          "needles": [
+            "for (const auto& operation : control_operation_registry())"
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "test/test_control_graph_file_reload_e2e.cpp",
+          "needles": [
+            "Graph file watch publishes through the standalone broker and CLI"
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "test/test_graph_file_reload.cpp",
+          "needles": [
+            "0.375"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "The new public headers are reviewed infrastructure in the canonical capability registry, not a second DSP catalog or an additional design-time capability."
+    }
+  }
+}

@@ -54,6 +54,9 @@ void print_help() {
            "Pair with `shipyard pr` /\n"
            "`pulp pr` at land time to restore full cross-platform validation.\n\n"
            "Options:\n"
+           "  --graph-file FILE      Reload .pat/.pulpgraph through an enrolled live instance\n"
+           "  --graph-instance ID --graph-grant ID --graph-generation N\n"
+           "  --graph-watch-polls N             Stop after 1..120 polls (500 ms each)\n"
            "  --platform=<macos|linux|windows>  Override the auto-detected host platform\n"
            "  --off                             Restore cross-platform mode (clear focus)\n"
            "  --status                          Print the current focus state and exit\n"
@@ -119,6 +122,8 @@ int cmd_loop(const std::vector<std::string>& args) {
     bool allow_unsupported_sdk = false;
     bool examples = false;
     bool no_dev_shared = false;
+    GraphReloadOptions graph_reload;
+    std::string graph_error;
     bool after_separator = false;
     std::string test_filter;
     std::string launch_target;
@@ -142,6 +147,13 @@ int cmd_loop(const std::vector<std::string>& args) {
             continue;
         }
 
+        if (parse_graph_reload_option(args, i, graph_reload, graph_error)) {
+            if (!graph_error.empty()) {
+                std::cerr << graph_error << '\n';
+                return 2;
+            }
+            continue;
+        }
         if (a == "--off") {
             clear_focus = true;
         } else if (a == "--status") {
@@ -203,6 +215,17 @@ int cmd_loop(const std::vector<std::string>& args) {
         } else {
             build_args.push_back(a);
         }
+    }
+
+    // Reject incomplete graph options before any focus state changes.
+    if (!validate_graph_reload_options(graph_reload, graph_error)) {
+        std::cerr << graph_error << '\n';
+        return 2;
+    }
+    if (!graph_reload.file.empty() && (no_watch || status_only || clear_focus)) {
+        std::cerr << "pulp loop: --graph-file needs the watch loop; remove --no-watch, --status "
+                     "and --off\n";
+        return 2;
     }
 
     // ── --status: just print and exit ───────────────────────────────────────
@@ -318,6 +341,11 @@ int cmd_loop(const std::vector<std::string>& args) {
 
     auto build_dir = project_root / "build";
 
+    // Take the graph file's baseline before the initial build, so a save made
+    // while it builds is applied once the watch starts.
+    std::optional<GraphReloadWatch> reload_watch;
+    if (!graph_reload.file.empty())
+        reload_watch.emplace(graph_reload);
     BuildPlan plan({project_root, build_dir, standalone_mode, examples, build_all, build_args,
                     "pulp loop", dev_shared_ui_default(no_dev_shared, standalone_mode)});
     if (!plan.ok()) {
@@ -333,6 +361,10 @@ int cmd_loop(const std::vector<std::string>& args) {
         std::cerr << "Initial build failed. Watch loop will retry on changes.\n";
     }
 
-    return watch_loop(plan.watch_options(run_tests, test_filter, run_validate, launch_target,
-                                         launch_args, false));
+    auto watch =
+        plan.watch_options(run_tests, test_filter, run_validate, launch_target, launch_args, false);
+    watch.graph_reload = graph_reload;
+    if (reload_watch)
+        watch.graph_poll = [&] { reload_watch->poll(); };
+    return watch_loop(watch);
 }

@@ -315,6 +315,7 @@ catch_discover_tests(pulp-test-cli-tweaks-shellout)
 add_library(pulp-test-cli-support-objects OBJECT EXCLUDE_FROM_ALL
     ${CMAKE_SOURCE_DIR}/tools/cli/tartci_lease.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_watch_shell.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/focused_build.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/shell_redirect.cpp

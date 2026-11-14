@@ -1289,17 +1289,26 @@ class SignalGraph : public format::AudioWorkgroupClient {
         RoutedParallel,
     };
 
-    // Private graph-ownership token. Public shared ProcessorNodeInstance handles
-    // may outlive node removal, but they do not extend its prepared lifecycle.
-    // Authoring state and every executable snapshot share this token, so its
-    // final destruction releases only after both ownership domains are gone.
+    // Private graph-ownership token, reserved process-wide per instance: a token
+    // for an already-reserved instance does not own its lifecycle. Authoring state
+    // and every executable snapshot share it, so final destruction releases only
+    // after both domains are gone. Public instance handles never extend it.
     struct ProcessorNodeLifetime {
-        explicit ProcessorNodeLifetime(
-            std::shared_ptr<format::ProcessorNodeInstance> value) noexcept;
+        explicit ProcessorNodeLifetime(std::shared_ptr<format::ProcessorNodeInstance> value);
 
         ~ProcessorNodeLifetime();
+        ProcessorNodeLifetime(const ProcessorNodeLifetime&) = delete;
+        ProcessorNodeLifetime& operator=(const ProcessorNodeLifetime&) = delete;
 
         std::shared_ptr<format::ProcessorNodeInstance> instance;
+        bool owns_lifecycle() const noexcept {
+            return owns_lifecycle_;
+        }
+
+      private:
+        struct Registry;
+        static Registry& registry_();
+        bool owns_lifecycle_ = false;
     };
 
     struct CompiledGraph {

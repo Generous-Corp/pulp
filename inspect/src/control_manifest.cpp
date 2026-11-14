@@ -56,6 +56,8 @@ constexpr std::array<std::string_view, 7> kPermissionTerms{
             input, "dev.pulp.schema/" slug "-output@1", output, "artifact",                        \
             {true, "artifact_id", "sha256", bytes, media}, {}                                      \
     }
+// Hand-laid schema literals: reformatting reflows every entry for a one-entry change.
+// clang-format off
 constexpr auto kControlOperations = std::to_array<ControlOperationDescriptor>({
     PULP_OPERATION(
         SessionDescribe, "instance/read", PULP_SCHEMA_EMPTY,
@@ -148,6 +150,9 @@ constexpr auto kControlOperations = std::to_array<ControlOperationDescriptor>({
     PULP_RECEIPT_OPERATION(ModulationRouteEdit, "graph/modulation-route.edit", R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"commands":{"maxItems":64,"minItems":1,"type":"array","items":{"additionalProperties":false,"properties":{"audio_rate":{"type":"boolean"},"destination":{"maximum":4294967295,"minimum":1,"type":"integer"},"kind":{"enum":["insert","rewire","remove"]},"parameter_id":{"maximum":4294967295,"minimum":1,"type":"integer"},"previous_source":{"maximum":4294967295,"minimum":1,"type":"integer"},"previous_source_port":{"maximum":4294967295,"minimum":0,"type":"integer"},"range_hi":{"type":"number"},"range_lo":{"type":"number"},"smoothing_ms":{"minimum":0,"type":"number"},"source":{"maximum":4294967295,"minimum":1,"type":"integer"},"source_port":{"maximum":4294967295,"minimum":0,"type":"integer"}},"required":["kind","source","source_port","destination","parameter_id"],"type":"object"}}},"required":["commands"],"type":"object"})",
                            R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"applied":{"minimum":0,"type":"integer"},"capacity":{"const":64},"code":{"enum":["applied","empty-batch","dense-queue-overflow","invalid-command","prepare-failed","commit-failed"]},"generation":{"minimum":0,"type":"integer"},"receipt_id":{"maxLength":128,"minLength":1,"type":"string"}},"required":["receipt_id","code","applied","capacity","generation"],"type":"object"})",
                            "receipt"),
+    PULP_RECEIPT_OPERATION(GraphFileReload, "graph/file.reload", R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"expected_generation":{"maximum":9007199254740991,"minimum":0,"type":"integer"},"format":{"enum":["notation","pulpgraph"]},"text":{"maxLength":524288,"type":"string","x-pulp-maxUtf8Bytes":524288}},"required":["expected_generation","format","text"],"type":"object"})",
+                           R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"code":{"enum":["prepared","committed","invalid-document","unsupported-contract","invalid-mutation","prepare-failed","stale-base","commit-failed"]},"diagnostic":{"type":"object"},"generation":{"minimum":0,"type":"integer"},"receipt_id":{"maxLength":128,"minLength":1,"type":"string"},"topology_result":{"minimum":0,"type":"integer"}},"required":["receipt_id","code","generation","diagnostic","topology_result"],"type":"object"})",
+                           "receipt"),
     PULP_OPERATION(
         ArtifactRead, "artifact/read",
         R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"artifact_id":{"maxLength":128,"minLength":1,"type":"string"},"max_bytes":{"maximum":1048576,"minimum":1,"type":"integer"},"offset":{"maximum":9007199254740991,"minimum":0,"type":"integer"}},"required":["artifact_id","offset","max_bytes"],"type":"object"})",
@@ -171,6 +176,7 @@ constexpr auto kControlOperations = std::to_array<ControlOperationDescriptor>({
         R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"action":{"enum":["set-range","set-enabled"]},"applied":{"type":"boolean"},"enabled":{"type":"boolean"},"end_tick":{"maximum":9007199254740991,"minimum":-9007199254740991,"type":"integer"},"receipt_id":{"maxLength":128,"minLength":1,"type":"string"},"sequence":{"maximum":9007199254740991,"minimum":0,"type":"integer"},"start_tick":{"maximum":9007199254740991,"minimum":-9007199254740991,"type":"integer"}},"required":["action","receipt_id","applied","enabled","start_tick","end_tick","sequence"],"type":"object"})",
         "receipt"),
 });
+// clang-format on
 consteval bool control_operations_are_unique_and_complete() {
     for (std::size_t i = 0; i < kControlOperations.size(); ++i) {
         const auto& operation = kControlOperations[i];

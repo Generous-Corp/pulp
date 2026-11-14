@@ -397,7 +397,7 @@ NodeId SignalGraph::add_processor_node(std::shared_ptr<format::ProcessorNodeInst
         return 0;
     }
     GraphNode node;
-    node.id = next_id_++;
+    node.id = next_id_;
     node.type = NodeType::Plugin;
     node.name = name.empty() ? descriptor.name : name;
     node.num_input_ports = inputs;
@@ -409,7 +409,10 @@ NodeId SignalGraph::add_processor_node(std::shared_ptr<format::ProcessorNodeInst
     node.plugin_info.num_outputs = outputs;
     const NodeId id = node.id;
     try {
-        processor_nodes_.emplace(id, std::make_shared<ProcessorNodeLifetime>(std::move(instance)));
+        auto lifetime = std::make_shared<ProcessorNodeLifetime>(std::move(instance));
+        if (!lifetime->owns_lifecycle())
+            return 0;
+        processor_nodes_.emplace(id, std::move(lifetime));
         detail::populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
         // MIDI is node-scoped; these handles do not consume or renumber audio buses.
         if (descriptor.accepts_midi)
@@ -419,6 +422,7 @@ NodeId SignalGraph::add_processor_node(std::shared_ptr<format::ProcessorNodeInst
             node.output_ports.push_back({id, 0, true, "midi", PortKind::Midi,
                                          diagnostic_graph_identity_, authoring_generation_ + 1});
         nodes_.push_back(std::move(node));
+        ++next_id_;
     } catch (...) {
         processor_nodes_.erase(id);
         return 0;

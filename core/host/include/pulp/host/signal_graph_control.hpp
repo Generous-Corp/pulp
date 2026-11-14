@@ -3,11 +3,18 @@
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 #include <pulp/host/signal_graph_runtime.hpp>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <mutex>
 #include <span>
+#include <string_view>
 
 namespace pulp::host {
+class GraphPatchCatalog;
+enum class GraphFileFormat;
+struct GraphFileReloadResult;
 
 /// One typed mutation accepted by the host's canonical graph authority.
 /// Modulation routes are edited through PreparedTopologyEdit, so a rejected
@@ -53,6 +60,13 @@ struct SignalGraphRouteResult {
 /// The sole host-side authority for live graph modulation-route lifecycle.
 /// It owns no second runtime: each batch is compiled and published by the
 /// graph's existing PreparedTopologyEdit transaction.
+///
+/// apply(), reload_graph_file() and reset() serialize on one internal mutex,
+/// so the generation check, preparation, publication and generation advance
+/// of one mutation never interleave with another. Callers may enter from
+/// different control threads (the standalone host runs file reload on its
+/// main thread and modulation-route edits on its RPC worker). Never call
+/// these from the audio thread.
 class SignalGraphControlAuthority final {
   public:
     static constexpr std::size_t kMaxDenseCommands = 64;
@@ -61,16 +75,26 @@ class SignalGraphControlAuthority final {
                                 int maximum_block_size) noexcept;
 
     SignalGraphRouteResult apply(std::span<const SignalGraphRouteCommand> commands);
-    void reset() noexcept;
+    /// The product's existing registry projection must outlive this authority.
+    /// Without one, graph-file reload supports only the default catalog.
+    void set_graph_file_catalog(const GraphPatchCatalog& catalog) noexcept {
+        graph_file_catalog_ = &catalog;
+    }
+    GraphFileReloadResult reload_graph_file(std::string_view text, GraphFileFormat format,
+                                            std::uint64_t expected_generation,
+                                            const std::function<bool()>& can_commit = {});
+    void reset();
     std::uint64_t generation() const noexcept {
-        return generation_;
+        return generation_.load(std::memory_order_acquire);
     }
 
   private:
     SignalGraph& graph_;
     double sample_rate_ = 0.0;
     int maximum_block_size_ = 0;
-    std::uint64_t generation_ = 0;
+    std::mutex mutation_mutex_;
+    std::atomic<std::uint64_t> generation_{0};
+    const GraphPatchCatalog* graph_file_catalog_ = nullptr;
 };
 
 } // namespace pulp::host

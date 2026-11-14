@@ -751,7 +751,8 @@ LOAD_APIS = (r"PluginSlot::load\s*\(", r"PluginSlot::load_exact\s*\(", r"load_cl
              r"load_node_pack\s*\(", r"load_verified_node_pack\s*\(",
              r"add_plugin_node\s*\(", r"add_plugin_node_from_drop\s*\(",
              r"GraphSerializer::from_json\s*\(",
-             r"load_graph_patch_json\s*\(", r"load_graph_patch_file\s*\(")
+             r"load_graph_patch_json\s*\(", r"load_graph_patch_file\s*\(",
+             r"GraphFileReloadTransaction\b", r"reload_graph_file\s*\(")
 # Public core/host functions that reach a loader but are not in LOAD_APIS,
 # each with the mechanism that covers a test calling it (loader_coverage).
 LOAD_API_EXEMPTIONS = Path("tools/ci/load_api_exemptions.json")
