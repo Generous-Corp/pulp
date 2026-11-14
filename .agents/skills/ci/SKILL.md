@@ -2406,6 +2406,21 @@ is in `gates.sh` only). So adding a gate to one adds it to neither the other nor
 the push path. **Wire a new local gate into both files, and check the other list
 rather than assuming it inherits.**
 
+The f-string floor (`python_floor_syntax_check.py`) and the worker-thread
+assertion check (`thread_assert_check.py`) were in `gates.sh` only, and each
+reddened a required check on a PR head that skipped `gates.sh`. The hook now
+runs both with `--changed-from <base>` (only the files the pushed commit
+changed, read from the commit), and its agent skip floor keeps them blocking
+when an agent (`SHIPYARD_AGENT_ID` set) pushes with `PULP_SKIP_PREPUSH=1` or
+`PULP_DISABLE_PREPUSH_GATES=1`. Diff scope is deliberate: a whole-tree check in
+the agent floor would block every agent push the moment `main` itself went red
+on it. The agent floor runs only when the push sends HEAD (not a deletion,
+tag or other branch), and diffs against the LOCAL `origin/main`: a stale one
+widens the diff, so `git fetch origin main` before blaming a refusal on lines
+the branch never touched. Exit 2 (no merge-base, interpreter below 3.11, an
+internal error) is "could not run", never a violation. `git push --no-verify`
+still skips everything; CI is the only backstop for that.
+
 The sequencer registries are wired into both:
 
 - **`sequencer_exposure_check.py`** — the cross-surface exposure ledger at
@@ -13691,6 +13706,19 @@ about that path are not obvious:
   Vellum main's head equals the head recorded in the last *successful* run's
   receipt artifact, and it uploads that receipt only when the whole run is
   green, so a red night is retried on the next one rather than forgotten.
+### Cutover trial deletion build
+
+`cutover-trial.yml` (manual dispatch only, GitHub-hosted `macos-15`, advisory)
+runs `tools/scripts/cutover_trial.py`: it deletes the cutover paths listed in
+`tools/scripts/cutover_trial_inputs.json` inside a scratch git worktree, builds
+with `-k 0`, and uploads a JSON report grouped by capability-ledger row. Notes:
+
+- The script always exits 0 on a build failure; read the report, not the job
+  status. Exit 2 means the inputs could not be read.
+- The scratch worktree must sit under the worktree root, never `/tmp`;
+  configure refuses it there.
+- It is not a required check and does not run on a schedule or pull request.
+
 - **Pin the Vellum commit a consumer needs.** The lane resolves Vellum main's
   newest green SDK, which is not necessarily one that carries an API a Pulp
   consumer was written against. `resolve --min-vellum-sha <sha>` refuses a run

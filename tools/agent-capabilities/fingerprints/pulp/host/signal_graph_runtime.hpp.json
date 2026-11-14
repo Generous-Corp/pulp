@@ -1,5 +1,5 @@
 {
   "schema": "pulp.agent-capability-fingerprint.v1",
   "include": "pulp/host/signal_graph_runtime.hpp",
-  "fingerprint": "sha256:dacbce67f38fd506ce3a5980ef1a934c85503082383604bc5ba2990862fc439e"
+  "fingerprint": "sha256:3749608edc77c34d9c74193f9633c46f4145f9e27598023d50b4aaad0107c0a7"
 }
