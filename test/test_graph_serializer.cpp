@@ -7,6 +7,7 @@
 // integration lane gated on PULP_TEST_CLAP_PATH.
 
 #include <catch2/catch_test_macros.hpp>
+#include <choc/text/choc_JSON.h>
 
 #include "../core/host/src/graph_serializer_test_access.hpp"
 
@@ -166,6 +167,46 @@ TEST_CASE("GraphSerializer saved identity writer validates and restores",
     dangling.replace(value, 1, "9");
     const auto refused = GraphSerializer::inspect_document(dangling);
     CHECK(refused.refusal == GraphDocumentRefusal::IdentityBindingDangling);
+}
+
+TEST_CASE("GraphSerializer saved identity requires an exact identity to node bijection",
+          "[host][serializer][g3]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "Input");
+    const auto output = graph.add_output_node(1, "Output");
+    REQUIRE(graph.connect(input, 0, output, 0));
+    const auto saved = GraphSerializer::to_saved_document(graph);
+    REQUIRE(GraphSerializer::inspect_document(saved).ok());
+
+    auto parsed = choc::json::parse(saved);
+    REQUIRE(parsed.hasObjectMember("bindings"));
+    const auto& bindings = parsed["bindings"];
+    REQUIRE(bindings.size() == 2);
+    const std::string first(bindings.getObjectMemberAt(0).name);
+    const std::string second(bindings.getObjectMemberAt(1).name);
+    const auto first_node = bindings[first].getInt64();
+    const auto second_node = bindings[second].getInt64();
+    REQUIRE(first_node != second_node);
+
+    const auto rebuilt = [&](const std::vector<std::pair<std::string, std::int64_t>>& entries) {
+        auto copy = choc::json::parse(saved);
+        auto object = choc::value::createObject("bindings");
+        for (const auto& [key, node] : entries)
+            object.addMember(key, node);
+        copy.setMember("bindings", object);
+        return choc::json::toString(copy, true);
+    };
+
+    // Swapped bindings: both keys known, both node ids exist, but they cross.
+    const auto swapped = rebuilt({{first, second_node}, {second, first_node}});
+    CHECK_FALSE(GraphSerializer::inspect_document(swapped).ok());
+
+    // One identity's binding dropped.
+    const auto missing = rebuilt({{first, first_node}});
+    CHECK_FALSE(GraphSerializer::inspect_document(missing).ok());
+    SignalGraph untouched;
+    CHECK_FALSE(GraphSerializer::from_saved_document(untouched, missing).ok);
+    CHECK(untouched.nodes().empty());
 }
 
 TEST_CASE("GraphSerializer semantic digest excludes editor layout", "[host][serializer][g3]") {

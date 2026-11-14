@@ -1227,6 +1227,8 @@ GraphDocumentInspection GraphSerializer::inspect_document(std::string_view json)
                 return result;
             }
             std::unordered_set<std::string> known;
+            std::unordered_map<std::string, NodeId> identity_node;
+            std::unordered_set<NodeId> bound_nodes;
             std::unordered_set<NodeId> node_ids;
             if (root.hasObjectMember("nodes") && root["nodes"].isArray()) {
                 for (std::uint32_t i = 0; i < root["nodes"].size(); ++i)
@@ -1254,6 +1256,18 @@ GraphDocumentInspection GraphSerializer::inspect_document(std::string_view json)
                                     "; re-export the graph with current node bindings";
                     return result;
                 }
+                if (!bound_nodes.insert(node_id).second) {
+                    result.refusal = GraphDocumentRefusal::IdentityBindingDuplicate;
+                    result.detail = "two logical identities bind node_id " +
+                                    std::to_string(node_id);
+                    return result;
+                }
+                identity_node.emplace(id, node_id);
+            }
+            if (bindings.size() != identities.size()) {
+                result.refusal = GraphDocumentRefusal::IdentityEnvelopeInvalid;
+                result.detail = "bindings must name every logical identity exactly once";
+                return result;
             }
             for (std::uint32_t i = 0; i < bindings.size(); ++i) {
                 const auto name = std::string(bindings.getObjectMemberAt(i).name);
@@ -1268,6 +1282,13 @@ GraphDocumentInspection GraphSerializer::inspect_document(std::string_view json)
                     result.detail = "binding references unknown node_id " +
                                     std::to_string(node_id) +
                                     "; re-export the graph with current node bindings";
+                    return result;
+                }
+                if (node_id != identity_node.at(name)) {
+                    result.refusal = GraphDocumentRefusal::IdentityEnvelopeInvalid;
+                    result.detail = "binding for " + name + " names node_id " +
+                                    std::to_string(node_id) +
+                                    " but the identity entry binds a different node";
                     return result;
                 }
             }
