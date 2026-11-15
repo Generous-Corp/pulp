@@ -51,6 +51,7 @@
 #include <cmath>
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -681,6 +682,15 @@ struct Alignment {
     double max_abs = 1.0e9;
 };
 
+/// Absolute error of one sample pair. A non-finite output or reference
+/// sample is an unbounded error: std::max(worst, NaN) would keep `worst`
+/// and let corrupted audio pass a tolerance check.
+double sample_error(float out, float ref) {
+    if (!std::isfinite(out) || !std::isfinite(ref))
+        return std::numeric_limits<double>::infinity();
+    return std::abs(static_cast<double>(out) - static_cast<double>(ref));
+}
+
 Alignment measure_lag(const std::vector<float>& out, const std::vector<float>& ref,
                       std::int64_t max_lag) {
     Alignment best;
@@ -688,8 +698,8 @@ Alignment measure_lag(const std::vector<float>& out, const std::vector<float>& r
     for (std::int64_t lag = 0; lag <= max_lag && lag < n; ++lag) {
         double worst = 0.0;
         for (std::int64_t t = lag; t < n; ++t)
-            worst = std::max(worst, std::abs(static_cast<double>(out[static_cast<std::size_t>(t)]) -
-                                             ref[static_cast<std::size_t>(t - lag)]));
+            worst = std::max(worst, sample_error(out[static_cast<std::size_t>(t)],
+                                                 ref[static_cast<std::size_t>(t - lag)]));
         if (worst < best.max_abs)
             best = {lag, worst};
     }
@@ -700,7 +710,7 @@ double max_error_at(const std::vector<float>& out, const std::vector<float>& ref
                     std::int64_t lag) {
     double worst = 0.0;
     for (std::size_t t = static_cast<std::size_t>(lag); t < out.size(); ++t)
-        worst = std::max(worst, std::abs(static_cast<double>(out[t]) - ref[t - lag]));
+        worst = std::max(worst, sample_error(out[t], ref[t - static_cast<std::size_t>(lag)]));
     return worst;
 }
 
@@ -777,6 +787,41 @@ TEST_CASE("a self-reported Dawn status is not provider attestation",
     o.provider_identity.provider = GpuAudioProvider::Dawn;
     o.status.provider = GpuAudioProvider::Unknown; // status disagrees with the identity
     CHECK(observed_provider(o) == ProviderClaim::Unattested);
+}
+
+TEST_CASE("output tolerance checks reject non-finite samples",
+          "[gpu_audio][graph][resource-admission][p4]") {
+    // Device-free planted control: corrupted audio (an isolated NaN or Inf
+    // output sample, or a non-finite reference) must break both tolerance
+    // helpers instead of being skipped by std::max.
+    const double tolerance = 1.0e-4;
+    std::vector<float> ref(64);
+    for (std::size_t i = 0; i < ref.size(); ++i)
+        ref[i] = 0.25f * static_cast<float>(std::sin(0.3 * static_cast<double>(i)));
+    constexpr std::int64_t lag = 3;
+    std::vector<float> out(ref.size() + lag, 0.0f);
+    for (std::size_t i = 0; i < ref.size(); ++i)
+        out[i + lag] = ref[i];
+
+    // Positive control: the clean signal is within tolerance at its lag.
+    REQUIRE(max_error_at(out, ref, lag) <= tolerance);
+    const auto clean = measure_lag(out, ref, 8);
+    REQUIRE(clean.lag == lag);
+    REQUIRE(clean.max_abs <= tolerance);
+
+    for (const float bad : {std::numeric_limits<float>::quiet_NaN(),
+                            std::numeric_limits<float>::infinity()}) {
+        CAPTURE(bad);
+        auto corrupted = out;
+        corrupted[static_cast<std::size_t>(lag) + 17] = bad;
+        CHECK_FALSE(max_error_at(corrupted, ref, lag) <= tolerance);
+        CHECK_FALSE(measure_lag(corrupted, ref, 8).max_abs <= tolerance);
+
+        auto bad_ref = ref;
+        bad_ref[17] = bad;
+        CHECK_FALSE(max_error_at(out, bad_ref, lag) <= tolerance);
+        CHECK_FALSE(measure_lag(out, bad_ref, 8).max_abs <= tolerance);
+    }
 }
 
 TEST_CASE("two GPU consumers in one graph pass shared admission with measured geometry",
