@@ -56,8 +56,17 @@ struct SurfaceFormatDriver {
     std::function<bool(std::uint32_t width, std::uint32_t height)> host_resize;
     /// The size the format reports for the open editor.
     std::function<format::EditorSize()> reported_size;
-    /// The host closes the editor.
+    /// The host closes the editor through the format's own call. The host's
+    /// views stay alive, so a format whose close removes the surface is checked
+    /// on the very view the surface was in.
     std::function<void()> close;
+    /// Whether `close` itself removes the surface from the host view. False for
+    /// a format whose editor closes when the host releases its view or audio
+    /// unit (AU): those are proved by the live-surface counts after `release`.
+    bool close_removes_surface = true;
+    /// The host drops its views, and for AU the last reference to what owns
+    /// the editor.
+    std::function<void()> release;
     /// Run the main run loop for about `seconds`.
     std::function<void(double seconds)> run_loop;
 };
@@ -191,10 +200,14 @@ inline void check_native_surface_lifecycle(const SurfaceFormatDriver& driver) {
             require_gain_colour(*driver.editor(), gain, static_cast<std::size_t>(kWidth * scale),
                                 static_cast<std::size_t>(kHeight * scale));
 
+            const int surfaces_before_close = native_surfaces_under(parent);
+            REQUIRE(surfaces_before_close == 1);
             driver.close();
-            // Closed: no surface left in the window, no editor.
-            CHECK(native_surfaces_under(window.contentView) == 0);
-            CHECK(driver.editor() == nullptr);
+            if (driver.close_removes_surface) {
+                // The format's close took the surface out of the view it was in.
+                CHECK(native_surfaces_under(parent) == 0);
+            }
+            driver.release();
         }
         driver.run_loop(0.05);
         REQUIRE(pulp::native::MetalSurface::live_surfaces() == live_surfaces);

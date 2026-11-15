@@ -135,18 +135,19 @@ TEST_CASE("AU v2 gives a native-surface editor its size, first frame, resize and
     driver.host_resize = [&](std::uint32_t width, std::uint32_t height) {
         // An AU host resizes the view it was given; the view tells the editor.
         [container setFrameSize:NSMakeSize(width, height)];
-        return true;
+        // The format took it when the editor's session reports the size.
+        auto* session = pulp::format::au::contract_view_session((__bridge void*)container);
+        return session && session->size().width == width && session->size().height == height;
     };
     driver.reported_size = [&] {
         auto* session = pulp::format::au::contract_view_session((__bridge void*)container);
         return session ? session->size() : pulp::format::EditorSize{};
     };
-    driver.close = [&] {
-        // The host removes the view and drops its last reference; the view's
-        // dealloc closes the editor.
-        [container removeFromSuperview];
-        container = nil;
-    };
+    // The view's dealloc closes the editor, which the live-surface counts after
+    // `release` prove.
+    driver.close_removes_surface = false;
+    driver.close = [&] { [container removeFromSuperview]; };
+    driver.release = [&] { container = nil; };
     driver.run_loop = [&](double seconds) { loop.run_for(seconds); };
 
     check_native_surface_lifecycle(driver);

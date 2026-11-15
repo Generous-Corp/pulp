@@ -1034,15 +1034,17 @@ factory keeps the ViewBridge editor untouched.
 
 ## Gotchas
 
-### Setting `preferredContentSize` keeps the controller alive
+### Setting `preferredContentSize` leaves a pending autorelease on the controller
 
-Setting `preferredContentSize` on an `AUViewController` leaves the controller
-with one extra retain: a controller whose `viewDidLoad` sets it never reaches
-dealloc when its owner releases it. A test cannot prove teardown by releasing
-the controller. Close the editor through the audio unit instead (release the
-last reference to the `PulpAudioUnit`, or rebind the controller to another
-unit), which closes the session through the unit's registry. Teardown of the
-view itself is covered at the contract-view level.
+Setting `preferredContentSize` on an `AUViewController` leaves one extra
+retain on it, so `retainCount` reads 2 after `viewDidLoad`. It is a pending
+autorelease, not a leak: the controller deallocs when the run loop's pool next
+drains (checked with a bare subclass: dealloc fires one run-loop turn after the
+last release). A test that releases a controller and asserts teardown must spin
+the run loop first. Rebinding a controller to another audio unit closes its
+contract editor through `rebuildEditorIfReady` -> `closeContractEditor`; an
+audio unit released with its editor still open closes it through the unit's
+`ContractSessionRegistry`.
 
 ### `transportStateBlock`'s sample position is a double — round it, never truncate
 

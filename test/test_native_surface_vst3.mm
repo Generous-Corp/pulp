@@ -98,8 +98,13 @@ TEST_CASE("VST3 gives a native-surface editor its size, first frame, resize and 
             [[NSView alloc] initWithFrame:NSMakeRect(0, 0, rect.getWidth(), rect.getHeight())];
         [window.contentView addSubview:host_view];
         if (view->attached((__bridge void*)host_view, Steinberg::kPlatformTypeNSView) !=
-            Steinberg::kResultTrue)
+            Steinberg::kResultTrue) {
+            view->release();
+            view = nullptr;
+            [host_view removeFromSuperview];
+            host_view = nil;
             return nil;
+        }
         return host_view;
     };
     driver.editor = [&]() -> pulp::format::Editor* { return view ? view->editor() : nullptr; };
@@ -118,10 +123,12 @@ TEST_CASE("VST3 gives a native-surface editor its size, first frame, resize and 
     };
     driver.close = [&] {
         REQUIRE(view->removed() == Steinberg::kResultOk);
-        [host_view removeFromSuperview];
-        host_view = nil;
         view->release();
         view = nullptr;
+    };
+    driver.release = [&] {
+        [host_view removeFromSuperview];
+        host_view = nil;
     };
     driver.run_loop = [&](double seconds) { loop.run_for(seconds); };
 

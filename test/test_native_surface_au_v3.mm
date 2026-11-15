@@ -103,19 +103,28 @@ TEST_CASE("AU v3 gives a native-surface editor its size, first frame, resize and
         // An AU host sizes the view that holds the plug-in's; the controller's
         // view and the contract view inside it follow.
         [host_container setFrameSize:NSMakeSize(width, height)];
-        return true;
+        // The format took it when the editor's session reports the size.
+        auto* view = contract_view();
+        auto* session = view ? [view session] : nullptr;
+        return session && session->size().width == width && session->size().height == height;
     };
     driver.reported_size = [&] {
         auto* view = contract_view();
         auto* session = view ? [view session] : nullptr;
         return session ? session->size() : pulp::format::EditorSize{};
     };
+    // The editor closes when the audio unit is released (its registry), which
+    // the live-surface counts after `release` prove.
+    driver.close_removes_surface = false;
     driver.close = [&] {
-        // The host drops the plug-in's window: the controller's view leaves the
-        // window, and the audio unit goes, which closes the editor in order.
+        // The host closes the plug-in's window.
         [host_container removeFromSuperview];
-        host_container = nil;
         [controller.view removeFromSuperview];
+    };
+    driver.release = [&] {
+        // The host drops the controller and the audio unit: the editor closes
+        // in order once the last reference goes.
+        host_container = nil;
         [controller setValue:nil forKey:@"audioUnit"];
         controller = nil;
         unit = nil;

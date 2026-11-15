@@ -118,6 +118,8 @@ TEST_CASE("CLAP gives a native-surface editor its size, first frame, resize and 
         gui->hide(plugin);
         gui->destroy(plugin);
         open = false;
+    };
+    driver.release = [&] {
         [host_view removeFromSuperview];
         host_view = nil;
     };
