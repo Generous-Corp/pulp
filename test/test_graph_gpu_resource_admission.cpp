@@ -26,6 +26,8 @@
 
 #include "detail/gpu_convolver_test_access.hpp"
 #include "detail/gpu_neural_realtime_test_access.hpp"
+#include "detail/realtime_gpu_audio_path.hpp"
+#include "detail/shared_io_provider_identity.hpp"
 #include "harness/rt_allocation_probe.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -49,6 +51,7 @@
 #include <cmath>
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -430,6 +433,9 @@ struct ConsumerObservation {
     std::uint64_t payload_bytes = 0;
     GpuAudioCapabilityReport capability{};
     GpuAudioStatus status{};
+    // Identity the concrete node's private realtime path establishes for its
+    // provider. Status is self-reported; only this identity can attest Dawn.
+    detail::SharedIoProviderIdentity provider_identity{};
     std::int64_t graph_latency_samples = 0;
     double sample_rate = 0.0;
 };
@@ -474,9 +480,17 @@ const char* to_string(AdmissionError e) {
 }
 
 ProviderClaim observed_provider(const ConsumerObservation& o) {
-    // Only a provider that names itself in the status counts as attested.
-    return o.status.provider == GpuAudioProvider::Dawn ? ProviderClaim::AttestedDawn
-                                                       : ProviderClaim::Unattested;
+    // The status provider is self-reported and is never attestation on its
+    // own. Dawn counts as attested only when the node's private realtime path
+    // returns an authenticated Dawn provider identity and the status agrees
+    // with it; anything else, including a status that names Dawn without
+    // that identity, is Unattested.
+    const bool authenticated_dawn = o.provider_identity.provider == GpuAudioProvider::Dawn &&
+                                    detail::gate_shared_io_provider_identity(o.provider_identity) !=
+                                        detail::SharedIoProviderIdentityGate::Unauthenticated;
+    return authenticated_dawn && o.status.provider == GpuAudioProvider::Dawn
+               ? ProviderClaim::AttestedDawn
+               : ProviderClaim::Unattested;
 }
 
 std::optional<Residency> observed_residency(const ConsumerObservation& o) {
@@ -609,6 +623,7 @@ struct GraphRig {
                  .payload_bytes = neural->payload_bytes(),
                  .capability = neural->transport().capability_report(),
                  .status = neural->transport().status_snapshot(),
+                 .provider_identity = detail::realtime_gpu_provider_identity(neural->node()),
                  .graph_latency_samples = artifact(neural_id),
                  .sample_rate = sample_rate},
                 {.consumer = "convolution.fir",
@@ -616,6 +631,7 @@ struct GraphRig {
                  .payload_bytes = convolution->payload_bytes(),
                  .capability = convolution->transport().capability_report(),
                  .status = convolution->transport().status_snapshot(),
+                 .provider_identity = detail::realtime_gpu_provider_identity(convolution->node()),
                  .graph_latency_samples = artifact(convolution_id),
                  .sample_rate = sample_rate}};
     }
@@ -666,27 +682,42 @@ struct Alignment {
     double max_abs = 1.0e9;
 };
 
+/// Absolute error of one sample pair. A non-finite output or reference
+/// sample is an unbounded error: std::max(worst, NaN) would keep `worst`
+/// and let corrupted audio pass a tolerance check.
+double sample_error(float out, float ref) {
+    if (!std::isfinite(out) || !std::isfinite(ref))
+        return std::numeric_limits<double>::infinity();
+    return std::abs(static_cast<double>(out) - static_cast<double>(ref));
+}
+
+/// Worst error of `out[t]` against `ref[t - lag]` over the overlap where
+/// both samples exist, so a reference shorter than the output is never read
+/// past its end. An empty overlap proves nothing and is an unbounded error.
+double max_error_at(const std::vector<float>& out, const std::vector<float>& ref,
+                    std::int64_t lag) {
+    if (lag < 0)
+        return std::numeric_limits<double>::infinity();
+    const auto offset = static_cast<std::size_t>(lag);
+    if (offset >= out.size() || ref.empty())
+        return std::numeric_limits<double>::infinity();
+    const std::size_t end = std::min(out.size(), offset + ref.size());
+    double worst = 0.0;
+    for (std::size_t t = offset; t < end; ++t)
+        worst = std::max(worst, sample_error(out[t], ref[t - offset]));
+    return worst;
+}
+
 Alignment measure_lag(const std::vector<float>& out, const std::vector<float>& ref,
                       std::int64_t max_lag) {
     Alignment best;
     const auto n = static_cast<std::int64_t>(out.size());
     for (std::int64_t lag = 0; lag <= max_lag && lag < n; ++lag) {
-        double worst = 0.0;
-        for (std::int64_t t = lag; t < n; ++t)
-            worst = std::max(worst, std::abs(static_cast<double>(out[static_cast<std::size_t>(t)]) -
-                                             ref[static_cast<std::size_t>(t - lag)]));
+        const double worst = max_error_at(out, ref, lag);
         if (worst < best.max_abs)
             best = {lag, worst};
     }
     return best;
-}
-
-double max_error_at(const std::vector<float>& out, const std::vector<float>& ref,
-                    std::int64_t lag) {
-    double worst = 0.0;
-    for (std::size_t t = static_cast<std::size_t>(lag); t < out.size(); ++t)
-        worst = std::max(worst, std::abs(static_cast<double>(out[t]) - ref[t - lag]));
-    return worst;
 }
 
 /// Escapes the planted allocation so the compiler cannot elide it.
@@ -741,6 +772,73 @@ void require_gpu_host(GraphRig& rig, const GeometryFixture& f) {
 }
 
 } // namespace
+
+TEST_CASE("a self-reported Dawn status is not provider attestation",
+          "[gpu_audio][graph][resource-admission][p4]") {
+    // Device-free: the provider claim is derived from the authenticated
+    // identity, never from the status alone.
+    ConsumerObservation o;
+    o.status.provider = GpuAudioProvider::Dawn;
+    CHECK(observed_provider(o) == ProviderClaim::Unattested);
+
+    o.provider_identity.provider = GpuAudioProvider::Dawn;
+    CHECK(observed_provider(o) == ProviderClaim::Unattested); // not authenticated
+
+    o.provider_identity.authenticated = true;
+    CHECK(observed_provider(o) == ProviderClaim::AttestedDawn);
+
+    o.provider_identity.provider = GpuAudioProvider::Cpu; // identity names another provider
+    CHECK(observed_provider(o) == ProviderClaim::Unattested);
+
+    o.provider_identity.provider = GpuAudioProvider::Dawn;
+    o.status.provider = GpuAudioProvider::Unknown; // status disagrees with the identity
+    CHECK(observed_provider(o) == ProviderClaim::Unattested);
+}
+
+TEST_CASE("output tolerance checks reject non-finite samples",
+          "[gpu_audio][graph][resource-admission][p4]") {
+    // Device-free planted control: corrupted audio (an isolated NaN or Inf
+    // output sample, or a non-finite reference) must break both tolerance
+    // helpers instead of being skipped by std::max.
+    const double tolerance = 1.0e-4;
+    std::vector<float> ref(64);
+    for (std::size_t i = 0; i < ref.size(); ++i)
+        ref[i] = 0.25f * static_cast<float>(std::sin(0.3 * static_cast<double>(i)));
+    constexpr std::int64_t lag = 3;
+    std::vector<float> out(ref.size() + lag, 0.0f);
+    for (std::size_t i = 0; i < ref.size(); ++i)
+        out[i + lag] = ref[i];
+
+    // Positive control: the clean signal is within tolerance at its lag.
+    REQUIRE(max_error_at(out, ref, lag) <= tolerance);
+    const auto clean = measure_lag(out, ref, 8);
+    REQUIRE(clean.lag == lag);
+    REQUIRE(clean.max_abs <= tolerance);
+
+    // Only the overlap is compared: an output tail past the reference end is
+    // not read against memory beyond `ref`, and a lag with no overlap is not
+    // a vacuous pass.
+    auto tailed = out;
+    tailed.insert(tailed.end(), 5, 1000.0f);
+    CHECK(max_error_at(tailed, ref, lag) <= tolerance);
+    CHECK(measure_lag(tailed, ref, 8).lag == lag);
+    CHECK_FALSE(max_error_at(out, ref, static_cast<std::int64_t>(out.size())) <= tolerance);
+    CHECK_FALSE(max_error_at(out, std::vector<float>{}, 0) <= tolerance);
+
+    for (const float bad :
+         {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity()}) {
+        CAPTURE(bad);
+        auto corrupted = out;
+        corrupted[static_cast<std::size_t>(lag) + 17] = bad;
+        CHECK_FALSE(max_error_at(corrupted, ref, lag) <= tolerance);
+        CHECK_FALSE(measure_lag(corrupted, ref, 8).max_abs <= tolerance);
+
+        auto bad_ref = ref;
+        bad_ref[17] = bad;
+        CHECK_FALSE(max_error_at(out, bad_ref, lag) <= tolerance);
+        CHECK_FALSE(measure_lag(out, bad_ref, 8).max_abs <= tolerance);
+    }
+}
 
 TEST_CASE("two GPU consumers in one graph pass shared admission with measured geometry",
           "[gpu_audio][graph][resource-admission][p4]") {
@@ -876,6 +974,17 @@ TEST_CASE("shared admission refuses each planted manifest or consumer defect",
         auto m = good;
         m.entries[1].provider = ProviderClaim::AttestedDawn;
         CHECK(admit(m, observed).error == AdmissionError::ProviderMismatch);
+    }
+    SECTION("neural status names Dawn without an authenticated provider identity") {
+        // False-provider control: the self-reported status still says Dawn,
+        // but nothing authenticates it, so the AttestedDawn claim must fail.
+        REQUIRE(observed[0].status.provider == GpuAudioProvider::Dawn);
+        auto forged = observed;
+        forged[0].provider_identity = {};
+        CHECK(admit(good, forged).error == AdmissionError::ProviderMismatch);
+        auto unauthenticated = observed;
+        unauthenticated[0].provider_identity.authenticated = false;
+        CHECK(admit(good, unauthenticated).error == AdmissionError::ProviderMismatch);
     }
     SECTION("residency claim") {
         auto m = good;
