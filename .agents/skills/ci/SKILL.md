@@ -7276,6 +7276,26 @@ If you change `test/test_trace_frame_pipeline.cpp`, re-derive that threshold
 from the REQUIREs on its real ON path — lowering it silently re-admits a
 skipped run as a pass.
 
+**The consumer jobs judge an installed prefix, not the build tree.**
+`tracing-consumer` installs a traced SDK and runs
+`tools/scripts/trace_consumer_e2e.sh --expect on`, which builds
+`test/fixtures/trace_consumer` against the prefix and needs trace_processor to
+find the fixture's own slice and instant in the file it flushed.
+`tracing-consumer-untraced` is that check's control: the same fixture against an
+untraced install must report tracing unavailable, write nothing, and carry no
+Perfetto symbols. Keep the two jobs together; with only the traced leg, a query
+that counted something unrelated would look exactly like a pass. The runner has
+no pulp CLI, so `--fetch-trace-processor` downloads the pinned binary named in
+`tools/packages/tool-registry.json` and checks its SHA-256; don't paste a second
+copy of that pin into the workflow.
+
+**This workflow does not run on `pull_request`.** Its triggers are `push` to
+`main`, `workflow_dispatch` and the nightly schedule, so a PR that edits it gets
+no run before merge. Dispatch it on the branch
+(`ghapp workflow run tracing-build.yml --ref <branch>`) and read that run before
+asking for review. Here a dispatch is the right proof, because nothing in this
+file is a required check.
+
 ## Governance is declared, and mirrors LIVE state — not aspiration
 
 `.shipyard/config.toml` declares Pulp's branch-protection posture so

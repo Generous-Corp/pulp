@@ -23,19 +23,20 @@ volatile unsigned g_sink = 0;
 void consumer_work() {
     PULP_TRACE_SCOPE_NAMED("lifecycle", "consumer_probe");
     unsigned acc = 0;
-    for (unsigned i = 0; i < 200000; ++i) acc = acc * 1664525u + 1013904223u;
+    for (unsigned i = 0; i < 200000; ++i)
+        acc = acc * 1664525u + 1013904223u;
     g_sink = acc;
 }
 
-}  // namespace
+} // namespace
 
 int main(int argc, char** argv) {
     if (argc != 2) {
         std::fprintf(stderr, "usage: trace-consumer <output.pftrace>\n");
         return 64;
     }
-    using pulp::runtime::Tracing;
     using pulp::runtime::TraceStartStatus;
+    using pulp::runtime::Tracing;
 
     auto started = Tracing::start_exclusive({"lifecycle"}, argv[1], 4u * 1024u);
     const bool owned = started.status == TraceStartStatus::Started && started.ownership;
@@ -44,11 +45,12 @@ int main(int argc, char** argv) {
     PULP_TRACE_INSTANT_ARGS("lifecycle", "consumer_probe_instant", "frame_index", 7);
 
     pulp::runtime::TraceStopResult stopped;
-    if (owned) stopped = Tracing::stop_owned(*started.ownership);
+    if (owned)
+        stopped = Tracing::stop_owned(*started.ownership);
 
     const char* status = started.status == TraceStartStatus::Started         ? "started"
                          : started.status == TraceStartStatus::AlreadyActive ? "already_active"
-                                                                              : "unavailable";
+                                                                             : "unavailable";
     std::printf("trace-consumer: compiled_in=%d start=%s stopped=%d path=%s bytes=%llu\n",
                 pulp::runtime::kTracingEnabled ? 1 : 0, status, stopped.ok ? 1 : 0,
                 stopped.path.empty() ? "-" : stopped.path.c_str(),
