@@ -300,7 +300,16 @@ per plug-in, and the factory class is exported. Things to keep straight:
   autorelease pool first. Otherwise the view outlives the unit and the
   registry's close runs instead of the view's.
 - AU v2 has no resize request. An editor's `request_resize` moves the
-  container's frame, and the host follows the frame.
+  container's frame, and the host follows the frame, so the request is a small
+  transaction (`requestEditorSize:`): main thread only, never nested (an editor
+  asking again from inside `set_size()` gets false), and accepted only when the
+  editor takes the size and the frame ends at exactly that size
+  (`detail::resize_request_accepted()`). Under Logic
+  (`logic_au_v2_container_resize`) the enclosing container must have followed
+  too. Otherwise the frame is restored and the editor is told it kept its
+  previous size. It is the same exact-size rule as the ViewBridge path's
+  `pulp_resize_logic_auv2_editor`, but it does not walk Logic's window
+  hierarchy and does not publish the new size before the frame change.
 - `pulp-test-au-v2-contract-adapters` builds all three adapter types from
   their real entry macros (one translation unit each, because
   `PULP_REGISTER_PLUGIN` defines a fixed-name registrar) and registers their

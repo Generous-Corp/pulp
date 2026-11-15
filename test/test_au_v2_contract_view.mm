@@ -272,6 +272,115 @@ TEST_CASE("AU v2 opens, sizes and closes a contract editor, twice",
     g_instance = nullptr;
 }
 
+TEST_CASE("an AU v2 contract editor's resize request is guarded and rolled back when refused",
+          "[auv2][editor-host][au-contract][resize-request]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    FakeInstance instance(true);
+    g_instance = &instance;
+    AudioUnit au = fake_audio_unit();
+    NSWindow* window = make_window();
+    @autoreleasepool {
+        NSView* view = [open_view(au) retain];
+        REQUIRE(view != nil);
+        [window.contentView addSubview:view];
+        auto* context = contract_log().context;
+        REQUIRE(context != nullptr);
+        const auto before = view.frame.size;
+
+        // Accepted: the frame and the editor both take the size.
+        REQUIRE(context->request_resize({600, 450, 1.0}));
+        REQUIRE(view.frame.size.width == 600);
+        REQUIRE(view.frame.size.height == 450);
+        REQUIRE(contract_log().saw("set_size:600x450"));
+
+        // The editor refuses (under its minimum): the request fails, the frame
+        // goes back and the editor is told it kept its size.
+        const auto kept = view.frame.size;
+        contract_log().calls.clear();
+        REQUIRE_FALSE(context->request_resize({100, 100, 1.0}));
+        REQUIRE(view.frame.size.width == kept.width);
+        REQUIRE(view.frame.size.height == kept.height);
+        REQUIRE(contract_log().saw("set_size:600x450"));
+        REQUIRE_FALSE(contract_log().saw("set_size:100x100"));
+
+        // A request for the size it already has is accepted without a change.
+        contract_log().calls.clear();
+        REQUIRE(context->request_resize({600, 450, 1.0}));
+        REQUIRE(contract_log().calls.empty());
+
+        // Zero is refused.
+        REQUIRE_FALSE(context->request_resize({0, 450, 1.0}));
+        (void)before;
+        [view release];
+    }
+    [window close];
+    [window release];
+    AudioComponentInstanceDispose(au);
+    g_instance = nullptr;
+}
+
+TEST_CASE("an AU v2 contract editor's resize request is refused off the main thread",
+          "[auv2][editor-host][au-contract][resize-request]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    FakeInstance instance(true);
+    g_instance = &instance;
+    AudioUnit au = fake_audio_unit();
+    NSWindow* window = make_window();
+    @autoreleasepool {
+        NSView* view = [open_view(au) retain];
+        REQUIRE(view != nil);
+        [window.contentView addSubview:view];
+        const auto frame = view.frame.size;
+        bool accepted = true;
+        std::thread([&] {
+            accepted = contract_log().context->request_resize({640, 480, 1.0});
+        }).join();
+        REQUIRE_FALSE(accepted);
+        REQUIRE(view.frame.size.width == frame.width);
+        REQUIRE(view.frame.size.height == frame.height);
+        // Control: the same request on the main thread is accepted.
+        REQUIRE(contract_log().context->request_resize({640, 480, 1.0}));
+        REQUIRE(view.frame.size.width == 640);
+        [view release];
+    }
+    [window close];
+    [window release];
+    AudioComponentInstanceDispose(au);
+    g_instance = nullptr;
+}
+
+TEST_CASE("an AU v2 contract editor cannot start a resize from inside the resize it is handling",
+          "[auv2][editor-host][au-contract][resize-request]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    contract_config().resize_inside_set_size = true;
+    FakeInstance instance(true);
+    g_instance = &instance;
+    AudioUnit au = fake_audio_unit();
+    NSWindow* window = make_window();
+    @autoreleasepool {
+        NSView* view = [open_view(au) retain];
+        REQUIRE(view != nil);
+        [window.contentView addSubview:view];
+        // Joining the window already told the editor its scale: only the
+        // request made inside the resize below counts.
+        contract_log().nested_resize_result.reset();
+        REQUIRE(contract_log().context->request_resize({600, 450, 1.0}));
+        REQUIRE(contract_log().nested_resize_result.has_value());
+        REQUIRE_FALSE(*contract_log().nested_resize_result);
+        REQUIRE(view.frame.size.width == 600);
+        REQUIRE(view.frame.size.height == 450);
+        [view release];
+    }
+    contract_config() = {};
+    [window close];
+    [window release];
+    AudioComponentInstanceDispose(au);
+    g_instance = nullptr;
+}
+
 TEST_CASE("an AU v2 contract editor ticks only while its view lives",
           "[auv2][editor-host][au-contract][idle]") {
     EditorEnvironment env;

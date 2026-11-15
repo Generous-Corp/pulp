@@ -34,6 +34,9 @@ struct ContractEditorLog {
     /// Attach, detach, invalidate and destruction calls made off the main
     /// thread (always 0 where the main thread cannot be told apart).
     int off_main_thread_calls = 0;
+    /// The result of a request_resize() made from inside set_size() (see
+    /// ContractEditorConfig::resize_inside_set_size); unset until one is made.
+    std::optional<bool> nested_resize_result;
 
     bool saw(const std::string& call) const {
         for (const auto& c : calls)
@@ -51,6 +54,9 @@ struct ContractEditorConfig {
     bool factory_supports_editor = true;
     /// Whether the editor offers EditorAutomation::capture_png().
     bool captures_frames = true;
+    /// Ask the host for a larger size from inside set_size(), the way an
+    /// editor reacting to a resize might.
+    bool resize_inside_set_size = false;
 };
 
 inline ContractEditorLog& contract_log() {
@@ -132,6 +138,11 @@ class RecordingContractEditor final : public format::Editor {
         if (size.width < 200 || size.height < 150)
             return false;
         size_ = size;
+        if (contract_config().resize_inside_set_size && contract_log().context != nullptr &&
+            !contract_log().nested_resize_result) {
+            contract_log().nested_resize_result = contract_log().context->request_resize(
+                {size.width + 20, size.height + 20, size.scale});
+        }
         contract_log().last_scale = size.scale;
         contract_log().calls.push_back("set_size:" + std::to_string(size.width) + "x" +
                                        std::to_string(size.height));

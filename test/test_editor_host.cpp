@@ -10,6 +10,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/format/contract_editor_session.hpp>
+#include <pulp/format/detail/au_v2_resize_accept.hpp>
 #include <pulp/format/editor_host.hpp>
 #include <pulp/format/editor_package.hpp>
 #include <pulp/format/host_parameter_edit.hpp>
@@ -1182,4 +1183,25 @@ TEST_CASE("an observation that outlives its host state is inert", "[editor-host]
     // Cancelling must not reach the destroyed state (ASan holds this).
     observation.reset();
     REQUIRE_FALSE(observation);
+}
+
+TEST_CASE("an AU v2 resize request is accepted only at the exact size the host followed",
+          "[editor-host][resize-request]") {
+    using pulp::format::detail::FrameSize;
+    using pulp::format::detail::resize_request_accepted;
+    const FrameSize wanted{720, 540};
+    const FrameSize other{700, 540};
+    // The frame took it and the editor agreed.
+    REQUIRE(resize_request_accepted(wanted, wanted, true, false, true, other));
+    // Within the half-point tolerance.
+    REQUIRE(resize_request_accepted(wanted, {720.3, 539.8}, true, false, false, other));
+    // The editor refused.
+    REQUIRE_FALSE(resize_request_accepted(wanted, wanted, false, false, true, wanted));
+    // The frame ended elsewhere.
+    REQUIRE_FALSE(resize_request_accepted(wanted, other, true, false, true, wanted));
+    // A host that resizes its container must have done so; one that does not
+    // is not asked to.
+    REQUIRE_FALSE(resize_request_accepted(wanted, wanted, true, true, true, other));
+    REQUIRE(resize_request_accepted(wanted, wanted, true, true, true, wanted));
+    REQUIRE(resize_request_accepted(wanted, wanted, true, true, false, other));
 }

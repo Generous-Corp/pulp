@@ -50,7 +50,10 @@
 #include <pulp/format/au_v2_common.hpp>
 #include <pulp/format/contract_editor_session.hpp>
 #include <pulp/format/detail/appkit_contract_key.hpp>
+#include <pulp/format/detail/au_v2_resize_accept.hpp>
 #include <pulp/format/detail/editor_environment.hpp>
+#include <pulp/format/host_quirks.hpp>
+#include <pulp/format/host_version.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/runtime/log.hpp>
 
@@ -81,10 +84,12 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
 @interface PULP_AU_CONTRACT_HOST_VIEW_CLASS : NSView {
     std::shared_ptr<pulp::format::ContractEditorSession> _session;
     bool _applyingEditorSize;
+    bool _editorResizeActive;
 }
 - (void)adoptSession:(std::shared_ptr<pulp::format::ContractEditorSession>)session;
 - (pulp::format::ContractEditorSession*)session;
 - (void)applyEditorSize;
+- (bool)requestEditorSize:(const pulp::format::EditorSize&)requested;
 @end
 
 @implementation PULP_AU_CONTRACT_HOST_VIEW_CLASS
@@ -117,6 +122,57 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
         return;
     _session->set_size(static_cast<std::uint32_t>(newSize.width),
                        static_cast<std::uint32_t>(newSize.height));
+}
+
+// The editor's own resize request. AU v2 has no resize request: the host
+// follows the container's frame, so the request is a frame change that counts
+// as accepted only when the editor takes the size, the frame ends at exactly
+// that size and, under a host that resizes its enclosing container to match
+// (Logic), the container does too (detail::resize_request_accepted). Anything
+// else is rolled back and the editor is told it kept its previous size.
+// Main thread only, and never nested.
+- (bool)requestEditorSize:(const pulp::format::EditorSize&)requested {
+    using pulp::format::detail::FrameSize;
+    if (![NSThread isMainThread] || _editorResizeActive || !_session ||
+        _session->editor() == nullptr || requested.width == 0 || requested.height == 0)
+        return false;
+    const FrameSize wanted{static_cast<double>(requested.width),
+                           static_cast<double>(requested.height)};
+    const NSRect previous = self.frame;
+    if (pulp::format::detail::same_frame_size({previous.size.width, previous.size.height}, wanted))
+        return true;
+
+    NSView* container = self.superview;
+    const NSRect previous_container = container != nil ? container.frame : NSZeroRect;
+    static const bool follow_container = [] {
+        const auto info = pulp::format::detect_host_info();
+        return pulp::format::resolved_quirks(info.type, info.version).logic_au_v2_container_resize;
+    }();
+
+    _editorResizeActive = true;
+    _applyingEditorSize = true;
+    [super setFrameSize:NSMakeSize(wanted.width, wanted.height)];
+    _applyingEditorSize = false;
+    const bool editor_took = _session->set_size(requested.width, requested.height);
+    const NSRect after = self.frame;
+    const NSRect after_container = container != nil ? container.frame : NSZeroRect;
+    const bool accepted = pulp::format::detail::resize_request_accepted(
+        wanted, {after.size.width, after.size.height}, editor_took, follow_container,
+        container != nil && self.window != nil,
+        {after_container.size.width, after_container.size.height});
+    if (!accepted) {
+        // Restore the host-owned parent first, then this view, so the parent's
+        // autoresizing mask cannot move an already-restored child twice.
+        if (container != nil && follow_container)
+            [container setFrame:previous_container];
+        _applyingEditorSize = true;
+        [super setFrameSize:previous.size];
+        _applyingEditorSize = false;
+        _session->set_size(static_cast<std::uint32_t>(previous.size.width),
+                           static_cast<std::uint32_t>(previous.size.height));
+    }
+    _editorResizeActive = false;
+    return accepted;
 }
 
 - (void)viewWillMoveToWindow:(NSWindow*)window {
@@ -198,8 +254,7 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
     // The view owns the session, so it outlives every hook call.
     hooks.request_resize = [view](const format::EditorSize& requested) {
         // AU v2 has no resize request: the host follows the view's frame.
-        [view setFrameSize:NSMakeSize(requested.width, requested.height)];
-        return true;
+        return [view requestEditorSize:requested];
     };
     auto session = format::ContractEditorSession::create(*ctx.processor, *ctx.store, *factory,
                                                          std::move(hooks));
