@@ -34,8 +34,16 @@ execute_process(COMMAND bash "${PULP_SOURCE_DIR}/tools/ci/governed-build.sh"
 if(NOT _rc EQUAL 0)
     message(FATAL_ERROR "Public consumer build failed (${_rc})\n${_out}\n${_err}")
 endif()
-execute_process(COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${_build}" --output-on-failure
+execute_process(COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${_build}"
+    -C "${PULP_PARENT_BUILD_TYPE}" --output-on-failure --no-tests=error
     RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
 if(NOT _rc EQUAL 0)
     message(FATAL_ERROR "Public consumer audio proof failed (${_rc})\n${_out}\n${_err}")
+endif()
+# A consumer whose test registration silently disappears must not pass.
+execute_process(COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${_build}"
+    -C "${PULP_PARENT_BUILD_TYPE}" -N
+    OUTPUT_VARIABLE _listing)
+if(NOT _listing MATCHES "Total Tests: 2([^0-9]|$)")
+    message(FATAL_ERROR "Public consumer expected two tests:\n${_listing}")
 endif()

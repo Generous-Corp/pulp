@@ -156,8 +156,11 @@ TEST_CASE("Graph file watcher bounds errors and coalesces repeated or partial sa
     GraphFileWatch watch(file);
     REQUIRE(watch.poll().code == GraphFileChange::Code::Unreadable);
     REQUIRE(watch.poll().code == GraphFileChange::Code::Unchanged);
+    // The file was missing at startup, so its first settled contents are a change.
     write(file, patch(0.25f));
-    REQUIRE(watch.poll().code == GraphFileChange::Code::Unchanged);
+    REQUIRE(watch.poll().code == GraphFileChange::Code::Pending);
+    REQUIRE(watch.poll().code == GraphFileChange::Code::Changed);
+    watch.acknowledge();
     write(file, "partial");
     REQUIRE(watch.poll().code == GraphFileChange::Code::Pending);
     write(file, patch(0.75f));
@@ -185,6 +188,19 @@ TEST_CASE("Graph file watch does not reapply its starting contents",
     REQUIRE(watch.poll().code == GraphFileChange::Code::Pending);
     write(file, patch(0.25f));
     REQUIRE(watch.poll().code == GraphFileChange::Code::Unchanged);
+}
+
+TEST_CASE("Graph file watch offers the first contents of a file missing at startup",
+          "[host][graph-file-reload][watch]") {
+    pulp::test::ScopedTempDir directory("pulp-graph-watch-late");
+    const auto file = directory.path / "live.pat";
+    GraphFileWatch watch(file);
+    REQUIRE(watch.poll().code == GraphFileChange::Code::Unreadable);
+    write(file, patch(0.25f));
+    REQUIRE(watch.poll().code == GraphFileChange::Code::Pending);
+    const auto changed = watch.poll();
+    REQUIRE(changed.code == GraphFileChange::Code::Changed);
+    REQUIRE(changed.text == patch(0.25f));
 }
 
 TEST_CASE("Graph file watch re-offers a change until it is acknowledged",
