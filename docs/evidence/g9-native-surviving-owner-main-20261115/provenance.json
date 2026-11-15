@@ -93,6 +93,11 @@
       "verdict_snapshot_s": 0.088383
     }
   ],
+  "formatting_rebuild": {
+    "executable_sha256": "daff385922550384b99a5d39efbec802a9bc86bf6ee69e595959477ab1a2555e",
+    "note": "clang-format whitespace changes to fixture.cpp, record.hpp and vendor.cpp, plus one CMake comment line; rebuilt Release artifacts are byte-identical to the executed ones",
+    "vendor_sha256": "de297beadf6dad063f2ef8c464762e775869d4a291735d33f918ec558377a996"
+  },
   "main_commit": "abb85fd983becdfba064697826b34db21486e4e8",
   "native_changes_since_original_base": [
     "c47cd275b341050a0db9ec7794ca99f56e4237e1 feat(platform): join native children to current process group"
@@ -194,6 +199,15 @@
     "raw/summary-healthy-host_eof-host_kill-retry-leak-leak_restored-census_error-anchor_stop-anchor_kill.json": "e61a6b1040d9a918e4f1cf267c17a5faff779ae7852ad33fa23b140b2945ed7b"
   },
   "source_sha256": {
+    "core/platform/include/pulp/platform/child_process.hpp": "eefd4f741c1e55b053fe3192d3f31e2e6a8560b823818bc39ca2875e11e4d380",
+    "core/platform/platform/posix/child_process_posix.cpp": "ddc613ecc912c5cb28e0191464da43578c2b297671a79be50ff84dfaab463d1c",
+    "test/fixtures/g9_native_surviving_owner/CMakeLists.txt": "cb29e3b2b495da528724f8b1dbb7e568d633e1b7b2f9c4024e332e92da17b784",
+    "test/fixtures/g9_native_surviving_owner/fixture.cpp": "c5b175467bb1e9cdaa4ee81d7ada90d7576ef4f20e57d43085ef75f660649d98",
+    "test/fixtures/g9_native_surviving_owner/record.hpp": "b0162bed2019195f61c1c95328ca30ef1cd86a5635e6971301abf0a32f50429f",
+    "test/fixtures/g9_native_surviving_owner/run.py": "419648a87314b53901775b722d78a68b6859d019c573b6d1392b8275a5034618",
+    "test/fixtures/g9_native_surviving_owner/vendor.cpp": "c823635785e1c075cabe5be0deff161271ecbefce94e39f2522469779af77238"
+  },
+  "source_sha256_as_executed": {
     "core/platform/include/pulp/platform/child_process.hpp": "eefd4f741c1e55b053fe3192d3f31e2e6a8560b823818bc39ca2875e11e4d380",
     "core/platform/platform/posix/child_process_posix.cpp": "ddc613ecc912c5cb28e0191464da43578c2b297671a79be50ff84dfaab463d1c",
     "test/fixtures/g9_native_surviving_owner/CMakeLists.txt": "fc9e1ede1719f23055003a5c784cee416f12635b12f1299da0209ba3a4918bcb",

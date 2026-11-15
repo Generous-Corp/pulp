@@ -4,6 +4,7 @@ if(NOT APPLE OR NOT CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
   message(FATAL_ERROR "This evidence fixture admits macOS arm64 only")
 endif()
 get_filename_component(PULP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
+# script-inputs: not-gated standalone macOS evidence project that the repository configure never adds
 add_executable(g9-native-surviving-owner fixture.cpp
   "${PULP_ROOT}/core/platform/platform/posix/child_process_posix.cpp")
 target_include_directories(g9-native-surviving-owner PRIVATE "${PULP_ROOT}/core/platform/include")

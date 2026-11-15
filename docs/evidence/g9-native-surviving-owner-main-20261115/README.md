@@ -32,6 +32,13 @@ therefore no longer matches the original binary hash (117432 bytes, SHA-256
 SHA-256 `de297bea...`). `provenance.json` binds the new hashes, sources and raw
 files.
 
+The fixture C++ sources are clang-formatted in this tree. That change is
+whitespace only (plus one CMake comment line marking the project as outside the script-inputs gate): a governed Release rebuild from the formatted sources produced
+an executable and module byte-identical to the ones that ran, so the receipts
+still describe this tree. `provenance.json` keeps both the as-executed and the
+formatted source hashes. The original packet's provenance keeps its own
+pre-format hashes, as recorded.
+
 ## Recorded outcome
 
 One governed Release build (`-O3 -DNDEBUG` on all three compilations, see
