@@ -311,6 +311,20 @@ void deliver_mouse_wheel(View& root, Point root_pt,
                          float scroll_delta_x, float scroll_delta_y,
                          uint16_t modifiers, const WheelHost& host);
 
+/// What a host knows about a wheel event beyond its deltas. Every MouseEvent
+/// the routing builds carries these (`MouseEvent::modifiers`,
+/// `MouseEvent::scroll_precise`).
+struct WheelAttributes {
+    uint16_t modifiers = 0;
+    /// False when the deltas count discrete wheel lines rather than points.
+    bool precise = true;
+};
+
+/// Wheel delivery with every attribute the host knows; the overloads above
+/// forward here with `precise = true`.
+void deliver_mouse_wheel(View& root, Point root_pt, float scroll_delta_x, float scroll_delta_y,
+                         const WheelAttributes& attributes, const WheelHost& host);
+
 /// Deliver a press to an already-resolved `target` (the host has done the
 /// hit_test, any combo/overlay pre-routing, and the focus protocol before
 /// calling in — those steps diverge per platform/host and stay host-side).

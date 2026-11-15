@@ -738,6 +738,14 @@ void deliver_mouse_wheel(View& root, Point root_pt,
 void deliver_mouse_wheel(View& root, Point root_pt,
                          float scroll_delta_x, float scroll_delta_y,
                          uint16_t modifiers, const WheelHost& host) {
+    WheelAttributes attributes;
+    attributes.modifiers = modifiers;
+    deliver_mouse_wheel(root, root_pt, scroll_delta_x, scroll_delta_y, attributes, host);
+}
+
+void deliver_mouse_wheel(View& root, Point root_pt, float scroll_delta_x, float scroll_delta_y,
+                         const WheelAttributes& attributes, const WheelHost& host) {
+    const uint16_t modifiers = attributes.modifiers;
     const auto repaint = [&] { if (host.request_repaint) host.request_repaint(); };
 
     // 1. An open ComboBox popup consumes the wheel to scroll its (clamped) item
@@ -757,6 +765,7 @@ void deliver_mouse_wheel(View& root, Point root_pt,
             me.position = point_to_local(root_pt, combo, &root);
             me.window_position = root_pt;
             me.modifiers = modifiers;
+            me.scroll_precise = attributes.precise;
             me.is_wheel = true;
             me.scroll_delta_x = scroll_delta_x;
             me.scroll_delta_y = scroll_delta_y;
@@ -784,6 +793,7 @@ void deliver_mouse_wheel(View& root, Point root_pt,
             me.position = root_pt;
             me.window_position = root_pt;
             me.modifiers = modifiers;
+            me.scroll_precise = attributes.precise;
             me.is_wheel = true;
             me.scroll_delta_x = scroll_delta_x;
             me.scroll_delta_y = scroll_delta_y;
@@ -803,6 +813,7 @@ void deliver_mouse_wheel(View& root, Point root_pt,
     // `0 - rect.left` and the wrong anchor.
     me.window_position = root_pt;
     me.modifiers = modifiers;
+    me.scroll_precise = attributes.precise;
     me.is_wheel = true;
     me.scroll_delta_x = scroll_delta_x;
     me.scroll_delta_y = scroll_delta_y;

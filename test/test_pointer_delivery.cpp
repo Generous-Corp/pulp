@@ -867,6 +867,87 @@ TEST_CASE("deliver_mouse_wheel preserves modifiers through portable routing",
     CHECK(repaints == 1);
 }
 
+namespace {
+
+// A wheel-scroll pane with no hit-testable content: the empty-background
+// fallback is the only route that reaches it.
+class EmptyBackgroundWheelScrollSpy : public WheelScrollSpy {
+  public:
+    View* hit_test(Point) override {
+        return nullptr;
+    }
+};
+
+} // namespace
+
+TEST_CASE("deliver_mouse_wheel carries the line/precise flag on every route",
+          "[view][input][wheel]") {
+    for (const bool precise : {false, true}) {
+        INFO("precise " << precise);
+        WheelAttributes attributes;
+        attributes.precise = precise;
+        int repaints = 0;
+
+        // A wants_wheel_scroll target under the cursor.
+        {
+            View root;
+            root.set_bounds({0, 0, 400, 300});
+            auto scroller = std::make_unique<WheelScrollSpy>();
+            WheelScrollSpy* spy = scroller.get();
+            spy->set_bounds({0, 0, 400, 300});
+            root.add_child(std::move(scroller));
+            deliver_mouse_wheel(root, {130, 70}, 0.0f, -1.0f, attributes, counting_host(repaints));
+            REQUIRE(spy->hits == 1);
+            CHECK(spy->last.is_wheel);
+            CHECK(spy->last.scroll_precise == precise);
+            CHECK(spy->last.scroll_delta_y == -1.0f);
+        }
+        // The empty-background fallback into the pane under the cursor.
+        {
+            View root;
+            root.set_bounds({0, 0, 200, 200});
+            root.set_pointer_events(View::PointerEvents::box_none);
+            auto scroller = std::make_unique<EmptyBackgroundWheelScrollSpy>();
+            EmptyBackgroundWheelScrollSpy* spy = scroller.get();
+            spy->set_bounds({0, 0, 200, 200});
+            root.add_child(std::move(scroller));
+            deliver_mouse_wheel(root, {10, 10}, 0.0f, -1.0f, attributes, counting_host(repaints));
+            REQUIRE(spy->hits == 1);
+            CHECK(spy->last.scroll_precise == precise);
+        }
+        // The W3C bubble to a pointer-registered ancestor.
+        {
+            View root;
+            root.set_bounds({0, 0, 400, 300});
+            auto wrapper = std::make_unique<WheelPointerSpy>();
+            WheelPointerSpy* wrap = wrapper.get();
+            wrap->set_bounds({50, 40, 300, 200});
+            auto leaf = std::make_unique<View>();
+            leaf->set_bounds({10, 10, 100, 100});
+            wrap->add_child(std::move(leaf));
+            root.add_child(std::move(wrapper));
+            deliver_mouse_wheel(root, {70, 60}, 0.0f, -1.0f, attributes, counting_host(repaints));
+            REQUIRE(wrap->wheel_events == 1);
+            CHECK(wrap->last.scroll_precise == precise);
+        }
+    }
+}
+
+TEST_CASE("wheel delivery without attributes keeps treating deltas as precise",
+          "[view][input][wheel]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    auto scroller = std::make_unique<WheelScrollSpy>();
+    WheelScrollSpy* spy = scroller.get();
+    spy->set_bounds({0, 0, 400, 300});
+    root.add_child(std::move(scroller));
+    int repaints = 0;
+    deliver_mouse_wheel(root, {130, 70}, 0.0f, -1.0f, counting_host(repaints));
+    deliver_mouse_wheel(root, {130, 70}, 0.0f, -1.0f, std::uint16_t{0}, counting_host(repaints));
+    REQUIRE(spy->hits == 2);
+    CHECK(spy->last.scroll_precise);
+}
+
 TEST_CASE("wheel layout is skipped when the scrolling view deletes itself",
           "[view][input][wheel][reentrancy]") {
     View root;

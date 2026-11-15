@@ -99,12 +99,9 @@ NSEvent* build_event(NSWindow* window,
         // deltas. Axis order: CGEventCreateScrollWheelEvent2's
         // variadic wheel args are (wheel1, wheel2) ≡ (Y, X).
         CGEventRef cge = CGEventCreateScrollWheelEvent2(
-            /* source */ NULL,
-            kCGScrollEventUnitPixel,
-            /* wheelCount */ 2,
-            static_cast<int32_t>(ev.scroll_delta_y),
-            static_cast<int32_t>(ev.scroll_delta_x),
-            0);
+            /* source */ NULL, ev.scroll_lines ? kCGScrollEventUnitLine : kCGScrollEventUnitPixel,
+            /* wheelCount */ 2, static_cast<int32_t>(ev.scroll_delta_y),
+            static_cast<int32_t>(ev.scroll_delta_x), 0);
         if (!cge) return nil;
         // Regression coverage: set the CGEvent location so
         // `event.locationInWindow` lands at the harness-requested coordinates

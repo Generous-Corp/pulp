@@ -126,6 +126,12 @@ struct MouseEvent {
     float movement_x = 0;        ///< Host-reported horizontal movement since the prior event
     float movement_y = 0;        ///< Host-reported vertical movement since the prior event
     bool has_movement_delta = false;  ///< Movement fields came from the native host
+    /// For a wheel event: true when `scroll_delta_x/y` are fine-grained points
+    /// (trackpad, Magic Mouse), false when they count discrete wheel lines (a
+    /// classic mouse wheel, one tick = 1). macOS hosts set it from
+    /// `NSEvent.hasPreciseScrollingDeltas`; other platforms leave it true,
+    /// which is how their deltas have always been treated.
+    bool scroll_precise = true;
 
     bool isShiftDown() const  { return (modifiers & kModShift) != 0; }
     bool isCtrlDown() const   { return (modifiers & kModCtrl) != 0; }

@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "event_id": "20261115-wheel-precise-flag",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-15T01:38:19Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/view/include/pulp/view/input_events.hpp",
+    "core/view/include/pulp/view/pointer_dispatch.hpp",
+    "core/view/platform/mac/window_host_mac.mm",
+    "core/view/src/pointer_dispatch.cpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "Adds MouseEvent::scroll_precise and a WheelAttributes overload of deliver_mouse_wheel, set by the macOS hosts from hasPreciseScrollingDeltas. Vellum does not take it from Pulp: these units are Vellum-native in framework/ and no longer re-exported, so if Vellum wants the flag it is made there first."
+}
