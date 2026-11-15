@@ -68,6 +68,16 @@ it and its tests, and both look like bugs until you know them:
   leaves a host's key routing (Musical Typing) dead, as the plug-in host's
   key-focus etiquette below describes.
 
+- **RmlUi frames hold one process-wide lock; input does not wait for it.**
+  `RmlUiSurface` takes `rmlui_mutex()` for a frame's update and render, and
+  RmlUi permits no narrower scope. Pointer and wheel events that arrive during
+  a frame are queued and applied on the main thread when the lock frees, so a
+  test that asserts a click's effect right after the event must call
+  `RmlUiSurface::flush_input()` first. `with_context()`, key and text input do
+  wait for a frame by design. A test that needs to see the stall sets a
+  per-draw delay in a counting renderer and times `with_context()` as the
+  control.
+
 `pulp::native::GlSurface` is the OpenGL counterpart for Windows and X11. On
 macOS only its offscreen backend exists (CGL into a framebuffer object), for
 tests and offline capture. Two things about it are easy to get wrong:
