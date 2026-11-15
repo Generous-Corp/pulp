@@ -1,0 +1,97 @@
+{
+  "id": "g3-graph-edit-history-diff",
+  "title": "Value-owned graph edit history and logical-identity document diff are ledgered",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "g3-graph-edit-history-diff-20261114",
+  "owned_paths": [
+    "core/host/include/pulp/host/graph_history.hpp",
+    "core/host/src/graph_history.cpp",
+    "test/test_graph_history.cpp",
+    "test/test_cli_graph_code_parity.cpp",
+    "tools/cli/cmd_graph.cpp",
+    "docs/graph-program-status/G-3.md",
+    "docs/status/sequencer-exposure/rows/g3-graph-edit-history-diff.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/host/include/pulp/host/graph_history.hpp",
+      "needles": ["class GraphEditHistory", "diff_graph_documents", "qualified_port_identities", "GraphHistoryCode"]
+    },
+    {
+      "path": "core/host/src/graph_history.cpp",
+      "needles": ["GraphHistoryCode::Diverged", "snapshot_port_identity", "GraphHistoryCode::PortIdentityMismatch", "result.rolled_back"]
+    },
+    {
+      "path": "test/test_graph_history.cpp",
+      "needles": ["graph edit history refuses to undo over an unrecorded edit", "graph document diff compares by logical identity, not NodeId", "graph edit history rolls back a restore that cannot be reproduced"]
+    },
+    {
+      "path": "docs/graph-program-status/G-3.md",
+      "needles": ["Edit history and document diff (2026-11-14)", "pulp graph diff"]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "GraphEditHistory and diff_graph_documents are public host APIs over saved-identity v6 documents; they hold no pointer into a live graph and the diff is data-only.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/graph_history.hpp",
+          "needles": ["class GraphEditHistory", "diff_graph_documents"]
+        },
+        {
+          "kind": "test",
+          "path": "test/test_graph_history.cpp",
+          "needles": ["graph edit history undoes and redoes by value"]
+        }
+      ],
+      "authority": {
+        "admission": "read_only",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "exposed",
+      "rationale": "pulp graph diff reads two bounded saved documents and reports their logical-identity differences; it never loads plugin code or writes files.",
+      "evidence": [
+        {
+          "kind": "cli_handler",
+          "path": "tools/cli/cmd_graph.cpp",
+          "needles": ["int diff_graphs("]
+        },
+        {
+          "kind": "test",
+          "path": "test/test_cli_graph_code_parity.cpp",
+          "needles": ["graph diff compares saved documents by logical identity"]
+        },
+        {
+          "kind": "cli_definition",
+          "path": "tools/cli/cmd_graph.cpp",
+          "needles": ["diff: pulp graph diff BEFORE.pulpgraph AFTER.pulpgraph [--json]"]
+        }
+      ],
+      "authority": {
+        "admission": "read_only",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation, schema, or handler is added; the pulp_graph tool does not expose diff."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "History restores through GraphSerializer on the caller's thread; it adds no runtime operation or executor authority."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No design-time capability or agent manifest entry is added."
+    }
+  }
+}
