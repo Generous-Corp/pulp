@@ -1257,6 +1257,43 @@ TEST_CASE("constrain_to_hints holds a locked aspect and the bounds together",
     REQUIRE((w == 300 && h == 600));
 }
 
+TEST_CASE("constrain_to_hints leaves an unbounded locked aspect uncapped up to uint32 limits",
+          "[editor-host][resize-hints]") {
+    using pulp::format::detail::constrain_to_hints;
+    constexpr auto kMax = std::numeric_limits<std::uint32_t>::max();
+    // max_width/max_height of zero mean unbounded: a request past one billion
+    // pixels on the ratio keeps its size instead of hitting a hidden cap.
+    auto open = bounded_hints(1.0);
+    open.max_width = open.max_height = 0;
+    std::uint32_t w = 2'000'000'000u, h = 2'000'000'000u;
+    REQUIRE(constrain_to_hints(open, w, h));
+    REQUIRE((w == 2'000'000'000u && h == 2'000'000'000u));
+    w = h = kMax;
+    REQUIRE(constrain_to_hints(open, w, h));
+    REQUIRE((w == kMax && h == kMax));
+
+    // A wide ratio: the width may reach the uint32 limit.
+    auto wide = bounded_hints(2.0);
+    wide.max_width = wide.max_height = 0;
+    w = kMax;
+    h = kMax;
+    REQUIRE(constrain_to_hints(wide, w, h));
+    REQUIRE(w == kMax);
+    REQUIRE(h == kMax / 2 + 1);
+
+    // A tall ratio: the height must not overflow past the uint32 limit.
+    auto tall = bounded_hints(0.5);
+    tall.min_width = 100;
+    tall.min_height = 200;
+    tall.max_width = tall.max_height = 0;
+    w = kMax;
+    h = kMax;
+    REQUIRE(constrain_to_hints(tall, w, h));
+    REQUIRE(h <= kMax);
+    REQUIRE(h > 4'000'000'000u);
+    REQUIRE(w == h / 2);
+}
+
 TEST_CASE("constrain_to_hints clamps each axis alone without an aspect, and refuses a fixed editor",
           "[editor-host][resize-hints]") {
     using pulp::format::detail::constrain_to_hints;

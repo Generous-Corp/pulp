@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 
 namespace pulp::format::detail {
 
@@ -41,6 +42,9 @@ inline bool constrain_to_hints(const ViewSize& hints, std::uint32_t& width, std:
         return true;
     }
     const double ratio = hints.aspect_ratio;
+    // A zero maximum means unbounded: the only ceiling is what both axes can
+    // hold as uint32, so the width also stays where width / ratio fits.
+    constexpr double kLimit = std::numeric_limits<std::uint32_t>::max();
     const double requested = static_cast<double>(width) / static_cast<double>(height);
     double w = width;
     if (requested > ratio)
@@ -48,7 +52,7 @@ inline bool constrain_to_hints(const ViewSize& hints, std::uint32_t& width, std:
     // The widths a box at `ratio` can have inside both axes' bounds.
     double lo =
         std::max<double>(hints.min_width, std::ceil(static_cast<double>(hints.min_height) * ratio));
-    double hi = 1e9;
+    double hi = std::min(kLimit, std::floor(kLimit * ratio));
     if (hints.max_width > 0)
         hi = std::min<double>(hi, hints.max_width);
     if (hints.max_height > 0)
@@ -56,12 +60,12 @@ inline bool constrain_to_hints(const ViewSize& hints, std::uint32_t& width, std:
     if (lo > hi) {
         // Bounds that cannot hold the ratio: the width limits win.
         lo = hints.min_width;
-        hi = hints.max_width > 0 ? hints.max_width : 1e9;
+        hi = hints.max_width > 0 ? static_cast<double>(hints.max_width) : kLimit;
     }
     hi = std::max(lo, hi);
     w = std::clamp(std::round(w), lo, hi);
     width = static_cast<std::uint32_t>(w);
-    height = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(w / ratio)));
+    height = static_cast<std::uint32_t>(std::clamp(std::round(w / ratio), 1.0, kLimit));
     return true;
 }
 
