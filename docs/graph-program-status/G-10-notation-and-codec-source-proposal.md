@@ -56,6 +56,32 @@ authoring path, so edges need only a `spectral` flag on the saved connection.
    serializer file limit) and a content-addressed sidecar keyed by the SHA-256
    that `SpectralAssetMorphConfig` already computes.
 
+### Remaining catalog and notation gap
+
+`pulp graph catalog --json` now lists the four spectral constructors. Checked
+against `core/host/src/graph_patch.cpp` on origin/main, these gaps remain:
+
+- The spectral rows share one probe identity (FFT 256, hop 64, mono, 48 kHz).
+  They do not state the admitted identity range (FFT 256 to 16384 power of two,
+  hop 1 to N/2, 1 to 16 channels), and the asset-morph row does not say that its
+  geometry is fixed at profile 1, FFT 256, hop 64, mono rather than following
+  the probe.
+- The stage row is built from `IdentityV1` only; the catalog does not list the
+  stage kinds (`IdentityV1`, `RealMaskV1`) or that a mask carries
+  `channels * bins` gains.
+- `SignalGraphPreparedTopologyEdit` offers analysis, stage and synthesis but no
+  asset-morph constructor, so the catalog's asset-morph row has no
+  prepared-edit counterpart.
+- Notation boundaries are stereo only: formatting refuses an input or output
+  boundary that is not two channels, and the default catalog builds both with
+  `add_input_node(2)` / `add_output_node(2)`. There is no mono or bus-layout
+  boundary spelling.
+- Notation has no subgraph-template syntax.
+- Persistence of every spectral node is the owner decision in this section.
+
+The first two are additive catalog fields that need no format decision; the
+rest depend on the grammar choices above.
+
 ### Recommendation
 
 Option 2 now, inside the G-3 v6 writer, with asset morph refused. Decide the
@@ -92,6 +118,33 @@ already accepts FFT 256 to 16384 (power of two), hop 1 to N/2 and 1 to 16
 channels, which matches `SpectralIdentity::make`. Preparation accepts a
 spectral root only if it is an analysis or asset morph node.
 
+### Prerequisite already in place
+
+The end-of-stream arithmetic is one internal, geometry-parameterized rule,
+`SpectralFiniteStreamRule` in `core/host/src/spectral_finite_stream_internal.hpp`.
+It derives the frame count, routed cutoff, published frame count (`N / H` drain),
+bin count and per-frame, per-channel component offsets from (N, H, C, L) with
+checked arithmetic against signed chronology. The asset morph node, its prepare
+step and its per-hop control average now read every one of those values from the
+rule instead of the literals listed above. The admitted geometry is unchanged:
+`make()` still refuses anything but profile 1, FFT 256, hop 64, mono, and the
+morph endpoint storage is still sized for 129 bins. No public API, port or
+format changed.
+
+`test/test_spectral_finite_stream_rule.cpp` checks the rule against the
+analysis frame grid the engine starts on
+(`spectral_frame_engine_first_frame_start`), not against its own formula, at
+eight geometries from N=256/H=1 to N=16384/H=8192 with 16 channels, plus the
+exact profile-one constants for lengths 1 to 4096, the component tiling, the
+length and capacity bounds at each geometry, and the refused geometries.
+
+The rule found a defect in the EOF policy proposed in choice 3 below: the
+closed form `ceil((L + N - H) / H)` equals the number of grid frames that
+overlap the source only when H divides N. For N=256, H=100, L=1 the closed form
+gives 2 frames while the analysis grid starts at -200 and produces 3. The codec
+and `SpectralIdentity` both accept such hops. The rule therefore refuses a hop
+that does not divide N; choice 5 asks whether that restriction should stand.
+
 ### Design choices that need a decision
 
 1. **Shape of the public path.**
@@ -118,12 +171,20 @@ spectral root only if it is an analysis or asset morph node.
 4. **Channels.** Allow the decoded channel count (1 to 16) or restrict to mono
    first. Recommendation: allow all, because synthesis already takes the
    identity's channel count.
+5. **Hops that do not divide N.** Either keep the source restricted to
+   power-of-two hops (H divides N), which is what the rule admits today, or
+   define the frame count as the analysis-grid count
+   `floor((L - 1) / H) + floor((N - 1) / H) + 1` and the drain as
+   `ceil(N / H)`, then prove the cutoff against the synthesis engine at a
+   non-dividing hop. Recommendation: keep the restriction for the first public
+   source; every current consumer and evidence row uses H dividing N.
 
 ### Work once decided
 
 Add the node type and ports in `spectral_graph.hpp`, `signal_graph_node.hpp`
-and `signal_graph_runtime.hpp`; replace every constant listed above with values
-derived from the decoded geometry; add the callback branch; update
+and `signal_graph_runtime.hpp`; construct the source's `SpectralFiniteStreamRule`
+from the decoded geometry; size the per-node frame storage from `rule.bins` and
+`rule.channels` instead of the fixed 129-bin array; add the callback branch; update
 `graph_rt_report.cpp`, the agent capability manifest, the consumption census
 and the catalog row added here. Acceptance: an analytic round trip through
 synthesis at two non-default geometries (for example N=1024/H=256 stereo and
