@@ -45,7 +45,7 @@ channels, finite length L = 6000 in an 8192-sample render.
 | --- | --- | --- | --- |
 | 1 | Explicit frame geometry | **PASS** | `SpectralFrameContract` is encoded, decoded and compared field by field (FFT, hop, channels, bins = N/2+1, sample-rate bits, window, phase, normalization, precision). The analysis and synthesis nodes' `spectral_identity` and the analysis node's encoded wire contract equal the declared geometry. Receipt line: `geometry: fft=512 hop=128 channels=2 bins=257 rate=48000`. |
 | 2 | Latency = reported PDC | **PASS** | `latency_samples()` = `prepared_latency_snapshot()->total_latency_samples` = 640 = N + H. Measured impulse delay (argmax) is 640 on channel 0 (impulse at 0) and on channel 1 (impulse at 1000), so channel layout is preserved. Instrument control: moving both impulses by one sample moves both readings by exactly one. |
-| 3 | EOF/tail | **PASS** (streaming EOF) | Contract (G-10 routed admission row "Tail drain L+N-1"): for a source of length L the output support is `[D, D+L+N-1)` with D the reported latency. Every output sample outside `[640, 7151)` is exactly zero for both identity and masked renders. Last nonzero sample is 7038, past the delayed EOF sample 6639, so the N-1 tail allowance is exercised, not vacuous. EOF is expressed by the host feeding zeros after L samples; the routed graph has no EOF signal. See "Binding gap" for codec-sourced EOF. |
+| 3 | EOF/tail | **PASS** (zero-padded finite input; no in-graph EOF) | Contract (G-10 routed admission row "Tail drain L+N-1"): for a source of length L the output support is `[D, D+L+N-1)` with D the reported latency. Every output sample outside `[640, 7151)` is exactly zero for both identity and masked renders. Last nonzero sample is 7038, past the delayed EOF sample 6639, so the N-1 tail allowance is exercised, not vacuous. The host feeds zeros after L samples and the routed graph has no EOF signal, so this proves the zero-padded tail of a linear system, not an EOF mechanism: analysis roots are unbounded and only asset-morph roots carry a finite frame count. See "Binding gap" for codec-sourced EOF. |
 | 4 | CPU fallback | **N/A** | The routed spectral runtime is CPU-only: `git grep -i "gpu\|provider"` over `core/host/src/spectral_graph.cpp`, `spectral_graph_internal.hpp` and `spectral_graph.hpp` at the source head returns no match (control: `fft\|stft\|wola` matches in all three files). There is no GPU path to fall back from. The consumer records `routed_walk_fallbacks() == 0` and bitwise-identical output with parallel routing requested. GPU spectral work (`core/gpu_audio/.../gpu_spectral_morph.hpp`) is a separate kernel that the graph does not reach. |
 | 5 | Partition invariance | **PASS** | Output is bitwise identical across partitions 64, 4096, 37 and an irregular 1..4096 schedule, for both the identity and the band-mask graph. Instrument control: the band render differs from the identity render. |
 | 6 | Planted geometry mutation | **PASS** | Three CTest controls, each matched on the named failing check (`PASS_REGULAR_EXPRESSION`, not a bare inverted exit): synthesis hop H/2 against analysis hop H is refused at `connect` (`FAIL: stage -> synthesis geometry match`); a window byte of 2 in the encoded contract is refused at decode (`FAIL: geometry contract decode`); a consistent runtime geometry with hop H/2 that disagrees with the recorded receipt fails the PDC check (`FAIL: reported latency N+H`). |
@@ -125,8 +125,14 @@ as N/A because the routed path has no GPU provider. The scope is limited to:
 
 * The existing profile-1 analysis/stage/synthesis nodes at one host rate. No
   second scheduler or multirate clock.
-* Streaming EOF (host zero padding) with the `[D, D+L+N-1)` support contract.
+* Zero-padded finite input (the host feeds zeros after L samples) with the
+  `[D, D+L+N-1)` support contract. There is no in-graph EOF: the routed
+  analysis root is unbounded, so nothing here proves an EOF signal or drain.
 
 Codec-sourced EOF at arbitrary geometry and any GPU spectral conversion are
 outside this admission. They need their own named consumer. The repository
-gate `cmake-spectral-resynthesis-consumer` passed at the source head above.
+gate `cmake-spectral-resynthesis-consumer` passed at the source head above;
+that result describes that head only. The gate carries the `slow` label, so the required `macos` gate never runs it. The lane that runs it is the informational nightly full build
+(`nightly-full-build.yml`, ctest without a label filter), so a later
+regression is reported there, not blocked at merge. The gate fails on zero
+registered tests and asserts the consumer registers exactly four.

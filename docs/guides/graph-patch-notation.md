@@ -128,9 +128,12 @@ numeric values use round-trippable float spellings. IDs are regenerated;
 notation preserves authored topology and supported values, not editor layout,
 prepared runtime history, publication policy or native DSP qualification.
 
-Spectral graphs have no notation or saved-graph contract yet:
-`GraphSerializer` also refuses them, so build them in C++ through the
-`SignalGraph::add_spectral_*` constructors.
+Spectral graphs have no notation contract: build them in C++ through the
+`SignalGraph::add_spectral_*` constructors. `GraphSerializer` saves only the
+bounded asset-replay subset (Audio boundaries, the two-asset morph source,
+identity/mask stages and synthesis; see
+[spectral asset replay](spectral-asset-replay.md)) and refuses every other
+spectral graph, including one with an analysis node.
 
 The notation profile refuses hosted binary plugins, spectral nodes, sample
 regions, opaque Processor/custom state, non-stereo audio boundaries,

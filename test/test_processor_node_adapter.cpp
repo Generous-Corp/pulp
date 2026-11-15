@@ -1807,3 +1807,171 @@ TEST_CASE("Processor node main-bus fast path passes the declared bus names",
     for (int frame = 0; frame < frames; ++frame)
         REQUIRE(output[frame] == 2.0f * input[frame]);
 }
+
+namespace {
+
+// Declares a stereo main bus and a stereo "Rear" aux bus but implements only
+// the main-in/main-out process(), so nothing ever writes the aux channels.
+class MainOnlyWriterWithAux final : public Processor {
+  public:
+    PluginDescriptor descriptor() const override {
+        PluginDescriptor d;
+        d.name = "MainOnlyWriterWithAux";
+        d.manufacturer = "Pulp";
+        d.bundle_id = "com.pulp.test.mainonlywriterwithaux";
+        d.version = "1.0.0";
+        d.category = PluginCategory::Effect;
+        d.input_buses = {{"Input", 1}};
+        d.output_buses = {{"Front", 2}, {"Rear", 2, true, pulp::format::BusRole::Aux}};
+        return d;
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>& output,
+                 const pulp::audio::BufferView<const float>& input, pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&, const ProcessContext&) override {
+        for (std::size_t channel = 0; channel < output.num_channels(); ++channel)
+            for (std::size_t frame = 0; frame < output.num_samples(); ++frame)
+                output.channel_ptr(channel)[frame] =
+                    input.num_channels() > 0 ? input.channel_ptr(0)[frame] : 0.0f;
+    }
+};
+
+// Main 2ch, "A" 2ch, "B" 1ch. Writes a marker into every active aux bus and
+// records which aux buses arrived active.
+struct ThreeBusObservation {
+    bool a_active = true;
+    bool b_active = true;
+};
+
+class ThreeBusProcessor final : public Processor {
+  public:
+    explicit ThreeBusProcessor(std::shared_ptr<ThreeBusObservation> seen)
+        : seen_(std::move(seen)) {}
+    PluginDescriptor descriptor() const override {
+        PluginDescriptor d;
+        d.name = "ThreeBus";
+        d.manufacturer = "Pulp";
+        d.bundle_id = "com.pulp.test.threebus";
+        d.version = "1.0.0";
+        d.category = PluginCategory::Effect;
+        d.input_buses = {{"Input", 1}};
+        d.output_buses = {{"Main", 2},
+                          {"A", 2, true, pulp::format::BusRole::Aux},
+                          {"B", 1, true, pulp::format::BusRole::Aux}};
+        return d;
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&, const ProcessContext&) override {
+    }
+    void process(pulp::format::ProcessBuffers& buses, pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&, const ProcessContext&) override {
+        auto* main = buses.outputs.find_by_name("Main");
+        auto* a = buses.outputs.find_by_name("A");
+        auto* b = buses.outputs.find_by_name("B");
+        seen_->a_active = a != nullptr && a->active();
+        seen_->b_active = b != nullptr && b->active();
+        const auto fill = [](auto* bus, float value) {
+            if (bus == nullptr || !bus->active())
+                return;
+            for (std::size_t channel = 0; channel < bus->buffer.num_channels(); ++channel)
+                std::fill_n(bus->buffer.channel_ptr(channel), bus->num_samples(), value);
+        };
+        fill(main, 1.0f);
+        fill(a, 2.0f);
+        fill(b, 7.0f);
+    }
+
+  private:
+    std::shared_ptr<ThreeBusObservation> seen_;
+};
+
+} // namespace
+
+TEST_CASE("Processor node clears aux output channels a main-only processor never writes",
+          "[format][graph][processor-node][bus-layout]") {
+    constexpr int frames = 8;
+    MainOnlyWriterWithAux processor;
+    pulp::state::StateStore store;
+    bind_processor(processor, store);
+    REQUIRE(ProcessorNode::routed_output_channels(processor.descriptor()) == 4);
+    ProcessorNode node(processor);
+    PrepareContext prepare;
+    prepare.sample_rate = kSr;
+    prepare.max_buffer_size = frames;
+    prepare.input_channels = 1;
+    prepare.output_channels = 4;
+    REQUIRE(node.prepare(prepare));
+
+    std::array<float, frames> input{};
+    for (int frame = 0; frame < frames; ++frame)
+        input[frame] = 0.125f * static_cast<float>(frame + 1);
+    // Every output slot starts with another node's samples, as a recycled
+    // scratch slot does under serial routing.
+    std::array<std::array<float, frames>, 4> outputs;
+    for (auto& channel : outputs)
+        channel.fill(9.0f);
+    std::array<const float*, 1> input_channels{input.data()};
+    std::array<float*, 4> output_channels{outputs[0].data(), outputs[1].data(), outputs[2].data(),
+                                          outputs[3].data()};
+    pulp::format::ProcessBlock block;
+    block.sample_rate = kSr;
+    block.frame_count = frames;
+    pulp::format::GraphRuntimeNodeProcessContext context;
+    context.routed = true;
+    context.node_inputs = {input_channels.data(), 1, frames};
+    context.node_outputs = {output_channels.data(), 4, frames};
+    REQUIRE(ProcessorNode::process_binding(block, context, &node));
+    for (int frame = 0; frame < frames; ++frame) {
+        INFO("frame " << frame);
+        REQUIRE(outputs[0][frame] == input[frame]);
+        REQUIRE(outputs[1][frame] == input[frame]);
+        REQUIRE(outputs[2][frame] == 0.0f);
+        REQUIRE(outputs[3][frame] == 0.0f);
+    }
+}
+
+TEST_CASE("Processor node keeps later aux buses on their own ports when an earlier bus "
+          "does not fit",
+          "[format][graph][processor-node][bus-layout]") {
+    constexpr int frames = 4;
+    auto seen = std::make_shared<ThreeBusObservation>();
+    ThreeBusProcessor processor(seen);
+    pulp::state::StateStore store;
+    bind_processor(processor, store);
+    REQUIRE(ProcessorNode::routed_output_channels(processor.descriptor()) == 5);
+    ProcessorNode node(processor);
+    PrepareContext prepare;
+    prepare.sample_rate = kSr;
+    prepare.max_buffer_size = frames;
+    prepare.input_channels = 1;
+    prepare.output_channels = 3;
+    REQUIRE(node.prepare(prepare));
+
+    std::array<float, frames> input{};
+    std::array<std::array<float, frames>, 3> outputs;
+    for (auto& channel : outputs)
+        channel.fill(9.0f);
+    std::array<const float*, 1> input_channels{input.data()};
+    std::array<float*, 3> output_channels{outputs[0].data(), outputs[1].data(), outputs[2].data()};
+    pulp::format::ProcessBlock block;
+    block.sample_rate = kSr;
+    block.frame_count = frames;
+    pulp::format::GraphRuntimeNodeProcessContext context;
+    context.routed = true;
+    context.node_inputs = {input_channels.data(), 1, frames};
+    context.node_outputs = {output_channels.data(), 3, frames};
+    REQUIRE(ProcessorNode::process_binding(block, context, &node));
+    // Channel 2 is the port named "A.0". A does not fit in a 3-channel view,
+    // and B (declared at channel 4) must not slide down onto it.
+    CHECK_FALSE(seen->a_active);
+    CHECK_FALSE(seen->b_active);
+    for (int frame = 0; frame < frames; ++frame) {
+        INFO("frame " << frame);
+        REQUIRE(outputs[0][frame] == 1.0f);
+        REQUIRE(outputs[1][frame] == 1.0f);
+        REQUIRE(outputs[2][frame] == 0.0f);
+    }
+}

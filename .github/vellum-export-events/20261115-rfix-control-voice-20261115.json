@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "20261115-rfix-control-voice-20261115",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-15T07:55:43Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/runtime/include/pulp/runtime/triple_buffer.hpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "TripleBuffer gains write_replacing_unread(), an additive writer method that reports when a publish replaced a value the reader never read; write() and write_with() keep their behaviour. Only Pulp's parameter mailbox uses it, so this is a Pulp-only edit; Vellum's framework copy needs no change."
+}

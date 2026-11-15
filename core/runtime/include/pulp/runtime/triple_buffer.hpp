@@ -71,15 +71,16 @@ public:
     /// and must not retain the reference. If it throws, no value is published.
     template <typename Fill>
     void write_with(Fill&& fill) noexcept(noexcept(std::declval<Fill>()(std::declval<T&>()))) {
-        [[maybe_unused]] const RoleGuard guard(active_roles_, kWriterRole);
-        std::forward<Fill>(fill)(buffers_[back_]);
-        // One exchange publishes the filled buffer as the middle slot and
-        // hands the previous middle slot back to the writer. Release makes the
-        // fill visible to the reader's acquire; acquire orders the reader's
-        // last use of the returned slot before the writer refills it.
-        const auto previous = middle_.exchange(static_cast<std::uint8_t>(back_ | kDirtyBit),
-                                               std::memory_order_acq_rel);
-        back_ = previous & kIndexMask;
+        (void)publish_with(std::forward<Fill>(fill));
+    }
+
+    /// Publish like write(), and report whether this write replaced a
+    /// published value the reader never read. That value is gone: the reader
+    /// will only ever see this one. Writers that must account for lost
+    /// payloads (event batches, not latest-state snapshots) use this.
+    bool write_replacing_unread(const T& value) noexcept(std::is_nothrow_copy_assignable_v<T>) {
+        return publish_with(
+            [&value](T& back) noexcept(std::is_nothrow_copy_assignable_v<T>) { back = value; });
     }
 
     /// Read the latest published value from the reader thread.
@@ -95,6 +96,22 @@ public:
     }
 
   private:
+    template <typename Fill>
+    bool publish_with(Fill&& fill) noexcept(noexcept(std::declval<Fill>()(std::declval<T&>()))) {
+        [[maybe_unused]] const RoleGuard guard(active_roles_, kWriterRole);
+        std::forward<Fill>(fill)(buffers_[back_]);
+        // One exchange publishes the filled buffer as the middle slot and
+        // hands the previous middle slot back to the writer. Release makes the
+        // fill visible to the reader's acquire; acquire orders the reader's
+        // last use of the returned slot before the writer refills it. The
+        // returned slot still carries the dirty bit only when the reader never
+        // swapped it out, so the bit reports an overwrite exactly.
+        const auto previous = middle_.exchange(static_cast<std::uint8_t>(back_ | kDirtyBit),
+                                               std::memory_order_acq_rel);
+        back_ = previous & kIndexMask;
+        return (previous & kDirtyBit) != 0;
+    }
+
     // middle_ holds the index of the slot between writer and reader, plus a
     // dirty bit set by the writer and cleared by the reader's swap. back_ is
     // owned by the writer thread and front_ by the reader thread; neither is

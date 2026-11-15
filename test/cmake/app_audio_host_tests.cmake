@@ -677,6 +677,16 @@ target_include_directories(pulp-test-spectral-finite-stream-rule
     PRIVATE ${PULP_ROOT_DIR}/core/host/src)
 catch_discover_tests(pulp-test-spectral-finite-stream-rule)
 
+# Two-asset spectral source at non-default codec geometries, checked against an
+# independent double-precision analysis grid and inverse DFT/OLA oracle.
+add_executable(pulp-test-spectral-asset-geometry test_spectral_asset_geometry.cpp
+    harness/rt_allocation_probe.cpp)
+target_link_libraries(pulp-test-spectral-asset-geometry PRIVATE pulp::host Catch2::Catch2WithMain)
+target_include_directories(pulp-test-spectral-asset-geometry
+    PRIVATE ${PULP_ROOT_DIR}/core/host/src)
+catch_discover_tests(pulp-test-spectral-asset-geometry
+    PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
+
 pulp_add_test_suite(pulp-test-oversampling-latency-contract
     GROUP pulp-test-group-app-audio-support
     LIBRARIES pulp-audio-test-support)
@@ -1369,3 +1379,6 @@ pulp_test_spawns(pulp-test-group-app-host NONE REASON "loads the in-process buil
 # Reviewed plugin-loader calls (tools/cmake/PulpTestData.cmake).
 pulp_test_spawns(pulp-test-plugin-manager-panel NONE REASON "drops rows whose paths under /plugins, /p and /nonexistent do not exist, so the loader loads nothing the tree builds")
 pulp_test_spawns(pulp-test-host-signal-graph NONE REASON "adds in-memory PluginSlot instances and one PluginInfo whose path /tmp/not-a-plugin.clap does not exist, so it loads nothing the tree builds")
+
+# Spectral asset save/replay persistence and its installed-SDK consumer.
+include("${CMAKE_CURRENT_LIST_DIR}/a3_spectral_replay_tests.cmake")

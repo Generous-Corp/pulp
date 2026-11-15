@@ -9,6 +9,7 @@
 #include <pulp/runtime/detail/durable_file_replacement.hpp>
 
 #include "graph_serializer_test_access.hpp"
+#include "spectral_graph_persistence.hpp"
 
 // The web DSP builds (Emscripten for WAM, plain clang targeting wasm32 for
 // WebCLAP) compile this serializer without the plugin scanner and have no
@@ -146,7 +147,10 @@ inline double get_double(const V& v) {
 // lane once the public registry contract is available.
 // v5 is emitted only when a graph needs typed ports or Control edges. Older
 // readers refuse the envelope before they could reinterpret those as Audio.
-constexpr int kFormatVersion = 5;
+// v6 is emitted only for graphs carrying spectral nodes and embedded
+// spectral_assets. A v5 reader would otherwise load those nodes as unresolved
+// Custom nodes and drop the assets on re-save, so it must refuse the version.
+constexpr int kFormatVersion = 6;
 // The saved-identity envelope is format-independent and first shipped on v4,
 // so inspection admits every format from v4 through the current writer. A v4
 // envelope keeps its semantic digest when the writer advances to v5.
@@ -166,13 +170,13 @@ bool migrate_graph_v1_to_v2(const std::string& source_json,
 bool migrate_graph_v2_to_v3(const std::string& source_json, std::string& migrated_json);
 bool migrate_graph_v3_to_v4(const std::string& source_json, std::string& migrated_json);
 bool migrate_graph_v4_to_v5(const std::string& source_json, std::string& migrated_json);
+bool migrate_graph_v5_to_v6(const std::string& source_json, std::string& migrated_json);
 
 std::vector<GraphMigrationEntry>& graph_migrations() {
     static std::vector<GraphMigrationEntry> migrations = {
-        {1, 2, migrate_graph_v1_to_v2},
-        {2, 3, migrate_graph_v2_to_v3},
-        {3, 4, migrate_graph_v3_to_v4},
-        {4, 5, migrate_graph_v4_to_v5},
+        {1, 2, migrate_graph_v1_to_v2}, {2, 3, migrate_graph_v2_to_v3},
+        {3, 4, migrate_graph_v3_to_v4}, {4, 5, migrate_graph_v4_to_v5},
+        {5, 6, migrate_graph_v5_to_v6},
     };
     return migrations;
 }
@@ -281,6 +285,13 @@ bool migrate_graph_v3_to_v4(const std::string& source_json, std::string& migrate
 bool migrate_graph_v4_to_v5(const std::string& source_json, std::string& migrated_json) {
     migrated_json = source_json;
     return replace_format_version(migrated_json, 4, 5);
+}
+
+bool migrate_graph_v5_to_v6(const std::string& source_json, std::string& migrated_json) {
+    // v6 is additive: it only admits spectral nodes and spectral_assets, which
+    // a v5 document cannot carry. Ordinary v5 files advance in memory only.
+    migrated_json = source_json;
+    return replace_format_version(migrated_json, 5, 6);
 }
 
 const GraphMigrationEntry* find_graph_migration(int from_version) {
@@ -1212,6 +1223,8 @@ const char* graph_document_refusal_name(GraphDocumentRefusal refusal) noexcept {
         return "subgraph_binding_dangling";
     case GraphDocumentRefusal::SubgraphBindingDuplicate:
         return "subgraph_binding_duplicate";
+    case GraphDocumentRefusal::NodeIdInvalid:
+        return "node_id_invalid";
     case GraphDocumentRefusal::AllocationFailed:
         return "allocation_failed";
     }
@@ -1333,10 +1346,33 @@ GraphDocumentInspection GraphSerializer::inspect_document(std::string_view json)
             std::unordered_map<std::string, NodeId> identity_node;
             std::unordered_set<NodeId> bound_nodes;
             std::unordered_set<NodeId> node_ids;
+            // The loader refuses a node id outside 1..NodeId max and a
+            // repeated one, so inspection refuses them too rather than
+            // truncating or merging them.
+            const auto refuse_node_id = [&](const std::string& where) {
+                result.refusal = GraphDocumentRefusal::NodeIdInvalid;
+                result.detail = where + " must be an integer node id in 1.." +
+                                std::to_string(std::numeric_limits<NodeId>::max());
+                return result;
+            };
+            const auto valid_node_id = [](const auto& value) {
+                return is_json_integer(value) && value.getInt64() > 0 &&
+                       static_cast<std::uint64_t>(value.getInt64()) <=
+                           std::numeric_limits<NodeId>::max();
+            };
             if (root.hasObjectMember("nodes") && root["nodes"].isArray()) {
-                for (std::uint32_t i = 0; i < root["nodes"].size(); ++i)
-                    if (root["nodes"][i].hasObjectMember("id"))
-                        node_ids.insert(static_cast<NodeId>(root["nodes"][i]["id"].getInt64()));
+                for (std::uint32_t i = 0; i < root["nodes"].size(); ++i) {
+                    const auto& node = root["nodes"][i];
+                    if (!node.isObject() || !node.hasObjectMember("id") ||
+                        !valid_node_id(node["id"]))
+                        return refuse_node_id("nodes[" + std::to_string(i) + "].id");
+                    if (!node_ids.insert(static_cast<NodeId>(node["id"].getInt64())).second) {
+                        result.refusal = GraphDocumentRefusal::NodeIdInvalid;
+                        result.detail =
+                            "two node records share id " + std::to_string(node["id"].getInt64());
+                        return result;
+                    }
+                }
             }
             for (std::uint32_t i = 0; i < identities.size(); ++i) {
                 const auto& item = identities[i];
@@ -1347,6 +1383,8 @@ GraphDocumentInspection GraphSerializer::inspect_document(std::string_view json)
                     return result;
                 }
                 const auto id = std::string(item["id"].getString());
+                if (!valid_node_id(item["node_id"]))
+                    return refuse_node_id("identity " + id + " node_id");
                 if (!known.insert(id).second) {
                     result.refusal = GraphDocumentRefusal::IdentityBindingDuplicate;
                     result.detail = "duplicate logical identity: " + id;
@@ -1384,6 +1422,8 @@ GraphDocumentInspection GraphSerializer::inspect_document(std::string_view json)
                     result.detail = "binding references unknown logical identity: " + name;
                     return result;
                 }
+                if (!valid_node_id(bindings[name]))
+                    return refuse_node_id("binding " + name);
                 const auto node_id = static_cast<NodeId>(bindings[name].getInt64());
                 if (!node_ids.contains(node_id)) {
                     result.refusal = GraphDocumentRefusal::IdentityBindingDangling;
@@ -1577,6 +1617,8 @@ bool GraphSerializer::register_migration(int from_version,
 std::string GraphSerializer::to_json(
     const SignalGraph& graph,
     const std::unordered_map<NodeId, std::pair<float,float>>& editor_layout) {
+    if (spectral_persistence::contains_spectral_nodes(graph))
+        return spectral_persistence::write(graph, editor_layout);
     bool has_processors = false;
     bool has_typed_ports = false;
     for (const auto& node : graph.nodes()) {
@@ -1894,6 +1936,12 @@ GraphSerializer::saved_node_identities(const SignalGraph& graph) {
 std::string GraphSerializer::to_saved_document(
     const SignalGraph& graph,
     const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout) {
+    // Spectral persistence has its own closed envelope. The saved-identity
+    // wrapper adds fields that the spectral reader intentionally rejects, so
+    // keep this older identity surface unsupported until it can bind spectral
+    // node identities and persisted IDs end to end.
+    if (spectral_persistence::contains_spectral_nodes(graph))
+        return {};
     const auto raw = to_json(graph, editor_layout);
     if (raw.empty())
         return {};
@@ -2083,23 +2131,26 @@ GraphSerializer::LoadResult GraphSerializer::from_saved_document(SignalGraph& gr
         result = from_json(graph, json, options);
         if (!result.ok)
             return result;
-        std::unordered_map<std::string, std::size_t> ordinals;
-        std::unordered_set<std::string> restored;
-        std::vector<const GraphNode*> nodes;
-        for (const auto& node : graph.nodes())
-            nodes.push_back(&node);
-        std::sort(nodes.begin(), nodes.end(),
-                  [](const auto* a, const auto* b) { return a->id < b->id; });
-        for (const auto* node : nodes)
-            restored.insert(authored_node_identity(*node, ordinals));
-        for (std::uint32_t i = 0; i < root["logical_identities"]["identities"].size(); ++i) {
-            const auto id =
-                std::string(root["logical_identities"]["identities"][i]["id"].getString());
-            if (!restored.contains(id)) {
+        // Each identity must name the node its persisted id was restored as.
+        // Checking only that the identity exists somewhere would accept a
+        // document whose node order swaps two same-key ordinals.
+        const auto restored = saved_node_identities(graph);
+        const auto& identities = root["logical_identities"]["identities"];
+        for (std::uint32_t i = 0; i < identities.size(); ++i) {
+            const auto id = std::string(identities[i]["id"].getString());
+            const auto persisted = static_cast<NodeId>(identities[i]["node_id"].getInt64());
+            const auto live = result.persisted_node_ids.find(persisted);
+            const auto live_identity = live == result.persisted_node_ids.end()
+                                           ? restored.end()
+                                           : restored.find(live->second);
+            if (live_identity == restored.end() || live_identity->second != id) {
                 graph.clear();
                 result.ok = false;
-                result.error =
-                    "identity_binding_unknown: restored graph is missing logical identity " + id;
+                result.persisted_node_ids.clear();
+                result.editor_layout.clear();
+                result.error = "identity_binding_unknown: logical identity " + id +
+                               " does not name the node restored from node_id " +
+                               std::to_string(persisted);
                 return result;
             }
         }
@@ -2185,6 +2236,62 @@ GraphSerializer::LoadResult GraphSerializer::from_file(SignalGraph& graph,
 GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const std::string& json,
                                                        const GraphLoadOptions& options) {
     LoadResult result;
+    auto spectral = spectral_persistence::read(json);
+    if (spectral.handled) {
+        if (!spectral.result.ok)
+            return spectral.result;
+        SignalGraph::GraphMutationLock lock(graph);
+        if (graph.refuse_spectral_mutation_()) {
+            spectral.result.ok = false;
+            spectral.result.error =
+                "active spectral controller refuses graph loading; stop it first";
+            return spectral.result;
+        }
+        auto& prepared = *spectral.graph;
+        prepared.set_limits(graph.limits_);
+        if (!prepared.validate_generated_graph(std::min(4096, graph.limits_.max_block_size))
+                 .accepted) {
+            spectral.result.ok = false;
+            spectral.result.error = "spectral graph exceeds destination graph limits";
+            return spectral.result;
+        }
+        if (prepared.connections_.size() >
+                std::numeric_limits<std::uint64_t>::max() - graph.next_connection_identity_ ||
+            graph.authoring_generation_ == std::numeric_limits<std::uint64_t>::max()) {
+            spectral.result.ok = false;
+            spectral.result.error = "spectral graph authoring identity exhausted";
+            return spectral.result;
+        }
+        // No allocation or fallible construction remains after preflight.
+        // Rebind handles so a candidate's ports cannot impersonate the target
+        // graph, and old target handles remain stale across replacement.
+        const auto incarnation = graph.authoring_generation_ + 1;
+        for (auto& n : prepared.nodes_)
+            for (auto* ports : {&n.input_ports, &n.output_ports})
+                for (auto& p : *ports) {
+                    p.owner = graph.diagnostic_graph_identity_;
+                    p.incarnation = incarnation;
+                }
+        for (auto& id : prepared.connection_identities_)
+            id = graph.next_connection_identity_++;
+        graph.cancel_swap_edit_locked_();
+        auto admitted_nodes = std::move(prepared.nodes_);
+        prepared.nodes_.swap(graph.nodes_);
+        graph.connections_.swap(prepared.connections_);
+        graph.connection_identities_.swap(prepared.connection_identities_);
+        graph.processor_nodes_.clear();
+        graph.graph_event_edge_.reset();
+        graph.sample_region_definitions_.clear();
+        graph.sample_region_parameter_binding_ = nullptr;
+        graph.prepared_sample_region_bank_.reset();
+        graph.prepared_sample_regions_.clear();
+        graph.next_id_ = prepared.next_id_;
+        // Invalidate while authoring nodes are empty, exactly as clear() does,
+        // so any previous typed-trigger attachment is retired too.
+        graph.invalidate_live_locked_();
+        graph.nodes_.swap(admitted_nodes);
+        return spectral.result;
+    }
     {
         SignalGraph::GraphMutationLock lock(graph);
         if (graph.refuse_spectral_mutation_()) {
@@ -3211,6 +3318,8 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
         }
     }
 
+    result.persisted_node_ids = std::move(id_map);
+
     } catch (const std::exception& e) {
         graph.clear();
         result.ok = false;
@@ -3220,6 +3329,32 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
 
     result.ok = true;
     return result;
+}
+
+bool GraphSerializer::copy_custom_node_types(const SignalGraph& from, SignalGraph& to) {
+    std::unordered_map<std::string, CustomNodeType> types;
+    std::unordered_map<std::string, SampleKernelDescriptor> kernels;
+    std::unordered_map<std::string, CustomNodeDiagnosticsDescriptor> diagnostics;
+    const SampleRegionParameterBinding* binding = nullptr;
+    std::uint32_t proof_block_size = 0;
+    {
+        SignalGraph::GraphMutationLock lock(from);
+        types = from.custom_node_types_;
+        kernels = from.sample_kernel_types_;
+        diagnostics = from.custom_node_diagnostics_;
+        binding = from.sample_region_parameter_binding_;
+        proof_block_size = from.sample_region_proof_block_size_;
+    }
+    SignalGraph::GraphMutationLock lock(to);
+    if (to.refuse_spectral_mutation_())
+        return false;
+    to.custom_node_types_ = std::move(types);
+    to.sample_kernel_types_ = std::move(kernels);
+    to.custom_node_diagnostics_ = std::move(diagnostics);
+    to.sample_region_parameter_binding_ = binding;
+    to.sample_region_proof_block_size_ = proof_block_size;
+    ++to.custom_registry_generation_;
+    return true;
 }
 
 } // namespace pulp::host
