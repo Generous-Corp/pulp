@@ -12,6 +12,7 @@
 #endif
 #include <dispatch/dispatch.h>
 
+#include <algorithm>
 #include <atomic>
 #include <charconv>
 #include <condition_variable>
@@ -186,8 +187,10 @@ public:
         close();
         auto shared = std::make_shared<CoreMidiInputShared>();
         shared->callback = std::move(callback);
-        shared->sysex_callback = pending_sysex_callback_;
-        shared_ = shared;
+        {
+            std::lock_guard life(lifecycle_);
+            shared->sysex_callback = pending_sysex_callback_;
+        }
 
         // MIDIInputPortCreateWithProtocol is the UMP/event-list API added in
         // iOS 14 and macOS 11. Pulp's current iOS floor is newer, but retain a
@@ -198,8 +201,9 @@ public:
         const MIDIClientRef client = shared_client();
         if (client == 0) return false;
 
+        MIDIPortRef port = 0;
         OSStatus status = MIDIInputPortCreateWithProtocol(
-            client, CFSTR("PulpInput"), kMIDIProtocol_1_0, &port_,
+            client, CFSTR("PulpInput"), kMIDIProtocol_1_0, &port,
             ^(const MIDIEventList* evtlist, void* __nullable) {
               {
                   std::lock_guard lock(shared->mutex);
@@ -289,21 +293,27 @@ public:
 
         if (status != noErr) {
             runtime::log_error("CoreMIDI: could not create input port ({})", static_cast<int>(status));
-            close();
             return false;
+        }
+        // Publish the port and its state together, under the lifecycle lock,
+        // so a concurrent close() (from a callback or another thread) sees
+        // both or neither.
+        {
+            std::lock_guard life(lifecycle_);
+            port_ = port;
+            shared_ = shared;
         }
 
         ItemCount source_count = MIDIGetNumberOfSources();
         if (port_id.empty() || port_id == "0") {
             if (source_count > 0) {
                 MIDIEndpointRef first = MIDIGetSource(0);
-                status = MIDIPortConnectSource(port_, first, nullptr);
-                is_open_ = (status == noErr);
-                if (is_open_)
-                    remember_source(first);
+                status = MIDIPortConnectSource(port, first, nullptr);
+                if (status == noErr && publish_open(port, first))
+                    return true;
             }
-            if (!is_open_) close();
-            return is_open_;
+            close();
+            return false;
         }
 
         SInt32 source_id = 0;
@@ -318,12 +328,9 @@ public:
             SInt32 unique_id = 0;
             MIDIObjectGetIntegerProperty(src, kMIDIPropertyUniqueID, &unique_id);
             if (unique_id == source_id) {
-                status = MIDIPortConnectSource(port_, src, nullptr);
-                if (status == noErr) {
-                    is_open_ = true;
-                    remember_source(src);
+                status = MIDIPortConnectSource(port, src, nullptr);
+                if (status == noErr && publish_open(port, src))
                     return true;
-                }
             }
         }
 
@@ -336,35 +343,42 @@ public:
     // the callback itself it cannot wait for itself: it stops further
     // deliveries and disposes the port after the callback returns.
     void close() override {
-        const MIDIPortRef port = port_;
-        port_ = 0;
-        auto shared = std::move(shared_);
-        shared_.reset();
-        source_ = 0;
-        source_unique_id_ = 0;
-        is_open_ = false;
-        // A close() made earlier from inside a callback could not wait for
-        // that callback; this later call waits for it, unless it too runs on
-        // that callback's thread.
-        if (retiring_ && tls_delivering != retiring_.get()) {
-            auto retiring = std::move(retiring_);
-            retiring_.reset();
-            std::unique_lock lock(retiring->mutex);
-            retiring->idle.wait(lock, [&] { return retiring->in_flight == 0; });
-        }
-        if (!shared) {
-            if (port)
-                MIDIPortDispose(port);
-            return;
-        }
+        MIDIPortRef port = 0;
+        std::shared_ptr<CoreMidiInputShared> shared;
+        // Every state still draining that this thread can wait for: the one
+        // closed here, plus any an earlier close() could not or did not finish
+        // waiting for (a close from inside a callback, or a close still
+        // waiting on another thread).
+        std::vector<std::shared_ptr<CoreMidiInputShared>> to_wait;
+        bool reentrant = false;
         {
-            std::lock_guard lock(shared->mutex);
-            shared->closed = true;
+            // The handoff of port_, shared_ and draining_ is serialized, so a
+            // callback's close() and an external close() never touch the same
+            // shared_ptr at once. The lock is never held while waiting or
+            // disposing: a callback that calls close() must be able to take it.
+            std::lock_guard life(lifecycle_);
+            port = port_;
+            port_ = 0;
+            shared = std::move(shared_);
+            shared_.reset();
+            source_ = 0;
+            source_unique_id_ = 0;
+            is_open_ = false;
+            if (shared) {
+                {
+                    std::lock_guard lock(shared->mutex);
+                    shared->closed = true;
+                }
+                // Stays listed until a close() off the delivering thread has
+                // seen it drain, so every later close() waits for it too.
+                draining_.push_back(shared);
+                reentrant = (tls_delivering == shared.get());
+            }
+            for (const auto& d : draining_)
+                if (tls_delivering != d.get())
+                    to_wait.push_back(d);
         }
-        if (tls_delivering == shared.get()) {
-            // Keep the state so a later close() from another thread still
-            // waits for this callback to finish.
-            retiring_ = shared;
+        if (reentrant) {
             // MIDIPortDispose waits for the running callback, which is this
             // thread, so hand the dispose to another thread. Only the port and
             // the shared state are captured, never this object.
@@ -376,17 +390,26 @@ public:
                   MIDIPortDispose(port);
                 });
             }
-            return;
-        }
-        // Only the port is ours to dispose; the client is shared by every port
-        // in the process (see shared_client()).
-        if (port)
+        } else if (port) {
+            // Only the port is ours to dispose; the client is shared by every
+            // port in the process (see shared_client()).
             MIDIPortDispose(port);
-        std::unique_lock lock(shared->mutex);
-        shared->idle.wait(lock, [&] { return shared->in_flight == 0; });
-        // Drop any in-progress sysex so a reopened port starts fresh and never
-        // emits a stale partial payload.
-        shared->sysex_reassembler.reset();
+        }
+        // closed is set on every listed state, so once in_flight reaches zero
+        // no delivery can start again.
+        for (const auto& d : to_wait) {
+            std::unique_lock lock(d->mutex);
+            d->idle.wait(lock, [&] { return d->in_flight == 0; });
+            // Drop any in-progress sysex so a stale partial payload is never
+            // emitted.
+            d->sysex_reassembler.reset();
+        }
+        if (!to_wait.empty()) {
+            std::lock_guard life(lifecycle_);
+            std::erase_if(draining_, [&](const auto& d) {
+                return std::find(to_wait.begin(), to_wait.end(), d) != to_wait.end();
+            });
+        }
     }
 
     // Open means the port exists AND the endpoint it was connected to is
@@ -394,13 +417,23 @@ public:
     // answer turns false, which tells an owner that reopens on `!is_open()`
     // (AudioDeviceManager) to connect again.
     bool is_open() const override {
-        return is_open_ && endpoint_is_current(source_, source_unique_id_);
+        MIDIEndpointRef source = 0;
+        SInt32 unique_id = 0;
+        {
+            std::lock_guard life(lifecycle_);
+            if (!is_open_)
+                return false;
+            source = source_;
+            unique_id = source_unique_id_;
+        }
+        return endpoint_is_current(source, unique_id);
     }
 
     void set_sysex_callback(MidiSysexCallback cb) override {
         // Valid before or after open(): keep it for the next open() and also
         // publish it to the live port, whose receive block reads it under the
         // same mutex.
+        std::lock_guard life(lifecycle_);
         if (shared_) {
             std::lock_guard lock(shared_->mutex);
             shared_->sysex_callback = cb;
@@ -409,21 +442,32 @@ public:
     }
 
   private:
-    void remember_source(MIDIEndpointRef source) {
+    // Marks the port open on `source`, unless a concurrent close() has
+    // already taken `port` away, in which case the caller reports failure.
+    bool publish_open(MIDIPortRef port, MIDIEndpointRef source) {
+        SInt32 unique_id = 0;
+        MIDIObjectGetIntegerProperty(source, kMIDIPropertyUniqueID, &unique_id);
+        std::lock_guard life(lifecycle_);
+        if (port_ != port)
+            return false;
         source_ = source;
-        source_unique_id_ = 0;
-        MIDIObjectGetIntegerProperty(source, kMIDIPropertyUniqueID, &source_unique_id_);
+        source_unique_id_ = unique_id;
+        is_open_ = true;
+        return true;
     }
 
     MIDIPortRef port_ = 0;
     MIDIEndpointRef source_ = 0;
     SInt32 source_unique_id_ = 0;
     std::shared_ptr<CoreMidiInputShared> shared_;
-    // State of a port closed from inside its own callback, kept until a later
-    // close() off that thread has waited for the callback to return.
-    std::shared_ptr<CoreMidiInputShared> retiring_;
-    // Registered before open(); moved into the shared state when the port opens.
+    // Closed states whose callbacks may still be running, kept until a close()
+    // off the delivering thread has waited for them to drain.
+    std::vector<std::shared_ptr<CoreMidiInputShared>> draining_;
+    // Registered before open(); copied into the shared state when the port opens.
     MidiSysexCallback pending_sysex_callback_;
+    // Guards port_, source_, source_unique_id_, shared_, draining_,
+    // pending_sysex_callback_ and is_open_. Taken before any shared->mutex.
+    mutable std::mutex lifecycle_;
     bool is_open_ = false;
 };
 
