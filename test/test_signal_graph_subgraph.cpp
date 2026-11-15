@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <choc/text/choc_JSON.h>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/signal_graph_subgraph.hpp>
 #include <pulp/host/subgraph_persistence.hpp>
@@ -703,4 +704,85 @@ TEST_CASE("subgraph records require the saved-identity envelope") {
     const auto inspection = GraphSerializer::inspect_document(profile + R"(, "subgraphs": []})");
     CHECK_FALSE(inspection.ok());
     CHECK(inspection.refusal == GraphDocumentRefusal::SubgraphRecordInvalid);
+}
+
+TEST_CASE("saved subgraph writer records live parameter values rather than the restore cache") {
+    PersistedRack rack;
+    build_rack(rack);
+    const auto& voice = rack.instances[0];
+    // An edit that bypasses restore_subgraph_state leaves the instance's
+    // cached value at 0.5.
+    REQUIRE(rack.graph.set_node_gain(voice.parameter_nodes.at("gain"), 0.25f));
+    REQUIRE(voice.parameters.at("gain") == 0.5f);
+    const auto document = to_saved_subgraph_document(rack.graph, rack.instances);
+    REQUIRE_FALSE(document.empty());
+
+    SignalGraph restored;
+    const auto templates = rack_templates();
+    const auto loaded = from_saved_subgraph_document(restored, document, templates);
+    INFO(loaded.load.error);
+    REQUIRE(loaded.ok());
+    const auto& restored_voice = loaded.subgraphs[1];
+    REQUIRE(restored_voice.instance_identity == "voice.a");
+    CHECK(restored_voice.parameters.at("gain") == 0.25f);
+    CHECK(restored.node(restored_voice.parameter_nodes.at("gain"))->gain == 0.25f);
+
+    // A live value outside the declared bounds cannot be restored, so the
+    // writer refuses instead of writing a document that will not load.
+    REQUIRE(rack.graph.set_node_gain(voice.parameter_nodes.at("gain"), 3.0f));
+    CHECK(to_saved_subgraph_document(rack.graph, rack.instances).empty());
+}
+
+TEST_CASE("saved subgraph writer reads Processor parameters from the StateStore") {
+    SignalGraph graph;
+    auto expansion = instantiate_subgraph(graph, two_param_template(), "two.a");
+    REQUIRE(expansion);
+    const auto& instance = expansion.instance;
+    const auto processor = graph.processor_node_instance(instance.parameter_nodes.at("two"));
+    REQUIRE(processor);
+    processor->state_store().set_value(2, 1.25f);
+    REQUIRE(instance.parameters.at("two") == 0.5f);
+
+    const auto document = to_saved_subgraph_document(graph, {&instance, 1});
+    REQUIRE_FALSE(document.empty());
+    const auto root = choc::json::parse(document);
+    const auto number = [](const auto& value) {
+        return value.isInt32() || value.isInt64() ? static_cast<double>(value.getInt64())
+                                                  : value.getFloat64();
+    };
+    CHECK(number(root["subgraphs"][0]["parameters"]["two"]) == 1.25);
+    CHECK(number(root["subgraphs"][0]["parameters"]["one"]) == 1.0);
+}
+
+TEST_CASE("saved subgraph writer refuses handles that predate a reload") {
+    // A template with no declared parameters, so only the handle check can
+    // notice that the held NodeIds now name other nodes.
+    auto plain = gain_template();
+    plain.identity = "test.plain";
+    plain.parameters.clear();
+    SignalGraph graph;
+    const auto spacer = graph.add_gain_node("spacer");
+    auto expansion = instantiate_subgraph(graph, plain, "plain.a");
+    REQUIRE(expansion);
+    REQUIRE(graph.add_gain_node("loose") != 0);
+    REQUIRE(graph.remove_node(spacer));
+    std::vector<SubgraphInstance> held{expansion.instance};
+    const auto document = to_saved_subgraph_document(graph, held);
+    REQUIRE_FALSE(document.empty());
+
+    // Reloading renumbers every node down by one; each held NodeId still
+    // exists but now names a different node.
+    REQUIRE(GraphSerializer::from_saved_document(graph, document).ok);
+    for (const auto node : held.front().nodes)
+        REQUIRE(graph.node(node) != nullptr);
+    CHECK(graph.node(held.front().nodes.front())->name != "plain.a.in");
+    CHECK(to_saved_subgraph_document(graph, held).empty());
+
+    // Control: the instance restored from the document is live and writes.
+    SignalGraph restored;
+    const std::vector<SubgraphTemplate> templates{plain};
+    const auto loaded = from_saved_subgraph_document(restored, document, templates);
+    INFO(loaded.load.error);
+    REQUIRE(loaded.ok());
+    CHECK_FALSE(to_saved_subgraph_document(restored, loaded.subgraphs).empty());
 }
