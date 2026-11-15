@@ -91,6 +91,14 @@ python3 -B test/fixtures/g9_native_surviving_owner/run.py \
 
 Do not pass `--recheck` against the committed original packet: it rewrites that
 packet's canonical receipts. Copy the raw directory to a scratch location first.
-The offline P2 proof, `python3 -B
-docs/evidence/g9-native-surviving-owner-p2-20261110/verify_repair.py`, reproduces
-its committed outputs byte for byte on this tree.
+
+`run.py` now names `encoding="utf-8"` on its text I/O and its `ps` census, as
+the text-encoding lint requires. The scorer functions it shares with the P2
+proof (`assess`, `selected`, `one`) are unchanged. Its file hash therefore moved
+from the reviewed `419648a8...` to `5df59c3a...`. The P2 directory keeps the
+reviewed hash: running its `verify_repair.py` on this tree passes every case and
+control and leaves the original packet unchanged, but rewrites the two
+`source_sha256`/`new_assessor_sha256` fields in its own outputs to the new file
+hash, so do not commit that rerun. With the edited observer, a second live run of
+all nine cases passed and an offline recheck of `raw/` reproduces every recorded
+assertion and containment verdict.

@@ -17,7 +17,7 @@ def now():
     return time.clock_gettime_ns(time.CLOCK_MONOTONIC)
 
 def save(path, data):
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 def events(path):
     if not path.exists():
@@ -40,7 +40,7 @@ def census(data, deadline):
     if remaining <= 0:
         return {"start_ns": start, "end_ns": now(), "ok": False, "rows": [], "raw": "deadline expired"}
     result = subprocess.run(["ps", "-axo", "pid=,ppid=,pgid=,stat=,lstart=,comm="],
-                            text=True, capture_output=True, timeout=min(1, remaining))
+                            text=True, encoding="utf-8", capture_output=True, timeout=min(1, remaining))
     pids = {e["pid"] for e in data} | {os.getpid()}
     pids.update(e["a"] for e in selected(data, "W", "vendor_fork"))
     w = one(data, "A", "worker_started")
@@ -225,10 +225,10 @@ def main():
     for m in modes:
         if a.recheck:
             folder = root / m
-            receipt = json.loads((folder / "receipt.json").read_text())
-            data = json.loads((folder / "verdict-events.json").read_text())
-            baseline = json.loads((folder / "baseline.json").read_text())
-            final = json.loads((folder / "pre-hygiene-census.json").read_text())
+            receipt = json.loads((folder / "receipt.json").read_text(encoding="utf-8"))
+            data = json.loads((folder / "verdict-events.json").read_text(encoding="utf-8"))
+            baseline = json.loads((folder / "baseline.json").read_text(encoding="utf-8"))
+            final = json.loads((folder / "pre-hygiene-census.json").read_text(encoding="utf-8"))
             checks, containment = assess(data, baseline, final, receipt["native_mode"],
                 receipt["action"], receipt["hygiene_started_ns"], receipt["deadline_ns"])
             if m == "host_kill": checks["actual_host_sigkill_exit"] = receipt["host_returncode"] == -9

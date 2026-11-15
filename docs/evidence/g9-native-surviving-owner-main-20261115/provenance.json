@@ -102,6 +102,11 @@
   "native_changes_since_original_base": [
     "c47cd275b341050a0db9ec7794ca99f56e4237e1 feat(platform): join native children to current process group"
   ],
+  "observer_encoding_edit": {
+    "as_executed_sha256": "419648a87314b53901775b722d78a68b6859d019c573b6d1392b8275a5034618",
+    "current_sha256": "5df59c3a8a32dabb20fdff50bbb5d6b092d73aca387403f4fe99f71865080b17",
+    "note": "run.py now names encoding=\"utf-8\" on its text I/O and its ps census; assess(), selected() and one() are unchanged. A second live run of all nine cases with the edited observer passed (raw not committed), and an offline recheck of this raw directory with it reproduces every recorded assertion and containment verdict."
+  },
   "original_packet_base": "ebded6b0a98e7353a13c4e74d1e9bc138dd6b342",
   "production_custody": "HOLD",
   "raw_sha256": {
@@ -204,7 +209,7 @@
     "test/fixtures/g9_native_surviving_owner/CMakeLists.txt": "cb29e3b2b495da528724f8b1dbb7e568d633e1b7b2f9c4024e332e92da17b784",
     "test/fixtures/g9_native_surviving_owner/fixture.cpp": "c5b175467bb1e9cdaa4ee81d7ada90d7576ef4f20e57d43085ef75f660649d98",
     "test/fixtures/g9_native_surviving_owner/record.hpp": "b0162bed2019195f61c1c95328ca30ef1cd86a5635e6971301abf0a32f50429f",
-    "test/fixtures/g9_native_surviving_owner/run.py": "419648a87314b53901775b722d78a68b6859d019c573b6d1392b8275a5034618",
+    "test/fixtures/g9_native_surviving_owner/run.py": "5df59c3a8a32dabb20fdff50bbb5d6b092d73aca387403f4fe99f71865080b17",
     "test/fixtures/g9_native_surviving_owner/vendor.cpp": "c823635785e1c075cabe5be0deff161271ecbefce94e39f2522469779af77238"
   },
   "source_sha256_as_executed": {
