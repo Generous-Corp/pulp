@@ -770,28 +770,43 @@ platform_maturity:
       presented frame. Tested by test_stationary_hover.cpp.
   accessibility:
     macos:
-      status: usable
-      notes: VoiceOver via NSAccessibilityElement. AccessRole maps to NSAccessibilityRole.
+      status: partial
+      notes: >
+        The plug-in editor view exposes names, roles and values to VoiceOver
+        through NSAccessibilityElement, with AccessRole mapped to
+        NSAccessibilityRole. The standalone window host does not build an
+        accessibility tree, and no value or focus notifications are posted.
     ios:
-      status: usable
-      notes: VoiceOver via UIAccessibilityElement with accessibilityIncrement/Decrement for sliders. See core/view/platform/ios/accessibility_ios.mm.
+      status: partial
+      notes: >
+        VoiceOver reads names, roles and values through UIAccessibilityElement.
+        The accessibilityIncrement/Decrement selectors call
+        View::on_accessibility_adjust, which no widget overrides, so slider
+        adjustment does nothing. See core/view/platform/ios/accessibility_ios.mm.
     android:
-      status: usable
-      notes: TalkBack via JNI bridge exposing role, label, value, table metadata, and click/increment/decrement actions. See core/view/platform/android/accessibility_android.cpp.
+      status: experimental
+      notes: >
+        The JNI bridge maps role, label, value and table metadata, but the
+        Kotlin delegate exposes no per-widget node provider, so TalkBack sees a
+        single host node and does not announce individual widgets. Click and
+        adjust actions are not reachable. See core/view/platform/android/accessibility_android.cpp.
     windows:
       status: partial
       notes: >
-        UIA provider tree, WM_GETOBJECT hook, per-widget fragments, and
+        UIA provider tree, a WM_GETOBJECT handler, per-widget fragments, and
         value/focus/name event helpers are implemented in
-        core/view/platform/win/accessibility_win.cpp. Direct UIA client and
-        screen-reader regression tests are still pending.
+        core/view/platform/win/accessibility_win.cpp. No window host forwards
+        WM_GETOBJECT to the handler, so a screen reader cannot reach the
+        provider yet. Direct UIA client and screen-reader regression tests are
+        pending.
     linux:
       status: partial
       notes: >
         AT-SPI2 over direct D-Bus (no libatk) exports root/application objects,
         per-widget Accessible/Component/Value objects, and event-hook
         marshalling; session-bus loopback tests cover tree/value behavior.
-        Real registry/Orca signal receipt remains pending.
+        Only the SDL standalone host publishes the tree; plug-in editor windows
+        expose nothing. Real registry/Orca signal receipt remains pending.
   ime_composition:
     status: usable
     platform: macos
@@ -1337,12 +1352,12 @@ accessibility_features:
       for View roles/labels/values, accessibility snapshots, and HTML/ARIA slot
       routing; native bridge source maps these slots on macOS/iOS/Android/Windows/Linux.
   slider_increment_decrement:
-    status: partial
+    status: planned
     notes: >
       iOS/Android source bridges route VoiceOver/TalkBack increment/decrement
-      actions to on_accessibility_adjust(float). Direct platform-action
-      regression tests and uniform macOS/Windows/Linux action semantics are still
-      pending.
+      actions to View::on_accessibility_adjust(float), whose default does
+      nothing, and no widget overrides it. Adjustment has no effect on any
+      platform until sliders implement it.
   actions:
     status: planned
     notes: Per-widget std::vector<Action> exposure planned.
@@ -1358,10 +1373,11 @@ accessibility_features:
     notes: >
       Cross-platform provider event helpers exist, Windows raises UIA
       structure/value/focus/name events, and Linux rebuilds AT-SPI trees plus
-      marshals value/focus/name events. test/test_accessibility_provider.cpp
+      marshals value/focus/name events. Widgets do not raise these events
+      yet, so live updates are not delivered. test/test_accessibility_provider.cpp
       and test/test_accessibility_tree.cpp cover the no-op/live helper paths.
-      macOS/iOS/Android notification parity and real client signal receipt are
-      still pending.
+      macOS/iOS/Android post no notifications, and real client signal receipt
+      is pending.
   a11y_test_harness:
     status: partial
     notes: >

@@ -327,11 +327,12 @@ Key headers: `pulp/state/parameter.hpp`, `pulp/state/store.hpp`, `pulp/state/bin
 |---|---|---|---|
 | Cursor management (7 styles) | usable | macOS | NSCursor in mouseMoved |
 | Tab focus traversal | usable | all | Tab/Shift+Tab cycles focusable views |
-| VoiceOver accessibility | usable | macOS | NSAccessibilityElement + AccessRole |
-| VoiceOver accessibility | usable | iOS | UIAccessibilityElement with slider increment/decrement |
-| TalkBack accessibility | usable | Android | JNI bridge: role, label, value, table metadata, actions |
-| UIA accessibility | partial | Windows | Provider tree, WM_GETOBJECT, and value/focus/name event helpers exist; direct UIA client regression still pending |
-| AT-SPI accessibility | partial | Linux | Direct D-Bus provider exposes per-widget tree/value paths with loopback tests; real registry/Orca signal receipt still pending |
+| VoiceOver accessibility | partial | macOS | Plug-in editor view only (NSAccessibilityElement + AccessRole); the standalone window host exposes no tree |
+| VoiceOver accessibility | partial | iOS | UIAccessibilityElement names, roles and values; slider increment/decrement is a no-op |
+| TalkBack accessibility | experimental | Android | JNI bridge maps role, label and value, but TalkBack sees one host node, not individual widgets |
+| UIA accessibility | partial | Windows | Provider tree and event helpers exist, but no window host forwards WM_GETOBJECT, so screen readers cannot reach them; direct UIA client regression pending |
+| AT-SPI accessibility | partial | Linux | Direct D-Bus provider exposes per-widget tree/value paths for the SDL standalone host only, with loopback tests; plug-in editors expose nothing |
+| Slider increment/decrement actions | planned | all | `on_accessibility_adjust` has no widget implementations |
 | IME composition (marked text) | usable | macOS | Full NSTextInputClient |
 | Right-click context menu | partial | all | on_context_menu/registerContextMenu fire; view-tree ContextMenu is actionable; native showContextMenu currently renders only on macOS and does not report selection |
 | Keyboard shortcuts | usable | all | registerShortcut bridge |
