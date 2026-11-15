@@ -119,5 +119,53 @@ class CMakeManifestsParse(unittest.TestCase):
         )
 
 
+class RegistrationFragmentHub(unittest.TestCase):
+    """test/cmake/fragments.cmake includes each fragment once, in lexical order.
+
+    Fragments exist so two pull requests that each add a registration add two
+    different files instead of appending to the same lines of one manifest.
+    The hub is the only thing that makes a fragment count, so a hub that
+    skipped one, ran one twice, or ran them out of order would drop or
+    reorder registrations without any manifest failing to parse."""
+
+    def _run(self, names: list[str]) -> tuple[int, str]:
+        cmake = shutil.which("cmake")
+        self.assertIsNotNone(cmake, "cmake is not on PATH")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "cmake" / "fragments").mkdir(parents=True)
+            shutil.copy(TEST_DIR / "cmake" / "fragments.cmake", root / "cmake" / "fragments.cmake")
+            for name in names:
+                (root / "cmake" / "fragments" / name).write_text(
+                    f'message(STATUS "ran:{name}")\n', encoding="utf-8")
+            (root / "cmake" / "fragments" / "README.md").write_text("not cmake\n", encoding="utf-8")
+            # A real configure, not `cmake -P`: script mode rejects the hub's
+            # CONFIGURE_DEPENDS glob.
+            (root / "CMakeLists.txt").write_text(
+                "cmake_minimum_required(VERSION 3.20)\nproject(probe NONE)\n"
+                'include("${CMAKE_SOURCE_DIR}/cmake/fragments.cmake")\n'
+                'message(STATUS "leaked:[${_pulp_test_fragments}${_pulp_test_fragment}]")\n',
+                encoding="utf-8")
+            done = subprocess.run([cmake, "-S", str(root), "-B", str(root / "build")],
+                                  capture_output=True, text=True, check=False)
+            return done.returncode, done.stdout + done.stderr
+
+    def test_fragments_run_once_each_in_lexical_order(self) -> None:
+        rc, out = self._run(["m-middle.cmake", "z-last.cmake", "a-first.cmake"])
+        self.assertEqual(rc, 0, out)
+        ran = [line.split("ran:")[1] for line in out.splitlines() if "ran:" in line]
+        self.assertEqual(ran, ["a-first.cmake", "m-middle.cmake", "z-last.cmake"], out)
+
+    def test_no_fragments_is_a_no_op_and_leaks_no_variable(self) -> None:
+        rc, out = self._run([])
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("ran:", out)
+        self.assertIn("leaked:[]", out)
+
+    def test_every_checked_in_fragment_parses_and_is_named_for_its_subject(self) -> None:
+        for path in sorted((TEST_DIR / "cmake" / "fragments").glob("*.cmake")):
+            self.assertRegex(path.name, r"^[a-z0-9][a-z0-9_-]*\.cmake$", path.name)
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(exit=False).result.wasSuccessful() else 1)
