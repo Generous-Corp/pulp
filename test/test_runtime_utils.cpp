@@ -3118,6 +3118,30 @@ TEST_CASE("Retained cleanup terminates a running leader and its job",
     CHECK_FALSE(process.is_running());
 }
 
+TEST_CASE("Retained failed spawn consumes the reservation without a process identity",
+          "[runtime][child-process][retained-custody]") {
+    using namespace pulp::platform;
+    RetainedProcessCustody reservation;
+    ChildProcess process;
+    REQUIRE_FALSE(
+        process.start_retained(reservation, "C:\\nonexistent\\pulp-custody-worker.exe", {}));
+    CHECK(process.process_id() == -1);
+    CHECK(reservation.retained_process_observation().state == RetainedProcessState::NotStarted);
+    const auto receipt = reservation.cleanup_retained_process_group(custody_deadline());
+    CHECK(receipt.status == RetainedCleanupStatus::Complete);
+    CHECK(receipt.descendants_gone);
+    CHECK_FALSE(receipt.child_reaped);
+    CHECK_FALSE(receipt.term_sent);
+    CHECK_FALSE(receipt.kill_sent);
+    // Single-use: neither the consumed reservation nor the process may launch again.
+    ChildProcess second;
+    CHECK_FALSE(second.start_retained(reservation, "cmd.exe", {"/c", "exit 0"}));
+    CHECK(second.process_id() == -1);
+    RetainedProcessCustody fresh;
+    CHECK_FALSE(process.start_retained(fresh, "cmd.exe", {"/c", "exit 0"}));
+    CHECK(fresh.retained_process_observation().state == RetainedProcessState::NotStarted);
+}
+
 TEST_CASE("Retained custody refuses reuse, input, and the unsupported channel before spawning",
           "[runtime][child-process][retained-custody]") {
     using namespace pulp::platform;

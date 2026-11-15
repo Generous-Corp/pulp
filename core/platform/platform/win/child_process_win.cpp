@@ -555,6 +555,17 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
     impl_->started = false;
     impl_->finished = false;
     impl_->result = {};
+    if (custody) {
+        // Reserve before any spawn attempt, as POSIX does: custody is single-use,
+        // so a launch that fails (for example a missing executable) still consumes
+        // it, and cleanup reports Complete with no child to reap.
+        impl_->retained = true;
+        impl_->retained_reaped = false;
+        impl_->retained_kill_sent = false;
+        impl_->retained_kill_time = {};
+        impl_->retained_observation = {};
+        custody->impl_ = impl_;
+    }
 
     if ((has_standard_input && (options.standard_input_timeout_ms <= 0 ||
                                 !impl_->standard_input.create_input())) ||
@@ -718,10 +729,6 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
     impl_->process_id = pi.dwProcessId;
     impl_->started = true;
     if (custody) {
-        impl_->retained = true;
-        impl_->retained_reaped = false;
-        impl_->retained_kill_sent = false;
-        impl_->retained_kill_time = {};
         impl_->job = retained_job;
         impl_->retained_observation = {
             .state = RetainedProcessState::Running,
@@ -729,7 +736,6 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
             .process_group_id = -1,
             .identity_retained = true,
         };
-        custody->impl_ = impl_;
         bool accepted = true;
         if (options.suspended_process_validator) {
             try {
