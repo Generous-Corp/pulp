@@ -24,10 +24,11 @@ The runtime module provides lock-free primitives, logging, assertions, and scope
 ## Retained child process custody
 
 `pulp/platform/child_process.hpp` provides an opt-in macOS desktop process-group
-cleanup contract. Create a `RetainedProcessCustody` reservation in the owner's
+and Windows job-object cleanup contract. Create a `RetainedProcessCustody` reservation in the owner's
 finite quarantine before calling `ChildProcess::start_retained()` or
-`start_retained_with_standard_input_channel()`. Other platforms return `false`
-before spawning and report `Unsupported`. The ordinary `start()` behavior is
+`start_retained_with_standard_input_channel()`. Linux and other platforms return
+`false` before spawning and report `Unsupported`. Windows supports
+`start_retained()` only; the channel variant refuses before spawning. The ordinary `start()` behavior is
 unchanged.
 
 The direct child stays unreaped after exit, reserving its PID and process-group
@@ -49,6 +50,13 @@ the reservation and retry from the owner. A deadline that has already elapsed
 causes no signals. `Complete` with `descendants_gone` and `child_reaped` is the
 receipt for a spawned child; a failed pre-spawn launch has no child to reap.
 `CustodyLost` forbids further group signals and never means successful cleanup.
+
+On Windows there is no graceful group signal: cleanup calls
+`TerminateJobObject` (reported as `kill_sent`, never `term_sent`), retries every
+10 ms, and reports `Complete` once the leader has exited and the job has no
+live members. The open process handle is the identity reservation, the
+observation's `process_group_id` is `-1`, and a reservation abandoned until host
+exit is still reclaimed by the kill-on-close job when the host exits.
 
 The handle and reservation are single-use. Moving or destroying the process
 handle preserves the reservation, including after a failed private-channel
