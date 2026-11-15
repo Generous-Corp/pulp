@@ -1,0 +1,16 @@
+{
+ "name": "pulp-test-p1-event-admission-consumer",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [],
+  "spawning_sources": [
+   "examples/p1-event-admission-consumer/main.cpp"
+  ],
+  "spawns": "undeclared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

@@ -832,3 +832,207 @@ TEST_CASE("MapClip maps non-finite input to the output minimum", "[signal][g5][c
     REQUIRE(below.process(nan) == 10.0f);
     REQUIRE(pulp::signal::map_clip(nan, -1.0f, 1.0f, 100.0f, 200.0f) == 100.0f);
 }
+
+namespace {
+
+// Control index -> `node_type` -> audio probe, with a silent audio input, so
+// the rendered output is exactly the node's Control output.
+NodeId build_control_node_graph(SignalGraph& graph, const CustomNodeType& node_type) {
+    REQUIRE(graph.register_custom_node_type(node_type));
+    REQUIRE(graph.register_custom_node_type(make_audio_probe()));
+    const auto audio = graph.add_input_node(1);
+    const auto index = graph.add_control_index_input_node();
+    const auto node = graph.add_custom_node(node_type.type_id);
+    const auto probe = graph.add_custom_node("pulp.test.control-audio-probe");
+    const auto sink = graph.add_output_node(1);
+    REQUIRE(node != 0);
+    REQUIRE(graph.connect(graph.node(index)->out("index"),
+                          graph.node(node)->in(node_type.input_ports.front().name)));
+    REQUIRE(graph.connect(graph.node(node)->out("value"), graph.node(probe)->in("control")));
+    REQUIRE(graph.connect(graph.node(audio)->out("audio"), graph.node(probe)->in("audio")));
+    REQUIRE(graph.connect(probe, 0, sink, 0));
+    return node;
+}
+
+std::vector<float> render_control_node_graph(SignalGraph& graph, const std::vector<float>& values) {
+    std::vector<float> silence(values.size(), 0.0f);
+    std::vector<float> result(values.size(), -100.0f);
+    const float* in_ptr[] = {silence.data()};
+    float* out_ptr[] = {result.data()};
+    pulp::audio::BufferView<const float> input(in_ptr, 1, values.size());
+    pulp::audio::BufferView<float> output(out_ptr, 1, values.size());
+    const auto position = graph.control_index_position();
+    REQUIRE(position.bound);
+    REQUIRE(
+        graph.process_control_checked(output, input, {position.epoch, position.cursor, values}) ==
+        ControlProcessResult::Accepted);
+    return result;
+}
+
+std::vector<float> run_unary_node(const CustomNodeType& type,
+                                  const std::vector<std::uint8_t>& state,
+                                  const std::vector<float>& input) {
+    void* instance = type.create();
+    REQUIRE(instance != nullptr);
+    if (!state.empty())
+        REQUIRE(type.load_state(instance, state));
+    type.prepare(instance, 48000.0, static_cast<int>(input.size()));
+    std::vector<float> output(input.size(), -100.0f);
+    const float* in_ptr[] = {input.data()};
+    float* out_ptr[] = {output.data()};
+    pulp::audio::BufferView<const float> in(in_ptr, 1, input.size());
+    pulp::audio::BufferView<float> out(out_ptr, 1, output.size());
+    type.process_instance(instance, out, in, static_cast<int>(input.size()));
+    type.destroy(instance);
+    return output;
+}
+
+std::vector<float> run_binary_node(const CustomNodeType& type, const std::vector<float>& a,
+                                   const std::vector<float>& b) {
+    REQUIRE(a.size() == b.size());
+    std::vector<float> output(a.size(), -100.0f);
+    const float* in_ptr[] = {a.data(), b.data()};
+    float* out_ptr[] = {output.data()};
+    pulp::audio::BufferView<const float> in(in_ptr, 2, a.size());
+    pulp::audio::BufferView<float> out(out_ptr, 1, output.size());
+    type.process(out, in, static_cast<int>(a.size()));
+    return output;
+}
+
+} // namespace
+
+TEST_CASE("an unconfigured slew node saves the times it runs with and restores identically",
+          "[graph][control-index][serializer]") {
+    const std::vector<float> step(96, 1.0f);
+    SignalGraph source;
+    const auto slew = build_control_node_graph(source, make_control_slew_type());
+    REQUIRE(source.prepare(48000, 96));
+    const auto original = render_control_node_graph(source, step);
+    // SlewLimiterT's default 10 ms rise is 480 samples at 48 kHz, so a unit
+    // step is still ramping after 96 samples.
+    CHECK(original.front() > 0.0f);
+    CHECK(original.back() < 0.5f);
+
+    const auto saved = source.custom_node_state(slew);
+    const std::array<float, 2> default_times{10.0f, 10.0f};
+    CHECK(saved == make_control_scalar_state(default_times));
+
+    const auto json = GraphSerializer::to_json(source);
+    SignalGraph restored;
+    REQUIRE(restored.register_custom_node_type(make_control_slew_type()));
+    REQUIRE(restored.register_custom_node_type(make_audio_probe()));
+    REQUIRE(GraphSerializer::from_json(restored, json).ok);
+    REQUIRE(restored.prepare(48000, 96));
+    CHECK(render_control_node_graph(restored, step) == original);
+}
+
+TEST_CASE("an unconfigured indexed table survives save after prepare and restore",
+          "[graph][control-index][serializer]") {
+    SignalGraph source;
+    const auto table = build_control_node_graph(source, make_control_indexed_table_type());
+    REQUIRE(source.prepare(48000, 4));
+    // The live instance exists now, so the saved state comes from save_state.
+    CHECK(source.custom_node_state(table).empty());
+    const auto json = GraphSerializer::to_json(source);
+
+    SignalGraph restored;
+    REQUIRE(restored.register_custom_node_type(make_control_indexed_table_type()));
+    REQUIRE(restored.register_custom_node_type(make_audio_probe()));
+    REQUIRE(GraphSerializer::from_json(restored, json).ok);
+    REQUIRE(restored.prepare(48000, 4));
+    const std::vector<float> indices{0, 1, 2, 3};
+    CHECK(render_control_node_graph(restored, indices) == std::vector<float>(4, 0.0f));
+}
+
+TEST_CASE("Control blocks are refused on a graph prepared into the parallel domain",
+          "[graph][control-index]") {
+    SignalGraph graph;
+    CustomNodeType latent;
+    latent.type_id = "pulp.test.control-latent";
+    latent.num_input_ports = 1;
+    latent.num_output_ports = 1;
+    latent.latency_samples = [](double) { return 4; };
+    latent.process = [](pulp::audio::BufferView<float>& out,
+                        const pulp::audio::BufferView<const float>& in, int frames) {
+        for (int i = 0; i < frames; ++i)
+            out.channel_ptr(0)[i] = in.channel_ptr(0)[i];
+    };
+    REQUIRE(graph.register_custom_node_type(latent));
+    const auto input = graph.add_input_node(1);
+    const auto delayed = graph.add_custom_node("pulp.test.control-latent");
+    const auto output = graph.add_output_node(1);
+    REQUIRE(graph.add_control_index_input_node() != 0);
+    REQUIRE(graph.connect(input, 0, delayed, 0));
+    REQUIRE(graph.connect(delayed, 0, output, 0));
+    REQUIRE(graph.connect(input, 0, output, 0));
+    graph.set_canonical_executor_routing_enabled(true);
+    graph.set_parallel_routing_enabled(true);
+    graph.set_parallel_min_work_units(0);
+    REQUIRE(graph.prepare(48000, 4));
+    REQUIRE(graph.routed_execution_status(4).parallel_selected);
+
+    // Turning the flag off does not re-prepare: the snapshot keeps the
+    // parallel domain prepare fixed for the latency-compensated graph.
+    graph.set_parallel_routing_enabled(false);
+    REQUIRE_FALSE(graph.parallel_routing_enabled());
+    REQUIRE(graph.routed_execution_status(4).parallel_selected);
+
+    std::array<float, 4> audio{1, 2, 3, 4};
+    std::array<float, 4> indices{0, 1, 2, 3};
+    std::array<float, 4> result{9, 9, 9, 9};
+    const float* in_ptr[] = {audio.data()};
+    float* out_ptr[] = {result.data()};
+    pulp::audio::BufferView<const float> in(in_ptr, 1, 4);
+    pulp::audio::BufferView<float> out(out_ptr, 1, 4);
+    const auto refusals = graph.control_index_refusals();
+    CHECK(graph.process_control_checked(out, in, {1, 0, indices}) ==
+          ControlProcessResult::UnsupportedMode);
+    CHECK((result == std::array<float, 4>{9, 9, 9, 9}));
+    CHECK(graph.control_index_refusals() == refusals + 1);
+
+    // A fresh prepare with the flag off leaves the parallel domain and admits.
+    REQUIRE(graph.prepare(48000, 4));
+    REQUIRE_FALSE(graph.routed_execution_status(4).parallel_selected);
+    CHECK(graph.process_control_checked(out, in, {1, 0, indices}) ==
+          ControlProcessResult::Accepted);
+}
+
+TEST_CASE("hysteresis, slew, max and safe-divide Control nodes render their rules",
+          "[graph][control-index]") {
+    SECTION("hysteresis defaults to 0.5 / 0.25 and holds between thresholds") {
+        const auto type = make_control_hysteresis_type();
+        const std::vector<float> input{0.4f, 0.5f, 0.3f, 0.25f, 0.3f, 0.6f};
+        CHECK(run_unary_node(type, {}, input) == std::vector<float>{0, 1, 1, 0, 0, 1});
+        const std::array<float, 2> thresholds{0.8f, 0.1f};
+        CHECK(run_unary_node(type, make_control_scalar_state(thresholds), input) ==
+              std::vector<float>(6, 0.0f));
+        const std::array<float, 2> inverted{0.1f, 0.8f};
+        void* instance = type.create();
+        CHECK_FALSE(type.load_state(instance, make_control_scalar_state(inverted)));
+        type.destroy(instance);
+    }
+
+    SECTION("slew defaults to 10 ms and honours configured times") {
+        const auto type = make_control_slew_type();
+        const std::vector<float> step(4, 1.0f);
+        const auto ramp = run_unary_node(type, {}, step);
+        CHECK(ramp.front() > 0.0f);
+        CHECK(ramp.back() < 0.1f);
+        const std::array<float, 2> instant{0.0f, 0.0f};
+        CHECK(run_unary_node(type, make_control_scalar_state(instant), step) == step);
+        const std::array<float, 2> negative{-1.0f, 0.0f};
+        void* instance = type.create();
+        CHECK_FALSE(type.load_state(instance, make_control_scalar_state(negative)));
+        type.destroy(instance);
+    }
+
+    SECTION("max and safe-divide map non-finite and zero inputs to finite outputs") {
+        const auto inf = std::numeric_limits<float>::infinity();
+        const auto nan = std::numeric_limits<float>::quiet_NaN();
+        CHECK(run_binary_node(make_control_max_type(), {1.0f, -2.0f, -inf, nan},
+                              {0.5f, -1.0f, 2.0f, 3.0f}) ==
+              std::vector<float>{1.0f, -1.0f, 2.0f, 3.0f});
+        CHECK(run_binary_node(make_control_safe_divide_type(), {1.0f, 1.0f, 6.0f},
+                              {0.0f, nan, 3.0f}) == std::vector<float>{0.0f, 0.0f, 2.0f});
+    }
+}
