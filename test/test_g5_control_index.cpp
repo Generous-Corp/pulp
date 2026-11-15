@@ -13,6 +13,7 @@
 #include <pulp/signal/indexed_control.hpp>
 #include <pulp/state/param_cursor.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
@@ -1035,4 +1036,127 @@ TEST_CASE("hysteresis, slew, max and safe-divide Control nodes render their rule
         CHECK(run_binary_node(make_control_safe_divide_type(), {1.0f, 1.0f, 6.0f},
                               {0.0f, nan, 3.0f}) == std::vector<float>{0.0f, 0.0f, 2.0f});
     }
+}
+
+TEST_CASE("a stateful Control node restarts from its initial state on a seek and on prepare",
+          "[graph][control-index][negative-control]") {
+    SignalGraph graph;
+    const auto integrator = build_control_node_graph(graph, make_control_integrator_type());
+    const std::array<float, 3> range{0.0f, 10.0f, 0.0f};
+    REQUIRE(graph.set_custom_node_state(integrator, make_control_scalar_state(range)));
+    REQUIRE(graph.prepare(48000, 4));
+    const std::vector<float> steps(4, 0.25f);
+    const std::vector<float> fresh{0.25f, 0.5f, 0.75f, 1.0f};
+    REQUIRE(render_control_node_graph(graph, steps) == fresh);
+    // The stream continues across ordinary blocks.
+    CHECK(render_control_node_graph(graph, steps).front() == 1.25f);
+
+    // A seek opens the next epoch at the transport position; the program
+    // renders as it did from a fresh graph rather than continuing from 2.0.
+    std::vector<float> silence(4, 0.0f);
+    std::vector<float> result(4, -100.0f);
+    const float* in_ptr[] = {silence.data()};
+    float* out_ptr[] = {result.data()};
+    pulp::audio::BufferView<const float> input(in_ptr, 1, 4);
+    pulp::audio::BufferView<float> output(out_ptr, 1, 4);
+    pulp::format::ProcessContext seek;
+    seek.reset_requested = true;
+    seek.position_samples = 0;
+    const auto position = graph.control_index_position();
+    REQUIRE(graph.process_control_checked(output, input, {position.epoch + 1, 0, steps}, &seek) ==
+            ControlProcessResult::Accepted);
+    CHECK(result == fresh);
+
+    // Re-prepare restarts the clock at epoch 1, cursor 0, and the node with it.
+    CHECK(render_control_node_graph(graph, steps).front() == 1.25f);
+    REQUIRE(graph.prepare(48000, 4));
+    CHECK(render_control_node_graph(graph, steps) == fresh);
+}
+
+TEST_CASE("Control blocks publish non-finite indices as zero and refuse negative resets",
+          "[graph][control-index][negative-control]") {
+    SignalGraph graph;
+    REQUIRE(graph.add_control_index_input_node() != 0);
+    REQUIRE(graph.prepare(48000, 4));
+    std::array<float, 4> audio{1, 2, 3, 4};
+    std::array<float, 4> result{9, 9, 9, 9};
+    const float* in_ptr[] = {audio.data()};
+    float* out_ptr[] = {result.data()};
+    pulp::audio::BufferView<const float> input(in_ptr, 1, 4);
+    pulp::audio::BufferView<float> output(out_ptr, 1, 4);
+    // A pre-roll position is a range error, not clock exhaustion.
+    const std::array<float, 4> indices{0, 1, 2, 3};
+    pulp::format::ProcessContext preroll;
+    preroll.reset_requested = true;
+    preroll.position_samples = -64;
+    CHECK(graph.process_control_checked(output, input, {2, 0, indices}, &preroll) ==
+          ControlProcessResult::OutOfRange);
+    CHECK((result == std::array<float, 4>{9, 9, 9, 9}));
+    CHECK(graph.control_index_position().epoch == 1);
+    CHECK(graph.process_control_checked(output, input, {1, 0, indices}) ==
+          ControlProcessResult::Accepted);
+}
+
+TEST_CASE("map-clip and hysteresis nodes treat non-finite input like their pure stages",
+          "[graph][control-index][negative-control]") {
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+    const std::array<float, 4> map{-1.0f, 1.0f, 100.0f, 200.0f};
+    // Zero lies mid-interval, so substituting zero would give 150.
+    const auto mapped =
+        run_unary_node(make_control_map_clip_type(), make_control_scalar_state(map), {nan, inf});
+    CHECK(mapped == std::vector<float>{pulp::signal::map_clip(nan, -1.0f, 1.0f, 100.0f, 200.0f),
+                                       pulp::signal::map_clip(inf, -1.0f, 1.0f, 100.0f, 200.0f)});
+    CHECK(mapped.front() == 100.0f);
+
+    // High at 0.8, then non-finite samples: the pure step holds the prior
+    // state, and so does the node; substituting zero would release it.
+    const std::vector<float> held{0.8f, nan, -inf, inf, 0.2f};
+    const auto rendered = run_unary_node(make_control_hysteresis_type(), {}, held);
+    bool prior = false;
+    std::vector<float> expected;
+    for (const float sample : held) {
+        prior = pulp::signal::hysteresis_step(sample, 0.5f, 0.25f, prior);
+        expected.push_back(prior ? 1.0f : 0.0f);
+    }
+    CHECK(expected == std::vector<float>{1, 1, 1, 1, 0});
+    CHECK(rendered == expected);
+}
+
+TEST_CASE("built-in Control nodes declare an allocation-free realtime contract",
+          "[graph][control-index][rt-safety]") {
+    for (const auto& type :
+         {make_control_min_type(), make_control_max_type(), make_control_safe_divide_type(),
+          make_control_map_clip_type(), make_control_hysteresis_type(),
+          make_control_integrator_type(), make_control_slew_type(),
+          make_control_indexed_table_type(), make_control_index_input_type()}) {
+        INFO(type.type_id);
+        CHECK(type.rt_contract.declared);
+        CHECK(type.rt_contract.safety_class ==
+              pulp::audio::RtSafetyClass::AudioCallbackSafeAfterPrepare);
+        CHECK(type.rt_contract.allocation_free);
+        CHECK_FALSE(type.rt_contract.loop_bound.empty());
+    }
+}
+
+TEST_CASE("a non-finite Control index never reaches a Control consumer",
+          "[graph][control-index][negative-control]") {
+    // Pass-through node: forwards its Control input unchanged, so the probe
+    // output is exactly the index the graph published.
+    CustomNodeType pass;
+    pass.type_id = "pulp.test.control-pass";
+    pass.num_input_ports = 1;
+    pass.num_output_ports = 1;
+    pass.input_ports = {{"value", PortKind::Control}};
+    pass.output_ports = {{"value", PortKind::Control}};
+    pass.process = [](pulp::audio::BufferView<float>& out,
+                      const pulp::audio::BufferView<const float>& in,
+                      int frames) { std::copy_n(in.channel_ptr(0), frames, out.channel_ptr(0)); };
+    SignalGraph graph;
+    build_control_node_graph(graph, pass);
+    REQUIRE(graph.prepare(48000, 4));
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+    CHECK(render_control_node_graph(graph, {0.5f, nan, inf, -inf}) ==
+          std::vector<float>{0.5f, 0.0f, 0.0f, 0.0f});
 }

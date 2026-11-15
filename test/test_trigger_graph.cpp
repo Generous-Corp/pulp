@@ -373,6 +373,39 @@ TEST_CASE("Host ingress binds to the checked trigger epoch and block cursor",
     CHECK(fixture.graph.host_event_trace().empty());
 }
 
+TEST_CASE("Host ingress delivers events in the epoch a typed reset opens",
+          "[trigger][host-ingress][negative-control]") {
+    // try_reset_events() is the only way to advance the controller epoch, so a
+    // host seek or loop must be able to open and project a host-event block in
+    // the new epoch. A generation still bound to the install epoch refuses the
+    // projection as StaleGeneration and never delivers the note.
+    Fixture fixture{2, 32, true};
+    Block block;
+    REQUIRE(fixture.graph.try_reset_events() == TriggerGraphResult::Accepted);
+    const auto reset = counters(fixture.graph);
+    REQUIRE(reset.epoch == 2);
+
+    HostEventRecord event;
+    event.epoch = reset.epoch;
+    event.absolute_sample = reset.cursor + 3;
+    event.producer_sequence = 1;
+    event.producer = fixture.producer;
+    event.midi = pulp::midi::MidiEvent::note_on(1, 64, 90);
+    REQUIRE(fixture.graph.begin_host_event_block(reset.epoch, reset.cursor, 4) ==
+            HostEventResult::Accepted);
+    REQUIRE(fixture.graph.publish_host_event(event) == HostEventResult::Accepted);
+    REQUIRE(fixture.graph.process_checked(block.out, block.in, 4) == TriggerGraphResult::Accepted);
+    CHECK(counters(fixture.graph).cursor == reset.cursor + 4);
+
+    pulp::midi::MidiBuffer delivered;
+    delivered.reserve(4);
+    delivered.set_realtime_capacity_limit(true);
+    REQUIRE(fixture.graph.extract_midi(fixture.midi_out, delivered));
+    REQUIRE(delivered.size() == 1);
+    CHECK(delivered[0].sample_offset == 3);
+    CHECK(delivered[0].is_note_on());
+}
+
 TEST_CASE("Host ingress refuses a block whose frames differ from the ingress window",
           "[trigger][host-ingress][negative-control]") {
     // The ingress window is fixed by begin_host_event_block(). Processing a
@@ -527,6 +560,34 @@ TEST_CASE("Typed render preflight preserves output and clock", "[trigger]") {
     CHECK(std::all_of(block.output.begin(), block.output.end(), [](float v) { return v == 91; }));
     CHECK(counters(fixture.graph).cursor == 0);
     CHECK(counters(fixture.graph).sequence == 0);
+}
+
+TEST_CASE("Unchecked typed process silences a refused block", "[trigger][negative-control]") {
+    // process() discards the typed result, so a refusal must not leave the
+    // host's previous buffer contents in place to be played again.
+    Fixture fixture;
+    Block block;
+    pulp::format::ProcessContext seek;
+    seek.reset_requested = true;
+    block.output.fill(91);
+    fixture.graph.process(block.out, block.in, 4, seek);
+    CHECK(std::all_of(block.output.begin(), block.output.begin() + 4,
+                      [](float v) { return v == 0.0f; }));
+    CHECK(block.output[4] == 91);
+    CHECK(counters(fixture.graph).cursor == 0);
+
+    block.output.fill(91);
+    fixture.graph.set_canonical_executor_routing_enabled(false);
+    fixture.graph.process(block.out, block.in, 4);
+    CHECK(std::all_of(block.output.begin(), block.output.begin() + 4,
+                      [](float v) { return v == 0.0f; }));
+    fixture.graph.set_canonical_executor_routing_enabled(true);
+
+    // The checked entry still reports the refusal and leaves output untouched.
+    block.output.fill(91);
+    fixture.graph.set_canonical_executor_routing_enabled(false);
+    CHECK(fixture.graph.process_checked(block.out, block.in, 4) == TriggerGraphResult::Mode);
+    CHECK(block.output[0] == 91);
 }
 
 TEST_CASE("Typed emission attempts and overflow have distinct budgets", "[trigger]") {
