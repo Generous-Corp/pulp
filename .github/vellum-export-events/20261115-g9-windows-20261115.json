@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "20261115-g9-windows-20261115",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-15T08:39:25Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/platform/include/pulp/platform/child_process.hpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "Pulp-only doc comment edit: the child_process.hpp declarations are unchanged and the comments now describe Pulp's Windows job-object retained custody. The Vellum framework transfer is in effect, so no re-export carries this edit."
+}
