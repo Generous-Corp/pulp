@@ -114,6 +114,12 @@ xcrun simctl launch --console booted com.example.MyApp
 
 ## AUv3 App Extension
 
+> **A processor with an `editor_factory()` (`UI <package>`) opens its editor
+> through the editor-host contract on iOS too:** `PulpAUViewController` adds a
+> `PulpAUv3ContractView` (`au_v3_contract_view.mm`) and publishes its size as
+> `preferredContentSize`, instead of building a ViewBridge editor. See the
+> `auv3` skill, "Contract editors".
+>
 > **macOS AU v3 is architecturally different — see the `auv3` skill.**
 > The macOS path (Phase 3.5) uses framework + stub .appex + container .app;
 > iOS stays monolithic. The threading hard guard (XPC queue →

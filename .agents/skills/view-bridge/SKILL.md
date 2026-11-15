@@ -199,7 +199,7 @@ error. Things that are easy to get wrong:
 - VST3, CLAP and the standalone app open a non-null `editor_factory()`
   through `ContractEditorSession` (`contract_editor_session.hpp`,
   `pulp-format-core`) before they consider `create_view()`. A UI-package AU v2
-  serves it from `au_v2_contract_view.mm`. The standalone window
+  serves it from `au_v2_contract_view.mm`, and the AU v3 controllers (macOS and iOS) open it in `au_v3_contract_view.mm` whenever `editor_factory()` is non-null. The standalone window
   (`standalone_contract_editor_mac.mm`) drives the tick from its own event loop
   (`IdleSource::host_driven`). Its headless run captures through
   `EditorAutomation::capture_png()` and fails when the editor offers no capture.
@@ -728,6 +728,7 @@ the `clap` skill's Parameters section for the complete transport contract.
 | CLAP | `gui_create` | Inside `gui_set_parent` on the matched window API |
 | AU v2 | `uiViewForAudioUnit` — after fetching context via `kPulpEditorContextProperty` | After `PluginViewHost::create` succeeds |
 | AU v3 | `viewDidLoad` | After `PluginViewHost::attach_to_parent` in `viewDidLoad` |
+| AU v3, processor with an `editor_factory()` | `rebuildEditorIfReady` opens a `ContractEditorSession` in `PulpAUv3ContractView` and never creates a ViewBridge | n/a: the contract editor's `attach()` is the attach point |
 | AAX | `AAX_CEffectGUI::CreateViewContainer()` — not `CreateViewContents()`, which runs before any window exists | After `try_attach_to_parent` succeeds |
 | Standalone | Before `WindowHost::create` | After `WindowHost::create` succeeds |
 
