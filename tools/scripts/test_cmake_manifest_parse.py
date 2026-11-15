@@ -147,7 +147,7 @@ class RegistrationFragmentHub(unittest.TestCase):
                 'message(STATUS "leaked:[${_pulp_test_fragments}${_pulp_test_fragment}]")\n',
                 encoding="utf-8")
             done = subprocess.run([cmake, "-S", str(root), "-B", str(root / "build")],
-                                  capture_output=True, text=True, check=False)
+                                  capture_output=True, text=True, encoding="utf-8", check=False)
             return done.returncode, done.stdout + done.stderr
 
     def test_fragments_run_once_each_in_lexical_order(self) -> None:
