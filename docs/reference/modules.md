@@ -3106,8 +3106,11 @@ VoiceOver (macOS + iOS), UIA (Windows), AT-SPI (Linux). Widgets declare their ro
 ```cpp
 knob->set_access_role(AccessRole::slider);
 knob->set_access_label("Gain");
-knob->set_access_value("-6 dB");
 ```
+
+A slider reads its value from its value interface, which takes priority over
+`set_access_value()`. Use `set_access_value()` for widgets with no other value
+source, such as a combo box's selected item.
 
 ---
 
