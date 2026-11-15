@@ -2216,6 +2216,11 @@
             "required": true
           },
           {
+            "name": "after",
+            "kind": "positional",
+            "required": false
+          },
+          {
             "name": "--notation",
             "kind": "flag"
           },

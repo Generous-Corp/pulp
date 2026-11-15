@@ -47,6 +47,7 @@
    "tools/ci/cmake_registration_impact.py",
    "tools/ci/codemodel_digest.py",
    "tools/ci/ctest_gate_args.py",
+   "tools/ci/drift_fast.py",
    "tools/ci/executable_keys.py",
    "tools/ci/executable_selection.py",
    "tools/ci/install_visual_python_deps.sh",

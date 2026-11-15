@@ -49,6 +49,17 @@ on a real PR. Do them in order.
    it build-free; its families prediction can still fail.
    The skipped lanes are listed as NOT CHECKED, so the verdict reads "not a full
    pass" rather than "safe to push". The cheap gates still run.
+   Two lanes read their commands from the CI jobs themselves, so a step added
+   there reaches `gates.sh` with no edit: the required `Enforce version & skill
+   sync` job's `python3 <script>` commands that `gates.sh` has no block for
+   (docs-sync, screenshot-sync, release-tag report, CLI/MCP parity, source
+   contracts, the gate-script fixture tests) run from
+   `source_selftests.py run --sync-job`, and the `drift-fast` job's selection
+   (`tools/ci/drift_fast.json`) runs from `--drift-fast`. On a gate host the
+   sync job's checks still run and its fixture tests are listed NOT CHECKED.
+   `tools/ci/sync_job_parity.json` names what `gates.sh` runs itself, and
+   `tools/scripts/test_gates_sync_parity.py` fails when the workflow and
+   `gates.sh` disagree.
    The pre-push hook and `local_diff_cover.sh` (exit 4) refuse the
    diff-coverage build the same way, and the hook ends "gates clean except
    diff coverage: NOT CHECKED". Run the full set on m1 (`light`) or a

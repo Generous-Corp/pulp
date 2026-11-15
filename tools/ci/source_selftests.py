@@ -699,6 +699,165 @@ def workflow_entries(
     return entries
 
 
+# --------------------------------------------------------------------------
+# the sync job's own commands (shared by the CI workflow, gates.sh and the
+# parity test)
+
+SYNC_JOB = "version-skill-check"
+SYNC_PARITY = REPO_ROOT / "tools" / "ci" / "sync_job_parity.json"
+# GitHub expressions the sync job's commands use, and what a local run puts in
+# their place. A command left with any other `${{` or `$` is not resolvable.
+_SYNC_SUBSTITUTIONS = {
+    "${{ steps.base.outputs.ref }}": "{base}",
+    "${{ github.event.pull_request.head.sha || 'HEAD' }}": "HEAD",
+    "$GITHUB_PR_TITLE": "{pr_title}",
+}
+
+
+def sync_job_commands(workflow_text: str, job: str = SYNC_JOB) -> list[dict[str, Any]]:
+    """Every ``python3 <script>.py ...`` command in one job's ``run:`` blocks.
+
+    Each is ``{"step", "script", "args", "key", "advisory", "resolved"}``. ``args``
+    keep the ``{base}`` / ``{pr_title}`` placeholders; ``key`` is the command as
+    one string, which is how ``tools/ci/sync_job_parity.json`` names it.
+    ``advisory`` is a ``continue-on-error: true`` step. A command with an
+    expression this function cannot resolve (``$EVENT_NAME``, ``$BASE_SHA``,
+    ``${IMPACT_BASE:+...}``) has ``resolved`` False and no ``args``.
+    """
+    import shlex
+
+    lines = _job_lines(workflow_text.splitlines(), job)
+    commands: list[dict[str, Any]] = []
+    step = ""
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        named = re.match(r"\s*- name:\s*(.+?)\s*$", line)
+        if named:
+            step = named.group(1)
+        stripped = line.strip()
+        if not stripped.startswith("python3 "):
+            index += 1
+            continue
+        logical = stripped
+        while logical.endswith("\\") and index + 1 < len(lines):
+            index += 1
+            logical = logical[:-1].rstrip() + " " + lines[index].strip()
+        index += 1
+        for expression, local in _SYNC_SUBSTITUTIONS.items():
+            logical = logical.replace(expression, local)
+        logical = logical.split(" | ")[0].strip()
+        resolved = "${{" not in logical and "$" not in logical.replace("${{", "")
+        try:
+            tokens = shlex.split(logical)
+        except ValueError:
+            tokens = logical.split()
+            resolved = False
+        if len(tokens) < 2 or not tokens[1].endswith(".py"):
+            continue
+        body = "\n".join(_step_lines(lines, index - 1))
+        args = tokens[2:]
+        commands.append({
+            "step": step,
+            "script": tokens[1],
+            "args": args if resolved else [],
+            "key": " ".join(tokens[1:]) if resolved else logical.split(None, 1)[1],
+            "advisory": bool(re.search(r"^\s*continue-on-error:\s*true\s*$", body, re.M)),
+            "resolved": resolved,
+        })
+    return commands
+
+
+def is_fixture_test(entry: dict[str, Any]) -> bool:
+    """A test of a gate script (``test_*.py``, or a script's ``--selftest``), not a gate."""
+    return (entry["script"].rsplit("/", 1)[-1].startswith("test_")
+            or "--selftest" in entry["argv"])
+
+
+def sync_parity_manifest(path: pathlib.Path = SYNC_PARITY) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def sync_job_entries(
+    base: str,
+    pr_title: str = "",
+    repo: pathlib.Path = REPO_ROOT,
+    workflow: pathlib.Path = LANE_WORKFLOW,
+    parity: pathlib.Path = SYNC_PARITY,
+    changed: list[str] | None = None,
+    checks_only: bool = False,
+) -> list[dict[str, Any]]:
+    """The sync job's commands that gates.sh does not run itself, as entries.
+
+    Read from the workflow file, so each runs with CI's own arguments, with the
+    diff base and PR title a local run has in place of the event's. Commands the
+    parity manifest lists (``gates_native``: gates.sh runs them in its own
+    block; ``ci_only``: CI runner plumbing) are left out. A command under
+    ``diff_scoped`` (minutes long, so measured and named there) runs when
+    ``changed`` can reach it, as the other source-selftest lanes do; every other
+    command runs every time, as in CI. ``checks_only`` (a gate host, which refuses
+    local suites) keeps the checks and drops the fixture tests (``test_*.py``
+    and ``--selftest`` runs), printing what it dropped.
+    """
+    manifest = sync_parity_manifest(parity)
+    skipped = set(manifest["gates_native"]) | set(manifest["ci_only"])
+    entries: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for command in sync_job_commands(workflow.read_text(encoding="utf-8")):
+        if command["key"] in skipped or command["key"] in seen:
+            continue
+        seen.add(command["key"])
+        if not command["resolved"]:
+            raise ManifestError(
+                f"{command['key']}: the sync job runs it with an expression a local run "
+                "cannot resolve; list it in tools/ci/sync_job_parity.json")
+        if not (repo / command["script"]).is_file():
+            raise ManifestError(f"{command['key']}: the sync job runs {command['script']}, "
+                                "which is not in the checkout")
+        args = [a.replace("{base}", base).replace("{pr_title}", pr_title)
+                for a in command["args"]]
+        entries.append({
+            "name": command["key"].replace("{base}", base).replace("{pr_title}", pr_title),
+            "argv": ["{repo}/" + command["script"], *args],
+            "cwd": "{repo}",
+            "timeout": WORKFLOW_TIMEOUT,
+            "advisory": command["advisory"],
+            "script": command["script"],
+        })
+    if checks_only:
+        fixtures = [e for e in entries if is_fixture_test(e)]
+        entries = [e for e in entries if not is_fixture_test(e)]
+        if fixtures:
+            print(f"source-selftests: NOT CHECKED locally: {len(fixtures)} sync-job fixture "
+                  "test(s) (a local suite is refused on this gate host); CI runs them: "
+                  + ", ".join(sorted(e["script"].rsplit("/", 1)[-1] for e in fixtures)),
+                  flush=True)
+    slow = set(manifest.get("diff_scoped", {}))
+    # A slow command the source-selftest manifest also registers is run, diff-scoped
+    # the same way, by gates.sh's manifest lane; running it here as well would
+    # spend its minutes twice.
+    owned = set()
+    manifest_file = repo / "tools" / "ci" / "source_selftests.json"
+    if slow and manifest_file.is_file():
+        owned = {pathlib.Path(expand(e["argv"][0], repo)).resolve()
+                 for e in load_manifest(manifest_file) if not e.get("raw")}
+    entries = [e for e in entries
+               if not (e["script"] in slow and (repo / e["script"]).resolve() in owned)]
+    if changed is not None and slow:
+        lane = LANE_FILES + (
+            workflow.resolve().relative_to(repo).as_posix(),
+            parity.resolve().relative_to(repo).as_posix(),
+        )
+        reached = {e["name"] for e in select_for_changes(
+            [e for e in entries if e["script"] in slow], changed, repo, lane)}
+        for entry in [e for e in entries if e["script"] in slow and e["name"] not in reached]:
+            entries.remove(entry)
+            print(f"source-selftests: not run, no change reaches it "
+                  f"({manifest['diff_scoped'][entry['script']]}): {entry['name']}; "
+                  "CI runs it", flush=True)
+    return entries
+
+
 class _ImportClosure:
     """Repo files each script loads, through repo helpers (cached per run)."""
 
@@ -1133,6 +1292,73 @@ def ctest_label_entries_from_build(
     return entries
 
 
+DRIFT_FAST_MANIFEST = REPO_ROOT / "tools" / "ci" / "drift_fast.json"
+
+
+def _drift_fast():
+    sys.path.insert(0, str(REPO_ROOT / "tools" / "ci"))
+    try:
+        import drift_fast
+    finally:
+        sys.path.pop(0)
+    return drift_fast
+
+
+def drift_fast_entries_from_build(
+    build_dir: pathlib.Path, repo: pathlib.Path = REPO_ROOT, ctest: str = "ctest",
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """The required ``drift-fast`` job's selection, as the configured build registered it.
+
+    The selection (``ctest_labels`` plus ``tests``) is read from
+    tools/ci/drift_fast.json and resolved with drift_fast.py's own functions, so
+    this runs what the job runs: a listed test the build does not register, and
+    one whose command names a build-tree file a configure does not create, come
+    back as not checked with the job's own reasons.
+    """
+    drift = _drift_fast()
+    data = drift.load_manifest(repo / "tools" / "ci" / "drift_fast.json")
+    problems = drift.manifest_problems(data)
+    if problems:
+        raise ManifestError("tools/ci/drift_fast.json: " + "; ".join(problems))
+    inventory = drift.ctest_inventory(ctest, build_dir)
+    selected, missing, empty_labels = drift.select(data, drift.parse_registrations(inventory))
+    if empty_labels:
+        raise ManifestError("drift-fast label(s) matched no registration: "
+                            + ", ".join(empty_labels))
+    unbuilt = drift.unbuilt_artifacts(inventory, build_dir)
+    not_checked = {name: "not registered in this configuration" for name in missing}
+    for name in selected:
+        if name in unbuilt:
+            not_checked[name] = f"needs a built {unbuilt[name]}"
+    by_name = {t["name"]: t for t in inventory.get("tests", [])}
+    entries = []
+    for name in selected:
+        test = by_name[name]
+        if name in not_checked or not test.get("command"):
+            continue
+        props = {p["name"]: p["value"] for p in test.get("properties", [])}
+        entries.append(_entry_from_command(name, test["command"], props, repo, build_dir))
+    return entries, not_checked
+
+
+def drift_fast_entries_from_source(
+    repo: pathlib.Path = REPO_ROOT,
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """The same selection read from the CMake manifests, when no build is usable.
+
+    A member whose command needs a value only a configure knows is returned as
+    not checked, with why (see ``static_ctest_entries``).
+    """
+    data = json.loads((repo / "tools" / "ci" / "drift_fast.json").read_text(encoding="utf-8"))
+    names = list(pr_fast_names(repo)) if "pr-fast" in data.get("ctest_labels", []) else []
+    other = [label for label in data.get("ctest_labels", []) if label != "pr-fast"]
+    names += [t["name"] for t in data["tests"] if t["name"] not in names]
+    entries, not_checked = static_ctest_entries(names, repo)
+    for label in other:
+        not_checked[f"label {label}"] = "only the pr-fast label has a source-side member list"
+    return entries, not_checked
+
+
 def _cmake_args(text: str) -> list[str]:
     return [m.group(1) if m.group(1) is not None else m.group(2)
             for m in _CMAKE_ARG.finditer(text)]
@@ -1562,6 +1788,13 @@ def _run_and_report(args: argparse.Namespace, parser: argparse.ArgumentParser,
                     entries: list[dict[str, Any]], start: float) -> int:
     results = run(entries, jobs=args.jobs)
     failed = [r for r in results if r["returncode"] != 0]
+    # A step CI marks continue-on-error reports here too, and cannot fail the run.
+    advisory = {e["name"] for e in entries if e.get("advisory")}
+    advisory_failed = [r for r in failed if r["name"] in advisory]
+    for res in advisory_failed:
+        print(f"source-selftests: ADVISORY (CI continues on error): {res['name']} "
+              f"exit {res['returncode']}\n{(res.get('output') or '')[-2000:]}", flush=True)
+    failed = [r for r in failed if r["name"] not in advisory]
     preexisting: list[str] = []
     if failed and args.label_base_failures:
         if not args.changed_from:
@@ -1582,13 +1815,15 @@ def _run_and_report(args: argparse.Namespace, parser: argparse.ArgumentParser,
         print(f"\n===== {res['name']} (exit {res['returncode']}) =====")
         print(res.get("output", "")[-6000:])
     skipped = [r for r in results if r["returncode"] == 0 and r.get("skipped")]
-    passed = len(results) - len(failed) - len(skipped)
+    passed = len(results) - len(failed) - len(advisory_failed) - len(skipped)
     print(
         f"\nsource-selftests: {passed} passed, {len(skipped)} skipped, "
         f"{len(caused)} failed, {len(preexisting)} pre-existing on base, "
         f"out of {len(results)} in {time.monotonic() - start:.1f}s"
+        + (f" ({len(advisory_failed)} advisory failure(s) reported above)"
+           if advisory_failed else "")
     )
-    if results and passed == 0 and not failed:
+    if results and passed == 0 and not failed and not advisory_failed:
         # Every selected entry skipped: nothing was executed, so the lane has
         # no evidence either way and must not report green.
         print("source-selftests: every selected entry skipped; nothing was executed",
@@ -1628,12 +1863,37 @@ def main(argv: list[str] | None = None) -> int:
         "manifest (e.g. .github/workflows/workflow-lint.yml)",
     )
     p_run.add_argument(
+        "--sync-job",
+        metavar="BASE",
+        help="run every command of the required sync job in version-skill-check.yml "
+        "that gates.sh does not run itself (tools/ci/sync_job_parity.json), with "
+        "CI's arguments and BASE as the diff base. Not diff-scoped: CI runs them all",
+    )
+    p_run.add_argument(
+        "--sync-job-checks-only",
+        action="store_true",
+        help="with --sync-job: skip the fixture tests (test_*.py, --selftest) and say so; "
+        "for a gate host, which refuses local suites but keeps the cheap checks",
+    )
+    p_run.add_argument(
+        "--pr-title",
+        default=None,
+        help="with --sync-job: the PR title (default $GITHUB_PR_TITLE)",
+    )
+    p_run.add_argument(
         "--ctest-label",
         metavar="LABEL",
         help="run the members of a ctest label (e.g. pr-fast) instead of the "
         "manifest: from --build-dir's registrations when it is configured, "
         "otherwise from the CMake manifests. The whole tier runs; it is not "
         "diff-scoped",
+    )
+    p_run.add_argument(
+        "--drift-fast",
+        action="store_true",
+        help="run the required drift-fast job's selection (tools/ci/drift_fast.json: "
+        "its ctest labels plus its named tests) instead of the manifest, resolved "
+        "like --ctest-label; a superset of --ctest-label pr-fast. Takes --build-dir",
     )
     p_run.add_argument("--build-dir", type=pathlib.Path)
     p_run.add_argument(
@@ -1678,7 +1938,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.cmd == "run":
-        if args.ctest_label:
+        if args.ctest_label or args.drift_fast:
+            tier = args.ctest_label or "drift-fast"
             build = args.build_dir
             if build is not None and str(build) == "auto":
                 build, why = choose_build_dir()
@@ -1692,23 +1953,44 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"source-selftests: {build} was configured before its CMake inputs "
                       "last changed; reading the members from the manifests instead", flush=True)
             if build and not stale and (build / "CTestTestfile.cmake").is_file():
-                entries = ctest_label_entries_from_build(args.ctest_label, build.resolve())
+                if args.drift_fast:
+                    entries, not_checked = drift_fast_entries_from_build(build.resolve())
+                    for name, why in sorted(not_checked.items()):
+                        print(f"source-selftests: NOT CHECKED locally: {name} ({why})",
+                              flush=True)
+                else:
+                    entries = ctest_label_entries_from_build(args.ctest_label, build.resolve())
                 origin = f"the configured build {build}"
                 for name, why in set_aside_census_tests(entries, build).items():
                     print(f"source-selftests: NOT CHECKED locally: {name} ({why})", flush=True)
             else:
-                entries, not_checked = ctest_label_entries_from_source(args.ctest_label)
+                if args.drift_fast:
+                    entries, not_checked = drift_fast_entries_from_source()
+                else:
+                    entries, not_checked = ctest_label_entries_from_source(args.ctest_label)
                 origin = "the CMake manifests"
                 for name, why in sorted(not_checked.items()):
                     print(f"source-selftests: NOT CHECKED locally: {name} ({why})", flush=True)
-            print(f"source-selftests: {len(entries)} {args.ctest_label} member(s) from {origin}",
+            print(f"source-selftests: {len(entries)} {tier} member(s) from {origin}",
                   flush=True)
             if not entries:
                 print("source-selftests: the tier resolved to no runnable member; the "
                       "instrument is pointed at the wrong place", file=sys.stderr)
                 return 2
             return _run_and_report(args, parser, entries, time.monotonic())
-        if args.ctest_python:
+        if args.sync_job:
+            if args.workflow or args.ctest_python or args.changed_from or args.impact_scope \
+                    or args.part != "all":
+                parser.error("--sync-job takes no other selector; CI runs every command")
+            entries = sync_job_entries(
+                args.sync_job,
+                args.pr_title if args.pr_title is not None
+                else os.environ.get("GITHUB_PR_TITLE", ""),
+                changed=changed_paths(args.sync_job),
+                checks_only=args.sync_job_checks_only)
+            print(f"source-selftests: {len(entries)} sync-job command(s) read from "
+                  f"{LANE_WORKFLOW.relative_to(REPO_ROOT)}", flush=True)
+        elif args.ctest_python:
             entries = python_ctest_entries()
         else:
             entries = (workflow_entries(args.workflow.resolve()) if args.workflow

@@ -11,6 +11,7 @@
 #include <map>
 #include <optional>
 #include <pulp/audio/audio_file.hpp>
+#include <pulp/host/graph_history.hpp>
 #include <pulp/host/graph_patch.hpp>
 #include <pulp/host/graph_rt_report.hpp>
 #include <pulp/host/graph_serializer.hpp>
@@ -26,6 +27,9 @@ void usage() {
     std::cout << "Usage: pulp graph "
                  "<catalog|inspect|validate|explain|render|probe|report|fmt|canonicalize|save> "
                  "<file.pulpgraph|file.pat> [--json] [--notation] [--output path]\n";
+    std::cout
+        << "diff: pulp graph diff <before.pulpgraph> <after.pulpgraph> [--json]; compares two "
+           "saved-identity documents by logical node identity (read-only)\n";
     std::cout << "render: --input file.wav (required when the graph has audio_in) "
                  "[--output out.wav] [--frames N]; reports frames, sample_rate and peak\n";
     std::cout << "report: [--sample-rate 48000] [--max-block-size 512] [--block-size N] "
@@ -652,6 +656,156 @@ int render_graph(pulp::host::SignalGraph& graph,
     }
     return 0;
 }
+// Reads one saved document for diff without parsing it. The bound matches the
+// serializer's file limit so a diff never reads more than a load would.
+std::optional<std::string> read_graph_document(const std::string& path, Code& code,
+                                               std::string& message) {
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(path, ec);
+    if (ec) {
+        code = Code::FileUnreadable;
+        message = "graph file is unreadable: " + path;
+        return std::nullopt;
+    }
+    if (size > pulp::host::GraphSerializer::max_file_bytes) {
+        code = Code::ResourceLimit;
+        message = "graph file exceeds the " +
+                  std::to_string(pulp::host::GraphSerializer::max_file_bytes) +
+                  " byte limit: " + path;
+        return std::nullopt;
+    }
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        code = Code::FileUnreadable;
+        message = "graph file is unreadable: " + path;
+        return std::nullopt;
+    }
+    std::string text(static_cast<std::size_t>(size), '\0');
+    in.read(text.data(), static_cast<std::streamsize>(size));
+    if (in.gcount() != static_cast<std::streamsize>(size)) {
+        code = Code::FileUnreadable;
+        message = "graph file could not be read completely: " + path;
+        return std::nullopt;
+    }
+    return text;
+}
+
+choc::value::Value string_array(const std::vector<std::string>& values) {
+    auto array = choc::value::createEmptyArray();
+    for (const auto& value : values)
+        array.addArrayElement(value);
+    return array;
+}
+
+int diff_graphs(const std::vector<std::string>& args) {
+    const bool json = std::find(args.begin() + 1, args.end(), "--json") != args.end();
+    std::vector<std::string> paths;
+    for (std::size_t i = 1; i < args.size(); ++i) {
+        if (args[i] == "--json")
+            continue;
+        if (args[i].starts_with("--")) {
+            if (json)
+                json_error("invalid_option", "unknown diff option: " + args[i]);
+            else
+                std::cerr << "pulp graph: unknown diff option: " << args[i] << '\n';
+            return 2;
+        }
+        paths.push_back(args[i]);
+    }
+    if (paths.size() != 2) {
+        if (json)
+            json_error("missing_input", "diff requires exactly two graph files: BEFORE AFTER");
+        else
+            std::cerr << "pulp graph: diff requires exactly two graph files: BEFORE AFTER\n";
+        return 2;
+    }
+    std::string documents[2];
+    for (std::size_t i = 0; i < 2; ++i) {
+        Code code = Code::Ok;
+        std::string message;
+        auto text = read_graph_document(paths[i], code, message);
+        if (!text) {
+            if (json)
+                json_error(patch_code(code), message);
+            else
+                std::cerr << "pulp graph: " << message << '\n';
+            return 1;
+        }
+        documents[i] = std::move(*text);
+    }
+    const auto diff = pulp::host::diff_graph_documents(documents[0], documents[1]);
+    if (!diff.ok()) {
+        const bool after = diff.code == pulp::host::GraphDocumentDiffCode::AfterRefused ||
+                           diff.detail.starts_with("after:");
+        if (json) {
+            // The document refusal is the C++ InvalidDocument class; the
+            // inspection refusal and the side name the exact cause.
+            auto value = choc::value::createObject("GraphError");
+            value.addMember("valid", false);
+            value.addMember("code", patch_code(Code::InvalidDocument));
+            value.addMember("refusal", pulp::host::graph_document_refusal_name(diff.refusal));
+            value.addMember("side", after ? "after" : "before");
+            value.addMember("message", diff.detail);
+            std::cout << choc::json::toString(value) << '\n';
+        } else {
+            std::cerr << "pulp graph: cannot diff (" << (after ? paths[1] : paths[0])
+                      << "): " << diff.detail << '\n';
+        }
+        return 1;
+    }
+    if (json) {
+        auto result = choc::value::createObject("GraphDiff");
+        result.addMember("valid", true);
+        result.addMember("code", patch_code(Code::Ok));
+        result.addMember("equal", diff.equal());
+        result.addMember("before_digest", diff.before_digest);
+        result.addMember("after_digest", diff.after_digest);
+        auto nodes = choc::value::createObject("Nodes");
+        nodes.addMember("added", string_array(diff.nodes_added));
+        nodes.addMember("removed", string_array(diff.nodes_removed));
+        auto changed = choc::value::createEmptyArray();
+        for (const auto& change : diff.nodes_changed) {
+            auto item = choc::value::createObject("NodeChange");
+            item.addMember("identity", change.identity);
+            item.addMember("fields", string_array(change.fields));
+            changed.addArrayElement(item);
+        }
+        nodes.addMember("changed", changed);
+        result.addMember("nodes", nodes);
+        auto connections = choc::value::createObject("Connections");
+        connections.addMember("added", string_array(diff.connections_added));
+        connections.addMember("removed", string_array(diff.connections_removed));
+        connections.addMember("changed", string_array(diff.connections_changed));
+        result.addMember("connections", connections);
+        result.addMember("layout_changed", string_array(diff.layout_changed));
+        result.addMember("sections_changed", string_array(diff.sections_changed));
+        std::cout << choc::json::toString(result) << '\n';
+        return 0;
+    }
+    for (const auto& id : diff.nodes_added)
+        std::cout << "+ node " << id << '\n';
+    for (const auto& id : diff.nodes_removed)
+        std::cout << "- node " << id << '\n';
+    for (const auto& change : diff.nodes_changed) {
+        std::cout << "~ node " << change.identity << " (";
+        for (std::size_t i = 0; i < change.fields.size(); ++i)
+            std::cout << (i ? ", " : "") << change.fields[i];
+        std::cout << ")\n";
+    }
+    for (const auto& key : diff.connections_added)
+        std::cout << "+ connection " << key << '\n';
+    for (const auto& key : diff.connections_removed)
+        std::cout << "- connection " << key << '\n';
+    for (const auto& key : diff.connections_changed)
+        std::cout << "~ connection " << key << '\n';
+    for (const auto& name : diff.sections_changed)
+        std::cout << "~ section " << name << '\n';
+    for (const auto& id : diff.layout_changed)
+        std::cout << "  layout " << id << '\n';
+    if (diff.equal())
+        std::cout << "no semantic differences\n";
+    return 0;
+}
 } // namespace
 int cmd_graph(const std::vector<std::string>& args) {
     if (args.empty() || args[0] == "help" || args[0] == "--help" || args[0] == "-h") {
@@ -663,6 +817,8 @@ int cmd_graph(const std::vector<std::string>& args) {
         std::cout << pulp::host::GraphPatchCatalog{}.to_json() << '\n';
         return 0;
     }
+    if (op == "diff")
+        return diff_graphs(args);
     if (args.size() < 2) {
         usage();
         return 2;
