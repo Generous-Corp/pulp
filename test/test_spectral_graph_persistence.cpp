@@ -301,6 +301,14 @@ TEST_CASE("Saved spectral asset geometry is checked against the finite stream ru
     REQUIRE_FALSE(result.ok);
     REQUIRE(result.error.find("finite stream rule") != std::string::npos);
     REQUIRE(GraphSerializer::to_json(old) == before);
+    // A refused rule derives no frame count, so a stored zero must not match it.
+    result = GraphSerializer::from_json(
+        old,
+        with_extent(good, 769, 0, hex(std::vector<std::uint8_t>(encoded.begin(), encoded.end()))));
+    INFO(result.error);
+    REQUIRE_FALSE(result.ok);
+    REQUIRE(result.error.find("finite stream rule") != std::string::npos);
+    REQUIRE(GraphSerializer::to_json(old) == before);
     // With the stored count matching the rule, the rule check passes and the
     // factory's frame-count binding refuses the 16-frame bytes instead.
     result = GraphSerializer::from_json(old, with_extent(good, 833, 17));
