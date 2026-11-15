@@ -263,8 +263,7 @@ public:
                                   std::lock_guard lock(shared->mutex);
                                   sysex_cb = shared->sysex_callback;
                               }
-                              EmitCtx ctx{&sysex_cb,
-                                          host_ticks_to_seconds(packet->timeStamp)};
+                              EmitCtx ctx{&sysex_cb, host_ticks_to_seconds(packet->timeStamp)};
                               auto emit = [](const std::vector<uint8_t>& p, void* user) {
                                   auto* c = static_cast<EmitCtx*>(user);
                                   if (*c->cb)

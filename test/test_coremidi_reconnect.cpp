@@ -325,8 +325,7 @@ TEST_CASE("CoreMIDI input delivers SysEx to a callback registered after open()",
 
     std::atomic<int> sysex_calls{0};
     // Registered after open(): this used to be dropped silently.
-    input->set_sysex_callback(
-        [&](const std::vector<std::uint8_t>&, double) { ++sysex_calls; });
+    input->set_sysex_callback([&](const std::vector<std::uint8_t>&, double) { ++sysex_calls; });
 
     MIDIEventList list;
     MIDIEventPacket* packet = MIDIEventListInit(&list, kMIDIProtocol_1_0);
