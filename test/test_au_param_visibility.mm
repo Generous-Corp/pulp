@@ -68,7 +68,7 @@ class VisibilityProcessor : public pulp::format::Processor {
 
         pulp::state::ParamInfo meta{
             .id = kMetaId, .name = "Mode", .range = {0.0f, 3.0f, 0.0f, 1.0f}};
-        meta.affects_other_params = true;
+        meta.affects_others = true;
         store.add_parameter(meta);
     }
 

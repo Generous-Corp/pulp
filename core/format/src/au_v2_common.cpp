@@ -14,6 +14,7 @@
 #include <Block.h>
 
 #include <algorithm>
+#include <atomic>
 #include <condition_variable>
 #include <cstring>
 #include <mutex>
@@ -93,9 +94,15 @@ bool is_index_valued_param(const state::ParamInfo& info) {
 // to the writing thread only.
 thread_local bool g_host_writing_param = false;
 
+std::atomic<ParameterEventSink> g_event_sink{nullptr};
+
 void notify_host_parameter_event(AudioUnit unit,
                                  AudioUnitEventType type,
                                  state::ParamID id) {
+    if (const auto sink = g_event_sink.load(std::memory_order_acquire)) {
+        sink(unit, type, id);
+        return;
+    }
     AudioUnitEvent event;
     std::memset(&event, 0, sizeof(event));
     event.mEventType = type;
@@ -108,6 +115,10 @@ void notify_host_parameter_event(AudioUnit unit,
 }
 
 }  // namespace
+
+void set_parameter_event_sink(ParameterEventSink sink) noexcept {
+    g_event_sink.store(sink, std::memory_order_release);
+}
 
 OSStatus fill_parameter_list(const state::StateStore& store,
                              AudioUnitScope scope,
@@ -165,7 +176,7 @@ OSStatus fill_parameter_info(const state::StateStore& store,
 
     // IsGlobalMeta tells the host that a change here may move other
     // parameters, so it re-reads them after the write.
-    if (param->affects_other_params)
+    if (state::is_meta_param(*param))
         out_info.flags |= kAudioUnitParameterFlag_IsGlobalMeta;
 
     if (!state::is_automatable_param(*param))
@@ -442,7 +453,19 @@ void wire_host_parameter_bridge(state::StateStore& store,
     // the echo is suppressed. The render thread never writes the store, so
     // this never notifies from the render thread.
     out_listener = store.add_listener(
-        [unit](state::ParamID id, float /*value*/) {
+        [unit, &store](state::ParamID id, float /*value*/) {
+            // A parameter flagged IsGlobalMeta promises that its change may
+            // move others, so the host is told every other value changed. This
+            // is not an echo of a host write and is sent even while one is in
+            // progress.
+            const auto* info = store.info(id);
+            if (info && state::is_meta_param(*info)) {
+                for (const auto& other : store.all_params()) {
+                    if (other.id != id)
+                        notify_host_parameter_event(
+                            unit, kAudioUnitEvent_ParameterValueChange, other.id);
+                }
+            }
             if (host_is_writing_param()) return;
             notify_host_parameter_event(
                 unit, kAudioUnitEvent_ParameterValueChange, id);

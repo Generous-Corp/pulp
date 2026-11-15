@@ -577,6 +577,12 @@ void wire_host_parameter_bridge(state::StateStore& store,
                                 AudioUnit unit,
                                 state::ListenerToken& out_listener);
 
+/// Receiver for the adapter's host parameter events. Null (the default) sends
+/// them to `AUEventListenerNotify`. A test installs one to observe what the
+/// host would be told; pass nullptr to restore the default.
+using ParameterEventSink = void (*)(AudioUnit, AudioUnitEventType, state::ParamID);
+void set_parameter_event_sink(ParameterEventSink sink) noexcept;
+
 // ── Host-facing parameter-name publishing ────────────────────────────────
 
 /// Coalesces StateStore presentation-name changes and republishes only the

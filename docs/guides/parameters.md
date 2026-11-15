@@ -53,7 +53,10 @@ Fields:
 - `rate` — `ControlRate` by default; `AudioRate` marks the parameter as audio-rate capable for adapters and graph/modulation integrations
 - `smoothing_ramp_seconds` — optional control-rate smoothing time; `0` means off
 - `kind` — declare a two-state parameter as `ParamKind::Toggle` so AU publishes the Boolean unit (otherwise it is Generic); `Enum` and `Integer` are likewise opt-in
-- `affects_other_params` — `false` by default; set it on a parameter whose change moves other parameters (a mode or preset selector). AU v2 and v3 publish `kAudioUnitParameterFlag_IsGlobalMeta` so the host re-reads the others after the change. VST3 and CLAP have no per-parameter equivalent (only plug-in-wide restart or rescan requests), so the field has no effect there
+- `affects_others` — `false` by default. Set it on a parameter whose change moves other parameters, such as a mode or preset selector that rewrites a group of controls. A host cannot otherwise know the other values changed behind its back, so it keeps showing stale values. What each format does:
+  - **AU v2 and v3** publish `kAudioUnitParameterFlag_IsGlobalMeta` on that parameter, and the AU v2 adapter also notifies the host that every other parameter's value changed whenever the flagged parameter changes (including when the host itself wrote it), so the host re-reads them.
+  - **VST3 and CLAP** have no per-parameter equivalent (VST3 offers only a plug-in-wide request to re-read all values, CLAP only a plug-in-wide parameter rescan), so the field has no effect there.
+  Leave it off for an ordinary control: setting it on many parameters makes the host re-read every other parameter on each of their changes.
 
 `to_string` / `from_string` are surfaced to the host's generic editor and
 text-entry fields by every format adapter: VST3 `getParamStringByValue` /

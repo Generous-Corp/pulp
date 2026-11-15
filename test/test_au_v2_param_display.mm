@@ -396,6 +396,112 @@ TEST_CASE("AU v2 GetParameterInfo maps range, default, and unit",
     REQUIRE_THAT(plain.defaultValue, WithinAbs(0.5f, 0.001f));
 }
 
+namespace {
+
+struct MetaProbe {
+    constexpr static pulp::state::ParamID kMeta = 1;
+    constexpr static pulp::state::ParamID kDependent = 2;
+    constexpr static pulp::state::ParamID kPlain = 3;
+
+    static inline std::vector<std::pair<AudioUnitEventType, pulp::state::ParamID>> events;
+    static void record(AudioUnit, AudioUnitEventType type, pulp::state::ParamID id) {
+        events.emplace_back(type, id);
+    }
+
+    static void declare(pulp::state::StateStore& store) {
+        pulp::state::ParamInfo meta{.id = kMeta, .name = "Mode", .range = {0.0f, 3.0f, 0.0f, 1.0f}};
+        meta.affects_others = true;
+        store.add_parameter(meta);
+        store.add_parameter({.id = kDependent, .name = "Depth", .range = {0.0f, 1.0f, 0.5f, 0.0f}});
+        store.add_parameter({.id = kPlain, .name = "Level", .range = {0.0f, 1.0f, 0.5f, 0.0f}});
+    }
+
+    static bool saw(pulp::state::ParamID id) {
+        for (const auto& e : events)
+            if (e.first == kAudioUnitEvent_ParameterValueChange && e.second == id) return true;
+        return false;
+    }
+};
+
+}  // namespace
+
+TEST_CASE("AU v2 publishes IsGlobalMeta only for a parameter that affects others",
+          "[au][au-v2][params][metadata][meta]") {
+    pulp::state::StateStore store;
+    MetaProbe::declare(store);
+
+    const auto flags_for = [&store](pulp::state::ParamID id) {
+        AudioUnitParameterInfo info{};
+        REQUIRE(pulp::format::au::fill_parameter_info(
+                    store, kAudioUnitScope_Global, static_cast<AudioUnitParameterID>(id), info,
+                    false) == noErr);
+        return info.flags;
+    };
+    REQUIRE((flags_for(MetaProbe::kMeta) & kAudioUnitParameterFlag_IsGlobalMeta) != 0);
+    REQUIRE((flags_for(MetaProbe::kDependent) & kAudioUnitParameterFlag_IsGlobalMeta) == 0);
+    REQUIRE((flags_for(MetaProbe::kPlain) & kAudioUnitParameterFlag_IsGlobalMeta) == 0);
+}
+
+TEST_CASE("AU v2 re-publishes other parameters when a meta parameter changes",
+          "[au][au-v2][params][meta]") {
+    pulp::state::StateStore store;
+    MetaProbe::declare(store);
+    pulp::state::ListenerToken token;
+    MetaProbe::events.clear();
+    pulp::format::au::set_parameter_event_sink(&MetaProbe::record);
+    pulp::format::au::wire_host_parameter_bridge(store, nullptr, token);
+
+    SECTION("a meta change tells the host every other value changed") {
+        store.set_value(MetaProbe::kMeta, 2.0f);
+        REQUIRE(MetaProbe::saw(MetaProbe::kMeta));
+        REQUIRE(MetaProbe::saw(MetaProbe::kDependent));
+        REQUIRE(MetaProbe::saw(MetaProbe::kPlain));
+    }
+
+    SECTION("a meta change made while the host is writing still re-publishes dependents") {
+        {
+            pulp::format::au::ScopedHostParamWrite guard;
+            store.set_value(MetaProbe::kMeta, 1.0f);
+        }
+        REQUIRE_FALSE(MetaProbe::saw(MetaProbe::kMeta));  // no echo of the host's own write
+        REQUIRE(MetaProbe::saw(MetaProbe::kDependent));
+    }
+
+    SECTION("a plain parameter change republishes only itself") {
+        store.set_value(MetaProbe::kPlain, 0.9f);
+        REQUIRE(MetaProbe::saw(MetaProbe::kPlain));
+        REQUIRE_FALSE(MetaProbe::saw(MetaProbe::kMeta));
+        REQUIRE_FALSE(MetaProbe::saw(MetaProbe::kDependent));
+    }
+
+    token.reset();
+    pulp::format::au::set_parameter_event_sink(nullptr);
+}
+
+TEST_CASE("AU v2 maps Toggle to Boolean and Enum to Indexed",
+          "[au][au-v2][params][metadata][unit]") {
+    pulp::state::StateStore store;
+    store.add_parameter({.id = 1, .name = "On", .range = {0.0f, 1.0f, 0.0f, 1.0f},
+                         .kind = pulp::state::ParamKind::Toggle});
+    pulp::state::ParamInfo mode{.id = 2, .name = "Mode", .range = {0.0f, 2.0f, 0.0f, 1.0f},
+                                .kind = pulp::state::ParamKind::Enum};
+    mode.value_labels = {"A", "B", "C"};
+    store.add_parameter(mode);
+    store.add_parameter({.id = 3, .name = "Two State", .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+
+    const auto unit_for = [&store](pulp::state::ParamID id) {
+        AudioUnitParameterInfo info{};
+        REQUIRE(pulp::format::au::fill_parameter_info(
+                    store, kAudioUnitScope_Global, static_cast<AudioUnitParameterID>(id), info,
+                    false) == noErr);
+        return info.unit;
+    };
+    REQUIRE(unit_for(1) == kAudioUnitParameterUnit_Boolean);
+    REQUIRE(unit_for(2) == kAudioUnitParameterUnit_Indexed);
+    // An undeclared two-state parameter is not guessed to be Boolean.
+    REQUIRE(unit_for(3) == kAudioUnitParameterUnit_Generic);
+}
+
 TEST_CASE("AU v2 republishes display names without changing parameter identity",
           "[au][au-v2][instrument][params][metadata]") {
     ScopedFactory factory;

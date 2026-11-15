@@ -165,7 +165,7 @@ containment stay identical to CLAP/VST3/AUv2/AAX.
   adds the `ExpertMode` display hint, non-automatable adds `NonRealTime`. AU has
   no literal hidden/readonly/automatable triple, so `ExpertMode` in particular
   is a hint a host may ignore — do not describe it as hiding the parameter.
-  `ParamInfo::affects_other_params` adds `IsGlobalMeta` the same way as v2.
+  `ParamInfo::affects_others` adds `IsGlobalMeta` the same way as v2.
 
   Keep the two AU adapters' mappings identical: they are separate code (this
   tree vs `fill_parameter_info`) reading one model, and the whole point of the

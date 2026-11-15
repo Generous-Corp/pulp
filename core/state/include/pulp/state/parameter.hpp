@@ -411,7 +411,7 @@ struct ParamInfo {
     ///
     /// Two-state parameters should be declared `kind = ParamKind::Toggle` so
     /// AU publishes the Boolean unit instead of Generic.
-    bool affects_other_params = false;
+    bool affects_others = false;
 
     /// Whether the host may record and play back automation for this
     /// parameter.
@@ -478,6 +478,13 @@ inline double host_normalized_from_value(const ParamInfo& info, float value) {
 
 inline bool is_boolean_param(const ParamInfo& info) {
     return info.kind == ParamKind::Toggle;
+}
+
+/// True when changing this parameter can change other parameters
+/// (`ParamInfo::affects_others`). AU adapters publish IsGlobalMeta for it and
+/// re-publish the other parameters' values after each change.
+inline bool is_meta_param(const ParamInfo& info) {
+    return info.affects_others;
 }
 
 inline uint32_t param_value_count(const ParamInfo& info) {
