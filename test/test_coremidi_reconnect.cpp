@@ -311,3 +311,31 @@ TEST_CASE("CoreMIDI input close() from inside its own callback does not deadlock
     }
     CHECK_FALSE(input->is_open());
 }
+
+TEST_CASE("CoreMIDI input delivers SysEx to a callback registered after open()",
+          "[midi][coremidi][sysex]") {
+    DrainSource vs;
+    if (!vs.create())
+        SKIP("CoreMIDI server not reachable; skipping");
+    auto system = pulp::midi::create_midi_system();
+    REQUIRE(system != nullptr);
+
+    auto input = system->create_input();
+    REQUIRE(input->open(std::to_string(kDrainId), [](const pulp::midi::MidiEvent&) {}));
+
+    std::atomic<int> sysex_calls{0};
+    // Registered after open(): this used to be dropped silently.
+    input->set_sysex_callback(
+        [&](const std::vector<std::uint8_t>&, double) { ++sysex_calls; });
+
+    MIDIEventList list;
+    MIDIEventPacket* packet = MIDIEventListInit(&list, kMIDIProtocol_1_0);
+    const UInt32 words[2] = {0x3002AABB, 0}; // SysEx7 complete, 2 data bytes
+    MIDIEventListAdd(&list, sizeof(list), packet, 0, 2, words);
+    MIDIReceivedEventList(vs.source, &list);
+
+    for (int i = 0; i < 100 && sysex_calls.load() == 0; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    CHECK(sysex_calls.load() == 1);
+    input->close();
+}

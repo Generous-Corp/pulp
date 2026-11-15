@@ -256,7 +256,14 @@ public:
                                   MidiSysexCallback* cb;
                                   double ts_sec;
                               };
-                              EmitCtx ctx{&shared->sysex_callback,
+                              // set_sysex_callback() may run after open(), so
+                              // read the callback under the lock, as a copy.
+                              MidiSysexCallback sysex_cb;
+                              {
+                                  std::lock_guard lock(shared->mutex);
+                                  sysex_cb = shared->sysex_callback;
+                              }
+                              EmitCtx ctx{&sysex_cb,
                                           host_ticks_to_seconds(packet->timeStamp)};
                               auto emit = [](const std::vector<uint8_t>& p, void* user) {
                                   auto* c = static_cast<EmitCtx*>(user);
@@ -373,6 +380,13 @@ public:
     }
 
     void set_sysex_callback(MidiSysexCallback cb) override {
+        // Valid before or after open(): keep it for the next open() and also
+        // publish it to the live port, whose receive block reads it under the
+        // same mutex.
+        if (shared_) {
+            std::lock_guard lock(shared_->mutex);
+            shared_->sysex_callback = cb;
+        }
         pending_sysex_callback_ = std::move(cb);
     }
 
