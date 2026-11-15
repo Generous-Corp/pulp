@@ -9,6 +9,7 @@
 #import <AppKit/AppKit.h>
 #import <Metal/Metal.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -127,8 +128,9 @@ struct RmlUiSurface::Impl {
         height_px = h;
         scale = s;
         context->set_dimensions(w, h);
-        if (auto* ctx = context->context())
-            ctx->SetDensityIndependentPixelRatio(static_cast<float>(s));
+#if defined(PULP_VELLUM_RMLUI_HAS_DENSITY_RATIO)
+        context->set_density_ratio(static_cast<float>(s));
+#endif
     }
 
     // Main thread, rmlui_mutex() held: hold the host's keyboard only while an
@@ -324,10 +326,8 @@ bool RmlUiSurface::attach(void* parent) {
         d.context = std::make_unique<vellum::rmlui::NativeContext>(d.assets, d.renderer);
         const auto g = d.surface->geometry();
         const double s = g.scale > 0.0 ? g.scale : 1.0;
-        const auto w =
-            std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.width * s)));
-        const auto h =
-            std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.height * s)));
+        const auto w = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.width * s)));
+        const auto h = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.height * s)));
         bool ok = d.context->open(w, h) == vellum::rmlui::Status::ok;
         if (ok) {
             vellum::rmlui::NativeContext::Scope scope(*d.context);
@@ -340,7 +340,9 @@ bool RmlUiSurface::attach(void* parent) {
             d.width_px = w;
             d.height_px = h;
             d.scale = s;
-            d.context->context()->SetDensityIndependentPixelRatio(static_cast<float>(s));
+#if defined(PULP_VELLUM_RMLUI_HAS_DENSITY_RATIO)
+            d.context->set_density_ratio(static_cast<float>(s));
+#endif
         }
     }
     if (!d.context) {

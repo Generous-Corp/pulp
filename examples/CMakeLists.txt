@@ -1,6 +1,11 @@
 # Pulp example projects
 # Each example exercises a framework path or integration surface.
 
+if(TARGET pulp-rmlui-native-metal)
+    add_subdirectory(${PROJECT_SOURCE_DIR}/integrations/rmlui-native/examples/rmlui-metal-demo
+                     ${CMAKE_CURRENT_BINARY_DIR}/rmlui-metal-demo)
+endif()
+
 # A designated initializer whose fields are out of declaration order is a hard
 # ERROR under GCC (ISO C++), but Clang only WARNS and builds on. So a reordered
 # `.field` init in an example can compile clean on a macOS/Clang dev box and then

@@ -63,6 +63,18 @@ A product may supply its own RmlUi build, including a fork, and its own
 - Keep `Rml::Initialise` process-scoped. Two RmlUi copies in one process (a
   shared-library build plus a product's own) must not interpose on each other.
 
+For Pulp's native Metal adapter, enable `PULP_ENABLE_RMLUI_ADAPTER` only with
+the main Vellum SDK and the matching optional RmlUi SDK prefix in
+`CMAKE_PREFIX_PATH`, exporting `VellumRmlUiNative::Native` and
+`VellumRmlUiNative::Metal`.
+Build a
+`MetalRenderInterface` on the `MetalSurface::device()` and pass
+`metal_renderer_hooks(renderer)` to `RmlUiSurface`; the hooks preserve the
+drawable viewport and backing scale and clear each drawable before RmlUi draws.
+The `rmlui-metal-demo` example is the smoke path for this wiring.
+Use `dp` units for text sizes when a document is rendered at multiple backing
+scales; `px` text is intentionally density-independent in RmlUi.
+
 ## Licence line
 
 Some RmlUi renderers in the wild are GPL, for example the Metal renderer in
