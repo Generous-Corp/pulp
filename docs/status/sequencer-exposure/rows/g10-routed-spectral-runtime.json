@@ -13,7 +13,9 @@
     "docs/status/sequencer-exposure/rows/g10-routed-spectral-runtime.json",
     "core/host/src/spectral_asset_morph_internal.hpp",
     "core/host/src/spectral_graph.cpp",
-    "core/host/src/graph_rt_report.cpp"
+    "core/host/src/graph_rt_report.cpp",
+    "core/host/src/spectral_finite_stream_internal.hpp",
+    "core/host/src/spectral_graph_internal.hpp"
   ],
   "evidence": [
     {
@@ -54,12 +56,20 @@
         "source.value->morph",
         "compare(audio, wanted)"
       ]
+    },
+    {
+      "path": "test/test_spectral_finite_stream_rule.cpp",
+      "needles": [
+        "Finite stream rule matches the profile-one asset constants",
+        "Finite stream frame count equals the analysis grid at every geometry",
+        "A hop that does not divide the FFT breaks the closed-form count"
+      ]
     }
   ],
   "surfaces": {
     "installed_sdk": {
       "disposition": "exposed",
-      "rationale": "Named runtime-only spectral stages and the finite mono FFT256/hop64 asset source use Pulp::host. Direct host Audio control is averaged per absolute hop; notation, saved-graph replay and paced qualification remain PARTIAL.",
+      "rationale": "Named runtime-only spectral stages and the finite mono FFT256/hop64 asset source use Pulp::host; its EOF frame count, cutoff, drain and component layout come from one geometry-derived internal rule. Direct host Audio control is averaged per absolute hop; notation, saved-graph replay and paced qualification remain PARTIAL.",
       "evidence": [
         {
           "kind": "sdk_header",
