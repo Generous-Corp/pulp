@@ -30,10 +30,16 @@ five cases.
 
 ## Glue budget
 
-`main.cpp` is 245 lines. The `StripFilter` Processor (the instrument DSP) is 48
-of them; the remaining 197 lines (includes, declaration, authoring, save and
-restore, rendering, oracle, and the four planted controls) are the glue, under
-the 200-line budget with little headroom.
+`main.cpp` is 245 physical lines. The `StripFilter` Processor (the instrument
+DSP) is 48 of them; the remaining 197 physical lines (includes, declaration,
+authoring, save and restore, rendering, oracle, and the four planted controls)
+are the glue. Counted the way the A9 budget test counts (non-blank, non-comment
+lines), the file is 226 code lines and the glue 179. Both numbers were measured
+once by hand; no test enforces the A2 budget, so it can drift unseen.
+
+The installed-SDK gate `a2-modular-instrument-installed-sdk` is labelled `slow`:
+the required `macos` gate never runs it. The informational nightly full build
+(`nightly-full-build.yml`) does.
 
 ## Not covered
 
