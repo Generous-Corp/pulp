@@ -500,7 +500,7 @@ TEST_CASE("numeric connections and persistence keep working on trigger nodes",
 }
 
 TEST_CASE("G-5 trigger chain uses a real feedback edge across block partitions",
-          "[g5][trigger][feedback]") {
+          "[trigger][feedback]") {
     const auto render = [](std::span<const int> partitions) {
         SignalGraph graph;
         const auto input = graph.add_input_node(1);
@@ -817,7 +817,7 @@ TEST_CASE("Control table drives dense AudioRate Processor parameter in both seri
     }
 }
 
-TEST_CASE("MapClip maps non-finite input to the output minimum", "[signal][g5][control-index]") {
+TEST_CASE("MapClip maps non-finite input to the output minimum", "[signal][control-index]") {
     const float nan = std::numeric_limits<float>::quiet_NaN();
     const float inf = std::numeric_limits<float>::infinity();
     // Zero lies mid-interval, so zero-substitution would not return 100.

@@ -131,7 +131,7 @@ TriggerCounters counters(SignalGraph& g) {
 } // namespace
 
 TEST_CASE("Graph-authored Custom callbacks receive ordered writer and reader handles",
-          "[g5][events][wiring]") {
+          "[events][wiring]") {
     SignalGraph graph;
     const auto input = graph.add_input_node(1);
     const auto output = graph.add_output_node(1);
@@ -182,7 +182,7 @@ TEST_CASE("Graph-authored Custom callbacks receive ordered writer and reader han
 }
 
 TEST_CASE("Graph-authored event edge clears when its feed-forward path is disconnected",
-          "[g5][events][wiring][negative-control]") {
+          "[events][wiring][negative-control]") {
     SignalGraph graph;
     CustomNodeType type;
     type.type_id = "test.g5.graph-event-disconnect";
@@ -212,7 +212,7 @@ TEST_CASE("Graph-authored event edge clears when its feed-forward path is discon
 }
 
 TEST_CASE("Graph-authored event admission refuses unsupported roles and fanout",
-          "[g5][events][wiring][negative-control]") {
+          "[events][wiring][negative-control]") {
     SignalGraph graph;
     const auto input = graph.add_input_node(1);
     const auto output = graph.add_output_node(1);
@@ -234,7 +234,7 @@ TEST_CASE("Graph-authored event admission refuses unsupported roles and fanout",
 }
 
 TEST_CASE("Graph-authored event admission requires a connected forward path",
-          "[g5][events][wiring][negative-control]") {
+          "[events][wiring][negative-control]") {
     auto make_type = [] {
         CustomNodeType type;
         type.type_id = "test.g5.graph-event-path";
@@ -323,7 +323,7 @@ TEST_CASE("Typed trigger pair preserves sample and tie order across partitions",
 }
 
 TEST_CASE("Host ingress binds to the checked trigger epoch and block cursor",
-          "[trigger][g5][host-ingress]") {
+          "[trigger][host-ingress]") {
     Fixture fixture{2, 32, true};
     Block block;
     HostEventRecord event;
@@ -374,7 +374,7 @@ TEST_CASE("Host ingress binds to the checked trigger epoch and block cursor",
 }
 
 TEST_CASE("Host ingress refuses a block whose frames differ from the ingress window",
-          "[trigger][g5][host-ingress][negative-control]") {
+          "[trigger][host-ingress][negative-control]") {
     // The ingress window is fixed by begin_host_event_block(). Processing a
     // shorter block must not project records past that block's end: they would
     // carry sample_offset >= frames and be delivered early while the cursor
@@ -418,7 +418,7 @@ TEST_CASE("Host ingress refuses a block whose frames differ from the ingress win
 }
 
 TEST_CASE("Host ingress projection refusal seals the active block",
-          "[trigger][g5][host-ingress][negative-control]") {
+          "[trigger][host-ingress][negative-control]") {
     // This generation deliberately has no admitted MidiInput destination. A
     // published host block must refuse as Unbound, then seal the ingress so a
     // later block is not wedged behind Busy.
@@ -447,7 +447,7 @@ TEST_CASE("Host ingress projection refusal seals the active block",
 }
 
 TEST_CASE("Host ingress preflights MPE fanout and retries without tracker mutation",
-          "[trigger][g5][host-ingress][mpe][negative-control]") {
+          "[trigger][host-ingress][mpe][negative-control]") {
     Fixture fixture{2, 8, true};
     Block block;
     auto& tracker = Access::host_projection_tracker(fixture.graph);

@@ -79,7 +79,7 @@ bool eight_slot_block_ok(const float* left, const float* right, std::size_t fram
 } // namespace
 
 TEST_CASE("G6 authored eight-slot bank renders partition-invariant stereo audio",
-          "[host][graph][g6][audio]") {
+          "[host][graph][voice-bank][audio]") {
     const auto scalar = render(1);
     REQUIRE(scalar.left.size() == 800);
     for (const auto partition : {32u, 64u, 127u, 256u}) {
@@ -111,7 +111,7 @@ TEST_CASE("G6 authored eight-slot bank renders partition-invariant stereo audio"
 }
 
 TEST_CASE("G6 ninth note uses the existing four MPE steal policies and first-slot ties",
-          "[host][graph][g6][mpe]") {
+          "[host][graph][voice-bank][mpe]") {
     const std::array modes{midi::MpeVoiceStealMode::Oldest, midi::MpeVoiceStealMode::LowestVelocity,
                            midi::MpeVoiceStealMode::LowestPitch,
                            midi::MpeVoiceStealMode::HighestPitch};
@@ -159,7 +159,7 @@ TEST_CASE("G6 ninth note uses the existing four MPE steal policies and first-slo
 }
 
 TEST_CASE("G6 eight authored slots sum in ordinal order across block partitions",
-          "[host][graph][g6][audio]") {
+          "[host][graph][voice-bank][audio]") {
     std::array<double, 8> phases{};
     std::vector<float> reference(512);
     for (std::size_t frame = 0; frame < reference.size(); ++frame) {
@@ -211,7 +211,7 @@ TEST_CASE("G6 eight authored slots sum in ordinal order across block partitions"
 }
 
 TEST_CASE("G6 binding refuses wrong shape and stale deferred generations",
-          "[host][graph][g6][binding]") {
+          "[host][graph][voice-bank][binding]") {
     VoiceBankBindingResult status;
     auto malformed = schema();
     malformed.bindings[4].shape = VoiceBindingShape::Mono;
@@ -322,7 +322,7 @@ TEST_CASE("G6 binding refuses wrong shape and stale deferred generations",
 }
 
 TEST_CASE("G6 retired bank's deferred token is a stale epoch on a replacement bank",
-          "[host][graph][g6][swap]") {
+          "[host][graph][voice-bank][swap]") {
     VoiceBankBindingResult status;
     auto retired = make_bank(schema(), status);
     REQUIRE(retired);
@@ -359,7 +359,7 @@ TEST_CASE("G6 retired bank's deferred token is a stale epoch on a replacement ba
 }
 
 TEST_CASE("G6 deferred expression rejects non-finite and out-of-range state before dispatch",
-          "[host][graph][g6][expression][validation]") {
+          "[host][graph][voice-bank][expression][validation]") {
     struct Case {
         midi::MpeExpressionEvent::Kind kind;
         float value;
@@ -425,7 +425,7 @@ TEST_CASE("G6 deferred expression rejects non-finite and out-of-range state befo
 }
 
 TEST_CASE("G6 malformed supported-kind MIDI refuses before rendering or voice dispatch",
-          "[host][graph][g6][ingress]") {
+          "[host][graph][voice-bank][ingress]") {
     VoiceBankBindingResult status;
     auto bank = make_bank(schema(), status);
     REQUIRE(bank);
@@ -446,7 +446,7 @@ TEST_CASE("G6 malformed supported-kind MIDI refuses before rendering or voice di
 }
 
 TEST_CASE("G6 named Processor parameters remain independent between slots",
-          "[host][graph][g6][parameter]") {
+          "[host][graph][voice-bank][parameter]") {
     auto first_sample = [](std::uint32_t changed_slot, float level) {
         VoiceBankBindingResult status;
         auto bank = make_bank(schema(), status);
@@ -466,7 +466,7 @@ TEST_CASE("G6 named Processor parameters remain independent between slots",
     CHECK(first_sample(0, 2.0f) == baseline * 2.0f);
 }
 
-TEST_CASE("G6 slot_parameter reads each slot's declared value", "[host][graph][g6][parameter]") {
+TEST_CASE("G6 slot_parameter reads each slot's declared value", "[host][graph][voice-bank][parameter]") {
     VoiceBankBindingResult status;
     auto bank = make_bank(schema(), status);
     REQUIRE(bank);
@@ -503,7 +503,7 @@ std::array<float, 8> slot_levels(const VoiceBankBinding& bank) {
 }
 } // namespace
 
-TEST_CASE("G6 captured slot state restores onto another live bank", "[host][graph][g6][state]") {
+TEST_CASE("G6 captured slot state restores onto another live bank", "[host][graph][voice-bank][state]") {
     VoiceBankBindingResult status;
     auto source = make_bank(schema(), status);
     REQUIRE(source);
@@ -539,7 +539,7 @@ TEST_CASE("G6 captured slot state restores onto another live bank", "[host][grap
 }
 
 TEST_CASE("G6 restored slot state reaches the slot processors, not only the cache",
-          "[host][graph][g6][state]") {
+          "[host][graph][voice-bank][state]") {
     VoiceBankBindingResult status;
     auto source = make_bank(schema(), status);
     REQUIRE(source);
@@ -563,7 +563,7 @@ TEST_CASE("G6 restored slot state reaches the slot processors, not only the cach
 }
 
 TEST_CASE("G6 restore_state refuses a whole state when any value is invalid",
-          "[host][graph][g6][state]") {
+          "[host][graph][voice-bank][state]") {
     VoiceBankBindingResult status;
     auto bank = make_bank(schema(), status);
     REQUIRE(bank);
@@ -638,7 +638,7 @@ TEST_CASE("G6 restore_state refuses a whole state when any value is invalid",
 }
 
 TEST_CASE("G6 tracker capacity refuses 129th distinct start atomically and recovers",
-          "[host][graph][g6][ingress][capacity]") {
+          "[host][graph][voice-bank][ingress][capacity]") {
     VoiceBankBindingResult status;
     auto bank = make_bank(schema(), status);
     REQUIRE(bank);
@@ -687,7 +687,7 @@ TEST_CASE("G6 tracker capacity refuses 129th distinct start atomically and recov
 }
 
 TEST_CASE("G6 capacity preview respects retrigger and equal-sample event order",
-          "[host][graph][g6][ingress][capacity]") {
+          "[host][graph][voice-bank][ingress][capacity]") {
     auto filled = [] {
         VoiceBankBindingResult status;
         auto bank = make_bank(schema(), status);
@@ -754,7 +754,7 @@ TEST_CASE("G6 capacity preview respects retrigger and equal-sample event order",
 }
 
 TEST_CASE("G6 polyphonic pressure refuses before note or output mutation",
-          "[host][graph][g6][ingress]") {
+          "[host][graph][voice-bank][ingress]") {
     VoiceBankBindingResult status;
     auto bank = make_bank(schema(), status);
     REQUIRE(bank);
@@ -784,7 +784,7 @@ TEST_CASE("G6 polyphonic pressure refuses before note or output mutation",
 }
 
 TEST_CASE("G6 member and manager pedals release once on the last applicable rise",
-          "[host][graph][g6][pedal]") {
+          "[host][graph][voice-bank][pedal]") {
     for (const std::uint8_t down : {64, 127}) {
         VoiceBankBindingResult status;
         auto bank = make_bank(schema(), status);
@@ -820,7 +820,7 @@ TEST_CASE("G6 member and manager pedals release once on the last applicable rise
 }
 
 TEST_CASE("G6 scoped channel modes preserve unrelated voices and refuse outside zones",
-          "[host][graph][g6][pedal]") {
+          "[host][graph][voice-bank][pedal]") {
     VoiceBankBindingResult status;
     auto bank = make_bank(schema(), status, definition(), midi::MpeConfig::dual(2, 2));
     REQUIRE(bank);
@@ -846,7 +846,7 @@ TEST_CASE("G6 scoped channel modes preserve unrelated voices and refuse outside 
     CHECK_FALSE(owner(*bank).allocator().voice(2).active());
 }
 
-TEST_CASE("G6 stolen held generation cannot release its replacement", "[host][graph][g6][pedal]") {
+TEST_CASE("G6 stolen held generation cannot release its replacement", "[host][graph][voice-bank][pedal]") {
     VoiceBankBindingResult status;
     auto bank = make_bank(schema(), status);
     REQUIRE(bank);
@@ -875,7 +875,7 @@ TEST_CASE("G6 stolen held generation cannot release its replacement", "[host][gr
 }
 
 TEST_CASE("G6 CC121 resets expression on held and releasing voices",
-          "[host][graph][g6][pedal][expression]") {
+          "[host][graph][voice-bank][pedal][expression]") {
     for (const bool held : {true, false}) {
         VoiceBankBindingResult status;
         auto bank = make_bank(schema(), status);
@@ -904,7 +904,7 @@ TEST_CASE("G6 CC121 resets expression on held and releasing voices",
 }
 
 TEST_CASE("G6 held expression stays generation-scoped when its member channel is reused",
-          "[host][graph][g6][pedal][expression][audio]") {
+          "[host][graph][voice-bank][pedal][expression][audio]") {
     struct Observation {
         float left = 0.0f;
         float old_pressure = 0.0f;
@@ -960,7 +960,7 @@ TEST_CASE("G6 held expression stays generation-scoped when its member channel is
 }
 
 TEST_CASE("G6 manager expression refuses before dispatch until scoped audio semantics exist",
-          "[host][graph][g6][ingress][expression]") {
+          "[host][graph][voice-bank][ingress][expression]") {
     const std::array<midi::MidiEvent, 3> unsupported{
         midi::MidiEvent::pitch_bend(0, 12288),
         midi::MidiEvent{choc::midi::ShortMessage(0xd0, 64, 0), 0, 0.0},
@@ -989,7 +989,7 @@ TEST_CASE("G6 manager expression refuses before dispatch until scoped audio sema
 // held from the first callback, so every paced block renders full polyphony.
 // The per-block oracle is the authored stereo law (right == 0.5 * left), a
 // finite bounded mix, and non-silence once the chord is sounding.
-TEST_CASE("G6 voice bank paced matrix cell", "[.][host][graph][g6][paced-matrix]") {
+TEST_CASE("G6 voice bank paced matrix cell", "[.][host][graph][voice-bank][paced-matrix]") {
     const auto config = pulp::test::paced::read_config("eight-slot", 128);
     REQUIRE(config.variant == "eight-slot");
     REQUIRE(config.rate == 48000);
@@ -1026,7 +1026,7 @@ TEST_CASE("G6 voice bank paced matrix cell", "[.][host][graph][g6][paced-matrix]
 }
 
 TEST_CASE("G6 paced cell oracle rejects a non-finite right channel beside a passing control",
-          "[host][graph][g6][paced-matrix]") {
+          "[host][graph][voice-bank][paced-matrix]") {
     std::array<float, 4> left{0.25f, -0.5f, 0.125f, 0.0f};
     std::array<float, 4> right{};
     for (std::size_t i = 0; i < left.size(); ++i)
