@@ -968,14 +968,18 @@ pulp_add_test_suite(pulp-test-gpu-neural-model-factory
 # Two independent GPU consumers (WaveNet neural node and staged convolver) as
 # SignalGraph processor nodes under one test-local resource admission
 # manifest, with measured geometry, injected device loss and planted
-# negatives. Needs a real Dawn device; skips where none can be prepared.
-if(TARGET pulp::gpu-device)
+# negatives. Needs a real Dawn device, so it is hardware evidence: registered
+# only under PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF and labelled gpu-proof, which
+# keeps it out of every required CI selection. Owner-run on a physical GPU.
+if(TARGET pulp::gpu-device AND PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
+    pulp_gpu_proof_begin()
     pulp_add_test_suite(pulp-test-graph-gpu-resource-admission
         SOURCES test_graph_gpu_resource_admission.cpp harness/rt_allocation_probe.cpp
         LIBRARIES pulp::gpu-audio pulp::audio pulp::host pulp::format pulp::runtime
                   Threads::Threads
         INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src
         PROPERTIES RESOURCE_LOCK pulp_gpu)
+    pulp_gpu_proof_end()
 endif()
 
 # Shadow placement (Inline, Worker, None, Auto) for the neural node.
