@@ -154,7 +154,10 @@ TEST_CASE("the AU v3 view controller opens, resizes and closes a contract editor
         [window.contentView addSubview:controller.view];
         REQUIRE(contract_log().saw("visible:on"));
 
-        // The host resizes the controller's view; the editor follows.
+        // The host resizes the controller's view; the editor follows. A host
+        // that does not autoresize subviews gets the same result, because the
+        // controller fits the contract view from the root view's frame hook.
+        controller.view.autoresizesSubviews = NO;
         [controller.view setFrameSize:NSMakeSize(640, 480)];
         REQUIRE(view.frame.size.width == 640);
         REQUIRE(contract_log().saw("set_size:640x480"));

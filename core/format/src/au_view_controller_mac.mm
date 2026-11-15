@@ -402,6 +402,18 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     view.frame = self.view.bounds;
     view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     [self.view addSubview:view];
+    // Autoresizing alone does not reach the contract view in every host, so
+    // the root view's frame hook (the one every host-driven resize passes
+    // through) keeps it filling the root view as well.
+    if ([self.view isKindOfClass:[PulpAUMacRootView class]]) {
+        ((PulpAUMacRootView*)self.view).onResize = ^{
+          if (controller->_contractView == nil)
+              return;
+          const NSRect bounds = controller.view.bounds;
+          if (!NSEqualSizes(controller->_contractView.frame.size, bounds.size))
+              controller->_contractView.frame = bounds;
+        };
+    }
     pulp::runtime::log_info("AU mac: contract editor attached at {}x{}",
                             static_cast<int>(size.width), static_cast<int>(size.height));
 }
@@ -411,6 +423,8 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
         return;
     PULP_AUV3_CONTRACT_VIEW_CLASS* view = _contractView;
     _contractView = nil;
+    if (self.isViewLoaded && [self.view isKindOfClass:[PulpAUMacRootView class]])
+        ((PulpAUMacRootView*)self.view).onResize = nil;
     [view closeEditor];
     [view removeFromSuperview];
 #if !__has_feature(objc_arc)
