@@ -107,6 +107,8 @@ using StandardInputChannelSession =
                        std::chrono::steady_clock::time_point deadline)>;
 
 /// Observation of a child whose exit has not released its process-group identity.
+/// Windows has no process group: process_group_id is -1 and the job object owns
+/// the descendants, while an open process handle retains the child's identity.
 enum class RetainedProcessState { Unsupported, NotStarted, Running, Exited, Reaped, CustodyLost };
 
 struct RetainedProcessObservation {
@@ -215,8 +217,11 @@ public:
                                            const StandardInputChannelSession& session,
                                            const ProcessOptions& options = {});
 
-    /// macOS desktop only. Reserve custody before spawning; all unsupported
-    /// platforms refuse without launching. The reservation outlives this handle
+    /// macOS desktop and Windows. Reserve custody before spawning; all
+    /// unsupported platforms refuse without launching. On Windows the child is
+    /// born suspended into a private kill-on-close job object that permits no
+    /// breakaway, so cleanup reaches every descendant; the private input channel
+    /// variant is unavailable there and refuses before spawning. The reservation outlives this handle
     /// until cleanup completes, including a failed post-spawn handshake.
     /// A retained handle and reservation are single-use. No caller may reap the
     /// child independently or install SIGCHLD auto-reaping while it is retained.
