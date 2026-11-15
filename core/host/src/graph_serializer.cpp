@@ -35,6 +35,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <numeric>
 #include <optional>
 #include <queue>
@@ -52,10 +53,17 @@ std::function<void(const std::filesystem::path&)> g_after_first_read_hook;
 std::atomic<bool> g_fail_next_write{false};
 std::atomic<bool> g_fail_next_replace{false};
 
-GraphDocumentRefusal preflight_document_depth(std::string_view json) noexcept {
+// Bounds nesting depth and object member counts in one linear scan before the
+// document reaches the parser. Each member of an object has exactly one ':'
+// outside a string at that object's level.
+GraphDocumentRefusal preflight_document_shape(std::string_view json) noexcept {
     bool in_string = false;
     bool escaped = false;
     std::size_t depth = 0;
+    std::size_t total_members = 0;
+    // Container kind and member count per depth; index 0 is the top level.
+    bool is_object[GraphSerializer::max_document_depth + 1] = {};
+    std::size_t members[GraphSerializer::max_document_depth + 1] = {};
     for (const auto character : json) {
         if (in_string) {
             if (escaped)
@@ -71,8 +79,14 @@ GraphDocumentRefusal preflight_document_depth(std::string_view json) noexcept {
         } else if (character == '{' || character == '[') {
             if (++depth > GraphSerializer::max_document_depth)
                 return GraphDocumentRefusal::NestingLimitExceeded;
+            is_object[depth] = character == '{';
+            members[depth] = 0;
         } else if ((character == '}' || character == ']') && depth != 0) {
             --depth;
+        } else if (character == ':' && depth != 0 && is_object[depth]) {
+            if (++members[depth] > GraphSerializer::max_object_members ||
+                ++total_members > GraphSerializer::max_document_members)
+                return GraphDocumentRefusal::MemberLimitExceeded;
         }
     }
     return GraphDocumentRefusal::None;
@@ -1225,6 +1239,8 @@ const char* graph_document_refusal_name(GraphDocumentRefusal refusal) noexcept {
         return "subgraph_binding_duplicate";
     case GraphDocumentRefusal::NodeIdInvalid:
         return "node_id_invalid";
+    case GraphDocumentRefusal::MemberLimitExceeded:
+        return "member_limit_exceeded";
     case GraphDocumentRefusal::AllocationFailed:
         return "allocation_failed";
     }
@@ -1243,7 +1259,7 @@ GraphDocumentInspection GraphSerializer::inspect_document(std::string_view json)
         result.detail = "document exceeds the encoded size limit";
         return result;
     }
-    if (const auto refusal = preflight_document_depth(json);
+    if (const auto refusal = preflight_document_shape(json);
         refusal != GraphDocumentRefusal::None) {
         result.refusal = refusal;
         result.detail = graph_document_refusal_name(refusal);
@@ -1496,9 +1512,13 @@ int GraphSerializer::current_format_version() {
     return kFormatVersion;
 }
 
+namespace {
 GraphSerializer::SaveResult
-GraphSerializer::to_file(const SignalGraph& graph, const std::filesystem::path& path,
-                         const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout) {
+write_graph_file(const SignalGraph& graph, const std::filesystem::path& path,
+                 const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout,
+                 bool saved_identity) {
+    using SaveResult = GraphSerializer::SaveResult;
+    constexpr auto max_file_bytes = GraphSerializer::max_file_bytes;
     SaveResult result;
     for (const auto& node : graph.nodes()) {
         if (node.type == NodeType::Custom &&
@@ -1509,10 +1529,12 @@ GraphSerializer::to_file(const SignalGraph& graph, const std::filesystem::path& 
             return result;
         }
     }
-    const auto json = to_json(graph, editor_layout);
+    const auto json = saved_identity ? GraphSerializer::to_saved_document(graph, editor_layout)
+                                     : GraphSerializer::to_json(graph, editor_layout);
     if (json.empty()) {
         result.code = SaveResult::Code::serialization_refused;
-        result.error = "graph serialization failed";
+        result.error = saved_identity ? "graph saved-identity serialization failed"
+                                      : "graph serialization failed";
         return result;
     }
     const auto payload_size = json.size() + 1; // canonical files end with a newline
@@ -1574,6 +1596,19 @@ GraphSerializer::to_file(const SignalGraph& graph, const std::filesystem::path& 
     result.error = "graph file replace failed: " + path.string();
     return result;
 }
+} // namespace
+
+GraphSerializer::SaveResult
+GraphSerializer::to_file(const SignalGraph& graph, const std::filesystem::path& path,
+                         const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout) {
+    return write_graph_file(graph, path, editor_layout, false);
+}
+
+GraphSerializer::SaveResult GraphSerializer::to_saved_file(
+    const SignalGraph& graph, const std::filesystem::path& path,
+    const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout) {
+    return write_graph_file(graph, path, editor_layout, true);
+}
 
 const char* GraphSerializer::save_code_name(SaveResult::Code code) noexcept {
     switch (code) {
@@ -1622,8 +1657,6 @@ std::string GraphSerializer::to_json(
     bool has_processors = false;
     bool has_typed_ports = false;
     for (const auto& node : graph.nodes()) {
-        if (node.spectral_identity)
-            return {};
         has_processors |= graph.is_processor_node(node.id);
         if (node.type == NodeType::Custom) {
             // A node may carry fewer handles than ports (none at all for a
@@ -2112,6 +2145,82 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
     return from_json(graph, json, GraphLoadOptions{});
 }
 
+namespace {
+// Lanes and the port fields the connect call records for that lane: MIDI
+// edges ignore both ports and parameter edges ignore the destination port.
+using ConnectionKey =
+    std::tuple<NodeId, PortIndex, NodeId, PortIndex, bool, bool, bool, bool, bool, bool>;
+
+ConnectionKey connection_key(NodeId source, PortIndex source_port, NodeId dest, PortIndex dest_port,
+                             bool feedback, bool midi, bool automation, bool audio_rate,
+                             bool sidechain, bool control) {
+    const bool parameter = automation || audio_rate;
+    return {source,     midi ? PortIndex{0} : source_port,
+            dest,       (midi || parameter) ? PortIndex{0} : dest_port,
+            feedback,   midi,
+            automation, audio_rate,
+            sidechain,  control};
+}
+
+// Every connection a saved document records must exist in the restored graph.
+// The tolerant loader skips a dangling or refused edge, so without this check a
+// saved-identity load would report success with an edge missing. The one
+// permitted omission is the partial-load rule: a parameter edge into an
+// unresolved plugin placeholder. Returns a description of the first edge that
+// is missing, or nullopt.
+template <typename V>
+std::optional<std::string>
+unrestored_connection(const SignalGraph& graph, const V& root,
+                      const std::unordered_map<NodeId, NodeId>& persisted_ids) {
+    std::map<ConnectionKey, std::size_t> restored;
+    for (const auto& c : graph.connections())
+        ++restored[connection_key(c.source_node, c.source_port, c.dest_node, c.dest_port,
+                                  c.feedback, c.midi, c.automation, c.audio_rate_modulation,
+                                  c.sidechain, c.control_signal)];
+    if (!root.hasObjectMember("connections"))
+        return std::nullopt;
+    const auto& connections = root["connections"];
+    const auto flag = [](const auto& item, const char* name) {
+        return item.hasObjectMember(name) && item[name].isBool() && item[name].getBool();
+    };
+    const auto port = [](const auto& item, const char* name) {
+        return item.hasObjectMember(name) && item[name].isInt()
+                   ? static_cast<PortIndex>(item[name].getInt64())
+                   : PortIndex{0};
+    };
+    for (std::uint32_t i = 0; i < connections.size(); ++i) {
+        const auto& item = connections[i];
+        const auto describe = [&] { return "saved connection " + std::to_string(i); };
+        if (!item.isObject() || !item.hasObjectMember("source_node") ||
+            !item.hasObjectMember("dest_node") || !item["source_node"].isInt() ||
+            !item["dest_node"].isInt())
+            return describe() + " is malformed";
+        const auto source = persisted_ids.find(static_cast<NodeId>(item["source_node"].getInt64()));
+        const auto dest = persisted_ids.find(static_cast<NodeId>(item["dest_node"].getInt64()));
+        if (source == persisted_ids.end() || dest == persisted_ids.end())
+            return describe() + " names a node the document does not hold";
+        const bool automation = flag(item, "automation");
+        const bool audio_rate = flag(item, "audio_rate_modulation");
+        const auto key = connection_key(source->second, port(item, "source_port"), dest->second,
+                                        port(item, "dest_port"), flag(item, "feedback"),
+                                        flag(item, "midi"), automation, audio_rate,
+                                        flag(item, "sidechain"), flag(item, "control_signal"));
+        if (const auto it = restored.find(key); it != restored.end() && it->second != 0) {
+            --it->second;
+            continue;
+        }
+        const auto* target = graph.node(dest->second);
+        const bool placeholder = target != nullptr && target->type == NodeType::Plugin &&
+                                 !target->plugin &&
+                                 graph.processor_node_instance(target->id) == nullptr;
+        if ((automation || audio_rate) && placeholder)
+            continue;
+        return describe() + " was not restored (invalid port, cycle, or duplicate edge)";
+    }
+    return std::nullopt;
+}
+} // namespace
+
 GraphSerializer::LoadResult GraphSerializer::from_saved_document(SignalGraph& graph,
                                                                  const std::string& json,
                                                                  const GraphLoadOptions& options) {
@@ -2153,6 +2262,14 @@ GraphSerializer::LoadResult GraphSerializer::from_saved_document(SignalGraph& gr
                                std::to_string(persisted);
                 return result;
             }
+        }
+        if (auto missing = unrestored_connection(graph, root, result.persisted_node_ids)) {
+            graph.clear();
+            result.ok = false;
+            result.persisted_node_ids.clear();
+            result.editor_layout.clear();
+            result.error = "connection_not_restored: " + *missing;
+            return result;
         }
         return result;
     } catch (const std::exception& error) {
@@ -2236,6 +2353,19 @@ GraphSerializer::LoadResult GraphSerializer::from_file(SignalGraph& graph,
 GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const std::string& json,
                                                        const GraphLoadOptions& options) {
     LoadResult result;
+    // Bound the document before any parse, so neither the spectral reader nor
+    // the ordinary reader sees an oversized or quadratic-to-parse document.
+    if (json.size() > max_file_bytes) {
+        result.error =
+            "graph document exceeds the " + std::to_string(max_file_bytes) + " byte limit";
+        return result;
+    }
+    if (const auto refusal = preflight_document_shape(json);
+        refusal != GraphDocumentRefusal::None) {
+        result.error = std::string("graph document refused before parsing: ") +
+                       graph_document_refusal_name(refusal);
+        return result;
+    }
     auto spectral = spectral_persistence::read(json);
     if (spectral.handled) {
         if (!spectral.result.ok)
@@ -2299,7 +2429,6 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
             return result;
         }
     }
-    graph.clear();
     PluginNodeResolver plugin_resolver(options);
 
     int source_format_version = 0;
@@ -2326,6 +2455,9 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
         result.error = "root is not an object";
         return result;
     }
+    // Clear only once the document parses, so malformed input leaves the
+    // caller's graph as it was, as a refused spectral document does.
+    graph.clear();
 
     struct ParsedRegion {
         SampleRegionDefinition definition;

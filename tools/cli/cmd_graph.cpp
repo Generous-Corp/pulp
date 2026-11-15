@@ -27,6 +27,9 @@ void usage() {
     std::cout << "Usage: pulp graph "
                  "<catalog|inspect|validate|explain|render|probe|report|fmt|canonicalize|save> "
                  "<file.pulpgraph|file.pat> [--json] [--notation] [--output path]\n";
+    std::cout << "save: --output path [--saved-identity]; a saved-identity input (and "
+                 "--saved-identity) writes the identity envelope that graph diff reads, and fmt "
+                 "keeps it\n";
     std::cout
         << "diff: pulp graph diff <before.pulpgraph> <after.pulpgraph> [--json]; compares two "
            "saved-identity documents by logical node identity (read-only)\n";
@@ -691,6 +694,47 @@ std::optional<std::string> read_graph_document(const std::string& path, Code& co
     return text;
 }
 
+// True when the document declares the saved-identity envelope or subgraph
+// records, which the plain writer would drop. A document the inspector
+// accepts always qualifies; a legacy document it refuses for a missing
+// envelope never does; anything else is parsed only after the inspector's
+// size and shape preflight passed, and a parse failure is left to the loader.
+bool declares_saved_identity(const std::string& text) {
+    using Refusal = pulp::host::GraphDocumentRefusal;
+    const auto inspection = pulp::host::GraphSerializer::inspect_document(text);
+    if (inspection.ok())
+        return true;
+    switch (inspection.refusal) {
+    case Refusal::LogicalIdentityMissing:
+    case Refusal::EmptyDocument:
+    case Refusal::DocumentTooLarge:
+    case Refusal::NestingLimitExceeded:
+    case Refusal::MemberLimitExceeded:
+    case Refusal::InvalidJson:
+        return false;
+    default:
+        break;
+    }
+    try {
+        const auto root = choc::json::parse(text);
+        return root.isObject() &&
+               (root.hasObjectMember("identity_schema") ||
+                root.hasObjectMember("logical_identities") || root.hasObjectMember("bindings") ||
+                root.hasObjectMember("subgraphs"));
+    } catch (...) {
+        return false;
+    }
+}
+
+bool declares_subgraph_records(const std::string& text) {
+    try {
+        const auto root = choc::json::parse(text);
+        return root.isObject() && root.hasObjectMember("subgraphs");
+    } catch (...) {
+        return false;
+    }
+}
+
 choc::value::Value string_array(const std::vector<std::string>& values) {
     auto array = choc::value::createEmptyArray();
     for (const auto& value : values)
@@ -738,6 +782,14 @@ int diff_graphs(const std::vector<std::string>& args) {
     if (!diff.ok()) {
         const bool after = diff.code == pulp::host::GraphDocumentDiffCode::AfterRefused ||
                            diff.detail.starts_with("after:");
+        // A plain graph (any format) has no envelope: the inspector refuses
+        // a v4+ one as missing it and an older one by format version.
+        const bool missing_identity =
+            diff.refusal == pulp::host::GraphDocumentRefusal::LogicalIdentityMissing ||
+            diff.refusal == pulp::host::GraphDocumentRefusal::InvalidFormatVersion;
+        const std::string resave =
+            "write the identity envelope with: pulp graph save FILE --output FILE "
+            "--saved-identity";
         if (json) {
             // The document refusal is the C++ InvalidDocument class; the
             // inspection refusal and the side name the exact cause.
@@ -747,10 +799,14 @@ int diff_graphs(const std::vector<std::string>& args) {
             value.addMember("refusal", pulp::host::graph_document_refusal_name(diff.refusal));
             value.addMember("side", after ? "after" : "before");
             value.addMember("message", diff.detail);
+            if (missing_identity)
+                value.addMember("hint", resave);
             std::cout << choc::json::toString(value) << '\n';
         } else {
             std::cerr << "pulp graph: cannot diff (" << (after ? paths[1] : paths[0])
                       << "): " << diff.detail << '\n';
+            if (missing_identity)
+                std::cerr << "pulp graph: " << resave << '\n';
         }
         return 1;
     }
@@ -864,6 +920,7 @@ int cmd_graph(const std::vector<std::string>& args) {
     pulp::host::GraphLoadOptions opts;
     opts.load_plugins = false;
     pulp::host::GraphSerializer::LoadResult loaded;
+    bool saved_identity = false;
     const bool notation = std::filesystem::path(path).extension() == ".pat";
     if (op == "validate" || notation ||
         (op == "fmt" && std::find(args.begin() + 2, args.end(), "--notation") != args.end())) {
@@ -879,6 +936,41 @@ int cmd_graph(const std::vector<std::string>& args) {
         }
         graph_ptr = std::move(strict.graph);
         loaded.ok = true;
+    } else if (op == "save" || op == "fmt" || op == "canonicalize") {
+        // A rewrite must not drop what the plain writer cannot express: the
+        // saved-identity envelope is kept (and verified on load), and subgraph
+        // records, which need the caller's templates, are refused.
+        Code read_code = Code::Ok;
+        std::string message;
+        auto text = read_graph_document(path, read_code, message);
+        if (!text) {
+            if (json)
+                json_error(patch_code(read_code), message);
+            else
+                std::cerr << "pulp graph: " << message << '\n';
+            return 1;
+        }
+        saved_identity = declares_saved_identity(*text);
+        if (saved_identity && declares_subgraph_records(*text)) {
+            const std::string refusal =
+                "the document holds subgraph records, which need the authoring templates to "
+                "rewrite; rewriting it here would drop every subgraph instance";
+            if (json)
+                json_error("subgraph_records_unsupported", refusal);
+            else
+                std::cerr << "pulp graph: " << refusal << '\n';
+            return 1;
+        }
+        loaded = saved_identity
+                     ? pulp::host::GraphSerializer::from_saved_document(*graph_ptr, *text, opts)
+                     : pulp::host::GraphSerializer::from_json(*graph_ptr, *text, opts);
+        if (!loaded.ok) {
+            if (json)
+                json_error(patch_code(Code::InvalidDocument), loaded.error);
+            else
+                std::cerr << "pulp graph: " << loaded.error << '\n';
+            return 1;
+        }
     } else {
         loaded = pulp::host::GraphSerializer::from_file(*graph_ptr, path, opts);
         if (!loaded.ok) {
@@ -962,8 +1054,12 @@ int cmd_graph(const std::vector<std::string>& args) {
                     << "pulp graph: cannot save with unresolved plugin or custom node state\n";
             return 1;
         }
-        const auto saved =
-            pulp::host::GraphSerializer::to_file(graph, *(output_arg + 1), loaded.editor_layout);
+        const bool write_identity = saved_identity || std::find(args.begin() + 2, args.end(),
+                                                                "--saved-identity") != args.end();
+        const auto saved = write_identity ? pulp::host::GraphSerializer::to_saved_file(
+                                                graph, *(output_arg + 1), loaded.editor_layout)
+                                          : pulp::host::GraphSerializer::to_file(
+                                                graph, *(output_arg + 1), loaded.editor_layout);
         if (!saved.ok) {
             if (json)
                 json_error(pulp::host::GraphSerializer::save_code_name(saved.code), saved.error);
@@ -1000,8 +1096,11 @@ int cmd_graph(const std::vector<std::string>& args) {
                          "overwrite it\n";
             return 1;
         }
-        const auto saved = pulp::host::GraphSerializer::to_file(graph, std::filesystem::path(path),
-                                                                loaded.editor_layout);
+        const auto saved = saved_identity
+                               ? pulp::host::GraphSerializer::to_saved_file(
+                                     graph, std::filesystem::path(path), loaded.editor_layout)
+                               : pulp::host::GraphSerializer::to_file(
+                                     graph, std::filesystem::path(path), loaded.editor_layout);
         if (!saved.ok) {
             if (json) {
                 json_error(pulp::host::GraphSerializer::save_code_name(saved.code), saved.error);

@@ -113,6 +113,129 @@ TEST_CASE("GraphSerializer inspection refuses identity and parser hazards",
     CHECK(hostile_depth.refusal == GraphDocumentRefusal::NestingLimitExceeded);
 }
 
+namespace {
+std::string object_with_members(std::size_t count) {
+    std::string doc = R"({"document_schema":"pulp.graph.authored-io-gain.v1","v":{)";
+    for (std::size_t i = 0; i < count; ++i) {
+        if (i)
+            doc.push_back(',');
+        doc += "\"k" + std::to_string(i) + "\":0";
+    }
+    return doc + "}}";
+}
+} // namespace
+
+TEST_CASE("GraphSerializer bounds object members before parsing", "[host][serializer][identity]") {
+    // Control: an object at the per-object bound is admitted.
+    const auto at_limit =
+        GraphSerializer::inspect_document(object_with_members(GraphSerializer::max_object_members));
+    INFO(at_limit.detail);
+    CHECK(at_limit.ok());
+
+    // One member over the bound, and a document far over it, are refused
+    // before the parser's per-member duplicate scan runs.
+    const auto over = GraphSerializer::inspect_document(
+        object_with_members(GraphSerializer::max_object_members + 1));
+    CHECK(over.refusal == GraphDocumentRefusal::MemberLimitExceeded);
+    const auto hostile = object_with_members(200'000);
+    CHECK(GraphSerializer::inspect_document(hostile).refusal ==
+          GraphDocumentRefusal::MemberLimitExceeded);
+
+    // The total bound: many objects, each under the per-object bound.
+    std::string many = R"({"document_schema":"pulp.graph.authored-io-gain.v1","v":[)";
+    const std::size_t per = 1000;
+    const std::size_t objects = GraphSerializer::max_document_members / per + 1;
+    for (std::size_t o = 0; o < objects; ++o) {
+        many += o ? ",{" : "{";
+        for (std::size_t i = 0; i < per; ++i)
+            many += (i ? ",\"" : "\"") + std::to_string(i) + "\":0";
+        many.push_back('}');
+    }
+    many += "]}";
+    CHECK(GraphSerializer::inspect_document(many).refusal ==
+          GraphDocumentRefusal::MemberLimitExceeded);
+
+    // Colons inside strings are not members.
+    const auto colons = GraphSerializer::inspect_document(
+        R"({"document_schema":"pulp.graph.authored-io-gain.v1","text":")" + std::string(5000, ':') +
+        "\"}");
+    CHECK(colons.ok());
+
+    // The loader applies the same bound, and leaves the graph untouched.
+    SignalGraph graph;
+    graph.add_gain_node("Kept");
+    const auto loaded = GraphSerializer::from_json(graph, hostile);
+    CHECK_FALSE(loaded.ok);
+    CHECK(loaded.error.find("member_limit_exceeded") != std::string::npos);
+    CHECK(graph.nodes().size() == 1);
+}
+
+namespace {
+// Replaces the first occurrence of `from` after `after` in `text`.
+std::string replace_after(std::string text, std::string_view after, std::string_view from,
+                          std::string_view to) {
+    const auto start = text.find(after);
+    REQUIRE(start != std::string::npos);
+    const auto at = text.find(from, start);
+    REQUIRE(at != std::string::npos);
+    text.replace(at, from.size(), to);
+    return text;
+}
+} // namespace
+
+TEST_CASE("GraphSerializer saved documents refuse a connection that does not restore",
+          "[host][serializer][identity]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "Input");
+    const auto gain = graph.add_gain_node("Gain");
+    const auto output = graph.add_output_node(1, "Output");
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+    const auto saved = GraphSerializer::to_saved_document(graph);
+    REQUIRE_FALSE(saved.empty());
+    REQUIRE(GraphSerializer::inspect_document(saved).ok());
+
+    // Control: the unmodified document restores with both edges.
+    {
+        SignalGraph restored;
+        const auto loaded = GraphSerializer::from_saved_document(restored, saved);
+        INFO(loaded.error);
+        REQUIRE(loaded.ok);
+        CHECK(restored.connections().size() == 2);
+    }
+
+    const std::string port_value =
+        choc::json::toString(choc::json::parse(saved)["connections"][0]["source_port"], false);
+    const std::string dest_value =
+        choc::json::toString(choc::json::parse(saved)["connections"][0]["dest_node"], false);
+    const std::vector<std::pair<const char*, std::string>> cases{
+        {"out-of-range source port",
+         replace_after(saved, "\"connections\"", "\"source_port\": " + port_value,
+                       "\"source_port\": 9")},
+        {"dangling destination",
+         replace_after(saved, "\"connections\"", "\"dest_node\": " + dest_value,
+                       "\"dest_node\": 77")},
+    };
+    for (const auto& [name, document] : cases) {
+        INFO(name);
+        REQUIRE(document != saved);
+        // Inspection does not check endpoints; the restore must.
+        REQUIRE(GraphSerializer::inspect_document(document).ok());
+        // The tolerant loader keeps its partial-load behaviour.
+        SignalGraph tolerant;
+        REQUIRE(GraphSerializer::from_json(tolerant, document).ok);
+        CHECK(tolerant.connections().size() == 1);
+
+        SignalGraph restored;
+        const auto loaded = GraphSerializer::from_saved_document(restored, document);
+        INFO(loaded.error);
+        CHECK_FALSE(loaded.ok);
+        CHECK(loaded.error.starts_with("connection_not_restored:"));
+        CHECK(restored.nodes().empty());
+        CHECK(loaded.persisted_node_ids.empty());
+    }
+}
+
 TEST_CASE("GraphSerializer refuses an incomplete saved identity envelope",
           "[host][serializer][g3][d5]") {
     // identity_schema without logical_identities/nodes is not a complete envelope.

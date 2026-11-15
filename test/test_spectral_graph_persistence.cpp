@@ -395,3 +395,35 @@ TEST_CASE("Spectral saves use a graph format the pre-spectral reader refuses",
     REQUIRE_FALSE(plain.empty());
     CHECK(pre_spectral_reader_admits(plain));
 }
+
+TEST_CASE("Malformed ordinary graphs keep the ordinary loader's error",
+          "[host][spectral][replay][negative]") {
+    const std::vector<std::string> plain{
+        R"({"format_version":5,"nodes":[{"id":1,"type":"gain")",
+        "[1,2,3]",
+        R"({"format_version":5,"nodes":[5],"connections":[]})",
+    };
+    for (const auto& document : plain) {
+        INFO(document);
+        SignalGraph graph;
+        graph.add_gain_node("Kept");
+        const auto result = GraphSerializer::from_json(graph, document);
+        INFO(result.error);
+        REQUIRE_FALSE(result.ok);
+        CHECK(result.error.find("spectral") == std::string::npos);
+    }
+    SignalGraph truncated;
+    const auto parse = GraphSerializer::from_json(truncated, plain[0]);
+    CHECK(parse.error.starts_with("JSON parse failed"));
+
+    // Control: a document that names spectral content still gets the
+    // spectral reader's error.
+    const auto good = GraphSerializer::to_json(*fixture());
+    REQUIRE_FALSE(good.empty());
+    auto wrong_version = good;
+    replace(wrong_version, "\"format_version\": 6", "\"format_version\": 5");
+    SignalGraph graph;
+    const auto spectral = GraphSerializer::from_json(graph, wrong_version);
+    REQUIRE_FALSE(spectral.ok);
+    CHECK(spectral.error.find("spectral") != std::string::npos);
+}
