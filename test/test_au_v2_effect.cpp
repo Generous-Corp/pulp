@@ -2119,6 +2119,156 @@ TEST_CASE("AU v2 reports no factory-preset property when the plug-in ships none"
                                            kAudioUnitScope_Global, 0, size, writable) != noErr);
 }
 
+namespace {
+
+std::string preset_name(const AUPreset& preset) {
+    char buffer[64] = {};
+    REQUIRE(CFStringGetCString(preset.presetName, buffer, sizeof(buffer), kCFStringEncodingUTF8));
+    return std::string(buffer);
+}
+
+AUPreset present_preset(pulp::format::au::PulpAUInstrument& unit) {
+    AUPreset current{};
+    REQUIRE(unit.DispatchGetProperty(kAudioUnitProperty_PresentPreset, kAudioUnitScope_Global, 0,
+                                     &current) == noErr);
+    return current;
+}
+
+OSStatus select_preset(pulp::format::au::PulpAUInstrument& unit, SInt32 number) {
+    AUPreset selection{};
+    selection.presetNumber = number;
+    selection.presetName = CFSTR("host-supplied");
+    return unit.DispatchSetProperty(kAudioUnitProperty_PresentPreset, kAudioUnitScope_Global, 0,
+                                    &selection, sizeof(selection));
+}
+
+} // namespace
+
+TEST_CASE("AU v2 instrument publishes a code-declared program and names the present preset",
+          "[au][au-v2][presets][programs]") {
+    ScopedPresetFactory factory;
+    pulp::format::au::PulpAUInstrument unit(nullptr);
+
+    int calls = 0;
+    std::size_t last = 99;
+    unit.set_programs({"default"}, [&](std::size_t n) {
+        ++calls;
+        last = n;
+    });
+
+    REQUIRE(unit.factory_preset_table().size() == 1);
+    CFArrayRef list = nullptr;
+    REQUIRE(unit.DispatchGetProperty(kAudioUnitProperty_FactoryPresets, kAudioUnitScope_Global, 0,
+                                     &list) == noErr);
+    REQUIRE(CFArrayGetCount(list) == 1);
+    const auto* entry = static_cast<const AUPreset*>(CFArrayGetValueAtIndex(list, 0));
+    REQUIRE(entry->presetNumber == 0);
+    REQUIRE(preset_name(*entry) == "default");
+    CFRelease(list);
+
+    AUPreset current = present_preset(unit);
+    REQUIRE(current.presetNumber == 0);
+    REQUIRE(preset_name(current) == "default");
+    CFRelease(current.presetName);
+
+    // A valid selection runs the callback once and keeps the table's name, not
+    // the host's.
+    REQUIRE(select_preset(unit, 0) == noErr);
+    REQUIRE(calls == 1);
+    REQUIRE(last == 0);
+    current = present_preset(unit);
+    REQUIRE(preset_name(current) == "default");
+    CFRelease(current.presetName);
+
+    // An invalid selection fails and changes nothing.
+    REQUIRE(select_preset(unit, 1) != noErr);
+    REQUIRE(calls == 1);
+    current = present_preset(unit);
+    REQUIRE(current.presetNumber == 0);
+    REQUIRE(preset_name(current) == "default");
+    CFRelease(current.presetName);
+}
+
+TEST_CASE("AU v2 instrument keeps a declared program slot whose name is not valid UTF-8",
+          "[au][au-v2][presets][programs]") {
+    ScopedPresetFactory factory;
+    pulp::format::au::PulpAUInstrument unit(nullptr);
+    std::vector<std::size_t> selected;
+    unit.set_programs({"first", std::string("bad\xff\xfe"), "third"},
+                      [&](std::size_t n) { selected.push_back(n); });
+
+    auto& table = unit.factory_preset_table();
+    REQUIRE(table.size() == 3);
+    REQUIRE(table.name_at(0) == "first");
+    REQUIRE(table.name_at(1) == "Program 2");
+    REQUIRE(table.name_at(2) == "third");
+
+    REQUIRE(select_preset(unit, 2) == noErr);
+    REQUIRE(selected == std::vector<std::size_t>{2});
+    AUPreset current = present_preset(unit);
+    REQUIRE(current.presetNumber == 2);
+    REQUIRE(preset_name(current) == "third");
+    CFRelease(current.presetName);
+}
+
+TEST_CASE("AU v2 instrument accepts a declared program with no callback",
+          "[au][au-v2][presets][programs]") {
+    ScopedPresetFactory factory;
+    pulp::format::au::PulpAUInstrument unit(nullptr);
+    unit.set_programs({"default"});
+    REQUIRE(select_preset(unit, 0) == noErr);
+}
+
+TEST_CASE("AU v2 instrument numbers bundle preset files after declared programs",
+          "[au][au-v2][presets][programs]") {
+    ScopedPresetFactory factory;
+    ScopedPresetDirectory presets;
+    presets.write("Warm", 6.0f, 0.75f);
+    presets.write("Bright", -9.0f, 0.25f);
+
+    pulp::format::au::PulpAUInstrument unit(nullptr);
+    std::vector<std::size_t> selected;
+    unit.set_programs({"default"}, [&](std::size_t n) { selected.push_back(n); });
+    unit.factory_preset_table().set_directory(presets.path());
+
+    auto& table = unit.factory_preset_table();
+    REQUIRE(table.size() == 3);
+    REQUIRE(table.name_at(0) == "default");
+    REQUIRE(table.name_at(1) == "Bright");
+    REQUIRE(table.name_at(2) == "Warm");
+    REQUIRE(table.preset_at(2)->presetNumber == 2);
+
+    // A file entry loads its parameters and does not run the program callback.
+    REQUIRE(select_preset(unit, 2) == noErr);
+    REQUIRE(selected.empty());
+    Float32 gain = 0.0f;
+    REQUIRE(unit.GetParameter(PresetEffectProcessor::kGainId, kAudioUnitScope_Global, 0, gain) ==
+            noErr);
+    REQUIRE(gain == Catch::Approx(6.0f));
+    AUPreset current = present_preset(unit);
+    REQUIRE(current.presetNumber == 2);
+    CFRelease(current.presetName);
+
+    REQUIRE(select_preset(unit, 0) == noErr);
+    REQUIRE(selected == std::vector<std::size_t>{0});
+}
+
+TEST_CASE("AU v2 instrument without declared programs keeps the untitled present preset",
+          "[au][au-v2][presets][programs]") {
+    ScopedPresetFactory factory;
+    pulp::format::au::PulpAUInstrument unit(nullptr);
+    REQUIRE(unit.factory_preset_table().size() == 0);
+
+    UInt32 size = 0;
+    bool writable = false;
+    REQUIRE(unit.DispatchGetPropertyInfo(kAudioUnitProperty_FactoryPresets, kAudioUnitScope_Global,
+                                         0, size, writable) != noErr);
+    AUPreset current = present_preset(unit);
+    REQUIRE(current.presetNumber == -1);
+    REQUIRE(preset_name(current) == "Untitled");
+    CFRelease(current.presetName);
+}
+
 // ===========================================================================
 // Initialize() warm-up: one render over silence that stops right after
 // validation and buffer wiring. It must not run the Processor or settle a

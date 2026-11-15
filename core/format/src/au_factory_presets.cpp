@@ -4,6 +4,7 @@
 
 #include <dlfcn.h>
 
+#include <string>
 #include <utility>
 
 namespace fs = std::filesystem;
@@ -88,33 +89,58 @@ void FactoryPresetTable::set_directory(const fs::path& dir) {
     rebuild();
 }
 
+void FactoryPresetTable::set_programs(std::vector<std::string> names, ProgramSelect on_select) {
+    programs_ = std::move(names);
+    on_select_ = std::move(on_select);
+    rebuild();
+}
+
 void FactoryPresetTable::rebuild() {
     clear_entries();
+
+    auto append = [this](const std::string& name) {
+        CFStringRef cf = CFStringCreateWithCString(kCFAllocatorDefault, name.c_str(),
+                                                   kCFStringEncodingUTF8);
+        if (cf == nullptr)
+            return false;
+        AUPreset preset{};
+        preset.presetNumber = static_cast<SInt32>(entries_.size());
+        preset.presetName = cf;
+        entries_.push_back(preset);
+        return true;
+    };
+
+    // Declared programs come first so their numbers do not move when preset
+    // files are added or removed. A name that cannot be encoded keeps its slot
+    // under a fallback name, so number n always selects the n-th declaration.
+    for (std::size_t i = 0; i < programs_.size(); ++i) {
+        if (!append(programs_[i])) {
+            programs_[i] = "Program " + std::to_string(i + 1);
+            append(programs_[i]);
+        }
+    }
+
     if (!presets_)
         return;
 
     const auto found = presets_->factory_presets();
-    entries_.reserve(found.size());
     infos_.reserve(found.size());
     for (const auto& info : found) {
-        CFStringRef name = CFStringCreateWithCString(kCFAllocatorDefault, info.name.c_str(),
-                                                     kCFStringEncodingUTF8);
-        if (name == nullptr)
+        if (!append(info.name))
             continue;
-        AUPreset preset{};
-        preset.presetNumber = static_cast<SInt32>(entries_.size());
-        preset.presetName = name;
-        entries_.push_back(preset);
         infos_.push_back(info);
     }
 
-    if (!entries_.empty()) {
-        runtime::log_info("AU: {} factory preset(s) from '{}'", entries_.size(),
+    if (!infos_.empty()) {
+        runtime::log_info("AU: {} factory preset(s) from '{}'", infos_.size(),
                           presets_->factory_presets_dir().string());
     }
 }
 
 std::string FactoryPresetTable::name_at(std::size_t index) const {
+    if (index < programs_.size())
+        return programs_[index];
+    index -= programs_.size();
     if (index >= infos_.size())
         return {};
     return infos_[index].name;
@@ -127,6 +153,12 @@ const AUPreset* FactoryPresetTable::preset_at(std::size_t index) const noexcept 
 }
 
 bool FactoryPresetTable::load(std::size_t index) {
+    if (index < programs_.size()) {
+        if (on_select_)
+            on_select_(index);
+        return true;
+    }
+    index -= programs_.size();
     if (!presets_ || index >= infos_.size())
         return false;
     if (!presets_->load(infos_[index]))

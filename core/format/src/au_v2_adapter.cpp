@@ -1370,6 +1370,14 @@ OSStatus PulpAUEffect::GetPresets(CFArrayRef* outData) const {
     return factory_presets_.copy_presets(outData);
 }
 
+void PulpAUEffect::set_programs(std::vector<std::string> names,
+                                FactoryPresetTable::ProgramSelect on_select) {
+    factory_presets_.set_programs(std::move(names), std::move(on_select));
+    if (const AUPreset* first = factory_presets_.preset_at(0);
+        first != nullptr && factory_presets_.program_count() > 0)
+        SetAFactoryPresetAsCurrent(*first);
+}
+
 OSStatus PulpAUEffect::NewFactoryPresetSet(const AUPreset& inNewFactoryPreset) {
     if (inNewFactoryPreset.presetNumber < 0)
         return kAudioUnitErr_InvalidPropertyValue;

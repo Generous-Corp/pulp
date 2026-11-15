@@ -22,6 +22,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace pulp::format::au {
@@ -183,6 +184,15 @@ public:
     /// selection changes what the plug-in sounds like instead of only
     /// relabelling the menu.
     OSStatus NewFactoryPresetSet(const AUPreset& inNewFactoryPreset) override;
+
+    /// Publish programs declared in code as factory presets (see
+    /// `FactoryPresetTable::set_programs`) and make the first one the present
+    /// preset, so a host shows `names[0]` instead of "Untitled". Selecting
+    /// program `n` runs @p on_select with `n` and makes `{n, names[n]}` the
+    /// present preset; an out-of-range number is refused. Call straight after
+    /// construction, before the host scans.
+    void set_programs(std::vector<std::string> names,
+                      FactoryPresetTable::ProgramSelect on_select = {});
 
     /// The factory-preset table this instance serves. Exposed so a plug-in
     /// whose presets live outside the default bundle folder can re-point
