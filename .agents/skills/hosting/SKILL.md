@@ -3256,6 +3256,18 @@ hangs until then. Do not register a second ctest entry for the same case under a
 shorter `TIMEOUT`: the duplicate-registration check refuses two budgets for one
 command.
 
+A finite spectral source's EOF values (frame count, routed cutoff, `N / H`
+drain, bin count, component stride) come from `SpectralFiniteStreamRule` in
+`core/host/src/spectral_finite_stream_internal.hpp`; do not reintroduce 64,
+129, 258 or 320 literals in the asset-morph path. The closed form
+`ceil((L + N - H) / H)` matches the analysis grid only when the hop divides the
+FFT size (N=256, H=100, L=1 gives 2 against the grid's 3), even though the codec
+and `SpectralIdentity` accept such hops, so the rule refuses them. Test any EOF
+change against `spectral_frame_engine_first_frame_start` walking the grid, not
+against the formula itself. The rule's `static_assert` turns a broken rounding
+into a compile error, which `confirm_failure.sh` reports as INCONCLUSIVE; break
+a different term to exercise the runtime test.
+
 ## Bounded typed trigger runtime
 
 Use `prepare_trigger_plan()` and `try_install_prepared_trigger_plan()` for the

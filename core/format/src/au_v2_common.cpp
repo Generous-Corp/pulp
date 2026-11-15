@@ -163,6 +163,11 @@ OSStatus fill_parameter_info(const state::StateStore& store,
     if (state::is_hidden_param(*param))
         out_info.flags |= kAudioUnitParameterFlag_ExpertMode;
 
+    // IsGlobalMeta tells the host that a change here may move other
+    // parameters, so it re-reads them after the write.
+    if (state::is_meta_param(*param))
+        out_info.flags |= kAudioUnitParameterFlag_IsGlobalMeta;
+
     if (!state::is_automatable_param(*param))
         out_info.flags |= kAudioUnitParameterFlag_NonRealTime;
 

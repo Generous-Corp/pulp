@@ -962,6 +962,8 @@ struct ScopedAuV3HostWriting {
             auFlags |= kAudioUnitParameterFlag_IsWritable;
         if (pulp::state::is_hidden_param(p))
             auFlags |= kAudioUnitParameterFlag_ExpertMode;
+        if (pulp::state::is_meta_param(p))
+            auFlags |= kAudioUnitParameterFlag_IsGlobalMeta;
         if (!pulp::state::is_automatable_param(p))
             auFlags |= kAudioUnitParameterFlag_NonRealTime;
 
