@@ -126,3 +126,402 @@ TEST_CASE("CoreMIDI output stops reporting open when its destination is replaced
     output->close();
     MIDIClientDispose(client);
 }
+
+// ---------------------------------------------------------------------------
+// close() is a barrier: once it returns, no input callback is running and none
+// will run again. An owner destroys whatever the callback captured right after
+// close(), so a callback still in flight is a use-after-free.
+// ---------------------------------------------------------------------------
+
+#include <unistd.h>
+
+#include <condition_variable>
+#include <functional>
+#include <future>
+#include <memory>
+#include <mutex>
+
+namespace {
+
+constexpr SInt32 kDrainId = 0x50554C51;
+
+struct DrainSource {
+    MIDIClientRef client = 0;
+    MIDIEndpointRef source = 0;
+    // The virtual source is visible system-wide while it exists, so it carries
+    // an obvious test name and the pid, and is disposed when the test ends.
+    bool create() {
+        const std::string name = "pulp-test-coremidi-" + std::to_string(getpid());
+        CFStringRef cf_name =
+            CFStringCreateWithCString(kCFAllocatorDefault, name.c_str(), kCFStringEncodingUTF8);
+        const OSStatus client_status = MIDIClientCreate(cf_name, nullptr, nullptr, &client);
+        if (client_status != noErr) {
+            CFRelease(cf_name);
+            return false;
+        }
+        const OSStatus source_status = MIDISourceCreate(client, cf_name, &source);
+        CFRelease(cf_name);
+        if (source_status != noErr)
+            return false;
+        MIDIObjectSetIntegerProperty(source, kMIDIPropertyUniqueID, kDrainId);
+        return true;
+    }
+    ~DrainSource() {
+        if (source)
+            MIDIEndpointDispose(source);
+        if (client)
+            MIDIClientDispose(client);
+    }
+};
+
+// Runs `fn` on a detached thread and reports whether it finished within the
+// deadline. A close() that never returns therefore reads as a failure after
+// seconds instead of hanging the process, and nothing here joins the thread.
+bool finishes_within(std::chrono::milliseconds deadline, std::function<void()> fn) {
+    auto done = std::make_shared<std::promise<void>>();
+    auto finished = done->get_future();
+    std::thread([done, fn = std::move(fn)] {
+        fn();
+        done->set_value();
+    }).detach();
+    return finished.wait_for(deadline) == std::future_status::ready;
+}
+
+// A one-shot gate a callback blocks on until the test lets it go. The hold is
+// bounded, so a test that never releases it cannot wedge the CoreMIDI thread;
+// the waits that follow then fail their own named checks.
+struct Gate {
+    std::mutex m;
+    std::condition_variable cv;
+    bool open = false;
+    bool hold() {
+        std::unique_lock lock(m);
+        return cv.wait_for(lock, std::chrono::seconds(10), [&] { return open; });
+    }
+    void release() {
+        {
+            std::lock_guard lock(m);
+            open = true;
+        }
+        cv.notify_all();
+    }
+};
+
+} // namespace
+
+TEST_CASE("CoreMIDI input close() waits for a callback that is in flight",
+          "[midi][coremidi][close]") {
+    DrainSource vs;
+    if (!vs.create())
+        SKIP("CoreMIDI server not reachable; skipping");
+    auto system = pulp::midi::create_midi_system();
+    REQUIRE(system != nullptr);
+
+    Gate gate;
+    std::atomic<bool> in_callback{false};
+    std::atomic<bool> callback_returned{false};
+    std::atomic<bool> close_returned{false};
+    // What the callback touches after it is unblocked; freed right after
+    // close(), exactly as an owner would. A callback that outlives close()
+    // reads freed memory (a hard failure under AddressSanitizer).
+    auto payload = std::make_unique<std::atomic<int>>(0);
+    auto* raw = payload.get();
+
+    auto input = system->create_input();
+    REQUIRE(input->open(std::to_string(kDrainId), [&, raw](const pulp::midi::MidiEvent&) {
+        in_callback = true;
+        gate.hold();
+        raw->fetch_add(1);
+        callback_returned = true;
+    }));
+    send_note(vs.source);
+    for (int i = 0; i < 300 && !in_callback; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    REQUIRE(in_callback);
+
+    std::thread closer([&] {
+        input->close();
+        close_returned = true;
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    // The callback is still blocked, so close() must still be waiting.
+    CHECK_FALSE(close_returned.load());
+
+    gate.release();
+    for (int i = 0; i < 500 && !close_returned; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    const bool returned = close_returned.load();
+    if (returned) {
+        closer.join();
+        CHECK(callback_returned.load());
+        payload.reset();
+    } else {
+        // Leave the stuck thread and everything it uses alive; fail the test.
+        closer.detach();
+        (void)input.release();
+        (void)payload.release();
+        FAIL("close() did not return after the callback was released");
+    }
+}
+
+TEST_CASE("CoreMIDI input delivers nothing after close() returns", "[midi][coremidi][close]") {
+    DrainSource vs;
+    if (!vs.create())
+        SKIP("CoreMIDI server not reachable; skipping");
+    auto system = pulp::midi::create_midi_system();
+    REQUIRE(system != nullptr);
+
+    std::atomic<int> received{0};
+    auto input = system->create_input();
+    REQUIRE(
+        input->open(std::to_string(kDrainId), [&](const pulp::midi::MidiEvent&) { ++received; }));
+    for (int i = 0; i < 20; ++i)
+        send_note(vs.source);
+    input->close();
+    const int at_close = received.load();
+    for (int i = 0; i < 20; ++i)
+        send_note(vs.source);
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    CHECK(received.load() == at_close);
+}
+
+TEST_CASE("CoreMIDI input close() from inside its own callback does not deadlock",
+          "[midi][coremidi][close]") {
+    DrainSource vs;
+    if (!vs.create())
+        SKIP("CoreMIDI server not reachable; skipping");
+    auto system = pulp::midi::create_midi_system();
+    REQUIRE(system != nullptr);
+
+    auto input = system->create_input();
+    std::atomic<int> received{0};
+    auto* raw = input.get();
+    REQUIRE(input->open(std::to_string(kDrainId), [&, raw](const pulp::midi::MidiEvent&) {
+        ++received;
+        raw->close();
+    }));
+
+    send_note(vs.source);
+    for (int i = 0; i < 300 && received.load() < 1; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    // An unlimited wait here would be a held test slot; give the nested close a
+    // deadline, then close again from outside.
+    CHECK(received.load() == 1);
+    if (!finishes_within(std::chrono::seconds(5), [&] { input->close(); })) {
+        (void)input.release();
+        FAIL("close() hung after a close from inside the callback");
+    }
+    CHECK_FALSE(input->is_open());
+}
+
+TEST_CASE("CoreMIDI input delivers SysEx to a callback registered after open()",
+          "[midi][coremidi][sysex]") {
+    DrainSource vs;
+    if (!vs.create())
+        SKIP("CoreMIDI server not reachable; skipping");
+    auto system = pulp::midi::create_midi_system();
+    REQUIRE(system != nullptr);
+
+    auto input = system->create_input();
+    REQUIRE(input->open(std::to_string(kDrainId), [](const pulp::midi::MidiEvent&) {}));
+
+    std::atomic<int> sysex_calls{0};
+    // Registered after open(): this used to be dropped silently.
+    input->set_sysex_callback([&](const std::vector<std::uint8_t>&, double) { ++sysex_calls; });
+
+    MIDIEventList list;
+    MIDIEventPacket* packet = MIDIEventListInit(&list, kMIDIProtocol_1_0);
+    // SysEx7 complete, 2 data bytes; SysEx data is 7-bit, so the reassembler
+    // drops a high-bit byte such as 0xAA.
+    const UInt32 words[2] = {0x30022A3B, 0};
+    MIDIEventListAdd(&list, sizeof(list), packet, 0, 2, words);
+    MIDIReceivedEventList(vs.source, &list);
+
+    for (int i = 0; i < 100 && sysex_calls.load() == 0; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    CHECK(sysex_calls.load() == 1);
+    input->close();
+}
+
+TEST_CASE("CoreMIDI input close() from a callback stops the rest of that event list",
+          "[midi][coremidi][close]") {
+    DrainSource vs;
+    if (!vs.create())
+        SKIP("CoreMIDI server not reachable; skipping");
+    auto system = pulp::midi::create_midi_system();
+    REQUIRE(system != nullptr);
+
+    auto input = system->create_input();
+    std::atomic<int> received{0};
+    auto* raw = input.get();
+    REQUIRE(input->open(std::to_string(kDrainId), [&, raw](const pulp::midi::MidiEvent&) {
+        ++received;
+        raw->close();
+    }));
+
+    // Three MIDI 1.0 channel-voice messages in one packet of one event list,
+    // so all three reach the same receive-block invocation.
+    MIDIEventList list;
+    MIDIEventPacket* packet = MIDIEventListInit(&list, kMIDIProtocol_1_0);
+    const UInt32 words[3] = {0x20903C64, 0x20903E64, 0x20904064};
+    MIDIEventListAdd(&list, sizeof(list), packet, 0, 3, words);
+    MIDIReceivedEventList(vs.source, &list);
+
+    for (int i = 0; i < 300 && received.load() < 1; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // The first delivery closed the port; the later events must not run.
+    CHECK(received.load() == 1);
+    input->close();
+}
+
+TEST_CASE("CoreMIDI input close() after a close from inside a callback waits for it",
+          "[midi][coremidi][close]") {
+    DrainSource vs;
+    if (!vs.create())
+        SKIP("CoreMIDI server not reachable; skipping");
+    auto system = pulp::midi::create_midi_system();
+    REQUIRE(system != nullptr);
+
+    Gate gate;
+    std::atomic<bool> nested_close_returned{false};
+    std::atomic<bool> callback_returned{false};
+    std::atomic<bool> close_returned{false};
+
+    auto input = system->create_input();
+    auto* raw = input.get();
+    REQUIRE(input->open(std::to_string(kDrainId), [&, raw](const pulp::midi::MidiEvent&) {
+        raw->close();
+        nested_close_returned = true;
+        gate.hold();
+        callback_returned = true;
+    }));
+    send_note(vs.source);
+    for (int i = 0; i < 300 && !nested_close_returned; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    REQUIRE(nested_close_returned);
+
+    std::thread closer([&] {
+        input->close();
+        close_returned = true;
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    // The callback is still running, so this external close() must wait.
+    CHECK_FALSE(close_returned.load());
+
+    gate.release();
+    for (int i = 0; i < 500 && !close_returned; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    if (close_returned.load()) {
+        closer.join();
+        CHECK(callback_returned.load());
+    } else {
+        closer.detach();
+        (void)input.release();
+        FAIL("close() did not return after the callback was released");
+    }
+}
+
+TEST_CASE("CoreMIDI input: every close() after a close from inside a callback waits for it",
+          "[midi][coremidi][close]") {
+    DrainSource vs;
+    if (!vs.create())
+        SKIP("CoreMIDI server not reachable; skipping");
+    auto system = pulp::midi::create_midi_system();
+    REQUIRE(system != nullptr);
+
+    Gate gate;
+    std::atomic<bool> nested_close_returned{false};
+    std::atomic<bool> callback_returned{false};
+    std::atomic<int> closes_returned{0};
+
+    auto input = system->create_input();
+    auto* raw = input.get();
+    REQUIRE(input->open(std::to_string(kDrainId), [&, raw](const pulp::midi::MidiEvent&) {
+        raw->close();
+        nested_close_returned = true;
+        gate.hold();
+        callback_returned = true;
+    }));
+    send_note(vs.source);
+    for (int i = 0; i < 300 && !nested_close_returned; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    REQUIRE(nested_close_returned);
+
+    // Two external closes: the draining state must stay discoverable to both,
+    // not be handed to whichever arrives first.
+    std::thread first([&] {
+        input->close();
+        ++closes_returned;
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::thread second([&] {
+        input->close();
+        ++closes_returned;
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    CHECK(closes_returned.load() == 0);
+
+    gate.release();
+    for (int i = 0; i < 500 && closes_returned.load() < 2; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    if (closes_returned.load() == 2) {
+        first.join();
+        second.join();
+        CHECK(callback_returned.load());
+    } else {
+        first.detach();
+        second.detach();
+        (void)input.release();
+        FAIL("close() did not return after the callback was released");
+    }
+}
+
+TEST_CASE("CoreMIDI input: a callback's close() overlapping an external close() is safe",
+          "[midi][coremidi][close]") {
+    DrainSource vs;
+    if (!vs.create())
+        SKIP("CoreMIDI server not reachable; skipping");
+    auto system = pulp::midi::create_midi_system();
+    REQUIRE(system != nullptr);
+
+    Gate gate;
+    std::atomic<bool> in_callback{false};
+    std::atomic<bool> callback_returned{false};
+    std::atomic<bool> close_returned{false};
+
+    auto input = system->create_input();
+    auto* raw = input.get();
+    REQUIRE(input->open(std::to_string(kDrainId), [&, raw](const pulp::midi::MidiEvent&) {
+        in_callback = true;
+        gate.hold();
+        // Runs while the external close() below is waiting for this callback:
+        // the two handoffs must be serialized (TSan reports the race otherwise)
+        // and neither may deadlock.
+        raw->close();
+        callback_returned = true;
+    }));
+    send_note(vs.source);
+    for (int i = 0; i < 300 && !in_callback; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    REQUIRE(in_callback);
+
+    std::thread closer([&] {
+        input->close();
+        close_returned = true;
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    CHECK_FALSE(close_returned.load());
+    gate.release();
+    for (int i = 0; i < 500 && !close_returned; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    if (close_returned.load()) {
+        closer.join();
+        CHECK(callback_returned.load());
+        CHECK_FALSE(input->is_open());
+    } else {
+        closer.detach();
+        (void)input.release();
+        FAIL("close() did not return after the callback was released");
+    }
+}
