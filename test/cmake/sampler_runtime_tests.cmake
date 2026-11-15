@@ -592,6 +592,12 @@ pulp_add_test_suite(pulp-test-graph-identity
     SOURCES test_graph_identity.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
 
+# Value-owned graph edit history (undo/redo over saved-identity documents)
+# and the logical-identity document diff behind `pulp graph diff`.
+pulp_add_test_suite(pulp-test-graph-history
+    SOURCES test_graph_history.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
+
 # G-4 authored voice-bank identity: canonical NFC wire encoding, SHA-256
 # digest, fixed eight-slot bound, and fail-closed malformed target controls.
 pulp_add_test_suite(pulp-test-voice-identity

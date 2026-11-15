@@ -8,6 +8,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <choc/text/choc_JSON.h>
 #include <pulp/host/graph_patch.hpp>
+#include <pulp/host/graph_serializer.hpp>
+#include <pulp/host/signal_graph_runtime.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -152,4 +154,70 @@ TEST_CASE("every CLI graph code the source emits is documented", "[cli][graph][d
         INFO(code);
         CHECK(doc.find("`" + code + "`") != std::string::npos);
     }
+}
+
+TEST_CASE("graph diff compares saved documents by logical identity",
+          "[cli][shellout][graph][parity]") {
+    if (!fs::exists(pulp_binary()))
+        SKIP("pulp not built");
+    const auto dir = unique_temp_dir("pulp-graph-diff");
+    fs::create_directories(dir);
+
+    pulp::host::SignalGraph graph;
+    const auto input = graph.add_input_node(1, "Input");
+    const auto gain = graph.add_gain_node("Gain");
+    const auto output = graph.add_output_node(1, "Output");
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+    const auto before = dir / "before.pulpgraph";
+    std::ofstream(before, std::ios::binary)
+        << pulp::host::GraphSerializer::to_saved_document(graph);
+    const auto legacy = dir / "legacy.pulpgraph";
+    std::ofstream(legacy, std::ios::binary)
+        << R"({"format_version":5,"nodes":[],"connections":[]})";
+
+    REQUIRE(graph.set_node_gain(gain, 0.5f));
+    const auto trim = graph.add_gain_node("Trim");
+    REQUIRE(graph.connect(gain, 0, trim, 0));
+    const auto after = dir / "after.pulpgraph";
+    std::ofstream(after, std::ios::binary) << pulp::host::GraphSerializer::to_saved_document(graph);
+
+    const auto changed = run_pulp({"graph", "diff", before.string(), after.string(), "--json"});
+    INFO(changed.stdout_output << changed.stderr_output);
+    REQUIRE(changed.exit_code == 0);
+    const auto report = choc::json::parse(changed.stdout_output);
+    CHECK(std::string(report["code"].getString()) == "Ok");
+    CHECK_FALSE(report["equal"].getBool());
+    REQUIRE(report["nodes"]["added"].size() == 1);
+    CHECK(std::string(report["nodes"]["added"][0].getString()) == "node:gain:Trim:0");
+    REQUIRE(report["nodes"]["changed"].size() == 1);
+    CHECK(std::string(report["nodes"]["changed"][0]["fields"][0].getString()) == "gain");
+    REQUIRE(report["connections"]["added"].size() == 1);
+
+    const auto same = run_pulp({"graph", "diff", before.string(), before.string(), "--json"});
+    REQUIRE(same.exit_code == 0);
+    CHECK(choc::json::parse(same.stdout_output)["equal"].getBool());
+
+    const auto text = run_pulp({"graph", "diff", before.string(), after.string()});
+    REQUIRE(text.exit_code == 0);
+    CHECK(text.stdout_output.find("+ node node:gain:Trim:0") != std::string::npos);
+
+    // A document without the identity envelope has no authored identity to
+    // compare by.
+    const auto refused = run_pulp({"graph", "diff", legacy.string(), after.string(), "--json"});
+    REQUIRE(refused.exit_code == 1);
+    const auto refusal = choc::json::parse(refused.stdout_output);
+    CHECK(std::string(refusal["code"].getString()) ==
+          pulp::host::graph_patch_code_name(Code::InvalidDocument));
+    CHECK(std::string(refusal["refusal"].getString()) == "logical_identity_missing");
+    CHECK(std::string(refusal["side"].getString()) == "before");
+
+    const auto missing =
+        run_pulp({"graph", "diff", before.string(), (dir / "absent.pulpgraph").string(), "--json"});
+    REQUIRE(missing.exit_code == 1);
+    CHECK(cli_code(missing) == pulp::host::graph_patch_code_name(Code::FileUnreadable));
+
+    const auto one = run_pulp({"graph", "diff", before.string(), "--json"});
+    REQUIRE(one.exit_code == 2);
+    CHECK(cli_code(one) == "missing_input");
 }
