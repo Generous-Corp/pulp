@@ -9,6 +9,15 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11370"></a>
+## [1.137.0] - 2026-11-15
+
+- release/version bump ([#12325](https://github.com/Generous-Corp/pulp/pull/12325))
+- graph/g12 rt sched 20261115 ([#12321](https://github.com/Generous-Corp/pulp/pull/12321))
+- graph/g10 codec eof 20261115 ([#12319](https://github.com/Generous-Corp/pulp/pull/12319))
+- feature/param affects others ([#12318](https://github.com/Generous-Corp/pulp/pull/12318))
+- fix/mac display link stop drain ([#12312](https://github.com/Generous-Corp/pulp/pull/12312))
+
 <a id="v11360"></a>
 ## [1.136.0] - 2026-11-15
 
@@ -13054,6 +13063,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.137.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.137.0
 [1.136.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.136.0
 [1.135.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.135.0
 [1.134.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.134.0

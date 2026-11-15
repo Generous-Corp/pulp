@@ -33,8 +33,11 @@ struct ProcessOptions {
     /// POSIX directory descriptor consumed atomically by spawn instead of
     /// resolving working_directory. The caller retains ownership through start().
     int working_directory_descriptor = -1;
-    /// macOS-only validation hook. When set, the process is born suspended;
-    /// returning true resumes that exact process, while false terminates it.
+    /// Validation hook for suspended launches on macOS and Windows retained
+    /// launches. When set, the process is born suspended; returning true
+    /// resumes that exact process, while false terminates it. Windows invokes
+    /// this hook only for start_retained; ordinary launches do not support
+    /// suspended validation.
     std::function<bool(int process_id)> suspended_process_validator;
     int timeout_ms = 0;                    ///< 0 = no timeout
     size_t max_output_bytes = 1 << 20;     ///< 1 MB default cap
@@ -107,6 +110,8 @@ using StandardInputChannelSession =
                        std::chrono::steady_clock::time_point deadline)>;
 
 /// Observation of a child whose exit has not released its process-group identity.
+/// Windows has no process group: process_group_id is -1 and the job object owns
+/// the descendants, while an open process handle retains the child's identity.
 enum class RetainedProcessState { Unsupported, NotStarted, Running, Exited, Reaped, CustodyLost };
 
 struct RetainedProcessObservation {
@@ -215,8 +220,11 @@ public:
                                            const StandardInputChannelSession& session,
                                            const ProcessOptions& options = {});
 
-    /// macOS desktop only. Reserve custody before spawning; all unsupported
-    /// platforms refuse without launching. The reservation outlives this handle
+    /// macOS desktop and Windows. Reserve custody before spawning; all
+    /// unsupported platforms refuse without launching. On Windows the child is
+    /// born suspended into a private kill-on-close job object that permits no
+    /// breakaway, so cleanup reaches every descendant; the private input channel
+    /// variant is unavailable there and refuses before spawning. The reservation outlives this handle
     /// until cleanup completes, including a failed post-spawn handshake.
     /// A retained handle and reservation are single-use. No caller may reap the
     /// child independently or install SIGCHLD auto-reaping while it is retained.
