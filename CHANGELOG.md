@@ -9,6 +9,19 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11340"></a>
+## [1.134.0] - 2026-11-15
+
+- release/version bump ([#12279](https://github.com/Generous-Corp/pulp/pull/12279))
+- graph/g11 aux buses 20261114 ([#12262](https://github.com/Generous-Corp/pulp/pull/12262))
+
+<a id="v11330"></a>
+## [1.133.0] - 2026-11-15
+
+- release/version bump ([#12273](https://github.com/Generous-Corp/pulp/pull/12273))
+- feature/rmlui native metal adapter ([#12270](https://github.com/Generous-Corp/pulp/pull/12270))
+- feature/platform dialog sync completion ([#12264](https://github.com/Generous-Corp/pulp/pull/12264))
+
 <a id="v11320"></a>
 ## [1.132.0] - 2026-11-14
 
@@ -13023,6 +13036,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.134.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.134.0
+[1.133.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.133.0
 [1.132.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.132.0
 [1.131.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.131.0
 [1.130.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.130.0

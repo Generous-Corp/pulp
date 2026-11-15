@@ -16,6 +16,7 @@
    "test/fixtures",
    "test/support",
    "tools/ci/ctest_gate_args.py",
+   "tools/ci/drift_fast.py",
    "tools/ci/governed-build.sh",
    "tools/ci/install_visual_python_deps.sh",
    "tools/ci/load_api_exemptions.json",

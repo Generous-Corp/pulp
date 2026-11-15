@@ -4,7 +4,7 @@
 # Resolve a merge conflict in this file by regenerating, never by hand.
 
 [[families]]
-name = "script-readers-d67c0cb98f3e"
+name = "script-readers-968a36804bf1"
 paths = [
   "tools/scripts/action_pin_lint.py",
   "tools/scripts/audio_inspect_crosscheck.py",
@@ -16,11 +16,9 @@ paths = [
   "tools/scripts/check_headers_selfcontained.py",
   "tools/scripts/check_host_matrix_evidence.py",
   "tools/scripts/check_sdk_complete.py",
-  "tools/scripts/ci_diff_base.py",
   "tools/scripts/clean_worktree_planning.py",
   "tools/scripts/coverage_diff_comment.py",
   "tools/scripts/ctest_nonruns.py",
-  "tools/scripts/docs_sync_check.py",
   "tools/scripts/frontend_ir_codegen_artifact_gate.py",
   "tools/scripts/frontend_ir_codegen_artifacts.py",
   "tools/scripts/frontend_ir_common.py",
@@ -101,7 +99,6 @@ paths = [
   "tools/scripts/test_check_sdk_complete.py",
   "tools/scripts/test_check_web_plugin_docs.py",
   "tools/scripts/test_checkout_preflight.py",
-  "tools/scripts/test_ci_diff_base.py",
   "tools/scripts/test_clean_worktree_planning.py",
   "tools/scripts/test_cli_sync_check.py",
   "tools/scripts/test_cli_sync_check_extra.py",
@@ -188,6 +185,7 @@ paths = [
   "tools/scripts/test_preamble_python_stable_cwd.py",
   "tools/scripts/test_prepare_logic_hostbench_au.py",
   "tools/scripts/test_prepare_node_runtime.py",
+  "tools/scripts/test_prepush_receipt.py",
   "tools/scripts/test_process_liveness.py",
   "tools/scripts/test_promote_quirk_tiers.py",
   "tools/scripts/test_pulp_lldb.py",
@@ -306,6 +304,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -320,7 +319,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-88ded67dfed6"
+name = "script-readers-15427144c920"
 paths = ["tools/scripts/check_bundled_font_lists.py"]
 tests = [
   "build-parallelism-guard",
@@ -343,6 +342,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -357,7 +357,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-327ae6b35062"
+name = "script-readers-7d09c14dac49"
 paths = ["tools/scripts/check_host_adapter_tracing_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -380,6 +380,7 @@ tests = [
   "host-adapter-tracing-contract",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -394,7 +395,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c552a3715a3e"
+name = "script-readers-49cfcfcfbb42"
 paths = ["tools/scripts/check_inspector_protocol_registry.py"]
 tests = [
   "build-parallelism-guard",
@@ -418,6 +419,7 @@ tests = [
   "inspector-protocol-registry-complete",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -432,7 +434,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-34a077fc0741"
+name = "script-readers-5f981c88cbec"
 paths = ["tools/scripts/check_visual_python_deps.py"]
 tests = [
   "build-parallelism-guard",
@@ -454,6 +456,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -470,7 +473,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-878af4a8df89"
+name = "script-readers-a679eea0a186"
 paths = ["tools/scripts/ci_routing_digest.py"]
 tests = [
   "build-parallelism-guard",
@@ -494,6 +497,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -508,7 +512,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1d68f5712026"
+name = "script-readers-0fc7a4f4f2a4"
 paths = ["tools/scripts/convolver_crossover_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -531,6 +535,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -545,7 +550,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3c5b75e3c9b1"
+name = "script-readers-b1ed310df368"
 paths = ["tools/scripts/ctest_inventory_parity.py"]
 tests = [
   "build-parallelism-guard",
@@ -568,6 +573,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -582,7 +588,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8920c5cedd44"
+name = "script-readers-e814e2192a36"
 paths = ["tools/scripts/ctest_unique_names_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -606,6 +612,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -620,7 +627,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-23992698ae35"
+name = "script-readers-bbcebcd1bdf5"
 paths = [
   "tools/scripts/cutover_trial.py",
   "tools/scripts/test_cutover_trial.py",
@@ -646,6 +653,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -661,7 +669,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-95a576b9d9a2"
+name = "script-readers-65600d651f2f"
 paths = ["tools/scripts/design_unit_boundary_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -685,6 +693,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -699,7 +708,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d36891b44d10"
+name = "script-readers-19a6fed087ad"
 paths = ["tools/scripts/dsp_provenance_audit.py"]
 tests = [
   "build-parallelism-guard",
@@ -722,6 +731,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -736,7 +746,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9d4ad9786a9a"
+name = "script-readers-b4e4cc6123f2"
 paths = ["tools/scripts/format_header_view_boundary.py"]
 tests = [
   "build-parallelism-guard",
@@ -759,6 +769,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -773,7 +784,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-66a48b38192f"
+name = "script-readers-d22d8d1b5ced"
 paths = ["tools/scripts/gate_python_imports_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -798,6 +809,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -814,7 +826,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7f21685ee869"
+name = "script-readers-38f8b6e10259"
 paths = ["tools/scripts/gpu_audio_header_vocabulary_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -837,6 +849,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -851,7 +864,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fd9cf44f0bd7"
+name = "script-readers-84755bdaa109"
 paths = ["tools/scripts/gpu_fault_hooks_release_gate.py"]
 tests = [
   "build-parallelism-guard",
@@ -874,6 +887,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -888,7 +902,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-eb7d2b3fa63a"
+name = "script-readers-7a0db14e2e4f"
 paths = ["tools/scripts/integrations_boundary_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -911,6 +925,7 @@ tests = [
   "integrations-boundary-check",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -925,7 +940,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4d35e34bc973"
+name = "script-readers-b62aa54dfdc5"
 paths = ["tools/scripts/link_floor_selftest.py"]
 tests = [
   "build-parallelism-guard",
@@ -948,6 +963,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -962,7 +978,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d8cdd90090aa"
+name = "script-readers-c2b9d451d67f"
 paths = ["tools/scripts/mac_objc_source_list_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -986,6 +1002,7 @@ tests = [
   "mac-objc-source-list-guard-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -1000,7 +1017,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d5f60c9e1570"
+name = "script-readers-ac44da55c46c"
 paths = ["tools/scripts/msvc_string_literal_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1023,6 +1040,7 @@ tests = [
   "msvc-string-literal-guard",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -1037,7 +1055,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f4755d681709"
+name = "script-readers-5a1025911d66"
 paths = ["tools/scripts/nonuniform_head_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1060,6 +1078,7 @@ tests = [
   "nonuniform-head-table",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -1074,7 +1093,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1ac666e43704"
+name = "script-readers-773f32602182"
 paths = ["tools/scripts/pch_wiring_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1097,6 +1116,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -1113,7 +1133,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4ea7eedc34f5"
+name = "script-readers-2f5a12911bef"
 paths = ["tools/scripts/plugin_footprint_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1137,6 +1157,7 @@ tests = [
   "plugin-footprint-check-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -1154,7 +1175,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c8136a230362"
+name = "script-readers-a0e8c1f1717a"
 paths = ["tools/scripts/pr_fast_tier_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1177,6 +1198,7 @@ tests = [
   "pr-fast-tier-contract",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -1191,7 +1213,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8193718f629a"
+name = "script-readers-6d1928f1604a"
 paths = [
   "tools/scripts/queue_admission_guard.py",
   "tools/scripts/test_queue_batch_attribute.py",
@@ -1216,6 +1238,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "queue-batch-attribute-selftest",
   "reuse-policy-replay-selftest",
@@ -1231,7 +1254,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d9132ead581c"
+name = "script-readers-e02dfff9423d"
 paths = ["tools/scripts/raw_this_async_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1253,6 +1276,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "raw-this-async-check",
   "raw-this-async-selftest",
@@ -1269,7 +1293,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-72d5b787eee9"
+name = "script-readers-2afe6cdbee82"
 paths = ["tools/scripts/relay_contract_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1291,6 +1315,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "relay-contract-hosts",
   "relay-contract-hosts-selftest",
@@ -1307,7 +1332,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-189bba102df5"
+name = "script-readers-bce53ecd40c5"
 paths = ["tools/scripts/render_upward_edge_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1329,6 +1354,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "render-upward-edge-check",
   "render-upward-edge-check-rules",
@@ -1345,7 +1371,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2bdd8d14e6de"
+name = "script-readers-1b5026202e6c"
 paths = ["tools/scripts/rust_cli_build_edge_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1367,6 +1393,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "rust-cli-build-edge",
@@ -1383,7 +1410,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5be7f5ea9342"
+name = "script-readers-6a44e6c15f70"
 paths = ["tools/scripts/sample_region_compat_baseline.py"]
 tests = [
   "build-parallelism-guard",
@@ -1405,6 +1432,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline",
@@ -1420,7 +1448,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ed9248d6111d"
+name = "script-readers-e504f66b467d"
 paths = ["tools/scripts/sequencer_control_skill_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1442,6 +1470,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -1458,7 +1487,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bdb1f4051511"
+name = "script-readers-655e5bb3d6de"
 paths = ["tools/scripts/setup_bootstrap_plan_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1480,6 +1509,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -1495,7 +1525,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2e340007b948"
+name = "script-readers-d2825e3fda51"
 paths = ["tools/scripts/shared_test_objects_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -1517,6 +1547,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -1533,7 +1564,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-85416a855be8"
+name = "script-readers-9aef10bbcc00"
 paths = ["tools/scripts/shipping_macro_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1555,6 +1586,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -1570,7 +1602,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-716cca342be6"
+name = "script-readers-0e8b8152f4aa"
 paths = ["tools/scripts/status_tone_signal_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -1592,6 +1624,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -1607,7 +1640,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ffab4f06f8fa"
+name = "script-readers-8d6d9b9f473a"
 paths = ["tools/scripts/test_advisory_macos_runner_policy.py"]
 tests = [
   "advisory-macos-runner-policy",
@@ -1630,6 +1663,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -1644,7 +1678,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d5037f5e217b"
+name = "script-readers-d09bf05a868a"
 paths = ["tools/scripts/test_affected_targets.py"]
 tests = [
   "affected-targets-selftest",
@@ -1667,6 +1701,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -1681,7 +1716,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-eaf2e712f37d"
+name = "script-readers-637135fbbe8d"
 paths = ["tools/scripts/test_agent_capability_store.py"]
 tests = [
   "agent-capability-store-selftest",
@@ -1704,6 +1739,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -1718,7 +1754,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-34e82364ed78"
+name = "script-readers-b93be4c116f7"
 paths = ["tools/scripts/test_agent_hook_paths.py"]
 tests = [
   "agent-hook-paths",
@@ -1741,6 +1777,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -1755,7 +1792,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-981790040fd9"
+name = "script-readers-f6e0ac0ecf9d"
 paths = ["tools/scripts/test_android_surface_runtime_contract.py"]
 tests = [
   "android-surface-runtime-contract",
@@ -1778,6 +1815,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -1792,7 +1830,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4a1d9eeb2842"
+name = "script-readers-9de7ddf1c146"
 paths = ["tools/scripts/test_archive_symbol_closure_check.py"]
 tests = [
   "archive-symbol-closure-selftest",
@@ -1815,6 +1853,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -1829,7 +1868,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4cb34d79ae4f"
+name = "script-readers-c421f64c52c6"
 paths = ["tools/scripts/test_build_combined_installer.py"]
 tests = [
   "build-parallelism-guard",
@@ -1852,6 +1891,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -1866,7 +1906,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4f581282c8dc"
+name = "script-readers-3dc817aa0f50"
 paths = ["tools/scripts/test_build_parallelism_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1889,6 +1929,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -1903,7 +1944,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8db316cff321"
+name = "script-readers-e18d76f2e048"
 paths = ["tools/scripts/test_build_speed_proxies.py"]
 tests = [
   "build-parallelism-guard",
@@ -1926,6 +1967,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -1940,7 +1982,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fd07cf8d89a5"
+name = "script-readers-b59b4379d5f6"
 paths = ["tools/scripts/test_build_speed_scorecard.py"]
 tests = [
   "build-parallelism-guard",
@@ -1963,6 +2005,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -1977,7 +2020,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f621355ca380"
+name = "script-readers-41af4f7d5c51"
 paths = ["tools/scripts/test_build_time_report.py"]
 tests = [
   "build-parallelism-guard",
@@ -2000,6 +2043,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -2014,7 +2058,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-98ddbd6929a2"
+name = "script-readers-fc12010ce77d"
 paths = ["tools/scripts/test_bump_fastpath.py"]
 tests = [
   "build-parallelism-guard",
@@ -2037,6 +2081,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -2051,7 +2096,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b0b27d8e26b5"
+name = "script-readers-db4940dd6d3d"
 paths = ["tools/scripts/test_capability_contract_gate.py"]
 tests = [
   "build-parallelism-guard",
@@ -2074,6 +2119,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -2088,7 +2134,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-801747b89c17"
+name = "script-readers-3632bd42ab7b"
 paths = ["tools/scripts/test_catch_discover_timeout_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -2111,6 +2157,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -2125,7 +2172,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-803905c65ab0"
+name = "script-readers-088332bad3de"
 paths = ["tools/scripts/test_catch_multilabel_properties.py"]
 tests = [
   "build-parallelism-guard",
@@ -2148,6 +2195,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -2162,7 +2210,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-60b050cfe1ed"
+name = "script-readers-5dd64b465e2c"
 paths = ["tools/scripts/test_catch_test_name_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -2185,6 +2233,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -2199,7 +2248,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-50d2d604740d"
+name = "script-readers-ea5bb8b33cc3"
 paths = ["tools/scripts/test_changed_surface_registration_projection.py"]
 tests = [
   "build-parallelism-guard",
@@ -2222,6 +2271,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -2236,7 +2286,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-990586d53cbd"
+name = "script-readers-c03e1abba262"
 paths = ["tools/scripts/test_check_android_jni_exports.py"]
 tests = [
   "android-jni-exports-selftest",
@@ -2259,6 +2309,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -2273,7 +2324,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8e004bab09e1"
+name = "script-readers-7b61792e8269"
 paths = ["tools/scripts/test_check_apple_bundle_signing.py"]
 tests = [
   "apple-bundle-signing-check",
@@ -2296,6 +2347,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -2310,7 +2362,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fb01321aabcd"
+name = "script-readers-17fc6f480b26"
 paths = ["tools/scripts/test_check_au_component_preflight.py"]
 tests = [
   "au-component-preflight-selftest",
@@ -2333,6 +2385,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -2347,7 +2400,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-90a8a1bb5734"
+name = "script-readers-1c2ad29b5182"
 paths = ["tools/scripts/test_check_bundle_architectures.py"]
 tests = [
   "build-parallelism-guard",
@@ -2370,6 +2423,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -2384,7 +2438,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-11b0d480bfcf"
+name = "script-readers-52188879962f"
 paths = ["tools/scripts/test_check_canvas_path_flush.py"]
 tests = [
   "build-parallelism-guard",
@@ -2407,6 +2461,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -2421,7 +2476,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3954557330b3"
+name = "script-readers-a45287014ab2"
 paths = ["tools/scripts/test_check_host_adapter_tracing_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -2444,6 +2499,7 @@ tests = [
   "host-adapter-tracing-contract-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -2458,7 +2514,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4a0c65c0bd91"
+name = "script-readers-438c1cef12c8"
 paths = ["tools/scripts/test_check_installed_rpaths.py"]
 tests = [
   "build-parallelism-guard",
@@ -2481,6 +2537,7 @@ tests = [
   "install-rpath-closure",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -2495,7 +2552,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-01d2bc6700ad"
+name = "script-readers-86be6f57c47c"
 paths = ["tools/scripts/test_check_skip_not_pass.py"]
 tests = [
   "build-parallelism-guard",
@@ -2517,6 +2574,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -2532,7 +2590,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c67c1cdc42e3"
+name = "script-readers-1b650cf615c2"
 paths = ["tools/scripts/test_check_test_file_paths.py"]
 tests = [
   "build-parallelism-guard",
@@ -2554,6 +2612,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -2569,7 +2628,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-55961e7d6bf9"
+name = "script-readers-a7aa03e9adf3"
 paths = ["tools/scripts/test_check_transient_interaction_trace.py"]
 tests = [
   "build-parallelism-guard",
@@ -2591,6 +2650,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -2606,7 +2666,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c2a2e40d9005"
+name = "script-readers-91e87cc6b3fa"
 paths = ["tools/scripts/test_check_visual_python_deps.py"]
 tests = [
   "build-parallelism-guard",
@@ -2628,6 +2688,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -2643,7 +2704,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2da388f6fd24"
+name = "script-readers-863ddc1b2a56"
 paths = ["tools/scripts/test_check_yoga_oracle_pin.py"]
 tests = [
   "build-parallelism-guard",
@@ -2665,6 +2726,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -2680,7 +2742,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a5f61adae91f"
+name = "script-readers-0df88826429c"
 paths = ["tools/scripts/test_ci_routing_digest.py"]
 tests = [
   "build-parallelism-guard",
@@ -2703,6 +2765,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -2717,7 +2780,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6a3e903dbd7f"
+name = "script-readers-396eb9bc3d38"
 paths = ["tools/scripts/test_clap_preset_library_gate.py"]
 tests = [
   "build-parallelism-guard",
@@ -2740,6 +2803,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -2754,7 +2818,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3806a767e8aa"
+name = "script-readers-8425dbdfb9b8"
 paths = ["tools/scripts/test_clean_build_cov.py"]
 tests = [
   "build-parallelism-guard",
@@ -2777,6 +2841,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -2791,7 +2856,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-142a79aaa20d"
+name = "script-readers-e89c4a9ed654"
 paths = ["tools/scripts/test_clean_worktree_builds.py"]
 tests = [
   "build-parallelism-guard",
@@ -2814,6 +2879,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -2828,7 +2894,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c8de4a58c9c6"
+name = "script-readers-2a09249a93fa"
 paths = ["tools/scripts/test_clean_worktrees.py"]
 tests = [
   "build-parallelism-guard",
@@ -2851,6 +2917,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -2865,7 +2932,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6b15f9c3eeb1"
+name = "script-readers-beecfab943bd"
 paths = ["tools/scripts/test_clock_only_temp_key_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -2888,6 +2955,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -2902,7 +2970,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3ed77820625d"
+name = "script-readers-5ec3ac3edda6"
 paths = ["tools/scripts/test_cmake_manifest_parse.py"]
 tests = [
   "build-parallelism-guard",
@@ -2925,6 +2993,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -2939,7 +3008,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b558d714d572"
+name = "script-readers-c30d543b0012"
 paths = ["tools/scripts/test_connected_git_history.py"]
 tests = [
   "build-parallelism-guard",
@@ -2962,6 +3031,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -2976,7 +3046,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-25ff77674f92"
+name = "script-readers-3e6fcd075452"
 paths = ["tools/scripts/test_consumption_census.py"]
 tests = [
   "build-parallelism-guard",
@@ -2999,6 +3069,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -3013,7 +3084,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e1b5f2b028d0"
+name = "script-readers-6bb5cc2df38d"
 paths = ["tools/scripts/test_control_profile_downgrade_is_announced.py"]
 tests = [
   "build-parallelism-guard",
@@ -3036,6 +3107,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -3050,7 +3122,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7d1cc1c69b3f"
+name = "script-readers-2c6d18e6a333"
 paths = ["tools/scripts/test_core_vellum_direction.py"]
 tests = [
   "build-parallelism-guard",
@@ -3073,6 +3145,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -3087,7 +3160,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-97b12c5f4883"
+name = "script-readers-471ad295cfe3"
 paths = ["tools/scripts/test_ctest_coremidi_lock.py"]
 tests = [
   "build-parallelism-guard",
@@ -3110,6 +3183,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -3124,7 +3198,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9f03d2863eaf"
+name = "script-readers-229d5f40879c"
 paths = ["tools/scripts/test_ctest_label_exclusion_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -3147,6 +3221,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -3161,7 +3236,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6d0d79b14f79"
+name = "script-readers-fb5255b5acc0"
 paths = ["tools/scripts/test_ctest_unique_names_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -3184,6 +3259,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -3198,7 +3274,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5582dcc41dcc"
+name = "script-readers-49e9cc8662d1"
 paths = ["tools/scripts/test_dawn_binding_census.py"]
 tests = [
   "build-parallelism-guard",
@@ -3221,6 +3297,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -3235,7 +3312,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9ce97fab0540"
+name = "script-readers-cc9972005357"
 paths = ["tools/scripts/test_dead_test_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -3258,6 +3335,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -3272,7 +3350,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-df5dc6bd8881"
+name = "script-readers-10fd34bf3fae"
 paths = ["tools/scripts/test_design_unit_boundary_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -3295,6 +3373,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -3309,7 +3388,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9d65b10655a8"
+name = "script-readers-f1e6072df94d"
 paths = ["tools/scripts/test_doxygen_installed_header_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -3332,6 +3411,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -3346,7 +3426,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a8a3891d636f"
+name = "script-readers-5e794fa56b8d"
 paths = ["tools/scripts/test_dsp_capability_registry.py"]
 tests = [
   "build-parallelism-guard",
@@ -3370,6 +3450,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -3384,7 +3465,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-84b258dd8bc1"
+name = "script-readers-c563b5ee7a2d"
 paths = ["tools/scripts/test_dsp_provenance_audit.py"]
 tests = [
   "build-parallelism-guard",
@@ -3407,6 +3488,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -3421,7 +3503,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-aad5bffb6dca"
+name = "script-readers-6abd7a43f58e"
 paths = ["tools/scripts/test_editor_host_acceptance.py"]
 tests = [
   "build-parallelism-guard",
@@ -3444,6 +3526,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -3458,7 +3541,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-33e12f5a8c5e"
+name = "script-readers-db550c3549fd"
 paths = ["tools/scripts/test_example_validation_paths.py"]
 tests = [
   "build-parallelism-guard",
@@ -3481,6 +3564,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -3495,7 +3579,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5078d3398a6f"
+name = "script-readers-dc568aa33a27"
 paths = ["tools/scripts/test_examples_index_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -3518,6 +3602,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -3532,7 +3617,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f258be677637"
+name = "script-readers-8ccdd905b771"
 paths = ["tools/scripts/test_findskia_arch_assert.py"]
 tests = [
   "build-parallelism-guard",
@@ -3555,6 +3640,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -3569,7 +3655,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f7ff8e9e9320"
+name = "script-readers-65dcf0a99530"
 paths = ["tools/scripts/test_findskia_windows_arm64_slice.py"]
 tests = [
   "build-parallelism-guard",
@@ -3592,6 +3678,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -3606,7 +3693,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1da7bea367e8"
+name = "script-readers-c2d54426bd0e"
 paths = ["tools/scripts/test_fleet_snapshot.py"]
 tests = [
   "build-parallelism-guard",
@@ -3629,6 +3716,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -3643,7 +3731,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-24657535bf6d"
+name = "script-readers-283100cde120"
 paths = ["tools/scripts/test_fold_migration_notes.py"]
 tests = [
   "build-parallelism-guard",
@@ -3666,6 +3754,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -3680,7 +3769,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bb73f29a580c"
+name = "script-readers-3eb32676f50f"
 paths = ["tools/scripts/test_fork_pr_runner_routing.py"]
 tests = [
   "build-parallelism-guard",
@@ -3703,6 +3792,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -3717,7 +3807,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8529507f973e"
+name = "script-readers-eaedc1c4579c"
 paths = ["tools/scripts/test_format_baseline_diff.py"]
 tests = [
   "build-parallelism-guard",
@@ -3740,6 +3830,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -3754,7 +3845,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-891d3b753b3c"
+name = "script-readers-78884ae16ef1"
 paths = ["tools/scripts/test_foundation_include_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -3777,6 +3868,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -3791,7 +3883,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6147fb6c6962"
+name = "script-readers-a1d16c536534"
 paths = ["tools/scripts/test_gallery_visual_diff.py"]
 tests = [
   "build-parallelism-guard",
@@ -3814,6 +3906,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -3828,7 +3921,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0cd81397bfc8"
+name = "script-readers-5942e92b1e2d"
 paths = ["tools/scripts/test_gate_python_imports_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -3851,6 +3944,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -3865,7 +3959,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5b1e4c602ca2"
+name = "script-readers-6bc170a793d8"
 paths = ["tools/scripts/test_gate_suite_executed.py"]
 tests = [
   "build-parallelism-guard",
@@ -3888,6 +3982,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -3902,7 +3997,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-66fdcaebda83"
+name = "script-readers-270095db6068"
 paths = ["tools/scripts/test_generated_version_bump_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -3925,6 +4020,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -3941,7 +4037,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9825416f9664"
+name = "script-readers-982c727bdece"
 paths = ["tools/scripts/test_git_read_memo.py"]
 tests = [
   "build-parallelism-guard",
@@ -3964,6 +4060,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -3978,7 +4075,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-cb2240c61f00"
+name = "script-readers-3325e3338178"
 paths = ["tools/scripts/test_git_stdin_pipe_deadlock.py"]
 tests = [
   "build-parallelism-guard",
@@ -4001,6 +4098,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -4015,7 +4113,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b98f62ef9b76"
+name = "script-readers-998e83e95a14"
 paths = ["tools/scripts/test_gpu_audio_comparator_v2.py"]
 tests = [
   "build-parallelism-guard",
@@ -4038,6 +4136,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -4052,7 +4151,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a4c8095a3cba"
+name = "script-readers-80f06d2c1906"
 paths = ["tools/scripts/test_gpu_audio_header_vocabulary_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -4075,6 +4174,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -4089,7 +4189,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-499d33c1d6f0"
+name = "script-readers-16574992f6b9"
 paths = ["tools/scripts/test_gpu_audio_p2_campaign.py"]
 tests = [
   "build-parallelism-guard",
@@ -4112,6 +4212,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -4126,7 +4227,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-da2be9de8c19"
+name = "script-readers-ae29b7a8283f"
 paths = ["tools/scripts/test_gpu_audio_p2_host_preflight.py"]
 tests = [
   "build-parallelism-guard",
@@ -4149,6 +4250,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -4163,7 +4265,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4a81838238f7"
+name = "script-readers-62072b5e169b"
 paths = ["tools/scripts/test_gpu_audio_p4_evidence.py"]
 tests = [
   "build-parallelism-guard",
@@ -4186,6 +4288,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -4200,7 +4303,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3d5b15155973"
+name = "script-readers-7ccdae3d923f"
 paths = ["tools/scripts/test_gpu_clean_agent_journey.py"]
 tests = [
   "build-parallelism-guard",
@@ -4223,6 +4326,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -4237,7 +4341,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-89ef436165ca"
+name = "script-readers-9e3ca65a88fa"
 paths = ["tools/scripts/test_gpu_device_link_closure_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -4260,6 +4364,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -4274,7 +4379,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-fe56b9957dc1"
+name = "script-readers-ec525681b6be"
 paths = ["tools/scripts/test_gpu_dpr_experiment.py"]
 tests = [
   "build-parallelism-guard",
@@ -4297,6 +4402,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -4311,7 +4417,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c3822aa8059e"
+name = "script-readers-f8aa35266b11"
 paths = ["tools/scripts/test_gpu_dpr_pulp_native_adapter.py"]
 tests = [
   "build-parallelism-guard",
@@ -4334,6 +4440,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -4348,7 +4455,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7ee145588327"
+name = "script-readers-c3e840bb1559"
 paths = ["tools/scripts/test_gpu_dpr_v2_evidence.py"]
 tests = [
   "build-parallelism-guard",
@@ -4371,6 +4478,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -4385,7 +4493,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-de40b8f537bc"
+name = "script-readers-364fbf2cf767"
 paths = ["tools/scripts/test_gpu_dpr_web_adapter.py"]
 tests = [
   "build-parallelism-guard",
@@ -4408,6 +4516,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -4422,7 +4531,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c454acf20d93"
+name = "script-readers-8136d3b322cb"
 paths = ["tools/scripts/test_gpu_fault_hooks_release_gate.py"]
 tests = [
   "build-parallelism-guard",
@@ -4446,6 +4555,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -4460,7 +4570,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-802942cce33a"
+name = "script-readers-c47b543b0159"
 paths = ["tools/scripts/test_gpu_fault_hooks_release_gate_macos.py"]
 tests = [
   "build-parallelism-guard",
@@ -4483,6 +4593,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -4497,7 +4608,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8c09cf10497c"
+name = "script-readers-ec98d0f2ae0e"
 paths = ["tools/scripts/test_gpu_first_visible_a3_acceptance_v2.py"]
 tests = [
   "build-parallelism-guard",
@@ -4520,6 +4631,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -4534,7 +4646,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e0f7fb36340c"
+name = "script-readers-0d3acc53c8fc"
 paths = ["tools/scripts/test_gpu_handoff_pin_freshness.py"]
 tests = [
   "build-parallelism-guard",
@@ -4557,6 +4669,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -4571,7 +4684,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-774d31b51603"
+name = "script-readers-3f25c7f09b7f"
 paths = ["tools/scripts/test_gpu_health_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -4594,6 +4707,7 @@ tests = [
   "gpu-health-contract-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -4608,7 +4722,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-aff59c1dc229"
+name = "script-readers-01ce241e854d"
 paths = ["tools/scripts/test_gpu_health_read_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -4631,6 +4745,7 @@ tests = [
   "gpu-health-read-contract-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -4645,7 +4760,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-817490103f3e"
+name = "script-readers-0450994fd4b9"
 paths = ["tools/scripts/test_gpu_health_run_attestation.py"]
 tests = [
   "build-parallelism-guard",
@@ -4668,6 +4783,7 @@ tests = [
   "gpu-health-run-attestation",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -4682,7 +4798,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2463f841e45c"
+name = "script-readers-7be977c8e624"
 paths = ["tools/scripts/test_gpu_probe_acceptance.py"]
 tests = [
   "build-parallelism-guard",
@@ -4705,6 +4821,7 @@ tests = [
   "gpu-probe-terminal-recorder-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -4719,7 +4836,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-aa69d314c7fb"
+name = "script-readers-69f8afdd08c6"
 paths = ["tools/scripts/test_gpu_recipe_catalog.py"]
 tests = [
   "build-parallelism-guard",
@@ -4742,6 +4859,7 @@ tests = [
   "gpu-recipe-catalog-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -4756,7 +4874,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-12039e10b4ac"
+name = "script-readers-4ae7c32f2314"
 paths = ["tools/scripts/test_gpu_test_resource_locks.py"]
 tests = [
   "build-parallelism-guard",
@@ -4779,6 +4897,7 @@ tests = [
   "gpu-test-resource-locks",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "realtime-pool-resource-locks",
   "reuse-policy-replay-selftest",
@@ -4794,7 +4913,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2e0037fe5f33"
+name = "script-readers-108293434cb6"
 paths = ["tools/scripts/test_hotspot_edit_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -4817,6 +4936,7 @@ tests = [
   "hotspot-edit-guard-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -4831,7 +4951,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6736f740b7d3"
+name = "script-readers-22283a85a973"
 paths = ["tools/scripts/test_hydrate_gpu_provenance_commits.py"]
 tests = [
   "build-parallelism-guard",
@@ -4854,6 +4974,7 @@ tests = [
   "gpu-provenance-hydration-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -4868,7 +4989,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bba2486079c4"
+name = "script-readers-fcde702f2394"
 paths = ["tools/scripts/test_hydrate_real_git.py"]
 tests = [
   "build-parallelism-guard",
@@ -4891,6 +5012,7 @@ tests = [
   "gpu-provenance-hydration-real-git-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -4905,7 +5027,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-3ed6253022f3"
+name = "script-readers-3fa64b309e86"
 paths = ["tools/scripts/test_include_boundary.py"]
 tests = [
   "build-parallelism-guard",
@@ -4927,6 +5049,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "pulp-view-core-include-boundary-negative-contract",
   "reuse-policy-replay-selftest",
@@ -4942,7 +5065,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-32bde6241417"
+name = "script-readers-fcabf29a1975"
 paths = ["tools/scripts/test_inspector_truth_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -4965,6 +5088,7 @@ tests = [
   "inspector-truth-check-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -4979,7 +5103,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-58f12b2655e4"
+name = "script-readers-94c793f53909"
 paths = ["tools/scripts/test_install_sha256sums.py"]
 tests = [
   "build-parallelism-guard",
@@ -5002,6 +5126,7 @@ tests = [
   "install-sha256sums-current",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -5016,7 +5141,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d8f2395606a7"
+name = "script-readers-efa36b34fc93"
 paths = ["tools/scripts/test_install_shipyard_queue_repair.py"]
 tests = [
   "build-parallelism-guard",
@@ -5039,6 +5164,7 @@ tests = [
   "install-shipyard-queue-repair",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -5053,7 +5179,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-90d4d2e0065d"
+name = "script-readers-6ef32fc3c338"
 paths = ["tools/scripts/test_integrations_boundary_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5076,6 +5202,7 @@ tests = [
   "integrations-boundary-check-negative-contract",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -5090,7 +5217,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-cfc4c0b89345"
+name = "script-readers-59b4c4e6b993"
 paths = ["tools/scripts/test_live_build_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5113,6 +5240,7 @@ tests = [
   "live-build-check-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -5127,7 +5255,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-12ea2a5ce855"
+name = "script-readers-c5c982252859"
 paths = ["tools/scripts/test_mac_objc_source_list_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -5150,6 +5278,7 @@ tests = [
   "mac-objc-source-list-guard-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -5164,7 +5293,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7719767d99f5"
+name = "script-readers-377492bfa1e9"
 paths = ["tools/scripts/test_measure_min_os.py"]
 tests = [
   "build-parallelism-guard",
@@ -5187,6 +5316,7 @@ tests = [
   "measure-min-os-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -5201,7 +5331,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-10173b8d35b5"
+name = "script-readers-0bd266e932dd"
 paths = ["tools/scripts/test_migration_note_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -5224,6 +5354,7 @@ tests = [
   "migration-note-guard-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -5238,7 +5369,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-34faf3374895"
+name = "script-readers-020a15acac28"
 paths = ["tools/scripts/test_minos_registry_absent.py"]
 tests = [
   "build-parallelism-guard",
@@ -5261,6 +5392,7 @@ tests = [
   "minos-registry-absent-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -5275,7 +5407,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9327f600f37a"
+name = "script-readers-279b73a15208"
 paths = ["tools/scripts/test_modules_yaml_dirs_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5298,6 +5430,7 @@ tests = [
   "modules-yaml-dirs-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -5312,7 +5445,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-65cb8d9c9b58"
+name = "script-readers-a2e61a91a654"
 paths = ["tools/scripts/test_nm_symbols.py"]
 tests = [
   "build-parallelism-guard",
@@ -5335,6 +5468,7 @@ tests = [
   "nm-symbols-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -5349,7 +5483,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d856c6646199"
+name = "script-readers-d6fc9c1ae493"
 paths = ["tools/scripts/test_p0_layered_replay_receipt.py"]
 tests = [
   "build-parallelism-guard",
@@ -5372,6 +5506,7 @@ tests = [
   "p0-layered-replay-receipt-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -5386,7 +5521,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-35b9891800a9"
+name = "script-readers-d91b67362ce9"
 paths = ["tools/scripts/test_param_designator_order.py"]
 tests = [
   "build-parallelism-guard",
@@ -5409,6 +5544,7 @@ tests = [
   "param-designator-order",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -5423,7 +5559,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bd387330834e"
+name = "script-readers-dafa69594ec1"
 paths = ["tools/scripts/test_patched_os_name_path_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -5446,6 +5582,7 @@ tests = [
   "patched-os-name-path-lint-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -5460,7 +5597,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-85a9b1f25ade"
+name = "script-readers-80b3df64dd54"
 paths = ["tools/scripts/test_pch_wiring_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5482,6 +5619,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -5497,7 +5635,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-572528c8d5f5"
+name = "script-readers-ef9502609753"
 paths = ["tools/scripts/test_planning_gitlink_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -5520,6 +5658,7 @@ tests = [
   "planning-gitlink-guard-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -5534,7 +5673,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-005359963a6d"
+name = "script-readers-8ffdb187f269"
 paths = ["tools/scripts/test_plugin_footprint_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5557,6 +5696,7 @@ tests = [
   "plugin-footprint-check-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -5571,7 +5711,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-452f511a4e15"
+name = "script-readers-7b58d8197f5b"
 paths = ["tools/scripts/test_pr_batch_advisor.py"]
 tests = [
   "build-parallelism-guard",
@@ -5594,6 +5734,7 @@ tests = [
   "pr-batch-advisor",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -5608,7 +5749,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8ad286f03ddd"
+name = "script-readers-3eefc6a63d94"
 paths = ["tools/scripts/test_pr_check_triage.py"]
 tests = [
   "build-parallelism-guard",
@@ -5631,6 +5772,7 @@ tests = [
   "pr-check-triage-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -5645,7 +5787,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ef172d620554"
+name = "script-readers-10a8c2e9bec2"
 paths = ["tools/scripts/test_pr_fast_tier_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -5668,6 +5810,7 @@ tests = [
   "pr-fast-tier-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -5682,7 +5825,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c96df997c90c"
+name = "script-readers-d4d0e3103c93"
 paths = ["tools/scripts/test_pr_flow_audit.py"]
 tests = [
   "build-parallelism-guard",
@@ -5705,6 +5848,7 @@ tests = [
   "pr-flow-audit-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -5719,7 +5863,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0cf30eef070a"
+name = "script-readers-8d76ce3f4e3c"
 paths = ["tools/scripts/test_prepush_affected_tests.py"]
 tests = [
   "build-parallelism-guard",
@@ -5742,6 +5886,7 @@ tests = [
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-affected-tests",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -5756,7 +5901,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-36e682100f56"
+name = "script-readers-134d80ed966b"
 paths = ["tools/scripts/test_prepush_format_gate.py"]
 tests = [
   "build-parallelism-guard",
@@ -5779,6 +5924,7 @@ tests = [
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-format-gate-wiring",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -5793,7 +5939,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d3c047c49de2"
+name = "script-readers-d8b21df0fd58"
 paths = ["tools/scripts/test_prepush_gate_output.py"]
 tests = [
   "build-parallelism-guard",
@@ -5816,6 +5962,7 @@ tests = [
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-gate-output",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -5830,7 +5977,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-b25862eb6734"
+name = "script-readers-43e2e83c3503"
 paths = ["tools/scripts/test_prepush_queue_rebase_hint.py"]
 tests = [
   "build-parallelism-guard",
@@ -5853,6 +6000,7 @@ tests = [
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
   "prepush-queue-rebase-hint",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -5867,7 +6015,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-38d0d998e402"
+name = "script-readers-28dac0250624"
 paths = ["tools/scripts/test_protected_merge_receipt.py"]
 tests = [
   "build-parallelism-guard",
@@ -5890,6 +6038,7 @@ tests = [
   "ios-gate-digest-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -5905,7 +6054,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9ba20781c46c"
+name = "script-readers-4bf79b9ace75"
 paths = ["tools/scripts/test_pulp_test_data_cmake.py"]
 tests = [
   "build-parallelism-guard",
@@ -5927,6 +6076,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "pulp-test-data-cmake-selftest",
   "reuse-policy-replay-selftest",
@@ -5942,7 +6092,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-ebc9768f8e52"
+name = "script-readers-7852cbc5878a"
 paths = ["tools/scripts/test_pulp_test_group.py"]
 tests = [
   "build-parallelism-guard",
@@ -5965,6 +6115,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -5979,7 +6130,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4478a02b3587"
+name = "script-readers-3006d708edc3"
 paths = ["tools/scripts/test_pulp_uninstall.py"]
 tests = [
   "build-parallelism-guard",
@@ -6001,6 +6152,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "pulp-uninstaller-contract",
   "reuse-policy-replay-selftest",
@@ -6016,7 +6168,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f154d6d1911d"
+name = "script-readers-1ee8e888bf20"
 paths = ["tools/scripts/test_realtime_pool_resource_locks.py"]
 tests = [
   "build-parallelism-guard",
@@ -6038,6 +6190,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "realtime-pool-resource-locks",
   "reuse-policy-replay-selftest",
@@ -6053,7 +6206,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0466aa063a02"
+name = "script-readers-c0059aa3bfd1"
 paths = ["tools/scripts/test_relay_contract_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -6075,6 +6228,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "relay-contract-hosts-selftest",
   "reuse-policy-replay-selftest",
@@ -6090,7 +6244,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4ca5ca8bd302"
+name = "script-readers-e06d073568c3"
 paths = ["tools/scripts/test_release_trailer_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -6112,6 +6266,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "release-trailer-guard-selftest",
   "reuse-policy-replay-selftest",
@@ -6127,7 +6282,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-253f7a52b343"
+name = "script-readers-252ef7db1f0e"
 paths = ["tools/scripts/test_render_upward_edge_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -6149,6 +6304,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "render-upward-edge-check-rules",
   "reuse-policy-replay-selftest",
@@ -6164,7 +6320,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1784b9950549"
+name = "script-readers-8e460e2ff195"
 paths = ["tools/scripts/test_repo_source_scan.py"]
 tests = [
   "build-parallelism-guard",
@@ -6186,6 +6342,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "repo-source-scan",
   "reuse-policy-replay-selftest",
@@ -6201,7 +6358,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4d50c936b0c5"
+name = "script-readers-7fdd7b38bec8"
 paths = ["tools/scripts/test_resolve_classify_base.py"]
 tests = [
   "build-parallelism-guard",
@@ -6223,6 +6380,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "resolve-classify-base-selftest",
   "reuse-policy-replay-selftest",
@@ -6238,7 +6396,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-97a52adf463f"
+name = "script-readers-8a9efdbe7d67"
 paths = ["tools/scripts/test_run_changed_surface_tests.py"]
 tests = [
   "build-parallelism-guard",
@@ -6261,6 +6419,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -6275,7 +6434,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8bfd71a58e2a"
+name = "script-readers-cdc5a1734bcc"
 paths = ["tools/scripts/test_runner_topology_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -6297,6 +6456,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "runner-topology-selftest",
@@ -6312,7 +6472,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-dbf82b6dcc37"
+name = "script-readers-a74d82d69751"
 paths = ["tools/scripts/test_runner_topology_static.py"]
 tests = [
   "build-parallelism-guard",
@@ -6334,6 +6494,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "runner-topology-static-selftest",
@@ -6349,7 +6510,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-37c79fa8c8aa"
+name = "script-readers-85bbf14c11a8"
 paths = ["tools/scripts/test_rust_cli_build_edge_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -6371,6 +6532,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "rust-cli-build-edge-selftest",
@@ -6386,7 +6548,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2cd5d42e42ca"
+name = "script-readers-cd1ddcfda31e"
 paths = ["tools/scripts/test_sample_region_catalogs.py"]
 tests = [
   "build-parallelism-guard",
@@ -6408,6 +6570,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-catalog-contract",
@@ -6423,7 +6586,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-80c7839dec3a"
+name = "script-readers-b136aff409c0"
 paths = ["tools/scripts/test_schema_drift_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -6445,6 +6608,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -6460,7 +6624,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8869e5a5e5f6"
+name = "script-readers-96971c8183a5"
 paths = ["tools/scripts/test_script_argv.py"]
 tests = [
   "build-parallelism-guard",
@@ -6482,6 +6646,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -6497,7 +6662,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bff252659c49"
+name = "script-readers-9234ba3f1520"
 paths = ["tools/scripts/test_script_inputs_offline.py"]
 tests = [
   "build-parallelism-guard",
@@ -6519,6 +6684,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -6534,7 +6700,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a1c5759ae5e3"
+name = "script-readers-2d1088710c8c"
 paths = ["tools/scripts/test_script_inputs_precheck.py"]
 tests = [
   "build-parallelism-guard",
@@ -6556,6 +6722,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -6571,7 +6738,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a1bf41e83440"
+name = "script-readers-ffe769873e4b"
 paths = ["tools/scripts/test_script_inputs_store.py"]
 tests = [
   "build-parallelism-guard",
@@ -6593,6 +6760,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -6608,7 +6776,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-17fc6b5f05eb"
+name = "script-readers-4d7b71fc67a1"
 paths = ["tools/scripts/test_script_test_inputs.py"]
 tests = [
   "build-parallelism-guard",
@@ -6630,6 +6798,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -6645,7 +6814,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-22f9566d3ad8"
+name = "script-readers-f7ac25e1b1ce"
 paths = ["tools/scripts/test_sdk_capability_handoff.py"]
 tests = [
   "agent-capability-sdk-handoff-selftest",
@@ -6668,6 +6837,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -6682,7 +6852,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4662c3416170"
+name = "script-readers-c80cf1ee9ded"
 paths = ["tools/scripts/test_sdk_consumer_sweep.py"]
 tests = [
   "build-parallelism-guard",
@@ -6704,6 +6874,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -6719,7 +6890,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-10ef2451546d"
+name = "script-readers-d30154a34ddc"
 paths = ["tools/scripts/test_sdk_consumer_update.py"]
 tests = [
   "build-parallelism-guard",
@@ -6741,6 +6912,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -6756,7 +6928,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-36cae18d3958"
+name = "script-readers-63d17cdb3023"
 paths = ["tools/scripts/test_sdk_plist_templates_installed.py"]
 tests = [
   "build-parallelism-guard",
@@ -6778,6 +6950,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -6793,7 +6966,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6e1117ff7c8d"
+name = "script-readers-7129cf5df731"
 paths = ["tools/scripts/test_seed_build_dir.py"]
 tests = [
   "build-parallelism-guard",
@@ -6815,6 +6988,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -6830,7 +7004,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-85f04d7a27a4"
+name = "script-readers-ee3310bcc385"
 paths = ["tools/scripts/test_sequencer_control_skill_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -6852,6 +7026,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -6867,7 +7042,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a4d24d34fb25"
+name = "script-readers-d1e133ddb137"
 paths = ["tools/scripts/test_setup_bootstrap_plan_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -6889,6 +7064,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -6904,7 +7080,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-70d7c3952cbc"
+name = "script-readers-20dde9bae49e"
 paths = ["tools/scripts/test_shared_test_objects_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -6926,6 +7102,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -6941,7 +7118,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e3d84b5767fd"
+name = "script-readers-c2485906da82"
 paths = ["tools/scripts/test_shipping_macro_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -6963,6 +7140,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -6979,7 +7157,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f946d9a999ff"
+name = "script-readers-35f38427822a"
 paths = ["tools/scripts/test_shipyard_merge_gate_evidence.py"]
 tests = [
   "build-parallelism-guard",
@@ -7001,6 +7179,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -7016,7 +7195,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bd88ff969753"
+name = "script-readers-0ef34051f25b"
 paths = ["tools/scripts/test_silent_revert_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -7038,6 +7217,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -7053,7 +7233,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e96d9c0d17ae"
+name = "script-readers-acf8b73ee7bf"
 paths = ["tools/scripts/test_skills_doc_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -7075,6 +7255,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -7090,7 +7271,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7949dc4d0621"
+name = "script-readers-7331d2afcf0b"
 paths = ["tools/scripts/test_status_tone_signal_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -7112,6 +7293,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -7127,7 +7309,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1568a3fb2840"
+name = "script-readers-b540ed94a2bb"
 paths = ["tools/scripts/test_tart_home_resolution.py"]
 tests = [
   "build-parallelism-guard",
@@ -7149,6 +7331,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -7164,7 +7347,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-e49b6e84be68"
+name = "script-readers-16785078deb7"
 paths = ["tools/scripts/test_timeline_fixture_coverage_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -7186,6 +7369,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -7201,7 +7385,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1b55fd53fa5e"
+name = "script-readers-43551816f666"
 paths = ["tools/scripts/test_tmp_leak_guard.py"]
 tests = [
   "build-parallelism-guard",
@@ -7223,6 +7407,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -7238,7 +7423,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f4b6f196d07a"
+name = "script-readers-b7b95d074cf9"
 paths = ["tools/scripts/test_tools_registry_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -7260,6 +7445,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -7275,7 +7461,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0e9f3ea31675"
+name = "script-readers-d8eec6e2c0cc"
 paths = ["tools/scripts/test_trace_frame_cost.py"]
 tests = [
   "build-parallelism-guard",
@@ -7297,6 +7483,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -7312,7 +7499,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9a60a5387d17"
+name = "script-readers-d16fa7b89418"
 paths = ["tools/scripts/test_trace_span_category_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -7334,6 +7521,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -7349,7 +7537,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-63bc57545a6a"
+name = "script-readers-c66a684aea5b"
 paths = ["tools/scripts/test_unbounded_wait_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -7371,6 +7559,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -7386,7 +7575,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-af19b57bd9ee"
+name = "script-readers-e761aef90d12"
 paths = ["tools/scripts/test_undefined_names_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -7409,6 +7598,7 @@ tests = [
   "import-validation-undefined-names",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -7423,7 +7613,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-560b8c362713"
+name = "script-readers-0a0f6d6e7f36"
 paths = ["tools/scripts/test_unregistered_tests_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -7445,6 +7635,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -7460,7 +7651,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-6c4da076a357"
+name = "script-readers-388310e358ce"
 paths = ["tools/scripts/test_validate_gpu_audio_trace_captures.py"]
 tests = [
   "build-parallelism-guard",
@@ -7483,6 +7674,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -7497,7 +7689,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-537417dc300e"
+name = "script-readers-eddf423b5324"
 paths = ["tools/scripts/test_vellum_boundary_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -7519,6 +7711,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -7534,7 +7727,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-4541748d4d3a"
+name = "script-readers-68945b07d932"
 paths = ["tools/scripts/test_vellum_inheritance_ledger_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -7556,6 +7749,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -7571,7 +7765,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2fd72b5d928a"
+name = "script-readers-2c1b129fc126"
 paths = ["tools/scripts/test_vellum_trusted_merge.py"]
 tests = [
   "build-parallelism-guard",
@@ -7593,6 +7787,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -7608,7 +7803,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f15c22e488f0"
+name = "script-readers-c0545c7e2a9e"
 paths = ["tools/scripts/test_vellum_ui_drift_report.py"]
 tests = [
   "build-parallelism-guard",
@@ -7630,6 +7825,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -7645,7 +7841,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-afe311d00e61"
+name = "script-readers-9ebc33f70acc"
 paths = ["tools/scripts/test_vellum_view_core_pulp_kept_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -7667,6 +7863,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -7682,7 +7879,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d5766bbfa160"
+name = "script-readers-6e39a333ceb6"
 paths = ["tools/scripts/test_vellum_workflow_dispatch.py"]
 tests = [
   "build-parallelism-guard",
@@ -7704,6 +7901,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -7719,7 +7917,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-0a08850cffe2"
+name = "script-readers-e134f31e0556"
 paths = ["tools/scripts/test_verify_create_templates.py"]
 tests = [
   "build-parallelism-guard",
@@ -7742,6 +7940,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -7756,7 +7955,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7b921c26fe26"
+name = "script-readers-e3c200a2b2b0"
 paths = ["tools/scripts/test_verify_gpu_dpr_inconclusive_receipt.py"]
 tests = [
   "build-parallelism-guard",
@@ -7779,6 +7978,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -7793,7 +7993,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-f2b0ecfe701a"
+name = "script-readers-976b9a244565"
 paths = ["tools/scripts/test_verify_gpu_probe_acceptance.py"]
 tests = [
   "build-parallelism-guard",
@@ -7816,6 +8016,7 @@ tests = [
   "gpu-probe-acceptance-verifier-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -7830,7 +8031,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-342724dfe453"
+name = "script-readers-86de45097039"
 paths = ["tools/scripts/test_verify_rendered_panel.py"]
 tests = [
   "build-parallelism-guard",
@@ -7852,6 +8053,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -7867,7 +8069,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9ec7ec37b815"
+name = "script-readers-ded8838a3dca"
 paths = ["tools/scripts/test_version_at_land.py"]
 tests = [
   "build-parallelism-guard",
@@ -7889,6 +8091,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -7904,7 +8107,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-1f2fdda1cd91"
+name = "script-readers-5bc39165c80a"
 paths = ["tools/scripts/test_view_audio_symbol_floor.py"]
 tests = [
   "build-parallelism-guard",
@@ -7926,6 +8129,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "pulp-view-audio-symbol-floor-negative-contract",
   "reuse-policy-replay-selftest",
@@ -7941,7 +8145,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-08c4168ce9dd"
+name = "script-readers-888aa1b63242"
 paths = ["tools/scripts/test_web_timeline_source_closure_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -7963,6 +8167,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -7978,7 +8183,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-aba646219268"
+name = "script-readers-50fb31a6c966"
 paths = ["tools/scripts/test_windows_posix_shims.py"]
 tests = [
   "build-parallelism-guard",
@@ -8000,6 +8205,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -8015,7 +8221,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-9ed322dcc96f"
+name = "script-readers-eab7eba6657a"
 paths = ["tools/scripts/timeline_command_doc_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -8037,6 +8243,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -8052,7 +8259,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-7caf6f14045c"
+name = "script-readers-985a4d33fc05"
 paths = ["tools/scripts/timeline_engine_dependency_floor_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -8074,6 +8281,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -8090,7 +8298,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-02486ff374b7"
+name = "script-readers-fdac13ba0053"
 paths = ["tools/scripts/timeline_fixture_coverage_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -8112,6 +8320,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -8127,7 +8336,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-5fe1738a030e"
+name = "script-readers-0584cb513d14"
 paths = ["tools/scripts/token_coverage_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -8149,6 +8358,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -8164,7 +8374,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-a87f8d21e4f5"
+name = "script-readers-9ba7720b1fea"
 paths = ["tools/scripts/token_key_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -8186,6 +8396,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -8201,7 +8412,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-bf2f03a8ad6e"
+name = "script-readers-ecffd0ec7aa8"
 paths = ["tools/scripts/trace_span_category_lint.py"]
 tests = [
   "build-parallelism-guard",
@@ -8223,6 +8434,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -8238,7 +8450,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-91cec2a2891e"
+name = "script-readers-f85cc274c083"
 paths = ["tools/scripts/vellum_view_core_pulp_kept_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -8260,6 +8472,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "pulp.vellum-view-core-pulp-kept",
   "reuse-policy-replay-selftest",
@@ -8275,7 +8488,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c9d54dda5890"
+name = "script-readers-58379f6395f4"
 paths = ["tools/scripts/verify_downstream_consumers.py"]
 tests = [
   "build-parallelism-guard",
@@ -8297,6 +8510,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "refactor-downstream-consumers-manifest",
   "refactor-downstream-consumers-negative-contract",
@@ -8313,7 +8527,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-2ff5d628855b"
+name = "script-readers-1006ac39ba95"
 paths = ["tools/scripts/verify_downstream_consumers_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -8335,6 +8549,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "refactor-downstream-consumers-negative-contract",
   "reuse-policy-replay-selftest",
@@ -8350,7 +8565,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-358b7cdf9bd2"
+name = "script-readers-643381570bfb"
 paths = ["tools/scripts/verify_refactor_baselines.py"]
 tests = [
   "build-parallelism-guard",
@@ -8372,6 +8587,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "refactor-baseline-manifest",
   "refactor-baseline-manifest-negative-contract",
@@ -8388,7 +8604,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-c84d041b4c77"
+name = "script-readers-8bceb4d221ba"
 paths = ["tools/scripts/verify_refactor_baselines_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -8410,6 +8626,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "refactor-baseline-manifest-negative-contract",
   "reuse-policy-replay-selftest",
@@ -8425,7 +8642,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-28e2e64ce19e"
+name = "script-readers-fbf413b8f1e0"
 paths = ["tools/scripts/verify_timeline_launcher_resource_contract.py"]
 tests = [
   "build-parallelism-guard",
@@ -8447,6 +8664,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -8464,7 +8682,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-dc44a61cd15c"
+name = "script-readers-291f6da58b45"
 paths = ["tools/scripts/verify_timeline_live_capture.py"]
 tests = [
   "build-parallelism-guard",
@@ -8486,6 +8704,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -8501,7 +8720,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-383d22fe33d1"
+name = "script-readers-d8380bebda40"
 paths = ["tools/scripts/verify_timeline_transaction_launcher_complexity.py"]
 tests = [
   "build-parallelism-guard",
@@ -8523,6 +8742,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -8539,7 +8759,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-d8ed8d10c145"
+name = "script-readers-8d08b7e0a196"
 paths = ["tools/scripts/verify_wasm_skia_slice.py"]
 tests = [
   "build-parallelism-guard",
@@ -8561,6 +8781,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -8577,7 +8798,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8130fe189001"
+name = "script-readers-6b315b0473db"
 paths = ["tools/scripts/view_audio_seam_debts.py"]
 tests = [
   "build-parallelism-guard",
@@ -8599,6 +8820,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -8614,7 +8836,7 @@ supported_build_types = [
 risk_class = "low"
 
 [[families]]
-name = "script-readers-8588c7e50d66"
+name = "script-readers-0d23bb04cd9b"
 paths = ["tools/scripts/web_timeline_source_closure_check.py"]
 tests = [
   "build-parallelism-guard",
@@ -8636,6 +8858,7 @@ tests = [
   "gpu-handoff-provenance-selftest",
   "pr-head-affected-tests-selftest",
   "pr-head-diff-scoped-registrations",
+  "prepush-receipt",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
   "sample-region-compat-baseline-selftest",
@@ -8723,6 +8946,7 @@ tests = [
   "prepush-format-gate-wiring",
   "prepush-gate-output",
   "prepush-queue-rebase-hint",
+  "prepush-receipt",
   "prepush-refresh-push",
   "pulp-ui-clean-output-lint-negative-contract",
   "queue-batch-attribute-selftest",
@@ -8784,7 +9008,6 @@ paths = [
   "tools/scripts/check_inspector_protocol_registry.py",
   "tools/scripts/check_sdk_complete.py",
   "tools/scripts/check_visual_python_deps.py",
-  "tools/scripts/ci_diff_base.py",
   "tools/scripts/ci_routing_digest.py",
   "tools/scripts/clean_worktree_planning.py",
   "tools/scripts/convolver_crossover_check.py",
@@ -8794,7 +9017,6 @@ paths = [
   "tools/scripts/ctest_unique_names_check.py",
   "tools/scripts/cutover_trial.py",
   "tools/scripts/design_unit_boundary_check.py",
-  "tools/scripts/docs_sync_check.py",
   "tools/scripts/dsp_provenance_audit.py",
   "tools/scripts/format_header_view_boundary.py",
   "tools/scripts/frontend_ir_codegen_artifact_gate.py",
@@ -8928,7 +9150,6 @@ paths = [
   "tools/scripts/test_check_web_plugin_docs.py",
   "tools/scripts/test_check_yoga_oracle_pin.py",
   "tools/scripts/test_checkout_preflight.py",
-  "tools/scripts/test_ci_diff_base.py",
   "tools/scripts/test_ci_routing_digest.py",
   "tools/scripts/test_clap_preset_library_gate.py",
   "tools/scripts/test_clean_build_cov.py",
@@ -9102,6 +9323,7 @@ paths = [
   "tools/scripts/test_prepush_format_gate.py",
   "tools/scripts/test_prepush_gate_output.py",
   "tools/scripts/test_prepush_queue_rebase_hint.py",
+  "tools/scripts/test_prepush_receipt.py",
   "tools/scripts/test_process_liveness.py",
   "tools/scripts/test_promote_quirk_tiers.py",
   "tools/scripts/test_protected_merge_receipt.py",
@@ -9406,7 +9628,6 @@ paths = [
   "tools/scripts/check_inspector_protocol_registry.py",
   "tools/scripts/check_sdk_complete.py",
   "tools/scripts/check_visual_python_deps.py",
-  "tools/scripts/ci_diff_base.py",
   "tools/scripts/ci_routing_digest.py",
   "tools/scripts/clean_worktree_planning.py",
   "tools/scripts/convolver_crossover_check.py",
@@ -9416,7 +9637,6 @@ paths = [
   "tools/scripts/ctest_unique_names_check.py",
   "tools/scripts/cutover_trial.py",
   "tools/scripts/design_unit_boundary_check.py",
-  "tools/scripts/docs_sync_check.py",
   "tools/scripts/dsp_provenance_audit.py",
   "tools/scripts/format_header_view_boundary.py",
   "tools/scripts/frontend_ir_codegen_artifact_gate.py",
@@ -9550,7 +9770,6 @@ paths = [
   "tools/scripts/test_check_web_plugin_docs.py",
   "tools/scripts/test_check_yoga_oracle_pin.py",
   "tools/scripts/test_checkout_preflight.py",
-  "tools/scripts/test_ci_diff_base.py",
   "tools/scripts/test_ci_routing_digest.py",
   "tools/scripts/test_clap_preset_library_gate.py",
   "tools/scripts/test_clean_build_cov.py",
@@ -9724,6 +9943,7 @@ paths = [
   "tools/scripts/test_prepush_format_gate.py",
   "tools/scripts/test_prepush_gate_output.py",
   "tools/scripts/test_prepush_queue_rebase_hint.py",
+  "tools/scripts/test_prepush_receipt.py",
   "tools/scripts/test_process_liveness.py",
   "tools/scripts/test_promote_quirk_tiers.py",
   "tools/scripts/test_protected_merge_receipt.py",

@@ -18,13 +18,22 @@ add_test(NAME graph-agent-loop-consumer
 # These are planted schema mutations. Each must fail closed before any graph
 # work starts, proving that a caller cannot opt the action plan into network or
 # ambient-plugin execution, or silently omit a required action.
-foreach(mutation IN ITEMS network-allowed plugin-allowed missing-action)
+foreach(mutation IN ITEMS network-allowed plugin-allowed missing-action duplicate-key
+                         escaped-duplicate-key url-string extra-step-field edit-target)
     if(mutation STREQUAL "network-allowed")
         set(expected_rule "rule=plan-network-allow")
     elseif(mutation STREQUAL "plugin-allowed")
         set(expected_rule "rule=plan-plugin-allow")
-    else()
+    elseif(mutation STREQUAL "missing-action")
         set(expected_rule "rule=action-catalog")
+    elseif(mutation MATCHES "duplicate-key")
+        set(expected_rule "rule=plan-json-parse")
+    elseif(mutation STREQUAL "url-string")
+        set(expected_rule "rule=plan-network-url")
+    elseif(mutation STREQUAL "extra-step-field")
+        set(expected_rule "rule=plan-action-field")
+    else()
+        set(expected_rule "rule=action-edit")
     endif()
     add_test(NAME graph-agent-loop-mutation-${mutation}
              COMMAND ${CMAKE_COMMAND}
@@ -44,3 +53,23 @@ add_test(NAME graph-agent-loop-consumer-action-log
 set_tests_properties(graph-agent-loop-consumer-action-log PROPERTIES
     DEPENDS graph-agent-loop-consumer
     PASS_REGULAR_EXPRESSION "pulp.a9.action-log/v1")
+
+# The authoring glue stays inside its line budget. The second test is the
+# counter's negative control: with a limit far below the real size it must
+# report the glue as over budget, so a counter that sees nothing cannot pass.
+foreach(control IN ITEMS budget over-budget-control)
+    if(control STREQUAL "budget")
+        set(limit 200)
+        set(expect_over "")
+    else()
+        set(limit 100)
+        set(expect_over "-DGRAPH_AGENT_LOOP_EXPECT_OVER=1")
+    endif()
+    add_test(NAME graph-agent-loop-glue-${control}
+             COMMAND ${CMAKE_COMMAND}
+                     -DGRAPH_AGENT_LOOP_GLUE=${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
+                     -DGRAPH_AGENT_LOOP_HARNESS=${CMAKE_CURRENT_SOURCE_DIR}/plan_boundary.hpp
+                     -DGRAPH_AGENT_LOOP_GLUE_LIMIT=${limit}
+                     ${expect_over}
+                     -P ${CMAKE_CURRENT_SOURCE_DIR}/assert-glue-budget.cmake)
+endforeach()

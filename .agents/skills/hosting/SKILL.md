@@ -2203,6 +2203,27 @@ which is how a test tells "refused" from "opened and failed", and the
 "default options never enumerate" case is the one that keeps the default
 honest.
 
+### Undo/redo and diff over saved documents (`graph_history.hpp`)
+
+`GraphEditHistory` stores saved-identity v6 documents, never graph pointers.
+Watch out for:
+
+- Undo and redo reload the graph through `from_saved_document`, which
+  renumbers NodeIds. Re-find nodes by name or saved identity after every step;
+  a cached NodeId (or an editor-layout map keyed by one) is stale. The step
+  result carries the restored `editor_layout` keyed by the new ids.
+- A mutation made without `checkpoint()` + `commit()` makes the next undo
+  refuse with `Diverged` instead of discarding it. Commit the edit or
+  `clear()` the history.
+- A restore that cannot be reproduced (for example a custom node type
+  re-registered with a different port count) is `RestoreFailed` and rolls the
+  graph back; the entry stays on the stack.
+- `diff_graph_documents` / `pulp graph diff` compare by authored identity, so
+  renumbering alone is equal, but `sample_regions` still records raw NodeIds and
+  is compared verbatim. A pre-v4 legacy file is refused as
+  `invalid_format_version`, not `logical_identity_missing`; re-save it with
+  `to_saved_document` first.
+
 ## Crash-isolated scanning — and the un-isolated LOAD
 
 `PluginScanner::scan` enumerates each CLAP bundle in a disposable

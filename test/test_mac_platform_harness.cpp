@@ -1267,6 +1267,44 @@ TEST_CASE("mac harness scroll event carries non-zero deltas through PulpView",
     REQUIRE(captured_dx == 0.0f);
 }
 
+TEST_CASE("mac window host tells a line wheel tick from precise scrolling",
+          "[mac][platform-harness][wheel]") {
+    for (const bool lines : {true, false}) {
+        INFO((lines ? "line wheel" : "pixel scroll"));
+        View root;
+        root.set_bounds({0, 0, 320, 240});
+        auto child = std::make_unique<View>();
+        child->flex().preferred_width = 320.0f;
+        child->flex().preferred_height = 240.0f;
+        int wheel_calls = 0;
+        bool precise = !lines;
+        float dy = 0.0f;
+        child->on_pointer_event = [&](const MouseEvent& me) {
+            if (!me.is_wheel)
+                return;
+            ++wheel_calls;
+            precise = me.scroll_precise;
+            dy = me.scroll_delta_y;
+        };
+        root.add_child(std::move(child));
+        root.layout_children();
+
+        auto host = pt::make_test_window(root);
+        REQUIRE(host != nullptr);
+        pt::SimulatedMouse ev;
+        ev.phase = pt::SimulatedMouse::Phase::scroll;
+        ev.x = 100.0f;
+        ev.y = 100.0f;
+        ev.scroll_delta_y = 1.0f; // one wheel line, or one pixel
+        ev.scroll_lines = lines;
+        REQUIRE(pt::simulate_mouse(*host, ev));
+
+        REQUIRE(wheel_calls >= 1);
+        CHECK(dy != 0.0f);
+        CHECK(precise == !lines);
+    }
+}
+
 TEST_CASE("mac harness right-click reaches PulpView::rightMouseDown: not mouseDown:",
           "[mac][platform-harness][issue-2001]") {
     View root;

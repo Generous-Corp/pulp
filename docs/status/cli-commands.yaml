@@ -394,16 +394,20 @@ commands:
 
   - name: graph
     status: usable
-    summary: Inspect, validate, explain, format, render, probe, and report on saved graphs and bounded catalog-derived notation offline.
+    summary: Inspect, validate, explain, diff, format, render, probe, and report on saved graphs and bounded catalog-derived notation offline.
     args:
       - name: operation
         kind: positional
         required: true
-        description: inspect, validate, explain, render, probe, report, fmt, canonicalize, save, or catalog
+        description: inspect, validate, explain, diff, render, probe, report, fmt, canonicalize, save, or catalog
       - name: file
         kind: positional
         required: true
-        description: Path to a .pulpgraph or .pat file (omitted for catalog)
+        description: Path to a .pulpgraph or .pat file (omitted for catalog); for diff, the BEFORE saved-identity document
+      - name: after
+        kind: positional
+        required: false
+        description: "diff only: the AFTER saved-identity document. Read-only comparison by logical node identity; JSON reports code Ok, equal, nodes, connections, layout_changed and sections_changed, or InvalidDocument with refusal and side"
       - name: --notation
         kind: flag
         description: Format a supported saved graph as canonical notation
