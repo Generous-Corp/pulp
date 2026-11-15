@@ -1724,3 +1724,14 @@ widths the host settled on. `MIDIOutputNames` reports "MIDI Out" only for a
 descriptor with `produces_midi`: a host installs `MIDIOutputEventBlock` only for
 a unit that reports an output. Tests: test_au_multibus.mm,
 test_au_midi_output.mm.
+
+## A `UI <package>` editor has no AU v3 path
+
+`au_view_controller_mac.mm` and `au_view_controller_ios.mm` always build a
+`ViewBridge`; neither consults `Processor::editor_factory()` or opens a
+`ContractEditorSession`, unlike VST3, CLAP and AU v2. `pulp_add_plugin(... UI
+<package>)` implies `NO_EDITOR`, but the AUv3 module still links the view
+stack, so an AUv3 built that way has no contract editor (an RmlUi or
+native-surface editor included) and nothing diagnoses it at configure time.
+Do not list `AUv3` in `FORMATS` for such a plug-in until the view controllers
+serve the contract.

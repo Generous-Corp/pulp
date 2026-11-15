@@ -26,6 +26,19 @@ sized backing surface alone does not prove the window fits it. The Windows
 
 ## Native Metal surfaces (`integrations/pulp-native`)
 
+Where a native surface (and so RmlUi on Metal) differs from the ViewBridge
+hosts today:
+
+| Behaviour | ViewBridge GPU host | Native surface |
+|---|---|---|
+| First frame | presented with the Core Animation transaction inside the host's attach call | requested on the surface's render thread after attach |
+| Occlusion / minimise | not gated (the link runs while the view is in a window) | `FramePump` gates on `OnScreenState` |
+| Hidden editor | trims GPU caches | keeps its renderer's resources |
+| Render thread | main thread | the surface's own render thread |
+| VST3 content scale | not implemented on `PulpPlugView` | `ContractPlugView` implements it |
+| AU v3 | `au_view_controller_*.mm` | none: the contract is not served |
+
+
 `pulp::native::MetalSurface` is for an editor that brings its own Metal
 renderer and does not go through `ViewBridge`. Two macOS behaviours shape both
 it and its tests, and both look like bugs until you know them:
