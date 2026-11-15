@@ -1024,6 +1024,16 @@ factory keeps the ViewBridge editor untouched.
 
 ## Gotchas
 
+### Setting `preferredContentSize` keeps the controller alive
+
+Setting `preferredContentSize` on an `AUViewController` leaves the controller
+with one extra retain: a controller whose `viewDidLoad` sets it never reaches
+dealloc when its owner releases it. A test cannot prove teardown by releasing
+the controller. Close the editor through the audio unit instead (release the
+last reference to the `PulpAudioUnit`, or rebind the controller to another
+unit), which closes the session through the unit's registry. Teardown of the
+view itself is covered at the contract-view level.
+
 ### `transportStateBlock`'s sample position is a double — round it, never truncate
 
 `transportStateBlock` returns `currentSamplePosition` as a `double`, and some hosts send a value a hair below the true sample: REAPER reports `13823.9999` for sample `13824`. A `static_cast<int64_t>` truncates it, so `position_samples` steps back one sample and then jumps two on the next block. Convert through `pulp::format::detail::host_sample_position()` (`detail/host_sample_position.hpp`, shared with AUv2). It returns the nearest sample (`std::round`, independent of the rounding mode), or `nullopt` for a non-finite or out-of-range value; leave `TransportField::SamplePosition` unset in that case.

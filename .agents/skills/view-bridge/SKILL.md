@@ -44,6 +44,17 @@ it and its tests, and both look like bugs until you know them:
   stays prompt while a client is acquiring. Holding drawables to force a block
   will not fail the way you expect.
 
+- **One lifecycle check covers every format.** The
+  `pulp-test-native-surface-{clap,vst3,au-v2,au-v3}` tests open the
+  metal-probe editor through each adapter and share
+  `test/support/native_surface_format_checks.hpp`. A driver per format supplies
+  open, host resize, reported size and close; the shared function asserts
+  attach size, first-frame colour and drawable size at the window's scale, a
+  resize round trip and a close then reopen. A new format adapter gets the
+  same proof by writing one driver. The AU v3 driver sizes a container that
+  holds the controller's view, never the window: AppKit pins an AU view
+  controller's window to its `preferredContentSize`, so a `setContentSize:` is
+  ignored, and a root view resized behind the container's back snaps back.
 - **A headless Mac has no display link.** `CVDisplayLinkCreateWithActiveCGDisplays`
   fails on a host with no active display (m1, CI VMs), so a pump that relied
   on it would skip every test on exactly the hosts that run them.
