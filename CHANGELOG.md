@@ -9,6 +9,16 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11320"></a>
+## [1.132.0] - 2026-11-14
+
+- release/version bump ([#12268](https://github.com/Generous-Corp/pulp/pull/12268))
+- graph/g7 probes docs 20261114 ([#12261](https://github.com/Generous-Corp/pulp/pull/12261))
+- graph/g5 lv2 adapters 20261114 ([#12260](https://github.com/Generous-Corp/pulp/pull/12260))
+- graph/g6 restore slotparam 20261114 ([#12259](https://github.com/Generous-Corp/pulp/pull/12259))
+- graph/g10 spectral notation 20261114 ([#12258](https://github.com/Generous-Corp/pulp/pull/12258))
+- graph/g2 midi alias 20261114 ([#12256](https://github.com/Generous-Corp/pulp/pull/12256))
+
 <a id="v11310"></a>
 ## [1.131.0] - 2026-11-14
 
@@ -13013,6 +13023,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.132.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.132.0
 [1.131.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.131.0
 [1.130.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.130.0
 [1.129.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.129.0

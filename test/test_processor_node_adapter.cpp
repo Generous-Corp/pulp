@@ -26,6 +26,7 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/format/processor_node_adapter.hpp>
 #include <pulp/graph/graph_runtime_plan.hpp>
+#include <pulp/host/signal_graph.hpp>
 #include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
 #include <pulp/state/store.hpp>
@@ -1568,4 +1569,241 @@ TEST_CASE("Processor node idle skip never confirms silence while its MIDI output
     }
     CHECK(rig.processor.calls == 4);
     CHECK(rig.node.idle_skipped_blocks() == 0);
+}
+
+namespace {
+
+// What a named-bus processor saw on its last block. Shared with the test so it
+// survives the processor moving into a graph.
+struct NamedBusObservation {
+    bool found_source = false;
+    bool found_front = false;
+    bool rear_declared = false;
+    bool rear_active = false;
+    bool layouts_match = false;
+    int prepared_output_channels = -1;
+    int blocks = 0;
+};
+
+// Mono "Source" in, stereo "Front" main out, optional stereo "Rear" aux out.
+// It finds its buses by declared name only (no main() fallback), so a host
+// that renames them to "main" makes it render silence.
+class NamedBusProcessor final : public Processor {
+  public:
+    explicit NamedBusProcessor(std::shared_ptr<NamedBusObservation> seen)
+        : seen_(std::move(seen)) {}
+
+    PluginDescriptor descriptor() const override {
+        PluginDescriptor d;
+        d.name = "NamedBus";
+        d.manufacturer = "Pulp";
+        d.bundle_id = "com.pulp.test.namedbus";
+        d.version = "1.0.0";
+        d.category = PluginCategory::Effect;
+        d.input_buses = {{"Source", 1}};
+        d.output_buses = {{"Front", 2}, {"Rear", 2, true, pulp::format::BusRole::Aux}};
+        return d;
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const PrepareContext& context) override {
+        seen_->prepared_output_channels = context.output_channels;
+    }
+    void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&, const ProcessContext&) override {
+    }
+    void process(pulp::format::ProcessBuffers& buses, pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&, const ProcessContext&) override {
+        ++seen_->blocks;
+        const auto* source = buses.inputs.find_by_name("Source");
+        auto* front = buses.outputs.find_by_name("Front");
+        auto* rear = buses.outputs.find_by_name("Rear");
+        seen_->found_source = source != nullptr;
+        seen_->found_front = front != nullptr;
+        seen_->rear_declared = rear != nullptr;
+        seen_->rear_active = rear != nullptr && rear->active();
+        seen_->layouts_match = buses.layouts_match_descriptors();
+        if (front == nullptr || !front->active())
+            return;
+        for (std::size_t frame = 0; frame < front->num_samples(); ++frame) {
+            const float x =
+                source != nullptr && source->active() ? source->buffer.channel_ptr(0)[frame] : 0.0f;
+            front->buffer.channel_ptr(0)[frame] = 0.75f * x;
+            front->buffer.channel_ptr(1)[frame] = 0.25f * x;
+            if (seen_->rear_active) {
+                rear->buffer.channel_ptr(0)[frame] = 0.5f * x;
+                rear->buffer.channel_ptr(1)[frame] = -0.5f * x;
+            }
+        }
+    }
+
+  private:
+    std::shared_ptr<NamedBusObservation> seen_;
+};
+
+} // namespace
+
+TEST_CASE("Processor graph node wires an aux output bus and passes declared bus names",
+          "[format][graph][processor-node][bus-layout]") {
+    constexpr std::size_t kFrames = 16;
+    auto seen = std::make_shared<NamedBusObservation>();
+    pulp::host::SignalGraph graph;
+    const auto in = graph.add_input_node(1, "In");
+    const auto proc = graph.add_processor_node(std::make_unique<NamedBusProcessor>(seen));
+    const auto out = graph.add_output_node(4, "Out");
+    REQUIRE(in != 0);
+    REQUIRE(proc != 0);
+    REQUIRE(out != 0);
+
+    // The main bus keeps its positional handles; the aux bus is named by bus.
+    const auto* node = graph.node(proc);
+    REQUIRE(node != nullptr);
+    REQUIRE(node->num_input_ports == 1);
+    REQUIRE(node->num_output_ports == 4);
+    REQUIRE(node->output_ports.size() == 4);
+    CHECK(node->output_ports[0].name == "audio");
+    CHECK(node->output_ports[1].name == "out1");
+    CHECK(node->output_ports[2].name == "Rear.0");
+    CHECK(node->output_ports[3].name == "Rear.1");
+    const auto* out_node = graph.node(out);
+    REQUIRE(out_node != nullptr);
+
+    REQUIRE(graph.connect(in, 0, proc, 0));
+    REQUIRE(graph.connect(proc, 0, out, 0));
+    REQUIRE(graph.connect(proc, 1, out, 1));
+    REQUIRE(graph.connect(node->out("Rear.0"), out_node->in("in2")));
+    REQUIRE(graph.connect(node->out("Rear.1"), out_node->in("in3")));
+    REQUIRE(graph.prepare(kSr, static_cast<int>(kFrames)));
+    // The processor is prepared for its main bus, as a format host would.
+    CHECK(seen->prepared_output_channels == 2);
+
+    std::vector<float> x(kFrames);
+    for (std::size_t i = 0; i < kFrames; ++i)
+        x[i] = 0.0625f * static_cast<float>(i + 1);
+    std::array<std::vector<float>, 4> y;
+    for (auto& channel : y)
+        channel.assign(kFrames, 9.0f);
+    std::array<const float*, 1> in_ch{x.data()};
+    std::array<float*, 4> out_ch{y[0].data(), y[1].data(), y[2].data(), y[3].data()};
+    pulp::audio::BufferView<const float> in_view(in_ch.data(), 1, kFrames);
+    pulp::audio::BufferView<float> out_view(out_ch.data(), 4, kFrames);
+    graph.process(out_view, in_view, static_cast<int>(kFrames));
+
+    REQUIRE(seen->blocks > 0);
+    CHECK(seen->found_source);
+    CHECK(seen->found_front);
+    CHECK(seen->rear_declared);
+    CHECK(seen->rear_active);
+    CHECK(seen->layouts_match);
+    for (std::size_t i = 0; i < kFrames; ++i) {
+        INFO("frame " << i);
+        // The name-only lookup renders: a graph that named the buses "main"
+        // would leave every channel silent.
+        REQUIRE(y[0][i] == 0.75f * x[i]);
+        REQUIRE(y[1][i] == 0.25f * x[i]);
+        REQUIRE(y[2][i] == 0.5f * x[i]);
+        REQUIRE(y[3][i] == -0.5f * x[i]);
+    }
+}
+
+TEST_CASE("Processor node leaves an aux bus inactive when its output view is main-only",
+          "[format][graph][processor-node][bus-layout]") {
+    constexpr int frames = 8;
+    auto seen = std::make_shared<NamedBusObservation>();
+    NamedBusProcessor processor(seen);
+    pulp::state::StateStore store;
+    bind_processor(processor, store);
+    CHECK(ProcessorNode::routed_output_channels(processor.descriptor()) == 4);
+    ProcessorNode node(processor);
+    PrepareContext prepare;
+    prepare.sample_rate = kSr;
+    prepare.max_buffer_size = frames;
+    prepare.input_channels = 1;
+    prepare.output_channels = 2;
+    REQUIRE(node.prepare(prepare));
+
+    std::array<float, frames> input{};
+    std::array<float, frames> left{};
+    std::array<float, frames> right{};
+    for (int frame = 0; frame < frames; ++frame)
+        input[frame] = static_cast<float>(frame + 1);
+    std::array<const float*, 1> input_channels{input.data()};
+    std::array<float*, 2> output_channels{left.data(), right.data()};
+    pulp::format::ProcessBlock block;
+    block.sample_rate = kSr;
+    block.frame_count = frames;
+    pulp::format::GraphRuntimeNodeProcessContext context;
+    context.routed = true;
+    context.node_inputs = {input_channels.data(), 1, frames};
+    context.node_outputs = {output_channels.data(), 2, frames};
+    REQUIRE(ProcessorNode::process_binding(block, context, &node));
+    CHECK(seen->found_source);
+    CHECK(seen->found_front);
+    CHECK(seen->rear_declared);
+    CHECK_FALSE(seen->rear_active);
+    CHECK(seen->layouts_match);
+    for (int frame = 0; frame < frames; ++frame) {
+        REQUIRE(left[frame] == 0.75f * input[frame]);
+        REQUIRE(right[frame] == 0.25f * input[frame]);
+    }
+}
+
+TEST_CASE("Processor node main-bus fast path passes the declared bus names",
+          "[format][graph][processor-node][bus-layout]") {
+    // SidechainProbe without a route provider would take the routed path; a
+    // one-in one-out processor takes the fast path, which must name its buses
+    // as declared too.
+    struct MainOnlyNames final : Processor {
+        PluginDescriptor descriptor() const override {
+            PluginDescriptor d;
+            d.name = "MainOnlyNames";
+            d.manufacturer = "Pulp";
+            d.bundle_id = "com.pulp.test.mainonlynames";
+            d.version = "1.0.0";
+            d.category = PluginCategory::Effect;
+            d.input_buses = {{"Dry", 1, false}};
+            d.output_buses = {{"Wet", 1, false}};
+            return d;
+        }
+        void define_parameters(pulp::state::StateStore&) override {}
+        void prepare(const PrepareContext&) override {}
+        void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                     pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                     const ProcessContext&) override {}
+        void process(pulp::format::ProcessBuffers& buses, pulp::midi::MidiBuffer&,
+                     pulp::midi::MidiBuffer&, const ProcessContext&) override {
+            const auto* dry = buses.inputs.find_by_name("Dry");
+            auto* wet = buses.outputs.find_by_name("Wet");
+            if (dry == nullptr || wet == nullptr)
+                return;
+            for (std::size_t i = 0; i < wet->num_samples(); ++i)
+                wet->buffer.channel_ptr(0)[i] = 2.0f * dry->buffer.channel_ptr(0)[i];
+        }
+    };
+
+    constexpr int frames = 4;
+    MainOnlyNames processor;
+    pulp::state::StateStore store;
+    bind_processor(processor, store);
+    CHECK(ProcessorNode::routed_output_channels(processor.descriptor()) == 1);
+    ProcessorNode node(processor);
+    PrepareContext prepare;
+    prepare.sample_rate = kSr;
+    prepare.max_buffer_size = frames;
+    prepare.input_channels = 1;
+    prepare.output_channels = 1;
+    REQUIRE(node.prepare(prepare));
+    std::array<float, frames> input{1.0f, 2.0f, 3.0f, 4.0f};
+    std::array<float, frames> output{};
+    std::array<const float*, 1> input_channels{input.data()};
+    std::array<float*, 1> output_channels{output.data()};
+    pulp::format::ProcessBlock block;
+    block.sample_rate = kSr;
+    block.frame_count = frames;
+    pulp::format::GraphRuntimeNodeProcessContext context;
+    context.routed = true;
+    context.node_inputs = {input_channels.data(), 1, frames};
+    context.node_outputs = {output_channels.data(), 1, frames};
+    REQUIRE(ProcessorNode::process_binding(block, context, &node));
+    for (int frame = 0; frame < frames; ++frame)
+        REQUIRE(output[frame] == 2.0f * input[frame]);
 }

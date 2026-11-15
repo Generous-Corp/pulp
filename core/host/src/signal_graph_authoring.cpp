@@ -244,6 +244,30 @@ bool numeric_overload_carries(const GraphNode& node, PortIndex index, bool outpu
            (node.type == NodeType::MidiInput || node.type == NodeType::MidiOutput);
 }
 
+// Output ports past the main bus belong to declared aux buses; each is named
+// "<bus>.<channel>" (for example "Rear.0") so an aux bus can be wired by name.
+// A name that is empty or already taken keeps its positional "out<N>" handle.
+void name_processor_aux_output_ports(GraphNode& node, const format::PluginDescriptor& descriptor) {
+    if (descriptor.output_buses.empty() || descriptor.output_buses[0].default_channels <= 0)
+        return;
+    std::size_t port = static_cast<std::size_t>(descriptor.output_buses[0].default_channels);
+    for (std::size_t bus = 1; bus < descriptor.output_buses.size(); ++bus) {
+        const auto& declared = descriptor.output_buses[bus];
+        for (int channel = 0; channel < declared.default_channels; ++channel, ++port) {
+            if (port >= node.output_ports.size())
+                return;
+            if (declared.name.empty())
+                continue;
+            auto name = declared.name + "." + std::to_string(channel);
+            const bool taken =
+                std::any_of(node.output_ports.begin(), node.output_ports.end(),
+                            [&](const PortHandle& existing) { return existing.name == name; });
+            if (!taken)
+                node.output_ports[port].name = std::move(name);
+        }
+    }
+}
+
 void apply_custom_port_descriptors(GraphNode& node,
                                    const std::vector<CustomNodePortDescriptor>& inputs,
                                    const std::vector<CustomNodePortDescriptor>& outputs) {
@@ -384,7 +408,8 @@ NodeId SignalGraph::add_processor_node(std::shared_ptr<format::ProcessorNodeInst
         return 0;
     const auto& descriptor = instance->descriptor();
     const int inputs = descriptor.default_input_channels();
-    const int outputs = descriptor.default_output_channels();
+    // Main output channels first, then every declared aux output bus.
+    const int outputs = format::ProcessorNode::routed_output_channels(descriptor);
     if (inputs < 0 || outputs < 0)
         return 0;
 
@@ -414,6 +439,7 @@ NodeId SignalGraph::add_processor_node(std::shared_ptr<format::ProcessorNodeInst
             return 0;
         processor_nodes_.emplace(id, std::move(lifetime));
         detail::populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
+        name_processor_aux_output_ports(node, descriptor);
         // MIDI is node-scoped; these handles do not consume or renumber audio buses.
         if (descriptor.accepts_midi)
             node.input_ports.push_back({id, 0, false, "midi", PortKind::Midi,
