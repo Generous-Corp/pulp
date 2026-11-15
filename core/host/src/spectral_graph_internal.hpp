@@ -124,8 +124,9 @@ class SpectralRuntimeBank {
                         break;
                     }
                     n.asset_morph.sum += value;
-                    if (++n.asset_morph.samples == 64) {
-                        const auto amount = static_cast<float>(n.asset_morph.sum / 64);
+                    if (++n.asset_morph.samples == static_cast<unsigned>(n.identity.hop())) {
+                        const auto amount =
+                            static_cast<float>(n.asset_morph.sum / n.identity.hop());
                         n.asset_morph.sum = 0;
                         n.asset_morph.samples = 0;
                         if (!n.asset_morph.frame(n.sequence, amount, n.working) ||
