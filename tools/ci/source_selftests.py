@@ -768,6 +768,12 @@ def sync_job_commands(workflow_text: str, job: str = SYNC_JOB) -> list[dict[str,
     return commands
 
 
+def is_fixture_test(entry: dict[str, Any]) -> bool:
+    """A test of a gate script (``test_*.py``, or a script's ``--selftest``), not a gate."""
+    return (entry["script"].rsplit("/", 1)[-1].startswith("test_")
+            or "--selftest" in entry["argv"])
+
+
 def sync_parity_manifest(path: pathlib.Path = SYNC_PARITY) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -779,6 +785,7 @@ def sync_job_entries(
     workflow: pathlib.Path = LANE_WORKFLOW,
     parity: pathlib.Path = SYNC_PARITY,
     changed: list[str] | None = None,
+    checks_only: bool = False,
 ) -> list[dict[str, Any]]:
     """The sync job's commands that gates.sh does not run itself, as entries.
 
@@ -788,7 +795,9 @@ def sync_job_entries(
     block; ``ci_only``: CI runner plumbing) are left out. A command under
     ``diff_scoped`` (minutes long, so measured and named there) runs when
     ``changed`` can reach it, as the other source-selftest lanes do; every other
-    command runs every time, as in CI.
+    command runs every time, as in CI. ``checks_only`` (a gate host, which refuses
+    local suites) keeps the checks and drops the fixture tests (``test_*.py``
+    and ``--selftest`` runs), printing what it dropped.
     """
     manifest = sync_parity_manifest(parity)
     skipped = set(manifest["gates_native"]) | set(manifest["ci_only"])
@@ -803,7 +812,8 @@ def sync_job_entries(
                 f"{command['key']}: the sync job runs it with an expression a local run "
                 "cannot resolve; list it in tools/ci/sync_job_parity.json")
         if not (repo / command["script"]).is_file():
-            continue
+            raise ManifestError(f"{command['key']}: the sync job runs {command['script']}, "
+                                "which is not in the checkout")
         args = [a.replace("{base}", base).replace("{pr_title}", pr_title)
                 for a in command["args"]]
         entries.append({
@@ -814,7 +824,25 @@ def sync_job_entries(
             "advisory": command["advisory"],
             "script": command["script"],
         })
+    if checks_only:
+        fixtures = [e for e in entries if is_fixture_test(e)]
+        entries = [e for e in entries if not is_fixture_test(e)]
+        if fixtures:
+            print(f"source-selftests: NOT CHECKED locally: {len(fixtures)} sync-job fixture "
+                  "test(s) (a local suite is refused on this gate host); CI runs them: "
+                  + ", ".join(sorted(e["script"].rsplit("/", 1)[-1] for e in fixtures)),
+                  flush=True)
     slow = set(manifest.get("diff_scoped", {}))
+    # A slow command the source-selftest manifest also registers is run, diff-scoped
+    # the same way, by gates.sh's manifest lane; running it here as well would
+    # spend its minutes twice.
+    owned = set()
+    manifest_file = repo / "tools" / "ci" / "source_selftests.json"
+    if slow and manifest_file.is_file():
+        owned = {pathlib.Path(expand(e["argv"][0], repo)).resolve()
+                 for e in load_manifest(manifest_file) if not e.get("raw")}
+    entries = [e for e in entries
+               if not (e["script"] in slow and (repo / e["script"]).resolve() in owned)]
     if changed is not None and slow:
         lane = LANE_FILES + (
             workflow.resolve().relative_to(repo).as_posix(),
@@ -1842,6 +1870,12 @@ def main(argv: list[str] | None = None) -> int:
         "CI's arguments and BASE as the diff base. Not diff-scoped: CI runs them all",
     )
     p_run.add_argument(
+        "--sync-job-checks-only",
+        action="store_true",
+        help="with --sync-job: skip the fixture tests (test_*.py, --selftest) and say so; "
+        "for a gate host, which refuses local suites but keeps the cheap checks",
+    )
+    p_run.add_argument(
         "--pr-title",
         default=None,
         help="with --sync-job: the PR title (default $GITHUB_PR_TITLE)",
@@ -1952,7 +1986,8 @@ def main(argv: list[str] | None = None) -> int:
                 args.sync_job,
                 args.pr_title if args.pr_title is not None
                 else os.environ.get("GITHUB_PR_TITLE", ""),
-                changed=changed_paths(args.sync_job))
+                changed=changed_paths(args.sync_job),
+                checks_only=args.sync_job_checks_only)
             print(f"source-selftests: {len(entries)} sync-job command(s) read from "
                   f"{LANE_WORKFLOW.relative_to(REPO_ROOT)}", flush=True)
         elif args.ctest_python:

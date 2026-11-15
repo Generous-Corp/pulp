@@ -132,7 +132,7 @@ fi
 # shellcheck source=gate_host_policy.sh
 source "$ROOT/tools/scripts/gate_host_policy.sh"
 gate_host_builds_skipped=0
-gate_host_skipped_what="compiles, a kept build-gate configure and the source-selftest suites (source-only, workflow-lint, pr-fast ctest, ctest-registered Python, the required sync job's own commands)"
+gate_host_skipped_what="compiles, a kept build-gate configure and the source-selftest suites (source-only, workflow-lint, pr-fast ctest, ctest-registered Python)"
 if pulp_gate_host_builds_reserved; then
     gate_host_builds_skipped=1
     pulp_gate_host_skip_line "$gate_host_skipped_what" "tools/scripts/gates.sh $BASE"
@@ -196,8 +196,8 @@ if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then
     exit 2
 fi
 
-# PR title detection for --require-bump-for-fix-feat. Mirrors how the CI
-# workflow sets GITHUB_PR_TITLE. Local-only nuance: if the branch has
+# PR title detection (the sync job's release-tag report reads it). Mirrors how
+# the CI workflow sets GITHUB_PR_TITLE. Local-only nuance: if the branch has
 # NO commits ahead of base, the tip commit IS the base commit, and using
 # its subject would falsely trip the gate when the base happens to be a
 # fix:/feat: merge. So we only synthesize a title from the FIRST commit
@@ -739,14 +739,22 @@ fi
 # tools/scripts/test_gates_sync_parity.py fails when the two disagree). Every
 # command runs every time except the two the manifest names as minutes long,
 # which run when the diff can reach them. A failing command is not re-run on the
-# base here: CI fails the same command. PULP_SKIP_SOURCE_SELFTESTS=1 skips it.
-if [ "$gate_host_builds_skipped" -eq 0 ] && [ -f "$ROOT/tools/ci/sync_job_parity.json" ] && [ "${PULP_SKIP_SOURCE_SELFTESTS:-0}" != "1" ]; then
+# base here: CI fails the same command. A gate host refuses local suites, so
+# there the checks run (a second each) and the fixture tests are listed NOT
+# CHECKED. PULP_SKIP_SOURCE_SELFTESTS=1 skips the lane.
+if [ -f "$ROOT/tools/ci/sync_job_parity.json" ] && [ "${PULP_SKIP_SOURCE_SELFTESTS:-0}" != "1" ]; then
     echo "" >&2
-    echo "▸ required sync job's own commands (read from version-skill-check.yml; docs-sync, screenshot-sync, release tags, CLI/MCP parity, source contracts, gate-script tests)" >&2
+    sync_job_args=()
+    if [ "$gate_host_builds_skipped" -eq 1 ]; then
+        sync_job_args=(--sync-job-checks-only)
+        echo "▸ required sync job's checks (read from version-skill-check.yml; docs-sync, screenshot-sync, release tags, CLI/MCP parity, source contracts; gate host: fixture tests not run)" >&2
+    else
+        echo "▸ required sync job's own commands (read from version-skill-check.yml; docs-sync, screenshot-sync, release tags, CLI/MCP parity, source contracts, gate-script tests)" >&2
+    fi
     sync_job_log="$(mktemp "${TMPDIR:-/tmp}/pulp-gates-sync-job.XXXXXX")"
     sync_job_base="$(git -C "$ROOT" merge-base "$BASE" HEAD)"
     if "$PYTHON" "$ROOT/tools/ci/source_selftests.py" run --sync-job "$sync_job_base" \
-            --pr-title "${GITHUB_PR_TITLE:-}" \
+            --pr-title "${GITHUB_PR_TITLE:-}" ${sync_job_args[@]+"${sync_job_args[@]}"} \
             ${PULP_BUILD_JOBS:+--jobs "$PULP_BUILD_JOBS"} >"$sync_job_log" 2>&1; then
         sed -n 's/^source-selftests: /  source-selftests: /p' "$sync_job_log" | tail -n 12 >&2
     else
@@ -754,6 +762,7 @@ if [ "$gate_host_builds_skipped" -eq 0 ] && [ -f "$ROOT/tools/ci/sync_job_parity
         echo "  sync-job: failing — the required \`Enforce version & skill sync\` check runs these; fix before pushing." >&2
         fail=1
     fi
+    sed -n "s/^source-selftests: \(NOT CHECKED locally: .*\)/[sync-job] \1/p" "$sync_job_log" >>"$not_checked_log"
     rm -f "$sync_job_log"
 fi
 

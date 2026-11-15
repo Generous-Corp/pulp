@@ -788,7 +788,8 @@ class GatesWiringTests(unittest.TestCase):
                       + self._block() + '\necho "fail=$fail"\n')
             env = {k: v for k, v in os.environ.items()
                    if k != "PULP_SKIP_SOURCE_SELFTESTS"
-                   and k != "PULP_GATES_BUILD_DIR"}  # the caller's build-dir override must not reach the fixture
+                   and k != "PULP_GATES_BUILD_DIR"
+                   and k != "PULP_BUILD_JOBS"}  # a governed shell sets it; gates.sh would add --jobs  # the caller's build-dir override must not reach the fixture
             result = subprocess.run(
                 ["bash", "-c", script], capture_output=True, text=True, env=env, timeout=60)
             argv = calls.read_text() if calls.exists() else ""

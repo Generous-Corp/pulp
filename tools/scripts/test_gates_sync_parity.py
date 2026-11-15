@@ -21,6 +21,8 @@ edit here. This test fails when that stops being true:
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import pathlib
 import re
@@ -59,6 +61,21 @@ class SyncJobParityTests(unittest.TestCase):
         cls.native = cls.manifest["gates_native"]
         cls.ci_only = cls.manifest["ci_only"]
 
+    def owned_by_manifest_lane(self) -> set[str]:
+        """Slow commands tools/ci/source_selftests.json also registers: gates.sh's
+        manifest lane runs them, diff-scoped, so the sync lane leaves them out."""
+        registered = {pathlib.Path(lane.expand(e["argv"][0], ROOT)).resolve()
+                      for e in lane.load_manifest(ROOT / "tools" / "ci" / "source_selftests.json")
+                      if not e.get("raw")}
+        return {script for script in self.manifest["diff_scoped"]
+                if (ROOT / script).resolve() in registered}
+
+    def test_a_slow_command_is_run_by_exactly_one_lane(self) -> None:
+        owned = self.owned_by_manifest_lane()
+        ran = {e["script"] for e in lane.sync_job_entries(BASE, "a title")}
+        for script in self.manifest["diff_scoped"]:
+            self.assertEqual(script in ran, script not in owned, script)
+
     def test_the_job_has_commands(self) -> None:
         # A parser that finds nothing would pass every test below.
         self.assertGreater(len(self.commands), 40)
@@ -69,7 +86,7 @@ class SyncJobParityTests(unittest.TestCase):
         lane_keys = {c["key"].replace("{base}", BASE).replace("{pr_title}", "a title")
                      for c in self.commands
                      if c["key"] not in self.native and c["key"] not in self.ci_only
-                     and (ROOT / c["script"]).is_file()}
+                     and c["script"] not in self.owned_by_manifest_lane()}
         self.assertEqual(run_by_lane, lane_keys)
         for command in self.commands:
             key = command["key"]
@@ -77,6 +94,17 @@ class SyncJobParityTests(unittest.TestCase):
             self.assertLessEqual(listed, 1, f"{key} is in both lists of the parity manifest")
             if listed == 0:
                 self.assertTrue(command["resolved"], key)
+
+    def test_no_repo_script_runs_in_the_job_where_the_lane_cannot_see_it(self) -> None:
+        # The lane reads `python3 <script>.py` lines. A step added as `bash
+        # tools/x.sh` or `./tools/x.sh` would reach CI and never gates.sh.
+        lines = lane._job_lines(WORKFLOW.read_text(encoding="utf-8").splitlines(), lane.SYNC_JOB)
+        seen = set()
+        for line in lines:
+            match = re.match(r"^\s*(?:bash |sh |\./)?(tools/[\w./-]+\.(?:sh|bash|rb|js|mjs|ts))\b", line)
+            if match:
+                seen.add(match.group(1))
+        self.assertEqual(seen, set(self.manifest["non_python_commands"]))
 
     def test_the_lane_runs_the_listed_gate_tests_and_sync_checks(self) -> None:
         names = {e["name"] for e in lane.sync_job_entries(BASE, "a title")}
@@ -150,10 +178,10 @@ class SyncJobParityTests(unittest.TestCase):
                         "gates.sh does not run the sync-job lane")
         self.assertTrue("--drift-fast --build-dir auto" in self.gates,
                         "gates.sh does not run the drift-fast selection")
-        # The lane is skipped, and reported, only where gates.sh already refuses
-        # the source-selftest suites (a tartci gate host).
+        # On a gate host (which refuses local suites) the lane still runs the
+        # checks and reports the fixture tests it dropped as NOT CHECKED.
         text = GATES.read_text(encoding="utf-8")
-        self.assertRegex(text, r'gate_host_skipped_what="[^"]*the required sync job')
+        self.assertIn("--sync-job-checks-only", text)
 
     def test_version_bump_runs_the_way_ci_runs_it_on_a_pull_request(self) -> None:
         # --require-bump-for-fix-feat accepts only a bump commit or a skip
@@ -207,6 +235,34 @@ jobs:
     def test_a_listed_native_command_is_left_to_gates(self) -> None:
         self.assertEqual(self._entries(self.WORKFLOW, native=()) [0]["script"],
                          "tools/scripts/kept_native.py")
+
+    def test_a_command_whose_script_is_missing_is_refused(self) -> None:
+        workflow = self.WORKFLOW.replace("brand_new_check.py", "not_in_checkout.py")
+        with self.assertRaises(lane.ManifestError):
+            self._entries(workflow)
+
+    def test_checks_only_drops_fixture_tests_and_says_so(self) -> None:
+        # the extra step must sit inside the sync job, before `other-job`
+        workflow = self.WORKFLOW.replace(
+            "  other-job:", "      - run: |\n          python3 tools/scripts/test_brand_new_check.py\n  other-job:", 1)
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            (root / "tools" / "scripts").mkdir(parents=True)
+            for name in ("kept_native", "brand_new_check", "test_brand_new_check"):
+                (root / "tools" / "scripts" / f"{name}.py").write_text("", encoding="utf-8")
+            wf = root / "wf.yml"
+            wf.write_text(workflow, encoding="utf-8")
+            parity = root / "parity.json"
+            parity.write_text(json.dumps({"gates_native": {}, "ci_only": {}, "diff_scoped": {}}),
+                              encoding="utf-8")
+            every = lane.sync_job_entries(BASE, "t", repo=root, workflow=wf, parity=parity)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                checks = lane.sync_job_entries(BASE, "t", repo=root, workflow=wf, parity=parity,
+                                               checks_only=True)
+        self.assertIn("tools/scripts/test_brand_new_check.py", [e["script"] for e in every])
+        self.assertNotIn("tools/scripts/test_brand_new_check.py", [e["script"] for e in checks])
+        self.assertIn("NOT CHECKED locally: 1 sync-job fixture test(s)", out.getvalue())
 
     def test_a_command_with_an_unresolvable_expression_is_refused(self) -> None:
         workflow = self.WORKFLOW.replace(

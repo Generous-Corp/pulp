@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "_comment": "Which commands of the required sync job (.github/workflows/version-skill-check.yml, job `version-skill-check`) tools/scripts/gates.sh does NOT hand to the lane that reads them from the workflow. Every other `python3 <script>` command in that job is run by gates.sh's `sync-job` lane with CI's own arguments, so adding a step to the workflow adds it to gates.sh with no further edit. `gates_native`: gates.sh runs the command in a block of its own; `gates` are literal fragments that must appear in tools/scripts/gates.sh, and every `--flag` CI passes must appear in them unless listed in `flag_exceptions` with a reason. `ci_only`: CI runner plumbing or a lane gates.sh runs by another path. Keys are the commands exactly as tools/ci/source_selftests.py sync_job_commands() prints them; tools/scripts/test_gates_sync_parity.py fails on a stale key, an unlisted unresolvable command, or a native block gates.sh lost. `diff_scoped`: the only commands gates.sh runs only when the diff can reach them (select_for_changes), each measured over a minute; the rest run every time.",
+  "_comment": "Which commands of the required sync job (.github/workflows/version-skill-check.yml, job `version-skill-check`) tools/scripts/gates.sh does NOT hand to the lane that reads them from the workflow. Every other `python3 <script>` command in that job is run by gates.sh's `sync-job` lane with CI's own arguments, so adding a step to the workflow adds it to gates.sh with no further edit. `gates_native`: gates.sh runs the command in a block of its own; `gates` are literal fragments that must appear in tools/scripts/gates.sh, and every `--flag` CI passes must appear in them unless listed in `flag_exceptions` with a reason. `ci_only`: CI runner plumbing or a lane gates.sh runs by another path. Keys are the commands exactly as tools/ci/source_selftests.py sync_job_commands() prints them; tools/scripts/test_gates_sync_parity.py fails on a stale key, an unlisted unresolvable command, or a native block gates.sh lost. `diff_scoped`: the only commands gates.sh runs only when the diff can reach them (select_for_changes), each measured over a minute; the rest run every time. `non_python_commands`: repo scripts the job runs that are not `python3 <script>.py`; the lane cannot see these, so each is listed and the test fails on an unlisted one.",
   "gates_native": {
     "tools/scripts/skill_sync_check.py --base {base} --config tools/scripts/versioning.json --mode=report": {
       "gates": [
@@ -120,5 +120,8 @@
   "diff_scoped": {
     "tools/scripts/test_gates.py": "runs gates.sh's lint blocks under bash, about 130s",
     "tools/scripts/test_version_at_land.py": "clones the checkout per fixture, about 160s"
+  },
+  "non_python_commands": {
+    "tools/ci/net-retry.sh": "installs PyYAML for the wide non-native tier, which runs only when PULP_CLASSIFY_WIDE_NON_NATIVE is set (see ci_only)"
   }
 }
