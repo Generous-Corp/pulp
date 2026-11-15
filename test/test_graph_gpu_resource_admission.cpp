@@ -358,6 +358,12 @@ class NeuralConsumer final : public StagedGpuConsumer {
     std::unique_ptr<GpuNeuralRealtimeNode> node_;
 };
 
+// The pump is synchronous; diagnostics are read only between service calls.
+struct ObservedConvolver final : GpuConvolver {
+    using GpuConvolver::GpuConvolver;
+    using GpuConvolver::staged_gpu_blocks;
+};
+
 class ConvolutionConsumer final : public StagedGpuConsumer {
   public:
     ConvolutionConsumer() : ir_(make_ir()) {}
@@ -370,7 +376,7 @@ class ConvolutionConsumer final : public StagedGpuConsumer {
     GpuAudioNode* node() noexcept override {
         return node_.get();
     }
-    GpuConvolver* convolver() noexcept {
+    ObservedConvolver* convolver() noexcept {
         return node_.get();
     }
     std::string identity_sha256() const override {
@@ -389,7 +395,7 @@ class ConvolutionConsumer final : public StagedGpuConsumer {
 
   protected:
     bool build(std::uint32_t quantum, std::uint32_t sample_rate) override {
-        node_ = std::make_unique<GpuConvolver>(1, quantum, sample_rate, ir_);
+        node_ = std::make_unique<ObservedConvolver>(1, quantum, sample_rate, ir_);
         return node_->set_provider_policy(GpuConvolver::ProviderPolicy::StagedOnly) &&
                node_->prepare();
     }
@@ -399,7 +405,7 @@ class ConvolutionConsumer final : public StagedGpuConsumer {
 
   private:
     std::vector<float> ir_;
-    std::unique_ptr<GpuConvolver> node_;
+    std::unique_ptr<ObservedConvolver> node_;
 };
 
 // ---------------------------------------------------------------------------
