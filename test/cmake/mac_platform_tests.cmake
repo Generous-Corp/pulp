@@ -68,6 +68,12 @@ if(APPLE AND NOT PULP_IOS)
     # the hosts use (see window_host_mac.mm); the header under test calls it.
     set_source_files_properties(test_mac_frame_timing.mm PROPERTIES
         COMPILE_OPTIONS -Wno-deprecated-declarations)
+    # What a static open plug-in editor costs the host's main thread: idle-pump
+    # calls, frames, wake-ups and CPU on the CPU plug-in host with a real
+    # ViewBridge. The measurement cases are [performance]; ctest runs the rest.
+    add_executable(pulp-test-mac-idle-pump-cost test_mac_idle_pump_cost.mm)
+    target_link_libraries(pulp-test-mac-idle-pump-cost PRIVATE
+        pulp::view pulp::format Catch2::Catch2WithMain "-framework AppKit")
 endif()
 if(APPLE AND NOT PULP_IOS)
     # Pin the invariant -[PulpView liveFocusedView] depends on:
