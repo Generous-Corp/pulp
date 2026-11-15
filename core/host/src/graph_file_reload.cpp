@@ -7,6 +7,18 @@
 
 namespace pulp::host {
 GraphFileChange GraphFileWatch::poll() {
+    const bool first = !started_;
+    started_ = true;
+    auto result = poll_once();
+    // A first poll that could not seed a baseline (file missing, unreadable or
+    // mid-save) leaves nothing to compare against; the first settled contents
+    // seen afterwards are a real change and must be offered, not adopted.
+    if (first && !observed_)
+        baseline_open_ = false;
+    return result;
+}
+
+GraphFileChange GraphFileWatch::poll_once() {
     using Code = GraphFileChange::Code;
     auto error = [&](Code code) {
         pending_.reset();
@@ -45,11 +57,11 @@ GraphFileChange GraphFileWatch::poll() {
     }
     text.resize(static_cast<std::size_t>(bytes));
     previous_error_ = Code::Unchanged;
-    if (!observed_) {
+    if (!observed_ && baseline_open_) {
         observed_ = std::move(text);
         return {};
     }
-    if (text == *observed_) {
+    if (observed_ && text == *observed_) {
         pending_.reset();
         offered_.reset();
         return {};
