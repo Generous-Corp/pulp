@@ -396,6 +396,29 @@ struct ParamInfo {
     /// trigger, both of which are defined by the host writing to them.
     bool read_only = false;
 
+    /// Declare that changing this parameter can change the values of other
+    /// parameters (a mode or preset selector that re-writes a group of
+    /// controls, for example).
+    ///
+    /// AU v2 and v3 publish `kAudioUnitParameterFlag_IsGlobalMeta` for a
+    /// flagged parameter, which tells the host this parameter can change
+    /// others. The flag only declares that: the plug-in must still report each
+    /// dependent parameter it changes through the normal parameter-change path.
+    /// VST3 and CLAP can only announce a change after it happened, for the
+    /// whole plug-in: VST3 `restartComponent(kParamValuesChanged)` and CLAP
+    /// `params.rescan(CLAP_PARAM_RESCAN_VALUES)`. Neither lets a single
+    /// parameter declare in advance that changing it moves others.
+    /// VST3's `kIsProgramChange` only marks a program-selection parameter, and
+    /// CLAP's `CLAP_PARAM_REQUIRES_PROCESS` says how a change must be applied,
+    /// so neither carries this meaning. The field has no effect on those
+    /// formats.
+    ///
+    /// Opt-in: defaults false.
+    ///
+    /// Two-state parameters should be declared `kind = ParamKind::Toggle` so
+    /// AU publishes the Boolean unit instead of Generic.
+    bool affects_others = false;
+
     /// Whether the host may record and play back automation for this
     /// parameter.
     ///
@@ -459,8 +482,10 @@ inline double host_normalized_from_value(const ParamInfo& info, float value) {
                       1.0);
 }
 
-inline bool is_boolean_param(const ParamInfo& info) {
-    return info.kind == ParamKind::Toggle;
+/// True when changing this parameter can change other parameters
+/// (`ParamInfo::affects_others`). AU adapters publish IsGlobalMeta for it.
+inline bool is_meta_param(const ParamInfo& info) {
+    return info.affects_others;
 }
 
 inline uint32_t param_value_count(const ParamInfo& info) {
@@ -470,6 +495,14 @@ inline uint32_t param_value_count(const ParamInfo& info) {
     const float step = info.range.step > 0.0f ? info.range.step : 1.0f;
     const float span = std::max(0.0f, info.range.max - info.range.min);
     return static_cast<uint32_t>(std::llround(span / step)) + 1u;
+}
+
+/// True for a discrete two-state parameter: declared `ParamKind::Toggle` and
+/// exactly two values. A Toggle whose range spans more than two steps is not
+/// Boolean, and a continuous parameter is never Boolean however small its
+/// range, so adapters publish Boolean units only where hosts expect them.
+inline bool is_boolean_param(const ParamInfo& info) {
+    return info.kind == ParamKind::Toggle && param_value_count(info) == 2;
 }
 
 inline float constrain_param_value(const ParamInfo& info, float value) {
