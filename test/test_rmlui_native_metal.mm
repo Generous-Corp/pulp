@@ -192,6 +192,8 @@ bool draw(const char* document, CGFloat scale, Drawn& out, std::string& failure,
             ui.detach();
         }
     }
+    // The window exists only to host the surface; it is never shown.
+    REQUIRE_FALSE(window.isVisible);
     [window close];
     if (!ok)
         return false;
@@ -346,6 +348,8 @@ bool draw_first_two(CGFloat scale, Drawn& first, Drawn& second, std::string& fai
         }
         ui.detach();
     }
+    // The window exists only to host the surface; it is never shown.
+    REQUIRE_FALSE(window.isVisible);
     [window close];
     first.unsupported = second.unsupported = renderer.unsupported_calls();
     return ok;
