@@ -38,7 +38,7 @@ namespace {
 constexpr int kParams = 8;
 
 class StaticEditorProcessor final : public format::Processor {
-public:
+  public:
     format::PluginDescriptor descriptor() const override {
         return {"Idle Probe", "Pulp", "com.pulp.idle-probe", "1.0.0",
                 format::PluginCategory::Effect};
@@ -50,16 +50,20 @@ public:
     void prepare(const format::PrepareContext&) override {}
     void process(audio::BufferView<float>&, const audio::BufferView<const float>&,
                  midi::MidiBuffer&, midi::MidiBuffer&, const format::ProcessContext&) override {}
-    format::ViewSize view_size() const override { return {480, 320, 320, 240, 1024, 768}; }
+    format::ViewSize view_size() const override {
+        return {480, 320, 320, 240, 1024, 768};
+    }
     std::unique_ptr<view::View> create_view() override {
         auto root = std::make_unique<BoundView>(*store_);
         return root;
     }
-    void attach(state::StateStore& store) { store_ = &store; }
+    void attach(state::StateStore& store) {
+        store_ = &store;
+    }
 
-private:
+  private:
     class BoundView final : public view::View {
-    public:
+      public:
         explicit BoundView(state::StateStore& store) {
             for (int i = 0; i < kParams; ++i) {
                 auto knob = std::make_unique<view::Knob>();
@@ -70,7 +74,7 @@ private:
             }
         }
 
-    private:
+      private:
         std::vector<view::ParameterBinding> bindings_;
     };
     state::StateStore* store_ = nullptr;
@@ -197,8 +201,7 @@ TEST_CASE("idle cost of a static open plug-in editor on the CPU host",
          {std::pair{"no idle callback", floor}, std::pair{"editor idle pump", pumped},
           std::pair{"continuous repaint", ceiling}}) {
         WARN(name << ": idle-pump calls " << r.idle_calls << "/s, frames " << r.frames
-                  << "/s, process wake-ups " << r.wakeups << "/s, CPU " << r.cpu_percent
-                  << "%");
+                  << "/s, process wake-ups " << r.wakeups << "/s, CPU " << r.cpu_percent << "%");
     }
     // Control: continuous repaint must keep frames flowing, or the instrument
     // sees nothing.
