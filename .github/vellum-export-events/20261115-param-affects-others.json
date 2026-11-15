@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "20261115-param-affects-others",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-15T06:51:49Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/state/include/pulp/state/parameter.hpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "Adds ParamInfo::affects_others and tightens is_boolean_param to a discrete two-state parameter, so AU publishes IsGlobalMeta and the Boolean unit correctly. Vellum's framework transfer is in effect, so no re-export carries it; Vellum can adopt the same contract independently."
+}
