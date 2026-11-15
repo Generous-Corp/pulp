@@ -27,6 +27,13 @@
    "writer": "python3 tools/scripts/agent_capability_manifest.py --migrate-fingerprints (or --accept-fingerprint <include> after reviewing the header)"
   },
   {
+   "added_line_pattern": "^\\s*(add_executable|add_test|catch_discover_tests|pulp_add_test_suite|pulp_add_test_group)\\s*\\(",
+   "fragments": "test/cmake/fragments/",
+   "path": "test/cmake/mac_platform_*.cmake",
+   "why": "7 merge conflicts in 6 days, every one two pull requests appending a whole if()/endif() registration block at the same tail; a union of both sides interleaves or repeats the blocks, so there is no automatic repair",
+   "writer": "create test/cmake/fragments/<area>-<what>.cmake; test/cmake/fragments.cmake includes it, nothing else to edit"
+  },
+  {
    "mode": "serialized",
    "path": "docs/status/consumption-profiles.json",
    "why": "the build-derived census is one large aggregate; concurrent profile regenerations rewrote the same header and profile blocks and produced DIRTY refresh work (for example Pulp #11938)",
