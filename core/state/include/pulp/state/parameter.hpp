@@ -482,9 +482,6 @@ inline double host_normalized_from_value(const ParamInfo& info, float value) {
                       1.0);
 }
 
-inline bool is_boolean_param(const ParamInfo& info) {
-    return info.kind == ParamKind::Toggle;
-}
 
 /// True when changing this parameter can change other parameters
 /// (`ParamInfo::affects_others`). AU adapters publish IsGlobalMeta for it.
@@ -499,6 +496,14 @@ inline uint32_t param_value_count(const ParamInfo& info) {
     const float step = info.range.step > 0.0f ? info.range.step : 1.0f;
     const float span = std::max(0.0f, info.range.max - info.range.min);
     return static_cast<uint32_t>(std::llround(span / step)) + 1u;
+}
+
+/// True for a discrete two-state parameter: declared `ParamKind::Toggle` and
+/// exactly two values. A Toggle whose range spans more than two steps is not
+/// Boolean, and a continuous parameter is never Boolean however small its
+/// range, so adapters publish Boolean units only where hosts expect them.
+inline bool is_boolean_param(const ParamInfo& info) {
+    return info.kind == ParamKind::Toggle && param_value_count(info) == 2;
 }
 
 inline float constrain_param_value(const ParamInfo& info, float value) {

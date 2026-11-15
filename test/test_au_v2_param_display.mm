@@ -448,6 +448,14 @@ TEST_CASE("AU v2 maps Toggle to Boolean and Enum to Indexed",
     REQUIRE(unit_for(2) == kAudioUnitParameterUnit_Indexed);
     // An undeclared two-state parameter is not guessed to be Boolean.
     REQUIRE(unit_for(3) == kAudioUnitParameterUnit_Generic);
+
+    // A continuous 0..1 parameter is not two-state, and a Toggle spanning more
+    // than two values is not Boolean.
+    store.add_parameter({.id = 4, .name = "Amount", .range = {0.0f, 1.0f, 0.5f, 0.0f}});
+    store.add_parameter({.id = 5, .name = "Wide Toggle", .range = {0.0f, 4.0f, 0.0f, 1.0f},
+                         .kind = pulp::state::ParamKind::Toggle});
+    REQUIRE(unit_for(4) == kAudioUnitParameterUnit_Generic);
+    REQUIRE(unit_for(5) == kAudioUnitParameterUnit_Generic);
 }
 
 TEST_CASE("AU v2 republishes display names without changing parameter identity",
