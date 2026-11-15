@@ -396,6 +396,23 @@ struct ParamInfo {
     /// trigger, both of which are defined by the host writing to them.
     bool read_only = false;
 
+    /// Declare that changing this parameter can change the values of other
+    /// parameters (a mode or preset selector that re-writes a group of
+    /// controls, for example).
+    ///
+    /// AU hosts re-read every parameter after a change to a flagged one, so a
+    /// plug-in that moves other parameters behind the host's back should set
+    /// this: AU v2 and v3 publish `kAudioUnitParameterFlag_IsGlobalMeta`.
+    /// VST3 and CLAP have no per-parameter equivalent (VST3 uses a
+    /// plug-in-wide restart-parameter-values request, CLAP a plug-in-wide
+    /// parameter rescan), so this field has no effect there.
+    ///
+    /// Opt-in: defaults false.
+    ///
+    /// Two-state parameters should be declared `kind = ParamKind::Toggle` so
+    /// AU publishes the Boolean unit instead of Generic.
+    bool affects_other_params = false;
+
     /// Whether the host may record and play back automation for this
     /// parameter.
     ///

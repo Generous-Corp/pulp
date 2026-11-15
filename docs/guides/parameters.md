@@ -52,6 +52,8 @@ Fields:
 - `from_string` — optional string parser (text → plain value)
 - `rate` — `ControlRate` by default; `AudioRate` marks the parameter as audio-rate capable for adapters and graph/modulation integrations
 - `smoothing_ramp_seconds` — optional control-rate smoothing time; `0` means off
+- `kind` — declare a two-state parameter as `ParamKind::Toggle` so AU publishes the Boolean unit (otherwise it is Generic); `Enum` and `Integer` are likewise opt-in
+- `affects_other_params` — `false` by default; set it on a parameter whose change moves other parameters (a mode or preset selector). AU v2 and v3 publish `kAudioUnitParameterFlag_IsGlobalMeta` so the host re-reads the others after the change. VST3 and CLAP have no per-parameter equivalent (only plug-in-wide restart or rescan requests), so the field has no effect there
 
 `to_string` / `from_string` are surfaced to the host's generic editor and
 text-entry fields by every format adapter: VST3 `getParamStringByValue` /
