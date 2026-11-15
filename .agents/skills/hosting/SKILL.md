@@ -77,6 +77,19 @@ check in `test_isolated_clap_worker.cpp` fails. A refusal must keep the live
 snapshot; `fail_swap_edit_locked_` would silence the whole graph. Checkpoint
 before the node renders: `pause()` is terminal while a graph still renders it.
 
+**Every unsupported proxy call is terminal, so generic graph code must not make
+one.** The isolated slot answers `save_state()`, `set_parameter()` and similar
+calls by latching `unsupported` silence. Generic `SignalGraph` and
+`GraphSerializer` paths therefore check `is_isolated_plugin_slot` before
+forwarding: serialization refuses the whole graph (an identity-only file would
+reload the plugin in-process) and `set_node_parameter` returns false. A new
+generic path that calls into a plugin slot needs the same check.
+
+**The callback reads a completion once.** `CallbackEndpoint::render` copies the
+completion block out of the shared mapping before validating it and emits from
+that copy; reading the mapping twice lets a worker swap in non-finite samples
+after the check.
+
 
 ## Live retuning at a callback boundary
 
