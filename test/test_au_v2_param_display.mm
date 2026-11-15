@@ -396,6 +396,74 @@ TEST_CASE("AU v2 GetParameterInfo maps range, default, and unit",
     REQUIRE_THAT(plain.defaultValue, WithinAbs(0.5f, 0.001f));
 }
 
+namespace {
+
+constexpr pulp::state::ParamID kMetaId = 1;
+constexpr pulp::state::ParamID kDependentId = 2;
+
+void declare_meta_params(pulp::state::StateStore& store) {
+    pulp::state::ParamInfo meta{.id = kMetaId, .name = "Mode", .range = {0.0f, 3.0f, 0.0f, 1.0f}};
+    meta.affects_others = true;
+    store.add_parameter(meta);
+    store.add_parameter({.id = kDependentId, .name = "Depth", .range = {0.0f, 1.0f, 0.5f, 0.0f}});
+}
+
+} // namespace
+
+TEST_CASE("AU v2 publishes IsGlobalMeta only for a parameter that affects others",
+          "[au][au-v2][params][metadata][meta]") {
+    pulp::state::StateStore store;
+    declare_meta_params(store);
+
+    const auto flags_for = [&store](pulp::state::ParamID id) {
+        AudioUnitParameterInfo info{};
+        REQUIRE(pulp::format::au::fill_parameter_info(store, kAudioUnitScope_Global,
+                                                      static_cast<AudioUnitParameterID>(id), info,
+                                                      false) == noErr);
+        return info.flags;
+    };
+    REQUIRE((flags_for(kMetaId) & kAudioUnitParameterFlag_IsGlobalMeta) != 0);
+    REQUIRE((flags_for(kDependentId) & kAudioUnitParameterFlag_IsGlobalMeta) == 0);
+}
+
+TEST_CASE("AU v2 maps Toggle to Boolean and Enum to Indexed",
+          "[au][au-v2][params][metadata][unit]") {
+    pulp::state::StateStore store;
+    store.add_parameter({.id = 1,
+                         .name = "On",
+                         .range = {0.0f, 1.0f, 0.0f, 1.0f},
+                         .kind = pulp::state::ParamKind::Toggle});
+    pulp::state::ParamInfo mode{.id = 2,
+                                .name = "Mode",
+                                .range = {0.0f, 2.0f, 0.0f, 1.0f},
+                                .kind = pulp::state::ParamKind::Enum};
+    mode.value_labels = {"A", "B", "C"};
+    store.add_parameter(mode);
+    store.add_parameter({.id = 3, .name = "Two State", .range = {0.0f, 1.0f, 0.0f, 1.0f}});
+
+    const auto unit_for = [&store](pulp::state::ParamID id) {
+        AudioUnitParameterInfo info{};
+        REQUIRE(pulp::format::au::fill_parameter_info(store, kAudioUnitScope_Global,
+                                                      static_cast<AudioUnitParameterID>(id), info,
+                                                      false) == noErr);
+        return info.unit;
+    };
+    REQUIRE(unit_for(1) == kAudioUnitParameterUnit_Boolean);
+    REQUIRE(unit_for(2) == kAudioUnitParameterUnit_Indexed);
+    // An undeclared two-state parameter is not guessed to be Boolean.
+    REQUIRE(unit_for(3) == kAudioUnitParameterUnit_Generic);
+
+    // A continuous 0..1 parameter is not two-state, and a Toggle spanning more
+    // than two values is not Boolean.
+    store.add_parameter({.id = 4, .name = "Amount", .range = {0.0f, 1.0f, 0.5f, 0.0f}});
+    store.add_parameter({.id = 5,
+                         .name = "Wide Toggle",
+                         .range = {0.0f, 4.0f, 0.0f, 1.0f},
+                         .kind = pulp::state::ParamKind::Toggle});
+    REQUIRE(unit_for(4) == kAudioUnitParameterUnit_Generic);
+    REQUIRE(unit_for(5) == kAudioUnitParameterUnit_Generic);
+}
+
 TEST_CASE("AU v2 republishes display names without changing parameter identity",
           "[au][au-v2][instrument][params][metadata]") {
     ScopedFactory factory;

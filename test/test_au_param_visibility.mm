@@ -27,6 +27,8 @@ constexpr pulp::state::ParamID kVisibleId = 1;
 constexpr pulp::state::ParamID kHiddenId = 2;
 constexpr pulp::state::ParamID kMeterId = 3;
 constexpr pulp::state::ParamID kNoAutoId = 4;
+constexpr pulp::state::ParamID kMetaId = 5;
+constexpr pulp::state::ParamID kToggleId = 6;
 
 // One processor declaring the three attributes alongside an ordinary
 // parameter, so each projection is asserted against a live adapter rather than
@@ -64,6 +66,16 @@ class VisibilityProcessor : public pulp::format::Processor {
             .id = kNoAutoId, .name = "Quality", .range = {0.0f, 1.0f, 0.0f, 0.0f}};
         no_auto.automatable = false;
         store.add_parameter(no_auto);
+
+        pulp::state::ParamInfo meta{
+            .id = kMetaId, .name = "Mode", .range = {0.0f, 3.0f, 0.0f, 1.0f}};
+        meta.affects_others = true;
+        store.add_parameter(meta);
+
+        store.add_parameter({.id = kToggleId,
+                             .name = "On",
+                             .range = {0.0f, 1.0f, 0.0f, 1.0f},
+                             .kind = pulp::state::ParamKind::Toggle});
     }
 
     void prepare(const pulp::format::PrepareContext&) override {}
@@ -130,6 +142,17 @@ TEST_CASE("AU v2 GetParameterInfo projects declared hidden and read-only paramet
         REQUIRE((info.flags & kAudioUnitParameterFlag_IsReadable) != 0);
     }
 
+    SECTION("Boolean is published only for a discrete two-state parameter") {
+        REQUIRE(info_for(kToggleId).unit == kAudioUnitParameterUnit_Boolean);
+        REQUIRE(info_for(kVisibleId).unit == kAudioUnitParameterUnit_Generic);
+    }
+
+    SECTION("IsGlobalMeta is published only for a parameter that affects others") {
+        REQUIRE((info_for(kMetaId).flags & kAudioUnitParameterFlag_IsGlobalMeta) != 0);
+        for (auto id : {kVisibleId, kHiddenId, kMeterId, kNoAutoId})
+            REQUIRE((info_for(id).flags & kAudioUnitParameterFlag_IsGlobalMeta) == 0);
+    }
+
     SECTION("a non-automatable parameter is flagged NonRealTime but stays writable") {
         const auto info = info_for(kNoAutoId);
         REQUIRE((info.flags & kAudioUnitParameterFlag_NonRealTime) != 0);
@@ -178,6 +201,19 @@ TEST_CASE("AU v3 parameter tree projects declared hidden and read-only parameter
     const auto no_auto = flags_for(kNoAutoId);
     REQUIRE((no_auto & kAudioUnitParameterFlag_NonRealTime) != 0);
     REQUIRE((no_auto & kAudioUnitParameterFlag_IsWritable) != 0);
+
+    const auto unit_for = [tree](pulp::state::ParamID id) {
+        AUParameter* param = [tree parameterWithAddress:static_cast<AUParameterAddress>(id)];
+        REQUIRE(param != nil);
+        return param.unit;
+    };
+    REQUIRE(unit_for(kToggleId) == kAudioUnitParameterUnit_Boolean);
+    // A continuous 0..1 parameter is not two-state.
+    REQUIRE(unit_for(kVisibleId) == kAudioUnitParameterUnit_Generic);
+
+    REQUIRE((flags_for(kMetaId) & kAudioUnitParameterFlag_IsGlobalMeta) != 0);
+    for (auto id : {kVisibleId, kHiddenId, kMeterId, kNoAutoId})
+        REQUIRE((flags_for(id) & kAudioUnitParameterFlag_IsGlobalMeta) == 0);
 
     [unit release];
 }
