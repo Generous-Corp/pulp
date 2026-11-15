@@ -27,7 +27,7 @@ void usage() {
     std::cout << "Usage: pulp graph "
                  "<catalog|inspect|validate|explain|render|probe|report|fmt|canonicalize|save> "
                  "<file.pulpgraph|file.pat> [--json] [--notation] [--output path]\n";
-    std::cout << "diff: pulp graph diff BEFORE.pulpgraph AFTER.pulpgraph [--json]; compares two "
+    std::cout << "diff: pulp graph diff <before.pulpgraph> <after.pulpgraph> [--json]; compares two "
                  "saved-identity documents by logical node identity (read-only)\n";
     std::cout << "render: --input file.wav (required when the graph has audio_in) "
                  "[--output out.wav] [--frames N]; reports frames, sample_rate and peak\n";

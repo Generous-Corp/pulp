@@ -71,7 +71,7 @@
         {
           "kind": "cli_definition",
           "path": "tools/cli/cmd_graph.cpp",
-          "needles": ["diff: pulp graph diff BEFORE.pulpgraph AFTER.pulpgraph [--json]"]
+          "needles": ["diff: pulp graph diff <before.pulpgraph> <after.pulpgraph> [--json]"]
         }
       ],
       "authority": {
