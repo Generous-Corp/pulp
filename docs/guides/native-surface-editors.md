@@ -75,6 +75,29 @@ and the density ratio is the backing scale. Documents that need
 density-scaled text should use `font-size` in `dp` (the example does this)
 rather than `px`.
 
+### Keys and window focus
+
+An RmlUi editor does not decide for itself whether a text field wants a key a
+host offers before its own accelerators. `pulp/rmlui_native/editor_keys.hpp`
+(with `pulp::format-core`) gives the two contract members as one call each:
+
+```cpp
+KeyDisposition offer_key(const EditorKeyEvent& e) override {
+    return pulp::rmlui_native::offer_editor_key(*ui_, e);
+}
+void focus_changed(bool focused) override {
+    pulp::rmlui_native::forward_editor_focus(*ui_, focused);
+}
+```
+
+`offer_key` returns `consumed` only while a text field has focus and takes the
+key: RmlUi consumed it, or it produced text, which is typed into the field. A
+command or control shortcut, a release and any key with no field focused go
+back to the host, so Space still reaches the transport. `focus_changed(false)`
+blurs a focused text field and hands the host's keyboard back;
+`focus_changed(true)` focuses it again, found by its `id`, so a field without
+one is not restored.
+
 ## Proof
 
 - `pulp-test-native-metal-surface`, `-frame-pump`, `-input` and

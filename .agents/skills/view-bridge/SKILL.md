@@ -68,6 +68,14 @@ it and its tests, and both look like bugs until you know them:
   leaves a host's key routing (Musical Typing) dead, as the plug-in host's
   key-focus etiquette below describes.
 
+- **An RmlUi editor forwards `offer_key` and `focus_changed` through
+  `pulp/rmlui_native/editor_keys.hpp`.** The default `offer_key` returns
+  `forward`, so a text field in an RmlUi editor loses Space to the host's
+  transport unless the editor answers; `offer_editor_key` applies the shared
+  policy (take the key only while a text field has focus) and types the key's
+  character. A field needs an `id` to be refocused after the window regains
+  focus.
+
 `pulp::native::GlSurface` is the OpenGL counterpart for Windows and X11. On
 macOS only its offscreen backend exists (CGL into a framebuffer object), for
 tests and offline capture. Two things about it are easy to get wrong:

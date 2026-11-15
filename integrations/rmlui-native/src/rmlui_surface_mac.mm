@@ -111,6 +111,8 @@ struct RmlUiSurface::Impl {
     std::uint32_t height_px = 0;
     double scale = 1.0;
     bool text_focus = false;
+    // The text field blurred when the window lost focus, by id.
+    std::string refocus_id;
 
     Impl(vellum::rmlui::AssetProvider& a, Rml::RenderInterface& r, RendererHooks h,
          RmlUiSurfaceOptions o)
@@ -276,6 +278,7 @@ struct RmlUiSurface::Impl {
         pump.reset();
         surface.reset();
         text_focus = false;
+        refocus_id.clear();
         width_px = height_px = 0;
     }
 };
@@ -383,6 +386,56 @@ void RmlUiSurface::idle() {
     }
     if (resized)
         d.pump->request_frame();
+}
+
+bool RmlUiSurface::text_field_focused() const noexcept {
+    return impl_->text_focus;
+}
+
+bool RmlUiSurface::offer_key(const KeyEvent& event) {
+    auto& d = *impl_;
+    // The shared policy: with no text field focused the host goes first.
+    if (!d.context || route_key(event, d.text_focus) == KeyRoute::host)
+        return false;
+    bool taken = d.on_key(event);
+    // Text a key produced arrives as text, not as a key, so a host that
+    // consumed the key leaves it to the surface to type it.
+    const bool command = (event.modifiers & (modifier_command | modifier_control)) != 0;
+    if (event.kind == KeyKind::down && !command && !event.characters.empty()) {
+        const auto lead = static_cast<unsigned char>(event.characters.front());
+        if (lead >= 0x20 && lead != 0x7f) {
+            d.on_text(event.characters);
+            taken = true;
+        }
+    }
+    return taken;
+}
+
+void RmlUiSurface::set_window_focused(bool focused) {
+    auto& d = *impl_;
+    {
+        std::lock_guard lock(rmlui_mutex());
+        auto* ctx = d.context ? d.context->context() : nullptr;
+        if (!ctx)
+            return;
+        vellum::rmlui::NativeContext::Scope scope(*d.context);
+        if (!focused) {
+            Rml::Element* field = ctx->GetFocusElement();
+            d.refocus_id = takes_text(field) ? field->GetId() : Rml::String();
+            if (!d.refocus_id.empty())
+                field->Blur();
+        } else if (!d.refocus_id.empty()) {
+            for (int i = 0; i < ctx->GetNumDocuments(); ++i) {
+                if (Rml::Element* field = ctx->GetDocument(i)->GetElementById(d.refocus_id)) {
+                    field->Focus();
+                    break;
+                }
+            }
+            d.refocus_id.clear();
+        }
+        d.sync_text_focus_locked();
+    }
+    request_frame();
 }
 
 void RmlUiSurface::request_frame() {

@@ -98,6 +98,19 @@ class RmlUiSurface {
 
     /// Main-thread tick: visibility and size follow the window.
     void idle();
+    /// True while an RmlUi text field holds the keyboard. Main thread.
+    bool text_field_focused() const noexcept;
+    /// A host offers `event` before acting on it itself (a transport shortcut
+    /// on Space, say). Returns true when the surface took it: a text field has
+    /// focus, and RmlUi consumed the key or the key produced text, which is
+    /// delivered to the field. Returns false, without touching RmlUi, when no
+    /// text field has focus, so the host keeps its shortcuts. Main thread.
+    bool offer_key(const pulp::native::KeyEvent& event);
+    /// The editor's window gained or lost keyboard focus. Losing it blurs a
+    /// focused text field (the caret stops showing and the host's keyboard is
+    /// handed back); gaining it focuses that field again, found by its `id`
+    /// attribute, so a field without one is not restored. Main thread.
+    void set_window_focused(bool focused);
     /// Draw one more frame (after a change the caller made through RmlUi).
     void request_frame();
 

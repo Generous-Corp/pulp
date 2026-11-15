@@ -7,6 +7,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/rmlui_native/editor_keys.hpp>
 #include <pulp/rmlui_native/rmlui_surface.hpp>
 
 #include <vellum/rmlui/assets.hpp>
@@ -440,5 +441,123 @@ TEST_CASE("the surface uses the device the caller's renderer was built on",
         REQUIRE_FALSE(view.layer.opaque);
         ui.detach();
         [window close];
+    }
+}
+
+namespace {
+
+std::string field_value(Editor& e) {
+    std::string value;
+    e.ui->with_context([&](Rml::Context& ctx) {
+        value = ctx.GetDocument(0)->GetElementById("field")->GetAttribute<Rml::String>("value", "");
+    });
+    return value;
+}
+
+void focus_field(Editor& e) {
+    [e.view() mouseDown:e.mouse(NSEventTypeLeftMouseDown, 190, 115)];
+    [e.view() mouseUp:e.mouse(NSEventTypeLeftMouseUp, 190, 115)];
+}
+
+pulp::format::EditorKeyEvent key_event(pulp::format::EditorKey key, char32_t character = 0,
+                                       std::uint8_t modifiers = 0) {
+    pulp::format::EditorKeyEvent event;
+    event.key = key;
+    event.character = character;
+    event.modifiers = modifiers;
+    return event;
+}
+
+} // namespace
+
+TEST_CASE("an offered key is taken only while a text field holds focus",
+          "[native-surface][rmlui][keys]") {
+    REQUIRE_METAL();
+    using pulp::format::EditorKey;
+    using pulp::format::KeyDisposition;
+    @autoreleasepool {
+        Editor e;
+        REQUIRE(e.attach());
+        REQUIRE(e.wait_for([&] { return e.ui->frames() > 0; }));
+
+        // No field focused: Space is the host's (transport), and RmlUi is not
+        // touched.
+        REQUIRE_FALSE(e.ui->text_field_focused());
+        REQUIRE(offer_editor_key(*e.ui, key_event(EditorKey::space, U' ')) ==
+                KeyDisposition::forward);
+        REQUIRE(field_value(e) == "ab");
+
+        focus_field(e);
+        REQUIRE(e.ui->text_field_focused());
+        // Space is typed into the field and the host does not see it.
+        REQUIRE(offer_editor_key(*e.ui, key_event(EditorKey::space, U' ')) ==
+                KeyDisposition::consumed);
+        REQUIRE(offer_editor_key(*e.ui, key_event(EditorKey::none, U'\u00e9')) ==
+                KeyDisposition::consumed);
+        REQUIRE(field_value(e) == "ab \xc3\xa9");
+        // An editing key reaches RmlUi as a key.
+        REQUIRE(offer_editor_key(*e.ui, key_event(EditorKey::backspace)) ==
+                KeyDisposition::consumed);
+        REQUIRE(field_value(e) == "ab ");
+        // A command shortcut is the host's, and types nothing.
+        REQUIRE(offer_editor_key(*e.ui, key_event(EditorKey::none, U's',
+                                                  pulp::format::editor_modifier_command)) ==
+                KeyDisposition::forward);
+        REQUIRE(field_value(e) == "ab ");
+        // A release types nothing.
+        auto release = key_event(EditorKey::space, U' ');
+        release.is_down = false;
+        offer_editor_key(*e.ui, release);
+        REQUIRE(field_value(e) == "ab ");
+        e.ui->detach();
+    }
+}
+
+TEST_CASE("contract keys map to pulp-native keys", "[native-surface][rmlui][keys]") {
+    using pulp::format::EditorKey;
+    using pulp::native::Key;
+    REQUIRE(native_key_for(EditorKey::space) == Key::space);
+    REQUIRE(native_key_for(EditorKey::delete_forward) == Key::delete_forward);
+    REQUIRE(native_key_for(EditorKey::page_down) == Key::page_down);
+    REQUIRE(native_key_for(EditorKey::none) == Key::unknown);
+    const auto mapped = native_key_event_for(
+        key_event(EditorKey::none, 0x1F600,
+                  pulp::format::editor_modifier_shift | pulp::format::editor_modifier_alt));
+    REQUIRE(mapped.characters == "\xF0\x9F\x98\x80");
+    REQUIRE(mapped.modifiers == (pulp::native::modifier_shift | pulp::native::modifier_option));
+}
+
+TEST_CASE("losing window focus blurs the text field and gaining it restores it",
+          "[native-surface][rmlui][keys]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        Editor e;
+        REQUIRE(e.attach());
+        REQUIRE(e.wait_for([&] { return e.ui->frames() > 0; }));
+        focus_field(e);
+        REQUIRE(e.ui->text_field_focused());
+        REQUIRE(e.ui->surface()->text_focus());
+
+        forward_editor_focus(*e.ui, false);
+        REQUIRE_FALSE(e.ui->text_field_focused());
+        REQUIRE_FALSE(e.ui->surface()->text_focus());
+        bool blurred = false;
+        e.ui->with_context([&](Rml::Context& ctx) {
+            blurred = ctx.GetFocusElement() != ctx.GetDocument(0)->GetElementById("field");
+        });
+        REQUIRE(blurred);
+
+        forward_editor_focus(*e.ui, true);
+        REQUIRE(e.ui->text_field_focused());
+        REQUIRE(e.ui->surface()->text_focus());
+
+        // With no field focused, gaining focus restores nothing.
+        [e.view() mouseDown:e.mouse(NSEventTypeLeftMouseDown, 250, 180)];
+        [e.view() mouseUp:e.mouse(NSEventTypeLeftMouseUp, 250, 180)];
+        REQUIRE_FALSE(e.ui->text_field_focused());
+        forward_editor_focus(*e.ui, false);
+        forward_editor_focus(*e.ui, true);
+        REQUIRE_FALSE(e.ui->text_field_focused());
+        e.ui->detach();
     }
 }
