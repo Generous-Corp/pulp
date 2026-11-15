@@ -1369,3 +1369,6 @@ pulp_test_spawns(pulp-test-group-app-host NONE REASON "loads the in-process buil
 # Reviewed plugin-loader calls (tools/cmake/PulpTestData.cmake).
 pulp_test_spawns(pulp-test-plugin-manager-panel NONE REASON "drops rows whose paths under /plugins, /p and /nonexistent do not exist, so the loader loads nothing the tree builds")
 pulp_test_spawns(pulp-test-host-signal-graph NONE REASON "adds in-memory PluginSlot instances and one PluginInfo whose path /tmp/not-a-plugin.clap does not exist, so it loads nothing the tree builds")
+
+# Spectral asset save/replay persistence and its installed-SDK consumer.
+include("${CMAKE_CURRENT_LIST_DIR}/a3_spectral_replay_tests.cmake")
