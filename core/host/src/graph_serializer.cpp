@@ -147,7 +147,10 @@ inline double get_double(const V& v) {
 // lane once the public registry contract is available.
 // v5 is emitted only when a graph needs typed ports or Control edges. Older
 // readers refuse the envelope before they could reinterpret those as Audio.
-constexpr int kFormatVersion = 5;
+// v6 is emitted only for graphs carrying spectral nodes and embedded
+// spectral_assets. A v5 reader would otherwise load those nodes as unresolved
+// Custom nodes and drop the assets on re-save, so it must refuse the version.
+constexpr int kFormatVersion = 6;
 // The saved-identity envelope is format-independent and first shipped on v4,
 // so inspection admits every format from v4 through the current writer. A v4
 // envelope keeps its semantic digest when the writer advances to v5.
@@ -167,13 +170,13 @@ bool migrate_graph_v1_to_v2(const std::string& source_json,
 bool migrate_graph_v2_to_v3(const std::string& source_json, std::string& migrated_json);
 bool migrate_graph_v3_to_v4(const std::string& source_json, std::string& migrated_json);
 bool migrate_graph_v4_to_v5(const std::string& source_json, std::string& migrated_json);
+bool migrate_graph_v5_to_v6(const std::string& source_json, std::string& migrated_json);
 
 std::vector<GraphMigrationEntry>& graph_migrations() {
     static std::vector<GraphMigrationEntry> migrations = {
-        {1, 2, migrate_graph_v1_to_v2},
-        {2, 3, migrate_graph_v2_to_v3},
-        {3, 4, migrate_graph_v3_to_v4},
-        {4, 5, migrate_graph_v4_to_v5},
+        {1, 2, migrate_graph_v1_to_v2}, {2, 3, migrate_graph_v2_to_v3},
+        {3, 4, migrate_graph_v3_to_v4}, {4, 5, migrate_graph_v4_to_v5},
+        {5, 6, migrate_graph_v5_to_v6},
     };
     return migrations;
 }
@@ -282,6 +285,13 @@ bool migrate_graph_v3_to_v4(const std::string& source_json, std::string& migrate
 bool migrate_graph_v4_to_v5(const std::string& source_json, std::string& migrated_json) {
     migrated_json = source_json;
     return replace_format_version(migrated_json, 4, 5);
+}
+
+bool migrate_graph_v5_to_v6(const std::string& source_json, std::string& migrated_json) {
+    // v6 is additive: it only admits spectral nodes and spectral_assets, which
+    // a v5 document cannot carry. Ordinary v5 files advance in memory only.
+    migrated_json = source_json;
+    return replace_format_version(migrated_json, 5, 6);
 }
 
 const GraphMigrationEntry* find_graph_migration(int from_version) {

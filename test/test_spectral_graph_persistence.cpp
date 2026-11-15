@@ -134,7 +134,7 @@ TEST_CASE("Spectral saved graph reproduces independent audio and absolute live h
     const auto original = fixture();
     const auto json = GraphSerializer::to_json(*original);
     REQUIRE_FALSE(json.empty());
-    REQUIRE(json.find("\"format_version\": 5") != std::string::npos);
+    REQUIRE(json.find("\"format_version\": 6") != std::string::npos);
     for (const auto& control : {timeline(), timeline(0), timeline(1), timeline(0.37f)}) {
         const auto expected = asset_oracle::expected(inputs().a, inputs().b, control);
         std::vector<float> reference;
@@ -196,8 +196,9 @@ TEST_CASE("Spectral asset corruption and unsupported contracts preserve the old 
     SignalGraph positive;
     REQUIRE(GraphSerializer::from_json(positive, good).ok);
     const std::vector<std::pair<std::string, std::string>> mutations{
-        {"\"format_version\": 5", "\"format_version\": 4"},
-        {"\"format_version\": 5", "\"format_version\": 6"},
+        {"\"format_version\": 6", "\"format_version\": 4"},
+        {"\"format_version\": 6", "\"format_version\": 5"},
+        {"\"format_version\": 6", "\"format_version\": 7"},
         {"pulp.analyzed-spectral-asset", "pulp.unsupported-spectral-asset"},
         {"\"version\": 1", "\"version\": 2"},
         {"\"source_samples\": 769", "\"source_samples\": 770"},
@@ -347,4 +348,44 @@ TEST_CASE("Spectral saved graph retains editor layout and refuses mixed opaque s
     REQUIRE(result.editor_layout.at(id) == std::pair{12.5f, -9.25f});
     graph->add_gain_node("unsupported_mix");
     REQUIRE(GraphSerializer::to_json(*graph).empty());
+}
+
+namespace {
+// The admission rule of the last pre-spectral reader (format 5): any integer
+// format_version up to 5 is migrated forward and loaded, and anything newer is
+// refused as "unsupported graph format_version". That reader resolves unknown
+// spectral node types as unresolved Custom nodes and ignores spectral_assets,
+// so a spectral save it admits would lose the assets on re-save.
+bool pre_spectral_reader_admits(const std::string& json) {
+    const auto root = choc::json::parse(json);
+    const auto& version = root["format_version"];
+    if (!version.isInt32() && !version.isInt64())
+        return false;
+    constexpr std::int64_t kLastPreSpectralFormatVersion = 5;
+    return version.getInt64() <= kLastPreSpectralFormatVersion;
+}
+} // namespace
+
+TEST_CASE("Spectral saves use a graph format the pre-spectral reader refuses",
+          "[host][spectral][replay][compat]") {
+    REQUIRE(GraphSerializer::current_format_version() == 6);
+    for (bool stages : {false, true}) {
+        const auto json = GraphSerializer::to_json(*fixture(stages));
+        REQUIRE_FALSE(json.empty());
+        CHECK_FALSE(pre_spectral_reader_admits(json));
+        SignalGraph loaded;
+        const auto result = GraphSerializer::from_json(loaded, json);
+        INFO(result.error);
+        CHECK(result.ok);
+    }
+
+    // Ordinary graphs keep their existing byte-stable formats, so the version
+    // bump does not make pre-spectral readers refuse graphs they understand.
+    SignalGraph ordinary;
+    const auto input = ordinary.add_input_node(2, "in");
+    const auto output = ordinary.add_output_node(2, "out");
+    REQUIRE(ordinary.connect(input, 0, output, 0));
+    const auto plain = GraphSerializer::to_json(ordinary);
+    REQUIRE_FALSE(plain.empty());
+    CHECK(pre_spectral_reader_admits(plain));
 }

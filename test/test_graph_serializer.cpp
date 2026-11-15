@@ -116,16 +116,16 @@ TEST_CASE("GraphSerializer inspection refuses identity and parser hazards",
 TEST_CASE("GraphSerializer refuses an incomplete saved identity envelope",
           "[host][serializer][g3][d5]") {
     // identity_schema without logical_identities/nodes is not a complete envelope.
-    for (const int version : {4, 5}) {
+    for (const int version : {4, 5, 6}) {
         const auto doc = std::string(R"({"identity_schema":"pulp.graph.saved-identity.v6",)") +
                          R"("bindings":{},"format_version":)" + std::to_string(version) + "}";
         const auto refused = GraphSerializer::inspect_document(doc);
         CHECK(refused.refusal == GraphDocumentRefusal::IdentityEnvelopeInvalid);
     }
-    REQUIRE(GraphSerializer::current_format_version() == 5);
+    REQUIRE(GraphSerializer::current_format_version() == 6);
 
     const auto next = GraphSerializer::inspect_document(
-        R"({"identity_schema":"pulp.graph.saved-identity.v6","bindings":{},"format_version":6})");
+        R"({"identity_schema":"pulp.graph.saved-identity.v6","bindings":{},"format_version":7})");
     CHECK(next.refusal == GraphDocumentRefusal::UnsupportedFutureVersion);
 }
 
@@ -1681,7 +1681,7 @@ TEST_CASE("GraphSerializer fails closed before loading missing or future graph v
 
     SignalGraph future_version;
     auto future_result = GraphSerializer::from_json(future_version, R"({
-  "format_version": 6,
+  "format_version": 7,
   "nodes": [
     {
       "id": 1,
@@ -1694,7 +1694,7 @@ TEST_CASE("GraphSerializer fails closed before loading missing or future graph v
   "connections": []
 })");
     REQUIRE_FALSE(future_result.ok);
-    REQUIRE(future_result.error.find("unsupported graph format_version 6") != std::string::npos);
+    REQUIRE(future_result.error.find("unsupported graph format_version 7") != std::string::npos);
     REQUIRE(future_version.nodes().empty());
 }
 
@@ -1729,7 +1729,8 @@ TEST_CASE("GraphSerializer dispatches graph format migrations before materializi
             const auto pos = migrated_json.find("\"format_version\": 0");
             if (pos == std::string::npos) return false;
             migrated_json.replace(pos, std::string("\"format_version\": 0").size(),
-                                  "\"format_version\": 5");
+                                  "\"format_version\": " +
+                                      std::to_string(GraphSerializer::current_format_version()));
             return true;
         }));
 
@@ -1763,7 +1764,7 @@ TEST_CASE("GraphSerializer rejects graph migrations that do not advance versions
 
 TEST_CASE("GraphSerializer rejects invalid graph migration registrations",
           "[host][serializer][migration]") {
-    REQUIRE(GraphSerializer::current_format_version() == 5);
+    REQUIRE(GraphSerializer::current_format_version() == 6);
     REQUIRE_FALSE(GraphSerializer::register_migration(
         2, 2,
         [](const std::string& source_json, std::string& migrated_json) {

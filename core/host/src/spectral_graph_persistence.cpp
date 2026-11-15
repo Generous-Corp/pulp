@@ -143,7 +143,7 @@ std::string write(const SignalGraph& graph,
             graph.connections().size() > 512)
             return {};
         auto root = choc::value::createObject("PulpGraph");
-        root.addMember("format_version", int64_t(5));
+        root.addMember("format_version", int64_t(6));
         auto nodes = choc::value::createEmptyArray();
         std::map<std::string, Value> assets;
         std::size_t encoded_charge = 0, retained_charge = 0;
@@ -301,8 +301,8 @@ Candidate read(std::string_view json) {
         if (!candidate.handled)
             return candidate;
         std::uint64_t version = 0;
-        if (!uint(root["format_version"], version) || version != 5)
-            return fail("spectral graph requires format_version 5");
+        if (!uint(root["format_version"], version) || version != 6)
+            return fail("spectral graph requires format_version 6");
         if (!fields(root, {"format_version", "nodes", "connections", "spectral_assets",
                            "sample_regions", "processors"}))
             return fail("unsupported spectral graph envelope member");

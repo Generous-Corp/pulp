@@ -598,16 +598,16 @@ TEST_CASE("restored Control index graphs prepare and future formats name the fix
     auto future = json;
     const auto at = future.find("\"format_version\": 5");
     REQUIRE(at != std::string::npos);
-    future.replace(at, std::string("\"format_version\": 5").size(), "\"format_version\": 6");
+    future.replace(at, std::string("\"format_version\": 5").size(), "\"format_version\": 7");
     SignalGraph refused;
     const auto newer = GraphSerializer::from_json(refused, future);
     REQUIRE_FALSE(newer.ok);
-    CHECK(newer.error.find("unsupported graph format_version 6") != std::string::npos);
-    CHECK(newer.error.find("upgrade Pulp, or re-export the graph at format 5 or lower") !=
+    CHECK(newer.error.find("unsupported graph format_version 7") != std::string::npos);
+    CHECK(newer.error.find("upgrade Pulp, or re-export the graph at format 6 or lower") !=
           std::string::npos);
 
     const auto inspected = GraphSerializer::inspect_document(
-        R"({"identity_schema":"pulp.graph.saved-identity.v6","format_version":6})");
+        R"({"identity_schema":"pulp.graph.saved-identity.v6","format_version":7})");
     CHECK(inspected.refusal == GraphDocumentRefusal::UnsupportedFutureVersion);
     CHECK(inspected.detail.find("upgrade Pulp") != std::string::npos);
 }

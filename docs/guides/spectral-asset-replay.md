@@ -42,7 +42,10 @@ The spectral persistence profile admits Audio boundaries, the fused asset
 source, existing identity/mask stages and synthesis. Mixed hosted-plugin,
 Processor, opaque Custom state, sample-region and unsupported edge contracts
 are refused. Existing non-spectral serialization keeps its previous writer
-bytes and restore contract. Older readers reject format 5.
+bytes and restore contract. Spectral graphs are written at format 6, a version
+format-5 readers refuse instead of loading spectral nodes as unresolved Custom
+nodes and dropping the embedded assets on re-save. Ordinary v5 files migrate to
+v6 in memory without changing their bytes.
 
 Before replacing a destination, the reader validates the complete envelope,
 asset digests and references, exact contracts and shapes, typed connections,

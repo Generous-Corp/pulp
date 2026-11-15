@@ -185,8 +185,10 @@ Dependency status, checked against GitHub and `origin/main`:
   Notation still refuses spectral nodes by design; the catalog binding and
   notation spelling planned above were never implemented on this lane and are
   not part of this revival.
-- `kFormatVersion` is 5 on main; the spectral envelope writes and reads
-  format 5 through the same dispatch as before.
+- `kFormatVersion` was 5 on main. Review found that a format-5 reader would
+  admit a format-5 spectral save as unresolved Custom nodes and drop the
+  assets on re-save, so the spectral envelope now writes and reads format 6,
+  with an identity v5 -> v6 migration for ordinary files.
 - The finite spectral stream rule
   ([PR 12319](https://github.com/Generous-Corp/pulp/pull/12319)) was OPEN at
   `399c5e5b9cfe`; this branch merges that head, so it is stacked on that PR.
