@@ -52,6 +52,14 @@
 #     written reason and an owner, and no allowlist entry outlives its raise)
 #   - ctest label-exclusion (no Catch2 suite is registered only behind a label
 #     that both the required gate and the coverage lane drop)
+#   - the required sync job's own commands (every `python3 <script>` command of
+#     `Enforce version & skill sync` that no block here runs: docs-sync,
+#     screenshot-sync, release-tag report, CLI/MCP parity, source contracts and
+#     the gate-script fixture tests; read from version-skill-check.yml so a new
+#     step reaches this script. tools/ci/sync_job_parity.json names the rest)
+#   - drift-fast (the required `drift-fast` job's selection,
+#     tools/ci/drift_fast.json: the pr-fast tier plus its named tests; a test
+#     that needs a configured build is listed NOT CHECKED, as the job lists it)
 #   - script-test inputs (test/ctest_script_inputs/ matches the ctest
 #     inventory for scripts the diff touches; configures build-gate, no
 #     compile, when no current build exists — PULP_GATES_NO_CONFIGURE=1 opts out;
@@ -188,8 +196,8 @@ if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then
     exit 2
 fi
 
-# PR title detection for --require-bump-for-fix-feat. Mirrors how the CI
-# workflow sets GITHUB_PR_TITLE. Local-only nuance: if the branch has
+# PR title detection (the sync job's release-tag report reads it). Mirrors how
+# the CI workflow sets GITHUB_PR_TITLE. Local-only nuance: if the branch has
 # NO commits ahead of base, the tip commit IS the base commit, and using
 # its subject would falsely trip the gate when the base happens to be a
 # fix:/feat: merge. So we only synthesize a title from the FIRST commit
@@ -357,8 +365,13 @@ fi
 # ── 2. version-bump ────────────────────────────────────────────────────────
 echo "" >&2
 echo "▸ version-bump check (fix:/feat: titles require a chore: bump versions commit)" >&2
+# CI's pull_request run passes --accept-intent-trailers here (a release-worthy PR
+# declares `Version-Bump: <surface>=<level>` and the post-merge bot assigns the
+# number). It is NOT paired with --require-bump-for-fix-feat: that flag accepts
+# only a bump commit or a skip trailer, so it would fail an intent-only PR that
+# CI passes (tools/ci/sync_job_parity.json pins this command to CI's).
 if ! "$PYTHON" "$VBC" --base "$BASE" --config "$CFG" --mode=report \
-        --require-bump-for-fix-feat; then
+        --accept-intent-trailers; then
     fail=1
 fi
 
@@ -685,8 +698,12 @@ if [ "$gate_host_builds_skipped" -eq 0 ] && [ -f "$ROOT/tools/ci/source_selftest
             pr-fast)
                 # `auto`: PULP_GATES_BUILD_DIR, else the newest current Ninja
                 # build*/ in the checkout; the lane names the one it chose.
-                echo "▸ ctest pr-fast tier (whole tier; from a configured build when one is usable, else the manifests)" >&2
-                src_lane_args=(--ctest-label pr-fast --build-dir auto) ;;
+                # The required `drift-fast` job's own selection
+                # (tools/ci/drift_fast.json): the pr-fast tier plus its named
+                # tests. A listed test that cannot run here is printed as NOT
+                # CHECKED with why, as the job prints it.
+                echo "▸ drift-fast selection (pr-fast tier + tools/ci/drift_fast.json tests; from a configured build when one is usable, else the manifests)" >&2
+                src_lane_args=(--drift-fast --build-dir auto) ;;
             ctest-python)
                 echo "▸ other ctest-registered Python contracts (diff-scoped; merge-group only in CI)" >&2
                 src_lane_args=(--ctest-python) ;;
@@ -708,6 +725,45 @@ if [ "$gate_host_builds_skipped" -eq 0 ] && [ -f "$ROOT/tools/ci/source_selftest
             "$src_selftest_log" >>"$not_checked_log"
         rm -f "$src_selftest_log"
     done
+fi
+
+# ── 7a-sync. the required sync job's own commands ─────────────────────────
+# `Enforce version & skill sync` (.github/workflows/version-skill-check.yml)
+# runs more than the blocks above: the docs-sync, screenshot-sync, release-tag,
+# CLI/MCP-parity and source-contract checks, and every gate-script fixture test.
+# Those used to run only there, and failed a push the local gates had called
+# clean. This lane reads every `python3 <script>` command from that job and
+# runs the ones no block above runs, with CI's own arguments, so a step added
+# to the workflow reaches this script with no edit here
+# (tools/ci/sync_job_parity.json names the ones gates.sh runs itself;
+# tools/scripts/test_gates_sync_parity.py fails when the two disagree). Every
+# command runs every time except the two the manifest names as minutes long,
+# which run when the diff can reach them. A failing command is not re-run on the
+# base here: CI fails the same command. A gate host refuses local suites, so
+# there the checks run (a second each) and the fixture tests are listed NOT
+# CHECKED. PULP_SKIP_SOURCE_SELFTESTS=1 skips the lane.
+if [ -f "$ROOT/tools/ci/sync_job_parity.json" ] && [ "${PULP_SKIP_SOURCE_SELFTESTS:-0}" != "1" ]; then
+    echo "" >&2
+    sync_job_args=()
+    if [ "$gate_host_builds_skipped" -eq 1 ]; then
+        sync_job_args=(--sync-job-checks-only)
+        echo "▸ required sync job's checks (read from version-skill-check.yml; docs-sync, screenshot-sync, release tags, CLI/MCP parity, source contracts; gate host: fixture tests not run)" >&2
+    else
+        echo "▸ required sync job's own commands (read from version-skill-check.yml; docs-sync, screenshot-sync, release tags, CLI/MCP parity, source contracts, gate-script tests)" >&2
+    fi
+    sync_job_log="$(mktemp "${TMPDIR:-/tmp}/pulp-gates-sync-job.XXXXXX")"
+    sync_job_base="$(git -C "$ROOT" merge-base "$BASE" HEAD)"
+    if "$PYTHON" "$ROOT/tools/ci/source_selftests.py" run --sync-job "$sync_job_base" \
+            --pr-title "${GITHUB_PR_TITLE:-}" ${sync_job_args[@]+"${sync_job_args[@]}"} \
+            ${PULP_BUILD_JOBS:+--jobs "$PULP_BUILD_JOBS"} >"$sync_job_log" 2>&1; then
+        sed -n 's/^source-selftests: /  source-selftests: /p' "$sync_job_log" | tail -n 12 >&2
+    else
+        tail -n 60 "$sync_job_log" >&2
+        echo "  sync-job: failing — the required \`Enforce version & skill sync\` check runs these; fix before pushing." >&2
+        fail=1
+    fi
+    sed -n "s/^source-selftests: \(NOT CHECKED locally: .*\)/[sync-job] \1/p" "$sync_job_log" >>"$not_checked_log"
+    rm -f "$sync_job_log"
 fi
 
 # ── 7a-bis. setup.sh shared-source-cache tests ─────────────────────────────

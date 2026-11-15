@@ -4,10 +4,12 @@
   "entry": "tools/ci/source_selftests.py",
   "inputs": [
    ".github/workflows/build.yml",
+   "docs/status",
    "docs/status/consumption-profiles.json",
    "docs/status/consumption-profiles.schema.json",
    "test/cmake/pr_fast_tests.cmake",
    "tools/ci/ctest_gate_args.py",
+   "tools/ci/drift_fast.py",
    "tools/ci/install_visual_python_deps.sh",
    "tools/ci/source_selftests.json",
    "tools/ci/source_selftests.py",
