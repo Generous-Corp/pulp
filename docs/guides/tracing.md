@@ -90,6 +90,51 @@ endif()
 `PULP_HAS_TRACING` is set from `if(TARGET Pulp::tracing)`, and that target is
 exported only under `PULP_TRACING=ON`. It is evidence, not a claim.
 
+### Starting a session from code
+
+A test hook or a plug-in can capture without the CLI or environment variables.
+The controller in `<pulp/runtime/trace_session.hpp>` has the same API in both
+build configurations; against an untraced SDK every call reports that tracing
+is unavailable, so no `#ifdef` is needed:
+
+```cpp
+#include <pulp/runtime/trace.hpp>
+#include <pulp/runtime/trace_session.hpp>
+
+using pulp::runtime::Tracing;
+auto started = Tracing::start_exclusive({"lifecycle"}, "/tmp/hook.pftrace");
+PULP_TRACE_SCOPE_NAMED("lifecycle", "editor_open");
+// ...
+if (started.status == pulp::runtime::TraceStartStatus::Started)
+    Tracing::stop_owned(*started.ownership);  // flushes; returns {ok, path, bytes}
+```
+
+`start_exclusive` reports `AlreadyActive` when another owner (the CLI, an
+inspector session, `PULP_TRACE_PATH`) already holds the process session, and
+only the owner it returned can stop it, so a test hook never truncates someone
+else's capture.
+
+### Proving it reaches a trace
+
+`tools/scripts/trace_consumer_e2e.sh` builds `test/fixtures/trace_consumer`, a
+small project that links only `Pulp::runtime`, against an installed prefix,
+runs it, and checks the result:
+
+```bash
+tools/scripts/trace_consumer_e2e.sh --sdk "$PULP_TRACE_SDK" --expect on  --work /path/to/scratch
+tools/scripts/trace_consumer_e2e.sh --sdk <untraced SDK>   --expect off --work /path/to/scratch
+```
+
+With `--expect on`, trace_processor must find the fixture's `consumer_probe`
+slice and its `consumer_probe_instant` (with `frame_index = 7`) in the file it
+wrote. With `--expect off`, the fixture must report tracing unavailable, write
+nothing, and carry no Perfetto symbols. The advisory `tracing-build` workflow
+runs both.
+
+### What tracing costs a consumer binary
+
+SIZE_TABLE_PLACEHOLDER
+
 ---
 
 ## Available analysis surface
@@ -593,8 +638,11 @@ average.
 ## Keeping Perfetto current
 
 The Perfetto SDK is a **dev-only, opt-in dependency** — fetched by pinned URL +
-SHA-256 in `tools/cmake/PulpTracing.cmake` only when `PULP_TRACING=ON`, never
-linked into a shipping build, never exported by `cmake --install`. You do not
+SHA-256 in `tools/cmake/PulpTracing.cmake` only when `PULP_TRACING=ON` and never
+linked into a shipping build. A default `cmake --install` exports none of it; an
+SDK installed from a `PULP_TRACING=ON` build exports `Pulp::tracing`,
+`libpulp-perfetto.a` and `perfetto.h`, which is how a plug-in built against a
+traced SDK links it. You do not
 need to do anything for a normal build; this section is for updating the pin.
 
 **Moving to a newer Perfetto release.** Both the version tag and its hash are

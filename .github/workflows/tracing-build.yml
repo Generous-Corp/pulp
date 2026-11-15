@@ -38,6 +38,8 @@ on:
       - 'setup.sh'
       - 'tools/ci/governed-build.sh'
       - '.agents/skills/trace-sql/**'
+      - 'tools/scripts/trace_consumer_e2e.sh'
+      - 'tools/packages/tool-registry.json'
       - '.github/workflows/tracing-build.yml'
   workflow_dispatch:
 
@@ -222,6 +224,17 @@ jobs:
           fi
           echo "negative control failed as required"
 
+      - name: A consumer span reaches a captured trace
+        # Configuring is not tracing. This builds test/fixtures/trace_consumer
+        # against the installed prefix, runs it (it starts and stops the session
+        # through pulp::runtime::Tracing), and asks trace_processor for the
+        # consumer's own slice and instant. The untraced counterpart is the
+        # `tracing-consumer-untraced` job below.
+        run: |
+          set -euo pipefail
+          tools/scripts/trace_consumer_e2e.sh --sdk "$PWD/stage" --expect on \
+            --work "$PWD/consumer-e2e" --fetch-trace-processor
+
       - name: Summarize
         if: always()
         run: |
@@ -235,11 +248,57 @@ jobs:
           `find_package(Pulp)` consumer then confirmed `PULP_HAS_TRACING`, with
           a negative control proving that assertion can fail.
 
+          The `trace_consumer` fixture, built against the same prefix, then
+          started and stopped a session itself and trace_processor found its
+          `consumer_probe` slice and `consumer_probe_instant` in the file.
+
           Every check is paired with a control that must be non-zero, so an
           absence cannot be mistaken for a clean result.
 
           Advisory, GitHub-hosted Linux. Does not gate merge.
           EOF
+
+  # The control for the consumer span check above: the same fixture against an
+  # UNTRACED installed SDK must build, report tracing unavailable, write no
+  # file, and carry no Perfetto symbols. Without this leg a consumer check that
+  # passed for a reason unrelated to tracing (a stale file, a query that counts
+  # anything) would be indistinguishable from a real pass.
+  tracing-consumer-untraced:
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
+    # Hard-coded GitHub-hosted Linux - advisory, never self-hosted (see header).
+    runs-on: ubuntu-latest
+    name: Installed untraced SDK gives a consumer no trace
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          submodules: false
+          lfs: false
+
+      - name: Install Linux dev headers
+        uses: ./.github/actions/install-linux-build-deps
+
+      - name: Bootstrap repository dependencies
+        run: ./setup.sh --ci --deps-only
+
+      - name: Configure and install an untraced SDK
+        run: |
+          set -euo pipefail
+          cmake -S . -B build-sdk \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_TRACING=OFF \
+            -DPULP_ENABLE_GPU=OFF \
+            -DPULP_BUILD_TESTS=OFF \
+            -DPULP_BUILD_EXAMPLES=OFF \
+            -DCMAKE_INSTALL_PREFIX="$PWD/stage"
+          tools/ci/governed-build.sh cmake --build build-sdk
+          cmake --install build-sdk
+
+      - name: The consumer emits nothing and carries no Perfetto
+        run: |
+          set -euo pipefail
+          tools/scripts/trace_consumer_e2e.sh --sdk "$PWD/stage" --expect off \
+            --work "$PWD/consumer-e2e"
 
   # The only lane that can prove a GPU trace span was actually emitted.
   #
