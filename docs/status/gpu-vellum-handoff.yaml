@@ -309,8 +309,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_trace_overhead_acceptance.py",
           "state": "pulp-owned-retained",
-          "revision": "adc3d93800544bab0f30093b10af5faf83f399b1",
-          "object_id": "50eff417fc7c4cbd4389a50d079e7f9b7e5d4f5d",
+          "revision": "ea78e2401eca0cc04b67f8ad9c891052a282b0c9",
+          "object_id": "b20d89529052a8693c9b5d866b96d3dfe6a3b0ba",
           "object_type": "blob"
         },
         {
@@ -2027,8 +2027,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "core/render/src/skia_surface.cpp",
           "state": "framework-authoritative-transferred-compatibility",
-          "revision": "faceed26a56e8ed647308c3abdd12aa263080ef4",
-          "object_id": "6b5312b81c4d3582e1177296d52b268800453e3f",
+          "revision": "41aa0aa05e4410ab0f063b2d879dab8afca25c2d",
+          "object_id": "87613a66d9a266a06c58cc12bcd365255b1d53d6",
           "object_type": "blob"
         },
         {
