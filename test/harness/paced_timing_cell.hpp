@@ -92,7 +92,9 @@ struct SchedReceipt {
     int preemptible = -1;
     int priority = -1;
 
-    bool refused() const { return status == "refused"; }
+    bool refused() const {
+        return status == "refused";
+    }
 };
 
 inline SchedRequest read_sched_request() {
@@ -118,7 +120,8 @@ inline std::int64_t mach_to_ns(std::uint64_t ticks) {
 inline std::uint32_t ns_to_mach(std::int64_t ns) {
     mach_timebase_info_data_t timebase{};
     mach_timebase_info(&timebase);
-    return static_cast<std::uint32_t>(static_cast<std::uint64_t>(ns) * timebase.denom / timebase.numer);
+    return static_cast<std::uint32_t>(static_cast<std::uint64_t>(ns) * timebase.denom /
+                                      timebase.numer);
 }
 } // namespace detail
 #endif
@@ -130,9 +133,9 @@ inline void observe_thread_scheduling(SchedReceipt& receipt) {
     thread_time_constraint_policy_data_t policy{};
     mach_msg_type_number_t count = THREAD_TIME_CONSTRAINT_POLICY_COUNT;
     boolean_t get_default = FALSE;
-    const auto result = thread_policy_get(thread, THREAD_TIME_CONSTRAINT_POLICY,
-                                          reinterpret_cast<thread_policy_t>(&policy), &count,
-                                          &get_default);
+    const auto result =
+        thread_policy_get(thread, THREAD_TIME_CONSTRAINT_POLICY,
+                          reinterpret_cast<thread_policy_t>(&policy), &count, &get_default);
     if (result == KERN_SUCCESS && !get_default) {
         receipt.obtained = "time_constraint";
         receipt.period_ns = detail::mach_to_ns(policy.period);
@@ -156,7 +159,9 @@ inline void observe_thread_scheduling(SchedReceipt& receipt) {
         receipt.obtained = "unknown";
         return;
     }
-    receipt.obtained = policy_kind == SCHED_FIFO ? "fifo" : policy_kind == SCHED_RR ? "rr" : "other";
+    receipt.obtained = policy_kind == SCHED_FIFO ? "fifo"
+                       : policy_kind == SCHED_RR ? "rr"
+                                                 : "other";
     receipt.priority = param.sched_priority;
 #else
     receipt.obtained = "unknown";
@@ -214,7 +219,8 @@ inline SchedReceipt request_thread_scheduling(SchedRequest request, std::int64_t
         return refuse("errno_" + std::to_string(errno));
     sched_param param{};
     // The malformed request names a priority above the policy maximum (EINVAL).
-    param.sched_priority = invalid ? top + 1 : std::max(sched_get_priority_min(SCHED_FIFO), top - 10);
+    param.sched_priority =
+        invalid ? top + 1 : std::max(sched_get_priority_min(SCHED_FIFO), top - 10);
     const int result = pthread_setschedparam(pthread_self(), SCHED_FIFO, &param);
     if (result != 0)
         return refuse("errno_" + std::to_string(result));

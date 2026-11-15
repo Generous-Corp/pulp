@@ -1056,7 +1056,8 @@ namespace paced_scheduling_fixture {
 pulp::test::paced::SchedReceipt request_on_fresh_thread(pulp::test::paced::SchedRequest request,
                                                         std::int64_t period_ns) {
     pulp::test::paced::SchedReceipt receipt;
-    std::thread thread([&] { receipt = pulp::test::paced::request_thread_scheduling(request, period_ns); });
+    std::thread thread(
+        [&] { receipt = pulp::test::paced::request_thread_scheduling(request, period_ns); });
     thread.join();
     return receipt;
 }
