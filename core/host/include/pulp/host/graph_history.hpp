@@ -52,6 +52,9 @@ struct GraphDocumentDiff {
     GraphDocumentDiffCode code = GraphDocumentDiffCode::AllocationFailed;
     GraphDocumentRefusal refusal = GraphDocumentRefusal::None;
     std::string detail;
+    // Digests of each compared view (node fields and connections keyed by
+    // authored identity, other sections as compared). Equal documents have
+    // equal digests, including when only NodeId numbering or layout differs.
     std::string before_digest;
     std::string after_digest;
 
@@ -67,9 +70,9 @@ struct GraphDocumentDiff {
     std::vector<std::string> connections_removed;
     std::vector<std::string> connections_changed;
     // Other top-level document members (for example format_version,
-    // sample_regions, subgraphs) whose canonical values differ. These
-    // sections are compared verbatim; one that records raw NodeIds reports a
-    // change when only the numbering differs.
+    // sample_regions, subgraphs) whose canonical values differ. NodeIds in
+    // sample_regions are compared as the authored identities they bind; the
+    // other sections are compared verbatim.
     std::vector<std::string> sections_changed;
 
     bool ok() const noexcept {
@@ -105,8 +108,10 @@ enum class GraphHistoryCode : std::uint8_t {
     // The live graph no longer matches the state history expects, so it was
     // edited outside this history; undo/redo refuses instead of discarding it.
     Diverged,
-    // The recorded document could not be restored. The graph was rolled back
-    // to its pre-call state when `rolled_back` is set on the result.
+    // The recorded document could not be restored faithfully: it fails to
+    // load, a node's state is rejected, or a node that is live now would come
+    // back unresolved (missing plugin, Processor, or custom node type). See
+    // GraphHistoryResult::graph_untouched and rolled_back.
     RestoreFailed,
     // The restored graph's authored ports differ from the recorded snapshot.
     PortIdentityMismatch,
@@ -133,7 +138,20 @@ struct GraphHistoryResult {
     PortIdentityDiff port_changes;
     // Editor layout recorded with the restored document.
     GraphEditorLayout editor_layout;
+    // Every restore reloads the graph and renumbers its NodeIds. When the
+    // graph was reloaded (Ok, or a failure that ran a rollback) this maps
+    // each node's authored identity to its NodeId after the call; map a
+    // handle held from before the call through saved_node_identities() taken
+    // before it. Empty when the graph was not touched.
+    std::unordered_map<std::string, NodeId> node_ids;
+    // On failure: the graph is in its pre-call state. Either the failure was
+    // found by a trial restore into a scratch graph (graph_untouched is also
+    // set, and live plugin instances were never destroyed), or the live
+    // graph was reloaded from its pre-call document with no node newly
+    // unresolved, no state rejected, and the same authored ports.
     bool rolled_back = false;
+    // On failure: the live graph was never modified.
+    bool graph_untouched = false;
     bool ok() const noexcept {
         return code == GraphHistoryCode::Ok;
     }
@@ -153,6 +171,10 @@ class GraphEditHistory {
     GraphHistoryResult commit(GraphEditCheckpoint before, const SignalGraph& graph,
                               std::string label, const GraphEditorLayout& editor_layout = {});
 
+    // Undo and redo first trial-restore the recorded document into a scratch
+    // graph that carries `graph`'s custom node types, so every plugin and
+    // Processor factory the document names is instantiated twice on success.
+    // Only a document that restores faithfully there is loaded into `graph`.
     GraphHistoryResult undo(SignalGraph& graph, const GraphLoadOptions& options = {});
     GraphHistoryResult redo(SignalGraph& graph, const GraphLoadOptions& options = {});
 

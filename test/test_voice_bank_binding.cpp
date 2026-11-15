@@ -538,6 +538,30 @@ TEST_CASE("G6 captured slot state restores onto another live bank", "[host][grap
     CHECK(reencoded.sha256 == encoded.sha256);
 }
 
+TEST_CASE("G6 restored slot state reaches the slot processors, not only the cache",
+          "[host][graph][g6][state]") {
+    VoiceBankBindingResult status;
+    auto source = make_bank(schema(), status);
+    REQUIRE(source);
+    for (std::uint32_t slot = 0; slot < 8; ++slot)
+        REQUIRE(source->set_slot_parameter(slot, "level", 0.125f * static_cast<float>(slot + 1)));
+    const auto captured = source->capture_state();
+
+    auto untouched = make_bank(schema(), status);
+    REQUIRE(untouched);
+    auto destination = make_bank(schema(), status);
+    REQUIRE(destination);
+    VoiceBankBindingResult restored;
+    REQUIRE(destination->restore_state(captured, restored));
+
+    // Identical fresh banks allocate the same slot for the same note, so the
+    // rendered sample follows the level each slot's processor now holds.
+    const auto expected = first_note_sample(*source, 0);
+    REQUIRE(expected != 0.0f);
+    CHECK(first_note_sample(*untouched, 0) != expected);
+    CHECK(first_note_sample(*destination, 0) == expected);
+}
+
 TEST_CASE("G6 restore_state refuses a whole state when any value is invalid",
           "[host][graph][g6][state]") {
     VoiceBankBindingResult status;
@@ -576,6 +600,18 @@ TEST_CASE("G6 restore_state refuses a whole state when any value is invalid",
     }
     SECTION("a different manifest identity") {
         candidate.manifest_sha256.back() = candidate.manifest_sha256.back() == '0' ? '1' : '0';
+        VoiceBankBindingResult result;
+        REQUIRE_FALSE(bank->restore_state(candidate, result));
+        CHECK(result.code == VoiceBankBindingCode::InvalidState);
+    }
+    SECTION("a duplicated parameter") {
+        candidate.parameters[4] = candidate.parameters[3];
+        VoiceBankBindingResult result;
+        REQUIRE_FALSE(bank->restore_state(candidate, result));
+        CHECK(result.code == VoiceBankBindingCode::InvalidState);
+    }
+    SECTION("an unsupported schema version") {
+        candidate.schema_version = 2;
         VoiceBankBindingResult result;
         REQUIRE_FALSE(bank->restore_state(candidate, result));
         CHECK(result.code == VoiceBankBindingCode::InvalidState);

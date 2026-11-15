@@ -17,7 +17,8 @@
       "needles": [
         "load_graph_patch_json",
         "edit_->prepare",
-        "edit_->commit()"
+        "edit_->commit()",
+        "baseline_open_"
       ]
     },
     {
