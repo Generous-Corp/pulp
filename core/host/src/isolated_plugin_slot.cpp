@@ -27,6 +27,20 @@ namespace pulp::host {
 using namespace isolation;
 using Clock = std::chrono::steady_clock;
 
+namespace {
+// One lifecycle exchange with the worker (prepare, checkpoint, restore,
+// destroy, and the load phase after hello).
+constexpr auto kLifecycleExchangeDeadline = std::chrono::seconds(5);
+// Custody cleanup when the caller supplies no deadline of its own.
+constexpr auto kDefaultCleanupDeadline = std::chrono::seconds(2);
+// stop() waits for the supervisor's graceful destroy exchange followed by
+// default cleanup, plus a margin; it is derived so raising either bound
+// cannot silently make stop() return while cleanup is still pending.
+constexpr auto kStopDeadline =
+    kLifecycleExchangeDeadline + kDefaultCleanupDeadline + std::chrono::seconds(1);
+static_assert(kStopDeadline > kLifecycleExchangeDeadline + kDefaultCleanupDeadline);
+} // namespace
+
 namespace detail {
 struct IsolatedClapSession {
     IsolatedClapOptions options;
@@ -82,7 +96,7 @@ struct IsolatedClapSession {
         if (!channel || cleanup.load(std::memory_order_acquire) != IsolationCleanup::pending ||
             fault.load(std::memory_order_acquire) != 0)
             return false;
-        const auto deadline = Clock::now() + std::chrono::seconds(5);
+        const auto deadline = Clock::now() + kLifecycleExchangeDeadline;
         ControlRecord request;
         request.command = command;
         request.generation = generation;
@@ -154,21 +168,23 @@ void release_reservation(const std::shared_ptr<Session>& session) {
 }
 
 void cleanup_session(const std::shared_ptr<Session>& session,
-                     Clock::time_point deadline = Clock::now() + std::chrono::seconds(2)) {
+                     Clock::time_point deadline = Clock::now() + kDefaultCleanupDeadline) {
 #if defined(PULP_ISOLATED_CLAP_SUPPORTED) && defined(__APPLE__) && defined(__aarch64__)
     std::lock_guard lock(session->control_mutex);
     const auto observed = session->custody.retained_process_observation();
+    // The reservation is released before cleanup reads complete: reserve()
+    // treats a listed session that is no longer pending as quarantine.
     if (observed.state == platform::RetainedProcessState::NotStarted) {
-        session->cleanup.store(IsolationCleanup::complete, std::memory_order_release);
         release_reservation(session);
+        session->cleanup.store(IsolationCleanup::complete, std::memory_order_release);
         return;
     }
     const auto result = session->custody.cleanup_retained_process_group(deadline);
     if (result.status == platform::RetainedCleanupStatus::Complete && result.child_reaped &&
         result.descendants_gone) {
         session->channel.reset();
-        session->cleanup.store(IsolationCleanup::complete, std::memory_order_release);
         release_reservation(session);
+        session->cleanup.store(IsolationCleanup::complete, std::memory_order_release);
     } else {
         session->cleanup.store(result.status == platform::RetainedCleanupStatus::CustodyLost
                                    ? IsolationCleanup::custody_lost
@@ -176,8 +192,8 @@ void cleanup_session(const std::shared_ptr<Session>& session,
                                std::memory_order_release);
     }
 #else
-    session->cleanup.store(IsolationCleanup::complete, std::memory_order_release);
     release_reservation(session);
+    session->cleanup.store(IsolationCleanup::complete, std::memory_order_release);
 #endif
 }
 
@@ -200,7 +216,7 @@ void supervise(std::shared_ptr<Session> session) {
     session->prepared.store(false, std::memory_order_release);
     const auto deadline_ns = session->cleanup_deadline_ns.load(std::memory_order_acquire);
     cleanup_session(session, deadline_ns ? Clock::time_point(std::chrono::nanoseconds(deadline_ns))
-                                         : Clock::now() + std::chrono::seconds(2));
+                                         : Clock::now() + kDefaultCleanupDeadline);
 #else
     (void)session;
 #endif
@@ -231,7 +247,7 @@ class IsolatedSlot final : public detail::RequestDrivenSlot {
         return session_->fault.load(std::memory_order_acquire) == 0;
     }
     bool prepare(double rate, int frames) override {
-        if (rate != 48000 || frames != 64 || ever_prepared_) {
+        if (rate != kSampleRate || frames != static_cast<int>(kFrames) || ever_prepared_) {
             session_->fail(IsolationReason::unsupported);
             return false;
         }
@@ -278,13 +294,13 @@ class IsolatedSlot final : public detail::RequestDrivenSlot {
     }
     void destroy_editor_view() override {}
     int latency_samples() const override {
-        return 64;
+        return static_cast<int>(kFrames);
     }
     int tail_samples() const override {
         return 0;
     }
     void set_preferred_channel_layout(int inputs, int outputs) override {
-        if (inputs != 2 || outputs != 2)
+        if (inputs != static_cast<int>(kChannels) || outputs != static_cast<int>(kChannels))
             session_->fail(IsolationReason::unsupported);
     }
     bool set_host_settings(const PluginHostSettings& settings) override {
@@ -329,11 +345,11 @@ class IsolatedSlot final : public detail::RequestDrivenSlot {
             return;
         }
         if (!session_->prepared.load(std::memory_order_acquire) || !shared ||
-            request.num_samples != 64 || !input || !output || input->num_channels() != 2 ||
-            output->num_channels() != 2 || input->num_samples() < 64 ||
-            output->num_samples() < 64 || request.audio->inputs.size() != 1 ||
-            request.audio->outputs.size() != 1 || request.transport || !request.midi_in->empty() ||
-            !request.midi_in->sysex().empty() ||
+            request.num_samples != static_cast<int>(kFrames) || !input || !output ||
+            input->num_channels() != kChannels || output->num_channels() != kChannels ||
+            input->num_samples() < kFrames || output->num_samples() < kFrames ||
+            request.audio->inputs.size() != 1 || request.audio->outputs.size() != 1 ||
+            request.transport || !request.midi_in->empty() || !request.midi_in->sysex().empty() ||
             (request.midi_in->ump() && !request.midi_in->ump()->empty()) ||
             !request.midi_out->sysex().empty() ||
             (request.midi_out->ump() && !request.midi_out->ump()->empty()) ||
@@ -384,7 +400,7 @@ bool launch(const std::shared_ptr<Session>& session) {
     return session->process.start_retained_with_standard_input_channel(
         session->custody, session->options.worker_path,
         {session->mapping_path, session->options.selection.path,
-         session->options.selection.type.descriptor_id, "MacClapStereo64V1"},
+         session->options.selection.type.descriptor_id, kProfileName},
         [session, identity](int pid, platform::ChildProcessInputChannel channel,
                             Deadline deadline) {
             session->worker_pid = pid;
@@ -417,7 +433,7 @@ bool launch(const std::shared_ptr<Session>& session) {
                 return false;
             session->mapping_path.clear();
             // The load phase receives its own five-second control deadline.
-            deadline = Clock::now() + std::chrono::seconds(5);
+            deadline = Clock::now() + kLifecycleExchangeDeadline;
             if (!receive_record(fd, reply, deadline) || reply.result != 2 ||
                 reply.generation != hello.generation || reply.build != hello.build)
                 return false;
@@ -466,7 +482,7 @@ bool IsolatedClapControl::checkpoint() {
 }
 IsolationCleanup IsolatedClapControl::stop() {
     session_->stop_requested.store(true, std::memory_order_release);
-    const auto deadline = Clock::now() + std::chrono::seconds(8);
+    const auto deadline = Clock::now() + kStopDeadline;
     while (session_->cleanup.load(std::memory_order_acquire) == IsolationCleanup::pending &&
            Clock::now() < deadline)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -610,7 +626,7 @@ IsolatedNodeRecoveryResult recover_isolated_graph_node(SignalGraph& graph, NodeI
     }
     // The supervisor normally finishes custody cleanup right after the fault;
     // this only bounds the wait and retries an incomplete earlier attempt.
-    if (old.cleanup(Clock::now() + std::chrono::seconds(2)) != IsolationCleanup::complete)
+    if (old.cleanup(Clock::now() + kDefaultCleanupDeadline) != IsolationCleanup::complete)
         return refuse(Outcome::cleanup_incomplete);
     auto recovered = recover_isolated_clap(options, old);
     if (!recovered)
