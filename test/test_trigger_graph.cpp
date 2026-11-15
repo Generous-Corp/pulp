@@ -1048,3 +1048,92 @@ TEST_CASE("Typed and spectral preparation remain separate admission lanes", "[tr
 
 // Keep the graph-event callback probe in this existing trigger-graph test unit.
 #include "fixtures/g5_graph_event_rt_cases.inc"
+
+// Scheduling of the paced callback thread. The malformed real-time request is
+// rejected by the kernel itself, so the refusal path is exercised without a
+// mock; the well-formed request on the same instrument is the control.
+namespace paced_scheduling_fixture {
+pulp::test::paced::SchedReceipt request_on_fresh_thread(pulp::test::paced::SchedRequest request,
+                                                        std::int64_t period_ns) {
+    pulp::test::paced::SchedReceipt receipt;
+    std::thread thread([&] { receipt = pulp::test::paced::request_thread_scheduling(request, period_ns); });
+    thread.join();
+    return receipt;
+}
+
+pulp::test::paced::CellConfig scheduling_config(pulp::test::paced::SchedRequest request) {
+    pulp::test::paced::CellConfig config;
+    config.variant = "scheduling";
+    config.frames = 128;
+    config.callbacks = 8;
+    config.sched = request;
+    return config;
+}
+} // namespace paced_scheduling_fixture
+
+TEST_CASE("Paced cell refuses a real-time scheduling request the kernel rejects",
+          "[graph][paced-matrix][scheduling]") {
+    using namespace paced_scheduling_fixture;
+    using pulp::test::paced::SchedRequest;
+    const auto period = pulp::test::paced::block_period_ns(48000, 128);
+    const auto refused = request_on_fresh_thread(SchedRequest::realtime_invalid, period);
+    CHECK(refused.status == "refused");
+    CHECK(refused.refused());
+    CHECK(refused.reason != "none");
+    CHECK(refused.obtained != "time_constraint");
+    CHECK(refused.obtained != "fifo");
+
+    std::size_t processed = 0;
+    const auto config = scheduling_config(SchedRequest::realtime_invalid);
+    const auto result = pulp::test::paced::run_cell(
+        config, [&](std::size_t, std::uint64_t) { ++processed; },
+        [](std::size_t, std::uint64_t) { return true; });
+    CHECK(result.sched.refused());
+    CHECK(result.rows.empty());
+    CHECK(processed == 0);
+    // A refused cell must fail its case even though no oracle ran.
+    CHECK(pulp::test::paced::print_cell("scheduling-probe", config, result) == 1);
+}
+
+TEST_CASE("Paced cell obtains and reads back the requested real-time scheduling",
+          "[graph][paced-matrix][scheduling]") {
+    using namespace paced_scheduling_fixture;
+    using pulp::test::paced::SchedRequest;
+    const auto period = pulp::test::paced::block_period_ns(48000, 128);
+    const auto plain = request_on_fresh_thread(SchedRequest::none, period);
+    CHECK(plain.status == "not_requested");
+    CHECK(plain.obtained != "time_constraint");
+    CHECK(plain.obtained != "fifo");
+
+    const auto realtime = request_on_fresh_thread(SchedRequest::realtime, period);
+#if defined(__APPLE__)
+    REQUIRE(realtime.status == "obtained");
+    CHECK(realtime.obtained == "time_constraint");
+    // Read back from the kernel, within one Mach tick of the request.
+    CHECK(std::abs(realtime.period_ns - period) < 1000);
+    CHECK(std::abs(realtime.constraint_ns - period) < 1000);
+    CHECK(std::abs(realtime.computation_ns - period / 2) < 1000);
+#elif defined(__linux__)
+    // SCHED_FIFO needs CAP_SYS_NICE or an RLIMIT_RTPRIO grant; without one the
+    // request must be refused, never reported as obtained.
+    if (realtime.status == "obtained")
+        CHECK(realtime.obtained == "fifo");
+    else
+        CHECK(realtime.reason.rfind("errno_", 0) == 0);
+#else
+    CHECK(realtime.refused());
+#endif
+    if (realtime.status != "obtained")
+        return;
+
+    std::size_t processed = 0;
+    const auto config = scheduling_config(SchedRequest::realtime);
+    const auto result = pulp::test::paced::run_cell(
+        config, [&](std::size_t, std::uint64_t) { ++processed; },
+        [](std::size_t, std::uint64_t) { return true; });
+    CHECK(result.sched.status == "obtained");
+    CHECK(result.sched.obtained == realtime.obtained);
+    CHECK(result.rows.size() == config.callbacks);
+    CHECK(processed == config.callbacks);
+    CHECK(pulp::test::paced::print_cell("scheduling-probe", config, result) == 0);
+}

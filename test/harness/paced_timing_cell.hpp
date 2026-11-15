@@ -19,9 +19,22 @@
 //   PULP_PACED_PLANTED_SLEEP_US  planted negative: sleep inside the timed
 //                                callback window (default 0)
 //   PULP_PACED_PLANTED_EVERY     apply the planted sleep to every Nth callback
+//   PULP_PACED_SCHED         callback-thread scheduling request: "none"
+//                            (default QoS), "realtime" (a time-constraint
+//                            thread on macOS, SCHED_FIFO on Linux), or
+//                            "realtime-invalid" (a deliberately malformed
+//                            real-time request the kernel must reject; the
+//                            negative control for the refusal path)
+//
+// A real-time request is read back from the kernel after it is applied. When
+// the request fails or the read-back does not show the requested class, the
+// cell refuses: no callback runs, the PACED_SCHED line records the reason and
+// print_cell reports a failure. A cell never silently falls back to default
+// scheduling.
 
 #include <pulp/runtime/build_info.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -33,10 +46,203 @@
 #include <thread>
 #include <vector>
 
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#include <mach/mach_time.h>
+#include <mach/thread_policy.h>
+#include <pthread.h>
+#elif defined(__linux__)
+#include <cerrno>
+#include <pthread.h>
+#include <sched.h>
+#endif
+
 namespace pulp::test::paced {
 
 inline constexpr std::string_view kCellHeader = "pulp_paced_timing_cell_v1";
 inline constexpr std::uint64_t kMaxCallbacks = 100000;
+
+enum class SchedRequest : std::uint8_t { none, realtime, realtime_invalid };
+
+inline std::string_view sched_request_name(SchedRequest request) {
+    switch (request) {
+    case SchedRequest::realtime:
+        return "realtime";
+    case SchedRequest::realtime_invalid:
+        return "realtime-invalid";
+    case SchedRequest::none:
+        break;
+    }
+    return "none";
+}
+
+// What the callback thread asked for and what the kernel reports it holds.
+// `obtained` is the class read back after the request: "time_constraint" or
+// "timeshare" on macOS, "fifo", "rr" or "other" on Linux, "unknown" elsewhere.
+// Period, computation and constraint are the read-back values in nanoseconds
+// (zero when the class carries none).
+struct SchedReceipt {
+    SchedRequest requested = SchedRequest::none;
+    std::string obtained = "unknown";
+    std::string status = "not_requested"; // "obtained" | "refused" | "not_requested"
+    std::string reason = "none";          // one token; "none" unless refused
+    std::int64_t period_ns = 0;
+    std::int64_t computation_ns = 0;
+    std::int64_t constraint_ns = 0;
+    int preemptible = -1;
+    int priority = -1;
+
+    bool refused() const { return status == "refused"; }
+};
+
+inline SchedRequest read_sched_request() {
+    const char* text = std::getenv("PULP_PACED_SCHED");
+    const std::string_view value = text == nullptr ? std::string_view{} : std::string_view(text);
+    if (value.empty() || value == "none")
+        return SchedRequest::none;
+    if (value == "realtime")
+        return SchedRequest::realtime;
+    if (value == "realtime-invalid")
+        return SchedRequest::realtime_invalid;
+    throw std::invalid_argument("malformed PULP_PACED_SCHED");
+}
+
+#if defined(__APPLE__)
+namespace detail {
+inline std::int64_t mach_to_ns(std::uint64_t ticks) {
+    mach_timebase_info_data_t timebase{};
+    mach_timebase_info(&timebase);
+    return static_cast<std::int64_t>(ticks * timebase.numer / timebase.denom);
+}
+
+inline std::uint32_t ns_to_mach(std::int64_t ns) {
+    mach_timebase_info_data_t timebase{};
+    mach_timebase_info(&timebase);
+    return static_cast<std::uint32_t>(static_cast<std::uint64_t>(ns) * timebase.denom / timebase.numer);
+}
+} // namespace detail
+#endif
+
+// Reads the calling thread's scheduling class back from the kernel.
+inline void observe_thread_scheduling(SchedReceipt& receipt) {
+#if defined(__APPLE__)
+    const thread_port_t thread = pthread_mach_thread_np(pthread_self());
+    thread_time_constraint_policy_data_t policy{};
+    mach_msg_type_number_t count = THREAD_TIME_CONSTRAINT_POLICY_COUNT;
+    boolean_t get_default = FALSE;
+    const auto result = thread_policy_get(thread, THREAD_TIME_CONSTRAINT_POLICY,
+                                          reinterpret_cast<thread_policy_t>(&policy), &count,
+                                          &get_default);
+    if (result == KERN_SUCCESS && !get_default) {
+        receipt.obtained = "time_constraint";
+        receipt.period_ns = detail::mach_to_ns(policy.period);
+        receipt.computation_ns = detail::mach_to_ns(policy.computation);
+        receipt.constraint_ns = detail::mach_to_ns(policy.constraint);
+        receipt.preemptible = policy.preemptible ? 1 : 0;
+    } else {
+        receipt.obtained = result == KERN_SUCCESS ? "timeshare" : "unknown";
+        receipt.period_ns = receipt.computation_ns = receipt.constraint_ns = 0;
+        receipt.preemptible = -1;
+    }
+    int policy_kind = 0;
+    sched_param param{};
+    receipt.priority = pthread_getschedparam(pthread_self(), &policy_kind, &param) == 0
+                           ? param.sched_priority
+                           : -1;
+#elif defined(__linux__)
+    int policy_kind = 0;
+    sched_param param{};
+    if (pthread_getschedparam(pthread_self(), &policy_kind, &param) != 0) {
+        receipt.obtained = "unknown";
+        return;
+    }
+    receipt.obtained = policy_kind == SCHED_FIFO ? "fifo" : policy_kind == SCHED_RR ? "rr" : "other";
+    receipt.priority = param.sched_priority;
+#else
+    receipt.obtained = "unknown";
+#endif
+}
+
+// Applies `request` to the calling thread for a callback period of `period_ns`
+// and returns the receipt. Call it on the callback thread before the first
+// callback. A real-time request asks for a computation budget of half the
+// period and a constraint of one full period; the readback must report that
+// class or the request is refused.
+inline SchedReceipt request_thread_scheduling(SchedRequest request, std::int64_t period_ns) {
+    SchedReceipt receipt;
+    receipt.requested = request;
+    if (request == SchedRequest::none) {
+        observe_thread_scheduling(receipt);
+        return receipt;
+    }
+    const bool invalid = request == SchedRequest::realtime_invalid;
+    const auto refuse = [&receipt](std::string reason) {
+        receipt.status = "refused";
+        receipt.reason = std::move(reason);
+        observe_thread_scheduling(receipt);
+        return receipt;
+    };
+    if (period_ns <= 0)
+        return refuse("invalid_period");
+#if defined(__APPLE__)
+    // The kernel rejects a computation budget above its 50 ms real-time quantum.
+    constexpr std::int64_t kMaxComputationNs = 50'000'000;
+    thread_time_constraint_policy_data_t policy{};
+    policy.period = detail::ns_to_mach(period_ns);
+    policy.computation = detail::ns_to_mach(std::min(period_ns / 2, kMaxComputationNs));
+    // The malformed request sets the constraint below the computation budget,
+    // which the kernel refuses with KERN_INVALID_ARGUMENT.
+    policy.constraint = invalid ? policy.computation / 2 : detail::ns_to_mach(period_ns);
+    policy.preemptible = TRUE;
+    const thread_port_t thread = pthread_mach_thread_np(pthread_self());
+    const auto result = thread_policy_set(thread, THREAD_TIME_CONSTRAINT_POLICY,
+                                          reinterpret_cast<thread_policy_t>(&policy),
+                                          THREAD_TIME_CONSTRAINT_POLICY_COUNT);
+    if (result != KERN_SUCCESS)
+        return refuse("kern_return_" + std::to_string(result));
+    observe_thread_scheduling(receipt);
+    if (receipt.obtained != "time_constraint")
+        return refuse("readback_" + receipt.obtained);
+    const auto expected = [](std::uint32_t ticks) { return detail::mach_to_ns(ticks); };
+    if (receipt.period_ns != expected(policy.period) ||
+        receipt.computation_ns != expected(policy.computation) ||
+        receipt.constraint_ns != expected(policy.constraint))
+        return refuse("readback_mismatch");
+#elif defined(__linux__)
+    const int top = sched_get_priority_max(SCHED_FIFO);
+    if (top < 0)
+        return refuse("errno_" + std::to_string(errno));
+    sched_param param{};
+    // The malformed request names a priority above the policy maximum (EINVAL).
+    param.sched_priority = invalid ? top + 1 : std::max(sched_get_priority_min(SCHED_FIFO), top - 10);
+    const int result = pthread_setschedparam(pthread_self(), SCHED_FIFO, &param);
+    if (result != 0)
+        return refuse("errno_" + std::to_string(result));
+    observe_thread_scheduling(receipt);
+    if (receipt.obtained != "fifo" || receipt.priority != param.sched_priority)
+        return refuse("readback_" + receipt.obtained);
+    receipt.period_ns = period_ns;
+#else
+    (void)invalid;
+    return refuse("unsupported_platform");
+#endif
+    receipt.status = "obtained";
+    return receipt;
+}
+
+// One line in the format parsed by tools/graph_paced_timing_matrix.py.
+inline void print_sched(const SchedReceipt& receipt) {
+    std::cout << "PACED_SCHED requested=" << sched_request_name(receipt.requested)
+              << " obtained=" << receipt.obtained << " status=" << receipt.status
+              << " reason=" << receipt.reason << " period_ns=" << receipt.period_ns
+              << " computation_ns=" << receipt.computation_ns
+              << " constraint_ns=" << receipt.constraint_ns
+              << " preemptible=" << receipt.preemptible << " priority=" << receipt.priority << '\n';
+}
+
+inline std::int64_t block_period_ns(std::uint64_t rate, std::uint64_t frames) {
+    return static_cast<std::int64_t>(frames * 1'000'000'000ull / rate);
+}
 
 struct CellConfig {
     std::string variant;
@@ -45,6 +251,7 @@ struct CellConfig {
     std::uint64_t callbacks = 32;
     std::uint64_t planted_sleep_us = 0;
     std::uint64_t planted_every = 1;
+    SchedRequest sched = SchedRequest::none;
 };
 
 struct CellRow {
@@ -52,6 +259,13 @@ struct CellRow {
     std::int64_t start_ns = 0;
     std::int64_t end_ns = 0;
     std::uint8_t ok = 0;
+};
+
+// Raw rows plus the scheduling receipt of the thread that produced them. A
+// refused scheduling request leaves `rows` empty.
+struct CellResult {
+    std::vector<CellRow> rows;
+    SchedReceipt sched;
 };
 
 inline std::uint64_t env_integer(const char* key, std::uint64_t fallback) {
@@ -77,6 +291,7 @@ inline CellConfig read_config(std::string_view default_variant, std::uint64_t de
     config.callbacks = env_integer("PULP_PACED_CALLBACKS", 32);
     config.planted_sleep_us = env_integer("PULP_PACED_PLANTED_SLEEP_US", 0);
     config.planted_every = env_integer("PULP_PACED_PLANTED_EVERY", 1);
+    config.sched = read_sched_request();
     if (config.rate == 0 || config.frames == 0 || config.callbacks == 0 ||
         config.callbacks > kMaxCallbacks || config.planted_every == 0)
         throw std::invalid_argument("paced cell configuration out of range");
@@ -87,13 +302,21 @@ inline CellConfig read_config(std::string_view default_variant, std::uint64_t de
 // schedule and times only that call (plus any planted sleep). `verify(index,
 // first_sample)` then checks the block outside the timed window and returns the
 // fixture's own oracle verdict; it still shares the callback period, so keep
-// it table-driven and cheap. Returns the raw rows.
+// it table-driven and cheap. The worker applies `config.sched` before the
+// first callback; when that request is refused no callback runs. Returns the
+// raw rows and the scheduling receipt.
 template <class Process, class Verify>
-std::vector<CellRow> run_cell(const CellConfig& config, Process&& process, Verify&& verify) {
+CellResult run_cell(const CellConfig& config, Process&& process, Verify&& verify) {
     using clock = std::chrono::steady_clock;
-    std::vector<CellRow> rows(static_cast<std::size_t>(config.callbacks));
+    CellResult result;
+    result.rows.resize(static_cast<std::size_t>(config.callbacks));
+    auto& rows = result.rows;
     const auto planted = std::chrono::microseconds(config.planted_sleep_us);
     std::thread worker([&] {
+        result.sched =
+            request_thread_scheduling(config.sched, block_period_ns(config.rate, config.frames));
+        if (result.sched.refused())
+            return;
         const auto origin = clock::now() + std::chrono::milliseconds(10);
         const auto offset = [origin](clock::time_point point) {
             return static_cast<std::int64_t>(
@@ -119,13 +342,17 @@ std::vector<CellRow> run_cell(const CellConfig& config, Process&& process, Verif
         }
     });
     worker.join();
-    return rows;
+    if (result.sched.refused())
+        rows.clear();
+    return result;
 }
 
 // Prints one cell in the line format parsed by tools/graph_paced_timing_matrix.py
-// and returns the number of blocks whose fixture oracle failed.
+// and returns the number of blocks whose fixture oracle failed. A refused
+// scheduling request counts as one failure so the cell's Catch2 case fails.
 inline std::uint64_t print_cell(std::string_view fixture, const CellConfig& config,
-                                const std::vector<CellRow>& rows, std::string_view extra = {}) {
+                                const CellResult& result, std::string_view extra = {}) {
+    const auto& rows = result.rows;
     std::uint64_t oracle_failures = 0;
     for (const auto& row : rows)
         oracle_failures += row.ok ? 0 : 1;
@@ -141,13 +368,14 @@ inline std::uint64_t print_cell(std::string_view fixture, const CellConfig& conf
     if (!extra.empty())
         std::cout << ' ' << extra;
     std::cout << '\n';
+    print_sched(result.sched);
     for (std::size_t i = 0; i < rows.size(); ++i) {
         const auto& row = rows[i];
         std::cout << "P " << i << ' ' << row.target_ns << ' ' << row.start_ns << ' ' << row.end_ns
                   << ' ' << static_cast<int>(row.ok) << '\n';
     }
     std::cout << "PACED_END rows=" << rows.size() << " oracle_failures=" << oracle_failures << '\n';
-    return oracle_failures;
+    return oracle_failures + (result.sched.refused() ? 1 : 0);
 }
 
 } // namespace pulp::test::paced
