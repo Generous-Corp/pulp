@@ -185,6 +185,8 @@ struct Editor {
     }
     ~Editor() {
         ui.reset();
+        // Hosts the surface only; never shown.
+        CHECK_FALSE(window.isVisible);
         [window close];
     }
     bool attach() {
@@ -304,6 +306,8 @@ TEST_CASE("a missing document or font fails attach and leaves nothing behind",
         REQUIRE(ui.surface() == nullptr);
         REQUIRE(window.contentView.subviews.count == 0);
         REQUIRE(vellum::rmlui::NativeContext::open_instances() == instances);
+        // Hosts the surface only; never shown.
+        REQUIRE_FALSE(window.isVisible);
         [window close];
     }
 }
@@ -488,6 +492,8 @@ TEST_CASE("the surface uses the device the caller's renderer was built on",
         NSView* view = (__bridge NSView*)ui.surface()->view();
         REQUIRE_FALSE(view.layer.opaque);
         ui.detach();
+        // Hosts the surface only; never shown.
+        REQUIRE_FALSE(window.isVisible);
         [window close];
     }
 }
