@@ -187,14 +187,16 @@ bool finishes_within(std::chrono::milliseconds deadline, std::function<void()> f
     return finished.wait_for(deadline) == std::future_status::ready;
 }
 
-// A one-shot gate a callback blocks on until the test lets it go.
+// A one-shot gate a callback blocks on until the test lets it go. The hold is
+// bounded, so a test that never releases it cannot wedge the CoreMIDI thread;
+// the waits that follow then fail their own named checks.
 struct Gate {
     std::mutex m;
     std::condition_variable cv;
     bool open = false;
-    void wait() {
+    bool hold() {
         std::unique_lock lock(m);
-        cv.wait(lock, [&] { return open; });
+        return cv.wait_for(lock, std::chrono::seconds(10), [&] { return open; });
     }
     void release() {
         {
@@ -228,7 +230,7 @@ TEST_CASE("CoreMIDI input close() waits for a callback that is in flight",
     auto input = system->create_input();
     REQUIRE(input->open(std::to_string(kDrainId), [&, raw](const pulp::midi::MidiEvent&) {
         in_callback = true;
-        gate.wait();
+        gate.hold();
         raw->fetch_add(1);
         callback_returned = true;
     }));
@@ -391,7 +393,7 @@ TEST_CASE("CoreMIDI input close() after a close from inside a callback waits for
     REQUIRE(input->open(std::to_string(kDrainId), [&, raw](const pulp::midi::MidiEvent&) {
         raw->close();
         nested_close_returned = true;
-        gate.wait();
+        gate.hold();
         callback_returned = true;
     }));
     send_note(vs.source);
@@ -438,7 +440,7 @@ TEST_CASE("CoreMIDI input: every close() after a close from inside a callback wa
     REQUIRE(input->open(std::to_string(kDrainId), [&, raw](const pulp::midi::MidiEvent&) {
         raw->close();
         nested_close_returned = true;
-        gate.wait();
+        gate.hold();
         callback_returned = true;
     }));
     send_note(vs.source);
@@ -492,7 +494,7 @@ TEST_CASE("CoreMIDI input: a callback's close() overlapping an external close() 
     auto* raw = input.get();
     REQUIRE(input->open(std::to_string(kDrainId), [&, raw](const pulp::midi::MidiEvent&) {
         in_callback = true;
-        gate.wait();
+        gate.hold();
         // Runs while the external close() below is waiting for this callback:
         // the two handoffs must be serialized (TSan reports the race otherwise)
         // and neither may deadlock.
