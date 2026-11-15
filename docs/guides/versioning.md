@@ -81,7 +81,8 @@ the self-tests for the compiler-asymmetry lints:
 | `safe_path_guard_lint.py` | an untrusted-path guard in `core/` or `tools/cli/` that trusts `is_absolute()`, which on Windows accepts `/x`, `\x` and `C:x`, instead of calling `pulp::runtime::is_safe_relative_path` |
 | `text_encoding_lint.py` | Python text I/O (`read_text`, `write_text`, `open`, `subprocess` with `text=True`) without `encoding=`, which decodes with cp1252 on Windows; the existing backlog is held by a per-file baseline (`text_encoding_baseline.json`) that can only go down |
 | `migration_note_guard.py` | a pull request adding `docs/migrations/vX.Y.Z.md` by hand. The release version is assigned after the change lands, so the note belongs in `docs/migrations/unreleased/<topic>.md`, which the version-at-land bump folds; only a bump commit (one with the `Version-Bump-Applied:` marker) may add a released note. Editing a released note is allowed |
-| `script_inputs_precheck.py` | a new `add_test(NAME <name> COMMAND ...)` that runs a Python, shell or Node script but has no entry in `test/ctest_script_inputs/`. Build-free counterpart of CI's `script-test-inputs-drift`: it reads only the CMake text the range adds. A computed name or the old `add_test(<name> <cmd>)` form is reported as not checked, never passed; `# script-inputs: not-gated <reason>` on or above the call skips a deliberately ungated test. Stale entries (a script that gained an import) still need the configured check |
+| `script_inputs_precheck.py` | a new `add_test(NAME <name> COMMAND ...)` that runs a Python, shell or Node script but has no entry in `test/ctest_script_inputs/`. Build-free counterpart of CI's `script-test-inputs-drift`: it reads only the CMake text the range adds. A computed name or the old `add_test(<name> <cmd>)` form is reported as not checked, never passed; `# script-inputs: not-gated <reason>` on or above the call skips a deliberately ungated test. Stale entries are `script_inputs_offline.py`'s half |
+| `script_inputs_offline.py` | a `test/ctest_script_inputs/` fragment the range makes stale, with no configure: a script test whose entry, recorded inputs or registering CMake file changed is rebuilt from its static `add_test` + `set_tests_properties` through the generator's own `inputs_for`; a new test suite with no `executables/` fragment; a source that starts or stops calling a process or loader API in a target an entry provably compiles. It prints the exact fragment diff and `--write` writes the ones it can recompute; the rest name the configure-based regeneration. A command naming a configure-only variable, a registration inside a function or foreach, a generated entry script or a suite under a guard it cannot evaluate is reported NOT CHECKED, never passed |
 | `python_floor_syntax_check.py` | a tracked `*.py` file that Python 3.12 parses but 3.11, the gates' floor, rejects: an f-string field that reuses the enclosing quote or holds a backslash (including a line continuation, or in a nested f-string's text), comment or (single-quoted) line break. CI runs 3.12, so only a 3.11 run (CMake's default on a stock Homebrew Mac) would see it |
 
 `gates.sh` runs `designated_initializer_lint.py` diff-scoped and
@@ -91,7 +92,9 @@ pre-push hook also run `text_encoding_lint.py --base`, the same invocation as
 CI's `Enforce version & skill sync`, so a missing `encoding="utf-8"` fails
 before the push rather than in CI, and `script_inputs_precheck.py --base`, which
 catches a new script-driven ctest with no `test/ctest_script_inputs/` entry
-without the configured build `script-test-inputs-drift` needs. All are canaries,
+without the configured build `script-test-inputs-drift` needs, and
+`script_inputs_offline.py --base`, which recomputes the fragments the diff
+reaches and fails on a stale one with its exact diff. All are canaries,
 not substitutes for building on the target: they check what a regex can check
 without a compiler, which for designated initializers means duplicates but not
 declaration order.

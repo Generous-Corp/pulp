@@ -1301,6 +1301,52 @@ TEST_CASE("LV2 transport survives a block the host sends no position in",
     REQUIRE_FALSE(g_lv2_time.transport_jump);
 }
 
+TEST_CASE("LV2 latched transport advances by the previous block's length",
+          "[format][lv2][transport]") {
+    Lv2FactoryGuard factory(&make_lv2_time_probe);
+    g_lv2_time = {};
+    Lv2FeatureBundle features;
+    Lv2HandleGuard handle{
+        lv2_generic::instantiate(&lv2_generic::g_lv2_descriptor, 48000.0, "", features.features)};
+    REQUIRE(handle.handle != nullptr);
+    auto* inst = static_cast<PulpLv2Instance*>(handle.handle);
+    const auto& urids = inst->time_urids;
+
+    std::array<float, 64> input{};
+    std::array<float, 64> output{};
+    LV2SequenceBuffer seq;
+    const uint32_t capacity = prepare_sequence(seq, inst->urid_atom_sequence);
+
+    TimePositionEvent pos(urids.atom_object, urids.time_position, 0);
+    pos.add<float>(urids.time_speed, urids.atom_float, 1.0f);
+    pos.add<int64_t>(urids.time_frame, urids.atom_long, 1000);
+    REQUIRE(lv2_atom_sequence_append_event(seq.as_seq(), capacity, pos.header()));
+
+    lv2_generic::connect_port(handle.handle, 0, input.data());
+    lv2_generic::connect_port(handle.handle, 1, output.data());
+    lv2_generic::connect_port(handle.handle, 2, seq.as_seq());
+    lv2_generic::run(handle.handle, 32);
+    REQUIRE(g_lv2_time.position_samples == 1000);
+
+    // The host grows the block without sending a new position. The first
+    // 32-frame block ended at 1032, so this block starts there whatever its
+    // own length; extrapolating by 64 would land at 1064 and read as a jump.
+    prepare_sequence(seq, inst->urid_atom_sequence);
+    lv2_generic::run(handle.handle, 64);
+    CHECK(g_lv2_time.position_samples == 1032);
+    CHECK_FALSE(g_lv2_time.transport_jump);
+
+    prepare_sequence(seq, inst->urid_atom_sequence);
+    lv2_generic::run(handle.handle, 16);
+    CHECK(g_lv2_time.position_samples == 1096);
+    CHECK_FALSE(g_lv2_time.transport_jump);
+
+    prepare_sequence(seq, inst->urid_atom_sequence);
+    lv2_generic::run(handle.handle, 48);
+    CHECK(g_lv2_time.position_samples == 1112);
+    CHECK_FALSE(g_lv2_time.transport_jump);
+}
+
 // ── Port-index cross-check + channel-ceiling admission ───────────────────
 
 namespace {

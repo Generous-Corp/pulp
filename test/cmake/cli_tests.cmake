@@ -206,13 +206,29 @@ endfunction()
 
 add_executable(pulp-test-cli-shellout test_cli_shellout.cpp test_cli_fmt_shellout.cpp
     test_cli_audio_heritage.cpp test_cli_timeline_render_shellout.cpp)
-target_link_libraries(pulp-test-cli-shellout PRIVATE pulp::platform Catch2::Catch2WithMain)
+target_link_libraries(pulp-test-cli-shellout PRIVATE pulp::platform pulp::audio Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-cli-shellout PRIVATE
     PULP_TEST_INSPECTOR_ENABLED=$<BOOL:${PULP_ENABLE_INSPECTOR}>)
 pulp_bind_cli_shellout_target(pulp-test-cli-shellout)
 # `pulp doctor` and `pulp status` walk the checkout, and `pulp docs` reads an
 # open-ended set of documents, all through the spawned pulp-cpp.
 pulp_test_data(pulp-test-cli-shellout WHOLE_CHECKOUT)
+
+# The graph CLI's `--json` codes are compared with the C++ GraphPatch code
+# names for the same files, so this suite links the host library and drives
+# the built CLI.
+if(TARGET pulp-host)
+    add_executable(pulp-test-cli-graph-code-parity test_cli_graph_code_parity.cpp)
+    target_link_libraries(pulp-test-cli-graph-code-parity PRIVATE
+        pulp::host pulp::platform Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-cli-graph-code-parity PRIVATE
+        PULP_CLI_SOURCE_ROOT="${CMAKE_SOURCE_DIR}")
+    pulp_test_data(pulp-test-cli-graph-code-parity
+        PATHS test/test_cli_graph_code_parity.cpp)
+    pulp_bind_cli_shellout_target(pulp-test-cli-graph-code-parity)
+    pulp_test_spawns(pulp-test-cli-graph-code-parity pulp-cli)
+    catch_discover_tests(pulp-test-cli-graph-code-parity)
+endif()
 
 add_executable(pulp-test-cli-overflow-shellout test_cli_overflow_shellout.cpp)
 target_link_libraries(pulp-test-cli-overflow-shellout PRIVATE
@@ -315,6 +331,7 @@ catch_discover_tests(pulp-test-cli-tweaks-shellout)
 add_library(pulp-test-cli-support-objects OBJECT EXCLUDE_FROM_ALL
     ${CMAKE_SOURCE_DIR}/tools/cli/tartci_lease.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_watch_shell.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/focused_build.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/shell_redirect.cpp

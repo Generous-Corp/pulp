@@ -119,11 +119,13 @@ file's connections array, and `UnsupportedKind` names the matching
   velocity 100, offset 0), so the first record has `payload_count` 1 and later
   blocks report 0. It reports `observation: events_before_destination_consumer`.
 - `control` requires `--destination-param ID` (a non-negative integer parameter
-  id) instead of `--destination-port`. The CLI and MCP accept this schema, but
-  graphs loaded by the offline probe admit only built-in input, output, gain and
-  MIDI nodes and so cannot contain an automation edge: a control request always
-  refuses with `MissingEdge`. Control probes are available only through the C++
-  API today.
+  id) instead of `--destination-port`. A control edge ends on a parameter of a
+  registered Processor node, an application type from the public C++ catalog.
+  The CLI and MCP accept this schema, but graphs loaded by the offline probe
+  admit only built-in input, output, gain and MIDI nodes, none of which has an
+  automatable parameter (the gain node's `gain` is a setting), so they cannot
+  contain an automation edge: a control request always refuses with
+  `MissingEdge`. Control probes are available only through the C++ API today.
 
 Limits are a 1 MiB graph, 128 nodes, 512 connections, 1024 ports, built-in
 input/output/gain/MIDI nodes, and an audio input with 1–8 channels, 8000–192000 Hz,
@@ -178,6 +180,31 @@ unattached or ordinary graph does not read per-node clocks, preserving the
 zero-cost audio path. The installed MCP `pulp_graph` operation mirrors these
 three booleans and invokes the matching sibling CLI, so its JSON sections and
 refusals stay identical to the CLI surface.
+
+Node and port values in these sections are numeric ids; match them to names
+through `plan.nodes`. For a stereo `in -> trim -> out` graph the sections look
+like this (abridged to one connection each):
+
+```json
+"plan": {
+  "nodes": [{"id": 1, "name": "in", "input_ports": 0, "output_ports": 2}, ...],
+  "connections": [{"source_node": 1, "source_port": 0, "destination_node": 2,
+                   "destination_port": 0, "feedback": false, "midi": false,
+                   "automation": false, "audio_rate_modulation": false,
+                   "sidechain": false}, ...]
+},
+"latency_pdc": {
+  "total_latency_samples": 0,
+  "nodes": [{"node_id": 1, "input_latency_samples": 0, "output_latency_samples": 0}, ...],
+  "connections": [{"source_node": 1, "source_port": 0, "destination_node": 2,
+                   "destination_port": 0, "delay_samples": 0}, ...]
+},
+"node_loads": [{"node_id": 1, "load": 0.0, "callback_count": 0}, ...]
+```
+
+`total_latency_samples` is the graph's compensated latency, each node reports
+the latency arriving at its inputs and leaving its outputs, and `delay_samples`
+is the compensation delay inserted on that connection.
 
 Requests that cannot be satisfied fail closed with a typed refusal rather than
 being represented as audio measurements or fabricated zero values.

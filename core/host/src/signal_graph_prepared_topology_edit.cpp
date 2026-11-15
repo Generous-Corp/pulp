@@ -7,6 +7,7 @@
 // compiled graph and control readers cannot observe a mixed authoring graph.
 
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
+#include <pulp/host/control_index_nodes.hpp>
 
 #include <algorithm>
 #include <array>
@@ -977,7 +978,7 @@ PreparedDescriptionResult SignalGraph::PreparedTopologyEdit::bind_authored_ident
         for (const auto& connection : candidate_->connections_) {
             if (connection.feedback || connection.midi || connection.automation ||
                 connection.audio_rate_modulation || connection.sidechain || connection.spectral ||
-                connection.source_port > 1 || connection.dest_port > 1)
+                connection.control_signal || connection.source_port > 1 || connection.dest_port > 1)
                 return PreparedDescriptionResult::refused(
                     PreparedDescriptionRefusal::UnsupportedPreparedProfile);
             const auto source = find_node(connection.source_node);
@@ -1379,9 +1380,18 @@ SignalGraph::PreparedTopologyEdit::baseline_removal_rejection_locked_() const {
             [&](const GraphNode& node) { return node.id == baseline.id; });
         if (retained)
             continue;
-        if (baseline.type == NodeType::Plugin &&
-            dynamic_cast<const PreparedOwnedBuiltInSlot*>(baseline.plugin.get()) == nullptr)
-            return Result::BaselinePluginRemovalRequiresRelease;
+        if (baseline.type == NodeType::Plugin) {
+            const auto processor = owner_->processor_nodes_.find(baseline.id);
+            // Processor lifetimes ride the compiled snapshots. An old pinned
+            // generation keeps its instance until control-thread retirement;
+            // external or unowned slots still require the stopped lifecycle.
+            const bool graph_owned_processor = !baseline.plugin &&
+                                               processor != owner_->processor_nodes_.end() &&
+                                               processor->second && processor->second->instance;
+            if (!graph_owned_processor &&
+                dynamic_cast<const PreparedOwnedBuiltInSlot*>(baseline.plugin.get()) == nullptr)
+                return Result::BaselinePluginRemovalRequiresRelease;
+        }
         if (baseline.type == NodeType::Custom) {
             const auto type = owner_->custom_node_types_.find(
                 prepared_custom_key(baseline.custom_type_id, baseline.custom_type_version));
@@ -1640,6 +1650,19 @@ NodeId SignalGraph::PreparedTopologyEdit::add_owned_builtin_plugin_node(
 
 NodeId SignalGraph::PreparedTopologyEdit::add_processor_node(
     std::shared_ptr<format::ProcessorNodeInstance> processor, const std::string& name) {
+    GraphMutationLock owner_lock(*owner_);
+    const auto aliases_baseline = [&](const auto& baseline) {
+        return std::any_of(baseline.begin(), baseline.end(), [&](const auto& entry) {
+            return entry.second && entry.second->instance == processor;
+        });
+    };
+    // A removed baseline ID is still live in the published generation. Reject
+    // before minting a second lifetime token, even if the caller removes it again.
+    if (processor && (aliases_baseline(owner_->processor_nodes_) ||
+                      (base_live_ && aliases_baseline(base_live_->processors)))) {
+        mutation_failed_ = true;
+        return 0;
+    }
     return add_node_([&] { return candidate_->add_processor_node(std::move(processor), name); });
 }
 
@@ -1695,6 +1718,27 @@ bool SignalGraph::PreparedTopologyEdit::connect_audio_rate_modulation(
         return candidate_->connect_audio_rate_modulation(source, source_port, dest, dest_param_id,
                                                          range_lo, range_hi, smoothing_ms, mix);
     });
+}
+
+bool SignalGraph::PreparedTopologyEdit::connect_control_modulation(
+    const PortHandle& source, NodeId dest, uint32_t dest_param_id, float range_lo, float range_hi,
+    float smoothing_ms, AutomationMix mix) {
+    return mutate_([&] {
+        return candidate_->connect_control_modulation(source, dest, dest_param_id, range_lo,
+                                                      range_hi, smoothing_ms, mix);
+    });
+}
+
+bool SignalGraph::PreparedTopologyEdit::set_control_node_state(
+    NodeId id, const std::vector<std::uint8_t>& bytes) {
+    if (baseline_node_ids_.contains(id))
+        return false;
+    const auto* node = candidate_->node(id);
+    if (node == nullptr || node->type != NodeType::Custom || node->custom_instance ||
+        candidate_->custom_node_type(node->custom_type_id, node->custom_type_version) == nullptr ||
+        !validate_control_node_state(node->custom_type_id, bytes))
+        return false;
+    return mutate_([&] { return candidate_->set_custom_node_state(id, bytes); });
 }
 
 bool SignalGraph::PreparedTopologyEdit::connect_feedback(NodeId source, PortIndex source_port,
@@ -2628,7 +2672,8 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
                                             !connection.feedback && !connection.midi &&
                                             !connection.automation &&
                                             !connection.audio_rate_modulation &&
-                                            !connection.sidechain && !connection.spectral;
+                                            !connection.sidechain && !connection.spectral &&
+                                            !connection.control_signal;
                                  }))
                     return last_result_ = Result::PreflightFailed;
             }

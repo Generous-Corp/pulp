@@ -178,6 +178,19 @@ non-zero, and let a freshly arrived Position overwrite the extrapolation
 outright — that way a host which *does* send one per cycle never accumulates
 drift, and one which does not keeps moving.
 
+Advance by the **previous** block's length, not the current one's: the latch
+describes the previous block's first frame. Using the current `sample_count`
+is invisible at a fixed block size and wrong the moment a host changes it; the
+position lands off by the difference and the playhead diff flags a transport
+jump on an unbroken timeline (`PulpLv2Instance::previous_block_samples`).
+
+The graph event projection (`pulp/host/host_event_timestamps.hpp`,
+`clock_from_lv2()` / `lv2_event_block_time()`) reads LV2 as a format with
+**no monotonic counter**: blocks are classified on `time:frame` alone, and only
+at `time:speed == 1`. Fill its `frame` with the block-start position, and
+convert event times through `lv2_event_block_time()`, which refuses a
+beat-time sequence instead of reading the `beats` double as frames.
+
 ### The unit traps in `time:`
 
 - **`time:beat` counts beats of `time:beatUnit`, not quarter notes.** Pulp's

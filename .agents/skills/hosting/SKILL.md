@@ -9,6 +9,42 @@ description: |
 
 # hosting
 
+## Graph-owned Control indexing
+
+Register `make_control_index_input_type()` and the needed scalar Control
+factories on the graph before adding their nodes. Connect typed Control ports
+from `ControlIndexInput.index` through an indexed table to a Processor Control
+input, then submit one finite index per frame with
+`SignalGraph::process_control_checked()`. Its checked result is part of the
+contract: a routed render failure returns `RenderFailed` and silences the
+output. Keep the table and scalar state bounded, validate it before the
+prepared edit is published, and consume the dense modulation inside the
+Processor's `process_block()`.
+
+`examples/g5-control-index-filter` is the installed SDK fixture. It compares
+one block with a partitioned render and an independent sample recurrence, and
+plants missing-edge and swapped-index failures. Its v4 and v5 emit modes also
+exercise the graph persistence boundary.
+Its installed-SDK test is labelled `slow`, so only the nightly full build runs
+it; it does not gate a PR.
+
+Gotchas: every node constructor must call `detail::populate_named_ports()`
+(`signal_graph_ports_internal.hpp`), because the numeric `connect()` kind guard
+and the serializer index `input_ports` / `output_ports` by port number; trigger
+nodes once skipped it and crashed numeric connect. Read the next block's epoch
+and start from `control_index_position()`, and expect prepare or a prepared-edit
+commit to reset it to epoch 1, cursor 0. `control_index_nodes.cpp` is part of
+the curated sample-region web source list, because authoring calls into it.
+
+Port names: a MidiInput/MidiOutput node's single port is named `audio` (the
+first-port name from `populate_named_ports`) with kind MIDI, so do not rename
+it; `GraphNode::in` / `out` accept `midi` as an alias for a node's only MIDI
+port instead. Exact names win, and a node with zero or several MIDI ports has no
+alias. Port-name rules live in that one lookup: notation's `resolve_port`
+delegates to it, so a rule added only to the parser would let `.pat` files and
+the C++ API disagree. The formatter still writes `midi.audio`, so formatted
+text never changes when the alias is used.
+
 ## Opt-in isolated CLAP processing
 
 `pulp/host/isolated_plugin_slot.hpp` supplies experimental MacClapStereo64V1
@@ -29,6 +65,17 @@ process. A new call from `signal_graph_*.cpp` into that file fails only at
 web list a wasm-safe definition, as `isolated_plugin_slot_web.cpp` does for
 `is_isolated_plugin_slot`, and add the symbol to the closure selftest in
 `tools/scripts/test_sample_region_compat_baseline.py`.
+
+**Recover a terminal isolated node by republishing, never by re-preparing.**
+An isolated graph refuses a second eager `prepare()`, `begin_swap_edit()` and
+prepared topology edits, so `recover_isolated_graph_node()` publishes the fresh
+generation through `SignalGraph::publish_isolated_recovery()`. That path shares
+the post-compile PDC adoption (`adopt_live_snapshot_state` in
+`signal_graph_live_swap.cpp`) with `prepare_swap()`. Skipping the
+adoption restarts every sibling's PDC ring at zero, and the bit-exact sibling
+check in `test_isolated_clap_worker.cpp` fails. A refusal must keep the live
+snapshot; `fail_swap_edit_locked_` would silence the whole graph. Checkpoint
+before the node renders: `pause()` is terminal while a graph still renders it.
 
 
 ## Live retuning at a callback boundary
@@ -70,7 +117,12 @@ consumers.
 ## Mental model
 
 The bounded G6 in-process voice bank is `voice_bank_binding.hpp` plus one
-authored `SubgraphTemplate` Processor per slot. Its owner retains the existing
+authored `SubgraphTemplate` Processor per slot. Its epochs come from one
+process-wide counter claimed at `prepare()` and every `activate()`, never a
+per-bank `++epoch`: each bank's tracker restarts note generations at 1, so a
+per-bank epoch lets a retired bank's deferred `(epoch, generation)` token
+release the same note in a replacement bank. Never assume a fresh bank is at
+epoch 1; read `epoch()`. Its owner retains the existing
 MPE allocator; factories and named parameter binding run during control-thread
 preparation. When rendering a graph interval for an instrument, pass a
 zero-channel input `BufferView` with that interval's exact frame count. A
@@ -81,7 +133,15 @@ bank now handles member and manager CC64 sustain, scoped CC120/121/123,
 generation-scoped release, and member-channel pitch, pressure, and CC74
 expression. Manager expression returns `UnsupportedExpression`. Its A1 scalar
 fixture uses a fixed `1/sqrt(8)` eight-slot stereo sum and four in-slot linear
-release frames. Saved-bank activation, edit/undo, DAW adapters, and paced
+release frames. `VoiceBankIdleSkip::SkipInactiveSlots` (last `prepare` argument, off
+by default) skips idle slots once they have produced confirmed silence; it is
+safe only for voices with no free-running state, see "Skipping idle voices" in
+`docs/guides/graph-voice-binding.md`. To restore saved slot parameters onto a
+live bank use `VoiceBankBinding::restore_state()`, not a loop of
+`set_slot_parameter()`: `restore_voice_bank_state()` knows no authored bounds,
+so a value-by-value replay can refuse halfway and leave the bank half-restored,
+while `restore_state()` checks every value (bounds included) before the first
+write. Saved-bank activation, edit/undo, DAW adapters, and paced
 realtime qualification remain open; do not infer them from the source-installed
 consumer.
 
@@ -528,6 +588,12 @@ every `AudioOutput` is aligned to the one reported total because outputs sum
 into the same host buffer. Do not "fix" a dry path that stays undelayed beside
 an echo node; that is the contract. See `docs/reference/signal-graph.md`
 (latency semantics) and `pulp/host/graph_rt_report.hpp`.
+
+A custom node that oversamples its own work declares the oversampler's delay
+through `pulp/host/custom_node_oversampling.hpp`, which derives the declaration
+and the oversampler setup from one spec. Only the linear-phase kind has a
+constant delay to declare; the helper refuses the minimum-phase kinds, so do not
+declare a guessed number for them.
 
 The timeline binding builds on this to schedule compensated event streams; the
 contract, including why an event-to-audio device contributes nothing to the
@@ -1086,6 +1152,11 @@ save/reopen render proof beside the legacy caller-owned route controls.
   automation when the fixed queue is full and lets injected events win a
   same-offset tie. Reuse the mailbox across gap-free snapshots for the same
   plugin node so an edit cannot discard a publication made before the swap.
+  `parameter_mailbox_counters()` reads that mailbox's published, overflowed
+  and dropped-event counts; they live in the mailbox, so they survive
+  `prepare_swap()` and restart on an eager `prepare()`. They count only the
+  source side; a delivery-time drop into a full block queue is not counted,
+  because a refused delivery is retried and would be counted twice.
 - Keep plugin automation scratch preallocated by `SignalGraph::prepare()`.
   The audio-thread `process()` path must not create per-block containers for
   input pointer casts, sparse automation accumulation, or dense audio-rate
@@ -3153,6 +3224,17 @@ processor-provider mutation must refuse in spectral mode even when the legacy
 Keep graph persistence and arbitrary stage registration refused; PARTIAL status
 does not establish notation coverage or realtime timing qualification.
 
+`SpectralRuntimeBank::prepare` walks each node's input chain to its analysis or
+asset-morph root. A forged connection list (stage A to B to A) passes every
+per-edge predicate, so only that walk sees the missing root; it fails closed
+through a visited set sized for the node count. Any guard on that walk turns a
+mutation into a spin, not a wrong answer: the discovered case
+`Spectral preparation refuses a forged stage cycle with no root` fails only when
+the lane's ctest timeout kills it, and a `confirm_failure.sh` break of the guard
+hangs until then. Do not register a second ctest entry for the same case under a
+shorter `TIMEOUT`: the duplicate-registration check refuses two budgets for one
+command.
+
 ## Bounded typed trigger runtime
 
 Use `prepare_trigger_plan()` and `try_install_prepared_trigger_plan()` for the
@@ -3193,12 +3275,45 @@ or a steady/no-steady flip opens a new epoch. Out-of-block times are refused,
 never clamped. The CLAP adapter still feeds the Processor `MidiBuffer`, not this
 projection.
 
+VST3 and AU enter the same timeline through `clock_from_vst3()` /
+`clock_from_au()` (plain fields, no SDK). Gotchas: VST3's steady counter is
+`continousTimeSamples` (SDK spelling) and is only valid under `kContTimeValid`,
+which the VST3 adapter's `kProcessContextRequirements` does NOT request today
+(`kNeedContinousTimeSamples`), so a strict host sends none and the projection
+falls back to "no steady clock". `kProjectTimeMusicValid` gates beats, not
+`projectTimeSamples`. AU's steady counter is `mSampleTime` (keeps running
+across loops; round it like the adapters do). The AU "transport state
+changed" flags fire on play/stop too, so never map them to `discontinuity`.
+Convert AUv3 event times with `au_event_block_time()`, not the adapter's
+`au_event_block_offset()`, which clamps out-of-block times into the block.
+
+LV2 enters through `clock_from_lv2()`. LV2 has no steady counter at all, so
+the clock is always counter-free: a skipped `run()` is indistinguishable from
+a contiguous one, and seeks are only visible from a playing `time:frame` whose
+delta is not the previous block's length. Only `time:speed == 1` counts as
+playing (varispeed moves the transport at a different rate). None of the four
+adapters can call these helpers yet: `pulp-host` links `pulp::format`, so an
+adapter using `HostBlockTimeline` would be a dependency cycle, and no
+`Processor` seam consumes `HostEventRecord`s (see
+`docs/graph-program-status/G-5.md`, "Adapter wiring assessment").
+
 # G-7 edge diagnostics
 
 SignalGraph control and event edge probes are serial routed diagnostics with
 fixed-capacity publication and explicit refusal in unsupported execution modes.
 Host lifecycle changes must preserve detach-on-reset and the source-edge event
 observation boundary.
+
+Gotcha: probes live on the published `CompiledGraph`, which `process()` reads
+under a `runtime::Slot` pin, so attach/detach race the audio thread. Each probe
+sits in a `format::EdgeProbeCell`: `process_snapshot_impl` loads the pointer
+once per block and uses that copy, and a displaced probe is parked rather than
+freed. Parked probes are freed only when the slot is `quiescent()` and the
+snapshot's `use_count()` is 1 (an `ExecutionSnapshot` render holds the snapshot
+by `shared_ptr`, outside the slot's reader count); otherwise they die with the
+snapshot. Attach/detach must therefore take the snapshot via
+`live_slot_.live()`, not `read_snapshot_()`: their own pin would keep the
+reader count above zero and nothing would ever be reclaimed.
 
 ### Catalog-derived graph notation
 
@@ -3215,6 +3330,48 @@ only when the node has exactly one output, so stereo built-ins need explicit
 `node.audio` and `node.out1` ports. User-facing walkthroughs live in
 `docs/guides/graph-first-steps.md` and `docs/guides/graph-notation-cookbook.md`.
 
+Spectral constructors appear in the catalog as `unsupported_typed_api_only`
+rows built at a fixed probe identity (FFT 256, hop 64, mono, 48 kHz), so their
+audio port counts are for that identity only. A catalog row is not proof a key
+is constructible from notation: `instantiate()` returns 0 for spectral keys and
+`parse_graph_patch` refuses them before instantiation. Never suggest
+`GraphSerializer` as the fix for a spectral refusal; `to_json` returns an empty
+string for any graph with a spectral node.
+
+### Transactional graph-file development reload
+
+The C++ dev/loop delegate accepts `--graph-file` with an existing enrolled
+`--graph-instance`, consent `--graph-grant` and `--graph-generation`. Reuse
+`SignalGraphControlAuthority`, the product catalog, strict shared parser and
+prepared-edit publication; no extension-only watcher or direct executor bypass.
+The serialized control request stays bounded at 512 KiB. See
+`docs/guides/graph-file-reload.md` for limitations and numeric installed proof.
+
+Retained snapshots can keep an instance alive after its node is replaced: a
+current-node scan cannot prevent A-to-B-to-A aliasing. Share its ownership token,
+reserve new ownership atomically across graphs, and keep the reservation visible
+until release returns. Custom callback compatibility cannot use `target_type` or
+shape: opaque captures are unprovable even when copied from the same catalog.
+
+Behaviour change to watch for: a `ProcessorNodeInstance` is reserved process-wide
+by the first graph that adds it. `add_processor_node` with that same instance on
+another graph, or on the same graph before every snapshot holding the old node
+has retired, now returns 0. Create a fresh instance per node instead of reusing
+one handle across graphs.
+
+A Processor node's output ports are its main output channels followed by every
+declared aux output bus (optional ones included), named `<bus>.<channel>`, for
+example `Rear.0`. Count ports with `ProcessorNode::routed_output_channels()`,
+not `default_output_channels()`, which is the main bus only. The processor sees
+its buses under the descriptor's declared names (`main` only when a name is
+empty) and is prepared with the main-bus channel count. Aux *input* buses are
+not graph ports; they arrive through `set_processor_audio_input_provider()`.
+
+`SignalGraphControlAuthority` serializes `apply`, `reload_graph_file` and `reset`
+on its own mutex. The standalone host runs file reload on the main thread but
+modulation-route edits on the RPC worker, so do not rely on caller threading to
+keep generation checks and publication atomic.
+
 ### Vendored lilv/zix on Android
 
 `pulp-host-lilv` (external/lilv) compiles into `pulp-host` on every platform,
@@ -3223,3 +3380,25 @@ including the Android NDK build. zix assumes any `__linux__` target has
 Android branch in `core/host/CMakeLists.txt` defines `HAVE_COPY_FILE_RANGE=0`.
 The `android-build` job runs only on main pushes (it is skipped for
 `pull_request` and `merge_group`), so a host-side C break shows up only there.
+
+## Saved identity documents
+
+`GraphSerializer::to_saved_document` wraps the normal graph payload (format
+version unchanged) in the saved-identity envelope; `from_saved_document` checks
+every binding (duplicate, unknown, dangling node id) before it mutates the
+graph. The envelope name `pulp.graph.saved-identity.v6` is not a graph format
+version: the payload stays at the current format, and a v6+ graph is still
+refused. The semantic digest ignores editor layout, so moving a node changes
+the canonical bytes but not the digest. `snapshot_port_identity` replaces the
+old `undo_port_identity` spelling, which returned a snapshot and not an undo.
+
+Subgraph instances flatten into ordinary nodes, so a plain saved document
+loses which nodes form which instance. `to_saved_subgraph_document` and
+`from_saved_subgraph_document` (`subgraph_persistence.hpp`) add a `subgraphs`
+record list that names members by logical identity, never NodeId. Restore
+needs the caller's templates: each record is checked against a fresh scratch
+expansion of its template (member type and nested name, child identities and
+indices, internal edges, parameter set and bounds), and any mismatch clears
+the graph. Bounds and Processor targets always come from the template, so a
+document cannot widen them. `inspect_document` refuses dangling or shared
+members and records outside the v6 envelope, without needing templates.

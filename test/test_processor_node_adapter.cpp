@@ -26,12 +26,15 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/format/processor_node_adapter.hpp>
 #include <pulp/graph/graph_runtime_plan.hpp>
+#include <pulp/host/signal_graph.hpp>
+#include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
 #include <pulp/state/store.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <span>
 #include <stdexcept>
@@ -1227,4 +1230,580 @@ TEST_CASE("ProcessorNode dense binding applies automation delay compensation",
     REQUIRE(observed->last_lane[1] == 0.4f);
     for (int frame = 2; frame < kFrames; ++frame)
         REQUIRE(observed->last_lane[static_cast<std::size_t>(frame)] == 0.6f);
+}
+
+namespace {
+
+// A source with no audio input. It writes `level` to its mono output and counts
+// calls. A well-behaved processor clears its MIDI output at the start of a block;
+// when `emit_note` is set it then writes one note-on.
+class IdleSource final : public Processor {
+  public:
+    float level = 0.0f;
+    bool emit_note = false;
+    int calls = 0;
+    PluginDescriptor descriptor() const override {
+        PluginDescriptor d;
+        d.name = "IdleSource";
+        d.manufacturer = "Pulp";
+        d.bundle_id = "com.pulp.test.idlesource";
+        d.version = "1.0.0";
+        d.category = PluginCategory::Instrument;
+        d.input_buses.clear();
+        d.output_buses = {{"Main Out", 1, false}};
+        return d;
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>& output,
+                 const pulp::audio::BufferView<const float>&, pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer& midi_out, const ProcessContext&) override {
+        ++calls;
+        midi_out.clear();
+        if (emit_note)
+            midi_out.add(pulp::midi::MidiEvent::note_on(1, 60, 100));
+        std::fill_n(output.channel_ptr(0), output.num_samples(), level);
+    }
+};
+
+struct IdleSourceRig {
+    static constexpr int kFrames = 32;
+    IdleSource processor;
+    pulp::state::StateStore store;
+    ProcessorNode node{processor};
+    bool idle = true;
+    std::array<float, kFrames> output{};
+    std::array<float*, 1> out_ch{output.data()};
+    pulp::midi::MidiBuffer midi_out;
+    pulp::format::GraphRuntimeNodeProcessContext context;
+    pulp::format::ProcessBlock block;
+
+    static bool is_idle(void* self) noexcept {
+        return static_cast<IdleSourceRig*>(self)->idle;
+    }
+    IdleSourceRig() {
+        bind_processor(processor, store);
+        node.set_idle_probe({&IdleSourceRig::is_idle, this});
+        PrepareContext prepare;
+        prepare.sample_rate = kSr;
+        prepare.max_buffer_size = kFrames;
+        prepare.output_channels = 1;
+        midi_out.reserve_events(8);
+        REQUIRE(node.prepare(prepare));
+        context.routed = true;
+        context.node_outputs = {out_ch.data(), 1, kFrames};
+        context.node_midi_out = &midi_out;
+        block.sample_rate = kSr;
+        block.frame_count = kFrames;
+    }
+    bool run() {
+        return ProcessorNode::process_binding(block, context, &node);
+    }
+    void fill_output(float value) {
+        output.fill(value);
+    }
+    bool output_all_zero_bits() const {
+        for (const float sample : output) {
+            std::uint32_t bits;
+            std::memcpy(&bits, &sample, sizeof(bits));
+            if (bits != 0)
+                return false;
+        }
+        return true;
+    }
+};
+
+} // namespace
+
+TEST_CASE("Processor node idle skip zeroes its output and does not allocate",
+          "[format][graph][processor-node][idle-skip][rt-safety]") {
+    IdleSourceRig rig;
+    REQUIRE(rig.node.idle_skip_armed());
+    // The first idle block runs the processor and confirms it is silent.
+    rig.fill_output(0.7f);
+    REQUIRE(rig.run());
+    CHECK(rig.processor.calls == 1);
+    CHECK(rig.output_all_zero_bits());
+    CHECK(rig.node.idle_skipped_blocks() == 0);
+    {
+        pulp::test::RtAllocationProbe probe;
+        for (int block = 0; block < 5; ++block) {
+            rig.fill_output(0.7f);
+            REQUIRE(rig.run());
+            REQUIRE(rig.output_all_zero_bits());
+        }
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+    CHECK(rig.processor.calls == 1);
+    CHECK(rig.node.idle_skipped_blocks() == 5);
+
+    // Busy again: the processor runs, and silence has to be confirmed anew.
+    rig.idle = false;
+    rig.processor.level = 0.25f;
+    REQUIRE(rig.run());
+    CHECK(rig.processor.calls == 2);
+    CHECK(rig.output[0] == 0.25f);
+    rig.idle = true;
+    rig.processor.level = 0.0f;
+    REQUIRE(rig.run());
+    CHECK(rig.processor.calls == 3);
+    REQUIRE(rig.run());
+    CHECK(rig.processor.calls == 3);
+}
+
+TEST_CASE("Processor node idle skip clears stale MIDI output",
+          "[format][graph][processor-node][idle-skip]") {
+    IdleSourceRig rig;
+    // A busy block leaves a note in the node's MIDI output.
+    rig.idle = false;
+    rig.processor.emit_note = true;
+    REQUIRE(rig.run());
+    REQUIRE_FALSE(rig.midi_out.empty());
+    // Idle blocks confirm silence (the processor clears its output when it runs).
+    rig.idle = true;
+    rig.processor.emit_note = false;
+    REQUIRE(rig.run());
+    CHECK(rig.midi_out.empty());
+    // Anything left in the buffer by an earlier block is gone after a skip.
+    rig.midi_out.add(pulp::midi::MidiEvent::note_on(1, 61, 100));
+    const int calls = rig.processor.calls;
+    REQUIRE(rig.run());
+    CHECK(rig.processor.calls == calls);
+    CHECK(rig.node.idle_skipped_blocks() == 1);
+    CHECK(rig.midi_out.empty());
+}
+
+TEST_CASE("Processor node idle skip is only armed for an eligible processor",
+          "[format][graph][processor-node][idle-skip]") {
+    // No probe installed: never armed, always processed.
+    {
+        IdleSource processor;
+        pulp::state::StateStore store;
+        bind_processor(processor, store);
+        ProcessorNode node(processor);
+        PrepareContext prepare;
+        prepare.sample_rate = kSr;
+        prepare.max_buffer_size = 32;
+        prepare.output_channels = 1;
+        REQUIRE(node.prepare(prepare));
+        CHECK_FALSE(node.idle_skip_armed());
+    }
+    // A processor with an audio input is refused even with a probe.
+    {
+        OnePoleMono processor;
+        pulp::state::StateStore store;
+        bind_processor(processor, store);
+        ProcessorNode node(processor);
+        node.set_idle_probe({[](void*) noexcept { return true; }, nullptr});
+        PrepareContext prepare;
+        prepare.sample_rate = kSr;
+        prepare.max_buffer_size = 32;
+        prepare.input_channels = 1;
+        prepare.output_channels = 1;
+        REQUIRE(node.prepare(prepare));
+        CHECK_FALSE(node.idle_skip_armed());
+    }
+}
+
+TEST_CASE("Processor node idle skip renders blocks that reset, jump or carry lost events",
+          "[format][graph][processor-node][idle-skip]") {
+    enum class Case {
+        ResetFlag,
+        JumpFlag,
+        TransportReset,
+        TransportJump,
+        IncompleteEvents,
+        DroppedUmp,
+        DroppedMidi,
+        DroppedSysex,
+        DroppedMpe,
+        ParameterOverflow,
+        MidiEvent,
+        MpeEvent,
+        ParameterEvent
+    };
+    for (const auto kind :
+         {Case::ResetFlag, Case::JumpFlag, Case::TransportReset, Case::TransportJump,
+          Case::IncompleteEvents, Case::DroppedUmp, Case::DroppedMidi, Case::DroppedSysex,
+          Case::DroppedMpe, Case::ParameterOverflow, Case::MidiEvent, Case::MpeEvent,
+          Case::ParameterEvent}) {
+        INFO("case=" << static_cast<int>(kind));
+        IdleSourceRig rig;
+        pulp::midi::MidiBuffer midi_in;
+        pulp::midi::UmpBuffer ump;
+        pulp::midi::MpeBuffer mpe{false};
+        pulp::state::ParameterEventQueue params;
+        ProcessContext transport;
+        transport.sample_rate = kSr;
+        transport.num_samples = IdleSourceRig::kFrames;
+        rig.context.node_midi_in = &midi_in;
+        rig.context.node_mpe_in = &mpe;
+        rig.context.node_param_events = &params;
+        midi_in.attach_ump(&ump);
+        // Confirm silence, then skip one block.
+        REQUIRE(rig.run());
+        REQUIRE(rig.run());
+        REQUIRE(rig.processor.calls == 1);
+        REQUIRE(rig.node.idle_skipped_blocks() == 1);
+
+        switch (kind) {
+        case Case::ResetFlag:
+            rig.block.flags.reset = true;
+            break;
+        case Case::JumpFlag:
+            rig.block.flags.transport_jump = true;
+            break;
+        case Case::TransportReset:
+            transport.reset_requested = true;
+            rig.block.transport = &transport;
+            break;
+        case Case::TransportJump:
+            transport.transport_jump = true;
+            rig.block.transport = &transport;
+            break;
+        case Case::IncompleteEvents:
+            rig.context.node_events_incomplete = true;
+            break;
+        case Case::DroppedUmp:
+            // A UMP buffer that filled up and dropped the next message.
+            ump.set_realtime_capacity_limit(true);
+            while (ump.add(pulp::midi::UmpPacket{})) {
+            }
+            REQUIRE(ump.dropped_event_count() > 0);
+            break;
+        case Case::DroppedMidi:
+            // A zero-capacity, capacity-limited buffer: the event is dropped
+            // and the buffer stays empty.
+            midi_in.set_realtime_capacity_limit(true);
+            REQUIRE_FALSE(midi_in.add(pulp::midi::MidiEvent::note_on(1, 60, 100)));
+            REQUIRE(midi_in.empty());
+            REQUIRE(midi_in.dropped_event_count() > 0);
+            break;
+        case Case::DroppedSysex: {
+            midi_in.set_realtime_capacity_limit(true);
+            const std::vector<std::uint8_t> payload{0xF0, 0x7D, 0xF7};
+            REQUIRE_FALSE(midi_in.add_sysex(payload));
+            REQUIRE(midi_in.sysex_size() == 0);
+            REQUIRE(midi_in.dropped_sysex_count() > 0);
+            break;
+        }
+        case Case::DroppedMpe:
+            mpe.set_realtime_capacity_limit(true);
+            REQUIRE_FALSE(mpe.add(pulp::midi::MpeExpressionEvent{}));
+            REQUIRE(mpe.empty());
+            REQUIRE(mpe.dropped_event_count() > 0);
+            break;
+        case Case::ParameterOverflow:
+            for (std::size_t i = 0; i <= pulp::state::ParameterEventQueue::kCapacity; ++i)
+                params.push(pulp::state::ParameterEvent{});
+            REQUIRE(params.dropped_event_count() > 0);
+            break;
+        case Case::MidiEvent:
+            midi_in.add(pulp::midi::MidiEvent::note_on(1, 60, 100));
+            break;
+        case Case::MpeEvent:
+            mpe.add(pulp::midi::MpeExpressionEvent{});
+            break;
+        case Case::ParameterEvent:
+            params.push(pulp::state::ParameterEvent{});
+            break;
+        }
+        // The block reaches the processor and restarts the confirmation.
+        REQUIRE(rig.run());
+        CHECK(rig.processor.calls == 2);
+        CHECK(rig.node.idle_skipped_blocks() == 1);
+        // Back to a clean block: processed once to confirm, then skipped.
+        rig.block.flags = {};
+        rig.block.transport = nullptr;
+        rig.context.node_events_incomplete = false;
+        midi_in.set_realtime_capacity_limit(false);
+        midi_in.clear();
+        midi_in.clear_sysex();
+        ump.clear();
+        mpe.set_realtime_capacity_limit(false);
+        mpe.clear();
+        params.clear();
+        REQUIRE(rig.run());
+        CHECK(rig.processor.calls == 3);
+        REQUIRE(rig.run());
+        CHECK(rig.processor.calls == 3);
+        CHECK(rig.node.idle_skipped_blocks() == 2);
+    }
+}
+
+TEST_CASE("Processor node idle skip starts over when the node is prepared again",
+          "[format][graph][processor-node][idle-skip]") {
+    IdleSourceRig rig;
+    REQUIRE(rig.run());
+    REQUIRE(rig.run());
+    REQUIRE(rig.node.idle_skipped_blocks() == 1);
+    REQUIRE(rig.node.release());
+    PrepareContext prepare;
+    prepare.sample_rate = 96000.0;
+    prepare.max_buffer_size = 64;
+    prepare.output_channels = 1;
+    REQUIRE(rig.node.prepare(prepare));
+    CHECK(rig.node.idle_skipped_blocks() == 0);
+    const int calls = rig.processor.calls;
+    REQUIRE(rig.run());
+    CHECK(rig.processor.calls == calls + 1);
+    REQUIRE(rig.run());
+    CHECK(rig.processor.calls == calls + 1);
+}
+
+TEST_CASE("Processor node idle skip never confirms silence while its MIDI output drops events",
+          "[format][graph][processor-node][idle-skip]") {
+    IdleSourceRig rig;
+    // The processor writes a note into a MIDI output with no room: the note is
+    // dropped, the buffer stays empty and its drop counter is set. Audio is
+    // silent, but the node is not quiet, so it is never skipped.
+    pulp::midi::MidiBuffer no_room;
+    no_room.set_realtime_capacity_limit(true);
+    rig.context.node_midi_out = &no_room;
+    rig.processor.emit_note = true;
+    for (int block = 0; block < 4; ++block) {
+        REQUIRE(rig.run());
+        REQUIRE(rig.output_all_zero_bits());
+        REQUIRE(no_room.empty());
+        REQUIRE(no_room.dropped_event_count() > 0);
+    }
+    CHECK(rig.processor.calls == 4);
+    CHECK(rig.node.idle_skipped_blocks() == 0);
+}
+
+namespace {
+
+// What a named-bus processor saw on its last block. Shared with the test so it
+// survives the processor moving into a graph.
+struct NamedBusObservation {
+    bool found_source = false;
+    bool found_front = false;
+    bool rear_declared = false;
+    bool rear_active = false;
+    bool layouts_match = false;
+    int prepared_output_channels = -1;
+    int blocks = 0;
+};
+
+// Mono "Source" in, stereo "Front" main out, optional stereo "Rear" aux out.
+// It finds its buses by declared name only (no main() fallback), so a host
+// that renames them to "main" makes it render silence.
+class NamedBusProcessor final : public Processor {
+  public:
+    explicit NamedBusProcessor(std::shared_ptr<NamedBusObservation> seen)
+        : seen_(std::move(seen)) {}
+
+    PluginDescriptor descriptor() const override {
+        PluginDescriptor d;
+        d.name = "NamedBus";
+        d.manufacturer = "Pulp";
+        d.bundle_id = "com.pulp.test.namedbus";
+        d.version = "1.0.0";
+        d.category = PluginCategory::Effect;
+        d.input_buses = {{"Source", 1}};
+        d.output_buses = {{"Front", 2}, {"Rear", 2, true, pulp::format::BusRole::Aux}};
+        return d;
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const PrepareContext& context) override {
+        seen_->prepared_output_channels = context.output_channels;
+    }
+    void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&, const ProcessContext&) override {
+    }
+    void process(pulp::format::ProcessBuffers& buses, pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&, const ProcessContext&) override {
+        ++seen_->blocks;
+        const auto* source = buses.inputs.find_by_name("Source");
+        auto* front = buses.outputs.find_by_name("Front");
+        auto* rear = buses.outputs.find_by_name("Rear");
+        seen_->found_source = source != nullptr;
+        seen_->found_front = front != nullptr;
+        seen_->rear_declared = rear != nullptr;
+        seen_->rear_active = rear != nullptr && rear->active();
+        seen_->layouts_match = buses.layouts_match_descriptors();
+        if (front == nullptr || !front->active())
+            return;
+        for (std::size_t frame = 0; frame < front->num_samples(); ++frame) {
+            const float x =
+                source != nullptr && source->active() ? source->buffer.channel_ptr(0)[frame] : 0.0f;
+            front->buffer.channel_ptr(0)[frame] = 0.75f * x;
+            front->buffer.channel_ptr(1)[frame] = 0.25f * x;
+            if (seen_->rear_active) {
+                rear->buffer.channel_ptr(0)[frame] = 0.5f * x;
+                rear->buffer.channel_ptr(1)[frame] = -0.5f * x;
+            }
+        }
+    }
+
+  private:
+    std::shared_ptr<NamedBusObservation> seen_;
+};
+
+} // namespace
+
+TEST_CASE("Processor graph node wires an aux output bus and passes declared bus names",
+          "[format][graph][processor-node][bus-layout]") {
+    constexpr std::size_t kFrames = 16;
+    auto seen = std::make_shared<NamedBusObservation>();
+    pulp::host::SignalGraph graph;
+    const auto in = graph.add_input_node(1, "In");
+    const auto proc = graph.add_processor_node(std::make_unique<NamedBusProcessor>(seen));
+    const auto out = graph.add_output_node(4, "Out");
+    REQUIRE(in != 0);
+    REQUIRE(proc != 0);
+    REQUIRE(out != 0);
+
+    // The main bus keeps its positional handles; the aux bus is named by bus.
+    const auto* node = graph.node(proc);
+    REQUIRE(node != nullptr);
+    REQUIRE(node->num_input_ports == 1);
+    REQUIRE(node->num_output_ports == 4);
+    REQUIRE(node->output_ports.size() == 4);
+    CHECK(node->output_ports[0].name == "audio");
+    CHECK(node->output_ports[1].name == "out1");
+    CHECK(node->output_ports[2].name == "Rear.0");
+    CHECK(node->output_ports[3].name == "Rear.1");
+    const auto* out_node = graph.node(out);
+    REQUIRE(out_node != nullptr);
+
+    REQUIRE(graph.connect(in, 0, proc, 0));
+    REQUIRE(graph.connect(proc, 0, out, 0));
+    REQUIRE(graph.connect(proc, 1, out, 1));
+    REQUIRE(graph.connect(node->out("Rear.0"), out_node->in("in2")));
+    REQUIRE(graph.connect(node->out("Rear.1"), out_node->in("in3")));
+    REQUIRE(graph.prepare(kSr, static_cast<int>(kFrames)));
+    // The processor is prepared for its main bus, as a format host would.
+    CHECK(seen->prepared_output_channels == 2);
+
+    std::vector<float> x(kFrames);
+    for (std::size_t i = 0; i < kFrames; ++i)
+        x[i] = 0.0625f * static_cast<float>(i + 1);
+    std::array<std::vector<float>, 4> y;
+    for (auto& channel : y)
+        channel.assign(kFrames, 9.0f);
+    std::array<const float*, 1> in_ch{x.data()};
+    std::array<float*, 4> out_ch{y[0].data(), y[1].data(), y[2].data(), y[3].data()};
+    pulp::audio::BufferView<const float> in_view(in_ch.data(), 1, kFrames);
+    pulp::audio::BufferView<float> out_view(out_ch.data(), 4, kFrames);
+    graph.process(out_view, in_view, static_cast<int>(kFrames));
+
+    REQUIRE(seen->blocks > 0);
+    CHECK(seen->found_source);
+    CHECK(seen->found_front);
+    CHECK(seen->rear_declared);
+    CHECK(seen->rear_active);
+    CHECK(seen->layouts_match);
+    for (std::size_t i = 0; i < kFrames; ++i) {
+        INFO("frame " << i);
+        // The name-only lookup renders: a graph that named the buses "main"
+        // would leave every channel silent.
+        REQUIRE(y[0][i] == 0.75f * x[i]);
+        REQUIRE(y[1][i] == 0.25f * x[i]);
+        REQUIRE(y[2][i] == 0.5f * x[i]);
+        REQUIRE(y[3][i] == -0.5f * x[i]);
+    }
+}
+
+TEST_CASE("Processor node leaves an aux bus inactive when its output view is main-only",
+          "[format][graph][processor-node][bus-layout]") {
+    constexpr int frames = 8;
+    auto seen = std::make_shared<NamedBusObservation>();
+    NamedBusProcessor processor(seen);
+    pulp::state::StateStore store;
+    bind_processor(processor, store);
+    CHECK(ProcessorNode::routed_output_channels(processor.descriptor()) == 4);
+    ProcessorNode node(processor);
+    PrepareContext prepare;
+    prepare.sample_rate = kSr;
+    prepare.max_buffer_size = frames;
+    prepare.input_channels = 1;
+    prepare.output_channels = 2;
+    REQUIRE(node.prepare(prepare));
+
+    std::array<float, frames> input{};
+    std::array<float, frames> left{};
+    std::array<float, frames> right{};
+    for (int frame = 0; frame < frames; ++frame)
+        input[frame] = static_cast<float>(frame + 1);
+    std::array<const float*, 1> input_channels{input.data()};
+    std::array<float*, 2> output_channels{left.data(), right.data()};
+    pulp::format::ProcessBlock block;
+    block.sample_rate = kSr;
+    block.frame_count = frames;
+    pulp::format::GraphRuntimeNodeProcessContext context;
+    context.routed = true;
+    context.node_inputs = {input_channels.data(), 1, frames};
+    context.node_outputs = {output_channels.data(), 2, frames};
+    REQUIRE(ProcessorNode::process_binding(block, context, &node));
+    CHECK(seen->found_source);
+    CHECK(seen->found_front);
+    CHECK(seen->rear_declared);
+    CHECK_FALSE(seen->rear_active);
+    CHECK(seen->layouts_match);
+    for (int frame = 0; frame < frames; ++frame) {
+        REQUIRE(left[frame] == 0.75f * input[frame]);
+        REQUIRE(right[frame] == 0.25f * input[frame]);
+    }
+}
+
+TEST_CASE("Processor node main-bus fast path passes the declared bus names",
+          "[format][graph][processor-node][bus-layout]") {
+    // SidechainProbe without a route provider would take the routed path; a
+    // one-in one-out processor takes the fast path, which must name its buses
+    // as declared too.
+    struct MainOnlyNames final : Processor {
+        PluginDescriptor descriptor() const override {
+            PluginDescriptor d;
+            d.name = "MainOnlyNames";
+            d.manufacturer = "Pulp";
+            d.bundle_id = "com.pulp.test.mainonlynames";
+            d.version = "1.0.0";
+            d.category = PluginCategory::Effect;
+            d.input_buses = {{"Dry", 1, false}};
+            d.output_buses = {{"Wet", 1, false}};
+            return d;
+        }
+        void define_parameters(pulp::state::StateStore&) override {}
+        void prepare(const PrepareContext&) override {}
+        void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                     pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                     const ProcessContext&) override {}
+        void process(pulp::format::ProcessBuffers& buses, pulp::midi::MidiBuffer&,
+                     pulp::midi::MidiBuffer&, const ProcessContext&) override {
+            const auto* dry = buses.inputs.find_by_name("Dry");
+            auto* wet = buses.outputs.find_by_name("Wet");
+            if (dry == nullptr || wet == nullptr)
+                return;
+            for (std::size_t i = 0; i < wet->num_samples(); ++i)
+                wet->buffer.channel_ptr(0)[i] = 2.0f * dry->buffer.channel_ptr(0)[i];
+        }
+    };
+
+    constexpr int frames = 4;
+    MainOnlyNames processor;
+    pulp::state::StateStore store;
+    bind_processor(processor, store);
+    CHECK(ProcessorNode::routed_output_channels(processor.descriptor()) == 1);
+    ProcessorNode node(processor);
+    PrepareContext prepare;
+    prepare.sample_rate = kSr;
+    prepare.max_buffer_size = frames;
+    prepare.input_channels = 1;
+    prepare.output_channels = 1;
+    REQUIRE(node.prepare(prepare));
+    std::array<float, frames> input{1.0f, 2.0f, 3.0f, 4.0f};
+    std::array<float, frames> output{};
+    std::array<const float*, 1> input_channels{input.data()};
+    std::array<float*, 1> output_channels{output.data()};
+    pulp::format::ProcessBlock block;
+    block.sample_rate = kSr;
+    block.frame_count = frames;
+    pulp::format::GraphRuntimeNodeProcessContext context;
+    context.routed = true;
+    context.node_inputs = {input_channels.data(), 1, frames};
+    context.node_outputs = {output_channels.data(), 1, frames};
+    REQUIRE(ProcessorNode::process_binding(block, context, &node));
+    for (int frame = 0; frame < frames; ++frame)
+        REQUIRE(output[frame] == 2.0f * input[frame]);
 }

@@ -146,11 +146,12 @@ These directories prove a contract and are exercised by CI. Do not copy them as 
 | `faust-rt-sdk-consumer` | Faust runtime builds against the installed SDK (**SDK project**) | `ctest -R cmake-faust-rt-sdk-consumer` | `test/consumers/faust-rt-sdk-consumer` |
 | `g10-routed-consumer` | Routed spectral ports work from an installed SDK (**SDK project**) | Configure as an SDK project | `test/consumers/g10-routed-consumer` |
 | `a10-routing-hosting-consumer` | Installed SDK host route-registration and preparation acceptance checks, prepared latency, and planted refusal controls (**SDK project**) | `ctest -R a10-routing-hosting-public-consumer` | `test/consumers/a10-routing-hosting-consumer` |
+| `graph-file-reload-consumer` | Real file save, off-side prepare, publication and malformed-state numeric preservation from an installed SDK (**SDK project**) | `ctest -R cmake-graph-file-reload-sdk-consumer` | `test/consumers/graph-file-reload-consumer` |
 | `graph-patch-consumer` | Catalog-derived notation, typed diagnostics and numeric MIDI/modulation from an installed SDK (**SDK project**) | `ctest -R cmake-graph-patch-sdk-consumer` | `test/consumers/graph-patch-consumer` |
 | `g2-processor-restore-consumer` | A registered processor restores its state from an installed SDK (**SDK project**) | `ctest -R cmake-g2-processor-restore-sdk-consumer` | `test/consumers/g2-processor-restore-consumer` |
 | `g9-isolated-clap-consumer` | Real isolated CLAP state recovery and 64-sample PDC from an installed SDK (**SDK project**) | `ctest -R cmake-g9-isolated-clap-sdk-consumer` | `test/consumers/g9-isolated-clap-consumer` |
-| `g3-d4-prepared-export-consumer` | Prepared serial I/O + Gain export and provenance from an installed SDK (**SDK project**) | Configure as an SDK project, then run `ctest` | `test/consumers/g3-d4-prepared-export-consumer` |
-| `g3-resolved-identity-consumer` | Bounded resolved graph identity and receipt from an installed SDK (**SDK project**) | Configure as an SDK project, then run `ctest` | `test/consumers/g3-resolved-identity-consumer` |
+| `g3-d4-prepared-export-consumer` | Prepared serial I/O + Gain export and provenance from an installed SDK (**SDK project**) | `ctest -R cmake-g3-d4-prepared-export-consumer` | `test/consumers/g3-d4-prepared-export-consumer` |
+| `g3-resolved-identity-consumer` | Bounded resolved graph identity and receipt from an installed SDK (**SDK project**) | `ctest -R cmake-g3-resolved-identity-consumer` | `test/consumers/g3-resolved-identity-consumer` |
 | `g3-io-gain-consumer` | Identity of an input and output gain graph, checked by a Python script | `python3 test/test_g3_io_gain_identity.py` | `test/consumers/g3-io-gain-consumer` |
 | `g5-event-consumer` | Reference event trace for two legal partitions | `python3 examples/g5-event-consumer/test_check_trace.py` | `test/consumers/g5-event-consumer` |
 | `g5-host-event-consumer` | Public host event boundary from an external program (**SDK project**) | `ctest -R g5-host-event-public-consumer` | `test/consumers/g5-host-event-consumer` |
@@ -168,6 +169,7 @@ These directories prove a contract and are exercised by CI. Do not copy them as 
 | `graph-agent-loop-replay` | Save, edit, and replay a prepared stereo graph with planted refusal controls (**SDK project**) | Configure as an SDK project | `test/consumers/graph-agent-loop-replay` |
 | `graph-edge-probe` | Graph edge kinds from an installed SDK (**SDK project**) | Configure as an SDK project | `test/consumers/graph-edge-probe` |
 | `graph-control-event-probe` | Bounded control/event edge publication and planted refusal-message controls (**SDK project**) | Configure as an SDK project | `test/consumers/graph-control-event-probe` |
+| `g5-control-index-filter` | Graph-authored Control index to dense Processor lowpass modulation (**SDK project**) | Configure as an SDK project | `examples/g5-control-index-filter` |
 | `gpu-fault-continuity` | Plugin that injects GPU faults for the host smoke test; needs `PULP_GPU_AUDIO_FAULT_HOOKS` | `pulp build --examples --target PulpGpuFaultContinuity_CLAP` | `test/consumers/gpu-fault-continuity` |
 | `text-input-test` | Text editor widget in a window | `pulp build --examples --target pulp-text-input-test` | `test/consumers/text-input-test` |
 | `native-ui-phase-f-preview` | Preview of a generated native editor; builds only on macOS with the design-import option and a generated editor source present | `pulp build --examples --target pulp-native-ui-phase-f-preview` | `test/consumers/native-ui-phase-f-preview` |

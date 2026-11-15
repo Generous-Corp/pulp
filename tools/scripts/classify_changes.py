@@ -277,6 +277,7 @@ IOS_COMPILE_REQUIRED_PATTERNS = (
     "test/gpu_health_scene3d_acceptance.cpp",
     "test/test_gpu_health_*.cpp",
     "test/test_python_bindings*",
+    "test/test_pulp_vellum_param_bridge.cpp",
     "test/test_control_phase15_aggregate_e2e.cpp",
     "test/mac_objc_coload_probe.cpp",
     "test/cmake/plugin_lab_clap_roundtrip.cmake",

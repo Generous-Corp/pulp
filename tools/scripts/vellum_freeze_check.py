@@ -15,6 +15,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -903,6 +904,19 @@ def _http_error_detail(exc: Exception, token: str) -> str:
     return detail
 
 
+# A GitHub 5xx or a dropped connection says nothing about Vellum authority, so
+# the identical read is repeated after these delays (seconds). Every other
+# failure, and a read still failing after the last delay, fails closed.
+_TRANSIENT_RETRY_DELAYS = (5, 15)
+_TRANSIENT_HTTP_CODES = frozenset({500, 502, 503, 504})
+
+
+def _is_transient(exc: BaseException) -> bool:
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code in _TRANSIENT_HTTP_CODES
+    return isinstance(exc, (urllib.error.URLError, TimeoutError))
+
+
 def _github_json(
     url: str, token: str, *, allow_anonymous: bool = False, expected: type = dict
 ) -> Any:
@@ -918,15 +932,29 @@ def _github_json(
             "X-GitHub-Api-Version": "2022-11-28",
         },
     )
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            value = json.load(response)
-    except (urllib.error.URLError, json.JSONDecodeError) as exc:
-        endpoint = urllib.parse.urlsplit(url).path
-        detail = _http_error_detail(exc, token)
-        raise FreezeError(
-            f"cannot verify Vellum authority at {endpoint}: {exc}{detail}"
-        ) from exc
+    attempt = 0
+    while True:
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                value = json.load(response)
+            break
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            endpoint = urllib.parse.urlsplit(url).path
+            if attempt < len(_TRANSIENT_RETRY_DELAYS) and _is_transient(exc):
+                delay = _TRANSIENT_RETRY_DELAYS[attempt]
+                attempt += 1
+                print(
+                    f"::warning::vellum-freeze: transient failure reading {endpoint} "
+                    f"({exc}); retrying the same read in {delay}s "
+                    f"(attempt {attempt + 1} of {len(_TRANSIENT_RETRY_DELAYS) + 1})",
+                    file=sys.stderr,
+                )
+                time.sleep(delay)
+                continue
+            detail = _http_error_detail(exc, token)
+            raise FreezeError(
+                f"cannot verify Vellum authority at {endpoint}: {exc}{detail}"
+            ) from exc
     # Each endpoint has one JSON shape (an object, or an array for list
     # endpoints); any other shape fails closed.
     if not isinstance(value, expected):

@@ -1492,10 +1492,45 @@ Remaining limitation:
 
 `pulp graph validate FILE --json` checks a saved `.pulpgraph` and returns
 `valid`, a stable `code`, and graph counts. Invalid input exits nonzero with
-`code: invalid_graph` and a diagnostic `message`. `inspect` and `explain`
+a typed `code` and a diagnostic `message`. `inspect` and `explain`
 report the graph shape without running plugin code. `fmt` rewrites the file in
 canonical JSON form and is byte stable on repeated runs; `canonicalize` remains
 an alias. Formatting refuses unresolved plugin nodes or rejected plugin state.
+
+#### Graph `--json` codes
+
+For graph and notation files the CLI reports the same code name the C++ API
+returns for the same file (`GraphPatchDiagnostic::Code`, spelled by
+`graph_patch_code_name`); it never renames them. The success code is `Ok` for
+`validate`, `fmt` and `render`. A test feeds one set of bad inputs to the C++
+loader and to the CLI and requires identical names.
+
+| Code | Meaning |
+|------|---------|
+| `Ok` | Loaded and valid |
+| `SyntaxError` | Malformed notation |
+| `UnknownNode`, `UnknownPort` | Edge names a node or port that does not exist |
+| `KindMismatch`, `IllegalCycle`, `Duplicate` | Edge or declaration violates the graph rules |
+| `InvalidDocument` | Not a valid `.pulpgraph` document (bad JSON, wrong shape) |
+| `UnsupportedContract` | Unregistered type or version, or an unsupported contract |
+| `ParameterOutOfRange`, `RestoreFailed`, `ResourceLimit` | Value, state restore or size limit refusal |
+| `FileUnreadable` | The file is missing or cannot be read |
+
+CLI-only codes (no C++ diagnostic equivalent) cover option handling, probe and
+render preconditions, and saving: `missing_option`, `invalid_option`,
+`missing_input`, `missing_output`, `unknown_operation`, `invalid_block_frames`,
+`graph_file_limit`, `graph_limit`, `unsupported_node`, `unresolved_node`,
+`ambiguous_node`, `prepare_failed`, `render_failed`, `non_finite_output`,
+`output_failed`, and `saved`. The probe adds `invalid_edge_kind`, `unknown_node`
+(a probe source or destination name that does not exist; distinct from the
+typed `UnknownNode`), `invalid_destination_param`, `event_injection_failed`,
+`non_finite_sample` and `unprepared_latency`. A test requires every code the
+CLI source emits to appear in this list. Save failures use
+`GraphSerializer::save_code_name` (`serialization_refused`, `file_too_large`,
+`parent_unavailable`, `temporary_unavailable`, `write_failed`, `replace_failed`,
+`directory_sync_failed`). The earlier CLI-only spellings `invalid_graph`,
+`file_unreadable` and lowercase `ok` for graph files are retired: the in-tree
+consumers (this repository's tests) moved to the typed names.
 
 `pulp graph save INPUT --output OUTPUT --json` loads a graph through the same
 bounded serializer and writes a canonical copy without modifying the input.
@@ -1507,10 +1542,21 @@ failures use the typed codes `serialization_refused`, `file_too_large`,
 C++ API and CLI so callers do not need to parse diagnostic text. Save is a
 CLI-only write operation; the MCP `pulp_graph` tool remains read-only.
 
-`pulp graph render FILE --output OUTPUT.wav --json` prepares the saved graph
-and renders one second at 48 kHz to a float WAV. Its JSON result reports frame,
-sample rate, and block counts. Unresolved node types and prepare failures return
-nonzero errors. The MCP `pulp_graph` tool exposes the read-only `inspect`,
+`pulp graph render FILE --input INPUT.wav --output OUTPUT.wav --json` prepares
+the saved graph at the input's sample rate and channel count, feeds the decoded
+input to its `audio_in` node, and renders the input's length to a float WAV at
+the same sample rate. The input must decode to 1-8 channels, 8000-192000 Hz,
+1-28800000 frames and at most 57600000 samples in total, with finite samples
+(`input_limit` or `non_finite_input`, exit 2). `--frames N` overrides the length
+(input shorter than `N` is zero-padded, which renders a tail). A graph with an
+`audio_in` node and no `--input` is refused with `missing_input` (exit 2)
+rather than rendering silence; a graph without `audio_in` renders 48000 frames
+at 48 kHz when no input is given. Unknown or repeated options are refused with
+`invalid_option` (exit 2). The JSON result reports `frames`, `sample_rate`,
+`channels` (the input channel count, at least 2), `blocks`, and `peak`, the
+largest absolute output sample over all channels, so a silent render is visible
+without reading the WAV. Unresolved node types, prepare failures and non-finite
+output (`non_finite_output`) return exit 1. The MCP `pulp_graph` tool exposes the read-only `inspect`,
 `validate`, `explain`, `render`, `probe`, and `report` operations; file writing stays in the CLI.
 
 `pulp graph report FILE [--sample-rate 48000] [--max-block-size 512]
@@ -1530,16 +1576,32 @@ See [Signal Graph: latency semantics](signal-graph.md#latency-semantics).
 observes one serial audio edge offline. The JSON report preserves the
 public probe identity, sequence, sample-relative timestamps, frame counts,
 peak/RMS and loss count. Measurements precede downstream mixing and PDC.
-`--edge-kind event` observes a MIDI edge after seeding one fixed note-on;
-`--edge-kind control --destination-param ID` accepts the control schema but
-always refuses with `MissingEdge`, because CLI-loaded graphs cannot contain
-automation edges (control probes are C++ API only). Each attach refusal's
-`message` names the cause and the fix.
+`--edge-kind audio|control|event` selects the probe (default `audio`).
+`--edge-kind event` observes a MIDI edge after seeding one fixed note-on.
+`--edge-kind control --destination-param ID` replaces `--destination-port` with
+an integer parameter id. A control edge ends on a parameter of a registered
+Processor node (an application type from the public C++ catalog); the offline
+probe admits only built-in input, output, gain and MIDI nodes, none of which
+has an automatable parameter, so through the CLI a control request always
+refuses with `MissingEdge` and control probes are C++ API only. Each attach
+refusal's `message` names the cause and the fix.
+
+`--plan` adds a `plan` object: `nodes` (`id`, `name`, `input_ports`,
+`output_ports`) and `connections` (`source_node`, `source_port`,
+`destination_node`, `destination_port`, and the booleans `feedback`, `midi`,
+`automation`, `audio_rate_modulation`, `sidechain`). `--latency` adds a
+`latency_pdc` object: `total_latency_samples`, `nodes` (`node_id`,
+`input_latency_samples`, `output_latency_samples`) and `connections`
+(`source_node`, `source_port`, `destination_node`, `destination_port`,
+`delay_samples`, the compensation delay inserted on that connection). Node and
+port values are numeric ids, not names. `--node-loads` adds `node_loads`
+(`node_id`, `load`, `callback_count`).
 See [edge probe limits and lifecycle](../guides/graph-edge-probes.md).
 
 ### SignalGraph notation
 
-`pulp graph catalog --json` projects the default runtime node catalog.
+`pulp graph catalog --json` projects the default runtime node catalog,
+including typed-API-only spectral constructor rows that notation refuses.
 `pulp graph validate FILE.pat --json` uses shared typed strict diagnostics;
 `.pulpgraph` validation checks every original connection. `pulp graph fmt
 FILE.pat` prints canonical notation, and `pulp graph fmt FILE.pulpgraph
@@ -2608,6 +2670,9 @@ Flags:
 
 | Flag | Description |
 |------|-------------|
+| `--graph-file FILE` | Apply changed `.pat`/`.pulpgraph` through the existing controlled graph authority; see [graph-file reload](../guides/graph-file-reload.md). Requires the C++ delegate. |
+| `--graph-instance ID`, `--graph-grant ID`, `--graph-generation N` | Exact enrolled instance, consent grant and expected graph generation; all required with `--graph-file`. |
+| `--graph-watch-polls N` | Stop after 1..120 graph watch polls (500 ms each). |
 | `--test`, `-t` | Run tests after each successful watch build, or after the Rust fallback's one build pass |
 | `--test-filter=PATTERN` | Run only tests matching PATTERN (implies `--test`) |
 | `--validate` | Delegated C++ path: run quick plugin dlopen validation after build |
@@ -2643,6 +2708,9 @@ Flags:
 
 | Flag | Description |
 |------|-------------|
+| `--graph-file FILE` | Apply changed `.pat`/`.pulpgraph` through the existing controlled graph authority; see [graph-file reload](../guides/graph-file-reload.md). Requires the C++ delegate. |
+| `--graph-instance ID`, `--graph-grant ID`, `--graph-generation N` | Exact enrolled instance, consent grant and expected graph generation; all required with `--graph-file`. |
+| `--graph-watch-polls N` | Stop after 1..120 graph watch polls (500 ms each). |
 | `--platform=<macos\|linux\|windows>` | Override the auto-detected focus marker |
 | `--off` | Restore cross-platform mode by clearing the focus marker |
 | `--status` | Print the current focus state and exit |

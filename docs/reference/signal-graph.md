@@ -316,6 +316,44 @@ The graph enforces these rules:
 `intentional_delay_samples` and, for per-port nodes, the declared
 `output_port_latency_samples` before equalisation.
 
+### Oversampling inside a node
+
+A custom node that oversamples its own work owns an `OversamplerT` and runs its
+processing between the up and down conversions. The graph never sees that; it
+only sees the latency the node declares, so the declaration has to match the
+filters the node actually runs.
+
+`pulp/host/custom_node_oversampling.hpp` derives both from one
+`CustomNodeOversampling` (factor 1, 2, 4, 8 or 16, plus filter kind and
+quality):
+
+```cpp
+CustomNodeOversampling spec;
+spec.factor = 4;                    // linear-phase filters, standard quality
+
+CustomNodeType type;
+// ... ports, create, destroy, process_instance ...
+if (!declare_oversampling_latency(type, spec))   // sets type.latency_samples
+    return false;
+type.prepare = [spec](void* p, double sample_rate, int) {
+    configure_oversampler(static_cast<MyNode*>(p)->oversampler, spec, sample_rate);
+};
+```
+
+`declare_oversampling_latency` takes an optional extra latency in samples for
+anything the node adds on top, such as a lookahead. It declines (returns
+`false` and leaves the type unchanged) when the node already declares latency
+through any of the three latency callbacks, when the total would exceed
+`kMaxLatencySamples`, or when the filter kind has no constant delay.
+
+Only the linear-phase kind qualifies. The two minimum-phase kinds delay
+different frequencies by different amounts, so no single sample count is
+correct, and a parallel dry path delayed by any one number stays out of step
+with them. Factor 1 declares zero latency and `configure_oversampler` returns
+`false` without touching the oversampler, so the node processes at the base
+rate. The latency does not depend on the sample rate. Both latency functions
+build a throwaway oversampler and are for the control thread only.
+
 ### Realtime report
 
 `pulp/host/graph_rt_report.hpp` builds a per-node and per-graph report from a

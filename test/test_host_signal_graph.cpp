@@ -4043,6 +4043,90 @@ TEST_CASE("SignalGraph parameter event mailbox is one shot and latest wins") {
     }
 }
 
+TEST_CASE("SignalGraph parameter mailbox counts published, overflowed and dropped events",
+          "[host][graph][parameter][telemetry]") {
+    SignalGraph graph;
+    auto slot = std::make_unique<ParameterMailboxProbe>();
+    auto* probe = slot.get();
+    const auto plugin = graph.add_plugin_node(std::move(slot), 1, 1, "probe");
+
+    SignalGraph::ParameterMailboxCounters counters;
+    counters.published = 77;
+    // Unprepared: no mailbox exists, and `out` is left untouched.
+    REQUIRE_FALSE(graph.parameter_mailbox_counters(plugin, counters));
+    CHECK(counters.published == 77);
+    REQUIRE(graph.prepare(48000.0, 8));
+    REQUIRE_FALSE(graph.parameter_mailbox_counters(plugin + 1000, counters));
+    CHECK(counters.published == 77);
+
+    REQUIRE(graph.parameter_mailbox_counters(plugin, counters));
+    CHECK(counters.published == 0);
+    CHECK(counters.overflowed == 0);
+    CHECK(counters.dropped_events == 0);
+
+    ParameterEventQueue fits;
+    REQUIRE(fits.push({ParameterMailboxProbe::kParamId, 1, 0.5f, 0}));
+    REQUIRE(graph.inject_parameter_events(plugin, fits));
+    REQUIRE(graph.parameter_mailbox_counters(plugin, counters));
+    CHECK(counters.published == 1);
+    CHECK(counters.overflowed == 0);
+    CHECK(counters.dropped_events == 0);
+
+    // A source queue that refused three pushes publishes its full prefix,
+    // reports false, and the mailbox counts the batch and its three losses.
+    ParameterEventQueue full;
+    for (std::size_t i = 0; i < ParameterEventQueue::kCapacity; ++i)
+        REQUIRE(full.push({ParameterMailboxProbe::kParamId, 2, 0.25f, 0}));
+    for (int i = 0; i < 3; ++i)
+        REQUIRE_FALSE(full.push({ParameterMailboxProbe::kParamId, 3, 0.75f, 0}));
+    REQUIRE_FALSE(graph.inject_parameter_events(plugin, full));
+    REQUIRE(graph.parameter_mailbox_counters(plugin, counters));
+    CHECK(counters.published == 2);
+    CHECK(counters.overflowed == 1);
+    CHECK(counters.dropped_events == 3);
+
+    pulp::audio::BufferView<const float> in;
+    pulp::audio::BufferView<float> out;
+    graph.process(out, in, 8);
+    CHECK(probe->received_count() == ParameterEventQueue::kCapacity);
+
+    // Delivery does not move the source-side counts.
+    REQUIRE(graph.parameter_mailbox_counters(plugin, counters));
+    CHECK(counters.published == 2);
+    CHECK(counters.overflowed == 1);
+    CHECK(counters.dropped_events == 3);
+
+    // A pinned execution snapshot writes the same mailbox.
+    using Result = SignalGraph::PreparedTopologyEdit::Result;
+    auto edit = graph.begin_prepared_topology_edit();
+    REQUIRE(edit->prepare(48000.0, 8) == Result::Prepared);
+    REQUIRE(edit->commit() == Result::Committed);
+    const auto pinned = edit->committed_execution_snapshot();
+    REQUIRE(pinned);
+    REQUIRE(pinned.inject_parameter_events(plugin, fits));
+    REQUIRE(graph.parameter_mailbox_counters(plugin, counters));
+    CHECK(counters.published == 3);
+    CHECK(counters.overflowed == 1);
+    CHECK(counters.dropped_events == 3);
+
+    // A gap-free prepare_swap() keeps the node's mailbox and its counts.
+    graph.begin_swap_edit();
+    REQUIRE(graph.prepare_swap(48000.0, 8) == SignalGraph::SwapResult::Swapped);
+    REQUIRE(graph.parameter_mailbox_counters(plugin, counters));
+    CHECK(counters.published == 3);
+    CHECK(counters.overflowed == 1);
+    CHECK(counters.dropped_events == 3);
+
+    // An eager prepare() creates a fresh mailbox, so the counts restart.
+    graph.release();
+    REQUIRE_FALSE(graph.parameter_mailbox_counters(plugin, counters));
+    REQUIRE(graph.prepare(48000.0, 8));
+    REQUIRE(graph.parameter_mailbox_counters(plugin, counters));
+    CHECK(counters.published == 0);
+    CHECK(counters.overflowed == 0);
+    CHECK(counters.dropped_events == 0);
+}
+
 TEST_CASE("ExecutionSnapshot parameter events target the pinned graph generation",
           "[host][graph][parameter][snapshot]") {
     using Result = SignalGraph::PreparedTopologyEdit::Result;
@@ -4247,6 +4331,7 @@ TEST_CASE("SignalGraph parameter event mailbox survives a gap free swap") {
     REQUIRE(graph.disconnect(plugin, 0, output, 0));
     REQUIRE(graph.connect(plugin, 0, gain, 0));
     REQUIRE(graph.connect(gain, 0, output, 0));
+    graph.begin_swap_edit();
     REQUIRE(graph.prepare_swap(48000.0, 8) == SignalGraph::SwapResult::Swapped);
 
     std::array<float, 8> source{};

@@ -7,6 +7,8 @@
 #include <pulp/format/processor_block_adapter.hpp>
 #include <pulp/state/store.hpp>
 
+#include <atomic>
+#include <cstdint>
 #include <memory>
 #include <array>
 #include <span>
@@ -14,6 +16,17 @@
 #include <vector>
 
 namespace pulp::format {
+
+/// Asked on the audio thread at the start of a node's block: "does the owner
+/// of this node say it has nothing to render right now?". Must be
+/// allocation-free, lock-free and must not throw.
+struct ProcessorIdleProbe {
+    bool (*is_idle)(void* context) noexcept = nullptr;
+    void* context = nullptr;
+    explicit operator bool() const noexcept {
+        return is_idle != nullptr;
+    }
+};
 
 /// Runs a real pulp::format::Processor as a node inside the routed graph.
 ///
@@ -56,15 +69,74 @@ public:
         input_provider_ = provider;
     }
 
+    /// Opt this node into idle skipping (off unless a probe is installed).
+    /// Install before prepare(), like set_audio_input_provider().
+    ///
+    /// While the probe reports idle, the node may skip calling the wrapped
+    /// Processor and write silence (and an empty MIDI output) instead. The
+    /// node is skipped only after it has run while idle and produced an
+    /// all-zero-bits block, repeated until the declared latency plus tail has
+    /// elapsed; any non-zero sample, any inbound event or audio, a failed
+    /// block, or reset_idle_confirmation() starts the confirmation over. A block
+    /// is also never skipped, and restarts the confirmation, when any event
+    /// buffer (MIDI, SysEx, UMP, MPE, parameter) holds an event or reports a
+    /// dropped one, when the graph marks the node's inbound events incomplete,
+    /// or when the block asks for a reset or follows a transport jump (the
+    /// processor must see those blocks).
+    ///
+    /// Contract the caller takes on: at every point the probe flips from idle
+    /// to busy, the processor's output must not depend on how many blocks it
+    /// was run while idle. Processors with free-running state (an LFO, noise,
+    /// a clock, a parameter smoother that keeps moving, a transport follower)
+    /// break that contract and must not be given a probe.
+    ///
+    /// Eligibility is decided in prepare(): the descriptor must declare no
+    /// input bus, the processor must not consume audio-rate modulation, its
+    /// tail must be bounded (tail_samples >= 0) and latency_samples() must be
+    /// non-negative. An ineligible node is simply never skipped; check
+    /// idle_skip_armed() after prepare().
+    ///
+    /// Do not install a probe on a node that can be rendered ahead of time on
+    /// another thread: the probe is read on the node's own render thread.
+    void set_idle_probe(ProcessorIdleProbe probe) noexcept {
+        idle_probe_ = probe;
+    }
+    /// True after prepare() when a probe is installed and the node is eligible.
+    bool idle_skip_armed() const noexcept {
+        return idle_armed_;
+    }
+    /// Blocks skipped since prepare(). Relaxed read; safe from any thread.
+    std::uint64_t idle_skipped_blocks() const noexcept {
+        return idle_skipped_blocks_.load(std::memory_order_relaxed);
+    }
+    /// Forget that silence was confirmed, so the next block runs the
+    /// processor. Call with the audio thread stopped or between blocks on the
+    /// render thread (for example after a parameter write).
+    void reset_idle_confirmation() noexcept {
+        idle_confirmed_ = false;
+        idle_silent_frames_ = 0;
+    }
+
+    /// Channels a graph exposes as this processor's output ports: the main
+    /// output bus first, then every declared aux output bus in descriptor order
+    /// (optional ones included), each contributing its default channel count.
+    /// A routed block whose output view holds that many channels is split back
+    /// into the declared buses, each carrying its declared name and role; a
+    /// shorter view feeds the main bus and leaves aux buses that do not fit
+    /// inactive.
+    static int routed_output_channels(const PluginDescriptor& descriptor) noexcept;
+
     /// Build the only valid graph binding for this adapter. The cached
     /// capability selects dense views or the legacy event expansion.
     GraphRuntimeNodeBinding binding(graph::NodeId node_id, bool required = true) noexcept;
 
     /// Routed node binding entry point. `user_data` must be the owning
-    /// ProcessorNode. Reads the executor's gathered mono input view
-    /// (ctx.node_inputs) and writes this node's mono output view
-    /// (ctx.node_outputs) by aliasing them into a block-local ProcessBlock
-    /// over the node's reused bus set, then forwards to
+    /// ProcessorNode. Reads the executor's gathered input view
+    /// (ctx.node_inputs) and writes this node's output view
+    /// (ctx.node_outputs, split across declared output buses as described at
+    /// routed_output_channels()) by aliasing them into a block-local
+    /// ProcessBlock over the node's reused bus set, under the descriptor's
+    /// declared bus names, then forwards to
     /// process_processor_block(). Allocation-free
     /// per block and only valid on the routed path (ctx.routed == true).
     static bool process_binding(ProcessBlock& block,
@@ -80,6 +152,12 @@ public:
     // points them at this block's buffers (see process_binding).
     bool process_main_bus_block(const ProcessBlock& block,
                                 const GraphRuntimeNodeProcessContext& ctx) noexcept;
+    // Adds the main output bus, and each declared aux output bus split from
+    // the node's output view, to `buses`. Allocation-free.
+    bool add_output_buses(BusBufferSet& buses, audio::BufferView<float> outputs) noexcept;
+    // The routed block body without idle skipping.
+    bool process_routed_block(ProcessBlock& block,
+                              const GraphRuntimeNodeProcessContext& ctx) noexcept;
 
     Processor* processor_;
     // Caller-owned MIDI/parameter fallback storage for the block bridge. Sized
@@ -105,7 +183,25 @@ public:
     // can publish stable, non-owning string_views without allocating on RT.
     std::array<std::string, BusBufferSet::kMaxBuses> input_names_{};
     std::size_t input_bus_count_ = 0;
+    // Output buses as declared. Bus 0 is the main output; when more than one
+    // bus is declared, the routed output view is split across them by their
+    // default channel counts. Names are copied at prepare() like input names.
+    std::array<BusRole, BusBufferSet::kMaxBuses> output_roles_{};
+    std::array<int, BusBufferSet::kMaxBuses> output_channels_{};
+    std::array<std::string, BusBufferSet::kMaxBuses> output_names_{};
+    std::size_t output_bus_count_ = 0;
+    // Per-block channel pointers for the split output view, sized at prepare().
+    std::vector<float*> output_channel_ptrs_;
     bool prepared_ = false;
+    // Idle skipping. Plain members are touched only from the node's render
+    // thread (a node never runs on two threads at once); the counter is atomic
+    // so another thread can read it.
+    ProcessorIdleProbe idle_probe_{};
+    bool idle_armed_ = false;
+    bool idle_confirmed_ = false;
+    std::uint64_t idle_silent_frames_ = 0;
+    std::uint64_t idle_hold_frames_ = 0;
+    std::atomic<std::uint64_t> idle_skipped_blocks_{0};
 };
 
 /// Retained, self-contained lifetime for an authored in-process graph node.
@@ -124,6 +220,18 @@ class ProcessorNodeInstance final {
     bool release() noexcept;
     void set_audio_input_provider(AudioInputBusProvider provider) noexcept {
         adapter_.set_audio_input_provider(provider);
+    }
+    void set_idle_probe(ProcessorIdleProbe probe) noexcept {
+        adapter_.set_idle_probe(probe);
+    }
+    bool idle_skip_armed() const noexcept {
+        return adapter_.idle_skip_armed();
+    }
+    std::uint64_t idle_skipped_blocks() const noexcept {
+        return adapter_.idle_skipped_blocks();
+    }
+    void reset_idle_confirmation() noexcept {
+        adapter_.reset_idle_confirmation();
     }
     GraphRuntimeNodeBinding binding(graph::NodeId node_id, bool required = true) noexcept {
         return adapter_.binding(node_id, required);

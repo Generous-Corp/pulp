@@ -32,7 +32,7 @@ gain1.gain = 0.5
 ```text
 $ pulp graph validate first.pat
 valid: true
-format_version: 4
+format_version: 5
 nodes: 3
 connections: 4
 ```
@@ -93,8 +93,10 @@ pulp graph: line 6: unregistered type/version 'pulp.cookbook.NamedBusPlacement';
 
 You need: a `Processor` whose descriptor declares the named buses, registered
 through `GraphPatchCatalog`. The full recipe is
-`examples/graph-named-bus-cookbook/README.md`; it notes that SignalGraph nodes
-map to main input/output channel counts rather than named host buses.
+`examples/graph-named-bus-cookbook/README.md`. In a SignalGraph a Processor
+node's ports are its main input channels and its main then aux output channels
+(aux ports named `<bus>.<channel>`), and the processor sees its declared bus
+names; the notation itself has no bus-layout syntax.
 
 ## 4. Live retune (refused: needs a registered Processor)
 

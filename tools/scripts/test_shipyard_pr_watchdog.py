@@ -18,6 +18,15 @@ sys.modules[SPEC.name] = WATCHDOG
 SPEC.loader.exec_module(WATCHDOG)
 
 
+def ps_runs() -> bool:
+    """Whether this process may run ps; a sandbox can forbid it."""
+    try:
+        return subprocess.run(["ps", "-o", "pid=", "-p", str(os.getpid())],
+                              capture_output=True, check=False).returncode == 0
+    except OSError:
+        return False
+
+
 class WatchdogUnitTests(unittest.TestCase):
     def test_descendants_are_transitive(self) -> None:
         self.assertEqual(WATCHDOG.descendants(1, {1: [2], 2: [3], 3: [4]}), {2, 3, 4})
@@ -25,6 +34,11 @@ class WatchdogUnitTests(unittest.TestCase):
     def test_failed_process_snapshot_fails_open(self) -> None:
         with mock.patch.object(WATCHDOG.subprocess, "run") as run:
             run.return_value.returncode = 1
+            self.assertIsNone(WATCHDOG.process_snapshot())
+
+    def test_ps_that_cannot_run_fails_open(self) -> None:
+        with mock.patch.object(WATCHDOG.subprocess, "run",
+                               side_effect=PermissionError(1, "Operation not permitted", "ps")):
             self.assertIsNone(WATCHDOG.process_snapshot())
 
     def test_cpu_seconds_reads_both_ps_time_formats(self) -> None:
@@ -107,6 +121,7 @@ class WatchdogUnitTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    @unittest.skipUnless(ps_runs(), "needs ps; this sandbox forbids it")
     def test_orphaned_pipe_state_restarts_once_then_fails(self) -> None:
         result = self.run_watchdog("import time; time.sleep(5)", stall=.1, confirm=.1)
         self.assertEqual(result.returncode, 124)

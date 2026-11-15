@@ -9,10 +9,14 @@
 /// class MySynth : public Processor {
 ///     state::MidiLearnEngine learn_;
 ///     format::MidiLearnHandle learn_handle_{*this, learn_}; // after learn_
+///     format::MidiFeedbackCapabilities feedback_{};
+///     void prepare(const PrepareContext&) override {
+///         // descriptor() builds strings and vectors, so resolve it here, never
+///         // on the audio thread.
+///         feedback_ = format::midi_feedback_capabilities(host_format_, descriptor());
+///     }
 ///     void process(..., midi::MidiBuffer& midi_in, midi::MidiBuffer& midi_out, ...) override {
-///         format::midi_learn_process_block(learn_, state(), midi_in, midi_out,
-///                                          format::midi_feedback_capabilities(
-///                                              host_format_, descriptor()));
+///         format::midi_learn_process_block(learn_, state(), midi_in, midi_out, feedback_);
 ///     }
 /// };
 /// @endcode
@@ -70,6 +74,10 @@ constexpr MidiFeedbackCapabilities midi_feedback_capabilities(MidiLearnFormat fo
     return {};
 }
 
+/// Not for the audio thread when `descriptor` is built per call: a
+/// `Processor::descriptor()` allocates its strings and bus lists. Resolve the
+/// capabilities once in `prepare()` and pass the stored value to
+/// `midi_learn_process_block`.
 inline MidiFeedbackCapabilities midi_feedback_capabilities(MidiLearnFormat format,
                                                            const PluginDescriptor& descriptor) {
     return midi_feedback_capabilities(format, descriptor.produces_midi);

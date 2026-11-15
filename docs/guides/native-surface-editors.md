@@ -54,6 +54,27 @@ An RmlUi renderer, or any other renderer that takes a `MTLDevice` and a target
 texture, draws into the drawable's texture the same way the metal-probe
 renderer does.
 
+## RmlUi on Metal
+
+The opt-in `PULP_ENABLE_RMLUI_ADAPTER` package adds
+`pulp::rmlui-native-metal` when the Vellum main SDK and the optional
+`vellum-rmlui-sdk-<version>-darwin-arm64` prefix export
+`VellumRmlUiNative::Native` and `VellumRmlUiNative::Metal`. Put both prefixes in
+`CMAKE_PREFIX_PATH` (the RmlUi prefix alongside the main Vellum prefix).
+Construct
+`vellum::rmlui::MetalRenderInterface` with the device returned by the surface,
+then pass `metal_renderer_hooks(renderer)` to `RmlUiSurface`. The hooks give
+Vellum the drawable's whole viewport, its backing scale, and a clear request on
+every frame. The drawable is BGRA8Unorm and the surface's device must be the
+renderer's device. The `rmlui-metal-demo` example is a small plug-in using this
+path; it remains unavailable when the adapter option or the Vellum Metal
+component is off.
+
+The surface context is sized in drawable pixels, the Metal frame scale is 1,
+and the density ratio is the backing scale. Documents that need
+density-scaled text should use `font-size` in `dp` (the example does this)
+rather than `px`.
+
 ## Proof
 
 - `pulp-test-native-metal-surface`, `-frame-pump`, `-input` and

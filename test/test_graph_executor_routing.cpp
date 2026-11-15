@@ -21,6 +21,7 @@
 #include <pulp/format/process_block.hpp>
 #include <pulp/graph/graph_runtime_plan.hpp>
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/midi/block_ops.hpp>
 
 #include <algorithm>
 #include <array>
@@ -1704,4 +1705,99 @@ TEST_CASE("Read-only readers of the graph input read the host input bus in place
             REQUIRE(h.outs[0][at] == x[at] * 2.0f);
         }
     }
+}
+
+namespace {
+
+// Emits `count` note-ons into its MIDI output (clearing it first).
+struct EventSourceState {
+    int count = 0;
+};
+bool emit_events(pulp::format::ProcessBlock&,
+                 const pulp::format::GraphRuntimeNodeProcessContext& ctx,
+                 void* user_data) noexcept {
+    const int count = static_cast<EventSourceState*>(user_data)->count;
+    if (ctx.node_midi_out == nullptr)
+        return false;
+    pulp::midi::clear_midi_block(*ctx.node_midi_out);
+    for (int i = 0; i < count; ++i)
+        ctx.node_midi_out->add(
+            pulp::midi::MidiEvent::note_on(1, static_cast<std::uint8_t>(60 + i), 100));
+    return true;
+}
+
+// Records what the executor says about this node's inbound events.
+struct EventSpyState {
+    bool incomplete = false;
+    std::size_t events = 0;
+    int calls = 0;
+};
+bool spy_events(pulp::format::ProcessBlock&,
+                const pulp::format::GraphRuntimeNodeProcessContext& ctx, void* user_data) noexcept {
+    auto* spy = static_cast<EventSpyState*>(user_data);
+    ++spy->calls;
+    spy->incomplete = ctx.node_events_incomplete;
+    spy->events = ctx.node_midi_in != nullptr ? ctx.node_midi_in->size() : 0;
+    auto out = ctx.node_outputs;
+    for (std::size_t c = 0; c < out.num_channels(); ++c)
+        std::fill_n(out.channel_ptr(c), out.num_samples(), 0.0f);
+    return true;
+}
+
+} // namespace
+
+TEST_CASE("Executor marks a node's inbound events incomplete on the serial and parallel paths",
+          "[format][graph][executor][routing][parallel][events]") {
+    constexpr int kFrames = 16;
+    const std::array nodes = {
+        GraphRuntimeNodeSpec{1, GraphRuntimeNodeKind::Processor, 0, 0, 0, 1},
+        GraphRuntimeNodeSpec{2, GraphRuntimeNodeKind::Processor, 0, 1, 1, 0},
+        GraphRuntimeNodeSpec{3, GraphRuntimeNodeKind::AudioOutput, 1, 0},
+    };
+    GraphRuntimeConnectionSpec event_edge{1, 0, 2, 0};
+    event_edge.kind = pulp::graph::GraphRuntimeConnectionKind::Event;
+    const std::array connections = {event_edge, GraphRuntimeConnectionSpec{2, 0, 3, 0}};
+    EventSourceState source;
+    EventSpyState spy;
+    const std::array bindings = {
+        GraphRuntimeNodeBinding{1, emit_events, &source, true},
+        GraphRuntimeNodeBinding{2, spy_events, &spy, true},
+        GraphRuntimeNodeBinding{3, nullptr, nullptr, false},
+    };
+    GraphRuntimeSnapshot snapshot;
+    REQUIRE(make_snapshot(snapshot, nodes, connections, bindings, /*parallel_safe=*/true));
+    const auto levels = pulp::graph::build_graph_runtime_levelization(snapshot.plan());
+    REQUIRE(levels.ok);
+    // One event of room per node: a second event is dropped.
+    pulp::format::GraphRuntimeMidiScratch midi;
+    REQUIRE(midi.reset(snapshot.node_count(), 1));
+    pulp::format::GraphRuntimeWorkerPool workers;
+    REQUIRE(workers.start(2));
+    GraphRuntimeExecutor exec;
+    const std::vector<std::vector<float>> in{test_signal(kFrames, 0.5f)};
+
+    for (const bool parallel : {false, true}) {
+        INFO("parallel=" << parallel);
+        auto pool = make_pool(snapshot, kFrames);
+        const auto run = [&]() {
+            RoutedHarness h(kSr, kFrames, in, 1);
+            return parallel
+                       ? exec.process_parallel(h.block, snapshot, levels, pool, workers, &midi).ok()
+                       : exec.process_routed(h.block, snapshot, pool, &midi).ok();
+        };
+        // One event fits: complete.
+        source.count = 1;
+        REQUIRE(run());
+        CHECK(spy.events == 1);
+        CHECK_FALSE(spy.incomplete);
+        // Two events overflow the one-event buffer: the consumer is told.
+        source.count = 2;
+        REQUIRE(run());
+        CHECK(spy.incomplete);
+        // The next clean block is complete again.
+        source.count = 1;
+        REQUIRE(run());
+        CHECK_FALSE(spy.incomplete);
+    }
+    workers.stop();
 }

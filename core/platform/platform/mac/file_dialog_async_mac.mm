@@ -50,6 +50,18 @@ NSArray<UTType*>* content_types(const std::vector<FileFilter>& filters) {
     return types;
 }
 
+// Whether the filters name any extension at all. When they do but none maps to
+// a type (the system refuses syntactically invalid extensions), showing the
+// panel unfiltered would allow every file, so the caller shows nothing.
+bool filters_name_extensions(const std::vector<FileFilter>& filters) {
+    for (const auto& filter : filters) {
+        for (char c : filter.extensions)
+            if (c != ';' && c != '.')
+                return true;
+    }
+    return false;
+}
+
 NSWindow* sheet_parent(NativeViewHandle parent) {
     NSView* view = (__bridge NSView*)parent;
     NSWindow* window = view != nil ? view.window : nil;
@@ -86,6 +98,8 @@ std::function<void()> present_native_open(NativeViewHandle parent,
     panel.canChooseDirectories = request.choose_directories ? YES : NO;
     panel.allowsMultipleSelection = request.multiple ? YES : NO;
     NSArray<UTType*>* types = content_types(request.filters);
+    if (types.count == 0 && filters_name_extensions(request.filters))
+        return {};
     if (types.count > 0)
         panel.allowedContentTypes = types;
     if (!request.default_path.empty())
@@ -112,6 +126,8 @@ present_native_save(NativeViewHandle parent, const FileDialog::SaveRequest& requ
     auto holder = std::make_shared<Retained>(panel);
     panel.title = ns(request.title);
     NSArray<UTType*>* types = content_types(request.filters);
+    if (types.count == 0 && filters_name_extensions(request.filters))
+        return {};
     if (types.count > 0)
         panel.allowedContentTypes = types;
     if (!request.default_path.empty())

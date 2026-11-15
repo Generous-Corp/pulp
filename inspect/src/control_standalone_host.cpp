@@ -509,6 +509,8 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
             make_control_signal_graph_executor([&processor](const ControlAdmissionPlan&) {
                 return detail::create_standalone_signal_graph_authority(processor);
             });
+        ControlMainThreadExecutor main_graph_file(rpc_, signal_graph_route);
+        auto graph_file_reload = main_graph_file.executor();
         // Vendor handlers touch the Processor and its StateStore, so they are
         // fenced onto the host main thread like every other state operation.
         const auto vendor_handlers = declared_vendor_handlers(
@@ -526,7 +528,8 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
              timeline_document_session = std::move(timeline_document_session),
              sample_region_read = std::move(fenced_sample_region_read),
              sample_region_edit = std::move(fenced_sample_region_edit),
-             signal_graph_route = std::move(signal_graph_route)](
+             signal_graph_route = std::move(signal_graph_route),
+             graph_file_reload = std::move(graph_file_reload)](
                 const ControlAdmissionPlan& plan, const ControlRequestEnvelope& request,
                 const ControlExecutionContext& context) {
                 if (request.operation_id == "dev.pulp.state/read@1")
@@ -549,6 +552,8 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                     return sample_region_edit(plan, request, context);
                 if (request.operation_id == "dev.pulp.graph/modulation-route.edit@1")
                     return signal_graph_route(plan, request, context);
+                if (request.operation_id == "dev.pulp.graph/file.reload@1")
+                    return graph_file_reload(plan, request, context);
                 if (request.operation_id == "dev.pulp.timeline/document-session@1")
                     return timeline_document_session(plan, request, context);
                 if (is_control_vendor_operation_id(request.operation_id))

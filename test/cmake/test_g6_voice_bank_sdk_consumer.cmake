@@ -69,11 +69,23 @@ set(_config Release)
 if(PULP_PARENT_BUILD_TYPE)
     set(_config "${PULP_PARENT_BUILD_TYPE}")
 endif()
+# Installed static libraries from an instrumented producer (a sanitizer lane)
+# keep references to its runtime, so the consumer compiles and links with the
+# producer's instrumentation.
 set(_args -S "${_source}" -B "${_build}" -G Ninja
     "-DPulp_DIR=${_prefix}/lib/cmake/Pulp"
     "-DCMAKE_PREFIX_PATH=${_prefix}"
     "-DCMAKE_BUILD_TYPE=${_config}"
-    "-DCMAKE_CXX_COMPILER=${PULP_PARENT_CXX_COMPILER}")
+    "-DCMAKE_CXX_COMPILER=${PULP_PARENT_CXX_COMPILER}"
+    "-DCMAKE_CXX_FLAGS=${PULP_PARENT_CXX_FLAGS} ${PULP_PARENT_INSTRUMENTATION_CXX_FLAGS}"
+    "-DCMAKE_EXE_LINKER_FLAGS=${PULP_PARENT_EXE_LINKER_FLAGS} ${PULP_PARENT_INSTRUMENTATION_LINKER_FLAGS}")
+string(TOLOWER "${_config}" _config_lower)
+if(_config_lower STREQUAL "debug")
+    list(APPEND _args -DPULP_ALLOW_DEBUG_SDK=ON)
+endif()
+if(PULP_PARENT_SANITIZER)
+    list(APPEND _args "-DPULP_SANITIZER=${PULP_PARENT_SANITIZER}")
+endif()
 if(PULP_PARENT_OSX_ARCHITECTURES)
     list(APPEND _args "-DCMAKE_OSX_ARCHITECTURES=${PULP_PARENT_OSX_ARCHITECTURES}")
 endif()

@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 1.124.0
+    VERSION 1.133.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -671,6 +671,8 @@ if(PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/audio)
     # The RT allocation probe for SDK consumers' tests (Pulp::rt-allocation-probe).
     add_subdirectory(tools/testing/rt_allocation_probe)
+    # Test-only texture-upload recorder (HARN-5); never linked into a shipped target.
+    add_subdirectory(tools/testing/texture_upload_recorder)
     add_subdirectory(tools/design-ab)
     # Offline driver that asks a built LV2 module to describe itself into its
     # bundle. Host-side, so it is useless when the modules it would run are
@@ -1028,6 +1030,16 @@ if(TARGET pulp-native AND (PULP_BUILD_TESTS OR PULP_BUILD_EXAMPLES))
 endif()
 if(TARGET pulp-rmlui-native AND PULP_BUILD_TESTS)
     add_subdirectory(integrations/rmlui-native/tests)
+endif()
+# Test directories the optional integration packages registered
+# (integrations/CMakeLists.txt), added now that Catch2 exists.
+get_property(_pulp_integration_test_dirs GLOBAL PROPERTY PULP_INTEGRATION_TEST_DIRS)
+if(PULP_BUILD_TESTS)
+    foreach(_dir IN LISTS _pulp_integration_test_dirs)
+        get_filename_component(_package "${_dir}" DIRECTORY)
+        get_filename_component(_package "${_package}" NAME)
+        add_subdirectory("${_dir}" "${CMAKE_BINARY_DIR}/integrations/${_package}-tests")
+    endforeach()
 endif()
 
 # ── CPU-only GPU-probe contract model (desktop tooling) ───────────────────

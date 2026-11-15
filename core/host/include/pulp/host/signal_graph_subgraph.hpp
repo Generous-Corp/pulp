@@ -18,9 +18,11 @@ namespace pulp::host {
 
 class SignalGraph;
 
-// Declarative, immutable subgraph template. The bounded first slice supports
-// built-in Input, Output, and Gain nodes; templates are expanded into the
-// ordinary SignalGraph plan and do not introduce a second scheduler.
+// Declarative, immutable subgraph template. Nodes are built-in Input, Output,
+// and Gain nodes, or Processor nodes (NodeType::Plugin with processor_factory
+// and an exact descriptor identity); parameter targets are Gain or Processor
+// nodes. Templates are expanded into the ordinary SignalGraph plan and do not
+// introduce a second scheduler.
 struct SubgraphNodeSpec {
     std::string key;
     NodeType type = NodeType::Gain;

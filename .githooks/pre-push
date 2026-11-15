@@ -180,6 +180,72 @@ if [ "${PULP_SKIP_PREPUSH:-0}" = "1" ] && [ -n "${SHIPYARD_AGENT_ID:-}" ] \
     unset _agent_ssc_rc
 fi
 
+# The same floor keeps two diff-scoped static checks for an agent push under
+# PULP_SKIP_PREPUSH or PULP_DISABLE_PREPUSH_GATES: the Python 3.11 f-string
+# floor and Catch2 assertions in worker threads, on the files the pushed commit
+# changed (committed blobs, seconds). Each fails a required check on the PR
+# head (`Enforce version & skill sync`, `drift-fast`), and repair lanes push
+# with those knobs. Diff-scoped, so a violation already on the base never
+# blocks an unrelated push.
+_prepush_static_floor() {
+    local base="$1" violation=0 error=0 one
+    if [ -f "$ROOT/tools/scripts/python_floor_syntax_check.py" ]; then
+        "$PULP_PYTHON" "$ROOT/tools/scripts/python_floor_syntax_check.py" --changed-from "$base"
+        one=$?
+        case "$one" in
+            0) ;;
+            1) violation=1 ;;
+            *) [ "$error" -eq 0 ] && error="$one" ;;
+        esac
+    fi
+    if [ -f "$ROOT/tools/scripts/thread_assert_check.py" ]; then
+        "$PULP_PYTHON" "$ROOT/tools/scripts/thread_assert_check.py" --changed-from "$base"
+        one=$?
+        case "$one" in
+            0) ;;
+            1) violation=1 ;;
+            *) [ "$error" -eq 0 ] && error="$one" ;;
+        esac
+    fi
+    [ "$violation" -eq 1 ] && return 1
+    [ "$error" -ne 0 ] && return "$error"
+    return 0
+}
+# The floor judges HEAD, so it runs only when the push sends HEAD to a
+# non-tag ref (not a deletion, a tag, or another branch's commit); the full
+# pushed-ref guard below does not run under PULP_SKIP_PREPUSH. The base is the
+# local origin/main: a stale one widens the diff, so refresh it when a push is
+# refused on lines the branch did not change.
+_prepush_sends_head() {
+    local head lref lsha rref rsha
+    head="$(git rev-parse HEAD 2>/dev/null)" || return 1
+    while read -r lref lsha rref rsha; do
+        case "${rref:-}" in refs/tags/*|refs/notes/*|"") continue ;; esac
+        [ "${lsha:-}" = "$head" ] && return 0
+    done <<EOF_SENDS_HEAD
+$PREPUSH_UPDATE_RECORDS
+EOF_SENDS_HEAD
+    return 1
+}
+_prepush_static_floor_ran=0
+if [ -n "${SHIPYARD_AGENT_ID:-}" ] \
+    && { [ "${PULP_SKIP_PREPUSH:-0}" = "1" ] || [ "${PULP_DISABLE_PREPUSH_GATES:-0}" = "1" ]; } \
+    && _prepush_sends_head; then
+    _prepush_static_floor_ran=1
+    _prepush_static_floor "${PULP_PREPUSH_BASE:-origin/main}"
+    _agent_sf_rc=$?
+    case $_agent_sf_rc in
+        0) ;;
+        1)
+            echo "✗ pre-push: PULP_SKIP_PREPUSH / PULP_DISABLE_PREPUSH_GATES do not skip the static floor for an agent push (SHIPYARD_AGENT_ID=${SHIPYARD_AGENT_ID})." >&2
+            echo "  Fix the lines named above, then push again." >&2
+            exit 1
+            ;;
+        *) echo "[pre-push] WARNING: the static floor could not run (exit $_agent_sf_rc); CI will run it." >&2 ;;
+    esac
+    unset _agent_sf_rc
+fi
+
 if [ "${PULP_SKIP_PREPUSH:-0}" = "1" ]; then
     echo "[pre-push] PULP_SKIP_PREPUSH=1 — skipping gates." >&2
     exit 0
@@ -295,6 +361,7 @@ SEQ_EXPOSURE="$ROOT/tools/scripts/sequencer_exposure_check.py"
 MIGRATION_NOTE_GUARD="$ROOT/tools/scripts/migration_note_guard.py"
 TEXT_ENCODING_LINT="$ROOT/tools/scripts/text_encoding_lint.py"
 SCRIPT_INPUTS_PRECHECK="$ROOT/tools/scripts/script_inputs_precheck.py"
+SCRIPT_INPUTS_OFFLINE="$ROOT/tools/scripts/script_inputs_offline.py"
 HOTSPOT_EDIT_GUARD="$ROOT/tools/scripts/hotspot_edit_guard.py"
 SURFACE_FAMILIES="$ROOT/tools/scripts/changed_surface_script_families.py"
 NEG_CAPABILITY="$ROOT/tools/scripts/negative_capability_check.py"
@@ -847,6 +914,22 @@ if [ -f "$SEQ_EXPOSURE" ]; then
     esac
 fi
 
+# The static floor defined above (Python 3.11 f-string floor, Catch2
+# assertions in worker threads; diff-scoped). Skipped here when the agent floor
+# already ran it blocking.
+if [ "$_prepush_static_floor_ran" = "0" ]; then
+    for _sf_script in python_floor_syntax_check.py thread_assert_check.py; do
+        [ -f "$ROOT/tools/scripts/$_sf_script" ] || continue
+        run_gate_captured "$PYTHON" "$ROOT/tools/scripts/$_sf_script" --changed-from "$BASE"
+        gate_rc=$?; case $gate_rc in
+            0) ;;
+            1) prepush_fail ;;
+            *) gate_could_not_run "$_sf_script" "$gate_rc"; prepush_fail ;;
+        esac
+    done
+    unset _sf_script
+fi
+
 # A hand-written docs/migrations/vX.Y.Z.md guesses the version version-at-land
 # assigns after the change lands; the note belongs in docs/migrations/unreleased/.
 if [ -f "$MIGRATION_NOTE_GUARD" ]; then
@@ -882,6 +965,22 @@ if [ -f "$SCRIPT_INPUTS_PRECHECK" ]; then
         0) ;;
         1) echo "[pre-push] script inputs: regenerate test/ctest_script_inputs/ (commands above)." >&2; prepush_fail ;;
         *) gate_could_not_run "script_inputs_precheck" "$gate_rc"; prepush_fail ;;
+    esac
+fi
+
+# A test/ctest_script_inputs/ fragment the push makes stale: a script test
+# whose entry or imports changed, a compiled suite with no fragment, a source
+# that starts spawning in a target an entry records. Recomputed offline with
+# the generator's own functions, so it runs on a gate host; what only a
+# configure can resolve is printed as NOT CHECKED and left to CI. It reads the
+# working tree, so it judges a push of HEAD and reports any other as not checked.
+if [ -f "$SCRIPT_INPUTS_OFFLINE" ]; then
+    run_gate_captured "$PYTHON" "$SCRIPT_INPUTS_OFFLINE" --root "$ROOT" --base "$BASE" \
+        --head "${_prepush_pushed_head_sha:-HEAD}"
+    gate_rc=$?; case $gate_rc in
+        0) ;;
+        1) echo "[pre-push] script inputs: a fragment is stale; apply the fix printed above." >&2; prepush_fail ;;
+        *) gate_could_not_run "script_inputs_offline" "$gate_rc"; prepush_fail ;;
     esac
 fi
 

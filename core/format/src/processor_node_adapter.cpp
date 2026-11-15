@@ -3,8 +3,12 @@
 #include <pulp/runtime/exceptions.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 
+#include <pulp/midi/block_ops.hpp>
+
 #include <algorithm>
 #include <cassert>
+#include <cstring>
+#include <limits>
 #include <unordered_set>
 
 namespace pulp::format {
@@ -34,7 +38,51 @@ bool ProcessorNode::prepare(const PrepareContext& context) {
             if (index > 0 && input_names_[index].empty())
                 input_names_[index] = "aux";
         }
-        processor_->prepare(context);
+        // The output bus cap leaves room for every routed input bus.
+        output_bus_count_ =
+            std::min(descriptor.output_buses.size(), output_roles_.size() - input_bus_count_);
+        std::size_t declared_output_channels = 0;
+        for (std::size_t index = 0; index < output_bus_count_; ++index) {
+            const auto& bus = descriptor.output_buses[index];
+            output_roles_[index] = index == 0 ? BusRole::Main : bus.role;
+            output_channels_[index] = std::max(0, bus.default_channels);
+            output_names_[index] = bus.name;
+            declared_output_channels += static_cast<std::size_t>(output_channels_[index]);
+        }
+        if (output_bus_count_ == 0 || output_names_[0].empty())
+            output_names_[0] = "main";
+        if (input_bus_count_ == 0 || input_names_[0].empty())
+            input_names_[0] = "main";
+        for (std::size_t index = 1; index < output_bus_count_; ++index) {
+            if (output_names_[index].empty())
+                output_names_[index] = "aux";
+        }
+        output_channel_ptrs_.assign(
+            std::max(declared_output_channels,
+                     static_cast<std::size_t>(std::max(0, context.output_channels))),
+            nullptr);
+        // A graph hands the node every declared output channel; the processor
+        // is prepared for its main bus, as a format host would prepare it.
+        PrepareContext processor_context = context;
+        if (output_bus_count_ > 1 && output_channels_[0] > 0)
+            processor_context.output_channels =
+                std::min(processor_context.output_channels, output_channels_[0]);
+        processor_->prepare(processor_context);
+        // Idle skipping is armed only for a node that cannot be fed by anything
+        // but its own events: no audio input, no audio-rate modulation, a
+        // bounded tail and a known latency.
+        idle_armed_ = false;
+        idle_confirmed_ = false;
+        idle_silent_frames_ = 0;
+        idle_hold_frames_ = 0;
+        idle_skipped_blocks_.store(0, std::memory_order_relaxed);
+        if (idle_probe_ && descriptor.input_buses.empty() &&
+            !capabilities_.consumes_audio_rate_modulations && descriptor.tail_samples >= 0 &&
+            processor_->latency_samples() >= 0) {
+            idle_armed_ = true;
+            idle_hold_frames_ = static_cast<std::uint64_t>(processor_->latency_samples()) +
+                                static_cast<std::uint64_t>(descriptor.tail_samples);
+        }
         // Pre-size the discard MIDI sinks so the per-block clear() the bridge runs
         // on the unused fallback buffers never reallocates on the RT thread.
         const int midi_hint = context.resource_limits.max_midi_events;
@@ -44,10 +92,10 @@ bool ProcessorNode::prepare(const PrepareContext& context) {
         // The main-bus views are fixed for the node's life; a block only points
         // them at its buffers. Their metadata matches what
         // process_processor_block() builds from the general bus set.
-        main_bus_fast_path_ =
-            !capabilities_.consumes_audio_rate_modulations && input_bus_count_ <= 1;
+        main_bus_fast_path_ = !capabilities_.consumes_audio_rate_modulations &&
+                              input_bus_count_ <= 1 && output_bus_count_ <= 1;
         scratch_.input_views[0] = {};
-        scratch_.input_views[0].info = {"main",
+        scratch_.input_views[0].info = {input_names_[0],
                                         0,
                                         BusDirection::Input,
                                         input_bus_count_ > 0 ? input_roles_[0] : BusRole::Main,
@@ -55,15 +103,17 @@ bool ProcessorNode::prepare(const PrepareContext& context) {
                                         false,
                                         true};
         scratch_.output_views[0] = {};
-        scratch_.output_views[0].info = {"main", 0,   BusDirection::Output, BusRole::Main, 0,
-                                         false,  true};
+        scratch_.output_views[0].info = {
+            output_names_[0], 0, BusDirection::Output, BusRole::Main, 0, false, true};
         block_context_ = {};
         block_context_from_transport_ = false;
     }
     PULP_CATCH_ALL {
         capabilities_ = {};
         input_bus_count_ = 0;
+        output_bus_count_ = 0;
         main_bus_fast_path_ = false;
+        idle_armed_ = false;
         return false;
     }
     prepared_ = true;
@@ -75,6 +125,9 @@ bool ProcessorNode::release() noexcept {
     main_bus_fast_path_ = false;
     capabilities_ = {};
     input_bus_count_ = 0;
+    output_bus_count_ = 0;
+    idle_armed_ = false;
+    reset_idle_confirmation();
     if (processor_ == nullptr)
         return false;
     PULP_TRY {
@@ -115,7 +168,80 @@ bool ProcessorNode::process_binding(ProcessBlock& block, const GraphRuntimeNodeP
     // block's buses.
     if (!ctx.routed)
         return false;
-    if (self->main_bus_fast_path_)
+    if (!self->idle_armed_)
+        return self->process_routed_block(block, ctx);
+
+    // Idle skipping. The skip needs the probe to report idle now, silence to
+    // have been confirmed on earlier blocks, and nothing inbound this block.
+    const bool idle_at_entry = self->idle_probe_.is_idle(self->idle_probe_.context);
+    // A buffer counts as empty only if it holds nothing and dropped nothing: a
+    // buffer that overflowed is an incomplete view of what arrived.
+    const auto empty_midi = [](const midi::MidiBuffer* buffer) noexcept {
+        // The executor attaches its (usually empty) UMP buffer to every routed
+        // MIDI buffer, so a non-null UMP pointer is not an inbound event.
+        return buffer == nullptr || (buffer->empty() && buffer->sysex_size() == 0 &&
+                                     (buffer->ump() == nullptr || buffer->ump()->empty()) &&
+                                     !midi::midi_block_has_drops(*buffer));
+    };
+    // Blocks that ask the processor to reset or that follow a timeline jump
+    // must reach it, whatever the voice state says.
+    const bool reset_or_jump = block.flags.reset || block.flags.transport_jump ||
+                               (block.transport != nullptr && (block.transport->reset_requested ||
+                                                               block.transport->transport_jump));
+    const bool nothing_inbound =
+        !reset_or_jump && !ctx.node_events_incomplete && ctx.node_inputs.num_channels() == 0 &&
+        empty_midi(ctx.node_midi_in) &&
+        (ctx.node_mpe_in == nullptr ||
+         (ctx.node_mpe_in->empty() && ctx.node_mpe_in->dropped_event_count() == 0)) &&
+        (ctx.node_param_events == nullptr ||
+         (ctx.node_param_events->empty() && ctx.node_param_events->dropped_event_count() == 0)) &&
+        ctx.node_audio_rate_modulations.empty();
+    if (idle_at_entry && self->idle_confirmed_ && nothing_inbound) {
+        auto outputs = ctx.node_outputs;
+        for (std::size_t channel = 0; channel < outputs.num_channels(); ++channel)
+            std::fill_n(outputs.channel_ptr(channel), outputs.num_samples(), 0.0f);
+        if (ctx.node_midi_out != nullptr)
+            midi::clear_midi_block(*ctx.node_midi_out);
+        self->idle_skipped_blocks_.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    }
+
+    const bool ok = self->process_routed_block(block, ctx);
+    bool silent = false;
+    if (ok && idle_at_entry && nothing_inbound &&
+        self->idle_probe_.is_idle(self->idle_probe_.context) &&
+        (ctx.node_midi_out == nullptr || empty_midi(ctx.node_midi_out))) {
+        // Compare bits, not values: -0.0f and subnormals are not silence.
+        silent = true;
+        const auto outputs = ctx.node_outputs;
+        for (std::size_t channel = 0; silent && channel < outputs.num_channels(); ++channel) {
+            const float* data = outputs.channel_ptr(channel);
+            for (std::size_t i = 0; i < outputs.num_samples(); ++i) {
+                std::uint32_t bits;
+                std::memcpy(&bits, data + i, sizeof(bits));
+                if (bits != 0) {
+                    silent = false;
+                    break;
+                }
+            }
+        }
+    }
+    if (silent) {
+        const auto frames = static_cast<std::uint64_t>(block.frame_count);
+        const auto room = std::numeric_limits<std::uint64_t>::max() - self->idle_silent_frames_;
+        self->idle_silent_frames_ += frames < room ? frames : room;
+        if (self->idle_silent_frames_ >= self->idle_hold_frames_)
+            self->idle_confirmed_ = true;
+    } else {
+        self->reset_idle_confirmation();
+    }
+    return ok;
+}
+
+bool ProcessorNode::process_routed_block(ProcessBlock& block,
+                                         const GraphRuntimeNodeProcessContext& ctx) noexcept {
+    ProcessorNode* const self = this;
+    if (main_bus_fast_path_)
         return self->process_main_bus_block(block, ctx);
 
     // The node's bus set aliases the executor's routed main view and any
@@ -126,7 +252,7 @@ bool ProcessorNode::process_binding(ProcessBlock& block, const GraphRuntimeNodeP
     BusBufferSet& local_buses = self->buses_;
     local_buses.clear();
     const auto main_role = self->input_bus_count_ > 0 ? self->input_roles_[0] : BusRole::Main;
-    if (!local_buses.add_input("main", ctx.node_inputs, main_role, true))
+    if (!local_buses.add_input(self->input_names_[0], ctx.node_inputs, main_role, true))
         return false;
     for (std::size_t bus = 1; bus < self->input_bus_count_; ++bus) {
         audio::BufferView<const float> route_view;
@@ -145,7 +271,7 @@ bool ProcessorNode::process_binding(ProcessBlock& block, const GraphRuntimeNodeP
                                    active))
             return false;
     }
-    if (!local_buses.add_output("main", ctx.node_outputs, BusRole::Main))
+    if (!self->add_output_buses(local_buses, ctx.node_outputs))
         return false;
 
     ProcessBlock local_block;
@@ -183,6 +309,54 @@ bool ProcessorNode::process_binding(ProcessBlock& block, const GraphRuntimeNodeP
         return false;
     }
     return process_processor_block(*self->processor_, local_block, self->scratch_);
+}
+
+int ProcessorNode::routed_output_channels(const PluginDescriptor& descriptor) noexcept {
+    if (descriptor.output_buses.empty())
+        return 0;
+    // Mirror prepare(): the inputs the node routes cap how many output buses fit.
+    const std::size_t inputs = std::min(descriptor.input_buses.size(), BusBufferSet::kMaxBuses - 1);
+    const std::size_t buses =
+        std::min(descriptor.output_buses.size(), BusBufferSet::kMaxBuses - inputs);
+    // A main bus that declares no channels takes the whole view, as it always has.
+    if (buses <= 1 || descriptor.output_buses[0].default_channels <= 0)
+        return descriptor.output_buses[0].default_channels;
+    int total = 0;
+    for (std::size_t index = 0; index < buses; ++index)
+        total += std::max(0, descriptor.output_buses[index].default_channels);
+    return total;
+}
+
+bool ProcessorNode::add_output_buses(BusBufferSet& buses,
+                                     audio::BufferView<float> outputs) noexcept {
+    if (output_bus_count_ <= 1 || output_channels_[0] <= 0)
+        return buses.add_output(output_names_[0], outputs, BusRole::Main);
+    // Split the node's output channels into the declared buses. The pointers
+    // are copied per block because the view may start at a sample offset.
+    const std::size_t available = std::min(outputs.num_channels(), output_channel_ptrs_.size());
+    for (std::size_t channel = 0; channel < available; ++channel)
+        output_channel_ptrs_[channel] = outputs.channel_ptr(channel);
+    const std::size_t frames = outputs.num_samples();
+    const std::size_t main_channels =
+        std::min(available, static_cast<std::size_t>(output_channels_[0]));
+    if (!buses.add_output(
+            output_names_[0],
+            audio::BufferView<float>(output_channel_ptrs_.data(), main_channels, frames),
+            BusRole::Main))
+        return false;
+    std::size_t offset = main_channels;
+    for (std::size_t bus = 1; bus < output_bus_count_; ++bus) {
+        const auto channels = static_cast<std::size_t>(output_channels_[bus]);
+        const bool fits = channels > 0 && offset + channels <= available;
+        const auto view =
+            fits ? audio::BufferView<float>(output_channel_ptrs_.data() + offset, channels, frames)
+                 : audio::BufferView<float>{};
+        if (!buses.add_output(output_names_[bus], view, output_roles_[bus], fits))
+            return false;
+        if (fits)
+            offset += channels;
+    }
+    return true;
 }
 
 // The same call process_processor_block() makes for a block with one main input

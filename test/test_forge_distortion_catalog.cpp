@@ -7,6 +7,7 @@
 #include <pulp/host/forge_distortion_catalog.hpp>
 
 #include <cmath>
+#include <utility>
 #include <vector>
 
 using namespace pulp::host;
@@ -173,6 +174,24 @@ TEST_CASE("8 the oversampling tiers report their latency exactly",
         // More cascaded stages can only add delay, never remove it.
         REQUIRE(latency >= previous);
         previous = latency;
+    }
+}
+
+TEST_CASE("Distortion node latency is unchanged by the oversampling helper",
+          "[host][baked][forge][forge-distortion][latency]") {
+    // The exact values the node reported before it shared the oversampling
+    // helper; they are part of every saved graph's alignment.
+    const std::pair<dist::OversampleTier, int> expected[] = {{dist::OversampleTier::x1, 0},
+                                                             {dist::OversampleTier::x2, 64},
+                                                             {dist::OversampleTier::x4, 76},
+                                                             {dist::OversampleTier::x8, 80}};
+    for (const auto& [tier, latency] : expected) {
+        for (const auto topology : {dist::Topology::to_ground, dist::Topology::in_loop}) {
+            CAPTURE(static_cast<int>(tier), latency);
+            REQUIRE(dist::make_distortion_node(topology, tier).latency_samples(kSr) == latency);
+            REQUIRE(dist::make_distortion_node(topology, tier).latency_samples(96000.0) == latency);
+        }
+        REQUIRE(dist::distortion_latency_samples(tier, kSr) == latency);
     }
 }
 

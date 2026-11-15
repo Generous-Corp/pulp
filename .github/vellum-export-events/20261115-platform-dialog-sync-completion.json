@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "event_id": "20261115-platform-dialog-sync-completion",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-15T00:00:00Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/platform/platform/mac/file_dialog_async_mac.mm",
+    "core/platform/src/dialog_internal.hpp",
+    "core/platform/src/platform_dialogs_stub.cpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "A dialog that completes inside the call that opens it is no longer cancelled by scope teardown, the unsupported-platform stubs are not compiled on macOS, and a filter whose extensions are all invalid shows no panel instead of allowing every file. Host-neutral, with no view or render dependency. A Pulp-only edit: Vellum's framework transfer is in effect, so Vellum adopts it only through its own framework/ port."
+}

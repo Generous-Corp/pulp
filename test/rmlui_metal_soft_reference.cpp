@@ -29,6 +29,34 @@ class NoLua final : public LuaInterface {
     }
 };
 
+class ScaledSoftRenderer final : public RenderInterface {
+  public:
+    explicit ScaledSoftRenderer(std::uint32_t) {}
+
+    void begin_frame(std::uint32_t width, std::uint32_t height) override {
+        renderer_.begin_frame(width, height);
+    }
+
+    void submit(const DrawCommand& input) override {
+        auto command = input;
+        renderer_.submit(command);
+    }
+
+    void end_frame() override {
+        renderer_.end_frame();
+    }
+
+    [[nodiscard]] const std::vector<std::uint8_t>& pixels() const noexcept {
+        return renderer_.pixels();
+    }
+    [[nodiscard]] std::size_t skipped_draws() const noexcept {
+        return renderer_.skipped_draws();
+    }
+
+  private:
+    SoftRenderer renderer_{0x00000000u};
+};
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -48,13 +76,16 @@ int main(int argc, char** argv) {
         for (const auto scale : pulp_rmlui_golden::kScales) {
             const std::uint32_t width = pulp_rmlui_golden::kWidthPoints * scale;
             const std::uint32_t height = pulp_rmlui_golden::kHeightPoints * scale;
-            SoftRenderer renderer(0x00000000u); // transparent, as a cleared Metal frame
+            ScaledSoftRenderer renderer(scale);
             NoLua lua;
             Backend backend(assets, renderer, lua);
             if (backend.open(width, height) != Status::ok) {
                 std::fprintf(stderr, "open failed at %ux%u\n", width, height);
                 return 1;
             }
+#if defined(PULP_VELLUM_RMLUI_HAS_DENSITY_RATIO)
+            backend.set_density_ratio(static_cast<float>(scale));
+#endif
             FontFaceOptions face;
             face.style = FontStyle::normal;
             face.weight = 400;

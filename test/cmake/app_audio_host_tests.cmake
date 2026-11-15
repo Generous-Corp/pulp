@@ -150,10 +150,13 @@ pulp_add_test_suite(pulp-test-midi-expansion GROUP pulp-test-group-app-midi
 
 # MidiOutput::send_sysex: framing, the mock backend, large messages, the default
 # for a backend without SysEx output, and (macOS) real CoreMIDI delivery to an
-# in-process virtual destination.
+# in-process virtual destination. Every suite that registers CoreMIDI endpoints
+# holds RESOURCE_LOCK pulp_coremidi: endpoints are server-global, so two suites
+# running at once see each other's.
 pulp_add_test_suite(pulp-test-midi-output-sysex
     SOURCES test_midi_output_sysex.cpp
-    LIBRARIES pulp::midi)
+    LIBRARIES pulp::midi
+    PROPERTIES RESOURCE_LOCK pulp_coremidi)
 if(APPLE)
     target_link_libraries(pulp-test-midi-output-sysex PRIVATE
         "-framework CoreMIDI" "-framework CoreFoundation")
@@ -173,7 +176,8 @@ pulp_add_test_suite(pulp-test-live-dsp-telemetry
 # systems and processes; unknown ids fail; resolve_port() rebinds a saved port.
 pulp_add_test_suite(pulp-test-midi-port-identity
     SOURCES test_midi_port_identity.cpp
-    LIBRARIES pulp::midi)
+    LIBRARIES pulp::midi
+    PROPERTIES RESOURCE_LOCK pulp_coremidi)
 target_include_directories(pulp-test-midi-port-identity PRIVATE
     ${PROJECT_SOURCE_DIR}/tools/midi-ports)
 if(APPLE)
@@ -652,9 +656,17 @@ catch_discover_tests(pulp-test-dspx06-graph-timing)
 # latency. Rendered through RenderScenario, so it shares the audio test support.
 add_executable(pulp-test-spectral-stream-start test_spectral_frame_engine_stream_start.cpp)
 add_executable(pulp-test-routed-spectral-ports test_routed_spectral_ports.cpp test_routed_spectral_faults.cpp harness/rt_allocation_probe.cpp)
+add_executable(pulp-test-routed-spectral-allocation-failure
+    test_routed_spectral_allocation_failure.cpp)
 target_link_libraries(pulp-test-routed-spectral-ports PRIVATE pulp::host Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-routed-spectral-ports
     PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
+target_link_libraries(pulp-test-routed-spectral-allocation-failure PRIVATE
+    pulp::host Catch2::Catch2WithMain)
+pulp_scaled_test_timeout(_pulp_routed_spectral_allocation_failure_timeout 120)
+catch_discover_tests(pulp-test-routed-spectral-allocation-failure
+    PROPERTIES TIMEOUT "${_pulp_routed_spectral_allocation_failure_timeout}"
+               RESOURCE_LOCK pulp_realtime_worker_pool)
 target_link_libraries(pulp-test-spectral-stream-start PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-spectral-stream-start)
 

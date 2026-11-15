@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <mutex>
 #include <pulp/host/isolated_plugin_slot.hpp>
+#include <pulp/host/signal_graph.hpp>
 #include <pulp/midi/ump_buffer.hpp>
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/runtime/memory_mapped_file.hpp>
@@ -222,6 +223,9 @@ class IsolatedSlot final : public detail::RequestDrivenSlot {
     }
     const PluginInfo& info() const override {
         return info_;
+    }
+    const std::shared_ptr<Session>& session() const noexcept {
+        return session_;
     }
     bool is_loaded() const override {
         return session_->fault.load(std::memory_order_acquire) == 0;
@@ -559,12 +563,79 @@ IsolatedClapResult recover_isolated_clap(const IsolatedClapOptions& options,
     if (recovered && (recovered.control->status().generation == previous->generation ||
                       !IsolatedClapAccess::session(*recovered.control)
                            ->exchange(Command::restore, nullptr, &bytes))) {
-        recovered.control->stop();
-        return {{}, {}, IsolationReason::checkpoint_invalid};
+        // An incomplete cleanup keeps its finite reservation, so hand the control
+        // back rather than strand it where nothing can finish the cleanup.
+        if (recovered.control->stop() == IsolationCleanup::complete)
+            return {{}, {}, IsolationReason::checkpoint_invalid};
+        return {{}, std::move(recovered.control), IsolationReason::checkpoint_invalid};
+    }
+    if (recovered) {
+        // The restored state is this generation's starting checkpoint, so a later
+        // fault can recover again without pausing a node the graph is rendering.
+        const auto& next = IsolatedClapAccess::session(*recovered.control);
+        std::lock_guard lock(next->control_mutex);
+        next->checkpoint_digest = runtime::sha256_hex(bytes.data(), bytes.size());
+        next->checkpoint_bytes = std::move(bytes);
     }
     return recovered;
 }
+IsolatedNodeRecoveryResult recover_isolated_graph_node(SignalGraph& graph, NodeId node,
+                                                       const IsolatedClapOptions& options,
+                                                       IsolatedClapControl& old) {
+    using Outcome = IsolatedNodeRecovery;
+    const auto refuse = [](Outcome outcome, IsolationReason error = IsolationReason::none) {
+        return IsolatedNodeRecoveryResult{outcome, error, nullptr};
+    };
+    // Share ownership of the published proxy (read under the graph lock), so it
+    // cannot be freed or its address reused while it is identified here and
+    // handed back for publication, even if another control thread releases or
+    // re-publishes the graph meanwhile.
+    const auto owner = graph.published_plugin_slot(node);
+    const auto* published = dynamic_cast<const IsolatedSlot*>(owner.get());
+    if (!published)
+        return refuse(Outcome::not_isolated_node);
+    const auto& previous = IsolatedClapAccess::session(old);
+    if (published->session() != previous)
+        return refuse(Outcome::control_mismatch);
+    // Healthy workers are never preempted: cleanup() below would stop them.
+    if (previous->fault.load(std::memory_order_acquire) == 0)
+        return refuse(Outcome::not_terminal);
+    {
+        std::lock_guard lock(previous->control_mutex);
+        if (options.selection.type != previous->options.selection.type ||
+            options.plugin_sha256 != previous->options.plugin_sha256)
+            return refuse(Outcome::identity_mismatch);
+        if (previous->checkpoint_digest.empty())
+            return refuse(Outcome::no_checkpoint);
+    }
+    // The supervisor normally finishes custody cleanup right after the fault;
+    // this only bounds the wait and retries an incomplete earlier attempt.
+    if (old.cleanup(Clock::now() + std::chrono::seconds(2)) != IsolationCleanup::complete)
+        return refuse(Outcome::cleanup_incomplete);
+    auto recovered = recover_isolated_clap(options, old);
+    if (!recovered)
+        return {Outcome::worker_failed, recovered.error, std::move(recovered.control)};
+    auto control = std::move(recovered.control);
+    if (graph.publish_isolated_recovery(node, *published, std::move(recovered.slot)) !=
+        SignalGraph::SwapResult::Swapped) {
+        // A complete stop releases the reservation; otherwise the caller needs the
+        // control to finish cleanup() or later loads stay quarantine_active.
+        if (control->stop() == IsolationCleanup::complete)
+            control.reset();
+        return {Outcome::publication_refused, IsolationReason::none, std::move(control)};
+    }
+    return {Outcome::recovered, IsolationReason::none, std::move(control)};
+}
 bool is_isolated_plugin_slot(const PluginSlot& slot) noexcept {
     return dynamic_cast<const IsolatedSlot*>(&slot) != nullptr;
+}
+bool same_isolated_plugin_binary(const PluginSlot& a, const PluginSlot& b) noexcept {
+    const auto* left = dynamic_cast<const IsolatedSlot*>(&a);
+    const auto* right = dynamic_cast<const IsolatedSlot*>(&b);
+    if (!left || !right)
+        return false;
+    const auto& x = left->session()->options;
+    const auto& y = right->session()->options;
+    return x.selection.type == y.selection.type && x.plugin_sha256 == y.plugin_sha256;
 }
 } // namespace pulp::host

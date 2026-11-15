@@ -40,12 +40,25 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME graph-stall-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/graph/test_graph_stall_guard.py")
     set_tests_properties(graph-stall-guard-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
+    # graph_paced_timing_matrix.py: receipt schema, quiet-host refusal before
+    # any cell runs, and a planted 90 ms sleep that must register deadline
+    # misses against an 85 ms block while the unplanted control stays clean.
+    # Uses the in-process reference fixture; needs no C++ build.
+    add_test(NAME graph-paced-timing-matrix-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/test_graph_paced_timing_matrix.py")
+    set_tests_properties(graph-paced-timing-matrix-selftest PROPERTIES LABELS "tools;selftest;graph" TIMEOUT 120)
     # macos_merge_group_bootstrap.sh: the merge-group `macos` verdict. A failed
     # or missing dependency fails closed; a cancelled classify (never given a
     # runner) is classified in-job, and the verdict proceeds on that answer.
     add_test(NAME macos-merge-group-bootstrap-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_macos_merge_group_bootstrap.py")
     set_tests_properties(macos-merge-group-bootstrap-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
+    # cheap_first_gate.py: build.yml's native matrix starts only after the
+    # cheap required checks pass at the head. Only a red check blocks; a
+    # pending one waits, and a deadline or unreadable API fails open.
+    add_test(NAME cheap-first-gate-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_cheap_first_gate.py")
+    set_tests_properties(cheap-first-gate-selftest PROPERTIES LABELS "tools;selftest" TIMEOUT 120)
     # clock_only_temp_key_guard.py: a test temp path named from a clock reading
     # alone is shared by two concurrent cases that read the same tick. The
     # selftest proves the scan reads real sources (an empty scan is an error).

@@ -5,6 +5,14 @@
 
 #include "dialog_internal.hpp"
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
+// macOS defines these in platform/mac; compiling the stub there would
+// duplicate the symbols.
+#if !defined(__APPLE__) || (defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
+
 namespace pulp::platform::detail {
 
 std::function<void()> present_native_alert(NativeViewHandle, const AlertRequest&,
@@ -38,3 +46,5 @@ std::vector<std::string> native_content_type_ids(const std::vector<FileFilter>&)
 }
 
 } // namespace pulp::platform::detail
+
+#endif

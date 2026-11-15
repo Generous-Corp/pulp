@@ -22,12 +22,15 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/processing_switch_crossfade.hpp": "Pulp::signal",
     "pulp/signal/smoothed_value.hpp": "Pulp::signal",
     "pulp/signal/indexed_control.hpp": "Pulp::signal",
+    "pulp/signal/control_math.hpp": "Pulp::signal",
     "pulp/host/signal_graph_authoring.hpp": "Pulp::host",
     "pulp/host/signal_graph.hpp": "Pulp::host",
     "pulp/host/signal_graph_runtime.hpp": "Pulp::host",
     "pulp/host/signal_graph_prepared_topology_edit.hpp": "Pulp::host",
     "pulp/host/custom_node_type.hpp": "Pulp::host",
+    "pulp/host/control_index_nodes.hpp": "Pulp::host",
     "pulp/host/custom_node_events.hpp": "Pulp::host",
+    "pulp/host/custom_node_oversampling.hpp": "Pulp::host",
     "pulp/host/sample_region_authoring.hpp": "Pulp::host",
     "pulp/host/sample_region_proof.hpp": "Pulp::host",
     "pulp/host/sample_region_parameters.hpp": "Pulp::host",
@@ -180,6 +183,8 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # Public headers can leave the frozen legacy bucket only through one of these
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
+    {'include': 'pulp/host/signal_graph_control.hpp', 'fingerprint': 'sha256:a5ec96c0088ae008f86367e0a94cfc0de42e9e86ab66b3716606dcb9adf89fa4', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Product graph authority over existing typed edits and strict graph-file reload; no independent executor or DSP capability.'},
+    {'include': 'pulp/host/graph_file_reload.hpp', 'fingerprint': 'sha256:118185aa57152f417c2ceaabfb9f8e5ffccc4e857493258da490c6bb858b2d20', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Strict catalog-derived graph-file preparation and existing transactional publication; bounded profile with explicit refusals, no alternate executor.'},
     {'include': 'pulp/host/graph_patch.hpp', 'fingerprint': 'sha256:017cd6e433918b371a9d37b48698bf392fc3d8879fff19eff7f0572bff82f368', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Control-thread catalog-derived graph notation and strict diagnostics transport over existing SignalGraph and restore contracts; bounded profile, not a DSP algorithm or full G2 completion.'},
     {
         'include': 'pulp/host/signal_graph_execution_snapshot.hpp',
@@ -190,10 +195,10 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         'include': 'pulp/host/isolated_plugin_slot.hpp',
-        'fingerprint': 'sha256:89e0eae24caedce120023b6fa6ec23766d8af54f0d2b01051fa0538b0907afa9',
+        'fingerprint': 'sha256:80ec7a2ac99dab05a379b47ad2d0d4b49a5a31e8dd1c8e15765d5002d748957a',
         'disposition': 'infrastructure',
         'capability_keys': [],
-        'rationale': 'Opt-in MacClapStereo64V1 hosted worker and bounded lifecycle control; no generator capability or full realtime qualification claim.',
+        'rationale': 'Opt-in MacClapStereo64V1 hosted worker, bounded lifecycle control and control-thread checkpoint recovery of a terminal graph node; no generator capability or full realtime qualification claim.',
     },
     {
         "include": "pulp/signal/spectrum_analyzer.hpp",
@@ -247,17 +252,24 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         'include': 'pulp/host/signal_graph_subgraph.hpp',
-        'fingerprint': 'sha256:81103ef7f256181918a1e4b60c254451192f492be5959e10a88e63858b6063c0',
+        'fingerprint': 'sha256:2aed03e2e63370d4a8c2af2b7f41d28375a3a70de891ef4e09b692b1b87dca02',
         'disposition': 'infrastructure',
         'capability_keys': [],
         'rationale': 'Control-thread authored subgraph expansion and exact Processor parameter binding; the bounded G6 runtime is still partial.',
     },
     {
         'include': 'pulp/host/voice_bank_binding.hpp',
-        'fingerprint': 'sha256:d622f444c145ccced476407b97bc62f59912601d4804dc557e4d022882d503a4',
+        'fingerprint': 'sha256:5aac3db19ba8cae73eb60ce09dc5a642a53e2a36841b12546e1ac173084a4f4c',
         'disposition': 'infrastructure',
         'capability_keys': [],
         'rationale': 'Bounded eight-slot graph voice-bank runtime with sustain; saved activation and paced realtime qualification remain open.',
+    },
+    {
+        'include': 'pulp/host/custom_node_oversampling.hpp',
+        'fingerprint': 'sha256:0b6b41116117486d4b2419a71d0025a3f5f6cfc1f6281203656031e69cbd3164',
+        'disposition': 'infrastructure',
+        'capability_keys': [],
+        'rationale': 'Derives a custom node\'s declared latency and its oversampler setup from one spec; refuses the minimum-phase kinds whose delay cannot be compensated.',
     },
     {
         'include': 'pulp/audio/buffer.hpp',
@@ -329,12 +341,34 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/indexed_control.hpp",
-        "fingerprint": "sha256:c25979e2e1c3b30cef33b022b908411bed087824f1407777e68d0809ed27632a",
+        "fingerprint": "sha256:4481ae3f91a73bc7ace938ae6ab92579ceb37a1320db1e6433e35157f808507c",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
             "Bounded scalar mapping and caller-indexed table reads support one G-5 "
             "workflow; they do not establish a graph event transport or independent "
+            "generator-facing capability contract."
+        ),
+    },
+    {
+        "include": "pulp/host/control_index_nodes.hpp",
+        "fingerprint": "sha256:bc280ff936706d00c25aebd8da2e1b5b7a27764a40358ff5caaa81c5db858a32",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Graph-owned ControlIndexInput and scalar Control node factories are "
+            "host graph infrastructure for the G-5 installed consumer, not an "
+            "independently advertised generator capability."
+        ),
+    },
+    {
+        "include": "pulp/signal/control_math.hpp",
+        "fingerprint": "sha256:51948a38e0ccfa2804f44fa2a344fcd17d51cac71951163f64d78f169ea8da33",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Finite scalar math and bounded integrator primitives support the G-5 "
+            "graph Control nodes; they do not establish an independent "
             "generator-facing capability contract."
         ),
     },

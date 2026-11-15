@@ -43,10 +43,11 @@ def check_structure(failures: list[str]) -> int:
     source = PREPUSH.read_text(encoding="utf-8")
 
     blocking = re.findall(
-        r'^\s*\*\) gate_could_not_run "([\w-]+)" "\$gate_rc"; (?:fail=1|prepush_fail) ;;$',
+        r'^\s*\*\) gate_could_not_run "([^"]+)" "\$gate_rc"; (?:fail=1|prepush_fail) ;;$',
         source, re.M,
     )
-    # `[^"]+`, not `[\w-]+`: a gate whose label carries arguments, e.g.
+    # `[^"]+`, not `[\w-]+`: both scans accept any quoted label (including
+    # the variable label "$static_gate"), and a gate whose label carries arguments, e.g.
     # "agent_capability_manifest --check", contains a space and slipped the
     # narrower class entirely — a fall-open branch this scan could not see,
     # which is the exact blind spot the file exists to close.

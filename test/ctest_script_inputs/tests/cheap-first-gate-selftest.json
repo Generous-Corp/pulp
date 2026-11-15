@@ -1,0 +1,12 @@
+{
+ "name": "cheap-first-gate-selftest",
+ "record": {
+  "entry": "tools/ci/test_cheap_first_gate.py",
+  "inputs": [
+   ".github/rulesets/main-protection.json",
+   "tools/ci/cheap_first_gate.py",
+   "tools/ci/test_cheap_first_gate.py"
+  ],
+  "kind": "python"
+ }
+}

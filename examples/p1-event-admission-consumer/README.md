@@ -17,7 +17,9 @@ and two partition schedules:
 * parameters through `SignalGraph::inject_parameter_events` into a small
   `PluginSlot` node added with `add_plugin_node`: latest-wins, sorted delivery
   with stable equal-offset order, one-shot delivery, and a source-side
-  overflow that returns `false` (block sizes 4 and 8). A standalone
+  overflow that returns `false` (block sizes 4 and 8), counted by
+  `SignalGraph::parameter_mailbox_counters` (four batches published, one
+  overflowed, one event dropped). A standalone
   `ParameterEventQueue` sort and overflow check is also kept;
 * voice intent through the installed `pulp::host::VoiceBankBinding`: note-on
   and note-off land across blocks on one slot and generation, and
@@ -42,6 +44,14 @@ digests, voice audio, graph audio and epoch map must match; planted
 perturbations on one backend must be named. Parallel routing is refused once
 the graph-authored lane is bound, so it is requested and recorded, not forced. `--trace <path>` writes the canonical trace and digests as JSON lines.
 Callback-side observation uses preallocated fixed arrays.
+
+The combined block's audio side runs in `combined_audio_block()`. Built with
+`-fsanitize=realtime`, that function is `[[clang::nonblocking]]`, so
+RealtimeSanitizer reports any allocation, lock or blocking call reached from
+it, and `P1_RTSAN_CONTROL=malloc|mutex|sleep|node-malloc|voice-malloc|clean`
+plants a real one at the boundary or inside the graph and voice-bank callees.
+`test/cmake/p1_event_admission_rtsan_tests.cmake` builds this source in-tree
+when the tree is configured with `PULP_SANITIZER=realtime` (label `rtsan`).
 
 It adds no runtime queue, voice-intent API, or graph seam. The fixture is qualified only when built from a complete installed
 SDK and the positive executable exits zero; the receipt stays `NOT_QUALIFIED`

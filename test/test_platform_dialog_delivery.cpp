@@ -6,6 +6,7 @@
 #include <pulp/platform/alert.hpp>
 #include <pulp/platform/file_dialog.hpp>
 #include <pulp/platform/main_thread.hpp>
+#include <pulp/platform/popup_menu.hpp>
 
 #include "dialog_internal.hpp"
 
@@ -111,4 +112,77 @@ TEST_CASE("a file panel with no backend reports an empty result exactly once",
     REQUIRE(pump_until([&] { return calls > 0; }));
     REQUIRE(calls == 1);
     REQUIRE(got.empty());
+}
+
+// A backend or presenter that completes inside the call that opens the dialog
+// leaves nothing showing. Tearing the scope down afterwards must not cancel it.
+TEST_CASE("a file dialog completed synchronously is not cancelled by scope teardown",
+          "[platform][dialog-delivery]") {
+    int cancels = 0;
+    FileDialog::AsyncBackend backend;
+    backend.open = [](const FileDialog::OpenRequest&,
+                      std::function<void(std::vector<std::string>)> done) { done({"a"}); };
+    backend.save = [](const FileDialog::SaveRequest&,
+                      std::function<void(std::optional<std::string>)> done) { done("a"); };
+    backend.cancel = [&] { ++cancels; };
+    FileDialog::set_async_backend(backend);
+    {
+        MainThreadScope scope;
+        FileDialog::open_async(scope, nullptr, FileDialog::OpenRequest{},
+                               [](std::vector<std::string>) {});
+        FileDialog::save_async(scope, nullptr, FileDialog::SaveRequest{},
+                               [](std::optional<std::string>) {});
+    }
+    FileDialog::clear_async_backend();
+    REQUIRE(cancels == 0);
+}
+
+TEST_CASE("an alert completed synchronously is not cancelled by scope teardown",
+          "[platform][dialog-delivery]") {
+    int cancels = 0;
+    AlertPresenter presenter;
+    presenter.present = [](const AlertRequest&, const AlertButtonPlan&,
+                           std::function<void(long)> respond) { respond(0); };
+    presenter.cancel = [&] { ++cancels; };
+    set_alert_presenter(presenter);
+    {
+        MainThreadScope scope;
+        show_alert_async(scope, nullptr, AlertRequest{}, [](AlertResult) {});
+    }
+    set_alert_presenter({});
+    REQUIRE(cancels == 0);
+}
+
+TEST_CASE("a menu completed synchronously is not cancelled by scope teardown",
+          "[platform][dialog-delivery]") {
+    int cancels = 0;
+    MenuPresenter presenter;
+    presenter.present = [](const MenuAnchor&, const MenuModel&, MenuPlacement,
+                           std::function<void(std::optional<int>)> respond) { respond(1); };
+    presenter.cancel = [&] { ++cancels; };
+    set_menu_presenter(presenter);
+    {
+        MainThreadScope scope;
+        show_menu_async(scope, MenuAnchor{}, MenuModel{}, MenuPlacement::below_anchor,
+                        [](std::optional<int>) {});
+    }
+    set_menu_presenter({});
+    REQUIRE(cancels == 0);
+}
+
+// Control: a dialog still showing when the scope dies is cancelled.
+TEST_CASE("a menu still showing is cancelled by scope teardown", "[platform][dialog-delivery]") {
+    int cancels = 0;
+    MenuPresenter presenter;
+    presenter.present = [](const MenuAnchor&, const MenuModel&, MenuPlacement,
+                           std::function<void(std::optional<int>)>) {};
+    presenter.cancel = [&] { ++cancels; };
+    set_menu_presenter(presenter);
+    {
+        MainThreadScope scope;
+        show_menu_async(scope, MenuAnchor{}, MenuModel{}, MenuPlacement::below_anchor,
+                        [](std::optional<int>) {});
+    }
+    set_menu_presenter({});
+    REQUIRE(cancels == 1);
 }

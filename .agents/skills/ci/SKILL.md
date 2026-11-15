@@ -1078,6 +1078,16 @@ macOS fast deterministic tier, so a running `macos` job on that head mostly
 repeats it. A version-skill red says nothing about the build or the tests, so
 the running job still carries signal you would otherwise wait another round for.
 
+A native `macos` job only starts on a head whose cheap required checks did not
+fail first: `build.yml`'s `cheap-first` job holds the native matrix until
+`drift-fast` and `Enforce version & skill sync` report, and on a red one
+`macos-cheap-first-blocked` reports a red `macos` that names it instead of
+starting a gate VM. The skip-safe `macos` aliases never wait for the gate. So a head whose cheap check is red usually has no `in_progress` native job
+at all, and a version-skill red now costs you that head's macOS result: fix the
+bump first. After re-running a flaky cheap check to green, re-run the Build
+run's failed jobs. Mechanism, fail-open rules and the measured latency:
+`docs/guides/local-ci.md`, "Cheap checks run first".
+
 Read the newest `macos` run in one call. A commit can carry several (re-runs,
 an older cancelled run, a `workflow_dispatch` full-lane run); on a head that
 needs no native build the alias job named `macos` is the one returned, and it
@@ -1858,9 +1868,22 @@ both.
 pre-push hook and `gates.sh` as well as in this job, and
 `script_inputs_precheck.py --base` runs there as a build-free stand-in for the
 `script-test-inputs-drift` ctest: a new script-driven `add_test()` must have a
-`test/ctest_script_inputs/` entry. It cannot see a stale entry (a script
-that gained an import) or a computed test name; those still need the
-configured check. Three PRs on 2026-10-22
+`test/ctest_script_inputs/` entry. `script_inputs_offline.py --base` runs
+beside it for the stale half: it rebuilds each fragment the diff reaches (a
+script test whose entry, imports or registration changed; a new suite; a
+source that starts spawning in a target an entry compiles) with the
+generator's own functions and fails with the exact fragment diff plus a
+`--write` fix, or the configure command when only a configure can write the
+record. A command that names a configure-only variable, a registration in a
+function or foreach body, or a suite under an unevaluable guard is printed as
+NOT CHECKED; the configured check stays the authority for those. A new Python
+module can resolve an import without changing the importer, so selection also
+checks the generator's newly resolved inputs. Shared spawning sources in a
+CMake list do not prove a target consumes that list; uncertain membership is
+NOT CHECKED, never grounds for declaring a fragment stale. CMake diff lines
+are not source removals: subtract sources added back in the same file, then
+check whether the recorded target still names them before flagging removal
+(another target can drop a shared source independently). Three PRs on 2026-10-22
 went red here on the encoding lint after the local gates reported clean,
 because only CI ran it. A new lint in this job that needs no build belongs in
 the hook too.
@@ -2405,6 +2428,21 @@ that is no longer true in either direction — the hook does not invoke
 is in `gates.sh` only). So adding a gate to one adds it to neither the other nor
 the push path. **Wire a new local gate into both files, and check the other list
 rather than assuming it inherits.**
+
+The f-string floor (`python_floor_syntax_check.py`) and the worker-thread
+assertion check (`thread_assert_check.py`) were in `gates.sh` only, and each
+reddened a required check on a PR head that skipped `gates.sh`. The hook now
+runs both with `--changed-from <base>` (only the files the pushed commit
+changed, read from the commit), and its agent skip floor keeps them blocking
+when an agent (`SHIPYARD_AGENT_ID` set) pushes with `PULP_SKIP_PREPUSH=1` or
+`PULP_DISABLE_PREPUSH_GATES=1`. Diff scope is deliberate: a whole-tree check in
+the agent floor would block every agent push the moment `main` itself went red
+on it. The agent floor runs only when the push sends HEAD (not a deletion,
+tag or other branch), and diffs against the LOCAL `origin/main`: a stale one
+widens the diff, so `git fetch origin main` before blaming a refusal on lines
+the branch never touched. Exit 2 (no merge-base, interpreter below 3.11, an
+internal error) is "could not run", never a violation. `git push --no-verify`
+still skips everything; CI is the only backstop for that.
 
 The sequencer registries are wired into both:
 
@@ -5921,6 +5959,11 @@ bisectable.
   gains a NEW colour literal that is not a `resolve_color(...)` fallback. Mark a
   deliberate material-effect literal `// token-lint:allow`; after intentionally
   lowering a file's count, re-freeze with `--update-baseline`.
+- **Graph vocabulary in the terminology lint.** `processing_model_terms_lint.py`
+  also flags "edge tap" / "SignalGraph tap" (the API says edge probe), "graph
+  bus port" (graph points are ports; a bus is a plugin channel group), a
+  sidechain described as a plain audio port, and "zero-delay feedback edge".
+  Add a rule only if the tree already satisfies it, with selftest cases.
 - **SignalGraph single-backend governance (`single_backend_guard.py` +
   `processing_model_terms_lint.py`).** Whole-tree structural guards (not
   diff-scoped) that keep the DSP runtime convergence from regrowing a second
@@ -13686,3 +13729,22 @@ about that path are not obvious:
   Vellum main's head equals the head recorded in the last *successful* run's
   receipt artifact, and it uploads that receipt only when the whole run is
   green, so a red night is retried on the next one rather than forgotten.
+### Cutover trial deletion build
+
+`cutover-trial.yml` (manual dispatch only, GitHub-hosted `macos-15`, advisory)
+runs `tools/scripts/cutover_trial.py`: it deletes the cutover paths listed in
+`tools/scripts/cutover_trial_inputs.json` inside a scratch git worktree, builds
+with `-k 0`, and uploads a JSON report grouped by capability-ledger row. Notes:
+
+- The script always exits 0 on a build failure; read the report, not the job
+  status. Exit 2 means the inputs could not be read.
+- The scratch worktree must sit under the worktree root, never `/tmp`;
+  configure refuses it there.
+- It is not a required check and does not run on a schedule or pull request.
+
+- **Pin the Vellum commit a consumer needs.** The lane resolves Vellum main's
+  newest green SDK, which is not necessarily one that carries an API a Pulp
+  consumer was written against. `resolve --min-vellum-sha <sha>` refuses a run
+  whose head does not contain that commit (checked with Vellum's compare
+  endpoint before anything is downloaded); the workflow sets it to the commit
+  that introduced the `ParamModel` surface `integrations/pulp-vellum` builds on.

@@ -1,4 +1,5 @@
 #include "signal_graph_internal.hpp"
+#include "signal_graph_ports_internal.hpp"
 
 #include <pulp/format/process_context.hpp>
 #include <pulp/host/signal_graph_runtime.hpp>
@@ -281,6 +282,7 @@ NodeId SignalGraph::add_trigger_producer(const TriggerProducerConfig& config) {
     node.custom_type_id = "pulp.trigger.onset";
     node.num_input_ports = config.input_channels;
     node.num_output_ports = config.input_channels;
+    detail::populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
     const auto id = node.id;
     nodes_.push_back(std::move(node));
     trigger_producers_.emplace(id, config);
@@ -301,6 +303,7 @@ NodeId SignalGraph::add_trigger_envelope(const TriggerEnvelopeConfig& config) {
     node.custom_type_id = "pulp.trigger.envelope";
     node.num_input_ports = 1;
     node.num_output_ports = 1;
+    detail::populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
     const auto id = node.id;
     nodes_.push_back(std::move(node));
     trigger_envelopes_.emplace(id, config);
@@ -329,6 +332,7 @@ NodeId SignalGraph::add_trigger_audio_(TriggerAudioConfig config) {
                                                                       : "pulp.trigger.lowpass";
     node.num_input_ports = config.kind == TriggerAudioKind::Modulation ? 2 : 1;
     node.num_output_ports = 1;
+    detail::populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
     const auto id = node.id;
     nodes_.push_back(std::move(node));
     trigger_audio_.emplace(id, config);

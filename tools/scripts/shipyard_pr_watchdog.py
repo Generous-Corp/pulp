@@ -42,12 +42,19 @@ def process_snapshot() -> tuple[dict[int, list[int]], dict[int, float]] | None:
     high figure long after it goes idle, while macOS decays it. Diffing
     cumulative time between polls measures the same thing on both.
     """
-    result = subprocess.run(
-        ["ps", "-axo", "pid=,ppid=,time="],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            ["ps", "-axo", "pid=,ppid=,time="],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+    except OSError:
+        # A sandbox that forbids running ps (the fleet's repair passes) gets
+        # no snapshot, like a failed ps: the watchdog then never stops the
+        # command for stalling, rather than crashing it.
+        return None
     children: dict[int, list[int]] = {}
     cpu: dict[int, float] = {}
     if result.returncode != 0:

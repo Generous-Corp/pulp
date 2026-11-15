@@ -41,12 +41,15 @@ struct Connection {
     float automation_smoothing_ms = 0.0f;  // per-source pre-mix slew
     AutomationMix automation_mix  = AutomationMix::Replace;
     bool spectral = false;
+    // Semantic Control sample edge; physically routed through the float buffer
+    // path. Also set on a Control source feeding dense AudioRate modulation.
+    bool control_signal = false;
 
     bool operator==(const Connection& o) const {
         return source_node == o.source_node && source_port == o.source_port &&
                dest_node == o.dest_node && dest_port == o.dest_port && automation == o.automation &&
                audio_rate_modulation == o.audio_rate_modulation && sidechain == o.sidechain &&
-               spectral == o.spectral &&
+               spectral == o.spectral && control_signal == o.control_signal &&
                ((automation || audio_rate_modulation) ? automation_param_id == o.automation_param_id
                                                       : true);
     }

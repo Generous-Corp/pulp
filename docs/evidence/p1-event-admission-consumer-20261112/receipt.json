@@ -118,7 +118,7 @@
         "voice": "76096164fc3782a6"
       }
     },
-    "callback_observation": "graph-lane, reset and combined consumers and the PluginSlot probe record into preallocated fixed arrays with a count and an overflow flag asserted after rendering; the block loop makes no topology call. Construction property only: no allocation instrumentation, RTSan or realtime claim",
+    "callback_observation": "graph-lane, reset and combined consumers and the PluginSlot probe record into preallocated fixed arrays with a count and an overflow flag asserted after rendering; the block loop makes no topology call. The combined audio path is RTSan-checked separately (see realtime_rtsan)",
     "executor_parity": {
       "result": "PASS (installed SDK): the combined schedule renders on the reference walk (canonical executor routing disabled) and the routed serial executor, at five schedules; canonical trace, four per-family digests, voice audio, graph audio (ramp input) and native-epoch map identical; 15 comparisons",
       "backend_dispatch": "routing_executor_stats().blocks_processed is 0 on the reference walk and 276/276 blocks on the routed executor; routed_walk_fallbacks() is 0",
@@ -129,6 +129,19 @@
         "one voice-audio sample +1.0 on the routed side -> backend-voice-audio"
       ],
       "sdk_headers": "installed signal_graph_runtime.hpp differs from origin/main 333b37effe57 only in comments; graph_event_contract.hpp is byte-identical"
+    },
+    "realtime_rtsan": {
+      "result": "PASS (in-tree source build, LLVM 21 RTSan, arm64 macOS, Release): the combined block's audio side (HostEventIngress project/end_block and inject_midi, inject_parameter_events into the PluginSlot node, SignalGraph::process with the graph-authored lane on the reference walk and routed serial executor, VoiceBankBinding begin_block/publish/render) runs inside a [[clang::nonblocking]] boundary for 1616 blocks across every combined render with 0 RTSan reports; functional output and digests unchanged",
+      "evidence": "docs/evidence/p1-rtsan-consumer-20261113.md",
+      "target": "pulp-test-p1-event-admission-rtsan (test/cmake/p1_event_admission_rtsan_tests.cmake, only with PULP_SANITIZER=realtime; label rtsan)",
+      "planted_controls": [
+        "malloc at the boundary -> DETECTED malloc",
+        "std::mutex at the boundary -> DETECTED pthread_mutex_lock",
+        "sleep_for at the boundary -> DETECTED nanosleep",
+        "malloc inside CustomNodeType::process_events under SignalGraph::process -> DETECTED malloc",
+        "malloc inside the voice render under VoiceBankBinding::render -> DETECTED malloc"
+      ],
+      "scope": "N=1 per case, one head, in-tree (not installed-SDK) RTSan build; RTSan sees intercepted allocation, lock, sleep and blocking calls only, not spin loops or execution time; parallel routing, prepare(), topology edits, Linux and deadline qualification are not covered"
     }
   },
   "closed_rows": [
@@ -136,19 +149,19 @@
     "MIDI 1.0 projection through SignalGraph::inject_midi inside this fixture",
     "partition schedules beyond two (five for the combined control)",
     "a sequence mutation that fails while the unaffected records remain explainable",
-    "routed serial executor versus reference walk parity for the graph-authored lane, MIDI input and parameter mailbox (trace, four digests, voice audio, graph audio, epoch map) across five schedules"
+    "routed serial executor versus reference walk parity for the graph-authored lane, MIDI input and parameter mailbox (trace, four digests, voice audio, graph audio, epoch map) across five schedules",
+    "callback allocation, lock and blocking-call freedom of the combined audio path under RealtimeSanitizer (local arm64 macOS, in-tree build; docs/evidence/p1-rtsan-consumer-20261113.md)"
   ],
   "not_checked_rows": [
     "UMP and MPE expression sidecars through SignalGraph::inject_midi(node, midi, mpe) inside this fixture (covered separately by examples/g5-host-event-consumer)",
     "parameter overflow telemetry counters (overflow_count) through the graph mailbox; only the false return and retained prefix are asserted",
     "reset and epoch cancellation applied to all four families at once; reset is checked per family",
-    "callback allocation freedom as a measured or realtime property (fixture callbacks use fixed arrays; runtime and VoiceBankBinding::render are not instrumented)",
     "parallel-routed versus reference executor parity: set_parallel_routing_enabled is refused once the graph-authored lane is bound, so it was requested after the bind, refused, and not forced",
     "voice intent as a SignalGraph node; the voice bank runs its own prepared graph on the shared block grid"
   ],
   "unavailable_lanes": [
     "runtime",
-    "realtime",
+    "realtime_timing",
     "provider_parity",
     "non_darwin",
     "parameter_mailbox_public_processor",

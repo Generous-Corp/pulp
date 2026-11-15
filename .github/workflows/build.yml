@@ -2056,17 +2056,69 @@ jobs:
           git fetch --no-tags --depth=1 origin "$source_revision"
           python3 tools/scripts/a2t_structural_verification_ci.py --verify-only
 
+  # Cheap first: the native matrix (the ~40-minute required `macos` gate VM)
+  # starts only after `drift-fast` and `Enforce version & skill sync` have
+  # passed on the same head. Both are required checks in their own workflows,
+  # so `needs:` cannot reach them; this job reads their check runs instead.
+  # It runs beside the preamble, so the native leg waits only for whatever of
+  # the cheap checks is still running when the preamble ends (measured at
+  # about 1 minute at the median, docs/guides/local-ci.md "Cheap checks run
+  # first"). It withholds the VM only from a head a cheap check has already
+  # failed (verdict `block`); a deadline, an unreadable API or a check that
+  # never appears all start the matrix (verdict `unknown`), so a missing or
+  # skipped cheap check can never hold the gate. `build` reads the verdict,
+  # not this job's result, so a crashed or cancelled gate fails open, and
+  # `macos-cheap-first-blocked` reports a blocked native leg as a red `macos`
+  # that names the red check. Only jobs on the native path wait for this one:
+  # the skip-safe and receipt-reused `macos` aliases do not need it, so a
+  # docs-only head or a reused group still reports `macos` in seconds.
+  # PULP_CHEAP_FIRST_MODE=off turns the wait off.
+  cheap-first:
+    name: cheap-first
+    if: ${{ (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true')) && (github.event.action != 'labeled' || (vars.PULP_MACOS_PR_GATING == 'true' && github.event.label.name == 'macos-ci' && github.event.sender.login == 'shipyard-local[bot]')) }}
+    runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    timeout-minutes: 35
+    outputs:
+      verdict: ${{ steps.gate.outputs.verdict }}
+      reason: ${{ steps.gate.outputs.reason }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 1
+          lfs: false
+          sparse-checkout: |
+            tools/ci/cheap_first_gate.py
+          sparse-checkout-cone-mode: false
+      - name: Wait for the cheap required checks at this head
+        id: gate
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          DISPATCH_PR: ${{ inputs.pr_number }}
+          CHEAP_FIRST_MODE: ${{ vars.PULP_CHEAP_FIRST_MODE }}
+        run: |
+          set -euo pipefail
+          cd /tmp
+          python3 "$GITHUB_WORKSPACE/tools/ci/cheap_first_gate.py" \
+            --repo "$GITHUB_REPOSITORY" --sha "$HEAD_SHA" --event "$GITHUB_EVENT_NAME" \
+            --base-ref "$BASE_REF" --dispatch-pr "$DISPATCH_PR" --mode "$CHEAP_FIRST_MODE"
+
   build:
-    needs: [resolve-provider, classify, protected-receipt-reuse]
+    needs: [resolve-provider, classify, protected-receipt-reuse, cheap-first]
     # Skip the entire native build matrix (no runner allocated) when the PR
     # touches no C++/Swift build input. The macos/linux/windows alias jobs
-    # below still run and report.
+    # below still run and report. A head on which a cheap required check is
+    # already red does not start it either (`cheap-first`); only an explicit
+    # `block` verdict withholds it, so a skipped or crashed gate fails open.
     if: >-
       (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true'))
       && !cancelled()
       && needs.resolve-provider.result == 'success'
       && needs.classify.result == 'success'
       && needs.classify.outputs.native_build_required == 'true'
+      && needs.cheap-first.outputs.verdict != 'block'
       && (needs.protected-receipt-reuse.result != 'success'
           || needs.protected-receipt-reuse.outputs.build_required == 'true')
     strategy:
@@ -4727,6 +4779,31 @@ jobs:
         continue-on-error: true
         shell: bash
         run: echo "::warning title=reuse-record NOT written::checkout, record or upload did not succeed; this job's replay history is lost"
+
+  # ── macos for a native leg `cheap-first` withheld ─────────────────────────
+  # Owns `macos`, red, exactly when `build` would have started but for a
+  # `block` verdict: every other `build` condition holds, so the native leg
+  # is absent only because a cheap required check is already red. It is the
+  # only `macos` owner that waits for `cheap-first`; the skip-safe aliases
+  # above and below keep their seconds-fast path because their conditions
+  # exclude a native head, so the two can never both own the name.
+  macos-cheap-first-blocked:
+    name: ${{ (((github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && (github.event.action != 'labeled' || (vars.PULP_MACOS_PR_GATING == 'true' && github.event.label.name == 'macos-ci' && github.event.sender.login == 'shipyard-local[bot]'))) || github.event_name == 'merge_group') && (needs.resolve-provider.result == 'success' && needs.classify.result == 'success' && needs.classify.outputs.native_build_required == 'true' && (needs.protected-receipt-reuse.result != 'success' || needs.protected-receipt-reuse.outputs.build_required == 'true') && needs.protected-receipt-reuse.outputs.macos_reused != 'true' && needs.cheap-first.outputs.verdict == 'block') && 'macos' || 'macos-cheap-first-unused' }}
+    needs: [resolve-provider, classify, protected-receipt-reuse, cheap-first]
+    runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    if: >-
+      (github.event_name != 'workflow_dispatch' || (inputs.local_proof != true && inputs.local_proof != 'true'))
+      && !cancelled()
+      && (((github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && (github.event.action != 'labeled' || (vars.PULP_MACOS_PR_GATING == 'true' && github.event.label.name == 'macos-ci' && github.event.sender.login == 'shipyard-local[bot]'))) || github.event_name == 'merge_group')
+      && (needs.resolve-provider.result == 'success' && needs.classify.result == 'success' && needs.classify.outputs.native_build_required == 'true' && (needs.protected-receipt-reuse.result != 'success' || needs.protected-receipt-reuse.outputs.build_required == 'true') && needs.protected-receipt-reuse.outputs.macos_reused != 'true' && needs.cheap-first.outputs.verdict == 'block')
+    steps:
+      - name: Refuse a head whose cheap required check is red
+        shell: bash
+        env:
+          CHEAP_FIRST_REASON: ${{ needs.cheap-first.outputs.reason }}
+        run: |
+          echo "::error title=macos not started: a cheap required check is red::${CHEAP_FIRST_REASON}. The native macOS leg did not start on a head that cannot merge. Fix the red check and push, or re-run it and then this run's failed jobs."
+          exit 1
 
   macos-merge-group:
     # Native merge groups get `macos` directly from the macOS matrix leg. This

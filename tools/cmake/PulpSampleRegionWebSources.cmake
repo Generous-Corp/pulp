@@ -10,6 +10,9 @@ function(pulp_sample_region_web_sources ROOT OUT)
         "${ROOT}/core/host/src/signal_graph.cpp"
         "${ROOT}/core/host/src/signal_graph_mailbox.cpp"
         "${ROOT}/core/host/src/signal_graph_authoring.cpp"
+        # Authoring registers the built-in Control index input type and the
+        # prepared edit validates Control node state, both defined here.
+        "${ROOT}/core/host/src/control_index_nodes.cpp"
         "${ROOT}/core/host/src/spectral_graph.cpp"
         "${ROOT}/core/host/src/signal_graph_process.cpp"
         "${ROOT}/core/host/src/trigger_graph.cpp"
