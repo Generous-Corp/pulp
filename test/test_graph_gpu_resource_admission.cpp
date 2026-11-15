@@ -691,27 +691,33 @@ double sample_error(float out, float ref) {
     return std::abs(static_cast<double>(out) - static_cast<double>(ref));
 }
 
+/// Worst error of `out[t]` against `ref[t - lag]` over the overlap where
+/// both samples exist, so a reference shorter than the output is never read
+/// past its end. An empty overlap proves nothing and is an unbounded error.
+double max_error_at(const std::vector<float>& out, const std::vector<float>& ref,
+                    std::int64_t lag) {
+    if (lag < 0)
+        return std::numeric_limits<double>::infinity();
+    const auto offset = static_cast<std::size_t>(lag);
+    if (offset >= out.size() || ref.empty())
+        return std::numeric_limits<double>::infinity();
+    const std::size_t end = std::min(out.size(), offset + ref.size());
+    double worst = 0.0;
+    for (std::size_t t = offset; t < end; ++t)
+        worst = std::max(worst, sample_error(out[t], ref[t - offset]));
+    return worst;
+}
+
 Alignment measure_lag(const std::vector<float>& out, const std::vector<float>& ref,
                       std::int64_t max_lag) {
     Alignment best;
     const auto n = static_cast<std::int64_t>(out.size());
     for (std::int64_t lag = 0; lag <= max_lag && lag < n; ++lag) {
-        double worst = 0.0;
-        for (std::int64_t t = lag; t < n; ++t)
-            worst = std::max(worst, sample_error(out[static_cast<std::size_t>(t)],
-                                                 ref[static_cast<std::size_t>(t - lag)]));
+        const double worst = max_error_at(out, ref, lag);
         if (worst < best.max_abs)
             best = {lag, worst};
     }
     return best;
-}
-
-double max_error_at(const std::vector<float>& out, const std::vector<float>& ref,
-                    std::int64_t lag) {
-    double worst = 0.0;
-    for (std::size_t t = static_cast<std::size_t>(lag); t < out.size(); ++t)
-        worst = std::max(worst, sample_error(out[t], ref[t - static_cast<std::size_t>(lag)]));
-    return worst;
 }
 
 /// Escapes the planted allocation so the compiler cannot elide it.
@@ -808,6 +814,16 @@ TEST_CASE("output tolerance checks reject non-finite samples",
     const auto clean = measure_lag(out, ref, 8);
     REQUIRE(clean.lag == lag);
     REQUIRE(clean.max_abs <= tolerance);
+
+    // Only the overlap is compared: an output tail past the reference end is
+    // not read against memory beyond `ref`, and a lag with no overlap is not
+    // a vacuous pass.
+    auto tailed = out;
+    tailed.insert(tailed.end(), 5, 1000.0f);
+    CHECK(max_error_at(tailed, ref, lag) <= tolerance);
+    CHECK(measure_lag(tailed, ref, 8).lag == lag);
+    CHECK_FALSE(max_error_at(out, ref, static_cast<std::int64_t>(out.size())) <= tolerance);
+    CHECK_FALSE(max_error_at(out, std::vector<float>{}, 0) <= tolerance);
 
     for (const float bad :
          {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity()}) {
