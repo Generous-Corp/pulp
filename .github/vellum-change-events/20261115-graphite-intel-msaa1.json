@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "20261115-graphite-intel-msaa1",
+  "kind": "change",
+  "created_at": "2026-11-15T20:30:58Z",
+  "slices": [
+    "render-skia-dawn"
+  ],
+  "rationale": "Pulp's shared Skia Graphite surface disables Graphite's optional internal 4x MSAA and uses single-sample internal targets. Intel macOS Metal rejects the Dawn-generated MSAA pipeline in hosted plugin surfaces, producing a black editor; Pulp's own analytic antialiasing preserves the visible result while avoiding that driver path. This is a Pulp-owned platform compatibility fix with no API, authority, design-import, or Vellum framework boundary move.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "governed pulp-render Release build",
+    "native Intel Spectr VST3/CLAP REAPER qualification"
+  ],
+  "disposition": "pulp-only"
+}
