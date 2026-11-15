@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <limits>
 #include <set>
+#include <string>
 #include <vector>
 
 using pulp::host::SpectralFiniteStreamRule;
@@ -112,14 +113,35 @@ TEST_CASE("Finite stream component layout tiles frames, channels and bins", "[sp
 }
 
 TEST_CASE("Finite stream rule refuses inadmissible geometry", "[spectral][eof]") {
-    const Geometry refused[] = {{128, 64, 1},  {32768, 64, 1}, {300, 64, 1}, {256, 0, 1},
-                                {256, 129, 1}, {256, 100, 1},  {256, 64, 0}, {256, 64, 17}};
-    for (const auto& g : refused) {
+    struct Refused {
+        Geometry geometry;
+        Status status;
+    };
+    const Refused refused[] = {{{128, 64, 1}, Status::fft_size_not_admitted},
+                               {{32768, 64, 1}, Status::fft_size_not_admitted},
+                               {{300, 64, 1}, Status::fft_size_not_admitted},
+                               {{256, 0, 1}, Status::hop_not_admitted},
+                               {{256, 129, 1}, Status::hop_not_admitted},
+                               {{256, 100, 1}, Status::hop_does_not_divide_fft_size},
+                               {{16384, 24, 1}, Status::hop_does_not_divide_fft_size},
+                               {{256, 64, 0}, Status::channels_not_admitted},
+                               {{256, 64, 17}, Status::channels_not_admitted}};
+    for (const auto& [g, status] : refused) {
         CAPTURE(g.fft, g.hop, g.channels);
         const auto rule = SpectralFiniteStreamRule::make(g.fft, g.hop, g.channels, 769);
         REQUIRE_FALSE(rule);
-        REQUIRE(rule.status == Status::invalid_geometry);
+        REQUIRE(rule.status == status);
+        REQUIRE(rule.geometry_refused());
+        REQUIRE_FALSE(SpectralFiniteStreamRule::admissible_geometry(g.fft, g.hop, g.channels));
     }
+    // Every refusal has its own name.
+    std::set<std::string> names;
+    for (const auto status :
+         {Status::ok, Status::unset, Status::fft_size_not_admitted, Status::hop_not_admitted,
+          Status::hop_does_not_divide_fft_size, Status::channels_not_admitted,
+          Status::invalid_length, Status::capacity_exceeded})
+        REQUIRE(names.insert(SpectralFiniteStreamRule::reason(status)).second);
+    REQUIRE_FALSE(SpectralFiniteStreamRule::make(256, 64, 1, 0).geometry_refused());
     // Control: the same lengths at an admitted neighbour geometry are accepted.
     REQUIRE(SpectralFiniteStreamRule::make(256, 128, 1, 769));
     REQUIRE(SpectralFiniteStreamRule::make(256, 64, 16, 769));

@@ -265,9 +265,11 @@ SpectralError SpectralRuntimeBank::prepare(std::span<const GraphNode> authored,
         state->working.resize(static_cast<size_t>(identity.channels()) * identity.bins());
         if (n.type == NodeType::SpectralAssetMorph) {
             if (!n.spectral_asset_morph || !charge(n.spectral_asset_morph->retained_bytes()) ||
-                !state->asset_morph.morph.prepare(
-                    static_cast<int>(n.spectral_asset_morph->rule.channels),
-                    static_cast<int>(n.spectral_asset_morph->rule.bins)))
+                !charge(n.spectral_asset_morph->endpoint_bytes()) ||
+                n.spectral_asset_morph->rule.channels !=
+                    static_cast<std::uint64_t>(identity.channels()) ||
+                n.spectral_asset_morph->rule.bins != static_cast<std::uint64_t>(identity.bins()) ||
+                !state->asset_morph.prepare())
                 return SpectralError::CapacityExceeded;
             state->finite_frames = n.spectral_asset_morph->rule.finite_frames;
             state->finite_cutoff = static_cast<std::int64_t>(n.spectral_asset_morph->render_frames);

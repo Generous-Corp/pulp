@@ -1546,14 +1546,16 @@ CLI-only write operation; the MCP `pulp_graph` tool remains read-only.
 documents (as written by `GraphSerializer::to_saved_document`) by logical node
 identity, read-only and without loading plugin code. NodeIds are lookup keys
 only, so two files that differ only in NodeId numbering compare equal. The JSON
-result reports `code` (`Ok`), `equal`, both semantic digests, `nodes`
+result reports `code` (`Ok`), `equal`, a numbering-independent digest of each
+compared document (`before_digest`, `after_digest`; equal documents have equal
+digests), `nodes`
 (`added`, `removed`, and `changed` with each node's differing `fields`),
 `connections` (`added`, `removed`, `changed`, keyed as
 `<source identity>[<port>] -> <destination identity>[<port>]`),
 `layout_changed` (editor layout only, never semantic), and `sections_changed`
-(other top-level members such as `format_version` or `sample_regions`, compared
-verbatim, so a section that records raw NodeIds reports a change when only the
-numbering differs). A successful comparison exits 0 whether or not the files
+(other top-level members such as `format_version` or `sample_regions`; NodeIds
+in `sample_regions` are compared as the identities they bind, and the other
+sections verbatim). A successful comparison exits 0 whether or not the files
 differ. A missing or unreadable file is `FileUnreadable` and a file over the
 64 MiB graph limit is `ResourceLimit` (exit 1). A document the saved-document
 inspector refuses, including a legacy file without the identity envelope, is
