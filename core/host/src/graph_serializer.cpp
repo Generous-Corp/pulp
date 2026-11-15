@@ -9,6 +9,7 @@
 #include <pulp/runtime/detail/durable_file_replacement.hpp>
 
 #include "graph_serializer_test_access.hpp"
+#include "spectral_graph_persistence.hpp"
 
 // The web DSP builds (Emscripten for WAM, plain clang targeting wasm32 for
 // WebCLAP) compile this serializer without the plugin scanner and have no
@@ -1577,6 +1578,8 @@ bool GraphSerializer::register_migration(int from_version,
 std::string GraphSerializer::to_json(
     const SignalGraph& graph,
     const std::unordered_map<NodeId, std::pair<float,float>>& editor_layout) {
+    if (spectral_persistence::contains_spectral_nodes(graph))
+        return spectral_persistence::write(graph, editor_layout);
     bool has_processors = false;
     bool has_typed_ports = false;
     for (const auto& node : graph.nodes()) {
@@ -2185,6 +2188,62 @@ GraphSerializer::LoadResult GraphSerializer::from_file(SignalGraph& graph,
 GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const std::string& json,
                                                        const GraphLoadOptions& options) {
     LoadResult result;
+    auto spectral = spectral_persistence::read(json);
+    if (spectral.handled) {
+        if (!spectral.result.ok)
+            return spectral.result;
+        SignalGraph::GraphMutationLock lock(graph);
+        if (graph.refuse_spectral_mutation_()) {
+            spectral.result.ok = false;
+            spectral.result.error =
+                "active spectral controller refuses graph loading; stop it first";
+            return spectral.result;
+        }
+        auto& prepared = *spectral.graph;
+        prepared.set_limits(graph.limits_);
+        if (!prepared.validate_generated_graph(std::min(4096, graph.limits_.max_block_size))
+                 .accepted) {
+            spectral.result.ok = false;
+            spectral.result.error = "spectral graph exceeds destination graph limits";
+            return spectral.result;
+        }
+        if (prepared.connections_.size() >
+                std::numeric_limits<std::uint64_t>::max() - graph.next_connection_identity_ ||
+            graph.authoring_generation_ == std::numeric_limits<std::uint64_t>::max()) {
+            spectral.result.ok = false;
+            spectral.result.error = "spectral graph authoring identity exhausted";
+            return spectral.result;
+        }
+        // No allocation or fallible construction remains after preflight.
+        // Rebind handles so a candidate's ports cannot impersonate the target
+        // graph, and old target handles remain stale across replacement.
+        const auto incarnation = graph.authoring_generation_ + 1;
+        for (auto& n : prepared.nodes_)
+            for (auto* ports : {&n.input_ports, &n.output_ports})
+                for (auto& p : *ports) {
+                    p.owner = graph.diagnostic_graph_identity_;
+                    p.incarnation = incarnation;
+                }
+        for (auto& id : prepared.connection_identities_)
+            id = graph.next_connection_identity_++;
+        graph.cancel_swap_edit_locked_();
+        auto admitted_nodes = std::move(prepared.nodes_);
+        prepared.nodes_.swap(graph.nodes_);
+        graph.connections_.swap(prepared.connections_);
+        graph.connection_identities_.swap(prepared.connection_identities_);
+        graph.processor_nodes_.clear();
+        graph.graph_event_edge_.reset();
+        graph.sample_region_definitions_.clear();
+        graph.sample_region_parameter_binding_ = nullptr;
+        graph.prepared_sample_region_bank_.reset();
+        graph.prepared_sample_regions_.clear();
+        graph.next_id_ = prepared.next_id_;
+        // Invalidate while authoring nodes are empty, exactly as clear() does,
+        // so any previous typed-trigger attachment is retired too.
+        graph.invalidate_live_locked_();
+        graph.nodes_.swap(admitted_nodes);
+        return spectral.result;
+    }
     {
         SignalGraph::GraphMutationLock lock(graph);
         if (graph.refuse_spectral_mutation_()) {
