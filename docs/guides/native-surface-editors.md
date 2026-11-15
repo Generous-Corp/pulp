@@ -75,6 +75,17 @@ and the density ratio is the backing scale. Documents that need
 density-scaled text should use `font-size` in `dp` (the example does this)
 rather than `px`.
 
+`RmlUiSurface` draws on demand. It draws a frame when it attaches, on input,
+when the surface changes size, and when the client calls `request_frame()`.
+After each update it reads RmlUi's `GetNextUpdateDelay()`. While an animation
+or transition plays (delay 0) it runs its `FramePump` continuously, the same
+rule `HostFramePump` applies to an animating view tree, and stops as soon as
+the delay is no longer 0. For an RmlUi timer,
+such as a text field's caret blink, it asks for one frame when the timer is
+due. When RmlUi reports nothing pending it draws nothing more, so an idle
+document costs one atomic check per vsync on the display-link thread and no
+main-thread or render-thread work.
+
 ## Proof
 
 - `pulp-test-native-metal-surface`, `-frame-pump`, `-input` and

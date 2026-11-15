@@ -72,12 +72,29 @@ body { width: 100%; height: 100%; margin: 0; font-family: Arial; font-size: 14dp
 </body>
 </rml>)";
 
+// A hover that starts a 0.4 s colour transition; nothing else animates.
+constexpr const char* kTransitionDocument = R"(<rml>
+<head>
+<style>
+body { width: 100%; height: 100%; margin: 0; }
+#swatch { position: absolute; left: 0; top: 0; width: 100dp; height: 50dp;
+          background-color: #ff0000; transition: background-color 0.4s linear-in-out; }
+#swatch:hover { background-color: #0000ff; }
+</style>
+</head>
+<body><div id="swatch"></div></body>
+</rml>)";
+
 class MemoryAssets final : public vellum::rmlui::AssetProvider {
   public:
     vellum::rmlui::Status load(std::string_view path, vellum::rmlui::Asset& out) override {
         out.path = std::string(path);
         if (path == "probe.rml") {
             out.bytes = kDocument;
+            return vellum::rmlui::Status::ok;
+        }
+        if (path == "transition.rml") {
+            out.bytes = kTransitionDocument;
             return vellum::rmlui::Status::ok;
         }
         if (path == "font.ttf") {
@@ -147,7 +164,7 @@ struct Editor {
     FrameTarget last_target;
     std::unique_ptr<RmlUiSurface> ui;
 
-    explicit Editor(NSRect frame = NSMakeRect(0, 0, 300, 200)) {
+    explicit Editor(NSRect frame = NSMakeRect(0, 0, 300, 200), const char* document = "probe.rml") {
         [NSApplication sharedApplication];
         window = [[NSWindow alloc] initWithContentRect:frame
                                              styleMask:NSWindowStyleMaskBorderless
@@ -161,7 +178,7 @@ struct Editor {
         };
         hooks.end_frame = [this] { ended.fetch_add(1); };
         RmlUiSurfaceOptions options;
-        options.document = "probe.rml";
+        options.document = document;
         options.font_faces = {"font.ttf"};
         options.rate_cap_hz = 120.0;
         ui = std::make_unique<RmlUiSurface>(assets, renderer, hooks, options);
@@ -229,6 +246,38 @@ TEST_CASE("the document loads and renders through the caller's renderer",
                 static_cast<std::uint32_t>(300 * e.window.backingScaleFactor));
         e.ui->detach();
         REQUIRE(vellum::rmlui::NativeContext::open_instances() == instances);
+    }
+}
+
+TEST_CASE("a transition keeps drawing without input, then the surface goes idle",
+          "[native-surface][rmlui][animation]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        Editor e(NSMakeRect(0, 0, 300, 200), "transition.rml");
+        REQUIRE(e.attach());
+        REQUIRE(e.wait_for([&] { return e.ui->frames() > 0; }));
+        // Settle: a static document draws nothing more.
+        e.wait_for([] { return false; }, 0.3);
+        const auto settled = e.ui->frames();
+        e.wait_for([] { return false; }, 0.3);
+        INFO("frames while static: " << (e.ui->frames() - settled));
+        REQUIRE(e.ui->frames() == settled);
+
+        // One pointer move starts the hover transition; no further input.
+        [e.view() mouseMoved:e.mouse(NSEventTypeMouseMoved, 20, 20)];
+        const auto at_input = e.ui->frames();
+        e.wait_for([] { return false; }, 0.6);
+        const auto after_transition = e.ui->frames();
+        INFO("frames during the 0.4 s transition: " << (after_transition - at_input));
+        // The input asks for one frame; the transition must ask for the rest.
+        REQUIRE(after_transition - at_input >= 10);
+
+        // Once it has ended, the surface is idle again.
+        e.wait_for([] { return false; }, 0.3);
+        const auto idle_from = e.ui->frames();
+        e.wait_for([] { return false; }, 0.3);
+        INFO("frames after the transition ended: " << (e.ui->frames() - idle_from));
+        REQUIRE(e.ui->frames() == idle_from);
     }
 }
 

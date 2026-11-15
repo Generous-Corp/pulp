@@ -13,6 +13,8 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <limits>
+#include <memory>
 #include <utility>
 
 #if !__has_feature(objc_arc)
@@ -111,6 +113,11 @@ struct RmlUiSurface::Impl {
     std::uint32_t height_px = 0;
     double scale = 1.0;
     bool text_focus = false;
+    // Cleared on the main thread at teardown; a delayed frame request checks it
+    // on the main thread before touching the pump.
+    std::shared_ptr<bool> alive = std::make_shared<bool>(true);
+    // A delayed request (an RmlUi timer such as the caret blink) is queued.
+    std::atomic<bool> timer_pending{false};
 
     Impl(vellum::rmlui::AssetProvider& a, Rml::RenderInterface& r, RendererHooks h,
          RmlUiSurfaceOptions o)
@@ -161,6 +168,12 @@ struct RmlUiSurface::Impl {
                 if (hooks.begin_frame)
                     hooks.begin_frame(target);
                 context->update();
+                // After Update(), RmlUi says when it next needs a frame: 0
+                // while an animation or transition plays, the time to its next
+                // timer, or infinity when idle.
+                const auto* ctx = context->context();
+                next_update = ctx ? ctx->GetNextUpdateDelay()
+                                  : std::numeric_limits<double>::infinity();
                 context->render();
                 if (hooks.end_frame)
                     hooks.end_frame();
@@ -168,8 +181,35 @@ struct RmlUiSurface::Impl {
             drawable.present((__bridge void*)cb);
             [cb commit];
             frames.fetch_add(1);
+            request_next_update(next_update);
         }
     }
+
+    // Render thread. Asks for the frames RmlUi needs next, so a transition
+    // finishes without further input and an idle document draws nothing.
+    // While RmlUi animates (delay 0) the pump runs continuously, the same rule
+    // HostFramePump applies to an animating view tree; it stops when the
+    // delay is no longer 0. A timer (finite delay) gets one frame when due.
+    void request_next_update(double delay) {
+        const bool animating = delay <= 0.0;
+        pump->set_continuous(animating);
+        if (animating || !(delay < std::numeric_limits<double>::infinity()))
+            return;
+        if (timer_pending.exchange(true))
+            return;
+        std::weak_ptr<bool> weak = alive;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, static_cast<int64_t>(delay * 1e9)),
+                       dispatch_get_main_queue(), ^{
+                         auto token = weak.lock();
+                         if (!token || !*token)
+                             return;
+                         timer_pending.store(false);
+                         if (pump)
+                             pump->request_frame();
+                       });
+    }
+
+    double next_update = std::numeric_limits<double>::infinity();
 
     void on_pointer(const PointerEvent& e) {
         {
@@ -259,6 +299,9 @@ struct RmlUiSurface::Impl {
     }
 
     void teardown(bool orderly) {
+        *alive = false;
+        alive = std::make_shared<bool>(true);
+        timer_pending.store(false);
         if (surface) {
             if (orderly)
                 surface->detach(); // stops the pump through the release handler

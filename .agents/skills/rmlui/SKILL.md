@@ -72,6 +72,11 @@ Build a
 `metal_renderer_hooks(renderer)` to `RmlUiSurface`; the hooks preserve the
 drawable viewport and backing scale and clear each drawable before RmlUi draws.
 The `rmlui-metal-demo` example is the smoke path for this wiring.
+A host that draws on demand must ask RmlUi when to draw next: after
+`Context::Update()`, `GetNextUpdateDelay()` is 0 while an animation or
+transition plays and finite for a timer such as the caret blink. Drawing only on
+input leaves a hover transition frozen part-way until the pointer moves again;
+`RmlUiSurface` re-requests from that delay.
 Use `dp` units for text sizes when a document is rendered at multiple backing
 scales; `px` text is intentionally density-independent in RmlUi.
 
