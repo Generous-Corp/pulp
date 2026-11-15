@@ -257,6 +257,52 @@ TEST_CASE("VST3 blocks classify contiguous, gap, seek, and stopped", "[graph][g5
     }
 }
 
+TEST_CASE("VST3 and AU blocks at a non-unit playback rate are not seeks when the adapter says so",
+          "[graph][g5][vst3][au]") {
+    using pulp::host::clock_from_au;
+    using pulp::host::clock_from_vst3;
+    HostBlockTimeline timeline;
+    HostBlockWindow window;
+
+    SECTION("VST3 at rate 2 without the adapter input reads every block as a seek") {
+        step(timeline, clock_from_vst3(vst3_block(1000, 0, true, 64)), window);
+        CHECK(step(timeline, clock_from_vst3(vst3_block(1064, 128, true, 64)), window) ==
+              HostBlockBoundary::NewEpoch);
+    }
+
+    SECTION("VST3 at rate 2 with transport_non_unit_rate stays on one epoch") {
+        for (std::int64_t block = 0; block < 4; ++block) {
+            auto timing = vst3_block(1000 + block * 64, block * 128, true, 64);
+            timing.transport_non_unit_rate = true;
+            CHECK_FALSE(clock_from_vst3(timing).transport_playing);
+            const auto boundary = step(timeline, clock_from_vst3(timing), window);
+            CHECK(boundary ==
+                  (block == 0 ? HostBlockBoundary::First : HostBlockBoundary::Continuous));
+        }
+        CHECK(window.epoch == 1);
+        CHECK(window.sample_start == 192);
+    }
+
+    SECTION("AU at rate 0.5 without the adapter input reads every block as a seek") {
+        step(timeline, clock_from_au(au_block(256.0, 128, true, 0.0, true)), window);
+        CHECK(step(timeline, clock_from_au(au_block(384.0, 128, true, 64.0, true)), window) ==
+              HostBlockBoundary::NewEpoch);
+    }
+
+    SECTION("AU at rate 0.5 with transport_non_unit_rate stays on one epoch") {
+        for (int block = 0; block < 4; ++block) {
+            auto timing = au_block(256.0 + block * 128.0, 128, true, block * 64.0, true);
+            timing.transport_non_unit_rate = true;
+            CHECK_FALSE(clock_from_au(timing).transport_playing);
+            const auto boundary = step(timeline, clock_from_au(timing), window);
+            CHECK(boundary ==
+                  (block == 0 ? HostBlockBoundary::First : HostBlockBoundary::Continuous));
+        }
+        CHECK(window.epoch == 1);
+        CHECK(window.sample_start == 384);
+    }
+}
+
 TEST_CASE("VST3 sampleOffsets outside the block are refused", "[graph][g5][vst3]") {
     HostBlockTimeline timeline;
     HostBlockWindow window;
