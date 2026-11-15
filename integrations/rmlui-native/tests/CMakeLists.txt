@@ -49,7 +49,8 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain AND TARGET pulp-rmlui-nati
         PULP_RMLUI_GOLDEN_FONT="${_pulp_rmlui_font}"
         PULP_RMLUI_SOFT_REFERENCES="${_pulp_rmlui_refs}")
     target_link_libraries(pulp-test-rmlui-native-metal PRIVATE
-        pulp::rmlui-native-metal Catch2::Catch2WithMain "-framework AppKit" "-framework Metal")
+        pulp::rmlui-native-metal Catch2::Catch2WithMain "-framework AppKit" "-framework Metal"
+        "-framework CoreGraphics" "-framework ImageIO" "-framework UniformTypeIdentifiers")
     catch_discover_tests(pulp-test-rmlui-native-metal
         PROPERTIES LABELS rmlui FIXTURES_REQUIRED rmlui_soft_references)
 endif()
