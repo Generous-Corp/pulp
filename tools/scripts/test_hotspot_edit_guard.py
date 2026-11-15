@@ -171,6 +171,31 @@ class GuardTests(unittest.TestCase):
             proc = repo.run("--base", "base-ref")
             self.assertNotIn(other, proc.stdout)
 
+    def test_a_new_registration_block_in_the_mac_platform_manifest_is_refused(self) -> None:
+        """Appending a block there is what made two pull requests conflict; a
+        fragment is the way to add one, and an edit to an existing block passes."""
+        manifest = "test/cmake/mac_platform_tests.cmake"
+        block = "if(APPLE)\n    pulp_add_test_suite(pulp-test-a\n        SOURCES a.mm)\nendif()\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = repo_with_aggregate(tmp)
+            repo.write(manifest, block)
+            repo.commit("old layout", manifest)
+            repo.git("branch", "-f", "base-ref", "HEAD")
+            repo.write(manifest, block.replace("SOURCES a.mm", "SOURCES a.mm b.mm"))
+            repo.commit("edit an existing block", manifest)
+            self.assertEqual(repo.run("--base", "base-ref").returncode, 0)
+            repo.write(manifest, block + block.replace("pulp-test-a", "pulp-test-b"))
+            repo.commit("append a block", manifest)
+            proc = repo.run("--base", "base-ref")
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertIn(f"file={manifest}; cause_class=HOTSPOT_LITERAL_EDIT", proc.stdout)
+            self.assertIn("test/cmake/fragments/", proc.stdout)
+            # The fragment itself is not a hotspot.
+            repo.git("reset", "-q", "--hard", "base-ref")
+            repo.write("test/cmake/fragments/mac-b.cmake", block)
+            repo.commit("fragment", "test/cmake/fragments")
+            self.assertEqual(repo.run("--base", "base-ref").returncode, 0)
+
     def test_a_bad_added_line_pattern_is_a_registry_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = repo_with_aggregate(tmp)
