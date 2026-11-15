@@ -13,9 +13,10 @@ installed `Pulp::host` target and follows the checked-in, pinned
 6. reload the original saved input and reproduce the baseline render exactly.
 
 The plan pins a deterministic offline action model, a 64-hex `sha256:` model
-digest, this tool version, and the audited source SHA. The executable decodes
-JSON escapes (including Unicode surrogate pairs) before duplicate-key
-rejection, validates the complete root/action/assertion/mutation schema, then
+digest, this tool version, and the audited source SHA. The executable parses
+the plan with choc, whose parser decodes JSON escapes and rejects a repeated
+key (including an escaped spelling of an existing key), validates the complete
+root/action/assertion/mutation schema as one exact shape, then
 executes the ordered plan steps and records each completed step. It declares
 `network_policy: deny` and `plugin_policy: deny-ambient`; the executable
 rejects case-insensitive URI schemes, protocol-relative and UNC authorities,
@@ -26,6 +27,19 @@ the denial policies, and a topology-only semantic fingerprint. Parameter edits
 must change samples while preserving that fingerprint, and replay must restore
 the original samples and fingerprint.
 
+## Source layout and glue budget
+
+`main.cpp` is the authoring glue: it builds the graph, saves and reloads it,
+renders, probes an edge, edits one gain and replays the saved input. It must
+stay at or under 200 non-blank, non-comment lines. `plan_boundary.hpp` is the
+verification harness around it: the fail-closed action-plan parser, the
+topology fingerprint and the JSONL action log. The harness is not part of the
+glue an author writes, but its size is reported next to the glue so the split
+cannot hide growth. `assert-glue-budget.cmake` counts both files; the
+`graph-agent-loop-glue-budget` test enforces the glue limit and
+`graph-agent-loop-glue-over-budget-control` proves the counter sees real code
+by requiring a far lower limit to be reported as exceeded.
+
 Configure it against an installed SDK:
 
 ```sh
@@ -35,8 +49,9 @@ cmake --build build/graph-agent-loop
 ctest --test-dir build/graph-agent-loop --output-on-failure
 ```
 
-The CTest suite includes three planted negative plans (`network-allowed`,
-`plugin-allowed`, and `missing-action`). Each is a full copy of the positive
+The CTest suite includes eight planted negative plans (`network-allowed`,
+`plugin-allowed`, `missing-action`, `duplicate-key`, `escaped-duplicate-key`,
+`url-string`, `extra-step-field`, and `edit-target`). Each is a full copy of the positive
 plan with one field or step changed. CTest asserts the named denial rule and
 marks each test `WILL_FAIL`; a green positive run without those negatives is not
 an admission receipt.
