@@ -71,9 +71,19 @@ path; it remains unavailable when the adapter option or the Vellum Metal
 component is off.
 
 The surface context is sized in drawable pixels, the Metal frame scale is 1,
-and the density ratio is the backing scale. Documents that need
-density-scaled text should use `font-size` in `dp` (the example does this)
-rather than `px`.
+and the density ratio is the backing scale. Every `px` length, not only text,
+is a device pixel: a `100px` box is 100 device pixels (50 points at 2x), while
+pointer positions arrive in points and are scaled to device pixels, so hit
+testing agrees with layout in either unit. A `dp` length is one point
+(`density_ratio()` device pixels). Size anything that must keep its physical
+size across displays in `dp` (the example does this).
+
+The density ratio needs a Vellum RmlUi SDK that exports
+`NativeContext::set_density_ratio`. Without it `density_ratio_supported()` is
+false, `dp` equals `px`, and a `dp` document renders at 1/scale of its intended
+size on a 2x display. Configure warns about it, and every `attach()` reports it
+through the diagnostic sink (standard error by default; `set_diagnostic_sink`
+redirects it).
 
 ## Proof
 

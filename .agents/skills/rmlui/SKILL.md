@@ -72,8 +72,11 @@ Build a
 `metal_renderer_hooks(renderer)` to `RmlUiSurface`; the hooks preserve the
 drawable viewport and backing scale and clear each drawable before RmlUi draws.
 The `rmlui-metal-demo` example is the smoke path for this wiring.
-Use `dp` units for text sizes when a document is rendered at multiple backing
-scales; `px` text is intentionally density-independent in RmlUi.
+In this adapter every `px` length, not only text, is a device pixel, because the
+context is sized in drawable pixels; use `dp` (a point) for anything that must
+keep its physical size across backing scales. `dp` only differs from `px` when
+the Vellum RmlUi SDK exports `set_density_ratio` (`density_ratio_supported()`);
+without it the adapter warns at configure and at each attach.
 
 ## Licence line
 

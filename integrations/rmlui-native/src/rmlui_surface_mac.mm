@@ -13,6 +13,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <utility>
 
 #if !__has_feature(objc_arc)
@@ -27,6 +28,18 @@ namespace KI = ::Rml::Input;
 namespace {
 
 std::atomic<std::size_t> g_live{0};
+
+std::function<void(const std::string&)>& diagnostic_sink() {
+    static std::function<void(const std::string&)> sink;
+    return sink;
+}
+
+void diagnose(const std::string& message) {
+    if (diagnostic_sink())
+        diagnostic_sink()(message);
+    else
+        std::fprintf(stderr, "pulp rmlui-native: %s\n", message.c_str());
+}
 
 /// The surface whose pointer event RmlUi is handling, for SetMouseCursor.
 /// Read and written with rmlui_mutex() held.
@@ -92,6 +105,18 @@ bool takes_text(Rml::Element* element) {
 }
 
 } // namespace
+
+bool density_ratio_supported() noexcept {
+#if defined(PULP_VELLUM_RMLUI_HAS_DENSITY_RATIO)
+    return true;
+#else
+    return false;
+#endif
+}
+
+void set_diagnostic_sink(std::function<void(const std::string&)> sink) {
+    diagnostic_sink() = std::move(sink);
+}
 
 std::mutex& rmlui_mutex() {
     static std::mutex m;
@@ -349,6 +374,11 @@ bool RmlUiSurface::attach(void* parent) {
         impl_->teardown(true);
         return false;
     }
+    if (!density_ratio_supported())
+        diagnose("the Vellum RmlUi SDK this was built against has no density ratio, so `dp` "
+                 "lengths equal `px` and a document sized in `dp` renders at 1/scale of its "
+                 "intended size on a high-density display; build against an SDK that exports "
+                 "NativeContext::set_density_ratio");
     d.pump->start();
     d.pump->request_frame();
     return true;
@@ -383,6 +413,10 @@ void RmlUiSurface::idle() {
     }
     if (resized)
         d.pump->request_frame();
+}
+
+double RmlUiSurface::density_ratio() const noexcept {
+    return density_ratio_supported() ? impl_->scale : 1.0;
 }
 
 void RmlUiSurface::request_frame() {
