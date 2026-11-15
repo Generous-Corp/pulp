@@ -2161,3 +2161,12 @@ in `agent_capability_registry.py`, or it is never reviewed. Do not hand-bump
 `SURFACE_INVENTORY_VERSION`; run `agent_capability_rederive.py`, which leaves it
 at the base value for the post-merge assignment, and `--check` then reads fresh.
 `pulp/host/custom_node_oversampling.hpp` was added this way.
+
+## Registry-literal headers: a comment edit still needs the literal updated
+
+A header that `agent_capability_registry.py` lists with its own `fingerprint`
+literal (an infrastructure header such as `pulp/midi/device.hpp`) fails `--check`
+after any byte change, including a doc comment. `--accept-fingerprint` refuses it
+("no capability binding names ..."). Replace the literal in the registry with the
+digest `--check` reports, then run `--write` and `--check`; the only generated
+change is that header's surface fragment.

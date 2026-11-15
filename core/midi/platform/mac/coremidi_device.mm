@@ -162,7 +162,7 @@ struct CoreMidiInputShared {
     bool closed = false;
     MidiInputCallback callback;
     MidiSysexCallback sysex_callback;
-    // SysEx7 (UMP type 0x03) reassembly state — shared implementation in
+    // SysEx7 (UMP type 0x03) reassembly state, the shared implementation in
     // core/midi/include/pulp/midi/ump_sysex7_reassembler.hpp. The OS callback
     // fires once per MIDIEventList delivery, so a multi-packet sysex spans
     // callback invocations and the reassembler keeps the partial payload.
@@ -244,7 +244,7 @@ public:
                                       shared->callback(evt);
                               }
                           } else if (type == 0x03) {
-                              // SysEx7 (UMP type 3) — reassemble multi-
+                              // SysEx7 (UMP type 3): reassemble multi-
                               // packet payloads via the shared
                               // UmpSysex7Reassembler. The reassembler state
                               // lives on this CoreMidiInput so a multi-packet
