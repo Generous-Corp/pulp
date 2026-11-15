@@ -1542,6 +1542,30 @@ failures use the typed codes `serialization_refused`, `file_too_large`,
 C++ API and CLI so callers do not need to parse diagnostic text. Save is a
 CLI-only write operation; the MCP `pulp_graph` tool remains read-only.
 
+`pulp graph diff BEFORE AFTER [--json]` compares two saved-identity v6
+documents (as written by `GraphSerializer::to_saved_document`) by logical node
+identity, read-only and without loading plugin code. NodeIds are lookup keys
+only, so two files that differ only in NodeId numbering compare equal. The JSON
+result reports `code` (`Ok`), `equal`, both semantic digests, `nodes`
+(`added`, `removed`, and `changed` with each node's differing `fields`),
+`connections` (`added`, `removed`, `changed`, keyed as
+`<source identity>[<port>] -> <destination identity>[<port>]`),
+`layout_changed` (editor layout only, never semantic), and `sections_changed`
+(other top-level members such as `format_version` or `sample_regions`, compared
+verbatim, so a section that records raw NodeIds reports a change when only the
+numbering differs). A successful comparison exits 0 whether or not the files
+differ. A missing or unreadable file is `FileUnreadable` and a file over the
+64 MiB graph limit is `ResourceLimit` (exit 1). A document the saved-document
+inspector refuses, including a legacy file without the identity envelope, is
+`InvalidDocument` (exit 1) with `refusal` set to the inspector's refusal name
+and `side` set to `before` or `after`: a document without the identity envelope
+is `logical_identity_missing`, and a pre-v4 legacy file is
+`invalid_format_version` (re-save it with the saved-identity writer).
+Anything other than exactly two files is `missing_input`, and an unknown option
+is `invalid_option` (exit 2). The same comparison is the C++
+`diff_graph_documents` in `pulp/host/graph_history.hpp`, which also provides the
+value-owned `GraphEditHistory` undo/redo over saved documents.
+
 `pulp graph render FILE --input INPUT.wav --output OUTPUT.wav --json` prepares
 the saved graph at the input's sample rate and channel count, feeds the decoded
 input to its `audio_in` node, and renders the input's length to a float WAV at

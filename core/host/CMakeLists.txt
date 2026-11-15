@@ -36,6 +36,7 @@ target_sources(pulp-host PRIVATE
     src/graph_patch.cpp
     src/graph_file_reload.cpp
     src/graph_identity.cpp
+    src/graph_history.cpp
     src/voice_identity.cpp
     src/voice_template.cpp
     src/voice_bank_binding.cpp
