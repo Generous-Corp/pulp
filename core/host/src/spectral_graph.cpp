@@ -265,9 +265,11 @@ SpectralError SpectralRuntimeBank::prepare(std::span<const GraphNode> authored,
         state->working.resize(static_cast<size_t>(identity.channels()) * identity.bins());
         if (n.type == NodeType::SpectralAssetMorph) {
             if (!n.spectral_asset_morph || !charge(n.spectral_asset_morph->retained_bytes()) ||
-                !state->asset_morph.morph.prepare(1, 129))
+                !state->asset_morph.morph.prepare(
+                    static_cast<int>(n.spectral_asset_morph->rule.channels),
+                    static_cast<int>(n.spectral_asset_morph->rule.bins)))
                 return SpectralError::CapacityExceeded;
-            state->finite_frames = n.spectral_asset_morph->a.frame_count + 4;
+            state->finite_frames = n.spectral_asset_morph->rule.finite_frames;
             state->finite_cutoff = static_cast<std::int64_t>(n.spectral_asset_morph->render_frames);
         }
         if (n.type == NodeType::SpectralAnalysis || n.type == NodeType::SpectralSynthesis) {
@@ -453,7 +455,11 @@ SignalGraph::add_spectral_asset_morph_v1(std::span<const std::uint8_t> asset_a,
     if (!config)
         return {std::nullopt, config.error};
     const auto& geometry = (*config.value)->a.geometry;
-    const auto identity = *SpectralIdentity::make(256, 64, 1, geometry.sample_rate).value;
+    const auto& rule = (*config.value)->rule;
+    const auto identity =
+        *SpectralIdentity::make(static_cast<int>(rule.fft_size), static_cast<int>(rule.hop),
+                                static_cast<int>(rule.channels), geometry.sample_rate)
+             .value;
     auto n = spectral_node(next_id_, NodeType::SpectralAssetMorph, identity, name,
                            diagnostic_graph_identity_, authoring_generation_ + 1);
     n.input_ports.clear();
