@@ -30,6 +30,9 @@ run_gate_captured() {
     _prepush_last_gate_label="$(_prepush_gate_label "$@")"
     _prepush_last_gate_log="$gate_log"
     _prepush_last_gate_status="$gate_status"
+    if declare -F prepush_receipt_note >/dev/null 2>&1; then
+        prepush_receipt_note ran "$_prepush_last_gate_label" "$gate_status"
+    fi
     return "$gate_status"
 }
 
