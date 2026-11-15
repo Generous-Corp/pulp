@@ -109,6 +109,9 @@ class RmlUiSurface {
     /// Apply pointer and wheel events that were queued behind a frame, now,
     /// waiting for the frame if one is in flight. Main thread.
     void flush_input();
+    /// Pointer and wheel events queued behind a frame so far (merged events
+    /// count once each as they arrived). For tests and diagnostics.
+    std::uint64_t queued_inputs() const noexcept;
     /// Draw one more frame (after a change the caller made through RmlUi).
     void request_frame();
 

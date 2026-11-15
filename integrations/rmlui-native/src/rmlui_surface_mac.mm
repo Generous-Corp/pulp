@@ -119,18 +119,20 @@ struct RmlUiSurface::Impl {
     bool text_focus = false;
 
     // Pointer and wheel events the main thread could not apply because the
-    // render thread held rmlui_mutex(). They run, in order, on the main thread
+    // render thread held rmlui_mutex(). Main thread only; they run, in order,
     // as soon as the lock is free.
     using QueuedInput = std::variant<PointerEvent, WheelEvent>;
-    std::mutex input_mutex;
     std::deque<QueuedInput> queued;
-    // Main thread: a retry is already scheduled.
-    bool retry_scheduled = false;
-    // Cleared on the main thread at teardown; a scheduled retry holds a copy.
+    // Set when something is queued, cleared when the queue is applied. The
+    // render thread reads it after each frame to post a drain to the main
+    // thread.
+    std::atomic<bool> has_queued{false};
+    std::atomic<std::uint64_t> queued_total{0};
+    // False after teardown, on the main thread; a posted drain holds a copy.
     struct Liveness {
         bool live = true;
     };
-    std::shared_ptr<Liveness> liveness = std::make_shared<Liveness>();
+    const std::shared_ptr<Liveness> liveness = std::make_shared<Liveness>();
 
     Impl(vellum::rmlui::AssetProvider& a, Rml::RenderInterface& r, RendererHooks h,
          RmlUiSurfaceOptions o)
@@ -188,7 +190,21 @@ struct RmlUiSurface::Impl {
             drawable.present((__bridge void*)cb);
             [cb commit];
             frames.fetch_add(1);
+            // The lock is free: let the main thread apply what queued behind
+            // this frame.
+            if (has_queued.load())
+                post_drain();
         }
+    }
+
+    // Any thread.
+    void post_drain() {
+        auto alive = liveness;
+        Impl* self = this;
+        dispatch_async(dispatch_get_main_queue(), ^{
+          if (alive->live)
+              self->try_drain();
+        });
     }
 
     // Main thread, rmlui_mutex() held.
@@ -240,12 +256,13 @@ struct RmlUiSurface::Impl {
     }
 
     // Main thread, rmlui_mutex() held: apply what was queued, in order.
-    void drain_queued_locked() {
+    // True when it applied anything: the caller then requests a frame (after
+    // unlocking), because the frame that was in flight when the event arrived
+    // drew without it.
+    bool drain_queued_locked() {
+        has_queued.store(false);
         std::deque<QueuedInput> batch;
-        {
-            std::lock_guard lock(input_mutex);
-            batch.swap(queued);
-        }
+        batch.swap(queued);
         for (const auto& item : batch) {
             if (const auto* p = std::get_if<PointerEvent>(&item))
                 apply_pointer_locked(*p);
@@ -254,6 +271,7 @@ struct RmlUiSurface::Impl {
         }
         if (!batch.empty())
             sync_text_focus_locked();
+        return !batch.empty();
     }
 
     // Queue an event for the main thread to apply when the lock is free.
@@ -261,7 +279,8 @@ struct RmlUiSurface::Impl {
     // merge, so a long stall keeps the newest position and the full scroll
     // without growing the queue.
     void enqueue(QueuedInput item) {
-        std::lock_guard lock(input_mutex);
+        queued_total.fetch_add(1);
+        has_queued.store(true);
         if (!queued.empty()) {
             auto& back = queued.back();
             if (auto* p = std::get_if<PointerEvent>(&item)) {
@@ -285,38 +304,18 @@ struct RmlUiSurface::Impl {
         queued.push_back(std::move(item));
     }
 
-    // Main thread. Retry after a millisecond: the lock is held for a frame.
-    void schedule_retry() {
-        if (retry_scheduled)
-            return;
-        retry_scheduled = true;
-        auto alive = liveness;
-        Impl* self = this;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_MSEC),
-                       dispatch_get_main_queue(), ^{
-                         if (!alive->live)
-                             return;
-                         self->retry_scheduled = false;
-                         self->try_drain();
-                       });
-    }
-
     // Main thread: apply queued input if the render thread is not in RmlUi.
+    // When it is, that frame posts another drain as it finishes.
     void try_drain() {
+        bool applied = false;
         {
             std::unique_lock lock(rmlui_mutex(), std::try_to_lock);
-            if (lock.owns_lock()) {
-                drain_queued_locked();
+            if (!lock.owns_lock())
                 return;
-            }
+            applied = drain_queued_locked();
         }
-        bool pending;
-        {
-            std::lock_guard lock(input_mutex);
-            pending = !queued.empty();
-        }
-        if (pending)
-            schedule_retry();
+        if (applied && pump)
+            pump->request_frame();
     }
 
     // Main thread. Never waits for a frame: applied now when the lock is free,
@@ -337,8 +336,11 @@ struct RmlUiSurface::Impl {
             }
         }
         enqueue(e);
-        schedule_retry();
         pump->request_frame();
+        // The frame that held the lock may have finished and checked the flag
+        // before it was set; if the lock is free now, apply the event here.
+        // If it is held again, that frame checks the flag when it finishes.
+        try_drain();
     }
 
     void on_pointer(const PointerEvent& e) {
@@ -385,12 +387,8 @@ struct RmlUiSurface::Impl {
 
     void teardown(bool orderly) {
         liveness->live = false;
-        liveness = std::make_shared<Liveness>();
-        {
-            std::lock_guard lock(input_mutex);
-            queued.clear();
-        }
-        retry_scheduled = false;
+        queued.clear();
+        has_queued.store(false);
         if (surface) {
             if (orderly)
                 surface->detach(); // stops the pump through the release handler
@@ -430,6 +428,7 @@ bool RmlUiSurface::attach(void* parent) {
     MetalSurfaceOptions surface_options;
     surface_options.device = d.options.device;
     surface_options.opaque = d.options.opaque;
+    d.liveness->live = true;
     d.surface = MetalSurface::create(surface_options);
     if (!d.surface)
         return false;
@@ -507,22 +506,32 @@ void RmlUiSurface::idle() {
     // The tick never waits for a frame: a busy lock means this tick leaves
     // the size and any queued input for the next one.
     bool resized = false;
+    bool applied = false;
     {
         std::unique_lock lock(rmlui_mutex(), std::try_to_lock);
         if (lock.owns_lock() && d.context) {
-            d.drain_queued_locked();
+            applied = d.drain_queued_locked();
             const auto before = std::make_pair(d.width_px, d.height_px);
             d.sync_size_locked();
             resized = before != std::make_pair(d.width_px, d.height_px);
         }
     }
-    if (resized)
+    if (resized || applied)
         d.pump->request_frame();
 }
 
 void RmlUiSurface::flush_input() {
-    std::lock_guard lock(rmlui_mutex());
-    impl_->drain_queued_locked();
+    bool applied;
+    {
+        std::lock_guard lock(rmlui_mutex());
+        applied = impl_->drain_queued_locked();
+    }
+    if (applied && impl_->pump)
+        impl_->pump->request_frame();
+}
+
+std::uint64_t RmlUiSurface::queued_inputs() const noexcept {
+    return impl_->queued_total.load();
 }
 
 void RmlUiSurface::request_frame() {
@@ -531,16 +540,21 @@ void RmlUiSurface::request_frame() {
 }
 
 bool RmlUiSurface::with_context(const std::function<void(Rml::Context&)>& fn) {
-    std::lock_guard lock(rmlui_mutex());
     auto& d = *impl_;
-    auto* ctx = d.context ? d.context->context() : nullptr;
-    if (!ctx)
-        return false;
-    d.drain_queued_locked();
-    vellum::rmlui::NativeContext::Scope scope(*d.context);
-    fn(*ctx);
-    // The caller may have moved focus (Element::Focus()).
-    d.sync_text_focus_locked();
+    bool applied;
+    {
+        std::lock_guard lock(rmlui_mutex());
+        auto* ctx = d.context ? d.context->context() : nullptr;
+        if (!ctx)
+            return false;
+        applied = d.drain_queued_locked();
+        vellum::rmlui::NativeContext::Scope scope(*d.context);
+        fn(*ctx);
+        // The caller may have moved focus (Element::Focus()).
+        d.sync_text_focus_locked();
+    }
+    if (applied && d.pump)
+        d.pump->request_frame();
     return true;
 }
 

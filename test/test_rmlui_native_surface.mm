@@ -109,6 +109,13 @@ class CountingRenderer final : public Rml::RenderInterface {
         rendered.fetch_add(1);
         // Long enough that two unserialized threads would overlap here.
         std::this_thread::sleep_for(std::chrono::microseconds(draw_delay_us.load()));
+        // A test can park the render thread inside a draw, lock held.
+        if (hold_draws.load()) {
+            parked.store(true);
+            while (hold_draws.load())
+                std::this_thread::sleep_for(std::chrono::microseconds(200));
+            parked.store(false);
+        }
         leave();
     }
     void ReleaseGeometry(Rml::CompiledGeometryHandle) override {}
@@ -127,6 +134,8 @@ class CountingRenderer final : public Rml::RenderInterface {
     std::atomic<int> compiled{0};
     std::atomic<int> rendered{0};
     std::atomic<int> draw_delay_us{200};
+    std::atomic<bool> hold_draws{false};
+    std::atomic<bool> parked{false};
 
   private:
     static void enter() {
@@ -515,10 +524,12 @@ TEST_CASE("pointer input does not wait for a frame the render thread is drawing"
         // The instrument can see a stall: a frame held the lock long enough
         // that a caller waiting on it (with_context blocks by design) lost
         // several milliseconds.
+        // Thresholds follow the measured hold rather than a wall-clock number,
+        // so a loaded host moves both sides together.
         REQUIRE(hold_ms > 10.0);
-        REQUIRE(with_context_max > 3.0);
+        REQUIRE(with_context_max > 0.25 * hold_ms);
         // Pointer input is not such a caller.
-        REQUIRE(p95 < 2.0);
+        REQUIRE(p95 < 0.1 * hold_ms);
         e.renderer.draw_delay_us.store(200);
         e.ui->detach();
     }
@@ -535,8 +546,8 @@ TEST_CASE("input queued behind a frame is applied in order and never lost",
         REQUIRE(a.attach());
         REQUIRE(b.attach());
         REQUIRE(a.wait_for([&] { return a.ui->frames() > 0 && b.ui->frames() > 0; }));
-        a.renderer.draw_delay_us.store(2000);
-        b.renderer.draw_delay_us.store(2000);
+        a.renderer.draw_delay_us.store(500);
+        b.renderer.draw_delay_us.store(500);
 
         int clicks_a = 0;
         int clicks_b = 0;
@@ -554,8 +565,9 @@ TEST_CASE("input queued behind a frame is applied in order and never lost",
             ctx.GetDocument(0)->GetElementById("button")->AddEventListener("click", &listener_b);
         });
 
-        // Frames requested from another thread while the main thread delivers
-        // input, idles and queries: the shape of a host driving two editors.
+        // Park a render thread inside a draw, lock held (one lock serves both
+        // editors), so every event below arrives behind a frame, then let them go. Frames are also
+        // requested from another thread, as a host driving two editors would.
         std::atomic<bool> stop{false};
         std::thread requester([&] {
             while (!stop.load()) {
@@ -565,24 +577,32 @@ TEST_CASE("input queued behind a frame is applied in order and never lost",
             }
         });
         int sent = 0;
-        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(1200);
-        while (std::chrono::steady_clock::now() < until) {
+        for (int round = 0; round < 15; ++round) {
+            a.renderer.hold_draws.store(true);
+            b.renderer.hold_draws.store(true);
+            a.ui->request_frame();
+            b.ui->request_frame();
+            REQUIRE(
+                a.wait_for([&] { return a.renderer.parked.load() || b.renderer.parked.load(); }));
             for (Editor* e : {&a, &b}) {
                 [e->view() mouseMoved:e->mouse(NSEventTypeMouseMoved, 20, 20)];
                 [e->view() mouseDown:e->mouse(NSEventTypeLeftMouseDown, 20, 20)];
                 [e->view() mouseUp:e->mouse(NSEventTypeLeftMouseUp, 20, 20)];
                 [e->view() mouseMoved:e->mouse(NSEventTypeMouseMoved, 250, 180)];
-                e->ui->idle();
             }
             ++sent;
-            a.ui->with_context([](Rml::Context&) {});
-            [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.002]];
+            a.renderer.hold_draws.store(false);
+            b.renderer.hold_draws.store(false);
+            [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
         }
         stop.store(true);
         requester.join();
         a.ui->flush_input();
         b.ui->flush_input();
-        REQUIRE(sent > 10);
+        REQUIRE(sent == 15);
+        // Something really queued behind a frame, so the claim is about the
+        // queue and not about uncontended delivery.
+        REQUIRE(a.ui->queued_inputs() + b.ui->queued_inputs() > 0);
         // Every click arrived: only moves and wheel deltas ever merge.
         REQUIRE(clicks_a == sent);
         REQUIRE(clicks_b == sent);
@@ -636,6 +656,57 @@ TEST_CASE("a click queued behind a frame lands before the text typed after it",
         });
         REQUIRE(value == "abZ");
         e.renderer.draw_delay_us.store(200);
+        e.ui->detach();
+    }
+}
+
+TEST_CASE("input applied after a frame is drawn without another request",
+          "[native-surface][rmlui][threading]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        Editor e;
+        REQUIRE(e.attach());
+        REQUIRE(e.wait_for([&] { return e.ui->frames() > 0; }));
+        std::atomic<long long> applied_ns{0};
+        struct Listener final : Rml::EventListener {
+            std::atomic<long long>& at;
+            explicit Listener(std::atomic<long long>& a) : at(a) {}
+            void ProcessEvent(Rml::Event&) override {
+                at.store(now_ns());
+            }
+        } listener(applied_ns);
+        e.ui->with_context([&](Rml::Context& ctx) {
+            ctx.GetDocument(0)->GetElementById("button")->AddEventListener("mouseover", &listener);
+        });
+        // Away from the button, and let every frame that asks for settle.
+        [e.view() mouseMoved:e.mouse(NSEventTypeMouseMoved, 250, 180)];
+        e.ui->flush_input();
+        [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.3]];
+
+        // Park the render thread inside a draw, lock held, and send exactly
+        // one event: it queues, and nothing else asks for a frame.
+        e.renderer.hold_draws.store(true);
+        e.ui->request_frame();
+        REQUIRE(e.wait_for([&] { return e.renderer.parked.load(); }));
+        const auto queued_before = e.ui->queued_inputs();
+        [e.view() mouseMoved:e.mouse(NSEventTypeMouseMoved, 20, 20)];
+        REQUIRE(e.ui->queued_inputs() == queued_before + 1);
+        REQUIRE(applied_ns.load() == 0);
+        e.renderer.hold_draws.store(false);
+        // Keep the main thread from draining while the frames that were
+        // already asked for run and finish: they draw without the event.
+        const long long released_ns = now_ns();
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        REQUIRE(applied_ns.load() == 0);
+        REQUIRE(e.begin_ns.load() > released_ns);
+        REQUIRE(e.wait_for([&] { return applied_ns.load() != 0; }));
+        // Now the drain runs. It must ask for another frame, because every
+        // frame so far drew without the event: one begins after it.
+        REQUIRE(e.wait_for([&] { return e.begin_ns.load() > applied_ns.load(); }, 2.0));
+        e.ui->with_context([&](Rml::Context& ctx) {
+            ctx.GetDocument(0)->GetElementById("button")->RemoveEventListener("mouseover",
+                                                                              &listener);
+        });
         e.ui->detach();
     }
 }
