@@ -166,6 +166,13 @@ class SkiaSurfaceImpl : public SkiaSurface {
         backend_ctx.fQueue = *queue_ptr;
 
         skgpu::graphite::ContextOptions ctx_options;
+        // Graphite defaults to 4x internal MSAA.  That path is not reliable on
+        // Intel Metal when a plugin is hosted in a DAW: Dawn emits an MSL
+        // pipeline that the Intel driver rejects (the editor then presents a
+        // black surface).  Pulp performs its own analytic antialiasing, so a
+        // single-sample internal target preserves the visible result and keeps
+        // the renderer compatible across Intel and Apple GPUs.
+        ctx_options.fInternalMultisampleCount = skgpu::graphite::SampleCount::k1;
         context_ = skgpu::graphite::ContextFactory::MakeDawn(backend_ctx, ctx_options);
 
         if (!context_) {
