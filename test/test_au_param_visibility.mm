@@ -72,7 +72,9 @@ class VisibilityProcessor : public pulp::format::Processor {
         meta.affects_others = true;
         store.add_parameter(meta);
 
-        store.add_parameter({.id = kToggleId, .name = "On", .range = {0.0f, 1.0f, 0.0f, 1.0f},
+        store.add_parameter({.id = kToggleId,
+                             .name = "On",
+                             .range = {0.0f, 1.0f, 0.0f, 1.0f},
                              .kind = pulp::state::ParamKind::Toggle});
     }
 

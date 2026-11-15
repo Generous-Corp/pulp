@@ -482,7 +482,6 @@ inline double host_normalized_from_value(const ParamInfo& info, float value) {
                       1.0);
 }
 
-
 /// True when changing this parameter can change other parameters
 /// (`ParamInfo::affects_others`). AU adapters publish IsGlobalMeta for it.
 inline bool is_meta_param(const ParamInfo& info) {
