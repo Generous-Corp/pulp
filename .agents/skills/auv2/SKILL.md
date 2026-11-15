@@ -1369,8 +1369,8 @@ Two host-conformance surfaces beyond the display-string path above:
   - non-automatable → `NonRealTime` ("changing the parameter in real-time will
     cause a glitch or otherwise undesirable effect"), which is the documented
     reason not to drive something from an automation lane.
-  - `ParamInfo::affects_others` → `IsGlobalMeta`: the host re-reads other
-    parameters after a change. VST3 and CLAP have no per-parameter equivalent
+  - `ParamInfo::affects_others` → `IsGlobalMeta`: declares that the parameter
+    can change others (the plug-in must still report the dependents it changes). VST3 and CLAP have no per-parameter equivalent
     (plug-in-wide restart/rescan only). Declare two-state parameters
     `ParamKind::Toggle` to get the Boolean unit rather than Generic.
 

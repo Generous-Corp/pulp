@@ -54,9 +54,9 @@ Fields:
 - `smoothing_ramp_seconds` — optional control-rate smoothing time; `0` means off
 - `kind` — declare a two-state parameter as `ParamKind::Toggle` so AU publishes the Boolean unit (otherwise it is Generic); `Enum` and `Integer` are likewise opt-in
 - `affects_others` — `false` by default. Set it on a parameter whose change moves other parameters, such as a mode or preset selector that rewrites a group of controls. A host cannot otherwise know the other values changed behind its back, so it keeps showing stale values. What each format does:
-  - **AU v2 and v3** publish `kAudioUnitParameterFlag_IsGlobalMeta` on that parameter, and the AU v2 adapter also notifies the host that every other parameter's value changed whenever the flagged parameter changes (including when the host itself wrote it), so the host re-reads them.
+  - **AU v2 and v3** publish `kAudioUnitParameterFlag_IsGlobalMeta` on that parameter. The flag only declares that the parameter can change others; it does not report anything. The plug-in must still report each dependent parameter it changes through the normal parameter-change path.
   - **VST3 and CLAP** have no per-parameter equivalent: they can only announce, for the whole plug-in and after the fact, that values changed (VST3 `restartComponent(kParamValuesChanged)`, CLAP `params.rescan(CLAP_PARAM_RESCAN_VALUES)`). VST3 `kIsProgramChange` marks a program-selection parameter and CLAP `CLAP_PARAM_REQUIRES_PROCESS` says how a change is applied; neither declares "changing this moves others". The field has no effect on those formats.
-  Leave it off for an ordinary control: setting it on many parameters makes the host re-read every other parameter on each of their changes.
+  Leave it off for an ordinary control.
 
 `to_string` / `from_string` are surfaced to the host's generic editor and
 text-entry fields by every format adapter: VST3 `getParamStringByValue` /

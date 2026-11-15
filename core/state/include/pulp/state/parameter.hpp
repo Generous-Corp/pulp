@@ -400,9 +400,10 @@ struct ParamInfo {
     /// parameters (a mode or preset selector that re-writes a group of
     /// controls, for example).
     ///
-    /// AU hosts re-read every parameter after a change to a flagged one, so a
-    /// plug-in that moves other parameters behind the host's back should set
-    /// this: AU v2 and v3 publish `kAudioUnitParameterFlag_IsGlobalMeta`.
+    /// AU v2 and v3 publish `kAudioUnitParameterFlag_IsGlobalMeta` for a
+    /// flagged parameter, which tells the host this parameter can change
+    /// others. The flag only declares that: the plug-in must still report each
+    /// dependent parameter it changes through the normal parameter-change path.
     /// VST3 and CLAP can only announce a change after it happened, for the
     /// whole plug-in: VST3 `restartComponent(kParamValuesChanged)` and CLAP
     /// `params.rescan(CLAP_PARAM_RESCAN_VALUES)`. Neither lets a single
@@ -486,8 +487,7 @@ inline bool is_boolean_param(const ParamInfo& info) {
 }
 
 /// True when changing this parameter can change other parameters
-/// (`ParamInfo::affects_others`). AU adapters publish IsGlobalMeta for it and
-/// re-publish the other parameters' values after each change.
+/// (`ParamInfo::affects_others`). AU adapters publish IsGlobalMeta for it.
 inline bool is_meta_param(const ParamInfo& info) {
     return info.affects_others;
 }

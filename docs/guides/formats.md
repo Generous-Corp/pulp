@@ -299,7 +299,7 @@ non-interactive runs do not launch editor windows.
 
 ## AU v2
 
-**Parameter metadata:** the AU adapters publish each `ParamInfo` attribute as the matching `AudioUnitParameterInfo` flag. Declare a two-state parameter as `ParamKind::Toggle` to get the Boolean unit (an undeclared one stays Generic), and an enumerated choice as `ParamKind::Enum` for Indexed. A parameter with `affects_others = true` publishes `kAudioUnitParameterFlag_IsGlobalMeta` and, when it changes, the host is told every other value changed so it re-reads them. VST3 and CLAP have no per-parameter equivalent. See [Parameters](parameters.md).
+**Parameter metadata:** the AU adapters publish each `ParamInfo` attribute as the matching `AudioUnitParameterInfo` flag. Declare a two-state parameter as `ParamKind::Toggle` to get the Boolean unit (an undeclared one stays Generic), and an enumerated choice as `ParamKind::Enum` for Indexed. A parameter with `affects_others = true` publishes `kAudioUnitParameterFlag_IsGlobalMeta`; the plug-in must still report the dependent parameters it changes. VST3 and CLAP have no per-parameter equivalent. See [Parameters](parameters.md).
 
 **Entry point headers:**
 - Effects: `<pulp/format/au_v2_entry.hpp>`
