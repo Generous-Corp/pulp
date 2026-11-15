@@ -26,6 +26,8 @@
 
 #include "detail/gpu_convolver_test_access.hpp"
 #include "detail/gpu_neural_realtime_test_access.hpp"
+#include "detail/realtime_gpu_audio_path.hpp"
+#include "detail/shared_io_provider_identity.hpp"
 #include "harness/rt_allocation_probe.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -430,6 +432,9 @@ struct ConsumerObservation {
     std::uint64_t payload_bytes = 0;
     GpuAudioCapabilityReport capability{};
     GpuAudioStatus status{};
+    // Identity the concrete node's private realtime path establishes for its
+    // provider. Status is self-reported; only this identity can attest Dawn.
+    detail::SharedIoProviderIdentity provider_identity{};
     std::int64_t graph_latency_samples = 0;
     double sample_rate = 0.0;
 };
@@ -474,9 +479,17 @@ const char* to_string(AdmissionError e) {
 }
 
 ProviderClaim observed_provider(const ConsumerObservation& o) {
-    // Only a provider that names itself in the status counts as attested.
-    return o.status.provider == GpuAudioProvider::Dawn ? ProviderClaim::AttestedDawn
-                                                       : ProviderClaim::Unattested;
+    // The status provider is self-reported and is never attestation on its
+    // own. Dawn counts as attested only when the node's private realtime path
+    // returns an authenticated Dawn provider identity and the status agrees
+    // with it; anything else, including a status that names Dawn without
+    // that identity, is Unattested.
+    const bool authenticated_dawn = o.provider_identity.provider == GpuAudioProvider::Dawn &&
+                                    detail::gate_shared_io_provider_identity(o.provider_identity) !=
+                                        detail::SharedIoProviderIdentityGate::Unauthenticated;
+    return authenticated_dawn && o.status.provider == GpuAudioProvider::Dawn
+               ? ProviderClaim::AttestedDawn
+               : ProviderClaim::Unattested;
 }
 
 std::optional<Residency> observed_residency(const ConsumerObservation& o) {
@@ -609,6 +622,7 @@ struct GraphRig {
                  .payload_bytes = neural->payload_bytes(),
                  .capability = neural->transport().capability_report(),
                  .status = neural->transport().status_snapshot(),
+                 .provider_identity = detail::realtime_gpu_provider_identity(neural->node()),
                  .graph_latency_samples = artifact(neural_id),
                  .sample_rate = sample_rate},
                 {.consumer = "convolution.fir",
@@ -616,6 +630,7 @@ struct GraphRig {
                  .payload_bytes = convolution->payload_bytes(),
                  .capability = convolution->transport().capability_report(),
                  .status = convolution->transport().status_snapshot(),
+                 .provider_identity = detail::realtime_gpu_provider_identity(convolution->node()),
                  .graph_latency_samples = artifact(convolution_id),
                  .sample_rate = sample_rate}};
     }
@@ -741,6 +756,28 @@ void require_gpu_host(GraphRig& rig, const GeometryFixture& f) {
 }
 
 } // namespace
+
+TEST_CASE("a self-reported Dawn status is not provider attestation",
+          "[gpu_audio][graph][resource-admission][p4]") {
+    // Device-free: the provider claim is derived from the authenticated
+    // identity, never from the status alone.
+    ConsumerObservation o;
+    o.status.provider = GpuAudioProvider::Dawn;
+    CHECK(observed_provider(o) == ProviderClaim::Unattested);
+
+    o.provider_identity.provider = GpuAudioProvider::Dawn;
+    CHECK(observed_provider(o) == ProviderClaim::Unattested); // not authenticated
+
+    o.provider_identity.authenticated = true;
+    CHECK(observed_provider(o) == ProviderClaim::AttestedDawn);
+
+    o.provider_identity.provider = GpuAudioProvider::Cpu; // identity names another provider
+    CHECK(observed_provider(o) == ProviderClaim::Unattested);
+
+    o.provider_identity.provider = GpuAudioProvider::Dawn;
+    o.status.provider = GpuAudioProvider::Unknown; // status disagrees with the identity
+    CHECK(observed_provider(o) == ProviderClaim::Unattested);
+}
 
 TEST_CASE("two GPU consumers in one graph pass shared admission with measured geometry",
           "[gpu_audio][graph][resource-admission][p4]") {
@@ -876,6 +913,17 @@ TEST_CASE("shared admission refuses each planted manifest or consumer defect",
         auto m = good;
         m.entries[1].provider = ProviderClaim::AttestedDawn;
         CHECK(admit(m, observed).error == AdmissionError::ProviderMismatch);
+    }
+    SECTION("neural status names Dawn without an authenticated provider identity") {
+        // False-provider control: the self-reported status still says Dawn,
+        // but nothing authenticates it, so the AttestedDawn claim must fail.
+        REQUIRE(observed[0].status.provider == GpuAudioProvider::Dawn);
+        auto forged = observed;
+        forged[0].provider_identity = {};
+        CHECK(admit(good, forged).error == AdmissionError::ProviderMismatch);
+        auto unauthenticated = observed;
+        unauthenticated[0].provider_identity.authenticated = false;
+        CHECK(admit(good, unauthenticated).error == AdmissionError::ProviderMismatch);
     }
     SECTION("residency claim") {
         auto m = good;
