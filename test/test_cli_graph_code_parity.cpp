@@ -122,6 +122,19 @@ TEST_CASE("graph CLI success code and fmt use the C++ spelling", "[cli][shellout
     const auto fmt = run_pulp({"graph", "fmt", path.string(), "--json"});
     REQUIRE(fmt.exit_code == 0);
     REQUIRE(cli_code(fmt) == ok);
+
+    // fmt on a saved document prints the same typed result.
+    const auto saved = dir / "ok.pulpgraph";
+    pulp::host::SignalGraph graph;
+    const auto in = graph.add_input_node(1, "Input");
+    const auto gain = graph.add_gain_node("Gain");
+    const auto out = graph.add_output_node(1, "Output");
+    REQUIRE(graph.connect(in, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, out, 0));
+    std::ofstream(saved, std::ios::binary) << pulp::host::GraphSerializer::to_saved_document(graph);
+    const auto fmt_doc = run_pulp({"graph", "fmt", saved.string(), "--json"});
+    REQUIRE(fmt_doc.exit_code == 0);
+    REQUIRE(cli_code(fmt_doc) == ok);
 }
 
 namespace {
@@ -149,6 +162,22 @@ TEST_CASE("every CLI graph code the source emits is documented", "[cli][graph][d
     CHECK(emitted.size() >= 20);
     CHECK(emitted.count("prepare_failed") == 1);
     CHECK(emitted.count("unprepared_latency") == 1);
+
+    // Probe refusal codes are returned from probe_refusal() as string pairs, not
+    // through a literal fail("...") call, so scan them separately.
+    const auto refusal_begin = source.find("probe_refusal(");
+    const auto refusal_end = source.find("\n}\n", refusal_begin);
+    REQUIRE(refusal_begin != std::string::npos);
+    REQUIRE(refusal_end != std::string::npos);
+    const auto refusals = source.substr(refusal_begin, refusal_end - refusal_begin);
+    const std::regex refusal_pattern(R"re(return \{"([A-Za-z]+)",)re");
+    std::set<std::string> refusal_codes;
+    for (std::sregex_iterator it(refusals.begin(), refusals.end(), refusal_pattern), end; it != end;
+         ++it)
+        refusal_codes.insert((*it)[1].str());
+    CHECK(refusal_codes.count("Busy") == 1);
+    CHECK(refusal_codes.size() >= 6);
+    emitted.insert(refusal_codes.begin(), refusal_codes.end());
 
     for (const auto& code : emitted) {
         INFO(code);

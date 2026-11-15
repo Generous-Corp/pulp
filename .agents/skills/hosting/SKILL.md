@@ -1167,8 +1167,12 @@ save/reopen render proof beside the legacy caller-owned route controls.
   automation when the fixed queue is full and lets injected events win a
   same-offset tie. Reuse the mailbox across gap-free snapshots for the same
   plugin node so an edit cannot discard a publication made before the swap.
-  `parameter_mailbox_counters()` reads that mailbox's published, overflowed
-  and dropped-event counts; they live in the mailbox, so they survive
+  `parameter_mailbox_counters()` reads that mailbox's published, overflowed,
+  overwritten and dropped-event counts. The mailbox keeps only the latest
+  batch, so a batch replaced before any process() read it is lost; the writer
+  learns that exactly from `TripleBuffer::write_replacing_unread()` (the dirty
+  bit still set on the slot it gets back), never by comparing `sequence_seen`,
+  which races the reader. The counts live in the mailbox, so they survive
   `prepare_swap()` and restart on an eager `prepare()`. They count only the
   source side; a delivery-time drop into a full block queue is not counted,
   because a refused delivery is retried and would be counted twice.
@@ -2224,18 +2228,34 @@ honest.
 Watch out for:
 
 - Undo and redo reload the graph through `from_saved_document`, which
-  renumbers NodeIds. Re-find nodes by name or saved identity after every step;
-  a cached NodeId (or an editor-layout map keyed by one) is stale. The step
-  result carries the restored `editor_layout` keyed by the new ids.
+  renumbers NodeIds. A cached NodeId (or an editor-layout map keyed by one) is
+  stale after every step: map it through `saved_node_identities()` taken
+  before the call and the result's `node_ids` (identity to new NodeId). The
+  step result also carries the restored `editor_layout` keyed by the new ids.
+  `SubgraphInstance` handles go stale the same way, and
+  `to_saved_subgraph_document` refuses them; re-derive instances from a
+  subgraph document instead of keeping them across a step.
+- Each step first trial-restores the target into a scratch graph (with the
+  live graph's custom node types copied by
+  `GraphSerializer::copy_custom_node_types`), so every plugin and Processor
+  factory in the document runs twice on success. Pass the same
+  `GraphLoadOptions` (Processor registry and allowlist, plugin roots) that
+  built the graph; without them a Processor graph refuses with
+  `RestoreFailed` and `graph_untouched`, it is never emptied.
 - A mutation made without `checkpoint()` + `commit()` makes the next undo
   refuse with `Diverged` instead of discarding it. Commit the edit or
   `clear()` the history.
-- A restore that cannot be reproduced (for example a custom node type
-  re-registered with a different port count) is `RestoreFailed` and rolls the
-  graph back; the entry stays on the stack.
+- A restore that cannot be reproduced (for example it would bring back a
+  custom node whose type was re-registered with a different port count) is
+  `RestoreFailed`; the entry stays on the stack. A node that is already
+  unresolved in the live graph may come back unresolved, so a graph holding a
+  missing plugin can still be undone.
 - `diff_graph_documents` / `pulp graph diff` compare by authored identity, so
-  renumbering alone is equal, but `sample_regions` still records raw NodeIds and
-  is compared verbatim. A pre-v4 legacy file is refused as
+  renumbering alone is equal, including `sample_regions` NodeIds, and the
+  reported digests match. `GraphDocument::semantic_digest` from
+  `inspect_document` still hashes raw NodeIds. Identities carry an ordinal in
+  NodeId order, so deleting the first of two same-named nodes shifts the
+  survivor's identity and the diff blames the wrong node. A pre-v4 legacy file is refused as
   `invalid_format_version`, not `logical_identity_missing`; re-save it with
   `to_saved_document` first.
 
@@ -3282,6 +3302,17 @@ change against `spectral_frame_engine_first_frame_start` walking the grid, not
 against the formula itself. The rule's `static_assert` turns a broken rounding
 into a compile error, which `confirm_failure.sh` reports as INCONCLUSIVE; break
 a different term to exercise the runtime test.
+
+The asset-morph source builds its rule from the decoded stream's geometry, so it
+runs at any admitted (N, H, C). Its endpoint scratch is a per-node vector sized
+by `SpectralAssetMorphState::prepare()` on the control thread and charged to the
+runtime bank; `frame()` must stay allocation-free and only index that storage.
+A refused geometry keeps its own `SpectralFiniteStreamRule::Status` and
+`reason()` text and surfaces publicly as `UnsupportedOperation`; a codec
+`ResourceLimit` while decoding either asset surfaces as `CapacityExceeded`, not
+`InvalidFrame`. The geometry suite (`test_spectral_asset_geometry.cpp`) carries
+its own double-precision oracle because the shared example oracle is fixed at
+FFT 256 / hop 64 mono.
 
 ## Bounded typed trigger runtime
 

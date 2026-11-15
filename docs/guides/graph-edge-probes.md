@@ -45,12 +45,12 @@ Read identity and records on the same control thread; do not race them with
 control-thread topology edits. Reads serialize with graph mutations, while the
 producer only uses bounded arithmetic and lock-free ring atomics.
 
-Attach/detach require quiesced processing: `process()` and retained
-execution-snapshot rendering must be stopped first. Live attach or detach while
-an audio callback is in flight is unsupported. The graph does not enforce this:
-attach/detach replace the probe on the published snapshot that the callback
-reads without the mutation lock, so the caller owns the quiesce, exactly as for
-`prepare()`. They allocate/free only on the control thread. A failed
+Attach and detach may run while `process()` is in flight. Each probe sits in a
+cell; a displaced probe is parked rather than freed, and is reclaimed only on the
+control thread once no `process()` pin and no outside execution-snapshot handle
+refers to it (otherwise at reprepare or topology publication). At most eight
+displaced probes per kind may be parked: past that, attach returns `Busy` and
+detach stops the probe in place until the holders are released. A failed
 attach leaves the existing attachment untouched. A successful replacement starts
 with an empty ring, zero loss count, sequence zero and timestamp zero. Reprepare
 or a newly published topology retires the attachment. Ordinary topology mutation

@@ -89,8 +89,9 @@ std::pair<std::string, std::string> probe_refusal(pulp::host::SignalGraph::EdgeP
                 "edge probes attach only to the serial routed executor; disable parallel routing "
                 "and anticipation, then prepare the graph again"};
     case Status::Busy:
-        return {"Busy", "a prepared topology edit is in progress; retry after it commits or is "
-                        "cancelled"};
+        return {"Busy", "a live swap edit is open, or eight displaced probes are still parked "
+                        "because a snapshot holder or running process() pins them; commit or "
+                        "cancel the edit, or release the snapshot holders, then retry"};
     case Status::Attached:
     case Status::Detached:
         break;
@@ -976,11 +977,23 @@ int cmd_graph(const std::vector<std::string>& args) {
     }
     if (op == "canonicalize" || op == "fmt") {
         if (!loaded.missing_plugins.empty()) {
+            if (json) {
+                json_error("unresolved_node", "cannot canonicalize while plugin nodes are "
+                                              "unresolved; resolve all plugins first");
+                return 1;
+            }
             std::cerr << "pulp graph: cannot canonicalize while plugin nodes are unresolved; "
                          "resolve all plugins first\n";
             return 1;
         }
         if (!loaded.state_restore_failures.empty()) {
+            if (json) {
+                json_error("RestoreFailed",
+                           std::to_string(loaded.state_restore_failures.size()) +
+                               " plugin(s) rejected their persisted state; canonicalizing would "
+                               "overwrite it");
+                return 1;
+            }
             std::cerr << "pulp graph: cannot canonicalize because "
                       << loaded.state_restore_failures.size()
                       << " plugin(s) rejected their persisted state; canonicalizing would "
@@ -990,11 +1003,17 @@ int cmd_graph(const std::vector<std::string>& args) {
         const auto saved = pulp::host::GraphSerializer::to_file(graph, std::filesystem::path(path),
                                                                 loaded.editor_layout);
         if (!saved.ok) {
+            if (json) {
+                json_error(pulp::host::GraphSerializer::save_code_name(saved.code), saved.error);
+                return 1;
+            }
             std::cerr << "pulp graph: cannot canonicalize graph ("
                       << pulp::host::GraphSerializer::save_code_name(saved.code)
                       << "): " << saved.error << '\n';
             return 1;
         }
+        if (json)
+            std::cout << "{\"valid\":true,\"code\":\"Ok\"}\n";
         return 0;
     }
     return 2;

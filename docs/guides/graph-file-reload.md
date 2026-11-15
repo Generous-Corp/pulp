@@ -29,7 +29,9 @@ message instead of building. `pulp loop` refuses them with `--no-watch`,
 `--status` or `--off`, which never start the watch.
 
 The watch reads the file once before the initial build and takes those contents
-as its baseline: starting a watch never reapplies an unchanged file, so the live
+as its baseline: starting a watch never reapplies an unchanged file,
+(if the file is missing or mid-save at startup there is no baseline, so the first
+settled contents seen later are applied as a change) so the live
 graph's DSP state is not reset at startup. Each 500 ms poll checks the size first
 and refuses a file over 1 MiB without reading it. Two consecutive identical reads
 coalesce a save; content changes are detected even with unchanged size and

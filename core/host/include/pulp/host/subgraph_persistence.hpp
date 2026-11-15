@@ -30,9 +30,13 @@
 namespace pulp::host {
 
 /// Write a saved-identity v6 document that also records each instance.
-/// Returns an empty string when an instance is not part of `graph` (a stale
-/// or foreign NodeId), two instances share an identity or a node, or the
-/// graph itself cannot be serialized.
+/// Parameter values are read from the live graph (the target Gain node's
+/// gain or the target Processor parameter), not from the instance's cached
+/// `parameters`. Returns an empty string when an instance is not part of
+/// `graph` (a stale or foreign NodeId, or an exposed port whose owner or
+/// incarnation no longer matches the live node), two instances share an
+/// identity or a node, a live parameter value is non-finite or outside its
+/// declared bounds, or the graph itself cannot be serialized.
 std::string to_saved_subgraph_document(
     const SignalGraph& graph, std::span<const SubgraphInstance> subgraphs,
     const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout = {});
@@ -50,9 +54,10 @@ struct SubgraphDocumentLoad {
 
 /// Restore a saved-identity v6 document and rebind its subgraph records to
 /// `templates`. Template lookup, document inspection, and record shape are
-/// checked before the graph is touched; conformance to each template is
-/// checked after the flattened graph loads. Every refusal clears `graph`
-/// and names its rule in load.error (`subgraph_template_unknown`,
+/// checked before the graph is touched, and those refusals leave `graph`
+/// unchanged; conformance to each template is checked after the flattened
+/// graph loads, and a refusal from then on clears `graph`. Every refusal
+/// names its rule in load.error (`subgraph_template_unknown`,
 /// `subgraph_template_duplicate`, `subgraph_instance_mismatch`,
 /// `subgraph_state_rejected`, or a document inspection refusal).
 SubgraphDocumentLoad from_saved_subgraph_document(SignalGraph& graph, const std::string& json,
