@@ -68,3 +68,6 @@ typedef BOOL (^PulpAUv3ContractResizeRequest)(CGSize size);
 - (void)closeEditor;
 
 @end
+
+// Implementation detail of the interface above; not for includers.
+#undef PULP_AUV3_PLATFORM_VIEW
