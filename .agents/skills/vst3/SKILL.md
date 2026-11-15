@@ -789,6 +789,11 @@ that check runs before `has_editor()`. Things to keep straight:
   alive), then destroy, because the editor's factory belongs to the processor
   about to be reset. `invalidate()` is only for a parent that is already gone.
   Do not move that call after `processor_.reset()`.
+- `canResize` and `checkSizeConstraint` come from the session
+  (`ContractEditorSession::resizable()` / `constrain()`), which applies the
+  editor's `size_hints()`: no minimums means fixed-size, `aspect_ratio > 0`
+  snaps to the ratio inside min/max, `0` clamps each axis alone
+  (`detail::constrain_to_hints()`).
 - `onKeyDown` returns `kResultFalse` for a forwarded key, which is how Space
   stays the host's transport key. Return `kResultTrue` only for `consumed`.
 - VST3 has no idle callback, so the view ticks `Editor::idle()` itself from a

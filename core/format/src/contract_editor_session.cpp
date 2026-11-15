@@ -1,5 +1,6 @@
 #include <pulp/format/contract_editor_session.hpp>
 
+#include <pulp/format/detail/editor_size_constraint.hpp>
 #include <pulp/format/detail/main_thread_timer.hpp>
 #include <pulp/format/native_surface_host.hpp>
 
@@ -277,35 +278,34 @@ bool ContractEditorSession::set_scale(double scale) {
 }
 
 bool ContractEditorSession::resizable() const {
-    if (!editor_)
-        return false;
-    const auto h = editor_->size_hints();
-    const bool fixed = h.min_width > 0 && h.min_width == h.max_width && h.min_height > 0 &&
-                       h.min_height == h.max_height;
-    return !fixed;
+    return editor_ && detail::editor_resizable(editor_->size_hints());
 }
 
 bool ContractEditorSession::constrain(std::uint32_t& width, std::uint32_t& height) const {
     if (!editor_ || width == 0 || height == 0)
         return false;
+    const auto hints = editor_->size_hints();
+    if (!detail::editor_resizable(hints)) {
+        // A fixed-size editor has one size, whatever the host proposes.
+        const auto fixed = size();
+        if (fixed.width == 0 || fixed.height == 0)
+            return false;
+        width = fixed.width;
+        height = fixed.height;
+        return true;
+    }
     EditorSize proposed = editor_->size();
     proposed.width = width;
     proposed.height = height;
-    auto adjusted = editor_->adjust_size(proposed);
-    const auto h = editor_->size_hints();
-    auto clamp = [](std::uint32_t v, std::uint32_t lo, std::uint32_t hi) {
-        if (lo > 0 && v < lo)
-            v = lo;
-        if (hi > 0 && v > hi)
-            v = hi;
-        return v;
-    };
-    adjusted.width = clamp(adjusted.width, h.min_width, h.max_width);
-    adjusted.height = clamp(adjusted.height, h.min_height, h.max_height);
-    if (adjusted.width == 0 || adjusted.height == 0)
+    const auto adjusted = editor_->adjust_size(proposed);
+    // The editor's own say first; the declared hints (aspect, min, max) still
+    // hold for an editor that does not override adjust_size().
+    std::uint32_t w = adjusted.width;
+    std::uint32_t h = adjusted.height;
+    if (!detail::constrain_to_hints(hints, w, h))
         return false;
-    width = adjusted.width;
-    height = adjusted.height;
+    width = w;
+    height = h;
     return true;
 }
 

@@ -13,7 +13,9 @@
 //
 //   uiViewForAudioUnit:withSize:   -> a session (factory create) attached to
 //                                     the container, sized to the editor
-//   container -setFrameSize:       -> Editor::set_size() (the host resized it)
+//   container -setFrameSize:       -> Editor::set_size() (the host resized it;
+//                                     a resizable editor's limits and locked aspect
+//                                     are applied to the frame first)
 //   container backing scale change -> Editor::set_size() with the new scale
 //   container moves into / out of a window -> Editor::visibility_changed()
 //   key events reaching the container -> Editor::offer_key(); a forwarded key
@@ -112,11 +114,27 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
 }
 
 - (void)setFrameSize:(NSSize)newSize {
-    [super setFrameSize:newSize];
-    if (_applyingEditorSize || !_session || newSize.width < 1.0 || newSize.height < 1.0)
+    if (_applyingEditorSize || !_session || newSize.width < 1.0 || newSize.height < 1.0) {
+        [super setFrameSize:newSize];
         return;
-    _session->set_size(static_cast<std::uint32_t>(newSize.width),
-                       static_cast<std::uint32_t>(newSize.height));
+    }
+    auto width = static_cast<std::uint32_t>(newSize.width);
+    auto height = static_cast<std::uint32_t>(newSize.height);
+    // A host that resizes the view by hand never asks the editor first (AU v2
+    // has no size negotiation), so the editor's limits and locked aspect are
+    // applied to the frame itself. A fixed-size editor keeps the host's frame.
+    if (_session->editor() != nullptr && _session->resizable()) {
+        auto constrained_width = width;
+        auto constrained_height = height;
+        if (_session->constrain(constrained_width, constrained_height) &&
+            (constrained_width != width || constrained_height != height)) {
+            width = constrained_width;
+            height = constrained_height;
+            newSize = NSMakeSize(width, height);
+        }
+    }
+    [super setFrameSize:newSize];
+    _session->set_size(width, height);
 }
 
 - (void)viewWillMoveToWindow:(NSWindow*)window {
