@@ -155,6 +155,9 @@ Rates measure(Arm arm, double seconds) {
         window.releasedWhenClosed = NO;
         [window setContentView:(__bridge NSView*)host->native_handle()];
         bridge.notify_attached();
+        // The window exists only so the host gets a display link: it is never
+        // ordered front, so nothing appears on screen.
+        REQUIRE_FALSE(window.isVisible);
 
         // Let the mount frames drain, then measure a static editor.
         pump_main_runloop(0.3);
@@ -164,6 +167,7 @@ Rates measure(Arm arm, double seconds) {
         const Usage u0 = process_usage();
         pump_main_runloop(seconds);
         const Usage u1 = process_usage();
+        REQUIRE_FALSE(window.isVisible);
         r.idle_calls = (idle_calls - idle0) / seconds;
         r.frames = (frames - frames0) / seconds;
         r.wakeups = double(u1.wakeups - u0.wakeups) / seconds;
