@@ -3359,6 +3359,14 @@ another graph, or on the same graph before every snapshot holding the old node
 has retired, now returns 0. Create a fresh instance per node instead of reusing
 one handle across graphs.
 
+A Processor node's output ports are its main output channels followed by every
+declared aux output bus (optional ones included), named `<bus>.<channel>`, for
+example `Rear.0`. Count ports with `ProcessorNode::routed_output_channels()`,
+not `default_output_channels()`, which is the main bus only. The processor sees
+its buses under the descriptor's declared names (`main` only when a name is
+empty) and is prepared with the main-bus channel count. Aux *input* buses are
+not graph ports; they arrive through `set_processor_audio_input_provider()`.
+
 `SignalGraphControlAuthority` serializes `apply`, `reload_graph_file` and `reset`
 on its own mutex. The standalone host runs file reload on the main thread but
 modulation-route edits on the RPC worker, so do not rely on caller threading to

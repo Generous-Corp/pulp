@@ -23,11 +23,10 @@ constexpr std::size_t kImpulseFrame = 8;
 
 class NamedBusPlacement final : public Processor {
   public:
-    // A routed graph node hands its Processor one input and one output bus both
-    // named "main", whatever the descriptor declares. By default the processor
-    // falls back to its main buses when a declared name is absent, which is what
-    // lets it run unchanged in a graph. `names_only` removes the fallback so the
-    // recipe can show what a name-only lookup does inside a graph (silence).
+    // A routed graph node hands its Processor buses under the descriptor's
+    // declared names. By default the processor still falls back to its main
+    // buses when a declared name is absent; `names_only` removes the fallback so
+    // the recipe proves the graph forwards "Source", "Front" and "Rear".
     explicit NamedBusPlacement(bool names_only = false) : names_only_(names_only) {}
 
     PluginDescriptor descriptor() const override {
@@ -99,9 +98,11 @@ bool matches(const audio::Buffer<float>& buffer, float left, float right) {
     return true;
 }
 
-// `front_out`, when set, receives the buffer bound to output bus slot 0 so the
-// graph path can be compared against the harness sample for sample.
-bool run_layout(std::size_t index, bool swap_names, audio::Buffer<float>* front_out = nullptr) {
+// `front_out` and `rear_out`, when set, receive the buffers bound to output bus
+// slots 0 and 1 so the graph path can be compared against the harness sample
+// for sample.
+bool run_layout(std::size_t index, bool swap_names, audio::Buffer<float>* front_out = nullptr,
+                audio::Buffer<float>* rear_out = nullptr) {
     NamedBusPlacement processor;
     const auto descriptor = processor.descriptor();
     if (index >= descriptor.supported_bus_layouts.size())
@@ -157,6 +158,12 @@ bool run_layout(std::size_t index, bool swap_names, audio::Buffer<float>* front_
             for (std::size_t frame = 0; frame < kFrames; ++frame)
                 front_out->channel(ch)[frame] = front.channel(ch)[frame];
     }
+    if (rear_out) {
+        *rear_out = audio::Buffer<float>(2, kFrames);
+        for (std::size_t ch = 0; ch < 2; ++ch)
+            for (std::size_t frame = 0; frame < kFrames; ++frame)
+                rear_out->channel(ch)[frame] = rear.channel(ch)[frame];
+    }
     const bool oracle = matches(front, 0.75f, 0.25f) &&
                         matches(rear, index == 0 ? 0.0f : 0.25f, index == 0 ? 0.0f : 0.75f);
     if (swap_names)
@@ -190,12 +197,14 @@ bool identical(const audio::Buffer<float>& a, const audio::Buffer<float>& b) {
 }
 
 // The same processor as a SignalGraph node: Input(1) -> NamedBusPlacement ->
-// Output(2). A Processor node exposes its MAIN output bus as graph ports (one
-// per channel, named "audio", "out1"); the aux "Rear" bus has no graph port.
-// `swap_ports` crosses the two main-bus channels on the way to the Output node.
+// Output(4). A Processor node exposes its main output bus as graph ports (one
+// per channel, named "audio", "out1") followed by the aux "Rear" bus (named
+// "Rear.0", "Rear.1"). `swap_ports` crosses the two main-bus channels on the way
+// to the Output node.
 struct GraphRun {
     bool ok = false;
     audio::Buffer<float> audio;
+    audio::Buffer<float> rear;
     NodeId processor = 0;
     bool bake_refused = false;
     LowerRejectReason bake_reason = LowerRejectReason::None;
@@ -207,24 +216,28 @@ GraphRun run_graph(bool swap_ports, bool names_only = false) {
     SignalGraph graph;
     const NodeId in = graph.add_input_node(1);
     const NodeId proc = graph.add_processor_node(std::make_unique<NamedBusPlacement>(names_only));
-    const NodeId out = graph.add_output_node(2);
+    const NodeId out = graph.add_output_node(4);
     if (!in || !proc || !out)
         return result;
     result.processor = proc;
     const auto* node = graph.node(proc);
-    if (!node || node->input_ports.size() != 1 || node->output_ports.size() != 2 ||
-        node->output_ports[0].name != "audio" || node->output_ports[1].name != "out1")
+    const auto* out_node = graph.node(out);
+    if (!node || !out_node || node->input_ports.size() != 1 || node->output_ports.size() != 4 ||
+        node->output_ports[0].name != "audio" || node->output_ports[1].name != "out1" ||
+        node->output_ports[2].name != "Rear.0" || node->output_ports[3].name != "Rear.1")
         return result;
     if (!graph.connect(in, 0, proc, 0) ||
         !graph.connect(proc, node->output_ports[0].index, out, swap_ports ? 1 : 0) ||
-        !graph.connect(proc, node->output_ports[1].index, out, swap_ports ? 0 : 1))
+        !graph.connect(proc, node->output_ports[1].index, out, swap_ports ? 0 : 1) ||
+        !graph.connect(node->out("Rear.0"), out_node->in("in2")) ||
+        !graph.connect(node->out("Rear.1"), out_node->in("in3")))
         return result;
 
     OfflineSignalGraphHost host(graph);
     if (!host.prepare({.sample_rate = 48000.0,
                        .block_frames = 16,
                        .input_channels = 1,
-                       .output_channels = 2}))
+                       .output_channels = 4}))
         return result;
     std::vector<float> stimulus(kFrames, 0.0f);
     stimulus[kImpulseFrame] = 1.0f;
@@ -233,7 +246,16 @@ GraphRun run_graph(bool swap_ports, bool names_only = false) {
     auto rendered = host.render({.frame_count = stimulus.size(), .input = input});
     if (!rendered.ok)
         return result;
-    result.audio = std::move(rendered.audio);
+    if (rendered.audio.num_channels() != 4 || rendered.audio.num_samples() != kFrames)
+        return result;
+    // Split the four rendered channels back into the Front and Rear buses.
+    result.audio = audio::Buffer<float>(2, kFrames);
+    result.rear = audio::Buffer<float>(2, kFrames);
+    for (std::size_t ch = 0; ch < 2; ++ch)
+        for (std::size_t frame = 0; frame < kFrames; ++frame) {
+            result.audio.channel(ch)[frame] = rendered.audio.channel(ch)[frame];
+            result.rear.channel(ch)[frame] = rendered.audio.channel(ch + 2)[frame];
+        }
 
     // Baked-artifact boundary: a Processor node is a hosted Plugin-type node, so
     // bake() must refuse it rather than silently dropping the bus layout.
@@ -247,15 +269,19 @@ GraphRun run_graph(bool swap_ports, bool names_only = false) {
 
 bool check_graph() {
     audio::Buffer<float> harness_front;
-    if (!run_layout(1, false, &harness_front))
+    audio::Buffer<float> harness_rear;
+    if (!run_layout(1, false, &harness_front, &harness_rear))
         return false;
     const auto graph = run_graph(false);
-    if (!graph.ok || !identical(graph.audio, harness_front) || !matches(graph.audio, 0.75f, 0.25f))
+    if (!graph.ok || !identical(graph.audio, harness_front) ||
+        !matches(graph.audio, 0.75f, 0.25f) || !identical(graph.rear, harness_rear) ||
+        !matches(graph.rear, 0.25f, 0.75f))
         return false;
-    // Name-only lookup finds neither "Source" nor "Front" on the graph's "main"
-    // buses and renders silence: the graph does not forward descriptor names.
+    // Name-only lookup finds "Source", "Front" and "Rear" on the graph node's
+    // buses, so it renders exactly what the harness renders.
     const auto names_only = run_graph(false, true);
-    if (!names_only.ok || !matches(names_only.audio, 0.0f, 0.0f))
+    if (!names_only.ok || !identical(names_only.audio, harness_front) ||
+        !identical(names_only.rear, harness_rear))
         return false;
     return graph.bake_refused &&
            graph.bake_reason == LowerRejectReason::HostedPluginNotSelfContained &&
