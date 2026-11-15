@@ -1,8 +1,9 @@
 {
   "schema": "pulp.graph.p4-two-consumer-admission-receipt.v0",
   "verdict": "HOLD",
-  "base_origin_main": "aa6532659d2d8565fae2164945aac6014583094d",
-  "test_commit": "5baa91145d65b0d207096eed0461102c4a433ff8",
+  "base_origin_main": "a7476ab8ce6ed158822e2aae7c9f1843a0e236a9",
+  "test_commit": "0987fec90892da410b95ed1f77578083ffe2342c",
+  "measurement_scope": "historical_fixture_commit",
   "test_binary": "pulp-test-graph-gpu-resource-admission",
   "test_binary_sha256": "83d69f9f3430c951fdab17e27d67abf6b814d2afde70b22ffb97388e998f79d3",
   "build": {
