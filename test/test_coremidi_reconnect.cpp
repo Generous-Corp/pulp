@@ -329,7 +329,9 @@ TEST_CASE("CoreMIDI input delivers SysEx to a callback registered after open()",
 
     MIDIEventList list;
     MIDIEventPacket* packet = MIDIEventListInit(&list, kMIDIProtocol_1_0);
-    const UInt32 words[2] = {0x3002AABB, 0}; // SysEx7 complete, 2 data bytes
+    // SysEx7 complete, 2 data bytes; SysEx data is 7-bit, so the reassembler
+    // drops a high-bit byte such as 0xAA.
+    const UInt32 words[2] = {0x30022A3B, 0};
     MIDIEventListAdd(&list, sizeof(list), packet, 0, 2, words);
     MIDIReceivedEventList(vs.source, &list);
 
@@ -337,4 +339,83 @@ TEST_CASE("CoreMIDI input delivers SysEx to a callback registered after open()",
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     CHECK(sysex_calls.load() == 1);
     input->close();
+}
+
+TEST_CASE("CoreMIDI input close() from a callback stops the rest of that event list",
+          "[midi][coremidi][close]") {
+    DrainSource vs;
+    if (!vs.create())
+        SKIP("CoreMIDI server not reachable; skipping");
+    auto system = pulp::midi::create_midi_system();
+    REQUIRE(system != nullptr);
+
+    auto input = system->create_input();
+    std::atomic<int> received{0};
+    auto* raw = input.get();
+    REQUIRE(input->open(std::to_string(kDrainId), [&, raw](const pulp::midi::MidiEvent&) {
+        ++received;
+        raw->close();
+    }));
+
+    // Three MIDI 1.0 channel-voice messages in one packet of one event list,
+    // so all three reach the same receive-block invocation.
+    MIDIEventList list;
+    MIDIEventPacket* packet = MIDIEventListInit(&list, kMIDIProtocol_1_0);
+    const UInt32 words[3] = {0x20903C64, 0x20903E64, 0x20904064};
+    MIDIEventListAdd(&list, sizeof(list), packet, 0, 3, words);
+    MIDIReceivedEventList(vs.source, &list);
+
+    for (int i = 0; i < 300 && received.load() < 1; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // The first delivery closed the port; the later events must not run.
+    CHECK(received.load() == 1);
+    input->close();
+}
+
+TEST_CASE("CoreMIDI input close() after a close from inside a callback waits for it",
+          "[midi][coremidi][close]") {
+    DrainSource vs;
+    if (!vs.create())
+        SKIP("CoreMIDI server not reachable; skipping");
+    auto system = pulp::midi::create_midi_system();
+    REQUIRE(system != nullptr);
+
+    Gate gate;
+    std::atomic<bool> nested_close_returned{false};
+    std::atomic<bool> callback_returned{false};
+    std::atomic<bool> close_returned{false};
+
+    auto input = system->create_input();
+    auto* raw = input.get();
+    REQUIRE(input->open(std::to_string(kDrainId), [&, raw](const pulp::midi::MidiEvent&) {
+        raw->close();
+        nested_close_returned = true;
+        gate.wait();
+        callback_returned = true;
+    }));
+    send_note(vs.source);
+    for (int i = 0; i < 300 && !nested_close_returned; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    REQUIRE(nested_close_returned);
+
+    std::thread closer([&] {
+        input->close();
+        close_returned = true;
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    // The callback is still running, so this external close() must wait.
+    CHECK_FALSE(close_returned.load());
+
+    gate.release();
+    for (int i = 0; i < 500 && !close_returned; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    if (close_returned.load()) {
+        closer.join();
+        CHECK(callback_returned.load());
+    } else {
+        closer.detach();
+        (void)input.release();
+        FAIL("close() did not return after the callback was released");
+    }
 }

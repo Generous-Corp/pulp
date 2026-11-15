@@ -159,7 +159,10 @@ struct CoreMidiInputShared {
     std::mutex mutex;
     std::condition_variable idle;
     int in_flight = 0;
-    bool closed = false;
+    // Written under the mutex; also read without it before every single
+    // delivery, so a close() made by an earlier event in the same
+    // MIDIEventList stops the rest of that list.
+    std::atomic<bool> closed{false};
     MidiInputCallback callback;
     MidiSysexCallback sysex_callback;
     // SysEx7 (UMP type 0x03) reassembly state, the shared implementation in
@@ -230,7 +233,7 @@ public:
                                   static_cast<uint8_t>((word >> 8) & 0xFF),
                                   static_cast<uint8_t>(word & 0xFF));
                               evt.timestamp = host_ticks_to_seconds(packet->timeStamp);
-                              if (shared->callback)
+                              if (shared->callback && !shared->closed.load())
                                   shared->callback(evt);
                           } else if (type == 0x04) {
                               UmpPacket p;
@@ -240,7 +243,7 @@ public:
                               MidiEvent evt{};
                               if (ump_to_midi1_event(p, evt)) {
                                   evt.timestamp = host_ticks_to_seconds(packet->timeStamp);
-                                  if (shared->callback)
+                                  if (shared->callback && !shared->closed.load())
                                       shared->callback(evt);
                               }
                           } else if (type == 0x03) {
@@ -255,6 +258,7 @@ public:
                               struct EmitCtx {
                                   MidiSysexCallback* cb;
                                   double ts_sec;
+                                  const std::atomic<bool>* closed;
                               };
                               // set_sysex_callback() may run after open(), so
                               // read the callback under the lock, as a copy.
@@ -263,10 +267,11 @@ public:
                                   std::lock_guard lock(shared->mutex);
                                   sysex_cb = shared->sysex_callback;
                               }
-                              EmitCtx ctx{&sysex_cb, host_ticks_to_seconds(packet->timeStamp)};
+                              EmitCtx ctx{&sysex_cb, host_ticks_to_seconds(packet->timeStamp),
+                                          &shared->closed};
                               auto emit = [](const std::vector<uint8_t>& p, void* user) {
                                   auto* c = static_cast<EmitCtx*>(user);
-                                  if (*c->cb)
+                                  if (*c->cb && !c->closed->load())
                                       (*c->cb)(p, c->ts_sec);
                               };
                               shared->sysex_reassembler.feed_packet(word, word1, emit, &ctx);
@@ -276,6 +281,8 @@ public:
                           // adapter for now.
                           (void)word_count;
                       });
+                  if (shared->closed.load())
+                      break;
                   packet = MIDIEventPacketNext(packet);
               }
             });
@@ -336,6 +343,15 @@ public:
         source_ = 0;
         source_unique_id_ = 0;
         is_open_ = false;
+        // A close() made earlier from inside a callback could not wait for
+        // that callback; this later call waits for it, unless it too runs on
+        // that callback's thread.
+        if (retiring_ && tls_delivering != retiring_.get()) {
+            auto retiring = std::move(retiring_);
+            retiring_.reset();
+            std::unique_lock lock(retiring->mutex);
+            retiring->idle.wait(lock, [&] { return retiring->in_flight == 0; });
+        }
         if (!shared) {
             if (port)
                 MIDIPortDispose(port);
@@ -346,6 +362,9 @@ public:
             shared->closed = true;
         }
         if (tls_delivering == shared.get()) {
+            // Keep the state so a later close() from another thread still
+            // waits for this callback to finish.
+            retiring_ = shared;
             // MIDIPortDispose waits for the running callback, which is this
             // thread, so hand the dispose to another thread. Only the port and
             // the shared state are captured, never this object.
@@ -400,6 +419,9 @@ public:
     MIDIEndpointRef source_ = 0;
     SInt32 source_unique_id_ = 0;
     std::shared_ptr<CoreMidiInputShared> shared_;
+    // State of a port closed from inside its own callback, kept until a later
+    // close() off that thread has waited for the callback to return.
+    std::shared_ptr<CoreMidiInputShared> retiring_;
     // Registered before open(); moved into the shared state when the port opens.
     MidiSysexCallback pending_sysex_callback_;
     bool is_open_ = false;
