@@ -20,7 +20,7 @@
     },
     {
       "path": "core/host/src/graph_history.cpp",
-      "needles": ["GraphHistoryCode::Diverged", "snapshot_port_identity", "GraphHistoryCode::PortIdentityMismatch", "result.rolled_back"]
+      "needles": ["GraphHistoryCode::Diverged", "snapshot_port_identity", "GraphHistoryCode::PortIdentityMismatch", "result.rolled_back", "pulp graph save --saved-identity"]
     },
     {
       "path": "test/test_graph_history.cpp",
@@ -56,7 +56,7 @@
     },
     "offline_timeline_cli": {
       "disposition": "exposed",
-      "rationale": "pulp graph diff reads two bounded saved documents and reports their logical-identity differences; it never loads plugin code or writes files.",
+      "rationale": "pulp graph diff reads two bounded saved documents and reports their logical-identity differences; it never loads plugin code or writes files. Its inputs come from pulp graph save --saved-identity, and save, fmt and canonicalize keep an input's identity envelope.",
       "evidence": [
         {
           "kind": "cli_handler",
@@ -68,13 +68,14 @@
           "path": "test/test_cli_graph_code_parity.cpp",
           "needles": [
             "graph diff compares saved documents by logical identity",
-            "graph CLI success code and fmt use the C++ spelling"
+            "graph CLI success code and fmt use the C++ spelling",
+            "graph save and fmt keep the saved-identity envelope that diff reads"
           ]
         },
         {
           "kind": "cli_definition",
           "path": "tools/cli/cmd_graph.cpp",
-          "needles": ["diff: pulp graph diff <before.pulpgraph> <after.pulpgraph> [--json]"]
+          "needles": ["diff: pulp graph diff <before.pulpgraph> <after.pulpgraph> [--json]", "save: --output path [--saved-identity]"]
         }
       ],
       "authority": {

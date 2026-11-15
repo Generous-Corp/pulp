@@ -504,6 +504,19 @@ WAV rate all follow the input file; do not reintroduce a fixed 48 kHz. The MCP
 `pulp graph render drives audio_in from --input and refuses silent renders`
 checks every output sample, so a size-only WAV check is not enough.
 
+### `pulp graph` rewrites must not drop what the plain writer cannot express
+
+`save`, `fmt` and `canonicalize` in `tools/cli/cmd_graph.cpp` rewrite a
+`.pulpgraph`. `GraphSerializer::to_file` writes `to_json`, which has no
+saved-identity envelope and no `subgraphs` records, so routing an envelope
+document through `from_file` + `to_file` exits 0 while destroying the only
+input `pulp graph diff` accepts. The rewrite path detects the envelope,
+restores through `from_saved_document` and writes `to_saved_file`; records that
+need authoring templates are refused (`subgraph_records_unsupported`) rather
+than stripped. A new rewrite mode needs the same check, and its shell-out test
+must diff the CLI's own output, not a file the C++ API wrote: the diff tests
+once passed while no CLI command could produce a diff input.
+
 ## Adding a CLI Command — Full Checklist
 
 ### 1. Implement in CLI source
