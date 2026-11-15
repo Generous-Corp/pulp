@@ -816,13 +816,48 @@ class GatesWiringTests(unittest.TestCase):
         self.assertEqual(calls[0], "run --changed-from origin/main --label-base-failures")
         self.assertRegex(calls[1], r"^run --workflow \S+/\.github/workflows/workflow-lint\.yml "
                                    r"--changed-from origin/main --label-base-failures$")
-        self.assertEqual(calls[2], "run --ctest-label pr-fast --build-dir auto "
+        self.assertEqual(calls[2], "run --drift-fast --build-dir auto "
                                    "--changed-from origin/main --label-base-failures")
         # Every lane's NOT CHECKED lines reach the summary's list, tagged by lane.
         self.assertEqual(self.not_checked.count("NOT CHECKED locally: needs-build"), 4)
         self.assertIn("[pr-fast] NOT CHECKED", self.not_checked)
         self.assertEqual(calls[3], "run --ctest-python --changed-from origin/main "
                                    "--label-base-failures")
+
+
+class SyncJobLaneTests(unittest.TestCase):
+    """The sync-job lane: advisory steps report without failing; slow ones are diff-scoped."""
+
+    def _report(self, entries):
+        import argparse
+        import contextlib
+        import io
+        args = argparse.Namespace(jobs=2, label_base_failures=False, changed_from=None)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = lane._run_and_report(args, argparse.ArgumentParser(), entries, 0.0)
+        return code, out.getvalue()
+
+    def _entry(self, root: pathlib.Path, name: str, exit_code: int, advisory: bool):
+        script = root / f"{name}.py"
+        script.write_text(f"raise SystemExit({exit_code})\n", encoding="utf-8")
+        return {"name": name, "argv": [str(script)], "cwd": str(root), "advisory": advisory}
+
+    def test_an_advisory_failure_is_reported_and_does_not_fail_the_run(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            code, out = self._report([self._entry(root, "ok", 0, False),
+                                      self._entry(root, "soft", 1, True)])
+        self.assertEqual(code, 0)
+        self.assertIn("ADVISORY (CI continues on error): soft", out)
+        self.assertIn("1 advisory failure(s) reported above", out)
+
+    def test_a_required_failure_still_fails_the_run(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            code, _ = self._report([self._entry(root, "hard", 1, False),
+                                    self._entry(root, "soft", 1, True)])
+        self.assertEqual(code, 1)
 
 
 class WorkflowEntriesTests(unittest.TestCase):

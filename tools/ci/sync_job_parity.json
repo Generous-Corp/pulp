@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "_comment": "Which commands of the required sync job (.github/workflows/version-skill-check.yml, job `version-skill-check`) tools/scripts/gates.sh does NOT hand to the lane that reads them from the workflow. Every other `python3 <script>` command in that job is run by gates.sh's `sync-job` lane with CI's own arguments, so adding a step to the workflow adds it to gates.sh with no further edit. `gates_native`: gates.sh runs the command in a block of its own; `gates` are literal fragments that must appear in tools/scripts/gates.sh, and every `--flag` CI passes must appear in them unless listed in `flag_exceptions` with a reason. `ci_only`: CI runner plumbing or a lane gates.sh runs by another path. Keys are the commands exactly as tools/ci/source_selftests.py sync_job_commands() prints them; tools/scripts/test_gates_sync_parity.py fails on a stale key, an unlisted unresolvable command, or a native block gates.sh lost. `diff_scoped`: the only commands gates.sh runs only when the diff can reach them (select_for_changes), each measured over a minute; the rest run every time.",
+  "gates_native": {
+    "tools/scripts/skill_sync_check.py --base {base} --config tools/scripts/versioning.json --mode=report": {
+      "gates": [
+        "\"$PYTHON\" \"$SSC\" --base \"$BASE\" --config \"$CFG\" --mode=report"
+      ]
+    },
+    "tools/scripts/skill_path_map_lint.py --base {base} --mode=report": {
+      "gates": [
+        "\"$PYTHON\" \"$SPML\" --base \"$BASE\" --mode=report"
+      ]
+    },
+    "tools/scripts/version_bump_check.py --base \"{base}\" --config tools/scripts/versioning.json --mode=report $extra": {
+      "gates": [
+        "\"$PYTHON\" \"$VBC\" --base \"$BASE\" --config \"$CFG\" --mode=report --accept-intent-trailers"
+      ]
+    },
+    "tools/scripts/compat_sync_check.py --base {base} --mode=report --enforce": {
+      "gates": [
+        "\"$PYTHON\" \"$CSC\" --base \"$BASE\" --mode=report --enforce"
+      ]
+    },
+    "tools/scripts/config_doc_check.py --base {base} --mode=report": {
+      "gates": [
+        "\"$PYTHON\" \"$CDC\" --base \"$BASE\" --mode=report"
+      ]
+    },
+    "tools/scripts/compat_aggregate.py check": {
+      "gates": [
+        "\"$PYTHON\" \"$COMPAT_AGG\" check"
+      ]
+    },
+    "tools/scripts/node_abi_gate.py --base {base} --mode=report": {
+      "gates": [
+        "\"$PYTHON\" \"$NAG\" --base \"$BASE\" --mode=report"
+      ]
+    },
+    "tools/scripts/hotspot_size_guard.py --base {base} --config tools/scripts/hotspot_size_guard.json --mode=report --require-ceiling-reduction": {
+      "gates": [
+        "\"$PYTHON\" \"$HSG\" --base \"$BASE\" --config \"$HSG_CFG\" --mode=report --require-ceiling-reduction"
+      ]
+    },
+    "tools/scripts/header_fanout_guard.py --base {base} --config tools/scripts/header_fanout_guard.json --mode=report": {
+      "gates": [
+        "\"$PYTHON\" \"$HFG\" --base \"$BASE\" --config \"$HFG_CFG\" --mode=report"
+      ]
+    },
+    "tools/scripts/planning_gitlink_guard.py --base {base} --mode=report --ci-warn-only": {
+      "gates": [
+        "\"$PYTHON\" \"$PGL\" --base \"$BASE\" --mode=report"
+      ],
+      "flag_exceptions": {
+        "--ci-warn-only": "CI cannot read the private planning repository, so an unverifiable pin ancestry is only a warning there; gates.sh can, and fails closed"
+      }
+    },
+    "tools/scripts/sequencer_exposure_check.py --base \"$BASE_SHA\"": {
+      "gates": [
+        "\"$PYTHON\" \"$SEQ_EXPOSURE\" --base \"$BASE\""
+      ]
+    },
+    "tools/scripts/processing_model_terms_lint.py": {
+      "gates": [
+        "\"$PYTHON\" \"$TERMS_LINT\""
+      ]
+    },
+    "tools/scripts/single_backend_guard.py": {
+      "gates": [
+        "\"$PYTHON\" \"$SINGLE_BACKEND_GUARD\""
+      ]
+    },
+    "tools/scripts/conflict_marker_check.py": {
+      "gates": [
+        "\"$PYTHON\" \"$CONFLICT_MARKER_GUARD\""
+      ]
+    },
+    "tools/scripts/framework_neutrality_check.py": {
+      "gates": [
+        "\"$PYTHON\" \"$FRAMEWORK_NEUTRALITY\""
+      ]
+    },
+    "tools/scripts/win32_include_lint.py": {
+      "gates": [
+        "\"$PYTHON\" \"$WIN32_INCLUDE_LINT\""
+      ]
+    },
+    "tools/scripts/safe_path_guard_lint.py": {
+      "gates": [
+        "\"$PYTHON\" \"$SAFE_PATH_LINT\""
+      ]
+    },
+    "tools/scripts/python_floor_syntax_check.py": {
+      "gates": [
+        "\"$PYTHON\" \"$PYTHON_FLOOR_SYNTAX\""
+      ]
+    },
+    "tools/scripts/raw_pid_probe_lint.py": {
+      "gates": [
+        "\"$PYTHON\" \"$RAW_PID_PROBE_LINT\""
+      ]
+    },
+    "tools/scripts/text_encoding_lint.py --base {base}": {
+      "gates": [
+        "\"$PYTHON\" \"$TEXT_ENCODING_LINT\" --root \"$ROOT\" --base"
+      ]
+    },
+    "tools/scripts/migration_note_guard.py --base {base}": {
+      "gates": [
+        "for local_gate in migration_note_guard.py",
+        "\"$PYTHON\" \"$local_path\" --root \"$ROOT\" --base \"$BASE\""
+      ]
+    }
+  },
+  "ci_only": {
+    "tools/scripts/ci_diff_base.py --event \"$EVENT_NAME\" --base-ref \"$BASE_REF\" --merge-group-base-sha \"$MERGE_GROUP_BASE_SHA\"": "resolves the event's diff base; gates.sh takes its base as an argument and the lane substitutes the merge-base with it",
+    "tools/ci/source_selftests.py run --min-count 130 --part shared ${IMPACT_BASE:+--impact-scope \"$IMPACT_BASE\"}": "the source-only selftests; gates.sh runs the same manifest diff-scoped in its 7a-src lane (and a gate host reports them NOT CHECKED)",
+    "tools/ci/source_selftests.py run --manifest tools/ci/wide_non_native_checks.json --min-count 7": "runs only when the repo variable PULP_CLASSIFY_WIDE_NON_NATIVE is set, for a tooling-only change that skips the macOS gate"
+  },
+  "diff_scoped": {
+    "tools/scripts/test_gates.py": "runs gates.sh's lint blocks under bash, about 130s",
+    "tools/scripts/test_version_at_land.py": "clones the checkout per fixture, about 160s"
+  }
+}
