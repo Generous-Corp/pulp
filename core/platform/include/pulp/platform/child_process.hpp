@@ -33,8 +33,11 @@ struct ProcessOptions {
     /// POSIX directory descriptor consumed atomically by spawn instead of
     /// resolving working_directory. The caller retains ownership through start().
     int working_directory_descriptor = -1;
-    /// macOS-only validation hook. When set, the process is born suspended;
-    /// returning true resumes that exact process, while false terminates it.
+    /// Validation hook for suspended launches on macOS and Windows retained
+    /// launches. When set, the process is born suspended; returning true
+    /// resumes that exact process, while false terminates it. Windows invokes
+    /// this hook only for start_retained; ordinary launches do not support
+    /// suspended validation.
     std::function<bool(int process_id)> suspended_process_validator;
     int timeout_ms = 0;                    ///< 0 = no timeout
     size_t max_output_bytes = 1 << 20;     ///< 1 MB default cap
