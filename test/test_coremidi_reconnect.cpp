@@ -133,6 +133,8 @@ TEST_CASE("CoreMIDI output stops reporting open when its destination is replaced
 // close(), so a callback still in flight is a use-after-free.
 // ---------------------------------------------------------------------------
 
+#include <unistd.h>
+
 #include <condition_variable>
 #include <future>
 #include <memory>
@@ -145,10 +147,20 @@ constexpr SInt32 kDrainId = 0x50554C51;
 struct DrainSource {
     MIDIClientRef client = 0;
     MIDIEndpointRef source = 0;
+    // The virtual source is visible system-wide while it exists, so it carries
+    // an obvious test name and the pid, and is disposed when the test ends.
     bool create() {
-        if (MIDIClientCreate(CFSTR("PulpDrainTest"), nullptr, nullptr, &client) != noErr)
+        const std::string name = "pulp-test-coremidi-" + std::to_string(getpid());
+        CFStringRef cf_name =
+            CFStringCreateWithCString(kCFAllocatorDefault, name.c_str(), kCFStringEncodingUTF8);
+        const OSStatus client_status = MIDIClientCreate(cf_name, nullptr, nullptr, &client);
+        if (client_status != noErr) {
+            CFRelease(cf_name);
             return false;
-        if (MIDISourceCreate(client, CFSTR("Pulp Drain Source"), &source) != noErr)
+        }
+        const OSStatus source_status = MIDISourceCreate(client, cf_name, &source);
+        CFRelease(cf_name);
+        if (source_status != noErr)
             return false;
         MIDIObjectSetIntegerProperty(source, kMIDIPropertyUniqueID, kDrainId);
         return true;
@@ -225,8 +237,7 @@ TEST_CASE("CoreMIDI input close() waits for a callback that is in flight",
     payload.reset();
 }
 
-TEST_CASE("CoreMIDI input delivers nothing after close() returns",
-          "[midi][coremidi][close]") {
+TEST_CASE("CoreMIDI input delivers nothing after close() returns", "[midi][coremidi][close]") {
     DrainSource vs;
     if (!vs.create())
         SKIP("CoreMIDI server not reachable; skipping");
@@ -235,8 +246,8 @@ TEST_CASE("CoreMIDI input delivers nothing after close() returns",
 
     std::atomic<int> received{0};
     auto input = system->create_input();
-    REQUIRE(input->open(std::to_string(kDrainId),
-                        [&](const pulp::midi::MidiEvent&) { ++received; }));
+    REQUIRE(
+        input->open(std::to_string(kDrainId), [&](const pulp::midi::MidiEvent&) { ++received; }));
     for (int i = 0; i < 20; ++i)
         send_note(vs.source);
     input->close();
