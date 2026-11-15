@@ -466,7 +466,8 @@ TEST_CASE("G6 named Processor parameters remain independent between slots",
     CHECK(first_sample(0, 2.0f) == baseline * 2.0f);
 }
 
-TEST_CASE("G6 slot_parameter reads each slot's declared value", "[host][graph][voice-bank][parameter]") {
+TEST_CASE("G6 slot_parameter reads each slot's declared value",
+          "[host][graph][voice-bank][parameter]") {
     VoiceBankBindingResult status;
     auto bank = make_bank(schema(), status);
     REQUIRE(bank);
@@ -503,7 +504,8 @@ std::array<float, 8> slot_levels(const VoiceBankBinding& bank) {
 }
 } // namespace
 
-TEST_CASE("G6 captured slot state restores onto another live bank", "[host][graph][voice-bank][state]") {
+TEST_CASE("G6 captured slot state restores onto another live bank",
+          "[host][graph][voice-bank][state]") {
     VoiceBankBindingResult status;
     auto source = make_bank(schema(), status);
     REQUIRE(source);
@@ -846,7 +848,8 @@ TEST_CASE("G6 scoped channel modes preserve unrelated voices and refuse outside 
     CHECK_FALSE(owner(*bank).allocator().voice(2).active());
 }
 
-TEST_CASE("G6 stolen held generation cannot release its replacement", "[host][graph][voice-bank][pedal]") {
+TEST_CASE("G6 stolen held generation cannot release its replacement",
+          "[host][graph][voice-bank][pedal]") {
     VoiceBankBindingResult status;
     auto bank = make_bank(schema(), status);
     REQUIRE(bank);
@@ -1658,4 +1661,114 @@ TEST_CASE("Activating a bank whose slots are all idle makes each slot render onc
         CHECK(result.calls_after_block[11][slot] == result.calls_after_block[10][slot]);
     }
     CHECK(result.skipped_after_block[11] == result.skipped_after_block[10] + 8);
+}
+
+TEST_CASE("A deferred note-off retires the tracker key it releases",
+          "[host][graph][voice-bank][ingress][capacity][negative-control]") {
+    // A host that starts notes through publish() and releases them through
+    // dispatch_deferred() must not exhaust the tracker's 128 keys: the 129th
+    // distinct key would otherwise be refused with eight idle voices.
+    VoiceBankBindingResult status;
+    auto bank = make_bank(schema(), status);
+    REQUIRE(bank);
+    for (int key = 0; key < 160; ++key) {
+        const auto channel = static_cast<std::uint8_t>(1 + key / 128);
+        const auto number = static_cast<std::uint8_t>(key % 128);
+        INFO("key " << key);
+        REQUIRE(step(*bank, static_cast<std::uint64_t>(key),
+                     {midi::MidiEvent::note_on(channel, number, 127)}) == VoiceBankBindingCode::Ok);
+        bool released = false;
+        for (std::uint32_t slot = 0; slot < kVoiceBankSlots && !released; ++slot) {
+            midi::MpeNoteState state{};
+            bool releasing = false;
+            if (!bank->owner().slot_note(slot, state, releasing) || releasing ||
+                state.channel != channel || state.note != number)
+                continue;
+            REQUIRE(bank->dispatch_deferred(bank->epoch(), slot, state.note_id,
+                                            midi::MpeExpressionEvent::Kind::NoteOff,
+                                            state) == VoiceBankBindingCode::Ok);
+            released = true;
+        }
+        REQUIRE(released);
+    }
+}
+
+namespace {
+// A slot processor whose block always fails, through the process_block()
+// path the graph takes when a descriptor opts into audio-rate modulation.
+class FailingVoiceProcessor final : public format::Processor {
+  public:
+    format::PluginDescriptor descriptor() const override {
+        format::PluginDescriptor d;
+        d.name = "Failing Voice";
+        d.manufacturer = "Pulp Test";
+        d.bundle_id = "com.pulp.test.failing-voice";
+        d.version = "1.0.0";
+        d.category = format::PluginCategory::Instrument;
+        d.output_buses = {{"Stereo", 2, false}};
+        d.node_capabilities.consumes_audio_rate_modulations = true;
+        return d;
+    }
+    void define_parameters(state::StateStore& store) override {
+        store.add_parameter(
+            {.id = 1, .name = "level", .range = state::ParamRange::linear(0.0f, 2.0f, 1.0f)});
+    }
+    void prepare(const format::PrepareContext&) override {}
+    void process(audio::BufferView<float>&, const audio::BufferView<const float>&,
+                 midi::MidiBuffer&, midi::MidiBuffer&, const format::ProcessContext&) override {}
+    bool process_block(format::ProcessBlock&) override {
+        return false;
+    }
+};
+} // namespace
+
+TEST_CASE("A slot failure silences the whole voice bank block",
+          "[host][graph][voice-bank][negative-control]") {
+    auto failing = std::make_unique<MpeVoiceBankOwner<ProbeVoice>>(
+        [](ProbeVoice&, std::uint32_t) -> std::unique_ptr<format::Processor> {
+            return std::make_unique<FailingVoiceProcessor>();
+        },
+        std::array<VoiceBankInputEndpoint, 4>{
+            {{"note_in", 0}, {"pitch", 1}, {"pressure", 2}, {"timbre", 3}}});
+    VoiceBankBindingResult status;
+    auto bank = VoiceBankBinding::prepare(schema(), definition(), std::move(failing), "audio_out",
+                                          48000, 256, status);
+    INFO("prepare code=" << static_cast<int>(status.code) << " detail=" << status.detail);
+    REQUIRE(bank);
+    // A note mid-block splits the render: the first slice fails, and the
+    // frames after it must not keep the host buffer's previous contents.
+    REQUIRE(bank->begin_block(0, 8) == HostEventResult::Accepted);
+    REQUIRE(bank->publish(event(bank->epoch(), 3, 1, midi::MidiEvent::note_on(1, 69, 127))) ==
+            HostEventResult::Accepted);
+    audio::Buffer<float> buffer(2, 8);
+    for (std::size_t channel = 0; channel < 2; ++channel)
+        std::fill_n(buffer.channel(channel).data(), 8, 7.0f);
+    auto view = buffer.view();
+    REQUIRE(bank->render(view, 0, 8) == VoiceBankBindingCode::GraphExecutionFailure);
+    for (std::size_t channel = 0; channel < 2; ++channel)
+        for (std::size_t frame = 0; frame < 8; ++frame) {
+            INFO("channel " << channel << " frame " << frame);
+            CHECK(buffer.channel(channel)[frame] == 0.0f);
+        }
+    // The failed block was closed, so the next one opens.
+    CHECK(bank->begin_block(8, 8) == HostEventResult::Accepted);
+}
+
+TEST_CASE("Voice bank block refusals use the host ingress result codes",
+          "[host][graph][voice-bank][ingress][negative-control]") {
+    VoiceBankBindingResult status;
+    auto bank = make_bank(schema(), status);
+    REQUIRE(bank);
+    const auto note = event(bank->epoch(), 0, 1, midi::MidiEvent::note_on(1, 69, 127));
+    // No open block: the record has no admitted epoch window, as in the ingress.
+    CHECK(bank->publish(note) == HostEventResult::StaleEpoch);
+    CHECK(bank->begin_block(0, 0) == HostEventResult::OutOfRange);
+    CHECK(bank->begin_block(0, 257) == HostEventResult::OutOfRange);
+    REQUIRE(bank->begin_block(0, 4) == HostEventResult::Accepted);
+    // A second block while one is open is Busy, as in the ingress.
+    CHECK(bank->begin_block(0, 4) == HostEventResult::Busy);
+    CHECK(bank->publish(note) == HostEventResult::Accepted);
+    audio::Buffer<float> buffer(2, 4);
+    auto view = buffer.view();
+    CHECK(bank->render(view, 0, 4) == VoiceBankBindingCode::Ok);
 }
