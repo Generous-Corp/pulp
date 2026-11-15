@@ -188,6 +188,12 @@ TEST_CASE("Spectral replay matches independent numeric audio without a serializa
                                           asset_oracle::expected(inputs().a, inputs().b, control)));
 }
 
+TEST_CASE("Saved-identity envelopes remain unsupported for spectral graphs",
+          "[host][spectral][replay][saved-identity]") {
+    const auto graph = fixture();
+    CHECK(GraphSerializer::to_saved_document(*graph).empty());
+}
+
 TEST_CASE("Spectral asset corruption and unsupported contracts preserve the old prepared graph",
           "[host][spectral][replay][negative]") {
     const auto original = fixture();

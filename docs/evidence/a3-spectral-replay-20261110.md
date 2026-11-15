@@ -207,6 +207,7 @@ Owner-decision conflict: `docs/graph-program-status/G-10-notation-and-codec-sour
 on main (written after this lane paused) lists spectral persistence as an open
 owner question, recommends persisting analysis/stage/synthesis inside the G-3
 v6 writer with asset morph refused, and asks whether assets should be embedded
-or sidecar. This lane embeds assets in format 5 and does not persist analysis
-nodes, per the lead admission recorded above. That ruling needs to be
+or sidecar. This lane embeds assets in format 6 and does not persist analysis
+nodes, per the lead admission recorded above. The revived lane writes format 6;
+that ruling needs to be
 reconciled before publication.

@@ -17,7 +17,7 @@ item is decided and implemented; section 2 records the decisions.
   spectral node (`core/host/src/graph_serializer.cpp`, the `spectral_identity`
   check at the top of `to_json`).
   The A3 replay branch (`graph/a3-spectral-persist-20261115`, not yet on main)
-  instead saves a bounded format-5 subset: Audio boundaries, the two-asset
+  instead saves a bounded format-6 subset: Audio boundaries, the two-asset
   morph with embedded canonical asset bytes, identity/mask stages and
   synthesis. It does not persist analysis nodes. Accepting it answers the
   embedded-versus-sidecar and format-version questions below.

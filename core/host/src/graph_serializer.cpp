@@ -1936,6 +1936,12 @@ GraphSerializer::saved_node_identities(const SignalGraph& graph) {
 std::string GraphSerializer::to_saved_document(
     const SignalGraph& graph,
     const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout) {
+    // Spectral persistence has its own closed envelope. The saved-identity
+    // wrapper adds fields that the spectral reader intentionally rejects, so
+    // keep this older identity surface unsupported until it can bind spectral
+    // node identities and persisted IDs end to end.
+    if (spectral_persistence::contains_spectral_nodes(graph))
+        return {};
     const auto raw = to_json(graph, editor_layout);
     if (raw.empty())
         return {};

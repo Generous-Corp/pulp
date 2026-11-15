@@ -20,7 +20,7 @@ if (!replay.prepare(48000, 4096))
     return std::string("prepare refused");
 ```
 
-Format 5's `spectral_assets` table embeds canonical SFRM bytes. Each record
+Format 6's `spectral_assets` table embeds canonical SFRM bytes. Each record
 binds schema `pulp.analyzed-spectral-asset`, version 1, the original positive
 sample count, the frame count, the canonical 32-byte frame contract, and the
 canonical bytes' SHA256. The frame count is not free metadata: the reader
