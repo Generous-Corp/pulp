@@ -240,7 +240,9 @@ void FramePump::stop() {
     s.live.store(false);
     if (s.link) {
         CVDisplayLinkStop(s.link);
-        // CVDisplayLinkStop does not wait for a callback already running.
+        // CVDisplayLinkStop waits for a callback already running (pinned by
+        // test_mac_frame_timing.mm). The drain is caution, not a fix: it keeps
+        // this pump safe if a platform version ever returned early.
         while (s.in_callback.load() != 0)
             std::this_thread::sleep_for(std::chrono::microseconds(100));
         CVDisplayLinkRelease(s.link);
