@@ -809,8 +809,8 @@ TEST_CASE("output tolerance checks reject non-finite samples",
     REQUIRE(clean.lag == lag);
     REQUIRE(clean.max_abs <= tolerance);
 
-    for (const float bad : {std::numeric_limits<float>::quiet_NaN(),
-                            std::numeric_limits<float>::infinity()}) {
+    for (const float bad :
+         {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity()}) {
         CAPTURE(bad);
         auto corrupted = out;
         corrupted[static_cast<std::size_t>(lag) + 17] = bad;
