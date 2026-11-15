@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <charconv>
 #include <cmath>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <map>
@@ -1046,18 +1047,39 @@ GraphPatchResult load_graph_patch_file(const std::filesystem::path& path,
                  "cannot read graph file",
                  "use a readable regular file"},
                 {}};
-    const auto limit = path.extension() == ".pat" ? 1024 * 1024 : GraphSerializer::max_file_bytes;
-    std::string text(limit + 1, '\0');
+    const std::uintmax_t limit =
+        path.extension() == ".pat" ? 1024 * 1024 : GraphSerializer::max_file_bytes;
+    const auto too_large = [] {
+        return GraphPatchResult{{Code::ResourceLimit,
+                                 0,
+                                 {},
+                                 {},
+                                 "graph file exceeds its size limit",
+                                 "use a smaller graph file"},
+                                {}};
+    };
+    const auto unreadable = [] {
+        return GraphPatchResult{{Code::FileUnreadable,
+                                 0,
+                                 {},
+                                 {},
+                                 "cannot read graph file",
+                                 "use a readable regular file"},
+                                {}};
+    };
+    // Size the buffer from the file instead of zero-filling the whole limit.
+    // The extra byte detects a file that changed size while it was read.
+    std::error_code size_error;
+    const auto size = std::filesystem::file_size(path, size_error);
+    if (size_error)
+        return unreadable();
+    if (size > limit)
+        return too_large();
+    std::string text(static_cast<std::size_t>(size) + 1, '\0');
     file.read(text.data(), static_cast<std::streamsize>(text.size()));
-    text.resize(static_cast<std::size_t>(file.gcount()));
-    if (text.size() > limit || file.bad())
-        return {{Code::ResourceLimit,
-                 0,
-                 {},
-                 {},
-                 "graph file exceeds bounds or read failed",
-                 "use a bounded readable file"},
-                {}};
+    if (file.bad() || static_cast<std::uintmax_t>(file.gcount()) != size)
+        return unreadable();
+    text.resize(static_cast<std::size_t>(size));
     return path.extension() == ".pat" ? parse_graph_patch(text, catalog)
                                       : load_graph_patch_json(text, catalog);
 }
