@@ -1,0 +1,135 @@
+{
+  "schema": "pulp.graph.p4-two-consumer-admission-receipt.v0",
+  "verdict": "HOLD",
+  "base_origin_main": "aa6532659d2d8565fae2164945aac6014583094d",
+  "test_commit": "5baa91145d65b0d207096eed0461102c4a433ff8",
+  "test_binary": "pulp-test-graph-gpu-resource-admission",
+  "test_binary_sha256": "83d69f9f3430c951fdab17e27d67abf6b814d2afde70b22ffb97388e998f79d3",
+  "build": {
+    "type": "Release",
+    "flags_contain": [
+      "-O3",
+      "-DNDEBUG"
+    ]
+  },
+  "host": {
+    "name": "m3",
+    "cpu": "Apple M3 Ultra",
+    "os": "macOS 27.2",
+    "gpu_provider": "Dawn (Metal backend), real device"
+  },
+  "consumers": [
+    {
+      "id": "neural.wavenet",
+      "node": "GpuNeuralRealtimeNode (WaveNet family) via make_gpu_neural_model",
+      "gpu": "real Dawn GpuWaveNetSession, shared-memory path, provider self-reported dawn",
+      "fallback": "inline exact CPU shadow"
+    },
+    {
+      "id": "convolution.fir",
+      "node": "GpuConvolver ProviderPolicy::StagedOnly",
+      "gpu": "real Dawn GpuCompute staged path; provider not self-reported (status provider unknown)",
+      "fallback": "continuously primed CPU partitioned convolution"
+    }
+  ],
+  "graph": "input -> neural.wavenet (processor node) -> convolution.fir (processor node) -> output",
+  "device_loss": "fault_injected: GpuCompute::notify_device_lost on the convolver's real device; NeuralRealtimeTestAccess::request_recovery(ProviderLost) on the neural bridge. No hardware loss observed.",
+  "fixtures": [
+    {
+      "schema": "pulp.test.graph-resource-admission.fixture.v0",
+      "fixture": "sr48k-b64",
+      "sample_rate": 48000,
+      "max_block": 64,
+      "neural": {
+        "quantum": 64,
+        "transport_latency_samples": 128,
+        "graph_artifact_latency_samples": 192,
+        "path": "shared_memory",
+        "provider": "dawn",
+        "prepared_lead_blocks": 2,
+        "gpu_blocks": 158,
+        "cpu_fallback_blocks": 0,
+        "priming_blocks": 2,
+        "identity_sha256": "39a52b12a3a4285337f1bbc6a879852a1eceaef83552b919c756e2767305a530"
+      },
+      "convolution": {
+        "quantum": 64,
+        "fft_size": 512,
+        "transport_latency_samples": 128,
+        "graph_artifact_latency_samples": 192,
+        "path": "staged",
+        "provider": "unknown",
+        "gpu_kernel_available": true,
+        "worker_output_blocks": 158,
+        "cpu_fallback_blocks": 0,
+        "identity_sha256": "71216e2d2c8ddd752e4958c75af9d513477d63165bd6212f3196ce2e5cb2427c"
+      },
+      "graph_latency_samples": 384,
+      "measured_lag_samples": 384,
+      "max_abs_error": 1.49012e-07,
+      "callback_allocations": 0
+    },
+    {
+      "schema": "pulp.test.graph-resource-admission.fixture.v0",
+      "fixture": "sr44k1-b256-ragged",
+      "sample_rate": 44100,
+      "max_block": 256,
+      "neural": {
+        "quantum": 256,
+        "transport_latency_samples": 512,
+        "graph_artifact_latency_samples": 768,
+        "path": "shared_memory",
+        "provider": "dawn",
+        "prepared_lead_blocks": 2,
+        "gpu_blocks": 158,
+        "cpu_fallback_blocks": 0,
+        "priming_blocks": 2,
+        "identity_sha256": "39a52b12a3a4285337f1bbc6a879852a1eceaef83552b919c756e2767305a530"
+      },
+      "convolution": {
+        "quantum": 256,
+        "fft_size": 1024,
+        "transport_latency_samples": 512,
+        "graph_artifact_latency_samples": 768,
+        "path": "staged",
+        "provider": "unknown",
+        "gpu_kernel_available": true,
+        "worker_output_blocks": 158,
+        "cpu_fallback_blocks": 0,
+        "identity_sha256": "71216e2d2c8ddd752e4958c75af9d513477d63165bd6212f3196ce2e5cb2427c"
+      },
+      "graph_latency_samples": 1536,
+      "measured_lag_samples": 1536,
+      "max_abs_error": 1.78814e-07,
+      "callback_allocations": 0
+    },
+    {
+      "schema": "pulp.test.graph-resource-admission.loss.v0",
+      "fixture": "sr48k-b64-loss",
+      "injection": "fault_injected",
+      "loss_frame": 3840,
+      "neural_cpu_fallback_blocks_before": 0,
+      "neural_cpu_fallback_blocks_after": 80,
+      "max_abs_error": 1.3411e-07,
+      "callback_allocations": 0
+    }
+  ],
+  "repeat_runs": "10/10 pass on this host",
+  "confirm_failure": {
+    "identity_guard": "CONFIRMED",
+    "inline_cpu_shadow_test_side": "CONFIRMED",
+    "independent_oracle": "CONFIRMED",
+    "runtime_neural_cpu_fallback_core": "CONFIRMED"
+  },
+  "not_checked": [
+    "real hardware device loss (only notify/recovery-seam injection)",
+    "device memory residency (payload budget is declared bytes, not measured device allocation)",
+    "per-block GPU attribution for the staged convolver (public status does not name provider or engine)",
+    "warm-up/prewarm budget",
+    "host deadline under a real audio device callback (offline graph loop with test-driven pump)",
+    "signed manifest; manifest is test-local",
+    "non-Darwin, Windows, Linux, installed-SDK consumer",
+    "GPU NAM repository plugin itself (external repo; this uses the same in-SDK WaveNet primitive)",
+    "AutoReacquire recovery inside the graph"
+  ]
+}
