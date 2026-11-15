@@ -3268,6 +3268,17 @@ against the formula itself. The rule's `static_assert` turns a broken rounding
 into a compile error, which `confirm_failure.sh` reports as INCONCLUSIVE; break
 a different term to exercise the runtime test.
 
+The asset-morph source builds its rule from the decoded stream's geometry, so it
+runs at any admitted (N, H, C). Its endpoint scratch is a per-node vector sized
+by `SpectralAssetMorphState::prepare()` on the control thread and charged to the
+runtime bank; `frame()` must stay allocation-free and only index that storage.
+A refused geometry keeps its own `SpectralFiniteStreamRule::Status` and
+`reason()` text and surfaces publicly as `UnsupportedOperation`; a codec
+`ResourceLimit` while decoding either asset surfaces as `CapacityExceeded`, not
+`InvalidFrame`. The geometry suite (`test_spectral_asset_geometry.cpp`) carries
+its own double-precision oracle because the shared example oracle is fixed at
+FFT 256 / hop 64 mono.
+
 ## Bounded typed trigger runtime
 
 Use `prepare_trigger_plan()` and `try_install_prepared_trigger_plan()` for the
