@@ -1152,8 +1152,12 @@ save/reopen render proof beside the legacy caller-owned route controls.
   automation when the fixed queue is full and lets injected events win a
   same-offset tie. Reuse the mailbox across gap-free snapshots for the same
   plugin node so an edit cannot discard a publication made before the swap.
-  `parameter_mailbox_counters()` reads that mailbox's published, overflowed
-  and dropped-event counts; they live in the mailbox, so they survive
+  `parameter_mailbox_counters()` reads that mailbox's published, overflowed,
+  overwritten and dropped-event counts. The mailbox keeps only the latest
+  batch, so a batch replaced before any process() read it is lost; the writer
+  learns that exactly from `TripleBuffer::write_replacing_unread()` (the dirty
+  bit still set on the slot it gets back), never by comparing `sequence_seen`,
+  which races the reader. The counts live in the mailbox, so they survive
   `prepare_swap()` and restart on an eager `prepare()`. They count only the
   source side; a delivery-time drop into a full block queue is not counted,
   because a refused delivery is retried and would be counted twice.

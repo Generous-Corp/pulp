@@ -61,7 +61,8 @@ const char* control_process_result_fix(ControlProcessResult result) noexcept {
                "nest it inside a graph-event block; a Busy block was not consumed, so resubmit "
                "it at the same absolute start";
     case ControlProcessResult::UnsupportedMode:
-        return "disable parallel routing and anticipation on a graph with a Control index input";
+        return "disable parallel routing and anticipation on a graph with a Control index input, "
+               "and prepare it again if it was prepared with parallel routing on";
     case ControlProcessResult::RenderFailed:
         return "the block was consumed and silenced; fix the failing node and continue at the "
                "next absolute start";
@@ -113,6 +114,11 @@ struct ControlInstance {
             parameters = {0.5f, 0.25f, 0, 0};
         } else if (op == Operation::Integrator) {
             parameters = {0, 1, 0, 0};
+        } else if (op == Operation::Slew) {
+            // Mirror SlewLimiterT's own 10 ms defaults so an unconfigured
+            // node saves the times it actually runs with.
+            parameters = {10, 10, 0, 0};
+            slew.set_times_ms(10.0f, 10.0f);
         }
     }
 
@@ -252,8 +258,10 @@ CustomNodeType make_unary_type(std::string_view id, Operation operation) {
     type.reset = [](void* pointer) { static_cast<ControlInstance*>(pointer)->reset(); };
     type.save_state = [](void* pointer) {
         const auto& state = *static_cast<ControlInstance*>(pointer);
+        // An unconfigured table has no state to persist; an empty blob keeps
+        // the serializer from writing a zero-length table its loader refuses.
         if (state.operation == Operation::IndexedTable)
-            return encode_values(state.table);
+            return state.table.empty() ? std::vector<std::uint8_t>{} : encode_values(state.table);
         const auto count = parameter_count(state.operation);
         return encode_values(std::span<const float>(state.parameters.data(), count));
     };

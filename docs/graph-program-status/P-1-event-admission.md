@@ -45,12 +45,22 @@ stays NOT_CHECKED); runtime, realtime timing,
 provider-parity, and non-Darwin lanes remain **NOT_CHECKED**.
 
 Mailbox overflow telemetry (2026-11-14): `SignalGraph::parameter_mailbox_counters`
-reports a `PluginSlot` node's published, overflowed and dropped-event counts,
+reports a `PluginSlot` node's published, overflowed, overwritten and
+dropped-event counts (since 2026-11-15 a batch replaced before any process()
+read it is counted as overwritten and its events as dropped),
 covered by `pulp-test-host-signal-graph`. The consumer source now asserts them
 (`parameter-mailbox-overflow-counters`, with a planted wrong expectation that
 fails under that rule in an in-tree build). The installed-SDK receipt has not
 been rerun, so that row stays **NOT_CHECKED** in the receipt. The same in-tree
-build of the unchanged `origin/main` consumer fails `combined-epoch-map`: voice
-bank epochs now come from one process-wide sequence, so the voice family's
-native epoch differs between the five combined renders. That control needs a
-rule that does not compare raw bank epochs across banks.
+build of the then-current `origin/main` consumer failed `combined-epoch-map`: voice
+bank epochs come from one process-wide sequence, so the voice family's
+native epoch differs between the five combined renders. Since 2026-11-15 the
+control compares the MIDI, parameter and trigger epochs exactly across runs
+and requires each run's fresh voice bank to carry a distinct non-zero epoch.
+The consumer source is also built and run in-tree on every configuration as
+`p1-event-admission-in-tree-consumer` (`test/cmake/g5_host_event_consumer_tests.cmake`),
+so a regression like this one fails the required gate instead of only the
+opt-in `PULP_SANITIZER=realtime` lane. The CI RTSan job passes raw
+`-fsanitize=realtime` flags without `PULP_SANITIZER=realtime`, so the planted
+RTSan controls are still not registered there; that row stays
+**NOT_CHECKED** in CI.
