@@ -13,7 +13,9 @@
     "docs/status/sequencer-exposure/rows/g10-routed-spectral-runtime.json",
     "core/host/src/spectral_asset_morph_internal.hpp",
     "core/host/src/spectral_graph.cpp",
-    "core/host/src/graph_rt_report.cpp"
+    "core/host/src/graph_rt_report.cpp",
+    "core/host/src/spectral_finite_stream_internal.hpp",
+    "core/host/src/spectral_graph_internal.hpp"
   ],
   "evidence": [
     {
@@ -54,12 +56,28 @@
         "source.value->morph",
         "compare(audio, wanted)"
       ]
+    },
+    {
+      "path": "test/test_spectral_finite_stream_rule.cpp",
+      "needles": [
+        "Finite stream rule matches the profile-one asset constants",
+        "Finite stream frame count equals the analysis grid at every geometry",
+        "A hop that does not divide the FFT breaks the closed-form count"
+      ]
+    },
+    {
+      "path": "test/test_spectral_asset_geometry.cpp",
+      "needles": [
+        "Asset morph renders the analysis grid at non-default codec geometries",
+        "Asset morph refuses a hop that does not divide the FFT size by name",
+        "Asset morph bounds retained assets at large geometry by the runtime bank"
+      ]
     }
   ],
   "surfaces": {
     "installed_sdk": {
       "disposition": "exposed",
-      "rationale": "Named runtime-only spectral stages and the finite mono FFT256/hop64 asset source use Pulp::host. Direct host Audio control is averaged per absolute hop; notation, saved-graph replay and paced qualification remain PARTIAL.",
+      "rationale": "Named runtime-only spectral stages and the finite two-asset source use Pulp::host. The source runs at the decoded profile-one geometry (power-of-two FFT 256 to 16384, hop dividing the FFT size, 1 to 16 channels) and refuses other hops by name; its EOF frame count, cutoff, drain and component layout come from one geometry-derived internal rule. Direct host Audio control is averaged per absolute hop; notation, saved-graph replay and paced qualification remain PARTIAL.",
       "evidence": [
         {
           "kind": "sdk_header",

@@ -4079,11 +4079,14 @@ TEST_CASE("SignalGraph parameter mailbox counts published, overflowed and droppe
         REQUIRE(full.push({ParameterMailboxProbe::kParamId, 2, 0.25f, 0}));
     for (int i = 0; i < 3; ++i)
         REQUIRE_FALSE(full.push({ParameterMailboxProbe::kParamId, 3, 0.75f, 0}));
+    // `full` also replaces `fits` before any process() read it, so the one
+    // event `fits` carried is lost as well and counted as an overwrite.
     REQUIRE_FALSE(graph.inject_parameter_events(plugin, full));
     REQUIRE(graph.parameter_mailbox_counters(plugin, counters));
     CHECK(counters.published == 2);
     CHECK(counters.overflowed == 1);
-    CHECK(counters.dropped_events == 3);
+    CHECK(counters.overwritten == 1);
+    CHECK(counters.dropped_events == 4);
 
     pulp::audio::BufferView<const float> in;
     pulp::audio::BufferView<float> out;
@@ -4094,7 +4097,20 @@ TEST_CASE("SignalGraph parameter mailbox counts published, overflowed and droppe
     REQUIRE(graph.parameter_mailbox_counters(plugin, counters));
     CHECK(counters.published == 2);
     CHECK(counters.overflowed == 1);
-    CHECK(counters.dropped_events == 3);
+    CHECK(counters.overwritten == 1);
+    CHECK(counters.dropped_events == 4);
+
+    // A batch published after process() read the previous one overwrites
+    // nothing, and once it is read the next publication overwrites nothing.
+    REQUIRE(graph.inject_parameter_events(plugin, fits));
+    graph.process(out, in, 8);
+    CHECK(probe->received_count() == 1);
+    REQUIRE(graph.inject_parameter_events(plugin, fits));
+    graph.process(out, in, 8);
+    REQUIRE(graph.parameter_mailbox_counters(plugin, counters));
+    CHECK(counters.published == 4);
+    CHECK(counters.overwritten == 1);
+    CHECK(counters.dropped_events == 4);
 
     // A pinned execution snapshot writes the same mailbox.
     using Result = SignalGraph::PreparedTopologyEdit::Result;
@@ -4105,17 +4121,17 @@ TEST_CASE("SignalGraph parameter mailbox counts published, overflowed and droppe
     REQUIRE(pinned);
     REQUIRE(pinned.inject_parameter_events(plugin, fits));
     REQUIRE(graph.parameter_mailbox_counters(plugin, counters));
-    CHECK(counters.published == 3);
+    CHECK(counters.published == 5);
     CHECK(counters.overflowed == 1);
-    CHECK(counters.dropped_events == 3);
+    CHECK(counters.dropped_events == 4);
 
     // A gap-free prepare_swap() keeps the node's mailbox and its counts.
     graph.begin_swap_edit();
     REQUIRE(graph.prepare_swap(48000.0, 8) == SignalGraph::SwapResult::Swapped);
     REQUIRE(graph.parameter_mailbox_counters(plugin, counters));
-    CHECK(counters.published == 3);
+    CHECK(counters.published == 5);
     CHECK(counters.overflowed == 1);
-    CHECK(counters.dropped_events == 3);
+    CHECK(counters.dropped_events == 4);
 
     // An eager prepare() creates a fresh mailbox, so the counts restart.
     graph.release();
@@ -4124,6 +4140,7 @@ TEST_CASE("SignalGraph parameter mailbox counts published, overflowed and droppe
     REQUIRE(graph.parameter_mailbox_counters(plugin, counters));
     CHECK(counters.published == 0);
     CHECK(counters.overflowed == 0);
+    CHECK(counters.overwritten == 0);
     CHECK(counters.dropped_events == 0);
 }
 

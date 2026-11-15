@@ -286,7 +286,15 @@ Every widget has an access role, label, and value for screen readers:
 ```cpp
 knob.set_access_role(View::AccessRole::slider);
 knob.set_access_label("Gain");
-knob.set_access_value("-6.0 dB");
+```
+
+A slider, meter or progress bar reads its value from its value interface
+(`get_value_string()`), which takes priority over `set_access_value()`.
+Use `set_access_value()` for widgets with no other value source, such as a
+combo box's selected item:
+
+```cpp
+combo.set_access_value("Hall");
 ```
 
 `AccessRole` covers the widget kinds Pulp ships: `slider`, `toggle` (switch),
@@ -359,6 +367,18 @@ the same roles by setting the ARIA `role` attribute; the token table is
 `pulp/view/aria_roles.hpp`.
 
 **Known limits (roles are correct; interaction patterns are not all wired):**
+
+- Not every window host publishes the accessibility tree. macOS exposes it from
+  the plug-in editor view only, not the standalone window host. On Windows no
+  host forwards `WM_GETOBJECT`, so the UIA provider is unreachable. On Linux
+  only the SDL standalone host publishes AT-SPI objects; plug-in editor windows
+  expose nothing.
+- Increment and decrement from VoiceOver and TalkBack call
+  `View::on_accessibility_adjust`, whose default does nothing. No widget
+  overrides it yet, so adjusting a slider by assistive technology has no
+  effect.
+- Widgets do not raise value, focus or name change events, and announcements
+  have no platform sink, so live updates are not delivered.
 
 - Composite widgets that PAINT their rows (`ListBox`, `TableListBox`,
   `TabPanel`) carry NO role. They hold no child Views for their rows and tabs,

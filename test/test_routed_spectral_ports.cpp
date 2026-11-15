@@ -832,8 +832,12 @@ TEST_CASE("Asset preparation enforces geometry control topology and retained mem
         auto wrong = pulp::signal::encode_spectral_stream(*stream.value);
         REQUIRE(wrong);
         SignalGraph graph;
-        REQUIRE_FALSE(
-            graph.add_spectral_asset_morph_v1(wrong.value->view(), bytes.view(), 769, "wrong"));
+        // Each geometry is admitted on its own, but its grid count for this
+        // length or its channel count differs from the profile-one endpoint.
+        const auto refused =
+            graph.add_spectral_asset_morph_v1(wrong.value->view(), bytes.view(), 769, "wrong");
+        REQUIRE_FALSE(refused);
+        REQUIRE(refused.error == SpectralError::IdentityMismatch);
         REQUIRE(graph.nodes().empty());
     }
     auto large = pulp::signal::make_spectral_stream({256, 64, 1, 48000}, 33000);

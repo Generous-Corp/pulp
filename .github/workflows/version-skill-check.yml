@@ -335,6 +335,7 @@ jobs:
       - name: Gate-script fixture tests
         run: |
           python3 tools/scripts/test_gates.py
+          python3 tools/scripts/test_gates_sync_parity.py
           python3 tools/scripts/test_ci_diff_base.py
           python3 tools/scripts/test_node_abi_gate.py
           python3 tools/scripts/test_hotspot_size_guard.py

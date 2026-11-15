@@ -88,6 +88,18 @@ if [ -z "${PULP_PYTHON:-}" ] || [ ! -x "${PULP_PYTHON}" ]; then
     exit 2
 fi
 
+# ── Per-push receipt ───────────────────────────────────────────────────────
+# One JSON line per push in ~/.local/state/pulp/prepush-receipts.jsonl: which
+# gates ran, were skipped or demoted, the bypass knobs set, and the exit code.
+# The EXIT trap is set here so the early refusals below are recorded too; the
+# later gate-log trap calls the same finisher. Never affects the push.
+# shellcheck source=.githooks/lib/receipt.sh
+source "$ROOT/.githooks/lib/receipt.sh" 2>/dev/null || {
+    prepush_receipt_note() { :; }
+    prepush_receipt_finish() { return 0; }
+}
+trap '_prepush_rc=$?; prepush_receipt_finish "$_prepush_rc"' EXIT
+
 # ── Queued-PR guard (blocking, before every gate and the diff-cover build) ──
 # A PR in the merge queue never needs a rebase or a merge of main: the queue
 # builds it on top of current main. Pushing to it anyway ran the multi-minute
@@ -248,6 +260,7 @@ fi
 
 if [ "${PULP_SKIP_PREPUSH:-0}" = "1" ]; then
     echo "[pre-push] PULP_SKIP_PREPUSH=1 — skipping gates." >&2
+    prepush_receipt_note skipped all-gates "PULP_SKIP_PREPUSH=1"
     exit 0
 fi
 
@@ -261,7 +274,7 @@ PREPUSH_GATE_LOG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/pulp-prepush-gates.XXXXXX")" 
     echo "[pre-push] failed to create gate log directory" >&2
     exit 1
 }
-trap 'rm -rf -- "$PREPUSH_GATE_LOG_DIR"' EXIT
+trap '_prepush_rc=$?; rm -rf -- "$PREPUSH_GATE_LOG_DIR"; prepush_receipt_finish "$_prepush_rc"' EXIT
 # shellcheck source=.githooks/lib/gate-output.sh
 source "$ROOT/.githooks/lib/gate-output.sh"
 
@@ -449,6 +462,7 @@ MERGE_TREE_SCRIPT_STATE="$ROOT/tools/scripts/merge_tree_script_state.py"
 MERGE_TREE_BASE="${PULP_PREPUSH_BASE:-origin/main}"
 if [ "${PULP_DISABLE_PREPUSH_GATES:-0}" = "1" ]; then
     echo "[pre-push] PULP_DISABLE_PREPUSH_GATES=1 — merge-tree script-state check DEMOTED to advisory." >&2
+    prepush_receipt_note demoted merge-tree-script-state "PULP_DISABLE_PREPUSH_GATES=1"
 elif [ -f "$MERGE_TREE_SCRIPT_STATE" ]; then
     if git remote get-url origin >/dev/null 2>&1 && ! git fetch --quiet origin main; then
         echo "[pre-push] merge-tree script-state: could not refresh $MERGE_TREE_BASE; advisory, continuing with the local base." >&2
@@ -1006,8 +1020,10 @@ PREPUSH_AFFECTED_TESTS="$ROOT/tools/scripts/prepush_affected_tests.py"
 if [ -f "$PREPUSH_AFFECTED_TESTS" ]; then
     if [ "$_prepush_gate_host" -eq 1 ]; then
         echo "[pre-push] affected tests: NOT CHECKED on a gate host; CI runs the PR-head lane." >&2
+        prepush_receipt_note skipped affected-tests "gate host"
     elif [ "${PULP_SKIP_PREPUSH_AFFECTED:-0}" = "1" ]; then
         echo "[pre-push] affected tests: NOT CHECKED via PULP_SKIP_PREPUSH_AFFECTED=1; CI remains authoritative." >&2
+        prepush_receipt_note skipped affected-tests "PULP_SKIP_PREPUSH_AFFECTED=1"
     else
         run_gate_captured "$PYTHON" "$PREPUSH_AFFECTED_TESTS" --root "$ROOT" --base "$BASE"
         gate_rc=$?; case $gate_rc in
@@ -1162,6 +1178,7 @@ elif [ "$_prepush_gate_host" -eq 1 ]; then
     else
         pulp_gate_host_skip_line "pre-push diff-coverage configure/build" "tools/scripts/local_diff_cover.sh"
     fi
+    prepush_receipt_note skipped diff-coverage "gate host"
     _prepush_diff_cover_refused=1
 elif [ -f "$DIFF_COVER_SH" ] && [ "${PULP_SKIP_DIFF_COVER:-0}" != "1" ]; then
     # The coverage script owns both compare-ref freshness and changed-surface
@@ -1237,6 +1254,7 @@ disable_diff="${PULP_DISABLE_PREPUSH_DIFF_COVER:-0}"
 
 if [ "$diff_cover_failed" = "1" ] && [ "$disable_diff" = "1" ]; then
     echo "[pre-push] PULP_DISABLE_PREPUSH_DIFF_COVER=1 — diff-coverage failure DEMOTED to advisory." >&2
+    prepush_receipt_note demoted diff-coverage "PULP_DISABLE_PREPUSH_DIFF_COVER=1"
     diff_cover_failed=0
 fi
 
@@ -1247,6 +1265,7 @@ fi
 
 if [ "$fail" = "1" ] && [ "$disable_main" = "1" ]; then
     echo "[pre-push] PULP_DISABLE_PREPUSH_GATES=1 — skill/version/compat/compat-aggregate/node-ABI/docs-noise/hotspot-size/deps gate failures DEMOTED to advisory." >&2
+    prepush_receipt_note demoted main-gates "PULP_DISABLE_PREPUSH_GATES=1 demoted a failing gate"
     fail=0
 fi
 

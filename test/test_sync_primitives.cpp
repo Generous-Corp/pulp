@@ -277,6 +277,25 @@ TEST_CASE("TripleBuffer alternating writes and reads see every value in order",
     }
 }
 
+TEST_CASE("TripleBuffer write_replacing_unread reports exactly the unread overwrites",
+          "[runtime][triple_buffer]") {
+    TripleBuffer<int> buf(0);
+    // Nothing published yet, so nothing is replaced.
+    CHECK_FALSE(buf.write_replacing_unread(1));
+    // The reader has not taken 1, so 2 replaces it.
+    CHECK(buf.write_replacing_unread(2));
+    REQUIRE(buf.read() == 2);
+    // The reader took 2, so 3 replaces nothing.
+    CHECK_FALSE(buf.write_replacing_unread(3));
+    // A plain write() of an unread value is detected by the next tracked write.
+    buf.write(4);
+    CHECK(buf.write_replacing_unread(5));
+    REQUIRE(buf.read() == 5);
+    REQUIRE(buf.read() == 5);
+    CHECK_FALSE(buf.write_replacing_unread(6));
+    REQUIRE(buf.read() == 6);
+}
+
 TEST_CASE("TripleBuffer write_with that throws publishes nothing", "[runtime][triple_buffer]") {
     TripleBuffer<int> buf(1);
     buf.write(2);

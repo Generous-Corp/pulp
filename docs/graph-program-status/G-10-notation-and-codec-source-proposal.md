@@ -6,7 +6,8 @@ each choice precisely so the owner can pick an option. The discoverability part
 of the first item is implemented: `pulp graph catalog --json` now lists the four
 spectral constructors as `unsupported_typed_api_only` rows with their owning
 `SignalGraph::add_spectral_*` constructor, and notation refuses each key with
-that constructor instead of telling the author to register a type.
+that constructor instead of telling the author to register a type. The second
+item is decided and implemented; section 2 records the decisions.
 
 ## 1. Spectral notation and saved-graph persistence
 
@@ -56,6 +57,32 @@ authoring path, so edges need only a `spectral` flag on the saved connection.
    serializer file limit) and a content-addressed sidecar keyed by the SHA-256
    that `SpectralAssetMorphConfig` already computes.
 
+### Remaining catalog and notation gap
+
+`pulp graph catalog --json` now lists the four spectral constructors. Checked
+against `core/host/src/graph_patch.cpp` on origin/main, these gaps remain:
+
+- The spectral rows share one probe identity (FFT 256, hop 64, mono, 48 kHz).
+  They do not state the admitted identity range (FFT 256 to 16384 power of two,
+  hop 1 to N/2, 1 to 16 channels), and the asset-morph row does not say that its
+  geometry is fixed at profile 1, FFT 256, hop 64, mono rather than following
+  the probe.
+- The stage row is built from `IdentityV1` only; the catalog does not list the
+  stage kinds (`IdentityV1`, `RealMaskV1`) or that a mask carries
+  `channels * bins` gains.
+- `SignalGraphPreparedTopologyEdit` offers analysis, stage and synthesis but no
+  asset-morph constructor, so the catalog's asset-morph row has no
+  prepared-edit counterpart.
+- Notation boundaries are stereo only: formatting refuses an input or output
+  boundary that is not two channels, and the default catalog builds both with
+  `add_input_node(2)` / `add_output_node(2)`. There is no mono or bus-layout
+  boundary spelling.
+- Notation has no subgraph-template syntax.
+- Persistence of every spectral node is the owner decision in this section.
+
+The first two are additive catalog fields that need no format decision; the
+rest depend on the grammar choices above.
+
 ### Recommendation
 
 Option 2 now, inside the G-3 v6 writer, with asset morph refused. Decide the
@@ -71,63 +98,99 @@ which other notation consumers (G-11 cookbooks, the MCP tool) read.
 
 ## 2. Codec-sourced EOF at arbitrary geometry
 
-### Current behavior (origin/main)
+### Decisions taken
 
-The only node that turns codec bytes into routed frames is
-`SignalGraph::add_spectral_asset_morph_v1`. Its geometry is fixed at profile 1,
-FFT 256, hop 64, mono, in each of these places:
+The lead decided this section's choices as follows; the code below implements
+them.
 
-- `core/host/src/spectral_asset_morph_internal.hpp`: `make()` refuses any other
-  geometry; `frames = (length + 192 + 63) / 64` and
-  `render_frames = 320 + frames * 64` hard-code N=256 and H=64; `frame()`
-  reads 129 bins with a stride of 258 components.
-- `core/host/src/spectral_graph.cpp`: the node identity is built as
-  `SpectralIdentity::make(256, 64, 1, rate)`; prepare calls
-  `morph.prepare(1, 129)` and sets `finite_frames = frame_count + 4` (4 is N/H).
-- `core/host/src/spectral_graph_internal.hpp`: the callback averages exactly 64
-  control samples per frame.
+1. **Shape of the public path: (b).** `add_spectral_asset_morph_v1` is
+   generalized to the decoded stream geometry. No new single-stream source or
+   public type was added; a caller that wants a plain source passes the same
+   stream twice, with the caveat that morph at amount 0 is not guaranteed to
+   reproduce endpoint A bit-exactly.
+2. **Clock:** the existing `morph` audio input. One frame per H control
+   samples, so the current root path and prepare-time root check are reused.
+3. **EOF policy:** the exact-count rule. Each stream holds exactly
+   `ceil((L + N - H) / H)` frames for source length L; the finite cutoff is
+   `N + H + frames * H`; `finite_frames` is `frame_count + N / H`.
+4. **Channels:** every channel count the identity admits, 1 to 16. One control
+   value drives all channels.
+5. **Hops that do not divide N:** refused. The rule names the refusal
+   (`hop_does_not_divide_fft_size`, "hop does not divide the fft size") and the
+   public call returns `UnsupportedOperation`.
+6. **Persistence:** still refused. `GraphSerializer::to_json` returns an empty
+   string for a graph holding the source at any geometry.
 
-The codec itself (`core/signal/include/pulp/signal/spectral_frame_codec.hpp`)
-already accepts FFT 256 to 16384 (power of two), hop 1 to N/2 and 1 to 16
-channels, which matches `SpectralIdentity::make`. Preparation accepts a
-spectral root only if it is an analysis or asset morph node.
+### Current behavior on this branch
 
-### Design choices that need a decision
+`SpectralAssetMorphConfig::make` decodes asset A, builds
+`SpectralFiniteStreamRule` from its geometry (N, H, C) and the caller's length,
+then requires asset B to match A's profile, FFT size, hop, channel count,
+sample-rate bits and frame count. The rule admits power-of-two N from 256 to
+16384, H from 1 to N/2 dividing N, and C from 1 to 16; these are the
+`SpectralIdentity` and codec limits plus the dividing-hop restriction. The node
+identity, prepare step, per-hop control average, published-frame drain and
+routed cutoff all read the rule.
 
-1. **Shape of the public path.**
-   - (a) A new single-stream source,
-     `add_spectral_stream_source_v1(encoded, source_samples, name)`, with one
-     `frames` output at the decoded geometry.
-   - (b) Generalize `add_spectral_asset_morph_v1` to any matching geometry and
-     let a caller pass the same stream twice. This is cheaper, but morph at
-     amount 0 is not guaranteed to reproduce endpoint A bit-exactly, so it is
-     not a faithful source.
-   Recommendation: (a).
-2. **Clock.** Every current spectral root consumes host audio, which is what
-   advances its frame clock. An input-free source needs either a clock or
-   trigger audio input (like asset morph's `morph` port: one frame per H input
-   samples) or an executor change so a root can advance from the callback's
-   sample count alone. Recommendation: an audio `clock` input, because it
-   reuses the existing root path and prepare-time root check.
-3. **EOF policy.** Generalize the asset morph rule: the stream must hold exactly
-   `ceil((L + N - H) / H)` frames for source length L; frames past the end are
-   zero; the finite cutoff is `N + H + frames * H` samples; `finite_frames` is
-   `frame_count + N / H`. An alternative is to accept any frame count and
-   derive L, which loses the explicit length check. Recommendation: keep the
-   exact-count rule.
-4. **Channels.** Allow the decoded channel count (1 to 16) or restrict to mono
-   first. Recommendation: allow all, because synthesis already takes the
-   identity's channel count.
+Refusals, each leaving authoring unchanged:
 
-### Work once decided
+| Cause | Public error | Rule status |
+| --- | --- | --- |
+| FFT, hop or channels outside the codec range | `InvalidFrame` (the codec cannot carry the asset) | `fft_size_not_admitted`, `hop_not_admitted`, `channels_not_admitted` |
+| Hop decodes but does not divide N | `UnsupportedOperation` | `hop_does_not_divide_fft_size` |
+| B differs from A in geometry or rate, or a frame count is not the grid count for L | `IdentityMismatch` | ok |
+| L is zero or past signed chronology | `InvalidFrame` | `invalid_length` |
+| Frame count past signed chronology | `CapacityExceeded` | `capacity_exceeded` |
+| Codec resource limit or the 64 MiB runtime bank while decoding either asset | `CapacityExceeded` | ok |
 
-Add the node type and ports in `spectral_graph.hpp`, `signal_graph_node.hpp`
-and `signal_graph_runtime.hpp`; replace every constant listed above with values
-derived from the decoded geometry; add the callback branch; update
-`graph_rt_report.cpp`, the agent capability manifest, the consumption census
-and the catalog row added here. Acceptance: an analytic round trip through
-synthesis at two non-default geometries (for example N=1024/H=256 stereo and
-N=512/H=128 mono) checked against an independent float64 IDFT/OLA reference;
-exact prefix and tail extent; 32/64/128 and irregular partitions identical;
-and planted mutations of the frame-count rule, cutoff, N/H tail and channel
-stride each caught by `confirm_failure.sh`.
+`SpectralFiniteStreamRule::reason()` spells each status.
+
+Realtime safety: endpoint storage is no longer a fixed 129-bin array. A
+prepared node sizes two channel-major vectors of `C * (N / 2 + 1)` bins in
+`SpectralAssetMorphState::prepare()` on the stopped control thread, charges them
+to the runtime bank with the retained assets, and prepares the morph DSP for C
+channels. The callback only indexes that storage and a fixed 16-entry pointer
+table; the geometry suite renders every partition under the realtime allocation
+probe and asserts zero allocations.
+
+### Evidence
+
+`test/test_spectral_asset_geometry.cpp`:
+
+- Renders the source through synthesis at N=256/H=32 mono, N=512/H=128 mono,
+  N=1024/H=256 stereo and N=2048/H=1024 three-channel. Assets come from an
+  independent double-precision DFT on the grid that
+  `spectral_frame_engine_first_frame_start` defines, and each stored frame's
+  origin is checked against that grid. Output at amounts 0, 1, 0.37 and a
+  varying control is compared with an independent double-precision inverse DFT
+  and squared-window OLA oracle (peak 2e-5, RMS 2e-6). The oracle is first
+  calibrated to reconstruct the input exactly at both endpoints. Partitions 32,
+  64, 128, 4096 and irregular produce identical audio, samples before N + H and
+  from `render_frames` on are exactly zero, latency is N + H, and no telemetry
+  error is raised.
+- Prepares and renders the largest admitted geometry, N=16384/H=8192 with 16
+  channels.
+- Refuses non-dividing hops (256/100, 512/96 stereo, 1024/3) by name, with a
+  dividing hop at the same size as the control; refuses geometry the codec
+  cannot carry; refuses channel, hop and frame-count mismatches with
+  `IdentityMismatch`; and checks that persistence stays refused.
+- Bounds retained assets at N=4096/H=2048 with 8 channels: two streams of 240
+  frames fit the 64 MiB bank and two of 260 are refused with
+  `CapacityExceeded`.
+
+`test/test_spectral_finite_stream_rule.cpp` checks the rule against the
+analysis grid at eight geometries (unchanged) and now checks that each refused
+geometry carries its own status and that every status has a distinct reason.
+
+### Still open
+
+- The catalog's asset-morph row is built at the probe identity (FFT 256, hop
+  64, mono) and does not state the admitted range.
+- `SignalGraphPreparedTopologyEdit` has no asset-morph constructor.
+- A dedicated single-stream source (choice 1a) and an input-free clock are not
+  built; reopen them if a consumer needs an exact pass-through source.
+- Non-dividing hops need the analysis-grid frame count
+  `floor((L - 1) / H) + floor((N - 1) / H) + 1`, a `ceil(N / H)` drain and a
+  cutoff proven against the synthesis engine before they can be admitted.
+- Paced realtime qualification at large geometry is not measured: a frame at
+  N=16384 with 16 channels morphs about 131k bins in one callback.

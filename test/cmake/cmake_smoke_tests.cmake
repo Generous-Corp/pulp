@@ -875,6 +875,16 @@ if(PULP_PYTHON3_FOR_TESTS)
         set_tests_properties(prepush-refresh-push PROPERTIES
             LABELS "tooling;hooks"
             TIMEOUT 180)
+        # The hook writes one JSON line per push (gates run, skipped or demoted,
+        # the bypass knobs, the exit code) to a per-host receipt log, so a CI
+        # failure can be traced to a skipped or missed local gate. Real
+        # repositories and the real hook; the log is never required to push.
+        add_test(NAME prepush-receipt
+            COMMAND ${PULP_PYTHON3_FOR_TESTS}
+                ${CMAKE_SOURCE_DIR}/tools/scripts/test_prepush_receipt.py)
+        set_tests_properties(prepush-receipt PROPERTIES
+            LABELS "tooling;hooks"
+            TIMEOUT 180)
         # An auto-merge-armed or queued PR re-based onto main by hand (same PR
         # diff, newer main base) gets an advisory hint; a content change, an
         # unarmed PR, a failing or hanging lookup, and the override stay silent.

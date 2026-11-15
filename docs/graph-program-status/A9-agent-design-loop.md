@@ -4,7 +4,48 @@
 
 Final status: PARTIAL (unchanged).
 
-The installed-SDK consumer and fail-closed action-plan harness are on main (PR 11682 and later work). The glue-over-200-lines budget and the independent trial packet are not done.
+The installed-SDK consumer and fail-closed action-plan harness are on main (PR 11682 and later work). The independent trial itself has not been re-run since the render-input defect was fixed.
+
+## Glue budget and trial packet (2026-11-14)
+
+Measured on `origin/main` `61136e15bc9b` as non-blank, non-comment lines: the
+consumer was one 690-line `main.cpp` (707 physical lines), far over the
+200-line glue budget. It is now split by role:
+
+| File | Role | Code lines |
+|------|------|-----------|
+| `examples/graph-agent-loop/main.cpp` | authoring glue: author, save, reload, render, probe, edit, replay | 165 |
+| `examples/graph-agent-loop/plan_boundary.hpp` | verification harness: fail-closed plan parser, topology fingerprint, action log | 213 |
+
+The combined 378 lines are 45 percent below the old 690. The split is a
+classification, not a deletion: the 200-line glue budget is met because the
+plan boundary is counted as harness. The budget test therefore holds each file
+to its own ceiling (glue 200, harness 220), so glue moved into
+`plan_boundary.hpp` fails the harness ceiling instead of passing silently. Each
+ceiling has its own over-budget negative control. The two budget tests and both
+controls run in the Pulp test tree on every build
+(`test/cmake/graph_agent_loop_consumer_tests.cmake`, not labelled `slow`). The
+full consumer with its planted plans runs as `graph-agent-loop-installed-sdk`,
+which is `slow` (the informational nightly full build runs it, the required
+`macos` gate does not), fails on zero registered tests and asserts exactly
+thirteen. The saving is real in three places: the
+hand-written duplicate-key scanner (about 200 lines) is gone because choc's
+parser already rejects a repeated key, including an escaped spelling (checked
+at the pinned choc, and pinned by two planted plans); the per-step field checks
+are one table; and the URI fence is one regular expression, differentially
+checked against the old function on 3,000,000 random strings with zero
+differences (one deliberate tightening: an upper-case `SHA256:` pin is now
+treated as a URI scheme because the plan's pin check is case-sensitive).
+
+New guards, each with a negative control: five more planted plans
+(`duplicate-key`, `escaped-duplicate-key`, `url-string`, `extra-step-field`,
+`edit-target`) and the glue-budget test with its over-budget control. The
+receipt changes from `checks=258` to `checks=225` because fewer redundant
+checks run; the digest, fingerprint and action log are byte-identical.
+
+The independent trial packet is
+[A9-independent-trial-packet.md](A9-independent-trial-packet.md). Nothing in it
+has been run as a trial.
 
 PR pointers below are historical; all PRs cited in this file that were queried (checked 2026-11-13) are merged, none remain open.
 

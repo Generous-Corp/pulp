@@ -38,6 +38,15 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #endif
@@ -2891,6 +2900,289 @@ TEST_CASE("Retained cleanup removes finite descendant churn",
         CHECK(count >= 1);
         CHECK(count <= 9);
     }
+}
+
+#elif defined(_WIN32)
+namespace {
+template <class Predicate>
+bool custody_eventually(Predicate predicate,
+                        std::chrono::milliseconds timeout = std::chrono::seconds(3)) {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    do {
+        if (predicate())
+            return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    } while (std::chrono::steady_clock::now() < deadline);
+    return false;
+}
+
+auto custody_deadline() {
+    return std::chrono::steady_clock::now() + std::chrono::seconds(2);
+}
+
+// Test-owned handle to a process observed through its recorded id. Holding the
+// handle from first sight means a later liveness read cannot see a reused id.
+struct ProcessWitness {
+    HANDLE handle = nullptr;
+    ProcessWitness() = default;
+    explicit ProcessWitness(int pid)
+        : handle(OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE,
+                             FALSE, static_cast<DWORD>(pid))) {}
+    ProcessWitness(const ProcessWitness&) = delete;
+    ProcessWitness& operator=(const ProcessWitness&) = delete;
+    ~ProcessWitness() {
+        if (handle != nullptr)
+            CloseHandle(handle);
+    }
+    bool opened() const {
+        return handle != nullptr;
+    }
+    bool alive() const {
+        return handle != nullptr && WaitForSingleObject(handle, 0) == WAIT_TIMEOUT;
+    }
+    bool gone_within(std::chrono::milliseconds timeout) const {
+        return handle != nullptr &&
+               WaitForSingleObject(handle, static_cast<DWORD>(timeout.count())) == WAIT_OBJECT_0;
+    }
+    void force_terminate() const {
+        if (alive()) {
+            TerminateProcess(handle, 1);
+            WaitForSingleObject(handle, 2000);
+        }
+    }
+};
+
+// cmd leader starts a PowerShell descendant and exits; the descendant starts a
+// ping grandchild, records "<descendant> <grandchild>" and waits on it.
+std::vector<std::string> descendant_tree_args(const std::string& marker_path) {
+    const std::string script =
+        "$g = Start-Process -PassThru -NoNewWindow -FilePath ping.exe -ArgumentList "
+        "'-n','60','127.0.0.1'; [IO.File]::WriteAllText('" +
+        marker_path + "', [string]$PID + ' ' + [string]$g.Id); Wait-Process -Id $g.Id";
+    return {"/c", "start \"\" /b powershell.exe -NoProfile -NonInteractive -Command \"" + script +
+                      "\" & exit 7"};
+}
+
+bool read_tree(const std::string& marker_path, int& descendant, int& grandchild) {
+    std::ifstream file(marker_path);
+    descendant = grandchild = -1;
+    file >> descendant >> grandchild;
+    return descendant > 0 && grandchild > 0;
+}
+} // namespace
+
+TEST_CASE("Retained observation preserves an exited leader until cleanup",
+          "[runtime][child-process][retained-custody][retained-observation]") {
+    using namespace pulp::platform;
+    RetainedProcessCustody reservation;
+    ChildProcess process;
+    REQUIRE(process.start_retained(reservation, "cmd.exe", {"/c", "exit 23"}));
+    const int leader = process.process_id();
+    INFO("retained leader=" << leader);
+    REQUIRE(custody_eventually([&] {
+        return reservation.retained_process_observation().state == RetainedProcessState::Exited;
+    }));
+    CHECK_FALSE(process.is_running());
+    CHECK(process.wait().exit_code == 23);
+    const auto observed = reservation.retained_process_observation();
+    CHECK(observed.process_id == leader);
+    CHECK(observed.process_group_id == -1);
+    CHECK(observed.identity_retained);
+    CHECK(observed.exit_code == 23);
+    // The retained handle keeps the exited process object, so its id still
+    // names this child for an independent observer.
+    ProcessWitness witness(leader);
+    REQUIRE(witness.opened());
+    DWORD witnessed_code = 0;
+    REQUIRE(GetExitCodeProcess(witness.handle, &witnessed_code));
+    CHECK(witnessed_code == 23);
+
+    const auto start = std::chrono::steady_clock::now();
+    const auto incomplete = process.cleanup_retained_process_group(start);
+    CHECK(incomplete.status == RetainedCleanupStatus::Incomplete);
+    CHECK(incomplete.observation.identity_retained);
+    CHECK_FALSE(incomplete.term_sent);
+    CHECK_FALSE(incomplete.kill_sent);
+    CHECK(std::chrono::steady_clock::now() - start < std::chrono::milliseconds(500));
+    CHECK_FALSE(process.start("cmd.exe", {"/c", "exit 0"}));
+    ChildProcess moved(std::move(process));
+    RetainedProcessCustody moved_reservation(std::move(reservation));
+    CHECK(moved.retained_process_observation().process_id == leader);
+    const auto cleaned = moved_reservation.cleanup_retained_process_group(custody_deadline());
+    CHECK(cleaned.status == RetainedCleanupStatus::Complete);
+    CHECK(cleaned.child_reaped);
+    CHECK(cleaned.descendants_gone);
+    CHECK_FALSE(cleaned.kill_sent);
+    CHECK_FALSE(cleaned.observation.identity_retained);
+    CHECK(cleaned.observation.state == RetainedProcessState::Reaped);
+}
+
+TEST_CASE("Ordinary launch leaks a grandchild after its leader exits",
+          "[runtime][child-process][retained-custody][retained-descendants][negative-control]") {
+    // Instrument control for the retained descendant test below: the same
+    // process tree under an ordinary launch must leave a live grandchild that
+    // ProcessWitness can see. If this stops observing the leak, the retained
+    // test's "gone" readings prove nothing.
+    using namespace pulp::platform;
+    TemporaryFile marker(".ordinary-descendants");
+    const auto marker_path = marker.path_string();
+    int descendant = -1, grandchild = -1;
+    ChildProcess process;
+    REQUIRE(process.start("cmd.exe", descendant_tree_args(marker_path)));
+    REQUIRE(custody_eventually([&] { return read_tree(marker_path, descendant, grandchild); },
+                               std::chrono::seconds(20)));
+    ProcessWitness child(descendant), grand(grandchild);
+    auto safety = make_scope_guard([&] {
+        grand.force_terminate();
+        child.force_terminate();
+    });
+    INFO("descendant=" << descendant << " grandchild=" << grandchild);
+    CHECK(process.wait().exit_code == 7);
+    REQUIRE(grand.opened());
+    CHECK(child.alive());
+    CHECK(grand.alive());
+}
+
+TEST_CASE("Retained cleanup removes nested descendants with inherited pipes",
+          "[runtime][child-process][retained-custody][retained-descendants]") {
+    using namespace pulp::platform;
+    TemporaryFile marker(".retained-descendants");
+    const auto marker_path = marker.path_string();
+    RetainedProcessCustody reservation;
+    int leader = -1, descendant = -1, grandchild = -1;
+    std::unique_ptr<ProcessWitness> child, grand;
+    auto safety = make_scope_guard([&] {
+        // Fixture cleanup independent of production termination, so a broken
+        // job never leaves hostile processes behind on the host.
+        if (grand)
+            grand->force_terminate();
+        if (child)
+            child->force_terminate();
+        (void)reservation.cleanup_retained_process_group(custody_deadline());
+    });
+    {
+        ChildProcess process;
+        REQUIRE(process.start_retained(reservation, "cmd.exe", descendant_tree_args(marker_path)));
+        leader = process.process_id();
+        REQUIRE(custody_eventually([&] { return read_tree(marker_path, descendant, grandchild); },
+                                   std::chrono::seconds(20)));
+        child = std::make_unique<ProcessWitness>(descendant);
+        grand = std::make_unique<ProcessWitness>(grandchild);
+        INFO("leader=" << leader << " descendant=" << descendant << " grandchild=" << grandchild);
+        REQUIRE(custody_eventually([&] {
+            return process.retained_process_observation().state == RetainedProcessState::Exited;
+        }));
+        CHECK(process.retained_process_observation().exit_code == 7);
+        REQUIRE(child->opened());
+        REQUIRE(grand->opened());
+        CHECK(child->alive());
+        CHECK(grand->alive());
+        const auto expired =
+            process.cleanup_retained_process_group(std::chrono::steady_clock::now());
+        CHECK(expired.status == RetainedCleanupStatus::Incomplete);
+        CHECK(expired.observation.identity_retained);
+        CHECK_FALSE(expired.kill_sent);
+        ChildProcess destination;
+        destination = std::move(process);
+        CHECK(destination.retained_process_observation().process_id == leader);
+    }
+    // Destroying the handle leaves the reservation and its descendants intact.
+    CHECK(reservation.retained_process_observation().state == RetainedProcessState::Exited);
+    CHECK(child->alive());
+    CHECK(grand->alive());
+    const auto start = std::chrono::steady_clock::now();
+    const auto cleaned = reservation.cleanup_retained_process_group(custody_deadline());
+    CHECK(std::chrono::steady_clock::now() - start < std::chrono::milliseconds(2500));
+    CHECK(cleaned.status == RetainedCleanupStatus::Complete);
+    CHECK(cleaned.kill_sent);
+    CHECK(cleaned.child_reaped);
+    CHECK(cleaned.descendants_gone);
+    CHECK(child->gone_within(std::chrono::milliseconds(0)));
+    CHECK(grand->gone_within(std::chrono::milliseconds(0)));
+}
+
+TEST_CASE("Retained cleanup terminates a running leader and its job",
+          "[runtime][child-process][retained-custody]") {
+    using namespace pulp::platform;
+    RetainedProcessCustody reservation;
+    ChildProcess process;
+    REQUIRE(process.start_retained(reservation, "ping.exe", {"-n", "60", "127.0.0.1"}));
+    CHECK(process.is_running());
+    CHECK(reservation.retained_process_observation().state == RetainedProcessState::Running);
+    const auto cleaned = reservation.cleanup_retained_process_group(custody_deadline());
+    CHECK(cleaned.status == RetainedCleanupStatus::Complete);
+    CHECK(cleaned.kill_sent);
+    CHECK_FALSE(cleaned.term_sent);
+    CHECK(cleaned.child_reaped);
+    CHECK(cleaned.descendants_gone);
+    CHECK_FALSE(process.is_running());
+}
+
+TEST_CASE("Retained failed spawn consumes the reservation without a process identity",
+          "[runtime][child-process][retained-custody]") {
+    using namespace pulp::platform;
+    RetainedProcessCustody reservation;
+    ChildProcess process;
+    REQUIRE_FALSE(
+        process.start_retained(reservation, "C:\\nonexistent\\pulp-custody-worker.exe", {}));
+    CHECK(process.process_id() == -1);
+    CHECK(reservation.retained_process_observation().state == RetainedProcessState::NotStarted);
+    const auto receipt = reservation.cleanup_retained_process_group(custody_deadline());
+    CHECK(receipt.status == RetainedCleanupStatus::Complete);
+    CHECK(receipt.descendants_gone);
+    CHECK_FALSE(receipt.child_reaped);
+    CHECK_FALSE(receipt.term_sent);
+    CHECK_FALSE(receipt.kill_sent);
+    // Single-use: neither the consumed reservation nor the process may launch again.
+    ChildProcess second;
+    CHECK_FALSE(second.start_retained(reservation, "cmd.exe", {"/c", "exit 0"}));
+    CHECK(second.process_id() == -1);
+    RetainedProcessCustody fresh;
+    CHECK_FALSE(process.start_retained(fresh, "cmd.exe", {"/c", "exit 0"}));
+    CHECK(fresh.retained_process_observation().state == RetainedProcessState::NotStarted);
+}
+
+TEST_CASE("Retained custody refuses reuse, input, and the unsupported channel before spawning",
+          "[runtime][child-process][retained-custody]") {
+    using namespace pulp::platform;
+    RetainedProcessCustody reservation;
+    ChildProcess process;
+    REQUIRE(process.start_retained(reservation, "cmd.exe", {"/c", "exit 0"}));
+    ChildProcess second;
+    CHECK_FALSE(second.start_retained(reservation, "cmd.exe", {"/c", "exit 0"}));
+    CHECK(second.process_id() == -1);
+    CHECK(reservation.cleanup_retained_process_group(custody_deadline()).status ==
+          RetainedCleanupStatus::Complete);
+
+    RetainedProcessCustody channel_reservation;
+    bool called = false;
+    ChildProcess channel_process;
+    CHECK_FALSE(channel_process.start_retained_with_standard_input_channel(
+        channel_reservation, "cmd.exe", {"/c", "exit 0"}, [&](int, ChildProcessInputChannel, auto) {
+            called = true;
+            return true;
+        }));
+    CHECK_FALSE(called);
+    CHECK(channel_process.process_id() == -1);
+    CHECK(channel_reservation.retained_process_observation().state ==
+          RetainedProcessState::NotStarted);
+    CHECK(channel_reservation.cleanup_retained_process_group(custody_deadline()).status ==
+          RetainedCleanupStatus::NotRetained);
+
+    RetainedProcessCustody rejected;
+    ChildProcess validated;
+    ProcessOptions options;
+    int seen = -1;
+    options.suspended_process_validator = [&](int pid) {
+        seen = pid;
+        return false;
+    };
+    CHECK_FALSE(validated.start_retained(rejected, "ping.exe", {"-n", "60", "127.0.0.1"}, options));
+    CHECK(seen > 0);
+    const auto receipt = rejected.retained_process_observation();
+    CHECK(receipt.process_id == seen);
+    CHECK(receipt.state == RetainedProcessState::Reaped);
+    CHECK_FALSE(CurrentProcessGroup::capture());
 }
 
 #else

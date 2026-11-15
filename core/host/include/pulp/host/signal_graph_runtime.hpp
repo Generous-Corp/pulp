@@ -118,13 +118,17 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // Source-side telemetry of one PluginSlot node's live parameter mailbox.
     // `published` counts batches inject_parameter_events() published;
     // `overflowed` counts those that kept only a prefix (the call returned
-    // false); `dropped_events` sums the events those batches lost. Counts run
-    // from the mailbox's creation: an eager prepare() creates a fresh mailbox,
-    // a prepare_swap() keeps the node's mailbox and its counts.
+    // false); `overwritten` counts batches a later injection replaced before
+    // any process() call read them. `dropped_events` sums every event lost
+    // either way: the prefix an overflowing batch could not keep, and every
+    // retained event of an overwritten batch. Counts run from the mailbox's
+    // creation: an eager prepare() creates a fresh mailbox, a prepare_swap()
+    // keeps the node's mailbox and its counts.
     struct ParameterMailboxCounters {
         std::uint64_t published = 0;
         std::uint64_t overflowed = 0;
         std::uint64_t dropped_events = 0;
+        std::uint64_t overwritten = 0;
     };
     class PreparedTopologyEdit;
     class ExecutionSnapshot;
@@ -1166,6 +1170,10 @@ class SignalGraph : public format::AudioWorkgroupClient {
         std::atomic<std::uint64_t> published_batches{0};
         std::atomic<std::uint64_t> overflowed_batches{0};
         std::atomic<std::uint64_t> dropped_events{0};
+        std::atomic<std::uint64_t> overwritten_batches{0};
+        // Writer-owned: events the most recent publication retained, charged
+        // to dropped_events if the next publication overwrites it unread.
+        std::uint64_t last_published_events = 0;
     };
 
     struct NodeRuntime {
@@ -2066,7 +2074,8 @@ class SignalGraph : public format::AudioWorkgroupClient {
                                            const state::ParameterEventQueue& events) noexcept;
     static void record_parameter_mailbox_publication(ParameterInputMailbox& mailbox,
                                                      const state::ParameterEventQueue& events,
-                                                     bool copied_all) noexcept;
+                                                     bool copied_all,
+                                                     bool replaced_unread) noexcept;
     // Exact-generation injection into a claimed node's exact mailbox. Fails for
     // any node that is not currently owner-claimed for exact ingress.
     static bool

@@ -48,6 +48,9 @@ struct SimulatedMouse {
     int click_count = 1;
     float scroll_delta_x = 0.0f;
     float scroll_delta_y = 0.0f;
+    /// Build the scroll as whole wheel lines (a classic mouse wheel, so
+    /// hasPreciseScrollingDeltas is NO) instead of pixels (a trackpad).
+    bool scroll_lines = false;
 };
 
 struct BackBufferFrameCapture {

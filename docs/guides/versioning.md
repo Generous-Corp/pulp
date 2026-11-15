@@ -243,6 +243,20 @@ the merge-base themselves, so the pre-push hook and `gates.sh`, which pass
 `origin/main`, behave the same way. Three-dot diffs and `base..HEAD` commit
 ranges give identical results under either anchor.
 
+**`gates.sh` runs the same job.** Every `python3 <script>` command in the
+`version-skill-check` job reaches `tools/scripts/gates.sh` with CI's own arguments:
+`gates.sh` reads them from this workflow (`tools/ci/source_selftests.py run --sync-job`)
+and runs those it has no block of its own for (docs-sync, screenshot-sync, the
+release-tag report, CLI/MCP parity, the source contracts and the gate-script
+fixture tests). `tools/ci/sync_job_parity.json` lists the commands `gates.sh` runs
+in its own blocks and the CI-only ones, and `tools/scripts/test_gates_sync_parity.py`
+fails when the workflow and `gates.sh` disagree, so a step added here cannot
+silently skip the local run. The two fixture tests that take minutes
+(`test_gates.py`, `test_version_at_land.py`) run locally when the diff can reach
+them; a tartci gate host refuses local suites, so there the fixture tests are
+listed NOT CHECKED. `gates.sh` likewise runs the `drift-fast` job's selection from
+`tools/ci/drift_fast.json`.
+
 Alongside the version and skill gates, this same workflow enforces two house
 invariants over Pulp's own source, both hard-failing:
 
