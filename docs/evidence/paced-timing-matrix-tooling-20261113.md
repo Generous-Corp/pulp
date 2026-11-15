@@ -6,6 +6,12 @@ such claim itself: the only runs recorded here are short mode and planted
 negatives on a loaded shared builder, and every one reports
 `timing_qualified=false`.
 
+Update (2026-11-14): cells now request real-time scheduling and the receipt
+schema is v2. See
+[`paced-timing-rt-scheduling-20261114.md`](paced-timing-rt-scheduling-20261114.md)
+for the current scheduling contract and quiet-host commands. The results below
+were measured before that change, at default scheduling.
+
 ## What it runs
 
 `tools/graph_paced_timing_matrix.py` runs the same fixed-origin paced-callback
