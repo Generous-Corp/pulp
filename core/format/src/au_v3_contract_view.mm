@@ -4,6 +4,10 @@
 // beside the view controllers, and names no view, canvas or render type: the
 // editor is the UI package's, opened through a ContractEditorSession.
 
+#if __has_feature(objc_arc)
+#error "au_v3_contract_view.mm is manual reference counting; do not compile it with -fobjc-arc"
+#endif
+
 #include "au_v3_contract_view.h"
 
 #include <pulp/format/detail/main_thread_timer.hpp>
@@ -132,16 +136,37 @@
     _applyingEditorSize = YES;
     const BOOL accepted = _resizeRequest(size);
     _applyingEditorSize = previous;
-    if (accepted)
-        [self setFrameWithoutEcho:size];
+    if (accepted) {
+        // The host decides the view's size: follow its container once it has
+        // one, so a request the host has not followed yet never leaves this
+        // view bigger or smaller than its parent. Without a parent, take the
+        // requested size.
+        if (self.superview != nil)
+            [self setFrameWithoutEcho:self.superview.bounds.size];
+        else
+            [self setFrameWithoutEcho:size];
+    }
     return accepted;
 }
 
 - (void)hostResizedTo:(CGSize)size {
     if (_applyingEditorSize || !_session || size.width < 1.0 || size.height < 1.0)
         return;
-    _session->set_size(static_cast<std::uint32_t>(size.width),
-                       static_cast<std::uint32_t>(size.height));
+    auto width = static_cast<std::uint32_t>(size.width);
+    auto height = static_cast<std::uint32_t>(size.height);
+    // The editor's own limits apply to a host size. A size outside them is
+    // taken at the nearest size the editor accepts, and that size is published
+    // as the preferred size, so a host that honours it brings the view back
+    // inside the editor's limits.
+    const auto host_width = width;
+    const auto host_height = height;
+    if (!_session->constrain(width, height) || width == 0 || height == 0) {
+        width = host_width;
+        height = host_height;
+    }
+    _session->set_size(width, height);
+    if ((width != host_width || height != host_height) && _resizeRequest)
+        [self requestEditorSize:CGSizeMake(width, height)];
 }
 
 - (void)pushScale {

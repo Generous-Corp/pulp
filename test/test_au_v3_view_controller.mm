@@ -199,6 +199,31 @@ TEST_CASE("the AU v3 view controller opens, resizes and closes a contract editor
     [window release];
 }
 
+TEST_CASE("releasing the AU v3 controller closes its contract editor in order",
+          "[auv3][editor-host][au-v3-contract][controller]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    g_has_factory = true;
+    ScopedFactoryRegistration registration(create_processor);
+
+    // Setting preferredContentSize leaves one pending autorelease on the
+    // controller, which the run loop's pool drops, so it deallocs a turn of
+    // the run loop after its last release.
+    @autoreleasepool {
+        PulpAudioUnit* unit = make_unit();
+        NSViewController* controller = make_controller(unit);
+        REQUIRE(contract_view_of(controller) != nil);
+        contract_log().context->params().begin(kGain);
+        [controller release];
+        [unit release];
+        REQUIRE(contract_log().live == 1);
+    }
+    pulp::test_support::MainLoop().run_for(0.3);
+    REQUIRE(contract_log().saw("detach"));
+    REQUIRE_FALSE(contract_log().saw("invalidate"));
+    REQUIRE(contract_log().live == 0);
+}
+
 TEST_CASE("an audio unit released by its controller closes the contract editor in order",
           "[auv3][editor-host][au-v3-contract][controller]") {
     EditorEnvironment env;

@@ -1016,6 +1016,16 @@ factory keeps the ViewBridge editor untouched.
 - **No view stack needed by the editor.** The framework still links the view
   stack (the ViewBridge path lives in the same controller), but the contract
   view names no view, canvas or render type.
+- **iOS is compile-checked only.** `au_view_controller_ios.mm` and the UIView
+  half of `au_v3_contract_view.mm` are syntax-checked against the iOS
+  Simulator SDK; no test runs them. On iOS the resize block publishes
+  `preferredContentSize` only, so after an accepted request the view takes its
+  superview's bounds (never the requested size) and the host's layout drives
+  the rest.
+- **Host limits apply.** A host size outside the editor's limits goes through
+  `ContractEditorSession::constrain()`; the nearest accepted size reaches the
+  editor and is published as the resize request, so a host that honours it
+  brings the view back inside the limits.
 - **Test it with the real controller.** `test_au_v3_view_controller.mm`
   compiles `au_adapter.mm` and `au_view_controller_mac.mm` into a test, binds
   the principal class to a real `PulpAudioUnit` over a registered processor and

@@ -27,6 +27,16 @@ using pulp::test_support::MainLoop;
 using pulp::test_support::RecordingContractFactory;
 using pulp::test_support::reset_contract_recording;
 
+// A window whose backing scale a test changes.
+@interface PulpAUv3TestWindow : NSWindow
+@property(nonatomic) CGFloat scale;
+@end
+@implementation PulpAUv3TestWindow
+- (CGFloat)backingScaleFactor {
+    return _scale > 0 ? _scale : 1.0;
+}
+@end
+
 namespace {
 
 constexpr pulp::state::ParamID kGain = 1;
@@ -79,25 +89,31 @@ struct FakeInstance {
 struct ResizeLog {
     std::vector<CGSize> requests;
     BOOL follow = YES;
+    // The host's container for the view; it follows an accepted request.
+    NSView* container = nil;
 };
 
 PULP_AUV3_CONTRACT_VIEW_CLASS* open_view(FakeInstance& instance, ResizeLog* log = nullptr) {
-    return [PULP_AUV3_CONTRACT_VIEW_CLASS openViewForProcessor:instance.processor.get()
-                                                         store:&instance.store
-                                                      registry:instance.sessions.get()
-                                                 resizeRequest:^BOOL(CGSize size) {
-                                                   if (log == nullptr)
-                                                       return YES;
-                                                   log->requests.push_back(size);
-                                                   return log->follow;
-                                                 }];
+    return [PULP_AUV3_CONTRACT_VIEW_CLASS
+        openViewForProcessor:instance.processor.get()
+                       store:&instance.store
+                    registry:instance.sessions.get()
+               resizeRequest:^BOOL(CGSize size) {
+                 if (log == nullptr)
+                     return YES;
+                 log->requests.push_back(size);
+                 if (log->follow && log->container != nil)
+                     [log->container setFrameSize:NSSizeFromCGSize(size)];
+                 return log->follow;
+               }];
 }
 
 NSWindow* make_window() {
-    NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(-20000, -20000, 800, 600)
-                                                   styleMask:NSWindowStyleMaskBorderless
-                                                     backing:NSBackingStoreBuffered
-                                                       defer:NO];
+    NSWindow* window =
+        [[PulpAUv3TestWindow alloc] initWithContentRect:NSMakeRect(-20000, -20000, 800, 600)
+                                              styleMask:NSWindowStyleMaskBorderless
+                                                backing:NSBackingStoreBuffered
+                                                  defer:NO];
     window.releasedWhenClosed = NO;
     return window;
 }
@@ -124,6 +140,7 @@ TEST_CASE("AU v3 opens, sizes and closes a contract editor, twice",
     FakeInstance instance(true);
     ResizeLog resizes;
     NSWindow* window = make_window();
+    resizes.container = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 400, 300)];
 
     @autoreleasepool {
         PULP_AUV3_CONTRACT_VIEW_CLASS* view = [open_view(instance, &resizes) retain];
@@ -135,29 +152,41 @@ TEST_CASE("AU v3 opens, sizes and closes a contract editor, twice",
         REQUIRE(contract_log().parent_handle == (__bridge void*)view);
         REQUIRE(instance.sessions->size() == 1);
 
-        [window.contentView addSubview:view];
+        [resizes.container addSubview:view];
+        [window.contentView addSubview:resizes.container];
         REQUIRE(contract_log().saw("visible:on"));
 
-        // The host resizes the view; an undersized frame is refused by the
-        // editor, which keeps its size.
+        // The host resizes the view: the editor follows.
         [view setFrameSize:NSMakeSize(640, 480)];
         REQUIRE(contract_log().saw("set_size:640x480"));
-        const auto calls = contract_log().calls.size();
-        [view setFrameSize:NSMakeSize(100, 100)];
-        REQUIRE(contract_log().calls.size() == calls);
+        REQUIRE(resizes.requests.empty());
 
-        // The window's backing scale reaches the editor's size.
+        // A host size outside the editor's limits is taken at the nearest size
+        // the editor accepts, and that size is published to the host, which
+        // follows: the view ends inside the limits instead of at 100x100.
+        [view setFrameSize:NSMakeSize(100, 100)];
+        REQUIRE(contract_log().saw("set_size:200x150"));
+        REQUIRE(resizes.requests.size() == 1);
+        REQUIRE(resizes.requests[0].width == 200);
+        REQUIRE(resizes.requests[0].height == 150);
+        REQUIRE(view.frame.size.width == 200);
+        REQUIRE(view.frame.size.height == 150);
+
+        // A backing scale change reaches the editor's size. The scale the view
+        // pushed on joining the window was 1.
+        REQUIRE(contract_log().last_scale == 1.0);
+        static_cast<PulpAUv3TestWindow*>(window).scale = 3.0;
         [view viewDidChangeBackingProperties];
-        REQUIRE(contract_log().last_scale == window.backingScaleFactor);
+        REQUIRE(contract_log().last_scale == 3.0);
 
         // An editor resize request goes to the controller's block, and the
         // view follows once the host accepts. The editor is not told about the
         // size it asked for.
         const auto before = contract_log().calls.size();
         REQUIRE(contract_log().context->request_resize({720, 540, 1.0}));
-        REQUIRE(resizes.requests.size() == 1);
-        REQUIRE(resizes.requests[0].width == 720);
-        REQUIRE(resizes.requests[0].height == 540);
+        REQUIRE(resizes.requests.size() == 2);
+        REQUIRE(resizes.requests[1].width == 720);
+        REQUIRE(resizes.requests[1].height == 540);
         REQUIRE(view.frame.size.width == 720);
         REQUIRE(view.frame.size.height == 540);
         REQUIRE(contract_log().calls.size() == before);
@@ -173,6 +202,7 @@ TEST_CASE("AU v3 opens, sizes and closes a contract editor, twice",
         port.begin(kGain);
         port.set(kGain, 0.75f);
         REQUIRE(instance.store.open_gesture_count() == 1);
+        [resizes.container removeFromSuperview];
         [view removeFromSuperview];
         REQUIRE(contract_log().saw("visible:off"));
         [view closeEditor];
@@ -220,6 +250,34 @@ TEST_CASE("an AU v3 editor resize the host does not follow is refused",
         [view release];
     }
     REQUIRE(contract_log().live == 0);
+}
+
+TEST_CASE("an accepted AU v3 resize request never leaves the view different from its parent",
+          "[auv3][editor-host][au-v3-contract]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    FakeInstance instance(true);
+    ResizeLog resizes; // accepts every request, but the parent does not change
+    NSView* parent = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 400, 300)];
+
+    @autoreleasepool {
+        PULP_AUV3_CONTRACT_VIEW_CLASS* view = [open_view(instance, &resizes) retain];
+        REQUIRE(view != nil);
+        view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+        [parent addSubview:view];
+        REQUIRE(contract_log().context->request_resize({720, 540, 1.0}));
+        // The host has not followed, so the view still fills its parent: it
+        // neither overflows nor waits for a size the parent will not give.
+        REQUIRE(view.frame.size.width == 400);
+        REQUIRE(view.frame.size.height == 300);
+        // The host follows: the parent grows and the flexible view fills it
+        // exactly, with no second step from the request.
+        [parent setFrameSize:NSMakeSize(720, 540)];
+        REQUIRE(view.frame.size.width == 720);
+        REQUIRE(view.frame.size.height == 540);
+        [view release];
+    }
+    [parent release];
 }
 
 TEST_CASE("an AU v3 contract editor ticks only while its view lives",
