@@ -65,15 +65,24 @@ class MidiInput {
 public:
     virtual ~MidiInput() = default;
     virtual bool open(const std::string& port_id, MidiInputCallback callback) = 0;
-    /// Stops delivery and releases the port.
+    /// Stops delivery and releases the port. Safe to call more than once and
+    /// from the destructor.
     ///
-    /// Contract: when close() returns, no callback registered through open()
-    /// or set_sysex_callback() is running and none will run again, so the
-    /// caller may immediately free whatever those callbacks captured. close()
-    /// waits for a callback that is mid-delivery on another thread. Called
-    /// from inside one of those callbacks it cannot wait for itself: it stops
-    /// further deliveries, returns at once, and the port is released once the
-    /// callback returns. Safe to call more than once and from the destructor.
+    /// Callback lifetime after close() is backend-specific. Only the CoreMIDI
+    /// port backend (macOS/iOS, not BLE MIDI) currently guarantees it: when
+    /// close() returns, no callback registered through open() or
+    /// set_sysex_callback() is running and none will run again, so the caller
+    /// may immediately free whatever those callbacks captured. It waits for a
+    /// callback that is mid-delivery on another thread. Called from inside one
+    /// of those callbacks it cannot wait for itself: it stops further
+    /// deliveries, returns at once, and the port is released once the
+    /// callback returns.
+    ///
+    /// Other backends (BLE MIDI on any platform, Linux ALSA, Windows, Android)
+    /// do not make these guarantees yet. A callback may still be running when
+    /// close() returns, and close() must not be called from inside a callback.
+    /// Follow-ups: https://github.com/Generous-Corp/pulp/issues/12332 and
+    /// https://github.com/Generous-Corp/pulp/issues/12333.
     virtual void close() = 0;
     virtual bool is_open() const = 0;
 

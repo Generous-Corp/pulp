@@ -1,7 +1,7 @@
 {
   "domain": "midi",
   "source": "core/midi/include/pulp/midi/device.hpp",
-  "fingerprint": "sha256:3f50338d76a853d6c660b48232f7d0d93cbe1c39fb7fabae36691e2363fc1f68",
+  "fingerprint": "sha256:2fe9e3ab11960310be8a09d17340eef1f5142a81d1a2730c0497ef0f7507c626",
   "include": "pulp/midi/device.hpp",
   "disposition": "infrastructure",
   "capability_keys": [],
