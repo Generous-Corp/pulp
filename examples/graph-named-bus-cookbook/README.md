@@ -18,21 +18,24 @@ rejected before processing.
 ## The same processor inside a SignalGraph
 
 The recipe also runs `NamedBusPlacement` as a node of a real `SignalGraph`
-(`add_input_node(1)` -> `add_processor_node` -> `add_output_node(2)`, connected
-by the node's port handles `audio` and `out1`) and renders it with
-`OfflineSignalGraphHost`. The `ProcessBuffers` harness stays the reference
-oracle: the graph's two output channels must equal the harness `Front` bus
-sample for sample, compared with `==`, not a tolerance.
+(`add_input_node(1)` -> `add_processor_node` -> `add_output_node(4)`, connected
+by the node's port handles `audio` and `out1` for `Front` and `Rear.0` and
+`Rear.1` for `Rear`) and renders it with `OfflineSignalGraphHost`. The
+`ProcessBuffers` harness stays the reference oracle: the graph's first two
+output channels must equal the harness `Front` bus, and the last two the
+harness `Rear` bus, sample for sample, compared with `==`, not a tolerance.
 
 What the graph does and does not carry:
 
-- A Processor node exposes only its **main** input and output buses, one graph
-  port per channel. The aux `Rear` bus has no graph port, so the graph proves
-  the `Front` bus, not `Rear`.
-- The routed node hands the processor buses named `main`, not the descriptor's
-  `Source` and `Front`. The processor therefore falls back to `inputs.main()`
-  and `outputs.main()` when a declared name is absent. A variant that looks up
-  names only renders silence in the graph; the test pins that result.
+- A Processor node exposes its main input bus and every declared output bus,
+  one graph port per channel: the main output first (`audio`, `out1`), then
+  each aux output bus as `<bus>.<channel>` (`Rear.0`, `Rear.1`). Aux input
+  buses are not graph ports; they reach the processor through an input-bus
+  provider.
+- The routed node hands the processor its buses under the descriptor's
+  declared names, `Source`, `Front` and `Rear`. A variant that looks buses up
+  by name only, with no `main()` fallback, renders exactly what the harness
+  renders; the test pins that result.
 - The planted negatives are checked in the graph path. A harness fed swapped
   output names, and a graph whose two main-bus channels are crossed, must each
   differ from the correct graph output (`--planted-graph-swap`, marker
@@ -47,8 +50,8 @@ Processor node. A Processor node is runtime-only and is not frozen into a
 baked artifact, so named-bus layouts are not preserved by baking; the cookbook
 asserts the refusal rather than a baked output. No bake API was added.
 
-This proves named format buses and layout selection, and main-bus parity of the
-graph path, using public installed-SDK APIs. It does not claim azimuth, HRTF,
+This proves named format buses and layout selection, and parity of the graph
+path for both the main and the aux bus, using public installed-SDK APIs. It does not claim azimuth, HRTF,
 realtime performance, a baked bus layout, tuning, or live sampling.
 
 ## Notation

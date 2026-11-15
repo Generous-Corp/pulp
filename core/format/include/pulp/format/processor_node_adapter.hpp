@@ -117,15 +117,26 @@ public:
         idle_silent_frames_ = 0;
     }
 
+    /// Channels a graph exposes as this processor's output ports: the main
+    /// output bus first, then every declared aux output bus in descriptor order
+    /// (optional ones included), each contributing its default channel count.
+    /// A routed block whose output view holds that many channels is split back
+    /// into the declared buses, each carrying its declared name and role; a
+    /// shorter view feeds the main bus and leaves aux buses that do not fit
+    /// inactive.
+    static int routed_output_channels(const PluginDescriptor& descriptor) noexcept;
+
     /// Build the only valid graph binding for this adapter. The cached
     /// capability selects dense views or the legacy event expansion.
     GraphRuntimeNodeBinding binding(graph::NodeId node_id, bool required = true) noexcept;
 
     /// Routed node binding entry point. `user_data` must be the owning
-    /// ProcessorNode. Reads the executor's gathered mono input view
-    /// (ctx.node_inputs) and writes this node's mono output view
-    /// (ctx.node_outputs) by aliasing them into a block-local ProcessBlock
-    /// over the node's reused bus set, then forwards to
+    /// ProcessorNode. Reads the executor's gathered input view
+    /// (ctx.node_inputs) and writes this node's output view
+    /// (ctx.node_outputs, split across declared output buses as described at
+    /// routed_output_channels()) by aliasing them into a block-local
+    /// ProcessBlock over the node's reused bus set, under the descriptor's
+    /// declared bus names, then forwards to
     /// process_processor_block(). Allocation-free
     /// per block and only valid on the routed path (ctx.routed == true).
     static bool process_binding(ProcessBlock& block,
@@ -141,6 +152,9 @@ public:
     // points them at this block's buffers (see process_binding).
     bool process_main_bus_block(const ProcessBlock& block,
                                 const GraphRuntimeNodeProcessContext& ctx) noexcept;
+    // Adds the main output bus, and each declared aux output bus split from
+    // the node's output view, to `buses`. Allocation-free.
+    bool add_output_buses(BusBufferSet& buses, audio::BufferView<float> outputs) noexcept;
     // The routed block body without idle skipping.
     bool process_routed_block(ProcessBlock& block,
                               const GraphRuntimeNodeProcessContext& ctx) noexcept;
@@ -169,6 +183,15 @@ public:
     // can publish stable, non-owning string_views without allocating on RT.
     std::array<std::string, BusBufferSet::kMaxBuses> input_names_{};
     std::size_t input_bus_count_ = 0;
+    // Output buses as declared. Bus 0 is the main output; when more than one
+    // bus is declared, the routed output view is split across them by their
+    // default channel counts. Names are copied at prepare() like input names.
+    std::array<BusRole, BusBufferSet::kMaxBuses> output_roles_{};
+    std::array<int, BusBufferSet::kMaxBuses> output_channels_{};
+    std::array<std::string, BusBufferSet::kMaxBuses> output_names_{};
+    std::size_t output_bus_count_ = 0;
+    // Per-block channel pointers for the split output view, sized at prepare().
+    std::vector<float*> output_channel_ptrs_;
     bool prepared_ = false;
     // Idle skipping. Plain members are touched only from the node's render
     // thread (a node never runs on two threads at once); the counter is atomic
