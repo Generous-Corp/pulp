@@ -13,5 +13,8 @@
     "governed pulp-render Release build",
     "native Intel Spectr VST3/CLAP REAPER qualification"
   ],
-  "disposition": "pulp-only"
+  "disposition": "emergency-exception",
+  "owner": "@danielraffel",
+  "expiry": "2026-12-13",
+  "follow_up": "https://github.com/Generous-Corp/vellum/issues/496"
 }
