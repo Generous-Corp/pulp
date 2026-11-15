@@ -114,6 +114,27 @@ TEST_CASE("LV2 TTL advertises explicit enum semantics and labels", "[format][lv2
     REQUIRE_THAT(ttl, ContainsSubstring("rdfs:label \"Hot\" ; rdf:value 2"));
 }
 
+TEST_CASE("LV2 TTL marks only a discrete two-state parameter as toggled",
+          "[format][lv2][params]") {
+    auto desc = make_effect_desc();
+    state::StateStore store;
+    store.add_parameter({.id = 1, .name = "Enabled", .range = {0.0f, 1.0f, 0.0f, 1.0f},
+                         .kind = state::ParamKind::Toggle});
+    const auto two_state = generate_plugin_ttl(desc, store, "http://pulp.audio/plugins/toggle");
+    REQUIRE_THAT(two_state, ContainsSubstring("lv2:portProperty lv2:toggled , lv2:integer"));
+
+    state::StateStore wide;
+    wide.add_parameter({.id = 1, .name = "Wide", .range = {0.0f, 4.0f, 0.0f, 1.0f},
+                        .kind = state::ParamKind::Toggle});
+    const auto four_state = generate_plugin_ttl(desc, wide, "http://pulp.audio/plugins/wide");
+    REQUIRE_THAT(four_state, !ContainsSubstring("lv2:toggled"));
+
+    state::StateStore plain;
+    plain.add_parameter({.id = 1, .name = "Amount", .range = {0.0f, 1.0f, 0.5f, 0.0f}});
+    const auto continuous = generate_plugin_ttl(desc, plain, "http://pulp.audio/plugins/plain");
+    REQUIRE_THAT(continuous, !ContainsSubstring("lv2:toggled"));
+}
+
 TEST_CASE("LV2 TTL emits a latency-reporting output control port",
           "[format][lv2][issue-mf2]") {
     auto desc = make_effect_desc();
