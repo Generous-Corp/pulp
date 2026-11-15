@@ -1115,6 +1115,22 @@ save/reopen render proof beside the legacy caller-owned route controls.
   path. Bump the graph format version, add a deterministic migrator for older
   fixtures, and keep future-version loads fail-closed instead of silently
   accepting fields the current reader does not understand.
+- Spectral saved assets use the format-6 envelope (v5 readers refuse it; a
+  v5 reader would otherwise load spectral nodes as unresolved Custom nodes): canonical SFRM bytes
+  remain unchanged, while the analyzed-asset record binds schema/version,
+  original sample count, exact frame contract and SHA256 in its content ID.
+  The record's `frame_count` must equal what `SpectralFiniteStreamRule`
+  derives from the saved contract geometry and extent; never compute the frame
+  grid separately in persistence, so a geometry the source factory admits is
+  the geometry persistence admits.
+  Keep these spectral-only hooks in `spectral_graph_persistence.cpp`; validate
+  an isolated candidate with existing typed factories and compiler bounds
+  before replacing destination authoring/prepared state. Refuse missing,
+  corrupt, mismatched and unsupported assets explicitly. Do not coerce opaque
+  Custom/Processor/plugin state into this profile or infer replay proof from
+  codec round trips. The pinned live-control timeline and independent audio
+  oracle are exercised by `examples/a3-spectral-replay-consumer`; full paced
+  qualification and sanitizer evidence remain separate requirements.
 - Use `connect_automation()` for sparse two-point-per-block control events.
   Use `connect_audio_rate_modulation()` only for continuous, automatable
   `HostParamInfo::rate == AudioRate` params; do not route dense CV into

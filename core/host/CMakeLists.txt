@@ -35,6 +35,7 @@ target_sources(pulp-host PRIVATE
     src/graph_serializer.cpp
     src/graph_patch.cpp
     src/graph_file_reload.cpp
+    src/spectral_graph_persistence.cpp
     src/graph_identity.cpp
     src/graph_history.cpp
     src/voice_identity.cpp

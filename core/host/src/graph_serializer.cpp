@@ -9,6 +9,7 @@
 #include <pulp/runtime/detail/durable_file_replacement.hpp>
 
 #include "graph_serializer_test_access.hpp"
+#include "spectral_graph_persistence.hpp"
 
 // The web DSP builds (Emscripten for WAM, plain clang targeting wasm32 for
 // WebCLAP) compile this serializer without the plugin scanner and have no
@@ -146,7 +147,10 @@ inline double get_double(const V& v) {
 // lane once the public registry contract is available.
 // v5 is emitted only when a graph needs typed ports or Control edges. Older
 // readers refuse the envelope before they could reinterpret those as Audio.
-constexpr int kFormatVersion = 5;
+// v6 is emitted only for graphs carrying spectral nodes and embedded
+// spectral_assets. A v5 reader would otherwise load those nodes as unresolved
+// Custom nodes and drop the assets on re-save, so it must refuse the version.
+constexpr int kFormatVersion = 6;
 // The saved-identity envelope is format-independent and first shipped on v4,
 // so inspection admits every format from v4 through the current writer. A v4
 // envelope keeps its semantic digest when the writer advances to v5.
@@ -166,13 +170,13 @@ bool migrate_graph_v1_to_v2(const std::string& source_json,
 bool migrate_graph_v2_to_v3(const std::string& source_json, std::string& migrated_json);
 bool migrate_graph_v3_to_v4(const std::string& source_json, std::string& migrated_json);
 bool migrate_graph_v4_to_v5(const std::string& source_json, std::string& migrated_json);
+bool migrate_graph_v5_to_v6(const std::string& source_json, std::string& migrated_json);
 
 std::vector<GraphMigrationEntry>& graph_migrations() {
     static std::vector<GraphMigrationEntry> migrations = {
-        {1, 2, migrate_graph_v1_to_v2},
-        {2, 3, migrate_graph_v2_to_v3},
-        {3, 4, migrate_graph_v3_to_v4},
-        {4, 5, migrate_graph_v4_to_v5},
+        {1, 2, migrate_graph_v1_to_v2}, {2, 3, migrate_graph_v2_to_v3},
+        {3, 4, migrate_graph_v3_to_v4}, {4, 5, migrate_graph_v4_to_v5},
+        {5, 6, migrate_graph_v5_to_v6},
     };
     return migrations;
 }
@@ -281,6 +285,13 @@ bool migrate_graph_v3_to_v4(const std::string& source_json, std::string& migrate
 bool migrate_graph_v4_to_v5(const std::string& source_json, std::string& migrated_json) {
     migrated_json = source_json;
     return replace_format_version(migrated_json, 4, 5);
+}
+
+bool migrate_graph_v5_to_v6(const std::string& source_json, std::string& migrated_json) {
+    // v6 is additive: it only admits spectral nodes and spectral_assets, which
+    // a v5 document cannot carry. Ordinary v5 files advance in memory only.
+    migrated_json = source_json;
+    return replace_format_version(migrated_json, 5, 6);
 }
 
 const GraphMigrationEntry* find_graph_migration(int from_version) {
@@ -1606,6 +1617,8 @@ bool GraphSerializer::register_migration(int from_version,
 std::string GraphSerializer::to_json(
     const SignalGraph& graph,
     const std::unordered_map<NodeId, std::pair<float,float>>& editor_layout) {
+    if (spectral_persistence::contains_spectral_nodes(graph))
+        return spectral_persistence::write(graph, editor_layout);
     bool has_processors = false;
     bool has_typed_ports = false;
     for (const auto& node : graph.nodes()) {
@@ -1923,6 +1936,12 @@ GraphSerializer::saved_node_identities(const SignalGraph& graph) {
 std::string GraphSerializer::to_saved_document(
     const SignalGraph& graph,
     const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout) {
+    // Spectral persistence has its own closed envelope. The saved-identity
+    // wrapper adds fields that the spectral reader intentionally rejects, so
+    // keep this older identity surface unsupported until it can bind spectral
+    // node identities and persisted IDs end to end.
+    if (spectral_persistence::contains_spectral_nodes(graph))
+        return {};
     const auto raw = to_json(graph, editor_layout);
     if (raw.empty())
         return {};
@@ -2217,6 +2236,62 @@ GraphSerializer::LoadResult GraphSerializer::from_file(SignalGraph& graph,
 GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const std::string& json,
                                                        const GraphLoadOptions& options) {
     LoadResult result;
+    auto spectral = spectral_persistence::read(json);
+    if (spectral.handled) {
+        if (!spectral.result.ok)
+            return spectral.result;
+        SignalGraph::GraphMutationLock lock(graph);
+        if (graph.refuse_spectral_mutation_()) {
+            spectral.result.ok = false;
+            spectral.result.error =
+                "active spectral controller refuses graph loading; stop it first";
+            return spectral.result;
+        }
+        auto& prepared = *spectral.graph;
+        prepared.set_limits(graph.limits_);
+        if (!prepared.validate_generated_graph(std::min(4096, graph.limits_.max_block_size))
+                 .accepted) {
+            spectral.result.ok = false;
+            spectral.result.error = "spectral graph exceeds destination graph limits";
+            return spectral.result;
+        }
+        if (prepared.connections_.size() >
+                std::numeric_limits<std::uint64_t>::max() - graph.next_connection_identity_ ||
+            graph.authoring_generation_ == std::numeric_limits<std::uint64_t>::max()) {
+            spectral.result.ok = false;
+            spectral.result.error = "spectral graph authoring identity exhausted";
+            return spectral.result;
+        }
+        // No allocation or fallible construction remains after preflight.
+        // Rebind handles so a candidate's ports cannot impersonate the target
+        // graph, and old target handles remain stale across replacement.
+        const auto incarnation = graph.authoring_generation_ + 1;
+        for (auto& n : prepared.nodes_)
+            for (auto* ports : {&n.input_ports, &n.output_ports})
+                for (auto& p : *ports) {
+                    p.owner = graph.diagnostic_graph_identity_;
+                    p.incarnation = incarnation;
+                }
+        for (auto& id : prepared.connection_identities_)
+            id = graph.next_connection_identity_++;
+        graph.cancel_swap_edit_locked_();
+        auto admitted_nodes = std::move(prepared.nodes_);
+        prepared.nodes_.swap(graph.nodes_);
+        graph.connections_.swap(prepared.connections_);
+        graph.connection_identities_.swap(prepared.connection_identities_);
+        graph.processor_nodes_.clear();
+        graph.graph_event_edge_.reset();
+        graph.sample_region_definitions_.clear();
+        graph.sample_region_parameter_binding_ = nullptr;
+        graph.prepared_sample_region_bank_.reset();
+        graph.prepared_sample_regions_.clear();
+        graph.next_id_ = prepared.next_id_;
+        // Invalidate while authoring nodes are empty, exactly as clear() does,
+        // so any previous typed-trigger attachment is retired too.
+        graph.invalidate_live_locked_();
+        graph.nodes_.swap(admitted_nodes);
+        return spectral.result;
+    }
     {
         SignalGraph::GraphMutationLock lock(graph);
         if (graph.refuse_spectral_mutation_()) {
