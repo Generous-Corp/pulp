@@ -563,3 +563,64 @@ TEST_CASE("CLAP offers the contract GUI only to a processor with an editor facto
     }
     g_processor_has_factory = true;
 }
+
+TEST_CASE("a CLAP contract editor applies its declared aspect and bounds",
+          "[clap][editor-host][clap-contract][resize-hints]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    g_processor_has_factory = true;
+    contract_config() = {};
+    contract_config().identity_adjust = true; // the session alone enforces the hints
+    FakeHost host;
+    OpenPlugin p(host);
+    REQUIRE(p.gui->create(p.plugin, platform_api(), false));
+
+    REQUIRE(p.gui->can_resize(p.plugin));
+    clap_gui_resize_hints_t hints{};
+    REQUIRE(p.gui->get_resize_hints(p.plugin, &hints));
+    REQUIRE(hints.preserve_aspect_ratio);
+
+    uint32_t w = 1000, h = 1000;
+    REQUIRE(p.gui->adjust_size(p.plugin, &w, &h));
+    REQUIRE(w == 800);
+    REQUIRE(h == 600);
+    w = 640;
+    h = 300;
+    REQUIRE(p.gui->adjust_size(p.plugin, &w, &h));
+    REQUIRE(w == 400);
+    REQUIRE(h == 300);
+    w = 100;
+    h = 100;
+    REQUIRE(p.gui->adjust_size(p.plugin, &w, &h));
+    REQUIRE(w == 200);
+    REQUIRE(h == 150);
+    p.gui->destroy(p.plugin);
+
+    SECTION("without an aspect, each axis is clamped on its own") {
+        contract_config().free_aspect = true;
+        REQUIRE(p.gui->create(p.plugin, platform_api(), false));
+        REQUIRE(p.gui->get_resize_hints(p.plugin, &hints));
+        REQUIRE_FALSE(hints.preserve_aspect_ratio);
+        w = 1000;
+        h = 100;
+        REQUIRE(p.gui->adjust_size(p.plugin, &w, &h));
+        REQUIRE(w == 800);
+        REQUIRE(h == 150);
+        p.gui->destroy(p.plugin);
+    }
+    SECTION("an editor with default hints is fixed-size") {
+        contract_config().default_hints = true;
+        REQUIRE(p.gui->create(p.plugin, platform_api(), false));
+        REQUIRE_FALSE(p.gui->can_resize(p.plugin));
+        REQUIRE(p.gui->get_resize_hints(p.plugin, &hints));
+        REQUIRE_FALSE(hints.can_resize_horizontally);
+        REQUIRE_FALSE(hints.can_resize_vertically);
+        w = 900;
+        h = 900;
+        REQUIRE(p.gui->adjust_size(p.plugin, &w, &h));
+        REQUIRE(w == 400);
+        REQUIRE(h == 300);
+        p.gui->destroy(p.plugin);
+    }
+    contract_config() = {};
+}

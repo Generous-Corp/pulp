@@ -72,6 +72,9 @@ EditorLog g_log;
 struct EditorConfig {
     bool attach_succeeds = true;
     bool fixed_size = false;
+    bool default_hints = false;
+    bool free_aspect = false;
+    bool identity_adjust = false;
     bool factory_builds_editor = true;
     bool factory_supports_editor = true;
 };
@@ -127,6 +130,12 @@ class RecordingEditor final : public Editor {
         hints.min_height = 150;
         hints.max_width = 800;
         hints.max_height = 600;
+        hints.aspect_ratio = g_config.free_aspect ? 0.0 : 4.0 / 3.0;
+        if (g_config.default_hints) {
+            hints.min_width = hints.min_height = 0;
+            hints.max_width = hints.max_height = 0;
+            hints.aspect_ratio = 0.0;
+        }
         if (g_config.fixed_size) {
             hints.min_width = hints.max_width = 400;
             hints.min_height = hints.max_height = 300;
@@ -134,6 +143,8 @@ class RecordingEditor final : public Editor {
         return hints;
     }
     EditorSize adjust_size(const EditorSize& proposed) const override {
+        if (g_config.identity_adjust)
+            return proposed;
         // Holds 4:3.
         EditorSize adjusted = proposed;
         adjusted.height = proposed.width * 3 / 4;
@@ -950,4 +961,65 @@ TEST_CASE("the host's content scale reaches the contract editor's size",
     // With the editor gone the host's scale has nowhere to go.
     REQUIRE(scale_support->setContentScaleFactor(2.0f) == Steinberg::kResultFalse);
     view->release();
+}
+
+namespace {
+
+Steinberg::ViewRect constrained(ContractPlugView* view, int w, int h) {
+    Steinberg::ViewRect rect(0, 0, w, h);
+    REQUIRE(view->checkSizeConstraint(&rect) == Steinberg::kResultTrue);
+    return rect;
+}
+
+} // namespace
+
+TEST_CASE("a VST3 contract view applies the editor's declared aspect and bounds",
+          "[vst3][editor-host][vst3-contract][resize-hints]") {
+    EditorEnvironment env;
+    g_log = {};
+    g_config = {};
+    g_config.identity_adjust = true; // the session alone enforces the hints
+    HostApp host_app;
+    PulpVst3Processor processor(create_contract_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    auto* view = open_contract_view(processor);
+
+    REQUIRE(view->canResize() == Steinberg::kResultTrue);
+    // Too big in both axes: the largest 4:3 box inside the bounds.
+    auto r = constrained(view, 1000, 1000);
+    REQUIRE(r.getWidth() == 800);
+    REQUIRE(r.getHeight() == 600);
+    // Wide request: the height decides.
+    r = constrained(view, 640, 300);
+    REQUIRE(r.getWidth() == 400);
+    REQUIRE(r.getHeight() == 300);
+    // Tall request: the width decides.
+    r = constrained(view, 480, 900);
+    REQUIRE(r.getWidth() == 480);
+    REQUIRE(r.getHeight() == 360);
+    // Under the minimum: moved up without leaving 4:3.
+    r = constrained(view, 100, 100);
+    REQUIRE(r.getWidth() == 200);
+    REQUIRE(r.getHeight() == 150);
+    view->release();
+
+    SECTION("without an aspect, each axis is clamped on its own") {
+        g_config.free_aspect = true;
+        auto* free_view = open_contract_view(processor);
+        REQUIRE(free_view->canResize() == Steinberg::kResultTrue);
+        auto fr = constrained(free_view, 1000, 100);
+        REQUIRE(fr.getWidth() == 800);
+        REQUIRE(fr.getHeight() == 150);
+        free_view->release();
+    }
+    SECTION("an editor with default hints is fixed-size") {
+        g_config.default_hints = true;
+        auto* fixed_view = open_contract_view(processor);
+        REQUIRE(fixed_view->canResize() == Steinberg::kResultFalse);
+        auto fr = constrained(fixed_view, 900, 900);
+        REQUIRE(fr.getWidth() == 400);
+        REQUIRE(fr.getHeight() == 300);
+        fixed_view->release();
+    }
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }

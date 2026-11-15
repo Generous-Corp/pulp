@@ -216,13 +216,18 @@ TEST_CASE("AU v2 opens, sizes and closes a contract editor, twice",
         [window.contentView addSubview:view];
         REQUIRE(contract_log().saw("visible:on"));
 
-        // The host resizes the view; an undersized frame is refused by the
-        // editor, which keeps its size.
+        // The host resizes the view; an undersized frame is moved up to the
+        // editor's minimum.
         [view setFrameSize:NSMakeSize(640, 480)];
         REQUIRE(contract_log().saw("set_size:640x480"));
         const auto calls = contract_log().calls.size();
         [view setFrameSize:NSMakeSize(100, 100)];
-        REQUIRE(contract_log().calls.size() == calls);
+        // The frame is brought inside the editor's bounds at its 4:3 aspect.
+        REQUIRE(view.frame.size.width == 200);
+        REQUIRE(view.frame.size.height == 150);
+        REQUIRE(contract_log().saw("set_size:200x150"));
+        REQUIRE(contract_log().calls.size() == calls + 1);
+        [view setFrameSize:NSMakeSize(640, 480)];
 
         // The window's backing scale reaches the editor's size.
         [view viewDidChangeBackingProperties];
@@ -266,6 +271,49 @@ TEST_CASE("AU v2 opens, sizes and closes a contract editor, twice",
     }
     REQUIRE(contract_log().live == 0);
 
+    [window close];
+    [window release];
+    AudioComponentInstanceDispose(au);
+    g_instance = nullptr;
+}
+
+TEST_CASE("an AU v2 contract view snaps a host resize to the editor's declared hints",
+          "[auv2][editor-host][au-contract][resize-hints]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    contract_config() = {};
+    FakeInstance instance(true);
+    g_instance = &instance;
+    AudioUnit au = fake_audio_unit();
+    NSWindow* window = make_window();
+    @autoreleasepool {
+        contract_config().identity_adjust = true; // the view alone enforces the hints
+        NSView* view = [open_view(au) retain];
+        REQUIRE(view != nil);
+        [window.contentView addSubview:view];
+
+        [view setFrameSize:NSMakeSize(1000, 1000)];
+        REQUIRE(view.frame.size.width == 800);
+        REQUIRE(view.frame.size.height == 600);
+        [view setFrameSize:NSMakeSize(640, 300)];
+        REQUIRE(view.frame.size.width == 400);
+        REQUIRE(view.frame.size.height == 300);
+        [view release];
+    }
+    contract_config() = {};
+    contract_config().identity_adjust = true;
+    contract_config().default_hints = true;
+    @autoreleasepool {
+        NSView* view = [open_view(au) retain];
+        REQUIRE(view != nil);
+        [window.contentView addSubview:view];
+        // A fixed-size editor keeps the host's frame; the host owns it.
+        [view setFrameSize:NSMakeSize(900, 700)];
+        REQUIRE(view.frame.size.width == 900);
+        REQUIRE(view.frame.size.height == 700);
+        [view release];
+    }
+    contract_config() = {};
     [window close];
     [window release];
     AudioComponentInstanceDispose(au);

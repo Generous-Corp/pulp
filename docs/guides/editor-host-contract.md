@@ -131,6 +131,30 @@ port.set(kGain, 0.75f);
 port.end(kGain);
 ```
 
+## Sizing
+
+`Editor::size_hints()` is how an editor tells every format what the host may do
+with its window. The session applies it the same way in VST3 (`canResize`,
+`checkSizeConstraint`), CLAP (`can_resize`, `get_resize_hints`, `adjust_size`)
+and AU v2 (the container's frame):
+
+- **Fixed size** is the default. An editor is resizable only when both minimums
+  are set and the bounds leave room (not `min == max` on both axes). An editor
+  that declares only a preferred size is fixed, as a ViewBridge editor is.
+- **Locked aspect.** With `aspect_ratio > 0` a proposed size snaps to the
+  largest box at that ratio that fits the request, then moves inside min/max
+  without leaving the ratio.
+- **Free resize.** With `aspect_ratio == 0` each axis is clamped to its own
+  min/max.
+- `Editor::adjust_size()` runs first; the hints still hold for an editor that
+  does not override it. `detail::constrain_to_hints()` is the same arithmetic as
+  a pure function, so a test or a widget can check a size without a host.
+
+AU v2 has no size negotiation, so a host that resizes the container by hand is
+snapped by the container itself: a resizable editor's frame is moved inside its
+limits and aspect before `set_size()`. A fixed-size editor keeps the host's
+frame.
+
 ## Keys
 
 Hosts offer keys synchronously before acting on them (VST3 `onKeyDown`, the

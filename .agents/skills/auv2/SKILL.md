@@ -301,6 +301,13 @@ per plug-in, and the factory class is exported. Things to keep straight:
   registry's close runs instead of the view's.
 - AU v2 has no resize request. An editor's `request_resize` moves the
   container's frame, and the host follows the frame.
+- A host that resizes the container by hand is snapped inside the container's
+  `-setFrameSize:`: a resizable editor's frame is brought inside its
+  `size_hints()` limits and locked aspect (`ContractEditorSession::constrain()`,
+  shared with VST3 `checkSizeConstraint` and CLAP `adjust_size`) before
+  `set_size()`. A fixed-size editor (the default: both minimums unset, or
+  `min == max`) keeps the host's frame. The arithmetic is
+  `detail::constrain_to_hints()`, a pure function.
 - `pulp-test-au-v2-contract-adapters` builds all three adapter types from
   their real entry macros (one translation unit each, because
   `PULP_REGISTER_PLUGIN` defines a fixed-name registrar) and registers their
