@@ -169,3 +169,42 @@ Expected numeric output peak `8.0661982593266401e-08`, RMS
 `6.7957485130856682e-09`; rendered binary32 output SHA256
 `76553b80d5d0afdf7e99fd952fdcfbc9ea649603358c324d191925d07532d3b9`.
 These are independent-slice receipts, not final integrated exact-head proof.
+
+## Revival onto current main (2026-11-15)
+
+The paused lane was revived on `graph/a3-spectral-persist-20261115` by merging
+`codex/a3-spectral-replay-20261110` at `0375e435de28` onto `origin/main` at
+`abb85fd983be`. The only textual conflict was the `pulp-host` source list,
+where both sides added sources; both were kept.
+
+Dependency status, checked against GitHub and `origin/main`:
+
+- Notation [PR 11999](https://github.com/Generous-Corp/pulp/pull/11999) merged
+  on 2026-11-11. Spectral constructor catalog rows
+  ([PR 12258](https://github.com/Generous-Corp/pulp/pull/12258)) are on main.
+  Notation still refuses spectral nodes by design; the catalog binding and
+  notation spelling planned above were never implemented on this lane and are
+  not part of this revival.
+- `kFormatVersion` is 5 on main; the spectral envelope writes and reads
+  format 5 through the same dispatch as before.
+- The finite spectral stream rule
+  ([PR 12319](https://github.com/Generous-Corp/pulp/pull/12319)) was OPEN at
+  `399c5e5b9cfe`; this branch merges that head, so it is stacked on that PR.
+
+Change on revival: each saved asset record stores `frame_count`, and the
+reader derives it through `SpectralFiniteStreamRule` from the saved contract
+geometry and original extent, refusing refused geometry, refused extent or a
+mismatched count before decoding bytes. The writer takes the count from the
+same rule and also refuses Control-signal edges. The fixture was re-recorded:
+only `graph.pulpgraph` and its manifest line changed; asset bytes, the control
+timeline and rendered output SHA256
+`76553b80d5d0afdf7e99fd952fdcfbc9ea649603358c324d191925d07532d3b9` (peak
+`8.0661982593266401e-08`, RMS `6.7957485130856682e-09`) are unchanged.
+
+Owner-decision conflict: `docs/graph-program-status/G-10-notation-and-codec-source-proposal.md`
+on main (written after this lane paused) lists spectral persistence as an open
+owner question, recommends persisting analysis/stage/synthesis inside the G-3
+v6 writer with asset morph refused, and asks whether assets should be embedded
+or sidecar. This lane embeds assets in format 5 and does not persist analysis
+nodes, per the lead admission recorded above. That ruling needs to be
+reconciled before publication.
