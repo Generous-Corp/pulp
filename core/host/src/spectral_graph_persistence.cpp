@@ -1,5 +1,6 @@
 #include "spectral_graph_persistence.hpp"
 #include "spectral_asset_morph_internal.hpp"
+#include "spectral_finite_stream_internal.hpp"
 
 #include <choc/text/choc_JSON.h>
 #include <pulp/runtime/base64.hpp>
@@ -92,6 +93,14 @@ std::optional<SpectralIdentity> identity(View v) {
                                            std::bit_cast<double>(c.sample_rate_bits));
     return id.value;
 }
+// The saved frame contract and original extent determine the finite stream:
+// the same rule the source factory and runtime use, so a saved asset carries
+// no geometry the runtime would derive differently.
+SpectralFiniteStreamRule stream_rule(const SpectralIdentity& shape, std::uint64_t length) {
+    return SpectralFiniteStreamRule::make(static_cast<std::uint64_t>(shape.fft_size()),
+                                          static_cast<std::uint64_t>(shape.hop()),
+                                          static_cast<std::uint64_t>(shape.channels()), length);
+}
 const char* type_name(NodeType type) {
     switch (type) {
     case NodeType::AudioInput:
@@ -140,7 +149,11 @@ std::string write(const SignalGraph& graph,
         std::size_t encoded_charge = 0, retained_charge = 0;
         auto add_asset = [&](const signal::OwnedSpectralStream& stream, std::uint64_t length,
                              const std::array<std::uint8_t, 32>& expected_hash,
+                             const SpectralIdentity& shape,
                              const std::string& contract) -> std::string {
+            const auto rule = stream_rule(shape, length);
+            if (!rule || stream.frame_count != rule.frame_count)
+                return {};
             const auto encoded = signal::encode_spectral_stream(stream, budget);
             if (!encoded || digest(encoded.value->view()) != hex(expected_hash))
                 return {};
@@ -157,6 +170,7 @@ std::string write(const SignalGraph& graph,
             record.addMember("schema", asset_schema);
             record.addMember("version", int64_t(1));
             record.addMember("source_samples", static_cast<int64_t>(length));
+            record.addMember("frame_count", static_cast<int64_t>(rule.frame_count));
             record.addMember("contract_hex", contract);
             record.addMember("bytes_sha256", hash);
             record.addMember("bytes_b64", runtime::base64_encode(encoded.value->bytes.get(),
@@ -188,10 +202,11 @@ std::string write(const SignalGraph& graph,
                     const auto& config = n.spectral_asset_morph;
                     if (!config || !charge(retained_charge, config->retained_bytes()))
                         return {};
-                    const auto a =
-                        add_asset(config->a, config->source_samples, config->hash_a, contract);
-                    const auto b =
-                        add_asset(config->b, config->source_samples, config->hash_b, contract);
+                    const auto& shape = *n.spectral_identity;
+                    const auto a = add_asset(config->a, config->source_samples, config->hash_a,
+                                             shape, contract);
+                    const auto b = add_asset(config->b, config->source_samples, config->hash_b,
+                                             shape, contract);
                     if (a.empty() || b.empty())
                         return {};
                     spectral.addMember("asset_a", a);
@@ -236,7 +251,8 @@ std::string write(const SignalGraph& graph,
         });
         auto edges = choc::value::createEmptyArray();
         for (const auto& c : ordered_edges) {
-            if (c.feedback || c.midi || c.automation || c.audio_rate_modulation || c.sidechain)
+            if (c.feedback || c.midi || c.automation || c.audio_rate_modulation || c.sidechain ||
+                c.control_signal)
                 return {};
             auto edge = choc::value::createObject("Conn");
             edge.addMember("source_node", int64_t(c.source_node));
@@ -300,8 +316,8 @@ Candidate read(std::string_view json) {
         std::map<std::string, Asset> assets;
         std::size_t decoded_bytes = 0, retained_bytes = 0;
         for (const auto row : root["spectral_assets"]) {
-            if (!fields(row, {"id", "schema", "version", "source_samples", "contract_hex",
-                              "bytes_sha256", "bytes_b64"}))
+            if (!fields(row, {"id", "schema", "version", "source_samples", "frame_count",
+                              "contract_hex", "bytes_sha256", "bytes_b64"}))
                 return fail("unsupported analyzed spectral asset member");
             std::string key, schema, bytes_hash, b64, contract;
             std::uint64_t v = 0, length = 0;
@@ -312,6 +328,12 @@ Candidate read(std::string_view json) {
                 !text(row["contract_hex"], contract) || !shape ||
                 key != asset_id(length, contract, bytes_hash) || assets.contains(key))
                 return fail("invalid, duplicate or unsupported analyzed spectral asset metadata");
+            // Refuse geometry or extent the finite stream rule does not admit,
+            // and a stored frame count it does not derive, before decoding.
+            std::uint64_t frames = 0;
+            const auto rule = stream_rule(*shape, length);
+            if (!rule || !uint(row["frame_count"], frames) || frames != rule.frame_count)
+                return fail("analyzed spectral asset geometry refused by the finite stream rule");
             // Canonical base64 admits no whitespace or alternative padding.
             // Bound its decoded allocation before calling the shared decoder.
             if (b64.size() % 4 || b64.size() > budget ||

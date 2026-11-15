@@ -1118,6 +1118,10 @@ save/reopen render proof beside the legacy caller-owned route controls.
 - Spectral saved assets use the shared format-5 envelope: canonical SFRM bytes
   remain unchanged, while the analyzed-asset record binds schema/version,
   original sample count, exact frame contract and SHA256 in its content ID.
+  The record's `frame_count` must equal what `SpectralFiniteStreamRule`
+  derives from the saved contract geometry and extent; never compute the frame
+  grid separately in persistence, so a geometry the source factory admits is
+  the geometry persistence admits.
   Keep these spectral-only hooks in `spectral_graph_persistence.cpp`; validate
   an isolated candidate with existing typed factories and compiler bounds
   before replacing destination authoring/prepared state. Refuse missing,

@@ -22,8 +22,12 @@ if (!replay.prepare(48000, 4096))
 
 Format 5's `spectral_assets` table embeds canonical SFRM bytes. Each record
 binds schema `pulp.analyzed-spectral-asset`, version 1, the original positive
-sample count, the canonical 32-byte frame contract, and the canonical bytes'
-SHA256. Its content ID hashes that metadata and byte digest with a versioned
+sample count, the frame count, the canonical 32-byte frame contract, and the
+canonical bytes' SHA256. The frame count is not free metadata: the reader
+derives it from the contract's FFT size, hop and channel count and the original
+sample count through the same finite stream rule the source factory and runtime
+use, and refuses a record whose geometry or extent the rule does not admit or
+whose stored count differs, before any asset bytes are decoded. Its content ID hashes that metadata and byte digest with a versioned
 domain separator. A morph node names its exact two records. Existing identity
 and real-mask stages retain their closed stage kind, contract and exact gains;
 synthesis retains its contract. Edges retain their spectral kind explicitly.

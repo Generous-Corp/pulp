@@ -1,9 +1,12 @@
 #include "../examples/g10-routed-consumer/asset_morph_oracle.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <choc/text/choc_JSON.h>
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/runtime/base64.hpp>
+#include <pulp/runtime/crypto.hpp>
 
 #include <functional>
+#include <map>
 
 namespace {
 using namespace pulp::host;
@@ -68,6 +71,56 @@ std::vector<float> render(SignalGraph& graph, const std::vector<float>& control,
         t += count;
     }
     return audio;
+}
+std::string hex(const std::vector<std::uint8_t>& bytes) {
+    std::string out;
+    for (auto b : bytes) {
+        out += "0123456789abcdef"[b >> 4];
+        out += "0123456789abcdef"[b & 15];
+    }
+    return out;
+}
+// Re-extend both saved assets to `length` with self-consistent content IDs and
+// references, so only the stored frame count can disagree with the stream rule.
+std::string with_extent(const std::string& json, std::uint64_t length, std::uint64_t frames,
+                        const std::string& contract_override = {}) {
+    auto root = choc::json::parse(json);
+    auto assets = choc::value::createEmptyArray();
+    std::map<std::string, std::string> renamed;
+    for (const auto row : root["spectral_assets"]) {
+        auto record = choc::value::Value(row);
+        const auto contract = contract_override.empty()
+                                  ? std::string(row["contract_hex"].getString())
+                                  : contract_override;
+        const auto material = std::string("pulp.analyzed-spectral-asset.v1\n") +
+                              std::to_string(length) + "\n" + contract + "\n" +
+                              std::string(row["bytes_sha256"].getString());
+        const auto id = hex(pulp::runtime::sha256(material));
+        renamed.emplace(std::string(row["id"].getString()), id);
+        record.setMember("id", id);
+        record.setMember("source_samples", static_cast<int64_t>(length));
+        record.setMember("frame_count", static_cast<int64_t>(frames));
+        record.setMember("contract_hex", contract);
+        assets.addArrayElement(record);
+    }
+    root.setMember("spectral_assets", assets);
+    auto nodes = choc::value::createEmptyArray();
+    for (const auto row : root["nodes"]) {
+        auto node = choc::value::Value(row);
+        if (row.hasObjectMember("spectral") && row["spectral"].hasObjectMember("asset_a")) {
+            auto spectral = choc::value::Value(row["spectral"]);
+            spectral.setMember("asset_a",
+                               renamed.at(std::string(row["spectral"]["asset_a"].getString())));
+            spectral.setMember("asset_b",
+                               renamed.at(std::string(row["spectral"]["asset_b"].getString())));
+            if (!contract_override.empty())
+                spectral.setMember("contract_hex", contract_override);
+            node.setMember("spectral", spectral);
+        }
+        nodes.addArrayElement(node);
+    }
+    root.setMember("nodes", nodes);
+    return choc::json::toString(root, true);
 }
 void replace(std::string& json, const std::string& from, const std::string& to) {
     const auto pos = json.find(from);
@@ -148,6 +201,9 @@ TEST_CASE("Spectral asset corruption and unsupported contracts preserve the old 
         {"pulp.analyzed-spectral-asset", "pulp.unsupported-spectral-asset"},
         {"\"version\": 1", "\"version\": 2"},
         {"\"source_samples\": 769", "\"source_samples\": 770"},
+        {"\"frame_count\": 16", "\"frame_count\": 17"},
+        {"\"frame_count\": 16", "\"frame_count\": 0"},
+        {"\"sidechain\": false", "\"sidechain\": false, \"control_signal\": true"},
         {"\"bytes_b64\": \"", "\"bytes_b64\": \"AAAA"},
         {"\"bytes_sha256\": \"", "\"bytes_sha256\": \"0"},
         {"\"source_samples\": 769", "\"unsupported_contract\": true, \"source_samples\": 769"},
@@ -208,6 +264,49 @@ TEST_CASE("Spectral asset corruption and unsupported contracts preserve the old 
     REQUIRE(GraphSerializer::to_json(old) == before);
     auto malformed = good.substr(0, good.size() / 2);
     REQUIRE_FALSE(GraphSerializer::from_json(old, malformed).ok);
+    REQUIRE(GraphSerializer::to_json(old) == before);
+}
+
+TEST_CASE("Saved spectral asset geometry is checked against the finite stream rule",
+          "[host][spectral][replay][negative][finite-stream-rule]") {
+    const auto good = GraphSerializer::to_json(*fixture());
+    REQUIRE_FALSE(good.empty());
+    // 769 samples at FFT 256 / hop 64 is ceil((769 + 192) / 64) = 16 frames.
+    REQUIRE(good.find("\"frame_count\": 16") != std::string::npos);
+    // Positive control: the self-consistent rewrite at the original extent
+    // loads, so the helper itself is not what refuses below.
+    {
+        SignalGraph loaded;
+        const auto result = GraphSerializer::from_json(loaded, with_extent(good, 769, 16));
+        INFO(result.error);
+        REQUIRE(result.ok);
+    }
+    SignalGraph old;
+    old.add_input_node(1, "retained");
+    const auto before = GraphSerializer::to_json(old);
+    // 833 samples derive 17 frames; the stored 16 must be refused by the rule
+    // before any asset bytes reach the decoder or factory.
+    auto result = GraphSerializer::from_json(old, with_extent(good, 833, 16));
+    INFO(result.error);
+    REQUIRE_FALSE(result.ok);
+    REQUIRE(result.error.find("finite stream rule") != std::string::npos);
+    REQUIRE(GraphSerializer::to_json(old) == before);
+    // A frame contract the identity admits but the rule refuses outright: a
+    // hop of 96 does not divide FFT 256, so no frame count is derivable.
+    const auto encoded = SpectralIdentity::make(256, 96, 1, 48000).value->frame_contract().encode();
+    result = GraphSerializer::from_json(
+        old,
+        with_extent(good, 769, 16, hex(std::vector<std::uint8_t>(encoded.begin(), encoded.end()))));
+    INFO(result.error);
+    REQUIRE_FALSE(result.ok);
+    REQUIRE(result.error.find("finite stream rule") != std::string::npos);
+    REQUIRE(GraphSerializer::to_json(old) == before);
+    // With the stored count matching the rule, the rule check passes and the
+    // factory's frame-count binding refuses the 16-frame bytes instead.
+    result = GraphSerializer::from_json(old, with_extent(good, 833, 17));
+    INFO(result.error);
+    REQUIRE_FALSE(result.ok);
+    REQUIRE(result.error.find("finite stream rule") == std::string::npos);
     REQUIRE(GraphSerializer::to_json(old) == before);
 }
 
