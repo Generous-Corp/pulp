@@ -172,8 +172,8 @@ struct RmlUiSurface::Impl {
                 // while an animation or transition plays, the time to its next
                 // timer, or infinity when idle.
                 const auto* ctx = context->context();
-                next_update = ctx ? ctx->GetNextUpdateDelay()
-                                  : std::numeric_limits<double>::infinity();
+                next_update =
+                    ctx ? ctx->GetNextUpdateDelay() : std::numeric_limits<double>::infinity();
                 context->render();
                 if (hooks.end_frame)
                     hooks.end_frame();
