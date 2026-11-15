@@ -1,0 +1,34 @@
+{
+  "end_ns": 1165188388044000,
+  "ok": true,
+  "raw": "43276 43274 43274 S    Sun Nov 15 00:04:05 2026     /Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python\n43877 43276 43274 Z    Sun Nov 15 00:04:06 2026     <defunct>\n43884     1 43884 S    Sun Nov 15 00:04:06 2026     /Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-land-20261115/build/g9-native-surviving-owner-main/g9-native-surviving-owner",
+  "returncode": 0,
+  "rows": [
+    {
+      "executable": "/Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python",
+      "pgid": 43274,
+      "pid": 43276,
+      "ppid": 43274,
+      "start": "Sun Nov 15 00:04:05 2026",
+      "state": "S"
+    },
+    {
+      "executable": "<defunct>",
+      "pgid": 43274,
+      "pid": 43877,
+      "ppid": 43276,
+      "start": "Sun Nov 15 00:04:06 2026",
+      "state": "Z"
+    },
+    {
+      "executable": "/Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-land-20261115/build/g9-native-surviving-owner-main/g9-native-surviving-owner",
+      "pgid": 43884,
+      "pid": 43884,
+      "ppid": 1,
+      "start": "Sun Nov 15 00:04:06 2026",
+      "state": "S"
+    }
+  ],
+  "start_ns": 1165188323752000,
+  "stderr": ""
+}

@@ -1,0 +1,47 @@
+{
+  "action": {
+    "kind": "anchor_kill",
+    "t_ns": 1165192003813000
+  },
+  "assertions": {
+    "actual_parent_separate_group": true,
+    "anchor_failure_injected": true,
+    "anchor_failure_unknown": true,
+    "baseline_precedes_loss": true,
+    "independent_anchor_failure_state": true,
+    "live_worker_and_owner_before_loss": true,
+    "live_worker_at_refusal": true,
+    "no_custody_success": true,
+    "no_fuse_before_verdict": true,
+    "no_h_signal_to_worker_or_group": true,
+    "no_nonretained_wait": true,
+    "no_signal_after_reap": true,
+    "outer_census_positive_control": true,
+    "pre_hygiene_observation": true,
+    "ready_before_trigger": true,
+    "reservation_retained_before_trigger": true,
+    "vendor_only_in_worker": true,
+    "within_fixed_deadline": true
+  },
+  "binary_sha256": "daff385922550384b99a5d39efbec802a9bc86bf6ee69e595959477ab1a2555e",
+  "command": [
+    "/Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-land-20261115/build/g9-native-surviving-owner-main/g9-native-surviving-owner",
+    "H",
+    "/Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-land-20261115/build/g9-native-rerun-main-20261115/anchor_kill",
+    "anchor_kill",
+    "/Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-land-20261115/build/g9-native-surviving-owner-main/libg9-native-hung-vendor.so",
+    "1165196922229000"
+  ],
+  "containment_oracle": false,
+  "deadline_ns": 1165196922229000,
+  "host_returncode": 74,
+  "hygiene_started_ns": 1165192076572000,
+  "mode": "anchor_kill",
+  "native_mode": "anchor_kill",
+  "observer_sha256": "419648a87314b53901775b722d78a68b6859d019c573b6d1392b8275a5034618",
+  "passed": true,
+  "production_custody": "HOLD",
+  "schema": 1,
+  "start_ns": 1165191922229000,
+  "vendor_sha256": "de297beadf6dad063f2ef8c464762e775869d4a291735d33f918ec558377a996"
+}

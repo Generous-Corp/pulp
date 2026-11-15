@@ -1,0 +1,50 @@
+{
+  "end_ns": 1165188470245000,
+  "ok": true,
+  "raw": "43276 43274 43274 S    Sun Nov 15 00:04:05 2026     /Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python\n44157 43276 43274 S    Sun Nov 15 00:04:06 2026     /Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-land-20261115/build/g9-native-surviving-owner-main/g9-native-surviving-owner\n44171 44157 44171 R    Sun Nov 15 00:04:06 2026     /Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-land-20261115/build/g9-native-surviving-owner-main/g9-native-surviving-owner\n44172 44171 44172 S    Sun Nov 15 00:04:06 2026     /Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-land-20261115/build/g9-native-surviving-owner-main/g9-native-surviving-owner\n44174 44172 44172 S    Sun Nov 15 00:04:06 2026     /Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-land-20261115/build/g9-native-surviving-owner-main/g9-native-surviving-owner",
+  "returncode": 0,
+  "rows": [
+    {
+      "executable": "/Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python",
+      "pgid": 43274,
+      "pid": 43276,
+      "ppid": 43274,
+      "start": "Sun Nov 15 00:04:05 2026",
+      "state": "S"
+    },
+    {
+      "executable": "/Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-land-20261115/build/g9-native-surviving-owner-main/g9-native-surviving-owner",
+      "pgid": 43274,
+      "pid": 44157,
+      "ppid": 43276,
+      "start": "Sun Nov 15 00:04:06 2026",
+      "state": "S"
+    },
+    {
+      "executable": "/Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-land-20261115/build/g9-native-surviving-owner-main/g9-native-surviving-owner",
+      "pgid": 44171,
+      "pid": 44171,
+      "ppid": 44157,
+      "start": "Sun Nov 15 00:04:06 2026",
+      "state": "R"
+    },
+    {
+      "executable": "/Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-land-20261115/build/g9-native-surviving-owner-main/g9-native-surviving-owner",
+      "pgid": 44172,
+      "pid": 44172,
+      "ppid": 44171,
+      "start": "Sun Nov 15 00:04:06 2026",
+      "state": "S"
+    },
+    {
+      "executable": "/Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-land-20261115/build/g9-native-surviving-owner-main/g9-native-surviving-owner",
+      "pgid": 44172,
+      "pid": 44174,
+      "ppid": 44172,
+      "start": "Sun Nov 15 00:04:06 2026",
+      "state": "S"
+    }
+  ],
+  "start_ns": 1165188404670000,
+  "stderr": ""
+}

@@ -1,0 +1,52 @@
+{
+  "action": {
+    "kind": "host_eof",
+    "t_ns": 1165189293478000
+  },
+  "assertions": {
+    "actual_host_loss": true,
+    "actual_parent_separate_group": true,
+    "aliases_closed": true,
+    "baseline_precedes_loss": true,
+    "containment": true,
+    "final_reap_after_signals": true,
+    "final_reaped_state": true,
+    "live_descendant_before_loss": true,
+    "live_worker_and_owner_before_loss": true,
+    "native_census_observed": true,
+    "native_cloexec_observed": true,
+    "no_fuse_before_verdict": true,
+    "no_h_signal_to_worker_or_group": true,
+    "no_nonretained_wait": true,
+    "no_signal_after_reap": true,
+    "outer_census_positive_control": true,
+    "pre_hygiene_observation": true,
+    "ready_before_trigger": true,
+    "reservation_retained_before_trigger": true,
+    "successful_nonreaping_observation": true,
+    "term_and_kill_observed": true,
+    "vendor_only_in_worker": true,
+    "within_fixed_deadline": true
+  },
+  "binary_sha256": "daff385922550384b99a5d39efbec802a9bc86bf6ee69e595959477ab1a2555e",
+  "command": [
+    "/Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-land-20261115/build/g9-native-surviving-owner-main/g9-native-surviving-owner",
+    "H",
+    "/Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-land-20261115/build/g9-native-rerun-main-20261115/leak_restored",
+    "host_eof",
+    "/Volumes/Workshop/Code/agent-worktrees/g9-native-evidence-land-20261115/build/g9-native-surviving-owner-main/libg9-native-hung-vendor.so",
+    "1165194212461000"
+  ],
+  "containment_oracle": true,
+  "deadline_ns": 1165194212461000,
+  "host_returncode": 0,
+  "hygiene_started_ns": 1165189464829000,
+  "mode": "leak_restored",
+  "native_mode": "host_eof",
+  "observer_sha256": "419648a87314b53901775b722d78a68b6859d019c573b6d1392b8275a5034618",
+  "passed": true,
+  "production_custody": "HOLD",
+  "schema": 1,
+  "start_ns": 1165189212461000,
+  "vendor_sha256": "de297beadf6dad063f2ef8c464762e775869d4a291735d33f918ec558377a996"
+}
