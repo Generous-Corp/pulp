@@ -1,0 +1,50 @@
+{
+  "end_ns": 791613263777000,
+  "ok": true,
+  "raw": "81285  5281 81285 Ss   Tue Nov 10 16:17:51 2026     /Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python\n81376 81285 81285 S    Tue Nov 10 16:17:51 2026     /Volumes/Workshop/Code/agent-worktrees/g9-native-surviving-owner-20261110/build/g9-native-surviving-owner/g9-native-surviving-owner\n81378 81376 81378 R    Tue Nov 10 16:17:51 2026     /Volumes/Workshop/Code/agent-worktrees/g9-native-surviving-owner-20261110/build/g9-native-surviving-owner/g9-native-surviving-owner\n81379 81378 81379 S    Tue Nov 10 16:17:51 2026     /Volumes/Workshop/Code/agent-worktrees/g9-native-surviving-owner-20261110/build/g9-native-surviving-owner/g9-native-surviving-owner\n81381 81379 81379 S    Tue Nov 10 16:17:51 2026     /Volumes/Workshop/Code/agent-worktrees/g9-native-surviving-owner-20261110/build/g9-native-surviving-owner/g9-native-surviving-owner",
+  "returncode": 0,
+  "rows": [
+    {
+      "executable": "/Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python",
+      "pgid": 81285,
+      "pid": 81285,
+      "ppid": 5281,
+      "start": "Tue Nov 10 16:17:51 2026",
+      "state": "Ss"
+    },
+    {
+      "executable": "/Volumes/Workshop/Code/agent-worktrees/g9-native-surviving-owner-20261110/build/g9-native-surviving-owner/g9-native-surviving-owner",
+      "pgid": 81285,
+      "pid": 81376,
+      "ppid": 81285,
+      "start": "Tue Nov 10 16:17:51 2026",
+      "state": "S"
+    },
+    {
+      "executable": "/Volumes/Workshop/Code/agent-worktrees/g9-native-surviving-owner-20261110/build/g9-native-surviving-owner/g9-native-surviving-owner",
+      "pgid": 81378,
+      "pid": 81378,
+      "ppid": 81376,
+      "start": "Tue Nov 10 16:17:51 2026",
+      "state": "R"
+    },
+    {
+      "executable": "/Volumes/Workshop/Code/agent-worktrees/g9-native-surviving-owner-20261110/build/g9-native-surviving-owner/g9-native-surviving-owner",
+      "pgid": 81379,
+      "pid": 81379,
+      "ppid": 81378,
+      "start": "Tue Nov 10 16:17:51 2026",
+      "state": "S"
+    },
+    {
+      "executable": "/Volumes/Workshop/Code/agent-worktrees/g9-native-surviving-owner-20261110/build/g9-native-surviving-owner/g9-native-surviving-owner",
+      "pgid": 81379,
+      "pid": 81381,
+      "ppid": 81379,
+      "start": "Tue Nov 10 16:17:51 2026",
+      "state": "S"
+    }
+  ],
+  "start_ns": 791613188925000,
+  "stderr": ""
+}

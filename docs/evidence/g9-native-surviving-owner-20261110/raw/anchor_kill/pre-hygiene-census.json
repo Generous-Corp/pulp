@@ -1,0 +1,50 @@
+{
+  "end_ns": 791617319487000,
+  "ok": true,
+  "raw": "81285  5281 81285 Ss   Tue Nov 10 16:17:51 2026     /Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python\n82953 81285 81285 S    Tue Nov 10 16:17:55 2026     /Volumes/Workshop/Code/agent-worktrees/g9-native-surviving-owner-20261110/build/g9-native-surviving-owner/g9-native-surviving-owner\n82955 82953 82955 Z    Tue Nov 10 16:17:55 2026     <defunct>\n82959     1 82959 R    Tue Nov 10 16:17:55 2026     /Volumes/Workshop/Code/agent-worktrees/g9-native-surviving-owner-20261110/build/g9-native-surviving-owner/g9-native-surviving-owner\n82965 82959 82959 S    Tue Nov 10 16:17:55 2026     /Volumes/Workshop/Code/agent-worktrees/g9-native-surviving-owner-20261110/build/g9-native-surviving-owner/g9-native-surviving-owner",
+  "returncode": 0,
+  "rows": [
+    {
+      "executable": "/Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python",
+      "pgid": 81285,
+      "pid": 81285,
+      "ppid": 5281,
+      "start": "Tue Nov 10 16:17:51 2026",
+      "state": "Ss"
+    },
+    {
+      "executable": "/Volumes/Workshop/Code/agent-worktrees/g9-native-surviving-owner-20261110/build/g9-native-surviving-owner/g9-native-surviving-owner",
+      "pgid": 81285,
+      "pid": 82953,
+      "ppid": 81285,
+      "start": "Tue Nov 10 16:17:55 2026",
+      "state": "S"
+    },
+    {
+      "executable": "<defunct>",
+      "pgid": 82955,
+      "pid": 82955,
+      "ppid": 82953,
+      "start": "Tue Nov 10 16:17:55 2026",
+      "state": "Z"
+    },
+    {
+      "executable": "/Volumes/Workshop/Code/agent-worktrees/g9-native-surviving-owner-20261110/build/g9-native-surviving-owner/g9-native-surviving-owner",
+      "pgid": 82959,
+      "pid": 82959,
+      "ppid": 1,
+      "start": "Tue Nov 10 16:17:55 2026",
+      "state": "R"
+    },
+    {
+      "executable": "/Volumes/Workshop/Code/agent-worktrees/g9-native-surviving-owner-20261110/build/g9-native-surviving-owner/g9-native-surviving-owner",
+      "pgid": 82959,
+      "pid": 82965,
+      "ppid": 82959,
+      "start": "Tue Nov 10 16:17:55 2026",
+      "state": "S"
+    }
+  ],
+  "start_ns": 791617241596000,
+  "stderr": ""
+}

@@ -1,0 +1,28 @@
+{
+  "assessor": {
+    "path": "test/fixtures/g9_native_surviving_owner/run.py",
+    "sha256": "419648a87314b53901775b722d78a68b6859d019c573b6d1392b8275a5034618"
+  },
+  "parent_commit": "2c1e6201feb2d26d980c71457f5865825848511b",
+  "process_fixture_reruns": 0,
+  "production_custody": "HOLD",
+  "repair_files": {
+    "docs/evidence/g9-native-surviving-owner-p2-20261110/README.md": "f6efdf33fafe1faad275d5c282ef291cba0b2e4d3d4b7e24dbebeb80fff3f202",
+    "docs/evidence/g9-native-surviving-owner-p2-20261110/build.log": "5b4080d9e2c758af9251d5ccc0c7714382bc0b5e3b7e55547888a5c6a677a099",
+    "docs/evidence/g9-native-surviving-owner-p2-20261110/canonical.json": "4fe253efd76735ecd017b45576e7d103bbfeeed2eaf4d2ded73c6b703ca4848d",
+    "docs/evidence/g9-native-surviving-owner-p2-20261110/configure.log": "e42759b070829524404afbb4d84b583c07d2c49f2d40cf2882a5598a027c00a0",
+    "docs/evidence/g9-native-surviving-owner-p2-20261110/controls.json": "12910cd5c519f5b52a638de18f47a83ce05678ffb4b2da561a7061bc827d5a94",
+    "docs/evidence/g9-native-surviving-owner-p2-20261110/copies/census_extra_member_live.json": "593097452df711df775f08a82fec1534bf6083607496b17d2f1b08a03a97a509",
+    "docs/evidence/g9-native-surviving-owner-p2-20261110/copies/census_extra_member_zombie.json": "56570cde4ee79bc40c4dc0b6a74fe180a6e6902fb63de5c7bb5ad1a206fc0b18",
+    "docs/evidence/g9-native-surviving-owner-p2-20261110/copies/census_live_worker.json": "8f35276988738561df40123cddcec460d18774413c58c6a371dd52067b090d0b",
+    "docs/evidence/g9-native-surviving-owner-p2-20261110/copies/census_missing_worker.json": "5bc892511477e296672016d212a7c485d7936f3be8c06f6f7ba7c6b7257a7a83",
+    "docs/evidence/g9-native-surviving-owner-p2-20261110/copies/nonretained_wait.json": "be8b2a56ec025ddfd55d07bb372698be12eacfc9fe538450abb0f3e31d3bde1a",
+    "docs/evidence/g9-native-surviving-owner-p2-20261110/copies/nonretained_wait_other_role.json": "e43d95a748a30f96033bd30acd8ebe5b50748a567ddd6bfde7e9adf6bf92edaa",
+    "docs/evidence/g9-native-surviving-owner-p2-20261110/immutability.json": "5e5ce554320793c992a57465957355c0e038f03438f328d28adf3c9034207e58",
+    "docs/evidence/g9-native-surviving-owner-p2-20261110/independent-review.json": "20d07a8590b2696ba3e7065bdb30347acd4669d225149220d50b0c5a04b2759a",
+    "docs/evidence/g9-native-surviving-owner-p2-20261110/rebuild.json": "4c33da1dd47d95bbe4fdcb611f45cd3222632118b0e446512230b82e5099ad8d",
+    "docs/evidence/g9-native-surviving-owner-p2-20261110/review-binding.json": "ddba6748b9ffc67680900adc8b8122d17d71418284c9b3b48d6115aee8281e0c",
+    "docs/evidence/g9-native-surviving-owner-p2-20261110/verify_repair.py": "6eddd019822f6c40238b7821d2b93b1d5db8a5e0334ab405e74b1387268fd7ae"
+  },
+  "schema": 1
+}

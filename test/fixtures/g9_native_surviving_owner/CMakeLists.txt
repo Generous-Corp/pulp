@@ -1,0 +1,12 @@
+cmake_minimum_required(VERSION 3.25)
+project(g9_native_surviving_owner LANGUAGES CXX)
+if(NOT APPLE OR NOT CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+  message(FATAL_ERROR "This evidence fixture admits macOS arm64 only")
+endif()
+get_filename_component(PULP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
+add_executable(g9-native-surviving-owner fixture.cpp
+  "${PULP_ROOT}/core/platform/platform/posix/child_process_posix.cpp")
+target_include_directories(g9-native-surviving-owner PRIVATE "${PULP_ROOT}/core/platform/include")
+target_compile_features(g9-native-surviving-owner PRIVATE cxx_std_20)
+add_library(g9-native-hung-vendor MODULE vendor.cpp)
+target_compile_features(g9-native-hung-vendor PRIVATE cxx_std_20)
