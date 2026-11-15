@@ -55,6 +55,10 @@ enum class GraphDocumentRefusal : std::uint8_t {
     SubgraphRecordInvalid,
     SubgraphBindingDangling,
     SubgraphBindingDuplicate,
+    // A node id in a saved-identity v6 document (a node record, identity
+    // entry, or binding) is not an integer in 1..NodeId max, or two node
+    // records share one id.
+    NodeIdInvalid,
 };
 
 const char* graph_document_refusal_name(GraphDocumentRefusal) noexcept;
@@ -73,6 +77,10 @@ class GraphDocument {
     std::string_view canonical_bytes() const noexcept {
         return canonical_bytes_;
     }
+    // Digest of the canonical document with node layout removed. It keeps
+    // raw NodeIds, so two documents that differ only in NodeId numbering
+    // have different digests; diff_graph_documents reports a
+    // numbering-independent digest for that comparison.
     std::string_view semantic_digest() const noexcept {
         return semantic_digest_;
     }
@@ -238,6 +246,9 @@ class GraphSerializer {
         std::vector<std::string> state_restore_failures;    // identity strings
         std::vector<std::string> missing_custom_node_types; // type_id@version
         std::unordered_map<NodeId, std::pair<float,float>> editor_layout;
+        // Persisted node id -> NodeId assigned by this load, for every node
+        // the load created. Empty whenever ok is false.
+        std::unordered_map<NodeId, NodeId> persisted_node_ids;
     };
 
     // Decode JSON into a freshly cleared graph. Returns LoadResult; the
@@ -251,7 +262,9 @@ class GraphSerializer {
                                 const GraphLoadOptions& options);
 
     /// Validate and restore a saved-identity v6 document. Identity bindings
-    /// are checked before graph mutation and are verified after restoration.
+    /// are checked before graph mutation, and after restoration every
+    /// identity must name the node its binding's persisted id was restored
+    /// as. A refusal after the load started leaves `graph` empty.
     static LoadResult from_saved_document(SignalGraph& graph, const std::string& json,
                                           const GraphLoadOptions& options = {});
 
@@ -259,6 +272,12 @@ class GraphSerializer {
     // rules as from_json. A read or size failure leaves graph untouched.
     static LoadResult from_file(SignalGraph& graph, const std::filesystem::path& path,
                                 const GraphLoadOptions& options = {});
+
+    /// Register every custom node type (and its sample-kernel companion)
+    /// that `from` holds into `to`, so a scratch graph can trial-load a
+    /// document exactly as `from` would without touching `from`. Returns
+    /// false when `to` refuses a registration.
+    static bool copy_custom_node_types(const SignalGraph& from, SignalGraph& to);
 };
 
 } // namespace pulp::host

@@ -24,7 +24,7 @@
     },
     {
       "path": "test/test_graph_history.cpp",
-      "needles": ["graph edit history refuses to undo over an unrecorded edit", "graph document diff compares by logical identity, not NodeId", "graph edit history rolls back a restore that cannot be reproduced"]
+      "needles": ["graph edit history refuses to undo over an unrecorded edit", "graph document diff compares by logical identity, not NodeId", "graph edit history refuses a restore that would leave a node unresolved"]
     },
     {
       "path": "docs/graph-program-status/G-3.md",
