@@ -1496,6 +1496,8 @@ a typed `code` and a diagnostic `message`. `inspect` and `explain`
 report the graph shape without running plugin code. `fmt` rewrites the file in
 canonical JSON form and is byte stable on repeated runs; `canonicalize` remains
 an alias. Formatting refuses unresolved plugin nodes or rejected plugin state.
+With `--json`, a successful `fmt` prints `{"valid":true,"code":"Ok"}` and a refusal
+prints a typed error (`unresolved_node`, `RestoreFailed` or a save code).
 
 #### Graph `--json` codes
 
@@ -1524,8 +1526,12 @@ render preconditions, and saving: `missing_option`, `invalid_option`,
 `output_failed`, and `saved`. The probe adds `invalid_edge_kind`, `unknown_node`
 (a probe source or destination name that does not exist; distinct from the
 typed `UnknownNode`), `invalid_destination_param`, `event_injection_failed`,
-`non_finite_sample` and `unprepared_latency`. A test requires every code the
-CLI source emits to appear in this list. Save failures use
+`non_finite_sample` and `unprepared_latency`. Probe attach refusals use the
+typed names `Unprepared`, `UnknownPort`, `MissingEdge`, `UnsupportedKind`,
+`UnsupportedExecution`, `Busy` and `Detached` (the probe did not attach; `Busy`: a live swap edit is open, or eight
+displaced probes are still parked until snapshot holders release them). A test
+requires every code the CLI source emits through `fail(...)`, `json_error(...)`,
+`code = ...` or the probe refusal table to appear in this list. Save failures use
 `GraphSerializer::save_code_name` (`serialization_refused`, `file_too_large`,
 `parent_unavailable`, `temporary_unavailable`, `write_failed`, `replace_failed`,
 `directory_sync_failed`). The earlier CLI-only spellings `invalid_graph`,
@@ -1583,7 +1589,8 @@ at 48 kHz when no input is given. Unknown or repeated options are refused with
 largest absolute output sample over all channels, so a silent render is visible
 without reading the WAV. Unresolved node types, prepare failures and non-finite
 output (`non_finite_output`) return exit 1. The MCP `pulp_graph` tool exposes the read-only `inspect`,
-`validate`, `explain`, `render`, `probe`, and `report` operations; file writing stays in the CLI.
+`validate`, `explain`, `render`, `probe`, `report` and `catalog` operations, and `fmt` forced to
+`--notation`, so it prints and never writes; file writing stays in the CLI.
 
 `pulp graph report FILE [--sample-rate 48000] [--max-block-size 512]
 [--block-size N] [--measure-blocks 16]` prepares the saved graph without loading

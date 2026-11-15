@@ -66,7 +66,10 @@
         {
           "kind": "test",
           "path": "test/test_cli_graph_code_parity.cpp",
-          "needles": ["graph diff compares saved documents by logical identity"]
+          "needles": [
+            "graph diff compares saved documents by logical identity",
+            "graph CLI success code and fmt use the C++ spelling"
+          ]
         },
         {
           "kind": "cli_definition",

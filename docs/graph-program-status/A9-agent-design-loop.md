@@ -18,8 +18,17 @@ consumer was one 690-line `main.cpp` (707 physical lines), far over the
 | `examples/graph-agent-loop/plan_boundary.hpp` | verification harness: fail-closed plan parser, topology fingerprint, action log | 213 |
 
 The combined 378 lines are 45 percent below the old 690. The split is a
-classification, not a deletion, so the budget test reports both numbers and the
-harness size cannot grow unseen. The saving is real in three places: the
+classification, not a deletion: the 200-line glue budget is met because the
+plan boundary is counted as harness. The budget test therefore holds each file
+to its own ceiling (glue 200, harness 220), so glue moved into
+`plan_boundary.hpp` fails the harness ceiling instead of passing silently. Each
+ceiling has its own over-budget negative control. The two budget tests and both
+controls run in the Pulp test tree on every build
+(`test/cmake/graph_agent_loop_consumer_tests.cmake`, not labelled `slow`). The
+full consumer with its planted plans runs as `graph-agent-loop-installed-sdk`,
+which is `slow` (the informational nightly full build runs it, the required
+`macos` gate does not), fails on zero registered tests and asserts exactly
+thirteen. The saving is real in three places: the
 hand-written duplicate-key scanner (about 200 lines) is gone because choc's
 parser already rejects a repeated key, including an escaped spelling (checked
 at the pinned choc, and pinned by two planted plans); the per-step field checks

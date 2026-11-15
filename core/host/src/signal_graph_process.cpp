@@ -41,7 +41,11 @@ ControlProcessResult SignalGraph::process_control_checked(
         }
     } release_busy{cg->control_index_busy};
     const auto frames = block.indices.size();
-    if (parallel_routing_enabled() || anticipation_enabled())
+    // A latency-compensated graph prepared while parallel routing was on keeps
+    // its parallel execution domain until the next prepare, whatever the live
+    // flag now says, so the snapshot's domain is checked as well.
+    if (parallel_routing_enabled() || anticipation_enabled() ||
+        cg->pdc_execution_domain == PdcExecutionDomain::RoutedParallel)
         return refuse(ControlProcessResult::UnsupportedMode);
     if (frames == 0 || frames > kControlIndexMaxFrames ||
         frames > static_cast<std::size_t>(cg->max_block_size) || output.num_samples() != frames ||
