@@ -2,6 +2,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <choc/text/choc_JSON.h>
+#include <pulp/host/custom_node_type.hpp>
 #include <pulp/host/graph_history.hpp>
 #include <pulp/host/signal_graph_runtime.hpp>
 
@@ -281,4 +282,41 @@ TEST_CASE("qualified port identities are independent of NodeId numbering",
     third.add_output_node(1, "Output");
     CHECK(port_identity_fingerprint(qualified_port_identities(third)) !=
           port_identity_fingerprint(a));
+}
+
+TEST_CASE("graph edit history rolls back a restore that cannot be reproduced",
+          "[host][graph][history][g3]") {
+    const auto make_type = [](int outputs) {
+        CustomNodeType type;
+        type.type_id = "test.history-port-shape";
+        type.version = 1;
+        type.num_input_ports = 1;
+        type.num_output_ports = outputs;
+        type.process = [](pulp::audio::BufferView<float>&,
+                          const pulp::audio::BufferView<const float>&, int) {};
+        return type;
+    };
+    SignalGraph graph;
+    REQUIRE(graph.register_custom_node_type(make_type(1)));
+    const auto input = graph.add_input_node(1, "Input");
+    const auto shaper = graph.add_custom_node("test.history-port-shape", 1, "Shaper");
+    const auto output = graph.add_output_node(1, "Output");
+    REQUIRE(graph.connect(input, 0, shaper, 0));
+    REQUIRE(graph.connect(shaper, 0, output, 0));
+
+    GraphEditHistory history;
+    auto before = GraphEditHistory::checkpoint(graph);
+    REQUIRE(graph.disconnect(shaper, 0, output, 0));
+    REQUIRE(history.commit(std::move(before), graph, "unplug").ok());
+
+    // The type now declares a different port set, so the recorded document
+    // cannot be restored as captured. The graph returns to its pre-call state.
+    REQUIRE(graph.register_custom_node_type(make_type(2)));
+    const auto refused = history.undo(graph);
+    INFO(refused.detail);
+    CHECK(refused.code == GraphHistoryCode::RestoreFailed);
+    CHECK(refused.rolled_back);
+    CHECK(history.can_undo());
+    CHECK(node_named(graph, "Shaper") != nullptr);
+    CHECK(graph.connections().size() == 1);
 }
