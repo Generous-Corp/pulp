@@ -607,6 +607,16 @@ release build and fails only here, with
 `kCatIndex_ADD_TO_PERFETTO_DEFINE_CATEGORIES_IF_FAILS_<line>`; lint category
 literals against that header in the plug-in's own tests.
 
+The symbol count proves Perfetto is in the archives, not that consumer code
+gets its spans into a file. For that, run
+`tools/scripts/trace_consumer_e2e.sh --sdk <prefix> --expect on --work <dir>`:
+it builds a tiny project against the prefix, captures through
+`Tracing::start_exclusive` / `stop_owned`, and fails unless trace_processor
+finds that project's own slice in the flushed file. Run it with `--expect off`
+against an untraced SDK as the control. When a plug-in's capture comes back
+empty, this separates "the SDK cannot trace" from "the plug-in never started a
+session or never reached the instrumented code".
+
 ### Editor open out of process (AUHostingService), with spans
 
 Logic runs AU v2 plug-ins in AUHostingService, which inherits no environment.
