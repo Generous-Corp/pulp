@@ -21,7 +21,10 @@
 #include "../core/view/platform/mac/window_host_mac_internal.hpp"
 #include "../core/view/platform/mac/window_host_mac_view.h"
 
+#include <atomic>
+#include <chrono>
 #include <memory>
+#include <thread>
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
@@ -83,6 +86,65 @@ struct FrameCounter {
 };
 
 }  // namespace
+
+namespace {
+
+// A link callback that holds its first tick until released, so a test can stop
+// the link while a callback is running.
+struct BlockingTick {
+    std::atomic<int> entered{0};
+    std::atomic<bool> release{false};
+    std::atomic<bool> finished{false};
+};
+
+CVReturn blocking_link_callback(CVDisplayLinkRef, const CVTimeStamp*, const CVTimeStamp*,
+                                CVOptionFlags, CVOptionFlags*, void* context) {
+    auto* tick = static_cast<BlockingTick*>(context);
+    if (tick->entered.fetch_add(1) != 0)
+        return kCVReturnSuccess;
+    // Bounded: a link that never waits must not hang the suite.
+    const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+    while (!tick->release.load() && std::chrono::steady_clock::now() < until)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    tick->finished.store(true);
+    return kCVReturnSuccess;
+}
+
+} // namespace
+
+TEST_CASE("stopping the display-link driver waits for a callback already running",
+          "[view][mac][frame-pump][display-link]") {
+    // A host frees itself right after stop() returns, and its link callback
+    // reads the host. So stop() must not return while a callback is still
+    // inside it. CVDisplayLinkStop is synchronous on macOS: measured here, it
+    // waits for a callback already running, which is what
+    // MacDisplayLinkDriver::stop() and each host's destructor rely on. A
+    // platform change that broke that would fail this case.
+    MacDisplayLinkDriver driver;
+    BlockingTick tick;
+    if (!driver.open(&blocking_link_callback, &tick))
+        SKIP("no display list in this process: no link to open");
+    driver.resume();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (tick.entered.load() == 0 && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    if (tick.entered.load() == 0) {
+        driver.stop();
+        SKIP("the display link never ticked in this process");
+    }
+    // The callback is inside its first tick. Let it go and stop at once.
+    tick.release.store(true);
+    // Control: the callback is still running as stop() is entered, so a pass
+    // below means stop() waited, not that the callback had already returned.
+    REQUIRE_FALSE(tick.finished.load());
+    driver.stop();
+    const bool finished_before_stop_returned = tick.finished.load();
+    // Wait out a callback that stop() abandoned before tick leaves scope.
+    while (!tick.finished.load())
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    REQUIRE(finished_before_stop_returned);
+}
 
 TEST_CASE("the pump's nominal dt is seeded from a link that has never run",
           "[view][mac][frame-pump][timing]") {
