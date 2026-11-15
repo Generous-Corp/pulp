@@ -403,9 +403,14 @@ struct ParamInfo {
     /// AU hosts re-read every parameter after a change to a flagged one, so a
     /// plug-in that moves other parameters behind the host's back should set
     /// this: AU v2 and v3 publish `kAudioUnitParameterFlag_IsGlobalMeta`.
-    /// VST3 and CLAP have no per-parameter equivalent (VST3 uses a
-    /// plug-in-wide restart-parameter-values request, CLAP a plug-in-wide
-    /// parameter rescan), so this field has no effect there.
+    /// VST3 and CLAP can only announce a change after it happened, for the
+    /// whole plug-in: VST3 `restartComponent(kParamValuesChanged)` and CLAP
+    /// `params.rescan(CLAP_PARAM_RESCAN_VALUES)`. Neither lets a single
+    /// parameter declare in advance that changing it moves others.
+    /// VST3's `kIsProgramChange` only marks a program-selection parameter, and
+    /// CLAP's `CLAP_PARAM_REQUIRES_PROCESS` says how a change must be applied,
+    /// so neither carries this meaning. The field has no effect on those
+    /// formats.
     ///
     /// Opt-in: defaults false.
     ///

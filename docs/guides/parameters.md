@@ -55,7 +55,7 @@ Fields:
 - `kind` — declare a two-state parameter as `ParamKind::Toggle` so AU publishes the Boolean unit (otherwise it is Generic); `Enum` and `Integer` are likewise opt-in
 - `affects_others` — `false` by default. Set it on a parameter whose change moves other parameters, such as a mode or preset selector that rewrites a group of controls. A host cannot otherwise know the other values changed behind its back, so it keeps showing stale values. What each format does:
   - **AU v2 and v3** publish `kAudioUnitParameterFlag_IsGlobalMeta` on that parameter, and the AU v2 adapter also notifies the host that every other parameter's value changed whenever the flagged parameter changes (including when the host itself wrote it), so the host re-reads them.
-  - **VST3 and CLAP** have no per-parameter equivalent (VST3 offers only a plug-in-wide request to re-read all values, CLAP only a plug-in-wide parameter rescan), so the field has no effect there.
+  - **VST3 and CLAP** have no per-parameter equivalent: they can only announce, for the whole plug-in and after the fact, that values changed (VST3 `restartComponent(kParamValuesChanged)`, CLAP `params.rescan(CLAP_PARAM_RESCAN_VALUES)`). VST3 `kIsProgramChange` marks a program-selection parameter and CLAP `CLAP_PARAM_REQUIRES_PROCESS` says how a change is applied; neither declares "changing this moves others". The field has no effect on those formats.
   Leave it off for an ordinary control: setting it on many parameters makes the host re-read every other parameter on each of their changes.
 
 `to_string` / `from_string` are surfaced to the host's generic editor and
