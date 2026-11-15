@@ -389,16 +389,51 @@ class TrustedFieldTamperTest(unittest.TestCase):
 
 
 FAKE_FIXTURE = """#!{python}
+# Stand-in for a compiled cell. PULP_FAKE_SCHED picks how it treats the
+# scheduling request: "honour" behaves like the C++ harness (a real-time
+# request is obtained, the malformed one refused); "fallback" ignores the
+# request and reports default scheduling, which the runner must reject;
+# "deny" refuses every real-time request, like a host without real-time rights.
 import os, sys
 sys.path.insert(0, {tools!r})
 import graph_paced_timing_matrix as m
 env = os.environ
+requested = env.get("PULP_PACED_SCHED", "none")
+behaviour = env.get("PULP_FAKE_SCHED", "honour")
+reference = m.format_sched_line("none", "unknown", "not_requested")
+if behaviour == "fallback" or requested == "none":
+    sched = m.format_sched_line("none", "timeshare", "not_requested")
+elif requested == "realtime" and behaviour != "deny":
+    sched = m.format_sched_line("realtime", "time_constraint", "obtained", period_ns=2666666,
+                                computation_ns=1333333, constraint_ns=2666666, preemptible=1,
+                                priority=97)
+else:
+    sched = m.format_sched_line(requested, "timeshare", "refused",
+                                "errno_1" if behaviour == "deny" else "kern_return_4", priority=31)
+if sched.split()[3] == "status=refused":
+    lines = m.reference_cell_output(env["PULP_PACED_VARIANT"], int(env["PULP_PACED_RATE"]),
+                                    int(env["PULP_PACED_FRAMES"]), 8, 0, 1).splitlines()[:2]
+    lines[1] = lines[1].replace("callbacks=8", "callbacks=" + env["PULP_PACED_CALLBACKS"])
+    text = "\\n".join(lines + [sched, "PACED_END rows=0 oracle_failures=0"]) + "\\n"
+    text = text.replace("fixture=python-reference", "fixture={fixture}")
+    sys.stdout.write(text + "test cases: 1 | 1 failed\\n")
+    sys.exit(1)
 text = m.reference_cell_output(env["PULP_PACED_VARIANT"], int(env["PULP_PACED_RATE"]),
                                int(env["PULP_PACED_FRAMES"]), int(env["PULP_PACED_CALLBACKS"]), 0, 1)
-text = text.replace("fixture=python-reference", "fixture=g6-voice-bank")
+text = text.replace("fixture=python-reference", "fixture={fixture}").replace(reference, sched)
 text = text.replace("build_type=python", "build_type={stamp}")
 sys.stdout.write(text + "All tests passed (1 assertion in 1 test case)\\n")
 """
+
+
+def install_fake(build: Path, fixture: str, stamp: str = "Release") -> None:
+    exe = build / matrix.FIXTURES[fixture].executable
+    exe.parent.mkdir(parents=True, exist_ok=True)
+    exe.write_text(FAKE_FIXTURE.format(python=sys.executable, tools=str(ROOT / "tools"), stamp=stamp,
+                                       fixture=fixture), encoding="utf-8")
+    exe.chmod(0o755)
+    (build / "CMakeCache.txt").write_text("CMAKE_BUILD_TYPE:STRING=Release\nPULP_SANITIZER:STRING=\n",
+                                          encoding="utf-8")
 
 
 class CompiledBuildTypeTest(unittest.TestCase):
@@ -406,13 +441,7 @@ class CompiledBuildTypeTest(unittest.TestCase):
 
     def run_fake(self, tmp, stamp):
         build = tmp / "build"
-        exe = build / matrix.FIXTURES["g6-voice-bank"].executable
-        exe.parent.mkdir(parents=True)
-        exe.write_text(FAKE_FIXTURE.format(python=sys.executable, tools=str(ROOT / "tools"), stamp=stamp),
-                       encoding="utf-8")
-        exe.chmod(0o755)
-        (build / "CMakeCache.txt").write_text("CMAKE_BUILD_TYPE:STRING=Release\nPULP_SANITIZER:STRING=\n",
-                                              encoding="utf-8")
+        install_fake(build, "g6-voice-bank", stamp)
         out = tmp / "out"
         receipt, code = matrix.record_matrix(
             mode="short", source_root=ROOT, build_dir=build, output_dir=out, fixtures=["g6-voice-bank"],
@@ -481,6 +510,7 @@ class QualificationRuleTest(unittest.TestCase):
             cells.append({"fixture": fixture.name, "variant": variant, "rate": rate, "frames": frames,
                           "callbacks": matrix.QUALIFICATION_CALLBACKS, "returncode": 0,
                           "compiled_source": "a" * 40, "build_dirty": 0, "build_type": "Release",
+                          "scheduling": {"status": "obtained", "obtained": "time_constraint"},
                           "metrics": {"thresholds_met": True}})
         return {"mode": "qualification", "status": "COMPLETE",
                 "requested": {"callbacks": matrix.QUALIFICATION_CALLBACKS,
@@ -489,6 +519,7 @@ class QualificationRuleTest(unittest.TestCase):
                 "admission": {"max_load_per_cpu": matrix.DEFAULT_MAX_LOAD_PER_CPU,
                               "before": {"admitted": True}, "after": {"admitted": True}},
                 "build_profile": {"CMAKE_BUILD_TYPE": "Release", "PULP_SANITIZER": ""},
+                "scheduling": {"requested": "realtime", "refusal": None},
                 "source": {"sha": "a" * 40, "dirty": False}, "cells": cells}
 
     def test_ideal_run_qualifies_and_each_single_defect_disqualifies(self):
@@ -502,6 +533,10 @@ class QualificationRuleTest(unittest.TestCase):
             "short_cell:": lambda r: r["cells"][1].__setitem__("callbacks", 99999),
             "build_type_mismatch:": lambda r: r["cells"][2].__setitem__("build_type", "Debug"),
             "admission_threshold_relaxed": lambda r: r["admission"].__setitem__("max_load_per_cpu", 0.5),
+            "scheduling_not_realtime_request": lambda r: r["scheduling"].__setitem__("requested", "none"),
+            "scheduling_refused": lambda r: r["scheduling"].__setitem__("refusal", {"reason": "x"}),
+            "scheduling_not_obtained:": lambda r: r["cells"][4]["scheduling"].update(
+                status="not_requested", obtained="timeshare"),
         }
         for reason, mutate in defects.items():
             receipt = self.ideal()
@@ -509,6 +544,155 @@ class QualificationRuleTest(unittest.TestCase):
             reasons = matrix.disqualifiers_for(receipt)
             self.assertTrue(any(r.startswith(reason) for r in reasons), (reason, reasons))
 
+
+def fake_record(tmp: Path, *, fixture="g6-voice-bank", scheduling="realtime", behaviour="honour",
+                mode="short", callbacks=8, source_root=ROOT, frames_filter=frozenset({128})):
+    build = tmp / "build"
+    install_fake(build, fixture)
+    fixtures = list(matrix.QUALIFYING_FIXTURES) if mode == "qualification" else [fixture]
+    previous = os.environ.get("PULP_FAKE_SCHED")
+    os.environ["PULP_FAKE_SCHED"] = behaviour
+    try:
+        return matrix.record_matrix(
+            mode=mode, source_root=source_root, build_dir=build, output_dir=tmp / "out",
+            fixtures=fixtures, callbacks=callbacks,
+            frames_filter=None if mode == "qualification" else set(frames_filter),
+            planted_sleep_us=0, planted_every=1, max_load_per_cpu=matrix.DEFAULT_MAX_LOAD_PER_CPU,
+            timeout_seconds=120, scheduling=scheduling, load_reader=QUIET)
+    finally:
+        if previous is None:
+            os.environ.pop("PULP_FAKE_SCHED", None)
+        else:
+            os.environ["PULP_FAKE_SCHED"] = previous
+
+
+class SchedulingTest(unittest.TestCase):
+    """Real-time scheduling is requested, read back, recorded, and refused when unavailable."""
+
+    def test_scheduling_line_must_be_internally_consistent(self):
+        good = matrix.format_sched_line("realtime", "time_constraint", "obtained", period_ns=1)
+        self.assertEqual(matrix.parse_sched_line(good)["obtained"], "time_constraint")
+        for line, message in (
+            (matrix.format_sched_line("realtime", "timeshare", "obtained"), "without a real-time class"),
+            (matrix.format_sched_line("realtime", "timeshare", "refused"), "refusal without"),
+            (matrix.format_sched_line("realtime", "timeshare", "not_requested"), "not_requested disagrees"),
+            (matrix.format_sched_line("none", "timeshare", "refused", "x"), "refusal without"),
+            (good + "\n" + good, "exactly one scheduling line"),
+            ("", "exactly one scheduling line"),
+            (good.replace("priority=-1", "priority=x"), "malformed scheduling integer"),
+        ):
+            with self.subTest(line=line):
+                with self.assertRaisesRegex(matrix.MatrixError, message):
+                    matrix.parse_sched_line(line)
+
+    def test_obtained_realtime_is_recorded_and_bound(self):
+        # Control for the refusal tests below: the same fake, honouring the request.
+        with tempfile.TemporaryDirectory() as tmp:
+            receipt, code = fake_record(Path(tmp))
+            self.assertEqual(code, 0)
+            self.assertEqual(receipt["status"], "COMPLETE")
+            self.assertEqual(receipt["scheduling"]["requested"], "realtime")
+            self.assertIsNone(receipt["scheduling"]["refusal"])
+            cell = receipt["cells"][0]
+            self.assertEqual((cell["scheduling"]["status"], cell["scheduling"]["obtained"]),
+                             ("obtained", "time_constraint"))
+            self.assertFalse([d for d in receipt["disqualifiers"] if d.startswith("scheduling_")])
+            path = Path(tmp) / "out" / "receipt.json"
+            matrix.validate_receipt(path)
+            original = path.read_text(encoding="utf-8")
+            changed = json.loads(original)
+            changed["cells"][0]["scheduling"]["obtained"] = "fifo"
+            path.write_text(json.dumps(resign(changed)), encoding="utf-8")
+            with self.assertRaisesRegex(matrix.MatrixError, "cell scheduling disagrees with raw output"):
+                matrix.validate_receipt(path)
+
+    def test_default_scheduling_never_qualifies(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            receipt, code = fake_record(Path(tmp), scheduling="none")
+            self.assertEqual(code, 0)
+            self.assertIn("scheduling_not_realtime_request", receipt["disqualifiers"])
+            self.assertIn("scheduling_not_obtained:g6-voice-bank/eight-slot/48000/128",
+                          receipt["disqualifiers"])
+            path = Path(tmp) / "out" / "receipt.json"
+            matrix.validate_receipt(path)
+            # Re-signing the request as realtime cannot erase it: the raw line says none.
+            changed = json.loads(path.read_text(encoding="utf-8"))
+            changed["scheduling"]["requested"] = "realtime"
+            changed["disqualifiers"] = matrix.disqualifiers_for(changed)
+            path.write_text(json.dumps(resign(changed)), encoding="utf-8")
+            with self.assertRaisesRegex(matrix.MatrixError, "requested class"):
+                matrix.validate_receipt(path)
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(matrix.MatrixError, "qualification requires realtime"):
+                fake_record(Path(tmp), scheduling="none", mode="qualification",
+                            callbacks=matrix.QUALIFICATION_CALLBACKS, source_root=clean_repo(Path(tmp)))
+
+    def test_silent_fallback_to_default_scheduling_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(matrix.MatrixError, "scheduling request mismatch"):
+                fake_record(Path(tmp), behaviour="fallback")
+
+    def test_refused_request_stops_short_run_with_refused_receipt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            receipt, code = fake_record(Path(tmp), scheduling="realtime-invalid")
+            self.assertEqual(code, matrix.REFUSED_EXIT)
+            self.assertEqual(receipt["status"], "REFUSED")
+            self.assertEqual(receipt["cells"], [])
+            refusal = receipt["scheduling"]["refusal"]
+            self.assertEqual(refusal["scheduling"]["reason"], "kern_return_4")
+            self.assertEqual(refusal["fixture"], "g6-voice-bank")
+            self.assertNotEqual(refusal["returncode"], 0)
+            self.assertIn("scheduling_refused", receipt["disqualifiers"])
+            self.assertIs(receipt["timing_qualified"], False)
+            path = Path(tmp) / "out" / "receipt.json"
+            matrix.validate_receipt(path)
+            original = path.read_text(encoding="utf-8")
+            tampers = (
+                (lambda r: r["scheduling"]["refusal"]["scheduling"].__setitem__("reason", "other"),
+                 "refusal disagrees with raw output"),
+                (lambda r: r["scheduling"]["refusal"].__setitem__("returncode", 0),
+                 "refusing cell must have failed"),
+                (lambda r: (r["scheduling"].__setitem__("refusal", None),
+                            r.__setitem__("disqualifiers", matrix.disqualifiers_for(r))),
+                 "refused receipt must have no cells and a refused admission"),
+                (lambda r: r.__setitem__("status", "COMPLETE"), "a scheduling refusal must stop the run"),
+            )
+            for mutate, message in tampers:
+                with self.subTest(message=message):
+                    changed = json.loads(original)
+                    mutate(changed)
+                    path.write_text(json.dumps(resign(changed)), encoding="utf-8")
+                    with self.assertRaisesRegex(matrix.MatrixError, message):
+                        matrix.validate_receipt(path)
+            path.write_text(original, encoding="utf-8")
+            raw = Path(tmp) / "out" / refusal["raw_stdout"]["path"]
+            raw.write_text(raw.read_text(encoding="utf-8").replace("kern_return_4", "kern_return_5"),
+                           encoding="utf-8")
+            with self.assertRaisesRegex(matrix.MatrixError, "refusal raw output digest mismatch"):
+                matrix.validate_receipt(path)
+
+    def test_unavailable_realtime_refuses_qualification_at_the_first_cell(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            # "deny" models a host that refuses real-time scheduling (for example
+            # Linux without CAP_SYS_NICE). Only the first fixture has an
+            # executable, so a run that continued past the refusal would fail on
+            # the missing second one instead of returning REFUSED.
+            receipt, code = fake_record(Path(tmp), fixture="g5-graph-event", behaviour="deny",
+                                        mode="qualification", callbacks=matrix.QUALIFICATION_CALLBACKS,
+                                        source_root=clean_repo(Path(tmp)))
+            self.assertEqual(code, matrix.REFUSED_EXIT)
+            self.assertEqual(receipt["status"], "REFUSED")
+            self.assertEqual(receipt["mode"], "qualification")
+            self.assertEqual(receipt["cells"], [])
+            self.assertEqual(receipt["scheduling"]["refusal"]["fixture"], "g5-graph-event")
+            self.assertEqual(receipt["scheduling"]["refusal"]["scheduling"]["requested"], "realtime")
+            self.assertIs(receipt["timing_qualified"], False)
+            matrix.validate_receipt(Path(tmp) / "out" / "receipt.json")
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(matrix.MatrixError, "qualification requires realtime"):
+                fake_record(Path(tmp), fixture="g5-graph-event", scheduling="realtime-invalid",
+                            mode="qualification", callbacks=matrix.QUALIFICATION_CALLBACKS,
+                            source_root=clean_repo(Path(tmp)))
 
 @unittest.skipUnless(os.environ.get("PULP_PACED_MATRIX_BUILD_DIR"),
                      "set PULP_PACED_MATRIX_BUILD_DIR to a Release build to run the C++ planted negative")
@@ -525,6 +709,28 @@ class CompiledPlantedNegativeTest(unittest.TestCase):
         for cell in receipt["cells"]:
             self.assertGreaterEqual(cell["metrics"]["deadline_misses"], 4)
             self.assertEqual(cell["metrics"]["oracle_failures"], 0)
+
+    def test_compiled_fixtures_obtain_realtime_and_refuse_a_rejected_request(self):
+        build = Path(os.environ["PULP_PACED_MATRIX_BUILD_DIR"]).resolve()
+        for fixture, frames in (("g5-graph-event", 128), ("g12-activation", 128)):
+            with self.subTest(fixture=fixture), tempfile.TemporaryDirectory() as tmp:
+                common = dict(mode="short", source_root=ROOT, build_dir=build, fixtures=[fixture],
+                              callbacks=16, frames_filter={frames}, planted_sleep_us=0,
+                              planted_every=1, max_load_per_cpu=0.25, timeout_seconds=300)
+                control, code = matrix.record_matrix(output_dir=Path(tmp) / "control",
+                                                     scheduling="realtime", **common)
+                if platform.system() == "Darwin":
+                    self.assertEqual(code, 0)
+                    for cell in control["cells"]:
+                        self.assertEqual(cell["scheduling"]["obtained"], "time_constraint")
+                    matrix.validate_receipt(Path(tmp) / "control" / "receipt.json")
+                refused, code = matrix.record_matrix(output_dir=Path(tmp) / "refused",
+                                                     scheduling="realtime-invalid", **common)
+                self.assertEqual(code, matrix.REFUSED_EXIT)
+                self.assertEqual(refused["status"], "REFUSED")
+                self.assertEqual(refused["cells"], [])
+                self.assertEqual(refused["scheduling"]["refusal"]["scheduling"]["status"], "refused")
+                matrix.validate_receipt(Path(tmp) / "refused" / "receipt.json")
 
     def test_g12_build_stamp_is_not_an_oracle_failure_but_audio_is(self):
         build = Path(os.environ["PULP_PACED_MATRIX_BUILD_DIR"]).resolve()
