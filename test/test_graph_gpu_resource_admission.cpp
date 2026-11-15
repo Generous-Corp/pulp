@@ -444,6 +444,9 @@ enum class AdmissionError : std::uint8_t {
     None,
     MissingConsumer,
     UnknownConsumer,
+    DuplicateConsumer,
+    DeviceLossMismatch,
+    OutputToleranceExceeded,
     IdentityMismatch,
     CapabilityInvalid,
     ProviderMismatch,
@@ -461,6 +464,12 @@ const char* to_string(AdmissionError e) {
         return "missing-consumer";
     case AdmissionError::UnknownConsumer:
         return "unknown-consumer";
+    case AdmissionError::DuplicateConsumer:
+        return "duplicate-consumer";
+    case AdmissionError::DeviceLossMismatch:
+        return "device-loss-mismatch";
+    case AdmissionError::OutputToleranceExceeded:
+        return "output-tolerance-exceeded";
     case AdmissionError::IdentityMismatch:
         return "identity-mismatch";
     case AdmissionError::CapabilityInvalid:
@@ -511,24 +520,43 @@ struct AdmissionVerdict {
     std::string consumer;
 };
 
-AdmissionVerdict admit(const AdmissionManifest& manifest,
-                       const std::vector<ConsumerObservation>& observed) {
+AdmissionVerdict match_consumers(const AdmissionManifest& manifest,
+                                 const std::vector<ConsumerObservation>& observed) {
+    for (const auto& e : manifest.entries) {
+        if (std::count_if(
+                manifest.entries.begin(), manifest.entries.end(),
+                [&](const AdmissionEntry& other) { return other.consumer == e.consumer; }) != 1)
+            return {AdmissionError::DuplicateConsumer, e.consumer};
+        if (std::none_of(observed.begin(), observed.end(),
+                         [&](const ConsumerObservation& o) { return o.consumer == e.consumer; }))
+            return {AdmissionError::MissingConsumer, e.consumer};
+    }
     for (const auto& o : observed) {
+        if (std::count_if(observed.begin(), observed.end(), [&](const ConsumerObservation& other) {
+                return other.consumer == o.consumer;
+            }) != 1)
+            return {AdmissionError::DuplicateConsumer, o.consumer};
         if (std::none_of(manifest.entries.begin(), manifest.entries.end(),
                          [&](const AdmissionEntry& e) { return e.consumer == o.consumer; }))
             return {AdmissionError::UnknownConsumer, o.consumer};
     }
+    return {};
+}
+
+AdmissionVerdict admit(const AdmissionManifest& manifest,
+                       const std::vector<ConsumerObservation>& observed) {
+    const auto matched = match_consumers(manifest, observed);
+    if (matched.error != AdmissionError::None)
+        return matched;
     for (const auto& e : manifest.entries) {
-        const auto it =
-            std::find_if(observed.begin(), observed.end(),
-                         [&](const ConsumerObservation& o) { return o.consumer == e.consumer; });
-        if (it == observed.end())
-            return {AdmissionError::MissingConsumer, e.consumer};
-        const auto& o = *it;
+        const auto& o =
+            *std::find_if(observed.begin(), observed.end(), [&](const ConsumerObservation& value) {
+                return value.consumer == e.consumer;
+            });
         if (o.identity_sha256 != e.identity_sha256)
             return {AdmissionError::IdentityMismatch, e.consumer};
         if (!validate_gpu_audio_capability(o.capability).accepted() || !o.capability.prepared ||
-            !validate_gpu_audio_status(o.status).accepted())
+            !o.capability.gpu_kernel_available || !validate_gpu_audio_status(o.status).accepted())
             return {AdmissionError::CapabilityInvalid, e.consumer};
         if (observed_provider(o) != e.provider)
             return {AdmissionError::ProviderMismatch, e.consumer};
@@ -543,6 +571,39 @@ AdmissionVerdict admit(const AdmissionManifest& manifest,
             1000.0 * static_cast<double>(o.graph_latency_samples) / o.sample_rate;
         if (latency_ms > e.latency_budget_ms)
             return {AdmissionError::LatencyOverBudget, e.consumer};
+    }
+    return {};
+}
+
+// A staged worker can deliver CPU convolution. Require a completed GPU
+// readback as well as kernel capability and transport delivery.
+bool staged_gpu_executed(const GpuAudioCapabilityReport& capability,
+                         const GpuAudioTransport::DeliverySnapshot& delivery,
+                         std::uint64_t gpu_blocks) {
+    return capability.gpu_kernel_available && delivery.worker_output_blocks > 0 && gpu_blocks > 0;
+}
+
+AdmissionVerdict validate_device_loss(const AdmissionManifest& manifest,
+                                      const std::vector<ConsumerObservation>& observed,
+                                      double output_error) {
+    const auto matched = match_consumers(manifest, observed);
+    if (matched.error != AdmissionError::None)
+        return matched;
+    for (const auto& e : manifest.entries) {
+        const auto& o =
+            *std::find_if(observed.begin(), observed.end(), [&](const ConsumerObservation& value) {
+                return value.consumer == e.consumer;
+            });
+        if (!validate_gpu_audio_status(o.status).accepted() ||
+            o.status.recovery_reason != e.device_loss_transition ||
+            o.status.provider_state != GpuAudioProviderState::Unavailable)
+            return {AdmissionError::DeviceLossMismatch, e.consumer};
+        // This is the serial graph's end-to-end error, checked against every
+        // consumer's bound; the strictest applicable tolerance wins.
+        if (!std::isfinite(output_error) || output_error < 0.0 ||
+            !std::isfinite(e.output_tolerance_abs) || e.output_tolerance_abs < 0.0 ||
+            output_error > e.output_tolerance_abs)
+            return {AdmissionError::OutputToleranceExceeded, e.consumer};
     }
     return {};
 }
@@ -840,6 +901,111 @@ TEST_CASE("output tolerance checks reject non-finite samples",
     }
 }
 
+TEST_CASE("shared admission requires unique consumers and GPU capability",
+          "[gpu_audio][graph][resource-admission]") {
+    // Synthetic snapshots exercise the policy without claiming provider proof.
+    AdmissionManifest manifest;
+    std::vector<ConsumerObservation> observed;
+    for (const auto* id : {"neural.wavenet", "convolution.fir"}) {
+        AdmissionEntry entry;
+        entry.consumer = id;
+        entry.identity_sha256 = id;
+        entry.latency_budget_ms = 20.0;
+        manifest.entries.push_back(entry);
+        ConsumerObservation o;
+        o.consumer = id;
+        o.identity_sha256 = id;
+        o.sample_rate = 48000.0;
+        o.capability.path = GpuAudioExecutionPath::Staged;
+        o.capability.eligibility = GpuAudioEligibility::Eligible;
+        o.capability.prepared = true;
+        o.capability.gpu_kernel_available = true;
+        o.capability.fallback_policy = MissPolicy::CpuFallback;
+        o.capability.fallback_available = true;
+        o.status.provider_state = GpuAudioProviderState::Ready;
+        o.status.selected_engine = GpuAudioEngine::Cpu;
+        o.status.sample_rate = 48000;
+        o.status.block_size = 64;
+        observed.push_back(o);
+    }
+    REQUIRE(admit(manifest, observed).error == AdmissionError::None);
+    std::reverse(observed.begin(), observed.end());
+    REQUIRE(admit(manifest, observed).error == AdmissionError::None);
+    for (std::size_t i = 0; i < observed.size(); ++i) {
+        auto duplicate_entry = manifest;
+        duplicate_entry.entries.push_back(manifest.entries[i]);
+        CHECK(admit(duplicate_entry, observed).error == AdmissionError::DuplicateConsumer);
+        auto duplicate_observation = observed;
+        duplicate_observation.push_back(observed[i]);
+        CHECK(admit(manifest, duplicate_observation).error == AdmissionError::DuplicateConsumer);
+        auto replaced_entry = manifest;
+        replaced_entry.entries[1 - i] = manifest.entries[i];
+        CHECK(admit(replaced_entry, observed).error == AdmissionError::DuplicateConsumer);
+        auto no_kernel = observed;
+        no_kernel[i].capability.gpu_kernel_available = false;
+        CHECK(admit(manifest, no_kernel).error == AdmissionError::CapabilityInvalid);
+    }
+}
+
+TEST_CASE("staged GPU evidence rejects worker output produced only by CPU fallback",
+          "[gpu_audio][graph][resource-admission]") {
+    GpuAudioCapabilityReport capability;
+    capability.gpu_kernel_available = true;
+    GpuAudioTransport::DeliverySnapshot delivery;
+    delivery.worker_output_blocks = 12;
+    REQUIRE(staged_gpu_executed(capability, delivery, 8));
+    CHECK_FALSE(staged_gpu_executed(capability, delivery, 0));
+    capability.gpu_kernel_available = false;
+    CHECK_FALSE(staged_gpu_executed(capability, delivery, 8));
+    capability.gpu_kernel_available = true;
+    delivery.worker_output_blocks = 0;
+    delivery.cpu_fallback_blocks = 12;
+    CHECK_FALSE(staged_gpu_executed(capability, delivery, 8));
+}
+
+TEST_CASE("device loss validates each named consumer transition and tolerance",
+          "[gpu_audio][graph][resource-admission]") {
+    AdmissionManifest manifest;
+    std::vector<ConsumerObservation> observed;
+    for (const auto* id : {"neural.wavenet", "convolution.fir"}) {
+        AdmissionEntry entry;
+        entry.consumer = id;
+        entry.output_tolerance_abs = 1.0e-4;
+        manifest.entries.push_back(entry);
+        ConsumerObservation o;
+        o.consumer = id;
+        o.status.provider_state = GpuAudioProviderState::Unavailable;
+        o.status.selected_engine = GpuAudioEngine::Cpu;
+        o.status.sample_rate = 48000;
+        o.status.block_size = 64;
+        o.status.recovery_reason = GpuAudioRecoveryReason::ProviderLost;
+        o.status.recovery_sequence = 1;
+        observed.push_back(o);
+    }
+    constexpr double error = 5.0e-5;
+    REQUIRE(validate_device_loss(manifest, observed, error).error == AdmissionError::None);
+    // Distinct transitions and reversed observations prove matching by ID.
+    manifest.entries[0].device_loss_transition = GpuAudioRecoveryReason::ProviderUnresponsive;
+    observed[0].status.recovery_reason = GpuAudioRecoveryReason::ProviderUnresponsive;
+    std::reverse(observed.begin(), observed.end());
+    REQUIRE(validate_device_loss(manifest, observed, error).error == AdmissionError::None);
+    for (std::size_t i = 0; i < manifest.entries.size(); ++i) {
+        auto wrong_transition = manifest;
+        wrong_transition.entries[i].device_loss_transition = GpuAudioRecoveryReason::None;
+        const auto transition = validate_device_loss(wrong_transition, observed, error);
+        CHECK(transition.error == AdmissionError::DeviceLossMismatch);
+        CHECK(transition.consumer == manifest.entries[i].consumer);
+        auto tighter = manifest;
+        tighter.entries[i].output_tolerance_abs = 1.0e-6;
+        const auto tolerance = validate_device_loss(tighter, observed, error);
+        CHECK(tolerance.error == AdmissionError::OutputToleranceExceeded);
+        CHECK(tolerance.consumer == manifest.entries[i].consumer);
+    }
+    CHECK(
+        validate_device_loss(manifest, observed, std::numeric_limits<double>::quiet_NaN()).error ==
+        AdmissionError::OutputToleranceExceeded);
+}
+
 TEST_CASE("two GPU consumers in one graph pass shared admission with measured geometry",
           "[gpu_audio][graph][resource-admission][p4]") {
     const auto fixture =
@@ -872,7 +1038,9 @@ TEST_CASE("two GPU consumers in one graph pass shared admission with measured ge
 
     const auto neural_delivery = rig.neural->transport().delivery_snapshot();
     const auto conv_delivery = rig.convolution->transport().delivery_snapshot();
-    CHECK(neural_delivery.gpu_blocks > 0);
+    REQUIRE(neural_delivery.gpu_blocks > 0);
+    REQUIRE(staged_gpu_executed(observed[1].capability, conv_delivery,
+                                rig.convolution->convolver()->staged_gpu_blocks()));
     CHECK(neural_delivery.silence_blocks == 0);
     CHECK(conv_delivery.silence_blocks == 0);
     CHECK(neural_delivery.invalid_blocks == 0);
@@ -900,6 +1068,7 @@ TEST_CASE("two GPU consumers in one graph pass shared admission with measured ge
               << ",\"path\":\"" << path_name(cc.path) << "\",\"provider\":\""
               << provider_name(observed[1].status.provider)
               << "\",\"gpu_kernel_available\":" << (cc.gpu_kernel_available ? "true" : "false")
+              << ",\"staged_gpu_blocks\":" << rig.convolution->convolver()->staged_gpu_blocks()
               << ",\"worker_output_blocks\":" << conv_delivery.worker_output_blocks
               << ",\"cpu_fallback_blocks\":" << conv_delivery.cpu_fallback_blocks
               << ",\"identity_sha256\":\"" << observed[1].identity_sha256
@@ -920,16 +1089,18 @@ TEST_CASE("fault-injected device loss moves both graph consumers to their CPU fa
     rig.render(64 * 60, fixture.pattern);
     const auto before_neural = rig.neural->transport().delivery_snapshot();
     REQUIRE(before_neural.gpu_blocks > 0);
+    REQUIRE(staged_gpu_executed(rig.convolution->transport().capability_report(),
+                                rig.convolution->transport().delivery_snapshot(),
+                                rig.convolution->convolver()->staged_gpu_blocks()));
     const auto loss_frame = rig.frame;
     rig.neural->inject_device_loss();
     rig.convolution->inject_device_loss();
     rig.render(64 * 80, fixture.pattern);
 
-    // The manifest's declared transition is what each consumer reports.
+    // Transport delivery remains valid across the loss.
     for (auto* consumer : std::initializer_list<StagedGpuConsumer*>{rig.neural, rig.convolution}) {
         const auto status = consumer->transport().status_snapshot();
         CHECK(validate_gpu_audio_status(status).accepted());
-        CHECK(status.recovery_reason == manifest.entries[0].device_loss_transition);
         CHECK(status.provider_state == GpuAudioProviderState::Unavailable);
         CHECK(consumer->transport().delivery_snapshot().silence_blocks == 0);
         CHECK(consumer->transport().delivery_snapshot().invalid_blocks == 0);
@@ -944,7 +1115,9 @@ TEST_CASE("fault-injected device loss moves both graph consumers to their CPU fa
     const auto ref = oracle(rig.input, make_ir());
     const double worst = max_error_at(rig.output, ref, declared);
     INFO("max abs error across loss " << worst << " loss frame " << loss_frame);
-    CHECK(worst <= manifest.entries[0].output_tolerance_abs);
+    const auto loss = validate_device_loss(manifest, rig.observe(fixture.sample_rate), worst);
+    INFO("loss validation: " << to_string(loss.error) << " " << loss.consumer);
+    CHECK(loss.error == AdmissionError::None);
     CHECK(silent_quanta(rig.output, static_cast<std::size_t>(declared), 64) == 0);
     CHECK(rig.callback_allocations == 0);
     std::cout << "{\"schema\":\"pulp.test.graph-resource-admission.loss.v0\",\"fixture\":\""
