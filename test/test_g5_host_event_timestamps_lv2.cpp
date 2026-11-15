@@ -71,7 +71,8 @@ std::vector<std::int64_t> drain(HostEventIngress<64>& ingress) {
 // ---------------------------------------------------------------------------
 
 #if defined(PULP_TEST_HAS_LV2_HEADERS)
-TEST_CASE("LV2 atom event times convert through the real sequence structs", "[graph][host-timestamps][lv2]") {
+TEST_CASE("LV2 atom event times convert through the real sequence structs",
+          "[graph][host-timestamps][lv2]") {
     LV2_Atom_Sequence seq{};
     LV2_Atom_Event ev{};
     ev.time.frames = 17;
@@ -150,7 +151,8 @@ TEST_CASE("LV2 timing maps onto a counter-free block clock", "[graph][host-times
 // Block classification
 // ---------------------------------------------------------------------------
 
-TEST_CASE("LV2 blocks classify contiguous, seek, loop, and stopped", "[graph][host-timestamps][lv2]") {
+TEST_CASE("LV2 blocks classify contiguous, seek, loop, and stopped",
+          "[graph][host-timestamps][lv2]") {
     HostBlockTimeline timeline;
     HostBlockWindow window;
 
@@ -263,7 +265,8 @@ TEST_CASE("LV2 event times are refused, never clamped", "[graph][host-timestamps
 // Partition invariance through the ingress
 // ---------------------------------------------------------------------------
 
-TEST_CASE("LV2 absolute samples are invariant to block partitioning", "[graph][host-timestamps][lv2]") {
+TEST_CASE("LV2 absolute samples are invariant to block partitioning",
+          "[graph][host-timestamps][lv2]") {
     constexpr std::int64_t kTransportOrigin = 2000;
     constexpr std::int64_t kTotal = 1024;
     const std::vector<std::int64_t> positions{0, 1, 31, 32, 63, 64, 126, 127, 128, 255, 500, 1023};

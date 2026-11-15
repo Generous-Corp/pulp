@@ -161,7 +161,8 @@ TEST_CASE("AudioTimeStamp fields map onto the block clock", "[graph][host-timest
 // VST3
 // ---------------------------------------------------------------------------
 
-TEST_CASE("VST3 timing validity decides whether a steady clock exists", "[graph][host-timestamps][vst3]") {
+TEST_CASE("VST3 timing validity decides whether a steady clock exists",
+          "[graph][host-timestamps][vst3]") {
     using pulp::host::clock_from_vst3;
 
     auto timing = vst3_block(5000, 100, true, 64);
@@ -191,7 +192,8 @@ TEST_CASE("VST3 timing validity decides whether a steady clock exists", "[graph]
           HostEventResult::OutOfRange);
 }
 
-TEST_CASE("VST3 blocks classify contiguous, gap, seek, and stopped", "[graph][host-timestamps][vst3]") {
+TEST_CASE("VST3 blocks classify contiguous, gap, seek, and stopped",
+          "[graph][host-timestamps][vst3]") {
     using pulp::host::clock_from_vst3;
     HostBlockTimeline timeline;
     HostBlockWindow window;
@@ -333,7 +335,8 @@ TEST_CASE("VST3 sampleOffsets outside the block are refused", "[graph][host-time
 // Audio Unit
 // ---------------------------------------------------------------------------
 
-TEST_CASE("AU timestamp validity decides whether a steady clock exists", "[graph][host-timestamps][au]") {
+TEST_CASE("AU timestamp validity decides whether a steady clock exists",
+          "[graph][host-timestamps][au]") {
     using pulp::host::clock_from_au;
 
     CHECK(clock_from_au(au_block(4096.0, 64)).steady_sample == 4096);
