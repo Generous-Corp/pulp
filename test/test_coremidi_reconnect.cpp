@@ -136,6 +136,7 @@ TEST_CASE("CoreMIDI output stops reporting open when its destination is replaced
 #include <unistd.h>
 
 #include <condition_variable>
+#include <functional>
 #include <future>
 #include <memory>
 #include <mutex>
@@ -172,6 +173,19 @@ struct DrainSource {
             MIDIClientDispose(client);
     }
 };
+
+// Runs `fn` on a detached thread and reports whether it finished within the
+// deadline. A close() that never returns therefore reads as a failure after
+// seconds instead of hanging the process, and nothing here joins the thread.
+bool finishes_within(std::chrono::milliseconds deadline, std::function<void()> fn) {
+    auto done = std::make_shared<std::promise<void>>();
+    auto finished = done->get_future();
+    std::thread([done, fn = std::move(fn)] {
+        fn();
+        done->set_value();
+    }).detach();
+    return finished.wait_for(deadline) == std::future_status::ready;
+}
 
 // A one-shot gate a callback blocks on until the test lets it go.
 struct Gate {
@@ -223,7 +237,7 @@ TEST_CASE("CoreMIDI input close() waits for a callback that is in flight",
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     REQUIRE(in_callback);
 
-    auto closer = std::async(std::launch::async, [&] {
+    std::thread closer([&] {
         input->close();
         close_returned = true;
     });
@@ -232,9 +246,20 @@ TEST_CASE("CoreMIDI input close() waits for a callback that is in flight",
     CHECK_FALSE(close_returned.load());
 
     gate.release();
-    REQUIRE(closer.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
-    CHECK(callback_returned.load());
-    payload.reset();
+    for (int i = 0; i < 500 && !close_returned; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    const bool returned = close_returned.load();
+    if (returned) {
+        closer.join();
+        CHECK(callback_returned.load());
+        payload.reset();
+    } else {
+        // Leave the stuck thread and everything it uses alive; fail the test.
+        closer.detach();
+        (void)input.release();
+        (void)payload.release();
+        FAIL("close() did not return after the callback was released");
+    }
 }
 
 TEST_CASE("CoreMIDI input delivers nothing after close() returns", "[midi][coremidi][close]") {
@@ -274,15 +299,15 @@ TEST_CASE("CoreMIDI input close() from inside its own callback does not deadlock
         raw->close();
     }));
 
-    auto done = std::async(std::launch::async, [&] {
-        send_note(vs.source);
-        for (int i = 0; i < 300 && received.load() < 1; ++i)
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    });
-    REQUIRE(done.wait_for(std::chrono::seconds(10)) == std::future_status::ready);
+    send_note(vs.source);
+    for (int i = 0; i < 300 && received.load() < 1; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    // An unlimited wait here would be a held test slot; give the nested close a
+    // deadline, then close again from outside.
     CHECK(received.load() == 1);
-    // A second close from outside is still safe.
-    auto outside = std::async(std::launch::async, [&] { input->close(); });
-    REQUIRE(outside.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+    if (!finishes_within(std::chrono::seconds(5), [&] { input->close(); })) {
+        (void)input.release();
+        FAIL("close() hung after a close from inside the callback");
+    }
     CHECK_FALSE(input->is_open());
 }

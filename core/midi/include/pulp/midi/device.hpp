@@ -65,6 +65,15 @@ class MidiInput {
 public:
     virtual ~MidiInput() = default;
     virtual bool open(const std::string& port_id, MidiInputCallback callback) = 0;
+    /// Stops delivery and releases the port.
+    ///
+    /// Contract: when close() returns, no callback registered through open()
+    /// or set_sysex_callback() is running and none will run again, so the
+    /// caller may immediately free whatever those callbacks captured. close()
+    /// waits for a callback that is mid-delivery on another thread. Called
+    /// from inside one of those callbacks it cannot wait for itself: it stops
+    /// further deliveries, returns at once, and the port is released once the
+    /// callback returns. Safe to call more than once and from the destructor.
     virtual void close() = 0;
     virtual bool is_open() const = 0;
 
