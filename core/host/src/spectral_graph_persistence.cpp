@@ -293,19 +293,28 @@ Candidate read(std::string_view json, int admission_block) {
         candidate.graph.reset();
         return std::move(candidate);
     };
+    // Only a document that parses as an object and names spectral content is
+    // claimed here. Anything else is left unhandled so the ordinary reader
+    // reports its own error (parser position, size limit, root shape).
+    if (json.size() > GraphSerializer::max_file_bytes)
+        return candidate;
+    choc::value::Value root;
     try {
-        if (json.size() > GraphSerializer::max_file_bytes)
-            return fail("spectral graph exceeds 64 MiB file limit");
-        const auto root = choc::json::parse(std::string(json));
-        if (!root.isObject())
-            return fail("root is not an object");
-        candidate.handled = root.hasObjectMember("spectral_assets");
-        if (root["nodes"].isArray())
-            for (const auto n : root["nodes"])
-                if (n["type"].isString() && n["type"].getString().starts_with("spectral"))
-                    candidate.handled = true;
-        if (!candidate.handled)
-            return candidate;
+        root = choc::json::parse(std::string(json));
+    } catch (const std::exception&) {
+        return candidate;
+    }
+    if (!root.isObject())
+        return candidate;
+    candidate.handled = root.hasObjectMember("spectral_assets");
+    if (root["nodes"].isArray())
+        for (const auto n : root["nodes"])
+            if (n.isObject() && n["type"].isString() &&
+                n["type"].getString().starts_with("spectral"))
+                candidate.handled = true;
+    if (!candidate.handled)
+        return candidate;
+    try {
         std::uint64_t version = 0;
         if (!uint(root["format_version"], version) || version != 6)
             return fail("spectral graph requires format_version 6");

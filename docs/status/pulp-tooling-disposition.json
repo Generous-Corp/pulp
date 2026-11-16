@@ -2233,6 +2233,10 @@
             "kind": "option"
           },
           {
+            "name": "--saved-identity",
+            "kind": "flag"
+          },
+          {
             "name": "--input",
             "kind": "option"
           },
