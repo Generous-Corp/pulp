@@ -7,6 +7,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <choc/text/choc_JSON.h>
+#include <pulp/host/graph_history.hpp>
 #include <pulp/host/graph_patch.hpp>
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/signal_graph_runtime.hpp>
@@ -280,6 +281,7 @@ TEST_CASE("graph diff compares saved documents by logical identity",
     REQUIRE(graph.connect(gain, 0, trim, 0));
     const auto after = dir / "after.pulpgraph";
     std::ofstream(after, std::ios::binary) << pulp::host::GraphSerializer::to_saved_document(graph);
+    const auto trim_id = pulp::host::GraphSerializer::saved_node_identities(graph).at(trim);
 
     const auto changed = run_pulp({"graph", "diff", before.string(), after.string(), "--json"});
     INFO(changed.stdout_output << changed.stderr_output);
@@ -288,7 +290,7 @@ TEST_CASE("graph diff compares saved documents by logical identity",
     CHECK(std::string(report["code"].getString()) == "Ok");
     CHECK_FALSE(report["equal"].getBool());
     REQUIRE(report["nodes"]["added"].size() == 1);
-    CHECK(std::string(report["nodes"]["added"][0].getString()) == "node:gain:Trim:0");
+    CHECK(std::string(report["nodes"]["added"][0].getString()) == trim_id);
     REQUIRE(report["nodes"]["changed"].size() == 1);
     CHECK(std::string(report["nodes"]["changed"][0]["fields"][0].getString()) == "gain");
     REQUIRE(report["connections"]["added"].size() == 1);
@@ -299,7 +301,7 @@ TEST_CASE("graph diff compares saved documents by logical identity",
 
     const auto text = run_pulp({"graph", "diff", before.string(), after.string()});
     REQUIRE(text.exit_code == 0);
-    CHECK(text.stdout_output.find("+ node node:gain:Trim:0") != std::string::npos);
+    CHECK(text.stdout_output.find("+ node " + trim_id) != std::string::npos);
 
     // A document without the identity envelope has no authored identity to
     // compare by.
@@ -448,6 +450,94 @@ TEST_CASE("graph rewrites refuse a plain document that loses an isolated node",
     CHECK(formatted.exit_code == 1);
     CHECK(formatted.stdout_output.find("node_not_restored") != std::string::npos);
     CHECK(read_text(lossy) == before);
+}
+
+TEST_CASE("graph rewrites migrate a v6 document deterministically and keep v7 IDs",
+          "[cli][shellout][graph][parity][identity]") {
+    if (!fs::exists(pulp_binary()))
+        SKIP("pulp not built");
+    const auto dir = unique_temp_dir("pulp-graph-v7");
+    fs::create_directories(dir);
+    // A saved-identity v6 document as a pre-v7 writer produced it.
+    const std::string legacy_text = R"({
+  "format_version": 2,
+  "nodes": [
+    {"id": 1, "type": "audio_in", "name": "Input", "num_input_ports": 0,
+     "num_output_ports": 1, "gain": 1.0},
+    {"id": 2, "type": "gain", "name": "Gain", "num_input_ports": 2, "num_output_ports": 2,
+     "gain": 0.5}
+  ],
+  "connections": [
+    {"source_node": 1, "source_port": 0, "dest_node": 2, "dest_port": 0, "feedback": false,
+     "midi": false, "automation": false}
+  ],
+  "identity_schema": "pulp.graph.saved-identity.v6",
+  "logical_identities": {
+    "profile": "pulp.graph.saved-identity.v6",
+    "identities": [
+      {"id": "node:audio_in:Input:0", "node_id": 1},
+      {"id": "node:gain:Gain:0", "node_id": 2}
+    ]
+  },
+  "bindings": {"node:audio_in:Input:0": 1, "node:gain:Gain:0": 2}
+})";
+    const auto migrated = pulp::host::GraphSerializer::migrate_saved_document(legacy_text);
+    INFO(migrated.detail);
+    REQUIRE(migrated.ok());
+
+    // fmt rewrites the file as its migration: the same IDs every time.
+    std::string first_rewrite;
+    for (int run = 0; run < 2; ++run) {
+        const auto copy = dir / ("legacy-" + std::to_string(run) + ".pulpgraph");
+        std::ofstream(copy, std::ios::binary) << legacy_text;
+        const auto rewritten = run_pulp({"graph", "fmt", copy.string(), "--json"});
+        INFO(rewritten.stdout_output << rewritten.stderr_output);
+        REQUIRE(rewritten.exit_code == 0);
+        const auto text = read_text(copy);
+        CHECK(text.find("pulp.graph.saved-identity.v7") != std::string::npos);
+        // The rewrite normalizes record fields the hand-written fixture
+        // omits, so compare which nodes and edges each side names: the IDs
+        // must be the migration's.
+        const auto against = pulp::host::diff_graph_documents(migrated.document, text);
+        INFO(against.detail);
+        REQUIRE(against.ok());
+        CHECK(against.nodes_added.empty());
+        CHECK(against.nodes_removed.empty());
+        CHECK(against.connections_added.empty());
+        CHECK(against.connections_removed.empty());
+        if (run == 0)
+            first_rewrite = text;
+        else
+            CHECK(text == first_rewrite);
+    }
+
+    // save --saved-identity stamps a plain document deterministically too.
+    const auto plain = dir / "plain.pulpgraph";
+    pulp::host::SignalGraph graph;
+    REQUIRE(graph.add_gain_node("Gain") != 0);
+    std::ofstream(plain, std::ios::binary) << pulp::host::GraphSerializer::to_json(graph);
+    std::string stamped;
+    for (int run = 0; run < 2; ++run) {
+        const auto out = dir / ("stamped-" + std::to_string(run) + ".pulpgraph");
+        REQUIRE(run_pulp(
+                    {"graph", "save", plain.string(), "--output", out.string(), "--saved-identity"})
+                    .exit_code == 0);
+        if (run == 0)
+            stamped = read_text(out);
+        else
+            CHECK(read_text(out) == stamped);
+    }
+
+    // A v6 and a v7 document are not compared with each other.
+    const auto legacy = dir / "legacy-v6.pulpgraph";
+    std::ofstream(legacy, std::ios::binary) << legacy_text;
+    const auto mixed = run_pulp(
+        {"graph", "diff", legacy.string(), (dir / "legacy-0.pulpgraph").string(), "--json"});
+    INFO(mixed.stdout_output << mixed.stderr_output);
+    CHECK(mixed.exit_code == 1);
+    // Control: two v6 documents still diff.
+    const auto both_v6 = run_pulp({"graph", "diff", legacy.string(), legacy.string(), "--json"});
+    CHECK(both_v6.exit_code == 0);
 }
 
 TEST_CASE("graph save and fmt keep the saved-identity envelope that diff reads",

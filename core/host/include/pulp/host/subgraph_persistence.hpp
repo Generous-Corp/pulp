@@ -1,6 +1,7 @@
 #pragma once
 
-// Authored subgraph persistence in the saved-identity v6 document.
+// Authored subgraph persistence in the saved-identity document (v7 written,
+// v6 still restored).
 //
 // A SubgraphInstance expands into ordinary graph nodes, so the flattened
 // graph already round-trips through GraphSerializer. What a plain document
@@ -10,7 +11,8 @@
 // flattened graph and rebuild live SubgraphInstance values on restore.
 //
 // A record never contains a runtime NodeId. Members are named by the
-// logical identities in the v6 envelope, in expansion order. On restore the
+// logical identities in the envelope (authored IDs in v7, structural
+// identities in v6), in expansion order. On restore the
 // caller supplies the templates; each record is checked against a fresh
 // expansion of its template (member count, node type and name, nested child
 // identities, internal edges, declared parameter set and bounds), and any
@@ -29,7 +31,7 @@
 
 namespace pulp::host {
 
-/// Write a saved-identity v6 document that also records each instance.
+/// Write a saved-identity v7 document that also records each instance.
 /// Parameter values are read from the live graph (the target Gain node's
 /// gain or the target Processor parameter), not from the instance's cached
 /// `parameters`. Returns an empty string when an instance is not part of
@@ -52,7 +54,7 @@ struct SubgraphDocumentLoad {
     }
 };
 
-/// Restore a saved-identity v6 document and rebind its subgraph records to
+/// Restore a saved-identity v6 or v7 document and rebind its subgraph records to
 /// `templates`. Template lookup, document inspection, and record shape are
 /// checked before the graph is touched, and those refusals leave `graph`
 /// unchanged; conformance to each template is checked after the flattened

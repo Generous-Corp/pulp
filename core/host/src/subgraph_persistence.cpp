@@ -306,9 +306,9 @@ SubgraphDocumentLoad from_saved_subgraph_document(SignalGraph& graph, const std:
         if (!out.load.ok || !has_records)
             return out;
 
-        std::unordered_map<std::string, NodeId> live_by_identity;
-        for (const auto& [node, identity] : GraphSerializer::saved_node_identities(graph))
-            live_by_identity.emplace(identity, node);
+        // Members name the document's identities: authored IDs in v7, the
+        // structural identities in v6.
+        const auto& live_by_identity = out.load.identity_node_ids;
 
         const auto& records = root["subgraphs"];
         std::map<std::string, SubgraphInstance> restored;

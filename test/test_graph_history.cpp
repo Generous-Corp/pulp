@@ -1,5 +1,7 @@
 // Value-owned graph edit history and logical-identity document diff.
 
+#include "../core/host/src/graph_serializer_test_access.hpp"
+
 #include <catch2/catch_test_macros.hpp>
 #include <choc/text/choc_JSON.h>
 #include <pulp/format/processor.hpp>
@@ -15,6 +17,7 @@
 #include <algorithm>
 #include <memory>
 #include <string>
+#include <unordered_map>
 
 using namespace pulp::host;
 
@@ -34,6 +37,26 @@ Chain build_chain(SignalGraph& graph) {
     REQUIRE(graph.connect(chain.input, 0, chain.gain, 0));
     REQUIRE(graph.connect(chain.gain, 0, chain.output, 0));
     return chain;
+}
+
+// The saved-identity v6 document a pre-v7 writer produced, and its
+// structural identities: legacy fixtures for the v6 validation rules.
+std::string legacy_v6(const SignalGraph& graph) {
+    return GraphSerializerTestAccess::legacy_v6_saved_document(graph);
+}
+
+std::unordered_map<NodeId, std::string> legacy_v6_identities(const SignalGraph& graph) {
+    return GraphSerializerTestAccess::legacy_v6_identities(graph);
+}
+
+// Save `graph`, reload it into a fresh graph (which renumbers NodeIds
+// densely) and save again.
+std::string reloaded_document(const std::string& saved) {
+    SignalGraph reloaded;
+    const auto loaded = GraphSerializer::from_saved_document(reloaded, saved);
+    INFO(loaded.error);
+    REQUIRE(loaded.ok);
+    return GraphSerializer::to_saved_document(reloaded);
 }
 
 bool contains(const std::vector<std::string>& values, std::string_view needle) {
@@ -215,20 +238,15 @@ std::string insert_into_array(std::string json, std::string_view member, std::st
 
 TEST_CASE("graph document diff compares by logical identity, not NodeId",
           "[host][graph][history][g3]") {
-    SignalGraph first;
-    build_chain(first);
-
-    // The same authored graph built with different NodeIds: a throwaway node
-    // shifts every later id.
-    SignalGraph second;
-    const auto spacer = second.add_gain_node("Spacer");
-    build_chain(second);
-    REQUIRE(second.remove_node(spacer));
-
-    const auto a = GraphSerializer::to_saved_document(first);
-    const auto b = GraphSerializer::to_saved_document(second);
+    // One authored graph saved with a NodeId gap (a throwaway node shifts
+    // every later id), then reloaded, which renumbers densely.
+    SignalGraph graph;
+    const auto spacer = graph.add_gain_node("Spacer");
+    build_chain(graph);
+    REQUIRE(graph.remove_node(spacer));
+    const auto a = GraphSerializer::to_saved_document(graph);
+    const auto b = reloaded_document(a);
     REQUIRE_FALSE(a.empty());
-    REQUIRE_FALSE(b.empty());
     // Control: the documents really differ in NodeId numbering.
     REQUIRE(a != b);
 
@@ -239,6 +257,22 @@ TEST_CASE("graph document diff compares by logical identity, not NodeId",
     CHECK(diff.nodes_added.empty());
     CHECK(diff.connections_added.empty());
     CHECK(diff.sections_changed.empty());
+
+    // A second graph built the same way is a different authored graph: its
+    // nodes have their own IDs, so nothing is matched by name.
+    SignalGraph other;
+    build_chain(other);
+    const auto independent = diff_graph_documents(a, GraphSerializer::to_saved_document(other));
+    REQUIRE(independent.ok());
+    CHECK(independent.nodes_added.size() == 3);
+    CHECK(independent.nodes_removed.size() == 3);
+
+    // v6 documents keep the v6 rule: structural identities, so the same two
+    // constructions compare equal.
+    const auto legacy = diff_graph_documents(legacy_v6(graph), legacy_v6(other));
+    INFO(legacy.detail);
+    REQUIRE(legacy.ok());
+    CHECK(legacy.equal());
 }
 
 TEST_CASE("graph document diff reports node, connection and layout changes",
@@ -253,21 +287,25 @@ TEST_CASE("graph document diff reports node, connection and layout changes",
     REQUIRE(graph.connect(chain.gain, 0, extra, 0));
     REQUIRE(graph.connect(extra, 0, chain.output, 0));
     const auto after = GraphSerializer::to_saved_document(graph, {{chain.gain, {5.0f, 6.0f}}});
+    const auto ids = GraphSerializer::saved_node_identities(graph);
+    const auto& gain = ids.at(chain.gain);
+    const auto& trim = ids.at(extra);
+    const auto& output = ids.at(chain.output);
 
     const auto diff = diff_graph_documents(before, after);
     INFO(diff.detail);
     REQUIRE(diff.ok());
     CHECK_FALSE(diff.equal());
     REQUIRE(diff.nodes_added.size() == 1);
-    CHECK(diff.nodes_added.front() == "node:gain:Trim:0");
+    CHECK(diff.nodes_added.front() == trim);
     CHECK(diff.nodes_removed.empty());
     REQUIRE(diff.nodes_changed.size() == 1);
-    CHECK(diff.nodes_changed.front().identity == "node:gain:Gain:0");
+    CHECK(diff.nodes_changed.front().identity == gain);
     CHECK(diff.nodes_changed.front().fields == std::vector<std::string>{"gain"});
-    CHECK(diff.layout_changed == std::vector<std::string>{"node:gain:Gain:0"});
-    CHECK(contains(diff.connections_removed, "node:gain:Gain:0[0] -> node:audio_out:Output:0[0]"));
-    CHECK(contains(diff.connections_added, "node:gain:Gain:0[0] -> node:gain:Trim:0[0]"));
-    CHECK(contains(diff.connections_added, "node:gain:Trim:0[0] -> node:audio_out:Output:0[0]"));
+    CHECK(diff.layout_changed == std::vector<std::string>{gain});
+    CHECK(contains(diff.connections_removed, gain + "[0] -> " + output + "[0]"));
+    CHECK(contains(diff.connections_added, gain + "[0] -> " + trim + "[0]"));
+    CHECK(contains(diff.connections_added, trim + "[0] -> " + output + "[0]"));
     CHECK_FALSE(diff.before_digest.empty());
     CHECK(diff.before_digest != diff.after_digest);
 
@@ -330,7 +368,8 @@ TEST_CASE("graph edit history undoes and redoes by value", "[host][graph][histor
     REQUIRE(graph.connect(trim, 0, chain.output, 0));
     const auto insert = history.commit(std::move(before), graph, "insert trim");
     REQUIRE(insert.ok());
-    CHECK(contains(insert.port_changes.added, "node:gain:Trim:0/in/"));
+    const auto trim_identity = GraphSerializer::saved_node_identities(graph).at(trim);
+    CHECK(contains(insert.port_changes.added, trim_identity + "/in/"));
     CHECK(history.undo_depth() == 2);
     CHECK(history.undo_label() == "insert trim");
 
@@ -342,7 +381,7 @@ TEST_CASE("graph edit history undoes and redoes by value", "[host][graph][histor
     CHECK(undone.label == "insert trim");
     CHECK(node_named(graph, "Trim") == nullptr);
     CHECK(graph.connections().size() == 2);
-    CHECK(contains(undone.port_changes.removed, "node:gain:Trim:0/"));
+    CHECK(contains(undone.port_changes.removed, trim_identity + "/"));
     CHECK(history.redo_label() == "insert trim");
 
     const auto undone_gain = history.undo(graph);
@@ -432,24 +471,31 @@ TEST_CASE("graph edit history is bounded by capacity", "[host][graph][history][g
 TEST_CASE("qualified port identities are independent of NodeId numbering",
           "[host][graph][history][g3]") {
     SignalGraph first;
-    build_chain(first);
+    const auto spacer = first.add_gain_node("Spacer");
+    const auto chain = build_chain(first);
+    REQUIRE(first.remove_node(spacer));
     SignalGraph second;
-    const auto spacer = second.add_gain_node("Spacer");
-    build_chain(second);
-    REQUIRE(second.remove_node(spacer));
+    const auto loaded =
+        GraphSerializer::from_saved_document(second, GraphSerializer::to_saved_document(first));
+    REQUIRE(loaded.ok);
+    // Control: the reload renumbered the nodes.
+    REQUIRE(second.node(chain.output) == nullptr);
 
     const auto a = qualified_port_identities(first);
     const auto b = qualified_port_identities(second);
     REQUIRE_FALSE(a.empty());
     REQUIRE(validate_port_identities(a).valid);
     CHECK(port_identity_fingerprint(a) == port_identity_fingerprint(b));
-    CHECK(contains({a.front().name}, "node:"));
+    CHECK(a.front().name.rfind("nid-", 0) == 0);
 
-    // Control: renaming a node changes its qualified ports.
+    // A rename keeps the node's authored ID, so its qualified ports.
+    REQUIRE(first.rename_node(chain.gain, "Renamed"));
+    CHECK(port_identity_fingerprint(qualified_port_identities(first)) ==
+          port_identity_fingerprint(a));
+
+    // Control: an identically built graph holds different nodes.
     SignalGraph third;
-    third.add_input_node(1, "Input");
-    third.add_gain_node("Renamed");
-    third.add_output_node(1, "Output");
+    build_chain(third);
     CHECK(port_identity_fingerprint(qualified_port_identities(third)) !=
           port_identity_fingerprint(a));
 }
@@ -586,6 +632,8 @@ TEST_CASE("graph edit history reports rolled_back only for a faithful rollback",
     auto before = GraphEditHistory::checkpoint(fixture.graph);
     REQUIRE(fixture.graph.set_node_gain(fixture.trim, 0.5f));
     REQUIRE(history.commit(std::move(before), fixture.graph, "trim").ok());
+    const auto trim_identity =
+        GraphSerializer::saved_node_identities(fixture.graph).at(fixture.trim);
 
     SECTION("the live restore fails and the rollback restores the pre-call graph") {
         // Call 1 is the trial restore, call 2 the live restore, call 3 the
@@ -600,7 +648,7 @@ TEST_CASE("graph edit history reports rolled_back only for a faithful rollback",
         CHECK(fixture.graph.nodes().size() == 4);
         REQUIRE(node_named(fixture.graph, "Trim") != nullptr);
         CHECK(node_named(fixture.graph, "Trim")->gain == 0.5f);
-        CHECK(refused.node_ids.at("node:gain:Trim:0") == node_named(fixture.graph, "Trim")->id);
+        CHECK(refused.node_ids.at(trim_identity) == node_named(fixture.graph, "Trim")->id);
         CHECK(history.can_undo());
     }
     SECTION("the rollback fails too and says so") {
@@ -642,14 +690,13 @@ TEST_CASE("graph edit history maps authored identities to renumbered NodeIds",
 }
 
 TEST_CASE("graph document diff digests ignore NodeId numbering", "[host][graph][history]") {
-    SignalGraph first;
-    build_chain(first);
     SignalGraph second;
     const auto spacer = second.add_gain_node("Spacer");
     const auto chain = build_chain(second);
     REQUIRE(second.remove_node(spacer));
-    const auto a = GraphSerializer::to_saved_document(first);
     const auto b = GraphSerializer::to_saved_document(second);
+    const auto a = reloaded_document(b);
+    REQUIRE(a != b);
 
     const auto same = diff_graph_documents(a, b);
     REQUIRE(same.equal());
@@ -840,11 +887,12 @@ TEST_CASE("saved document writer never records an unnamed Processor node",
 
 TEST_CASE("saved document inspection refuses an unnamed Processor record",
           "[host][graph][history][identity]") {
+    // A v6 rule: a v6 identity is rebuilt from the record's name.
     ProcessorGraph fixture;
     build_processor_graph(fixture);
-    const auto saved = GraphSerializer::to_saved_document(fixture.graph);
+    const auto saved = legacy_v6(fixture.graph);
     REQUIRE_FALSE(saved.empty());
-    const auto identities = GraphSerializer::saved_node_identities(fixture.graph);
+    const auto identities = legacy_v6_identities(fixture.graph);
     const auto& level = identities.at(fixture.processor);
     REQUIRE(level == "node:plugin:Level::0");
 
@@ -964,9 +1012,11 @@ std::string replace_once(std::string text, std::string_view from, std::string_vi
 
 TEST_CASE("saved document inspection rebuilds identities for every node kind",
           "[host][graph][history][identity]") {
+    // The v6 rule: inspection rebuilds each structural identity from its
+    // record, for every node kind.
     EveryKindGraph fixture;
     build_every_kind(fixture);
-    const auto saved = GraphSerializer::to_saved_document(fixture.graph);
+    const auto saved = legacy_v6(fixture.graph);
     REQUIRE_FALSE(saved.empty());
     const auto inspection = GraphSerializer::inspect_document(saved);
     INFO(inspection.detail);
@@ -983,19 +1033,26 @@ TEST_CASE("saved document inspection rebuilds identities for every node kind",
     REQUIRE(restored.ok);
     const auto resaved = GraphSerializer::to_saved_document(loaded);
     REQUIRE(GraphSerializer::inspect_document(resaved).ok());
-    const auto diff = diff_graph_documents(saved, resaved);
+    // The restore assigned exactly the IDs the data-only migration assigns,
+    // so the resaved v7 document matches the migrated one node for node.
+    const auto migrated = GraphSerializer::migrate_saved_document(saved);
+    INFO(migrated.detail);
+    REQUIRE(migrated.ok());
+    const auto diff = diff_graph_documents(migrated.document, resaved);
     INFO(diff.detail);
     REQUIRE(diff.ok());
     CHECK(diff.nodes_added.empty());
     CHECK(diff.nodes_removed.empty());
+    CHECK(diff.connections_added.empty());
+    CHECK(diff.connections_removed.empty());
 }
 
 TEST_CASE("saved document inspection refuses identities that name other nodes",
           "[host][graph][history][identity]") {
     EveryKindGraph fixture;
     build_every_kind(fixture);
-    const auto saved = GraphSerializer::to_saved_document(fixture.graph);
-    const auto identities = GraphSerializer::saved_node_identities(fixture.graph);
+    const auto saved = legacy_v6(fixture.graph);
+    const auto identities = legacy_v6_identities(fixture.graph);
     const auto& input = identities.at(fixture.input);
     const auto& gain = identities.at(fixture.gain);
     const auto& custom = identities.at(fixture.custom);
