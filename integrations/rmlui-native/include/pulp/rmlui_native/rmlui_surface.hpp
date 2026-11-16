@@ -14,9 +14,17 @@
 ///
 /// Threading: RmlUi's state is process-wide and not thread-safe, so every call
 /// into RmlUi in this binary, from any surface, input or render, holds
-/// `rmlui_mutex()`. A caller that calls RmlUi itself (data models, element
-/// queries) uses `with_context()`, which takes it. Members other than
-/// `with_context()` run on the main thread.
+/// `rmlui_mutex()`; a frame holds it for its update and render. Members other
+/// than `with_context()` run on the main thread.
+///
+/// The main thread does not wait for a frame to deliver pointer or wheel
+/// input or to run `idle()`. When the render thread holds the lock, pointer
+/// and wheel events are queued (consecutive moves and wheel deltas merge) and
+/// applied, in order and on the main thread, within about a millisecond of the
+/// frame ending. Their listeners therefore run on the main thread, a moment
+/// later than the event. `with_context()`, key and text input apply anything
+/// queued first, so they always see earlier events' effects; they, and
+/// `flush_input()`, do wait for a frame.
 
 #include <pulp/native/frame_pump.hpp>
 #include <pulp/native/metal_surface.hpp>
@@ -109,6 +117,9 @@ class RmlUiSurface {
 
     /// Main-thread tick: visibility and size follow the window.
     void idle();
+    /// Apply pointer and wheel events that were queued behind a frame, now,
+    /// waiting for the frame if one is in flight. Main thread.
+    void flush_input();
     /// The density ratio RmlUi was given: the backing scale when
     /// `density_ratio_supported()`, otherwise 1, and 1 while detached. `px` lengths are always
     /// device pixels; `dp` lengths are `density_ratio()` device pixels. Main

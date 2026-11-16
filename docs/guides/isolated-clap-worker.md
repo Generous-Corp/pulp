@@ -47,6 +47,13 @@ generation/PID, lifecycle and cleanup outcome. Ordinary `ProcessStatus` remains
 `ok` after terminal silence, allowing healthy graph siblings to continue. There
 is no automatic restart or in-process fallback.
 
+A graph that contains an isolated node cannot be saved: `GraphSerializer`
+returns an empty document and `to_file` refuses with `serialization_refused`,
+because the proxy has no state to save and the plugin identity alone would
+reload the plugin in-process. `SignalGraph::set_node_parameter` returns false
+for an isolated node without reaching the worker. Neither refusal faults the
+node.
+
 ## Lifecycle and recovery
 
 Retain both handles. Stop callbacks and drain graph readers before calling
@@ -107,8 +114,8 @@ checks, not complete realtime qualification.
 This is crash/hang containment while the parent survives, not a security
 sandbox. Host death, deliberate group escape and an independent custody anchor
 remain subsequent work. Other rates/blocks, events, latency/tail shapes, Linux,
-Windows Job Objects, installed A10 saved-configuration qualification and the full
-paced realtime matrix remain unqualified.
+Windows Job Objects, qualification of an installed saved configuration and the
+full paced realtime matrix remain unqualified.
 
 ## Reproducing the controls
 
@@ -132,4 +139,4 @@ installed SDK and production companion into a fresh private prefix, copies the
 public consumer into a separate source directory and runs half-gain,
 checkpoint/recovery, generation and PDC controls. It compares installed public
 header hashes and records SDK/worker/plugin/consumer provenance. This functional
-consumer does not establish full A10 saved-configuration or realtime qualification.
+consumer does not establish saved-configuration or realtime qualification.

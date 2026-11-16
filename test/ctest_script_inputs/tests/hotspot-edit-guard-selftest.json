@@ -4,6 +4,8 @@
   "entry": "tools/scripts/test_hotspot_edit_guard.py",
   "inputs": [
    "docs/status/consumption-profiles.json",
+   "test/cmake/fragments",
+   "test/cmake/mac_platform_tests.cmake",
    "test/ctest_script_inputs",
    "tools/agent-capabilities/fingerprints",
    "tools/scripts/agent_capability_catalog_signal.py",
