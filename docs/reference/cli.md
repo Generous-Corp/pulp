@@ -1614,8 +1614,16 @@ at 48 kHz when no input is given. Unknown or repeated options are refused with
 largest absolute output sample over all channels, so a silent render is visible
 without reading the WAV. Unresolved node types, prepare failures and non-finite
 output (`non_finite_output`) return exit 1. The MCP `pulp_graph` tool exposes the read-only `inspect`,
-`validate`, `explain`, `render`, `probe`, `report` and `catalog` operations, and `fmt` forced to
+`validate`, `explain`, `diff`, `render`, `probe`, `report` and `catalog` operations, and `fmt` forced to
 `--notation`, so it prints and never writes; file writing stays in the CLI.
+
+MCP `pulp_graph` operation `diff` takes `before` and `after` (not `path`) and runs the matched
+sibling `pulp-cpp graph diff BEFORE AFTER --json`, so its text is the CLI JSON byte for byte. The
+process starts without a shell, with a 30-second deadline and a 2 MiB output cap. A comparison that
+finds differences exits 0 and is a successful result; `isError: true` means a refusal (CLI exit 1 or
+2: `FileUnreadable`, `ResourceLimit`, `InvalidDocument` with `side`, `missing_input`,
+`invalid_option`) or a failed or truncated process. The CLI keeps its exit contract (0 for any
+completed comparison); there is no diff-style exit code.
 
 `pulp graph report FILE [--sample-rate 48000] [--max-block-size 512]
 [--block-size N] [--measure-blocks 16]` prepares the saved graph without loading
