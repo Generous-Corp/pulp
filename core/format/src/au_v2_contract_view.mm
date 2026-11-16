@@ -73,15 +73,19 @@
 
 namespace pulp::format::au {
 
+#if defined(PULP_AU_V2_TEST_HOOKS)
 namespace {
 std::optional<bool> g_follow_container_override;
 }
+#endif
 
 /// Whether this host resizes the editor view's enclosing container to match
-/// the view (Logic). A test can fix the answer.
+/// the view (Logic).
 bool contract_resize_follows_container() {
+#if defined(PULP_AU_V2_TEST_HOOKS)
     if (g_follow_container_override)
         return *g_follow_container_override;
+#endif
     static const bool follows = [] {
         const auto info = pulp::format::detect_host_info();
         return pulp::format::resolved_quirks(info.type, info.version).logic_au_v2_container_resize;
@@ -89,11 +93,13 @@ bool contract_resize_follows_container() {
     return follows;
 }
 
+#if defined(PULP_AU_V2_TEST_HOOKS)
 /// Test seam: force `contract_resize_follows_container()`; nullopt restores
-/// host detection.
+/// host detection. Compiled only into test targets, never into a plug-in.
 void set_contract_resize_follows_container_for_testing(std::optional<bool> follows) {
     g_follow_container_override = follows;
 }
+#endif
 
 /// The contract's key event for an AppKit key event.
 EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,

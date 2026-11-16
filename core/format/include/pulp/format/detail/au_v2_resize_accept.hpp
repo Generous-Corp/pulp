@@ -22,8 +22,13 @@ inline bool same_frame_size(FrameSize a, FrameSize b) {
            std::fabs(a.height - b.height) < kFrameTolerance;
 }
 
-inline bool same_frame_origin(FrameSize a, FrameSize b) {
-    return same_frame_size(a, b);
+struct FramePoint {
+    double x = 0.0;
+    double y = 0.0;
+};
+
+inline bool same_frame_origin(FramePoint a, FramePoint b) {
+    return std::fabs(a.x - b.x) < kFrameTolerance && std::fabs(a.y - b.y) < kFrameTolerance;
 }
 
 /// True when the request took. `container` is only consulted when

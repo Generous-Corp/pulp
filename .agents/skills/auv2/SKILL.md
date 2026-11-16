@@ -307,7 +307,11 @@ per plug-in, and the factory class is exported. Things to keep straight:
   (`detail::resize_request_accepted()`). Under Logic
   (`logic_au_v2_container_resize`) the enclosing container must have followed
   too. Otherwise the frame is restored and the editor is told it kept its
-  previous size. It is the same exact-size rule as the ViewBridge path's
+  previous size. The container branch (a host that resizes its container) is
+  proven only through a test seam, `set_contract_resize_follows_container_for_testing`,
+  compiled under `PULP_AU_V2_TEST_HOOKS` and absent from shipped builds
+  (`pulp-test-au-v2-contract-shipping`); it has not run in a real Logic host.
+  It is the same exact-size rule as the ViewBridge path's
   `pulp_resize_logic_auv2_editor`, but it does not walk Logic's window
   hierarchy and does not publish the new size before the frame change.
 - `pulp-test-au-v2-contract-adapters` builds all three adapter types from

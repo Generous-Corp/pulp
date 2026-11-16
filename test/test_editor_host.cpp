@@ -1204,4 +1204,10 @@ TEST_CASE("an AU v2 resize request is accepted only at the exact size the host f
     REQUIRE_FALSE(resize_request_accepted(wanted, wanted, true, true, true, other));
     REQUIRE(resize_request_accepted(wanted, wanted, true, true, true, wanted));
     REQUIRE(resize_request_accepted(wanted, wanted, true, true, false, other));
+    // The origin check is separate from the size check.
+    using pulp::format::detail::FramePoint;
+    using pulp::format::detail::same_frame_origin;
+    REQUIRE(same_frame_origin({0, 0}, {0.3, -0.2}));
+    REQUIRE_FALSE(same_frame_origin({0, 0}, {5, 0}));
+    REQUIRE_FALSE(same_frame_origin({0, 0}, {0, 5}));
 }

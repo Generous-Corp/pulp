@@ -527,11 +527,32 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_AUSDK)
         "-framework AppKit" "-framework AudioToolbox" "-framework AudioUnit")
     target_compile_definitions(pulp-test-au-v2-contract-view PRIVATE
         PULP_AU_CONTRACT_VIEW_FACTORY_CLASS=PulpAUContractViewFactory_Test
-        PULP_AU_CONTRACT_HOST_VIEW_CLASS=PulpAUContractHostView_Test)
+        PULP_AU_CONTRACT_HOST_VIEW_CLASS=PulpAUContractHostView_Test
+        PULP_AU_V2_TEST_HOOKS=1)
     set_target_properties(pulp-test-au-v2-contract-view PROPERTIES CXX_STANDARD 23)
     target_compile_options(pulp-test-au-v2-contract-view PRIVATE
         $<$<COMPILE_LANGUAGE:OBJCXX>:-std=gnu++23>)
+    # The shipping check looks the seam up by symbol name, which needs the
+    # executable's symbols exported.
+    target_link_options(pulp-test-au-v2-contract-view PRIVATE -Wl,-export_dynamic)
     catch_discover_tests(pulp-test-au-v2-contract-view)
+
+    # The same module compiled the way a shipped UI-package AU v2 builds it, with
+    # no PULP_AU_V2_TEST_HOOKS: the test seam must not be in it.
+    add_executable(pulp-test-au-v2-contract-shipping
+        test_au_v2_contract_shipping.mm
+        ${CMAKE_SOURCE_DIR}/core/format/src/au_v2_contract_view.mm)
+    target_link_libraries(pulp-test-au-v2-contract-shipping PRIVATE
+        pulp::format-core ausdk Catch2::Catch2WithMain
+        "-framework AppKit" "-framework AudioToolbox" "-framework AudioUnit")
+    target_compile_definitions(pulp-test-au-v2-contract-shipping PRIVATE
+        PULP_AU_CONTRACT_VIEW_FACTORY_CLASS=PulpAUContractViewFactory_Shipping
+        PULP_AU_CONTRACT_HOST_VIEW_CLASS=PulpAUContractHostView_Shipping)
+    set_target_properties(pulp-test-au-v2-contract-shipping PROPERTIES CXX_STANDARD 23)
+    target_compile_options(pulp-test-au-v2-contract-shipping PRIVATE
+        $<$<COMPILE_LANGUAGE:OBJCXX>:-std=gnu++23>)
+    target_link_options(pulp-test-au-v2-contract-shipping PRIVATE -Wl,-export_dynamic)
+    catch_discover_tests(pulp-test-au-v2-contract-shipping)
 
     # Every AU v2 adapter type (effect, instrument, MIDI processor), built from
     # its real entry macro, hands its contract session registry to the view.

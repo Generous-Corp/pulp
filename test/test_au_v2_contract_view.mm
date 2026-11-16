@@ -20,6 +20,8 @@
 #include <pulp/runtime/alive_token.hpp>
 #include <pulp/state/store.hpp>
 
+#include <dlfcn.h>
+
 #include <atomic>
 #include <memory>
 #include <optional>
@@ -754,4 +756,11 @@ TEST_CASE("an AU v2 contract editor's resize request checks the host's container
     [window release];
     AudioComponentInstanceDispose(au);
     g_instance = nullptr;
+}
+
+TEST_CASE("the container-follow test seam is found by the lookup the shipping check uses",
+          "[auv2][editor-host][au-contract][shipping]") {
+    CHECK(dlsym(RTLD_DEFAULT,
+                "_ZN4pulp6format2au49set_contract_resize_follows_container_for_testingENSt3__18optionalIbEE") !=
+          nullptr);
 }
