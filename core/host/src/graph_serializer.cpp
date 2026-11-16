@@ -2,6 +2,7 @@
 
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/control_index_nodes.hpp>
+#include <pulp/host/isolated_plugin_slot.hpp>
 #include <pulp/host/processor_restore.hpp>
 #include <pulp/host/sample_region_parameters.hpp>
 #include <pulp/runtime/crypto.hpp>
@@ -1508,6 +1509,12 @@ GraphSerializer::to_file(const SignalGraph& graph, const std::filesystem::path& 
                            "@" + std::to_string(node.custom_type_version);
             return result;
         }
+        if (node.type == NodeType::Plugin && node.plugin && is_isolated_plugin_slot(*node.plugin)) {
+            result.code = SaveResult::Code::serialization_refused;
+            result.error =
+                "graph contains an isolated plugin node, which cannot be saved: " + node.name;
+            return result;
+        }
     }
     const auto json = to_json(graph, editor_layout);
     if (json.empty()) {
@@ -1623,6 +1630,10 @@ std::string GraphSerializer::to_json(
     bool has_typed_ports = false;
     for (const auto& node : graph.nodes()) {
         if (node.spectral_identity)
+            return {};
+        // An isolated proxy has no state to save (asking for it makes the node
+        // terminal), and its identity alone would reload the plugin in-process.
+        if (node.type == NodeType::Plugin && node.plugin && is_isolated_plugin_slot(*node.plugin))
             return {};
         has_processors |= graph.is_processor_node(node.id);
         if (node.type == NodeType::Custom) {
@@ -2236,7 +2247,11 @@ GraphSerializer::LoadResult GraphSerializer::from_file(SignalGraph& graph,
 GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const std::string& json,
                                                        const GraphLoadOptions& options) {
     LoadResult result;
-    auto spectral = spectral_persistence::read(json);
+    // A destination whose limits name a smaller block admits a spectral graph
+    // at that block, the size it will be prepared for.
+    auto spectral =
+        spectral_persistence::read(json, std::clamp(graph.limits_.max_block_size, 1,
+                                                    spectral_persistence::max_admission_block));
     if (spectral.handled) {
         if (!spectral.result.ok)
             return spectral.result;

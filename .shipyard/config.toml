@@ -707,7 +707,7 @@ enabled = true
 # tree-reading drift checks, so it reports in minutes and cannot be starved by
 # the shared Macs.
 #
-# This is the FULL contract, all seven contexts: `shipyard governance apply`
+# This is the FULL contract, all eight contexts: `shipyard governance apply`
 # pushes exactly this list to branch protection, so a partial list would drop
 # required checks. It must equal the contexts in
 # .github/rulesets/main-protection.json; `base-poison-detector-selftest`
@@ -728,6 +728,7 @@ required_status_checks = [
     "Vellum trusted freeze",
     "drift-fast",
     "workflow-lint",
+    "review-verdict",
 ]
 
 # Every workflow that PRODUCES a required status context, so Shipyard's
@@ -746,6 +747,7 @@ required_status_checks = [
 #   Vellum trusted freeze                  vellum-trusted-gate.yml
 #   drift-fast                             drift-fast.yml
 #   workflow-lint                          workflow-lint.yml
+#   review-verdict                         review-verdict-merge-group.yml
 #
 # None of the seven is path-filtered under `pull_request`
 # (`wclap-cloudflare.yml`'s `paths:` sits under `push`, deliberately: a
@@ -761,6 +763,7 @@ workflows = [
     ".github/workflows/vellum-trusted-gate.yml",
     ".github/workflows/drift-fast.yml",
     ".github/workflows/workflow-lint.yml",
+    ".github/workflows/review-verdict-merge-group.yml",
 ]
 
 # Per-branch protection knobs. `require_strict_status = true` means a PR must

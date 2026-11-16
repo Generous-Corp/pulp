@@ -45,6 +45,9 @@ struct VoiceBankInputEndpoint {
     std::uint32_t ordinal = 0;
 };
 
+// Number of voice slots in a bank.
+inline constexpr std::uint32_t kVoiceBankSlots = 8;
+
 // The developer supplies a Processor that borrows the corresponding voice.
 // This adapter retains exactly one existing MPE allocator for all eight slots.
 template <class Voice> class MpeVoiceBankOwner final : public VoiceBankOwner {
@@ -55,9 +58,11 @@ template <class Voice> class MpeVoiceBankOwner final : public VoiceBankOwner {
         std::function<std::unique_ptr<format::Processor>(Voice&, std::uint32_t)>;
     explicit MpeVoiceBankOwner(ProcessorFactory factory,
                                std::array<VoiceBankInputEndpoint, 4> endpoints)
-        : allocator_(8), factory_(std::move(factory)), endpoints_(std::move(endpoints)) {}
+        : allocator_(kVoiceBankSlots), factory_(std::move(factory)),
+          endpoints_(std::move(endpoints)) {}
     std::unique_ptr<format::Processor> make_processor(std::uint32_t slot) override {
-        return slot < 8 && factory_ ? factory_(allocator_.voice(slot), slot) : nullptr;
+        return slot < kVoiceBankSlots && factory_ ? factory_(allocator_.voice(slot), slot)
+                                                  : nullptr;
     }
     void dispatch(const midi::MpeExpressionEvent& event) noexcept override {
         allocator_.dispatch(event);
@@ -65,7 +70,7 @@ template <class Voice> class MpeVoiceBankOwner final : public VoiceBankOwner {
     bool live(std::uint32_t slot, midi::MpeNoteGeneration generation,
               midi::MpeExpressionEvent::Kind kind,
               const midi::MpeNoteState& state) const noexcept override {
-        return slot < 8 && generation != 0 && allocator_.voice(slot).active() &&
+        return slot < kVoiceBankSlots && generation != 0 && allocator_.voice(slot).active() &&
                allocator_.voice(slot).note_id() == generation && state.note_id == generation &&
                state.channel == allocator_.voice(slot).channel() &&
                state.note == allocator_.voice(slot).note_number() &&
@@ -82,7 +87,7 @@ template <class Voice> class MpeVoiceBankOwner final : public VoiceBankOwner {
     }
     bool slot_note(std::uint32_t slot, midi::MpeNoteState& note,
                    bool& releasing) const noexcept override {
-        if (slot >= 8 || !allocator_.voice(slot).active())
+        if (slot >= kVoiceBankSlots || !allocator_.voice(slot).active())
             return false;
         const auto& voice = allocator_.voice(slot);
         note = {};
@@ -98,7 +103,7 @@ template <class Voice> class MpeVoiceBankOwner final : public VoiceBankOwner {
         return allocator_.retire_slot(slot, generation);
     }
     const void* slot_state_identity(std::uint32_t slot) const noexcept override {
-        return slot < 8 ? static_cast<const void*>(&allocator_.voice(slot)) : nullptr;
+        return slot < kVoiceBankSlots ? static_cast<const void*>(&allocator_.voice(slot)) : nullptr;
     }
     InputSemantic resolve_input(const VoiceBindingSpec& binding) const noexcept override {
         if (binding.target_kind != VoiceBindingTarget::Port ||
@@ -190,10 +195,15 @@ class VoiceBankBinding final {
     void set_steal_mode(midi::MpeVoiceStealMode mode) noexcept;
     const VoiceBankOwner& owner() const noexcept;
 
+    // begin_block returns Busy while a block is open and OutOfRange for an
+    // empty or oversized window; publish returns StaleEpoch with no open block.
     HostEventResult begin_block(std::uint64_t first_sample, std::size_t frames) noexcept;
     HostEventResult publish(const HostEventRecord& event) noexcept;
+    // On GraphExecutionFailure the whole block is silenced and closed.
     VoiceBankBindingCode render(audio::BufferView<float>& stereo, std::uint64_t first_sample,
                                 std::size_t frames) noexcept;
+    // A deferred NoteOff releases the voice and retires its tracker entry, so
+    // no MIDI note-off for the same key is needed to free tracker capacity.
     VoiceBankBindingCode dispatch_deferred(std::uint64_t epoch, std::uint32_t slot,
                                            midi::MpeNoteGeneration generation,
                                            midi::MpeExpressionEvent::Kind kind,

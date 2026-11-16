@@ -70,6 +70,10 @@ renderer's device. The `rmlui-metal-demo` example is a small plug-in using this
 path; it remains unavailable when the adapter option or the Vellum Metal
 component is off.
 
+When the Vellum RmlUi SDK provides `NativeContext::warm()`, `RmlUiSurface::attach()`
+calls it after the document loads, so textures, geometry and glyphs are ready
+before the first frame is requested. Older SDKs draw the first frame cold.
+
 The surface context is sized in drawable pixels, the Metal frame scale is 1,
 and the density ratio is the backing scale. Every `px` length, not only text,
 is a device pixel: a `100px` box is 100 device pixels (50 points at 2x), while
@@ -103,6 +107,9 @@ as a test does after a click.
 - `pulp-test-native-metal-surface`, `-frame-pump`, `-input` and
   `-surface-input` cover the package on the real Metal device in offscreen
   windows. They skip, saying so, without one.
+- `pulp-test-rmlui-native-surface` and `pulp-test-rmlui-native-metal` cover the
+  RmlUi adapter, including the first-frame preparation. They need an installed
+  Vellum RmlUi SDK and no CI lane builds them yet, so run them locally.
 - `pulp-test-native-metal-probe` drives the example through the editor-host
   contract, the path every format adapter takes.
 - `native-metal-probe-clap-host` and `native-metal-probe-au-host` load the
