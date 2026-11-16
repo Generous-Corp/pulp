@@ -60,6 +60,15 @@ hostile-fixture, endpoint, sibling/PDC and production-mutation controls together
 Functional callback traps do not establish full realtime or A10 qualification;
 host death and deliberate group escape are outside first-mode custody.
 
+**The Windows worker transport differs from the POSIX one in three places.**
+The control channel is an overlapped named pipe, so every transfer on either
+end must be overlapped and deadline-bounded (`isolated_clap_windows_channel.hpp`);
+a synchronous `ReadFile` on it ignores the deadline. The shared mapping is an
+unnamed section duplicated into the worker with `DuplicateHandle`, and the hello
+record's `file` field carries that child-side handle value instead of a file
+identity, so there is no path to unlink. And the Windows retained channel refuses
+output capture, because nothing drains a retained child's pipes.
+
 **Graph code that calls an isolation helper must also link on the web.** The
 WAM / WebCLAP sample-region profile compiles a curated source list
 (`tools/cmake/PulpSampleRegionWebSources.cmake`), not `pulp-host`, and
