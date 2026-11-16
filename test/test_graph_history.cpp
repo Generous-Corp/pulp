@@ -838,25 +838,31 @@ TEST_CASE("saved document inspection refuses identities that name other nodes",
     const auto& custom = identities.at(fixture.custom);
 
     // Swap the identity strings of two nodes of different types everywhere
-    // they appear, so the identity entries and bindings stay consistent.
+    // they appear, so the identity entries and bindings stay consistent. The
+    // envelope is read from one parse and written into another, so no view
+    // into a value being modified is held.
+    const auto original = choc::json::parse(saved);
     auto root = choc::json::parse(saved);
     const auto swapped_name = [&](const std::string& name) {
         return name == input ? gain : name == gain ? input : name;
     };
+    const auto listed = original["logical_identities"]["identities"];
     auto entries = choc::value::createEmptyArray();
-    for (std::uint32_t i = 0; i < root["logical_identities"]["identities"].size(); ++i) {
-        const auto& entry = root["logical_identities"]["identities"][i];
+    for (std::uint32_t i = 0; i < listed.size(); ++i) {
         auto item = choc::value::createObject("Identity");
-        item.addMember("id", swapped_name(std::string(entry["id"].getString())));
-        item.addMember("node_id", entry["node_id"].getInt64());
+        item.addMember("id", swapped_name(std::string(listed[i]["id"].getString())));
+        item.addMember("node_id", listed[i]["node_id"].getInt64());
         entries.addArrayElement(item);
     }
-    auto logical = choc::value::Value(root["logical_identities"]);
-    logical.setMember("identities", entries);
+    auto logical = choc::value::createObject("LogicalIdentities");
+    logical.addMember("profile",
+                      std::string(original["logical_identities"]["profile"].getString()));
+    logical.addMember("identities", entries);
     root.setMember("logical_identities", logical);
+    const auto bound = original["bindings"];
     auto bindings = choc::value::createObject("Bindings");
-    for (std::uint32_t i = 0; i < root["bindings"].size(); ++i) {
-        const auto member = root["bindings"].getObjectMemberAt(i);
+    for (std::uint32_t i = 0; i < bound.size(); ++i) {
+        const auto member = bound.getObjectMemberAt(i);
         bindings.addMember(swapped_name(std::string(member.name)), member.value.getInt64());
     }
     root.setMember("bindings", bindings);
