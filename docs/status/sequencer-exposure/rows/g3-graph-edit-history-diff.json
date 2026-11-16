@@ -96,9 +96,14 @@
       "rationale": "The pulp_graph MCP tool exposes operation diff with explicit before and after paths. It runs the matched sibling pulp-cpp graph diff --json (the CLI implementation) without a shell, with a 30 second deadline and a 2 MiB output cap; a comparison that finds differences is a successful result and only a refusal is an MCP error.",
       "evidence": [
         {
-          "kind": "mcp_handler",
+          "kind": "mcp_definition",
           "path": "tools/mcp/mcp_tools.cpp",
           "needles": ["handle_graph_diff", "\"graph\", \"diff\", before, after"]
+        },
+        {
+          "kind": "mcp_handler",
+          "path": "tools/mcp/mcp_tools.hpp",
+          "needles": ["handle_graph"]
         },
         {
           "kind": "test",
