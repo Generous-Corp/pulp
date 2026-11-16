@@ -8,6 +8,7 @@
 #   tools/ci/rmlui_native_lane.sh sdk-key                  # cache key: pin + SDK build options
 #   tools/ci/rmlui_native_lane.sh sdk <vellum-dir> <prefix>  # build + install the SDK
 #   tools/ci/rmlui_native_lane.sh test <prefix> [build-dir]  # configure, build, run
+#   tools/ci/rmlui_native_lane.sh run-suite <program> <report>  # run and judge one program
 #
 # The lane fails, rather than passes empty, when the test program is absent,
 # when any case fails, or when any case skipped. PULP_REQUIRE_METAL turns a
@@ -68,10 +69,26 @@ run_test() {
         echo "::error::pulp-test-rmlui-native-surface was not built; the adapter did not configure" >&2
         exit 1
     fi
-    local report="$build_dir/rmlui-native-surface.xml"
-    # Catch2's exit code is not enough: skipped cases exit 0. The timing cases
-    # ([performance]) stay out, as they do from the required ctest lane.
-    PULP_REQUIRE_METAL=1 "$program" "~[performance]" -r xml -o "$report" || true
+    run_suite "$program" "$build_dir/rmlui-native-surface.xml"
+}
+
+# Run the suite and judge it. A stale report from an earlier run must not be
+# readable, and a nonzero exit (a failed case, a loader error, a crash) fails the
+# lane even if a report exists.
+run_suite() {
+    local program="$1" report="$2" status=0
+    rm -f "$report"
+    # Catch2's exit code is not enough alone: skipped cases exit 0. The timing
+    # cases ([performance]) stay out, as they do from the required ctest lane.
+    PULP_REQUIRE_METAL=1 "$program" "~[performance]" -r xml -o "$report" || status=$?
+    if [ "$status" -ne 0 ]; then
+        echo "::error::pulp-test-rmlui-native-surface exited $status" >&2
+        exit 1
+    fi
+    if [ ! -f "$report" ]; then
+        echo "::error::the suite wrote no report at $report" >&2
+        exit 1
+    fi
     python3 - "$report" <<'PY'
 import sys
 import xml.etree.ElementTree as ET
@@ -105,6 +122,7 @@ negative_control() {
 case "${1:-}" in
 pin) pin ;;
 sdk-key) sdk_key ;;
+run-suite) shift; run_suite "$@" ;;
 negative-control) shift; negative_control "$@" ;;
 sdk) shift; sdk "$@" ;;
 test) shift; run_test "$@" ;;
