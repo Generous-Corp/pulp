@@ -12,7 +12,6 @@
 
 #include "support/recording_contract_editor.hpp"
 
-#include <pulp/format/detail/standalone_contract_editor.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/standalone.hpp>
 #include <pulp/state/store.hpp>
@@ -205,31 +204,28 @@ namespace {
 
 // Runs the standalone contract window headless, hands the native window to
 // `on_window`, and calls `on_frame` once from the window's loop.
-bool run_window(pulp::format::detail::StandaloneContractEditorOptions options,
-                std::function<void(NSWindow*)> on_window, std::function<void(NSWindow*)> on_frame) {
-    ContractProcessor processor;
-    pulp::state::StateStore store;
-    processor.set_state_store(&store);
-    processor.define_parameters(store);
-    auto png = temp_png("pulp-standalone-contract-window");
-    options.headless = true;
-    options.screenshot_path = png;
-    options.screenshot_frame_delay = 3;
+bool run_window(double screen_width, double screen_height, std::function<void(NSWindow*)> on_window,
+                std::function<void(NSWindow*)> on_frame) {
+    const auto png = temp_png("pulp-standalone-contract-window");
+    pulp::format::StandaloneApp app(create_contract_processor);
+    auto config = headless_config(png);
+    config.test_screen_visible_width = screen_width;
+    config.test_screen_visible_height = screen_height;
     NSWindow* window = nil;
-    options.on_window_ready = [&](void* native) {
+    bool framed = false;
+    config.test_on_editor_window = [&](void* native) {
         window = (NSWindow*)native;
         if (on_window)
             on_window(window);
     };
-    bool framed = false;
-    options.on_idle = [&] {
+    config.test_on_editor_frame = [&] {
         if (!framed && window != nil && on_frame) {
             framed = true;
             on_frame(window);
         }
     };
-    const bool ok = pulp::format::detail::run_standalone_contract_editor(
-        processor, store, *processor.editor_factory(), options);
+    app.set_config(config);
+    const bool ok = app.run_with_editor(false);
     std::filesystem::remove(png);
     return ok;
 }
@@ -248,7 +244,7 @@ TEST_CASE("a standalone contract window holds the editor's aspect and limits whi
     reset_contract_recording();
     contract_config().identity_adjust = true; // the window alone enforces the hints
     bool ran = false;
-    REQUIRE(run_window({}, nullptr, [&](NSWindow* window) {
+    REQUIRE(run_window(0, 0, nullptr, [&](NSWindow* window) {
         ran = true;
         for (const NSSize drag :
              {NSMakeSize(1000, 400), NSMakeSize(500, 900), NSMakeSize(640, 520)}) {
@@ -274,7 +270,7 @@ TEST_CASE(
     contract_config().identity_adjust = true;
     contract_config().default_hints = true;
     bool ran = false;
-    REQUIRE(run_window({}, nullptr, [&](NSWindow* window) {
+    REQUIRE(run_window(0, 0, nullptr, [&](NSWindow* window) {
         ran = true;
         REQUIRE_FALSE((window.styleMask & NSWindowStyleMaskResizable) != 0);
         // Control for the test above: a fixed-size editor is not snapped.
@@ -288,11 +284,8 @@ TEST_CASE("a standalone contract window opens inside a small screen at the edito
           "[standalone][editor-host][standalone-contract][resize-hints]") {
     EditorEnvironment env;
     reset_contract_recording();
-    pulp::format::detail::StandaloneContractEditorOptions small_screen;
-    small_screen.screen_visible_width = 300;
-    small_screen.screen_visible_height = 250;
     NSSize opened{};
-    REQUIRE(run_window(small_screen, nullptr, [&](NSWindow* window) {
+    REQUIRE(run_window(300, 250, nullptr, [&](NSWindow* window) {
         opened = window.contentView.frame.size;
         REQUIRE(window.frame.size.width <= 300);
         REQUIRE(window.frame.size.height <= 250);
@@ -305,7 +298,7 @@ TEST_CASE("a standalone contract window opens inside a small screen at the edito
     reset_contract_recording();
     NSSize full{};
     REQUIRE(
-        run_window({}, nullptr, [&](NSWindow* window) { full = window.contentView.frame.size; }));
+        run_window(0, 0, nullptr, [&](NSWindow* window) { full = window.contentView.frame.size; }));
     REQUIRE(full.width == 400);
     REQUIRE(full.height == 300);
 }
