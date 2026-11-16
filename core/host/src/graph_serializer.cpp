@@ -622,8 +622,7 @@ bool parse_type(std::string_view s, NodeType& out) {
 //   - a "plugin" record keeps its plugin.unique_id;
 //   - a "custom" record uses custom.type_id and custom.version (1 when
 //     absent), and an unknown type string restores as a custom node of that
-//     type id at version 1;
-//   - a custom node with an empty name takes its type id as its name.
+//     type id at version 1, and must carry a name.
 // Returns nullopt with `detail` set for a record the loader cannot rebuild
 // as a node.
 template <typename V>
@@ -685,8 +684,16 @@ std::optional<std::string> saved_record_identity_key(const V& node, std::string&
             version = custom["version"].getInt64();
         }
     }
-    if (name.empty())
-        name = type_id;
+    // The loader names an unnamed custom node after its registered type's
+    // default_name when one is set, and after its type id otherwise, and
+    // inspection has no registry to tell the two apart. The writer never
+    // records an empty custom name: a custom node added without a name takes
+    // the default_name or type id at creation.
+    if (name.empty()) {
+        detail = "custom node record " + id +
+                 " requires a name; its restored identity cannot be determined";
+        return std::nullopt;
+    }
     return identity_key(NodeType::Custom, name, {}, type_id, version);
 }
 

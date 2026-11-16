@@ -1060,12 +1060,11 @@ TEST_CASE("saved document inspection rebuilds identities the loader would assign
           "[host][graph][history][identity]") {
     // Hand-written records the writer never emits but the loader restores:
     // an unknown type string restores as a custom node of that type at
-    // version 1, a custom record without a version reads as version 1, and an
-    // unnamed custom node takes its type id as its name.
+    // version 1, and a custom record without a version reads as version 1.
     const std::string document = R"({
   "format_version": 2,
   "nodes": [
-    {"id": 1, "type": "pulp.test.unknown", "name": "", "num_input_ports": 1,
+    {"id": 1, "type": "pulp.test.unknown", "name": "U", "num_input_ports": 1,
      "num_output_ports": 1, "gain": 1.0},
     {"id": 2, "type": "custom", "name": "C", "num_input_ports": 1, "num_output_ports": 1,
      "gain": 1.0, "custom": {"type_id": "pulp.test.unversioned"}}
@@ -1075,12 +1074,12 @@ TEST_CASE("saved document inspection rebuilds identities the loader would assign
   "logical_identities": {
     "profile": "pulp.graph.saved-identity.v6",
     "identities": [
-      {"id": "node:custom:pulp.test.unknown:pulp.test.unknown@1:0", "node_id": 1},
+      {"id": "node:custom:U:pulp.test.unknown@1:0", "node_id": 1},
       {"id": "node:custom:C:pulp.test.unversioned@1:0", "node_id": 2}
     ]
   },
   "bindings": {
-    "node:custom:pulp.test.unknown:pulp.test.unknown@1:0": 1,
+    "node:custom:U:pulp.test.unknown@1:0": 1,
     "node:custom:C:pulp.test.unversioned@1:0": 2
   }
 })";
@@ -1091,6 +1090,106 @@ TEST_CASE("saved document inspection rebuilds identities the loader would assign
     const auto restored = GraphSerializer::from_saved_document(loaded, document);
     INFO(restored.error);
     CHECK(restored.ok);
+}
+
+constexpr std::string_view kNamedDefaultType = "pulp.test.unknown";
+
+// A registered custom type whose default_name differs from its type id.
+CustomNodeType named_default_type() {
+    CustomNodeType type;
+    type.type_id = std::string(kNamedDefaultType);
+    type.version = 1;
+    type.num_input_ports = 1;
+    type.num_output_ports = 1;
+    type.default_name = "Registered";
+    type.process = [](auto&, const auto&, int) {};
+    return type;
+}
+
+TEST_CASE("saved document writer never records an unnamed custom node",
+          "[host][graph][history][identity]") {
+    // A custom node added without a name takes its registered default_name,
+    // or its type id when unresolved, so the writer never emits an unnamed
+    // custom record for inspection to refuse.
+    SignalGraph graph;
+    REQUIRE(graph.register_custom_node_type(named_default_type()));
+    const auto registered = graph.add_custom_node(kNamedDefaultType, 1, "");
+    REQUIRE(registered != 0);
+    CHECK(graph.node(registered)->name == "Registered");
+    const auto unresolved = graph.add_unresolved_custom_node("pulp.test.absent", 1, 1, 1, "");
+    REQUIRE(unresolved != 0);
+    CHECK(graph.node(unresolved)->name == "pulp.test.absent");
+
+    const auto saved = GraphSerializer::to_saved_document(graph);
+    REQUIRE_FALSE(saved.empty());
+    const auto saved_root = choc::json::parse(saved);
+    const auto records = saved_root["nodes"];
+    REQUIRE(records.size() == 2);
+    for (std::uint32_t i = 0; i < records.size(); ++i)
+        CHECK_FALSE(std::string(records[i]["name"].getString()).empty());
+    const auto inspection = GraphSerializer::inspect_document(saved);
+    INFO(inspection.detail);
+    REQUIRE(inspection.ok());
+
+    // Round trip through a restore and a second save.
+    SignalGraph loaded;
+    REQUIRE(loaded.register_custom_node_type(named_default_type()));
+    const auto restored = GraphSerializer::from_saved_document(loaded, saved);
+    INFO(restored.error);
+    REQUIRE(restored.ok);
+    const auto resaved = GraphSerializer::to_saved_document(loaded);
+    REQUIRE(GraphSerializer::inspect_document(resaved).ok());
+    const auto diff = diff_graph_documents(saved, resaved);
+    INFO(diff.detail);
+    REQUIRE(diff.ok());
+    CHECK(diff.equal());
+}
+
+TEST_CASE("saved document inspection refuses an unnamed custom record",
+          "[host][graph][history][identity]") {
+    // Inspection would name this record by its type id, while a destination
+    // that registers the type with a default_name restores it as
+    // "Registered", so its identity cannot be determined without a registry.
+    const std::string document = R"({
+  "format_version": 2,
+  "nodes": [
+    {"id": 1, "type": "pulp.test.unknown", "name": "", "num_input_ports": 1,
+     "num_output_ports": 1, "gain": 1.0}
+  ],
+  "connections": [],
+  "identity_schema": "pulp.graph.saved-identity.v6",
+  "logical_identities": {
+    "profile": "pulp.graph.saved-identity.v6",
+    "identities": [
+      {"id": "node:custom:pulp.test.unknown:pulp.test.unknown@1:0", "node_id": 1}
+    ]
+  },
+  "bindings": {
+    "node:custom:pulp.test.unknown:pulp.test.unknown@1:0": 1
+  }
+})";
+    const auto inspection = GraphSerializer::inspect_document(document);
+    INFO(inspection.detail);
+    CHECK(inspection.refusal == GraphDocumentRefusal::IdentityBindingUnknown);
+    CHECK(inspection.detail.find("requires a name") != std::string::npos);
+
+    // A populated destination that registers the type survives the refusal
+    // untouched.
+    SignalGraph target;
+    REQUIRE(target.register_custom_node_type(named_default_type()));
+    const auto kept_input = target.add_input_node(1, "Kept In");
+    const auto kept_gain = target.add_gain_node("Kept");
+    REQUIRE(target.connect(kept_input, 0, kept_gain, 0));
+    const auto before = GraphSerializer::to_saved_document(target);
+    const auto refused = GraphSerializer::from_saved_document(target, document);
+    INFO(refused.error);
+    CHECK_FALSE(refused.ok);
+    CHECK(refused.error.find("identity_binding_unknown") != std::string::npos);
+    REQUIRE(target.nodes().size() == 2);
+    CHECK(target.node(kept_input) != nullptr);
+    CHECK(target.node(kept_gain) != nullptr);
+    CHECK(target.connections().size() == 1);
+    CHECK(GraphSerializer::to_saved_document(target) == before);
 }
 
 TEST_CASE("graph document diff compares sample region NodeIds by identity",
