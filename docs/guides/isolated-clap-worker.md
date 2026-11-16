@@ -6,13 +6,15 @@
 operations. The parent hashes files without loading vendor code; the companion
 uses the existing strict CLAP loader in a retained child process.
 
-This mode requires macOS arm64, stereo main input/output, 48 kHz, exactly 64
-callback frames and a headless CLAP effect reporting zero latency and tail.
-Both latency and tail extensions must exist. Supply the exact descriptor ID,
-companion path, plugin executable SHA-256 and companion SHA-256 through
-`IsolatedClapOptions`. For a bundle, hash its executable under `Contents/MacOS`.
-A missing or incompatible companion refuses creation. Other platforms refuse
-explicitly.
+This mode requires macOS arm64 or Windows x64, stereo main input/output, 48 kHz,
+exactly 64 callback frames and a headless CLAP effect reporting zero latency and
+tail. Both latency and tail extensions must exist. Supply the exact descriptor
+ID, companion path, plugin executable SHA-256 and companion SHA-256 through
+`IsolatedClapOptions`. For a macOS bundle, hash its executable under
+`Contents/MacOS`; a Windows `.clap` is a single module file and is hashed as
+itself. A missing or incompatible companion refuses creation. Other platforms
+refuse explicitly. The profile keeps its `MacClapStereo64V1` name on Windows:
+the name identifies the shape, and both transports share it.
 
 The caller opts out of transport delivery. Descriptors cannot establish that a
 vendor does not depend on transport. MIDI, automation, sidechains, editor,
@@ -114,28 +116,63 @@ checks, not complete realtime qualification.
 This is crash/hang containment while the parent survives, not a security
 sandbox. Host death, deliberate group escape and an independent custody anchor
 remain subsequent work. Other rates/blocks, events, latency/tail shapes, Linux,
-Windows Job Objects, qualification of an installed saved configuration and the
-full paced realtime matrix remain unqualified.
+Windows realtime pacing, the installed SDK consumer on Windows, qualification of
+an installed saved configuration and the full paced realtime matrix remain
+unqualified.
 
-On Windows the slot still refuses. The transport it will use exists:
-retained custody (a kill-on-close job object) offers the private duplex
-channel, and `isolated_clap_windows_channel.hpp` carries the deadline-bounded
-control records, an unnamed section duplicated into the worker by handle, and
-the hello exchange that binds that section to one worker process and
-generation. The Windows `pulp-test-isolated-clap-protocol` cases drive that
-handshake against a peer executable that loads no vendor code. Slot launch, the
-worker loop, executable checks and the plugin fixture are not yet ported.
+## Windows
 
-No CI lane runs the Windows transport cases: the pull-request `windows` check
-does not build them and no scheduled Windows lane exists. They are owner-run on
-the Windows Server VM, from a git checkout, in a Visual Studio x64 developer
-prompt (VS 2022 Build Tools, Ninja, `cl`):
+On Windows x64 the slot uses the same session, protocol, callback endpoint and
+retained custody, with a different transport. Retained custody (a kill-on-close
+job object, child born suspended) offers the private duplex channel;
+`isolated_clap_windows_channel.hpp` carries the deadline-bounded control records,
+the unnamed 8192-byte section and the hello. The parent creates the section
+before launch and duplicates it into the worker process during hello; the hello
+binds generation, the duplicated handle value, both hashes and the build, and
+the reply must carry the worker's own process id. The worker proves its own
+module hash (from `GetModuleFileNameW`) and the plugin hash before loading, and
+the parent accepts it only after the exact load report. Windows has no mode bits
+to check on the worker executable; its hash binds it instead.
+
+The worker owns the duplicated section value only once that value maps as a
+full section. It then closes the value at once, because the view keeps the
+section alive, so the value is never closed twice. A value that does not map is
+never closed: it may name another live handle of the worker. The parent never
+closes the value remotely; a failed hello is always followed by terminating the
+job, which releases a value the worker never adopted.
+
+Between blocks the worker waits on a high-resolution waitable timer (about
+50 us) rather than `Sleep`, which rounds up to the scheduler tick. A closed
+control pipe ends the worker, as a hang-up does on POSIX.
+
+`pulp-test-isolated-clap-worker-windows` drives the production worker and the
+lifecycle fixture (built as a plain `.clap` module) through the public loader:
+real processing with worker image, descriptor and hashes; a measured one-block
+impulse latency; identity refusals; malformed and partial completions; a
+stalled worker; bounded lifecycle hangs; failed state saves with a recovery
+control; descendant cleanup after leader exit; and a killed worker beside a
+bit-exact in-process sibling. Every callback runs inside operator-new counting
+and import-table traps on the test executable for heap, lock, wait, pipe I/O,
+handle and process calls (Pulp and the static CRT resolve through that table);
+a negative control proves each trap kind sees deliberate calls. These are
+functional checks on the callback, not realtime qualification. A hidden
+`[.paced]` case paces callbacks at the real block period and prints how many
+blocks completed before the first fault; on the 4-vCPU Windows Server VM the
+worker kept pace for hundreds of blocks, not thousands, so Windows realtime
+pacing is unqualified.
+
+No CI lane runs the Windows cases: the pull-request `windows` check does not
+build them and no scheduled Windows lane exists. They are owner-run on the
+Windows Server VM, from a git checkout (with an empty `planning` directory), in
+a Visual Studio x64 developer prompt (Build Tools, Ninja, `cl`):
 
 ```bat
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -DPULP_BUILD_EXAMPLES=OFF -DPULP_ENABLE_GPU=OFF -DPULP_BUILD_WEBVIEW=OFF
-cmake --build build -j 3 --target pulp-test-group-core-runtime-http pulp-test-isolated-clap-protocol
+cmake --build build -j 3 --target pulp-test-group-core-runtime-http pulp-test-isolated-clap-protocol pulp-test-isolated-clap-worker-windows
 build\test\pulp-test-group-core-runtime-http.exe "[retained-custody]"
 build\tools\clap-worker\pulp-test-isolated-clap-protocol.exe
+build\tools\clap-worker\pulp-test-isolated-clap-worker-windows.exe
+build\tools\clap-worker\pulp-test-isolated-clap-worker-windows.exe "[.paced]"
 ```
 
 ## Reproducing the controls
