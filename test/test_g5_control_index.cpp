@@ -1135,6 +1135,90 @@ TEST_CASE("a seek resets a Custom Control node only when it declares an audio-sa
     CHECK(resets_after_seek(false) == 0);
 }
 
+namespace {
+
+// One-port converters so a Control chain can run from an ordinary audio input
+// with no Control index input and no graph-event edge, so no event lane.
+CustomNodeType make_audio_to_control_type() {
+    CustomNodeType type;
+    type.type_id = "pulp.test.audio-to-control";
+    type.num_input_ports = 1;
+    type.num_output_ports = 1;
+    type.input_ports = {{"audio", PortKind::Audio}};
+    type.output_ports = {{"value", PortKind::Control}};
+    type.process = [](pulp::audio::BufferView<float>& out,
+                      const pulp::audio::BufferView<const float>& in,
+                      int frames) { std::copy_n(in.channel_ptr(0), frames, out.channel_ptr(0)); };
+    return type;
+}
+
+CustomNodeType make_control_to_audio_type() {
+    CustomNodeType type;
+    type.type_id = "pulp.test.control-to-audio";
+    type.num_input_ports = 1;
+    type.num_output_ports = 1;
+    type.input_ports = {{"value", PortKind::Control}};
+    type.output_ports = {{"audio", PortKind::Audio}};
+    type.process = [](pulp::audio::BufferView<float>& out,
+                      const pulp::audio::BufferView<const float>& in,
+                      int frames) { std::copy_n(in.channel_ptr(0), frames, out.channel_ptr(0)); };
+    return type;
+}
+
+std::vector<float> render_laneless(SignalGraph& graph, std::vector<float> values,
+                                   const pulp::format::ProcessContext& transport) {
+    std::vector<float> result(values.size(), -100.0f);
+    const float* in_ptr[] = {values.data()};
+    float* out_ptr[] = {result.data()};
+    pulp::audio::BufferView<const float> input(in_ptr, 1, values.size());
+    pulp::audio::BufferView<float> output(out_ptr, 1, values.size());
+    graph.process(output, input, static_cast<int>(values.size()), transport);
+    return result;
+}
+
+} // namespace
+
+TEST_CASE("a seek resets a stateful Control node on a graph with no event lane",
+          "[graph][control-index][negative-control]") {
+    SignalGraph graph;
+    const auto integrator_type = make_control_integrator_type();
+    REQUIRE(graph.register_custom_node_type(integrator_type));
+    REQUIRE(graph.register_custom_node_type(make_audio_to_control_type()));
+    REQUIRE(graph.register_custom_node_type(make_control_to_audio_type()));
+    const auto audio = graph.add_input_node(1);
+    const auto to_control = graph.add_custom_node("pulp.test.audio-to-control");
+    const auto integrator = graph.add_custom_node(integrator_type.type_id);
+    const auto to_audio = graph.add_custom_node("pulp.test.control-to-audio");
+    const auto sink = graph.add_output_node(1);
+    REQUIRE((to_control != 0 && integrator != 0 && to_audio != 0));
+    REQUIRE(graph.connect(audio, 0, to_control, 0));
+    REQUIRE(graph.connect(graph.node(to_control)->out("value"),
+                          graph.node(integrator)->in(integrator_type.input_ports.front().name)));
+    REQUIRE(graph.connect(graph.node(integrator)->out("value"), graph.node(to_audio)->in("value")));
+    REQUIRE(graph.connect(to_audio, 0, sink, 0));
+    const std::array<float, 3> range{0.0f, 10.0f, 0.0f};
+    REQUIRE(graph.set_custom_node_state(integrator, make_control_scalar_state(range)));
+    REQUIRE(graph.prepare(48000, 4));
+    // No Control index input and no graph-event edge: the Control-only entry
+    // point is unbound, so this graph runs through process() alone.
+    REQUIRE_FALSE(graph.control_index_position().bound);
+
+    const std::vector<float> steps(4, 0.25f);
+    const std::vector<float> fresh{0.25f, 0.5f, 0.75f, 1.0f};
+    pulp::format::ProcessContext playing;
+    playing.position_samples = 0;
+    REQUIRE(render_laneless(graph, steps, playing) == fresh);
+    // Negative control: an ordinary block continues the stream.
+    playing.position_samples = 4;
+    CHECK(render_laneless(graph, steps, playing).front() == 1.25f);
+
+    pulp::format::ProcessContext seek;
+    seek.reset_requested = true;
+    seek.position_samples = 0;
+    REQUIRE(seek.should_reset_stream_history());
+    CHECK(render_laneless(graph, steps, seek) == fresh);
+}
+
 TEST_CASE("custom_node_reset_runs_on_audio_thread admits only audio-callback safety classes",
           "[graph][control-index][rt-safety]") {
     auto resets = std::make_shared<int>(0);

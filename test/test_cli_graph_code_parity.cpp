@@ -187,6 +187,13 @@ TEST_CASE("graph CLI file size and readability codes agree across subcommands",
     INFO(too_large.stdout_output << too_large.stderr_output);
     REQUIRE(too_large.exit_code == 2);
     REQUIRE(cli_code(too_large) == "graph_file_limit");
+    // A file of exactly the bound is read and judged as a document instead.
+    fs::resize_file(large, 1024 * 1024);
+    const auto at_limit = probe(large);
+    INFO(at_limit.stdout_output << at_limit.stderr_output);
+    REQUIRE(at_limit.exit_code == 2);
+    REQUIRE(cli_code(at_limit) != "graph_file_limit");
+    REQUIRE(cli_code(at_limit) != unreadable);
 }
 
 namespace {

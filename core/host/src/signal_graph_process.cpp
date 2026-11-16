@@ -262,6 +262,12 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
         if (result != GraphEventResult::Accepted)
             return;
         graph_event_guard.active = true;
+    } else if (transport && transport->should_reset_stream_history()) {
+        // A graph with no event lane has no event clock or epoch to advance,
+        // but its stateful Control nodes still restart on a seek, so it
+        // renders like a fresh graph exactly as a graph with a lane does.
+        for (const auto& reset_node : cg->control_stream_resets)
+            reset_node();
     }
     if (cg->spectral)
         cg->spectral->begin_block();

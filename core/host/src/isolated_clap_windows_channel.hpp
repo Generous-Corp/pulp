@@ -26,11 +26,26 @@
 namespace pulp::host::isolation::windows {
 using Deadline = std::chrono::steady_clock::time_point;
 
+/// The wait in milliseconds for `left` time remaining: at least 1, and at most
+/// INFINITE - 1, so a distant deadline never truncates to a short wait and never
+/// becomes an unbounded one.
+inline DWORD wait_milliseconds(std::chrono::milliseconds left) noexcept {
+    return static_cast<DWORD>(
+        std::clamp<std::int64_t>(left.count(), 1, static_cast<std::int64_t>(INFINITE) - 1));
+}
+
+/// What `transfer` saw when a wait expired, for tests of its cancellation rule.
+struct TransferObservation {
+    bool timed_out = false;
+    /// The expired operation had completed when its storage was released.
+    bool settled = false;
+};
+
 /// Moves exactly `size` bytes or fails. Every read and write is overlapped and
 /// waits on the one absolute deadline; an expired wait cancels the operation and
 /// waits for the cancellation, so the buffer is never written after return.
 inline bool transfer(std::intptr_t channel, void* data, std::size_t size, bool sending,
-                     Deadline deadline) {
+                     Deadline deadline, TransferObservation* observation = nullptr) {
     const auto handle = reinterpret_cast<HANDLE>(channel);
     const HANDLE event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     if (event == nullptr)
@@ -56,11 +71,14 @@ inline bool transfer(std::intptr_t channel, void* data, std::size_t size, bool s
         }
         DWORD moved = 0;
         if (!started) {
-            const auto waited = WaitForSingleObject(
-                event, static_cast<DWORD>(std::max<std::int64_t>(1, left.count())));
+            const auto waited = WaitForSingleObject(event, wait_milliseconds(left));
             if (waited != WAIT_OBJECT_0) {
                 CancelIoEx(handle, &operation);
                 GetOverlappedResult(handle, &operation, &moved, TRUE);
+                if (observation != nullptr) {
+                    observation->timed_out = true;
+                    observation->settled = HasOverlappedIoCompleted(&operation) != FALSE;
+                }
                 ok = false;
                 break;
             }
@@ -183,12 +201,7 @@ inline bool parent_hello(std::intptr_t channel, int process_id, const SharedSect
         return false;
     ControlRecord reply;
     return send_record(channel, hello, deadline) && receive_record(channel, reply, deadline) &&
-           reply.command == Command::hello && reply.result == 1 &&
-           reply.generation == hello.generation &&
-           reply.process_id == static_cast<std::uint64_t>(process_id) &&
-           reply.payload_bytes == kMappingBytes && reply.file == hello.file && reply.volume == 0 &&
-           reply.file_generation == 0 && reply.plugin_sha256 == hello.plugin_sha256 &&
-           reply.worker_sha256 == hello.worker_sha256 && reply.build == hello.build;
+           hello_reply_matches(hello, reply, static_cast<std::uint64_t>(process_id));
 }
 
 /// Worker half: receive hello, adopt the section and verify its header before
