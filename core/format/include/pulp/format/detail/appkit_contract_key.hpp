@@ -74,6 +74,17 @@ inline EditorKeyEvent appkit_contract_key_event(unsigned short key_code, NSStrin
         // Function keys arrive as private-use code points; they carry no text.
         if (first < 0xF700 || first > 0xF8FF)
             event.character = static_cast<char32_t>(first);
+        // An astral character (an emoji) arrives as a UTF-16 pair; a lone unit
+        // of one is not a scalar value and is dropped.
+        if (first >= 0xD800 && first <= 0xDBFF && characters.length > 1) {
+            const unichar low = [characters characterAtIndex:1];
+            event.character =
+                (low >= 0xDC00 && low <= 0xDFFF)
+                    ? 0x10000 + ((static_cast<char32_t>(first) - 0xD800) << 10) + (low - 0xDC00)
+                    : 0;
+        } else if (first >= 0xD800 && first <= 0xDFFF) {
+            event.character = 0;
+        }
     }
     if (event.key == EditorKey::space)
         event.character = U' ';

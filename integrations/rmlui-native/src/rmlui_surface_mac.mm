@@ -18,6 +18,7 @@
 #include <deque>
 #include <type_traits>
 #include <memory>
+#include <set>
 #include <utility>
 #include <variant>
 
@@ -117,6 +118,8 @@ struct RmlUiSurface::Impl {
     std::uint32_t height_px = 0;
     double scale = 1.0;
     bool text_focus = false;
+    // Keys whose press a text field took, so only their releases are its own.
+    std::set<Key> consumed_presses;
     // The text field blurred when the window lost focus, by id.
     std::string refocus_id;
 
@@ -411,6 +414,7 @@ struct RmlUiSurface::Impl {
         surface.reset();
         text_focus = false;
         refocus_id.clear();
+        consumed_presses.clear();
         width_px = height_px = 0;
     }
 };
@@ -533,21 +537,21 @@ bool RmlUiSurface::offer_key(const KeyEvent& event) {
         return false;
     // A click queued behind a frame may move focus: apply it before deciding,
     // so the key goes where the user clicked. Only waits when input is queued.
-    bool pending;
-    {
-        std::lock_guard lock(d.input_mutex);
-        pending = !d.queued.empty();
-    }
-    if (pending)
+    // The queue is main-thread only, so it is read without a lock.
+    if (!d.queued.empty())
         flush_input();
+    // A release follows its press: it is the field's only if the field took
+    // the press, wherever focus has gone since.
+    if (event.kind == KeyKind::up) {
+        if (d.consumed_presses.erase(event.key) == 0)
+            return false;
+        d.on_key(event);
+        return true;
+    }
     // The shared policy: with no text field focused the host goes first.
     if (route_key(event, d.text_focus) == KeyRoute::host)
         return false;
     bool taken = d.on_key(event);
-    // A release mirrors its press: consumed while a field holds focus, so the
-    // host never sees the key-up of a key it was not offered.
-    if (event.kind == KeyKind::up)
-        return true;
     // Text a key produced arrives as text, not as a key, so a host that
     // consumed the key leaves it to the surface to type it.
     const bool command = (event.modifiers & (modifier_command | modifier_control)) != 0;
@@ -558,6 +562,8 @@ bool RmlUiSurface::offer_key(const KeyEvent& event) {
             taken = true;
         }
     }
+    if (taken && event.key != Key::unknown)
+        d.consumed_presses.insert(event.key);
     return taken;
 }
 

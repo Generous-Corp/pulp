@@ -539,6 +539,23 @@ TEST_CASE("an offered key is taken only while a text field holds focus",
         release.is_down = false;
         // The release of a key the field took is the field's too.
         REQUIRE(offer_editor_key(*e.ui, release) == KeyDisposition::consumed);
+        // A release whose press the host took stays the host's, even when a
+        // field gained focus in between.
+        e.ui->with_context(
+            [&](Rml::Context& ctx) { ctx.GetDocument(0)->GetElementById("field")->Blur(); });
+        REQUIRE_FALSE(e.ui->text_field_focused());
+        REQUIRE(offer_editor_key(*e.ui, key_event(EditorKey::space, U' ')) ==
+                KeyDisposition::forward);
+        focus_field(e);
+        REQUIRE(e.ui->text_field_focused());
+        REQUIRE(offer_editor_key(*e.ui, release) == KeyDisposition::forward);
+        // And a press the field took is released to the field after the field
+        // lost focus.
+        REQUIRE(offer_editor_key(*e.ui, key_event(EditorKey::space, U' ')) ==
+                KeyDisposition::consumed);
+        e.ui->with_context(
+            [&](Rml::Context& ctx) { ctx.GetDocument(0)->GetElementById("field")->Blur(); });
+        REQUIRE(offer_editor_key(*e.ui, release) == KeyDisposition::consumed);
         REQUIRE(field_value(e) == "ab ");
         e.ui->detach();
     }
@@ -610,12 +627,9 @@ TEST_CASE("contract keys map to pulp-native keys", "[native-surface][rmlui][keys
     REQUIRE(mapped.characters == "\xF0\x9F\x98\x80");
     REQUIRE(mapped.modifiers == (pulp::native::modifier_shift | pulp::native::modifier_option));
 
-    // A lone surrogate types nothing; a pair combines to one scalar.
+    // A lone surrogate types nothing.
     REQUIRE(native_key_event_for(key_event(EditorKey::none, 0xD83D)).characters.empty());
     REQUIRE(native_key_event_for(key_event(EditorKey::none, 0xDE00)).characters.empty());
-    REQUIRE(combine_utf16(0xD83D, 0xDE00) == 0x1F600);
-    REQUIRE(combine_utf16(0xDE00, 0xD83D) == 0);
-    REQUIRE(combine_utf16(u'a', 0xDE00) == 0);
 }
 
 TEST_CASE("losing window focus blurs the text field and gaining it restores it",
