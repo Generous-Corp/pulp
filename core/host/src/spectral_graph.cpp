@@ -458,10 +458,14 @@ SignalGraph::add_spectral_asset_morph_v1(std::span<const std::uint8_t> asset_a,
         return {std::nullopt, config.error};
     const auto& geometry = (*config.value)->a.geometry;
     const auto& rule = (*config.value)->rule;
-    const auto identity =
-        *SpectralIdentity::make(static_cast<int>(rule.fft_size), static_cast<int>(rule.hop),
-                                static_cast<int>(rule.channels), geometry.sample_rate)
-             .value;
+    // The finite stream rule admits a subset of SpectralIdentity's geometry, so
+    // this succeeds for every admitted asset; a refusal is reported, not assumed.
+    const auto made =
+        SpectralIdentity::make(static_cast<int>(rule.fft_size), static_cast<int>(rule.hop),
+                               static_cast<int>(rule.channels), geometry.sample_rate);
+    if (!made)
+        return {std::nullopt, made.error};
+    const auto identity = *made.value;
     auto n = spectral_node(next_id_, NodeType::SpectralAssetMorph, identity, name,
                            diagnostic_graph_identity_, authoring_generation_ + 1);
     n.input_ports.clear();

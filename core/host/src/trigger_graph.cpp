@@ -738,6 +738,9 @@ TriggerGraphResult SignalGraph::try_reset_events() noexcept {
     if (trigger_controller_->epoch == std::numeric_limits<std::uint64_t>::max())
         return TriggerGraphResult::ClockExhausted;
     pin->trigger_state->reset(++trigger_controller_->epoch);
+    // The host-event projection refuses a generation whose epoch differs from
+    // the controller's, so the live generation follows the new epoch.
+    pin->host_event_epoch = trigger_controller_->epoch;
     (void)trigger_controller_->host_ingress.reset(trigger_controller_->epoch);
     trigger_controller_->clear_host_trace();
     reset_trigger_audio_(*pin);

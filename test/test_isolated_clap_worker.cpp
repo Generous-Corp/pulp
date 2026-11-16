@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/isolated_plugin_slot.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
@@ -614,6 +615,47 @@ TEST_CASE("Isolated CLAP graph policy refuses before and after prepare", "[host]
         graph.release();
         REQUIRE(result.control->stop() == IsolationCleanup::complete);
     }
+}
+
+TEST_CASE("Isolated CLAP graph refuses saving and parameter writes without faulting the node",
+          "[host][isolation]") {
+    auto result = load_isolated_clap(options());
+    REQUIRE(result);
+    SignalGraph graph;
+    const auto input = graph.add_input_node(2, "input");
+    const auto effect = graph.add_plugin_node(std::move(result.slot), 2, 2, "isolated");
+    const auto output = graph.add_output_node(2, "output");
+    for (PortIndex c = 0; c < 2; ++c) {
+        REQUIRE(graph.connect(input, c, effect, c));
+        REQUIRE(graph.connect(effect, c, output, c));
+    }
+    REQUIRE(graph.prepare(48000, 64));
+    // Saving would write the plugin identity without state, which a later load
+    // would host in-process, so every serializer entry point refuses.
+    REQUIRE(GraphSerializer::to_json(graph).empty());
+    REQUIRE(GraphSerializer::to_saved_document(graph).empty());
+    const auto path = std::filesystem::temp_directory_path() /
+                      ("pulp-isolated-save-" + std::to_string(::getpid()) + ".pulpgraph");
+    const auto saved = GraphSerializer::to_file(graph, path);
+    REQUIRE_FALSE(saved.ok);
+    REQUIRE(saved.code == GraphSerializer::SaveResult::Code::serialization_refused);
+    REQUIRE_FALSE(std::filesystem::exists(path));
+    REQUIRE_FALSE(graph.set_node_parameter(effect, 0, 0.5f));
+    // None of the refusals reached the worker: the node keeps rendering.
+    REQUIRE(result.control->status().reason == IsolationReason::none);
+    Buffers buffers;
+    buffers.fill();
+    auto in = static_cast<const audio::Buffer<float>&>(buffers.input).view();
+    auto out = buffers.output.view();
+    graph.process(out, in, 64);
+    std::this_thread::sleep_for(10ms);
+    graph.process(out, in, 64);
+    for (std::size_t c = 0; c < 2; ++c)
+        for (std::size_t n = 0; n < 64; ++n)
+            REQUIRE(buffers.output.channel(c)[n] == buffers.input.channel(c)[n] * 0.5f);
+    REQUIRE(result.control->status().reason == IsolationReason::none);
+    graph.release();
+    REQUIRE(result.control->stop() == IsolationCleanup::complete);
 }
 
 TEST_CASE("Isolated CLAP cross-process publication wraps slots with changing audio",

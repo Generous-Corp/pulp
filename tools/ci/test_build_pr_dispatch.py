@@ -946,6 +946,9 @@ PR_DISPATCH_ALLOWLIST: dict[tuple[str, str], tuple[tuple[str, ...], str]] = {
     ("windows", "Windows leg outcome (advisory)"): (("pr_number", "run_windows"), "passes a pr_number dispatch as it does a PR"),
     ("ci-cause", "actions/checkout@v7.0.1"): ((), "sparse checkout of the cause script"),
     ("ci-cause", "Name the cause of each failed job"): ((), "advisory; reads this run's logs, writes annotations"),
+    ("cheap-first", "actions/checkout@v7.0.1"): ((), "sparse checkout of the cheap-first gate script"),
+    ("cheap-first", "Wait for the cheap required checks at this head"): (("pr_number",), "passes a pr_number dispatch to the gate as its dispatch PR so it reads that PR's head; read-only, withholds the native build only on an explicit block verdict"),
+    ("macos-cheap-first-blocked", "Refuse a head whose cheap required check is red"): ((), "prints an annotation and fails; reads only the cheap-first verdict and reason"),
 }
 DIAGNOSTIC_UPLOADS = {"Upload ctest logs and JUnit report"}
 DEAD_UPLOADS = {"Upload exact GPU-audio SDK (macOS ARM64, retry)", "Publish A2T structural verification",

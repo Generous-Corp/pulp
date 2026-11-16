@@ -13,8 +13,11 @@ inline constexpr std::uint32_t kAbi = 1;
 inline constexpr std::uint32_t kMagic = 0x4739434c;
 inline constexpr std::size_t kMappingBytes = 8192;
 inline constexpr std::size_t kCheckpointBytes = 1 << 20;
+inline constexpr std::uint32_t kSampleRate = 48000;
 inline constexpr std::uint32_t kFrames = 64;
 inline constexpr std::uint32_t kChannels = 2;
+// The single supported profile, named on the worker command line.
+inline constexpr const char* kProfileName = "MacClapStereo64V1";
 inline constexpr std::uint32_t kSlots = 3;
 
 enum class BlockResult : std::uint32_t { ok = 1, plugin_error, invalid_audio };
