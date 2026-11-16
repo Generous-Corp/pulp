@@ -130,6 +130,167 @@ def parse_configure_log(text: str) -> list[dict]:
     return errors
 
 
+# ---- cutover edits ----------------------------------------------------------
+# A real cutover edits the CMake files that name deleted paths. The trial
+# derives those edits from configure's own errors, in the scratch checkout
+# only: each error names the statement that failed, and that statement is
+# commented out. Every edit is recorded so the report says what a cutover
+# must change, and why.
+
+ERROR_HEAD = re.compile(r"^CMake Error at (\S+?):(\d+) \((\w+)\):", re.M)
+CALL_STACK = re.compile(r"Call Stack \(most recent call first\):\n\s+(\S+?):(\d+) \((\w+)\)")
+CUTOVER_MARK = "# cutover-trial: "
+# Statements whose failure means a path they name is gone.
+FIXABLE = re.compile(
+    r"(does not contain a CMakeLists.txt|include could not find|Cannot find source file|Unknown CMake command|"
+    r"matches nothing in the checkout|No SOURCES given|does not exist|not found|"
+    r"Cannot find|No such file|is not a directory|could not find)", re.I)
+
+
+def parse_configure_errors(text: str) -> list[dict]:
+    errors = []
+    heads = list(ERROR_HEAD.finditer(text))
+    for index, head in enumerate(heads):
+        end = heads[index + 1].start() if index + 1 < len(heads) else len(text)
+        body = text[head.end():end]
+        stack = CALL_STACK.search(body)
+        message = " ".join(line.strip() for line in body.split("Call Stack")[0].splitlines()
+                           if line.strip())
+        errors.append({"file": head.group(1), "line": int(head.group(2)), "command": head.group(3),
+                       "message": message[:300],
+                       "caller": (stack.group(1), int(stack.group(2))) if stack else None})
+    return errors
+
+
+def statement_span(lines: list[str], start: int) -> tuple[int, int]:
+    """Line range [start, end] of the CMake statement beginning at `start`."""
+    depth = 0
+    for index in range(start, len(lines)):
+        code = lines[index].split("#", 1)[0]
+        depth += code.count("(") - code.count(")")
+        if depth <= 0 and (index > start or "(" in code):
+            return start, index
+    return start, len(lines) - 1
+
+
+def disable_statement(scratch: Path, rel: str, line: int, why: str) -> dict | None:
+    path = scratch / rel
+    if not path.is_file():
+        return None
+    lines = path.read_text(encoding="utf-8").split("\n")
+    start, end = statement_span(lines, line - 1)
+    if lines[start].lstrip().startswith(CUTOVER_MARK.strip()):
+        return None
+    first = lines[start].strip()
+    for index in range(start, end + 1):
+        lines[index] = CUTOVER_MARK + lines[index]
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return {"file": rel, "line": line, "statement": first[:160], "why": why}
+
+
+INCLUDE_MISSING = re.compile(r"include could not find requested file:\s*(\S+)")
+
+
+def restore_deleted_module(scratch: Path, message: str, deleted: set[str]) -> dict | None:
+    """When kept code includes a deleted CMake module, put that module back from
+    the original tree so the trial can go on, and report it as a stranded
+    dependency instead of dropping the targets that use it."""
+    found = INCLUDE_MISSING.search(message)
+    if not found:
+        return None
+    try:
+        rel = Path(found.group(1)).resolve().relative_to(scratch.resolve()).as_posix()
+    except ValueError:
+        return None
+    if rel not in deleted or not rel.endswith(".cmake"):
+        return None
+    shown = run(["git", "-C", str(scratch), "show", f"HEAD:{rel}"])
+    if shown.returncode:
+        return None
+    target = scratch / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(shown.stdout, encoding="utf-8")
+    return {"restored": rel}
+
+
+def repair_configure(scratch: Path, configure, limit: int = 300,
+                     deleted: set[str] | None = None) -> tuple[list[dict], str, bool]:
+    """Configure, disabling the statement each fixable error names, until it
+    passes, stops making progress, or the limit is reached. Returns the edits,
+    the last configure log and whether configure passed."""
+    edits: list[dict] = []
+    seen: set[tuple] = set()
+    text = ""
+    for iteration in range(1, limit + 1):
+        ok, text = configure()
+        if ok:
+            return edits, text, True
+        progress = False
+        for error in parse_configure_errors(text):
+            if not (FIXABLE.search(error["message"]) or error["command"] != "message"
+                    or error["caller"]):
+                continue
+            # An error raised inside a helper function belongs to its caller.
+            target = error["caller"] if error["caller"] and error["file"].startswith(
+                ("tools/cmake/", "cmake/")) else (error["file"], error["line"])
+            if target in seen:
+                continue
+            seen.add(target)
+            restored = restore_deleted_module(scratch, error["message"], deleted or set())
+            if restored:
+                restored.update({"class": "b-stranded-restored", "consumer": f"{target[0]}:{target[1]}",
+                                 "why": error["message"], "iteration": iteration})
+                edits.append(restored)
+                progress = True
+                continue
+            edit = disable_statement(scratch, target[0], target[1], error["message"])
+            if edit:
+                edit["iteration"] = iteration
+                edit["class"] = classify_edit(error["message"], deleted or set())
+                edits.append(edit)
+                progress = True
+        if not progress:
+            return edits, text, False
+    return edits, text, False
+
+
+LINKS_MISSING = re.compile(r'Target "([^"]+)" links to: (\S+) but the target was not found')
+CASCADE = re.compile(r"(No SOURCES given|Cannot specify .* not built by this project|"
+                     r"could not find TARGET|non-existent target|Error evaluating generator|"
+                     r"Can not find (target|test) to add|cannot create ALIAS)")
+
+
+def classify_edit(message: str, deleted: set[str]) -> str:
+    """a-expected: the statement names a deleted path, so a cutover removes it too.
+    b-stranded-consumer: a kept target links a target the deletion removed.
+    cascade: a follow-on error from an earlier edit (a target that no longer exists).
+    Anything else is listed as unclassified for review."""
+    if LINKS_MISSING.search(message):
+        return "b-stranded-consumer"
+    if CASCADE.search(message):
+        return "cascade"
+    if "Cannot find source file" in message or "matches nothing in the checkout" in message \
+            or "does not contain a CMakeLists" in message:
+        return "a-expected"
+    return "unclassified"
+
+
+def deleted_data_still_referenced(scratch: Path, paths: list[str]) -> list[dict]:
+    """Deleted non-source data files (fonts, headers) that kept files still
+    name: deleted UI data that audio tests or packaging still use."""
+    found = []
+    for rel in paths:
+        if not rel.startswith("external/") or rel.endswith((".cpp", ".mm")):
+            continue
+        done = run(["git", "-C", str(scratch), "grep", "-l", "-F", rel, "--", ".",
+                    ":(exclude)docs", ":(exclude).github", ":(exclude).agents",
+                    ":(exclude)tools/scripts/cutover_trial_inputs.json"])
+        users = [u for u in done.stdout.split() if not u.startswith(("planning/",))]
+        if users:
+            found.append({"path": rel, "referenced_by": users[:10], "count": len(users)})
+    return found
+
+
 # ---- grouping -------------------------------------------------------------
 
 def path_matches(row_path: str, candidate: str) -> bool:
@@ -175,7 +336,9 @@ def group_failures(failures: list[dict], rows: list[dict],
 
 def build_report(inputs: dict, configure_text: str, build_text: str,
                  deleted: int, missing: list[str], configure_ok: bool,
-                 build_ran: bool, build_returncode: int | None = None) -> dict:
+                 build_ran: bool, build_returncode: int | None = None,
+                 edits: list[dict] | None = None,
+                 data_refs: list[dict] | None = None) -> dict:
     rows = inputs["stranded_rows"]
     failures = parse_build_log(build_text) if build_ran else []
     configure_errors = [] if configure_ok else parse_configure_log(configure_text)
@@ -186,6 +349,16 @@ def build_report(inputs: dict, configure_text: str, build_text: str,
         "paths": {"listed": len(inputs["delete_paths"]), "deleted": deleted,
                   "already_absent": missing},
         "configure": {"ok": configure_ok, "errors": configure_errors},
+        "cutover_required_changes": [e for e in edits or [] if e.get("class") == "a-expected"],
+        "stranded_dependencies": [e for e in edits or [] if e.get("class") == "b-stranded-restored"]
+                                 + (data_refs or []),
+        "stranded_consumers": [
+            dict(e, consumer_target=LINKS_MISSING.search(e["why"]).group(1),
+                 needs=LINKS_MISSING.search(e["why"]).group(2))
+            for e in edits or [] if e.get("class") == "b-stranded-consumer"],
+        "cascade_edits": sum(1 for e in edits or [] if e.get("class") == "cascade"),
+        "unclassified_edits": [e for e in edits or [] if e.get("class") == "unclassified"],
+        "deleted_data_still_referenced": data_refs or [],
         "build": {"ran": build_ran,
                   "ok": (build_returncode == 0
                          if build_returncode is not None else None),
@@ -236,6 +409,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ref", default="origin/main")
     parser.add_argument("--inputs", type=Path, default=INPUTS)
     parser.add_argument("--log-dir", type=Path)
+    parser.add_argument("--no-repair", action="store_true",
+                        help="report configure errors as they are; apply no cutover edits")
     parser.add_argument("--prepare", help="shell command run in the scratch checkout "
                         "after the deletion and before configure (dependency bootstrap)")
     parser.add_argument("--analyze-log", type=Path,
@@ -259,20 +434,28 @@ def main(argv: list[str] | None = None) -> int:
                                           text=True, encoding="utf-8", errors="replace", capture_output=True, check=False)
                 (log_dir / "cutover-prepare.log").write_text(
                     prepared.stdout + prepared.stderr, encoding="utf-8")
-            configure = run(["cmake", "-S", str(args.scratch), "-B", str(build_dir),
-                             "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release"])
-            configure_text = configure.stdout + configure.stderr
+            def configure_once() -> tuple[bool, str]:
+                done = run(["cmake", "-S", str(args.scratch), "-B", str(build_dir),
+                            "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release",
+                            "-DPULP_BUILD_EXAMPLES=OFF"])
+                return done.returncode == 0, done.stdout + done.stderr
+
+            edits, configure_text, configure_ok = (
+                repair_configure(args.scratch, configure_once,
+                                 deleted=set(inputs["delete_paths"])) if not args.no_repair
+                else ([], *configure_once()))
+            data_refs = deleted_data_still_referenced(args.scratch, inputs["delete_paths"])
             (log_dir / "cutover-configure.log").write_text(configure_text, encoding="utf-8")
             build_text, ran, build_returncode = "", False, None
-            if configure.returncode == 0:
+            if configure_ok:
                 governed = args.scratch / "tools/ci/governed-build.sh"
                 built = run([str(governed), "cmake", "--build", str(build_dir), "--",
                              "-k", "0"], cwd=args.scratch)
-                build_text, ran, build_returncode = (built.stdout + built.stderr,
-                                                     True, built.returncode)
+                build_text, ran = built.stdout + built.stderr, True
+                build_returncode = built.returncode
                 (log_dir / "cutover-build.log").write_text(build_text, encoding="utf-8")
             report = build_report(inputs, configure_text, build_text, deleted, missing,
-                                  configure.returncode == 0, ran, build_returncode)
+                                  configure_ok, ran, build_returncode, edits, data_refs)
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8")
     except (InputError, OSError) as error:

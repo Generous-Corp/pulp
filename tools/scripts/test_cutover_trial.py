@@ -102,6 +102,28 @@ class GroupingTests(unittest.TestCase):
         self.assertEqual(failure["build"]["failed_targets"], [])
 
 
+class EditClassTests(unittest.TestCase):
+    def test_classes(self):
+        c = ct.classify_edit
+        self.assertEqual(c('Target "pulp-cli" links to: pulp::render but the target was not found.', set()),
+                         "b-stranded-consumer")
+        self.assertEqual(c('Cannot specify sources for target "pulp-render" which is not built by this project.', set()),
+                         "cascade")
+        self.assertEqual(c("Cannot find source file: src/data_display.cpp", set()), "a-expected")
+        self.assertEqual(c("something unforeseen", set()), "unclassified")
+
+    def test_disable_statement_comments_the_whole_call_and_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "CMakeLists.txt").write_text("a()\nfoo(x\n  y)\nb()\n", encoding="utf-8")
+            edit = ct.disable_statement(root, "CMakeLists.txt", 2, "why")
+            text = (root / "CMakeLists.txt").read_text(encoding="utf-8")
+            self.assertEqual(text.count("# cutover-trial: "), 2)
+            self.assertIn("b()", text)
+            self.assertEqual(edit["line"], 2)
+            self.assertIsNone(ct.disable_statement(root, "CMakeLists.txt", 2, "why"))
+
+
 class InputTests(unittest.TestCase):
     def test_shipped_inputs_hold_the_687_paths(self):
         data = ct.load_inputs()
