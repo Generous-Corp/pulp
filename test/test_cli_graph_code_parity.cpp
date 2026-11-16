@@ -312,3 +312,200 @@ TEST_CASE("graph diff compares saved documents by logical identity",
     REQUIRE(one.exit_code == 2);
     CHECK(cli_code(one) == "missing_input");
 }
+
+TEST_CASE("graph save --saved-identity refuses a plain document that loses an edge",
+          "[cli][shellout][graph][parity]") {
+    if (!fs::exists(pulp_binary()))
+        SKIP("pulp not built");
+    const auto dir = unique_temp_dir("pulp-graph-lossy-envelope");
+    fs::create_directories(dir);
+
+    pulp::host::SignalGraph graph;
+    const auto input = graph.add_input_node(1, "Input");
+    const auto gain = graph.add_gain_node("Gain");
+    const auto output = graph.add_output_node(1, "Output");
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+    const auto document = pulp::host::GraphSerializer::to_json(graph);
+    const auto good = dir / "good.pulpgraph";
+    std::ofstream(good, std::ios::binary) << document;
+
+    // The tolerant loader skips an edge whose destination does not exist.
+    auto lossy_text = document;
+    const auto connections = lossy_text.find("\"connections\"");
+    REQUIRE(connections != std::string::npos);
+    const auto dest = lossy_text.find("\"dest_node\": ", connections);
+    REQUIRE(dest != std::string::npos);
+    const auto value_end = lossy_text.find_first_of(",\n}", dest + 13);
+    lossy_text.replace(dest, value_end - dest, "\"dest_node\": 99");
+    const auto lossy = dir / "lossy.pulpgraph";
+    std::ofstream(lossy, std::ios::binary) << lossy_text;
+
+    // Control: the intact plain document gains the envelope.
+    const auto stamped = dir / "stamped.pulpgraph";
+    const auto ok = run_pulp({"graph", "save", good.string(), "--output", stamped.string(),
+                              "--saved-identity", "--json"});
+    INFO(ok.stdout_output << ok.stderr_output);
+    REQUIRE(ok.exit_code == 0);
+    CHECK(read_text(stamped).find("identity_schema") != std::string::npos);
+
+    // A plain save keeps its partial-load behaviour.
+    const auto plain_out = dir / "plain-out.pulpgraph";
+    REQUIRE(run_pulp({"graph", "save", lossy.string(), "--output", plain_out.string()}).exit_code ==
+            0);
+
+    const auto refused_out = dir / "refused.pulpgraph";
+    const auto refused = run_pulp({"graph", "save", lossy.string(), "--output",
+                                   refused_out.string(), "--saved-identity", "--json"});
+    INFO(refused.stdout_output << refused.stderr_output);
+    REQUIRE(refused.exit_code == 1);
+    CHECK(cli_code(refused) == pulp::host::graph_patch_code_name(Code::InvalidDocument));
+    CHECK(refused.stdout_output.find("connection_not_restored") != std::string::npos);
+    CHECK_FALSE(fs::exists(refused_out));
+}
+
+TEST_CASE("graph save and fmt keep the saved-identity envelope that diff reads",
+          "[cli][shellout][graph][parity]") {
+    if (!fs::exists(pulp_binary()))
+        SKIP("pulp not built");
+    const auto dir = unique_temp_dir("pulp-graph-envelope");
+    fs::create_directories(dir);
+
+    pulp::host::SignalGraph graph;
+    const auto input = graph.add_input_node(1, "Input");
+    const auto gain = graph.add_gain_node("Gain");
+    const auto output = graph.add_output_node(1, "Output");
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+    const auto plain = dir / "plain.pulpgraph";
+    std::ofstream(plain, std::ios::binary) << pulp::host::GraphSerializer::to_json(graph);
+    const auto envelope = dir / "envelope.pulpgraph";
+    std::ofstream(envelope, std::ios::binary)
+        << pulp::host::GraphSerializer::to_saved_document(graph);
+
+    // Two files written only by the CLI can be diffed.
+    const auto first = dir / "first.pulpgraph";
+    const auto from_plain = run_pulp({"graph", "save", plain.string(), "--output", first.string(),
+                                      "--saved-identity", "--json"});
+    INFO(from_plain.stdout_output << from_plain.stderr_output);
+    REQUIRE(from_plain.exit_code == 0);
+    CHECK(read_text(first).find("identity_schema") != std::string::npos);
+    const auto second = dir / "second.pulpgraph";
+    REQUIRE(run_pulp({"graph", "save", first.string(), "--output", second.string()}).exit_code ==
+            0);
+    const auto cli_diff = run_pulp({"graph", "diff", first.string(), second.string(), "--json"});
+    INFO(cli_diff.stdout_output << cli_diff.stderr_output);
+    REQUIRE(cli_diff.exit_code == 0);
+    CHECK(choc::json::parse(cli_diff.stdout_output)["equal"].getBool());
+
+    // Control: a plain save of a plain file stays plain, so diff refuses it
+    // and names the way to write the envelope.
+    const auto still_plain = dir / "still-plain.pulpgraph";
+    REQUIRE(
+        run_pulp({"graph", "save", plain.string(), "--output", still_plain.string()}).exit_code ==
+        0);
+    CHECK(read_text(still_plain).find("identity_schema") == std::string::npos);
+    const auto refused =
+        run_pulp({"graph", "diff", still_plain.string(), first.string(), "--json"});
+    REQUIRE(refused.exit_code == 1);
+    const auto refusal = choc::json::parse(refused.stdout_output);
+    // A simple plain graph keeps an older format, which the inspector
+    // refuses by version rather than by the missing envelope.
+    const std::string reason(refusal["refusal"].getString());
+    CHECK((reason == "logical_identity_missing" || reason == "invalid_format_version"));
+    REQUIRE(refusal.hasObjectMember("hint"));
+    CHECK(std::string(refusal["hint"].getString()).find("--saved-identity") != std::string::npos);
+
+    // fmt and canonicalize rewrite an envelope document in place and keep it.
+    for (const std::string op : {"fmt", "canonicalize"}) {
+        INFO(op);
+        const auto copy = dir / (op + ".pulpgraph");
+        fs::copy_file(envelope, copy, fs::copy_options::overwrite_existing);
+        const auto rewritten = run_pulp({"graph", op, copy.string(), "--json"});
+        INFO(rewritten.stdout_output << rewritten.stderr_output);
+        REQUIRE(rewritten.exit_code == 0);
+        CHECK(read_text(copy).find("identity_schema") != std::string::npos);
+        const auto same = run_pulp({"graph", "diff", envelope.string(), copy.string(), "--json"});
+        INFO(same.stdout_output << same.stderr_output);
+        REQUIRE(same.exit_code == 0);
+        CHECK(choc::json::parse(same.stdout_output)["equal"].getBool());
+        // Byte stable on a second run.
+        const auto once = read_text(copy);
+        REQUIRE(run_pulp({"graph", op, copy.string()}).exit_code == 0);
+        CHECK(read_text(copy) == once);
+    }
+
+    // Subgraph records cannot be rewritten without their templates, so the
+    // file is refused and left unchanged rather than stripped.
+    auto with_records = read_text(envelope);
+    const auto brace = with_records.find('{');
+    REQUIRE(brace != std::string::npos);
+    with_records.insert(brace + 1, R"("subgraphs":[],)");
+    const auto records = dir / "records.pulpgraph";
+    std::ofstream(records, std::ios::binary) << with_records;
+    for (const std::string op : {"fmt", "canonicalize"}) {
+        const auto refused_rewrite = run_pulp({"graph", op, records.string(), "--json"});
+        INFO(op << ": " << refused_rewrite.stdout_output << refused_rewrite.stderr_output);
+        REQUIRE(refused_rewrite.exit_code == 1);
+        CHECK(cli_code(refused_rewrite) == "subgraph_records_unsupported");
+        CHECK(read_text(records) == with_records);
+    }
+    const auto saved_records = dir / "records-out.pulpgraph";
+    const auto refused_save =
+        run_pulp({"graph", "save", records.string(), "--output", saved_records.string(), "--json"});
+    REQUIRE(refused_save.exit_code == 1);
+    CHECK(cli_code(refused_save) == "subgraph_records_unsupported");
+    CHECK_FALSE(fs::exists(saved_records));
+
+    // Subgraph records with no identity envelope are refused too: the
+    // inspector reports the missing envelope first, which must not let the
+    // rewrite fall through to the plain writer.
+    for (const char* text :
+         {R"({"format_version":4,"nodes":[],"connections":[],"subgraphs":[]})",
+          R"({"format_version":5,"nodes":[],"connections":[],"subgraphs":[]})"}) {
+        const auto bare = dir / "records-bare.pulpgraph";
+        std::ofstream(bare, std::ios::binary) << text;
+        for (const std::string op : {"fmt", "canonicalize"}) {
+            const auto refused_bare = run_pulp({"graph", op, bare.string(), "--json"});
+            INFO(op << ": " << refused_bare.stdout_output << refused_bare.stderr_output);
+            REQUIRE(refused_bare.exit_code == 1);
+            CHECK(cli_code(refused_bare) == "subgraph_records_unsupported");
+            CHECK(read_text(bare) == text);
+        }
+        const auto bare_out = dir / "records-bare-out.pulpgraph";
+        const auto refused_bare_save =
+            run_pulp({"graph", "save", bare.string(), "--output", bare_out.string(), "--json"});
+        REQUIRE(refused_bare_save.exit_code == 1);
+        CHECK(cli_code(refused_bare_save) == "subgraph_records_unsupported");
+        CHECK_FALSE(fs::exists(bare_out));
+    }
+
+    // A document the shape preflight refuses (runaway nesting) is refused by
+    // the loader under the same bounds; the rewrite helper must not parse it
+    // first, so it exits cleanly with the typed document code, file unchanged.
+    {
+        const std::string deep = R"({"format_version":5,"subgraphs":)" + std::string(200000, '[') +
+                                 std::string(200000, ']') + "}";
+        const auto deep_path = dir / "deep.pulpgraph";
+        std::ofstream(deep_path, std::ios::binary) << deep;
+        for (const std::string op : {"fmt", "canonicalize", "save"}) {
+            INFO(op);
+            std::vector<std::string> argv{"graph", op, deep_path.string(), "--json"};
+            if (op == "save") {
+                argv.push_back("--output");
+                argv.push_back((dir / "deep-out.pulpgraph").string());
+            }
+            const auto refused_deep = run_pulp(argv);
+            INFO(refused_deep.stdout_output << refused_deep.stderr_output);
+            REQUIRE(refused_deep.exit_code == 1);
+            CHECK(cli_code(refused_deep) != "subgraph_records_unsupported");
+            CHECK(read_text(deep_path) == deep);
+        }
+        CHECK_FALSE(fs::exists(dir / "deep-out.pulpgraph"));
+    }
+
+    // A missing input keeps the typed file code on the rewrite path.
+    const auto missing = run_pulp({"graph", "fmt", (dir / "absent.pulpgraph").string(), "--json"});
+    REQUIRE(missing.exit_code == 1);
+    CHECK(cli_code(missing) == pulp::host::graph_patch_code_name(Code::FileUnreadable));
+}

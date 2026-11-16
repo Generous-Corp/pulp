@@ -170,7 +170,7 @@ std::optional<GraphDocumentDiffCode> read_document(std::string_view json, Docume
     if (!root.hasObjectMember("identity_schema")) {
         refusal = GraphDocumentRefusal::LogicalIdentityMissing;
         detail = "document has no saved-identity v6 envelope; re-save it with "
-                 "GraphSerializer::to_saved_document";
+                 "GraphSerializer::to_saved_file or pulp graph save --saved-identity";
         return GraphDocumentDiffCode::LogicalIdentityMissing;
     }
 

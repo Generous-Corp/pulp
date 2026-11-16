@@ -9,6 +9,28 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11440"></a>
+## [1.144.0] - 2026-11-16
+
+- release/version bump ([#12425](https://github.com/Generous-Corp/pulp/pull/12425))
+- graph/ffix identity cli 20261115 ([#12374](https://github.com/Generous-Corp/pulp/pull/12374))
+- feature/rmlui density ratio loud ([#12378](https://github.com/Generous-Corp/pulp/pull/12378))
+- feature/cutover trial edits ([#12399](https://github.com/Generous-Corp/pulp/pull/12399))
+- graph/paced selftest flake 20261116 ([#12422](https://github.com/Generous-Corp/pulp/pull/12422))
+- fix/san script inputs selftest timeout ([#12411](https://github.com/Generous-Corp/pulp/pull/12411))
+- fix/contract editor size hints ([#12385](https://github.com/Generous-Corp/pulp/pull/12385))
+
+<a id="v11430"></a>
+## [1.143.0] - 2026-11-16
+
+- release/version bump ([#12421](https://github.com/Generous-Corp/pulp/pull/12421))
+- fix/rmlui queued input redraw ([#12397](https://github.com/Generous-Corp/pulp/pull/12397))
+- fix/san paced timing split ([#12412](https://github.com/Generous-Corp/pulp/pull/12412))
+- graph/rereview main 20261116 ([#12415](https://github.com/Generous-Corp/pulp/pull/12415))
+- graph/swarm windows worker 20261116 ([#12410](https://github.com/Generous-Corp/pulp/pull/12410))
+- fix/san graph file reload consumer flags ([#12407](https://github.com/Generous-Corp/pulp/pull/12407))
+- fix/san seek production test race ([#12418](https://github.com/Generous-Corp/pulp/pull/12418))
+
 <a id="v11420"></a>
 ## [1.142.0] - 2026-11-16
 
@@ -13132,6 +13154,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.144.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.144.0
+[1.143.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.143.0
 [1.142.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.142.0
 [1.141.2]: https://github.com/Generous-Corp/pulp/releases/tag/v1.141.2
 [1.141.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.141.1

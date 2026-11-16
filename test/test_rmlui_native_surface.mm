@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <future>
 #include <map>
@@ -68,12 +69,17 @@ body { width: 100%; height: 100%; margin: 0; font-family: Arial; font-size: 14dp
 #button { position: absolute; left: 0; top: 0; width: 100dp; height: 50dp;
           background-color: #ff0000; cursor: pointer; }
 #button:hover { background-color: #00ff00; }
+#pxbox { position: absolute; left: 0; top: 160px; width: 100px; height: 10px;
+         background-color: #0000ff; }
+#dpbox { position: absolute; left: 0; top: 175dp; width: 100dp; height: 10dp;
+         background-color: #0000ff; }
 #field { display: block; position: absolute; left: 0; top: 100dp; width: 200dp; height: 30dp;
          background-color: #333333; }
 </style>
 </head>
 <body>
 <div id="button"></div>
+<div id="pxbox"></div><div id="dpbox"></div>
 <input id="field" type="text" value="ab"/>
 </body>
 </rml>)";
@@ -231,6 +237,29 @@ struct Editor {
                                eventNumber:0
                                 clickCount:1
                                   pressure:1.0];
+    }
+    /// A pointer event at a document position in dp. Events are in window
+    /// points and reach RmlUi in device pixels, and a dp is `density_ratio()`
+    /// device pixels: with an SDK that lacks the setter dp equals px, so on a 2x
+    /// window the same document position is fewer points.
+    NSEvent* doc_mouse(NSEventType type, double x, double y) const {
+        const double to_points = ui->density_ratio() / window.backingScaleFactor;
+        return mouse(type, x * to_points, y * to_points);
+    }
+    /// idle() only try-locks, so a frame in flight leaves a resize for a later
+    /// tick. Tick until the context has the wanted size, within a deadline.
+    bool sync_context_size(Rml::Vector2i want, double seconds = 5.0) {
+        bool synced = false;
+        const auto until =
+            std::chrono::steady_clock::now() + std::chrono::duration<double>(seconds);
+        while (!synced && std::chrono::steady_clock::now() < until) {
+            ui->idle();
+            ui->with_context([&](Rml::Context& ctx) { synced = ctx.GetDimensions() == want; });
+            if (!synced)
+                [[NSRunLoop currentRunLoop]
+                    runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+        }
+        return synced;
     }
     template <class Pred> bool wait_for(Pred done, double seconds = 5.0) {
         const auto until =
@@ -407,8 +436,8 @@ TEST_CASE("a focused RmlUi text field takes the keyboard and receives text",
         REQUIRE(face != 0);
         REQUIRE_FALSE(e.ui->surface()->text_focus());
         // Past the end of the text, so the caret lands after "ab".
-        [e.view() mouseDown:e.mouse(NSEventTypeLeftMouseDown, 190, 115)];
-        [e.view() mouseUp:e.mouse(NSEventTypeLeftMouseUp, 190, 115)];
+        [e.view() mouseDown:e.doc_mouse(NSEventTypeLeftMouseDown, 190, 115)];
+        [e.view() mouseUp:e.doc_mouse(NSEventTypeLeftMouseUp, 190, 115)];
         e.ui->flush_input();
         REQUIRE(e.ui->surface()->text_focus());
         id<NSTextInputClient> client = (id<NSTextInputClient>)e.view();
@@ -435,11 +464,12 @@ TEST_CASE("the RmlUi context follows the surface size", "[native-surface][rmlui]
         REQUIRE(e.attach());
         const double scale = e.window.backingScaleFactor;
         [e.window setContentSize:NSMakeSize(400, 260)];
-        e.ui->idle();
+        const Rml::Vector2i want(static_cast<int>(400 * scale), static_cast<int>(260 * scale));
+        REQUIRE(e.sync_context_size(want));
         Rml::Vector2i size;
         e.ui->with_context([&](Rml::Context& ctx) { size = ctx.GetDimensions(); });
-        REQUIRE(size.x == static_cast<int>(400 * scale));
-        REQUIRE(size.y == static_cast<int>(260 * scale));
+        REQUIRE(size.x == want.x);
+        REQUIRE(size.y == want.y);
         e.ui->detach();
     }
 }
@@ -534,6 +564,163 @@ TEST_CASE("the surface uses the device the caller's renderer was built on",
         REQUIRE_FALSE(view.layer.opaque);
         ui.detach();
         [window close];
+    }
+}
+
+// A window whose backing scale a test can set, standing in for a display with
+// another scale.
+@interface PulpRmlUiScaleWindow : NSWindow
+@property(nonatomic) CGFloat testScale;
+@end
+@implementation PulpRmlUiScaleWindow
+- (CGFloat)backingScaleFactor {
+    return self.testScale > 0 ? self.testScale : [super backingScaleFactor];
+}
+@end
+
+TEST_CASE("px lengths are device pixels and dp lengths follow the density ratio",
+          "[native-surface][rmlui][scale]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        [NSApplication sharedApplication];
+        auto* window = [[PulpRmlUiScaleWindow alloc] initWithContentRect:NSMakeRect(0, 0, 300, 200)
+                                                               styleMask:NSWindowStyleMaskBorderless
+                                                                 backing:NSBackingStoreBuffered
+                                                                   defer:NO];
+        window.releasedWhenClosed = NO;
+        window.testScale = 1.0;
+        MemoryAssets assets;
+        CountingRenderer renderer;
+        RmlUiSurfaceOptions options;
+        options.document = "probe.rml";
+        options.font_faces = {"font.ttf"};
+        RmlUiSurface ui(assets, renderer, {}, options);
+        REQUIRE(ui.attach((__bridge void*)window.contentView));
+        NSView* view = (__bridge NSView*)ui.surface()->view();
+        // Hit testing needs a laid-out document, which the first frame does.
+        const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (ui.frames() == 0 && std::chrono::steady_clock::now() < until)
+            [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+        REQUIRE(ui.frames() > 0);
+
+        auto measure = [&](double scale, float& px_width, float& dp_width, bool& hover_px,
+                           bool& hover_dp) {
+            window.testScale = scale;
+            [view viewDidChangeBackingProperties];
+            // idle() only try-locks, so a frame in flight leaves the resize for
+            // a later tick. Tick until the context has the new size, then run
+            // its update under the lock so the dp layout is current before any
+            // measurement or pointer event.
+            const Rml::Vector2i want(static_cast<int>(std::lround(300 * scale)),
+                                     static_cast<int>(std::lround(200 * scale)));
+            bool synced = false;
+            const auto sync_until = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            while (!synced && std::chrono::steady_clock::now() < sync_until) {
+                ui.idle();
+                ui.with_context([&](Rml::Context& ctx) {
+                    synced = ctx.GetDimensions() == want;
+                    if (synced)
+                        ctx.Update();
+                });
+                if (!synced)
+                    [[NSRunLoop currentRunLoop]
+                        runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+            }
+            REQUIRE(synced);
+            // Pointer positions are in points and reach RmlUi in device pixels.
+            // 60 points is 60*scale device pixels: outside a 100px box at 2x.
+            auto mouse = [&](double y) {
+                return [NSEvent mouseEventWithType:NSEventTypeMouseMoved
+                                          location:NSMakePoint(60, 200 - y)
+                                     modifierFlags:0
+                                         timestamp:1.0
+                                      windowNumber:window.windowNumber
+                                           context:nil
+                                       eventNumber:0
+                                        clickCount:1
+                                          pressure:1.0];
+            };
+            ui.with_context([&](Rml::Context& ctx) {
+                px_width = ctx.GetDocument(0)->GetElementById("pxbox")->GetClientWidth();
+                dp_width = ctx.GetDocument(0)->GetElementById("dpbox")->GetClientWidth();
+            });
+            [view mouseMoved:mouse(162 / scale)];
+            ui.with_context([&](Rml::Context& ctx) {
+                hover_px = ctx.GetDocument(0)->GetElementById("pxbox")->IsPseudoClassSet("hover");
+            });
+            // 177 in the context's dp-scaled layout: inside #dpbox, which starts
+            // at 175dp (175 * density_ratio device pixels), in points.
+            [view mouseMoved:mouse(177 * ui.density_ratio() / scale)];
+            ui.with_context([&](Rml::Context& ctx) {
+                hover_dp = ctx.GetDocument(0)->GetElementById("dpbox")->IsPseudoClassSet("hover");
+            });
+        };
+
+        float px = 0, dp = 0;
+        bool hover_px = false, hover_dp = false;
+        // 1x: the two units agree.
+        measure(1.0, px, dp, hover_px, hover_dp);
+        REQUIRE(px == 100.0f);
+        REQUIRE(dp == 100.0f);
+        REQUIRE(hover_px);
+        REQUIRE(hover_dp);
+        REQUIRE(ui.density_ratio() == 1.0);
+
+        // 2x: a px length stays 100 device pixels (50 points), so the pointer
+        // at 60 points is outside it. A dp length is a point: 200 device pixels
+        // with a density ratio, so the pointer is inside; without one it is
+        // 100 device pixels and the document renders half size.
+        measure(2.0, px, dp, hover_px, hover_dp);
+        REQUIRE(px == 100.0f);
+        REQUIRE_FALSE(hover_px);
+        if (density_ratio_supported()) {
+            REQUIRE(ui.density_ratio() == 2.0);
+            REQUIRE(dp == 200.0f);
+            REQUIRE(hover_dp);
+        } else {
+            REQUIRE(ui.density_ratio() == 1.0);
+            REQUIRE(dp == 100.0f);
+            REQUIRE_FALSE(hover_dp);
+        }
+
+        // Back to 1x: nothing stays scaled.
+        measure(1.0, px, dp, hover_px, hover_dp);
+        REQUIRE(px == 100.0f);
+        REQUIRE(dp == 100.0f);
+        ui.detach();
+        [window close];
+    }
+}
+
+TEST_CASE("an attach without a density ratio says so once, and one with it does not",
+          "[native-surface][rmlui][scale]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        std::vector<std::string> messages;
+        set_diagnostic_sink([&](const std::string& m) { messages.push_back(m); });
+        // Declared after `messages`: restores the sink on an assertion unwind too,
+        // before `messages` is destroyed.
+        struct SinkReset {
+            ~SinkReset() {
+                set_diagnostic_sink({});
+            }
+        } sink_reset;
+        for (int i = 0; i < 2; ++i) {
+            Editor e;
+            REQUIRE(e.attach());
+            REQUIRE(e.ui->density_ratio() > 0.0);
+            e.ui->detach();
+            // Detached: no stale scale.
+            REQUIRE(e.ui->density_ratio() == 1.0);
+        }
+        set_diagnostic_sink({});
+        if (density_ratio_supported()) {
+            REQUIRE(messages.empty());
+        } else {
+            REQUIRE(messages.size() == 1);
+            REQUIRE(messages[0].find("density ratio") != std::string::npos);
+            REQUIRE(messages[0].find("dp") != std::string::npos);
+        }
     }
 }
 
@@ -788,8 +975,8 @@ TEST_CASE("a click queued behind a frame lands before the text typed after it",
             e.ui->request_frame();
             [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.008]];
             const auto t0 = std::chrono::steady_clock::now();
-            [e.view() mouseDown:e.mouse(NSEventTypeLeftMouseDown, 190, 115)];
-            [e.view() mouseUp:e.mouse(NSEventTypeLeftMouseUp, 190, 115)];
+            [e.view() mouseDown:e.doc_mouse(NSEventTypeLeftMouseDown, 190, 115)];
+            [e.view() mouseUp:e.doc_mouse(NSEventTypeLeftMouseUp, 190, 115)];
             // Returned without waiting: the frame was in flight, so the click
             // is queued and the field is not focused yet.
             queued =

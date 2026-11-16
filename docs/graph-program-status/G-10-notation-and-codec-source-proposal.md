@@ -13,14 +13,14 @@ item is decided and implemented; section 2 records the decisions.
 
 ### Current behavior (origin/main)
 
-- `GraphSerializer::to_json` returns an empty string for any graph that holds a
-  spectral node (`core/host/src/graph_serializer.cpp`, the `spectral_identity`
-  check at the top of `to_json`).
-  The A3 replay branch (`graph/a3-spectral-persist-20261115`, not yet on main)
-  instead saves a bounded format-6 subset: Audio boundaries, the two-asset
-  morph with embedded canonical asset bytes, identity/mask stages and
-  synthesis. It does not persist analysis nodes. Accepting it answers the
-  embedded-versus-sidecar and format-version questions below.
+- `GraphSerializer::to_json` saves a bounded format-6 subset for a graph that
+  holds spectral nodes (`core/host/src/spectral_graph_persistence.cpp`): Audio
+  boundaries, the two-asset morph with embedded canonical asset bytes,
+  identity/mask stages and synthesis. It does not persist analysis nodes, and
+  it returns an empty string for a spectral graph outside that subset or one
+  the reader cannot prepare. This settled the embedded-versus-sidecar and
+  format-version questions below: assets are embedded and spectral graphs are
+  written at format 6. See `docs/guides/spectral-asset-replay.md`.
 - The strict JSON loader refuses `spectral*` node types and `spectral` edges;
   notation formatting refuses spectral nodes and frame edges
   (`core/host/src/graph_patch.cpp`). The bake path refuses with "spectral graph
@@ -123,8 +123,10 @@ them.
 5. **Hops that do not divide N:** refused. The rule names the refusal
    (`hop_does_not_divide_fft_size`, "hop does not divide the fft size") and the
    public call returns `UnsupportedOperation`.
-6. **Persistence:** still refused. `GraphSerializer::to_json` returns an empty
-   string for a graph holding the source at any geometry.
+6. **Persistence:** a complete graph holding the source (source, synthesis and
+   output) saves through the format-6 spectral subset. A graph the reader
+   cannot prepare, such as the source alone, is still not saveable, and
+   `GraphSerializer::to_json` returns an empty string for it.
 
 ### Current behavior on this branch
 
@@ -178,7 +180,8 @@ probe and asserts zero allocations.
 - Refuses non-dividing hops (256/100, 512/96 stereo, 1024/3) by name, with a
   dividing hop at the same size as the control; refuses geometry the codec
   cannot carry; refuses channel, hop and frame-count mismatches with
-  `IdentityMismatch`; and checks that persistence stays refused.
+  `IdentityMismatch`; and checks that an incomplete graph holding the source
+  is not saveable.
 - Bounds retained assets at N=4096/H=2048 with 8 channels: two streams of 240
   frames fit the 64 MiB bank and two of 260 are refused with
   `CapacityExceeded`.

@@ -17,8 +17,10 @@ and [reviewed lowering contract](https://github.com/danielraffel/pulp-planning/b
 
 The implementation preserves one SignalGraph execution plan and the existing
 STFT/WOLA engine. No callback codec, second execution runtime, unrestricted
-native stage registration, saved graph restoration, or full G-10/A3 completion
-is authorized by this work.
+native stage registration, or full G-10/A3 completion is authorized by this
+work. Saved graph restoration is limited to the separately landed format-6
+spectral subset (asset source, identity/mask stages, synthesis); routed
+analysis graphs are not saveable.
 
 ## Delivery sequence
 
@@ -133,8 +135,10 @@ the qualification scope described below.
   [`G-10-notation-and-codec-source-proposal.md`](G-10-notation-and-codec-source-proposal.md).
   Runtime infrastructure registry rows deliberately do not claim a
   generator-facing spectral capability.
-- Preserve runtime-only save/load/bake refusal; offline codec work belongs to
-  its separate admitted slice and never executes in the callback.
+- Preserve the bake refusal and the save/load refusal for routed analysis
+  graphs; the format-6 spectral subset is the only saveable spectral shape.
+  Offline codec work belongs to its separate admitted slice and never executes
+  in the callback.
 
 G-10 and A3 remain PARTIAL. These qualification gaps are not implemented features
 or passing evidence, and require a follow-up contract/evidence packet.
