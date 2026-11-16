@@ -151,9 +151,70 @@ std::string handle_minos(const std::string& params_json) {
     return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
 }
 
+namespace {
+std::string graph_tool_result(bool failed, const std::string& text) {
+    return "{\"isError\":" + std::string(failed ? "true" : "false") +
+           ",\"content\":[{\"type\":\"text\",\"text\":" + json_string(text) + "}]}";
+}
+
+// The refusal the CLI prints for a bad diff invocation, so an MCP caller sees
+// the same GraphError object whether the mistake is caught here or there.
+std::string graph_diff_input_error(const std::string& code, const std::string& message) {
+    return graph_tool_result(true, "{\"valid\":false,\"code\":" + json_string(code) +
+                                       ",\"message\":" + json_string(message) + "}\n");
+}
+
+// Delegates to `pulp-cpp graph diff BEFORE AFTER --json`, the one
+// implementation the CLI runs. The process is the matched sibling of this
+// server, started without a shell, with a deadline and an output cap. A
+// comparison that finds differences exits 0 and is a successful result; only
+// a refusal (CLI exit 1 or 2) is an MCP error.
+std::string handle_graph_diff(const std::string& params_json) {
+    if (!extract_string(params_json, "path").empty())
+        return graph_diff_input_error(
+            "invalid_option", "diff takes before and after, not path");
+    for (const char* key : {"input", "source_node", "source_port", "destination_node",
+                            "destination_port", "edge_kind", "destination_param", "block_frames"}) {
+        if (!extract_raw(params_json, key).empty())
+            return graph_diff_input_error(
+                "invalid_option", std::string("diff does not accept ") + key);
+    }
+    if (extract_bool(params_json, "plan", false) || extract_bool(params_json, "latency", false) ||
+        extract_bool(params_json, "node_loads", false))
+        return graph_diff_input_error("invalid_option",
+                                      "plan, latency and node_loads are only valid for probe");
+    const auto before = extract_string(params_json, "before");
+    const auto after = extract_string(params_json, "after");
+    if (before.empty() || after.empty())
+        return graph_diff_input_error(
+            "missing_input", "diff requires exactly two graph files: BEFORE AFTER");
+    fs::path binary;
+    {
+        std::lock_guard lock(graph_executable_mutex);
+        if (!graph_executable.empty())
+            binary = sibling_pulp_cpp_path(graph_executable);
+    }
+    if (binary.empty() || !fs::is_regular_file(binary))
+        return "{\"isError\":true,\"content\":[{\"type\":\"text\",\"text\":\"Error: matched "
+               "sibling pulp-cpp is unavailable\"}]}";
+    pulp::platform::ProcessOptions options;
+    options.timeout_ms = 30000;
+    options.max_output_bytes = 2 * 1024 * 1024;
+    const auto process = pulp::platform::ChildProcess::run(
+        binary.string(), {"graph", "diff", before, after, "--json"}, options);
+    const bool failed = process.exit_code != 0 || process.timed_out ||
+                        process.output_limit_exceeded || process.was_cancelled;
+    const auto output =
+        process.stdout_output.empty() ? process.stderr_output : process.stdout_output;
+    return graph_tool_result(failed, output);
+}
+} // namespace
+
 std::string handle_graph(const std::string& params_json) {
     auto path = extract_string(params_json, "path");
     auto op = extract_string(params_json, "operation");
+    if (op == "diff")
+        return handle_graph_diff(params_json);
     if (path.empty() && op != "catalog")
         return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: path is required\"}]}";
     if (op.empty())
