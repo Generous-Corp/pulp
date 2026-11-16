@@ -1180,3 +1180,30 @@ TEST_CASE("a VST3 host's off-aspect size is asked back on the real main loop",
     view->release();
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }
+
+TEST_CASE("VST3 synchronously acknowledges a fixed editor's resize request",
+          "[vst3][editor-host][resize-ack]") {
+    EditorEnvironment env;
+    g_log = {};
+    g_config = {};
+    g_config.default_hints = true;
+    ScopedManualSnapTimer settle;
+    HostApp host_app;
+    HostFrame frame;
+    PulpVst3Processor processor(create_contract_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    auto* view = open_contract_view(processor);
+    REQUIRE(view->setFrame(&frame) == Steinberg::kResultTrue);
+    REQUIRE(view->attached(fake_parent(), Steinberg::kPlatformTypeNSView) ==
+            Steinberg::kResultTrue);
+    REQUIRE(g_log.context->request_resize({600, 450, 1.0}));
+    REQUIRE(g_log.saw("set_size:600x450"));
+    REQUIRE_FALSE(settle.armed());
+    Steinberg::ViewRect rect;
+    REQUIRE(view->getSize(&rect) == Steinberg::kResultTrue);
+    REQUIRE(rect.getWidth() == 600);
+    REQUIRE(rect.getHeight() == 450);
+    REQUIRE(view->removed() == Steinberg::kResultTrue);
+    view->release();
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}

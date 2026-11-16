@@ -34,6 +34,15 @@ opens inside the screen's usable frame (`detail::fit_size_to_area`). A test
 reaches the delegate and a small screen through `StandaloneConfig`'s
 `test_on_editor_window`, `test_on_editor_frame` and `test_screen_visible_*`.
 
+Fixed user sizing does not forbid an editor-origin resize: preserve the
+`EditorContext::request_resize` acknowledgment even when `can_resize` is false.
+Install the pending request before calling the host because an acknowledgment
+may be synchronous (VST3/AU) or deferred (CLAP). A newer editor request cancels
+an older debounced host correction. In standalone, acknowledge the requested
+size before moving the native window and propagate editor refusal; suppress
+only the native frame echo so the editor does not miss its layout update.
+
+
 ## Native Metal surfaces (`integrations/pulp-native`)
 
 Where a native surface (and so RmlUi on Metal) differs from the ViewBridge

@@ -579,3 +579,25 @@ TEST_CASE("AppKit key events map to the contract's key events",
     REQUIRE(contract_key_event(122, [NSString stringWithCharacters:&f1 length:1], 0, true, false)
                 .character == 0);
 }
+
+TEST_CASE("AU v2 acknowledges a fixed editor's resize request", "[auv2][editor-host][resize-ack]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    contract_config().default_hints = true;
+    ScopedManualSnapTimer settle;
+    FakeInstance instance(true);
+    g_instance = &instance;
+    AudioUnit au = fake_audio_unit();
+    @autoreleasepool {
+        NSView* view = [open_view(au) retain];
+        REQUIRE(view != nil);
+        REQUIRE(contract_log().context->request_resize({600, 450, 1.0}));
+        REQUIRE(contract_log().saw("set_size:600x450"));
+        REQUIRE(view.frame.size.width == 600);
+        REQUIRE(view.frame.size.height == 450);
+        REQUIRE_FALSE(settle.armed());
+        [view release];
+    }
+    AudioComponentInstanceDispose(au);
+    g_instance = nullptr;
+}

@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <optional>
 #include <utility>
 
 namespace pulp::format {
@@ -44,8 +45,8 @@ void ContractEditorSession::set_snap_timer_factory_for_testing(SnapTimerFactory 
 
 class ContractEditorSession::Context final : public EditorContext {
   public:
-    Context(ParamPort& port, EditorHostKind kind, HostHooks hooks)
-        : port_(port), kind_(kind), hooks_(std::move(hooks)) {}
+    Context(ContractEditorSession& session, ParamPort& port, EditorHostKind kind, HostHooks hooks)
+        : session_(session), port_(port), kind_(kind), hooks_(std::move(hooks)) {}
 
     ParamPort& params() override {
         return port_;
@@ -56,7 +57,32 @@ class ContractEditorSession::Context final : public EditorContext {
     bool request_resize(const EditorSize& size) override {
         if (owner_gone_.load() || !hooks_.request_resize || size.width == 0 || size.height == 0)
             return false;
-        return hooks_.request_resize(size);
+        // Install before calling the host: VST3 and AU may acknowledge inside
+        // the hook, while CLAP can acknowledge later through set_size.
+        const auto previous_request = pending_resize_;
+        const auto request_id = ++resize_request_id_;
+        pending_resize_ = size;
+        session_.cancel_snap_request();
+        const bool accepted = hooks_.request_resize(size);
+        if (!accepted && resize_request_id_ == request_id)
+            pending_resize_ = previous_request;
+        return accepted;
+    }
+    bool acknowledge_resize(std::uint32_t width, std::uint32_t height) {
+        if (!pending_resize_ || pending_resize_->width != width ||
+            pending_resize_->height != height)
+            return false;
+        pending_resize_.reset();
+        return true;
+    }
+    void cancel_resize_request() {
+        ++resize_request_id_;
+        pending_resize_.reset();
+    }
+    bool request_correction(const EditorSize& size) {
+        // The editor already took this size. A correction is not a new
+        // editor-origin request and must not grant a future resize exemption.
+        return !owner_gone_.load() && hooks_.request_resize && hooks_.request_resize(size);
     }
     bool host_action(const HostActionRequest& request) override {
         if (owner_gone_.load())
@@ -79,6 +105,9 @@ class ContractEditorSession::Context final : public EditorContext {
     }
 
   private:
+    ContractEditorSession& session_;
+    std::optional<EditorSize> pending_resize_;
+    std::uint64_t resize_request_id_ = 0;
     ParamPort& port_;
     EditorHostKind kind_;
     HostHooks hooks_;
@@ -175,7 +204,8 @@ ContractEditorSession::create(Processor& processor, state::StateStore& store,
 ContractEditorSession::ContractEditorSession(Processor& processor, state::StateStore& store,
                                              HostHooks hooks, IdleSource idle)
     : idle_source_(idle), store_(store), port_(std::make_unique<StateStoreParamPort>(store)),
-      context_(std::make_unique<Context>(*port_, processor.editor_host_kind(), std::move(hooks))),
+      context_(
+          std::make_unique<Context>(*this, *port_, processor.editor_host_kind(), std::move(hooks))),
       snap_timer_(snap_timer_factory() ? snap_timer_factory()()
                                        : std::make_unique<MainThreadSnapTimer>()) {}
 
@@ -224,6 +254,8 @@ bool ContractEditorSession::attach(const NativeParent& parent) {
 }
 
 void ContractEditorSession::detach() {
+    if (context_)
+        context_->cancel_resize_request();
     stop_idle();
     cancel_snap_request();
     // Closing the window mid-drag must still balance every begin.
@@ -347,6 +379,12 @@ bool ContractEditorSession::set_host_size(std::uint32_t& width, std::uint32_t& h
     snapped = false;
     if (!editor_ || width == 0 || height == 0)
         return false;
+    // User resizing and acknowledgment of an editor's request are distinct.
+    // In particular, fixed user sizing still permits editor-driven layout changes.
+    if (context_->acknowledge_resize(width, height)) {
+        cancel_snap_request();
+        return set_size(width, height);
+    }
     // One pixel is rounding, not a different size: it is never snapped.
     auto differs = [](std::uint32_t a, std::uint32_t b) { return (a > b ? a - b : b - a) > 1; };
     if (!resizable()) {
@@ -397,7 +435,7 @@ void ContractEditorSession::schedule_snap_request(std::uint32_t width, std::uint
         EditorSize size = editor_->size();
         size.width = snap_width_;
         size.height = snap_height_;
-        context_->request_resize(size);
+        context_->request_correction(size);
     });
 }
 
