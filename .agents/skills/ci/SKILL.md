@@ -1607,6 +1607,15 @@ Two things worth keeping straight when reading that lane:
   `[rt-safety]` and the TSan name-regex lane all still run, because catching
   that class is the reason the lane exists. A failing race test there is a
   finding, not label noise.
+- **Installed-SDK consumers and disk.** Each `sdk` / `installed-sdk` test stages
+  a full instrumented install prefix inside the build tree. On a hosted macOS
+  runner that exhausted the disk (`No space left on device`) late in the ASan
+  pass, so ASan excludes those labels and UBSan keeps them. A consumer script
+  must pass the producer's build type, `PULP_PARENT_INSTRUMENTATION_*` flags and
+  sanitizer to its configure, or the link fails on missing runtime symbols.
+- **A wall-clock deadline test needs a name exclusion.**
+  `graph-paced-timing-matrix-selftest` is unlabelled; its zero-miss control
+  fails under instrumentation, so both lanes exclude it by name.
 - **A timing-sensitive test is not always labelled.** `Runtime clock transitions
   preserve invariant measured latency` (`[clock][latency]`) and `drift wanders
   the pitch slowly at ~the commanded RMS` (`[drift]`) time out under ASan while
