@@ -136,16 +136,16 @@ class RepairRegressionTests(unittest.TestCase):
             root.mkdir()
             external = parent / "installed.cmake"
             original = 'include("missing.cmake")\n'
-            external.write_text(original)
+            external.write_text(original, encoding="utf-8")
             (root / "linked.cmake").symlink_to(external)
             for diagnostic in (str(external), "../installed.cmake", "linked.cmake"):
                 with self.subTest(diagnostic=diagnostic):
                     self.assertIsNone(ct.disable_statement(root, diagnostic, 1, "missing"))
-                    self.assertEqual(external.read_text(), original)
+                    self.assertEqual(external.read_text(encoding="utf-8"), original)
             local = root / "local.cmake"
-            local.write_text(original)
+            local.write_text(original, encoding="utf-8")
             self.assertIsNotNone(ct.disable_statement(root, str(local), 1, "missing"))
-            self.assertTrue(local.read_text().startswith(ct.CUTOVER_MARK))
+            self.assertTrue(local.read_text(encoding="utf-8").startswith(ct.CUTOVER_MARK))
 
     def test_statement_lexing_preserves_adjacent_calls(self):
         statements = ['include("missing#module.cmake")',
@@ -160,10 +160,10 @@ class RepairRegressionTests(unittest.TestCase):
             path = root / "CMakeLists.txt"
             for statement in statements:
                 with self.subTest(statement=statement):
-                    path.write_text(statement + '\nmessage(STATUS "survives")\n')
+                    path.write_text(statement + '\nmessage(STATUS "survives")\n', encoding="utf-8")
                     self.assertIsNotNone(ct.disable_statement(root, "CMakeLists.txt", 1, "missing"))
-                    self.assertEqual(path.read_text().splitlines()[-1], 'message(STATUS "survives")')
-                    self.assertEqual(path.read_text().count(ct.CUTOVER_MARK), len(statement.splitlines()))
+                    self.assertEqual(path.read_text(encoding="utf-8").splitlines()[-1], 'message(STATUS "survives")')
+                    self.assertEqual(path.read_text(encoding="utf-8").count(ct.CUTOVER_MARK), len(statement.splitlines()))
                     result = ct.run(["cmake", "-P", str(path)])
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertIn("survives", result.stdout)
@@ -179,18 +179,18 @@ class RepairRegressionTests(unittest.TestCase):
                                    ('include(missing\\([[.cmake)\nset(untouched x]])\n', 1),
                                    ('include(x)\n', 0), ('include(x)\n', 99)]:
                 with self.subTest(original=original, line=line):
-                    path.write_text(original)
+                    path.write_text(original, encoding="utf-8")
                     self.assertIsNone(ct.disable_statement(root, "CMakeLists.txt", line, "missing"))
-                    self.assertEqual(path.read_text(), original)
+                    self.assertEqual(path.read_text(encoding="utf-8"), original)
 
     def test_relative_deleted_module_is_restored_for_its_cmake_caller(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             module = root / "sub/tools/cmake/Removed.cmake"
             module.parent.mkdir(parents=True)
-            module.write_text('set(RESTORED yes)\n')
-            (root / "CMakeLists.txt").write_text('cmake_minimum_required(VERSION 3.20)\nproject(fixture NONE)\nadd_subdirectory(sub)\n')
-            (root / "sub/CMakeLists.txt").write_text('include(tools/cmake/Removed.cmake)\nif(NOT RESTORED)\nmessage(FATAL_ERROR "module not restored")\nendif()\n')
+            module.write_text('set(RESTORED yes)\n', encoding="utf-8")
+            (root / "CMakeLists.txt").write_text('cmake_minimum_required(VERSION 3.20)\nproject(fixture NONE)\nadd_subdirectory(sub)\n', encoding="utf-8")
+            (root / "sub/CMakeLists.txt").write_text('include(tools/cmake/Removed.cmake)\nif(NOT RESTORED)\nmessage(FATAL_ERROR "module not restored")\nendif()\n', encoding="utf-8")
             for args in (["init", "-q"], ["add", "."],
                          ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"]):
                 done = ct.run(["git", "-C", str(root), *args])
@@ -202,7 +202,7 @@ class RepairRegressionTests(unittest.TestCase):
             edits, log, ok = ct.repair_configure(root, configure, deleted={"sub/tools/cmake/Removed.cmake"})
             self.assertTrue(ok, log)
             self.assertEqual([e.get("restored") for e in edits], ["sub/tools/cmake/Removed.cmake"])
-            self.assertEqual(module.read_text(), 'set(RESTORED yes)\n')
+            self.assertEqual(module.read_text(encoding="utf-8"), 'set(RESTORED yes)\n')
 
     def test_classification_requires_actual_deleted_path_in_source_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -215,7 +215,7 @@ class RepairRegressionTests(unittest.TestCase):
                                           ({"other/" + deleted_path}, "unclassified")]:
                     with self.subTest(message=message, deleted=deleted):
                         cmake = root / "sub/CMakeLists.txt"
-                        cmake.write_text('add_library(gone src/removed.cpp)\n')
+                        cmake.write_text('add_library(gone src/removed.cpp)\n', encoding="utf-8")
                         configure = mock.Mock(side_effect=[(False, f'CMake Error at sub/CMakeLists.txt:1 (add_library):\n  {message}\n'), (True, '')])
                         edits, _, ok = ct.repair_configure(root, configure, deleted=deleted)
                         self.assertTrue(ok)
@@ -226,12 +226,12 @@ class RepairRegressionTests(unittest.TestCase):
             root = Path(tmp)
             (root / "sub").mkdir()
             (root / "cmake").mkdir()
-            (root / "cmake/helper.cmake").write_text('include(src/Removed.cmake)\n')
+            (root / "cmake/helper.cmake").write_text('include(src/Removed.cmake)\n', encoding="utf-8")
             (root / "sub/src").mkdir()
             module = root / "sub/src/Removed.cmake"
-            module.write_text("set(RESTORED yes)\n")
-            (root / "CMakeLists.txt").write_text('cmake_minimum_required(VERSION 3.20)\nproject(fixture NONE)\nadd_subdirectory(sub)\n')
-            (root / "sub/CMakeLists.txt").write_text('include(../cmake/helper.cmake)\n')
+            module.write_text("set(RESTORED yes)\n", encoding="utf-8")
+            (root / "CMakeLists.txt").write_text('cmake_minimum_required(VERSION 3.20)\nproject(fixture NONE)\nadd_subdirectory(sub)\n', encoding="utf-8")
+            (root / "sub/CMakeLists.txt").write_text('include(../cmake/helper.cmake)\n', encoding="utf-8")
             for args in (["init", "-q"], ["add", "."],
                          ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"]):
                 done = ct.run(["git", "-C", str(root), *args])
@@ -249,9 +249,9 @@ class RepairRegressionTests(unittest.TestCase):
             root = Path(tmp)
             (root / "sub/src").mkdir(parents=True)
             module = root / "sub/src/Removed.cmake"
-            module.write_text("set(RESTORED yes)\n")
-            (root / "CMakeLists.txt").write_text('cmake_minimum_required(VERSION 3.20)\nproject(fixture NONE)\nfunction(load_module)\ninclude(src/Removed.cmake)\nendfunction()\nadd_subdirectory(sub)\n')
-            (root / "sub/CMakeLists.txt").write_text('load_module()\n')
+            module.write_text("set(RESTORED yes)\n", encoding="utf-8")
+            (root / "CMakeLists.txt").write_text('cmake_minimum_required(VERSION 3.20)\nproject(fixture NONE)\nfunction(load_module)\ninclude(src/Removed.cmake)\nendfunction()\nadd_subdirectory(sub)\n', encoding="utf-8")
+            (root / "sub/CMakeLists.txt").write_text('load_module()\n', encoding="utf-8")
             for args in (["init", "-q"], ["add", "."],
                          ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"]):
                 done = ct.run(["git", "-C", str(root), *args])
@@ -269,9 +269,9 @@ class RepairRegressionTests(unittest.TestCase):
             root = Path(tmp)
             (root / "sub/src").mkdir(parents=True)
             module = root / "sub/src/Removed.cmake"
-            module.write_text("set(RESTORED yes)\n")
-            (root / "CMakeLists.txt").write_text('cmake_minimum_required(VERSION 3.20)\nproject(fixture NONE)\nfunction(load_inner)\ninclude(src/Removed.cmake)\nendfunction()\nfunction(load_module)\nload_inner()\nendfunction()\nadd_subdirectory(sub)\n')
-            (root / "sub/CMakeLists.txt").write_text('load_module()\n')
+            module.write_text("set(RESTORED yes)\n", encoding="utf-8")
+            (root / "CMakeLists.txt").write_text('cmake_minimum_required(VERSION 3.20)\nproject(fixture NONE)\nfunction(load_inner)\ninclude(src/Removed.cmake)\nendfunction()\nfunction(load_module)\nload_inner()\nendfunction()\nadd_subdirectory(sub)\n', encoding="utf-8")
+            (root / "sub/CMakeLists.txt").write_text('load_module()\n', encoding="utf-8")
             for args in (["init", "-q"], ["add", "."],
                          ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"]):
                 done = ct.run(["git", "-C", str(root), *args])
@@ -290,8 +290,8 @@ class RepairRegressionTests(unittest.TestCase):
             root.mkdir()
             module = root / "modules/Removed.cmake"
             module.parent.mkdir()
-            module.write_text('set(RESTORED yes)\n')
-            (root / "CMakeLists.txt").write_text('cmake_minimum_required(VERSION 3.20)\nproject(fixture NONE)\ninclude(Removed)\n')
+            module.write_text('set(RESTORED yes)\n', encoding="utf-8")
+            (root / "CMakeLists.txt").write_text('cmake_minimum_required(VERSION 3.20)\nproject(fixture NONE)\ninclude(Removed)\n', encoding="utf-8")
             for args in (["init", "-q"], ["add", "."],
                          ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"]):
                 done = ct.run(["git", "-C", str(root), *args])
@@ -305,7 +305,7 @@ class RepairRegressionTests(unittest.TestCase):
             self.assertFalse(ok, log)
             self.assertEqual(edits, [])
             self.assertFalse(module.exists())
-            self.assertIn("include(Removed)", (root / "CMakeLists.txt").read_text())
+            self.assertIn("include(Removed)", (root / "CMakeLists.txt").read_text(encoding="utf-8"))
             module.parent.rmdir()
             external = Path(tmp) / "external"
             external.mkdir()
@@ -314,16 +314,16 @@ class RepairRegressionTests(unittest.TestCase):
                                                        {"modules/Removed.cmake"}, root))
             self.assertEqual(list(external.iterdir()), [])
             outside = external / "Removed.cmake"
-            outside.write_text("preserve me")
+            outside.write_text("preserve me", encoding="utf-8")
             with self.assertRaises(ct.InputError):
                 ct.delete_paths(root, ["modules/Removed.cmake"])
-            self.assertEqual(outside.read_text(), "preserve me")
+            self.assertEqual(outside.read_text(encoding="utf-8"), "preserve me")
             previous = Path.cwd()
             try:
                 os.chdir(root.parent)
                 with self.assertRaises(ct.InputError):
                     ct.delete_paths(Path("scratch"), ["modules/Removed.cmake"])
-                self.assertEqual(outside.read_text(), "preserve me")
+                self.assertEqual(outside.read_text(encoding="utf-8"), "preserve me")
             finally:
                 os.chdir(previous)
 
@@ -340,10 +340,10 @@ class RepairRegressionTests(unittest.TestCase):
                          mock.patch.object(ct, "run", side_effect=[done, built] if ok else [done]), \
                          mock.patch.object(ct, "repair_configure", side_effect=AssertionError("repair must not run")):
                         self.assertEqual(ct.main(["--scratch", str(root / "source"), "--report", str(report), "--no-repair"]), 0)
-                    data = json.loads(report.read_text())
+                    data = json.loads(report.read_text(encoding="utf-8"))
                     self.assertEqual(data["configure"]["ok"], ok)
                     self.assertEqual(data["build"]["ran"], ok)
-                    self.assertEqual((root / "cutover-configure.log").read_text(), 'configure output')
+                    self.assertEqual((root / "cutover-configure.log").read_text(encoding="utf-8"), 'configure output')
 
 
 class InputTests(unittest.TestCase):
