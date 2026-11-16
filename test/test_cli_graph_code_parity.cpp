@@ -313,6 +313,57 @@ TEST_CASE("graph diff compares saved documents by logical identity",
     CHECK(cli_code(one) == "missing_input");
 }
 
+TEST_CASE("graph save --saved-identity refuses a plain document that loses an edge",
+          "[cli][shellout][graph][parity]") {
+    if (!fs::exists(pulp_binary()))
+        SKIP("pulp not built");
+    const auto dir = unique_temp_dir("pulp-graph-lossy-envelope");
+    fs::create_directories(dir);
+
+    pulp::host::SignalGraph graph;
+    const auto input = graph.add_input_node(1, "Input");
+    const auto gain = graph.add_gain_node("Gain");
+    const auto output = graph.add_output_node(1, "Output");
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+    const auto document = pulp::host::GraphSerializer::to_json(graph);
+    const auto good = dir / "good.pulpgraph";
+    std::ofstream(good, std::ios::binary) << document;
+
+    // The tolerant loader skips an edge whose destination does not exist.
+    auto lossy_text = document;
+    const auto connections = lossy_text.find("\"connections\"");
+    REQUIRE(connections != std::string::npos);
+    const auto dest = lossy_text.find("\"dest_node\": ", connections);
+    REQUIRE(dest != std::string::npos);
+    const auto value_end = lossy_text.find_first_of(",\n}", dest + 13);
+    lossy_text.replace(dest, value_end - dest, "\"dest_node\": 99");
+    const auto lossy = dir / "lossy.pulpgraph";
+    std::ofstream(lossy, std::ios::binary) << lossy_text;
+
+    // Control: the intact plain document gains the envelope.
+    const auto stamped = dir / "stamped.pulpgraph";
+    const auto ok = run_pulp({"graph", "save", good.string(), "--output", stamped.string(),
+                              "--saved-identity", "--json"});
+    INFO(ok.stdout_output << ok.stderr_output);
+    REQUIRE(ok.exit_code == 0);
+    CHECK(read_text(stamped).find("identity_schema") != std::string::npos);
+
+    // A plain save keeps its partial-load behaviour.
+    const auto plain_out = dir / "plain-out.pulpgraph";
+    REQUIRE(run_pulp({"graph", "save", lossy.string(), "--output", plain_out.string()}).exit_code ==
+            0);
+
+    const auto refused_out = dir / "refused.pulpgraph";
+    const auto refused = run_pulp({"graph", "save", lossy.string(), "--output",
+                                   refused_out.string(), "--saved-identity", "--json"});
+    INFO(refused.stdout_output << refused.stderr_output);
+    REQUIRE(refused.exit_code == 1);
+    CHECK(cli_code(refused) == pulp::host::graph_patch_code_name(Code::InvalidDocument));
+    CHECK(refused.stdout_output.find("connection_not_restored") != std::string::npos);
+    CHECK_FALSE(fs::exists(refused_out));
+}
+
 TEST_CASE("graph save and fmt keep the saved-identity envelope that diff reads",
           "[cli][shellout][graph][parity]") {
     if (!fs::exists(pulp_binary()))

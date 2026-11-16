@@ -52,10 +52,10 @@ v6 in memory without changing their bytes.
 A spectral graph is saveable only when it is complete. The writer refuses, and
 `to_file` reports `serialization_refused`, when the graph holds a
 `SpectralAnalysis` node (live analysis is not persisted; only the asset source
-is), a node gain other than 1, two nodes with the same name (the reader
-requires unique names), a non-finite editor layout coordinate, or a chain the
-reader cannot prepare at the saved rate with 4096-sample blocks (for example a
-source with no synthesis or output yet). The writer does not name which rule
+is), a node gain other than 1, a non-finite editor layout coordinate, or a
+chain the reader cannot prepare at the saved rate at its admission block (see
+below; for example a source with no synthesis or output yet). Repeated node
+names are allowed. The writer does not name which rule
 failed. A spectral graph also has no saved-identity envelope:
 `to_saved_document` returns an empty string for it, so `pulp graph diff` and
 `GraphEditHistory` do not cover spectral graphs.
