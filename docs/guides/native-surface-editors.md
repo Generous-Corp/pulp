@@ -70,6 +70,10 @@ renderer's device. The `rmlui-metal-demo` example is a small plug-in using this
 path; it remains unavailable when the adapter option or the Vellum Metal
 component is off.
 
+When the Vellum RmlUi SDK provides `NativeContext::warm()`, `RmlUiSurface::attach()`
+calls it after the document loads, so textures, geometry and glyphs are ready
+before the first frame is requested. Older SDKs draw the first frame cold.
+
 The surface context is sized in drawable pixels, the Metal frame scale is 1,
 and the density ratio is the backing scale. Documents that need
 density-scaled text should use `font-size` in `dp` (the example does this)
