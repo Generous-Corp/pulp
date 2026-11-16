@@ -19,7 +19,7 @@ const Inputs& inputs() {
     static Inputs value;
     return value;
 }
-std::unique_ptr<SignalGraph> fixture(bool stages = false) {
+std::unique_ptr<SignalGraph> fixture(bool stages = false, const char* identity_name = "identity") {
     auto graph = std::make_unique<SignalGraph>();
     const auto input = graph->add_input_node(1, "control");
     const auto source =
@@ -29,7 +29,7 @@ std::unique_ptr<SignalGraph> fixture(bool stages = false) {
     auto frames = source.value->frames;
     if (stages) {
         const auto identity = graph->add_spectral_stage(
-            shape, *QualifiedSpectralStage::identity_v1(shape).value, "identity");
+            shape, *QualifiedSpectralStage::identity_v1(shape).value, identity_name);
         REQUIRE(identity);
         REQUIRE(graph->connect(frames, identity.value->frames_in));
         frames = identity.value->frames_out;
@@ -394,4 +394,83 @@ TEST_CASE("Spectral saves use a graph format the pre-spectral reader refuses",
     const auto plain = GraphSerializer::to_json(ordinary);
     REQUIRE_FALSE(plain.empty());
     CHECK(pre_spectral_reader_admits(plain));
+}
+
+TEST_CASE("Spectral graph with repeated node names saves and reloads", "[host][spectral][replay]") {
+    // Node ids identify nodes in the saved document; a name is a label, and
+    // the authoring factories accept repeated ones.
+    auto graph = fixture(true, "mask");
+    const auto json = GraphSerializer::to_json(*graph);
+    REQUIRE_FALSE(json.empty());
+    SignalGraph loaded;
+    const auto result = GraphSerializer::from_json(loaded, json);
+    INFO(result.error);
+    REQUIRE(result.ok);
+    REQUIRE(GraphSerializer::to_json(loaded) == json);
+    REQUIRE(loaded.prepare(48000, 4096));
+    const auto control = timeline();
+    REQUIRE_NOTHROW(asset_oracle::compare(render(loaded, control, 0),
+                                          asset_oracle::expected(inputs().a, inputs().b, control)));
+}
+
+namespace {
+// Silent canonical asset bytes for an arbitrary dividing geometry.
+pulp::signal::EncodedSpectralStream silent_asset(pulp::signal::SpectralStreamGeometry geometry,
+                                                 std::size_t source_samples) {
+    const auto frames =
+        (source_samples + geometry.fft_size - geometry.hop + geometry.hop - 1) / geometry.hop;
+    auto stream = pulp::signal::make_spectral_stream(geometry, frames);
+    REQUIRE(stream);
+    auto bytes = pulp::signal::encode_spectral_stream(*stream.value);
+    REQUIRE(bytes);
+    return std::move(*bytes.value);
+}
+} // namespace
+
+TEST_CASE("Spectral graph saves at the block it is prepared for, not the largest block",
+          "[host][spectral][replay][limits]") {
+    // FFT 4096, hop 16, four channels: two retained assets and two frame edges
+    // fit the 64 MiB bank at 512-sample blocks, but the edges alone grow past
+    // what remains at 4096-sample blocks.
+    constexpr std::size_t length = 256;
+    const pulp::signal::SpectralStreamGeometry geometry{4096, 16, 4, 48000};
+    const auto a = silent_asset(geometry, length);
+    const auto b = silent_asset(geometry, length);
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "control");
+    const auto source = graph.add_spectral_asset_morph_v1(a.view(), b.view(), length, "assets");
+    INFO(int(source.error));
+    REQUIRE(source);
+    const auto shape = *SpectralIdentity::make(4096, 16, 4, 48000).value;
+    const auto stage = graph.add_spectral_stage(
+        shape, *QualifiedSpectralStage::identity_v1(shape).value, "identity");
+    REQUIRE(stage);
+    const auto synthesis = graph.add_spectral_synthesis(shape, "synthesis");
+    REQUIRE(synthesis);
+    const auto output = graph.add_output_node(4, "audio");
+    REQUIRE(graph.connect(graph.node(input)->out("audio"), source.value->morph));
+    REQUIRE(graph.connect(source.value->frames, stage.value->frames_in));
+    REQUIRE(graph.connect(stage.value->frames_out, synthesis.value->frames));
+    for (int channel = 0; channel < 4; ++channel)
+        REQUIRE(graph.connect(synthesis.value->audio[channel],
+                              graph.node(output)->input_ports[channel]));
+
+    REQUIRE_FALSE(graph.prepare(48000, 4096));
+    REQUIRE(graph.prepare(48000, 512));
+    REQUIRE(graph.stop_spectral_controller() == SpectralError::None);
+    const auto json = GraphSerializer::to_json(graph);
+    REQUIRE_FALSE(json.empty());
+
+    // A destination that declares the block it will be prepared for loads the
+    // graph; one that may be prepared at 4096 samples refuses it up front.
+    SignalGraph loaded;
+    auto limits = loaded.limits();
+    limits.max_block_size = 512;
+    loaded.set_limits(limits);
+    const auto result = GraphSerializer::from_json(loaded, json);
+    INFO(result.error);
+    REQUIRE(result.ok);
+    REQUIRE(loaded.prepare(48000, 512));
+    SignalGraph unbounded;
+    REQUIRE_FALSE(GraphSerializer::from_json(unbounded, json).ok);
 }

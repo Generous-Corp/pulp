@@ -68,7 +68,8 @@
           "path": "test/test_cli_graph_code_parity.cpp",
           "needles": [
             "graph diff compares saved documents by logical identity",
-            "graph CLI success code and fmt use the C++ spelling"
+            "graph CLI success code and fmt use the C++ spelling",
+            "graph CLI file size and readability codes agree across subcommands"
           ]
         },
         {

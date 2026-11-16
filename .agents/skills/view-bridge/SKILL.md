@@ -26,6 +26,19 @@ sized backing surface alone does not prove the window fits it. The Windows
 
 ## Native Metal surfaces (`integrations/pulp-native`)
 
+Where a native surface (and so RmlUi on Metal) differs from the ViewBridge
+hosts today:
+
+| Behaviour | ViewBridge GPU host | Native surface |
+|---|---|---|
+| First frame | presented with the Core Animation transaction inside the host's attach call | requested on the surface's render thread after attach |
+| Occlusion / minimise | not gated (the link runs while the view is in a window) | `FramePump` gates on `OnScreenState` |
+| Hidden editor | trims GPU caches | keeps its renderer's resources |
+| Render thread | main thread | the surface's own render thread |
+| VST3 content scale | not implemented on `PulpPlugView` | `ContractPlugView` implements it |
+| AU v3 | `au_view_controller_*.mm` | none: the contract is not served |
+
+
 `pulp::native::MetalSurface` is for an editor that brings its own Metal
 renderer and does not go through `ViewBridge`. Two macOS behaviours shape both
 it and its tests, and both look like bugs until you know them:
@@ -67,6 +80,16 @@ it and its tests, and both look like bugs until you know them:
   held it when the client took it, falling back to nil. Handing it to nil
   leaves a host's key routing (Musical Typing) dead, as the plug-in host's
   key-focus etiquette below describes.
+
+- **RmlUi frames hold one process-wide lock; input does not wait for it.**
+  `RmlUiSurface` takes `rmlui_mutex()` for a frame's update and render, and
+  RmlUi permits no narrower scope. Pointer and wheel events that arrive during
+  a frame are queued and applied on the main thread when the lock frees, so a
+  test that asserts a click's effect right after the event must call
+  `RmlUiSurface::flush_input()` first. `with_context()`, key and text input do
+  wait for a frame by design. A test that needs to see the stall sets a
+  per-draw delay in a counting renderer and times `with_context()` as the
+  control.
 
 `pulp::native::GlSurface` is the OpenGL counterpart for Windows and X11. On
 macOS only its offscreen backend exists (CGL into a framebuffer object), for

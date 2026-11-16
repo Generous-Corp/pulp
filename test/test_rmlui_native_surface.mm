@@ -18,6 +18,7 @@
 #import <Carbon/Carbon.h>
 #import <Metal/Metal.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <map>
@@ -112,7 +113,7 @@ class CountingRenderer final : public Rml::RenderInterface {
         enter();
         rendered.fetch_add(1);
         // Long enough that two unserialized threads would overlap here.
-        std::this_thread::sleep_for(std::chrono::microseconds(200));
+        std::this_thread::sleep_for(std::chrono::microseconds(draw_delay_us.load()));
         leave();
     }
     void ReleaseGeometry(Rml::CompiledGeometryHandle) override {}
@@ -130,6 +131,7 @@ class CountingRenderer final : public Rml::RenderInterface {
     static inline std::atomic<int> max_inside{0};
     std::atomic<int> compiled{0};
     std::atomic<int> rendered{0};
+    std::atomic<int> draw_delay_us{200};
 
   private:
     static void enter() {
@@ -143,12 +145,29 @@ class CountingRenderer final : public Rml::RenderInterface {
     }
 };
 
+long long now_ns() {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
+double percentile_ms(std::vector<double> v, double p) {
+    std::sort(v.begin(), v.end());
+    return v.empty() ? 0.0 : v[static_cast<std::size_t>(p * (v.size() - 1))];
+}
+
 struct Editor {
     NSWindow* window = nil;
     MemoryAssets assets;
     CountingRenderer renderer;
     std::atomic<int> begun{0};
+    /// What the renderer had compiled when the first frame began.
+    std::atomic<int> compiled_at_first_begin{-1};
     std::atomic<int> ended{0};
+    /// Longest span between a frame's begin and end hooks, which run with the
+    /// RmlUi lock held: how long a frame keeps everyone else out.
+    std::atomic<long long> max_hold_ns{0};
+    std::atomic<long long> begin_ns{0};
     FrameTarget last_target;
     std::unique_ptr<RmlUiSurface> ui;
 
@@ -162,9 +181,17 @@ struct Editor {
         RendererHooks hooks;
         hooks.begin_frame = [this](const FrameTarget& t) {
             last_target = t;
-            begun.fetch_add(1);
+            if (begun.fetch_add(1) == 0)
+                compiled_at_first_begin.store(renderer.compiled.load());
+            begin_ns.store(now_ns());
         };
-        hooks.end_frame = [this] { ended.fetch_add(1); };
+        hooks.end_frame = [this] {
+            const long long hold = now_ns() - begin_ns.load();
+            long long seen = max_hold_ns.load();
+            while (hold > seen && !max_hold_ns.compare_exchange_weak(seen, hold)) {
+            }
+            ended.fetch_add(1);
+        };
         RmlUiSurfaceOptions options;
         options.document = "probe.rml";
         options.font_faces = {"font.ttf"};
@@ -237,6 +264,25 @@ TEST_CASE("the document loads and renders through the caller's renderer",
     }
 }
 
+TEST_CASE("the document's first frame is prepared before any frame is drawn",
+          "[native-surface][rmlui][first-frame]") {
+    REQUIRE_METAL();
+#if defined(PULP_VELLUM_RMLUI_HAS_WARM)
+    @autoreleasepool {
+        Editor e;
+        REQUIRE(e.attach());
+        REQUIRE(e.wait_for([&] { return e.begun.load() > 0; }));
+        // begin_frame runs before RmlUi updates, so geometry compiled by then
+        // was compiled while the document was prepared, not by the first
+        // frame's own update.
+        REQUIRE(e.compiled_at_first_begin.load() > 0);
+        e.ui->detach();
+    }
+#else
+    SKIP("the installed Vellum RmlUi SDK has no NativeContext::warm()");
+#endif
+}
+
 TEST_CASE("a missing document or font fails attach and leaves nothing behind",
           "[native-surface][rmlui]") {
     REQUIRE_METAL();
@@ -290,6 +336,8 @@ TEST_CASE("pointer input reaches RmlUi elements in device pixels", "[native-surf
         REQUIRE(hovered);
         [e.view() mouseDown:e.mouse(NSEventTypeLeftMouseDown, 20, 20)];
         [e.view() mouseUp:e.mouse(NSEventTypeLeftMouseUp, 20, 20)];
+        // A frame in flight queues the event; flush applies it.
+        e.ui->flush_input();
         REQUIRE(clicks == 1);
         // Outside the button: no hover, no click.
         [e.view() mouseMoved:e.mouse(NSEventTypeMouseMoved, 250, 180)];
@@ -322,6 +370,7 @@ TEST_CASE("a focused RmlUi text field takes the keyboard and receives text",
         // Past the end of the text, so the caret lands after "ab".
         [e.view() mouseDown:e.mouse(NSEventTypeLeftMouseDown, 190, 115)];
         [e.view() mouseUp:e.mouse(NSEventTypeLeftMouseUp, 190, 115)];
+        e.ui->flush_input();
         REQUIRE(e.ui->surface()->text_focus());
         id<NSTextInputClient> client = (id<NSTextInputClient>)e.view();
         [client insertText:@"cé" replacementRange:NSMakeRange(NSNotFound, 0)];
@@ -334,6 +383,7 @@ TEST_CASE("a focused RmlUi text field takes the keyboard and receives text",
         // A click elsewhere blurs the field and gives the keyboard back.
         [e.view() mouseDown:e.mouse(NSEventTypeLeftMouseDown, 250, 180)];
         [e.view() mouseUp:e.mouse(NSEventTypeLeftMouseUp, 250, 180)];
+        e.ui->flush_input();
         REQUIRE_FALSE(e.ui->surface()->text_focus());
         e.ui->detach();
     }
@@ -574,5 +624,171 @@ TEST_CASE("an attach without a density ratio says so once, and one with it does 
             REQUIRE(messages[0].find("density ratio") != std::string::npos);
             REQUIRE(messages[0].find("dp") != std::string::npos);
         }
+TEST_CASE("pointer input does not wait for a frame the render thread is drawing",
+          "[native-surface][rmlui][threading]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        Editor e;
+        REQUIRE(e.attach());
+        REQUIRE(e.wait_for([&] { return e.ui->frames() > 0; }));
+        // Each frame holds the RmlUi lock for several draws of 6 ms.
+        e.renderer.draw_delay_us.store(6000);
+        e.max_hold_ns.store(0);
+        std::vector<double> pointer_ms;
+        std::vector<double> with_context_ms;
+        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
+        int i = 0;
+        while (std::chrono::steady_clock::now() < until) {
+            e.ui->request_frame();
+            // Let the render thread take the lock and start drawing, so the
+            // event arrives while a frame is in flight.
+            [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.008]];
+            // Alternate: the same kind of in-flight frame, once for an event
+            // and once for with_context(), which waits for the lock by design.
+            if (i++ % 2 == 0) {
+                const double x = 10 + (i % 200);
+                const auto t0 = std::chrono::steady_clock::now();
+                [e.view() mouseMoved:e.mouse(NSEventTypeMouseMoved, x, 20)];
+                pointer_ms.push_back(
+                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0)
+                        .count());
+            } else {
+                const auto t0 = std::chrono::steady_clock::now();
+                e.ui->with_context([](Rml::Context&) {});
+                with_context_ms.push_back(
+                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0)
+                        .count());
+            }
+        }
+        const double hold_ms = static_cast<double>(e.max_hold_ns.load()) / 1e6;
+        const double p95 = percentile_ms(pointer_ms, 0.95);
+        const double with_context_max = percentile_ms(with_context_ms, 1.0);
+        INFO("longest frame hold " << hold_ms << " ms, pointer p95 " << p95
+                                   << " ms, with_context max " << with_context_max << " ms");
+        // The instrument can see a stall: a frame held the lock long enough
+        // that a caller waiting on it (with_context blocks by design) lost
+        // several milliseconds.
+        REQUIRE(hold_ms > 10.0);
+        REQUIRE(with_context_max > 3.0);
+        // Pointer input is not such a caller.
+        REQUIRE(p95 < 2.0);
+        e.renderer.draw_delay_us.store(200);
+        e.ui->detach();
+    }
+}
+
+TEST_CASE("input queued behind a frame is applied in order and never lost",
+          "[native-surface][rmlui][threading]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        CountingRenderer::inside.store(0);
+        CountingRenderer::max_inside.store(0);
+        Editor a(NSMakeRect(0, 0, 300, 200));
+        Editor b(NSMakeRect(0, 0, 300, 200));
+        REQUIRE(a.attach());
+        REQUIRE(b.attach());
+        REQUIRE(a.wait_for([&] { return a.ui->frames() > 0 && b.ui->frames() > 0; }));
+        a.renderer.draw_delay_us.store(2000);
+        b.renderer.draw_delay_us.store(2000);
+
+        int clicks_a = 0;
+        int clicks_b = 0;
+        struct Listener final : Rml::EventListener {
+            int& count;
+            explicit Listener(int& c) : count(c) {}
+            void ProcessEvent(Rml::Event&) override {
+                ++count;
+            }
+        } listener_a(clicks_a), listener_b(clicks_b);
+        a.ui->with_context([&](Rml::Context& ctx) {
+            ctx.GetDocument(0)->GetElementById("button")->AddEventListener("click", &listener_a);
+        });
+        b.ui->with_context([&](Rml::Context& ctx) {
+            ctx.GetDocument(0)->GetElementById("button")->AddEventListener("click", &listener_b);
+        });
+
+        // Frames requested from another thread while the main thread delivers
+        // input, idles and queries: the shape of a host driving two editors.
+        std::atomic<bool> stop{false};
+        std::thread requester([&] {
+            while (!stop.load()) {
+                a.ui->request_frame();
+                b.ui->request_frame();
+                std::this_thread::sleep_for(std::chrono::microseconds(500));
+            }
+        });
+        int sent = 0;
+        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(1200);
+        while (std::chrono::steady_clock::now() < until) {
+            for (Editor* e : {&a, &b}) {
+                [e->view() mouseMoved:e->mouse(NSEventTypeMouseMoved, 20, 20)];
+                [e->view() mouseDown:e->mouse(NSEventTypeLeftMouseDown, 20, 20)];
+                [e->view() mouseUp:e->mouse(NSEventTypeLeftMouseUp, 20, 20)];
+                [e->view() mouseMoved:e->mouse(NSEventTypeMouseMoved, 250, 180)];
+                e->ui->idle();
+            }
+            ++sent;
+            a.ui->with_context([](Rml::Context&) {});
+            [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.002]];
+        }
+        stop.store(true);
+        requester.join();
+        a.ui->flush_input();
+        b.ui->flush_input();
+        REQUIRE(sent > 10);
+        // Every click arrived: only moves and wheel deltas ever merge.
+        REQUIRE(clicks_a == sent);
+        REQUIRE(clicks_b == sent);
+        REQUIRE(CountingRenderer::max_inside.load() == 1);
+        a.ui->with_context([&](Rml::Context& ctx) {
+            ctx.GetDocument(0)->GetElementById("button")->RemoveEventListener("click", &listener_a);
+        });
+        b.ui->with_context([&](Rml::Context& ctx) {
+            ctx.GetDocument(0)->GetElementById("button")->RemoveEventListener("click", &listener_b);
+        });
+        a.ui->detach();
+        b.ui->detach();
+    }
+}
+
+TEST_CASE("a click queued behind a frame lands before the text typed after it",
+          "[native-surface][rmlui][threading]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        Editor e;
+        REQUIRE(e.attach());
+        REQUIRE(e.wait_for([&] { return e.ui->frames() > 0; }));
+        e.renderer.draw_delay_us.store(6000);
+        bool queued = false;
+        for (int attempt = 0; attempt < 20 && !queued; ++attempt) {
+            e.ui->request_frame();
+            [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.008]];
+            const auto t0 = std::chrono::steady_clock::now();
+            [e.view() mouseDown:e.mouse(NSEventTypeLeftMouseDown, 190, 115)];
+            [e.view() mouseUp:e.mouse(NSEventTypeLeftMouseUp, 190, 115)];
+            // Returned without waiting: the frame was in flight, so the click
+            // is queued and the field is not focused yet.
+            queued =
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0)
+                        .count() < 3.0 &&
+                !e.ui->surface()->text_focus();
+            if (!queued) {
+                // Raced the frame: reset and try again.
+                [e.view() mouseDown:e.mouse(NSEventTypeLeftMouseDown, 250, 180)];
+                [e.view() mouseUp:e.mouse(NSEventTypeLeftMouseUp, 250, 180)];
+                e.ui->flush_input();
+            }
+        }
+        REQUIRE(queued);
+        id<NSTextInputClient> client = (id<NSTextInputClient>)e.view();
+        [client insertText:@"Z" replacementRange:NSMakeRange(NSNotFound, 0)];
+        std::string value;
+        e.ui->with_context([&](Rml::Context& ctx) {
+            value =
+                ctx.GetDocument(0)->GetElementById("field")->GetAttribute<Rml::String>("value", "");
+        });
+        REQUIRE(value == "abZ");
+        e.renderer.draw_delay_us.store(200);
+        e.ui->detach();
     }
 }
