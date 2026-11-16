@@ -5,7 +5,10 @@
 #include <pulp/runtime/base64.hpp>
 #include <pulp/runtime/crypto.hpp>
 
+#include <cmath>
+#include <filesystem>
 #include <functional>
+#include <limits>
 #include <map>
 
 namespace {
@@ -505,4 +508,37 @@ TEST_CASE("Spectral graph saves at the block it is prepared for, not the largest
     REQUIRE(loaded.prepare(48000, 512));
     SignalGraph unbounded;
     REQUIRE_FALSE(GraphSerializer::from_json(unbounded, json).ok);
+}
+
+TEST_CASE("Spectral save refusals name the rule the graph breaks",
+          "[host][spectral][replay][negative]") {
+    const auto dir = std::filesystem::temp_directory_path() / "pulp-spectral-save-reason";
+    std::filesystem::create_directories(dir);
+    const auto path = dir / "graph.pulpgraph";
+
+    // Control: the same graph saves when it breaks no rule.
+    auto graph = fixture();
+    const auto saved = GraphSerializer::to_file(*graph, path);
+    INFO(saved.error);
+    REQUIRE(saved.ok);
+
+    const auto id = graph->nodes().front().id;
+    const auto off_canvas = GraphSerializer::to_file(
+        *graph, path, {{id, {std::numeric_limits<float>::quiet_NaN(), 0.0f}}});
+    CHECK_FALSE(off_canvas.ok);
+    CHECK(off_canvas.code == GraphSerializer::SaveResult::Code::serialization_refused);
+    CHECK(off_canvas.error.find("non-finite editor position") != std::string::npos);
+
+    const auto envelope = GraphSerializer::to_saved_file(*graph, path);
+    CHECK_FALSE(envelope.ok);
+    CHECK(envelope.error.find("no saved-identity envelope") != std::string::npos);
+
+    graph->add_gain_node("unsupported_mix");
+    const auto mixed = GraphSerializer::to_file(*graph, path);
+    CHECK_FALSE(mixed.ok);
+    CHECK(mixed.code == GraphSerializer::SaveResult::Code::serialization_refused);
+    CHECK(mixed.error.find("unsupported_mix") != std::string::npos);
+    CHECK(mixed.error.find("not an audio input, audio output or spectral node") !=
+          std::string::npos);
+    std::filesystem::remove_all(dir);
 }

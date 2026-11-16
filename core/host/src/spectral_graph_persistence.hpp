@@ -3,6 +3,7 @@
 #include <pulp/host/graph_serializer.hpp>
 
 #include <memory>
+#include <string>
 #include <string_view>
 
 namespace pulp::host::spectral_persistence {
@@ -10,6 +11,11 @@ namespace pulp::host::spectral_persistence {
 bool contains_spectral_nodes(const SignalGraph& graph);
 std::string write(const SignalGraph& graph,
                   const std::unordered_map<NodeId, std::pair<float, float>>& layout);
+// Same document as write(); on refusal returns an empty string and sets
+// `reason` to the rule the graph breaks. `reason` is cleared on success.
+std::string write(const SignalGraph& graph,
+                  const std::unordered_map<NodeId, std::pair<float, float>>& layout,
+                  std::string& reason);
 
 struct Candidate {
     bool handled = false;

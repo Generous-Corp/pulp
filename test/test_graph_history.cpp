@@ -748,6 +748,182 @@ TEST_CASE("saved document restore binds each identity to its persisted node",
     CHECK(target.nodes().empty());
 }
 
+// Every node kind the saved-identity writer records: built-in nodes, two
+// nodes that share one identity key, registered and unresolved custom nodes,
+// an unresolved plugin whose unique id contains the delimiter, and a
+// Processor node.
+struct EveryKindGraph {
+    SignalGraph graph;
+    NodeId input = 0;
+    NodeId gain = 0;
+    NodeId custom = 0;
+};
+
+constexpr std::string_view kKindType = "pulp.test.identity-kind";
+
+CustomNodeType kind_type() {
+    CustomNodeType type;
+    type.type_id = std::string(kKindType);
+    type.version = 3;
+    type.num_input_ports = 1;
+    type.num_output_ports = 1;
+    type.process = [](auto&, const auto&, int) {};
+    return type;
+}
+
+void build_every_kind(EveryKindGraph& fixture) {
+    auto& graph = fixture.graph;
+    fixture.input = graph.add_input_node(1, "Input");
+    fixture.gain = graph.add_gain_node("G");
+    REQUIRE(graph.add_gain_node("G") != 0);
+    REQUIRE(graph.add_output_node(1, "Output") != 0);
+    REQUIRE(graph.add_midi_input_node("MIDI In") != 0);
+    REQUIRE(graph.add_midi_output_node("MIDI Out") != 0);
+    REQUIRE(graph.register_custom_node_type(kind_type()));
+    fixture.custom = graph.add_custom_node(kKindType, 3, "Kind");
+    REQUIRE(fixture.custom != 0);
+    REQUIRE(graph.add_unresolved_custom_node("pulp.test.absent", 2, 1, 1, "Absent") != 0);
+    PluginInfo info;
+    info.name = "External";
+    info.unique_id = "vendor:external:1";
+    info.format = PluginFormat::VST3;
+    REQUIRE(graph.add_unresolved_plugin_node(info, 2, 2, "External") != 0);
+    REQUIRE(graph.add_processor_node(std::make_unique<HistoryLevel>(), "Level") != 0);
+    REQUIRE(graph.connect(fixture.input, 0, fixture.gain, 0));
+}
+
+std::string replace_once(std::string text, std::string_view from, std::string_view to) {
+    const auto at = text.find(from);
+    REQUIRE(at != std::string::npos);
+    text.replace(at, from.size(), to);
+    return text;
+}
+
+TEST_CASE("saved document inspection rebuilds identities for every node kind",
+          "[host][graph][history][identity]") {
+    EveryKindGraph fixture;
+    build_every_kind(fixture);
+    const auto saved = GraphSerializer::to_saved_document(fixture.graph);
+    REQUIRE_FALSE(saved.empty());
+    const auto inspection = GraphSerializer::inspect_document(saved);
+    INFO(inspection.detail);
+    REQUIRE(inspection.ok());
+    CHECK(diff_graph_documents(saved, saved).equal());
+
+    // The writer's own identities survive a restore and a second save.
+    LevelRegistry registry([](int) { return false; });
+    registry.options.load_plugins = false;
+    SignalGraph loaded;
+    REQUIRE(loaded.register_custom_node_type(kind_type()));
+    const auto restored = GraphSerializer::from_saved_document(loaded, saved, registry.options);
+    INFO(restored.error);
+    REQUIRE(restored.ok);
+    const auto resaved = GraphSerializer::to_saved_document(loaded);
+    REQUIRE(GraphSerializer::inspect_document(resaved).ok());
+    const auto diff = diff_graph_documents(saved, resaved);
+    INFO(diff.detail);
+    REQUIRE(diff.ok());
+    CHECK(diff.nodes_added.empty());
+    CHECK(diff.nodes_removed.empty());
+}
+
+TEST_CASE("saved document inspection refuses identities that name other nodes",
+          "[host][graph][history][identity]") {
+    EveryKindGraph fixture;
+    build_every_kind(fixture);
+    const auto saved = GraphSerializer::to_saved_document(fixture.graph);
+    const auto identities = GraphSerializer::saved_node_identities(fixture.graph);
+    const auto& input = identities.at(fixture.input);
+    const auto& gain = identities.at(fixture.gain);
+    const auto& custom = identities.at(fixture.custom);
+
+    // Swap the identity strings of two nodes of different types everywhere
+    // they appear, so the identity entries and bindings stay consistent.
+    auto root = choc::json::parse(saved);
+    const auto swapped_name = [&](const std::string& name) {
+        return name == input ? gain : name == gain ? input : name;
+    };
+    auto entries = choc::value::createEmptyArray();
+    for (std::uint32_t i = 0; i < root["logical_identities"]["identities"].size(); ++i) {
+        const auto& entry = root["logical_identities"]["identities"][i];
+        auto item = choc::value::createObject("Identity");
+        item.addMember("id", swapped_name(std::string(entry["id"].getString())));
+        item.addMember("node_id", entry["node_id"].getInt64());
+        entries.addArrayElement(item);
+    }
+    auto logical = choc::value::Value(root["logical_identities"]);
+    logical.setMember("identities", entries);
+    root.setMember("logical_identities", logical);
+    auto bindings = choc::value::createObject("Bindings");
+    for (std::uint32_t i = 0; i < root["bindings"].size(); ++i) {
+        const auto member = root["bindings"].getObjectMemberAt(i);
+        bindings.addMember(swapped_name(std::string(member.name)), member.value.getInt64());
+    }
+    root.setMember("bindings", bindings);
+    const auto swapped = choc::json::toString(root, true);
+
+    // A custom record whose version no longer matches its identity, and one
+    // whose version the loader cannot restore.
+    REQUIRE(saved.find("\"version\": 3") != std::string::npos);
+    const auto bumped = replace_once(saved, "\"version\": 3", "\"version\": 4");
+    const auto zero = replace_once(saved, "\"version\": 3", "\"version\": 0");
+    REQUIRE(custom.find("@3:") != std::string::npos);
+
+    for (const auto* document : {&swapped, &bumped, &zero}) {
+        const auto inspection = GraphSerializer::inspect_document(*document);
+        INFO(inspection.detail);
+        CHECK(inspection.refusal == GraphDocumentRefusal::IdentityBindingUnknown);
+        const auto diff = diff_graph_documents(saved, *document);
+        CHECK(diff.code == GraphDocumentDiffCode::AfterRefused);
+        CHECK(diff.refusal == GraphDocumentRefusal::IdentityBindingUnknown);
+
+        // Refused before the caller's graph is cleared.
+        SignalGraph target;
+        build_chain(target);
+        const auto refused = GraphSerializer::from_saved_document(target, *document);
+        CHECK_FALSE(refused.ok);
+        CHECK(refused.error.find("identity_binding_unknown") != std::string::npos);
+        CHECK(target.nodes().size() == 3);
+    }
+}
+
+TEST_CASE("saved document inspection rebuilds identities the loader would assign",
+          "[host][graph][history][identity]") {
+    // Hand-written records the writer never emits but the loader restores:
+    // an unknown type string restores as a custom node of that type at
+    // version 1, a custom record without a version reads as version 1, and an
+    // unnamed custom node takes its type id as its name.
+    const std::string document = R"({
+  "format_version": 2,
+  "nodes": [
+    {"id": 1, "type": "pulp.test.unknown", "name": "", "num_input_ports": 1,
+     "num_output_ports": 1, "gain": 1.0},
+    {"id": 2, "type": "custom", "name": "C", "num_input_ports": 1, "num_output_ports": 1,
+     "gain": 1.0, "custom": {"type_id": "pulp.test.unversioned"}}
+  ],
+  "connections": [],
+  "identity_schema": "pulp.graph.saved-identity.v6",
+  "logical_identities": {
+    "profile": "pulp.graph.saved-identity.v6",
+    "identities": [
+      {"id": "node:custom:pulp.test.unknown:pulp.test.unknown@1:0", "node_id": 1},
+      {"id": "node:custom:C:pulp.test.unversioned@1:0", "node_id": 2}
+    ]
+  },
+  "bindings": {
+    "node:custom:pulp.test.unknown:pulp.test.unknown@1:0": 1,
+    "node:custom:C:pulp.test.unversioned@1:0": 2
+  }
+})";
+    const auto inspection = GraphSerializer::inspect_document(document);
+    INFO(inspection.detail);
+    REQUIRE(inspection.ok());
+    SignalGraph loaded;
+    const auto restored = GraphSerializer::from_saved_document(loaded, document);
+    INFO(restored.error);
+    CHECK(restored.ok);
+}
+
 TEST_CASE("graph document diff compares sample region NodeIds by identity",
           "[host][graph][history][sample-region]") {
     RegionGraph fixture;

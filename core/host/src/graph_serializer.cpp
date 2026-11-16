@@ -410,13 +410,16 @@ const char* node_type_str(NodeType t) {
     return "unknown";
 }
 
+// The writer records a custom type version below 1 as 1, so the identity
+// uses the same normalized version and a reload reproduces it.
 std::string authored_node_identity(const GraphNode& node,
                                    std::unordered_map<std::string, std::size_t>& ordinals) {
     std::string key = std::string(node_type_str(node.type)) + ":" + node.name;
     if (node.type == NodeType::Plugin)
         key += ":" + node.plugin_info.unique_id;
     if (node.type == NodeType::Custom)
-        key += ":" + node.custom_type_id + "@" + std::to_string(node.custom_type_version);
+        key += ":" + node.custom_type_id + "@" +
+               std::to_string(node.custom_type_version > 0 ? node.custom_type_version : 1);
     const auto ordinal = ordinals[key]++;
     return "node:" + key + ":" + std::to_string(ordinal);
 }
@@ -590,6 +593,70 @@ bool parse_type(std::string_view s, NodeType& out) {
     if (s == "midi_out")  { out = NodeType::MidiOutput; return true; }
     if (s == "custom")    { out = NodeType::Custom; return true; }
     return false;
+}
+
+// The authored identity key (without its ordinal) of one saved node record,
+// computed from the record exactly as the loader rebuilds the node:
+//   - a "processor" record restores a Plugin node with no unique id;
+//   - a "plugin" record keeps its plugin.unique_id;
+//   - a "custom" record uses custom.type_id and custom.version (1 when
+//     absent), and an unknown type string restores as a custom node of that
+//     type id at version 1;
+//   - a custom node with an empty name takes its type id as its name.
+// Returns nullopt with `detail` set for a record the loader cannot rebuild
+// as a node.
+template <typename V>
+std::optional<std::string> saved_record_identity_key(const V& node, std::string& detail) {
+    const auto id = std::to_string(node["id"].getInt64());
+    if (!node.hasObjectMember("type") || !node["type"].isString() ||
+        !node.hasObjectMember("name") || !node["name"].isString()) {
+        detail = "node record " + id + " requires a string type and name";
+        return std::nullopt;
+    }
+    const std::string type(node["type"].getString());
+    std::string name(node["name"].getString());
+    if (type == "processor")
+        return "plugin:" + name + ":";
+    NodeType parsed = NodeType::Custom;
+    const bool known = parse_type(type, parsed);
+    if (parsed == NodeType::Plugin) {
+        if (!node.hasObjectMember("plugin") || !node["plugin"].isObject() ||
+            !node["plugin"].hasObjectMember("unique_id") ||
+            !node["plugin"]["unique_id"].isString()) {
+            detail = "plugin node record " + id + " requires plugin.unique_id";
+            return std::nullopt;
+        }
+        return "plugin:" + name + ":" + std::string(node["plugin"]["unique_id"].getString());
+    }
+    if (parsed != NodeType::Custom)
+        return std::string(node_type_str(parsed)) + ":" + name;
+    std::string type_id = type;
+    std::int64_t version = 1;
+    if (known && node.hasObjectMember("custom")) {
+        const auto& custom = node["custom"];
+        if (!custom.isObject()) {
+            detail = "custom node record " + id + " has a non-object custom member";
+            return std::nullopt;
+        }
+        if (custom.hasObjectMember("type_id")) {
+            if (!custom["type_id"].isString()) {
+                detail = "custom node record " + id + " requires a string custom.type_id";
+                return std::nullopt;
+            }
+            type_id = std::string(custom["type_id"].getString());
+        }
+        if (custom.hasObjectMember("version")) {
+            if (!is_json_integer(custom["version"]) || custom["version"].getInt64() <= 0 ||
+                custom["version"].getInt64() > std::numeric_limits<int>::max()) {
+                detail = "custom node record " + id + " requires custom.version in 1..int max";
+                return std::nullopt;
+            }
+            version = custom["version"].getInt64();
+        }
+    }
+    if (name.empty())
+        name = type_id;
+    return "custom:" + name + ":" + type_id + "@" + std::to_string(version);
 }
 
 std::string custom_type_label(std::string_view type_id, int version) {
@@ -1457,6 +1524,44 @@ GraphDocumentInspection GraphSerializer::inspect_document(std::string_view json)
                     return result;
                 }
             }
+            // Rebuild every identity from the node records with the writer's
+            // rule (ordinals assigned in persisted node id order) and refuse a
+            // document whose identity strings name other nodes. Without this,
+            // a document that swaps the identities of two nodes of different
+            // types, with consistent bindings, would be diffed under false
+            // identities while a load refuses it.
+            if (root.hasObjectMember("nodes") && root["nodes"].isArray()) {
+                std::vector<std::pair<NodeId, std::string>> keys;
+                const auto& records = root["nodes"];
+                keys.reserve(records.size());
+                for (std::uint32_t i = 0; i < records.size(); ++i) {
+                    std::string detail;
+                    auto key = saved_record_identity_key(records[i], detail);
+                    if (!key) {
+                        result.refusal = GraphDocumentRefusal::IdentityBindingUnknown;
+                        result.detail = std::move(detail);
+                        return result;
+                    }
+                    keys.emplace_back(static_cast<NodeId>(records[i]["id"].getInt64()),
+                                      std::move(*key));
+                }
+                std::sort(keys.begin(), keys.end(),
+                          [](const auto& a, const auto& b) { return a.first < b.first; });
+                std::unordered_map<std::string, std::size_t> ordinals;
+                std::unordered_map<NodeId, std::string> expected;
+                for (const auto& [node_id, key] : keys)
+                    expected.emplace(node_id,
+                                     "node:" + key + ":" + std::to_string(ordinals[key]++));
+                for (const auto& [name, node_id] : identity_node) {
+                    const auto& rebuilt = expected.at(node_id);
+                    if (rebuilt != name) {
+                        result.refusal = GraphDocumentRefusal::IdentityBindingUnknown;
+                        result.detail = "logical identity " + name + " does not match node " +
+                                        std::to_string(node_id) + ", whose identity is " + rebuilt;
+                        return result;
+                    }
+                }
+            }
             if (root.hasObjectMember("subgraphs")) {
                 result.refusal = validate_subgraph_records(root["subgraphs"], known, result.detail);
                 if (result.refusal != GraphDocumentRefusal::None)
@@ -1536,12 +1641,23 @@ write_graph_file(const SignalGraph& graph, const std::filesystem::path& path,
             return result;
         }
     }
-    const auto json = saved_identity ? GraphSerializer::to_saved_document(graph, editor_layout)
-                                     : GraphSerializer::to_json(graph, editor_layout);
+    const bool spectral = spectral_persistence::contains_spectral_nodes(graph);
+    if (spectral && saved_identity) {
+        result.code = SaveResult::Code::serialization_refused;
+        result.error = "graph saved-identity serialization failed: a spectral graph has no "
+                       "saved-identity envelope";
+        return result;
+    }
+    std::string spectral_reason;
+    const auto json = spectral ? spectral_persistence::write(graph, editor_layout, spectral_reason)
+                      : saved_identity ? GraphSerializer::to_saved_document(graph, editor_layout)
+                                       : GraphSerializer::to_json(graph, editor_layout);
     if (json.empty()) {
         result.code = SaveResult::Code::serialization_refused;
         result.error = saved_identity ? "graph saved-identity serialization failed"
                                       : "graph serialization failed";
+        if (!spectral_reason.empty())
+            result.error += ": " + spectral_reason;
         return result;
     }
     const auto payload_size = json.size() + 1; // canonical files end with a newline
