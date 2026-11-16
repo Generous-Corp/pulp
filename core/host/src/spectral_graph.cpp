@@ -478,7 +478,7 @@ SignalGraph::add_spectral_asset_morph_v1(std::span<const std::uint8_t> asset_a,
                                    n.input_ports.front(),
                                    {n.output_ports.front()},
                                    n.spectral_asset_morph->render_frames};
-    nodes_.push_back(std::move(n));
+    push_node_locked_(std::move(n));
     ++next_id_;
     invalidate_live_locked_();
     return {std::move(result)};
@@ -492,7 +492,7 @@ SpectralResult<SpectralAnalysisPorts> SignalGraph::add_spectral_analysis(Spectra
     auto n = spectral_node(next_id_++, NodeType::SpectralAnalysis, identity, name,
                            diagnostic_graph_identity_, authoring_generation_ + 1);
     SpectralAnalysisPorts result{n.id, n.input_ports, {n.output_ports.front()}};
-    nodes_.push_back(std::move(n));
+    push_node_locked_(std::move(n));
     invalidate_live_locked_();
     return {std::move(result)};
 }
@@ -509,7 +509,7 @@ SpectralResult<SpectralStagePorts> SignalGraph::add_spectral_stage(SpectralIdent
                            diagnostic_graph_identity_, authoring_generation_ + 1);
     n.spectral_stage = std::move(stage);
     SpectralStagePorts result{n.id, {n.input_ports.front()}, {n.output_ports.front()}};
-    nodes_.push_back(std::move(n));
+    push_node_locked_(std::move(n));
     invalidate_live_locked_();
     return {std::move(result)};
 }
@@ -522,7 +522,7 @@ SignalGraph::add_spectral_synthesis(SpectralIdentity identity, const std::string
     auto n = spectral_node(next_id_++, NodeType::SpectralSynthesis, identity, name,
                            diagnostic_graph_identity_, authoring_generation_ + 1);
     SpectralSynthesisPorts result{n.id, {n.input_ports.front()}, n.output_ports};
-    nodes_.push_back(std::move(n));
+    push_node_locked_(std::move(n));
     invalidate_live_locked_();
     return {std::move(result)};
 }

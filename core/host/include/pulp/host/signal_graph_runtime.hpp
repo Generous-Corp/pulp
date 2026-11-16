@@ -426,6 +426,11 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // Remove a node and all its connections
     bool remove_node(NodeId id);
 
+    /// Rename a node. Its authored ID, ports and connections are unchanged.
+    /// Returns false for an unknown node, an empty name, or while a spectral
+    /// controller refuses mutation.
+    bool rename_node(NodeId id, const std::string& name);
+
     // Connect two nodes (port-to-port)
     bool connect(NodeId source, PortIndex source_port, NodeId dest, PortIndex dest_port);
 
@@ -1653,6 +1658,14 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // receipts cannot be reused after a policy mutation.
     std::atomic<std::uint64_t> execution_selection_generation_{0};
     NodeId next_id_ = 1;
+    // Fresh authored node IDs: a lazily drawn per-graph random salt and a
+    // counter. Guarded by graph_mutation_mutex_.
+    std::uint64_t authored_id_salt_[2] = {0, 0};
+    std::uint64_t authored_id_counter_ = 0;
+    bool authored_id_seeded_ = false;
+    std::string mint_authored_id_locked_();
+    // Assign a fresh authored ID when `node` has none, then append it.
+    void push_node_locked_(GraphNode&& node);
     NodeId last_prepare_custom_failure_node_ = 0;
     format::ProcessMode hosted_plugin_process_mode_ = format::ProcessMode::Realtime;
     double last_plugin_prepare_rate_ = 0.0;

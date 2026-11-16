@@ -188,6 +188,11 @@ struct GraphNode {
     std::optional<graph::QualifiedSpectralStage> spectral_stage;
     std::shared_ptr<const SpectralAssetMorphConfig> spectral_asset_morph;
 
+    // Opaque authored identity, minted on the control thread when the node is
+    // created and kept across rename, NodeId renumbering and every restore of
+    // a saved-identity v7 document. A new node always gets a new ID.
+    std::string authored_id;
+
     PortHandle in(std::string_view port) const;
     PortHandle out(std::string_view port) const;
 };
