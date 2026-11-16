@@ -78,6 +78,7 @@
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/parameter_text.hpp>
 #include <pulp/format/plugin_state_io.hpp>
+#include <pulp/format/contract_editor_session.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/registry.hpp>
@@ -340,6 +341,10 @@ struct ScopedAuV3HostWriting {
     // Captured by AUv3 view controllers. They may outlive this AUAudioUnit
     // when a host tears down the audio instance before its retained editor.
     pulp::runtime::AliveToken _ownerAlive;
+    // The contract editors (UI package) this instance's view controllers hold.
+    // Declared after _bridge so it is destroyed before the processor and store
+    // its editors reach; -dealloc also closes them first, explicitly.
+    pulp::format::ContractSessionRegistry _contractSessions;
     AUAudioUnitBus *_inputBus;
     AUAudioUnitBus *_outputBus;
     AUAudioUnitBusArray *_inputBusArray;
@@ -1250,6 +1255,10 @@ struct ScopedAuV3HostWriting {
 
 // Symmetric teardown of the MainThreadDispatcher backend installed in init.
 - (void)dealloc {
+    // Contract editors still open in a retained view close in order (gestures
+    // released, detached, destroyed) while the processor and store exist.
+    _contractSessions.close_all();
+
     // Retained AUv3 editors must stop touching _bridge.processor/_bridge.store
     // before either C++ object begins destruction.
     _ownerAlive.retire();
@@ -2283,6 +2292,10 @@ struct ScopedAuV3HostWriting {
 
 - (pulp::runtime::AliveToken::Handle)pulpOwnerAlive {
     return _ownerAlive.capture();
+}
+
+- (pulp::format::ContractSessionRegistry*)pulpContractSessions {
+    return &_contractSessions;
 }
 
 - (uint32_t)pulpBypassParameterId {

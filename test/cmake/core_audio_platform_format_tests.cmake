@@ -701,6 +701,34 @@ if(APPLE AND PULP_HAS_AUSDK)
         CXX_STANDARD 23
         OBJCXX_STANDARD 23
     )
+    # The macOS AU v3 view controller (the extension's principal class) bound to
+    # a real PulpAudioUnit: a processor with an editor factory gets a contract
+    # editor, one without keeps the ViewBridge path.
+    if(NOT PULP_IOS)
+        add_executable(pulp-test-au-v3-view-controller
+            test_au_v3_view_controller.mm
+            ${CMAKE_SOURCE_DIR}/core/format/src/au_adapter.mm
+            ${CMAKE_SOURCE_DIR}/core/format/src/au_view_controller_mac.mm
+            ${CMAKE_SOURCE_DIR}/core/format/src/au_v3_contract_view.mm
+        )
+        target_link_libraries(pulp-test-au-v3-view-controller PRIVATE
+            pulp::format
+            pulp::view
+            ausdk
+            Catch2::Catch2WithMain
+            "-framework AppKit"
+            "-framework AudioToolbox"
+            "-framework AVFoundation"
+            "-framework CoreAudioKit"
+            "-framework Foundation"
+        )
+        set_target_properties(pulp-test-au-v3-view-controller PROPERTIES
+            CXX_STANDARD 23
+            OBJCXX_STANDARD 23
+        )
+        catch_discover_tests(pulp-test-au-v3-view-controller)
+    endif()
+
     catch_discover_tests(pulp-test-au-plugin-state)
     catch_discover_tests(pulp-test-au-plugin-state
         TEST_SPEC "[lifecycle]"

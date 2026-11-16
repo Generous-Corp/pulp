@@ -26,6 +26,7 @@
 #include <pulp/runtime/log.hpp>
 
 #import "au_audio_unit.h"
+#import "au_v3_contract_view.h"
 
 #include <algorithm>
 #include <cmath>
@@ -143,6 +144,10 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     // Non-owning; the audio unit owns the processor. Cached so the
     // editor→host resize handler can be cleared on teardown.
     pulp::format::Processor *_processor;
+    // The editor of a processor that supplies an editor factory (UI package):
+    // the contract view fills the root view, in place of the ViewBridge editor.
+    // Retained here under manual reference counting.
+    PULP_AUV3_CONTRACT_VIEW_CLASS* _contractView;
 }
 
 - (void)loadView {
@@ -270,6 +275,7 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     if (_processor) {
         _processor->set_editor_resize_handler((const void *)self, nullptr);
     }
+    [self closeContractEditor];
     _gpuSurfaceBinding.reset();
     _viewHost.reset();
     _fallbackView.reset();
@@ -283,6 +289,15 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
         store = [(PulpAudioUnit *)self.audioUnit pulpStore];
     }
     _processor = processor;
+
+    // A processor with an editor factory is opened through the editor-host
+    // contract, as VST3, CLAP and AU v2 do.
+    if (processor && store && processor->editor_factory() != nullptr) {
+        _pendingRoot = nullptr;
+        _viewHostPending = NO;
+        [self openContractEditorForProcessor:processor store:store];
+        return;
+    }
 
     pulp::view::View *root = nullptr;
     uint32_t w = 400, h = 300;
@@ -349,6 +364,72 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     // and start the settle driver as a fallback for hosts that size us late.
     [self createViewHostIfReady];
     [self scheduleInitialSizeSync];
+}
+
+// Open the processor's contract editor into a view that fills the root view.
+// The root view takes the editor's size, which is also published as
+// preferredContentSize; the host then owns the size, and every change reaches
+// the editor through the contract view's frame.
+- (void)openContractEditorForProcessor:(pulp::format::Processor*)processor
+                                 store:(pulp::state::StateStore*)store {
+    __unsafe_unretained PulpAUMacViewController* controller = self;
+    PULP_AUV3_CONTRACT_VIEW_CLASS* view = [PULP_AUV3_CONTRACT_VIEW_CLASS
+        openViewForProcessor:processor
+                       store:store
+                    registry:[(PulpAudioUnit*)self.audioUnit pulpContractSessions]
+               resizeRequest:^BOOL(CGSize size) {
+                 // AU has no accept/refuse callback: publish the new natural
+                 // size and resize the root view, which the host follows.
+                 if (!controller.isViewLoaded)
+                     return NO;
+                 pulp_auv3_apply_preferred_size(controller, size,
+                                                /*resize_view_frame=*/true);
+                 return YES;
+               }];
+    if (!view) {
+        pulp::runtime::log_error("AU mac: the contract editor did not open");
+        return;
+    }
+#if !__has_feature(objc_arc)
+    _contractView = [view retain];
+#else
+    _contractView = view;
+#endif
+    const NSSize size = view.frame.size;
+    // The root view takes the editor's size before the contract view joins it,
+    // so the editor is not asked to resize to the placeholder frame.
+    pulp_auv3_apply_preferred_size(self, size, /*resize_view_frame=*/true);
+    view.frame = self.view.bounds;
+    view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    [self.view addSubview:view];
+    // Autoresizing alone does not reach the contract view in every host, so
+    // the root view's frame hook (the one every host-driven resize passes
+    // through) keeps it filling the root view as well.
+    if ([self.view isKindOfClass:[PulpAUMacRootView class]]) {
+        ((PulpAUMacRootView*)self.view).onResize = ^{
+          if (controller->_contractView == nil)
+              return;
+          const NSRect bounds = controller.view.bounds;
+          if (!NSEqualSizes(controller->_contractView.frame.size, bounds.size))
+              controller->_contractView.frame = bounds;
+        };
+    }
+    pulp::runtime::log_info("AU mac: contract editor attached at {}x{}",
+                            static_cast<int>(size.width), static_cast<int>(size.height));
+}
+
+- (void)closeContractEditor {
+    if (!_contractView)
+        return;
+    PULP_AUV3_CONTRACT_VIEW_CLASS* view = _contractView;
+    _contractView = nil;
+    if (self.isViewLoaded && [self.view isKindOfClass:[PulpAUMacRootView class]])
+        ((PulpAUMacRootView*)self.view).onResize = nil;
+    [view closeEditor];
+    [view removeFromSuperview];
+#if !__has_feature(objc_arc)
+    [view release];
+#endif
 }
 
 // Build the GPU host lazily, at the view's REAL bounds, once the host has
@@ -550,23 +631,22 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     // touches _viewHost (destroyed below, after [super dealloc]), so a stray
     // setFrameSize: during teardown must not call back into us.
     void (^teardownMainThreadState)(void) = ^{
-        // Guard the property read: self.view lazily calls loadView, which must
-        // never construct/schedule an editor while this controller deallocates.
-        if (self.isViewLoaded &&
-            [self.view isKindOfClass:[PulpAUMacRootView class]]) {
-            ((PulpAUMacRootView *)self.view).onResize = nil;
-        }
-        // Same reasoning for the editor→host resize handler: it captures self
-        // unretained and touches _viewHost (destroyed below).
-        if (self->_processor) {
-            self->_processor->set_editor_resize_handler(
-                (const void *)self, nullptr);
-            self->_processor = nullptr;
-        }
-        // Before the host publishes its surface teardown, and before the
-        // scripted session the observer writes into can go away.
-        self->_gpuSurfaceBinding.reset();
-        self->_viewHost.reset();
+      [self closeContractEditor];
+      // Guard the property read: self.view lazily calls loadView, which must
+      // never construct/schedule an editor while this controller deallocates.
+      if (self.isViewLoaded && [self.view isKindOfClass:[PulpAUMacRootView class]]) {
+          ((PulpAUMacRootView*)self.view).onResize = nil;
+      }
+      // Same reasoning for the editor→host resize handler: it captures self
+      // unretained and touches _viewHost (destroyed below).
+      if (self->_processor) {
+          self->_processor->set_editor_resize_handler((const void*)self, nullptr);
+          self->_processor = nullptr;
+      }
+      // Before the host publishes its surface teardown, and before the
+      // scripted session the observer writes into can go away.
+      self->_gpuSurfaceBinding.reset();
+      self->_viewHost.reset();
     };
     // The GPU host owns the CVDisplayLink idle pump, dispatched to the MAIN
     // queue, which dereferences the bridge. An AU v3 controller can be released

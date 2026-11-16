@@ -21,6 +21,7 @@
 #include <pulp/runtime/log.hpp>
 
 #import "au_audio_unit.h"
+#import "au_v3_contract_view.h"
 
 #include <algorithm>
 
@@ -44,6 +45,10 @@
     // path). Declaring _viewHost LAST makes it destroy FIRST (reverse order),
     // which is safe for both paths.
     pulp::format::Processor *_resizeProcessor;
+    // The editor of a processor that supplies an editor factory (UI package):
+    // the contract view fills the controller's view, in place of the
+    // ViewBridge editor. Retained here under manual reference counting.
+    PULP_AUV3_CONTRACT_VIEW_CLASS* _contractView;
     std::unique_ptr<pulp::format::ViewBridge> _bridge;
     std::unique_ptr<pulp::view::View> _fallbackView;
     std::unique_ptr<pulp::view::PluginViewHost> _viewHost;
@@ -150,6 +155,7 @@
         _resizeProcessor->set_editor_resize_handler((const void *)self, nullptr);
         _resizeProcessor = nullptr;
     }
+    [self closeContractEditor];
     _gpuSurfaceBinding.reset();
     _viewHost.reset();
     _fallbackView.reset();
@@ -161,6 +167,13 @@
         [self.audioUnit respondsToSelector:@selector(pulpStore)]) {
         processor = [(PulpAudioUnit *)self.audioUnit pulpProcessor];
         store = [(PulpAudioUnit *)self.audioUnit pulpStore];
+    }
+
+    // A processor with an editor factory is opened through the editor-host
+    // contract, as VST3, CLAP and AU v2 do.
+    if (processor && store && processor->editor_factory() != nullptr) {
+        [self openContractEditorForProcessor:processor store:store];
+        return;
     }
 
     pulp::view::View *root = nullptr;
@@ -272,6 +285,54 @@
         _bridge->prepare_first_frame(*_viewHost);
 }
 
+// Open the processor's contract editor into a view that fills this view. The
+// editor's size is published as preferredContentSize; the host then owns the
+// size, and every change reaches the editor through the contract view's bounds.
+- (void)openContractEditorForProcessor:(pulp::format::Processor*)processor
+                                 store:(pulp::state::StateStore*)store {
+    __unsafe_unretained PulpAUViewController* controller = self;
+    PULP_AUV3_CONTRACT_VIEW_CLASS* view = [PULP_AUV3_CONTRACT_VIEW_CLASS
+        openViewForProcessor:processor
+                       store:store
+                    registry:[(PulpAudioUnit*)self.audioUnit pulpContractSessions]
+               resizeRequest:^BOOL(CGSize size) {
+                 // AU has no accept/refuse callback: publish the new natural
+                 // size, which the host follows.
+                 if (!controller.isViewLoaded)
+                     return NO;
+                 controller.preferredContentSize = size;
+                 return YES;
+               }];
+    if (!view) {
+        pulp::runtime::log_error("AU iOS: the contract editor did not open");
+        return;
+    }
+#if !__has_feature(objc_arc)
+    _contractView = [view retain];
+#else
+    _contractView = view;
+#endif
+    const CGSize size = view.frame.size;
+    self.preferredContentSize = size;
+    view.frame = self.view.bounds;
+    view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [self.view addSubview:view];
+    pulp::runtime::log_info("AU iOS: contract editor attached at {}x{}",
+                            static_cast<int>(size.width), static_cast<int>(size.height));
+}
+
+- (void)closeContractEditor {
+    if (!_contractView)
+        return;
+    PULP_AUV3_CONTRACT_VIEW_CLASS* view = _contractView;
+    _contractView = nil;
+    [view closeEditor];
+    [view removeFromSuperview];
+#if !__has_feature(objc_arc)
+    [view release];
+#endif
+}
+
 - (void)resizeEditorToViewBounds {
     if (!_viewHost) return;
     CGSize size = self.view.bounds.size;
@@ -349,15 +410,15 @@
     // teardown and the idle block are mutually exclusive on one queue; its later
     // reverse-order ivar destruction is then a no-op and the contract above holds.
     void (^teardownMainThreadState)(void) = ^{
-        if (self->_resizeProcessor) {
-            self->_resizeProcessor->set_editor_resize_handler(
-                (const void *)self, nullptr);
-            self->_resizeProcessor = nullptr;
-        }
-        // Before the host publishes its surface teardown, and before the
-        // scripted session the observer writes into can go away.
-        self->_gpuSurfaceBinding.reset();
-        self->_viewHost.reset();
+      [self closeContractEditor];
+      if (self->_resizeProcessor) {
+          self->_resizeProcessor->set_editor_resize_handler((const void*)self, nullptr);
+          self->_resizeProcessor = nullptr;
+      }
+      // Before the host publishes its surface teardown, and before the
+      // scripted session the observer writes into can go away.
+      self->_gpuSurfaceBinding.reset();
+      self->_viewHost.reset();
     };
     if ([NSThread isMainThread]) {
         teardownMainThreadState();
