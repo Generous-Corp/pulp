@@ -17,7 +17,6 @@ TEST_CASE("a shipped AU v2 contract view carries no test seam",
     // Control: the module's real function resolves by the same lookup.
     CHECK(dlsym(RTLD_DEFAULT, "_ZN4pulp6format2au33contract_resize_follows_containerEv") !=
           nullptr);
-    CHECK(dlsym(RTLD_DEFAULT,
-                "_ZN4pulp6format2au49set_contract_resize_follows_container_for_testingENSt3__18optionalIbEE") ==
-          nullptr);
+    CHECK(dlsym(RTLD_DEFAULT, "_ZN4pulp6format2au49set_contract_resize_follows_container_for_"
+                              "testingENSt3__18optionalIbEE") == nullptr);
 }
