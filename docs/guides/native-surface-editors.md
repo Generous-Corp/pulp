@@ -75,6 +75,19 @@ and the density ratio is the backing scale. Documents that need
 density-scaled text should use `font-size` in `dp` (the example does this)
 rather than `px`.
 
+### Threading
+
+A frame holds one process-wide lock, `rmlui_mutex()`, for RmlUi's update and
+render, because RmlUi's state is shared and not thread-safe. The main thread
+does not wait for it to deliver pointer or wheel input or to run `idle()`:
+when a frame is in flight, pointer and wheel events are queued (consecutive
+moves, and wheel deltas with the same modifiers, merge) and applied in order on
+the main thread within about a millisecond of the frame ending. Element
+listeners therefore still run on the main thread, a moment after the event.
+`with_context()`, key and text input apply the queue first and wait for a
+frame; call `flush_input()` where a caller needs earlier events applied now,
+as a test does after a click.
+
 ## Proof
 
 - `pulp-test-native-metal-surface`, `-frame-pump`, `-input` and

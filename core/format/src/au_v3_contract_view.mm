@@ -33,6 +33,10 @@
     // The last scale handed to the editor, so a scale change is noticed on
     // layout (UIKit's trait callbacks are deprecated for this).
     CGFloat _pushedScale;
+    // Fires the ask-back once the host's sizes stop changing; each host size
+    // replaces it. It holds no reference to this view and is cancelled before
+    // the view goes.
+    dispatch_source_t _askBackTimer;
 }
 
 + (instancetype)openViewForProcessor:(pulp::format::Processor*)processor
@@ -46,6 +50,7 @@
         return nil;
 
     PULP_AUV3_CONTRACT_VIEW_CLASS* view = [[self alloc] initWithFrame:CGRectZero];
+    view.askBackDelayMs = 120;
     view->_resizeRequest = [resizeRequest copy];
 
     pulp::format::ContractEditorSession::HostHooks hooks;
@@ -89,6 +94,7 @@
 }
 
 - (void)closeEditor {
+    [self cancelAskBack];
     if (_session) {
         _session->detach();
         _session.reset();
@@ -165,8 +171,42 @@
         height = host_height;
     }
     _session->set_size(width, height);
-    if ((width != host_width || height != host_height) && _resizeRequest)
-        [self requestEditorSize:CGSizeMake(width, height)];
+    if ((width != host_width || height != host_height) && _resizeRequest) {
+        // Ask the host for the accepted size only once its sizes stop changing,
+        // and never from inside its resize call.
+        [self scheduleAskBack:CGSizeMake(width, height)];
+    } else {
+        [self cancelAskBack];
+    }
+}
+
+- (void)scheduleAskBack:(CGSize)size {
+    [self cancelAskBack];
+    __unsafe_unretained PULP_AUV3_CONTRACT_VIEW_CLASS* me = self;
+    dispatch_source_t timer =
+        dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+    dispatch_source_set_timer(timer,
+                              dispatch_time(DISPATCH_TIME_NOW, _askBackDelayMs * NSEC_PER_MSEC),
+                              DISPATCH_TIME_FOREVER, 0);
+    dispatch_source_set_event_handler(timer, ^{
+      [me fireAskBack:size];
+    });
+    _askBackTimer = timer;
+    dispatch_resume(timer);
+}
+
+- (void)cancelAskBack {
+    if (_askBackTimer == nil)
+        return;
+    dispatch_source_cancel(_askBackTimer);
+    [_askBackTimer release];
+    _askBackTimer = nil;
+}
+
+- (void)fireAskBack:(CGSize)size {
+    [self cancelAskBack];
+    if (_session)
+        [self requestEditorSize:size];
 }
 
 - (void)pushScale {
