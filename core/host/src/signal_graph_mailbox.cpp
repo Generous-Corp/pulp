@@ -33,33 +33,51 @@ std::uint64_t next_nonzero_mailbox_sequence(std::atomic<std::uint64_t>& counter)
     }
 }
 
-} // namespace
-
-void SignalGraph::record_parameter_mailbox_publication(ParameterInputMailbox& mailbox,
-                                                       const state::ParameterEventQueue& events,
-                                                       bool copied_all,
-                                                       bool replaced_unread) noexcept {
+// Charge one publication to a mailbox's writer-owned telemetry. `retained` is
+// what the published batch kept; `lost` is what an overflowing batch could not
+// keep. The mailbox keeps only the latest batch, so a batch no process() call
+// read before this one replaced it is never delivered.
+template <typename Mailbox>
+void record_mailbox_publication(Mailbox& mailbox, std::uint64_t retained, std::uint64_t lost,
+                                bool copied_all, bool replaced_unread) noexcept {
     // Single writer: plain load+store would do, fetch_add keeps it obviously
     // correct for any accidental concurrent observer.
     mailbox.published_batches.fetch_add(1, std::memory_order_relaxed);
-    // The mailbox keeps only the latest batch, so a batch no process() call
-    // read before this one replaced it is never delivered.
     if (replaced_unread) {
         mailbox.overwritten_batches.fetch_add(1, std::memory_order_relaxed);
         mailbox.dropped_events.fetch_add(mailbox.last_published_events, std::memory_order_relaxed);
     }
-    mailbox.last_published_events = mailbox.writer_scratch.size;
+    mailbox.last_published_events = retained;
     if (copied_all)
         return;
     mailbox.overflowed_batches.fetch_add(1, std::memory_order_relaxed);
-    // Events the source queue refused at push() plus any it held that the
-    // snapshot could not retain.
-    const std::uint64_t retained = mailbox.writer_scratch.size;
-    const std::uint64_t held = events.size();
-    const std::uint64_t lost = static_cast<std::uint64_t>(events.dropped_event_count()) +
-                               (held > retained ? held - retained : 0);
     mailbox.dropped_events.fetch_add(lost, std::memory_order_relaxed);
 }
+
+template <typename Mailbox, typename Counters>
+void read_mailbox_counters(const Mailbox& mailbox, Counters& out) noexcept {
+    out.published = mailbox.published_batches.load(std::memory_order_relaxed);
+    out.overflowed = mailbox.overflowed_batches.load(std::memory_order_relaxed);
+    out.dropped_events = mailbox.dropped_events.load(std::memory_order_relaxed);
+    out.overwritten = mailbox.overwritten_batches.load(std::memory_order_relaxed);
+}
+
+// Messages a MIDI block holds: short messages, SysEx, UMP packets and MPE
+// expression events. With `count_drops`, add the messages the block itself
+// already refused at add().
+std::uint64_t midi_message_count(const midi::MidiBuffer& block, const midi::UmpBuffer* ump,
+                                 const midi::MpeBuffer* mpe, bool count_drops) noexcept {
+    std::uint64_t count = block.size() + block.sysex_size();
+    if (count_drops)
+        count += block.dropped_event_count() + block.dropped_sysex_count();
+    if (ump != nullptr)
+        count += ump->size() + (count_drops ? ump->dropped_event_count() : 0);
+    if (mpe != nullptr)
+        count += mpe->size() + (count_drops ? mpe->dropped_event_count() : 0);
+    return count;
+}
+
+} // namespace
 
 bool SignalGraph::inject_midi(NodeId id, const midi::MidiBuffer& events) noexcept {
     // Pin the live snapshot for the whole dereference. Without the guard a
@@ -97,8 +115,25 @@ bool SignalGraph::inject_midi_into_snapshot_(CompiledGraph& snapshot, NodeId id,
     const bool copied_all = mpe != nullptr
                                 ? mailbox.writer_scratch.set_from_midi(events, *mpe, sequence)
                                 : mailbox.writer_scratch.set_from_midi(events, sequence);
-    mailbox.published.write(mailbox.writer_scratch);
+    const bool replaced_unread = mailbox.published.write_replacing_unread(mailbox.writer_scratch);
+    const auto& kept = mailbox.writer_scratch;
+    const std::uint64_t retained = midi_message_count(kept.events, &kept.ump, &kept.mpe, false);
+    const std::uint64_t offered = midi_message_count(events, events.ump(), mpe, true);
+    record_mailbox_publication(mailbox, retained, offered > retained ? offered - retained : 0,
+                               copied_all, replaced_unread);
     return copied_all;
+}
+
+bool SignalGraph::midi_mailbox_counters(NodeId id, MidiMailboxCounters& out) const noexcept {
+    auto read_guard = read_snapshot_(true);
+    const auto* cg = read_guard.get();
+    if (!cg)
+        return false;
+    const auto runtime_it = cg->runtime.find(id);
+    if (runtime_it == cg->runtime.end() || !runtime_it->second.midi_input_mailbox)
+        return false;
+    read_mailbox_counters(*runtime_it->second.midi_input_mailbox, out);
+    return true;
 }
 
 bool SignalGraph::inject_parameter_events(NodeId id, const state::ParameterEventQueue& events) {
@@ -138,7 +173,13 @@ bool SignalGraph::inject_parameter_events_into_snapshot_(
     const std::uint64_t sequence = next_nonzero_mailbox_sequence(mailbox.next_sequence);
     const bool copied_all = mailbox.writer_scratch.set_from_queue(events, sequence);
     const bool replaced_unread = mailbox.published.write_replacing_unread(mailbox.writer_scratch);
-    record_parameter_mailbox_publication(mailbox, events, copied_all, replaced_unread);
+    // Events the source queue refused at push() plus any it held that the
+    // snapshot could not retain.
+    const std::uint64_t retained = mailbox.writer_scratch.size;
+    const std::uint64_t held = events.size();
+    const std::uint64_t lost = static_cast<std::uint64_t>(events.dropped_event_count()) +
+                               (held > retained ? held - retained : 0);
+    record_mailbox_publication(mailbox, retained, lost, copied_all, replaced_unread);
     return copied_all;
 }
 
@@ -151,11 +192,7 @@ bool SignalGraph::parameter_mailbox_counters(NodeId id,
     const auto runtime_it = cg->runtime.find(id);
     if (runtime_it == cg->runtime.end() || !runtime_it->second.parameter_input_mailbox)
         return false;
-    const auto& mailbox = *runtime_it->second.parameter_input_mailbox;
-    out.published = mailbox.published_batches.load(std::memory_order_relaxed);
-    out.overflowed = mailbox.overflowed_batches.load(std::memory_order_relaxed);
-    out.dropped_events = mailbox.dropped_events.load(std::memory_order_relaxed);
-    out.overwritten = mailbox.overwritten_batches.load(std::memory_order_relaxed);
+    read_mailbox_counters(*runtime_it->second.parameter_input_mailbox, out);
     return true;
 }
 
