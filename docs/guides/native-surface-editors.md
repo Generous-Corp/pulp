@@ -101,9 +101,9 @@ void focus_changed(bool focused) override {
 `offer_key` returns `consumed` only while a text field has focus and takes the
 key: RmlUi consumed it, or it produced text, which is typed into the field. A
 command or control shortcut and any key with no field focused go
-back to the host, so Space still reaches the transport. A release follows its
-press: it is the field's only if the field took the press, wherever focus has
-moved since. `focus_changed(false)` blurs a focused text field and hands the
+back to the host, so Space still reaches the transport. Repeats and releases
+keep the initial press disposition, even when focus moves while the key is
+held. `focus_changed(false)` blurs a focused text field and hands the
 host's keyboard back; `focus_changed(true)` focuses it again, found by its
 `id` (a field without one is blurred but not restored). Pointer input queued behind a frame is applied before the
 decision, so a click on a field followed at once by Space types the space.

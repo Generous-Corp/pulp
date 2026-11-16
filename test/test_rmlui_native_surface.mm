@@ -515,11 +515,12 @@ void focus_field(Editor& e) {
 }
 
 pulp::format::EditorKeyEvent key_event(pulp::format::EditorKey key, char32_t character = 0,
-                                       std::uint8_t modifiers = 0) {
+                                       std::uint8_t modifiers = 0, bool repeat = false) {
     pulp::format::EditorKeyEvent event;
     event.key = key;
     event.character = character;
     event.modifiers = modifiers;
+    event.is_repeat = repeat;
     return event;
 }
 
@@ -538,12 +539,18 @@ TEST_CASE("an offered key is taken only while a text field holds focus",
         // No field focused: Space is the host's (transport), and RmlUi is not
         // touched.
         REQUIRE_FALSE(e.ui->text_field_focused());
-        REQUIRE(offer_editor_key(*e.ui, key_event(EditorKey::space, U' ')) ==
-                KeyDisposition::forward);
+        const auto host_press = key_event(EditorKey::space, U' ');
+        REQUIRE(offer_editor_key(*e.ui, host_press) == KeyDisposition::forward);
         REQUIRE(field_value(e) == "ab");
 
         focus_field(e);
         REQUIRE(e.ui->text_field_focused());
+        // A repeat keeps the host's original ownership after focus changes.
+        REQUIRE(offer_editor_key(*e.ui, key_event(EditorKey::space, U' ', 0, true)) ==
+                KeyDisposition::forward);
+        auto host_release = host_press;
+        host_release.is_down = false;
+        REQUIRE(offer_editor_key(*e.ui, host_release) == KeyDisposition::forward);
         // Space is typed into the field and the host does not see it.
         REQUIRE(offer_editor_key(*e.ui, key_event(EditorKey::space, U' ')) ==
                 KeyDisposition::consumed);
@@ -574,14 +581,44 @@ TEST_CASE("an offered key is taken only while a text field holds focus",
         focus_field(e);
         REQUIRE(e.ui->text_field_focused());
         REQUIRE(offer_editor_key(*e.ui, release) == KeyDisposition::forward);
-        // And a press the field took is released to the field after the field
-        // lost focus.
-        REQUIRE(offer_editor_key(*e.ui, key_event(EditorKey::space, U' ')) ==
+        // A field-owned printable key inserts its character before the
+        // release, and that release leaves the value unchanged.
+        auto final_space = key_event(EditorKey::space, U' ');
+        REQUIRE(offer_editor_key(*e.ui, final_space) == KeyDisposition::consumed);
+        REQUIRE(field_value(e) == "ab  ");
+        e.ui->with_context(
+            [&](Rml::Context& ctx) { ctx.GetDocument(0)->GetElementById("field")->Blur(); });
+        final_space.is_down = false;
+        REQUIRE(offer_editor_key(*e.ui, final_space) == KeyDisposition::consumed);
+        REQUIRE(field_value(e) == "ab  ");
+
+        // A field-owned editing key keeps its ownership through repeats and a
+        // blur, too.
+        focus_field(e);
+        REQUIRE(offer_editor_key(*e.ui, key_event(EditorKey::left)) == KeyDisposition::consumed);
+        REQUIRE(offer_editor_key(*e.ui, key_event(EditorKey::left, 0, 0, true)) ==
                 KeyDisposition::consumed);
         e.ui->with_context(
             [&](Rml::Context& ctx) { ctx.GetDocument(0)->GetElementById("field")->Blur(); });
-        REQUIRE(offer_editor_key(*e.ui, release) == KeyDisposition::consumed);
-        REQUIRE(field_value(e) == "ab ");
+        auto left_release = key_event(EditorKey::left);
+        left_release.is_down = false;
+        REQUIRE(offer_editor_key(*e.ui, left_release) == KeyDisposition::consumed);
+
+        // Printable contract keys have no physical Key value. Their character
+        // identity keeps overlapping presses paired with the right releases.
+        focus_field(e);
+        REQUIRE(offer_editor_key(*e.ui, key_event(EditorKey::none, U'x')) ==
+                KeyDisposition::consumed);
+        REQUIRE(offer_editor_key(*e.ui, key_event(EditorKey::none, U'y')) ==
+                KeyDisposition::consumed);
+        REQUIRE(field_value(e) == "ab  xy");
+        auto x_release = key_event(EditorKey::none, U'x');
+        x_release.is_down = false;
+        auto y_release = key_event(EditorKey::none, U'y');
+        y_release.is_down = false;
+        REQUIRE(offer_editor_key(*e.ui, x_release) == KeyDisposition::consumed);
+        REQUIRE(offer_editor_key(*e.ui, y_release) == KeyDisposition::consumed);
+        REQUIRE(field_value(e) == "ab  xy");
         e.ui->detach();
     }
 }

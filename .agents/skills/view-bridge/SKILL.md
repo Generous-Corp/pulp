@@ -86,7 +86,8 @@ it and its tests, and both look like bugs until you know them:
   `forward`, so a text field in an RmlUi editor loses Space to the host's
   transport unless the editor answers; `offer_editor_key` applies the shared
   policy (take the key only while a text field has focus) and types the key's
-  character. A field needs an `id` to be refocused after the window regains
+  character. Repeats and releases keep the initial press disposition through
+  focus changes. A field needs an `id` to be refocused after the window regains
   focus. It applies queued pointer input before deciding, so a click on a
   field that has not landed yet still routes the next key into the field.
 - **RmlUi frames hold one process-wide lock; input does not wait for it.**

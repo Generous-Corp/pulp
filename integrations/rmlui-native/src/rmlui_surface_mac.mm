@@ -18,7 +18,7 @@
 #include <deque>
 #include <type_traits>
 #include <memory>
-#include <set>
+#include <map>
 #include <utility>
 #include <variant>
 
@@ -118,8 +118,24 @@ struct RmlUiSurface::Impl {
     std::uint32_t height_px = 0;
     double scale = 1.0;
     bool text_focus = false;
-    // Keys whose press a text field took, so only their releases are its own.
-    std::set<Key> consumed_presses;
+    // The disposition of each key press, so repeats and releases keep the
+    // original host/client owner even if focus changes while it is held. For
+    // contract-only printable keys, `characters` is the stable identity when
+    // there is no physical Key value.
+    struct PressIdentity {
+        Key key = Key::unknown;
+        std::uint16_t native_code = 0;
+        std::string characters;
+
+        bool operator<(const PressIdentity& other) const noexcept {
+            if (key != other.key)
+                return key < other.key;
+            if (native_code != other.native_code)
+                return native_code < other.native_code;
+            return characters < other.characters;
+        }
+    };
+    std::map<PressIdentity, bool> press_dispositions;
     // The text field blurred when the window lost focus, by id.
     std::string refocus_id;
 
@@ -375,6 +391,48 @@ struct RmlUiSurface::Impl {
         return consumed;
     }
 
+    PressIdentity press_identity(const KeyEvent& event) const {
+        // Characters distinguish simultaneous contract-only printable keys;
+        // physical keys already have a stable Key/native_code identity.
+        return {event.key, event.native_code,
+                event.key == Key::unknown ? event.characters : std::string()};
+    }
+
+    auto find_press(const KeyEvent& event) {
+        const auto identity = press_identity(event);
+        auto it = press_dispositions.find(identity);
+        if (it != press_dispositions.end() ||
+            (event.key != Key::unknown || !event.characters.empty()))
+            return it;
+
+        // Some hosts omit characters on a release. If exactly one unknown
+        // press with this native code is active, it is still unambiguous.
+        auto candidate = press_dispositions.end();
+        for (auto current = press_dispositions.begin(); current != press_dispositions.end();
+             ++current) {
+            if (current->first.key == event.key &&
+                current->first.native_code == event.native_code) {
+                if (candidate != press_dispositions.end())
+                    return press_dispositions.end();
+                candidate = current;
+            }
+        }
+        return candidate;
+    }
+
+    bool deliver_taken_key(const KeyEvent& event) {
+        bool taken = on_key(event);
+        const bool command = (event.modifiers & (modifier_command | modifier_control)) != 0;
+        if (event.kind == KeyKind::down && !command && !event.characters.empty()) {
+            const auto lead = static_cast<unsigned char>(event.characters.front());
+            if (lead >= 0x20 && lead != 0x7f) {
+                on_text(event.characters);
+                taken = true;
+            }
+        }
+        return taken;
+    }
+
     void on_text(const std::string& text) {
         {
             std::lock_guard lock(rmlui_mutex());
@@ -414,7 +472,7 @@ struct RmlUiSurface::Impl {
         surface.reset();
         text_focus = false;
         refocus_id.clear();
-        consumed_presses.clear();
+        press_dispositions.clear();
         width_px = height_px = 0;
     }
 };
@@ -551,30 +609,30 @@ bool RmlUiSurface::offer_key(const KeyEvent& event) {
     // The queue is main-thread only, so it is read without a lock.
     if (!d.queued.empty())
         flush_input();
-    // A release follows its press: it is the field's only if the field took
-    // the press, wherever focus has gone since.
-    if (event.kind == KeyKind::up) {
-        if (d.consumed_presses.erase(event.key) == 0)
+    // Repeats and releases follow the initial disposition, wherever focus has
+    // gone since. This keeps a host-owned press from losing its key-up when a
+    // field gains focus, and keeps a field-owned press paired after a blur.
+    if (event.kind == KeyKind::up || event.repeat) {
+        if (auto it = d.find_press(event); it != d.press_dispositions.end()) {
+            const bool taken = it->second;
+            if (event.kind == KeyKind::up)
+                d.press_dispositions.erase(it);
+            if (taken && event.kind == KeyKind::down)
+                d.deliver_taken_key(event);
+            else if (taken && event.kind == KeyKind::up)
+                d.on_key(event);
+            return taken;
+        }
+        if (event.kind == KeyKind::up)
             return false;
-        d.on_key(event);
-        return true;
     }
     // The shared policy: with no text field focused the host goes first.
-    if (route_key(event, d.text_focus) == KeyRoute::host)
+    if (route_key(event, d.text_focus) == KeyRoute::host) {
+        d.press_dispositions.emplace(d.press_identity(event), false);
         return false;
-    bool taken = d.on_key(event);
-    // Text a key produced arrives as text, not as a key, so a host that
-    // consumed the key leaves it to the surface to type it.
-    const bool command = (event.modifiers & (modifier_command | modifier_control)) != 0;
-    if (event.kind == KeyKind::down && !command && !event.characters.empty()) {
-        const auto lead = static_cast<unsigned char>(event.characters.front());
-        if (lead >= 0x20 && lead != 0x7f) {
-            d.on_text(event.characters);
-            taken = true;
-        }
     }
-    if (taken && event.key != Key::unknown)
-        d.consumed_presses.insert(event.key);
+    const bool taken = d.deliver_taken_key(event);
+    d.press_dispositions.emplace(d.press_identity(event), taken);
     return taken;
 }
 

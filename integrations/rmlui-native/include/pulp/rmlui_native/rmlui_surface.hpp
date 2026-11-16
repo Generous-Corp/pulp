@@ -112,8 +112,9 @@ class RmlUiSurface {
     /// on Space, say). Returns true when the surface took it: a text field has
     /// focus, and RmlUi consumed the key or the key produced text, which is
     /// delivered to the field. Returns false, without touching RmlUi, when no
-    /// text field has focus, so the host keeps its shortcuts. A release
-    /// while a field has focus is always taken, mirroring the press. Pointer
+    /// text field has focus, so the host keeps its shortcuts. Repeats and
+    /// releases keep the initial press disposition even if focus changes while
+    /// the key is held. Pointer
     /// input queued behind a frame is applied first, so a click on a field
     /// that has not landed yet still decides where the key goes. Main thread.
     bool offer_key(const pulp::native::KeyEvent& event);

@@ -90,6 +90,9 @@ inline pulp::native::KeyEvent native_key_event_for(const pulp::format::EditorKey
             out.characters.push_back(static_cast<char>(0x80 | (c & 0x3F)));
         }
     }
+    // Keep the composed character on unknown contract keys: the native
+    // surface uses this UTF-8 identity to pair printable repeats and releases
+    // even though EditorKey::none has no physical Key value.
     return out;
 }
 
