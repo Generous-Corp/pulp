@@ -235,12 +235,14 @@ struct Editor {
     /// tick. Tick until the context has the wanted size, within a deadline.
     bool sync_context_size(Rml::Vector2i want, double seconds = 5.0) {
         bool synced = false;
-        const auto until = std::chrono::steady_clock::now() + std::chrono::duration<double>(seconds);
+        const auto until =
+            std::chrono::steady_clock::now() + std::chrono::duration<double>(seconds);
         while (!synced && std::chrono::steady_clock::now() < until) {
             ui->idle();
             ui->with_context([&](Rml::Context& ctx) { synced = ctx.GetDimensions() == want; });
             if (!synced)
-                [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+                [[NSRunLoop currentRunLoop]
+                    runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
         }
         return synced;
     }
@@ -656,7 +658,9 @@ TEST_CASE("an attach without a density ratio says so once, and one with it does 
         // Declared after `messages`: restores the sink on an assertion unwind too,
         // before `messages` is destroyed.
         struct SinkReset {
-            ~SinkReset() { set_diagnostic_sink({}); }
+            ~SinkReset() {
+                set_diagnostic_sink({});
+            }
         } sink_reset;
         for (int i = 0; i < 2; ++i) {
             Editor e;
