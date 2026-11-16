@@ -535,6 +535,12 @@ TEST_CASE("Edge probe attach/detach hammered against a running process() stays c
         }
     });
 
+    // Start hammering only once process() is running, so the cycles overlap
+    // it even on a loaded host that schedules the audio thread late.
+    for (int spins = 0; spins < 5'000'000 && blocks.load(std::memory_order_relaxed) == 0; ++spins)
+        std::this_thread::yield();
+    REQUIRE(blocks.load() > 0);
+
     constexpr int kCycles = 2000;
     int attached = 0;
     int busy = 0;
