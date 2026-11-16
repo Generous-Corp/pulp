@@ -298,7 +298,7 @@ void send_pointer_event(Display* dpy, Window target, int type, int x, int y,
                           ? PointerMotionMask
                           : (type == ButtonPress ? ButtonPressMask : ButtonReleaseMask);
     XSendEvent(dpy, target, False, mask, &ev);
-    XFlush(dpy);
+    XSync(dpy, False);
 }
 
 } // namespace
@@ -337,20 +337,30 @@ TEST_CASE("X11 plugin host runs the XDND target handshake into dispatch_drop",
     Window inner = XCreateSimpleWindow(src, outer, 11, 13, 240, 190, 0, 0, 0);
     XMapWindow(src, outer);
     XMapWindow(src, inner);
-    XFlush(src);
+    // The host reparents from another connection; flushing does not establish
+    // that the server has created these parent windows yet.
+    XSync(src, False);
     host->attach_to_parent(reinterpret_cast<void*>(static_cast<uintptr_t>(inner)));
     Window child = static_cast<Window>(reinterpret_cast<uintptr_t>(host->native_handle()));
     REQUIRE(child != 0);
 
     host->set_scale_factor(1.0f);
+    auto pump_until = [&](int expected, const int& observed) {
+        for (int i = 0; i < 100 && observed < expected; ++i) {
+            host->pump_x_events();
+            if (observed < expected)
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        REQUIRE(observed == expected);
+    };
     constexpr int child_local_x = 40;
     constexpr int child_local_y = 30;
     send_pointer_event(src, child, ButtonPress, child_local_x, child_local_y);
-    host->pump_x_events();
+    pump_until(1, zone->pointer_downs);
     send_pointer_event(src, child, MotionNotify, child_local_x + 15, child_local_y + 5);
-    host->pump_x_events();
+    pump_until(1, zone->pointer_drags);
     send_pointer_event(src, child, ButtonRelease, child_local_x + 15, child_local_y + 5);
-    host->pump_x_events();
+    pump_until(1, zone->pointer_ups);
     CHECK(zone->pointer_downs == 1);
     CHECK(zone->pointer_drags == 1);
     CHECK(zone->pointer_ups == 1);
