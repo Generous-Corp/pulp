@@ -218,7 +218,7 @@ tresult PLUGIN_API ContractPlugView::onSize(ViewRect* newSize) {
     if (!session_->set_host_size(width, height, snapped))
         return kResultFalse;
     ViewRect applied(0, 0, static_cast<int32>(width), static_cast<int32>(height));
-    const auto result = CPluginView::onSize(snapped ? &applied : newSize);
+    const auto result = CPluginView::onSize(&applied);
     return result;
 }
 

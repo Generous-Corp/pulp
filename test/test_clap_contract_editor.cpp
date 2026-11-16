@@ -685,10 +685,19 @@ TEST_CASE("a CLAP host that calls set_size without adjust_size gets the snapped 
     REQUIRE(host.resize_requests == std::vector<std::string>{"400x300"});
     host.accept_resize = true;
 
-    // One pixel off the aspect is not snapped; on the aspect asks for nothing.
+    // One pixel off the aspect is not asked back, but the editor still gets
+    // the constrained size, never one outside its limits; on the aspect asks
+    // for nothing.
     host.resize_requests.clear();
     REQUIRE(p.gui->set_size(p.plugin, 640, 481));
-    REQUIRE(contract_log().saw("set_size:640x481"));
+    REQUIRE(contract_log().saw("set_size:640x480"));
+    REQUIRE_FALSE(settle.armed());
+    REQUIRE(p.gui->set_size(p.plugin, 199, 150));
+    REQUIRE(contract_log().saw("set_size:200x150"));
+    REQUIRE_FALSE(contract_log().saw("set_size:199x150"));
+    REQUIRE(p.gui->set_size(p.plugin, 801, 601));
+    REQUIRE(contract_log().saw("set_size:800x600"));
+    REQUIRE_FALSE(contract_log().saw("set_size:801x601"));
     REQUIRE_FALSE(settle.armed());
     REQUIRE(p.gui->set_size(p.plugin, 640, 480));
     settle.fire();

@@ -184,13 +184,13 @@ class ContractEditorSession : public std::enable_shared_from_this<ContractEditor
     /// own size. False when nothing usable results.
     bool constrain(std::uint32_t& width, std::uint32_t& height) const;
     /// A size the host chose without asking `constrain()` first: the editor
-    /// takes the constrained size, and `snapped` is true when that differs from
-    /// the host's. Once host sizes stop arriving for `kSnapSettleMs`, the
+    /// always takes the constrained size, and `snapped` is true when that
+    /// differs from the host's by more than a pixel. Once host sizes stop arriving for `kSnapSettleMs`, the
     /// session asks the host for the snapped size through the
     /// `request_resize` hook, from the main loop and never from inside the
     /// host's own call or while a drag is still sending sizes; a later size
-    /// that already fits cancels the request. A difference of one pixel is not
-    /// snapped. A fixed-size editor takes no host size at all: it keeps its
+    /// that already fits cancels the request. A difference of one pixel is
+    /// given to the editor but not asked back. A fixed-size editor takes no host size at all: it keeps its
     /// own, and the host is asked for that size the same way. False when the
     /// editor refuses a size.
     bool set_host_size(std::uint32_t& width, std::uint32_t& height, bool& snapped);

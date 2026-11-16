@@ -364,10 +364,12 @@ bool ContractEditorSession::set_host_size(std::uint32_t& width, std::uint32_t& h
             cancel_snap_request();
         return true;
     }
+    // The editor always gets the constrained size, even a pixel outside its
+    // limits; the tolerance only decides whether the host is asked for it back.
     std::uint32_t w = width;
     std::uint32_t h = height;
-    if (constrain(w, h) && (differs(w, width) || differs(h, height)))
-        snapped = true;
+    if (constrain(w, h))
+        snapped = differs(w, width) || differs(h, height);
     else {
         w = width;
         h = height;

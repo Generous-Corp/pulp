@@ -1095,12 +1095,23 @@ TEST_CASE(
     REQUIRE(frame.requests == std::vector<std::string>{"400x300"});
     frame.accept = true;
 
-    // One pixel off the aspect is rounding: the editor takes the host's size
-    // and nothing is asked back.
+    // One pixel off the aspect is rounding: the editor still gets the
+    // constrained size, and nothing is asked back.
     frame.requests.clear();
     Steinberg::ViewRect one_off(0, 0, 640, 481);
     REQUIRE(view->onSize(&one_off) == Steinberg::kResultTrue);
-    REQUIRE(g_log.saw("set_size:640x481"));
+    REQUIRE(g_log.saw("set_size:640x480"));
+    REQUIRE_FALSE(settle.armed());
+    // One pixel outside the limits: the editor is never handed it.
+    Steinberg::ViewRect under_min(0, 0, 199, 150);
+    REQUIRE(view->onSize(&under_min) == Steinberg::kResultTrue);
+    REQUIRE(g_log.saw("set_size:200x150"));
+    REQUIRE_FALSE(g_log.saw("set_size:199x150"));
+    REQUIRE_FALSE(settle.armed());
+    Steinberg::ViewRect over_max(0, 0, 801, 601);
+    REQUIRE(view->onSize(&over_max) == Steinberg::kResultTrue);
+    REQUIRE(g_log.saw("set_size:800x600"));
+    REQUIRE_FALSE(g_log.saw("set_size:801x601"));
     REQUIRE_FALSE(settle.armed());
     settle.fire();
     REQUIRE(frame.requests.empty());

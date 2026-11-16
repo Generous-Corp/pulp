@@ -165,9 +165,10 @@ own size. The macOS standalone window holds a live drag to the same
 limits and aspect, and opens inside the screen's usable frame
 (`detail::fit_size_to_area`).
 
-AU v2 has no size negotiation, so a host that resizes the container by hand is
-snapped by the container itself: a resizable editor's frame is moved inside its
-limits and aspect before `set_size()`. A fixed-size editor's frame returns to
+AU v2 has no size negotiation, so a host that resizes the container by hand goes
+through the same call: during a drag the frame stays at the host's size and the
+editor gets the constrained size at once, and the frame moves there later
+through the debounced request. A fixed-size editor's frame returns to
 the editor's size and the editor is told nothing.
 
 ## Keys
