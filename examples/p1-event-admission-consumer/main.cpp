@@ -971,11 +971,13 @@ void voice_bank_controls(const VoiceObservation& obs) {
 // ParameterEventQueue offsets for inject_parameter_events into a PluginSlot
 // node in the same graph. A graph-authored lane producer in that graph emits at
 // absolute targets, and voice intent is published to a VoiceBankBinding over
-// the same blocks. The runtime has no shared epoch: each native epoch is
-// mapped to the test epoch and must stay constant for the whole run.
+// the same blocks. The runtime has no shared epoch: the trigger and voice
+// native epochs are mapped to the test epoch and must stay constant for the
+// whole run. The MIDI and parameter mailboxes have no runtime epoch, so their
+// map entries are the test epoch and 0 and only fill the table.
 //
-// Across runs the MIDI, parameter and trigger epochs belong to a fresh graph
-// and repeat exactly. Voice-bank epochs come from one process-wide sequence,
+// Across runs the trigger epoch belongs to a fresh graph and repeats exactly.
+// Voice-bank epochs come from one process-wide sequence,
 // so every run's freshly prepared bank must carry a different epoch; equal
 // voice epochs across two runs would mean a bank reused a retired epoch.
 

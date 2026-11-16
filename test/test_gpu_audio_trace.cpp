@@ -21,7 +21,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <limits>
 #include <memory>
 #include <sstream>
@@ -420,7 +419,6 @@ TEST_CASE("strict P4 raw writer emits a complete campaign envelope", "[gpu_audio
           std::string::npos);
     CHECK(output.str().find("\"provider_asset_sha256\":\"" + manifest.provider_asset_sha256) !=
           std::string::npos);
-    std::ofstream("/tmp/pulp-p4-raw-writer-test.jsonl") << output.str();
 }
 
 TEST_CASE("GPU audio trace records require ordered timestamps and preserve unavailable GPU time",

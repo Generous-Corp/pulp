@@ -129,6 +129,43 @@ TEST_CASE(
     }
 }
 
+TEST_CASE("Engine split results map to distinct graph errors", "[host][spectral-fault]") {
+    using pulp::host::SpectralError;
+    using pulp::host::to_spectral_error;
+    using R = pulp::signal::SpectralSplitResult;
+    REQUIRE(to_spectral_error(R::Ok) == SpectralError::None);
+    REQUIRE(to_spectral_error(R::NotPrepared) == SpectralError::UnsupportedOperation);
+    REQUIRE(to_spectral_error(R::InvalidBlock) == SpectralError::CapacityExceeded);
+    REQUIRE(to_spectral_error(R::CapacityExceeded) == SpectralError::CapacityExceeded);
+    REQUIRE(to_spectral_error(R::InvalidFrame) == SpectralError::InvalidFrame);
+    REQUIRE(to_spectral_error(R::ChronologyExhausted) == SpectralError::ChronologyExhausted);
+    REQUIRE(to_spectral_error(R::NonfiniteSynthesis) == SpectralError::SynthesisOverflow);
+    REQUIRE(to_spectral_error(R::StreamStopped) == SpectralError::SynthesisOverflow);
+    REQUIRE(to_spectral_error(R::OutputUnderrun) == SpectralError::OutputUnderrun);
+}
+
+TEST_CASE("Nodes downstream of a fatal asset source report the upstream fatal, not its cause",
+          "[host][spectral-asset-morph][spectral-fault]") {
+    AssetFaultGraph f;
+    std::array<float, 512> input{}, scratch{};
+    // A morph amount outside [0, 1] latches InvalidFrame at the source. Nothing
+    // downstream ran out of capacity, so no node may report CapacityExceeded.
+    input.fill(1.5f);
+    for (int block = 0; block < 3; ++block) {
+        f.bank.begin_block();
+        f.process(f.source, input, scratch);
+        f.process(f.stage, input, scratch);
+        f.process(f.wet, input, scratch);
+        f.process(f.sibling, input, scratch);
+    }
+    using pulp::host::SpectralError;
+    REQUIRE(f.bank.find(f.source)->first_error == SpectralError::InvalidFrame);
+    for (const auto id : {f.stage, f.wet, f.sibling}) {
+        INFO("node " << id);
+        REQUIRE(f.bank.find(id)->first_error == SpectralError::UpstreamFatal);
+    }
+}
+
 TEST_CASE("Routed late synthesis failure preserves prefix and independent sibling",
           "[host][spectral-fault][spectral-fatal-prefix]") {
     FaultGraph bad, reference;
@@ -183,6 +220,7 @@ TEST_CASE("Frame capacity failure carries a fatal marker without a payload slot"
     f.process(f.stage, input, output);
     REQUIRE(f.bank.find(f.wet)->input->fatal);
     REQUIRE(f.bank.find(f.stage)->sequence == 1);
+    REQUIRE(f.bank.find(f.stage)->first_error == pulp::host::SpectralError::UpstreamFatal);
     f.process(f.wet, input, output);
     for (float value : output)
         REQUIRE(value == 0);
