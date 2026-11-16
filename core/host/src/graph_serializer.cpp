@@ -617,7 +617,8 @@ bool parse_type(std::string_view s, NodeType& out) {
 
 // The authored identity key (without its ordinal) of one saved node record,
 // computed from the record exactly as the loader rebuilds the node:
-//   - a "processor" record restores a Plugin node with no unique id;
+//   - a "processor" record restores a Plugin node with no unique id, and
+//     must carry a name;
 //   - a "plugin" record keeps its plugin.unique_id;
 //   - a "custom" record uses custom.type_id and custom.version (1 when
 //     absent), and an unknown type string restores as a custom node of that
@@ -635,8 +636,18 @@ std::optional<std::string> saved_record_identity_key(const V& node, std::string&
     }
     const std::string type(node["type"].getString());
     std::string name(node["name"].getString());
-    if (type == "processor")
+    if (type == "processor") {
+        // The loader names an unnamed Processor node after its restored
+        // descriptor, which inspection cannot know. The writer never records
+        // an empty Processor name: a Processor node added without a name
+        // takes its descriptor name, which descriptor validation requires.
+        if (name.empty()) {
+            detail = "processor node record " + id +
+                     " requires a name; its restored identity cannot be determined";
+            return std::nullopt;
+        }
         return identity_key(NodeType::Plugin, name, {}, {}, 0);
+    }
     NodeType parsed = NodeType::Custom;
     const bool known = parse_type(type, parsed);
     if (parsed == NodeType::Plugin) {
@@ -1465,6 +1476,12 @@ GraphDocumentInspection GraphSerializer::inspect_document(std::string_view json)
                            std::numeric_limits<NodeId>::max();
             };
             if (root.hasObjectMember("nodes") && root["nodes"].isArray()) {
+                // The loader creates nodes in array order and numbers each
+                // identity's ordinal in that order, while identities are
+                // written in persisted id order. The writer lists node records
+                // in ascending id order, so a record out of that order would
+                // restore with a different ordinal than its identity names.
+                std::int64_t previous_id = 0;
                 for (std::uint32_t i = 0; i < root["nodes"].size(); ++i) {
                     const auto& node = root["nodes"][i];
                     if (!node.isObject() || !node.hasObjectMember("id") ||
@@ -1476,6 +1493,15 @@ GraphDocumentInspection GraphSerializer::inspect_document(std::string_view json)
                             "two node records share id " + std::to_string(node["id"].getInt64());
                         return result;
                     }
+                    if (node["id"].getInt64() < previous_id) {
+                        result.refusal = GraphDocumentRefusal::NodeIdInvalid;
+                        result.detail = "nodes[" + std::to_string(i) + "].id " +
+                                        std::to_string(node["id"].getInt64()) +
+                                        " is out of order; node records must be listed in "
+                                        "ascending id order";
+                        return result;
+                    }
+                    previous_id = node["id"].getInt64();
                 }
             }
             for (std::uint32_t i = 0; i < identities.size(); ++i) {
@@ -2105,6 +2131,21 @@ saved_identity_document(const SignalGraph& graph,
         return {};
     try {
         auto root = choc::json::parse(raw);
+        // Inspection requires node records in ascending id order, the order
+        // the identity ordinals are counted in.
+        if (root.hasObjectMember("nodes") && root["nodes"].isArray()) {
+            const auto records = root["nodes"];
+            std::vector<std::uint32_t> order(records.size());
+            for (std::uint32_t i = 0; i < records.size(); ++i)
+                order[i] = i;
+            std::stable_sort(order.begin(), order.end(), [&](auto a, auto b) {
+                return records[a]["id"].getInt64() < records[b]["id"].getInt64();
+            });
+            auto sorted = choc::value::createEmptyArray();
+            for (const auto i : order)
+                sorted.addArrayElement(choc::value::Value(records[i]));
+            root.setMember("nodes", sorted);
+        }
         auto identities = choc::value::createEmptyArray();
         auto bindings = choc::value::createObject("Bindings");
         std::unordered_map<std::string, std::size_t> ordinals;

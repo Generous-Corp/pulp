@@ -730,22 +730,185 @@ TEST_CASE("saved document restore binds each identity to its persisted node",
     CHECK(loaded.node(ok.persisted_node_ids.at(first))->gain == 0.5f);
 
     // Swap the two node records: the loader numbers nodes in array order, so
-    // node:gain:G:0 would come back bound to the 1.0 gain node.
+    // node:gain:G:0 would come back bound to the 1.0 gain node. Inspection
+    // refuses the out-of-order records before anything is loaded.
+    const auto original = choc::json::parse(saved);
     auto root = choc::json::parse(saved);
     auto nodes = choc::value::createEmptyArray();
-    nodes.addArrayElement(choc::value::Value(root["nodes"][1]));
-    nodes.addArrayElement(choc::value::Value(root["nodes"][0]));
+    nodes.addArrayElement(choc::value::Value(original["nodes"][1]));
+    nodes.addArrayElement(choc::value::Value(original["nodes"][0]));
     root.setMember("nodes", nodes);
     const auto swapped = choc::json::toString(root, true);
-    REQUIRE(GraphSerializer::inspect_document(swapped).ok());
+    const auto inspection = GraphSerializer::inspect_document(swapped);
+    INFO(inspection.detail);
+    CHECK(inspection.refusal == GraphDocumentRefusal::NodeIdInvalid);
+    CHECK(inspection.detail.find("ascending id order") != std::string::npos);
+    CHECK(diff_graph_documents(saved, swapped).code == GraphDocumentDiffCode::AfterRefused);
     (void)second;
 
+    // A populated destination survives the refusal untouched.
     SignalGraph target;
+    const auto kept_input = target.add_input_node(1, "Kept In");
+    const auto kept_gain = target.add_gain_node("Kept");
+    REQUIRE(target.connect(kept_input, 0, kept_gain, 0));
+    const auto before = GraphSerializer::to_saved_document(target);
     const auto refused = GraphSerializer::from_saved_document(target, swapped);
     INFO(refused.error);
     CHECK_FALSE(refused.ok);
+    CHECK(refused.error.find("node_id_invalid") != std::string::npos);
+    REQUIRE(target.nodes().size() == 2);
+    CHECK(target.node(kept_input) != nullptr);
+    CHECK(target.node(kept_gain) != nullptr);
+    CHECK(target.connections().size() == 1);
+    CHECK(GraphSerializer::to_saved_document(target) == before);
+}
+
+TEST_CASE("saved document writer lists node records in ascending id order",
+          "[host][graph][history][identity]") {
+    // Removing and re-adding nodes still leaves the writer's records sorted,
+    // so its own output never meets the ordering refusal.
+    SignalGraph graph;
+    const auto first = graph.add_gain_node("G");
+    REQUIRE(graph.add_gain_node("G") != 0);
+    REQUIRE(graph.remove_node(first));
+    REQUIRE(graph.add_gain_node("G") != 0);
+    const auto saved = GraphSerializer::to_saved_document(graph);
+    const auto root = choc::json::parse(saved);
+    const auto records = root["nodes"];
+    REQUIRE(records.size() == 2);
+    CHECK(records[0]["id"].getInt64() < records[1]["id"].getInt64());
+    CHECK(GraphSerializer::inspect_document(saved).ok());
+}
+
+// A Processor whose descriptor carries no name.
+class NamelessLevel final : public pulp::format::Processor {
+  public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        pulp::format::PluginDescriptor d;
+        d.manufacturer = "Pulp Test";
+        d.bundle_id = "com.pulp.test.nameless-level";
+        d.version = "1";
+        d.input_buses = {{"In", 1, false}};
+        d.output_buses = {{"Out", 1, false}};
+        return d;
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>& out, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        out.clear();
+    }
+};
+
+TEST_CASE("saved document writer never records an unnamed Processor node",
+          "[host][graph][history][identity]") {
+    // A Processor node added without a name takes its descriptor name, and a
+    // descriptor without a name is refused, so no live Processor node is
+    // unnamed and the writer never emits a record inspection refuses.
+    SignalGraph graph;
+    const auto named = graph.add_processor_node(std::make_unique<HistoryLevel>(), "");
+    REQUIRE(named != 0);
+    CHECK(graph.node(named)->name == "HistoryLevel");
+    CHECK(graph.add_processor_node(std::make_unique<NamelessLevel>(), "") == 0);
+    CHECK(graph.nodes().size() == 1);
+
+    const auto saved = GraphSerializer::to_saved_document(graph);
+    REQUIRE_FALSE(saved.empty());
+    const auto saved_root = choc::json::parse(saved);
+    const auto records = saved_root["nodes"];
+    REQUIRE(records.size() == 1);
+    CHECK(std::string(records[0]["name"].getString()) == "HistoryLevel");
+    const auto inspection = GraphSerializer::inspect_document(saved);
+    INFO(inspection.detail);
+    REQUIRE(inspection.ok());
+
+    // Round trip through a restore and a second save.
+    LevelRegistry registry([](int) { return false; });
+    SignalGraph loaded;
+    const auto restored = GraphSerializer::from_saved_document(loaded, saved, registry.options);
+    INFO(restored.error);
+    REQUIRE(restored.ok);
+    CHECK(registry.calls == 1);
+    const auto resaved = GraphSerializer::to_saved_document(loaded);
+    REQUIRE(GraphSerializer::inspect_document(resaved).ok());
+    const auto diff = diff_graph_documents(saved, resaved);
+    INFO(diff.detail);
+    REQUIRE(diff.ok());
+    CHECK(diff.equal());
+}
+
+TEST_CASE("saved document inspection refuses an unnamed Processor record",
+          "[host][graph][history][identity]") {
+    ProcessorGraph fixture;
+    build_processor_graph(fixture);
+    const auto saved = GraphSerializer::to_saved_document(fixture.graph);
+    REQUIRE_FALSE(saved.empty());
+    const auto identities = GraphSerializer::saved_node_identities(fixture.graph);
+    const auto& level = identities.at(fixture.processor);
+    REQUIRE(level == "node:plugin:Level::0");
+
+    // Blank the record's name and rename its identity entry and binding to
+    // the empty-name identity, so the envelope stays self-consistent. The
+    // loader would name the restored node "HistoryLevel" instead.
+    const auto original = choc::json::parse(saved);
+    auto root = choc::json::parse(saved);
+    auto nodes = choc::value::createEmptyArray();
+    for (std::uint32_t i = 0; i < original["nodes"].size(); ++i) {
+        auto record = choc::value::Value(original["nodes"][i]);
+        if (record["id"].getInt64() == static_cast<std::int64_t>(fixture.processor))
+            record.setMember("name", std::string());
+        nodes.addArrayElement(record);
+    }
+    root.setMember("nodes", nodes);
+    const std::string blank = "node:plugin:::0";
+    const auto renamed = [&](const std::string& name) { return name == level ? blank : name; };
+    const auto listed = original["logical_identities"]["identities"];
+    auto entries = choc::value::createEmptyArray();
+    for (std::uint32_t i = 0; i < listed.size(); ++i) {
+        auto item = choc::value::createObject("Identity");
+        item.addMember("id", renamed(std::string(listed[i]["id"].getString())));
+        item.addMember("node_id", listed[i]["node_id"].getInt64());
+        entries.addArrayElement(item);
+    }
+    auto logical = choc::value::createObject("LogicalIdentities");
+    logical.addMember("profile",
+                      std::string(original["logical_identities"]["profile"].getString()));
+    logical.addMember("identities", entries);
+    root.setMember("logical_identities", logical);
+    const auto bound = original["bindings"];
+    auto bindings = choc::value::createObject("Bindings");
+    for (std::uint32_t i = 0; i < bound.size(); ++i) {
+        const auto member = bound.getObjectMemberAt(i);
+        bindings.addMember(renamed(std::string(member.name)), member.value.getInt64());
+    }
+    root.setMember("bindings", bindings);
+    const auto unnamed = choc::json::toString(root, true);
+    REQUIRE(unnamed.find(blank) != std::string::npos);
+
+    const auto inspection = GraphSerializer::inspect_document(unnamed);
+    INFO(inspection.detail);
+    CHECK(inspection.refusal == GraphDocumentRefusal::IdentityBindingUnknown);
+    CHECK(inspection.detail.find("requires a name") != std::string::npos);
+
+    // A populated destination survives the refusal untouched, and no restore
+    // factory runs.
+    LevelRegistry registry([](int) { return false; });
+    SignalGraph target;
+    const auto kept_input = target.add_input_node(1, "Kept In");
+    const auto kept_gain = target.add_gain_node("Kept");
+    REQUIRE(target.connect(kept_input, 0, kept_gain, 0));
+    const auto before = GraphSerializer::to_saved_document(target);
+    const auto refused = GraphSerializer::from_saved_document(target, unnamed, registry.options);
+    INFO(refused.error);
+    CHECK_FALSE(refused.ok);
     CHECK(refused.error.find("identity_binding_unknown") != std::string::npos);
-    CHECK(target.nodes().empty());
+    CHECK(registry.calls == 0);
+    REQUIRE(target.nodes().size() == 2);
+    CHECK(target.node(kept_input) != nullptr);
+    CHECK(target.node(kept_gain) != nullptr);
+    CHECK(target.connections().size() == 1);
+    CHECK(GraphSerializer::to_saved_document(target) == before);
 }
 
 // Every node kind the saved-identity writer records: built-in nodes, two
