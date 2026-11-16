@@ -50,3 +50,33 @@ TEST_CASE("Isolated CLAP callback validates adversarial peer publications", "[ho
         }
     }
 }
+
+TEST_CASE("Isolated CLAP callback emits the completion it validated, not a later rewrite",
+          "[host][isolation]") {
+    using namespace host::isolation;
+    Mapping mapping{};
+    CallbackEndpoint endpoint;
+    std::array<float, 64> in{}, left{}, right{};
+    in.fill(0.25f);
+    REQUIRE(endpoint.render(mapping, 17, left.data(), right.data(), in.data(), in.data()) ==
+            IsolationReason::none);
+    auto& completion = mapping.completions[0];
+    completion.block.generation = 17;
+    completion.block.sequence = 0;
+    completion.block.audio.fill(0.125f);
+    completion.ready.store(1, std::memory_order_release);
+    // A peer that still writes the mapping replaces every sample with NaN
+    // after the finiteness check has passed.
+    int rewrites = 0;
+    const auto reason =
+        endpoint.render(mapping, 17, left.data(), right.data(), in.data(), in.data(), [&] {
+            completion.block.audio.fill(std::numeric_limits<float>::quiet_NaN());
+            ++rewrites;
+        });
+    REQUIRE(rewrites == 1);
+    REQUIRE(reason == IsolationReason::none);
+    for (float sample : left)
+        REQUIRE(sample == 0.125f);
+    for (float sample : right)
+        REQUIRE(sample == 0.125f);
+}
