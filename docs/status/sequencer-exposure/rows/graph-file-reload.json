@@ -27,6 +27,12 @@
         "revoke_after_publication",
         "renewal refused"
       ]
+    },
+    {
+      "path": "test/test_graph_file_reload.cpp",
+      "needles": [
+        "Graph file reload receipt schema lists exactly the reload code names"
+      ]
     }
   ],
   "surfaces": {

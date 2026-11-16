@@ -38,7 +38,9 @@
         "Output clock exhaustion stops publication before arithmetic overflows",
         "Routed late synthesis failure preserves prefix and independent sibling",
         "Spectral render reset and activation allocate no callback storage",
-        "Spectral preparation refuses a forged stage cycle with no root"
+        "Spectral preparation refuses a forged stage cycle with no root",
+        "Engine split results map to distinct graph errors",
+        "Nodes downstream of a fatal asset source report the upstream fatal, not its cause"
       ]
     },
     {
