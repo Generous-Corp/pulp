@@ -510,9 +510,12 @@ bool RmlUiSurface::attach(void* parent) {
             // Textures, geometry and glyphs are prepared here, before the
             // first frame is requested, so the first frame has less to do.
             // This runs on the calling (main) thread inside the host's attach
-            // call, with rmlui_mutex() held; warm() enters its own context
-            // scope.
-            d.context->warm();
+            // call, with rmlui_mutex() held. The SDK header does not say warm()
+            // enters the instance's scope, so it runs inside one.
+            {
+                vellum::rmlui::NativeContext::Scope scope(*d.context);
+                d.context->warm();
+            }
 #endif
         }
     }
