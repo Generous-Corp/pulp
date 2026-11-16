@@ -841,7 +841,7 @@ void require_gpu_host(GraphRig& rig, const GeometryFixture& f) {
 } // namespace
 
 TEST_CASE("a self-reported Dawn status is not provider attestation",
-          "[gpu_audio][graph][resource-admission][p4]") {
+          "[gpu_audio][graph][resource-admission][device-free]") {
     // Device-free: the provider claim is derived from the authenticated
     // identity, never from the status alone.
     ConsumerObservation o;
@@ -863,7 +863,7 @@ TEST_CASE("a self-reported Dawn status is not provider attestation",
 }
 
 TEST_CASE("output tolerance checks reject non-finite samples",
-          "[gpu_audio][graph][resource-admission][p4]") {
+          "[gpu_audio][graph][resource-admission][device-free]") {
     // Device-free planted control: corrupted audio (an isolated NaN or Inf
     // output sample, or a non-finite reference) must break both tolerance
     // helpers instead of being skipped by std::max.
@@ -908,7 +908,7 @@ TEST_CASE("output tolerance checks reject non-finite samples",
 }
 
 TEST_CASE("shared admission requires unique consumers and GPU capability",
-          "[gpu_audio][graph][resource-admission]") {
+          "[gpu_audio][graph][resource-admission][device-free]") {
     // Synthetic snapshots exercise the policy without claiming provider proof.
     AdmissionManifest manifest;
     std::vector<ConsumerObservation> observed;
@@ -954,7 +954,7 @@ TEST_CASE("shared admission requires unique consumers and GPU capability",
 }
 
 TEST_CASE("staged GPU evidence rejects worker output produced only by CPU fallback",
-          "[gpu_audio][graph][resource-admission]") {
+          "[gpu_audio][graph][resource-admission][device-free]") {
     GpuAudioCapabilityReport capability;
     capability.gpu_kernel_available = true;
     GpuAudioTransport::DeliverySnapshot delivery;
@@ -970,7 +970,7 @@ TEST_CASE("staged GPU evidence rejects worker output produced only by CPU fallba
 }
 
 TEST_CASE("device loss validates each named consumer transition and tolerance",
-          "[gpu_audio][graph][resource-admission]") {
+          "[gpu_audio][graph][resource-admission][device-free]") {
     AdmissionManifest manifest;
     std::vector<ConsumerObservation> observed;
     for (const auto* id : {"neural.wavenet", "convolution.fir"}) {

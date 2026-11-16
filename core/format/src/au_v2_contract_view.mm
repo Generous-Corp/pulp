@@ -13,7 +13,9 @@
 //
 //   uiViewForAudioUnit:withSize:   -> a session (factory create) attached to
 //                                     the container, sized to the editor
-//   container -setFrameSize:       -> Editor::set_size() (the host resized it)
+//   container -setFrameSize:       -> Editor::set_size() (the host resized it;
+//                                     a resizable editor's limits and locked aspect
+//                                     are applied to the frame first)
 //   container backing scale change -> Editor::set_size() with the new scale
 //   container moves into / out of a window -> Editor::visibility_changed()
 //   key events reaching the container -> Editor::offer_key(); a forwarded key
@@ -145,12 +147,24 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
     _applyingEditorSize = false;
 }
 
+// A host that resizes the view by hand never asks the editor first (AU v2 has
+// no size negotiation). The editor gets a size inside its limits and aspect at
+// once; the frame itself is moved there by the session's snapped-size request
+// (a setFrameSize: through the request_resize hook) only after the host has
+// stopped resizing it, so a live drag is never fought. A fixed-size editor
+// takes no host size: the frame returns to its size the same way.
 - (void)setFrameSize:(NSSize)newSize {
     [super setFrameSize:newSize];
     if (_applyingEditorSize || !_session || newSize.width < 1.0 || newSize.height < 1.0)
         return;
-    _session->set_size(static_cast<std::uint32_t>(newSize.width),
-                       static_cast<std::uint32_t>(newSize.height));
+    auto width = static_cast<std::uint32_t>(newSize.width);
+    auto height = static_cast<std::uint32_t>(newSize.height);
+    if (_session->editor() == nullptr) {
+        _session->set_size(width, height);
+        return;
+    }
+    bool snapped = false;
+    _session->set_host_size(width, height, snapped);
 }
 
 // The editor's own resize request. AU v2 has no resize request: the host
@@ -170,13 +184,6 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
         return false;
     auto request_width = requested.width;
     auto request_height = requested.height;
-    if (_session->resizable()) {
-        auto limited_width = request_width;
-        auto limited_height = request_height;
-        if (!_session->constrain(limited_width, limited_height) || limited_width != request_width ||
-            limited_height != request_height)
-            return false;
-    }
     const FrameSize wanted{static_cast<double>(request_width), static_cast<double>(request_height)};
     const NSRect previous = self.frame;
     const auto current = _session->size();
@@ -189,14 +196,32 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
         pulp::format::detail::resize_request_accepted(
             wanted, {previous.size.width, previous.size.height}, true, follow_container,
             container != nil && self.window != nil,
-            {previous_container.size.width, previous_container.size.height}))
+            {previous_container.size.width, previous_container.size.height})) {
+        if (_session->has_pending_resize(request_width, request_height)) {
+            auto ack_width = request_width;
+            auto ack_height = request_height;
+            bool snapped = false;
+            _session->set_host_size(ack_width, ack_height, snapped);
+        }
         return true;
+    }
 
     _editorResizeActive = true;
     _applyingEditorSize = true;
     [super setFrameSize:NSMakeSize(wanted.width, wanted.height)];
     _applyingEditorSize = false;
-    const bool editor_took = _session->set_size(request_width, request_height);
+    // An editor-origin request is acknowledged to the session (it is exempt
+    // from the editor's own limits: the editor asked for this size); anything
+    // else is a plain size.
+    bool editor_took = false;
+    if (_session->has_pending_resize(request_width, request_height)) {
+        auto ack_width = request_width;
+        auto ack_height = request_height;
+        bool snapped = false;
+        editor_took = _session->set_host_size(ack_width, ack_height, snapped);
+    } else {
+        editor_took = _session->set_size(request_width, request_height);
+    }
     const NSRect after = self.frame;
     const NSRect after_container = container != nil ? container.frame : NSZeroRect;
     bool accepted = pulp::format::detail::resize_request_accepted(

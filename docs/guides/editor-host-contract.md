@@ -136,6 +136,52 @@ port.set(kGain, 0.75f);
 port.end(kGain);
 ```
 
+## Sizing
+
+`Editor::size_hints()` is how an editor tells every format what the host may do
+with its window. The session applies it the same way in VST3 (`canResize`,
+`checkSizeConstraint`), CLAP (`can_resize`, `get_resize_hints`, `adjust_size`)
+and AU v2 (the container's frame):
+
+- **Fixed size** is the default. An editor is resizable only when both minimums
+  are set and the bounds leave room (not `min == max` on both axes). An editor
+  that declares only a preferred size is fixed, as a ViewBridge editor is.
+- **Locked aspect.** With `aspect_ratio > 0` a proposed size snaps to the
+  largest box at that ratio that fits the request, then moves inside min/max
+  without leaving the ratio.
+- **Free resize.** With `aspect_ratio == 0` each axis is clamped to its own
+  min/max.
+- `Editor::adjust_size()` runs first; the hints still hold for an editor that
+  does not override it. `detail::constrain_to_hints()` is the same arithmetic as
+  a pure function, so a test or a widget can check a size without a host.
+
+A host can also set a size without asking first (VST3 `onSize` without
+`checkSizeConstraint`, CLAP `set_size` without `adjust_size`). The editor then
+gets the constrained size, and the adapter asks the host for that size back
+(`IPlugFrame::resizeView`, `clap_host_gui::request_resize`) so the window does
+not keep a margin the editor never paints. A fixed-size editor takes no
+unsolicited host size in any format: it is told nothing, and the host is asked for the editor's
+own size. The macOS standalone window holds a live drag to the same
+limits and aspect, and opens inside the screen's usable frame
+(`detail::fit_size_to_area`).
+
+AU v2 has no size negotiation, so a host that resizes the container by hand goes
+through the same call: during a drag the frame stays at the host's size and the
+editor gets the constrained size at once, and the frame moves there later
+through the debounced request. A fixed-size editor's frame returns to
+the editor's size and the editor is told nothing.
+
+### Editor-origin resize acknowledgments
+
+A fixed-size editor still may request a new layout through
+`EditorContext::request_resize`. Fixed sizing prevents unsolicited host resizes;
+it does not discard the host's acknowledgment of an editor request. The session
+recognizes that acknowledgment whether it arrives inside the request hook or
+later. A new editor request supersedes any pending debounced host correction.
+The standalone host delivers the accepted size to the editor before moving the
+window, returns failure if the editor refuses it, and suppresses the resulting
+native frame echo.
+
 ## Keys
 
 Hosts offer keys synchronously before acting on them (VST3 `onKeyDown`, the

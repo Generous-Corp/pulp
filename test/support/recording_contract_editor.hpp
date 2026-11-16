@@ -12,6 +12,7 @@
 
 #include <pulp/events/main_thread_dispatcher.hpp>
 #include <pulp/format/editor_host.hpp>
+#include "manual_snap_timer.hpp"
 
 #include <cstdint>
 #include <cstdlib>
@@ -50,6 +51,13 @@ struct ContractEditorLog {
 struct ContractEditorConfig {
     bool attach_succeeds = true;
     bool fixed_size = false;
+    /// Declare only a preferred size: no bounds, no aspect (a ViewSize default).
+    bool default_hints = false;
+    /// Declare bounds but no aspect ratio.
+    bool free_aspect = false;
+    /// adjust_size() returns the proposal unchanged (the Editor default), so
+    /// the session alone enforces the hints.
+    bool identity_adjust = false;
     bool factory_builds_editor = true;
     bool factory_supports_editor = true;
     /// Whether the editor offers EditorAutomation::capture_png().
@@ -160,7 +168,12 @@ class RecordingContractEditor final : public format::Editor {
         hints.min_height = 150;
         hints.max_width = 800;
         hints.max_height = 600;
-        hints.aspect_ratio = 4.0 / 3.0;
+        hints.aspect_ratio = contract_config().free_aspect ? 0.0 : 4.0 / 3.0;
+        if (contract_config().default_hints) {
+            hints.min_width = hints.min_height = 0;
+            hints.max_width = hints.max_height = 0;
+            hints.aspect_ratio = 0.0;
+        }
         if (contract_config().fixed_size) {
             hints.min_width = hints.max_width = 400;
             hints.min_height = hints.max_height = 300;
@@ -168,6 +181,8 @@ class RecordingContractEditor final : public format::Editor {
         return hints;
     }
     format::EditorSize adjust_size(const format::EditorSize& proposed) const override {
+        if (contract_config().identity_adjust)
+            return proposed;
         format::EditorSize adjusted = proposed;
         adjusted.height = proposed.width * 3 / 4;
         return adjusted;

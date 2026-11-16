@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "20261116-swarm-windows-worker-20261116",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-16T06:17:03Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/platform/include/pulp/platform/child_process.hpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "Pulp-only doc comment on start_retained: it now describes the Windows private duplex channel that retained custody supports. No declaration changed, and Vellum's framework transfer is in effect, so Vellum does not take this edit."
+}

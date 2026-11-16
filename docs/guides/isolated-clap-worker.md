@@ -117,6 +117,15 @@ remain subsequent work. Other rates/blocks, events, latency/tail shapes, Linux,
 Windows Job Objects, qualification of an installed saved configuration and the
 full paced realtime matrix remain unqualified.
 
+On Windows the slot still refuses. The transport it will use exists and is
+tested on its own: retained custody (a kill-on-close job object) now offers the
+private duplex channel, and `isolated_clap_windows_channel.hpp` carries the
+deadline-bounded control records, an unnamed section duplicated into the worker
+by handle, and the hello exchange that binds that section to one worker process
+and generation. The Windows `pulp-test-isolated-clap-protocol` cases drive that
+handshake against a peer executable that loads no vendor code. Slot launch, the
+worker loop, executable checks and the plugin fixture are not yet ported.
+
 ## Reproducing the controls
 
 Build the production companion and focused controls through the governor:
