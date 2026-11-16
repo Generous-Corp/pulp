@@ -347,8 +347,9 @@ TEST_CASE("graph save and fmt keep the saved-identity envelope that diff reads",
     // Subgraph records with no identity envelope are refused too: the
     // inspector reports the missing envelope first, which must not let the
     // rewrite fall through to the plain writer.
-    for (const char* text : {R"({"format_version":4,"nodes":[],"connections":[],"subgraphs":[]})",
-                             R"({"format_version":5,"nodes":[],"connections":[],"subgraphs":[]})"}) {
+    for (const char* text :
+         {R"({"format_version":4,"nodes":[],"connections":[],"subgraphs":[]})",
+          R"({"format_version":5,"nodes":[],"connections":[],"subgraphs":[]})"}) {
         const auto bare = dir / "records-bare.pulpgraph";
         std::ofstream(bare, std::ios::binary) << text;
         for (const std::string op : {"fmt", "canonicalize"}) {

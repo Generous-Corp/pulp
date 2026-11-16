@@ -668,8 +668,8 @@ std::optional<std::string> read_graph_document(const std::string& path, Code& co
     if (!pulp::host::GraphSerializer::read_file_bounded(path, text, message)) {
         // The serializer reader names the cause: the byte limit is a resource
         // limit, anything else (missing, changed while reading) is unreadable.
-        code = message.starts_with("graph file exceeds") ? Code::ResourceLimit
-                                                         : Code::FileUnreadable;
+        code =
+            message.starts_with("graph file exceeds") ? Code::ResourceLimit : Code::FileUnreadable;
         return std::nullopt;
     }
     return text;

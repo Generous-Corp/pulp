@@ -1732,9 +1732,8 @@ TEST_CASE("GraphSerializer::read_file_bounded verifies the file did not change w
 
     // Control: the source accepts the file above, so the failures below come
     // from the change detection, not from the document.
-    GraphSerializerTestAccess::set_after_first_read([&](const auto&) {
-        std::ofstream(path, std::ios::binary | std::ios::app) << "\n";
-    });
+    GraphSerializerTestAccess::set_after_first_read(
+        [&](const auto&) { std::ofstream(path, std::ios::binary | std::ios::app) << "\n"; });
     REQUIRE_FALSE(GraphSerializer::read_file_bounded(path, text, error));
     REQUIRE(error.find("changed while reading") != std::string::npos);
     REQUIRE(text.empty());
