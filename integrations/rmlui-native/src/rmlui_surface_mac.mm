@@ -554,8 +554,10 @@ void RmlUiSurface::visibility_changed(bool visible) {
         d.trim_gpu_resources();
         return;
     }
+    // The host says it is shown: draw now. The next idle() tick narrows that to
+    // what the window reports (occluded, minimised).
     d.surface->poll_visibility();
-    d.pump->set_on_screen(d.surface->on_screen().on_screen());
+    d.pump->set_on_screen(true);
     d.pump->request_frame();
 }
 
