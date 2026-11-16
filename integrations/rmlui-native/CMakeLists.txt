@@ -38,6 +38,13 @@ else()
     message(STATUS "rmlui-native: NativeContext::warm() not in this Vellum RmlUi SDK; the first frame draws cold")
 endif()
 set(CMAKE_TRY_COMPILE_TARGET_TYPE "${_pulp_try_compile_target_type}")
+if(NOT PULP_VELLUM_RMLUI_HAS_DENSITY_RATIO)
+    message(WARNING "rmlui-native: this Vellum RmlUi SDK has no "
+        "NativeContext::set_density_ratio. The adapter cannot apply the backing scale, so "
+        "`dp` lengths equal `px` and a document sized in `dp` renders at 1/scale of its "
+        "intended size on a high-density display. Build against a Vellum RmlUi SDK that "
+        "exports it; each attach reports this at run time too.")
+endif()
 unset(_pulp_try_compile_target_type)
 unset(CMAKE_REQUIRED_INCLUDES)
 

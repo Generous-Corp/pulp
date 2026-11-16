@@ -10,6 +10,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/format/contract_editor_session.hpp>
+#include <pulp/format/detail/au_v2_resize_accept.hpp>
 #include <pulp/format/detail/editor_size_constraint.hpp>
 #include <pulp/format/editor_host.hpp>
 #include <pulp/format/editor_package.hpp>
@@ -795,6 +796,27 @@ TEST_CASE("a hidden contract session's tick does nothing and showing it ticks at
     session->close_for_owner();
 }
 
+TEST_CASE("a session hidden, detached and attached again ticks its editor", "[editor-host]") {
+    Fixture f;
+    GainProcessor processor;
+    int idles = 0;
+    TickingFactory factory(idles);
+    auto session = ContractEditorSession::create(processor, f.store, factory, {},
+                                                 ContractEditorSession::IdleSource::host_driven);
+    REQUIRE(session);
+    int parent = 0;
+    REQUIRE(session->attach({NativeParentKind::cocoa_view, &parent, 0}));
+    session->visibility_changed(false);
+    session->tick();
+    REQUIRE(idles == 0);
+    // The hidden state belongs to the attach that was hidden.
+    session->detach();
+    REQUIRE(session->attach({NativeParentKind::cocoa_view, &parent, 0}));
+    session->tick();
+    REQUIRE(idles == 1);
+    session->close_for_owner();
+}
+
 TEST_CASE("a hidden contract session keeps draining the audio-thread change queue",
           "[editor-host]") {
     Fixture f;
@@ -1248,6 +1270,33 @@ TEST_CASE("an observation that outlives its host state is inert", "[editor-host]
     // Cancelling must not reach the destroyed state (ASan holds this).
     observation.reset();
     REQUIRE_FALSE(observation);
+}
+
+TEST_CASE("an AU v2 resize request is accepted only at the exact size the host followed",
+          "[editor-host][resize-request]") {
+    using pulp::format::detail::FrameSize;
+    using pulp::format::detail::resize_request_accepted;
+    const FrameSize wanted{720, 540};
+    const FrameSize other{700, 540};
+    // The frame took it and the editor agreed.
+    REQUIRE(resize_request_accepted(wanted, wanted, true, false, true, other));
+    // Within the half-point tolerance.
+    REQUIRE(resize_request_accepted(wanted, {720.3, 539.8}, true, false, false, other));
+    // The editor refused.
+    REQUIRE_FALSE(resize_request_accepted(wanted, wanted, false, false, true, wanted));
+    // The frame ended elsewhere.
+    REQUIRE_FALSE(resize_request_accepted(wanted, other, true, false, true, wanted));
+    // A host that resizes its container must have done so; one that does not
+    // is not asked to.
+    REQUIRE_FALSE(resize_request_accepted(wanted, wanted, true, true, true, other));
+    REQUIRE(resize_request_accepted(wanted, wanted, true, true, true, wanted));
+    REQUIRE(resize_request_accepted(wanted, wanted, true, true, false, other));
+    // The origin check is separate from the size check.
+    using pulp::format::detail::FramePoint;
+    using pulp::format::detail::same_frame_origin;
+    REQUIRE(same_frame_origin({0, 0}, {0.3, -0.2}));
+    REQUIRE_FALSE(same_frame_origin({0, 0}, {5, 0}));
+    REQUIRE_FALSE(same_frame_origin({0, 0}, {0, 5}));
 }
 
 // ── Size constraint arithmetic ───────────────────────────────────────────────

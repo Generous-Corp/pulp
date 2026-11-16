@@ -255,6 +255,9 @@ bool ContractEditorSession::attach(const NativeParent& parent) {
         runtime::log_error("editor host: the editor did not attach to the host window");
         return false;
     }
+    // A new attach starts visible: the surface a previous attach hid is gone,
+    // and a host that attaches a hidden editor says so with visibility_changed.
+    visible_ = true;
     attached_ = true;
     start_idle();
     return true;
@@ -270,6 +273,7 @@ void ContractEditorSession::detach() {
         port_->release_all();
     if (editor_ && attached_)
         editor_->detach();
+    visible_ = true;
     attached_ = false;
 }
 
@@ -285,6 +289,7 @@ void ContractEditorSession::invalidate() {
     cancel_snap_request();
     if (editor_)
         editor_->invalidate();
+    visible_ = true;
     attached_ = false;
     destroy_editor();
 }
