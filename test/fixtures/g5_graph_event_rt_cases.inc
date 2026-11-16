@@ -284,7 +284,7 @@ double p99(std::array<double, 128> values) {
 using namespace g5_rt_fixture;
 
 TEST_CASE("G5 graph event callbacks keep fixed storage across both serial backends",
-          "[host][graph][g5][events][rt]") {
+          "[host][graph][events][rt]") {
     std::array<Observation, 4> baseline{};
     constexpr std::array<std::size_t, 4> sizes{64, 128, 256, 4096};
     for (std::size_t index = 0; index < sizes.size(); ++index) {
@@ -325,7 +325,7 @@ TEST_CASE("G5 graph event callbacks keep fixed storage across both serial backen
 }
 
 TEST_CASE("G5 callback reset retires a queued graph event without allocating",
-          "[host][graph][g5][events][rt]") {
+          "[host][graph][events][rt]") {
     for (const bool routed : {false, true}) {
         for (const bool reset_requested : {false, true}) {
             struct ResetState {
@@ -408,7 +408,7 @@ TEST_CASE("G5 callback reset retires a queued graph event without allocating",
     }
 }
 
-TEST_CASE("G5 graph event callback paced measurement", "[.][host][graph][g5][events][rt][paced]") {
+TEST_CASE("G5 graph event callback paced measurement", "[.][host][graph][events][rt][paced]") {
     constexpr std::array<std::size_t, 4> sizes{64, 128, 256, 4096};
     for (const auto frames : sizes) {
         for (const bool routed : {false, true}) {
@@ -432,7 +432,7 @@ TEST_CASE("G5 graph event callback paced measurement", "[.][host][graph][g5][eve
 // Paced-timing matrix cell: the same producer/consumer graph-event chain under
 // a configurable fixed-origin callback count. Timing runs carry no scoped
 // resource probes; the oracle is the delivered payload on every block.
-TEST_CASE("G5 graph event paced matrix cell", "[.][host][graph][g5][events][paced-matrix]") {
+TEST_CASE("G5 graph event paced matrix cell", "[.][host][graph][events][paced-matrix]") {
     const auto config = pulp::test::paced::read_config("routed", 128);
     REQUIRE((config.variant == "direct" || config.variant == "routed"));
     REQUIRE(config.rate == 48000);
