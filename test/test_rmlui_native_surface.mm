@@ -223,6 +223,27 @@ struct Editor {
                                 clickCount:1
                                   pressure:1.0];
     }
+    /// A pointer event at a document position in dp. Events are in window
+    /// points and reach RmlUi in device pixels, and a dp is `density_ratio()`
+    /// device pixels: with an SDK that lacks the setter dp equals px, so on a 2x
+    /// window the same document position is fewer points.
+    NSEvent* doc_mouse(NSEventType type, double x, double y) const {
+        const double to_points = ui->density_ratio() / window.backingScaleFactor;
+        return mouse(type, x * to_points, y * to_points);
+    }
+    /// idle() only try-locks, so a frame in flight leaves a resize for a later
+    /// tick. Tick until the context has the wanted size, within a deadline.
+    bool sync_context_size(Rml::Vector2i want, double seconds = 5.0) {
+        bool synced = false;
+        const auto until = std::chrono::steady_clock::now() + std::chrono::duration<double>(seconds);
+        while (!synced && std::chrono::steady_clock::now() < until) {
+            ui->idle();
+            ui->with_context([&](Rml::Context& ctx) { synced = ctx.GetDimensions() == want; });
+            if (!synced)
+                [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+        }
+        return synced;
+    }
     template <class Pred> bool wait_for(Pred done, double seconds = 5.0) {
         const auto until =
             std::chrono::steady_clock::now() + std::chrono::duration<double>(seconds);
@@ -372,8 +393,8 @@ TEST_CASE("a focused RmlUi text field takes the keyboard and receives text",
         REQUIRE(face != 0);
         REQUIRE_FALSE(e.ui->surface()->text_focus());
         // Past the end of the text, so the caret lands after "ab".
-        [e.view() mouseDown:e.mouse(NSEventTypeLeftMouseDown, 190, 115)];
-        [e.view() mouseUp:e.mouse(NSEventTypeLeftMouseUp, 190, 115)];
+        [e.view() mouseDown:e.doc_mouse(NSEventTypeLeftMouseDown, 190, 115)];
+        [e.view() mouseUp:e.doc_mouse(NSEventTypeLeftMouseUp, 190, 115)];
         e.ui->flush_input();
         REQUIRE(e.ui->surface()->text_focus());
         id<NSTextInputClient> client = (id<NSTextInputClient>)e.view();
@@ -400,11 +421,12 @@ TEST_CASE("the RmlUi context follows the surface size", "[native-surface][rmlui]
         REQUIRE(e.attach());
         const double scale = e.window.backingScaleFactor;
         [e.window setContentSize:NSMakeSize(400, 260)];
-        e.ui->idle();
+        const Rml::Vector2i want(static_cast<int>(400 * scale), static_cast<int>(260 * scale));
+        REQUIRE(e.sync_context_size(want));
         Rml::Vector2i size;
         e.ui->with_context([&](Rml::Context& ctx) { size = ctx.GetDimensions(); });
-        REQUIRE(size.x == static_cast<int>(400 * scale));
-        REQUIRE(size.y == static_cast<int>(260 * scale));
+        REQUIRE(size.x == want.x);
+        REQUIRE(size.y == want.y);
         e.ui->detach();
     }
 }
@@ -631,6 +653,11 @@ TEST_CASE("an attach without a density ratio says so once, and one with it does 
     @autoreleasepool {
         std::vector<std::string> messages;
         set_diagnostic_sink([&](const std::string& m) { messages.push_back(m); });
+        // Declared after `messages`: restores the sink on an assertion unwind too,
+        // before `messages` is destroyed.
+        struct SinkReset {
+            ~SinkReset() { set_diagnostic_sink({}); }
+        } sink_reset;
         for (int i = 0; i < 2; ++i) {
             Editor e;
             REQUIRE(e.attach());
@@ -790,8 +817,8 @@ TEST_CASE("a click queued behind a frame lands before the text typed after it",
             e.ui->request_frame();
             [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.008]];
             const auto t0 = std::chrono::steady_clock::now();
-            [e.view() mouseDown:e.mouse(NSEventTypeLeftMouseDown, 190, 115)];
-            [e.view() mouseUp:e.mouse(NSEventTypeLeftMouseUp, 190, 115)];
+            [e.view() mouseDown:e.doc_mouse(NSEventTypeLeftMouseDown, 190, 115)];
+            [e.view() mouseUp:e.doc_mouse(NSEventTypeLeftMouseUp, 190, 115)];
             // Returned without waiting: the frame was in flight, so the click
             // is queued and the field is not focused yet.
             queued =
