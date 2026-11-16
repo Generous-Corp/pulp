@@ -682,16 +682,28 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
     SECURITY_ATTRIBUTES sa{};
     sa.nLength = sizeof(sa);
     sa.bInheritHandle = TRUE;
-    HANDLE null_stdin = INVALID_HANDLE_VALUE;
+    HANDLE owned_stdin = INVALID_HANDLE_VALUE;
     HANDLE null_stdout = INVALID_HANDLE_VALUE;
     HANDLE null_stderr = INVALID_HANDLE_VALUE;
 
-    si.hStdInput = standard_input_session ? duplex.child
-                   : has_standard_input   ? impl_->standard_input.read_end
-                                          : GetStdHandle(STD_INPUT_HANDLE);
+    if (standard_input_session) {
+        si.hStdInput = duplex.child;
+    } else if (has_standard_input) {
+        si.hStdInput = impl_->standard_input.read_end;
+    } else {
+        // The handle list below admits only inheritable handles, and the
+        // parent's own standard input need not be one, so the child receives
+        // an inheritable duplicate that is closed after the launch.
+        const HANDLE parent_stdin = GetStdHandle(STD_INPUT_HANDLE);
+        if (is_valid_handle(parent_stdin) &&
+            !DuplicateHandle(GetCurrentProcess(), parent_stdin, GetCurrentProcess(), &owned_stdin,
+                             0, TRUE, DUPLICATE_SAME_ACCESS))
+            owned_stdin = INVALID_HANDLE_VALUE;
+        si.hStdInput = owned_stdin;
+    }
     if (!is_valid_handle(si.hStdInput)) {
-        null_stdin = open_null_device(GENERIC_READ, sa);
-        si.hStdInput = null_stdin;
+        owned_stdin = open_null_device(GENERIC_READ, sa);
+        si.hStdInput = owned_stdin;
     }
 
     if (options.capture_stdout) {
@@ -712,8 +724,8 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
         impl_->standard_input.close_all();
         impl_->stdout_pipe.close_all();
         impl_->stderr_pipe.close_all();
-        if (is_valid_handle(null_stdin))
-            CloseHandle(null_stdin);
+        if (is_valid_handle(owned_stdin))
+            CloseHandle(owned_stdin);
         if (is_valid_handle(null_stdout))
             CloseHandle(null_stdout);
         if (is_valid_handle(null_stderr))
@@ -722,14 +734,20 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
         return false;
     }
 
+    // Every launch names exactly the handles its child receives. Inheritance
+    // stays enabled for those three, but any other inheritable handle live in
+    // this process at the same moment (another launch's pipe ends, or the
+    // private duplex endpoint of a concurrent retained launch) stays here.
     SIZE_T attributes_size = 0;
     std::vector<std::byte> attributes;
     std::vector<HANDLE> inherited;
     DWORD creation_flags = CREATE_NO_WINDOW;
     bool attributes_initialized = false;
-    if (has_standard_input || standard_input_session) {
+    {
         si.cb = sizeof(startup);
         inherited = {si.hStdInput, si.hStdOutput, si.hStdError};
+        std::sort(inherited.begin(), inherited.end());
+        inherited.erase(std::unique(inherited.begin(), inherited.end()), inherited.end());
         InitializeProcThreadAttributeList(nullptr, 1, 0, &attributes_size);
         attributes.resize(attributes_size);
         startup.lpAttributeList = reinterpret_cast<PPROC_THREAD_ATTRIBUTE_LIST>(attributes.data());
@@ -744,8 +762,8 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
             impl_->standard_input.close_all();
             impl_->stdout_pipe.close_all();
             impl_->stderr_pipe.close_all();
-            if (is_valid_handle(null_stdin))
-                CloseHandle(null_stdin);
+            if (is_valid_handle(owned_stdin))
+                CloseHandle(owned_stdin);
             if (is_valid_handle(null_stdout))
                 CloseHandle(null_stdout);
             if (is_valid_handle(null_stderr))
@@ -782,8 +800,8 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
     duplex.close_child();
     impl_->stdout_pipe.close_write();
     impl_->stderr_pipe.close_write();
-    if (is_valid_handle(null_stdin))
-        CloseHandle(null_stdin);
+    if (is_valid_handle(owned_stdin))
+        CloseHandle(owned_stdin);
     if (is_valid_handle(null_stdout))
         CloseHandle(null_stdout);
     if (is_valid_handle(null_stderr))
