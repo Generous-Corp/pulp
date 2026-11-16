@@ -3142,7 +3142,80 @@ TEST_CASE("Retained failed spawn consumes the reservation without a process iden
     CHECK(fresh.retained_process_observation().state == RetainedProcessState::NotStarted);
 }
 
-TEST_CASE("Retained custody refuses reuse, input, and the unsupported channel before spawning",
+static pulp::platform::ProcessOptions uncaptured_channel_options() {
+    pulp::platform::ProcessOptions options;
+    options.capture_stdout = options.capture_stderr = false;
+    return options;
+}
+
+TEST_CASE("Retained private channel hands a connected duplex endpoint to the session",
+          "[runtime][child-process][retained-custody]") {
+    using namespace pulp::platform;
+    RetainedProcessCustody reservation;
+    ChildProcess process;
+    int leader = -1;
+    std::optional<ChildProcessInputChannel> kept;
+    REQUIRE(process.start_retained_with_standard_input_channel(
+        reservation, "ping.exe", {"-n", "60", "127.0.0.1"},
+        [&](int pid, ChildProcessInputChannel channel, auto deadline) {
+            leader = pid;
+            // The parent endpoint is an overlapped duplex pipe already connected
+            // to the child's standard input, so a bounded write completes.
+            const auto handle = reinterpret_cast<HANDLE>(channel.native_handle());
+            DWORD flags = 0;
+            if (!GetNamedPipeInfo(handle, &flags, nullptr, nullptr, nullptr) ||
+                (flags & PIPE_SERVER_END) == 0 || deadline <= std::chrono::steady_clock::now())
+                return false;
+            OVERLAPPED write{};
+            write.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+            const char byte = 'x';
+            DWORD written = 0;
+            const bool started =
+                WriteFile(handle, &byte, 1, nullptr, &write) || GetLastError() == ERROR_IO_PENDING;
+            const bool done = started && WaitForSingleObject(write.hEvent, 2000) == WAIT_OBJECT_0 &&
+                              GetOverlappedResult(handle, &write, &written, FALSE) && written == 1;
+            CloseHandle(write.hEvent);
+            if (done)
+                kept.emplace(std::move(channel));
+            return done;
+        },
+        uncaptured_channel_options()));
+    CHECK(leader == process.process_id());
+    CHECK(kept);
+    CHECK(reservation.retained_process_observation().state == RetainedProcessState::Running);
+    const auto cleaned = reservation.cleanup_retained_process_group(custody_deadline());
+    CHECK(cleaned.status == RetainedCleanupStatus::Complete);
+    CHECK(cleaned.child_reaped);
+    CHECK(cleaned.descendants_gone);
+}
+
+TEST_CASE("Retained failed handshake leaves its cleanup receipt with the reservation",
+          "[runtime][child-process][retained-custody]") {
+    using namespace pulp::platform;
+    RetainedProcessCustody reservation;
+    int leader = -1;
+    {
+        ChildProcess process;
+        CHECK_FALSE(process.start_retained_with_standard_input_channel(
+            reservation, "ping.exe", {"-n", "60", "127.0.0.1"},
+            [&](int pid, ChildProcessInputChannel, auto) {
+                leader = pid;
+                return false;
+            },
+            uncaptured_channel_options()));
+        REQUIRE(leader > 0);
+    }
+    RetainedProcessCustody moved;
+    moved = std::move(reservation);
+    CHECK(moved.retained_process_observation().process_id == leader);
+    CHECK(moved.retained_process_observation().state == RetainedProcessState::Reaped);
+    const auto cleaned = moved.cleanup_retained_process_group(custody_deadline());
+    CHECK(cleaned.status == RetainedCleanupStatus::Complete);
+    CHECK(cleaned.child_reaped);
+    CHECK(cleaned.descendants_gone);
+}
+
+TEST_CASE("Retained custody refuses reuse, input, and unsupported channel options before spawning",
           "[runtime][child-process][retained-custody]") {
     using namespace pulp::platform;
     RetainedProcessCustody reservation;
@@ -3154,20 +3227,32 @@ TEST_CASE("Retained custody refuses reuse, input, and the unsupported channel be
     CHECK(reservation.cleanup_retained_process_group(custody_deadline()).status ==
           RetainedCleanupStatus::Complete);
 
-    RetainedProcessCustody channel_reservation;
-    bool called = false;
-    ChildProcess channel_process;
-    CHECK_FALSE(channel_process.start_retained_with_standard_input_channel(
-        channel_reservation, "cmd.exe", {"/c", "exit 0"}, [&](int, ChildProcessInputChannel, auto) {
-            called = true;
-            return true;
-        }));
-    CHECK_FALSE(called);
-    CHECK(channel_process.process_id() == -1);
-    CHECK(channel_reservation.retained_process_observation().state ==
-          RetainedProcessState::NotStarted);
-    CHECK(channel_reservation.cleanup_retained_process_group(custody_deadline()).status ==
-          RetainedCleanupStatus::NotRetained);
+    // Nothing drains a retained child's output during the session, and the
+    // channel needs a positive deadline, so both refuse before reserving.
+    for (int variant = 0; variant < 3; ++variant) {
+        INFO("variant=" << variant);
+        RetainedProcessCustody channel_reservation;
+        bool called = false;
+        ChildProcess channel_process;
+        ProcessOptions channel_options;
+        channel_options.capture_stdout = variant == 0;
+        channel_options.capture_stderr = variant == 1;
+        if (variant == 2)
+            channel_options.standard_input_timeout_ms = 0;
+        CHECK_FALSE(channel_process.start_retained_with_standard_input_channel(
+            channel_reservation, "cmd.exe", {"/c", "exit 0"},
+            [&](int, ChildProcessInputChannel, auto) {
+                called = true;
+                return true;
+            },
+            channel_options));
+        CHECK_FALSE(called);
+        CHECK(channel_process.process_id() == -1);
+        CHECK(channel_reservation.retained_process_observation().state ==
+              RetainedProcessState::NotStarted);
+        CHECK(channel_reservation.cleanup_retained_process_group(custody_deadline()).status ==
+              RetainedCleanupStatus::NotRetained);
+    }
 
     RetainedProcessCustody rejected;
     ChildProcess validated;

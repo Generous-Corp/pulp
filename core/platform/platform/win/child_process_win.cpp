@@ -4,8 +4,11 @@
 #ifdef _WIN32
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <cwchar>
+#include <iterator>
 #include <future>
 #include <mutex>
 #include <thread>
@@ -172,6 +175,80 @@ void wipe_bytes(std::vector<std::uint8_t>& bytes) noexcept {
 struct SensitiveInputBytes {
     std::vector<std::uint8_t> value;
     ~SensitiveInputBytes() { wipe_bytes(value); }
+};
+
+// Private duplex channel for a retained child's standard input. Anonymous
+// pipes are one-way, so this is a single-instance local named pipe whose only
+// client is opened here, before any child exists: a squatter on the name makes
+// FILE_FLAG_FIRST_PIPE_INSTANCE fail closed, and no later process can connect.
+// Both ends are overlapped so each side can bound every transfer to a deadline.
+struct DuplexChannel {
+    HANDLE parent = INVALID_HANDLE_VALUE;
+    HANDLE child = INVALID_HANDLE_VALUE;
+
+    DuplexChannel() = default;
+    DuplexChannel(const DuplexChannel&) = delete;
+    DuplexChannel& operator=(const DuplexChannel&) = delete;
+    ~DuplexChannel() {
+        close_all();
+    }
+
+    bool create() {
+        static std::atomic<unsigned long long> counter{0};
+        LARGE_INTEGER ticks{};
+        QueryPerformanceCounter(&ticks);
+        wchar_t name[128];
+        std::swprintf(name, std::size(name), L"\\\\.\\pipe\\pulp-child-%lu-%llx-%llx",
+                      GetCurrentProcessId(), static_cast<unsigned long long>(ticks.QuadPart),
+                      counter.fetch_add(1, std::memory_order_relaxed));
+        constexpr DWORD buffer_bytes = 64 * 1024;
+        parent = CreateNamedPipeW(
+            name, PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE | FILE_FLAG_OVERLAPPED,
+            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS, 1,
+            buffer_bytes, buffer_bytes, 0, nullptr);
+        if (parent == INVALID_HANDLE_VALUE)
+            return false;
+        SECURITY_ATTRIBUTES inherit{};
+        inherit.nLength = sizeof(inherit);
+        inherit.bInheritHandle = TRUE;
+        child = CreateFileW(name, GENERIC_READ | GENERIC_WRITE, 0, &inherit, OPEN_EXISTING,
+                            FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION,
+                            nullptr);
+        if (child == INVALID_HANDLE_VALUE) {
+            close_all();
+            return false;
+        }
+        // The client above is already connected; any other outcome means the
+        // instance is not the private pair this channel promises.
+        OVERLAPPED connect{};
+        connect.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        const bool connected = connect.hEvent != nullptr && !ConnectNamedPipe(parent, &connect) &&
+                               GetLastError() == ERROR_PIPE_CONNECTED;
+        if (!connected && connect.hEvent != nullptr) {
+            CancelIoEx(parent, &connect);
+            DWORD ignored = 0;
+            GetOverlappedResult(parent, &connect, &ignored, TRUE);
+        }
+        if (connect.hEvent != nullptr)
+            CloseHandle(connect.hEvent);
+        if (!connected) {
+            close_all();
+            return false;
+        }
+        return true;
+    }
+    HANDLE release_parent() noexcept {
+        return std::exchange(parent, INVALID_HANDLE_VALUE);
+    }
+    void close_child() noexcept {
+        if (child != INVALID_HANDLE_VALUE)
+            CloseHandle(std::exchange(child, INVALID_HANDLE_VALUE));
+    }
+    void close_all() noexcept {
+        close_child();
+        if (parent != INVALID_HANDLE_VALUE)
+            CloseHandle(std::exchange(parent, INVALID_HANDLE_VALUE));
+    }
 };
 
 }  // namespace
@@ -474,14 +551,11 @@ bool ChildProcess::start_retained(RetainedProcessCustody& custody, const std::st
                                   const ProcessOptions& options) {
     return start_impl(command, args, options, nullptr, nullptr, nullptr, &custody);
 }
-// The private duplex channel is not available on Windows, so the channel
-// variant refuses before reserving or spawning.
-bool ChildProcess::start_retained_with_standard_input_channel(RetainedProcessCustody&,
-                                                              const std::string&,
-                                                              const std::vector<std::string>&,
-                                                              const StandardInputChannelSession&,
-                                                              const ProcessOptions&) {
-    return false;
+bool ChildProcess::start_retained_with_standard_input_channel(
+    RetainedProcessCustody& custody, const std::string& command,
+    const std::vector<std::string>& args, const StandardInputChannelSession& session,
+    const ProcessOptions& options) {
+    return start_impl(command, args, options, nullptr, nullptr, &session, &custody);
 }
 bool ChildProcess::start_joined_to_current_group(const CurrentProcessGroup&, JoinedChildCustody&,
                                                  const std::string&,
@@ -530,7 +604,11 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
                               JoinedChildCustody* joined_custody) {
     if (joined_group || joined_custody)
         return false;
-    if (standard_input_session)
+    // The duplex channel is retained-only on Windows. Output capture is refused
+    // with it because nothing drains a retained child's pipes during the session.
+    if (standard_input_session &&
+        (!custody || !*standard_input_session || options.standard_input_timeout_ms <= 0 ||
+         options.capture_stdout || options.capture_stderr))
         return false;
     if (custody && (custody->impl_ || standard_input || standard_input_provider))
         return false;
@@ -567,8 +645,10 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
         custody->impl_ = impl_;
     }
 
-    if ((has_standard_input && (options.standard_input_timeout_ms <= 0 ||
-                                !impl_->standard_input.create_input())) ||
+    DuplexChannel duplex;
+    if ((standard_input_session && !duplex.create()) ||
+        (has_standard_input &&
+         (options.standard_input_timeout_ms <= 0 || !impl_->standard_input.create_input())) ||
         (options.capture_stdout && !impl_->stdout_pipe.create()) ||
         (options.capture_stderr && !impl_->stderr_pipe.create())) {
         impl_->standard_input.close_all();
@@ -606,8 +686,9 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
     HANDLE null_stdout = INVALID_HANDLE_VALUE;
     HANDLE null_stderr = INVALID_HANDLE_VALUE;
 
-    si.hStdInput = has_standard_input ? impl_->standard_input.read_end
-                                      : GetStdHandle(STD_INPUT_HANDLE);
+    si.hStdInput = standard_input_session ? duplex.child
+                   : has_standard_input   ? impl_->standard_input.read_end
+                                          : GetStdHandle(STD_INPUT_HANDLE);
     if (!is_valid_handle(si.hStdInput)) {
         null_stdin = open_null_device(GENERIC_READ, sa);
         si.hStdInput = null_stdin;
@@ -646,7 +727,7 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
     std::vector<HANDLE> inherited;
     DWORD creation_flags = CREATE_NO_WINDOW;
     bool attributes_initialized = false;
-    if (has_standard_input) {
+    if (has_standard_input || standard_input_session) {
         si.cb = sizeof(startup);
         inherited = {si.hStdInput, si.hStdOutput, si.hStdError};
         InitializeProcThreadAttributeList(nullptr, 1, 0, &attributes_size);
@@ -698,6 +779,7 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
         DeleteProcThreadAttributeList(startup.lpAttributeList);
 
     impl_->standard_input.close_read();
+    duplex.close_child();
     impl_->stdout_pipe.close_write();
     impl_->stderr_pipe.close_write();
     if (is_valid_handle(null_stdin))
@@ -752,6 +834,25 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
             return false;
         }
         CloseHandle(pi.hThread);
+        if (!standard_input_session)
+            return true;
+        const auto deadline = std::chrono::steady_clock::now() +
+                              std::chrono::milliseconds(options.standard_input_timeout_ms);
+        ChildProcessInputChannel channel(reinterpret_cast<std::intptr_t>(duplex.release_parent()));
+        lock.unlock();
+        bool completed = false;
+        try {
+            completed = (*standard_input_session)(static_cast<int>(pi.dwProcessId),
+                                                  std::move(channel), deadline);
+        } catch (...) {
+            completed = false;
+        }
+        if (!completed || std::chrono::steady_clock::now() >= deadline) {
+            // The receipt stays with the reservation, as after a rejected validator.
+            (void)impl_->cleanup_retained(std::chrono::steady_clock::now() +
+                                          std::chrono::seconds(2));
+            return false;
+        }
         return true;
     }
     CloseHandle(pi.hThread);
