@@ -539,7 +539,14 @@ TEST_CASE("Edge probe attach/detach hammered against a running process() stays c
     // it even on a loaded host that schedules the audio thread late.
     for (int spins = 0; spins < 5'000'000 && blocks.load(std::memory_order_relaxed) == 0; ++spins)
         std::this_thread::yield();
-    REQUIRE(blocks.load() > 0);
+    const bool audio_started = blocks.load(std::memory_order_relaxed) > 0;
+    if (!audio_started) {
+        // Never let a fatal assertion unwind past a joinable thread (that would
+        // std::terminate instead of reporting a failure): stop and join first.
+        stop.store(true, std::memory_order_release);
+        audio.join();
+    }
+    REQUIRE(audio_started);
 
     constexpr int kCycles = 2000;
     int attached = 0;
