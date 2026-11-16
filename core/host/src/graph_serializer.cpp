@@ -2279,37 +2279,35 @@ GraphSerializer::LoadResult GraphSerializer::from_saved_document(SignalGraph& gr
     }
 }
 
-GraphSerializer::LoadResult GraphSerializer::from_file(SignalGraph& graph,
-                                                       const std::filesystem::path& path,
-                                                       const GraphLoadOptions& options) {
-    LoadResult result;
+bool GraphSerializer::read_file_bounded(const std::filesystem::path& path, std::string& json,
+                                        std::string& error) {
+    const auto fail = [&](std::string message) {
+        error = std::move(message);
+        json.clear();
+        return false;
+    };
     std::error_code ec;
     const auto size = std::filesystem::file_size(path, ec);
     if (ec) {
-        result.error = "graph file cannot be opened: " + path.string();
-        return result;
+        return fail("graph file cannot be opened: " + path.string());
     }
     if (size > max_file_bytes) {
-        result.error = "graph file exceeds " + std::to_string(max_file_bytes) + " byte limit";
-        return result;
+        return fail("graph file exceeds " + std::to_string(max_file_bytes) + " byte limit");
     }
 
     std::ifstream input(path, std::ios::binary);
     if (!input) {
-        result.error = "graph file cannot be opened: " + path.string();
-        return result;
+        return fail("graph file cannot be opened: " + path.string());
     }
-    std::string json(static_cast<std::size_t>(size), '\0');
+    json.assign(static_cast<std::size_t>(size), '\0');
     if (!json.empty())
         input.read(json.data(), static_cast<std::streamsize>(json.size()));
     if (!input && !input.eof()) {
-        result.error = "graph file read failed: " + path.string();
-        return result;
+        return fail("graph file read failed: " + path.string());
     }
     const auto count = static_cast<std::size_t>(input.gcount());
     if (count != json.size()) {
-        result.error = "graph file changed while reading: " + path.string();
-        return result;
+        return fail("graph file changed while reading: " + path.string());
     }
     if (g_after_first_read_hook) {
         auto hook = std::move(g_after_first_read_hook);
@@ -2318,8 +2316,7 @@ GraphSerializer::LoadResult GraphSerializer::from_file(SignalGraph& graph,
     ec.clear();
     const auto final_size = std::filesystem::file_size(path, ec);
     if (ec || final_size != size) {
-        result.error = "graph file changed while reading: " + path.string();
-        return result;
+        return fail("graph file changed while reading: " + path.string());
     }
     // A same-size replacement is invisible to the size checks above. Read the
     // current pathname again and compare its content before mutating the
@@ -2327,26 +2324,32 @@ GraphSerializer::LoadResult GraphSerializer::from_file(SignalGraph& graph,
     // writers and atomic same-size renames.
     std::ifstream verification(path, std::ios::binary);
     if (!verification) {
-        result.error = "graph file changed while reading: " + path.string();
-        return result;
+        return fail("graph file changed while reading: " + path.string());
     }
     std::string verified(static_cast<std::size_t>(size), '\0');
     if (!verified.empty())
         verification.read(verified.data(), static_cast<std::streamsize>(verified.size()));
     if (!verification && !verification.eof()) {
-        result.error = "graph file changed while reading: " + path.string();
-        return result;
+        return fail("graph file changed while reading: " + path.string());
     }
     if (static_cast<std::size_t>(verification.gcount()) != verified.size() || verified != json) {
-        result.error = "graph file changed while reading: " + path.string();
-        return result;
+        return fail("graph file changed while reading: " + path.string());
     }
     ec.clear();
     const auto verified_size = std::filesystem::file_size(path, ec);
     if (ec || verified_size != size) {
-        result.error = "graph file changed while reading: " + path.string();
-        return result;
+        return fail("graph file changed while reading: " + path.string());
     }
+    return true;
+}
+
+GraphSerializer::LoadResult GraphSerializer::from_file(SignalGraph& graph,
+                                                       const std::filesystem::path& path,
+                                                       const GraphLoadOptions& options) {
+    std::string json;
+    LoadResult result;
+    if (!read_file_bounded(path, json, result.error))
+        return result;
     return from_json(graph, json, options);
 }
 

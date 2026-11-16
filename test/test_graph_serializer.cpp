@@ -1714,6 +1714,43 @@ TEST_CASE("GraphSerializer rejects same-size replacement without mutating the ca
     std::filesystem::remove_all(root);
 }
 
+TEST_CASE("GraphSerializer::read_file_bounded verifies the file did not change while read",
+          "[host][serializer][file][concurrency][negative]") {
+    const auto root = std::filesystem::temp_directory_path() / "pulp-graph-bounded-read";
+    std::filesystem::remove_all(root);
+    REQUIRE(std::filesystem::create_directories(root));
+    const auto path = root / "graph.pulpgraph";
+    const std::string original = R"({"format_version":2,"nodes":[],"connections":[]})";
+    const auto write = [&](const std::string& text) {
+        std::ofstream(path, std::ios::binary | std::ios::trunc) << text;
+    };
+
+    std::string text, error;
+    write(original);
+    REQUIRE(GraphSerializer::read_file_bounded(path, text, error));
+    REQUIRE(text == original);
+
+    // Control: the source accepts the file above, so the failures below come
+    // from the change detection, not from the document.
+    GraphSerializerTestAccess::set_after_first_read([&](const auto&) {
+        std::ofstream(path, std::ios::binary | std::ios::app) << "\n";
+    });
+    REQUIRE_FALSE(GraphSerializer::read_file_bounded(path, text, error));
+    REQUIRE(error.find("changed while reading") != std::string::npos);
+    REQUIRE(text.empty());
+
+    write(original);
+    auto swapped = original;
+    swapped[swapped.find("2")] = '3';
+    GraphSerializerTestAccess::set_after_first_read([&](const auto&) { write(swapped); });
+    REQUIRE_FALSE(GraphSerializer::read_file_bounded(path, text, error));
+    REQUIRE(error.find("changed while reading") != std::string::npos);
+
+    REQUIRE_FALSE(GraphSerializer::read_file_bounded(root / "absent", text, error));
+    REQUIRE(error.find("cannot be opened") != std::string::npos);
+    std::filesystem::remove_all(root);
+}
+
 TEST_CASE("GraphSerializer rejects non-object roots and malformed field types",
           "[host][serializer][issue-643]") {
     SignalGraph root_dst;

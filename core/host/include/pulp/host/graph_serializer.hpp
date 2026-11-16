@@ -289,6 +289,12 @@ class GraphSerializer {
     static LoadResult from_saved_document(SignalGraph& graph, const std::string& json,
                                           const GraphLoadOptions& options = {});
 
+    /// Read one graph file under the size bound and verify it did not change
+    /// while being read (size growth or a same-size replacement). On failure
+    /// returns false, clears `json` and sets `error`.
+    static bool read_file_bounded(const std::filesystem::path& path, std::string& json,
+                                  std::string& error);
+
     // Read one bounded graph file, then apply the same migration and restore
     // rules as from_json. A read or size failure leaves graph untouched.
     static LoadResult from_file(SignalGraph& graph, const std::filesystem::path& path,

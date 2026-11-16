@@ -344,6 +344,28 @@ TEST_CASE("graph save and fmt keep the saved-identity envelope that diff reads",
     CHECK(cli_code(refused_save) == "subgraph_records_unsupported");
     CHECK_FALSE(fs::exists(saved_records));
 
+    // Subgraph records with no identity envelope are refused too: the
+    // inspector reports the missing envelope first, which must not let the
+    // rewrite fall through to the plain writer.
+    for (const char* text : {R"({"format_version":4,"nodes":[],"connections":[],"subgraphs":[]})",
+                             R"({"format_version":5,"nodes":[],"connections":[],"subgraphs":[]})"}) {
+        const auto bare = dir / "records-bare.pulpgraph";
+        std::ofstream(bare, std::ios::binary) << text;
+        for (const std::string op : {"fmt", "canonicalize"}) {
+            const auto refused_bare = run_pulp({"graph", op, bare.string(), "--json"});
+            INFO(op << ": " << refused_bare.stdout_output << refused_bare.stderr_output);
+            REQUIRE(refused_bare.exit_code == 1);
+            CHECK(cli_code(refused_bare) == "subgraph_records_unsupported");
+            CHECK(read_text(bare) == text);
+        }
+        const auto bare_out = dir / "records-bare-out.pulpgraph";
+        const auto refused_bare_save =
+            run_pulp({"graph", "save", bare.string(), "--output", bare_out.string(), "--json"});
+        REQUIRE(refused_bare_save.exit_code == 1);
+        CHECK(cli_code(refused_bare_save) == "subgraph_records_unsupported");
+        CHECK_FALSE(fs::exists(bare_out));
+    }
+
     // A missing input keeps the typed file code on the rewrite path.
     const auto missing = run_pulp({"graph", "fmt", (dir / "absent.pulpgraph").string(), "--json"});
     REQUIRE(missing.exit_code == 1);

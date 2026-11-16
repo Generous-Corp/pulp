@@ -664,31 +664,12 @@ int render_graph(pulp::host::SignalGraph& graph,
 // serializer's file limit so a diff never reads more than a load would.
 std::optional<std::string> read_graph_document(const std::string& path, Code& code,
                                                std::string& message) {
-    std::error_code ec;
-    const auto size = std::filesystem::file_size(path, ec);
-    if (ec) {
-        code = Code::FileUnreadable;
-        message = "graph file is unreadable: " + path;
-        return std::nullopt;
-    }
-    if (size > pulp::host::GraphSerializer::max_file_bytes) {
-        code = Code::ResourceLimit;
-        message = "graph file exceeds the " +
-                  std::to_string(pulp::host::GraphSerializer::max_file_bytes) +
-                  " byte limit: " + path;
-        return std::nullopt;
-    }
-    std::ifstream in(path, std::ios::binary);
-    if (!in) {
-        code = Code::FileUnreadable;
-        message = "graph file is unreadable: " + path;
-        return std::nullopt;
-    }
-    std::string text(static_cast<std::size_t>(size), '\0');
-    in.read(text.data(), static_cast<std::streamsize>(size));
-    if (in.gcount() != static_cast<std::streamsize>(size)) {
-        code = Code::FileUnreadable;
-        message = "graph file could not be read completely: " + path;
+    std::string text;
+    if (!pulp::host::GraphSerializer::read_file_bounded(path, text, message)) {
+        // The serializer reader names the cause: the byte limit is a resource
+        // limit, anything else (missing, changed while reading) is unreadable.
+        code = message.starts_with("graph file exceeds") ? Code::ResourceLimit
+                                                         : Code::FileUnreadable;
         return std::nullopt;
     }
     return text;
@@ -951,7 +932,7 @@ int cmd_graph(const std::vector<std::string>& args) {
             return 1;
         }
         saved_identity = declares_saved_identity(*text);
-        if (saved_identity && declares_subgraph_records(*text)) {
+        if (declares_subgraph_records(*text)) {
             const std::string refusal =
                 "the document holds subgraph records, which need the authoring templates to "
                 "rewrite; rewriting it here would drop every subgraph instance";
