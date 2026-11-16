@@ -130,6 +130,15 @@ class SignalGraph : public format::AudioWorkgroupClient {
         std::uint64_t dropped_events = 0;
         std::uint64_t overwritten = 0;
     };
+    // The same counts for one MidiInput node's mailbox, read by
+    // midi_mailbox_counters(). An event is one short message, SysEx message,
+    // UMP packet or MPE expression event.
+    struct MidiMailboxCounters {
+        std::uint64_t published = 0;
+        std::uint64_t overflowed = 0;
+        std::uint64_t dropped_events = 0;
+        std::uint64_t overwritten = 0;
+    };
     class PreparedTopologyEdit;
     class ExecutionSnapshot;
 
@@ -507,7 +516,9 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // a control-side producer, but never concurrent writers. A false return means
     // the live node is unavailable or the bounded mailbox retained only a prefix;
     // that retained prefix is still published. A preserved MidiInput NodeId keeps
-    // its unconsumed publication across a gap-free prepare_swap().
+    // its unconsumed publication across a gap-free prepare_swap(). A batch that
+    // a later call replaces before process() reads it is lost and counted in
+    // midi_mailbox_counters(), not reported by the return value.
     bool inject_midi(NodeId midi_input_node, const midi::MidiBuffer& events) noexcept;
 
     // Inject a block-local MIDI stream together with its prepared MPE
@@ -532,6 +543,8 @@ class SignalGraph : public format::AudioWorkgroupClient {
     // live parameter mailbox. Lock-free relaxed reads; safe from any thread.
     bool parameter_mailbox_counters(NodeId plugin_node,
                                     ParameterMailboxCounters& out) const noexcept;
+    // Read a MidiInput node's mailbox counters, with the same contract.
+    bool midi_mailbox_counters(NodeId midi_input_node, MidiMailboxCounters& out) const noexcept;
 
     // Drain queued nonempty MIDI blocks from a MidiOutput sink node in process
     // order. Appends to `out`; returns false if bounded egress overflowed, a
@@ -1108,6 +1121,12 @@ class SignalGraph : public format::AudioWorkgroupClient {
         MidiBlockSnapshot writer_scratch;
         std::atomic<uint64_t> next_sequence{0};
         std::atomic<uint64_t> sequence_seen{0};
+        // Same writer-owned telemetry as ParameterInputMailbox.
+        std::atomic<std::uint64_t> published_batches{0};
+        std::atomic<std::uint64_t> overflowed_batches{0};
+        std::atomic<std::uint64_t> dropped_events{0};
+        std::atomic<std::uint64_t> overwritten_batches{0};
+        std::uint64_t last_published_events = 0;
     };
 
     struct HostEventProjection {
@@ -2076,10 +2095,6 @@ class SignalGraph : public format::AudioWorkgroupClient {
     static bool
     inject_parameter_events_into_snapshot_(CompiledGraph& snapshot, NodeId id,
                                            const state::ParameterEventQueue& events) noexcept;
-    static void record_parameter_mailbox_publication(ParameterInputMailbox& mailbox,
-                                                     const state::ParameterEventQueue& events,
-                                                     bool copied_all,
-                                                     bool replaced_unread) noexcept;
     // Exact-generation injection into a claimed node's exact mailbox. Fails for
     // any node that is not currently owner-claimed for exact ingress.
     static bool
