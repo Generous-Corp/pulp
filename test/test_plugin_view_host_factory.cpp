@@ -21,6 +21,8 @@
 #if defined(PULP_TEST_HAS_X11)
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
+#include <X11/keysym.h>
+#include <pulp/view/ui_components.hpp>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -651,6 +653,103 @@ TEST_CASE("X11 plugin host ignores a stale echo of an earlier resize",
 
     host.reset();
     unsetenv("PULP_TEST_X11_HOST_CPU_ONLY");
+    XCloseDisplay(daw);
+}
+
+TEST_CASE("X11 popup keyboard navigation restores DAW focus and forwards transport",
+          "[view][plugin-view-host][input][keyboard][linux]") {
+    Display* daw = open_test_display("popup keyboard routing");
+    class FixedRoot : public View {
+        void layout_children() override {}
+    } root;
+    root.set_bounds({0, 0, 400, 300});
+    auto owned = std::make_unique<ComboBox>();
+    auto* combo = owned.get();
+    combo->set_bounds({20, 20, 120, 30});
+    combo->set_items({"One", "Two", "Three"});
+    root.add_child(std::move(owned));
+    register_platform_plugin_view_host();
+    PluginViewHost::Options options;
+    options.size = {400, 300};
+    options.use_gpu = false;
+    auto host = PluginViewHost::create(root, options);
+    REQUIRE(host);
+    const Window outer = XCreateSimpleWindow(daw, DefaultRootWindow(daw), 0, 0, 400, 300, 0, 0, 0);
+    XSelectInput(daw, outer, KeyPressMask | KeyReleaseMask);
+    XMapWindow(daw, outer);
+    XSync(daw, False);
+    host->attach_to_parent(reinterpret_cast<void*>(static_cast<uintptr_t>(outer)));
+    const Window child = static_cast<Window>(reinterpret_cast<uintptr_t>(host->native_handle()));
+    XSync(daw, False);
+    XSetInputFocus(daw, outer, RevertToParent, CurrentTime);
+    XSync(daw, False);
+    auto pump_until = [&](auto predicate) {
+        for (int i = 0; i < 100 && !predicate(); ++i) {
+            host->pump_x_events();
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        REQUIRE(predicate());
+    };
+    auto click = [&] {
+        for (int type : {ButtonPress, ButtonRelease}) {
+            XEvent event{};
+            event.xbutton.type = type;
+            event.xbutton.display = daw;
+            event.xbutton.window = child;
+            event.xbutton.root = DefaultRootWindow(daw);
+            event.xbutton.button = Button1;
+            event.xbutton.x = 40;
+            event.xbutton.y = 35;
+            event.xbutton.same_screen = True;
+            REQUIRE(XSendEvent(daw, child, False,
+                               type == ButtonPress ? ButtonPressMask : ButtonReleaseMask, &event));
+        }
+        XSync(daw, False);
+    };
+    auto key = [&](KeySym symbol) {
+        XEvent event{};
+        event.xkey.type = KeyPress;
+        event.xkey.display = daw;
+        event.xkey.window = child;
+        event.xkey.root = DefaultRootWindow(daw);
+        event.xkey.keycode = XKeysymToKeycode(daw, symbol);
+        event.xkey.same_screen = True;
+        REQUIRE(XSendEvent(daw, child, False, KeyPressMask, &event));
+        XSync(daw, False);
+    };
+    click();
+    pump_until([&] { return combo->is_open(); });
+    Window focus = None;
+    int revert = 0;
+    XGetInputFocus(daw, &focus, &revert);
+    REQUIRE(focus == child);
+    key(XK_Down);
+    pump_until([&] { return combo->hovered_index() == 1; });
+    key(XK_Return);
+    pump_until([&] { return !combo->is_open(); });
+    CHECK(combo->selected() == 1);
+    XGetInputFocus(daw, &focus, &revert);
+    CHECK(focus == outer);
+    click();
+    pump_until([&] { return combo->is_open(); });
+    key(XK_space);
+    pump_until([&] {
+        XSync(daw, False);
+        return XPending(daw) > 0;
+    });
+    XEvent forwarded{};
+    XNextEvent(daw, &forwarded);
+    CHECK(forwarded.type == KeyPress);
+    CHECK(forwarded.xkey.window == outer);
+    CHECK(XLookupKeysym(&forwarded.xkey, 0) == XK_space);
+    REQUIRE(combo->is_open());
+    key(XK_Escape);
+    pump_until([&] { return !combo->is_open(); });
+    CHECK(combo->selected() == 1);
+    XGetInputFocus(daw, &focus, &revert);
+    CHECK(focus == outer);
+    host.reset();
+    XDestroyWindow(daw, outer);
     XCloseDisplay(daw);
 }
 

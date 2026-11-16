@@ -26,6 +26,9 @@
 #include <pulp/view/repaint_damage.hpp>  // compute_effective_damage (platform-free)
 #include <pulp/view/host_frame_pump.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
+#include <pulp/view/plugin_key_routing.hpp>
+#include <pulp/view/hover_cursor.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/drag_drop.hpp>
 
@@ -51,6 +54,8 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
+#include <X11/keysym.h>
+#include <X11/cursorfont.h>
 #include <X11/Xresource.h>  // Xrm* — Xft.dpi lookup for HiDPI scale (L9)
 
 #include <atomic>
@@ -62,6 +67,7 @@
 #include <unistd.h>  // usleep (XDND source poll loop)
 #include <functional>
 #include <memory>
+#include <utility>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -116,7 +122,8 @@ public:
         // Exposure keep the existing repaint/reparent behavior.
         XSelectInput(display_, child_,
                      ExposureMask | StructureNotifyMask | PropertyChangeMask | ButtonPressMask |
-                         ButtonReleaseMask | PointerMotionMask | EnterWindowMask | LeaveWindowMask);
+                         ButtonReleaseMask | PointerMotionMask | EnterWindowMask | LeaveWindowMask |
+                         KeyPressMask | KeyReleaseMask | FocusChangeMask);
         gc_ = XCreateGC(display_, child_, 0, nullptr);
         init_xdnd();
         XFlush(display_);
@@ -153,6 +160,9 @@ public:
         release_gpu_surfaces(GpuSurfaceState::unavailable);
 #endif
         if (display_) {
+            restore_keyboard_focus();
+            if (cursor_)
+                XFreeCursor(display_, cursor_);
             if (gc_) XFreeGC(display_, gc_);
             if (child_) XDestroyWindow(display_, child_);
             XFlush(display_);
@@ -193,6 +203,7 @@ public:
             XFlush(display_);
             pointer_grabbed_ = false;
         }
+        restore_keyboard_focus();
         pointer_capture_.reset();
         pointer_button_ = MouseButton::none;
         XUnmapWindow(display_, child_);
@@ -412,11 +423,36 @@ public:
             XEvent ev;
             XNextEvent(display_, &ev);
             switch (ev.type) {
+            case KeyPress:
+            case KeyRelease:
+                handle_popup_key(ev.xkey);
+                break;
+            case FocusOut:
+                if (restored_focus_serial_ != 0 && ev.xfocus.serial == restored_focus_serial_) {
+                    restored_focus_serial_ = 0;
+                    break;
+                }
+                if (ev.xfocus.mode == NotifyNormal) {
+                    keyboard_focus_owned_ = false;
+                    ComboBox::close_active_popup(root_);
+                    auto* target = pointer_capture_.live_in(root_);
+                    pointer_capture_.reset();
+                    const auto button = std::exchange(pointer_button_, MouseButton::none);
+                    if (target)
+                        deliver_mouse_cancel(root_, target, hover_cursor_.pointer(), 0, 1, button);
+                    if (pointer_grabbed_) {
+                        XUngrabPointer(display_, CurrentTime);
+                        pointer_grabbed_ = false;
+                    }
+                }
+                break;
             case ButtonPress:
                 handle_pointer_press(ev.xbutton);
+                sync_popup_keyboard_focus();
                 break;
             case ButtonRelease:
                 handle_pointer_release(ev.xbutton);
+                sync_popup_keyboard_focus();
                 break;
             case MotionNotify:
                 handle_pointer_motion(ev.xmotion);
@@ -428,8 +464,11 @@ public:
                 // Keep the capture alive during a drag that leaves the child;
                 // the next motion/release still belongs to this editor. A
                 // non-drag leave only clears the hover state.
-                if (!pointer_capture_.has_value())
+                if (!pointer_capture_.has_value()) {
                     deliver_hover_move(root_, {-1.0f, -1.0f}, 0);
+                    hover_cursor_.clear_pointer();
+                    XUndefineCursor(display_, child_);
+                }
                 break;
             case ClientMessage:
                 handle_client_message(ev.xclient);
@@ -448,8 +487,148 @@ public:
                 break;
             }
         }
+        publish_cursor();
         return configured_w != 0 && configured_h != 0 &&
                handle_configure(configured_w, configured_h);
+    }
+
+    void restore_keyboard_focus() {
+        if (!keyboard_focus_owned_)
+            return;
+        keyboard_focus_owned_ = false;
+        Window current = None;
+        int revert = 0;
+        XGetInputFocus(display_, &current, &revert);
+        if (current == child_) {
+            restored_focus_serial_ = NextRequest(display_);
+            XSetInputFocus(display_, previous_keyboard_focus_, previous_focus_revert_, CurrentTime);
+        }
+        XFlush(display_);
+    }
+
+    void sync_popup_keyboard_focus() {
+        if (!enabled_open_popup_in(root_)) {
+            restore_keyboard_focus();
+            return;
+        }
+        if (keyboard_focus_owned_)
+            return;
+        XGetInputFocus(display_, &previous_keyboard_focus_, &previous_focus_revert_);
+        if (previous_keyboard_focus_ == child_)
+            return;
+        keyboard_focus_owned_ = true;
+        XSetInputFocus(display_, child_, RevertToParent, CurrentTime);
+        XFlush(display_);
+    }
+
+    void handle_popup_key(XKeyEvent event) {
+        if (!keyboard_focus_owned_)
+            return;
+        KeyCode key = KeyCode::unknown;
+        switch (XLookupKeysym(&event, 0)) {
+        case XK_Up:
+            key = KeyCode::up;
+            break;
+        case XK_Down:
+            key = KeyCode::down;
+            break;
+        case XK_Left:
+            key = KeyCode::left;
+            break;
+        case XK_Right:
+            key = KeyCode::right;
+            break;
+        case XK_Home:
+            key = KeyCode::home;
+            break;
+        case XK_End:
+            key = KeyCode::end_;
+            break;
+        case XK_Return:
+        case XK_KP_Enter:
+            key = KeyCode::enter;
+            break;
+        case XK_Escape:
+            key = KeyCode::escape;
+            break;
+        default:
+            break;
+        }
+        const Window previous = previous_keyboard_focus_;
+        const auto disposition = route_plugin_key(
+            root_,
+            {{key, pointer_modifiers(event.state), event.type == KeyPress, false}, true, false});
+        if (disposition == PluginKeyDisposition::forward_to_host && previous != None &&
+            previous != PointerRoot) {
+            XEvent forwarded{};
+            forwarded.xkey = event;
+            forwarded.xkey.window = previous;
+            XSendEvent(display_, previous, True,
+                       event.type == KeyPress ? KeyPressMask : KeyReleaseMask, &forwarded);
+        }
+        sync_popup_keyboard_focus();
+        XFlush(display_);
+    }
+
+    void publish_cursor() {
+        const auto style = hover_cursor_.poll(root_);
+        if (!style)
+            return;
+        unsigned shape = XC_left_ptr;
+        switch (*style) {
+        case View::CursorStyle::pointer:
+            shape = XC_hand2;
+            break;
+        case View::CursorStyle::crosshair:
+            shape = XC_crosshair;
+            break;
+        case View::CursorStyle::text:
+            shape = XC_xterm;
+            break;
+        case View::CursorStyle::grab:
+        case View::CursorStyle::grabbing:
+        case View::CursorStyle::multi_directional_resize:
+            shape = XC_fleur;
+            break;
+        case View::CursorStyle::not_allowed:
+            shape = XC_X_cursor;
+            break;
+        case View::CursorStyle::horizontal_resize:
+            shape = XC_sb_h_double_arrow;
+            break;
+        case View::CursorStyle::vertical_resize:
+            shape = XC_sb_v_double_arrow;
+            break;
+        case View::CursorStyle::top_left_resize:
+        case View::CursorStyle::bottom_right_resize:
+            shape = XC_bottom_right_corner;
+            break;
+        case View::CursorStyle::top_right_resize:
+        case View::CursorStyle::bottom_left_resize:
+            shape = XC_bottom_left_corner;
+            break;
+        default:
+            break;
+        }
+        Cursor next = None;
+        if (*style == View::CursorStyle::invisible) {
+            const char transparent[] = {0};
+            const Pixmap bitmap = XCreateBitmapFromData(display_, child_, transparent, 1, 1);
+            if (bitmap) {
+                XColor color{};
+                next = XCreatePixmapCursor(display_, bitmap, bitmap, &color, &color, 0, 0);
+                XFreePixmap(display_, bitmap);
+            }
+        } else {
+            next = XCreateFontCursor(display_, shape);
+        }
+        if (!next)
+            return;
+        XDefineCursor(display_, child_, next);
+        if (cursor_)
+            XFreeCursor(display_, cursor_);
+        cursor_ = next;
+        XFlush(display_);
     }
 
     static uint16_t pointer_modifiers(unsigned state) {
@@ -484,7 +663,9 @@ public:
     }
 
     void handle_pointer_hover(int x, int y, unsigned state) {
-        deliver_hover_move(root_, pointer_point(x, y), pointer_modifiers(state));
+        const auto point = pointer_point(x, y);
+        hover_cursor_.set_pointer(point);
+        deliver_hover_move(root_, point, pointer_modifiers(state));
     }
 
     void handle_pointer_press(const XButtonEvent& event) {
@@ -502,7 +683,13 @@ public:
         if (button == MouseButton::none)
             return;
         const Point point = pointer_point(event.x, event.y);
+        hover_cursor_.set_pointer(point);
         auto* target = root_.hit_test(point);
+        if (auto* combo = enabled_open_popup_in(root_)) {
+            float x = 0, y = 0, w = 0, h = 0;
+            if (combo->dropdown_window_rect(x, y, w, h) && Rect{x, y, w, h}.contains(point))
+                target = combo;
+        }
         pointer_capture_.reset();
         pointer_button_ = button;
         if (!target || !transfer_input_focus(root_, target)) {
@@ -533,6 +720,7 @@ public:
 
     void handle_pointer_motion(const XMotionEvent& event) {
         const Point point = pointer_point(event.x, event.y);
+        hover_cursor_.set_pointer(point);
         const auto modifiers = pointer_modifiers(event.state);
         if (auto* target = pointer_capture_.live_in(root_)) {
             deliver_mouse_drag(root_, target, point, modifiers, 1, pointer_button_,
@@ -631,6 +819,12 @@ private:
     bool needs_repaint_ = true;
     bool continuous_frames_ = false;
     bool in_frame_tick_ = false;
+    bool keyboard_focus_owned_ = false;
+    unsigned long restored_focus_serial_ = 0;
+    Window previous_keyboard_focus_ = None;
+    int previous_focus_revert_ = RevertToParent;
+    HoverCursorTracker hover_cursor_;
+    Cursor cursor_ = None;
     ViewCapture pointer_capture_;
     MouseButton pointer_button_ = MouseButton::none;
     bool pointer_grabbed_ = false;
