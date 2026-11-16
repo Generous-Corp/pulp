@@ -6,6 +6,7 @@
    "core/view/include/pulp/view/motion.hpp",
    "core/view/src/js_jsc_engine.mm",
    "tools/ci/governed-build.sh",
+   "tools/cmake",
    "tools/mcp",
    "tools/scripts/cutover_trial.py",
    "tools/scripts/test_cutover_trial.py"

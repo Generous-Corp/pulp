@@ -378,8 +378,9 @@ TEST_CASE("Asset morph refuses geometry the codec cannot carry and mismatched en
     REQUIRE(public_refusal(a.view(), a.view(), length + 256) == SpectralError::IdentityMismatch);
     REQUIRE(public_refusal(a.view(), a.view(), 0) == SpectralError::InvalidFrame);
 
-    // Control: the same stream with its own grid length is admitted, and the
-    // resulting graph still refuses saved-graph persistence.
+    // Control: the same stream with its own grid length is admitted. A graph
+    // holding only the source (no synthesis or output) cannot be prepared, so
+    // the writer, which saves only graphs its reader can restore, refuses it.
     pulp::host::SignalGraph graph;
     const auto accepted = graph.add_spectral_asset_morph_v1(a.view(), a.view(), length, "kept");
     REQUIRE(accepted);

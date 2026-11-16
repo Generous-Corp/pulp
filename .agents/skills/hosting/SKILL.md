@@ -3328,7 +3328,9 @@ activates at one render boundary, and requires control-side finalization.
 Snapshot-bound access must use the controller-aware snapshot lease, and live
 processor-provider mutation must refuse in spectral mode even when the legacy
 `live_slot_` is empty. Query prepared geometry from the active snapshot.
-Keep graph persistence and arbitrary stage registration refused; PARTIAL status
+Keep arbitrary stage registration refused, and keep graph persistence limited
+to the format-6 spectral subset (no analysis nodes; the graph must prepare);
+PARTIAL status
 does not establish notation coverage or realtime timing qualification.
 
 `SpectralRuntimeBank::prepare` walks each node's input chain to its analysis or
@@ -3526,6 +3528,12 @@ version: the payload stays at the current format, and a v6+ graph is still
 refused. The semantic digest ignores editor layout, so moving a node changes
 the canonical bytes but not the digest. `snapshot_port_identity` replaces the
 old `undo_port_identity` spelling, which returned a snapshot and not an undo.
+
+Saved connection validation must reject a declared spectral lane even when
+ordinary endpoints let the tolerant loader restore it as audio. Spectral
+graphs are unsupported on this identity surface. The partial-load exception
+for parameter edges into unresolved plugins still requires a valid source
+node and output port; a missing plugin cannot excuse an invalid source.
 
 Subgraph instances flatten into ordinary nodes, so a plain saved document
 loses which nodes form which instance. `to_saved_subgraph_document` and
