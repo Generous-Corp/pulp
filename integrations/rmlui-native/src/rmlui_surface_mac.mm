@@ -572,6 +572,7 @@ double RmlUiSurface::density_ratio() const noexcept {
 void RmlUiSurface::flush_input() {
     std::lock_guard lock(rmlui_mutex());
     impl_->drain_queued_locked();
+    impl_->sync_size_locked();
 }
 
 void RmlUiSurface::request_frame() {
@@ -586,6 +587,8 @@ bool RmlUiSurface::with_context(const std::function<void(Rml::Context&)>& fn) {
     if (!ctx)
         return false;
     d.drain_queued_locked();
+    // The size is the window's now, even if idle() found the lock busy.
+    d.sync_size_locked();
     vellum::rmlui::NativeContext::Scope scope(*d.context);
     fn(*ctx);
     // The caller may have moved focus (Element::Focus()).
