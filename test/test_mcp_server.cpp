@@ -731,7 +731,9 @@ struct ScopedGraphExecutable {
     explicit ScopedGraphExecutable(const std::filesystem::path& executable) {
         configure_graph_executable(executable.string());
     }
-    ~ScopedGraphExecutable() { configure_graph_executable(""); }
+    ~ScopedGraphExecutable() {
+        configure_graph_executable("");
+    }
 };
 } // namespace
 
@@ -804,9 +806,9 @@ TEST_CASE("MCP graph diff delegates to the matched CLI and maps only refusals to
     // Without a matched sibling the tool fails closed rather than falling back
     // to PATH or the working directory.
     std::filesystem::remove(sibling);
-    const auto missing = handle_request(tool_call(
-        "85", "pulp_graph",
-        R"JSON({"operation":"diff","before":"a.pulpgraph","after":"b.pulpgraph"})JSON"));
+    const auto missing = handle_request(
+        tool_call("85", "pulp_graph",
+                  R"JSON({"operation":"diff","before":"a.pulpgraph","after":"b.pulpgraph"})JSON"));
     require_contains(missing, "matched sibling pulp-cpp is unavailable");
     REQUIRE(missing.find("\"isError\":true") != std::string::npos);
 #endif

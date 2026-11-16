@@ -171,13 +171,12 @@ std::string graph_diff_input_error(const std::string& code, const std::string& m
 // a refusal (CLI exit 1 or 2) is an MCP error.
 std::string handle_graph_diff(const std::string& params_json) {
     if (!extract_string(params_json, "path").empty())
-        return graph_diff_input_error(
-            "invalid_option", "diff takes before and after, not path");
+        return graph_diff_input_error("invalid_option", "diff takes before and after, not path");
     for (const char* key : {"input", "source_node", "source_port", "destination_node",
                             "destination_port", "edge_kind", "destination_param", "block_frames"}) {
         if (!extract_raw(params_json, key).empty())
-            return graph_diff_input_error(
-                "invalid_option", std::string("diff does not accept ") + key);
+            return graph_diff_input_error("invalid_option",
+                                          std::string("diff does not accept ") + key);
     }
     if (extract_bool(params_json, "plan", false) || extract_bool(params_json, "latency", false) ||
         extract_bool(params_json, "node_loads", false))
@@ -186,8 +185,8 @@ std::string handle_graph_diff(const std::string& params_json) {
     const auto before = extract_string(params_json, "before");
     const auto after = extract_string(params_json, "after");
     if (before.empty() || after.empty())
-        return graph_diff_input_error(
-            "missing_input", "diff requires exactly two graph files: BEFORE AFTER");
+        return graph_diff_input_error("missing_input",
+                                      "diff requires exactly two graph files: BEFORE AFTER");
     fs::path binary;
     {
         std::lock_guard lock(graph_executable_mutex);
