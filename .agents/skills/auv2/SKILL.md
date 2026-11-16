@@ -307,7 +307,10 @@ per plug-in, and the factory class is exported. Things to keep straight:
   `<Class>Factory` functions with `AudioComponentRegister`. Use it when you need
   a real adapter instance in-process without a bundle.
 - The AppKit key mapping lives in `detail/appkit_contract_key.hpp`, shared with
-  the standalone contract window.
+  the standalone contract window. AppKit delivers an astral character (an
+  emoji) as a UTF-16 pair: the helper combines a valid pair into one scalar and
+  drops a lone surrogate, so a key's `character` is always a scalar value
+  (`[auv2]` "carry an astral character whole" case).
 - `au::contract_view_session(ns_view)` (declared in `au_v2_common.hpp`) reaches
   an open contract view's session, and through it the editor's
   `EditorAutomation`, from an in-process host. A harness that opens contract
