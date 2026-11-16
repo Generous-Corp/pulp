@@ -9,7 +9,8 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
             PULP_VELLUM_RMLUI_HAS_WARM)
     endif()
     target_link_libraries(pulp-test-rmlui-native-surface PRIVATE
-        pulp::rmlui-native Catch2::Catch2WithMain "-framework AppKit" "-framework Metal")
+        pulp::rmlui-native pulp::format-core Catch2::Catch2WithMain "-framework AppKit"
+        "-framework Metal")
     include(Catch)
     # One label: catch_discover_tests splits a quoted list into separate
     # property arguments, so "a;b" would set LABELS to "a" alone.

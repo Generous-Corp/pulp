@@ -477,8 +477,49 @@ class CompiledBuildTypeTest(unittest.TestCase):
             matrix.validate_receipt(path)
 
 
+def control_failure(control_misses, attempts, planted_floor, noise_ceiling):
+    """Why the unplanted control runs fail, or None when they pass.
+
+    Every attempt must stay at or under `noise_ceiling`, well below the
+    `planted_floor` misses the planted run must show, and at least one of at
+    most `attempts` runs must be clean. Requiring only one clean run would let
+    an instrument that falsely reports misses on most runs pass."""
+    if not control_misses or len(control_misses) > attempts:
+        return "expected 1 to %d control attempts, got %d" % (attempts, len(control_misses))
+    if noise_ceiling >= planted_floor:
+        return "noise ceiling %d must be below the planted floor %d" % (noise_ceiling, planted_floor)
+    noisy = [m for m in control_misses if m > noise_ceiling]
+    if noisy:
+        return ("an unplanted attempt reported %s misses, above the noise ceiling of %d "
+                "(misses per attempt: %s)" % (noisy, noise_ceiling, control_misses))
+    if min(control_misses) != 0:
+        return ("the unplanted run must be clean in at least one of %d attempts "
+                "(misses per attempt: %s)" % (attempts, control_misses))
+    return None
+
+
 class MissCounterTest(unittest.TestCase):
     CONTROL_ATTEMPTS = 4
+    PLANTED_MIN_MISSES = 4
+    # Host noise may add a genuine miss to an unplanted run; more than this in
+    # any attempt is the instrument, not the host.
+    CONTROL_NOISE_CEILING = 1
+
+    def test_control_rule_bounds_every_attempt_and_needs_one_clean_run(self):
+        def verdict(misses):
+            return control_failure(misses, self.CONTROL_ATTEMPTS, self.PLANTED_MIN_MISSES,
+                                   self.CONTROL_NOISE_CEILING)
+        self.assertIsNone(verdict([0]))
+        self.assertIsNone(verdict([1, 0]))
+        self.assertIsNone(verdict([1, 1, 1, 0]))
+        # An instrument that reports planted-sized misses on some runs fails
+        # even when a later attempt comes back clean.
+        self.assertIsNotNone(verdict([3, 0]))
+        self.assertIsNotNone(verdict([4, 4, 4, 0]))
+        # No clean attempt at all fails.
+        self.assertIsNotNone(verdict([1, 1, 1, 1]))
+        self.assertIsNotNone(verdict([]))
+        self.assertIsNotNone(verdict([0, 0, 0, 0, 0]))
 
     def test_deadline_rule_boundary(self):
         period = 4096 * 1_000_000_000 // 48000
@@ -497,16 +538,17 @@ class MissCounterTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             planted, _ = record(Path(tmp) / "planted", planted_sleep_us=90_000, planted_every=2)
         misses = planted["cells"][0]["metrics"]["deadline_misses"]
-        self.assertGreaterEqual(misses, 4, "instrument failed to see a planted overrun")
+        self.assertGreaterEqual(misses, self.PLANTED_MIN_MISSES,
+                                "instrument failed to see a planted overrun")
         self.assertIn("planted_fault", planted["disqualifiers"])
         self.assertGreater(planted["cells"][0]["metrics"]["duration_ns"]["max"], 90_000_000)
 
         # Negative control: an unplanted run must report no misses. The control
         # records real callbacks, so one slow scheduling slice on a loaded or
         # sanitizer-instrumented runner can add a genuine miss that is host
-        # noise, not an instrument false positive. A systematic false positive
-        # shows up in every attempt, so require at least one clean run out of
-        # CONTROL_ATTEMPTS, and never a planted-fault disqualifier.
+        # noise, not an instrument false positive. Every attempt must stay
+        # under the noise ceiling, at least one of CONTROL_ATTEMPTS must be
+        # clean, and none may carry a planted-fault disqualifier.
         control_misses = []
         for attempt in range(self.CONTROL_ATTEMPTS):
             with tempfile.TemporaryDirectory() as tmp:
@@ -515,10 +557,9 @@ class MissCounterTest(unittest.TestCase):
             control_misses.append(control["cells"][0]["metrics"]["deadline_misses"])
             if control_misses[-1] == 0:
                 break
-        self.assertEqual(min(control_misses), 0,
-                         "negative control: the unplanted run must be clean in at least one "
-                         "of %d attempts (misses per attempt: %s)"
-                         % (self.CONTROL_ATTEMPTS, control_misses))
+        failure = control_failure(control_misses, self.CONTROL_ATTEMPTS, self.PLANTED_MIN_MISSES,
+                                  self.CONTROL_NOISE_CEILING)
+        self.assertIsNone(failure, "negative control: %s" % failure)
 
 
 class QualificationRuleTest(unittest.TestCase):

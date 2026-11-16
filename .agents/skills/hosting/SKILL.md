@@ -39,8 +39,10 @@ A transport stream-history reset (and prepare) also resets every stateful
 Control node (integrator, slew, hysteresis) to its configured initial state, so
 a seek renders like a fresh graph; a negative reset position is `OutOfRange`,
 and a non-finite index is published as 0 rather than forwarded to a parameter.
-That seek reset calls `CustomNodeType::reset` on the AUDIO thread, from both the
-Control index path and the graph-event path, but only for a type that passes
+That seek reset calls `CustomNodeType::reset` on the AUDIO thread, from the
+Control index path, the graph-event path, and plain `process()` on a graph with
+no event lane (a Control chain fed by an ordinary audio source has no lane and
+no epoch, yet still resets), but only for a type that passes
 `custom_node_reset_runs_on_audio_thread()` (a declared `rt_contract` with an
 audio-callback safety class). A third-party Control-port type that leaves
 `rt_contract` undeclared keeps its state across a seek; declaring it promises
@@ -3545,3 +3547,20 @@ indices, internal edges, parameter set and bounds), and any mismatch clears
 the graph. Bounds and Processor targets always come from the template, so a
 document cannot widen them. `inspect_document` refuses dangling or shared
 members and records outside the v6 envelope, without needing templates.
+
+Saved identity strictness: `inspect_document`, `diff_graph_documents` and
+`from_saved_document` rebuild each node's identity string from its saved record
+(numbered by persisted node id, as the writer does) and refuse a mismatch as
+`identity_binding_unknown`, so an edited identity string cannot bind a node it
+was not written for. A custom node's missing `version` means 1 and a value
+below 1 is refused; the writer records a version below 1 as 1. A spectral graph
+that cannot be saved reports the failing rule through `SaveResult::error`
+(`to_saved_file` refuses it with that reason); the older string-returning
+writer overloads keep returning an empty string. The writer and inspection
+build identity strings through one key function (`identity_key` in
+`graph_serializer.cpp`); change the format there, never in only one side, or
+every saved document is refused. The tolerant loader drops a node record it
+cannot add (a second Control index input, a plugin record without plugin info)
+and lists it in `LoadResult::unrestored_node_ids`; `from_saved_document` and
+the CLI rewrites (`save`, `fmt`, `canonicalize`) refuse such a document as
+`node_not_restored` rather than write a file that silently lost the node.

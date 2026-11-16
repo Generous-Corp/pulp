@@ -81,11 +81,60 @@ TEST_CASE("Isolated CLAP callback emits the completion it validated, not a later
         REQUIRE(sample == 0.125f);
 }
 
+TEST_CASE("Isolated CLAP hello reply must echo every binding field", "[host][isolation]") {
+    using namespace pulp::host::isolation;
+    ControlRecord sent;
+    sent.command = Command::hello;
+    sent.generation = 41;
+    sent.payload_bytes = kMappingBytes;
+    sent.volume = 7;
+    sent.file = 9;
+    sent.file_generation = 11;
+    sent.plugin_sha256.fill('a');
+    sent.worker_sha256.fill('b');
+    sent.build.fill('c');
+    constexpr std::uint64_t pid = 1234;
+    ControlRecord good = sent;
+    good.result = 1;
+    good.process_id = pid;
+    CHECK(hello_reply_matches(sent, good, pid));
+
+    // Every field the parent binds is checked on its own.
+    const std::array<void (*)(ControlRecord&), 13> defects{
+        [](ControlRecord& r) { r.command = Command::destroy; },
+        [](ControlRecord& r) { r.result = 0; },
+        [](ControlRecord& r) { ++r.generation; },
+        [](ControlRecord& r) { ++r.process_id; },
+        [](ControlRecord& r) { ++r.payload_bytes; },
+        [](ControlRecord& r) { ++r.volume; },
+        [](ControlRecord& r) { ++r.file; },
+        [](ControlRecord& r) { ++r.file_generation; },
+        [](ControlRecord& r) { r.plugin_sha256[3] = 'z'; },
+        [](ControlRecord& r) { r.worker_sha256[3] = 'z'; },
+        [](ControlRecord& r) { r.build[3] = 'z'; },
+        [](ControlRecord& r) { r.plugin_sha256.back() = 'z'; },
+        [](ControlRecord& r) { r.build.back() = 'z'; },
+    };
+    for (std::size_t i = 0; i < defects.size(); ++i) {
+        INFO("defect=" << i);
+        auto reply = good;
+        defects[i](reply);
+        CHECK_FALSE(hello_reply_matches(sent, reply, pid));
+    }
+    // A parent that sent a different mapping size is refused even when echoed.
+    auto odd = sent;
+    odd.payload_bytes = kMappingBytes / 2;
+    auto echoed = good;
+    echoed.payload_bytes = odd.payload_bytes;
+    CHECK_FALSE(hello_reply_matches(odd, echoed, pid));
+}
+
 #if defined(_WIN32) && defined(PULP_ISOLATED_CLAP_WINDOWS_PEER)
 #include "isolated_clap_windows_channel.hpp"
 #include <optional>
 #include <pulp/platform/child_process.hpp>
 #include <thread>
+#include <vector>
 
 namespace {
 using namespace pulp::host::isolation;
@@ -215,6 +264,51 @@ TEST_CASE("Windows isolated CLAP handshake refuses a defective worker reply",
         CHECK(receipt.status == RetainedCleanupStatus::Complete);
         CHECK(receipt.descendants_gone);
     }
+}
+
+TEST_CASE("Windows isolated CLAP transfer cancels a timed-out write before returning",
+          "[host][isolation][windows]") {
+    RetainedProcessCustody reservation;
+    ChildProcess process;
+    ProcessOptions options;
+    options.capture_stdout = options.capture_stderr = false;
+    windows::TransferObservation observation;
+    bool sent = true;
+    std::chrono::steady_clock::duration elapsed{};
+    // ping never reads its standard input, so 1 MiB outgrows the pipe buffer
+    // and a write stays pending until the deadline expires.
+    REQUIRE(process.start_retained_with_standard_input_channel(
+        reservation, "ping.exe", {"-n", "60", "127.0.0.1"},
+        [&](int, ChildProcessInputChannel channel, auto) {
+            std::vector<char> payload(1 << 20, 'x');
+            const auto start = std::chrono::steady_clock::now();
+            sent = windows::transfer(channel.native_handle(), payload.data(), payload.size(), true,
+                                     start + std::chrono::milliseconds(50), &observation);
+            elapsed = std::chrono::steady_clock::now() - start;
+            return true;
+        },
+        options));
+    CHECK_FALSE(sent);
+    CHECK(observation.timed_out);
+    CHECK(observation.settled);
+    CHECK(elapsed < std::chrono::seconds(4));
+    const auto cleaned = reservation.cleanup_retained_process_group(
+        std::chrono::steady_clock::now() + std::chrono::seconds(2));
+    CHECK(cleaned.status == RetainedCleanupStatus::Complete);
+}
+
+TEST_CASE("Windows isolated CLAP waits stay finite and positive for any deadline",
+          "[host][isolation][windows]") {
+    using std::chrono::milliseconds;
+    CHECK(windows::wait_milliseconds(milliseconds(-5)) == 1);
+    CHECK(windows::wait_milliseconds(milliseconds(0)) == 1);
+    CHECK(windows::wait_milliseconds(milliseconds(750)) == 750);
+    CHECK(windows::wait_milliseconds(milliseconds(INFINITE - 1)) == INFINITE - 1);
+    // Exactly INFINITE, and anything past 32 bits, clamps below INFINITE
+    // instead of becoming an unbounded wait or truncating to a short one.
+    CHECK(windows::wait_milliseconds(milliseconds(INFINITE)) == INFINITE - 1);
+    CHECK(windows::wait_milliseconds(milliseconds(0x1'0000'0005LL)) == INFINITE - 1);
+    CHECK(windows::wait_milliseconds(std::chrono::hours(24 * 60)) == INFINITE - 1);
 }
 
 TEST_CASE("Windows isolated CLAP handshake is bounded by its deadline",
