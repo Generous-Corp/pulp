@@ -12,6 +12,32 @@
 
 namespace pulp::host {
 
+// The graph error an engine's guarded split result latches on a node. Each
+// engine cause keeps a distinct graph code where one exists; a block the
+// engine refuses as larger than it was prepared for is a capacity failure.
+constexpr SpectralError to_spectral_error(signal::SpectralSplitResult result) noexcept {
+    using R = signal::SpectralSplitResult;
+    switch (result) {
+    case R::Ok:
+        return SpectralError::None;
+    case R::NotPrepared:
+        return SpectralError::UnsupportedOperation;
+    case R::InvalidBlock:
+    case R::CapacityExceeded:
+        return SpectralError::CapacityExceeded;
+    case R::InvalidFrame:
+        return SpectralError::InvalidFrame;
+    case R::ChronologyExhausted:
+        return SpectralError::ChronologyExhausted;
+    case R::NonfiniteSynthesis:
+    case R::StreamStopped:
+        return SpectralError::SynthesisOverflow;
+    case R::OutputUnderrun:
+        return SpectralError::OutputUnderrun;
+    }
+    return SpectralError::UnsupportedOperation;
+}
+
 class SpectralRuntimeBank {
   public:
     static constexpr std::size_t memory_limit = 64u * 1024u * 1024u;
@@ -124,8 +150,9 @@ class SpectralRuntimeBank {
                         break;
                     }
                     n.asset_morph.sum += value;
-                    if (++n.asset_morph.samples == 64) {
-                        const auto amount = static_cast<float>(n.asset_morph.sum / 64);
+                    if (++n.asset_morph.samples == static_cast<unsigned>(n.identity.hop())) {
+                        const auto amount =
+                            static_cast<float>(n.asset_morph.sum / n.identity.hop());
                         n.asset_morph.sum = 0;
                         n.asset_morph.samples = 0;
                         if (!n.asset_morph.frame(n.sequence, amount, n.working) ||
@@ -156,7 +183,7 @@ class SpectralRuntimeBank {
                         n.advance();
                     });
                 if (result != signal::SpectralSplitResult::Ok)
-                    n.fatal(n.origin, SpectralError::ChronologyExhausted);
+                    n.fatal(n.origin, to_spectral_error(result));
             } else if (n.type != NodeType::SpectralAnalysis && n.fatal_origin == limit) {
                 const auto* batch = ctx.spectral_input;
                 const auto decoded_contract =
@@ -173,7 +200,7 @@ class SpectralRuntimeBank {
                     if (batch->fatal && n.origin >= batch->fatal_origin) {
                         if (n.type == NodeType::SpectralSynthesis)
                             n.engine->stop_synthesis_guarded();
-                        n.fatal(batch->fatal_origin, SpectralError::CapacityExceeded);
+                        n.fatal(batch->fatal_origin, SpectralError::UpstreamFatal);
                         break;
                     }
                     while (cursor < batch->count && batch->stamps[cursor].sequence < n.sequence) {
@@ -221,10 +248,10 @@ class SpectralRuntimeBank {
                         std::array<const std::complex<float>*, 16> frames{};
                         for (int c = 0; c < channels; ++c)
                             frames[c] = n.working.data() + c * bins;
-                        if (n.engine->synthesize_frame_guarded(frames.data()) !=
-                            signal::SpectralSplitResult::Ok) {
+                        if (const auto result = n.engine->synthesize_frame_guarded(frames.data());
+                            result != signal::SpectralSplitResult::Ok) {
                             n.engine->stop_synthesis_guarded();
-                            n.fatal(n.origin, SpectralError::SynthesisOverflow);
+                            n.fatal(n.origin, to_spectral_error(result));
                             break;
                         }
                     }

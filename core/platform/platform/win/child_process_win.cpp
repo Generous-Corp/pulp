@@ -3,7 +3,9 @@
 
 #ifdef _WIN32
 
+#include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <future>
 #include <mutex>
 #include <thread>
@@ -189,7 +191,162 @@ struct ChildProcess::Impl {
     bool started = false;
     bool finished = false;
     ProcessResult result;
+    // Retained custody: the job object owns the child and every descendant
+    // (breakaway is not permitted), and the open process handle reserves the
+    // child's identity until cleanup has observed an empty job.
+    bool retained = false;
+    bool retained_reaped = false;
+    bool retained_kill_sent = false;
+    HANDLE job = nullptr;
+    std::chrono::steady_clock::time_point retained_kill_time{};
+    RetainedProcessObservation retained_observation;
+    std::shared_ptr<Impl> abandoned_reservation;
+
+    ~Impl() {
+        if (is_valid_job())
+            CloseHandle(job);
+    }
+    bool is_valid_job() const noexcept {
+        return job != nullptr && job != INVALID_HANDLE_VALUE;
+    }
+    RetainedProcessObservation observe_retained_locked();
+    RetainedProcessCleanup cleanup_retained(std::chrono::steady_clock::time_point deadline);
+    void preserve_abandoned_reservation(const std::shared_ptr<Impl>& owner) {
+        if (retained && started && !finished && owner.use_count() == 1) {
+            // Never destroyed: closing the job would kill descendants without a
+            // cleanup receipt, so the record stays diagnosable until host exit,
+            // when the kill-on-close job reclaims anything still running.
+            abandoned_reservation = owner;
+            std::fprintf(stderr,
+                         "ChildProcess: unresolved custody retained until host exit "
+                         "(pid=%lu job); cleanup did not complete\n",
+                         static_cast<unsigned long>(process_id));
+        }
+    }
 };
+
+namespace {
+
+// Live members of the job, excluding processes that have already terminated.
+// A failed query never establishes descendant disappearance.
+bool job_is_empty(HANDLE job) noexcept {
+    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting{};
+    if (!QueryInformationJobObject(job, JobObjectBasicAccountingInformation, &accounting,
+                                   sizeof(accounting), nullptr))
+        return false;
+    return accounting.ActiveProcesses == 0;
+}
+
+HANDLE create_retained_job() noexcept {
+    HANDLE job = CreateJobObjectW(nullptr, nullptr);
+    if (job == nullptr)
+        return nullptr;
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+    // No breakaway flag: a descendant cannot leave the job, so terminating the
+    // job reaches grandchildren whose parent has already exited.
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits))) {
+        CloseHandle(job);
+        return nullptr;
+    }
+    return job;
+}
+
+} // namespace
+
+RetainedProcessObservation ChildProcess::Impl::observe_retained_locked() {
+    if (!retained || !started)
+        return {};
+    auto& observation = retained_observation;
+    observation.process_id = static_cast<int>(process_id);
+    // Windows has no process group; the job object is the group authority.
+    observation.process_group_id = -1;
+    if (retained_reaped) {
+        observation.state = RetainedProcessState::Reaped;
+        observation.identity_retained = false;
+        return observation;
+    }
+    const auto waited = WaitForSingleObject(process, 0);
+    if (waited == WAIT_OBJECT_0) {
+        DWORD code = 0;
+        observation.state = RetainedProcessState::Exited;
+        observation.exit_code = GetExitCodeProcess(process, &code) ? static_cast<int>(code) : -1;
+        observation.termination_signal = 0;
+    } else if (waited == WAIT_TIMEOUT) {
+        observation.state = RetainedProcessState::Running;
+    } else {
+        observation.state = RetainedProcessState::CustodyLost;
+    }
+    observation.identity_retained = observation.state != RetainedProcessState::CustodyLost;
+    return observation;
+}
+
+RetainedProcessCleanup
+ChildProcess::Impl::cleanup_retained(std::chrono::steady_clock::time_point requested_deadline) {
+    RetainedProcessCleanup result;
+    std::unique_lock lock(mutex, std::try_to_lock);
+    if (!lock.owns_lock()) {
+        result.status = RetainedCleanupStatus::Busy;
+        return result;
+    }
+    if (!retained)
+        return result;
+    const auto deadline =
+        std::min(requested_deadline, std::chrono::steady_clock::now() + std::chrono::seconds(2));
+    result.status = RetainedCleanupStatus::Incomplete;
+    const auto finish_result = [&] {
+        result.observation = observe_retained_locked();
+        if (result.observation.state == RetainedProcessState::CustodyLost)
+            result.status = RetainedCleanupStatus::CustodyLost;
+        // Windows has no graceful group signal; termination is the job kill.
+        result.term_sent = false;
+        result.kill_sent = retained_kill_sent;
+        result.child_reaped = retained_reaped;
+        return result;
+    };
+    if (!started || finished) {
+        result.status = RetainedCleanupStatus::Complete;
+        result.descendants_gone = true;
+        finished = true;
+        return finish_result();
+    }
+    while (std::chrono::steady_clock::now() < deadline) {
+        const auto observation = observe_retained_locked();
+        if (observation.state == RetainedProcessState::CustodyLost) {
+            result.status = RetainedCleanupStatus::CustodyLost;
+            return finish_result();
+        }
+        if (observation.state == RetainedProcessState::Exited && job_is_empty(job)) {
+            // Nothing can join a job whose last member has exited. Release the
+            // identity only after that observation.
+            this->result.exit_code = observation.exit_code;
+            CloseHandle(process);
+            process = INVALID_HANDLE_VALUE;
+            CloseHandle(job);
+            job = nullptr;
+            retained_reaped = true;
+            finished = true;
+            stdout_pipe.close_all();
+            stderr_pipe.close_all();
+            standard_input.close_all();
+            result.status = RetainedCleanupStatus::Complete;
+            result.descendants_gone = true;
+            return finish_result();
+        }
+        if (std::chrono::steady_clock::now() >= deadline)
+            break;
+        if (std::chrono::steady_clock::now() - retained_kill_time >=
+            std::chrono::milliseconds(10)) {
+            // Retry while custody is held: a member may be mid-creation.
+            retained_kill_time = std::chrono::steady_clock::now();
+            const bool sent = TerminateJobObject(job, 1) != FALSE;
+            retained_kill_sent = retained_kill_sent || sent;
+        }
+        std::this_thread::sleep_until(
+            std::min(deadline, std::chrono::steady_clock::now() + std::chrono::milliseconds(1)));
+    }
+    return finish_result();
+}
 
 ChildProcessInputChannel::~ChildProcessInputChannel() {
     if (handle_ >= 0)
@@ -227,6 +384,13 @@ CurrentProcessGroup& CurrentProcessGroup::operator=(CurrentProcessGroup&& other)
 
 ChildProcess::ChildProcess() : impl_(std::make_shared<Impl>()) {}
 ChildProcess::~ChildProcess() {
+    if (impl_ && impl_->retained) {
+        if (impl_.use_count() == 1)
+            (void)impl_->cleanup_retained(std::chrono::steady_clock::now() +
+                                          std::chrono::seconds(2));
+        impl_->preserve_abandoned_reservation(impl_);
+        return;
+    }
     if (impl_ && impl_->started && !impl_->finished) {
         if (is_running())
             cancel();
@@ -234,27 +398,59 @@ ChildProcess::~ChildProcess() {
     }
 }
 ChildProcess::ChildProcess(ChildProcess&&) noexcept = default;
-ChildProcess& ChildProcess::operator=(ChildProcess&&) noexcept = default;
+ChildProcess& ChildProcess::operator=(ChildProcess&& other) noexcept {
+    if (this != &other) {
+        if (impl_ && impl_->retained) {
+            if (impl_.use_count() == 1)
+                (void)impl_->cleanup_retained(std::chrono::steady_clock::now() +
+                                              std::chrono::seconds(2));
+            impl_->preserve_abandoned_reservation(impl_);
+        }
+        impl_ = std::move(other.impl_);
+    }
+    return *this;
+}
 
-RetainedProcessCustody::~RetainedProcessCustody() = default;
+RetainedProcessCustody::~RetainedProcessCustody() {
+    if (impl_) {
+        if (impl_.use_count() == 1)
+            (void)impl_->cleanup_retained(std::chrono::steady_clock::now() +
+                                          std::chrono::seconds(2));
+        impl_->preserve_abandoned_reservation(impl_);
+    }
+}
 RetainedProcessCustody::RetainedProcessCustody(RetainedProcessCustody&&) noexcept = default;
-RetainedProcessCustody&
-RetainedProcessCustody::operator=(RetainedProcessCustody&&) noexcept = default;
+RetainedProcessCustody& RetainedProcessCustody::operator=(RetainedProcessCustody&& other) noexcept {
+    if (this != &other) {
+        if (impl_) {
+            if (impl_.use_count() == 1)
+                (void)impl_->cleanup_retained(std::chrono::steady_clock::now() +
+                                              std::chrono::seconds(2));
+            impl_->preserve_abandoned_reservation(impl_);
+        }
+        impl_ = std::move(other.impl_);
+    }
+    return *this;
+}
 RetainedProcessObservation ChildProcess::retained_process_observation() const {
-    return {.state = RetainedProcessState::Unsupported};
+    if (!impl_)
+        return {};
+    std::lock_guard lock(impl_->mutex);
+    return impl_->observe_retained_locked();
 }
 RetainedProcessObservation RetainedProcessCustody::retained_process_observation() const {
-    return {.state = RetainedProcessState::Unsupported};
+    if (!impl_)
+        return {};
+    std::lock_guard lock(impl_->mutex);
+    return impl_->observe_retained_locked();
 }
 RetainedProcessCleanup
-ChildProcess::cleanup_retained_process_group(std::chrono::steady_clock::time_point) {
-    return {.status = RetainedCleanupStatus::Unsupported,
-            .observation = {.state = RetainedProcessState::Unsupported}};
+ChildProcess::cleanup_retained_process_group(std::chrono::steady_clock::time_point deadline) {
+    return impl_ ? impl_->cleanup_retained(deadline) : RetainedProcessCleanup{};
 }
-RetainedProcessCleanup
-RetainedProcessCustody::cleanup_retained_process_group(std::chrono::steady_clock::time_point) {
-    return {.status = RetainedCleanupStatus::Unsupported,
-            .observation = {.state = RetainedProcessState::Unsupported}};
+RetainedProcessCleanup RetainedProcessCustody::cleanup_retained_process_group(
+    std::chrono::steady_clock::time_point deadline) {
+    return impl_ ? impl_->cleanup_retained(deadline) : RetainedProcessCleanup{};
 }
 JoinedChildObservation ChildProcess::joined_child_observation() const {
     return {.state = JoinedChildState::Unsupported};
@@ -273,10 +469,13 @@ JoinedChildCleanup JoinedChildCustody::cleanup_joined_child(std::chrono::steady_
     return {.status = JoinedChildCleanupStatus::Unsupported,
             .observation = {.state = JoinedChildState::Unsupported}};
 }
-bool ChildProcess::start_retained(RetainedProcessCustody&, const std::string&,
-                                  const std::vector<std::string>&, const ProcessOptions&) {
-    return false;
+bool ChildProcess::start_retained(RetainedProcessCustody& custody, const std::string& command,
+                                  const std::vector<std::string>& args,
+                                  const ProcessOptions& options) {
+    return start_impl(command, args, options, nullptr, nullptr, nullptr, &custody);
 }
+// The private duplex channel is not available on Windows, so the channel
+// variant refuses before reserving or spawning.
 bool ChildProcess::start_retained_with_standard_input_channel(RetainedProcessCustody&,
                                                               const std::string&,
                                                               const std::vector<std::string>&,
@@ -329,11 +528,15 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
                               RetainedProcessCustody* custody,
                               const CurrentProcessGroup* joined_group,
                               JoinedChildCustody* joined_custody) {
-    if (custody || joined_group || joined_custody)
+    if (joined_group || joined_custody)
         return false;
     if (standard_input_session)
         return false;
+    if (custody && (custody->impl_ || standard_input || standard_input_provider))
+        return false;
     std::unique_lock<std::recursive_mutex> lock(impl_->mutex);
+    if (impl_->retained)
+        return false;
     const bool has_standard_input = standard_input || standard_input_provider;
     if (impl_->started && !impl_->finished) {
         if (is_running())
@@ -352,6 +555,17 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
     impl_->started = false;
     impl_->finished = false;
     impl_->result = {};
+    if (custody) {
+        // Reserve before any spawn attempt, as POSIX does: custody is single-use,
+        // so a launch that fails (for example a missing executable) still consumes
+        // it, and cleanup reports Complete with no child to reap.
+        impl_->retained = true;
+        impl_->retained_reaped = false;
+        impl_->retained_kill_sent = false;
+        impl_->retained_kill_time = {};
+        impl_->retained_observation = {};
+        custody->impl_ = impl_;
+    }
 
     if ((has_standard_input && (options.standard_input_timeout_ms <= 0 ||
                                 !impl_->standard_input.create_input())) ||
@@ -461,8 +675,19 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
         creation_flags |= EXTENDED_STARTUPINFO_PRESENT;
     }
 
+    HANDLE retained_job = nullptr;
+    if (custody) {
+        retained_job = create_retained_job();
+        // Born suspended so no instruction runs, and no descendant exists,
+        // before the child is a job member.
+        creation_flags |= CREATE_SUSPENDED;
+    }
+
     PROCESS_INFORMATION pi{};
-    BOOL ok = CreateProcessA(nullptr, cmdline.data(), nullptr, nullptr,
+    BOOL ok =
+        (custody && retained_job == nullptr)
+            ? FALSE
+            : CreateProcessA(nullptr, cmdline.data(), nullptr, nullptr,
                              TRUE, // inherit handles
                              creation_flags, nullptr,
                              options.working_directory.empty() ? nullptr
@@ -482,7 +707,17 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
     if (is_valid_handle(null_stderr))
         CloseHandle(null_stderr);
 
+    if (ok && custody && !AssignProcessToJobObject(retained_job, pi.hProcess)) {
+        TerminateProcess(pi.hProcess, 1);
+        WaitForSingleObject(pi.hProcess, 1000);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        ok = FALSE;
+    }
+
     if (!ok) {
+        if (retained_job != nullptr)
+            CloseHandle(retained_job);
         impl_->standard_input.close_all();
         impl_->stdout_pipe.close_all();
         impl_->stderr_pipe.close_all();
@@ -492,8 +727,34 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
 
     impl_->process = pi.hProcess;
     impl_->process_id = pi.dwProcessId;
-    CloseHandle(pi.hThread);
     impl_->started = true;
+    if (custody) {
+        impl_->job = retained_job;
+        impl_->retained_observation = {
+            .state = RetainedProcessState::Running,
+            .process_id = static_cast<int>(pi.dwProcessId),
+            .process_group_id = -1,
+            .identity_retained = true,
+        };
+        bool accepted = true;
+        if (options.suspended_process_validator) {
+            try {
+                accepted = options.suspended_process_validator(static_cast<int>(pi.dwProcessId));
+            } catch (...) {
+                accepted = false;
+            }
+        }
+        if (!accepted || ResumeThread(pi.hThread) == static_cast<DWORD>(-1)) {
+            CloseHandle(pi.hThread);
+            lock.unlock();
+            (void)impl_->cleanup_retained(std::chrono::steady_clock::now() +
+                                          std::chrono::seconds(2));
+            return false;
+        }
+        CloseHandle(pi.hThread);
+        return true;
+    }
+    CloseHandle(pi.hThread);
     const auto spawned_process_id = impl_->process_id;
     const auto deadline = std::chrono::steady_clock::now() +
                           std::chrono::milliseconds(options.standard_input_timeout_ms);
@@ -595,6 +856,8 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
 
 bool ChildProcess::is_running() const {
     std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
+    if (impl_->retained)
+        return impl_->observe_retained_locked().state == RetainedProcessState::Running;
     if (!impl_->started || impl_->finished) return false;
     return WaitForSingleObject(impl_->process, 0) == WAIT_TIMEOUT;
 }
@@ -606,6 +869,11 @@ int ChildProcess::process_id() const {
 
 void ChildProcess::cancel() {
     std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
+    if (impl_->retained) {
+        impl_->result.was_cancelled = impl_->started && !impl_->finished;
+        (void)impl_->cleanup_retained(std::chrono::steady_clock::now() + std::chrono::seconds(2));
+        return;
+    }
     if (!impl_->started || impl_->finished) return;
     if (!is_running()) {
         impl_->standard_input.close_all();
@@ -631,6 +899,14 @@ void ChildProcess::cancel() {
 
 ProcessResult ChildProcess::wait() {
     std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
+    if (impl_->retained) {
+        const auto observation = impl_->observe_retained_locked();
+        auto result = impl_->result;
+        result.exit_code = observation.exit_code;
+        result.stdout_output = impl_->stdout_full;
+        result.stderr_output = impl_->stderr_full;
+        return result;
+    }
     if (!impl_->started) return impl_->result;
     if (impl_->finished) return impl_->result;
 

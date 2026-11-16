@@ -122,6 +122,71 @@ TEST_CASE("graph CLI success code and fmt use the C++ spelling", "[cli][shellout
     const auto fmt = run_pulp({"graph", "fmt", path.string(), "--json"});
     REQUIRE(fmt.exit_code == 0);
     REQUIRE(cli_code(fmt) == ok);
+
+    // fmt on a saved document prints the same typed result.
+    const auto saved = dir / "ok.pulpgraph";
+    pulp::host::SignalGraph graph;
+    const auto in = graph.add_input_node(1, "Input");
+    const auto gain = graph.add_gain_node("Gain");
+    const auto out = graph.add_output_node(1, "Output");
+    REQUIRE(graph.connect(in, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, out, 0));
+    std::ofstream(saved, std::ios::binary) << pulp::host::GraphSerializer::to_saved_document(graph);
+    const auto fmt_doc = run_pulp({"graph", "fmt", saved.string(), "--json"});
+    REQUIRE(fmt_doc.exit_code == 0);
+    REQUIRE(cli_code(fmt_doc) == ok);
+}
+
+TEST_CASE("graph CLI file size and readability codes agree across subcommands",
+          "[cli][shellout][graph][parity]") {
+    if (!fs::exists(pulp_binary()))
+        SKIP("pulp not built");
+    const auto dir = unique_temp_dir("pulp-graph-code-parity-files");
+    fs::create_directories(dir);
+
+    // One byte over the serializer limit, sparse so the test writes nothing.
+    const auto oversize = dir / "oversize.pulpgraph";
+    std::ofstream(oversize, std::ios::binary).close();
+    fs::resize_file(oversize, pulp::host::GraphSerializer::max_file_bytes + 1);
+    REQUIRE(pulp::host::load_graph_patch_file(oversize).diagnostic.code == Code::ResourceLimit);
+    const std::string limit = pulp::host::graph_patch_code_name(Code::ResourceLimit);
+    for (const std::string op : {"validate", "inspect", "report"}) {
+        const auto cli = run_pulp({"graph", op, oversize.string(), "--json"});
+        INFO(op << ": " << cli.stdout_output << cli.stderr_output);
+        REQUIRE(cli.exit_code == 1);
+        REQUIRE(cli_code(cli) == limit);
+    }
+
+    // A path that exists but is not a readable regular file.
+    const auto directory = dir / "directory.pulpgraph";
+    fs::create_directories(directory);
+    REQUIRE(pulp::host::load_graph_patch_file(directory).diagnostic.code == Code::FileUnreadable);
+    const std::string unreadable = pulp::host::graph_patch_code_name(Code::FileUnreadable);
+    for (const std::string op : {"validate", "inspect"}) {
+        const auto cli = run_pulp({"graph", op, directory.string(), "--json"});
+        INFO(op << ": " << cli.stdout_output << cli.stderr_output);
+        REQUIRE(cli.exit_code == 1);
+        REQUIRE(cli_code(cli) == unreadable);
+    }
+
+    // The probe names a missing file the same way, keeping graph_file_limit
+    // for its own 1 MiB size bound.
+    const auto probe = [&](const fs::path& path) {
+        return run_pulp({"graph", "probe", path.string(), "--json", "--input",
+                         (dir / "in.wav").string(), "--source-node", "source", "--source-port",
+                         "audio", "--destination-node", "out", "--destination-port", "audio"});
+    };
+    const auto missing = probe(dir / "absent.pulpgraph");
+    INFO(missing.stdout_output << missing.stderr_output);
+    REQUIRE(missing.exit_code == 2);
+    REQUIRE(cli_code(missing) == unreadable);
+    const auto large = dir / "large.pulpgraph";
+    std::ofstream(large, std::ios::binary).close();
+    fs::resize_file(large, 1024 * 1024 + 1);
+    const auto too_large = probe(large);
+    INFO(too_large.stdout_output << too_large.stderr_output);
+    REQUIRE(too_large.exit_code == 2);
+    REQUIRE(cli_code(too_large) == "graph_file_limit");
 }
 
 namespace {
@@ -140,8 +205,17 @@ TEST_CASE("every CLI graph code the source emits is documented", "[cli][graph][d
     REQUIRE_FALSE(source.empty());
     REQUIRE_FALSE(doc.empty());
 
+    // Only the graph section counts: a generic code such as `saved` must not
+    // pass because another command documents the same word.
+    const auto section_begin = doc.find("\n### graph\n");
+    REQUIRE(section_begin != std::string::npos);
+    const auto section_end = doc.find("\n### ", section_begin + 1);
+    REQUIRE(section_end != std::string::npos);
+    const auto graph_doc = doc.substr(section_begin, section_end - section_begin);
+    REQUIRE(graph_doc.find("`missing_option`") != std::string::npos);
+
     std::set<std::string> emitted;
-    const std::regex pattern(R"re((?:fail|json_error)\("([a-z_]+)"|code = "([a-z_]+)")re");
+    const std::regex pattern(R"re((?:fail|json_error)\("([A-Za-z_]+)"|code = "([A-Za-z_]+)")re");
     for (std::sregex_iterator it(source.begin(), source.end(), pattern), end; it != end; ++it)
         emitted.insert((*it)[1].matched ? (*it)[1].str() : (*it)[2].str());
 
@@ -149,10 +223,27 @@ TEST_CASE("every CLI graph code the source emits is documented", "[cli][graph][d
     CHECK(emitted.size() >= 20);
     CHECK(emitted.count("prepare_failed") == 1);
     CHECK(emitted.count("unprepared_latency") == 1);
+    CHECK(emitted.count("RestoreFailed") == 1);
+
+    // Probe refusal codes are returned from probe_refusal() as string pairs, not
+    // through a literal fail("...") call, so scan them separately.
+    const auto refusal_begin = source.find("probe_refusal(");
+    const auto refusal_end = source.find("\n}\n", refusal_begin);
+    REQUIRE(refusal_begin != std::string::npos);
+    REQUIRE(refusal_end != std::string::npos);
+    const auto refusals = source.substr(refusal_begin, refusal_end - refusal_begin);
+    const std::regex refusal_pattern(R"re(return \{"([A-Za-z]+)",)re");
+    std::set<std::string> refusal_codes;
+    for (std::sregex_iterator it(refusals.begin(), refusals.end(), refusal_pattern), end; it != end;
+         ++it)
+        refusal_codes.insert((*it)[1].str());
+    CHECK(refusal_codes.count("Busy") == 1);
+    CHECK(refusal_codes.size() >= 6);
+    emitted.insert(refusal_codes.begin(), refusal_codes.end());
 
     for (const auto& code : emitted) {
         INFO(code);
-        CHECK(doc.find("`" + code + "`") != std::string::npos);
+        CHECK(graph_doc.find("`" + code + "`") != std::string::npos);
     }
 }
 

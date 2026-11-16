@@ -1,0 +1,11 @@
+cmake_minimum_required(VERSION 3.24)
+project(A3SpectralReplayConsumer LANGUAGES CXX)
+find_package(Pulp REQUIRED COMPONENTS host)
+add_executable(a3-spectral-replay main.cpp)
+target_compile_features(a3-spectral-replay PRIVATE cxx_std_20)
+target_link_libraries(a3-spectral-replay PRIVATE Pulp::host)
+enable_testing()
+if(DEFINED A3_REPLAY_FIXTURE)
+    add_test(NAME a3-spectral-replay-public-consumer
+        COMMAND a3-spectral-replay "${A3_REPLAY_FIXTURE}")
+endif()

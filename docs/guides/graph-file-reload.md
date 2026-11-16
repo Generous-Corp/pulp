@@ -29,13 +29,15 @@ message instead of building. `pulp loop` refuses them with `--no-watch`,
 `--status` or `--off`, which never start the watch.
 
 The watch reads the file once before the initial build and takes those contents
-as its baseline: starting a watch never reapplies an unchanged file, so the live
-graph's DSP state is not reset at startup. Each 500 ms poll checks the size first
+as its baseline, so starting a watch never reapplies an unchanged file and the
+live graph's DSP state is not reset at startup. If the file is missing or
+mid-save at startup there is no baseline, and the first settled contents seen
+later are applied as a change. Each 500 ms poll checks the size first
 and refuses a file over 1 MiB without reading it. Two consecutive identical reads
 coalesce a save; content changes are detected even with unchanged size and
 modification time. A change is recorded as handled only after a terminal receipt:
 a publication or a typed refusal is not resent, a request the product refused
-before it ran (deadline before start, cancelled) is retried up to three times per
+before it ran or stopped before publication (deadline, cancelled) is retried up to three times per
 distinct file content (a newly changed file starts a fresh count), a stale-base
 refusal (the live graph moved past the watch's generation) leaves the file
 unconsumed and pauses graph reload with a message naming the restart generation, an
@@ -101,7 +103,7 @@ empty or identical raw function pointers and the existing compatibility check
 accepts its metadata. Same-key changed callbacks, shapes and opaque captured
 callbacks refuse explicitly, including captured callbacks from the same catalog.
 This profile does not qualify arbitrary
-node/state contracts or constitute full G2 completion.
+node/state contracts.
 
 The public consumer under `examples/graph-file-reload-consumer` uses only installed
 headers: it checks that the starting file is only a baseline, then a real file save stages a 0.25 gain, preserves old output 0.125 during

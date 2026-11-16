@@ -20,6 +20,13 @@ Two modes:
   host. The run is refused before any cell starts when the host's 1-minute
   load is above the admission threshold.
 
+Each cell's callback thread requests real-time scheduling by default (a Mach
+time-constraint policy on macOS, SCHED_FIFO on Linux) and reads the class it
+actually obtained back from the kernel into a ``PACED_SCHED`` line. When the
+request is refused the cell runs no callback and the run stops with a
+``REFUSED`` receipt that names the refusing cell, in every mode. ``--scheduling
+none`` measures default scheduling for comparison and can never qualify.
+
 What a receipt can never prove: WCET, behaviour under a real audio device or
 DAW callback thread, other hosts or platforms, or resource safety (timing runs
 carry no allocation/lock probes; those are separate fixtures).
@@ -41,7 +48,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-SCHEMA = "pulp.graph_paced_timing_matrix_receipt.v1"
+SCHEMA = "pulp.graph_paced_timing_matrix_receipt.v2"
 CELL_HEADER = "pulp_paced_timing_cell_v1"
 QUALIFICATION_CALLBACKS = 100000
 SHORT_CALLBACKS = 32
@@ -55,11 +62,29 @@ TIMING_RULE = (
     "logical CPUs), Release without sanitizer, clean source equal to every cell's compiled "
     "source, no planted fault, and for every cell: zero deadline misses (callback end later "
     "than target + one block), zero oracle failures, nearest-rank p99 callback duration < 70% "
-    "of the block period and nearest-rank p99 absolute wake < 0.1 sample")
+    "of the block period and nearest-rank p99 absolute wake < 0.1 sample; the run must request "
+    "realtime scheduling and every registered fixture cell's callback thread must have obtained "
+    "and read back a real-time class (time_constraint or fifo)")
 
 ADMISSION_RULE = ("admit when os.getloadavg()[0] <= max_load_per_cpu x os.cpu_count(); "
                   "qualification refuses to start otherwise and is disqualified when the "
                   "post-run sample also exceeds it; short mode only records the verdict")
+
+
+SCHED_TRAILER = "PACED_SCHED"
+SCHED_REQUESTS = ("realtime", "none", "realtime-invalid")
+REALTIME_CLASSES = ("time_constraint", "fifo")
+SCHED_STATUSES = ("obtained", "refused", "not_requested")
+SCHED_INT_FIELDS = ("period_ns", "computation_ns", "constraint_ns", "preemptible", "priority")
+SCHED_STR_FIELDS = ("requested", "obtained", "status", "reason")
+SCHEDULING_RULE = (
+    "each cell's callback thread applies the requested scheduling before its first callback and "
+    "reads the class back from the kernel: realtime requests a Mach time-constraint policy "
+    "(computation half the block period, constraint one block period) on macOS or SCHED_FIFO on "
+    "Linux; a failed request or a read-back that is not the requested class refuses the cell, "
+    "which runs no callback, and the run stops with status REFUSED in every mode; "
+    "realtime-invalid is a malformed request the kernel must reject (negative control); none "
+    "keeps default scheduling and never qualifies")
 
 
 class MatrixError(ValueError):
@@ -236,6 +261,40 @@ def parse_cell_output(stdout: str) -> dict[str, Any]:
     return {"meta": meta, "rows": rows}
 
 
+def format_sched_line(requested: str, obtained: str, status: str, reason: str = "none", *,
+                      period_ns: int = 0, computation_ns: int = 0, constraint_ns: int = 0,
+                      preemptible: int = -1, priority: int = -1) -> str:
+    """The ``PACED_SCHED`` line in the format the C++ harness prints."""
+    return (f"{SCHED_TRAILER} requested={requested} obtained={obtained} status={status} "
+            f"reason={reason} period_ns={period_ns} computation_ns={computation_ns} "
+            f"constraint_ns={constraint_ns} preemptible={preemptible} priority={priority}")
+
+
+def parse_sched_line(stdout: str) -> dict[str, Any]:
+    """The scheduling receipt the callback thread printed, checked for internal consistency."""
+    lines = [line for line in stdout.splitlines() if line.startswith(SCHED_TRAILER + " ")]
+    _require(len(lines) == 1, "raw output must carry exactly one scheduling line")
+    fields = dict(_TOKEN.findall(lines[0]))
+    _require(set(fields) == set(SCHED_INT_FIELDS + SCHED_STR_FIELDS), "malformed scheduling line")
+    try:
+        sched: dict[str, Any] = {k: int(fields[k]) for k in SCHED_INT_FIELDS}
+    except ValueError as exc:
+        raise MatrixError("malformed scheduling integer") from exc
+    sched.update({k: fields[k] for k in SCHED_STR_FIELDS})
+    _require(sched["requested"] in SCHED_REQUESTS and sched["status"] in SCHED_STATUSES,
+             "unknown scheduling request or status")
+    if sched["status"] == "not_requested":
+        _require(sched["requested"] == "none" and sched["reason"] == "none",
+                 "scheduling not_requested disagrees with its request")
+    elif sched["status"] == "obtained":
+        _require(sched["requested"] != "none" and sched["obtained"] in REALTIME_CLASSES and
+                 sched["reason"] == "none", "scheduling obtained without a real-time class")
+    else:
+        _require(sched["requested"] != "none" and sched["reason"] != "none",
+                 "scheduling refusal without a request or reason")
+    return sched
+
+
 def parse_g12_output(stdout: str) -> dict[str, Any]:
     """Read the G-12 activation fixture through its own typed validator."""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -360,11 +419,12 @@ def raw_cell_view(fixture: Fixture, stdout: str) -> dict[str, Any]:
                 metrics=compute_metrics(parsed["rows"], meta["rate"], meta["frames"]))
     view.update(provenance)
     view["admission"] = parse_admission_trailer(stdout)
+    view["scheduling"] = parse_sched_line(stdout)
     return view
 
 
 RAW_BOUND_CELL_FIELDS = ("fixture", "variant", "rate", "frames", "callbacks", "compiled_source",
-                         "build_type", "build_dirty", "extras", "returncode", "metrics")
+                         "build_type", "build_dirty", "extras", "returncode", "metrics", "scheduling")
 
 
 def compute_metrics(rows: list[tuple[int, int, int, int]], rate: int, frames: int) -> dict[str, Any]:
@@ -426,7 +486,9 @@ def reference_cell_output(variant: str, rate: int, frames: int, callbacks: int,
     out = [CELL_HEADER,
            f"PACED_CELL fixture=python-reference variant={variant} rate={rate} frames={frames} "
            f"callbacks={callbacks} planted_sleep_us={planted_sleep_us} planted_every={planted_every} "
-           f"compiled_source=none build_type=python build_dirty=0"]
+           f"compiled_source=none build_type=python build_dirty=0",
+           # The in-process reference never requests scheduling.
+           format_sched_line("none", "unknown", "not_requested")]
     out += [f"P {i} {t} {s} {e} {ok}" for i, (t, s, e, ok) in enumerate(rows)]
     out.append(f"PACED_END rows={len(rows)} oracle_failures={sum(1 for r in rows if r[3] == 0)}")
     return "\n".join(out) + "\n"
@@ -444,8 +506,9 @@ def cell_timeout(rate: int, frames: int, callbacks: int, planted_sleep_us: int,
 
 
 def _cell_env(fixture: Fixture, variant: str, rate: int, frames: int, callbacks: int,
-              planted_sleep_us: int, planted_every: int) -> dict[str, str]:
+              planted_sleep_us: int, planted_every: int, scheduling: str = "realtime") -> dict[str, str]:
     env = {k: v for k, v in os.environ.items() if not k.startswith(("PULP_PACED_", "G12_"))}
+    env["PULP_PACED_SCHED"] = scheduling
     if fixture.row_format == "g12":
         env.update(G12_ACTIVATION_RATE=str(rate), G12_ACTIVATION_FRAMES=str(frames),
                    G12_ACTIVATION_CALLBACKS=str(callbacks), G12_ACTIVATION_BACKEND=variant)
@@ -557,10 +620,19 @@ def disqualifiers_for(receipt: dict[str, Any]) -> list[str]:
         reasons.append("dirty_source")
     if receipt["status"] != "COMPLETE":
         reasons.append("run_not_complete")
+    scheduling = receipt["scheduling"]
+    if scheduling["requested"] != "realtime":
+        reasons.append("scheduling_not_realtime_request")
+    if scheduling["refusal"] is not None:
+        reasons.append("scheduling_refused")
     for cell in receipt["cells"]:
         tag = f"{cell['fixture']}/{cell['variant']}/{cell['rate']}/{cell['frames']}"
         if cell["returncode"] != 0:
             reasons.append(f"cell_failed:{tag}")
+        if FIXTURES[cell["fixture"]].row_format != "reference" and (
+                cell["scheduling"]["status"] != "obtained" or
+                cell["scheduling"]["obtained"] not in REALTIME_CLASSES):
+            reasons.append(f"scheduling_not_obtained:{tag}")
         if cell["compiled_source"] != receipt["source"]["sha"] or cell["build_dirty"]:
             reasons.append(f"stale_binary:{tag}")
         # The CMake cache can be flipped to Release without a rebuild, so the
@@ -595,14 +667,16 @@ def _finish(receipt: dict[str, Any]) -> dict[str, Any]:
 def record_matrix(*, mode: str, source_root: Path, build_dir: Path, output_dir: Path,
                   fixtures: list[str], callbacks: int, frames_filter: set[int] | None,
                   planted_sleep_us: int, planted_every: int, max_load_per_cpu: float,
-                  timeout_seconds: float | None,
+                  timeout_seconds: float | None, scheduling: str = "realtime",
                   load_reader: Callable[[], tuple[list[float], int]] = read_load) -> tuple[dict[str, Any], int]:
     _require(mode in ("short", "qualification"), "unknown mode")
+    _require(scheduling in SCHED_REQUESTS, "unknown scheduling request")
     _require(all(name in FIXTURES for name in fixtures), "unknown fixture")
     if mode == "qualification":
         _require(callbacks == QUALIFICATION_CALLBACKS, "qualification requires 100000 callbacks per cell")
         _require(not planted_sleep_us, "qualification cannot carry a planted fault")
         _require(all(FIXTURES[name].qualifying for name in fixtures), "reference fixture is not admissible")
+        _require(scheduling == "realtime", "qualification requires realtime scheduling")
     else:
         lo, hi = SHORT_CALLBACK_RANGE
         _require(lo <= callbacks <= hi, f"short mode requires {lo}..{hi} callbacks")
@@ -632,6 +706,7 @@ def record_matrix(*, mode: str, source_root: Path, build_dir: Path, output_dir: 
         "requested": {"fixtures": list(fixtures), "callbacks": callbacks,
                       "frames_filter": sorted(frames_filter) if frames_filter else None},
         "planted": {"sleep_us": planted_sleep_us, "every": planted_every},
+        "scheduling": {"rule": SCHEDULING_RULE, "requested": scheduling, "refusal": None},
         "cells": [],
     }
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -653,7 +728,7 @@ def record_matrix(*, mode: str, source_root: Path, build_dir: Path, output_dir: 
             exe_sha = executable_hashes.setdefault(fixture.executable, sha256_file(executable))
             result = subprocess.run([str(executable), fixture.test_case],
                                     env=_cell_env(fixture, variant, rate, frames, callbacks,
-                                                  planted_sleep_us, planted_every),
+                                                  planted_sleep_us, planted_every, scheduling),
                                     capture_output=True, text=True, encoding="utf-8",
                                     errors="replace", timeout=timeout_seconds or cell_timeout(
                                         rate, frames, callbacks, planted_sleep_us, planted_every))
@@ -674,6 +749,20 @@ def record_matrix(*, mode: str, source_root: Path, build_dir: Path, output_dir: 
         stdout += (f"{BUILD_TRAILER} cmake_build_type={_provenance_token(build_profile['CMAKE_BUILD_TYPE'])} "
                    f"pulp_sanitizer={_provenance_token(build_profile['PULP_SANITIZER'])}\n")
         raw_path.write_text(stdout, encoding="utf-8")
+        sched = parse_sched_line(stdout)
+        if fixture.row_format != "reference":
+            _require(sched["requested"] == scheduling, f"cell scheduling request mismatch for {stem}")
+            if sched["status"] == "refused":
+                # Stop: no later cell can be measured under the requested class either.
+                receipt["scheduling"]["refusal"] = {
+                    "fixture": fixture.name, "variant": variant, "rate": rate, "frames": frames,
+                    "returncode": returncode, "scheduling": sched,
+                    "raw_stdout": {"path": raw_path.name, "sha256": sha256_file(raw_path)}}
+                load, ncpu = load_reader()
+                receipt["admission"]["after"] = admission_verdict(load, ncpu, max_load_per_cpu)
+                receipt["status"] = "REFUSED"
+                _write(output_dir, _finish(receipt))
+                return receipt, REFUSED_EXIT
         parsed = parse_raw(fixture, stdout)
         meta = parsed["meta"]
         _require((meta["fixture"], meta["variant"], meta["rate"], meta["frames"], meta["callbacks"]) ==
@@ -687,6 +776,7 @@ def record_matrix(*, mode: str, source_root: Path, build_dir: Path, output_dir: 
             "extras": meta["extras"], "returncode": returncode,
             "raw_stdout": {"path": raw_path.name, "sha256": sha256_file(raw_path)},
             "metrics": compute_metrics(parsed["rows"], rate, frames),
+            "scheduling": sched,
         })
     load, ncpu = load_reader()
     receipt["admission"]["after"] = admission_verdict(load, ncpu, max_load_per_cpu)
@@ -706,11 +796,45 @@ def _write(output_dir: Path, receipt: dict[str, Any]) -> Path:
 SOURCE_FIELDS = {"sha", "dirty", "tracked_changes", "untracked_count", "untracked_digest",
                  "untracked_paths"}
 REQUIRED_TOP = {"schema", "tool", "mode", "status", "timing_rule", "source", "build_profile",
-                "host_identity_class", "admission", "requested", "planted", "cells", "totals",
-                "disqualifiers", "timing_qualified", "receipt_sha256"}
+                "host_identity_class", "admission", "requested", "planted", "scheduling", "cells",
+                "totals", "disqualifiers", "timing_qualified", "receipt_sha256"}
 REQUIRED_CELL = {"fixture", "variant", "rate", "frames", "callbacks", "test_case", "executable",
                  "executable_sha256", "source_file", "compiled_source", "build_type", "build_dirty",
-                 "extras", "returncode", "raw_stdout", "metrics"}
+                 "extras", "returncode", "raw_stdout", "metrics", "scheduling"}
+REFUSAL_FIELDS = {"fixture", "variant", "rate", "frames", "returncode", "scheduling", "raw_stdout"}
+
+
+def _validate_scheduling(path: Path, receipt: dict[str, Any]) -> None:
+    """The requested class is legal for the mode, and a refusal is bound to its raw output."""
+    scheduling = receipt["scheduling"]
+    _require(isinstance(scheduling, dict) and set(scheduling) == {"rule", "requested", "refusal"},
+             "scheduling fields mismatch")
+    _require(scheduling["rule"] == SCHEDULING_RULE, "scheduling rule text changed")
+    _require(scheduling["requested"] in SCHED_REQUESTS, "unknown scheduling request")
+    if receipt["mode"] == "qualification":
+        _require(scheduling["requested"] == "realtime", "qualification receipt did not request realtime")
+    refusal = scheduling["refusal"]
+    if refusal is None:
+        return
+    _require(receipt["status"] == "REFUSED", "a scheduling refusal must stop the run")
+    _require(isinstance(refusal, dict) and set(refusal) == REFUSAL_FIELDS, "refusal fields mismatch")
+    fixture = FIXTURES.get(refusal["fixture"])
+    _require(fixture is not None and fixture.row_format != "reference" and
+             refusal["variant"] in fixture.variants and refusal["rate"] in fixture.rates and
+             refusal["frames"] in fixture.frames, "unexpected refusing cell")
+    name = refusal["raw_stdout"]["path"]
+    raw = path.parent / name
+    _require(Path(name).name == name and raw.is_file(), "refusal raw output missing")
+    _require(sha256_file(raw) == refusal["raw_stdout"]["sha256"], "refusal raw output digest mismatch")
+    stdout = raw.read_text(encoding="utf-8")
+    sched = parse_sched_line(stdout)
+    _require(sched == refusal["scheduling"] and sched["status"] == "refused" and
+             sched["requested"] == scheduling["requested"], "refusal disagrees with raw output")
+    returncode = parse_process_trailer(stdout)
+    _require(returncode == refusal["returncode"] and returncode != 0,
+             "refusing cell must have failed and match its process trailer")
+    provenance = parse_provenance_trailers(stdout)
+    _require(provenance["source_sha"] == receipt["source"]["sha"], "refusal source disagrees with raw output")
 
 
 def _validate_admission(receipt: dict[str, Any]) -> None:
@@ -775,10 +899,11 @@ def validate_receipt(path: Path) -> dict[str, Any]:
     _require(receipt["tool"] == "tools/graph_paced_timing_matrix.py", "unexpected tool")
     _validate_admission(receipt)
     _validate_mode(receipt)
+    _validate_scheduling(path, receipt)
     _require("hostname" not in json.dumps(receipt["host_identity_class"]).lower(),
              "host identity must be a class, not a hostname")
     _require(receipt["status"] in ("COMPLETE", "REFUSED"), "unknown status")
-    if receipt["status"] == "REFUSED":
+    if receipt["status"] == "REFUSED" and receipt["scheduling"]["refusal"] is None:
         _require(not receipt["cells"] and not receipt["admission"]["before"]["admitted"],
                  "refused receipt must have no cells and a refused admission")
     seen = set()
@@ -811,6 +936,10 @@ def validate_receipt(path: Path) -> dict[str, Any]:
                  view["source_untracked_count"] == source["untracked_count"] and
                  view["source_untracked_digest"] == source["untracked_digest"],
                  "source state disagrees with raw output")
+        if fixture.row_format != "reference":
+            _require(view["scheduling"]["requested"] == receipt["scheduling"]["requested"] and
+                     view["scheduling"]["status"] != "refused",
+                     "cell scheduling disagrees with the requested class")
         _require(view["cmake_build_type"] == receipt["build_profile"]["CMAKE_BUILD_TYPE"] and
                  view["pulp_sanitizer"] == receipt["build_profile"]["PULP_SANITIZER"],
                  "build profile disagrees with raw output")
@@ -860,6 +989,9 @@ def parser() -> argparse.ArgumentParser:
                      help="planted negative: sleep inside the timed callback window")
     rec.add_argument("--planted-every", type=int, default=1)
     rec.add_argument("--max-load-per-cpu", type=float, default=DEFAULT_MAX_LOAD_PER_CPU)
+    rec.add_argument("--scheduling", choices=SCHED_REQUESTS, default="realtime",
+                     help="callback-thread scheduling request; none never qualifies and "
+                          "realtime-invalid is the refusal negative control")
     rec.add_argument("--plan", action="store_true",
                      help="print the cells and expected paced wall time, then exit")
     rec.add_argument("--timeout-seconds", type=float, default=None,
@@ -873,14 +1005,16 @@ def summary_lines(receipt: dict[str, Any]) -> list[str]:
     lines = [f"matrix status={receipt['status']} mode={receipt['mode']} "
              f"timing_qualified={str(receipt['timing_qualified']).lower()} "
              f"admission_before={receipt['admission']['before']['verdict']} "
-             f"load_before={receipt['admission']['before']['load']}"]
+             f"load_before={receipt['admission']['before']['load']} "
+             f"scheduling={receipt['scheduling']['requested']}"]
     for cell in receipt["cells"]:
         m = cell["metrics"]
         lines.append(f"cell {cell['fixture']}/{cell['variant']} rate={cell['rate']} frames={cell['frames']} "
                      f"callbacks={cell['callbacks']} misses={m['deadline_misses']} "
                      f"oracle_failures={m['oracle_failures']} p50_us={m['duration_ns']['p50'] / 1000:.1f} "
                      f"p99_us={m['duration_ns']['p99'] / 1000:.1f} max_us={m['duration_ns']['max'] / 1000:.1f} "
-                     f"period_us={m['period_ns'] / 1000:.1f}")
+                     f"period_us={m['period_ns'] / 1000:.1f} wake_p99_us={m['wake_ns']['p99'] / 1000:.1f} "
+                     f"sched={cell['scheduling']['obtained']}/{cell['scheduling']['status']}")
     lines.append(f"totals {json.dumps(receipt['totals'], sort_keys=True)}")
     lines.append(f"disqualifiers={','.join(receipt['disqualifiers']) or 'none'}")
     return lines
@@ -910,12 +1044,17 @@ def main(argv: Iterable[str] | None = None) -> int:
             output_dir=args.output_dir.resolve(), fixtures=list(dict.fromkeys(args.fixtures)),
             callbacks=callbacks, frames_filter=set(args.frames) if args.frames else None,
             planted_sleep_us=args.planted_sleep_us, planted_every=args.planted_every,
-            max_load_per_cpu=args.max_load_per_cpu, timeout_seconds=args.timeout_seconds)
+            max_load_per_cpu=args.max_load_per_cpu, timeout_seconds=args.timeout_seconds,
+            scheduling=args.scheduling)
         for line in summary_lines(receipt):
             print(line)
         print(f"receipt={args.output_dir.resolve() / 'receipt.json'}")
         if code == REFUSED_EXIT:
-            print(f"refused: {receipt['admission']['before']['reason']}", file=sys.stderr)
+            refusal = receipt["scheduling"]["refusal"]
+            reason = (f"scheduling {refusal['scheduling']['reason']} in {refusal['fixture']}/"
+                      f"{refusal['variant']}/{refusal['rate']}/{refusal['frames']}"
+                      if refusal else receipt["admission"]["before"]["reason"])
+            print(f"refused: {reason}", file=sys.stderr)
         return code
     except (MatrixError, OSError, subprocess.SubprocessError, ValueError, KeyError) as exc:
         print(f"matrix_error={exc}", file=sys.stderr)

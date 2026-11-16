@@ -314,6 +314,11 @@ per plug-in, and the factory class is exported. Things to keep straight:
   views must give each open/close round its own `@autoreleasepool`. AppKit
   autoreleases the view on a resize, and without a draining pool (a bare
   `main`) the view never deallocates, so the editor never closes.
+- An RmlUi or native Metal surface is a child `NSView` of this container with
+  an autoresizing mask on both axes, so it follows the container's frame; it
+  watches its own window for occlusion and scale. It has no first-frame
+  present with the Core Animation transaction that the ViewBridge GPU host
+  uses.
 - A `create_view()` AU (PULP_AU_GUI) keeps the ViewBridge factory even when its
   processor overrides `editor_factory()`. Only view-free UI-package AUs serve the
   contract view.
@@ -1369,6 +1374,10 @@ Two host-conformance surfaces beyond the display-string path above:
   - non-automatable → `NonRealTime` ("changing the parameter in real-time will
     cause a glitch or otherwise undesirable effect"), which is the documented
     reason not to drive something from an automation lane.
+  - `ParamInfo::affects_others` → `IsGlobalMeta`: declares that the parameter
+    can change others (the plug-in must still report the dependents it changes). VST3 and CLAP have no per-parameter equivalent
+    (plug-in-wide restart/rescan only). Declare two-state parameters
+    `ParamKind::Toggle` to get the Boolean unit rather than Generic.
 
   Because one helper serves `aufx`, `aumu` and `aumi`, this is a single site for
   all three v2 variants. Note it was **never an AU gap**: `ParamInfo` simply had

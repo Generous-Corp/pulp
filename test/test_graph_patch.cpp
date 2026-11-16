@@ -409,8 +409,8 @@ TEST_CASE("Spectral nodes and frame edges are explicit notation refusals",
     REQUIRE_FALSE(formatted);
     REQUIRE(formatted.diagnostic.code == Code::UnsupportedContract);
     REQUIRE(formatted.diagnostic.rule.find("spectral") != std::string::npos);
-    // GraphSerializer cannot save spectral nodes either, so the fix must not
-    // send the author there.
+    // GraphSerializer saves only the asset-replay subset, which excludes
+    // analysis nodes, so the fix must not send the author there.
     REQUIRE(formatted.diagnostic.suggested_fix.find("GraphSerializer") == std::string::npos);
     REQUIRE(formatted.diagnostic.suggested_fix.find("add_spectral_") != std::string::npos);
 

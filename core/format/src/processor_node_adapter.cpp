@@ -38,9 +38,12 @@ bool ProcessorNode::prepare(const PrepareContext& context) {
             if (index > 0 && input_names_[index].empty())
                 input_names_[index] = "aux";
         }
-        // The output bus cap leaves room for every routed input bus.
+        // The output bus cap leaves room for every routed input bus. The routed
+        // block always carries a main input bus, even for a processor that
+        // declares none, so at least one input slot is reserved.
         output_bus_count_ =
-            std::min(descriptor.output_buses.size(), output_roles_.size() - input_bus_count_);
+            std::min(descriptor.output_buses.size(),
+                     output_roles_.size() - std::max<std::size_t>(1, input_bus_count_));
         std::size_t declared_output_channels = 0;
         for (std::size_t index = 0; index < output_bus_count_; ++index) {
             const auto& bus = descriptor.output_buses[index];
@@ -314,8 +317,10 @@ bool ProcessorNode::process_routed_block(ProcessBlock& block,
 int ProcessorNode::routed_output_channels(const PluginDescriptor& descriptor) noexcept {
     if (descriptor.output_buses.empty())
         return 0;
-    // Mirror prepare(): the inputs the node routes cap how many output buses fit.
-    const std::size_t inputs = std::min(descriptor.input_buses.size(), BusBufferSet::kMaxBuses - 1);
+    // Mirror prepare(): the inputs the node routes cap how many output buses fit,
+    // and the main input bus is always routed even when none is declared.
+    const std::size_t inputs = std::max<std::size_t>(
+        1, std::min(descriptor.input_buses.size(), BusBufferSet::kMaxBuses - 1));
     const std::size_t buses =
         std::min(descriptor.output_buses.size(), BusBufferSet::kMaxBuses - inputs);
     // A main bus that declares no channels takes the whole view, as it always has.
@@ -344,17 +349,26 @@ bool ProcessorNode::add_output_buses(BusBufferSet& buses,
             audio::BufferView<float>(output_channel_ptrs_.data(), main_channels, frames),
             BusRole::Main))
         return false;
-    std::size_t offset = main_channels;
+    // Every channel past the main bus starts the block silent. A processor that
+    // writes only its main bus, or only part of an aux bus, would otherwise leave
+    // whatever an earlier node wrote into a recycled slot on the aux ports, and
+    // the channels of a bus that does not fit have no writer at all.
+    for (std::size_t channel = main_channels; channel < available; ++channel)
+        std::fill_n(output_channel_ptrs_[channel], frames, 0.0f);
+    // Each bus sits at its declared position, the one the graph's port names
+    // count, whether or not an earlier bus fits. Once a bus falls off the end
+    // of the view, every later bus is inactive rather than shifted onto an
+    // earlier bus's ports.
+    std::size_t offset = static_cast<std::size_t>(output_channels_[0]);
     for (std::size_t bus = 1; bus < output_bus_count_; ++bus) {
-        const auto channels = static_cast<std::size_t>(output_channels_[bus]);
+        const auto channels = static_cast<std::size_t>(std::max(0, output_channels_[bus]));
         const bool fits = channels > 0 && offset + channels <= available;
         const auto view =
             fits ? audio::BufferView<float>(output_channel_ptrs_.data() + offset, channels, frames)
                  : audio::BufferView<float>{};
         if (!buses.add_output(output_names_[bus], view, output_roles_[bus], fits))
             return false;
-        if (fits)
-            offset += channels;
+        offset += channels;
     }
     return true;
 }

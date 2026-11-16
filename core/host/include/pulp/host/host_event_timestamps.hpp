@@ -37,6 +37,20 @@
 /// `au_event_block_time()`, and `lv2_event_block_time()` convert their event
 /// times to block-relative times without clamping.
 ///
+/// There is no CLAP mapping helper. A CLAP caller sets `steady_sample` from
+/// `clap_process_t::steady_time` directly; CLAP reports its transport only in
+/// seconds or beats (`clap_event_transport_t`), so a caller that wants a
+/// transport sample must convert and round it itself, and an inexact rounding
+/// reads as a seek.
+///
+/// Transport comparison assumes unit-rate playback. LV2 reports `time:speed`
+/// and counts only speed 1 as playing. VST3 and AU carry no playback rate, so
+/// a host playing at another rate (a varispeed or playrate control) moves the
+/// transport by a different amount than the counter and every block would
+/// read as a seek. The adapter owns that knowledge: it sets
+/// `transport_non_unit_rate` on `Vst3BlockTiming` / `AuBlockTiming` when it
+/// knows the rate is not 1, and the transport is then treated as not playing.
+///
 /// Everything here is fixed-size, `noexcept`, and allocation-free, so it may
 /// run on the audio thread. It owns no queue and schedules nothing.
 
@@ -297,6 +311,8 @@ inline constexpr std::uint32_t kVst3ContextContTimeValid = 1u << 17;
 /// | `num_samples`             | `ProcessData::numSamples`                     |
 /// | `discontinuity`           | adapter-owned (no VST3 flag; e.g. the first   |
 /// |                           | block after `setProcessing(true)`)            |
+/// | `transport_non_unit_rate` | adapter-owned (no VST3 field; set when the    |
+/// |                           | host plays at a rate other than 1)            |
 struct Vst3BlockTiming {
     bool has_process_context = false;
     std::uint32_t state = 0;
@@ -304,6 +320,7 @@ struct Vst3BlockTiming {
     std::int64_t continuous_time_samples = 0;
     std::int32_t num_samples = 0;
     bool discontinuity = false;
+    bool transport_non_unit_rate = false;
 };
 
 /// Map a VST3 block onto `HostBlockClock`.
@@ -315,8 +332,11 @@ struct Vst3BlockTiming {
 /// bit of its own (`kProjectTimeMusicValid` covers `projectTimeMusic`, the
 /// beat position) and is required whenever a context is supplied, so it is the
 /// transport position for every block that has a context; `kPlaying` is the
-/// playing state. A missing context yields no counter and no transport. A
-/// non-positive `numSamples` maps to zero frames, which `advance()` refuses.
+/// playing state, unless `transport_non_unit_rate` is set: a transport
+/// playing at another rate never advances by the block length, so it counts as
+/// not playing and is not compared. A missing context yields no counter and no
+/// transport. A non-positive `numSamples` maps to zero frames, which
+/// `advance()` refuses.
 inline constexpr HostBlockClock clock_from_vst3(const Vst3BlockTiming& timing) noexcept {
     HostBlockClock clock;
     clock.frames = timing.num_samples > 0 ? static_cast<std::size_t>(timing.num_samples) : 0;
@@ -327,7 +347,8 @@ inline constexpr HostBlockClock clock_from_vst3(const Vst3BlockTiming& timing) n
         clock.steady_sample = timing.continuous_time_samples;
     clock.has_transport_sample = true;
     clock.transport_sample = timing.project_time_samples;
-    clock.transport_playing = (timing.state & kVst3ContextPlaying) != 0;
+    clock.transport_playing =
+        (timing.state & kVst3ContextPlaying) != 0 && !timing.transport_non_unit_rate;
     return clock;
 }
 
@@ -353,6 +374,8 @@ inline constexpr std::int64_t kAuImmediateWindow = 4096;
 /// | `transport_sample_position` | AUv3 `currentSamplePosition` / AUv2                    |
 /// |                             | `outCurrentSampleInTimeLine`                           |
 /// | `discontinuity`             | adapter-owned (e.g. the first render after `reset`)    |
+/// | `transport_non_unit_rate`   | adapter-owned (no AU field; set when the host plays at |
+/// |                             | a rate other than 1)                                   |
 ///
 /// The hosts' `AUHostTransportStateChanged` / `outTransportStateChanged`
 /// flag is deliberately not a discontinuity: it also fires on play and stop,
@@ -366,6 +389,7 @@ struct AuBlockTiming {
     bool transport_moving = false;
     double transport_sample_position = 0.0;
     bool discontinuity = false;
+    bool transport_non_unit_rate = false;
 };
 
 namespace detail {
@@ -387,7 +411,8 @@ inline bool au_host_sample(double samples, std::int64_t& out) noexcept {
 /// `kAudioTimeStampSampleTimeValid` is set and the rounded value is
 /// representable and non-negative; otherwise the block has no steady clock.
 /// The transport position is used only when the host's transport callback
-/// succeeded and the position is representable.
+/// succeeded and the position is representable; it counts as playing only
+/// while moving at unit rate (`transport_non_unit_rate` unset).
 inline HostBlockClock clock_from_au(const AuBlockTiming& timing) noexcept {
     HostBlockClock clock;
     clock.frames = timing.frames;
@@ -399,7 +424,7 @@ inline HostBlockClock clock_from_au(const AuBlockTiming& timing) noexcept {
     if (timing.has_transport && detail::au_host_sample(timing.transport_sample_position, sample)) {
         clock.has_transport_sample = true;
         clock.transport_sample = sample;
-        clock.transport_playing = timing.transport_moving;
+        clock.transport_playing = timing.transport_moving && !timing.transport_non_unit_rate;
     }
     return clock;
 }

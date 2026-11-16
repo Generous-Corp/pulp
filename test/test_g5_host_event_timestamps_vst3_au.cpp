@@ -95,7 +95,7 @@ static_assert(pulp::host::kVst3ContextPlaying == Steinberg::Vst::ProcessContext:
 static_assert(pulp::host::kVst3ContextContTimeValid ==
               Steinberg::Vst::ProcessContext::kContTimeValid);
 
-TEST_CASE("VST3 ProcessContext fields map onto the block clock", "[graph][g5][vst3]") {
+TEST_CASE("VST3 ProcessContext fields map onto the block clock", "[graph][host-timestamps][vst3]") {
     Steinberg::Vst::ProcessContext pc{};
     pc.state = Steinberg::Vst::ProcessContext::kPlaying |
                Steinberg::Vst::ProcessContext::kContTimeValid |
@@ -137,7 +137,7 @@ TEST_CASE("VST3 ProcessContext fields map onto the block clock", "[graph][g5][vs
 #if defined(PULP_TEST_HAS_AU_SDK)
 static_assert(pulp::host::kAuTimeStampSampleTimeValid == kAudioTimeStampSampleTimeValid);
 
-TEST_CASE("AudioTimeStamp fields map onto the block clock", "[graph][g5][au]") {
+TEST_CASE("AudioTimeStamp fields map onto the block clock", "[graph][host-timestamps][au]") {
     AudioTimeStamp ts{};
     ts.mFlags = kAudioTimeStampSampleTimeValid | kAudioTimeStampHostTimeValid;
     ts.mSampleTime = 13823.9999; // REAPER-style value a hair below the integer
@@ -161,7 +161,8 @@ TEST_CASE("AudioTimeStamp fields map onto the block clock", "[graph][g5][au]") {
 // VST3
 // ---------------------------------------------------------------------------
 
-TEST_CASE("VST3 timing validity decides whether a steady clock exists", "[graph][g5][vst3]") {
+TEST_CASE("VST3 timing validity decides whether a steady clock exists",
+          "[graph][host-timestamps][vst3]") {
     using pulp::host::clock_from_vst3;
 
     auto timing = vst3_block(5000, 100, true, 64);
@@ -191,7 +192,8 @@ TEST_CASE("VST3 timing validity decides whether a steady clock exists", "[graph]
           HostEventResult::OutOfRange);
 }
 
-TEST_CASE("VST3 blocks classify contiguous, gap, seek, and stopped", "[graph][g5][vst3]") {
+TEST_CASE("VST3 blocks classify contiguous, gap, seek, and stopped",
+          "[graph][host-timestamps][vst3]") {
     using pulp::host::clock_from_vst3;
     HostBlockTimeline timeline;
     HostBlockWindow window;
@@ -257,7 +259,53 @@ TEST_CASE("VST3 blocks classify contiguous, gap, seek, and stopped", "[graph][g5
     }
 }
 
-TEST_CASE("VST3 sampleOffsets outside the block are refused", "[graph][g5][vst3]") {
+TEST_CASE("VST3 and AU blocks at a non-unit playback rate are not seeks when the adapter says so",
+          "[graph][host-timestamps][vst3][au]") {
+    using pulp::host::clock_from_au;
+    using pulp::host::clock_from_vst3;
+    HostBlockTimeline timeline;
+    HostBlockWindow window;
+
+    SECTION("VST3 at rate 2 without the adapter input reads every block as a seek") {
+        step(timeline, clock_from_vst3(vst3_block(1000, 0, true, 64)), window);
+        CHECK(step(timeline, clock_from_vst3(vst3_block(1064, 128, true, 64)), window) ==
+              HostBlockBoundary::NewEpoch);
+    }
+
+    SECTION("VST3 at rate 2 with transport_non_unit_rate stays on one epoch") {
+        for (std::int64_t block = 0; block < 4; ++block) {
+            auto timing = vst3_block(1000 + block * 64, block * 128, true, 64);
+            timing.transport_non_unit_rate = true;
+            CHECK_FALSE(clock_from_vst3(timing).transport_playing);
+            const auto boundary = step(timeline, clock_from_vst3(timing), window);
+            CHECK(boundary ==
+                  (block == 0 ? HostBlockBoundary::First : HostBlockBoundary::Continuous));
+        }
+        CHECK(window.epoch == 1);
+        CHECK(window.sample_start == 192);
+    }
+
+    SECTION("AU at rate 0.5 without the adapter input reads every block as a seek") {
+        step(timeline, clock_from_au(au_block(256.0, 128, true, 0.0, true)), window);
+        CHECK(step(timeline, clock_from_au(au_block(384.0, 128, true, 64.0, true)), window) ==
+              HostBlockBoundary::NewEpoch);
+    }
+
+    SECTION("AU at rate 0.5 with transport_non_unit_rate stays on one epoch") {
+        for (int block = 0; block < 4; ++block) {
+            auto timing = au_block(256.0 + block * 128.0, 128, true, block * 64.0, true);
+            timing.transport_non_unit_rate = true;
+            CHECK_FALSE(clock_from_au(timing).transport_playing);
+            const auto boundary = step(timeline, clock_from_au(timing), window);
+            CHECK(boundary ==
+                  (block == 0 ? HostBlockBoundary::First : HostBlockBoundary::Continuous));
+        }
+        CHECK(window.epoch == 1);
+        CHECK(window.sample_start == 384);
+    }
+}
+
+TEST_CASE("VST3 sampleOffsets outside the block are refused", "[graph][host-timestamps][vst3]") {
     HostBlockTimeline timeline;
     HostBlockWindow window;
     step(timeline, pulp::host::clock_from_vst3(vst3_block(0, 0, true, 64)), window);
@@ -287,7 +335,8 @@ TEST_CASE("VST3 sampleOffsets outside the block are refused", "[graph][g5][vst3]
 // Audio Unit
 // ---------------------------------------------------------------------------
 
-TEST_CASE("AU timestamp validity decides whether a steady clock exists", "[graph][g5][au]") {
+TEST_CASE("AU timestamp validity decides whether a steady clock exists",
+          "[graph][host-timestamps][au]") {
     using pulp::host::clock_from_au;
 
     CHECK(clock_from_au(au_block(4096.0, 64)).steady_sample == 4096);
@@ -313,7 +362,7 @@ TEST_CASE("AU timestamp validity decides whether a steady clock exists", "[graph
     CHECK_FALSE(bad_pos.has_transport_sample);
 }
 
-TEST_CASE("AU blocks classify contiguous, gap, loop, and stopped", "[graph][g5][au]") {
+TEST_CASE("AU blocks classify contiguous, gap, loop, and stopped", "[graph][host-timestamps][au]") {
     using pulp::host::clock_from_au;
     HostBlockTimeline timeline;
     HostBlockWindow window;
@@ -368,7 +417,7 @@ TEST_CASE("AU blocks classify contiguous, gap, loop, and stopped", "[graph][g5][
     }
 }
 
-TEST_CASE("AUv3 event sample times convert without clamping", "[graph][g5][au]") {
+TEST_CASE("AUv3 event sample times convert without clamping", "[graph][host-timestamps][au]") {
     using pulp::host::au_event_block_time;
     using pulp::host::kAuEventSampleTimeImmediate;
     const auto block = au_block(10000.0, 64);
@@ -411,7 +460,7 @@ TEST_CASE("AUv3 event sample times convert without clamping", "[graph][g5][au]")
 // ---------------------------------------------------------------------------
 
 TEST_CASE("VST3 and AU absolute samples are invariant to block partitioning",
-          "[graph][g5][vst3][au]") {
+          "[graph][host-timestamps][vst3][au]") {
     constexpr std::int64_t kOrigin = 48000;
     constexpr std::int64_t kTransportOrigin = 2000;
     constexpr std::int64_t kTotal = 1024;

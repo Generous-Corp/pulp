@@ -12,8 +12,10 @@
 #endif
 #include <dispatch/dispatch.h>
 
+#include <algorithm>
 #include <atomic>
 #include <charconv>
+#include <condition_variable>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -151,12 +153,44 @@ MIDIClientRef shared_client() {
     return client;
 }
 
+// State the CoreMIDI receive block shares with its CoreMidiInput. The block
+// holds a reference, so it stays valid however late CoreMIDI runs it, and
+// close() uses the in-flight count to wait for callbacks that are mid-delivery.
+struct CoreMidiInputShared {
+    std::mutex mutex;
+    std::condition_variable idle;
+    int in_flight = 0;
+    // Written under the mutex; also read without it before every single
+    // delivery, so a close() made by an earlier event in the same
+    // MIDIEventList stops the rest of that list.
+    std::atomic<bool> closed{false};
+    MidiInputCallback callback;
+    MidiSysexCallback sysex_callback;
+    // SysEx7 (UMP type 0x03) reassembly state, the shared implementation in
+    // core/midi/include/pulp/midi/ump_sysex7_reassembler.hpp. The OS callback
+    // fires once per MIDIEventList delivery, so a multi-packet sysex spans
+    // callback invocations and the reassembler keeps the partial payload.
+    UmpSysex7Reassembler sysex_reassembler;
+};
+
+// The shared state whose callback the current thread is running, if any, so
+// close() can tell it was called from inside its own callback.
+thread_local const CoreMidiInputShared* tls_delivering = nullptr;
+
 class CoreMidiInput : public MidiInput {
 public:
     ~CoreMidiInput() override { close(); }
 
     bool open(const std::string& port_id, MidiInputCallback callback) override {
-        callback_ = std::move(callback);
+        // A reopen starts from fresh shared state, so a block still draining
+        // from the previous port can never see this port's callbacks.
+        close();
+        auto shared = std::make_shared<CoreMidiInputShared>();
+        shared->callback = std::move(callback);
+        {
+            std::lock_guard life(lifecycle_);
+            shared->sysex_callback = pending_sysex_callback_;
+        }
 
         // MIDIInputPortCreateWithProtocol is the UMP/event-list API added in
         // iOS 14 and macOS 11. Pulp's current iOS floor is newer, but retain a
@@ -167,84 +201,119 @@ public:
         const MIDIClientRef client = shared_client();
         if (client == 0) return false;
 
-        OSStatus status = MIDIInputPortCreateWithProtocol(client, CFSTR("PulpInput"),
-            kMIDIProtocol_1_0, &port_,
+        MIDIPortRef port = 0;
+        OSStatus status = MIDIInputPortCreateWithProtocol(
+            client, CFSTR("PulpInput"), kMIDIProtocol_1_0, &port,
             ^(const MIDIEventList* evtlist, void* __nullable) {
-                const MIDIEventPacket* packet = &evtlist->packet[0];
-                for (UInt32 i = 0; i < evtlist->numPackets; ++i) {
-                    walk_ump_packet(
-                        packet->words, packet->wordCount,
-                        [&](uint8_t type, const uint32_t* words,
-                            uint32_t word_count) {
-                        const uint32_t word = words[0];
-                        if (type == 0x02) {
-                            MidiEvent evt;
-                            evt.message = choc::midi::ShortMessage(
-                                static_cast<uint8_t>((word >> 16) & 0xFF),
-                                static_cast<uint8_t>((word >> 8) & 0xFF),
-                                static_cast<uint8_t>(word & 0xFF));
-                            evt.timestamp = host_ticks_to_seconds(packet->timeStamp);
-                            if (this->callback_) this->callback_(evt);
-                        } else if (type == 0x04) {
-                            UmpPacket p;
-                            p.word_count = 2;
-                            p.words[0] = word;
-                            p.words[1] = words[1];
-                            MidiEvent evt{};
-                            if (ump_to_midi1_event(p, evt)) {
-                                evt.timestamp =
-                                        host_ticks_to_seconds(packet->timeStamp);
-                                if (this->callback_) this->callback_(evt);
-                            }
-                        } else if (type == 0x03) {
-                            // SysEx7 (UMP type 3) — reassemble multi-
-                            // packet payloads via the shared
-                            // UmpSysex7Reassembler. The reassembler state
-                            // lives on this CoreMidiInput so a multi-packet
-                            // sysex spanning callback invocations accumulates
-                            // correctly and shares the tested state machine
-                            // with the AUv3 adapter.
-                            const uint32_t word1 = words[1];
-                            struct EmitCtx {
-                                MidiSysexCallback* cb;
-                                double ts_sec;
-                            };
-                            EmitCtx ctx{&this->sysex_callback_,
-                                        host_ticks_to_seconds(packet->timeStamp)};
-                            auto emit = [](const std::vector<uint8_t>& p,
-                                           void* user) {
-                                auto* c = static_cast<EmitCtx*>(user);
-                                if (*c->cb) (*c->cb)(p, c->ts_sec);
-                            };
-                            this->sysex_reassembler_.feed_packet(
-                                word, word1, emit, &ctx);
-                        }
-                        // Other UMP types (utility, system, SysEx8,
-                        // stream, flex) are ignored by this MIDI 1.0 input
-                        // adapter for now.
-                        (void)word_count;
-                    });
-                    packet = MIDIEventPacketNext(packet);
-                }
+              {
+                  std::lock_guard lock(shared->mutex);
+                  if (shared->closed)
+                      return;
+                  ++shared->in_flight;
+              }
+              struct Leave {
+                  CoreMidiInputShared* s;
+                  const CoreMidiInputShared* previous;
+                  ~Leave() {
+                      tls_delivering = previous;
+                      {
+                          std::lock_guard lock(s->mutex);
+                          --s->in_flight;
+                      }
+                      s->idle.notify_all();
+                  }
+              } leave{shared.get(), tls_delivering};
+              tls_delivering = shared.get();
+              const MIDIEventPacket* packet = &evtlist->packet[0];
+              for (UInt32 i = 0; i < evtlist->numPackets; ++i) {
+                  walk_ump_packet(
+                      packet->words, packet->wordCount,
+                      [&](uint8_t type, const uint32_t* words, uint32_t word_count) {
+                          const uint32_t word = words[0];
+                          if (type == 0x02) {
+                              MidiEvent evt;
+                              evt.message = choc::midi::ShortMessage(
+                                  static_cast<uint8_t>((word >> 16) & 0xFF),
+                                  static_cast<uint8_t>((word >> 8) & 0xFF),
+                                  static_cast<uint8_t>(word & 0xFF));
+                              evt.timestamp = host_ticks_to_seconds(packet->timeStamp);
+                              if (shared->callback && !shared->closed.load())
+                                  shared->callback(evt);
+                          } else if (type == 0x04) {
+                              UmpPacket p;
+                              p.word_count = 2;
+                              p.words[0] = word;
+                              p.words[1] = words[1];
+                              MidiEvent evt{};
+                              if (ump_to_midi1_event(p, evt)) {
+                                  evt.timestamp = host_ticks_to_seconds(packet->timeStamp);
+                                  if (shared->callback && !shared->closed.load())
+                                      shared->callback(evt);
+                              }
+                          } else if (type == 0x03) {
+                              // SysEx7 (UMP type 3): reassemble multi-
+                              // packet payloads via the shared
+                              // UmpSysex7Reassembler. The reassembler state
+                              // lives on this CoreMidiInput so a multi-packet
+                              // sysex spanning callback invocations accumulates
+                              // correctly and shares the tested state machine
+                              // with the AUv3 adapter.
+                              const uint32_t word1 = words[1];
+                              struct EmitCtx {
+                                  MidiSysexCallback* cb;
+                                  double ts_sec;
+                                  const std::atomic<bool>* closed;
+                              };
+                              // set_sysex_callback() may run after open(), so
+                              // read the callback under the lock, as a copy.
+                              MidiSysexCallback sysex_cb;
+                              {
+                                  std::lock_guard lock(shared->mutex);
+                                  sysex_cb = shared->sysex_callback;
+                              }
+                              EmitCtx ctx{&sysex_cb, host_ticks_to_seconds(packet->timeStamp),
+                                          &shared->closed};
+                              auto emit = [](const std::vector<uint8_t>& p, void* user) {
+                                  auto* c = static_cast<EmitCtx*>(user);
+                                  if (*c->cb && !c->closed->load())
+                                      (*c->cb)(p, c->ts_sec);
+                              };
+                              shared->sysex_reassembler.feed_packet(word, word1, emit, &ctx);
+                          }
+                          // Other UMP types (utility, system, SysEx8,
+                          // stream, flex) are ignored by this MIDI 1.0 input
+                          // adapter for now.
+                          (void)word_count;
+                      });
+                  if (shared->closed.load())
+                      break;
+                  packet = MIDIEventPacketNext(packet);
+              }
             });
 
         if (status != noErr) {
             runtime::log_error("CoreMIDI: could not create input port ({})", static_cast<int>(status));
-            close();
             return false;
+        }
+        // Publish the port and its state together, under the lifecycle lock,
+        // so a concurrent close() (from a callback or another thread) sees
+        // both or neither.
+        {
+            std::lock_guard life(lifecycle_);
+            port_ = port;
+            shared_ = shared;
         }
 
         ItemCount source_count = MIDIGetNumberOfSources();
         if (port_id.empty() || port_id == "0") {
             if (source_count > 0) {
                 MIDIEndpointRef first = MIDIGetSource(0);
-                status = MIDIPortConnectSource(port_, first, nullptr);
-                is_open_ = (status == noErr);
-                if (is_open_)
-                    remember_source(first);
+                status = MIDIPortConnectSource(port, first, nullptr);
+                if (status == noErr && publish_open(port, first))
+                    return true;
             }
-            if (!is_open_) close();
-            return is_open_;
+            close();
+            return false;
         }
 
         SInt32 source_id = 0;
@@ -259,12 +328,9 @@ public:
             SInt32 unique_id = 0;
             MIDIObjectGetIntegerProperty(src, kMIDIPropertyUniqueID, &unique_id);
             if (unique_id == source_id) {
-                status = MIDIPortConnectSource(port_, src, nullptr);
-                if (status == noErr) {
-                    is_open_ = true;
-                    remember_source(src);
+                status = MIDIPortConnectSource(port, src, nullptr);
+                if (status == noErr && publish_open(port, src))
                     return true;
-                }
             }
         }
 
@@ -272,16 +338,78 @@ public:
         return false;
     }
 
+    // Once close() returns, no input callback is running and none runs again,
+    // so the owner may free whatever the callback captured. Called from inside
+    // the callback itself it cannot wait for itself: it stops further
+    // deliveries and disposes the port after the callback returns.
     void close() override {
-        // Only the port is ours to dispose; the client is shared by every
-        // port in the process (see shared_client()).
-        if (port_) { MIDIPortDispose(port_); port_ = 0; }
-        // Drop any in-progress sysex so a reopened port starts fresh
-        // and never emits a stale partial payload.
-        sysex_reassembler_.reset();
-        source_ = 0;
-        source_unique_id_ = 0;
-        is_open_ = false;
+        MIDIPortRef port = 0;
+        std::shared_ptr<CoreMidiInputShared> shared;
+        // Every state still draining that this thread can wait for: the one
+        // closed here, plus any an earlier close() could not or did not finish
+        // waiting for (a close from inside a callback, or a close still
+        // waiting on another thread).
+        std::vector<std::shared_ptr<CoreMidiInputShared>> to_wait;
+        bool reentrant = false;
+        {
+            // The handoff of port_, shared_ and draining_ is serialized, so a
+            // callback's close() and an external close() never touch the same
+            // shared_ptr at once. The lock is never held while waiting or
+            // disposing: a callback that calls close() must be able to take it.
+            std::lock_guard life(lifecycle_);
+            port = port_;
+            port_ = 0;
+            shared = std::move(shared_);
+            shared_.reset();
+            source_ = 0;
+            source_unique_id_ = 0;
+            is_open_ = false;
+            if (shared) {
+                {
+                    std::lock_guard lock(shared->mutex);
+                    shared->closed = true;
+                }
+                // Stays listed until a close() off the delivering thread has
+                // seen it drain, so every later close() waits for it too.
+                draining_.push_back(shared);
+                reentrant = (tls_delivering == shared.get());
+            }
+            for (const auto& d : draining_)
+                if (tls_delivering != d.get())
+                    to_wait.push_back(d);
+        }
+        if (reentrant) {
+            // MIDIPortDispose waits for the running callback, which is this
+            // thread, so hand the dispose to another thread. Only the port and
+            // the shared state are captured, never this object.
+            if (port) {
+                dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+                  std::unique_lock lock(shared->mutex);
+                  shared->idle.wait(lock, [&] { return shared->in_flight == 0; });
+                  lock.unlock();
+                  MIDIPortDispose(port);
+                });
+            }
+        } else if (port) {
+            // Only the port is ours to dispose; the client is shared by every
+            // port in the process (see shared_client()).
+            MIDIPortDispose(port);
+        }
+        // closed is set on every listed state, so once in_flight reaches zero
+        // no delivery can start again.
+        for (const auto& d : to_wait) {
+            std::unique_lock lock(d->mutex);
+            d->idle.wait(lock, [&] { return d->in_flight == 0; });
+            // Drop any in-progress sysex so a stale partial payload is never
+            // emitted.
+            d->sysex_reassembler.reset();
+        }
+        if (!to_wait.empty()) {
+            std::lock_guard life(lifecycle_);
+            std::erase_if(draining_, [&](const auto& d) {
+                return std::find(to_wait.begin(), to_wait.end(), d) != to_wait.end();
+            });
+        }
     }
 
     // Open means the port exists AND the endpoint it was connected to is
@@ -289,31 +417,57 @@ public:
     // answer turns false, which tells an owner that reopens on `!is_open()`
     // (AudioDeviceManager) to connect again.
     bool is_open() const override {
-        return is_open_ && endpoint_is_current(source_, source_unique_id_);
+        MIDIEndpointRef source = 0;
+        SInt32 unique_id = 0;
+        {
+            std::lock_guard life(lifecycle_);
+            if (!is_open_)
+                return false;
+            source = source_;
+            unique_id = source_unique_id_;
+        }
+        return endpoint_is_current(source, unique_id);
     }
 
     void set_sysex_callback(MidiSysexCallback cb) override {
-        sysex_callback_ = std::move(cb);
+        // Valid before or after open(): keep it for the next open() and also
+        // publish it to the live port, whose receive block reads it under the
+        // same mutex.
+        std::lock_guard life(lifecycle_);
+        if (shared_) {
+            std::lock_guard lock(shared_->mutex);
+            shared_->sysex_callback = cb;
+        }
+        pending_sysex_callback_ = std::move(cb);
     }
 
   private:
-    void remember_source(MIDIEndpointRef source) {
+    // Marks the port open on `source`, unless a concurrent close() has
+    // already taken `port` away, in which case the caller reports failure.
+    bool publish_open(MIDIPortRef port, MIDIEndpointRef source) {
+        SInt32 unique_id = 0;
+        MIDIObjectGetIntegerProperty(source, kMIDIPropertyUniqueID, &unique_id);
+        std::lock_guard life(lifecycle_);
+        if (port_ != port)
+            return false;
         source_ = source;
-        source_unique_id_ = 0;
-        MIDIObjectGetIntegerProperty(source, kMIDIPropertyUniqueID, &source_unique_id_);
+        source_unique_id_ = unique_id;
+        is_open_ = true;
+        return true;
     }
 
     MIDIPortRef port_ = 0;
     MIDIEndpointRef source_ = 0;
     SInt32 source_unique_id_ = 0;
-    MidiInputCallback callback_;
-    MidiSysexCallback sysex_callback_;
-    // SysEx7 (UMP type 0x03) reassembly state — shared implementation
-    // in core/midi/include/pulp/midi/ump_sysex7_reassembler.hpp. The
-    // OS callback fires once per MIDIEventList delivery, so a multi-
-    // packet sysex (start → continue* → end) spans callback invocations
-    // and the reassembler keeps the partial payload between deliveries.
-    UmpSysex7Reassembler sysex_reassembler_;
+    std::shared_ptr<CoreMidiInputShared> shared_;
+    // Closed states whose callbacks may still be running, kept until a close()
+    // off the delivering thread has waited for them to drain.
+    std::vector<std::shared_ptr<CoreMidiInputShared>> draining_;
+    // Registered before open(); copied into the shared state when the port opens.
+    MidiSysexCallback pending_sysex_callback_;
+    // Guards port_, source_, source_unique_id_, shared_, draining_,
+    // pending_sysex_callback_ and is_open_. Taken before any shared->mutex.
+    mutable std::mutex lifecycle_;
     bool is_open_ = false;
 };
 

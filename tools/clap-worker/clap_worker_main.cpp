@@ -90,7 +90,7 @@ bool save(const clap_plugin_t* plugin, std::vector<std::uint8_t>& bytes) {
 }
 
 int run(int argc, char** argv) {
-    if (argc != 5 || std::strcmp(argv[4], "MacClapStereo64V1") != 0)
+    if (argc != 5 || std::strcmp(argv[4], kProfileName) != 0)
         return 64;
     // A socket's SIGPIPE policy is per descriptor; it cannot change host policy.
     int no_sigpipe = 1;
@@ -145,7 +145,7 @@ int run(int argc, char** argv) {
     if (!send_record(STDIN_FILENO, hello, Clock::now() + std::chrono::seconds(5)))
         return 75;
 
-    audio::Buffer<float> input(2, 64), output(2, 64);
+    audio::Buffer<float> input(kChannels, kFrames), output(kChannels, kFrames);
     midi::MidiBuffer midi_in, midi_out;
     host::ParameterEventQueue params;
     bool prepared = false;
@@ -162,14 +162,14 @@ int run(int argc, char** argv) {
             deadline = Clock::now() + std::chrono::seconds(5);
             if (!receive_record(STDIN_FILENO, request, deadline) ||
                 request.generation != hello.generation || request.payload_bytes > kCheckpointBytes)
-                return 78;
+                return 86;
             auto reply = request;
             reply.result = 0;
             reply.payload_bytes = 0;
             std::vector<std::uint8_t> state;
             switch (request.command) {
             case Command::prepare:
-                if (!prepared && slot->prepare(48000, 64) && admitted(native.plugin)) {
+                if (!prepared && slot->prepare(kSampleRate, kFrames) && admitted(native.plugin)) {
                     prepared = true;
                     reply.result = 1;
                 }
@@ -238,7 +238,7 @@ int run(int argc, char** argv) {
         if (midi_out.ump())
             midi_out.ump()->clear();
         slot->begin_process();
-        slot->process(out, in, midi_in, midi_out, params, 64);
+        slot->process(out, in, midi_in, midi_out, params, static_cast<int>(kFrames));
         Block result;
         result.generation = hello.generation;
         result.sequence = sequence;

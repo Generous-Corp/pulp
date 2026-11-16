@@ -1,5 +1,6 @@
 #include <pulp/host/graph_history.hpp>
 #include <pulp/host/signal_graph_runtime.hpp>
+#include <pulp/runtime/crypto.hpp>
 
 #include <choc/text/choc_JSON.h>
 
@@ -8,6 +9,7 @@
 #include <map>
 #include <new>
 #include <optional>
+#include <set>
 
 namespace pulp::host {
 namespace {
@@ -75,6 +77,83 @@ template <typename V> std::int64_t node_id_of(const V& value) {
                                               : static_cast<std::int64_t>(value.getFloat64());
 }
 
+// Members of a sample region record whose numbers are NodeIds.
+bool is_region_node_key(std::string_view name) {
+    return name == "node" || name == "bound_node" || name == "input_boundaries" ||
+           name == "output_boundaries";
+}
+
+// Canonical text for a sample_regions section with every NodeId spelled as
+// the authored identity it binds, so renumbering alone is not a change.
+template <typename V, typename Identity>
+void append_region_canonical(const V& value, std::string& out, const Identity& identity,
+                             bool node_ids) {
+    if (value.isObject()) {
+        std::vector<std::string> names;
+        names.reserve(value.size());
+        for (std::uint32_t i = 0; i < value.size(); ++i)
+            names.emplace_back(value.getObjectMemberAt(i).name);
+        std::sort(names.begin(), names.end());
+        out.push_back('{');
+        for (std::size_t i = 0; i < names.size(); ++i) {
+            if (i)
+                out.push_back(',');
+            out += choc::json::toString(choc::value::createString(names[i]), false);
+            out.push_back(':');
+            append_region_canonical(value[names[i]], out, identity, is_region_node_key(names[i]));
+        }
+        out.push_back('}');
+        return;
+    }
+    if (value.isArray()) {
+        out.push_back('[');
+        for (std::uint32_t i = 0; i < value.size(); ++i) {
+            if (i)
+                out.push_back(',');
+            append_region_canonical(value[i], out, identity, node_ids);
+        }
+        out.push_back(']');
+        return;
+    }
+    if (node_ids &&
+        (value.isInt32() || value.isInt64() || value.isFloat32() || value.isFloat64())) {
+        out += choc::json::toString(choc::value::createString(identity(value)), false);
+        return;
+    }
+    out += choc::json::toString(value, false);
+}
+
+// Numbering-independent digest of the compared view: node fields and
+// connections keyed by authored identity, other sections as compared.
+std::string view_digest(const DocumentView& view) {
+    std::string preimage = "pulp.graph.identity-view.v1";
+    preimage.push_back('\0');
+    const auto field = [&](std::string_view text) {
+        preimage += std::to_string(text.size());
+        preimage.push_back(':');
+        preimage += text;
+    };
+    for (const auto& [identity, record] : view.nodes) {
+        field("node");
+        field(identity);
+        for (const auto& [name, value] : record.fields) {
+            field(name);
+            field(value);
+        }
+    }
+    for (const auto& [key, attributes] : view.connections) {
+        field("connection");
+        field(key);
+        field(attributes);
+    }
+    for (const auto& [name, value] : view.sections) {
+        field("section");
+        field(name);
+        field(value);
+    }
+    return "sha256:" + runtime::sha256_hex(preimage);
+}
+
 // Returns the refusal code for a side that cannot be compared, or nullopt.
 std::optional<GraphDocumentDiffCode> read_document(std::string_view json, DocumentView& view,
                                                    GraphDocumentRefusal& refusal,
@@ -94,7 +173,6 @@ std::optional<GraphDocumentDiffCode> read_document(std::string_view json, Docume
                  "GraphSerializer::to_saved_document";
         return GraphDocumentDiffCode::LogicalIdentityMissing;
     }
-    view.digest = std::string(inspection.document.semantic_digest());
 
     std::unordered_map<std::int64_t, std::string> identity_of;
     const auto& identities = root["logical_identities"]["identities"];
@@ -186,9 +264,17 @@ std::optional<GraphDocumentDiffCode> read_document(std::string_view json, Docume
     }
     for (std::uint32_t m = 0; m < root.size(); ++m) {
         const auto member = root.getObjectMemberAt(m);
-        if (!is_identity_section(member.name))
+        if (is_identity_section(member.name))
+            continue;
+        if (std::string_view(member.name) == "sample_regions") {
+            std::string text;
+            append_region_canonical(member.value, text, identity, false);
+            view.sections.emplace(std::string(member.name), std::move(text));
+        } else {
             view.sections.emplace(std::string(member.name), canonical(member.value));
+        }
     }
+    view.digest = view_digest(view);
     return std::nullopt;
 }
 
@@ -211,6 +297,34 @@ std::uint64_t fingerprint(const std::vector<PortHandle>& ports) {
     return port_identity_fingerprint(ports);
 }
 
+// Authored identities of nodes that hold no runnable implementation: a
+// plugin placeholder (no slot and no Processor) or a custom node whose type
+// is not registered or no longer declares the node's ports.
+std::set<std::string> unresolved_identities(const SignalGraph& graph) {
+    const auto identities = GraphSerializer::saved_node_identities(graph);
+    std::set<std::string> unresolved;
+    for (const auto& node : graph.nodes()) {
+        const bool placeholder = (node.type == NodeType::Plugin && !node.plugin &&
+                                  !graph.processor_node_instance(node.id)) ||
+                                 (node.type == NodeType::Custom && [&] {
+                                     const auto* type = graph.custom_node_type(
+                                         node.custom_type_id, node.custom_type_version);
+                                     return !type || !type->matches_ports(node);
+                                 }());
+        if (placeholder)
+            if (const auto it = identities.find(node.id); it != identities.end())
+                unresolved.insert(it->second);
+    }
+    return unresolved;
+}
+
+std::unordered_map<std::string, NodeId> live_node_ids(const SignalGraph& graph) {
+    std::unordered_map<std::string, NodeId> ids;
+    for (const auto& [node, identity] : GraphSerializer::saved_node_identities(graph))
+        ids.emplace(identity, node);
+    return ids;
+}
+
 } // namespace
 
 const char* graph_document_diff_code_name(GraphDocumentDiffCode code) noexcept {
@@ -231,6 +345,7 @@ const char* graph_document_diff_code_name(GraphDocumentDiffCode code) noexcept {
 
 GraphDocumentDiff diff_graph_documents(std::string_view before, std::string_view after) {
     GraphDocumentDiff diff;
+    bool reading_after = false;
     try {
         DocumentView lhs, rhs;
         if (auto code = read_document(before, lhs, diff.refusal, diff.detail)) {
@@ -238,6 +353,7 @@ GraphDocumentDiff diff_graph_documents(std::string_view before, std::string_view
             diff.detail = "before: " + diff.detail;
             return diff;
         }
+        reading_after = true;
         if (auto code = read_document(after, rhs, diff.refusal, diff.detail)) {
             diff.code = *code == GraphDocumentDiffCode::BeforeRefused
                             ? GraphDocumentDiffCode::AfterRefused
@@ -245,6 +361,7 @@ GraphDocumentDiff diff_graph_documents(std::string_view before, std::string_view
             diff.detail = "after: " + diff.detail;
             return diff;
         }
+        reading_after = false;
         diff.before_digest = lhs.digest;
         diff.after_digest = rhs.digest;
         compare_maps(lhs.nodes, rhs.nodes, diff.nodes_added, diff.nodes_removed,
@@ -292,9 +409,10 @@ GraphDocumentDiff diff_graph_documents(std::string_view before, std::string_view
         return diff;
     } catch (const std::exception& error) {
         diff = {};
-        diff.code = GraphDocumentDiffCode::BeforeRefused;
+        diff.code = reading_after ? GraphDocumentDiffCode::AfterRefused
+                                  : GraphDocumentDiffCode::BeforeRefused;
         diff.refusal = GraphDocumentRefusal::InvalidJson;
-        diff.detail = error.what();
+        diff.detail = std::string(reading_after ? "after: " : "before: ") + error.what();
         return diff;
     }
 }
@@ -440,29 +558,79 @@ GraphHistoryResult GraphEditHistory::step(SignalGraph& graph, const GraphLoadOpt
         result.code = GraphHistoryCode::RestoreFailed;
         result.detail =
             std::string(graph_document_refusal_name(inspection.refusal)) + ": " + inspection.detail;
+        result.graph_untouched = true;
+        result.rolled_back = true;
         return result;
     }
 
+    // A node the restore leaves unresolved is acceptable only when it was
+    // already unresolved in the live graph; anything else would replace a
+    // working node with a placeholder.
+    const auto baseline_unresolved = unresolved_identities(graph);
+    const auto faithful = [&](const SignalGraph& restored,
+                              const GraphSerializer::LoadResult& loaded,
+                              std::uint64_t expected_ports) -> std::optional<std::string> {
+        if (!loaded.ok)
+            return loaded.error;
+        if (!loaded.state_restore_failures.empty())
+            return "a node's state could not be restored: " + loaded.state_restore_failures.front();
+        for (const auto& identity : unresolved_identities(restored))
+            if (!baseline_unresolved.contains(identity))
+                return "node " + identity +
+                       " would be restored unresolved (missing plugin, Processor, or custom "
+                       "node type)";
+        if (fingerprint(qualified_port_identities(restored)) != expected_ports)
+            return std::string("the restored graph's authored ports differ from the recorded "
+                               "snapshot");
+        return std::nullopt;
+    };
+    const auto target_ports = fingerprint(target.ports.before);
+    const auto refusal_code = [&](const std::string& detail) {
+        return detail.find("authored ports differ") != std::string::npos
+                   ? GraphHistoryCode::PortIdentityMismatch
+                   : GraphHistoryCode::RestoreFailed;
+    };
+
+    // Trial-load the target into a scratch graph that carries the live
+    // graph's custom node types, so a document that cannot be restored
+    // faithfully is refused before the live graph (and any plugin instance
+    // in it) is touched.
+    {
+        SignalGraph scratch;
+        if (!GraphSerializer::copy_custom_node_types(graph, scratch)) {
+            result.code = GraphHistoryCode::RestoreFailed;
+            result.detail = "the live graph's custom node types could not be staged for a trial "
+                            "restore";
+            result.graph_untouched = true;
+            result.rolled_back = true;
+            return result;
+        }
+        const auto trial = GraphSerializer::from_saved_document(scratch, target.document, options);
+        if (auto problem = faithful(scratch, trial, target_ports)) {
+            result.code = refusal_code(*problem);
+            result.detail = std::move(*problem);
+            result.graph_untouched = true;
+            result.rolled_back = true;
+            return result;
+        }
+    }
+
+    const auto current_fingerprint = fingerprint(current_ports);
     const auto rollback = [&](GraphHistoryCode code, std::string detail) {
         result.code = code;
         result.detail = std::move(detail);
-        result.rolled_back = GraphSerializer::from_saved_document(graph, current, options).ok;
+        const auto restored = GraphSerializer::from_saved_document(graph, current, options);
+        result.rolled_back = !faithful(graph, restored, current_fingerprint).has_value();
+        result.node_ids = live_node_ids(graph);
         return result;
     };
     const auto loaded = GraphSerializer::from_saved_document(graph, target.document, options);
-    if (!loaded.ok)
-        return rollback(GraphHistoryCode::RestoreFailed, loaded.error);
-    if (!loaded.state_restore_failures.empty() || !loaded.missing_custom_node_types.empty() ||
-        (options.load_plugins && !loaded.missing_plugins.empty()))
-        return rollback(GraphHistoryCode::RestoreFailed,
-                        "a node or its state could not be restored faithfully");
-    const auto restored_ports = qualified_port_identities(graph);
-    if (fingerprint(restored_ports) != fingerprint(target.ports.before))
-        return rollback(GraphHistoryCode::PortIdentityMismatch,
-                        "the restored graph's authored ports differ from the recorded snapshot");
+    if (auto problem = faithful(graph, loaded, target_ports))
+        return rollback(refusal_code(*problem), std::move(*problem));
 
-    result.port_changes = diff_port_identities(current_ports, restored_ports);
+    result.port_changes = diff_port_identities(current_ports, qualified_port_identities(graph));
     result.editor_layout = loaded.editor_layout;
+    result.node_ids = live_node_ids(graph);
     result.code = GraphHistoryCode::Ok;
     to.push_back(std::move(from.back()));
     from.pop_back();

@@ -284,7 +284,7 @@ double p99(std::array<double, 128> values) {
 using namespace g5_rt_fixture;
 
 TEST_CASE("G5 graph event callbacks keep fixed storage across both serial backends",
-          "[host][graph][g5][events][rt]") {
+          "[host][graph][events][rt]") {
     std::array<Observation, 4> baseline{};
     constexpr std::array<std::size_t, 4> sizes{64, 128, 256, 4096};
     for (std::size_t index = 0; index < sizes.size(); ++index) {
@@ -325,7 +325,7 @@ TEST_CASE("G5 graph event callbacks keep fixed storage across both serial backen
 }
 
 TEST_CASE("G5 callback reset retires a queued graph event without allocating",
-          "[host][graph][g5][events][rt]") {
+          "[host][graph][events][rt]") {
     for (const bool routed : {false, true}) {
         for (const bool reset_requested : {false, true}) {
             struct ResetState {
@@ -408,7 +408,7 @@ TEST_CASE("G5 callback reset retires a queued graph event without allocating",
     }
 }
 
-TEST_CASE("G5 graph event callback paced measurement", "[.][host][graph][g5][events][rt][paced]") {
+TEST_CASE("G5 graph event callback paced measurement", "[.][host][graph][events][rt][paced]") {
     constexpr std::array<std::size_t, 4> sizes{64, 128, 256, 4096};
     for (const auto frames : sizes) {
         for (const bool routed : {false, true}) {
@@ -432,7 +432,7 @@ TEST_CASE("G5 graph event callback paced measurement", "[.][host][graph][g5][eve
 // Paced-timing matrix cell: the same producer/consumer graph-event chain under
 // a configurable fixed-origin callback count. Timing runs carry no scoped
 // resource probes; the oracle is the delivered payload on every block.
-TEST_CASE("G5 graph event paced matrix cell", "[.][host][graph][g5][events][paced-matrix]") {
+TEST_CASE("G5 graph event paced matrix cell", "[.][host][graph][events][paced-matrix]") {
     const auto config = pulp::test::paced::read_config("routed", 128);
     REQUIRE((config.variant == "direct" || config.variant == "routed"));
     REQUIRE(config.rate == 48000);
@@ -667,7 +667,9 @@ NodeId prepare_gain_graph(SignalGraph& graph, bool routed, double rate = kRate,
 
 Observation run(bool routed, double rate = kRate, std::size_t frames = kBlockFrames,
                 std::size_t callbacks = kCallbacks, bool probes = true,
-                std::string_view fault = {}) {
+                std::string_view fault = {},
+                pulp::test::paced::SchedRequest sched = pulp::test::paced::SchedRequest::none,
+                pulp::test::paced::SchedReceipt* sched_out = nullptr) {
     const auto control = analyzer_control();
     SignalGraph graph;
     const auto gain = prepare_gain_graph(graph, routed, rate, frames);
@@ -688,7 +690,16 @@ Observation run(bool routed, double rate = kRate, std::size_t frames = kBlockFra
     std::vector<float> source(frames, kInput);
     std::vector<float> destination(frames);
     std::atomic<std::size_t> completed{0};
+    std::atomic<bool> sched_refused{false};
     std::thread callback_thread([&] {
+        const auto sched_receipt = pulp::test::paced::request_thread_scheduling(
+            sched, static_cast<std::int64_t>(static_cast<double>(frames) * 1e9 / rate));
+        if (sched_out != nullptr)
+            *sched_out = sched_receipt;
+        if (sched_receipt.refused()) {
+            sched_refused.store(true, std::memory_order_release);
+            return;
+        }
         for_each_fixed_origin_callback(
             frames, rate, callbacks,
             [&](std::size_t i, clock::time_point target, clock::time_point before) {
@@ -721,7 +732,8 @@ Observation run(bool routed, double rate = kRate, std::size_t frames = kBlockFra
             });
     });
     const auto wait_deadline = clock::now() + std::chrono::seconds(2);
-    while (completed.load(std::memory_order_acquire) < 8 && clock::now() < wait_deadline)
+    while (completed.load(std::memory_order_acquire) < 8 && clock::now() < wait_deadline &&
+           !sched_refused.load(std::memory_order_acquire))
         std::this_thread::sleep_for(std::chrono::microseconds(100));
     if (completed.load(std::memory_order_acquire) >= 8 && fault != "omit_commit") {
         observation.request_ns = ns(clock::now());
@@ -938,8 +950,13 @@ TEST_CASE("G12 paced activation receipt cell", "[.][host][graph][g12][activation
     const std::string_view fault = std::getenv("G12_ACTIVATION_FAULT")
         ? std::getenv("G12_ACTIVATION_FAULT") : "";
     REQUIRE((fault.empty() || fault == "omit_commit" || fault == "wrong_gain"));
+    pulp::test::paced::SchedReceipt sched;
     const auto observed = run(backend == "routed", static_cast<double>(rate), frames,
-                              callbacks, false, fault);
+                              callbacks, false, fault, pulp::test::paced::read_sched_request(),
+                              &sched);
+    pulp::test::paced::print_sched(sched);
+    if (sched.refused())
+        FAIL("callback-thread scheduling request refused: " << sched.reason);
     const auto& p = observed.prepared;
     const auto row_bytes = observed.rows.capacity() * sizeof(CallbackRow);
     const auto audio_bytes = observed.audio_bits.capacity() * sizeof(std::uint32_t);

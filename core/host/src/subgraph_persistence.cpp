@@ -4,8 +4,10 @@
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <set>
 #include <tuple>
 #include <unordered_set>
@@ -50,6 +52,54 @@ std::multiset<EdgeKey> internal_edges(const SignalGraph& graph,
 struct Refusal {
     std::string error;
 };
+
+// The value a declared parameter has in the live graph: the target Gain
+// node's gain, or the target Processor parameter. The instance's own
+// `parameters` map is only a cache of the last restore and goes stale as
+// soon as anything edits the node or the Processor's StateStore.
+std::optional<float> live_parameter_value(const SignalGraph& graph,
+                                          const SubgraphInstance& instance,
+                                          const std::string& path) {
+    const auto node = instance.parameter_nodes.find(path);
+    if (node == instance.parameter_nodes.end())
+        return std::nullopt;
+    const auto* target = graph.node(node->second);
+    if (!target)
+        return std::nullopt;
+    if (const auto id = instance.processor_parameter_ids.find(path);
+        id != instance.processor_parameter_ids.end()) {
+        const auto processor = graph.processor_node_instance(node->second);
+        if (!processor || !processor->parameter(id->second))
+            return std::nullopt;
+        return processor->state_store().get_value(id->second);
+    }
+    if (target->type != NodeType::Gain)
+        return std::nullopt;
+    return target->gain;
+}
+
+// The instance's handles still name the nodes it was expanded or restored
+// into: every exposed port resolves on a member node with the same owner
+// and incarnation, and every parameter target is a member.
+bool instance_handles_live(const SignalGraph& graph, const SubgraphInstance& instance) {
+    const std::unordered_set<NodeId> members(instance.nodes.begin(), instance.nodes.end());
+    for (const auto& [name, port] : instance.ports) {
+        const auto* node = graph.node(port.node);
+        if (!node || !members.contains(port.node))
+            return false;
+        const auto& ports = port.output ? node->output_ports : node->input_ports;
+        const bool found = std::any_of(ports.begin(), ports.end(), [&](const PortHandle& live) {
+            return live.index == port.index && live.kind == port.kind && live.owner == port.owner &&
+                   live.incarnation == port.incarnation;
+        });
+        if (!found)
+            return false;
+    }
+    for (const auto& [path, node] : instance.parameter_nodes)
+        if (!members.contains(node))
+            return false;
+    return true;
+}
 
 // Rebuild one instance against a fresh expansion of its template. The scratch
 // graph is the authority for structure, ports, bounds, and Processor targets;
@@ -158,6 +208,8 @@ std::string to_saved_subgraph_document(
         for (const auto node : instance.nodes)
             if (!identities.contains(node) || !claimed.insert(node).second)
                 return {};
+        if (!instance_handles_live(graph, instance))
+            return {};
     }
 
     const auto document = GraphSerializer::to_saved_document(graph, editor_layout);
@@ -176,9 +228,19 @@ std::string to_saved_subgraph_document(
                 members.addArrayElement(identities.at(node));
             record.addMember("members", members);
             auto parameters = choc::value::createObject("Parameters");
-            for (const auto& [path, value] : std::map<std::string, float>(
-                     instance->parameters.begin(), instance->parameters.end()))
-                parameters.addMember(path, static_cast<double>(value));
+            for (const auto& [path, cached] : std::map<std::string, float>(
+                     instance->parameters.begin(), instance->parameters.end())) {
+                (void)cached;
+                const auto value = live_parameter_value(graph, *instance, path);
+                const auto bounds = instance->parameter_bounds.find(path);
+                // Restore refuses a non-finite or out-of-bounds value, so
+                // writing one would produce a document that cannot load.
+                if (!value || !std::isfinite(*value) ||
+                    bounds == instance->parameter_bounds.end() || *value < bounds->second.minimum ||
+                    *value > bounds->second.maximum)
+                    return {};
+                parameters.addMember(path, static_cast<double>(*value));
+            }
             record.addMember("parameters", parameters);
             auto children = choc::value::createObject("Children");
             for (const auto& [key, child_template] :

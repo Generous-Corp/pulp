@@ -21,9 +21,12 @@ struct GraphFileChange {
 
 /// One bounded poll; no thread or timer. The first readable contents seed the
 /// baseline and are not reported, so starting a watch never reapplies an
-/// unchanged file. Two equal consecutive reads debounce a save. A Changed
-/// result is offered again until acknowledge() records it as observed; call it
-/// once the change reached a terminal outcome (published or refused).
+/// unchanged file. If the first poll cannot read settled contents (missing
+/// file, read error, save in progress), no baseline is seeded and the first
+/// settled contents afterwards are reported as a change. Two equal consecutive
+/// reads debounce a save. A Changed result is offered again until acknowledge()
+/// records it as observed; call it once the change reached a terminal outcome
+/// (published or refused).
 /// Read errors are reported once per distinct error.
 class GraphFileWatch final {
   public:
@@ -32,6 +35,9 @@ class GraphFileWatch final {
     void acknowledge();
 
   private:
+    GraphFileChange poll_once();
+    bool started_ = false;
+    bool baseline_open_ = true;
     std::filesystem::path path_;
     std::optional<std::string> pending_, observed_, offered_;
     GraphFileChange::Code previous_error_ = GraphFileChange::Code::Unchanged;

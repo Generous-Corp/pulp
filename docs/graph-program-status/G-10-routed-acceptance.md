@@ -160,6 +160,13 @@ printed matching source/installed archive hashes, and relinked the consumer in
 each baseline/broken/restored phase. This deliberately modified SDK is test
 material, not a release artifact or an immutable release receipt.
 
+The RTSan mutation runs are a one-time local receipt at the head above. No CI
+lane repeats them: the hosted `rtsan` sanitizer job runs only on manual
+dispatch, and the installed consumer gate `cmake-spectral-asset-morph-consumer`
+is labelled `slow`, so it runs in the informational nightly full build, never
+on the required `macos` gate. It fails on
+zero registered tests and asserts the consumer registers exactly two.
+
 Coverage is the fixture's N=256, H=63, C=1, fixed/large/irregular callbacks,
 independent identity/mask fan-out and dry PDC. It establishes resource-instrument
 sensitivity and clean tested callbacks, not the roadmap's paced timing matrix,

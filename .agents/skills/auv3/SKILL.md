@@ -165,6 +165,7 @@ containment stay identical to CLAP/VST3/AUv2/AAX.
   adds the `ExpertMode` display hint, non-automatable adds `NonRealTime`. AU has
   no literal hidden/readonly/automatable triple, so `ExpertMode` in particular
   is a hint a host may ignore — do not describe it as hiding the parameter.
+  `ParamInfo::affects_others` adds `IsGlobalMeta` the same way as v2.
 
   Keep the two AU adapters' mappings identical: they are separate code (this
   tree vs `fill_parameter_info`) reading one model, and the whole point of the
@@ -1723,3 +1724,14 @@ widths the host settled on. `MIDIOutputNames` reports "MIDI Out" only for a
 descriptor with `produces_midi`: a host installs `MIDIOutputEventBlock` only for
 a unit that reports an output. Tests: test_au_multibus.mm,
 test_au_midi_output.mm.
+
+## A `UI <package>` editor has no AU v3 path
+
+`au_view_controller_mac.mm` and `au_view_controller_ios.mm` always build a
+`ViewBridge`; neither consults `Processor::editor_factory()` or opens a
+`ContractEditorSession`, unlike VST3, CLAP and AU v2. `pulp_add_plugin(... UI
+<package>)` implies `NO_EDITOR`, but the AUv3 module still links the view
+stack, so an AUv3 built that way has no contract editor (an RmlUi or
+native-surface editor included) and nothing diagnoses it at configure time.
+Do not list `AUv3` in `FORMATS` for such a plug-in until the view controllers
+serve the contract.

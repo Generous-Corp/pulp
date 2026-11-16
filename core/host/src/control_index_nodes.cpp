@@ -46,7 +46,8 @@ const char* control_process_result_fix(ControlProcessResult result) noexcept {
                "graph before calling process_control_checked()";
     case ControlProcessResult::OutOfRange:
         return "submit between 1 and the prepared block size (at most kControlIndexMaxFrames) "
-               "indices, with input and output buffers of the same frame count";
+               "indices, with input and output buffers of the same frame count, and "
+               "reset only to a non-negative transport position";
     case ControlProcessResult::StaleEpoch:
         return "use control_index_position().epoch, or the next epoch when the transport "
                "requests a stream-history reset";
@@ -54,14 +55,14 @@ const char* control_process_result_fix(ControlProcessResult result) noexcept {
         return "set absolute_start to control_index_position().cursor (the previous start "
                "plus its frames), or to the transport position on a reset";
     case ControlProcessResult::ClockExhausted:
-        return "reset the stream with a non-negative transport position before the 64-bit "
-               "sample clock or epoch overflows";
+        return "reset the stream before the 64-bit sample clock or epoch overflows";
     case ControlProcessResult::Busy:
         return "call process_control_checked() from one audio thread at a time and do not "
                "nest it inside a graph-event block; a Busy block was not consumed, so resubmit "
                "it at the same absolute start";
     case ControlProcessResult::UnsupportedMode:
-        return "disable parallel routing and anticipation on a graph with a Control index input";
+        return "disable parallel routing and anticipation on a graph with a Control index input, "
+               "and prepare it again if it was prepared with parallel routing on";
     case ControlProcessResult::RenderFailed:
         return "the block was consumed and silenced; fix the failing node and continue at the "
                "next absolute start";
@@ -113,6 +114,11 @@ struct ControlInstance {
             parameters = {0.5f, 0.25f, 0, 0};
         } else if (op == Operation::Integrator) {
             parameters = {0, 1, 0, 0};
+        } else if (op == Operation::Slew) {
+            // Mirror SlewLimiterT's own 10 ms defaults so an unconfigured
+            // node saves the times it actually runs with.
+            parameters = {10, 10, 0, 0};
+            slew.set_times_ms(10.0f, 10.0f);
         }
     }
 
@@ -216,8 +222,19 @@ bool load_control_state(ControlInstance& instance, const std::vector<std::uint8_
     return true;
 }
 
+// Every built-in Control node runs a bounded per-frame loop over prepared
+// state with no allocation, lock, or blocking call.
+void declare_control_rt_contract(CustomNodeType& type) {
+    type.rt_contract.declared = true;
+    type.rt_contract.safety_class = audio::RtSafetyClass::AudioCallbackSafeAfterPrepare;
+    type.rt_contract.allocation_free = true;
+    type.rt_contract.worst_case_work = [](int) { return signal::rt::RtWorkCounts{}; };
+    type.rt_contract.loop_bound = "one scalar update per frame";
+}
+
 CustomNodeType make_binary_type(std::string_view id, float (*rule)(float, float) noexcept) {
     CustomNodeType type;
+    declare_control_rt_contract(type);
     type.type_id = std::string(id);
     type.num_input_ports = 2;
     type.num_output_ports = 1;
@@ -238,6 +255,7 @@ CustomNodeType make_binary_type(std::string_view id, float (*rule)(float, float)
 
 CustomNodeType make_unary_type(std::string_view id, Operation operation) {
     CustomNodeType type;
+    declare_control_rt_contract(type);
     type.type_id = std::string(id);
     type.num_input_ports = 1;
     type.num_output_ports = 1;
@@ -246,14 +264,20 @@ CustomNodeType make_unary_type(std::string_view id, Operation operation) {
     type.output_ports = {{"value", PortKind::Control}};
     type.create = [operation]() -> void* { return new ControlInstance(operation); };
     type.destroy = [](void* pointer) { delete static_cast<ControlInstance*>(pointer); };
+    // Prepare starts a fresh Control lane at epoch 1, so the node restarts
+    // from its configured initial state as well.
     type.prepare = [](void* pointer, double sample_rate, int) {
-        static_cast<ControlInstance*>(pointer)->slew.prepare(sample_rate);
+        auto& instance = *static_cast<ControlInstance*>(pointer);
+        instance.slew.prepare(sample_rate);
+        instance.reset();
     };
     type.reset = [](void* pointer) { static_cast<ControlInstance*>(pointer)->reset(); };
     type.save_state = [](void* pointer) {
         const auto& state = *static_cast<ControlInstance*>(pointer);
+        // An unconfigured table has no state to persist; an empty blob keeps
+        // the serializer from writing a zero-length table its loader refuses.
         if (state.operation == Operation::IndexedTable)
-            return encode_values(state.table);
+            return state.table.empty() ? std::vector<std::uint8_t>{} : encode_values(state.table);
         const auto count = parameter_count(state.operation);
         return encode_values(std::span<const float>(state.parameters.data(), count));
     };
@@ -270,11 +294,14 @@ CustomNodeType make_unary_type(std::string_view id, Operation operation) {
         for (int i = 0; i < frames; ++i) {
             const float value = signal::finite_control(src[i]);
             switch (state.operation) {
+            // A non-finite input maps to the output minimum and holds the
+            // hysteresis state, matching map_clip() and hysteresis_step().
             case Operation::MapClip:
-                dst[i] = signal::finite_control(state.map.process(value));
+                dst[i] = signal::finite_control(state.map.process(src[i]));
                 break;
             case Operation::Hysteresis:
-                (void)state.hysteresis.process(value);
+                if (std::isfinite(src[i]))
+                    (void)state.hysteresis.process(src[i]);
                 dst[i] = state.hysteresis.high() ? 1.0f : 0.0f;
                 break;
             case Operation::Integrator:

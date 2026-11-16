@@ -35,6 +35,10 @@ nodes once skipped it and crashed numeric connect. Read the next block's epoch
 and start from `control_index_position()`, and expect prepare or a prepared-edit
 commit to reset it to epoch 1, cursor 0. `control_index_nodes.cpp` is part of
 the curated sample-region web source list, because authoring calls into it.
+A transport stream-history reset (and prepare) also resets every stateful
+Control node (integrator, slew, hysteresis) to its configured initial state, so
+a seek renders like a fresh graph; a negative reset position is `OutOfRange`,
+and a non-finite index is published as 0 rather than forwarded to a parameter.
 
 Port names: a MidiInput/MidiOutput node's single port is named `audio` (the
 first-port name from `populate_named_ports`) with kind MIDI, so do not rename
@@ -76,6 +80,19 @@ adoption restarts every sibling's PDC ring at zero, and the bit-exact sibling
 check in `test_isolated_clap_worker.cpp` fails. A refusal must keep the live
 snapshot; `fail_swap_edit_locked_` would silence the whole graph. Checkpoint
 before the node renders: `pause()` is terminal while a graph still renders it.
+
+**Every unsupported proxy call is terminal, so generic graph code must not make
+one.** The isolated slot answers `save_state()`, `set_parameter()` and similar
+calls by latching `unsupported` silence. Generic `SignalGraph` and
+`GraphSerializer` paths therefore check `is_isolated_plugin_slot` before
+forwarding: serialization refuses the whole graph (an identity-only file would
+reload the plugin in-process) and `set_node_parameter` returns false. A new
+generic path that calls into a plugin slot needs the same check.
+
+**The callback reads a completion once.** `CallbackEndpoint::render` copies the
+completion block out of the shared mapping before validating it and emits from
+that copy; reading the mapping twice lets a worker swap in non-finite samples
+after the check.
 
 
 ## Live retuning at a callback boundary
@@ -141,7 +158,11 @@ live bank use `VoiceBankBinding::restore_state()`, not a loop of
 `set_slot_parameter()`: `restore_voice_bank_state()` knows no authored bounds,
 so a value-by-value replay can refuse halfway and leave the bank half-restored,
 while `restore_state()` checks every value (bounds included) before the first
-write. Saved-bank activation, edit/undo, DAW adapters, and paced
+write. A release through `dispatch_deferred()` also retires the key in the
+bank's MPE tracker, and a graph failure during `render()` silences the whole
+block. `begin_block()` with a block open is `Busy` and `publish()` with no block
+is `StaleEpoch`, matching `HostEventIngress`. Saved-bank activation,
+edit/undo, DAW adapters, and paced
 realtime qualification remain open; do not infer them from the source-installed
 consumer.
 
@@ -1115,6 +1136,22 @@ save/reopen render proof beside the legacy caller-owned route controls.
   path. Bump the graph format version, add a deterministic migrator for older
   fixtures, and keep future-version loads fail-closed instead of silently
   accepting fields the current reader does not understand.
+- Spectral saved assets use the format-6 envelope (v5 readers refuse it; a
+  v5 reader would otherwise load spectral nodes as unresolved Custom nodes): canonical SFRM bytes
+  remain unchanged, while the analyzed-asset record binds schema/version,
+  original sample count, exact frame contract and SHA256 in its content ID.
+  The record's `frame_count` must equal what `SpectralFiniteStreamRule`
+  derives from the saved contract geometry and extent; never compute the frame
+  grid separately in persistence, so a geometry the source factory admits is
+  the geometry persistence admits.
+  Keep these spectral-only hooks in `spectral_graph_persistence.cpp`; validate
+  an isolated candidate with existing typed factories and compiler bounds
+  before replacing destination authoring/prepared state. Refuse missing,
+  corrupt, mismatched and unsupported assets explicitly. Do not coerce opaque
+  Custom/Processor/plugin state into this profile or infer replay proof from
+  codec round trips. The pinned live-control timeline and independent audio
+  oracle are exercised by `examples/a3-spectral-replay-consumer`; full paced
+  qualification and sanitizer evidence remain separate requirements.
 - Use `connect_automation()` for sparse two-point-per-block control events.
   Use `connect_audio_rate_modulation()` only for continuous, automatable
   `HostParamInfo::rate == AudioRate` params; do not route dense CV into
@@ -1152,8 +1189,12 @@ save/reopen render proof beside the legacy caller-owned route controls.
   automation when the fixed queue is full and lets injected events win a
   same-offset tie. Reuse the mailbox across gap-free snapshots for the same
   plugin node so an edit cannot discard a publication made before the swap.
-  `parameter_mailbox_counters()` reads that mailbox's published, overflowed
-  and dropped-event counts; they live in the mailbox, so they survive
+  `parameter_mailbox_counters()` reads that mailbox's published, overflowed,
+  overwritten and dropped-event counts. The mailbox keeps only the latest
+  batch, so a batch replaced before any process() read it is lost; the writer
+  learns that exactly from `TripleBuffer::write_replacing_unread()` (the dirty
+  bit still set on the slot it gets back), never by comparing `sequence_seen`,
+  which races the reader. The counts live in the mailbox, so they survive
   `prepare_swap()` and restart on an eager `prepare()`. They count only the
   source side; a delivery-time drop into a full block queue is not counted,
   because a refused delivery is retried and would be counted twice.
@@ -2106,6 +2147,16 @@ Keep these host graph invariants covered by tests:
   rather than memset'ing with a wrapped size_t.
 - MidiInput nodes' `midi_out` is drained at the END of `process()`, not
   the start. Hosts call `inject_midi()` before each `process()` to refill.
+- A routed `ProcessorNode` block always carries a main input bus, even for
+  a Processor that declares none, so a no-input instrument fits at most 15
+  output buses in `BusBufferSet::kMaxBuses`. `prepare()` and
+  `routed_output_channels()` must reserve that slot together, or the port
+  count promises a bus that fails every block.
+- A spectral `.pulpgraph` is admitted against the 64 MiB bank at a block
+  size, and frame edges grow with the block. Saving admits at the block the
+  graph is prepared for; loading admits at the destination's
+  `GraphLimits::max_block_size` (both at most 4096). A graph that fits only
+  at small blocks loads only into a destination whose limits name that block.
 
 ## PluginManagerPanel
 
@@ -2209,18 +2260,34 @@ honest.
 Watch out for:
 
 - Undo and redo reload the graph through `from_saved_document`, which
-  renumbers NodeIds. Re-find nodes by name or saved identity after every step;
-  a cached NodeId (or an editor-layout map keyed by one) is stale. The step
-  result carries the restored `editor_layout` keyed by the new ids.
+  renumbers NodeIds. A cached NodeId (or an editor-layout map keyed by one) is
+  stale after every step: map it through `saved_node_identities()` taken
+  before the call and the result's `node_ids` (identity to new NodeId). The
+  step result also carries the restored `editor_layout` keyed by the new ids.
+  `SubgraphInstance` handles go stale the same way, and
+  `to_saved_subgraph_document` refuses them; re-derive instances from a
+  subgraph document instead of keeping them across a step.
+- Each step first trial-restores the target into a scratch graph (with the
+  live graph's custom node types copied by
+  `GraphSerializer::copy_custom_node_types`), so every plugin and Processor
+  factory in the document runs twice on success. Pass the same
+  `GraphLoadOptions` (Processor registry and allowlist, plugin roots) that
+  built the graph; without them a Processor graph refuses with
+  `RestoreFailed` and `graph_untouched`, it is never emptied.
 - A mutation made without `checkpoint()` + `commit()` makes the next undo
   refuse with `Diverged` instead of discarding it. Commit the edit or
   `clear()` the history.
-- A restore that cannot be reproduced (for example a custom node type
-  re-registered with a different port count) is `RestoreFailed` and rolls the
-  graph back; the entry stays on the stack.
+- A restore that cannot be reproduced (for example it would bring back a
+  custom node whose type was re-registered with a different port count) is
+  `RestoreFailed`; the entry stays on the stack. A node that is already
+  unresolved in the live graph may come back unresolved, so a graph holding a
+  missing plugin can still be undone.
 - `diff_graph_documents` / `pulp graph diff` compare by authored identity, so
-  renumbering alone is equal, but `sample_regions` still records raw NodeIds and
-  is compared verbatim. A pre-v4 legacy file is refused as
+  renumbering alone is equal, including `sample_regions` NodeIds, and the
+  reported digests match. `GraphDocument::semantic_digest` from
+  `inspect_document` still hashes raw NodeIds. Identities carry an ordinal in
+  NodeId order, so deleting the first of two same-named nodes shifts the
+  survivor's identity and the diff blames the wrong node. A pre-v4 legacy file is refused as
   `invalid_format_version`, not `logical_identity_missing`; re-save it with
   `to_saved_document` first.
 
@@ -3256,6 +3323,29 @@ hangs until then. Do not register a second ctest entry for the same case under a
 shorter `TIMEOUT`: the duplicate-registration check refuses two budgets for one
 command.
 
+A finite spectral source's EOF values (frame count, routed cutoff, `N / H`
+drain, bin count, component stride) come from `SpectralFiniteStreamRule` in
+`core/host/src/spectral_finite_stream_internal.hpp`; do not reintroduce 64,
+129, 258 or 320 literals in the asset-morph path. The closed form
+`ceil((L + N - H) / H)` matches the analysis grid only when the hop divides the
+FFT size (N=256, H=100, L=1 gives 2 against the grid's 3), even though the codec
+and `SpectralIdentity` accept such hops, so the rule refuses them. Test any EOF
+change against `spectral_frame_engine_first_frame_start` walking the grid, not
+against the formula itself. The rule's `static_assert` turns a broken rounding
+into a compile error, which `confirm_failure.sh` reports as INCONCLUSIVE; break
+a different term to exercise the runtime test.
+
+The asset-morph source builds its rule from the decoded stream's geometry, so it
+runs at any admitted (N, H, C). Its endpoint scratch is a per-node vector sized
+by `SpectralAssetMorphState::prepare()` on the control thread and charged to the
+runtime bank; `frame()` must stay allocation-free and only index that storage.
+A refused geometry keeps its own `SpectralFiniteStreamRule::Status` and
+`reason()` text and surfaces publicly as `UnsupportedOperation`; a codec
+`ResourceLimit` while decoding either asset surfaces as `CapacityExceeded`, not
+`InvalidFrame`. The geometry suite (`test_spectral_asset_geometry.cpp`) carries
+its own double-precision oracle because the shared example oracle is fixed at
+FFT 256 / hop 64 mono.
+
 ## Bounded typed trigger runtime
 
 Use `prepare_trigger_plan()` and `try_install_prepared_trigger_plan()` for the
@@ -3295,6 +3385,11 @@ not advance). A steady-clock forward gap stays in the epoch; a backwards clock
 or a steady/no-steady flip opens a new epoch. Out-of-block times are refused,
 never clamped. The CLAP adapter still feeds the Processor `MidiBuffer`, not this
 projection.
+On a timeline `NewEpoch` (seek or loop), call `SignalGraph::try_reset_events()`
+before opening the next host-event block at the new epoch; it is the only call
+that advances the trigger epoch, and the live generation follows it. The
+unchecked `process()` silences a refused typed-trigger block, while
+`process_checked()` leaves the output untouched and returns the refusal.
 
 VST3 and AU enter the same timeline through `clock_from_vst3()` /
 `clock_from_au()` (plain fields, no SDK). Gotchas: VST3's steady counter is

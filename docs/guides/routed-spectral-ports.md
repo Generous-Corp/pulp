@@ -57,24 +57,31 @@ must be tracked separately in `docs/graph-program-status/G-10-routed.md`.
 ## Finite two-asset source
 
 `add_spectral_asset_morph_v1(asset_a, asset_b, source_samples, name)` owns two
-validated canonical codec streams. It accepts profile 1, mono, FFT 256/hop 64,
-matching exact sample-rate bits and matching frame grids. For positive length L,
-each stream has exactly `ceil((L+192)/64)` frames starting at origin -192.
-The codec does not store original length: the caller supplies the same original
-length for both assets. Calls that reject leave authoring unchanged.
+validated canonical codec streams. The node takes its geometry from the decoded
+streams: profile 1, FFT size N a power of two from 256 to 16384, a hop H that
+divides N, and 1 to 16 channels. Both streams must match in geometry, channel
+count, exact sample-rate bits and frame grid. For positive length L, each stream
+has exactly `ceil((L + N - H) / H)` frames starting at origin `-(N - H)`, which
+is the analysis grid's count of frames overlapping the source. A hop that does
+not divide N is refused with `UnsupportedOperation` even though the codec
+carries it, because no closed-form count matches its grid. The codec does not
+store original length: the caller supplies the same original length for both
+assets. Calls that reject leave authoring unchanged.
 
 Connect one direct host `AudioInput` output to the returned named `morph` Audio
-input and connect `frames` to existing typed synthesis, optionally through
-identity or real-mask stages. Each absolute hop uses the mean of its 64 live
-control samples, independently of callback partition. Every consumed sample
+input and connect `frames` to typed synthesis at the same identity, optionally
+through identity or real-mask stages. Each absolute hop uses the mean of its H
+live control samples, independently of callback partition, and one control
+value drives every channel. Every consumed sample
 must be finite and in [0,1]; invalid control terminates the affected branch at
 the failing frame's absolute origin. Magnitudes interpolate linearly and phases
 follow the shortest arc using the same mean. DC/Nyquist retain real-only values
 with the existing morph DSP's sign selection policy.
 
-The source publishes four zero drain frames after the stored frames, including
+The source publishes N / H zero drain frames after the stored frames, including
 their windows in synthesis normalization. `render_frames` is the exclusive
-finite audio cutoff, including exactly 320 initial silent samples. Rendering
+finite audio cutoff, `N + H + frames * H`, including exactly N + H initial
+silent samples. Rendering
 beyond it returns silence without additional frame synthesis or missing-frame
 diagnostics. Reset restarts both assets and hop accumulation under a fresh
 epoch; transport position does not select an asset offset. Arbitrary seeks,

@@ -651,10 +651,11 @@ void parameter_mailbox_controls(const ParameterObservation& obs) {
     check(obs.overflow_refused, "parameter-mailbox-source-overflow-refusal");
     check(obs.retained_prefix == pulp::host::ParameterEventQueue::kCapacity,
           "parameter-mailbox-retained-prefix");
-    // Four batches were published; only the last overflowed, losing the one
-    // push its source queue refused.
+    // Four batches were published. The first was overwritten unread by the
+    // second, losing its one event; the last overflowed, losing the one push
+    // its source queue refused.
     check(obs.counters_read && obs.counters.published == 4 && obs.counters.overflowed == 1 &&
-              obs.counters.dropped_events == 1,
+              obs.counters.overwritten == 1 && obs.counters.dropped_events == 2,
           "parameter-mailbox-overflow-counters");
 }
 
@@ -970,8 +971,15 @@ void voice_bank_controls(const VoiceObservation& obs) {
 // ParameterEventQueue offsets for inject_parameter_events into a PluginSlot
 // node in the same graph. A graph-authored lane producer in that graph emits at
 // absolute targets, and voice intent is published to a VoiceBankBinding over
-// the same blocks. The runtime has no shared epoch: each native epoch is
-// mapped to the test epoch and must stay constant for the whole run.
+// the same blocks. The runtime has no shared epoch: the trigger and voice
+// native epochs are mapped to the test epoch and must stay constant for the
+// whole run. The MIDI and parameter mailboxes have no runtime epoch, so their
+// map entries are the test epoch and 0 and only fill the table.
+//
+// Across runs the trigger epoch belongs to a fresh graph and repeats exactly.
+// Voice-bank epochs come from one process-wide sequence,
+// so every run's freshly prepared bank must carry a different epoch; equal
+// voice epochs across two runs would mean a bank reused a retired epoch.
 
 constexpr std::uint64_t kCombinedEpoch = 7;
 constexpr std::uint64_t kCombinedFrames = 256;
@@ -992,6 +1000,16 @@ struct TraceRecord {
     std::array<std::uint64_t, 3> key{};
     friend bool operator==(const TraceRecord&, const TraceRecord&) = default;
 };
+
+// Compares two runs' epoch maps under the cross-run rule above.
+bool epoch_maps_match_across_runs(const std::array<std::uint64_t, 4>& a,
+                                  const std::array<std::uint64_t, 4>& b) {
+    constexpr auto voice = static_cast<std::size_t>(Family::Voice);
+    for (std::size_t f = 0; f < voice; ++f)
+        if (a[f] != b[f])
+            return false;
+    return a[voice] != 0 && b[voice] != 0 && a[voice] != b[voice];
+}
 
 // The key position each family orders equal-time records by.
 constexpr std::array<std::size_t, 4> kOrderKey{1, 1, 0, 1};
@@ -1569,7 +1587,7 @@ const char* backend_parity_diff(const CombinedRun& a, const CombinedRun& b) {
         return "backend-voice-audio";
     if (!(a.graph_audio == b.graph_audio))
         return "backend-graph-audio";
-    if (!(a.native_epoch == b.native_epoch))
+    if (!epoch_maps_match_across_runs(a.native_epoch, b.native_epoch))
         return "backend-epoch-map";
     return "";
 }
@@ -1735,7 +1753,8 @@ int main(int argc, char** argv) {
                   "combined-partition-invariance");
             check(family_digests(other.trace) == family_digests(combined.trace),
                   "combined-partition-invariance");
-            check(other.native_epoch == combined.native_epoch, "combined-epoch-map");
+            check(epoch_maps_match_across_runs(other.native_epoch, combined.native_epoch),
+                  "combined-epoch-map");
             future_staged += other.trigger_future_staged;
             current_block += other.trigger_current_block;
         }

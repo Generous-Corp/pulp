@@ -9,6 +9,81 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11410"></a>
+## [1.141.0] - 2026-11-16
+
+- release/version bump ([#12392](https://github.com/Generous-Corp/pulp/pull/12392))
+- ci/ruleset mirror live ([#12391](https://github.com/Generous-Corp/pulp/pull/12391))
+- fix/rmlui warm first frame ([#12386](https://github.com/Generous-Corp/pulp/pull/12386))
+- graph/p4 two consumer 20261115 ([#12335](https://github.com/Generous-Corp/pulp/pull/12335))
+- release/version bump ([#12387](https://github.com/Generous-Corp/pulp/pull/12387))
+- graph/ffix control events 20261115 ([#12382](https://github.com/Generous-Corp/pulp/pull/12382))
+- graph/ffix spectral buses 20261115 ([#12381](https://github.com/Generous-Corp/pulp/pull/12381))
+- graph/ffix probes worker 20261115 ([#12379](https://github.com/Generous-Corp/pulp/pull/12379))
+- fix/pr dispatch allowlist ([#12375](https://github.com/Generous-Corp/pulp/pull/12375))
+- docs/contract editor skills sync ([#12377](https://github.com/Generous-Corp/pulp/pull/12377))
+- feature/rmlui narrow render lock ([#12372](https://github.com/Generous-Corp/pulp/pull/12372))
+
+<a id="v11392"></a>
+## [1.139.2] - 2026-11-15
+
+- release/version bump ([#12369](https://github.com/Generous-Corp/pulp/pull/12369))
+- infra/merge friendly registries ([#12349](https://github.com/Generous-Corp/pulp/pull/12349))
+- fix/graphite intel msaa1 ([#12358](https://github.com/Generous-Corp/pulp/pull/12358))
+- fix/a2t history repin 20261115 ([#12355](https://github.com/Generous-Corp/pulp/pull/12355))
+- codex/release platform naming 20261115 ([#12353](https://github.com/Generous-Corp/pulp/pull/12353))
+
+<a id="v11391"></a>
+## [1.139.1] - 2026-11-15
+
+- release/version bump ([#12351](https://github.com/Generous-Corp/pulp/pull/12351))
+- graph/a3 spectral persist 20261115 ([#12338](https://github.com/Generous-Corp/pulp/pull/12338))
+- fix/coremidi input close drain ([#12331](https://github.com/Generous-Corp/pulp/pull/12331))
+
+<a id="v11390"></a>
+## [1.139.0] - 2026-11-15
+
+- release/version bump ([#12346](https://github.com/Generous-Corp/pulp/pull/12346))
+- graph/g9 windows 20261115 ([#12334](https://github.com/Generous-Corp/pulp/pull/12334))
+
+<a id="v11380"></a>
+## [1.138.0] - 2026-11-15
+
+- release/version bump ([#12342](https://github.com/Generous-Corp/pulp/pull/12342))
+- graph/g9 native land slim 20261115 ([#12337](https://github.com/Generous-Corp/pulp/pull/12337))
+- graph/rfix control voice 20261115 ([#12327](https://github.com/Generous-Corp/pulp/pull/12327))
+- graph/rfix probes cli 20261115 ([#12329](https://github.com/Generous-Corp/pulp/pull/12329))
+- graph/rfix spectral buses 20261115 ([#12328](https://github.com/Generous-Corp/pulp/pull/12328))
+- graph/rfix g3g4 20261115 ([#12324](https://github.com/Generous-Corp/pulp/pull/12324))
+- graph/g10 geometry 20261115 ([#12323](https://github.com/Generous-Corp/pulp/pull/12323))
+
+<a id="v11370"></a>
+## [1.137.0] - 2026-11-15
+
+- release/version bump ([#12325](https://github.com/Generous-Corp/pulp/pull/12325))
+- graph/g12 rt sched 20261115 ([#12321](https://github.com/Generous-Corp/pulp/pull/12321))
+- graph/g10 codec eof 20261115 ([#12319](https://github.com/Generous-Corp/pulp/pull/12319))
+- feature/param affects others ([#12318](https://github.com/Generous-Corp/pulp/pull/12318))
+- fix/mac display link stop drain ([#12312](https://github.com/Generous-Corp/pulp/pull/12312))
+
+<a id="v11360"></a>
+## [1.136.0] - 2026-11-15
+
+- release/version bump ([#12311](https://github.com/Generous-Corp/pulp/pull/12311))
+- ci/prepush receipt ([#12293](https://github.com/Generous-Corp/pulp/pull/12293))
+- docs/accessibility status ([#12309](https://github.com/Generous-Corp/pulp/pull/12309))
+- ci/gates parity shared list ([#12289](https://github.com/Generous-Corp/pulp/pull/12289))
+
+<a id="v11350"></a>
+## [1.135.0] - 2026-11-15
+
+- release/version bump ([#12287](https://github.com/Generous-Corp/pulp/pull/12287))
+- graph/a2 flagship 20261114 ([#12288](https://github.com/Generous-Corp/pulp/pull/12288))
+- graph/g3 undo diff 20261114 ([#12281](https://github.com/Generous-Corp/pulp/pull/12281))
+- fix/wheel precise flag ([#12282](https://github.com/Generous-Corp/pulp/pull/12282))
+- graph/a9 glue 20261114 ([#12284](https://github.com/Generous-Corp/pulp/pull/12284))
+- codex/omarchy linux docs 20261114 ([#12280](https://github.com/Generous-Corp/pulp/pull/12280))
+
 <a id="v11340"></a>
 ## [1.134.0] - 2026-11-15
 
@@ -13036,6 +13111,14 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.141.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.141.0
+[1.139.2]: https://github.com/Generous-Corp/pulp/releases/tag/v1.139.2
+[1.139.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.139.1
+[1.139.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.139.0
+[1.138.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.138.0
+[1.137.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.137.0
+[1.136.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.136.0
+[1.135.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.135.0
 [1.134.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.134.0
 [1.133.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.133.0
 [1.132.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.132.0

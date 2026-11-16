@@ -352,6 +352,21 @@ including the Intel `darwin-x64` CLI+SDK pair, which is now a REQUIRED leg
 | `pulp-sdk-windows-x64.tar.gz` | " |
 | `SHA256SUMS` | SHA-256 manifest for every user-facing release asset above; `pulp upgrade` and `pulp sdk install` fetch it and refuse to extract an archive whose digest differs (see `checksum_manifest_floor` in `release_product_matrix.json`) |
 
+### Platform names and Intel testing
+
+The platform token is part of the public filename and is deliberately stable:
+use `arm64` or `x64` for Linux and Windows, and `darwin-arm64` or
+`darwin-x64` for macOS. The `darwin-x64` release pair is the installable Intel
+artifact; it is cross-compiled on Apple Silicon and smoke-tested under Rosetta.
+
+Native Intel Mac validation is a separate test signal, not a second release
+artifact. The release dry-run includes an advisory `macos-15-intel` leg that
+builds, packages, and runs the same `darwin-x64` output on native Intel
+hardware. `nightly-intel.yml` provides the longer native-Intel build and test
+lane (with the physical Mac mini available through its explicit runner
+selector). This separation keeps release inclusion simple while making it
+possible to qualify Intel hardware without creating duplicate asset names.
+
 The table shows the FULL platform inventory. Which per-platform rows a given
 release actually carries is `release_product_matrix.json`'s
 `active_platforms` (absent = all of them): the same field derives the build

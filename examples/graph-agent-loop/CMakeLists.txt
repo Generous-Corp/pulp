@@ -54,22 +54,28 @@ set_tests_properties(graph-agent-loop-consumer-action-log PROPERTIES
     DEPENDS graph-agent-loop-consumer
     PASS_REGULAR_EXPRESSION "pulp.a9.action-log/v1")
 
-# The authoring glue stays inside its line budget. The second test is the
-# counter's negative control: with a limit far below the real size it must
-# report the glue as over budget, so a counter that sees nothing cannot pass.
-foreach(control IN ITEMS budget over-budget-control)
+# The authoring glue and the plan-boundary harness each stay inside a line
+# ceiling, so glue cannot move into the harness header unseen. The two controls
+# are the counter's negative controls: with a limit far below the real size of
+# one file it must report that file as over budget, so a counter that sees
+# nothing cannot pass.
+foreach(control IN ITEMS budget over-budget-control harness-over-budget-control)
+    set(glue_limit 200)
+    set(harness_limit 220)
+    set(expect_over "-DGRAPH_AGENT_LOOP_EXPECT_OVER=1")
     if(control STREQUAL "budget")
-        set(limit 200)
         set(expect_over "")
+    elseif(control STREQUAL "over-budget-control")
+        set(glue_limit 100)
     else()
-        set(limit 100)
-        set(expect_over "-DGRAPH_AGENT_LOOP_EXPECT_OVER=1")
+        set(harness_limit 100)
     endif()
     add_test(NAME graph-agent-loop-glue-${control}
              COMMAND ${CMAKE_COMMAND}
                      -DGRAPH_AGENT_LOOP_GLUE=${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
                      -DGRAPH_AGENT_LOOP_HARNESS=${CMAKE_CURRENT_SOURCE_DIR}/plan_boundary.hpp
-                     -DGRAPH_AGENT_LOOP_GLUE_LIMIT=${limit}
+                     -DGRAPH_AGENT_LOOP_GLUE_LIMIT=${glue_limit}
+                     -DGRAPH_AGENT_LOOP_HARNESS_LIMIT=${harness_limit}
                      ${expect_over}
                      -P ${CMAKE_CURRENT_SOURCE_DIR}/assert-glue-budget.cmake)
 endforeach()
