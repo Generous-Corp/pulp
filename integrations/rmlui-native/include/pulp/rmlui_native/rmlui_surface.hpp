@@ -65,11 +65,13 @@ struct FrameTarget {
 struct RendererHooks {
     std::function<void(const FrameTarget&)> begin_frame;
     std::function<void()> end_frame;
-    /// Called, with `rmlui_mutex()` held and no frame in flight, when the
-    /// editor is hidden, after RmlUi has released its compiled geometry and
-    /// textures through the renderer. Free any GPU memory the renderer itself
-    /// caches (layer, filter and atlas textures); it is rebuilt on the next
-    /// frame. Optional.
+    /// Called when the editor is hidden, with `rmlui_mutex()` held, so no
+    /// frame is being encoded, after RmlUi has released its compiled geometry
+    /// and textures through the renderer. The GPU may still be finishing the
+    /// previous frame's command buffer, so release resources the usual
+    /// deferred way (drop references, do not wait on the device). Free any GPU
+    /// memory the renderer itself caches (layer, filter and atlas textures);
+    /// it is rebuilt on the next frame. Optional.
     std::function<void()> trim;
 };
 
@@ -93,7 +95,10 @@ struct RmlUiSurfaceOptions {
 
 class RmlUiSurface {
   public:
-    /// `assets` and `renderer` must outlive the surface.
+    /// `assets` and `renderer` must outlive the surface. The surface expects
+    /// the renderer to serve it alone: hiding releases the renderer's
+    /// geometry and textures, which a renderer shared with another surface
+    /// would lose too.
     RmlUiSurface(vellum::rmlui::AssetProvider& assets, Rml::RenderInterface& renderer,
                  RendererHooks hooks, RmlUiSurfaceOptions options);
     ~RmlUiSurface();

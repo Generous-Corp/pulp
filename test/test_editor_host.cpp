@@ -773,7 +773,8 @@ TEST_CASE("a hidden contract session's tick does nothing and showing it ticks at
     session->tick();
     REQUIRE(idles == 1);
 
-    // A host timer that keeps firing while the editor is hidden does no work.
+    // A host timer that keeps firing while the editor is hidden does not idle
+    // the editor.
     session->visibility_changed(false);
     session->tick();
     session->tick();
@@ -790,6 +791,36 @@ TEST_CASE("a hidden contract session's tick does nothing and showing it ticks at
     // Showing twice is no change.
     session->visibility_changed(true);
     REQUIRE(idles == 3);
+    session->close_for_owner();
+}
+
+TEST_CASE("a hidden contract session keeps draining the audio-thread change queue",
+          "[editor-host]") {
+    Fixture f;
+    GainProcessor processor;
+    int idles = 0;
+    TickingFactory factory(idles);
+    auto session = ContractEditorSession::create(processor, f.store, factory, {},
+                                                 ContractEditorSession::IdleSource::host_driven);
+    REQUIRE(session);
+    int parent = 0;
+    REQUIRE(session->attach({NativeParentKind::cocoa_view, &parent, 0}));
+    auto token = f.store.add_listener([](ParamID, float) {}, pulp::state::ListenerThread::Main);
+    const auto capacity = f.store.rt_listener_queue_telemetry().capacity;
+    REQUIRE(capacity > 0);
+
+    session->visibility_changed(false);
+    // The audio thread keeps writing while the editor is hidden; the host's
+    // timer keeps ticking. Several queues' worth must pass without overflow.
+    for (std::size_t round = 0; round < 6; ++round) {
+        for (std::size_t i = 0; i < capacity / 2; ++i)
+            f.store.set_value_rt(kGain, static_cast<float>(i % 100) * 0.01f);
+        session->tick();
+    }
+    REQUIRE(f.store.rt_listener_queue_telemetry().overflow_count == 0);
+    REQUIRE(idles == 0);
+    session->visibility_changed(true);
+    REQUIRE(idles == 1);
     session->close_for_owner();
 }
 

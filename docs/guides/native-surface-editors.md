@@ -83,26 +83,18 @@ rather than `px`.
 
 A host that hides an editor without detaching it (CLAP `gui_hide`, an AU view
 leaving its window) reaches the editor as `visibility_changed(false)`. The
-contract session then stops its 16 ms idle tick (a host-driven tick does no
-work) until the editor is shown again, and showing it ticks once at once. An
-RmlUi editor forwards the call to `RmlUiSurface::visibility_changed()`: frames
-stop at once, RmlUi releases its compiled geometry and textures through the
-renderer, and `RendererHooks::trim` is called so the renderer can free the
-layer, filter and atlas textures it caches. Showing resumes frames and draws
+contract session then stops calling the editor's `idle()` until the editor is
+shown again. It keeps draining the parameter change queue, because the audio
+thread keeps writing and the queue is bounded, and showing ticks once at once.
+An RmlUi editor forwards the call to `RmlUiSurface::visibility_changed()`:
+frames stop at once, including one already waiting for the frame lock, RmlUi
+releases its compiled geometry and textures through the renderer, and
+`RendererHooks::trim` is called so the renderer can free the layer, filter and
+atlas textures it caches. The trim runs with no frame being encoded, but the
+GPU may still be finishing the previous frame. Showing resumes frames and draws
 one, which recompiles everything that was released, so the first visible frame
-is complete.
-### Threading
-
-A frame holds one process-wide lock, `rmlui_mutex()`, for RmlUi's update and
-render, because RmlUi's state is shared and not thread-safe. The main thread
-does not wait for it to deliver pointer or wheel input or to run `idle()`:
-when a frame is in flight, pointer and wheel events are queued (consecutive
-moves, and wheel deltas with the same modifiers, merge) and applied in order on
-the main thread within about a millisecond of the frame ending. Element
-listeners therefore still run on the main thread, a moment after the event.
-`with_context()`, key and text input apply the queue first and wait for a
-frame; call `flush_input()` where a caller needs earlier events applied now,
-as a test does after a click.
+is complete. A surface expects a renderer of its own, since the release calls
+are renderer-wide.
 
 ## Proof
 

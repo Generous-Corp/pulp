@@ -109,6 +109,13 @@ class CountingRenderer final : public Rml::RenderInterface {
         rendered.fetch_add(1);
         // Long enough that two unserialized threads would overlap here.
         std::this_thread::sleep_for(std::chrono::microseconds(draw_delay_us.load()));
+        // A test can park the render thread inside a draw, lock held.
+        if (hold_draws.load()) {
+            parked.store(true);
+            while (hold_draws.load())
+                std::this_thread::sleep_for(std::chrono::microseconds(200));
+            parked.store(false);
+        }
         leave();
     }
     void ReleaseGeometry(Rml::CompiledGeometryHandle) override {
@@ -133,6 +140,8 @@ class CountingRenderer final : public Rml::RenderInterface {
     std::atomic<int> released_geometry{0};
     std::atomic<int> released_textures{0};
     std::atomic<int> draw_delay_us{200};
+    std::atomic<bool> hold_draws{false};
+    std::atomic<bool> parked{false};
 
   private:
     static void enter() {
@@ -706,5 +715,50 @@ TEST_CASE("a hidden editor stops frames and trims GPU memory, and showing it dra
         REQUIRE(e.renderer.rendered.load() > rendered_before);
         REQUIRE(e.trimmed.load() == 1);
         e.ui->detach();
+    }
+}
+
+TEST_CASE("a frame already waiting for the lock does not redraw a hidden editor",
+          "[native-surface][rmlui][visibility]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        Editor a;
+        Editor b;
+        REQUIRE(a.attach());
+        REQUIRE(b.attach());
+        REQUIRE(a.wait_for([&] { return a.ui->frames() > 0 && b.ui->frames() > 0; }));
+        // One lock serves both editors. Park b's render thread inside a draw
+        // with the lock held, so a's frame waits for it; then hide a and let b
+        // go. Which waiter takes the lock first is up to the OS, so repeat: a
+        // frame that ran after the trim would recompile what it released.
+        for (int round = 0; round < 12; ++round) {
+            b.renderer.hold_draws.store(true);
+            b.ui->request_frame();
+            REQUIRE(b.wait_for([&] { return b.renderer.parked.load(); }));
+            a.ui->request_frame();
+            // Let a's render thread reach the lock.
+            [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+            std::thread releaser([&] {
+                std::this_thread::sleep_for(std::chrono::milliseconds(60));
+                b.renderer.hold_draws.store(false);
+            });
+            a.ui->visibility_changed(false);
+            releaser.join();
+            [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.15]];
+            const int compiled = a.renderer.compiled.load();
+            const auto frames = a.ui->frames();
+            for (int i = 0; i < 5; ++i) {
+                a.ui->request_frame();
+                [[NSRunLoop currentRunLoop]
+                    runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.03]];
+            }
+            INFO("round " << round);
+            REQUIRE(a.ui->frames() == frames);
+            REQUIRE(a.renderer.compiled.load() == compiled);
+            a.ui->visibility_changed(true);
+            REQUIRE(a.wait_for([&] { return a.ui->frames() > frames; }));
+        }
+        a.ui->detach();
+        b.ui->detach();
     }
 }

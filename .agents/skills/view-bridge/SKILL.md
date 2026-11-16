@@ -81,23 +81,16 @@ it and its tests, and both look like bugs until you know them:
   leaves a host's key routing (Musical Typing) dead, as the plug-in host's
   key-focus etiquette below describes.
 
-- **A hidden contract editor's tick stops, and the editor must stop drawing
-  and give memory back itself.** `ContractEditorSession::visibility_changed(false)`
-  stops the self-paced tick (a host-timer tick returns early) and
-  `visibility_changed(true)` ticks once at once. An RmlUi editor forwards the
-  call to `RmlUiSurface::visibility_changed()`, which stops frames (an
-  `idle()` cannot restart them), releases RmlUi's geometry and textures and
-  calls `RendererHooks::trim`. A test must prove the first frame after show is
-  complete (geometry compiled and drawn again), not only that frames resume.
-- **RmlUi frames hold one process-wide lock; input does not wait for it.**
-  `RmlUiSurface` takes `rmlui_mutex()` for a frame's update and render, and
-  RmlUi permits no narrower scope. Pointer and wheel events that arrive during
-  a frame are queued and applied on the main thread when the lock frees, so a
-  test that asserts a click's effect right after the event must call
-  `RmlUiSurface::flush_input()` first. `with_context()`, key and text input do
-  wait for a frame by design. A test that needs to see the stall sets a
-  per-draw delay in a counting renderer and times `with_context()` as the
-  control.
+- **A hidden contract editor gets no `idle()`, and must stop drawing and give
+  memory back itself.** `ContractEditorSession::visibility_changed(false)` skips
+  `Editor::idle()` but keeps draining the parameter change queue (it is
+  bounded and the audio thread keeps writing); `visibility_changed(true)` ticks
+  once at once. An RmlUi editor forwards the call to
+  `RmlUiSurface::visibility_changed()`, which stops frames (an `idle()` cannot
+  restart them, and a frame already waiting for the lock returns early),
+  releases RmlUi's geometry and textures and calls `RendererHooks::trim`. A
+  test must prove the first frame after show is complete (geometry compiled
+  and drawn again) and that nothing recompiles while hidden.
 
 `pulp::native::GlSurface` is the OpenGL counterpart for Windows and X11. On
 macOS only its offscreen backend exists (CGL into a framebuffer object), for

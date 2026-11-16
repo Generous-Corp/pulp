@@ -118,7 +118,7 @@ struct RmlUiSurface::Impl {
     double scale = 1.0;
     bool text_focus = false;
     // The host hid the editor: frames stay off whatever the window says.
-    bool host_hidden = false;
+    std::atomic<bool> host_hidden{false};
 
     // Pointer and wheel events the main thread could not apply because the
     // render thread held rmlui_mutex(). They run, in order, on the main thread
@@ -189,7 +189,9 @@ struct RmlUiSurface::Impl {
                 [(__bridge id<MTLCommandQueue>)surface->command_queue() commandBuffer];
             {
                 std::lock_guard lock(rmlui_mutex());
-                if (!context || !context->is_open())
+                // A frame that was waiting for the lock while the host hid the
+                // editor must not rebuild what the trim just released.
+                if (!context || !context->is_open() || host_hidden.load())
                     return;
                 FrameTarget target{(__bridge void*)cb, drawable.texture(), drawable.width(),
                                    drawable.height(), scale};
@@ -423,7 +425,7 @@ struct RmlUiSurface::Impl {
         pump.reset();
         surface.reset();
         text_focus = false;
-        host_hidden = false;
+        host_hidden.store(false);
         width_px = height_px = 0;
     }
 };
@@ -527,7 +529,7 @@ void RmlUiSurface::idle() {
     if (!d.surface || !d.pump)
         return;
     d.surface->poll_visibility();
-    d.pump->set_on_screen(d.surface->on_screen().on_screen() && !d.host_hidden);
+    d.pump->set_on_screen(d.surface->on_screen().on_screen() && !d.host_hidden.load());
     // The tick never waits for a frame: a busy lock means this tick leaves
     // the size and any queued input for the next one.
     bool resized = false;
@@ -548,7 +550,7 @@ void RmlUiSurface::visibility_changed(bool visible) {
     auto& d = *impl_;
     if (!d.surface || !d.pump)
         return;
-    d.host_hidden = !visible;
+    d.host_hidden.store(!visible);
     if (!visible) {
         d.pump->set_on_screen(false);
         d.trim_gpu_resources();

@@ -155,9 +155,9 @@ class ContractEditorSession : public std::enable_shared_from_this<ContractEditor
     IdleSource idle_source() const {
         return idle_source_;
     }
-    /// One idle tick: Editor::idle() while attached and visible. A hidden
-    /// editor's tick stops (a self-paced timer) or does nothing (a host timer);
-    /// showing it ticks once at once.
+    /// One idle tick: drains the parameter listener queues, then calls
+    /// Editor::idle() while attached and visible. A hidden editor gets no
+    /// Editor::idle(); showing it ticks once at once.
     void tick();
 
     /// Be closed by `registry` when its adapter instance goes away first. The
