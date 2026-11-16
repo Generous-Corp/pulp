@@ -293,8 +293,6 @@ struct EditorEnvironment {
 #endif
 };
 
-
-
 /// The main thread's event loop, for an editor's own idle tick. On Apple
 /// platforms that tick is a dispatch source on the main queue, so the loop
 /// runs the real main run loop; elsewhere the tick posts through

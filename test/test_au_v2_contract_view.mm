@@ -34,9 +34,9 @@ using pulp::test_support::contract_config;
 using pulp::test_support::contract_log;
 using pulp::test_support::EditorEnvironment;
 using pulp::test_support::MainLoop;
-using pulp::test_support::ScopedManualSnapTimer;
 using pulp::test_support::RecordingContractFactory;
 using pulp::test_support::reset_contract_recording;
+using pulp::test_support::ScopedManualSnapTimer;
 
 namespace {
 
@@ -282,8 +282,9 @@ TEST_CASE("AU v2 opens, sizes and closes a contract editor, twice",
     g_instance = nullptr;
 }
 
-TEST_CASE("an AU v2 contract view snaps a host resize to the editor's declared hints once it settles",
-          "[auv2][editor-host][au-contract][resize-hints]") {
+TEST_CASE(
+    "an AU v2 contract view snaps a host resize to the editor's declared hints once it settles",
+    "[auv2][editor-host][au-contract][resize-hints]") {
     EditorEnvironment env;
     reset_contract_recording();
     contract_config() = {};

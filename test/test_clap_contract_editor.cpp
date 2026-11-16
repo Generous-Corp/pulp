@@ -35,9 +35,9 @@ using pulp::test_support::contract_config;
 using pulp::test_support::contract_log;
 using pulp::test_support::EditorEnvironment;
 using pulp::test_support::MainLoop;
-using pulp::test_support::ScopedManualSnapTimer;
 using pulp::test_support::RecordingContractFactory;
 using pulp::test_support::reset_contract_recording;
+using pulp::test_support::ScopedManualSnapTimer;
 
 namespace {
 

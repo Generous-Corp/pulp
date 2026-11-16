@@ -35,7 +35,6 @@
 #include <string>
 #include <vector>
 
-using pulp::test_support::ScopedManualSnapTimer;
 using pulp::format::Editor;
 using pulp::format::EditorContext;
 using pulp::format::EditorFactory;
@@ -49,6 +48,7 @@ using pulp::format::NativeParentKind;
 using pulp::format::ViewSize;
 using pulp::format::vst3::ContractPlugView;
 using pulp::format::vst3::PulpVst3Processor;
+using pulp::test_support::ScopedManualSnapTimer;
 
 namespace {
 
@@ -1035,9 +1035,10 @@ TEST_CASE("a VST3 contract view applies the editor's declared aspect and bounds"
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }
 
-TEST_CASE("a VST3 host that calls onSize without checkSizeConstraint gets the snapped size asked back "
-          "once its sizes settle",
-          "[vst3][editor-host][vst3-contract][resize-hints]") {
+TEST_CASE(
+    "a VST3 host that calls onSize without checkSizeConstraint gets the snapped size asked back "
+    "once its sizes settle",
+    "[vst3][editor-host][vst3-contract][resize-hints]") {
     EditorEnvironment env;
     g_log = {};
     g_config = {};
