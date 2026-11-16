@@ -33,7 +33,10 @@ enum class SpectralError : std::uint8_t {
     StageContractViolation = 17,
     SynthesisOverflow = 18,
     OutputUnderrun = 19,
-    InvalidContract = 20
+    InvalidContract = 20,
+    // A node stopped because a node upstream of it latched a fatal error; the
+    // upstream node's own error names the cause.
+    UpstreamFatal = 21
 };
 
 template <typename T> struct SpectralResult {

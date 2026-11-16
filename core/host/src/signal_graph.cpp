@@ -9,6 +9,7 @@
 // See signal_graph.hpp for the mutation protocol details.
 
 #include "signal_graph_internal.hpp"
+#include <pulp/host/isolated_plugin_slot.hpp>
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -1146,6 +1147,9 @@ bool SignalGraph::set_node_parameter(NodeId id, uint32_t param_id, float value) 
         return false;
     auto* n = node_mut_locked_(id);
     if (!n || n->type != NodeType::Plugin || !n->plugin) return false;
+    // An isolated proxy has no parameter path; forwarding would make it terminal.
+    if (is_isolated_plugin_slot(*n->plugin))
+        return false;
     n->plugin->set_parameter(param_id, value);
     return true;
 }

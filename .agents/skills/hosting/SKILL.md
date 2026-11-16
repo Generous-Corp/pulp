@@ -35,6 +35,10 @@ nodes once skipped it and crashed numeric connect. Read the next block's epoch
 and start from `control_index_position()`, and expect prepare or a prepared-edit
 commit to reset it to epoch 1, cursor 0. `control_index_nodes.cpp` is part of
 the curated sample-region web source list, because authoring calls into it.
+A transport stream-history reset (and prepare) also resets every stateful
+Control node (integrator, slew, hysteresis) to its configured initial state, so
+a seek renders like a fresh graph; a negative reset position is `OutOfRange`,
+and a non-finite index is published as 0 rather than forwarded to a parameter.
 
 Port names: a MidiInput/MidiOutput node's single port is named `audio` (the
 first-port name from `populate_named_ports`) with kind MIDI, so do not rename
@@ -76,6 +80,19 @@ adoption restarts every sibling's PDC ring at zero, and the bit-exact sibling
 check in `test_isolated_clap_worker.cpp` fails. A refusal must keep the live
 snapshot; `fail_swap_edit_locked_` would silence the whole graph. Checkpoint
 before the node renders: `pause()` is terminal while a graph still renders it.
+
+**Every unsupported proxy call is terminal, so generic graph code must not make
+one.** The isolated slot answers `save_state()`, `set_parameter()` and similar
+calls by latching `unsupported` silence. Generic `SignalGraph` and
+`GraphSerializer` paths therefore check `is_isolated_plugin_slot` before
+forwarding: serialization refuses the whole graph (an identity-only file would
+reload the plugin in-process) and `set_node_parameter` returns false. A new
+generic path that calls into a plugin slot needs the same check.
+
+**The callback reads a completion once.** `CallbackEndpoint::render` copies the
+completion block out of the shared mapping before validating it and emits from
+that copy; reading the mapping twice lets a worker swap in non-finite samples
+after the check.
 
 
 ## Live retuning at a callback boundary
@@ -141,7 +158,11 @@ live bank use `VoiceBankBinding::restore_state()`, not a loop of
 `set_slot_parameter()`: `restore_voice_bank_state()` knows no authored bounds,
 so a value-by-value replay can refuse halfway and leave the bank half-restored,
 while `restore_state()` checks every value (bounds included) before the first
-write. Saved-bank activation, edit/undo, DAW adapters, and paced
+write. A release through `dispatch_deferred()` also retires the key in the
+bank's MPE tracker, and a graph failure during `render()` silences the whole
+block. `begin_block()` with a block open is `Busy` and `publish()` with no block
+is `StaleEpoch`, matching `HostEventIngress`. Saved-bank activation,
+edit/undo, DAW adapters, and paced
 realtime qualification remain open; do not infer them from the source-installed
 consumer.
 
@@ -2126,6 +2147,16 @@ Keep these host graph invariants covered by tests:
   rather than memset'ing with a wrapped size_t.
 - MidiInput nodes' `midi_out` is drained at the END of `process()`, not
   the start. Hosts call `inject_midi()` before each `process()` to refill.
+- A routed `ProcessorNode` block always carries a main input bus, even for
+  a Processor that declares none, so a no-input instrument fits at most 15
+  output buses in `BusBufferSet::kMaxBuses`. `prepare()` and
+  `routed_output_channels()` must reserve that slot together, or the port
+  count promises a bus that fails every block.
+- A spectral `.pulpgraph` is admitted against the 64 MiB bank at a block
+  size, and frame edges grow with the block. Saving admits at the block the
+  graph is prepared for; loading admits at the destination's
+  `GraphLimits::max_block_size` (both at most 4096). A graph that fits only
+  at small blocks loads only into a destination whose limits name that block.
 
 ## PluginManagerPanel
 
@@ -3356,6 +3387,11 @@ not advance). A steady-clock forward gap stays in the epoch; a backwards clock
 or a steady/no-steady flip opens a new epoch. Out-of-block times are refused,
 never clamped. The CLAP adapter still feeds the Processor `MidiBuffer`, not this
 projection.
+On a timeline `NewEpoch` (seek or loop), call `SignalGraph::try_reset_events()`
+before opening the next host-event block at the new epoch; it is the only call
+that advances the trigger epoch, and the live generation follows it. The
+unchecked `process()` silences a refused typed-trigger block, while
+`process_checked()` leaves the output untouched and returns the refusal.
 
 VST3 and AU enter the same timeline through `clock_from_vst3()` /
 `clock_from_au()` (plain fields, no SDK). Gotchas: VST3's steady counter is
