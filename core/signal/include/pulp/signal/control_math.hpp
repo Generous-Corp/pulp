@@ -1,5 +1,15 @@
 #pragma once
 
+/// @file control_math.hpp
+/// Canonical finite scalar Control operations. Every scalar Control stage in
+/// Pulp (the graph Control nodes, the indexed Control utilities, and their
+/// pure step forms) computes through these functions, so a value has one
+/// definition no matter which surface produced it.
+///
+/// Shared contract: a non-finite input (NaN or either infinity) is replaced
+/// with zero before it is used, so a Control lane never propagates NaN or
+/// infinity. Nothing here allocates, locks, or keeps hidden time state.
+
 #include <algorithm>
 #include <cmath>
 #include <concepts>
@@ -7,6 +17,7 @@
 
 namespace pulp::signal {
 
+/// Replace a non-finite Control sample with zero. Signed zero is preserved.
 template <std::floating_point SampleType> SampleType finite_control(SampleType value) noexcept {
     return std::isfinite(value) ? value : SampleType{0};
 }
@@ -25,18 +36,48 @@ SampleType safe_control_divide(SampleType numerator, SampleType denominator) noe
     return static_cast<SampleType>(std::clamp(quotient, -limit, limit));
 }
 
+/// The smaller finite operand. When the operands compare equal (including
+/// -0 against +0) the first operand is returned, as std::min does.
 template <std::floating_point SampleType>
 SampleType control_min(SampleType a, SampleType b) noexcept {
     return std::min(finite_control(a), finite_control(b));
 }
 
+/// The larger finite operand. When the operands compare equal (including
+/// -0 against +0) the first operand is returned, as std::max does.
 template <std::floating_point SampleType>
 SampleType control_max(SampleType a, SampleType b) noexcept {
     return std::max(finite_control(a), finite_control(b));
 }
 
-/// Per-sample bounded accumulation. Failed configuration leaves the prior
-/// range and state untouched; reset and process allocate no memory.
+/// Clamp a finite value to a finite interval. Reversed bounds are reordered
+/// rather than refused, so the pure form never has undefined behaviour.
+template <std::floating_point SampleType>
+SampleType control_clamp(SampleType value, SampleType minimum, SampleType maximum) noexcept {
+    const auto lo = finite_control(minimum);
+    const auto hi = finite_control(maximum);
+    return std::clamp(finite_control(value), std::min(lo, hi), std::max(lo, hi));
+}
+
+/// Pure one-sample bounded accumulation. The state is first bounded to the
+/// interval, the finite increment is added in extended precision, and the sum
+/// saturates at the interval endpoints. Reversed bounds are reordered.
+template <std::floating_point SampleType>
+SampleType integrator_step(SampleType state, SampleType increment, SampleType minimum,
+                           SampleType maximum) noexcept {
+    const auto lo = finite_control(minimum);
+    const auto hi = finite_control(maximum);
+    const auto bounded_state = control_clamp(state, lo, hi);
+    const auto sum = static_cast<long double>(bounded_state) +
+                     static_cast<long double>(finite_control(increment));
+    return static_cast<SampleType>(std::clamp(sum, static_cast<long double>(std::min(lo, hi)),
+                                              static_cast<long double>(std::max(lo, hi))));
+}
+
+/// Per-sample bounded accumulation over integrator_step(). Unlike the pure
+/// step, configuration refuses reversed or non-finite bounds; a failed
+/// configuration leaves the prior range and state untouched. Reset and
+/// process allocate no memory.
 template <std::floating_point SampleType = float> class ControlIntegratorT {
   public:
     bool configure(SampleType minimum, SampleType maximum,
@@ -56,10 +97,7 @@ template <std::floating_point SampleType = float> class ControlIntegratorT {
     }
 
     SampleType process(SampleType increment) noexcept {
-        const long double sum =
-            static_cast<long double>(state_) + static_cast<long double>(finite_control(increment));
-        state_ = static_cast<SampleType>(std::clamp(sum, static_cast<long double>(minimum_),
-                                                    static_cast<long double>(maximum_)));
+        state_ = integrator_step(state_, increment, minimum_, maximum_);
         return state_;
     }
 
