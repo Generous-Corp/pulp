@@ -185,8 +185,11 @@ struct Editor {
         RendererHooks hooks;
         hooks.begin_frame = [this](const FrameTarget& t) {
             last_target = t;
-            if (begun.fetch_add(1) == 0)
+            // Stored before the count moves, so a reader that sees the count
+            // sees the value.
+            if (begun.load() == 0)
                 compiled_at_first_begin.store(renderer.compiled.load());
+            begun.fetch_add(1);
             begin_ns.store(now_ns());
         };
         hooks.end_frame = [this] {
