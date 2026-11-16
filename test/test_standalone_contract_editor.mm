@@ -255,6 +255,12 @@ TEST_CASE("a standalone contract window holds the editor's aspect and limits whi
             REQUIRE(content.width <= 800);
             REQUIRE(content.height <= 600);
         }
+        // A programmatic resize (no drag, so no delegate call) is held to the
+        // same aspect.
+        [window setContentSize:NSMakeSize(1000, 400)];
+        const NSSize set = window.contentView.frame.size;
+        REQUIRE(std::abs(set.width - set.height * 4.0 / 3.0) <= 1.0);
+        REQUIRE(set.width <= 800);
         const NSSize big = content_after_drag(window, 3000, 3000);
         REQUIRE(big.width == 800);
         REQUIRE(big.height == 600);

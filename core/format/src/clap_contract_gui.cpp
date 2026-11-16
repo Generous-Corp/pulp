@@ -23,7 +23,6 @@ struct ContractGui {
     const clap_host_t* host = nullptr;
     const clap_host_timer_support_t* host_timer = nullptr;
     clap_id timer_id = CLAP_INVALID_ID;
-    bool requesting_snapped_size = false;
     std::unique_ptr<ContractEditorSession> session;
 
     ~ContractGui() {
@@ -202,26 +201,14 @@ bool gui_adjust_size(const clap_plugin_t* plugin, uint32_t* width, uint32_t* hei
 }
 
 bool gui_set_size(const clap_plugin_t* plugin, uint32_t width, uint32_t height) {
-    auto* self = self_of(plugin);
     auto* session = session_of(plugin);
     if (session == nullptr)
         return false;
     // A host may call set_size without adjust_size first. The editor takes a
-    // size inside its limits and aspect, and the host is asked for that size.
+    // size inside its limits and aspect; once the host's sizes settle the
+    // session asks the host for that size back (request_resize).
     bool snapped = false;
-    if (!session->set_host_size(width, height, snapped))
-        return false;
-    auto& gui = *gui_of(*self);
-    if (snapped && !gui.requesting_snapped_size) {
-        const auto* host_gui =
-            static_cast<const clap_host_gui_t*>(host_extension(*self, CLAP_EXT_GUI));
-        if (host_gui != nullptr && host_gui->request_resize != nullptr) {
-            gui.requesting_snapped_size = true;
-            host_gui->request_resize(self->host, width, height);
-            gui.requesting_snapped_size = false;
-        }
-    }
-    return true;
+    return session->set_host_size(width, height, snapped);
 }
 
 bool gui_set_parent(const clap_plugin_t* plugin, const clap_window_t* window) {

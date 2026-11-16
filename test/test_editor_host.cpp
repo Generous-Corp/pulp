@@ -1301,3 +1301,38 @@ TEST_CASE("fit_size_to_area shrinks proportionally inside the hints and leaves f
     fit_size_to_area(defaults, w, h, 300, 222);
     REQUIRE((w == 800 && h == 600));
 }
+
+TEST_CASE("constrain_to_hints is stable: a second pass over its result changes nothing",
+          "[editor-host][resize-hints]") {
+    using pulp::format::detail::constrain_to_hints;
+    for (const double ratio : {1.0, 0.5, 4.0 / 3.0, 16.0 / 9.0, 2.39, 1.618}) {
+        auto hints = bounded_hints(ratio);
+        hints.min_width = 100;
+        hints.min_height = 100;
+        hints.max_width = 900;
+        hints.max_height = 700;
+        for (std::uint32_t w = 50; w <= 1100; w += 7) {
+            for (std::uint32_t h = 50; h <= 900; h += 11) {
+                std::uint32_t a = w, b = h;
+                REQUIRE(constrain_to_hints(hints, a, b));
+                REQUIRE(a >= hints.min_width);
+                REQUIRE(a <= hints.max_width);
+                REQUIRE(b >= hints.min_height);
+                REQUIRE(b <= hints.max_height);
+                std::uint32_t a2 = a, b2 = b;
+                REQUIRE(constrain_to_hints(hints, a2, b2));
+                REQUIRE((a2 == a && b2 == b));
+            }
+        }
+    }
+    // The case that jittered before: 16:9 with a 100x100 minimum.
+    auto wide = bounded_hints(16.0 / 9.0);
+    wide.min_width = 100;
+    wide.min_height = 100;
+    wide.max_width = wide.max_height = 0;
+    std::uint32_t w = 255, h = 143;
+    REQUIRE(constrain_to_hints(wide, w, h));
+    const auto first_w = w, first_h = h;
+    REQUIRE(constrain_to_hints(wide, w, h));
+    REQUIRE((w == first_w && h == first_h));
+}

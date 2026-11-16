@@ -185,9 +185,16 @@ class ContractEditorSession : public std::enable_shared_from_this<ContractEditor
     bool constrain(std::uint32_t& width, std::uint32_t& height) const;
     /// A size the host chose without asking `constrain()` first: the editor
     /// takes the constrained size, and `snapped` is true when that differs from
-    /// the host's. The caller can then ask the host for the constrained size
-    /// back. False when the editor refuses it.
+    /// the host's. Once host sizes stop arriving for `kSnapSettleMs`, the
+    /// session asks the host for the snapped size through the
+    /// `request_resize` hook, never while a drag is still sending sizes; a
+    /// later size that already fits cancels the request. A fixed-size editor
+    /// keeps the host's size and asks for nothing. False when the editor
+    /// refuses it.
     bool set_host_size(std::uint32_t& width, std::uint32_t& height, bool& snapped);
+
+    /// How long host sizes must stop before a snapped size is asked back.
+    static constexpr int kSnapSettleMs = 120;
 
     /// Offer a key. Forward when not attached.
     KeyDisposition offer_key(const EditorKeyEvent& event);
@@ -211,6 +218,8 @@ class ContractEditorSession : public std::enable_shared_from_this<ContractEditor
     void start_idle();
     void stop_idle();
     void destroy_editor();
+    void schedule_snap_request(std::uint32_t width, std::uint32_t height);
+    void cancel_snap_request();
 
     IdleSource idle_source_;
     // Declared in dependency order so the editor is destroyed first, then the
@@ -221,6 +230,9 @@ class ContractEditorSession : public std::enable_shared_from_this<ContractEditor
     std::unique_ptr<Editor> editor_;
     bool attached_ = false;
     detail::MainThreadTimer idle_timer_;
+    detail::MainThreadTimer snap_timer_;
+    std::uint32_t snap_width_ = 0;
+    std::uint32_t snap_height_ = 0;
     std::atomic<bool> owner_gone_{false};
 };
 

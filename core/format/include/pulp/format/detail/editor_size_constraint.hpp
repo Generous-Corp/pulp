@@ -41,27 +41,43 @@ inline bool constrain_to_hints(const ViewSize& hints, std::uint32_t& width, std:
         return true;
     }
     const double ratio = hints.aspect_ratio;
-    const double requested = static_cast<double>(width) / static_cast<double>(height);
-    double w = width;
-    if (requested > ratio)
-        w = static_cast<double>(height) * ratio;
-    // The widths a box at `ratio` can have inside both axes' bounds.
-    double lo =
-        std::max<double>(hints.min_width, std::ceil(static_cast<double>(hints.min_height) * ratio));
-    double hi = 1e9;
-    if (hints.max_width > 0)
-        hi = std::min<double>(hi, hints.max_width);
-    if (hints.max_height > 0)
-        hi = std::min<double>(hi, std::floor(static_cast<double>(hints.max_height) * ratio));
-    if (lo > hi) {
-        // Bounds that cannot hold the ratio: the width limits win.
-        lo = hints.min_width;
-        hi = hints.max_width > 0 ? hints.max_width : 1e9;
+    // The result is a box (w, round(w / ratio)): fixing the width and deriving
+    // the height keeps a second pass over the result unchanged. The widest w
+    // that fits the request is the smaller of the requested width and the
+    // widest w whose derived height still fits the requested height.
+    auto height_for = [ratio](std::uint32_t w) {
+        return static_cast<std::uint32_t>(std::max<long>(1, std::lround(w / ratio)));
+    };
+    std::uint32_t w = width;
+    if (height_for(w) > height) {
+        w = static_cast<std::uint32_t>(
+            std::max(1.0, std::floor((static_cast<double>(height) + 0.5) * ratio)));
+        while (w > 1 && height_for(w) > height)
+            --w;
     }
-    hi = std::max(lo, hi);
-    w = std::clamp(std::round(w), lo, hi);
-    width = static_cast<std::uint32_t>(w);
-    height = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(w / ratio)));
+    // The widths whose derived height lies inside the height bounds, and
+    // whose own value lies inside the width bounds.
+    std::uint32_t lo = hints.min_width;
+    {
+        auto from_height = static_cast<std::uint32_t>(std::max(
+            1.0, std::floor((static_cast<double>(hints.min_height) - 0.5) * ratio)));
+        while (height_for(from_height) < hints.min_height)
+            ++from_height;
+        lo = std::max(lo, from_height);
+    }
+    std::uint32_t hi = hints.max_width > 0 ? hints.max_width : 0x7FFFFFFFu;
+    if (hints.max_height > 0) {
+        auto from_height = static_cast<std::uint32_t>(
+            std::ceil((static_cast<double>(hints.max_height) + 0.5) * ratio));
+        while (from_height > 1 && height_for(from_height) > hints.max_height)
+            --from_height;
+        hi = std::min(hi, from_height);
+    }
+    if (hi < lo)
+        hi = lo; // contradictory bounds: the lower bound wins
+    w = std::clamp(w, lo, hi);
+    width = w;
+    height = height_for(w);
     return true;
 }
 

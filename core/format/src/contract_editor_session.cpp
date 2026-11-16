@@ -152,6 +152,7 @@ ContractEditorSession::ContractEditorSession(Processor& processor, state::StateS
 
 ContractEditorSession::~ContractEditorSession() {
     stop_idle();
+    cancel_snap_request();
     // Destroyed while attached: the host tore its window down without an
     // orderly detach.
     if (editor_ && attached_)
@@ -195,6 +196,7 @@ bool ContractEditorSession::attach(const NativeParent& parent) {
 
 void ContractEditorSession::detach() {
     stop_idle();
+    cancel_snap_request();
     // Closing the window mid-drag must still balance every begin.
     if (port_)
         port_->release_all();
@@ -212,6 +214,7 @@ void ContractEditorSession::close_for_owner() {
 
 void ContractEditorSession::invalidate() {
     stop_idle();
+    cancel_snap_request();
     if (editor_)
         editor_->invalidate();
     attached_ = false;
@@ -219,6 +222,7 @@ void ContractEditorSession::invalidate() {
 }
 
 void ContractEditorSession::destroy_editor() {
+    cancel_snap_request();
     editor_.reset();
     context_.reset();
     // Destroying the port releases every gesture it still holds.
@@ -328,7 +332,31 @@ bool ContractEditorSession::set_host_size(std::uint32_t& width, std::uint32_t& h
         return false;
     width = w;
     height = h;
+    if (snapped)
+        schedule_snap_request(w, h);
+    else
+        cancel_snap_request();
     return true;
+}
+
+void ContractEditorSession::schedule_snap_request(std::uint32_t width, std::uint32_t height) {
+    snap_width_ = width;
+    snap_height_ = height;
+    // Restarting the timer on every snapped size is the debounce: the request
+    // goes out only after the host has been quiet for kSnapSettleMs.
+    snap_timer_.start(kSnapSettleMs, [this] {
+        snap_timer_.stop();
+        if (!context_ || !editor_ || !attached_ || owner_gone_.load())
+            return;
+        EditorSize size = editor_->size();
+        size.width = snap_width_;
+        size.height = snap_height_;
+        context_->request_resize(size);
+    });
+}
+
+void ContractEditorSession::cancel_snap_request() {
+    snap_timer_.stop();
 }
 
 KeyDisposition ContractEditorSession::offer_key(const EditorKeyEvent& event) {

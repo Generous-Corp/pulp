@@ -122,15 +122,24 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
     auto height = static_cast<std::uint32_t>(newSize.height);
     // A host that resizes the view by hand never asks the editor first (AU v2
     // has no size negotiation), so the editor's limits and locked aspect are
-    // applied to the frame itself. A fixed-size editor keeps the host's frame.
-    if (_session->editor() != nullptr && _session->resizable()) {
-        auto constrained_width = width;
-        auto constrained_height = height;
-        if (_session->constrain(constrained_width, constrained_height) &&
-            (constrained_width != width || constrained_height != height)) {
-            width = constrained_width;
-            height = constrained_height;
-            newSize = NSMakeSize(width, height);
+    // applied to the frame itself. A fixed-size editor has one size: the frame
+    // goes back to it and the editor is told nothing.
+    if (_session->editor() != nullptr) {
+        if (_session->resizable()) {
+            auto constrained_width = width;
+            auto constrained_height = height;
+            if (_session->constrain(constrained_width, constrained_height) &&
+                (constrained_width != width || constrained_height != height)) {
+                width = constrained_width;
+                height = constrained_height;
+                newSize = NSMakeSize(width, height);
+            }
+        } else {
+            const auto fixed = _session->size();
+            if (fixed.width > 0 && fixed.height > 0) {
+                [super setFrameSize:NSMakeSize(fixed.width, fixed.height)];
+                return;
+            }
         }
     }
     [super setFrameSize:newSize];

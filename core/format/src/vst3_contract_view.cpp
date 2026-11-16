@@ -209,8 +209,9 @@ tresult PLUGIN_API ContractPlugView::onSize(ViewRect* newSize) {
         return kResultFalse;
     // A host that lets the user drag its window frame may call onSize without
     // asking checkSizeConstraint. The editor still gets a size inside its
-    // limits and aspect, and the host is asked for that size back, so the
-    // window does not keep a margin the editor never paints.
+    // limits and aspect; once the host's sizes settle the session asks the
+    // host for that size back (resizeView), so the window does not keep a
+    // margin the editor never paints.
     auto width = static_cast<std::uint32_t>(newSize->getWidth());
     auto height = static_cast<std::uint32_t>(newSize->getHeight());
     bool snapped = false;
@@ -218,13 +219,6 @@ tresult PLUGIN_API ContractPlugView::onSize(ViewRect* newSize) {
         return kResultFalse;
     ViewRect applied(0, 0, static_cast<int32>(width), static_cast<int32>(height));
     const auto result = CPluginView::onSize(snapped ? &applied : newSize);
-    if (snapped && plugFrame != nullptr && !requesting_snapped_size_) {
-        // The host may answer with onSize again; the flag keeps that from
-        // starting another request.
-        requesting_snapped_size_ = true;
-        plugFrame->resizeView(this, &applied);
-        requesting_snapped_size_ = false;
-    }
     return result;
 }
 

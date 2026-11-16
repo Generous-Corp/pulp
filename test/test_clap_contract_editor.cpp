@@ -627,7 +627,8 @@ TEST_CASE("a CLAP contract editor applies its declared aspect and bounds",
     contract_config() = {};
 }
 
-TEST_CASE("a CLAP host that calls set_size without adjust_size gets the snapped size asked back",
+TEST_CASE("a CLAP host that calls set_size without adjust_size gets the snapped size asked back "
+          "once its sizes settle",
           "[clap][editor-host][clap-contract][resize-hints]") {
     EditorEnvironment env;
     reset_contract_recording();
@@ -636,19 +637,28 @@ TEST_CASE("a CLAP host that calls set_size without adjust_size gets the snapped 
     contract_config().identity_adjust = true; // the session alone enforces the hints
     FakeHost host;
     OpenPlugin p(host);
+    MainLoop loop;
     REQUIRE(p.gui->create(p.plugin, platform_api(), false));
     const auto window = fake_window();
     REQUIRE(p.gui->set_parent(p.plugin, &window));
 
-    // Off the 4:3 aspect: the editor takes the 4:3 box inside it and the host
-    // is asked for that box.
-    REQUIRE(p.gui->set_size(p.plugin, 700, 300));
-    REQUIRE(contract_log().saw("set_size:400x300"));
-    REQUIRE(host.resize_requests == std::vector<std::string>{"400x300"});
+    // Off the 4:3 aspect: the editor takes the 4:3 box inside it at once.
+    REQUIRE(p.gui->set_size(p.plugin, 900, 500));
+    REQUIRE(contract_log().saw("set_size:667x500"));
+    // A drag still sending sizes is not fought.
+    for (int i = 0; i < 4; ++i) {
+        loop.run_for(0.04);
+        REQUIRE(p.gui->set_size(p.plugin, 900 + i, 500));
+    }
+    REQUIRE(host.resize_requests.empty());
+    REQUIRE(loop.run_until([&] { return !host.resize_requests.empty(); }));
+    loop.run_for(0.3);
+    REQUIRE(host.resize_requests == std::vector<std::string>{"667x500"});
 
     // On the aspect: nothing is asked of the host.
     host.resize_requests.clear();
     REQUIRE(p.gui->set_size(p.plugin, 640, 480));
+    loop.run_for(0.3);
     REQUIRE(host.resize_requests.empty());
     p.gui->destroy(p.plugin);
 
@@ -658,6 +668,7 @@ TEST_CASE("a CLAP host that calls set_size without adjust_size gets the snapped 
     REQUIRE(p.gui->set_parent(p.plugin, &window));
     REQUIRE(p.gui->set_size(p.plugin, 700, 300));
     REQUIRE(contract_log().saw("set_size:700x300"));
+    loop.run_for(0.3);
     REQUIRE(host.resize_requests.empty());
     p.gui->destroy(p.plugin);
     contract_config() = {};

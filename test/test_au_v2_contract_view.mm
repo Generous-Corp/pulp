@@ -307,10 +307,13 @@ TEST_CASE("an AU v2 contract view snaps a host resize to the editor's declared h
         NSView* view = [open_view(au) retain];
         REQUIRE(view != nil);
         [window.contentView addSubview:view];
-        // A fixed-size editor keeps the host's frame; the host owns it.
+        // A fixed-size editor has one size: the frame goes back to it and
+        // the editor is told nothing.
+        const auto calls = contract_log().calls.size();
         [view setFrameSize:NSMakeSize(900, 700)];
-        REQUIRE(view.frame.size.width == 900);
-        REQUIRE(view.frame.size.height == 700);
+        REQUIRE(view.frame.size.width == 400);
+        REQUIRE(view.frame.size.height == 300);
+        REQUIRE(contract_log().calls.size() == calls);
         [view release];
     }
     contract_config() = {};
