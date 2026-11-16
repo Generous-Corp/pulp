@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from unittest import mock
@@ -317,6 +318,14 @@ class RepairRegressionTests(unittest.TestCase):
             with self.assertRaises(ct.InputError):
                 ct.delete_paths(root, ["modules/Removed.cmake"])
             self.assertEqual(outside.read_text(), "preserve me")
+            previous = Path.cwd()
+            try:
+                os.chdir(root.parent)
+                with self.assertRaises(ct.InputError):
+                    ct.delete_paths(Path("scratch"), ["modules/Removed.cmake"])
+                self.assertEqual(outside.read_text(), "preserve me")
+            finally:
+                os.chdir(previous)
 
     def test_no_repair_reports_configure_success_and_failure(self):
         with tempfile.TemporaryDirectory() as tmp:

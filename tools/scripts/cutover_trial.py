@@ -487,7 +487,7 @@ def make_scratch(source: Path, scratch: Path, ref: str) -> None:
 def delete_paths(scratch: Path, paths: list[str]) -> tuple[int, list[str]]:
     deleted, missing = 0, []
     for rel in paths:
-        target = scratch / rel
+        target = scratch.resolve() / rel
         # Unlinking a symlink itself is safe; traversing a symlinked parent is not.
         if scratch_path(scratch, target.parent) is None:
             raise InputError(f"deletion path escapes scratch: {rel}")
