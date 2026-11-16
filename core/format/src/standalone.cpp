@@ -901,6 +901,9 @@ bool StandaloneApp::run_contract_editor(EditorFactory& factory) {
     options.screenshot_path = config_.screenshot_path;
     options.screenshot_frame_delay = config_.screenshot_frame_delay;
     options.key_frame_delay = config_.test_key_frame_delay;
+    options.screen_visible_width = config_.test_screen_visible_width;
+    options.screen_visible_height = config_.test_screen_visible_height;
+    options.on_window_ready = config_.test_on_editor_window;
     if (!config_.test_key_sequence.empty()) {
         std::string error;
         if (!detail::parse_key_sequence(config_.test_key_sequence, options.key_steps, error)) {
@@ -918,6 +921,8 @@ bool StandaloneApp::run_contract_editor(EditorFactory& factory) {
     options.on_idle = [this] {
         service_state_persistence();
         service_program_changes();
+        if (config_.test_on_editor_frame)
+            config_.test_on_editor_frame();
     };
     return detail::run_standalone_contract_editor(*processor_, store_, factory, options);
 }

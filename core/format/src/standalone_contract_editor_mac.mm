@@ -10,6 +10,7 @@
 
 #include <pulp/format/contract_editor_session.hpp>
 #include <pulp/format/detail/appkit_contract_key.hpp>
+#include <pulp/format/detail/editor_size_constraint.hpp>
 #include <pulp/format/detail/standalone_key_driver.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/runtime/log.hpp>
@@ -17,6 +18,7 @@
 
 #import <AppKit/AppKit.h>
 
+#include <cmath>
 #include <cstdint>
 #include <fstream>
 #include <functional>
@@ -33,7 +35,7 @@
 }
 - (void)setSession:(pulp::format::ContractEditorSession*)session
     onTransportKey:(std::function<void()>)onTransportKey;
-- (void)applyEditorSize:(NSSize)size;
+- (bool)applyEditorSize:(NSSize)size;
 @end
 
 @implementation PulpStandaloneContractView
@@ -52,18 +54,39 @@
     return YES;
 }
 
-- (void)applyEditorSize:(NSSize)size {
+- (bool)applyEditorSize:(NSSize)size {
+    if (_session == nullptr || self.window == nil)
+        return false;
+    auto width = static_cast<std::uint32_t>(size.width);
+    auto height = static_cast<std::uint32_t>(size.height);
+    bool snapped = false;
+    // Deliver the editor-origin acknowledgment before changing the window.
+    // Refusal leaves both the native window and the editor at their old size.
+    if (!_session->set_host_size(width, height, snapped))
+        return false;
     _applyingEditorSize = true;
-    [self.window setContentSize:size];
+    [self.window setContentSize:NSMakeSize(width, height)];
     _applyingEditorSize = false;
+    return true;
 }
 
 - (void)setFrameSize:(NSSize)newSize {
     [super setFrameSize:newSize];
     if (_applyingEditorSize || _session == nullptr || newSize.width < 1.0 || newSize.height < 1.0)
         return;
-    _session->set_size(static_cast<std::uint32_t>(newSize.width),
-                       static_cast<std::uint32_t>(newSize.height));
+    auto width = static_cast<std::uint32_t>(newSize.width);
+    auto height = static_cast<std::uint32_t>(newSize.height);
+    // A size the window took without a drag (a programmatic resize, full
+    // screen, a restored frame) still goes through the editor's limits and
+    // aspect: the editor takes the constrained size now, and the window is
+    // brought there through the session's snapped-size request once the
+    // window's sizes settle.
+    if (_session->editor() != nullptr) {
+        bool snapped = false;
+        _session->set_host_size(width, height, snapped);
+    } else {
+        _session->set_size(width, height);
+    }
 }
 
 - (void)viewDidChangeBackingProperties {
@@ -102,14 +125,30 @@
 
 @end
 
-// Ends the loop when the user closes the window.
+// Ends the loop when the user closes the window, and holds a live resize to
+// the editor's limits and locked aspect.
 @interface PulpStandaloneContractWindowDelegate : NSObject <NSWindowDelegate> {
   @public
     bool closed;
+    pulp::format::ContractEditorSession* session;
 }
 @end
 
 @implementation PulpStandaloneContractWindowDelegate
+- (NSSize)windowWillResize:(NSWindow*)sender toSize:(NSSize)frameSize {
+    if (session == nullptr || session->editor() == nullptr || !session->resizable())
+        return frameSize;
+    const NSRect content =
+        [sender contentRectForFrameRect:NSMakeRect(0, 0, frameSize.width, frameSize.height)];
+    if (content.size.width < 1.0 || content.size.height < 1.0)
+        return frameSize;
+    auto width = static_cast<std::uint32_t>(std::lround(content.size.width));
+    auto height = static_cast<std::uint32_t>(std::lround(content.size.height));
+    if (!session->constrain(width, height))
+        return frameSize;
+    return [sender frameRectForContentRect:NSMakeRect(0, 0, width, height)].size;
+}
+
 - (void)windowWillClose:(NSNotification*)notification {
     (void)notification;
     closed = true;
@@ -170,8 +209,7 @@ bool run_standalone_contract_editor(Processor& processor, state::StateStore& sto
     hooks.request_resize = [&content](const EditorSize& size) {
         if (content == nil)
             return false;
-        [content applyEditorSize:NSMakeSize(size.width, size.height)];
-        return true;
+        return [content applyEditorSize:NSMakeSize(size.width, size.height)];
     };
     hooks.host_action = [&window](const HostActionRequest& request) {
         if (request.action != HostAction::close_editor || window == nil)
@@ -187,11 +225,37 @@ bool run_standalone_contract_editor(Processor& processor, state::StateStore& sto
         return false;
     }
 
-    const auto size = session->size();
+    auto size = session->size();
     NSWindowStyleMask style =
         NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable;
     if (session->resizable())
         style |= NSWindowStyleMaskResizable;
+    // Open inside the screen: shrink an oversized editor, keeping its aspect
+    // and limits, by the room left after the window chrome.
+    {
+        double visible_width = options.screen_visible_width;
+        double visible_height = options.screen_visible_height;
+        if (visible_width <= 0.0 || visible_height <= 0.0) {
+            const NSRect visible = [NSScreen mainScreen].visibleFrame;
+            visible_width = visible.size.width;
+            visible_height = visible.size.height;
+        }
+        const NSRect chrome = [NSWindow frameRectForContentRect:NSMakeRect(0, 0, 100, 100)
+                                                      styleMask:style];
+        const double room_width = visible_width - (chrome.size.width - 100.0);
+        const double room_height = visible_height - (chrome.size.height - 100.0);
+        if (room_width >= 1.0 && room_height >= 1.0) {
+            auto width = size.width;
+            auto height = size.height;
+            detail::fit_size_to_area(session->size_hints(), width, height,
+                                     static_cast<std::uint32_t>(room_width),
+                                     static_cast<std::uint32_t>(room_height));
+            if (width != size.width || height != size.height) {
+                session->set_size(width, height);
+                size = session->size();
+            }
+        }
+    }
     window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, size.width, size.height)
                                          styleMask:style
                                            backing:NSBackingStoreBuffered
@@ -210,6 +274,7 @@ bool run_standalone_contract_editor(Processor& processor, state::StateStore& sto
     [content release];
     PulpStandaloneContractWindowDelegate* delegate =
         [[PulpStandaloneContractWindowDelegate alloc] init];
+    delegate->session = session.get();
     window.delegate = delegate;
 
     NativeParent parent;
@@ -224,6 +289,8 @@ bool run_standalone_contract_editor(Processor& processor, state::StateStore& sto
     [content setSession:session.get() onTransportKey:options.on_transport_key];
     session->set_scale(window.backingScaleFactor);
     [window makeFirstResponder:content];
+    if (options.on_window_ready)
+        options.on_window_ready((__bridge void*)window);
 
     if (!options.headless) {
         session->visibility_changed(true);
@@ -282,6 +349,7 @@ bool run_standalone_contract_editor(Processor& processor, state::StateStore& sto
         session->visibility_changed(false);
     session->detach();
     [content setSession:nullptr onTransportKey:{}];
+    delegate->session = nullptr;
     session.reset();
     window.delegate = nil;
     [delegate release];

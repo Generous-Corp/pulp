@@ -13,7 +13,9 @@
 //
 //   uiViewForAudioUnit:withSize:   -> a session (factory create) attached to
 //                                     the container, sized to the editor
-//   container -setFrameSize:       -> Editor::set_size() (the host resized it)
+//   container -setFrameSize:       -> Editor::set_size() (the host resized it;
+//                                     a resizable editor's limits and locked aspect
+//                                     are applied to the frame first)
 //   container backing scale change -> Editor::set_size() with the new scale
 //   container moves into / out of a window -> Editor::visibility_changed()
 //   key events reaching the container -> Editor::offer_key(); a forwarded key
@@ -85,6 +87,7 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
 - (void)adoptSession:(std::shared_ptr<pulp::format::ContractEditorSession>)session;
 - (pulp::format::ContractEditorSession*)session;
 - (void)applyEditorSize;
+- (void)moveFrameToEditorSize:(NSSize)size;
 @end
 
 @implementation PULP_AU_CONTRACT_HOST_VIEW_CLASS
@@ -111,12 +114,30 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
     _applyingEditorSize = false;
 }
 
+- (void)moveFrameToEditorSize:(NSSize)size {
+    _applyingEditorSize = true;
+    [super setFrameSize:size];
+    _applyingEditorSize = false;
+}
+
+// A host that resizes the view by hand never asks the editor first (AU v2 has
+// no size negotiation). The editor gets a size inside its limits and aspect at
+// once; the frame itself is moved there by the session's snapped-size request
+// (a setFrameSize: through the request_resize hook) only after the host has
+// stopped resizing it, so a live drag is never fought. A fixed-size editor
+// takes no host size: the frame returns to its size the same way.
 - (void)setFrameSize:(NSSize)newSize {
     [super setFrameSize:newSize];
     if (_applyingEditorSize || !_session || newSize.width < 1.0 || newSize.height < 1.0)
         return;
-    _session->set_size(static_cast<std::uint32_t>(newSize.width),
-                       static_cast<std::uint32_t>(newSize.height));
+    auto width = static_cast<std::uint32_t>(newSize.width);
+    auto height = static_cast<std::uint32_t>(newSize.height);
+    if (_session->editor() == nullptr) {
+        _session->set_size(width, height);
+        return;
+    }
+    bool snapped = false;
+    _session->set_host_size(width, height, snapped);
 }
 
 - (void)viewWillMoveToWindow:(NSWindow*)window {
@@ -197,8 +218,18 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
     format::ContractEditorSession::HostHooks hooks;
     // The view owns the session, so it outlives every hook call.
     hooks.request_resize = [view](const format::EditorSize& requested) {
-        // AU v2 has no resize request: the host follows the view's frame.
-        [view setFrameSize:NSMakeSize(requested.width, requested.height)];
+        // AU v2 has no resize request: the host follows the view's frame. An
+        // editor-origin request is acknowledged to the editor first, and the
+        // frame moves only if the editor took the size.
+        auto* session = [view session];
+        auto width = requested.width;
+        auto height = requested.height;
+        if (session != nullptr && session->has_pending_resize(width, height)) {
+            bool snapped = false;
+            if (!session->set_host_size(width, height, snapped))
+                return false;
+        }
+        [view moveFrameToEditorSize:NSMakeSize(requested.width, requested.height)];
         return true;
     };
     auto session = format::ContractEditorSession::create(*ctx.processor, *ctx.store, *factory,
