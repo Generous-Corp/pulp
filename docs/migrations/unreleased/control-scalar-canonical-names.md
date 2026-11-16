@@ -1,0 +1,41 @@
+---
+breaking = false
+summary = "Scalar Control operations have one canonical home in pulp/signal/control_math.hpp; four indexed_control.hpp spellings are deprecated forwarding wrappers"
+---
+
+## Deprecations
+
+`pulp/signal/control_math.hpp` is now the single implementation of the
+shared scalar Control operations. Four spellings in
+`pulp/signal/indexed_control.hpp` duplicated them; they now forward to the
+canonical functions, return bit-identical results (including NaN and
+infinity replacement, signed zero and saturation), and are marked
+`[[deprecated]]`:
+
+| Deprecated (`indexed_control.hpp`) | Canonical (`control_math.hpp`) |
+|---|---|
+| `finite_control_sample` | `finite_control` |
+| `control_minimum` | `control_min` |
+| `control_maximum` | `control_max` |
+| `control_safe_divide` | `safe_control_divide` |
+
+`control_clamp` and `integrator_step` moved from `indexed_control.hpp` to
+`control_math.hpp` under the same names and are not deprecated;
+`indexed_control.hpp` includes `control_math.hpp`, so code that includes only
+`indexed_control.hpp` keeps compiling. `ControlIntegratorT` now computes
+through `integrator_step`, with unchanged results.
+
+`map_clip`, `MapClipT`, `hysteresis_step`, `HysteresisT`, `slew_step`,
+`SlewT` and `IndexedControlT` are unchanged and not deprecated.
+
+The deprecated spellings are removed only at an announced breaking SDK
+release, after at least two ordinary releases that carry this note.
+
+## Migration steps
+
+- Replace each deprecated spelling with its canonical name from the table.
+  The arguments and results are identical.
+- Include `pulp/signal/control_math.hpp` where only the scalar operations are
+  used.
+- To find remaining uses, build with `-Werror=deprecated-declarations`
+  (MSVC: `/we4996`).
