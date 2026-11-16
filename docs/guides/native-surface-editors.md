@@ -93,6 +93,31 @@ size on a 2x display. Configure warns about it, and the first `attach()` reports
 through the diagnostic sink, once per process (standard error by default; `set_diagnostic_sink`
 redirects it).
 
+### Keys and window focus
+
+An RmlUi editor does not decide for itself whether a text field wants a key a
+host offers before its own accelerators. `pulp/rmlui_native/editor_keys.hpp`
+(with `pulp::format-core`) gives the two contract members as one call each:
+
+```cpp
+KeyDisposition offer_key(const EditorKeyEvent& e) override {
+    return pulp::rmlui_native::offer_editor_key(*ui_, e);
+}
+void focus_changed(bool focused) override {
+    pulp::rmlui_native::forward_editor_focus(*ui_, focused);
+}
+```
+
+`offer_key` returns `consumed` only while a text field has focus and takes the
+key: RmlUi consumed it, or it produced text, which is typed into the field. A
+command or control shortcut and any key with no field focused go
+back to the host, so Space still reaches the transport. Repeats and releases
+keep the initial press disposition, even when focus moves while the key is
+held. `focus_changed(false)` blurs a focused text field and hands the
+host's keyboard back; `focus_changed(true)` focuses it again, found by its
+`id` (a field without one is blurred but not restored). Pointer input queued behind a frame is applied before the
+decision, so a click on a field followed at once by Space types the space.
+
 ### Threading
 
 A frame holds one process-wide lock, `rmlui_mutex()`, for RmlUi's update and
@@ -106,7 +131,9 @@ applied; it needs no further frame or host idle tick. Element
 listeners therefore still run on the main thread, a moment after the event.
 `with_context()`, key and text input apply the queue first and wait for a
 frame; call `flush_input()` where a caller needs earlier events applied now,
-as a test does after a click.
+as a test does after a click. `offer_key()` applies the queue only when input
+is queued, so with nothing pending a key offered with no field focused still
+returns at once without touching RmlUi.
 
 ## Proof
 
