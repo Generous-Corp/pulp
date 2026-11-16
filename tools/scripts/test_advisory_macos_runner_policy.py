@@ -5,7 +5,10 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import os
 import re
+import subprocess
+import tempfile
 import unittest
 from contextlib import redirect_stderr
 from pathlib import Path
@@ -147,6 +150,10 @@ class AdvisoryMacosRunnerPolicyTests(unittest.TestCase):
                 "PULP_ADVISORY_MACOS_RUNS_ON_JSON",
                 ("PULP_LOCAL_MACOS_RUNS_ON_JSON", "PULP_PREAMBLE_RUNS_ON_JSON"),
             ),
+            "rmlui-native.yml": (
+                "PULP_ADVISORY_MACOS_RUNS_ON_JSON",
+                ("PULP_LOCAL_MACOS_RUNS_ON_JSON", "PULP_PREAMBLE_RUNS_ON_JSON"),
+            ),
             "web-plugins.yml": (
                 "PULP_ADVISORY_GPU_MACOS_RUNS_ON_JSON",
                 ("PULP_LOCAL_MACOS_RUNS_ON_JSON", "PULP_PREAMBLE_RUNS_ON_JSON"),
@@ -166,6 +173,49 @@ class AdvisoryMacosRunnerPolicyTests(unittest.TestCase):
                     re.search(r"runs-on:.*pulp-(?:build|preamble)", text),
                     "advisory workflow hard-codes a required-pool label",
                 )
+
+
+class RmlUiNativeLaneSuiteTests(unittest.TestCase):
+    """run-suite must not go green on a stale report or a failed process."""
+
+    LANE = REPO_ROOT / "tools" / "ci" / "rmlui_native_lane.sh"
+    GOOD_XML = (
+        '<Catch2TestRun><OverallResultsCases successes="3" failures="0" skips="0"/>'
+        "</Catch2TestRun>"
+    )
+
+    def run_suite(self, program_body: str, report: Path) -> subprocess.CompletedProcess:
+        program = report.parent / "program.sh"
+        program.write_text("#!/usr/bin/env bash\n" + program_body, encoding="utf-8")
+        program.chmod(0o755)
+        return subprocess.run(
+            ["bash", str(self.LANE), "run-suite", str(program), str(report)],
+            capture_output=True, text=True, encoding="utf-8", env={**os.environ},
+        )
+
+    def test_success_then_crash_without_report_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "report.xml"
+            ok = self.run_suite(f'cat > "$5" <<\'X\'\n{self.GOOD_XML}\nX\n', report)
+            self.assertEqual(ok.returncode, 0, ok.stderr)
+            self.assertTrue(report.exists())
+            # Loader failure: nonzero exit, no report written; the old one must not count.
+            bad = self.run_suite("exit 127\n", report)
+            self.assertNotEqual(bad.returncode, 0)
+            self.assertFalse(report.exists())
+
+    def test_zero_exit_without_report_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "report.xml"
+            report.write_text(self.GOOD_XML, encoding="utf-8")
+            result = self.run_suite("exit 0\n", report)
+            self.assertNotEqual(result.returncode, 0)
+
+    def test_nonzero_exit_with_good_report_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "report.xml"
+            result = self.run_suite(f'cat > "$5" <<\'X\'\n{self.GOOD_XML}\nX\nexit 1\n', report)
+            self.assertNotEqual(result.returncode, 0)
 
 
 if __name__ == "__main__":
