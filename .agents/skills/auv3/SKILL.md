@@ -1771,3 +1771,12 @@ widths the host settled on. `MIDIOutputNames` reports "MIDI Out" only for a
 descriptor with `produces_midi`: a host installs `MIDIOutputEventBlock` only for
 a unit that reports an output. Tests: test_au_multibus.mm,
 test_au_midi_output.mm.
+
+## A `UI <package>` editor in AU v3
+
+Both view controllers consult `Processor::editor_factory()` in
+`rebuildEditorIfReady` and open a `ContractEditorSession` through
+`PulpAUv3ContractView` when it is non-null (see "Contract editors" above), so
+an AUv3 built with `pulp_add_plugin(... UI <package>)` has its package's editor
+(an RmlUi or native-surface editor included). The module still links the view
+stack for the ViewBridge path, and the iOS path is compile-checked only.

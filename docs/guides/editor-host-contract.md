@@ -6,11 +6,12 @@ in `pulp::format-core`, it names no view, canvas, render or GPU type, and it
 adds nothing to a processor that does not use it.
 
 The existing editor path (`Processor::has_editor()`, `create_view()` and
-`ViewBridge`, described in [ViewBridge](view-bridge.md)) is unchanged. The VST3,
-CLAP, AU v2, AU v3 (macOS and iOS) and standalone adapters open a processor's
-editor through the contract whenever it returns a factory from
-`editor_factory()`, and keep the existing path for a processor that does not.
-AU v2 chooses at build time (a `UI <package>` plug-in links the contract view,
+`ViewBridge`, described in [ViewBridge](view-bridge.md)) is unchanged. The VST3
+(`ContractPlugView`), CLAP (the contract `clap_plugin_gui`), AU v2
+(`au_v2_contract_view.mm`), AU v3 (macOS and iOS, `au_v3_contract_view.mm`) and
+standalone adapters open a processor's editor through the contract whenever it
+returns a factory from `editor_factory()`, and keep the existing path for a
+processor that does not. On iOS the AU v3 path is compile-checked only. AU v2 chooses at build time (a `UI <package>` plug-in links the contract view,
 and a `create_view()` plug-in keeps its ViewBridge view); the other adapters
 choose at run time.
 
