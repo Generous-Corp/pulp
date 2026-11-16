@@ -489,7 +489,9 @@ A processor whose initialized `editor_factory()` is non-null gets the contract
 `clap_plugin_gui` instead of the `create_view()` one, in GUI and view-free builds
 alike. The contract GUI lives in `clap_contract_gui.cpp`, which is compiled into
 both `pulp-format-clap-core` and `pulp-format-view`. It sits on a
-`ContractEditorSession` (shared with VST3, and with AU next). Things to keep
+`ContractEditorSession` (shared with VST3, AU v2 and the standalone host). It
+is the CLAP path for RmlUi and native-surface editors too, which are
+macOS-only today (`MetalSurface`). Things to keep
 straight:
 
 - The choice is made in `clap_entry.hpp`'s `get_static_extension`, which reads
@@ -521,6 +523,9 @@ straight:
   `detail::constrain_to_hints()` is the pure arithmetic.
 - CLAP has no key callback, so keys reach a contract editor only through its
   own native view.
+- The legacy `gui_set_scale` (the ViewBridge path) returns false and ignores the
+  host's scale; the contract GUI forwards it to the editor
+  (`ContractEditorSession::set_scale`).
 - WebCLAP (`PULP_WCLAP`) leaves the contract GUI out; `PulpWclap.cmake`'s source
   list carries no contract code.
 

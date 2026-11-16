@@ -6,10 +6,13 @@ in `pulp::format-core`, it names no view, canvas, render or GPU type, and it
 adds nothing to a processor that does not use it.
 
 The existing editor path (`Processor::has_editor()`, `create_view()` and
-`ViewBridge`, described in [ViewBridge](view-bridge.md)) is unchanged. The
-format adapters do not consume the contract yet; a processor that provides a
-factory today is ready for them, and keeps working through the existing path
-until they do.
+`ViewBridge`, described in [ViewBridge](view-bridge.md)) is unchanged. The VST3
+(`ContractPlugView`), CLAP (the contract `clap_plugin_gui`), AU v2
+(`au_v2_contract_view.mm`) and standalone adapters consume the contract: a
+processor whose `editor_factory()` is non-null gets it instead of
+`create_view()`. **AU v3 does not**: its view controllers always build a
+`ViewBridge`, so a `UI <package>` plug-in built as AUv3 has no editor. A
+processor without a factory keeps the existing path everywhere.
 
 ## The pieces
 
@@ -48,8 +51,10 @@ A plug-in's editor is wired per plug-in, never by a process-wide registration.
 binary that returns the named UI package's `EditorFactory`, the way a VST3
 plug-in supplies its own view from `createView()`. Several plug-ins loaded into
 one host process therefore never share or override each other's editor choice.
-That generator is not built yet; until it is, a processor provides a factory by
-overriding `Processor::editor_factory()`.
+A processor can also provide a factory directly by overriding
+`Processor::editor_factory()`. AU v2 serves the contract view only to a
+view-free (`UI <package>`) plug-in: a `create_view()` AU keeps the ViewBridge
+factory even when it overrides `editor_factory()`.
 
 ## Extending the contract
 
