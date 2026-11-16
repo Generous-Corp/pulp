@@ -3510,6 +3510,12 @@ refused. The semantic digest ignores editor layout, so moving a node changes
 the canonical bytes but not the digest. `snapshot_port_identity` replaces the
 old `undo_port_identity` spelling, which returned a snapshot and not an undo.
 
+Saved connection validation must reject a declared spectral lane even when
+ordinary endpoints let the tolerant loader restore it as audio. Spectral
+graphs are unsupported on this identity surface. The partial-load exception
+for parameter edges into unresolved plugins still requires a valid source
+node and output port; a missing plugin cannot excuse an invalid source.
+
 Subgraph instances flatten into ordinary nodes, so a plain saved document
 loses which nodes form which instance. `to_saved_subgraph_document` and
 `from_saved_subgraph_document` (`subgraph_persistence.hpp`) add a `subgraphs`

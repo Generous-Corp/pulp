@@ -2208,6 +2208,8 @@ unrestored_connection(const SignalGraph& graph, const V& root,
             !item.hasObjectMember("dest_node") || !item["source_node"].isInt() ||
             !item["dest_node"].isInt())
             return describe() + " is malformed";
+        if (flag(item, "spectral"))
+            return describe() + " uses the unsupported spectral lane";
         const auto source = persisted_ids.find(static_cast<NodeId>(item["source_node"].getInt64()));
         const auto dest = persisted_ids.find(static_cast<NodeId>(item["dest_node"].getInt64()));
         if (source == persisted_ids.end() || dest == persisted_ids.end())
@@ -2223,10 +2225,14 @@ unrestored_connection(const SignalGraph& graph, const V& root,
             continue;
         }
         const auto* target = graph.node(dest->second);
+        const auto* source_node = graph.node(source->second);
+        const bool valid_source =
+            source_node != nullptr && source_node->num_output_ports > 0 &&
+            port(item, "source_port") < static_cast<PortIndex>(source_node->num_output_ports);
         const bool placeholder = target != nullptr && target->type == NodeType::Plugin &&
                                  !target->plugin &&
                                  graph.processor_node_instance(target->id) == nullptr;
-        if ((automation || audio_rate) && placeholder)
+        if ((automation || audio_rate) && placeholder && valid_source)
             continue;
         return describe() + " was not restored (invalid port, cycle, or duplicate edge)";
     }
