@@ -35,7 +35,7 @@
 }
 - (void)setSession:(pulp::format::ContractEditorSession*)session
     onTransportKey:(std::function<void()>)onTransportKey;
-- (void)applyEditorSize:(NSSize)size;
+- (bool)applyEditorSize:(NSSize)size;
 @end
 
 @implementation PulpStandaloneContractView
@@ -54,10 +54,20 @@
     return YES;
 }
 
-- (void)applyEditorSize:(NSSize)size {
+- (bool)applyEditorSize:(NSSize)size {
+    if (_session == nullptr || self.window == nil)
+        return false;
+    auto width = static_cast<std::uint32_t>(size.width);
+    auto height = static_cast<std::uint32_t>(size.height);
+    bool snapped = false;
+    // Deliver the editor-origin acknowledgment before changing the window.
+    // Refusal leaves both the native window and the editor at their old size.
+    if (!_session->set_host_size(width, height, snapped))
+        return false;
     _applyingEditorSize = true;
-    [self.window setContentSize:size];
+    [self.window setContentSize:NSMakeSize(width, height)];
     _applyingEditorSize = false;
+    return true;
 }
 
 - (void)setFrameSize:(NSSize)newSize {
@@ -199,8 +209,7 @@ bool run_standalone_contract_editor(Processor& processor, state::StateStore& sto
     hooks.request_resize = [&content](const EditorSize& size) {
         if (content == nil)
             return false;
-        [content applyEditorSize:NSMakeSize(size.width, size.height)];
-        return true;
+        return [content applyEditorSize:NSMakeSize(size.width, size.height)];
     };
     hooks.host_action = [&window](const HostActionRequest& request) {
         if (request.action != HostAction::close_editor || window == nil)

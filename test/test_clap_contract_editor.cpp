@@ -742,3 +742,61 @@ TEST_CASE("a CLAP host's off-aspect size is asked back on the real main loop",
     p.gui->destroy(p.plugin);
     contract_config() = {};
 }
+
+TEST_CASE("CLAP acknowledges editor-origin resizing with fixed user sizing",
+          "[clap][editor-host][resize-ack]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    g_processor_has_factory = true;
+    contract_config().default_hints = true;
+    ScopedManualSnapTimer settle;
+    FakeHost host;
+    OpenPlugin p(host);
+    REQUIRE(p.gui->create(p.plugin, platform_api(), false));
+    const auto window = fake_window();
+    REQUIRE(p.gui->set_parent(p.plugin, &window));
+    auto* session = pulp::format::clap_adapter::contract_gui_session(p.plugin);
+    REQUIRE(contract_log().context->request_resize({600, 450, 1.0}));
+    REQUIRE(session->size().width == 400); // acceptance is not acknowledgment
+    // A refused replacement cannot erase an earlier accepted request.
+    host.accept_resize = false;
+    REQUIRE_FALSE(contract_log().context->request_resize({700, 525, 1.0}));
+    host.accept_resize = true;
+    REQUIRE(p.gui->set_size(p.plugin, 600, 450));
+    REQUIRE(session->size().width == 600);
+    REQUIRE(session->size().height == 450);
+    REQUIRE(contract_log().saw("set_size:600x450"));
+    REQUIRE_FALSE(settle.armed());
+    // Consumed once: an unsolicited resize remains fixed, even at an old size.
+    REQUIRE(p.gui->set_size(p.plugin, 400, 300));
+    REQUIRE(session->size().width == 600);
+    settle.fire();
+    REQUIRE(host.resize_requests.back() == "600x450");
+    host.accept_resize = false;
+    REQUIRE_FALSE(contract_log().context->request_resize({700, 525, 1.0}));
+    REQUIRE(p.gui->set_size(p.plugin, 700, 525));
+    REQUIRE(session->size().width == 600);
+    p.gui->destroy(p.plugin);
+}
+
+TEST_CASE("an editor request cancels an older CLAP correction before acknowledgment",
+          "[clap][editor-host][resize-ack]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    g_processor_has_factory = true;
+    contract_config().identity_adjust = true;
+    ScopedManualSnapTimer settle;
+    FakeHost host;
+    OpenPlugin p(host);
+    REQUIRE(p.gui->create(p.plugin, platform_api(), false));
+    const auto window = fake_window();
+    REQUIRE(p.gui->set_parent(p.plugin, &window));
+    REQUIRE(p.gui->set_size(p.plugin, 900, 500));
+    REQUIRE(settle.armed());
+    REQUIRE(contract_log().context->request_resize({640, 480, 1.0}));
+    REQUIRE_FALSE(settle.armed());
+    settle.fire();
+    REQUIRE(host.resize_requests == std::vector<std::string>{"640x480"});
+    REQUIRE(p.gui->set_size(p.plugin, 640, 480));
+    p.gui->destroy(p.plugin);
+}

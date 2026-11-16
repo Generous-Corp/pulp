@@ -159,8 +159,8 @@ A host can also set a size without asking first (VST3 `onSize` without
 `checkSizeConstraint`, CLAP `set_size` without `adjust_size`). The editor then
 gets the constrained size, and the adapter asks the host for that size back
 (`IPlugFrame::resizeView`, `clap_host_gui::request_resize`) so the window does
-not keep a margin the editor never paints. A fixed-size editor takes no host
-size in any format: it is told nothing, and the host is asked for the editor's
+not keep a margin the editor never paints. A fixed-size editor takes no
+unsolicited host size in any format: it is told nothing, and the host is asked for the editor's
 own size. The macOS standalone window holds a live drag to the same
 limits and aspect, and opens inside the screen's usable frame
 (`detail::fit_size_to_area`).
@@ -170,6 +170,17 @@ through the same call: during a drag the frame stays at the host's size and the
 editor gets the constrained size at once, and the frame moves there later
 through the debounced request. A fixed-size editor's frame returns to
 the editor's size and the editor is told nothing.
+
+### Editor-origin resize acknowledgments
+
+A fixed-size editor still may request a new layout through
+`EditorContext::request_resize`. Fixed sizing prevents unsolicited host resizes;
+it does not discard the host's acknowledgment of an editor request. The session
+recognizes that acknowledgment whether it arrives inside the request hook or
+later. A new editor request supersedes any pending debounced host correction.
+The standalone host delivers the accepted size to the editor before moving the
+window, returns failure if the editor refuses it, and suppresses the resulting
+native frame echo.
 
 ## Keys
 

@@ -309,3 +309,46 @@ TEST_CASE("a standalone contract window opens inside a small screen at the edito
     REQUIRE(full.width == 400);
     REQUIRE(full.height == 300);
 }
+
+TEST_CASE("standalone acknowledges editor requests and rejects refused sizes",
+          "[standalone][editor-host][resize-ack]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    contract_config().default_hints = true;
+    pulp::test_support::ScopedManualSnapTimer settle;
+    bool ran = false;
+    REQUIRE(run_window(0, 0, nullptr, [&](NSWindow* window) {
+        ran = true;
+        REQUIRE(contract_log().context->request_resize({640, 480, 1.0}));
+        REQUIRE(contract_log().saw("set_size:640x480"));
+        REQUIRE(window.contentView.frame.size.width == 640);
+        REQUIRE(window.contentView.frame.size.height == 480);
+        REQUIRE_FALSE(settle.armed());
+        // RecordingContractEditor refuses sizes below 200x150.
+        REQUIRE_FALSE(contract_log().context->request_resize({100, 100, 1.0}));
+        REQUIRE(window.contentView.frame.size.width == 640);
+        REQUIRE(window.contentView.frame.size.height == 480);
+    }));
+    REQUIRE(ran);
+}
+
+TEST_CASE("standalone editor requests supersede a pending host correction",
+          "[standalone][editor-host][resize-ack]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    contract_config().identity_adjust = true;
+    pulp::test_support::ScopedManualSnapTimer settle;
+    bool ran = false;
+    REQUIRE(run_window(0, 0, nullptr, [&](NSWindow* window) {
+        ran = true;
+        [window setContentSize:NSMakeSize(900, 500)];
+        REQUIRE(settle.armed());
+        REQUIRE(contract_log().context->request_resize({640, 480, 1.0}));
+        REQUIRE_FALSE(settle.armed());
+        settle.fire();
+        REQUIRE(window.contentView.frame.size.width == 640);
+        REQUIRE(window.contentView.frame.size.height == 480);
+        REQUIRE(contract_log().saw("set_size:640x480"));
+    }));
+    REQUIRE(ran);
+}
