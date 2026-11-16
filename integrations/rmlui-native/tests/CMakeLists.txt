@@ -4,6 +4,10 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
     add_executable(pulp-test-rmlui-native-surface
         ${PROJECT_SOURCE_DIR}/test/test_rmlui_native_surface.mm)
     target_compile_options(pulp-test-rmlui-native-surface PRIVATE -fobjc-arc)
+    if(PULP_VELLUM_RMLUI_HAS_WARM)
+        target_compile_definitions(pulp-test-rmlui-native-surface PRIVATE
+            PULP_VELLUM_RMLUI_HAS_WARM)
+    endif()
     target_link_libraries(pulp-test-rmlui-native-surface PRIVATE
         pulp::rmlui-native Catch2::Catch2WithMain "-framework AppKit" "-framework Metal")
     include(Catch)
