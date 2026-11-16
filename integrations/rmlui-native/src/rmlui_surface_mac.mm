@@ -394,15 +394,24 @@ struct RmlUiSurface::Impl {
     PressIdentity press_identity(const KeyEvent& event) const {
         // Characters distinguish simultaneous contract-only printable keys;
         // physical keys already have a stable Key/native_code identity.
-        return {event.key, event.native_code,
-                event.key == Key::unknown ? event.characters : std::string()};
+        // A contract key carries its physical code in native_code; only when a
+        // host gave none do the characters stand in, case-folded so Shift does
+        // not change the identity.
+        std::string chars;
+        if (event.key == Key::unknown && event.native_code == 0) {
+            chars = event.characters;
+            for (auto& c : chars)
+                if (c >= 'A' && c <= 'Z')
+                    c = static_cast<char>(c - 'A' + 'a');
+        }
+        return {event.key, event.native_code, std::move(chars)};
     }
 
     auto find_press(const KeyEvent& event) {
         const auto identity = press_identity(event);
         auto it = press_dispositions.find(identity);
         if (it != press_dispositions.end() ||
-            (event.key != Key::unknown || !event.characters.empty()))
+            (event.key != Key::unknown || event.native_code != 0 || !event.characters.empty()))
             return it;
 
         // Some hosts omit characters on a release. If exactly one unknown
@@ -628,11 +637,11 @@ bool RmlUiSurface::offer_key(const KeyEvent& event) {
     }
     // The shared policy: with no text field focused the host goes first.
     if (route_key(event, d.text_focus) == KeyRoute::host) {
-        d.press_dispositions.emplace(d.press_identity(event), false);
+        d.press_dispositions.insert_or_assign(d.press_identity(event), false);
         return false;
     }
     const bool taken = d.deliver_taken_key(event);
-    d.press_dispositions.emplace(d.press_identity(event), taken);
+    d.press_dispositions.insert_or_assign(d.press_identity(event), taken);
     return taken;
 }
 
@@ -645,6 +654,10 @@ void RmlUiSurface::set_window_focused(bool focused) {
             return;
         // Queued clicks land before the focus they would change is read.
         d.drain_queued_locked();
+        // A focus change can swallow a key-up, so no press survives it: a held
+        // key's later repeat or release is routed afresh, and a lost release
+        // can never leave a stale owner for the next press of that key.
+        d.press_dispositions.clear();
         vellum::rmlui::NativeContext::Scope scope(*d.context);
         if (!focused) {
             Rml::Element* field = ctx->GetFocusElement();

@@ -22,6 +22,7 @@ inline EditorKeyEvent appkit_contract_key_event(unsigned short key_code, NSStrin
     EditorKeyEvent event;
     event.is_down = is_down;
     event.is_repeat = is_repeat;
+    event.physical_key = static_cast<std::uint32_t>(key_code) + 1u;
     switch (key_code) {
     case 49:
         event.key = EditorKey::space;

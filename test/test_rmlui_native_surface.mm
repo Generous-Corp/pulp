@@ -623,6 +623,74 @@ TEST_CASE("an offered key is taken only while a text field holds focus",
     }
 }
 
+TEST_CASE("a key press keeps its owner across modifier changes and a lost release",
+          "[native-surface][rmlui][keys]") {
+    REQUIRE_METAL();
+    using pulp::format::EditorKey;
+    using pulp::format::KeyDisposition;
+    @autoreleasepool {
+        Editor e;
+        REQUIRE(e.attach());
+        REQUIRE(e.wait_for([&] { return e.ui->frames() > 0; }));
+        auto blur = [&] {
+            e.ui->with_context(
+                [&](Rml::Context& ctx) { ctx.GetDocument(0)->GetElementById("field")->Blur(); });
+        };
+        // The same physical key (code 0 + 1) with a different composed
+        // character, as Shift changes it.
+        auto key_a = [](char32_t c, bool down, bool repeat, std::uint8_t mods) {
+            auto event = key_event(EditorKey::none, c, mods, repeat);
+            event.is_down = down;
+            event.physical_key = 1;
+            return event;
+        };
+
+        // A host-owned 'a' gains a field and Shift before its repeat and
+        // release: both stay the host's.
+        REQUIRE(offer_editor_key(*e.ui, key_a(U'a', true, false, 0)) == KeyDisposition::forward);
+        focus_field(e);
+        REQUIRE(e.ui->text_field_focused());
+        REQUIRE(offer_editor_key(*e.ui, key_a(U'A', true, true, pulp::format::editor_modifier_shift)) ==
+                KeyDisposition::forward);
+        REQUIRE(offer_editor_key(*e.ui, key_a(U'A', false, false,
+                                              pulp::format::editor_modifier_shift)) ==
+                KeyDisposition::forward);
+        REQUIRE(field_value(e) == "ab");
+
+        // A field-owned shifted 'A' released without Shift is still the field's.
+        REQUIRE(offer_editor_key(*e.ui, key_a(U'A', true, false,
+                                              pulp::format::editor_modifier_shift)) ==
+                KeyDisposition::consumed);
+        REQUIRE(field_value(e) == "abA");
+        blur();
+        REQUIRE(offer_editor_key(*e.ui, key_a(U'a', false, false, 0)) == KeyDisposition::consumed);
+        REQUIRE(field_value(e) == "abA");
+
+        // A consumed Space whose release was lost to window deactivation must
+        // not own the next, host-routed Space press.
+        focus_field(e);
+        auto space = key_event(EditorKey::space, U' ');
+        REQUIRE(offer_editor_key(*e.ui, space) == KeyDisposition::consumed);
+        e.ui->set_window_focused(false);
+        e.ui->set_window_focused(true);
+        blur();
+        REQUIRE_FALSE(e.ui->text_field_focused());
+        REQUIRE(offer_editor_key(*e.ui, space) == KeyDisposition::forward);
+        auto space_repeat = key_event(EditorKey::space, U' ', 0, true);
+        REQUIRE(offer_editor_key(*e.ui, space_repeat) == KeyDisposition::forward);
+        auto space_up = space;
+        space_up.is_down = false;
+        REQUIRE(offer_editor_key(*e.ui, space_up) == KeyDisposition::forward);
+        // A fresh press replaces a stale record with no deactivation in between.
+        focus_field(e);
+        REQUIRE(offer_editor_key(*e.ui, space) == KeyDisposition::consumed);
+        blur();
+        REQUIRE(offer_editor_key(*e.ui, space) == KeyDisposition::forward);
+        REQUIRE(offer_editor_key(*e.ui, space_up) == KeyDisposition::forward);
+        e.ui->detach();
+    }
+}
+
 TEST_CASE("pointer input does not wait for a frame the render thread is drawing",
           "[native-surface][rmlui][threading]") {
     REQUIRE_METAL();
