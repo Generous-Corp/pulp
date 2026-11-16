@@ -117,17 +117,14 @@ class RmlUiSurface {
 
     /// Main-thread tick: visibility and size follow the window.
     void idle();
-<<<<<<< HEAD
+    /// Apply pointer and wheel events that were queued behind a frame, now,
+    /// waiting for the frame if one is in flight. Main thread.
+    void flush_input();
     /// The density ratio RmlUi was given: the backing scale when
     /// `density_ratio_supported()`, otherwise 1, and 1 while detached. `px` lengths are always
     /// device pixels; `dp` lengths are `density_ratio()` device pixels. Main
     /// thread.
     double density_ratio() const noexcept;
-=======
-    /// Apply pointer and wheel events that were queued behind a frame, now,
-    /// waiting for the frame if one is in flight. Main thread.
-    void flush_input();
->>>>>>> origin/main
     /// Draw one more frame (after a change the caller made through RmlUi).
     void request_frame();
 
