@@ -116,8 +116,7 @@ class CountingRenderer final : public Rml::RenderInterface {
         // A test can park the render thread inside a draw, lock held.
         if (hold_draws.load()) {
             parked.store(true);
-            // unbounded-wait: allow DrawCleanup releases the latch on every exit,
-            // including failure of the main thread's bounded parked-draw assertion.
+            // unbounded-wait: allow DrawCleanup releases this latch on bounded assertion failure.
             while (hold_draws.load())
                 std::this_thread::sleep_for(std::chrono::microseconds(200));
             parked.store(false);
