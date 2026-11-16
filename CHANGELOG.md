@@ -9,6 +9,27 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11411"></a>
+## [1.141.1] - 2026-11-16
+
+- release/version bump ([#12394](https://github.com/Generous-Corp/pulp/pull/12394))
+- fix/web spectral persistence ([#12384](https://github.com/Generous-Corp/pulp/pull/12384))
+
+<a id="v11410"></a>
+## [1.141.0] - 2026-11-16
+
+- release/version bump ([#12392](https://github.com/Generous-Corp/pulp/pull/12392))
+- ci/ruleset mirror live ([#12391](https://github.com/Generous-Corp/pulp/pull/12391))
+- fix/rmlui warm first frame ([#12386](https://github.com/Generous-Corp/pulp/pull/12386))
+- graph/p4 two consumer 20261115 ([#12335](https://github.com/Generous-Corp/pulp/pull/12335))
+- release/version bump ([#12387](https://github.com/Generous-Corp/pulp/pull/12387))
+- graph/ffix control events 20261115 ([#12382](https://github.com/Generous-Corp/pulp/pull/12382))
+- graph/ffix spectral buses 20261115 ([#12381](https://github.com/Generous-Corp/pulp/pull/12381))
+- graph/ffix probes worker 20261115 ([#12379](https://github.com/Generous-Corp/pulp/pull/12379))
+- fix/pr dispatch allowlist ([#12375](https://github.com/Generous-Corp/pulp/pull/12375))
+- docs/contract editor skills sync ([#12377](https://github.com/Generous-Corp/pulp/pull/12377))
+- feature/rmlui narrow render lock ([#12372](https://github.com/Generous-Corp/pulp/pull/12372))
+
 <a id="v11392"></a>
 ## [1.139.2] - 2026-11-15
 
@@ -13096,6 +13117,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.141.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.141.1
+[1.141.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.141.0
 [1.139.2]: https://github.com/Generous-Corp/pulp/releases/tag/v1.139.2
 [1.139.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.139.1
 [1.139.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.139.0
