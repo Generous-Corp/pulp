@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <map>
 #include <memory>
 #include <string>
@@ -516,7 +517,26 @@ TEST_CASE("px lengths are device pixels and dp lengths follow the density ratio"
                            bool& hover_dp) {
             window.testScale = scale;
             [view viewDidChangeBackingProperties];
-            ui.idle();
+            // idle() only try-locks, so a frame in flight leaves the resize for
+            // a later tick. Tick until the context has the new size, then run
+            // its update under the lock so the dp layout is current before any
+            // measurement or pointer event.
+            const Rml::Vector2i want(static_cast<int>(std::lround(300 * scale)),
+                                     static_cast<int>(std::lround(200 * scale)));
+            bool synced = false;
+            const auto sync_until = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            while (!synced && std::chrono::steady_clock::now() < sync_until) {
+                ui.idle();
+                ui.with_context([&](Rml::Context& ctx) {
+                    synced = ctx.GetDimensions() == want;
+                    if (synced)
+                        ctx.Update();
+                });
+                if (!synced)
+                    [[NSRunLoop currentRunLoop]
+                        runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+            }
+            REQUIRE(synced);
             // Pointer positions are in points and reach RmlUi in device pixels.
             // 60 points is 60*scale device pixels: outside a 100px box at 2x.
             auto mouse = [&](double y) {
