@@ -6,6 +6,7 @@
   "claim_id": "44444043-8d30-4ef9-91f9-7e6c272cd5d1",
   "owned_paths": [
     "test/test_playback_buffered_content_source.cpp",
+    ".agents/skills/playback/SKILL.md",
     "docs/status/sequencer-exposure/rows/buffered-source-seek-test-producer-race.json"
   ],
   "evidence": [
@@ -13,6 +14,12 @@
       "path": "test/test_playback_buffered_content_source.cpp",
       "needles": [
         "source.stats().ring_available_frames >= kChunkFrames"
+      ]
+    },
+    {
+      "path": ".agents/skills/playback/SKILL.md",
+      "needles": [
+        "also call `pump_background()`"
       ]
     }
   ],
