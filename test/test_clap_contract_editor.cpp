@@ -660,7 +660,11 @@ TEST_CASE("a CLAP host that calls set_size without adjust_size gets the snapped 
         REQUIRE(host.resize_requests.empty());
     REQUIRE(loop.run_until([&] { return !host.resize_requests.empty(); }));
     loop.run_for(0.3);
-    REQUIRE(host.resize_requests == std::vector<std::string>{"667x500"});
+    // Once settled the request is made once (more only if the host stalled
+    // between drag sizes).
+    if (!stalled)
+        REQUIRE(host.resize_requests.size() == 1);
+    REQUIRE(host.resize_requests.back() == "667x500");
 
     // On the aspect: nothing is asked of the host.
     host.resize_requests.clear();
