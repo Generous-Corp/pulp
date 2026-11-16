@@ -97,6 +97,9 @@ as a test does after a click.
 - `pulp-test-native-metal-surface`, `-frame-pump`, `-input` and
   `-surface-input` cover the package on the real Metal device in offscreen
   windows. They skip, saying so, without one.
+- `pulp-test-rmlui-native-surface` and `pulp-test-rmlui-native-metal` cover the
+  RmlUi adapter, including the first-frame preparation. They need an installed
+  Vellum RmlUi SDK and no CI lane builds them yet, so run them locally.
 - `pulp-test-native-metal-probe` drives the example through the editor-host
   contract, the path every format adapter takes.
 - `native-metal-probe-clap-host` and `native-metal-probe-au-host` load the

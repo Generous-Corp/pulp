@@ -30,6 +30,13 @@ check_cxx_source_compiles(
        return 0;
      }"
     PULP_VELLUM_RMLUI_HAS_WARM)
+# The probe is compile-only and cached: a later SDK change needs a fresh
+# configure (or the cache entry removed) to be seen.
+if(PULP_VELLUM_RMLUI_HAS_WARM)
+    message(STATUS "rmlui-native: NativeContext::warm() available; the first frame is prepared at attach")
+else()
+    message(STATUS "rmlui-native: NativeContext::warm() not in this Vellum RmlUi SDK; the first frame draws cold")
+endif()
 set(CMAKE_TRY_COMPILE_TARGET_TYPE "${_pulp_try_compile_target_type}")
 unset(_pulp_try_compile_target_type)
 unset(CMAKE_REQUIRED_INCLUDES)
