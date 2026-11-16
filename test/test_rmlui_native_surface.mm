@@ -732,3 +732,27 @@ TEST_CASE("input applied after a frame is drawn without another request",
         e.ui->detach();
     }
 }
+
+TEST_CASE("a size change idle() could not apply is applied by the next with_context",
+          "[native-surface][rmlui][threading]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        Editor e;
+        REQUIRE(e.attach());
+        REQUIRE(e.wait_for([&] { return e.ui->frames() > 0; }));
+        const double scale = e.window.backingScaleFactor;
+        // Park the render thread inside a draw, lock held, then resize and
+        // tick: the tick finds the lock busy and skips the size.
+        e.renderer.hold_draws.store(true);
+        e.ui->request_frame();
+        REQUIRE(e.wait_for([&] { return e.renderer.parked.load(); }));
+        [e.window setContentSize:NSMakeSize(420, 280)];
+        e.ui->idle();
+        e.renderer.hold_draws.store(false);
+        Rml::Vector2i size;
+        e.ui->with_context([&](Rml::Context& ctx) { size = ctx.GetDimensions(); });
+        REQUIRE(size.x == static_cast<int>(420 * scale));
+        REQUIRE(size.y == static_cast<int>(280 * scale));
+        e.ui->detach();
+    }
+}

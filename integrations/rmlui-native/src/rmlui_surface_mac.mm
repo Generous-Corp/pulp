@@ -155,6 +155,13 @@ struct RmlUiSurface::Impl {
 #endif
     }
 
+    // Main thread, rmlui_mutex() held. True when the size changed.
+    bool sync_size_changed_locked() {
+        const auto before = std::make_pair(width_px, height_px);
+        sync_size_locked();
+        return before != std::make_pair(width_px, height_px);
+    }
+
     // Main thread, rmlui_mutex() held: hold the host's keyboard only while an
     // RmlUi text field has focus.
     void sync_text_focus_locked() {
@@ -533,6 +540,7 @@ void RmlUiSurface::flush_input() {
     {
         std::lock_guard lock(rmlui_mutex());
         applied = impl_->drain_queued_locked();
+        applied |= impl_->sync_size_changed_locked();
     }
     if (applied && impl_->pump)
         impl_->pump->request_frame();
@@ -556,6 +564,8 @@ bool RmlUiSurface::with_context(const std::function<void(Rml::Context&)>& fn) {
         if (!ctx)
             return false;
         applied = d.drain_queued_locked();
+        // The size is the window's now, even if idle() found the lock busy.
+        applied |= d.sync_size_changed_locked();
         vellum::rmlui::NativeContext::Scope scope(*d.context);
         fn(*ctx);
         // The caller may have moved focus (Element::Focus()).
