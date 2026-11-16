@@ -59,7 +59,12 @@ Four connection variants cover the non-audio-passthrough cases:
   before `process()`. The publication is consumed once and follows a preserved
   `MidiInput` node ID across a gap-free swap; its non-zero publication sequence
   skips the zero sentinel after 64-bit wrap. A `false` return still publishes
-  the fixed-capacity prefix. `extract_midi(node, &out)` drains nonempty
+  the fixed-capacity prefix. A block that a later `inject_midi()` replaces
+  before `process()` reads it is lost while both calls return true;
+  `midi_mailbox_counters(node, out)` reports published, overflowed and
+  overwritten blocks and the events lost either way, the same counts
+  `parameter_mailbox_counters()` gives for a `PluginSlot` parameter mailbox.
+  `extract_midi(node, &out)` drains nonempty
   `MidiOutput` blocks in process order from a fixed four-block SPSC queue;
   routine empty blocks cannot overwrite pending output, and bounded overflow
   retains the earliest blocks while making extraction return false. A false
