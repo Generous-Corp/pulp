@@ -70,7 +70,7 @@ body { width: 100%; height: 100%; margin: 0; font-family: Arial; font-size: 14dp
 #button:hover { background-color: #00ff00; }
 #pxbox { position: absolute; left: 0; top: 160px; width: 100px; height: 10px;
          background-color: #0000ff; }
-#dpbox { position: absolute; left: 0; top: 175px; width: 100dp; height: 10dp;
+#dpbox { position: absolute; left: 0; top: 175dp; width: 100dp; height: 10dp;
          background-color: #0000ff; }
 #field { display: block; position: absolute; left: 0; top: 100dp; width: 200dp; height: 30dp;
          background-color: #333333; }
@@ -639,7 +639,9 @@ TEST_CASE("px lengths are device pixels and dp lengths follow the density ratio"
             ui.with_context([&](Rml::Context& ctx) {
                 hover_px = ctx.GetDocument(0)->GetElementById("pxbox")->IsPseudoClassSet("hover");
             });
-            [view mouseMoved:mouse(177 / scale)];
+            // 177 in the context's dp-scaled layout: inside #dpbox, which starts
+            // at 175dp (175 * density_ratio device pixels), in points.
+            [view mouseMoved:mouse(177 * ui.density_ratio() / scale)];
             ui.with_context([&](Rml::Context& ctx) {
                 hover_dp = ctx.GetDocument(0)->GetElementById("dpbox")->IsPseudoClassSet("hover");
             });
