@@ -1,4 +1,16 @@
 {
  "name": "pulp-test-isolated-clap-protocol",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [],
+  "spawning_sources": [
+   "test/test_isolated_clap_protocol.cpp"
+  ],
+  "spawns": "undeclared",
+  "undeclared_sources": []
+ },
  "scanned": true
 }

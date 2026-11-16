@@ -21,16 +21,20 @@
 namespace pulp::host {
 namespace {
 
-// The compiled graph and every serial and parallel Custom context carry the
-// activation epoch; they always advance together.
-// A template so it can take the private compiled-graph type by deduction.
+// Opens a new stream-history epoch after a transport seek. The compiled graph
+// and every serial and parallel Custom context carry the activation epoch, and
+// they always advance together; stateful Control nodes restart from their
+// configured initial state in the same step, whichever entry point saw the
+// seek. A template so it can take the private compiled-graph type by deduction.
 template <typename CompiledGraph>
-void set_graph_event_epoch(CompiledGraph& graph, std::uint64_t epoch) noexcept {
+void begin_stream_history_epoch(CompiledGraph& graph, std::uint64_t epoch) noexcept {
     graph.graph_event_epoch = epoch;
     for (auto& context : graph.routed.serial.custom_ctx)
         context.graph_event_epoch = epoch;
     for (auto& context : graph.routed.parallel.custom_ctx)
         context.graph_event_epoch = epoch;
+    for (const auto& reset_node : graph.control_stream_resets)
+        reset_node();
 }
 
 } // namespace
@@ -91,11 +95,7 @@ ControlProcessResult SignalGraph::process_control_checked(
         if (cg->graph_event_lane->reset(expected_epoch, expected_start) !=
             GraphEventResult::Accepted)
             return refuse(ControlProcessResult::StaleEpoch);
-        set_graph_event_epoch(*cg, expected_epoch);
-        // A stream-history reset restarts the Control program, so stateful
-        // Control nodes return to their configured initial state.
-        for (const auto& reset_node : cg->control_stream_resets)
-            reset_node();
+        begin_stream_history_epoch(*cg, expected_epoch);
     }
     // Publish the index block only once every admission check has passed, so
     // a refused call leaves the previously admitted block in place.
@@ -254,7 +254,7 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                                 sizeof(float) * static_cast<std::size_t>(num_samples));
                 return;
             }
-            set_graph_event_epoch(*cg, next_epoch);
+            begin_stream_history_epoch(*cg, next_epoch);
         }
         const auto result = cg->graph_event_lane->begin_block(
             cg->graph_event_epoch, cg->graph_event_lane->counters().cursor,

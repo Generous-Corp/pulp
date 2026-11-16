@@ -486,7 +486,13 @@ TEST_CASE("a seek invalidates in flight production and no stale epoch frame reac
     REQUIRE(source.pull(block.view(), kChunkFrames) == kChunkFrames);
     REQUIRE(block.view().channel(0).front() == static_cast<float>(3 * kChunkFrames));
     REQUIRE(last_epoch.load(std::memory_order_relaxed) == 2);
-    REQUIRE(source.pump_background() == kChunkFrames);
+    // The owned producer thread refills the room the pull opened; driving
+    // pump_background() here as well would race it and sometimes find the ring
+    // already full, so wait for the refill instead.
+    for (std::uint32_t spins = 0;
+         spins < 1'000'000 && source.stats().ring_available_frames < kChunkFrames; ++spins)
+        std::this_thread::yield();
+    REQUIRE(source.stats().ring_available_frames >= kChunkFrames);
     REQUIRE(source.pull(block.view(), kChunkFrames) == kChunkFrames);
     REQUIRE(block.view().channel(0).front() == static_cast<float>(4 * kChunkFrames));
     source.release();

@@ -223,8 +223,10 @@ public:
     /// macOS desktop and Windows. Reserve custody before spawning; all
     /// unsupported platforms refuse without launching. On Windows the child is
     /// born suspended into a private kill-on-close job object that permits no
-    /// breakaway, so cleanup reaches every descendant; the private input channel
-    /// variant is unavailable there and refuses before spawning. The reservation outlives this handle
+    /// breakaway, so cleanup reaches every descendant. Its private input channel
+    /// is an overlapped single-instance local named pipe, connected before the
+    /// child exists; it refuses output capture and a non-positive input timeout
+    /// before spawning. The reservation outlives this handle
     /// until cleanup completes, including a failed post-spawn handshake.
     /// A retained handle and reservation are single-use. No caller may reap the
     /// child independently or install SIGCHLD auto-reaping while it is retained.

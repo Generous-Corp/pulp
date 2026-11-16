@@ -2629,7 +2629,7 @@ TEST_CASE("SignalGraph connect_midi routes events through the graph",
     pulp::midi::MidiBuffer in_events;
     auto ev0 = pulp::midi::MidiEvent::note_on(0, 60, 100);
     ev0.sample_offset = 0;
-    auto ev1 = pulp::midi::MidiEvent::note_off(0, 60, 0);
+    auto ev1 = pulp::midi::MidiEvent::note_off(0, 60);
     ev1.sample_offset = 16;
     in_events.add(ev0);
     in_events.add(ev1);
@@ -3079,6 +3079,142 @@ TEST_CASE("SignalGraph MIDI ingress is latest wins and consumed once",
     CHECK(arrived.empty());
 }
 
+TEST_CASE("SignalGraph MIDI mailbox counts published, overwritten and dropped events",
+          "[host][graph][midi][mailbox][telemetry]") {
+    SignalGraph graph;
+    const auto midi_in = graph.add_midi_input_node("keys");
+    const auto midi_out = graph.add_midi_output_node("thru");
+    REQUIRE(graph.connect_midi(midi_in, midi_out));
+
+    SignalGraph::MidiMailboxCounters counters;
+    counters.published = 77;
+    // Unprepared: no mailbox exists, and `out` is left untouched.
+    REQUIRE_FALSE(graph.midi_mailbox_counters(midi_in, counters));
+    CHECK(counters.published == 77);
+    REQUIRE(graph.prepare(48000.0, 32));
+    REQUIRE_FALSE(graph.midi_mailbox_counters(midi_in + 1000, counters));
+    REQUIRE_FALSE(graph.midi_mailbox_counters(midi_out, counters));
+    CHECK(counters.published == 77);
+    REQUIRE(graph.midi_mailbox_counters(midi_in, counters));
+    CHECK(counters.published == 0);
+    CHECK(counters.overflowed == 0);
+    CHECK(counters.overwritten == 0);
+    CHECK(counters.dropped_events == 0);
+
+    float in_sample = 0.f, out_sample = 0.f;
+    const float* in_ptrs[1] = {&in_sample};
+    float* out_ptrs[1] = {&out_sample};
+    pulp::audio::BufferView<const float> in(in_ptrs, 0, 32);
+    pulp::audio::BufferView<float> out(out_ptrs, 0, 32);
+
+    // A note-on batch replaced by its note-off before process() read it: both
+    // calls return true, only the note-off arrives, and the lost note-on is
+    // counted as one overwritten batch and one dropped event.
+    pulp::midi::MidiBuffer note_on;
+    note_on.add(pulp::midi::MidiEvent::note_on(0, 60, 100));
+    pulp::midi::MidiBuffer note_off;
+    note_off.add(pulp::midi::MidiEvent::note_off(0, 60));
+    REQUIRE(graph.inject_midi(midi_in, note_on));
+    REQUIRE(graph.inject_midi(midi_in, note_off));
+    REQUIRE(graph.midi_mailbox_counters(midi_in, counters));
+    CHECK(counters.published == 2);
+    CHECK(counters.overflowed == 0);
+    CHECK(counters.overwritten == 1);
+    CHECK(counters.dropped_events == 1);
+    graph.process(out, in, 32);
+    pulp::midi::MidiBuffer arrived;
+    REQUIRE(graph.extract_midi(midi_out, arrived));
+    REQUIRE(arrived.size() == 1);
+    CHECK(arrived[0].is_note_off());
+
+    // Batches each read by a process() call overwrite nothing.
+    REQUIRE(graph.inject_midi(midi_in, note_on));
+    graph.process(out, in, 32);
+    REQUIRE(graph.inject_midi(midi_in, note_off));
+    graph.process(out, in, 32);
+    REQUIRE(graph.midi_mailbox_counters(midi_in, counters));
+    CHECK(counters.published == 4);
+    CHECK(counters.overwritten == 1);
+    CHECK(counters.dropped_events == 1);
+
+    // An overflowing batch publishes its prefix, returns false and counts the
+    // events it could not keep. Overwriting it unread then charges only the
+    // retained prefix, so no lost event is counted twice.
+    constexpr std::size_t event_capacity = ParameterEventQueue::kCapacity;
+    pulp::midi::MidiBuffer overflow;
+    for (std::size_t i = 0; i < event_capacity + 3; ++i)
+        overflow.add(pulp::midi::MidiEvent::note_on(0, static_cast<int>(i % 127), 100));
+    pulp::midi::MidiBuffer oversized_sysex;
+    oversized_sysex.add_sysex(std::vector<uint8_t>(4097, uint8_t{0x7D}));
+    REQUIRE_FALSE(graph.inject_midi(midi_in, overflow));
+    REQUIRE(graph.midi_mailbox_counters(midi_in, counters));
+    CHECK(counters.published == 5);
+    CHECK(counters.overflowed == 1);
+    CHECK(counters.overwritten == 1);
+    CHECK(counters.dropped_events == 4);
+    REQUIRE_FALSE(graph.inject_midi(midi_in, oversized_sysex));
+    REQUIRE(graph.midi_mailbox_counters(midi_in, counters));
+    CHECK(counters.published == 6);
+    CHECK(counters.overflowed == 2);
+    CHECK(counters.overwritten == 2);
+    CHECK(counters.dropped_events == 4 + event_capacity + 1);
+    graph.process(out, in, 32);
+    arrived.clear();
+    arrived.clear_sysex();
+    REQUIRE_FALSE(graph.extract_midi(midi_out, arrived));
+
+    // MPE expression events in the sidecar count as events too.
+    pulp::midi::MpeBuffer expression;
+    expression.reserve(4);
+    pulp::midi::MpeExpressionEvent pressure{};
+    REQUIRE(expression.add(pressure));
+    REQUIRE(expression.add(pressure));
+    REQUIRE(graph.inject_midi(midi_in, note_on, expression));
+    REQUIRE(graph.inject_midi(midi_in, note_off));
+    REQUIRE(graph.midi_mailbox_counters(midi_in, counters));
+    CHECK(counters.published == 8);
+    CHECK(counters.overwritten == 3);
+    CHECK(counters.dropped_events == 4 + event_capacity + 1 + 3);
+    graph.process(out, in, 32);
+
+    // An eager prepare() creates a fresh mailbox, so the counts restart.
+    graph.release();
+    REQUIRE_FALSE(graph.midi_mailbox_counters(midi_in, counters));
+    REQUIRE(graph.prepare(48000.0, 32));
+    REQUIRE(graph.midi_mailbox_counters(midi_in, counters));
+    CHECK(counters.published == 0);
+    CHECK(counters.overflowed == 0);
+    CHECK(counters.overwritten == 0);
+    CHECK(counters.dropped_events == 0);
+}
+
+TEST_CASE("SignalGraph MIDI mailbox counters survive a gap free swap",
+          "[host][graph][midi][mailbox][telemetry][live-swap]") {
+    // A MidiOutput node refuses a live swap, so the MIDI input feeds a plugin.
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "input");
+    const auto plugin = graph.add_plugin_node(std::make_unique<MidiForwarder>(), 1, 1, "fwd");
+    const auto output = graph.add_output_node(1, "output");
+    const auto midi_in = graph.add_midi_input_node("keys");
+    REQUIRE(graph.connect(input, 0, plugin, 0));
+    REQUIRE(graph.connect(plugin, 0, output, 0));
+    REQUIRE(graph.connect_midi(midi_in, plugin));
+    REQUIRE(graph.prepare(48000.0, 32));
+
+    pulp::midi::MidiBuffer note_on;
+    note_on.add(pulp::midi::MidiEvent::note_on(0, 60, 100));
+    REQUIRE(graph.inject_midi(midi_in, note_on));
+    REQUIRE(graph.inject_midi(midi_in, note_on));
+
+    graph.begin_swap_edit();
+    REQUIRE(graph.prepare_swap(48000.0, 32) == SignalGraph::SwapResult::Swapped);
+    SignalGraph::MidiMailboxCounters counters;
+    REQUIRE(graph.midi_mailbox_counters(midi_in, counters));
+    CHECK(counters.published == 2);
+    CHECK(counters.overwritten == 1);
+    CHECK(counters.dropped_events == 1);
+}
+
 TEST_CASE("SignalGraph MIDI ingress survives a gap free swap",
           "[host][graph][midi][mailbox][live-swap]") {
     for (const int mode : {0, 1, 2}) {
@@ -3172,7 +3308,7 @@ TEST_CASE("SignalGraph preserves pending MIDI egress by rejecting a live swap",
         REQUIRE(graph.prepare(48000.0, 32));
 
         pulp::midi::MidiBuffer events;
-        events.add(pulp::midi::MidiEvent::note_off(0, 60, 0));
+        events.add(pulp::midi::MidiEvent::note_off(0, 60));
         REQUIRE(graph.inject_midi(midi_in, events));
         std::array<float, 32> source{};
         const float* input_ptrs[] = {source.data()};

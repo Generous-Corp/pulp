@@ -58,7 +58,8 @@ make_control_signal_graph_executor(ControlSignalGraphAuthorityResolver resolve) 
                                 "graph file request is malformed");
                 const auto text = params["text"].getString();
                 const auto format = params["format"].getString();
-                if (text.size() > 1024 * 1024 || (format != "notation" && format != "pulpgraph"))
+                if (text.size() > host::max_graph_notation_bytes ||
+                    (format != "notation" && format != "pulpgraph"))
                     return fail(ControlResultCode::InvalidRequest,
                                 "graph file format or bound is invalid");
                 auto stopped = ControlExecutionCheckpoint::Continue;
