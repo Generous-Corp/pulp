@@ -1034,6 +1034,18 @@ factory keeps the ViewBridge editor untouched.
 
 ## Gotchas
 
+### Setting `preferredContentSize` leaves a pending autorelease on the controller
+
+Setting `preferredContentSize` on an `AUViewController` leaves one extra
+retain on it, so `retainCount` reads 2 after `viewDidLoad`. It is a pending
+autorelease, not a leak: the controller deallocs when the run loop's pool next
+drains (checked with a bare subclass: dealloc fires one run-loop turn after the
+last release). A test that releases a controller and asserts teardown must spin
+the run loop first. Rebinding a controller to another audio unit closes its
+contract editor through `rebuildEditorIfReady` -> `closeContractEditor`; an
+audio unit released with its editor still open closes it through the unit's
+`ContractSessionRegistry`.
+
 ### `transportStateBlock`'s sample position is a double — round it, never truncate
 
 `transportStateBlock` returns `currentSamplePosition` as a `double`, and some hosts send a value a hair below the true sample: REAPER reports `13823.9999` for sample `13824`. A `static_cast<int64_t>` truncates it, so `position_samples` steps back one sample and then jumps two on the next block. Convert through `pulp::format::detail::host_sample_position()` (`detail/host_sample_position.hpp`, shared with AUv2). It returns the nearest sample (`std::round`, independent of the rounding mode), or `nullopt` for a non-finite or out-of-range value; leave `TransportField::SamplePosition` unset in that case.

@@ -164,6 +164,13 @@ returns at once without touching RmlUi.
   Vellum RmlUi SDK and no CI lane builds them yet, so run them locally.
 - `pulp-test-native-metal-probe` drives the example through the editor-host
   contract, the path every format adapter takes.
+- `pulp-test-native-surface-clap`, `-vst3`, `-au-v2` and `-au-v3` open the
+  probe through each format's own adapter (the CLAP contract GUI, the VST3
+  contract view, the AU v2 contract view and the macOS AU v3 view controller)
+  in an offscreen window. Each asserts the same lifecycle through
+  `support/native_surface_format_checks.hpp`: the editor attaches at its size,
+  the first frame carries the gain colour at the drawable's size, a host resize
+  moves the drawable and back, and a close then reopen starts clean.
 - `native-metal-probe-clap-host` and `native-metal-probe-au-host` load the
   built plug-in in-process as CLAP and AU hosts do. They install nothing, so
   they run headless.
