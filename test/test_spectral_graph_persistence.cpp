@@ -5,11 +5,13 @@
 #include <pulp/runtime/base64.hpp>
 #include <pulp/runtime/crypto.hpp>
 
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <functional>
 #include <limits>
 #include <map>
+#include <string>
 
 namespace {
 using namespace pulp::host;
@@ -512,7 +514,11 @@ TEST_CASE("Spectral graph saves at the block it is prepared for, not the largest
 
 TEST_CASE("Spectral save refusals name the rule the graph breaks",
           "[host][spectral][replay][negative]") {
-    const auto dir = std::filesystem::temp_directory_path() / "pulp-spectral-save-reason";
+    // A per-run directory, so concurrent suites in other checkouts on one host
+    // never remove each other's file.
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("pulp-spectral-save-reason-" +
+                      std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directories(dir);
     const auto path = dir / "graph.pulpgraph";
 
@@ -540,5 +546,15 @@ TEST_CASE("Spectral save refusals name the rule the graph breaks",
     CHECK(mixed.error.find("unsupported_mix") != std::string::npos);
     CHECK(mixed.error.find("not an audio input, audio output or spectral node") !=
           std::string::npos);
+
+    // A live analysis node has its own rule, not the generic node-type one.
+    auto analysed = fixture();
+    const auto shape = *SpectralIdentity::make(256, 64, 1, 48000).value;
+    REQUIRE(analysed->add_spectral_analysis(shape, "live_analysis"));
+    const auto analysis = GraphSerializer::to_file(*analysed, path);
+    CHECK_FALSE(analysis.ok);
+    CHECK(analysis.code == GraphSerializer::SaveResult::Code::serialization_refused);
+    CHECK(analysis.error.find("live_analysis is a SpectralAnalysis node") != std::string::npos);
+    CHECK(analysis.error.find("live analysis is not persisted") != std::string::npos);
     std::filesystem::remove_all(dir);
 }

@@ -47,6 +47,7 @@
 #include <utility>
 #include <vector>
 #include <span>
+#include <string_view>
 
 namespace pulp::host {
 namespace {
@@ -413,18 +414,34 @@ const char* node_type_str(NodeType t) {
     return "unknown";
 }
 
-// The writer records a custom type version below 1 as 1, so the identity
-// uses the same normalized version and a reload reproduces it.
+// The one authored identity key format. The writer (from a live node) and
+// inspection (from a saved record) both build keys here, so they cannot
+// disagree. A Plugin key carries its unique id (empty for a Processor node), a
+// Custom key carries its type id and version. The writer records a custom type
+// version below 1 as 1, so the key uses the same normalized version and a
+// reload reproduces it.
+std::string identity_key(NodeType type, std::string_view name, std::string_view unique_id,
+                         std::string_view custom_type_id, std::int64_t custom_version) {
+    std::string key = std::string(node_type_str(type)) + ":" + std::string(name);
+    if (type == NodeType::Plugin)
+        key += ":" + std::string(unique_id);
+    if (type == NodeType::Custom)
+        key += ":" + std::string(custom_type_id) + "@" +
+               std::to_string(custom_version > 0 ? custom_version : 1);
+    return key;
+}
+
+// A logical identity: the key plus its ordinal among nodes sharing that key,
+// counted in persisted node id order.
+std::string format_identity(std::string_view key, std::size_t ordinal) {
+    return "node:" + std::string(key) + ":" + std::to_string(ordinal);
+}
+
 std::string authored_node_identity(const GraphNode& node,
                                    std::unordered_map<std::string, std::size_t>& ordinals) {
-    std::string key = std::string(node_type_str(node.type)) + ":" + node.name;
-    if (node.type == NodeType::Plugin)
-        key += ":" + node.plugin_info.unique_id;
-    if (node.type == NodeType::Custom)
-        key += ":" + node.custom_type_id + "@" +
-               std::to_string(node.custom_type_version > 0 ? node.custom_type_version : 1);
-    const auto ordinal = ordinals[key]++;
-    return "node:" + key + ":" + std::to_string(ordinal);
+    const auto key = identity_key(node.type, node.name, node.plugin_info.unique_id,
+                                  node.custom_type_id, node.custom_type_version);
+    return format_identity(key, ordinals[key]++);
 }
 
 template <typename V>
@@ -619,7 +636,7 @@ std::optional<std::string> saved_record_identity_key(const V& node, std::string&
     const std::string type(node["type"].getString());
     std::string name(node["name"].getString());
     if (type == "processor")
-        return "plugin:" + name + ":";
+        return identity_key(NodeType::Plugin, name, {}, {}, 0);
     NodeType parsed = NodeType::Custom;
     const bool known = parse_type(type, parsed);
     if (parsed == NodeType::Plugin) {
@@ -629,10 +646,11 @@ std::optional<std::string> saved_record_identity_key(const V& node, std::string&
             detail = "plugin node record " + id + " requires plugin.unique_id";
             return std::nullopt;
         }
-        return "plugin:" + name + ":" + std::string(node["plugin"]["unique_id"].getString());
+        return identity_key(NodeType::Plugin, name, node["plugin"]["unique_id"].getString(), {},
+                            0);
     }
     if (parsed != NodeType::Custom)
-        return std::string(node_type_str(parsed)) + ":" + name;
+        return identity_key(parsed, name, {}, {}, 0);
     std::string type_id = type;
     std::int64_t version = 1;
     if (known && node.hasObjectMember("custom")) {
@@ -659,7 +677,7 @@ std::optional<std::string> saved_record_identity_key(const V& node, std::string&
     }
     if (name.empty())
         name = type_id;
-    return "custom:" + name + ":" + type_id + "@" + std::to_string(version);
+    return identity_key(NodeType::Custom, name, {}, type_id, version);
 }
 
 std::string custom_type_label(std::string_view type_id, int version) {
@@ -1553,8 +1571,7 @@ GraphDocumentInspection GraphSerializer::inspect_document(std::string_view json)
                 std::unordered_map<std::string, std::size_t> ordinals;
                 std::unordered_map<NodeId, std::string> expected;
                 for (const auto& [node_id, key] : keys)
-                    expected.emplace(node_id,
-                                     "node:" + key + ":" + std::to_string(ordinals[key]++));
+                    expected.emplace(node_id, format_identity(key, ordinals[key]++));
                 for (const auto& [name, node_id] : identity_node) {
                     const auto& rebuilt = expected.at(node_id);
                     if (rebuilt != name) {
@@ -1622,6 +1639,10 @@ int GraphSerializer::current_format_version() {
 }
 
 namespace {
+std::string serialize(const SignalGraph& graph,
+                      const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout,
+                      bool saved_identity, std::string* reason);
+
 GraphSerializer::SaveResult
 write_graph_file(const SignalGraph& graph, const std::filesystem::path& path,
                  const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout,
@@ -1644,23 +1665,14 @@ write_graph_file(const SignalGraph& graph, const std::filesystem::path& path,
             return result;
         }
     }
-    const bool spectral = spectral_persistence::contains_spectral_nodes(graph);
-    if (spectral && saved_identity) {
-        result.code = SaveResult::Code::serialization_refused;
-        result.error = "graph saved-identity serialization failed: a spectral graph has no "
-                       "saved-identity envelope";
-        return result;
-    }
-    std::string spectral_reason;
-    const auto json = spectral ? spectral_persistence::write(graph, editor_layout, spectral_reason)
-                      : saved_identity ? GraphSerializer::to_saved_document(graph, editor_layout)
-                                       : GraphSerializer::to_json(graph, editor_layout);
+    std::string reason;
+    const auto json = serialize(graph, editor_layout, saved_identity, &reason);
     if (json.empty()) {
         result.code = SaveResult::Code::serialization_refused;
         result.error = saved_identity ? "graph saved-identity serialization failed"
                                       : "graph serialization failed";
-        if (!spectral_reason.empty())
-            result.error += ": " + spectral_reason;
+        if (!reason.empty())
+            result.error += ": " + reason;
         return result;
     }
     const auto payload_size = json.size() + 1; // canonical files end with a newline
@@ -1775,11 +1787,12 @@ bool GraphSerializer::register_migration(int from_version,
     return true;
 }
 
-std::string GraphSerializer::to_json(
+namespace {
+// The plain (non-spectral, no envelope) writer. serialize() owns the choice
+// between it, the spectral writer and the saved-identity envelope.
+std::string plain_document(
     const SignalGraph& graph,
     const std::unordered_map<NodeId, std::pair<float,float>>& editor_layout) {
-    if (spectral_persistence::contains_spectral_nodes(graph))
-        return spectral_persistence::write(graph, editor_layout);
     bool has_processors = false;
     bool has_typed_ports = false;
     for (const auto& node : graph.nodes()) {
@@ -2084,30 +2097,11 @@ std::string GraphSerializer::to_json(
     return choc::json::toString(root, true);
 }
 
-std::unordered_map<NodeId, std::string>
-GraphSerializer::saved_node_identities(const SignalGraph& graph) {
-    std::unordered_map<std::string, std::size_t> ordinals;
-    std::vector<const GraphNode*> nodes;
-    for (const auto& node : graph.nodes())
-        nodes.push_back(&node);
-    std::sort(nodes.begin(), nodes.end(),
-              [](const auto* a, const auto* b) { return a->id < b->id; });
-    std::unordered_map<NodeId, std::string> identities;
-    for (const auto* node : nodes)
-        identities.emplace(node->id, authored_node_identity(*node, ordinals));
-    return identities;
-}
-
-std::string GraphSerializer::to_saved_document(
+// The plain document wrapped in the saved-identity v6 envelope.
+std::string saved_identity_document(
     const SignalGraph& graph,
     const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout) {
-    // Spectral persistence has its own closed envelope. The saved-identity
-    // wrapper adds fields that the spectral reader intentionally rejects, so
-    // keep this older identity surface unsupported until it can bind spectral
-    // node identities and persisted IDs end to end.
-    if (spectral_persistence::contains_spectral_nodes(graph))
-        return {};
-    const auto raw = to_json(graph, editor_layout);
+    const auto raw = plain_document(graph, editor_layout);
     if (raw.empty())
         return {};
     try {
@@ -2138,6 +2132,60 @@ std::string GraphSerializer::to_saved_document(
     } catch (...) {
         return {};
     }
+}
+
+// The one place that picks a writer: a graph holding spectral nodes is written
+// by the spectral writer, every other graph by the plain writer, optionally
+// wrapped in the saved-identity envelope. Spectral persistence has its own
+// closed envelope, which the saved-identity fields would break, so a spectral
+// graph has no saved-identity form. Returns an empty string on refusal and,
+// when `reason` is given and the writer names one, the rule the graph breaks.
+std::string serialize(const SignalGraph& graph,
+                      const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout,
+                      bool saved_identity, std::string* reason) {
+    if (reason)
+        reason->clear();
+    if (spectral_persistence::contains_spectral_nodes(graph)) {
+        if (saved_identity) {
+            if (reason)
+                *reason = "a spectral graph has no saved-identity envelope";
+            return {};
+        }
+        std::string why;
+        auto json = spectral_persistence::write(graph, editor_layout, why);
+        if (reason)
+            *reason = std::move(why);
+        return json;
+    }
+    return saved_identity ? saved_identity_document(graph, editor_layout)
+                          : plain_document(graph, editor_layout);
+}
+} // namespace
+
+std::string GraphSerializer::to_json(
+    const SignalGraph& graph,
+    const std::unordered_map<NodeId, std::pair<float,float>>& editor_layout) {
+    return serialize(graph, editor_layout, false, nullptr);
+}
+
+std::unordered_map<NodeId, std::string>
+GraphSerializer::saved_node_identities(const SignalGraph& graph) {
+    std::unordered_map<std::string, std::size_t> ordinals;
+    std::vector<const GraphNode*> nodes;
+    for (const auto& node : graph.nodes())
+        nodes.push_back(&node);
+    std::sort(nodes.begin(), nodes.end(),
+              [](const auto* a, const auto* b) { return a->id < b->id; });
+    std::unordered_map<NodeId, std::string> identities;
+    for (const auto* node : nodes)
+        identities.emplace(node->id, authored_node_identity(*node, ordinals));
+    return identities;
+}
+
+std::string GraphSerializer::to_saved_document(
+    const SignalGraph& graph,
+    const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout) {
+    return serialize(graph, editor_layout, true, nullptr);
 }
 
 namespace {
@@ -2385,6 +2433,16 @@ GraphSerializer::LoadResult GraphSerializer::from_saved_document(SignalGraph& gr
             std::string(graph_document_refusal_name(inspection.refusal)) + ": " + inspection.detail;
         return result;
     }
+    // A refusal after the load started leaves the graph and the result empty.
+    const auto refuse = [&](std::string error) {
+        graph.clear();
+        result.ok = false;
+        result.persisted_node_ids.clear();
+        result.unrestored_node_ids.clear();
+        result.editor_layout.clear();
+        result.error = std::move(error);
+        return result;
+    };
     try {
         const auto root = choc::json::parse(json);
         if (!root.hasObjectMember("identity_schema")) {
@@ -2394,6 +2452,10 @@ GraphSerializer::LoadResult GraphSerializer::from_saved_document(SignalGraph& gr
         result = from_json(graph, json, options);
         if (!result.ok)
             return result;
+        if (!result.unrestored_node_ids.empty())
+            return refuse("node_not_restored: node record " +
+                          std::to_string(result.unrestored_node_ids.front()) +
+                          " could not be added to the graph");
         // Each identity must name the node its persisted id was restored as.
         // Checking only that the identity exists somewhere would accept a
         // document whose node order swaps two same-key ordinals.
@@ -2406,25 +2468,13 @@ GraphSerializer::LoadResult GraphSerializer::from_saved_document(SignalGraph& gr
             const auto live_identity = live == result.persisted_node_ids.end()
                                            ? restored.end()
                                            : restored.find(live->second);
-            if (live_identity == restored.end() || live_identity->second != id) {
-                graph.clear();
-                result.ok = false;
-                result.persisted_node_ids.clear();
-                result.editor_layout.clear();
-                result.error = "identity_binding_unknown: logical identity " + id +
-                               " does not name the node restored from node_id " +
-                               std::to_string(persisted);
-                return result;
-            }
+            if (live_identity == restored.end() || live_identity->second != id)
+                return refuse("identity_binding_unknown: logical identity " + id +
+                              " does not name the node restored from node_id " +
+                              std::to_string(persisted));
         }
-        if (auto missing = find_unrestored_connection(graph, root, result.persisted_node_ids)) {
-            graph.clear();
-            result.ok = false;
-            result.persisted_node_ids.clear();
-            result.editor_layout.clear();
-            result.error = "connection_not_restored: " + *missing;
-            return result;
-        }
+        if (auto missing = find_unrestored_connection(graph, root, result.persisted_node_ids))
+            return refuse("connection_not_restored: " + *missing);
         return result;
     } catch (const std::exception& error) {
         result.ok = false;
@@ -3256,7 +3306,9 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                     break;
                 }
             }
-            if (new_id != 0) {
+            if (new_id == 0) {
+                result.unrestored_node_ids.push_back(old_id);
+            } else {
                 id_map[old_id] = new_id;
                 graph.set_node_gain(new_id, gain);
                 if (nv.hasObjectMember("layout")) {

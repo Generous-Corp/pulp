@@ -143,12 +143,6 @@ int admission_block_for(const SignalGraph& graph) {
 }
 
 std::string write(const SignalGraph& graph,
-                  const std::unordered_map<NodeId, std::pair<float, float>>& layout) {
-    std::string reason;
-    return write(graph, layout, reason);
-}
-
-std::string write(const SignalGraph& graph,
                   const std::unordered_map<NodeId, std::pair<float, float>>& layout,
                   std::string& reason) {
     reason.clear();
@@ -208,6 +202,10 @@ std::string write(const SignalGraph& graph,
             const auto* type = type_name(n.type);
             if (graph.is_processor_node(n.id))
                 return refuse("node " + n.name + " is a Processor node");
+            if (n.type == NodeType::SpectralAnalysis)
+                return refuse("node " + n.name +
+                              " is a SpectralAnalysis node; live analysis is not persisted, "
+                              "only the asset source is");
             if (!type)
                 return refuse("node " + n.name +
                               " is not an audio input, audio output or spectral node");

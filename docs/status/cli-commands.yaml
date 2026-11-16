@@ -419,7 +419,7 @@ commands:
         description: "render: write the offline render to a float WAV file at the render's sample rate. save (required): the path the graph document is written to"
       - name: --saved-identity
         kind: flag
-        description: "save only: write the saved-identity v6 envelope that graph diff reads; a plain input whose connections did not all restore is refused (InvalidDocument, connection_not_restored). Saved-identity inputs keep the envelope on save, fmt and canonicalize without the flag"
+        description: "save only: write the saved-identity v6 envelope that graph diff reads; a plain input whose connections did not all restore is refused (InvalidDocument, connection_not_restored); save, fmt and canonicalize refuse an input with a node record the loader could not add (InvalidDocument, node_not_restored). Saved-identity inputs keep the envelope on save, fmt and canonicalize without the flag"
       - name: --input
         kind: option
         description: Audio input WAV for probe (required) and render (required when the graph has an audio_in node, otherwise refused with missing_input); render takes its sample rate, channel count and length from this file
