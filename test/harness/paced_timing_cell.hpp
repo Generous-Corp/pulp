@@ -4,9 +4,12 @@
 //
 // A matrix cell drives an already-prepared fixture from one callback thread on
 // a fixed schedule: callback i targets origin + i * frames / rate and a late
-// callback never resets the origin. The harness records raw steady-clock
-// offsets into preallocated storage and prints them only after the last
-// callback, so the timed window contains no I/O. Percentiles, deadline misses
+// callback never resets the origin. The schedule and the wait come from the
+// shared deadline driver (paced_deadline_driver.hpp), which records the kernel
+// wake, the callback start and the spin CPU cost of every callback. The
+// harness records raw steady-clock offsets into preallocated storage and
+// prints them only after the last callback, so the timed window contains no
+// I/O. Percentiles, deadline misses
 // and the qualification verdict are computed by
 // tools/graph_paced_timing_matrix.py from the raw rows, not here.
 //
@@ -25,12 +28,17 @@
 //                            "realtime-invalid" (a deliberately malformed
 //                            real-time request the kernel must reject; the
 //                            negative control for the refusal path)
+//   PULP_PACED_WAKE*, PULP_PACED_INJECT_LATE_*  wake backend, guard, spin
+//                            limit and injected lateness; see
+//                            read_wake_config()
 //
 // A real-time request is read back from the kernel after it is applied. When
 // the request fails or the read-back does not show the requested class, the
 // cell refuses: no callback runs, the PACED_SCHED line records the reason and
 // print_cell reports a failure. A cell never silently falls back to default
 // scheduling.
+
+#include "paced_deadline_driver.hpp"
 
 #include <pulp/runtime/build_info.hpp>
 
@@ -59,7 +67,7 @@
 
 namespace pulp::test::paced {
 
-inline constexpr std::string_view kCellHeader = "pulp_paced_timing_cell_v1";
+inline constexpr std::string_view kCellHeader = "pulp_paced_timing_cell_v2";
 inline constexpr std::uint64_t kMaxCallbacks = 100000;
 
 enum class SchedRequest : std::uint8_t { none, realtime, realtime_invalid };
@@ -258,21 +266,48 @@ struct CellConfig {
     std::uint64_t planted_sleep_us = 0;
     std::uint64_t planted_every = 1;
     SchedRequest sched = SchedRequest::none;
+    WakeConfig wake;
 };
 
+// Offsets are relative to the fixed origin. `wake_ns` is when the kernel wait
+// returned, `start_ns` when the callback was released, and `spin_cpu_ns` the
+// thread CPU time spent spinning between the two.
 struct CellRow {
     std::int64_t target_ns = 0;
     std::int64_t start_ns = 0;
     std::int64_t end_ns = 0;
     std::uint8_t ok = 0;
+    std::int64_t wake_ns = 0;
+    std::int64_t spin_cpu_ns = 0;
+    std::uint8_t lateness = 0;
+    std::uint8_t spin_overrun = 0;
 };
 
-// Raw rows plus the scheduling receipt of the thread that produced them. A
-// refused scheduling request leaves `rows` empty.
+// Raw rows plus the scheduling and wake receipts of the thread that produced
+// them. A refused scheduling request leaves `rows` empty.
 struct CellResult {
     std::vector<CellRow> rows;
     SchedReceipt sched;
+    WakeSettings wake;
 };
+
+// One line in the format parsed by tools/graph_paced_timing_matrix.py.
+inline void print_wake(const WakeSettings& wake) {
+    std::cout << "PACED_WAKE backend=" << wake_backend_name(wake.backend)
+              << " kernel_wait=" << wake.kernel_wait << " guard_source=" << wake.guard_source
+              << " guard_ns=" << wake.guard_ns << " guard_bound_ns=" << wake.guard_bound_ns
+              << " guard_clamped=" << wake.guard_clamped << " spin_limit_ns=" << wake.spin_limit_ns
+              << " calibration_samples=" << wake.calibration_samples
+              << " calibration_p50_ns=" << wake.calibration_p50_ns
+              << " calibration_p99_ns=" << wake.calibration_p99_ns
+              << " calibration_max_ns=" << wake.calibration_max_ns
+              << " timebase_numer=" << wake.timebase_numer
+              << " timebase_denom=" << wake.timebase_denom
+              << " cpu_clock_resolution_ns=" << wake.cpu_clock_resolution_ns
+              << " inject_late_us=" << wake.inject_late_us
+              << " inject_late_every=" << wake.inject_late_every
+              << " wait_failures=" << wake.wait_failures << '\n';
+}
 
 inline std::uint64_t env_integer(const char* key, std::uint64_t fallback) {
     const char* text = std::getenv(key);
@@ -298,6 +333,7 @@ inline CellConfig read_config(std::string_view default_variant, std::uint64_t de
     config.planted_sleep_us = env_integer("PULP_PACED_PLANTED_SLEEP_US", 0);
     config.planted_every = env_integer("PULP_PACED_PLANTED_EVERY", 1);
     config.sched = read_sched_request();
+    config.wake = read_wake_config();
     if (config.rate == 0 || config.frames == 0 || config.callbacks == 0 ||
         config.callbacks > kMaxCallbacks || config.planted_every == 0)
         throw std::invalid_argument("paced cell configuration out of range");
@@ -305,17 +341,23 @@ inline CellConfig read_config(std::string_view default_variant, std::uint64_t de
 }
 
 // Runs `process(index, first_sample)` on a dedicated thread at the fixed-origin
-// schedule and times only that call (plus any planted sleep). `verify(index,
+// schedule kept by the shared deadline driver and times only that call (plus
+// any planted sleep). `verify(index,
 // first_sample)` then checks the block outside the timed window and returns the
 // fixture's own oracle verdict; it still shares the callback period, so keep
 // it table-driven and cheap. The worker applies `config.sched` before the
-// first callback; when that request is refused no callback runs. Returns the
-// raw rows and the scheduling receipt.
+// first callback, then calibrates the wake guard under that class; when the
+// request is refused no callback runs. Returns the raw rows and the
+// scheduling and wake receipts.
 template <class Process, class Verify>
 CellResult run_cell(const CellConfig& config, Process&& process, Verify&& verify) {
     using clock = std::chrono::steady_clock;
     CellResult result;
     result.rows.resize(static_cast<std::size_t>(config.callbacks));
+    // A refused cell still reports the wake request it carried.
+    result.wake.backend = config.wake.backend;
+    result.wake.inject_late_us = config.wake.inject_late_us;
+    result.wake.inject_late_every = config.wake.inject_late_every;
     auto& rows = result.rows;
     const auto planted = std::chrono::microseconds(config.planted_sleep_us);
     std::thread worker([&] {
@@ -323,29 +365,32 @@ CellResult run_cell(const CellConfig& config, Process&& process, Verify&& verify
             request_thread_scheduling(config.sched, block_period_ns(config.rate, config.frames));
         if (result.sched.refused())
             return;
-        const auto origin = clock::now() + std::chrono::milliseconds(10);
-        const auto offset = [origin](clock::time_point point) {
-            return static_cast<std::int64_t>(
-                std::chrono::duration_cast<std::chrono::nanoseconds>(point - origin).count());
-        };
+        SystemWakePlatform platform;
+        DeadlineDriver driver(platform, config.rate, config.frames, config.wake);
+        driver.start();
+        const auto origin = driver.origin_ns();
         for (std::uint64_t i = 0; i < config.callbacks; ++i) {
-            // Integer schedule arithmetic: no accumulated floating drift.
-            const auto target_ns =
-                static_cast<std::int64_t>(i * config.frames * 1'000'000'000ull / config.rate);
-            const auto target = origin + std::chrono::nanoseconds(target_ns);
-            std::this_thread::sleep_until(target);
-            const auto start = clock::now();
+            const auto tick = driver.wait(static_cast<std::size_t>(i));
             process(static_cast<std::size_t>(i), i * config.frames);
             if (config.planted_sleep_us != 0 && i % config.planted_every == 0)
                 std::this_thread::sleep_for(planted);
             const auto end = clock::now();
             const bool ok = verify(static_cast<std::size_t>(i), i * config.frames);
             auto& row = rows[static_cast<std::size_t>(i)];
-            row.target_ns = target_ns;
-            row.start_ns = offset(start);
-            row.end_ns = offset(end);
+            row.target_ns = tick.target_offset_ns;
+            row.start_ns = tick.start_ns - origin;
+            row.end_ns =
+                static_cast<std::int64_t>(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(end.time_since_epoch())
+                        .count()) -
+                origin;
             row.ok = ok ? 1 : 0;
+            row.wake_ns = tick.kernel_wake_ns - origin;
+            row.spin_cpu_ns = tick.spin_cpu_ns;
+            row.lateness = static_cast<std::uint8_t>(tick.lateness);
+            row.spin_overrun = tick.spin_overrun ? 1 : 0;
         }
+        result.wake = driver.settings();
     });
     worker.join();
     if (result.sched.refused())
@@ -375,10 +420,13 @@ inline std::uint64_t print_cell(std::string_view fixture, const CellConfig& conf
         std::cout << ' ' << extra;
     std::cout << '\n';
     print_sched(result.sched);
+    print_wake(result.wake);
     for (std::size_t i = 0; i < rows.size(); ++i) {
         const auto& row = rows[i];
         std::cout << "P " << i << ' ' << row.target_ns << ' ' << row.start_ns << ' ' << row.end_ns
-                  << ' ' << static_cast<int>(row.ok) << '\n';
+                  << ' ' << static_cast<int>(row.ok) << ' ' << row.wake_ns << ' ' << row.spin_cpu_ns
+                  << ' ' << static_cast<int>(row.lateness) << ' '
+                  << static_cast<int>(row.spin_overrun) << '\n';
     }
     std::cout << "PACED_END rows=" << rows.size() << " oracle_failures=" << oracle_failures << '\n';
     return oracle_failures + (result.sched.refused() ? 1 : 0);
