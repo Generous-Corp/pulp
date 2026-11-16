@@ -81,8 +81,8 @@ size across displays in `dp` (the example does this).
 The density ratio needs a Vellum RmlUi SDK that exports
 `NativeContext::set_density_ratio`. Without it `density_ratio_supported()` is
 false, `dp` equals `px`, and a `dp` document renders at 1/scale of its intended
-size on a 2x display. Configure warns about it, and every `attach()` reports it
-through the diagnostic sink (standard error by default; `set_diagnostic_sink`
+size on a 2x display. Configure warns about it, and the first `attach()` reports it
+through the diagnostic sink, once per process (standard error by default; `set_diagnostic_sink`
 redirects it).
 
 ## Proof

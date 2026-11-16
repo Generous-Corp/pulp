@@ -552,16 +552,19 @@ TEST_CASE("px lengths are device pixels and dp lengths follow the density ratio"
     }
 }
 
-TEST_CASE("an attach without a density ratio says so, and one with it does not",
+TEST_CASE("an attach without a density ratio says so once, and one with it does not",
           "[native-surface][rmlui][scale]") {
     REQUIRE_METAL();
     @autoreleasepool {
         std::vector<std::string> messages;
         set_diagnostic_sink([&](const std::string& m) { messages.push_back(m); });
-        {
+        for (int i = 0; i < 2; ++i) {
             Editor e;
             REQUIRE(e.attach());
+            REQUIRE(e.ui->density_ratio() > 0.0);
             e.ui->detach();
+            // Detached: no stale scale.
+            REQUIRE(e.ui->density_ratio() == 1.0);
         }
         set_diagnostic_sink({});
         if (density_ratio_supported()) {

@@ -44,7 +44,7 @@ namespace pulp::rmlui_native {
 /// length in `dp` is one point. False when the Vellum RmlUi SDK it was built
 /// against has no `set_density_ratio`: `dp` then equals `px`, and a document
 /// sized in `dp` renders at 1/scale of its intended size on a 2x display.
-/// Each `attach()` with this false reports it through the diagnostic sink.
+/// The first `attach()` with this false reports it through the diagnostic sink, once per process (setting a new sink re-arms it).
 bool density_ratio_supported() noexcept;
 
 /// Where the adapter's diagnostics go. Default: standard error. Pass an empty
@@ -110,7 +110,7 @@ class RmlUiSurface {
     /// Main-thread tick: visibility and size follow the window.
     void idle();
     /// The density ratio RmlUi was given: the backing scale when
-    /// `density_ratio_supported()`, otherwise 1. `px` lengths are always
+    /// `density_ratio_supported()`, otherwise 1, and 1 while detached. `px` lengths are always
     /// device pixels; `dp` lengths are `density_ratio()` device pixels. Main
     /// thread.
     double density_ratio() const noexcept;
