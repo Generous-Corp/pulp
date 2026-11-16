@@ -317,6 +317,7 @@
    "core/host/src/signal_graph_prepare.cpp",
    "core/host/src/signal_graph_prepared_topology_edit.cpp",
    "core/host/src/signal_graph_reference_walk.cpp",
+   "core/host/src/spectral_graph_persistence.cpp",
    "core/host/src/timeline_automation_delivery.cpp",
    "core/host/src/timeline_device_resolver.cpp",
    "core/host/src/timeline_graph_binding.cpp",
