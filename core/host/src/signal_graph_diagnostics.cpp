@@ -75,28 +75,26 @@ SignalGraph::EdgeProbeStatus SignalGraph::attach_audio_edge_probe(const PortHand
         return EdgeProbeStatus::UnsupportedExecution;
     if (source.kind != PortKind::Audio || destination.kind != PortKind::Audio)
         return EdgeProbeStatus::UnsupportedKind;
-    const auto valid_port = [&](const PortHandle& handle, bool output) {
-        const auto* n = node(handle.node);
-        if (!n || handle.output != output)
-            return false;
-        const auto& ports = output ? n->output_ports : n->input_ports;
-        return std::any_of(ports.begin(), ports.end(), [&](const auto& p) {
-            return p.name == handle.name && p.index == handle.index && p.kind == handle.kind;
-        });
-    };
-    if (!valid_port(source, true) || !valid_port(destination, false))
+    if (!valid_probe_port(*this, source, true) || !valid_probe_port(*this, destination, false))
         return EdgeProbeStatus::UnknownPort;
     const auto& plan = cg->routed.serial.snapshot.plan();
+    // An automation or MIDI edge can share these node ids and port indices
+    // (an automation edge stores destination port 0), so non-audio edges are
+    // skipped rather than refused while an audio edge may still follow.
+    bool non_audio_match = false;
     for (std::size_t i = 0; i < cg->connections.size(); ++i) {
         const auto& edge = cg->connections[i];
         if (edge.source_node != source.node || edge.source_port != source.index ||
             edge.dest_node != destination.node || edge.dest_port != destination.index)
             continue;
-        if (edge.midi || edge.automation || edge.audio_rate_modulation)
-            return EdgeProbeStatus::UnsupportedKind;
+        if (edge.midi || edge.automation || edge.audio_rate_modulation) {
+            non_audio_match = true;
+            continue;
+        }
         for (std::uint32_t j = 0; j < plan.connections.size(); ++j) {
             const auto& resolved = plan.connections[j];
-            if (plan.nodes[resolved.source_index].id != source.node ||
+            if (!graph::carries_audio(resolved) ||
+                plan.nodes[resolved.source_index].id != source.node ||
                 plan.nodes[resolved.dest_index].id != destination.node ||
                 resolved.source_port != source.index || resolved.dest_port != destination.index)
                 continue;
@@ -122,7 +120,7 @@ SignalGraph::EdgeProbeStatus SignalGraph::attach_audio_edge_probe(const PortHand
         }
         return EdgeProbeStatus::UnsupportedExecution;
     }
-    return EdgeProbeStatus::MissingEdge;
+    return non_audio_match ? EdgeProbeStatus::UnsupportedKind : EdgeProbeStatus::MissingEdge;
 }
 
 void SignalGraph::detach_audio_edge_probe() {

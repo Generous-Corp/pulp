@@ -86,7 +86,8 @@ std::vector<std::int64_t> run_block(HostBlockTimeline& timeline, HostEventIngres
 
 } // namespace
 
-TEST_CASE("CLAP block times project to contiguous absolute samples", "[graph][g5][clap]") {
+TEST_CASE("CLAP block times project to contiguous absolute samples",
+          "[graph][host-timestamps][clap]") {
     HostBlockTimeline timeline;
     HostEventIngress<64> ingress;
     ingress.reset(1);
@@ -115,7 +116,7 @@ TEST_CASE("CLAP block times project to contiguous absolute samples", "[graph][g5
     CHECK(record.midi.sample_offset == 7);
 }
 
-TEST_CASE("CLAP steady_time is consumed as a sample counter", "[graph][g5][clap]") {
+TEST_CASE("CLAP steady_time is consumed as a sample counter", "[graph][host-timestamps][clap]") {
     HostBlockTimeline timeline;
     HostBlockWindow window;
 
@@ -132,7 +133,8 @@ TEST_CASE("CLAP steady_time is consumed as a sample counter", "[graph][g5][clap]
     CHECK(absolute == 255);
 }
 
-TEST_CASE("Hosts without a steady clock still advance contiguously", "[graph][g5][clap]") {
+TEST_CASE("Hosts without a steady clock still advance contiguously",
+          "[graph][host-timestamps][clap]") {
     HostBlockTimeline timeline;
     HostBlockWindow window;
     REQUIRE(timeline.advance(steady_block(-1, 32), window) == HostEventResult::Accepted);
@@ -146,7 +148,7 @@ TEST_CASE("Hosts without a steady clock still advance contiguously", "[graph][g5
     CHECK(window.sample_start == 0);
 }
 
-TEST_CASE("Seek and loop discontinuities open a new epoch", "[graph][g5][clap]") {
+TEST_CASE("Seek and loop discontinuities open a new epoch", "[graph][host-timestamps][clap]") {
     HostBlockTimeline timeline;
     HostEventIngress<64> ingress;
     ingress.reset(1);
@@ -209,7 +211,8 @@ TEST_CASE("Seek and loop discontinuities open a new epoch", "[graph][g5][clap]")
     }
 }
 
-TEST_CASE("A playing forward gap with matching transport stays in the epoch", "[graph][g5][clap]") {
+TEST_CASE("A playing forward gap with matching transport stays in the epoch",
+          "[graph][host-timestamps][clap]") {
     HostBlockTimeline timeline;
     HostEventIngress<64> ingress;
     ingress.reset(1);
@@ -247,7 +250,8 @@ TEST_CASE("A playing forward gap with matching transport stays in the epoch", "[
     REQUIRE(ingress.end_block() == HostEventResult::Accepted);
 }
 
-TEST_CASE("A transport delta that differs from the counter delta is a seek", "[graph][g5][clap]") {
+TEST_CASE("A transport delta that differs from the counter delta is a seek",
+          "[graph][host-timestamps][clap]") {
     HostBlockTimeline timeline;
     HostBlockWindow window;
 
@@ -281,7 +285,8 @@ TEST_CASE("A transport delta that differs from the counter delta is a seek", "[g
     }
 }
 
-TEST_CASE("Event times outside the block are refused, never clamped", "[graph][g5][clap]") {
+TEST_CASE("Event times outside the block are refused, never clamped",
+          "[graph][host-timestamps][clap]") {
     HostBlockTimeline timeline;
     HostBlockWindow window;
     REQUIRE(timeline.advance(steady_block(0, 64), window) == HostEventResult::Accepted);
@@ -312,7 +317,7 @@ TEST_CASE("Event times outside the block are refused, never clamped", "[graph][g
     CHECK(timeline.current().sample_start == 0);
 }
 
-TEST_CASE("Events projected against a previous block are late", "[graph][g5][clap]") {
+TEST_CASE("Events projected against a previous block are late", "[graph][host-timestamps][clap]") {
     HostBlockTimeline timeline;
     HostEventIngress<64> ingress;
     ingress.reset(1);
@@ -342,7 +347,8 @@ TEST_CASE("Events projected against a previous block are late", "[graph][g5][cla
     CHECK(timeline.project(forged, 0, absolute) == HostEventResult::OutOfRange);
 }
 
-TEST_CASE("Absolute samples are invariant to host block partitioning", "[graph][g5][clap]") {
+TEST_CASE("Absolute samples are invariant to host block partitioning",
+          "[graph][host-timestamps][clap]") {
     constexpr std::int64_t kOrigin = 96000;
     constexpr std::int64_t kTotal = 1024;
     const std::vector<std::int64_t> event_positions{0,   1,   31,  32,  63,  64,  126,

@@ -96,22 +96,31 @@ pulp.spectral-resynthesis-consumer.v1: all checks passed
 
 ## Binding gap (codec EOF into a routed source)
 
-Resynthesis is expressible through public API. A codec-decoded stream
-(`pulp/signal/spectral_frame_codec.hpp`) cannot be routed into synthesis at an
-arbitrary geometry:
+Resynthesis is expressible through public API. The section below describes the
+code as of `origin/main` `6b072721d25a`, not the receipt head above.
 
 * The public spectral sources are `add_spectral_analysis` (audio in) and
-  `add_spectral_asset_morph_v1` (`core/host/include/pulp/host/signal_graph_runtime.hpp:222-232`).
-* The only codec-to-frames source is the asset morph node, which hard-requires
-  profile 1, FFT 256, hop 64, mono and a morph of two assets
-  (`core/host/src/spectral_asset_morph_internal.hpp:56-62`; documented at
-  `core/host/include/pulp/host/spectral_graph.hpp:35-43`). Its finite tail is
-  `render_frames = 320 + frames * 64` (same file, line 67) and is already
-  covered by `examples/g10-routed-consumer/asset_morph.cpp`.
-* There is no public node that takes a decoded `OwnedSpectralStream` of the
-  consumer's geometry and emits frames with codec EOF. This matches the
-  acceptance audit, which keeps "Codec EOF-source integration" outside routed
-  admission (`docs/graph-program-status/G-10-routed-acceptance.md:48`).
+  `add_spectral_asset_morph_v1` (`core/host/include/pulp/host/signal_graph_runtime.hpp:241-247`).
+* The only codec-to-frames source is the asset morph node. It admits the
+  geometry decoded from its assets through the finite stream rule
+  (`core/host/src/spectral_asset_morph_internal.hpp:66`;
+  `core/host/src/spectral_finite_stream_internal.hpp:79-90`): profile 1, FFT N
+  a power of two from 256 to 16384, a hop H from 1 to N/2 that divides N, and 1
+  to 16 channels, documented at `core/host/include/pulp/host/spectral_graph.hpp:35-38`.
+  Its finite cutoff is `render_frames = N + H + frames * H` with
+  `frames = ceil((L + N - H) / H)` (`spectral_finite_stream_internal.hpp:113-121`).
+  The 256/64 mono case is covered by `examples/g10-routed-consumer/asset_morph.cpp`.
+* What remains outside admission is narrower than arbitrary geometry:
+  * the only codec source is a morph of exactly two assets of equal length and
+    geometry; there is no public node that takes a single decoded
+    `OwnedSpectralStream` and emits its frames with codec EOF;
+  * a hop that does not divide N is refused rather than given a frame count;
+  * no installed consumer exercises the asset source at a geometry other than
+    FFT 256, hop 64, mono.
+
+  The acceptance audit keeps "Codec EOF-source integration" outside routed
+  admission (`docs/graph-program-status/G-10-routed-acceptance.md:48`), and
+  this remainder is what that row refers to.
 
 No API was added.
 
@@ -129,7 +138,8 @@ as N/A because the routed path has no GPU provider. The scope is limited to:
   `[D, D+L+N-1)` support contract. There is no in-graph EOF: the routed
   analysis root is unbounded, so nothing here proves an EOF signal or drain.
 
-Codec-sourced EOF at arbitrary geometry and any GPU spectral conversion are
+A single-stream codec EOF source, non-dividing hops, an installed consumer of
+the asset source at a non-default geometry, and any GPU spectral conversion are
 outside this admission. They need their own named consumer. The repository
 gate `cmake-spectral-resynthesis-consumer` passed at the source head above;
 that result describes that head only. The gate carries the `slow` label, so the required `macos` gate never runs it. The lane that runs it is the informational nightly full build
