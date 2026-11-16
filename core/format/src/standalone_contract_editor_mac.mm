@@ -66,19 +66,17 @@
         return;
     auto width = static_cast<std::uint32_t>(newSize.width);
     auto height = static_cast<std::uint32_t>(newSize.height);
-    // A size the window took without a drag (a programmatic resize, a restored
-    // frame) still goes through the editor's limits and aspect.
-    if (_session->editor() != nullptr && _session->resizable()) {
-        auto constrained_width = width;
-        auto constrained_height = height;
-        if (_session->constrain(constrained_width, constrained_height) &&
-            (constrained_width != width || constrained_height != height) && self.window != nil) {
-            width = constrained_width;
-            height = constrained_height;
-            [self applyEditorSize:NSMakeSize(width, height)];
-        }
+    // A size the window took without a drag (a programmatic resize, full
+    // screen, a restored frame) still goes through the editor's limits and
+    // aspect: the editor takes the constrained size now, and the window is
+    // brought there through the session's snapped-size request once the
+    // window's sizes settle.
+    if (_session->editor() != nullptr) {
+        bool snapped = false;
+        _session->set_host_size(width, height, snapped);
+    } else {
+        _session->set_size(width, height);
     }
-    _session->set_size(width, height);
 }
 
 - (void)viewDidChangeBackingProperties {

@@ -132,6 +132,8 @@ struct FakeHost {
     bool offers_timers = false;
     bool refuse_timers = false;
     bool accept_resize = true;
+    bool inside_host_call = false;
+    int requests_inside_host_call = 0;
     std::vector<std::string> resize_requests;
     int dirty_marks = 0;
     std::vector<clap_id> live_timers;
@@ -167,6 +169,8 @@ struct FakeHost {
         gui.request_resize = [](const clap_host_t* h, uint32_t w, uint32_t hh) {
             auto* self = static_cast<FakeHost*>(h->host_data);
             self->resize_requests.push_back(std::to_string(w) + "x" + std::to_string(hh));
+            if (self->inside_host_call)
+                ++self->requests_inside_host_call;
             return self->accept_resize;
         };
         gui.request_show = [](const clap_host_t*) { return false; };
@@ -650,12 +654,16 @@ TEST_CASE("a CLAP host that calls set_size without adjust_size gets the snapped 
     // A drag still sending sizes is not fought.
     // (A gap longer than the settle time on a loaded host is not a drag.)
     bool stalled = false;
-    for (int i = 0; i < 5; ++i) {
+    for (int i = 0; i < 30; ++i) {
         const auto before = std::chrono::steady_clock::now();
-        loop.run_for(0.02);
+        loop.run_for(0.01);
         stalled |= std::chrono::steady_clock::now() - before > std::chrono::milliseconds(100);
+        host.inside_host_call = true;
         REQUIRE(p.gui->set_size(p.plugin, 900 + i, 500));
+        host.inside_host_call = false;
     }
+    // The request never came from inside the host's own set_size call.
+    REQUIRE(host.requests_inside_host_call == 0);
     if (!stalled)
         REQUIRE(host.resize_requests.empty());
     REQUIRE(loop.run_until([&] { return !host.resize_requests.empty(); }));
@@ -678,9 +686,10 @@ TEST_CASE("a CLAP host that calls set_size without adjust_size gets the snapped 
     REQUIRE(p.gui->create(p.plugin, platform_api(), false));
     REQUIRE(p.gui->set_parent(p.plugin, &window));
     REQUIRE(p.gui->set_size(p.plugin, 700, 300));
-    REQUIRE(contract_log().saw("set_size:700x300"));
-    loop.run_for(0.3);
-    REQUIRE(host.resize_requests.empty());
+    // The fixed editor takes no host size; the host is asked for its own.
+    REQUIRE_FALSE(contract_log().saw("set_size:700x300"));
+    REQUIRE(loop.run_until([&] { return !host.resize_requests.empty(); }));
+    REQUIRE(host.resize_requests.back() == "400x300");
     p.gui->destroy(p.plugin);
     contract_config() = {};
 }

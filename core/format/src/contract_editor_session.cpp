@@ -318,11 +318,26 @@ bool ContractEditorSession::set_host_size(std::uint32_t& width, std::uint32_t& h
     snapped = false;
     if (!editor_ || width == 0 || height == 0)
         return false;
+    // One pixel is rounding, not a different size: it is never snapped.
+    auto differs = [](std::uint32_t a, std::uint32_t b) { return (a > b ? a - b : b - a) > 1; };
+    if (!resizable()) {
+        // A fixed-size editor has one size, whatever the host sends: it takes
+        // nothing, and the host is asked for the size it has.
+        const auto fixed = size();
+        if (fixed.width == 0 || fixed.height == 0)
+            return false;
+        snapped = differs(fixed.width, width) || differs(fixed.height, height);
+        width = fixed.width;
+        height = fixed.height;
+        if (snapped)
+            schedule_snap_request(width, height);
+        else
+            cancel_snap_request();
+        return true;
+    }
     std::uint32_t w = width;
     std::uint32_t h = height;
-    // A fixed-size editor keeps the size the host gave it: only a resizable
-    // editor's limits move the host's choice.
-    if (resizable() && constrain(w, h) && (w != width || h != height))
+    if (constrain(w, h) && (differs(w, width) || differs(h, height)))
         snapped = true;
     else {
         w = width;

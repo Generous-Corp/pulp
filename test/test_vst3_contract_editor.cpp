@@ -620,6 +620,8 @@ class HostFrame final : public Steinberg::IPlugFrame {
                                              Steinberg::ViewRect* rect) override {
         requests.push_back(std::to_string(rect->getWidth()) + "x" +
                            std::to_string(rect->getHeight()));
+        if (inside_host_call)
+            ++requests_inside_host_call;
         if (!accept)
             return Steinberg::kResultFalse;
         view->onSize(rect);
@@ -643,6 +645,9 @@ class HostFrame final : public Steinberg::IPlugFrame {
 
     bool accept = true;
     std::vector<std::string> requests;
+    int requests_inside_host_call = 0;
+    /// True while the test is inside a call it makes as the host.
+    static inline bool inside_host_call = false;
 };
 
 } // namespace
@@ -1054,13 +1059,17 @@ TEST_CASE(
     // keep coming faster than the settle time.
     // (A gap longer than the settle time on a loaded host is not a drag.)
     bool stalled = false;
-    for (int i = 0; i < 5; ++i) {
+    for (int i = 0; i < 30; ++i) {
         const auto before = std::chrono::steady_clock::now();
-        loop.run_for(0.02);
+        loop.run_for(0.01);
         stalled |= std::chrono::steady_clock::now() - before > std::chrono::milliseconds(100);
         Steinberg::ViewRect drag(0, 0, 900 + i, 500);
+        HostFrame::inside_host_call = true;
         REQUIRE(view->onSize(&drag) == Steinberg::kResultTrue);
+        HostFrame::inside_host_call = false;
     }
+    // The request never came from inside the host's own onSize call.
+    REQUIRE(frame.requests_inside_host_call == 0);
     if (!stalled)
         REQUIRE(frame.requests.empty());
     // Once they stop, the last snapped size is asked back, once.
@@ -1098,9 +1107,10 @@ TEST_CASE(
             Steinberg::kResultTrue);
     Steinberg::ViewRect fixed_size(0, 0, 700, 300);
     REQUIRE(fixed->onSize(&fixed_size) == Steinberg::kResultTrue);
-    REQUIRE(g_log.saw("set_size:700x300"));
-    loop.run_for(0.3);
-    REQUIRE(frame.requests.empty());
+    // The fixed editor takes no host size; the host is asked for its own.
+    REQUIRE_FALSE(g_log.saw("set_size:700x300"));
+    REQUIRE(loop.run_until([&] { return !frame.requests.empty(); }));
+    REQUIRE(frame.requests.back() == "400x300");
     REQUIRE(fixed->removed() == Steinberg::kResultOk);
     fixed->setFrame(nullptr);
     fixed->release();

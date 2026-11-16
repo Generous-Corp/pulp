@@ -21,6 +21,7 @@
 #include <pulp/state/store.hpp>
 
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <thread>
 
@@ -222,11 +223,12 @@ TEST_CASE("AU v2 opens, sizes and closes a contract editor, twice",
         REQUIRE(contract_log().saw("set_size:640x480"));
         const auto calls = contract_log().calls.size();
         [view setFrameSize:NSMakeSize(100, 100)];
-        // The frame is brought inside the editor's bounds at its 4:3 aspect.
-        REQUIRE(view.frame.size.width == 200);
-        REQUIRE(view.frame.size.height == 150);
+        // The editor takes the size inside its bounds at once; the frame is
+        // brought there once the host's sizes settle.
         REQUIRE(contract_log().saw("set_size:200x150"));
-        REQUIRE(contract_log().calls.size() == calls + 1);
+        REQUIRE(MainLoop().run_until([&] { return view.frame.size.width == 200; }));
+        REQUIRE(view.frame.size.height == 150);
+        REQUIRE(contract_log().calls.size() > calls);
         [view setFrameSize:NSMakeSize(640, 480)];
 
         // The window's backing scale reaches the editor's size.
@@ -277,7 +279,7 @@ TEST_CASE("AU v2 opens, sizes and closes a contract editor, twice",
     g_instance = nullptr;
 }
 
-TEST_CASE("an AU v2 contract view snaps a host resize to the editor's declared hints",
+TEST_CASE("an AU v2 contract view snaps a host resize to the editor's declared hints once it settles",
           "[auv2][editor-host][au-contract][resize-hints]") {
     EditorEnvironment env;
     reset_contract_recording();
@@ -286,18 +288,35 @@ TEST_CASE("an AU v2 contract view snaps a host resize to the editor's declared h
     g_instance = &instance;
     AudioUnit au = fake_audio_unit();
     NSWindow* window = make_window();
+    MainLoop loop;
     @autoreleasepool {
         contract_config().identity_adjust = true; // the view alone enforces the hints
         NSView* view = [open_view(au) retain];
         REQUIRE(view != nil);
         [window.contentView addSubview:view];
 
+        // The frame is the host's until it stops resizing.
         [view setFrameSize:NSMakeSize(1000, 1000)];
-        REQUIRE(view.frame.size.width == 800);
+        REQUIRE(view.frame.size.width == 1000);
+        REQUIRE(contract_log().saw("set_size:800x600"));
+        REQUIRE(loop.run_until([&] { return view.frame.size.width == 800; }));
         REQUIRE(view.frame.size.height == 600);
         [view setFrameSize:NSMakeSize(640, 300)];
-        REQUIRE(view.frame.size.width == 400);
+        REQUIRE(loop.run_until([&] { return view.frame.size.width == 400; }));
         REQUIRE(view.frame.size.height == 300);
+
+        // A burst of sizes is answered once, after the last.
+        bool stalled = false;
+        for (int i = 0; i < 5; ++i) {
+            const auto before = std::chrono::steady_clock::now();
+            loop.run_for(0.02);
+            stalled |= std::chrono::steady_clock::now() - before > std::chrono::milliseconds(100);
+            [view setFrameSize:NSMakeSize(900 + i, 500)];
+        }
+        if (!stalled)
+            REQUIRE(view.frame.size.width == 904);
+        REQUIRE(loop.run_until([&] { return view.frame.size.width == 667; }));
+        REQUIRE(view.frame.size.height == 500);
         [view release];
     }
     contract_config() = {};
@@ -307,11 +326,11 @@ TEST_CASE("an AU v2 contract view snaps a host resize to the editor's declared h
         NSView* view = [open_view(au) retain];
         REQUIRE(view != nil);
         [window.contentView addSubview:view];
-        // A fixed-size editor has one size: the frame goes back to it and
-        // the editor is told nothing.
+        // A fixed-size editor takes no host size: the frame goes back to its
+        // size and the editor is told nothing.
         const auto calls = contract_log().calls.size();
         [view setFrameSize:NSMakeSize(900, 700)];
-        REQUIRE(view.frame.size.width == 400);
+        REQUIRE(loop.run_until([&] { return view.frame.size.width == 400; }));
         REQUIRE(view.frame.size.height == 300);
         REQUIRE(contract_log().calls.size() == calls);
         [view release];

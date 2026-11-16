@@ -796,7 +796,9 @@ that check runs before `has_editor()`. Things to keep straight:
   (`detail::constrain_to_hints()`). An `onSize` the host sends without calling
   `checkSizeConstraint` goes through `ContractEditorSession::set_host_size()`:
   the editor gets the constrained size and `IPlugFrame::resizeView` is asked for
-  it (a fixed-size editor keeps the host's size).
+  it once the host's sizes settle (a fixed-size editor takes no host size and
+  the host is asked for its own). Until the host follows, the stored rect is the
+  snapped size while the host's window keeps the size it chose.
 - `IPlugViewContentScaleSupport` exists only on `ContractPlugView`;
   `PulpPlugView` (the ViewBridge view) does not implement it. Neither view's
   `attached()`/`removed()` call `visibility_changed`, so the native-surface
