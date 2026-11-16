@@ -918,8 +918,9 @@ TEST_CASE("the container-follow test seam is found by the lookup the shipping ch
                               "testingENSt3__18optionalIbEE") != nullptr);
 }
 
-TEST_CASE("an AU v2 editor's own resize request is acknowledged once, then limits apply to the host",
-          "[auv2][editor-host][au-contract][resize-request]") {
+TEST_CASE(
+    "an AU v2 editor's own resize request is acknowledged once, then limits apply to the host",
+    "[auv2][editor-host][au-contract][resize-request]") {
     EditorEnvironment env;
     reset_contract_recording();
     contract_config().identity_adjust = true;
