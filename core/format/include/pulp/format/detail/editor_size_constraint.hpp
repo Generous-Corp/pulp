@@ -59,8 +59,8 @@ inline bool constrain_to_hints(const ViewSize& hints, std::uint32_t& width, std:
     // whose own value lies inside the width bounds.
     std::uint32_t lo = hints.min_width;
     {
-        auto from_height = static_cast<std::uint32_t>(std::max(
-            1.0, std::floor((static_cast<double>(hints.min_height) - 0.5) * ratio)));
+        auto from_height = static_cast<std::uint32_t>(
+            std::max(1.0, std::floor((static_cast<double>(hints.min_height) - 0.5) * ratio)));
         while (height_for(from_height) < hints.min_height)
             ++from_height;
         lo = std::max(lo, from_height);
