@@ -482,6 +482,17 @@ bool RmlUiSurface::attach(void* parent) {
 #if defined(PULP_VELLUM_RMLUI_HAS_DENSITY_RATIO)
             d.context->set_density_ratio(static_cast<float>(s));
 #endif
+#if defined(PULP_VELLUM_RMLUI_HAS_WARM)
+            // Textures, geometry and glyphs are prepared here, before the
+            // first frame is requested, so the first frame has less to do.
+            // This runs on the calling (main) thread inside the host's attach
+            // call, with rmlui_mutex() held. The SDK header does not say warm()
+            // enters the instance's scope, so it runs inside one.
+            {
+                vellum::rmlui::NativeContext::Scope scope(*d.context);
+                d.context->warm();
+            }
+#endif
         }
     }
     if (!d.context) {
