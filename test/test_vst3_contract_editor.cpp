@@ -626,6 +626,13 @@ class HostFrame final : public Steinberg::IPlugFrame {
             ++requests_inside_host_call;
         if (!accept)
             return Steinberg::kResultFalse;
+        if (negotiate) {
+            // A host that checks the size constraint inside resizeView.
+            Steinberg::ViewRect negotiated = *rect;
+            if (view->checkSizeConstraint(&negotiated) != Steinberg::kResultTrue)
+                return Steinberg::kResultFalse;
+            *rect = negotiated;
+        }
         view->onSize(rect);
         return Steinberg::kResultTrue;
     }
@@ -646,6 +653,7 @@ class HostFrame final : public Steinberg::IPlugFrame {
     }
 
     bool accept = true;
+    bool negotiate = false;
     std::vector<std::string> requests;
     int requests_inside_host_call = 0;
     /// True while the test is inside a call it makes as the host.
@@ -1203,6 +1211,34 @@ TEST_CASE("VST3 synchronously acknowledges a fixed editor's resize request",
     REQUIRE(view->getSize(&rect) == Steinberg::kResultTrue);
     REQUIRE(rect.getWidth() == 600);
     REQUIRE(rect.getHeight() == 450);
+    REQUIRE(view->removed() == Steinberg::kResultTrue);
+    view->release();
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("a fixed editor's requested size survives host constraint negotiation",
+          "[vst3][editor-host][resize-ack]") {
+    EditorEnvironment env;
+    g_log = {};
+    g_config = {};
+    g_config.default_hints = true;
+    ScopedManualSnapTimer settle;
+    HostApp host_app;
+    HostFrame frame;
+    frame.negotiate = true;
+    PulpVst3Processor processor(create_contract_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    auto* view = open_contract_view(processor);
+    REQUIRE(view->setFrame(&frame) == Steinberg::kResultTrue);
+    REQUIRE(view->attached(fake_parent(), Steinberg::kPlatformTypeNSView) ==
+            Steinberg::kResultTrue);
+    REQUIRE(g_log.context->request_resize({600, 450, 1.0}));
+    REQUIRE(g_log.saw("set_size:600x450"));
+    // Not an exemption for anything else: an unsolicited proposal stays fixed.
+    Steinberg::ViewRect other(0, 0, 700, 525);
+    REQUIRE(view->checkSizeConstraint(&other) == Steinberg::kResultTrue);
+    REQUIRE(other.getWidth() == 600);
+    REQUIRE(other.getHeight() == 450);
     REQUIRE(view->removed() == Steinberg::kResultTrue);
     view->release();
     REQUIRE(processor.terminate() == Steinberg::kResultOk);

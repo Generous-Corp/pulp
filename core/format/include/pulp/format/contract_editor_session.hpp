@@ -183,6 +183,10 @@ class ContractEditorSession : public std::enable_shared_from_this<ContractEditor
     /// hints (locked aspect, min, max). A fixed-size editor answers with its
     /// own size. False when nothing usable results.
     bool constrain(std::uint32_t& width, std::uint32_t& height) const;
+
+    /// True while an editor-origin resize request for exactly this size awaits
+    /// the host's acknowledgment through set_host_size().
+    bool has_pending_resize(std::uint32_t width, std::uint32_t height) const;
     /// A size the host chose without asking `constrain()` first: the editor
     /// always takes the constrained size, and `snapped` is true when that
     /// differs from the host's by more than a pixel. Once host sizes stop arriving for `kSnapSettleMs`, the

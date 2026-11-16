@@ -75,6 +75,13 @@ class ContractEditorSession::Context final : public EditorContext {
         pending_resize_.reset();
         return true;
     }
+    bool has_pending_resize(std::uint32_t width, std::uint32_t height) const {
+        return pending_resize_ && pending_resize_->width == width &&
+               pending_resize_->height == height;
+    }
+    const std::optional<EditorSize>& pending_resize() const {
+        return pending_resize_;
+    }
     void cancel_resize_request() {
         ++resize_request_id_;
         pending_resize_.reset();
@@ -351,6 +358,15 @@ bool ContractEditorSession::constrain(std::uint32_t& width, std::uint32_t& heigh
         return false;
     const auto hints = editor_->size_hints();
     if (!detail::editor_resizable(hints)) {
+        // An accepted editor-origin request is the one size a fixed editor
+        // will take next: a host that negotiates inside the request (VST3
+        // checkSizeConstraint, CLAP adjust_size) must see it, without
+        // consuming the acknowledgment that set_host_size matches.
+        if (context_ && context_->pending_resize()) {
+            const auto& pending = *context_->pending_resize();
+            if (pending.width == width && pending.height == height)
+                return true;
+        }
         // A fixed-size editor has one size, whatever the host proposes.
         const auto fixed = size();
         if (fixed.width == 0 || fixed.height == 0)
@@ -372,6 +388,10 @@ bool ContractEditorSession::constrain(std::uint32_t& width, std::uint32_t& heigh
     width = w;
     height = h;
     return true;
+}
+
+bool ContractEditorSession::has_pending_resize(std::uint32_t width, std::uint32_t height) const {
+    return context_ && context_->has_pending_resize(width, height);
 }
 
 bool ContractEditorSession::set_host_size(std::uint32_t& width, std::uint32_t& height,

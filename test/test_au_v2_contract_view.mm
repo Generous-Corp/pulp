@@ -601,3 +601,28 @@ TEST_CASE("AU v2 acknowledges a fixed editor's resize request", "[auv2][editor-h
     AudioComponentInstanceDispose(au);
     g_instance = nullptr;
 }
+
+TEST_CASE("AU v2 reports a refused editor resize request and leaves the frame alone",
+          "[auv2][editor-host][resize-ack]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    contract_config().default_hints = true;
+    ScopedManualSnapTimer settle;
+    FakeInstance instance(true);
+    g_instance = &instance;
+    AudioUnit au = fake_audio_unit();
+    @autoreleasepool {
+        NSView* view = [open_view(au) retain];
+        REQUIRE(view != nil);
+        // The recording editor refuses anything under 200x150.
+        REQUIRE_FALSE(contract_log().context->request_resize({100, 100, 1.0}));
+        REQUIRE(view.frame.size.width == 400);
+        REQUIRE(view.frame.size.height == 300);
+        // The refusal left no pending request behind to acknowledge later.
+        REQUIRE(contract_log().context->request_resize({600, 450, 1.0}));
+        REQUIRE(view.frame.size.width == 600);
+        [view release];
+    }
+    AudioComponentInstanceDispose(au);
+    g_instance = nullptr;
+}

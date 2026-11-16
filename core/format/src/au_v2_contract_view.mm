@@ -87,6 +87,7 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
 - (void)adoptSession:(std::shared_ptr<pulp::format::ContractEditorSession>)session;
 - (pulp::format::ContractEditorSession*)session;
 - (void)applyEditorSize;
+- (void)moveFrameToEditorSize:(NSSize)size;
 @end
 
 @implementation PULP_AU_CONTRACT_HOST_VIEW_CLASS
@@ -110,6 +111,12 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
     const auto size = _session->size();
     _applyingEditorSize = true;
     [super setFrameSize:NSMakeSize(size.width, size.height)];
+    _applyingEditorSize = false;
+}
+
+- (void)moveFrameToEditorSize:(NSSize)size {
+    _applyingEditorSize = true;
+    [super setFrameSize:size];
     _applyingEditorSize = false;
 }
 
@@ -211,8 +218,18 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
     format::ContractEditorSession::HostHooks hooks;
     // The view owns the session, so it outlives every hook call.
     hooks.request_resize = [view](const format::EditorSize& requested) {
-        // AU v2 has no resize request: the host follows the view's frame.
-        [view setFrameSize:NSMakeSize(requested.width, requested.height)];
+        // AU v2 has no resize request: the host follows the view's frame. An
+        // editor-origin request is acknowledged to the editor first, and the
+        // frame moves only if the editor took the size.
+        auto* session = [view session];
+        auto width = requested.width;
+        auto height = requested.height;
+        if (session != nullptr && session->has_pending_resize(width, height)) {
+            bool snapped = false;
+            if (!session->set_host_size(width, height, snapped))
+                return false;
+        }
+        [view moveFrameToEditorSize:NSMakeSize(requested.width, requested.height)];
         return true;
     };
     auto session = format::ContractEditorSession::create(*ctx.processor, *ctx.store, *factory,
