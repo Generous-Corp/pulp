@@ -57,6 +57,8 @@ struct ContractEditorConfig {
     /// Ask the host for a larger size from inside set_size(), the way an
     /// editor reacting to a resize might.
     bool resize_inside_set_size = false;
+    /// set_size() refuses every size (the editor keeps its own).
+    bool refuse_set_size = false;
 };
 
 inline ContractEditorLog& contract_log() {
@@ -135,6 +137,8 @@ class RecordingContractEditor final : public format::Editor {
         return size_;
     }
     bool set_size(const format::EditorSize& size) override {
+        if (contract_config().refuse_set_size)
+            return false;
         if (size.width < 200 || size.height < 150)
             return false;
         size_ = size;

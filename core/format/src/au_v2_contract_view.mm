@@ -59,6 +59,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <utility>
 
 #ifndef PULP_AU_CONTRACT_VIEW_FACTORY_CLASS
@@ -71,6 +72,28 @@
 #define PULP_AU_CONTRACT_STRINGIFY(x) PULP_AU_CONTRACT_STRINGIFY_IMPL(x)
 
 namespace pulp::format::au {
+
+namespace {
+std::optional<bool> g_follow_container_override;
+}
+
+/// Whether this host resizes the editor view's enclosing container to match
+/// the view (Logic). A test can fix the answer.
+bool contract_resize_follows_container() {
+    if (g_follow_container_override)
+        return *g_follow_container_override;
+    static const bool follows = [] {
+        const auto info = pulp::format::detect_host_info();
+        return pulp::format::resolved_quirks(info.type, info.version).logic_au_v2_container_resize;
+    }();
+    return follows;
+}
+
+/// Test seam: force `contract_resize_follows_container()`; nullopt restores
+/// host detection.
+void set_contract_resize_follows_container_for_testing(std::optional<bool> follows) {
+    g_follow_container_override = follows;
+}
 
 /// The contract's key event for an AppKit key event.
 EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
@@ -127,49 +150,72 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
 // The editor's own resize request. AU v2 has no resize request: the host
 // follows the container's frame, so the request is a frame change that counts
 // as accepted only when the editor takes the size, the frame ends at exactly
-// that size and, under a host that resizes its enclosing container to match
-// (Logic), the container does too (detail::resize_request_accepted). Anything
-// else is rolled back and the editor is told it kept its previous size.
-// Main thread only, and never nested.
+// that size and origin and, under a host that resizes its enclosing container
+// to match (Logic), the container does too (detail::resize_request_accepted).
+// True always means set_size() followed. Anything else restores the frame in
+// full and tells the editor it kept its previous size; a refused restore
+// leaves the frame at whatever size the editor reports. A size the editor's
+// own limits would change is refused rather than negotiated. Main thread only,
+// and never nested. A frame change the host makes while this runs is swallowed.
 - (bool)requestEditorSize:(const pulp::format::EditorSize&)requested {
     using pulp::format::detail::FrameSize;
     if (![NSThread isMainThread] || _editorResizeActive || !_session ||
         _session->editor() == nullptr || requested.width == 0 || requested.height == 0)
         return false;
-    const FrameSize wanted{static_cast<double>(requested.width),
-                           static_cast<double>(requested.height)};
+    auto request_width = requested.width;
+    auto request_height = requested.height;
+    if (_session->resizable()) {
+        auto limited_width = request_width;
+        auto limited_height = request_height;
+        if (!_session->constrain(limited_width, limited_height) ||
+            limited_width != request_width || limited_height != request_height)
+            return false;
+    }
+    const FrameSize wanted{static_cast<double>(request_width), static_cast<double>(request_height)};
     const NSRect previous = self.frame;
-    if (pulp::format::detail::same_frame_size({previous.size.width, previous.size.height}, wanted))
+    const auto current = _session->size();
+    if (pulp::format::detail::same_frame_size({previous.size.width, previous.size.height},
+                                              wanted) &&
+        current.width == request_width && current.height == request_height)
         return true;
 
     NSView* container = self.superview;
     const NSRect previous_container = container != nil ? container.frame : NSZeroRect;
-    static const bool follow_container = [] {
-        const auto info = pulp::format::detect_host_info();
-        return pulp::format::resolved_quirks(info.type, info.version).logic_au_v2_container_resize;
-    }();
+    const bool follow_container = pulp::format::au::contract_resize_follows_container();
 
     _editorResizeActive = true;
     _applyingEditorSize = true;
     [super setFrameSize:NSMakeSize(wanted.width, wanted.height)];
     _applyingEditorSize = false;
-    const bool editor_took = _session->set_size(requested.width, requested.height);
+    const bool editor_took = _session->set_size(request_width, request_height);
     const NSRect after = self.frame;
     const NSRect after_container = container != nil ? container.frame : NSZeroRect;
-    const bool accepted = pulp::format::detail::resize_request_accepted(
+    bool accepted = pulp::format::detail::resize_request_accepted(
         wanted, {after.size.width, after.size.height}, editor_took, follow_container,
         container != nil && self.window != nil,
         {after_container.size.width, after_container.size.height});
+    if (accepted && follow_container && container != nil && self.window != nil)
+        accepted = pulp::format::detail::same_frame_origin(
+            {after.origin.x, after.origin.y}, {previous.origin.x, previous.origin.y});
     if (!accepted) {
         // Restore the host-owned parent first, then this view, so the parent's
         // autoresizing mask cannot move an already-restored child twice.
         if (container != nil && follow_container)
             [container setFrame:previous_container];
         _applyingEditorSize = true;
-        [super setFrameSize:previous.size];
+        [super setFrame:previous];
         _applyingEditorSize = false;
-        _session->set_size(static_cast<std::uint32_t>(previous.size.width),
-                           static_cast<std::uint32_t>(previous.size.height));
+        if (!_session->set_size(static_cast<std::uint32_t>(previous.size.width),
+                                static_cast<std::uint32_t>(previous.size.height))) {
+            // The editor will not go back to the frame's size: the frame
+            // follows the editor.
+            const auto kept = _session->size();
+            if (kept.width > 0 && kept.height > 0) {
+                _applyingEditorSize = true;
+                [super setFrameSize:NSMakeSize(kept.width, kept.height)];
+                _applyingEditorSize = false;
+            }
+        }
     }
     _editorResizeActive = false;
     return accepted;

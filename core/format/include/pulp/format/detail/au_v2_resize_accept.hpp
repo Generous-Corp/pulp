@@ -22,6 +22,10 @@ inline bool same_frame_size(FrameSize a, FrameSize b) {
            std::fabs(a.height - b.height) < kFrameTolerance;
 }
 
+inline bool same_frame_origin(FrameSize a, FrameSize b) {
+    return same_frame_size(a, b);
+}
+
 /// True when the request took. `container` is only consulted when
 /// `host_resizes_container` and a container exists.
 inline bool resize_request_accepted(FrameSize wanted, FrameSize view_after, bool editor_took_size,
