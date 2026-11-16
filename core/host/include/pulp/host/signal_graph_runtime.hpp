@@ -1351,6 +1351,10 @@ class SignalGraph : public format::AudioWorkgroupClient {
         std::uint64_t graph_event_epoch = 1;
         std::shared_ptr<detail::ControlIndexInputState> control_index_state;
         std::atomic<bool> control_index_busy{false};
+        // Instance resets for stateful nodes with a Control port. A checked
+        // Control stream-history reset runs them on the audio thread; each
+        // holds its instance so it outlives this snapshot's readers.
+        std::vector<std::function<void()>> control_stream_resets;
         // Keeps candidate-owned per-node measurers alive after publication.
         std::shared_ptr<SignalGraph> trigger_preparation_owner;
 

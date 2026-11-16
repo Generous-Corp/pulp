@@ -1792,3 +1792,6 @@ Both view controllers consult `Processor::editor_factory()` in
 an AUv3 built with `pulp_add_plugin(... UI <package>)` has its package's editor
 (an RmlUi or native-surface editor included). The module still links the view
 stack for the ViewBridge path, and the iOS path is compile-checked only.
+`_pulp_warn_ui_package_formats` (`tools/cmake/PulpEditorPackage.cmake`) does not
+name AUv3, because `AUv3` is in `_PULP_CONTRACT_EDITOR_FORMATS`; it still names
+the formats whose adapters serve no contract editor (LV2, AAX).

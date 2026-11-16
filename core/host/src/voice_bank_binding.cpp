@@ -16,7 +16,7 @@
 namespace pulp::host {
 namespace {
 
-constexpr std::uint32_t kSlots = 8;
+constexpr std::uint32_t kSlots = kVoiceBankSlots;
 
 // What a slot's idle probe reads. The owner's slot_note() is the same call the
 // bank already makes on the audio thread; a slot is idle when its voice is not
@@ -317,6 +317,34 @@ struct VoiceBankBinding::Impl {
         }
     }
 
+    struct ResolvedParameter {
+        std::shared_ptr<format::ProcessorNodeInstance> processor;
+        std::uint32_t id = 0;
+        float* cached = nullptr;
+    };
+    // Resolves a declared slot parameter for a write of `value`. Returns
+    // nullptr on success, otherwise why the write is refused.
+    const char* resolve_parameter(std::uint32_t slot_ordinal, const std::string& key, float value,
+                                  ResolvedParameter& resolved) {
+        if (slot_ordinal >= kSlots)
+            return "slot is outside the bank";
+        auto& slot = slots[slot_ordinal];
+        const auto target = slot.parameter_nodes.find(key);
+        const auto bounds = slot.parameter_bounds.find(key);
+        const auto id = slot.processor_parameter_ids.find(key);
+        const auto current = slot.parameters.find(key);
+        if (target == slot.parameter_nodes.end() || bounds == slot.parameter_bounds.end() ||
+            id == slot.processor_parameter_ids.end() || current == slot.parameters.end())
+            return "parameter is not bound in this slot";
+        if (!(value >= bounds->second.minimum && value <= bounds->second.maximum))
+            return "value is outside the parameter's authored bounds";
+        auto processor = graph.processor_node_instance(target->second);
+        if (!processor || !processor->parameter(id->second))
+            return "slot processor does not expose the parameter";
+        resolved = {std::move(processor), id->second, &current->second};
+        return nullptr;
+    }
+
     Impl() {
         tracker.on_note_on = [this](const midi::MpeNoteState& note) {
             owner->dispatch({0, midi::MpeExpressionEvent::Kind::NoteOn, note});
@@ -513,7 +541,11 @@ bool VoiceBankBinding::activate(VoiceBankBindingResult& result) noexcept {
 }
 HostEventResult VoiceBankBinding::begin_block(std::uint64_t first_sample,
                                               std::size_t frames) noexcept {
-    if (impl_->block_open || frames == 0 || frames > impl_->max_frames)
+    // Result codes follow HostEventIngress: an open block is Busy, a bad
+    // window is OutOfRange, and publishing with no open block is StaleEpoch.
+    if (impl_->block_open)
+        return HostEventResult::Busy;
+    if (frames == 0 || frames > impl_->max_frames)
         return HostEventResult::OutOfRange;
     const auto status = impl_->ingress.begin_block(impl_->epoch, first_sample, frames);
     if (status == HostEventResult::Accepted) {
@@ -525,7 +557,7 @@ HostEventResult VoiceBankBinding::begin_block(std::uint64_t first_sample,
 }
 HostEventResult VoiceBankBinding::publish(const HostEventRecord& event) noexcept {
     if (!impl_->block_open)
-        return HostEventResult::Busy;
+        return HostEventResult::StaleEpoch;
     if (event.has_ump || event.midi.size() == 0)
         return HostEventResult::OutOfRange;
     return impl_->ingress.publish(event);
@@ -610,6 +642,14 @@ VoiceBankBindingCode VoiceBankBinding::render(audio::BufferView<float>& stereo,
         }
     }
     const auto failures_before = impl_->graph.routed_only_execution_failures();
+    // A graph failure part way through the block silences the whole block, so
+    // frames after the failing slice never keep the host's previous contents.
+    const auto fail_graph = [&]() {
+        stereo.clear();
+        (void)impl_->ingress.end_block();
+        impl_->block_open = false;
+        return VoiceBankBindingCode::GraphExecutionFailure;
+    };
     std::size_t offset = 0;
     for (std::size_t index = 0; index < count;) {
         const auto at = static_cast<std::size_t>(impl_->projected[index].absolute_sample -
@@ -618,11 +658,8 @@ VoiceBankBindingCode VoiceBankBinding::render(audio::BufferView<float>& stereo,
             auto slice = stereo.slice(offset, at - offset);
             audio::BufferView<const float> input(nullptr, 0, at - offset);
             impl_->graph.process(slice, input, static_cast<int>(at - offset));
-            if (impl_->graph.routed_only_execution_failures() != failures_before) {
-                (void)impl_->ingress.end_block();
-                impl_->block_open = false;
-                return VoiceBankBindingCode::GraphExecutionFailure;
-            }
+            if (impl_->graph.routed_only_execution_failures() != failures_before)
+                return fail_graph();
             offset = at;
         }
         do {
@@ -644,11 +681,8 @@ VoiceBankBindingCode VoiceBankBinding::render(audio::BufferView<float>& stereo,
         auto slice = stereo.slice(offset, frames - offset);
         audio::BufferView<const float> input(nullptr, 0, frames - offset);
         impl_->graph.process(slice, input, static_cast<int>(frames - offset));
-        if (impl_->graph.routed_only_execution_failures() != failures_before) {
-            (void)impl_->ingress.end_block();
-            impl_->block_open = false;
-            return VoiceBankBindingCode::GraphExecutionFailure;
-        }
+        if (impl_->graph.routed_only_execution_failures() != failures_before)
+            return fail_graph();
     }
     (void)impl_->ingress.end_block();
     impl_->block_open = false;
@@ -671,28 +705,30 @@ VoiceBankBindingCode VoiceBankBinding::dispatch_deferred(std::uint64_t epoch, st
     } else {
         impl_->owner->dispatch({0, kind, state});
     }
+    if (kind == midi::MpeExpressionEvent::Kind::NoteOff) {
+        // The voice is released here, so its tracker entry is retired too, or
+        // it would hold one of the tracker's 128 keys until a MIDI note-off for
+        // the same key arrived. The callback is suppressed: the release above
+        // already went to the owner or the pedal hold table.
+        const auto* tracked = impl_->tracker.find(state.channel, state.note);
+        if (tracked != nullptr && tracked->note_id == generation) {
+            impl_->suppress_note_off = true;
+            (void)impl_->tracker.process(midi::MidiEvent::note_off(state.channel, state.note));
+            impl_->suppress_note_off = false;
+        }
+    }
     return VoiceBankBindingCode::Ok;
 }
 bool VoiceBankBinding::set_slot_parameter(std::uint32_t slot, std::string_view path, float value) {
-    if (slot >= kSlots || !std::isfinite(value) || impl_->block_open)
+    if (!std::isfinite(value) || impl_->block_open)
         return false;
-    const auto key = std::string(path);
-    const auto target = impl_->slots[slot].parameter_nodes.find(key);
-    const auto bounds = impl_->slots[slot].parameter_bounds.find(key);
-    const auto id = impl_->slots[slot].processor_parameter_ids.find(key);
-    if (target == impl_->slots[slot].parameter_nodes.end() ||
-        bounds == impl_->slots[slot].parameter_bounds.end() ||
-        id == impl_->slots[slot].processor_parameter_ids.end() || value < bounds->second.minimum ||
-        value > bounds->second.maximum)
+    Impl::ResolvedParameter write;
+    if (impl_->resolve_parameter(slot, std::string(path), value, write) != nullptr)
         return false;
-    const auto node = target->second;
-    const auto processor = impl_->graph.processor_node_instance(node);
-    if (!processor || !processor->parameter(id->second))
-        return false;
-    processor->state_store().set_value(id->second, value);
-    impl_->slots[slot].parameters.at(key) = value;
+    write.processor->state_store().set_value(write.id, value);
+    *write.cached = value;
     // The processor must run again with the new value before it can be skipped.
-    processor->reset_idle_confirmation();
+    write.processor->reset_idle_confirmation();
     return true;
 }
 
@@ -736,42 +772,25 @@ bool VoiceBankBinding::restore_state(const VoiceBankState& state, VoiceBankBindi
         return false;
     }
     struct Write {
-        std::shared_ptr<format::ProcessorNodeInstance> processor;
-        std::uint32_t slot = 0;
-        std::uint32_t id = 0;
-        const std::string* key = nullptr;
+        Impl::ResolvedParameter target;
         float value = 0.0f;
     };
     std::vector<Write> writes;
     writes.reserve(canonical.parameters.size());
     // Resolve and bound-check every value before the first write.
     for (const auto& value : canonical.parameters) {
-        const auto refuse = [&](const char* detail) {
+        Impl::ResolvedParameter target;
+        if (const auto* detail =
+                impl_->resolve_parameter(value.slot_ordinal, value.target, value.value, target)) {
             result = {VoiceBankBindingCode::InvalidState, value.slot_ordinal, value.target, detail};
             return false;
-        };
-        if (value.slot_ordinal >= kSlots)
-            return refuse("slot is outside the bank");
-        auto& slot = impl_->slots[value.slot_ordinal];
-        const auto target = slot.parameter_nodes.find(value.target);
-        const auto bounds = slot.parameter_bounds.find(value.target);
-        const auto id = slot.processor_parameter_ids.find(value.target);
-        const auto current = slot.parameters.find(value.target);
-        if (target == slot.parameter_nodes.end() || bounds == slot.parameter_bounds.end() ||
-            id == slot.processor_parameter_ids.end() || current == slot.parameters.end())
-            return refuse("parameter is not bound in this slot");
-        if (!(value.value >= bounds->second.minimum && value.value <= bounds->second.maximum))
-            return refuse("value is outside the parameter's authored bounds");
-        auto processor = impl_->graph.processor_node_instance(target->second);
-        if (!processor || !processor->parameter(id->second))
-            return refuse("slot processor does not expose the parameter");
-        writes.push_back(
-            {std::move(processor), value.slot_ordinal, id->second, &current->first, value.value});
+        }
+        writes.push_back({std::move(target), value.value});
     }
     for (const auto& write : writes) {
-        write.processor->state_store().set_value(write.id, write.value);
-        impl_->slots[write.slot].parameters.at(*write.key) = write.value;
-        write.processor->reset_idle_confirmation();
+        write.target.processor->state_store().set_value(write.target.id, write.value);
+        *write.target.cached = write.value;
+        write.target.processor->reset_idle_confirmation();
     }
     result = {};
     return true;

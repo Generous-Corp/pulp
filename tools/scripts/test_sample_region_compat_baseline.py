@@ -53,6 +53,19 @@ class BaselineTests(unittest.TestCase):
         self.assertIn('${ROOT}/core/runtime/src/durable_file_replacement.cpp"', listing)
         self.assertIn('${ROOT}/core/host/src/processor_restore.cpp"', listing)
 
+    def test_web_sources_compile_spectral_persistence_the_serializer_calls(self):
+        # graph_serializer.cpp calls spectral_persistence::read, defined in
+        # spectral_graph_persistence.cpp; omitting it fails wasm-ld.
+        repo = Path(__file__).resolve().parents[2]
+        listing = (repo / "tools" / "cmake" /
+                   "PulpSampleRegionWebSources.cmake").read_text(encoding="utf-8")
+        serializer = (repo / "core/host/src/graph_serializer.cpp").read_text(encoding="utf-8")
+        self.assertIn("spectral_persistence::read", serializer)
+        self.assertIn('${ROOT}/core/host/src/spectral_graph_persistence.cpp"', listing)
+        persistence = (repo / "core/host/src/spectral_graph_persistence.cpp").read_text(encoding="utf-8")
+        self.assertIn("runtime::base64_encode", persistence)
+        self.assertIn('${ROOT}/core/runtime/src/base64.cpp"', listing)
+
     def test_web_sources_define_every_host_query_the_closure_calls(self):
         # The isolated web profile links only the curated closure, so a
         # function its sources call must be DEFINED by one of its sources or
