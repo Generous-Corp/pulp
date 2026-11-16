@@ -38,6 +38,10 @@ CONTEXT_PRODUCERS = {
     "Vellum trusted freeze": (".github/workflows/vellum-trusted-gate.yml",),
     "drift-fast": (".github/workflows/drift-fast.yml",),
     "workflow-lint": (".github/workflows/workflow-lint.yml",),
+    "review-verdict": (
+        ".github/workflows/review-verdict.yml",
+        ".github/workflows/review-verdict-merge-group.yml",
+    ),
 }
 
 # Code a merge group runs to decide whether the macOS suite may be skipped by
