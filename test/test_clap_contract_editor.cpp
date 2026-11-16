@@ -685,7 +685,9 @@ TEST_CASE("a CLAP host that calls set_size without adjust_size gets the snapped 
     contract_config().default_hints = true;
     REQUIRE(p.gui->create(p.plugin, platform_api(), false));
     REQUIRE(p.gui->set_parent(p.plugin, &window));
+    const auto calls_before = contract_log().calls.size();
     REQUIRE(p.gui->set_size(p.plugin, 700, 300));
+    REQUIRE(contract_log().calls.size() == calls_before); // the editor is told nothing
     // The fixed editor takes no host size; the host is asked for its own.
     REQUIRE_FALSE(contract_log().saw("set_size:700x300"));
     REQUIRE(loop.run_until([&] { return !host.resize_requests.empty(); }));

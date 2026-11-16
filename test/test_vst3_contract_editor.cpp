@@ -1115,7 +1115,9 @@ TEST_CASE(
     REQUIRE(fixed->attached(fake_parent(), Steinberg::kPlatformTypeNSView) ==
             Steinberg::kResultTrue);
     Steinberg::ViewRect fixed_size(0, 0, 700, 300);
+    const auto calls_before = g_log.calls.size();
     REQUIRE(fixed->onSize(&fixed_size) == Steinberg::kResultTrue);
+    REQUIRE(g_log.calls.size() == calls_before); // the editor is told nothing
     // The fixed editor takes no host size; the host is asked for its own.
     REQUIRE_FALSE(g_log.saw("set_size:700x300"));
     REQUIRE(loop.run_until([&] { return !frame.requests.empty(); }));
