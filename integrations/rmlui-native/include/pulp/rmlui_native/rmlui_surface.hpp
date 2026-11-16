@@ -2,7 +2,7 @@
 
 /// @file rmlui_surface.hpp
 /// RmlUi on a pulp-native Metal surface: the glue between Vellum's open RmlUi
-/// entry point (`VellumRmlUiNative::Native`) and `pulp::native`.
+/// entry point (`VellumRmlUi::Native`) and `pulp::native`.
 ///
 /// An `RmlUiSurface` owns a `MetalSurface`, a `FramePump` and a
 /// `vellum::rmlui::NativeContext`. It translates the surface's input into
