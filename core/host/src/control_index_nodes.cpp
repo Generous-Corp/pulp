@@ -10,6 +10,8 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <string>
+#include <utility>
 
 namespace pulp::host {
 
@@ -70,6 +72,21 @@ const char* control_process_result_fix(ControlProcessResult result) noexcept {
     return "unknown result";
 }
 
+namespace {
+
+// Every built-in Control node runs a bounded per-frame loop over prepared
+// state with no allocation, lock, or blocking call.
+void declare_control_rt_contract(CustomNodeType& type,
+                                 std::string loop_bound = "one scalar update per frame") {
+    type.rt_contract.declared = true;
+    type.rt_contract.safety_class = audio::RtSafetyClass::AudioCallbackSafeAfterPrepare;
+    type.rt_contract.allocation_free = true;
+    type.rt_contract.worst_case_work = [](int) { return signal::rt::RtWorkCounts{}; };
+    type.rt_contract.loop_bound = std::move(loop_bound);
+}
+
+} // namespace
+
 CustomNodeType make_control_index_input_type() {
     CustomNodeType type;
     type.type_id = std::string(kControlIndexInputTypeId);
@@ -84,11 +101,7 @@ CustomNodeType make_control_index_input_type() {
         if (output.num_channels() != 0 && frames > 0)
             std::fill_n(output.channel_ptr(0), frames, 0.0f);
     };
-    type.rt_contract.declared = true;
-    type.rt_contract.safety_class = audio::RtSafetyClass::AudioCallbackSafeAfterPrepare;
-    type.rt_contract.allocation_free = true;
-    type.rt_contract.worst_case_work = [](int) { return signal::rt::RtWorkCounts{}; };
-    type.rt_contract.loop_bound = "one float copy per frame";
+    declare_control_rt_contract(type, "one float copy per frame");
     return type;
 }
 
@@ -220,16 +233,6 @@ bool load_control_state(ControlInstance& instance, const std::vector<std::uint8_
     std::copy(values.begin(), values.end(), instance.parameters.begin());
     instance.reset();
     return true;
-}
-
-// Every built-in Control node runs a bounded per-frame loop over prepared
-// state with no allocation, lock, or blocking call.
-void declare_control_rt_contract(CustomNodeType& type) {
-    type.rt_contract.declared = true;
-    type.rt_contract.safety_class = audio::RtSafetyClass::AudioCallbackSafeAfterPrepare;
-    type.rt_contract.allocation_free = true;
-    type.rt_contract.worst_case_work = [](int) { return signal::rt::RtWorkCounts{}; };
-    type.rt_contract.loop_bound = "one scalar update per frame";
 }
 
 CustomNodeType make_binary_type(std::string_view id, float (*rule)(float, float) noexcept) {

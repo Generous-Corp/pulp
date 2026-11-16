@@ -9,6 +9,8 @@
 
 #include <pulp/rmlui_native/rmlui_surface.hpp>
 
+#include "../integrations/rmlui-native/src/input_drain.hpp"
+
 #include <vellum/rmlui/assets.hpp>
 #include <vellum/rmlui/native.hpp>
 
@@ -21,8 +23,11 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
+#include <future>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -63,12 +68,17 @@ body { width: 100%; height: 100%; margin: 0; font-family: Arial; font-size: 14dp
 #button { position: absolute; left: 0; top: 0; width: 100dp; height: 50dp;
           background-color: #ff0000; cursor: pointer; }
 #button:hover { background-color: #00ff00; }
+#pxbox { position: absolute; left: 0; top: 160px; width: 100px; height: 10px;
+         background-color: #0000ff; }
+#dpbox { position: absolute; left: 0; top: 175dp; width: 100dp; height: 10dp;
+         background-color: #0000ff; }
 #field { display: block; position: absolute; left: 0; top: 100dp; width: 200dp; height: 30dp;
          background-color: #333333; }
 </style>
 </head>
 <body>
 <div id="button"></div>
+<div id="pxbox"></div><div id="dpbox"></div>
 <input id="field" type="text" value="ab"/>
 </body>
 </rml>)";
@@ -109,6 +119,14 @@ class CountingRenderer final : public Rml::RenderInterface {
         rendered.fetch_add(1);
         // Long enough that two unserialized threads would overlap here.
         std::this_thread::sleep_for(std::chrono::microseconds(draw_delay_us.load()));
+        // A test can park the render thread inside a draw, lock held.
+        if (hold_draws.load()) {
+            parked.store(true);
+            // unbounded-wait: allow DrawCleanup releases this latch on bounded assertion failure.
+            while (hold_draws.load())
+                std::this_thread::sleep_for(std::chrono::microseconds(200));
+            parked.store(false);
+        }
         leave();
     }
     void ReleaseGeometry(Rml::CompiledGeometryHandle) override {}
@@ -127,6 +145,8 @@ class CountingRenderer final : public Rml::RenderInterface {
     std::atomic<int> compiled{0};
     std::atomic<int> rendered{0};
     std::atomic<int> draw_delay_us{200};
+    std::atomic<bool> hold_draws{false};
+    std::atomic<bool> parked{false};
 
   private:
     static void enter() {
@@ -217,6 +237,29 @@ struct Editor {
                                 clickCount:1
                                   pressure:1.0];
     }
+    /// A pointer event at a document position in dp. Events are in window
+    /// points and reach RmlUi in device pixels, and a dp is `density_ratio()`
+    /// device pixels: with an SDK that lacks the setter dp equals px, so on a 2x
+    /// window the same document position is fewer points.
+    NSEvent* doc_mouse(NSEventType type, double x, double y) const {
+        const double to_points = ui->density_ratio() / window.backingScaleFactor;
+        return mouse(type, x * to_points, y * to_points);
+    }
+    /// idle() only try-locks, so a frame in flight leaves a resize for a later
+    /// tick. Tick until the context has the wanted size, within a deadline.
+    bool sync_context_size(Rml::Vector2i want, double seconds = 5.0) {
+        bool synced = false;
+        const auto until =
+            std::chrono::steady_clock::now() + std::chrono::duration<double>(seconds);
+        while (!synced && std::chrono::steady_clock::now() < until) {
+            ui->idle();
+            ui->with_context([&](Rml::Context& ctx) { synced = ctx.GetDimensions() == want; });
+            if (!synced)
+                [[NSRunLoop currentRunLoop]
+                    runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+        }
+        return synced;
+    }
     template <class Pred> bool wait_for(Pred done, double seconds = 5.0) {
         const auto until =
             std::chrono::steady_clock::now() + std::chrono::duration<double>(seconds);
@@ -226,6 +269,24 @@ struct Editor {
             [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
         }
         return true;
+    }
+};
+
+// Declared after listeners and before parking a draw: unwinding must release
+// render threads and stop the requester before detaching editors or listeners.
+template <class EditorType> struct DrawCleanup {
+    std::vector<EditorType*> editors;
+    std::atomic<bool> stop{false};
+    std::thread requester;
+
+    ~DrawCleanup() {
+        stop.store(true);
+        for (auto* editor : editors)
+            editor->renderer.hold_draws.store(false);
+        if (requester.joinable())
+            requester.join();
+        for (auto* editor : editors)
+            editor->ui->detach();
     }
 };
 
@@ -366,8 +427,8 @@ TEST_CASE("a focused RmlUi text field takes the keyboard and receives text",
         REQUIRE(face != 0);
         REQUIRE_FALSE(e.ui->surface()->text_focus());
         // Past the end of the text, so the caret lands after "ab".
-        [e.view() mouseDown:e.mouse(NSEventTypeLeftMouseDown, 190, 115)];
-        [e.view() mouseUp:e.mouse(NSEventTypeLeftMouseUp, 190, 115)];
+        [e.view() mouseDown:e.doc_mouse(NSEventTypeLeftMouseDown, 190, 115)];
+        [e.view() mouseUp:e.doc_mouse(NSEventTypeLeftMouseUp, 190, 115)];
         e.ui->flush_input();
         REQUIRE(e.ui->surface()->text_focus());
         id<NSTextInputClient> client = (id<NSTextInputClient>)e.view();
@@ -394,11 +455,12 @@ TEST_CASE("the RmlUi context follows the surface size", "[native-surface][rmlui]
         REQUIRE(e.attach());
         const double scale = e.window.backingScaleFactor;
         [e.window setContentSize:NSMakeSize(400, 260)];
-        e.ui->idle();
+        const Rml::Vector2i want(static_cast<int>(400 * scale), static_cast<int>(260 * scale));
+        REQUIRE(e.sync_context_size(want));
         Rml::Vector2i size;
         e.ui->with_context([&](Rml::Context& ctx) { size = ctx.GetDimensions(); });
-        REQUIRE(size.x == static_cast<int>(400 * scale));
-        REQUIRE(size.y == static_cast<int>(260 * scale));
+        REQUIRE(size.x == want.x);
+        REQUIRE(size.y == want.y);
         e.ui->detach();
     }
 }
@@ -496,8 +558,165 @@ TEST_CASE("the surface uses the device the caller's renderer was built on",
     }
 }
 
+// A window whose backing scale a test can set, standing in for a display with
+// another scale.
+@interface PulpRmlUiScaleWindow : NSWindow
+@property(nonatomic) CGFloat testScale;
+@end
+@implementation PulpRmlUiScaleWindow
+- (CGFloat)backingScaleFactor {
+    return self.testScale > 0 ? self.testScale : [super backingScaleFactor];
+}
+@end
+
+TEST_CASE("px lengths are device pixels and dp lengths follow the density ratio",
+          "[native-surface][rmlui][scale]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        [NSApplication sharedApplication];
+        auto* window = [[PulpRmlUiScaleWindow alloc] initWithContentRect:NSMakeRect(0, 0, 300, 200)
+                                                               styleMask:NSWindowStyleMaskBorderless
+                                                                 backing:NSBackingStoreBuffered
+                                                                   defer:NO];
+        window.releasedWhenClosed = NO;
+        window.testScale = 1.0;
+        MemoryAssets assets;
+        CountingRenderer renderer;
+        RmlUiSurfaceOptions options;
+        options.document = "probe.rml";
+        options.font_faces = {"font.ttf"};
+        RmlUiSurface ui(assets, renderer, {}, options);
+        REQUIRE(ui.attach((__bridge void*)window.contentView));
+        NSView* view = (__bridge NSView*)ui.surface()->view();
+        // Hit testing needs a laid-out document, which the first frame does.
+        const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (ui.frames() == 0 && std::chrono::steady_clock::now() < until)
+            [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+        REQUIRE(ui.frames() > 0);
+
+        auto measure = [&](double scale, float& px_width, float& dp_width, bool& hover_px,
+                           bool& hover_dp) {
+            window.testScale = scale;
+            [view viewDidChangeBackingProperties];
+            // idle() only try-locks, so a frame in flight leaves the resize for
+            // a later tick. Tick until the context has the new size, then run
+            // its update under the lock so the dp layout is current before any
+            // measurement or pointer event.
+            const Rml::Vector2i want(static_cast<int>(std::lround(300 * scale)),
+                                     static_cast<int>(std::lround(200 * scale)));
+            bool synced = false;
+            const auto sync_until = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            while (!synced && std::chrono::steady_clock::now() < sync_until) {
+                ui.idle();
+                ui.with_context([&](Rml::Context& ctx) {
+                    synced = ctx.GetDimensions() == want;
+                    if (synced)
+                        ctx.Update();
+                });
+                if (!synced)
+                    [[NSRunLoop currentRunLoop]
+                        runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+            }
+            REQUIRE(synced);
+            // Pointer positions are in points and reach RmlUi in device pixels.
+            // 60 points is 60*scale device pixels: outside a 100px box at 2x.
+            auto mouse = [&](double y) {
+                return [NSEvent mouseEventWithType:NSEventTypeMouseMoved
+                                          location:NSMakePoint(60, 200 - y)
+                                     modifierFlags:0
+                                         timestamp:1.0
+                                      windowNumber:window.windowNumber
+                                           context:nil
+                                       eventNumber:0
+                                        clickCount:1
+                                          pressure:1.0];
+            };
+            ui.with_context([&](Rml::Context& ctx) {
+                px_width = ctx.GetDocument(0)->GetElementById("pxbox")->GetClientWidth();
+                dp_width = ctx.GetDocument(0)->GetElementById("dpbox")->GetClientWidth();
+            });
+            [view mouseMoved:mouse(162 / scale)];
+            ui.with_context([&](Rml::Context& ctx) {
+                hover_px = ctx.GetDocument(0)->GetElementById("pxbox")->IsPseudoClassSet("hover");
+            });
+            // 177 in the context's dp-scaled layout: inside #dpbox, which starts
+            // at 175dp (175 * density_ratio device pixels), in points.
+            [view mouseMoved:mouse(177 * ui.density_ratio() / scale)];
+            ui.with_context([&](Rml::Context& ctx) {
+                hover_dp = ctx.GetDocument(0)->GetElementById("dpbox")->IsPseudoClassSet("hover");
+            });
+        };
+
+        float px = 0, dp = 0;
+        bool hover_px = false, hover_dp = false;
+        // 1x: the two units agree.
+        measure(1.0, px, dp, hover_px, hover_dp);
+        REQUIRE(px == 100.0f);
+        REQUIRE(dp == 100.0f);
+        REQUIRE(hover_px);
+        REQUIRE(hover_dp);
+        REQUIRE(ui.density_ratio() == 1.0);
+
+        // 2x: a px length stays 100 device pixels (50 points), so the pointer
+        // at 60 points is outside it. A dp length is a point: 200 device pixels
+        // with a density ratio, so the pointer is inside; without one it is
+        // 100 device pixels and the document renders half size.
+        measure(2.0, px, dp, hover_px, hover_dp);
+        REQUIRE(px == 100.0f);
+        REQUIRE_FALSE(hover_px);
+        if (density_ratio_supported()) {
+            REQUIRE(ui.density_ratio() == 2.0);
+            REQUIRE(dp == 200.0f);
+            REQUIRE(hover_dp);
+        } else {
+            REQUIRE(ui.density_ratio() == 1.0);
+            REQUIRE(dp == 100.0f);
+            REQUIRE_FALSE(hover_dp);
+        }
+
+        // Back to 1x: nothing stays scaled.
+        measure(1.0, px, dp, hover_px, hover_dp);
+        REQUIRE(px == 100.0f);
+        REQUIRE(dp == 100.0f);
+        ui.detach();
+        [window close];
+    }
+}
+
+TEST_CASE("an attach without a density ratio says so once, and one with it does not",
+          "[native-surface][rmlui][scale]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        std::vector<std::string> messages;
+        set_diagnostic_sink([&](const std::string& m) { messages.push_back(m); });
+        // Declared after `messages`: restores the sink on an assertion unwind too,
+        // before `messages` is destroyed.
+        struct SinkReset {
+            ~SinkReset() {
+                set_diagnostic_sink({});
+            }
+        } sink_reset;
+        for (int i = 0; i < 2; ++i) {
+            Editor e;
+            REQUIRE(e.attach());
+            REQUIRE(e.ui->density_ratio() > 0.0);
+            e.ui->detach();
+            // Detached: no stale scale.
+            REQUIRE(e.ui->density_ratio() == 1.0);
+        }
+        set_diagnostic_sink({});
+        if (density_ratio_supported()) {
+            REQUIRE(messages.empty());
+        } else {
+            REQUIRE(messages.size() == 1);
+            REQUIRE(messages[0].find("density ratio") != std::string::npos);
+            REQUIRE(messages[0].find("dp") != std::string::npos);
+        }
+    }
+}
+
 TEST_CASE("pointer input does not wait for a frame the render thread is drawing",
-          "[native-surface][rmlui][threading]") {
+          "[native-surface][rmlui][threading][performance]") {
     REQUIRE_METAL();
     @autoreleasepool {
         Editor e;
@@ -540,10 +759,12 @@ TEST_CASE("pointer input does not wait for a frame the render thread is drawing"
         // The instrument can see a stall: a frame held the lock long enough
         // that a caller waiting on it (with_context blocks by design) lost
         // several milliseconds.
+        // Thresholds follow the measured hold rather than a wall-clock number,
+        // so a loaded host moves both sides together.
         REQUIRE(hold_ms > 10.0);
-        REQUIRE(with_context_max > 3.0);
+        REQUIRE(with_context_max > 0.25 * hold_ms);
         // Pointer input is not such a caller.
-        REQUIRE(p95 < 2.0);
+        REQUIRE(p95 < 0.1 * hold_ms);
         e.renderer.draw_delay_us.store(200);
         e.ui->detach();
     }
@@ -560,8 +781,8 @@ TEST_CASE("input queued behind a frame is applied in order and never lost",
         REQUIRE(a.attach());
         REQUIRE(b.attach());
         REQUIRE(a.wait_for([&] { return a.ui->frames() > 0 && b.ui->frames() > 0; }));
-        a.renderer.draw_delay_us.store(2000);
-        b.renderer.draw_delay_us.store(2000);
+        a.renderer.draw_delay_us.store(500);
+        b.renderer.draw_delay_us.store(500);
 
         int clicks_a = 0;
         int clicks_b = 0;
@@ -579,35 +800,44 @@ TEST_CASE("input queued behind a frame is applied in order and never lost",
             ctx.GetDocument(0)->GetElementById("button")->AddEventListener("click", &listener_b);
         });
 
-        // Frames requested from another thread while the main thread delivers
-        // input, idles and queries: the shape of a host driving two editors.
-        std::atomic<bool> stop{false};
-        std::thread requester([&] {
-            while (!stop.load()) {
+        // Park a render thread inside a draw, lock held (one lock serves both
+        // editors), so every event below arrives behind a frame, then let them go. Frames are also
+        // requested from another thread, as a host driving two editors would.
+        DrawCleanup<Editor> cleanup{{&a, &b}};
+        cleanup.requester = std::thread([&] {
+            while (!cleanup.stop.load()) {
                 a.ui->request_frame();
                 b.ui->request_frame();
                 std::this_thread::sleep_for(std::chrono::microseconds(500));
             }
         });
         int sent = 0;
-        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(1200);
-        while (std::chrono::steady_clock::now() < until) {
+        for (int round = 0; round < 15; ++round) {
+            a.renderer.hold_draws.store(true);
+            b.renderer.hold_draws.store(true);
+            a.ui->request_frame();
+            b.ui->request_frame();
+            REQUIRE(
+                a.wait_for([&] { return a.renderer.parked.load() || b.renderer.parked.load(); }));
             for (Editor* e : {&a, &b}) {
                 [e->view() mouseMoved:e->mouse(NSEventTypeMouseMoved, 20, 20)];
                 [e->view() mouseDown:e->mouse(NSEventTypeLeftMouseDown, 20, 20)];
                 [e->view() mouseUp:e->mouse(NSEventTypeLeftMouseUp, 20, 20)];
                 [e->view() mouseMoved:e->mouse(NSEventTypeMouseMoved, 250, 180)];
-                e->ui->idle();
             }
             ++sent;
-            a.ui->with_context([](Rml::Context&) {});
-            [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.002]];
+            a.renderer.hold_draws.store(false);
+            b.renderer.hold_draws.store(false);
+            [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
         }
-        stop.store(true);
-        requester.join();
+        cleanup.stop.store(true);
+        cleanup.requester.join();
         a.ui->flush_input();
         b.ui->flush_input();
-        REQUIRE(sent > 10);
+        REQUIRE(sent == 15);
+        // Something really queued behind a frame, so the claim is about the
+        // queue and not about uncontended delivery.
+        REQUIRE(a.ui->queued_inputs() + b.ui->queued_inputs() > 0);
         // Every click arrived: only moves and wheel deltas ever merge.
         REQUIRE(clicks_a == sent);
         REQUIRE(clicks_b == sent);
@@ -620,6 +850,106 @@ TEST_CASE("input queued behind a frame is applied in order and never lost",
         });
         a.ui->detach();
         b.ui->detach();
+    }
+}
+
+TEST_CASE("queued input retries after another editor consumes the last drain notification",
+          "[native-surface][rmlui][threading]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        Editor a;
+        Editor b;
+        REQUIRE(a.attach());
+        REQUIRE(b.attach());
+        REQUIRE(a.wait_for([&] { return a.ui->frames() > 0 && b.ui->frames() > 0; }));
+        int applied = 0;
+        struct Listener final : Rml::EventListener {
+            int& count;
+            explicit Listener(int& c) : count(c) {}
+            void ProcessEvent(Rml::Event&) override {
+                ++count;
+            }
+        } listener(applied);
+        DrawCleanup<Editor> cleanup{{&a, &b}};
+        a.ui->with_context([&](Rml::Context& ctx) {
+            ctx.GetDocument(0)->GetElementById("button")->AddEventListener("mouseover", &listener);
+        });
+        [a.view() mouseMoved:a.mouse(NSEventTypeMouseMoved, 250, 180)];
+        a.ui->flush_input();
+        [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.3]];
+        a.renderer.hold_draws.store(true);
+        a.ui->request_frame();
+        REQUIRE(a.wait_for([&] { return a.renderer.parked.load(); }));
+        const auto queued_before = a.ui->queued_inputs();
+        [a.view() mouseMoved:a.mouse(NSEventTypeMouseMoved, 20, 20)];
+        REQUIRE(a.ui->queued_inputs() == queued_before + 1);
+        a.renderer.hold_draws.store(false);
+        // Do not pump the main queue: A must finish all requested frames before
+        // B takes the mutex, so A cannot post a later notification to rescue it.
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        const auto finished = a.ui->frames();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        REQUIRE(a.ui->frames() == finished);
+        REQUIRE(a.begun.load() == a.ended.load());
+        b.renderer.hold_draws.store(true);
+        b.ui->request_frame();
+        // Wait without servicing A's main-queue callbacks.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (!b.renderer.parked.load() && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        REQUIRE(b.renderer.parked.load());
+        // Consume A's callbacks with B holding the lock and no input of its
+        // own. The failed attempts must leave a retry behind.
+        [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+        REQUIRE(applied == 0);
+        REQUIRE(a.ui->frames() == finished);
+        REQUIRE(b.ui->queued_inputs() == 0);
+        b.renderer.hold_draws.store(false);
+        REQUIRE(a.wait_for([&] { return applied == 1; }));
+        REQUIRE(a.wait_for([&] { return a.ui->frames() > finished; }));
+        a.ui->with_context([&](Rml::Context& ctx) {
+            ctx.GetDocument(0)->GetElementById("button")->RemoveEventListener("mouseover",
+                                                                              &listener);
+        });
+    }
+}
+
+TEST_CASE("parked draw cleanup releases both editors and joins during unwinding",
+          "[native-surface][rmlui][threading]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        Editor a;
+        Editor b;
+        REQUIRE(a.attach());
+        REQUIRE(b.attach());
+        struct Unwind {};
+        bool parked = false;
+        std::atomic<bool> requester_exited{false};
+        try {
+            DrawCleanup<Editor> cleanup{{&a, &b}};
+            a.renderer.hold_draws.store(true);
+            b.renderer.hold_draws.store(true);
+            cleanup.requester = std::thread([&] {
+                while (!cleanup.stop.load()) {
+                    a.ui->request_frame();
+                    b.ui->request_frame();
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+                requester_exited.store(true);
+            });
+            parked =
+                a.wait_for([&] { return a.renderer.parked.load() || b.renderer.parked.load(); });
+            throw Unwind{};
+        } catch (const Unwind&) {
+        }
+        REQUIRE(parked);
+        REQUIRE(requester_exited.load());
+        REQUIRE_FALSE(a.renderer.hold_draws.load());
+        REQUIRE_FALSE(b.renderer.hold_draws.load());
+        REQUIRE_FALSE(a.renderer.parked.load());
+        REQUIRE_FALSE(b.renderer.parked.load());
+        REQUIRE_FALSE(a.ui->attached());
+        REQUIRE_FALSE(b.ui->attached());
     }
 }
 
@@ -636,8 +966,8 @@ TEST_CASE("a click queued behind a frame lands before the text typed after it",
             e.ui->request_frame();
             [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.008]];
             const auto t0 = std::chrono::steady_clock::now();
-            [e.view() mouseDown:e.mouse(NSEventTypeLeftMouseDown, 190, 115)];
-            [e.view() mouseUp:e.mouse(NSEventTypeLeftMouseUp, 190, 115)];
+            [e.view() mouseDown:e.doc_mouse(NSEventTypeLeftMouseDown, 190, 115)];
+            [e.view() mouseUp:e.doc_mouse(NSEventTypeLeftMouseUp, 190, 115)];
             // Returned without waiting: the frame was in flight, so the click
             // is queued and the field is not focused yet.
             queued =
@@ -663,4 +993,199 @@ TEST_CASE("a click queued behind a frame lands before the text typed after it",
         e.renderer.draw_delay_us.store(200);
         e.ui->detach();
     }
+}
+
+TEST_CASE("input applied after a frame is drawn without another request",
+          "[native-surface][rmlui][threading]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        Editor e;
+        REQUIRE(e.attach());
+        REQUIRE(e.wait_for([&] { return e.ui->frames() > 0; }));
+        std::atomic<long long> applied_ns{0};
+        struct Listener final : Rml::EventListener {
+            std::atomic<long long>& at;
+            explicit Listener(std::atomic<long long>& a) : at(a) {}
+            void ProcessEvent(Rml::Event&) override {
+                at.store(now_ns());
+            }
+        } listener(applied_ns);
+        e.ui->with_context([&](Rml::Context& ctx) {
+            ctx.GetDocument(0)->GetElementById("button")->AddEventListener("mouseover", &listener);
+        });
+        // Away from the button, and let every frame that asks for settle.
+        [e.view() mouseMoved:e.mouse(NSEventTypeMouseMoved, 250, 180)];
+        e.ui->flush_input();
+        [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.3]];
+
+        // Park the render thread inside a draw, lock held, and send exactly
+        // one event: it queues, and nothing else asks for a frame.
+        DrawCleanup<Editor> cleanup{{&e}};
+        e.renderer.hold_draws.store(true);
+        e.ui->request_frame();
+        REQUIRE(e.wait_for([&] { return e.renderer.parked.load(); }));
+        const auto queued_before = e.ui->queued_inputs();
+        [e.view() mouseMoved:e.mouse(NSEventTypeMouseMoved, 20, 20)];
+        REQUIRE(e.ui->queued_inputs() == queued_before + 1);
+        REQUIRE(applied_ns.load() == 0);
+        e.renderer.hold_draws.store(false);
+        // Keep the main thread from draining while the frames that were
+        // already asked for run and finish: they draw without the event.
+        const long long released_ns = now_ns();
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        REQUIRE(applied_ns.load() == 0);
+        REQUIRE(e.begin_ns.load() > released_ns);
+        REQUIRE(e.wait_for([&] { return applied_ns.load() != 0; }));
+        // Now the drain runs. It must ask for another frame, because every
+        // frame so far drew without the event: one begins after it.
+        REQUIRE(e.wait_for([&] { return e.begin_ns.load() > applied_ns.load(); }, 2.0));
+        e.ui->with_context([&](Rml::Context& ctx) {
+            ctx.GetDocument(0)->GetElementById("button")->RemoveEventListener("mouseover",
+                                                                              &listener);
+        });
+        e.ui->detach();
+    }
+}
+
+TEST_CASE("a size change idle() could not apply is applied by the next with_context",
+          "[native-surface][rmlui][threading]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        Editor e;
+        REQUIRE(e.attach());
+        REQUIRE(e.wait_for([&] { return e.ui->frames() > 0; }));
+        const double scale = e.window.backingScaleFactor;
+        // Park the render thread inside a draw, lock held, then resize and
+        // tick: the tick finds the lock busy and skips the size.
+        DrawCleanup<Editor> cleanup{{&e}};
+        e.renderer.hold_draws.store(true);
+        e.ui->request_frame();
+        REQUIRE(e.wait_for([&] { return e.renderer.parked.load(); }));
+        [e.window setContentSize:NSMakeSize(420, 280)];
+        e.ui->idle();
+        e.renderer.hold_draws.store(false);
+        Rml::Vector2i size;
+        e.ui->with_context([&](Rml::Context& ctx) { size = ctx.GetDimensions(); });
+        REQUIRE(size.x == static_cast<int>(420 * scale));
+        REQUIRE(size.y == static_cast<int>(280 * scale));
+        e.ui->detach();
+    }
+}
+
+TEST_CASE("flush_input on a surface that is not attached does nothing",
+          "[native-surface][rmlui][threading]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        MemoryAssets assets;
+        CountingRenderer renderer;
+        RmlUiSurfaceOptions options;
+        options.document = "probe.rml";
+        options.font_faces = {"font.ttf"};
+        RmlUiSurface fresh(assets, renderer, {}, options);
+        fresh.flush_input();
+        fresh.idle();
+        REQUIRE(fresh.frames() == 0);
+
+        Editor e;
+        REQUIRE(e.attach());
+        REQUIRE(e.wait_for([&] { return e.ui->frames() > 0; }));
+        e.ui->detach();
+        const auto frames = e.ui->frames();
+        e.ui->flush_input();
+        e.ui->with_context([](Rml::Context&) {});
+        REQUIRE(e.ui->frames() == frames);
+    }
+}
+
+// These synchronization contracts do not need a drawable or a Metal device.
+TEST_CASE("contended input drain survives the last notification", "[rmlui][threading][cpu]") {
+    std::mutex mutex;
+    std::promise<void> owns_lock;
+    std::promise<void> release_lock;
+    auto release = release_lock.get_future();
+    auto owned = owns_lock.get_future();
+    std::atomic<bool> owner_timed_out{false};
+    auto other_editor = std::async(std::launch::async, [&] {
+        std::lock_guard lock(mutex);
+        owns_lock.set_value();
+        owner_timed_out.store(release.wait_for(std::chrono::seconds(10)) !=
+                              std::future_status::ready);
+    });
+    const bool acquired = owned.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+    int pending = 3;
+    int delivered = 0;
+    bool retry_posted = false;
+    auto attempt = [&] {
+        return detail::try_drain_input(
+            mutex, [&] { retry_posted = true; },
+            [&] {
+                delivered += pending;
+                pending = 0;
+                return true;
+            });
+    };
+    // Consume the only notification while an unrelated editor holds the lock.
+    // No fatal assertion until the other thread has been released and joined.
+    const bool applied_while_busy = attempt();
+    const int delivered_while_busy = delivered;
+    release_lock.set_value();
+    other_editor.get();
+    REQUIRE(acquired);
+    REQUIRE_FALSE(owner_timed_out.load());
+    CHECK_FALSE(applied_while_busy);
+    CHECK(delivered_while_busy == 0);
+    REQUIRE(retry_posted);
+    // The unrelated editor posts nothing. Only the saved retry can deliver.
+    retry_posted = false;
+    CHECK(attempt());
+    CHECK(delivered == 3);
+    CHECK(pending == 0);
+    CHECK_FALSE(retry_posted);
+}
+
+TEST_CASE("parked cleanup releases holds before joining on exception", "[rmlui][threading][cpu]") {
+    struct ParkedEditor {
+        struct Renderer {
+            std::atomic<bool> hold_draws{true};
+        } renderer;
+        struct Surface {
+            bool detached = false;
+            void detach() {
+                detached = true;
+            }
+        } surface;
+        Surface* ui = &surface;
+    } a, b;
+    std::atomic<bool> exited{false};
+    std::atomic<bool> timed_out{false};
+    struct Unwind {};
+    bool requester_started = false;
+    try {
+        std::promise<void> started;
+        auto ready = started.get_future();
+        DrawCleanup<ParkedEditor> cleanup{{&a, &b}};
+        cleanup.requester = std::thread([&] {
+            started.set_value();
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+            while (!cleanup.stop.load() || a.renderer.hold_draws.load() ||
+                   b.renderer.hold_draws.load()) {
+                if (std::chrono::steady_clock::now() >= deadline) {
+                    timed_out.store(true);
+                    return;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            exited.store(true);
+        });
+        requester_started = ready.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+        throw Unwind{};
+    } catch (const Unwind&) {
+    }
+    CHECK(requester_started);
+    CHECK_FALSE(timed_out.load());
+    CHECK(exited.load());
+    CHECK_FALSE(a.renderer.hold_draws.load());
+    CHECK_FALSE(b.renderer.hold_draws.load());
+    CHECK(a.surface.detached);
+    CHECK(b.surface.detached);
 }

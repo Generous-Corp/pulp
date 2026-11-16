@@ -490,3 +490,20 @@ TEST_CASE("Patch catalog lists spectral constructors as typed-API-only rows",
         REQUIRE(parsed.diagnostic.suggested_fix.find(e.constructor) != std::string::npos);
     }
 }
+
+TEST_CASE("Notation admits exactly max_graph_notation_bytes and refuses one more",
+          "[host][patch][negative-control]") {
+    GraphPatchCatalog c;
+    register_patch_gain(c);
+    STATIC_REQUIRE(max_graph_notation_bytes == 1024u * 1024u);
+    auto text = hello();
+    REQUIRE(text.size() < max_graph_notation_bytes);
+    // Trailing blank lines keep the document valid at any length.
+    text.append(max_graph_notation_bytes - text.size(), '\n');
+    const auto at_limit = parse_graph_patch(text, c);
+    CHECK(at_limit.diagnostic.code == Code::Ok);
+    text.push_back('\n');
+    const auto over = parse_graph_patch(text, c);
+    CHECK(over.diagnostic.code == Code::ResourceLimit);
+    CHECK_FALSE(over.graph);
+}

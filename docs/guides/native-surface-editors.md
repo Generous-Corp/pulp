@@ -79,9 +79,19 @@ backend): a custom `Rml::RenderInterface` must draw nothing between frames, or
 the product must build against an SDK without `warm()`.
 
 The surface context is sized in drawable pixels, the Metal frame scale is 1,
-and the density ratio is the backing scale. Documents that need
-density-scaled text should use `font-size` in `dp` (the example does this)
-rather than `px`.
+and the density ratio is the backing scale. Every `px` length, not only text,
+is a device pixel: a `100px` box is 100 device pixels (50 points at 2x), while
+pointer positions arrive in points and are scaled to device pixels, so hit
+testing agrees with layout in either unit. A `dp` length is one point
+(`density_ratio()` device pixels). Size anything that must keep its physical
+size across displays in `dp` (the example does this).
+
+The density ratio needs a Vellum RmlUi SDK that exports
+`NativeContext::set_density_ratio`. Without it `density_ratio_supported()` is
+false, `dp` equals `px`, and a `dp` document renders at 1/scale of its intended
+size on a 2x display. Configure warns about it, and the first `attach()` reports it
+through the diagnostic sink, once per process (standard error by default; `set_diagnostic_sink`
+redirects it).
 
 ### Threading
 
@@ -90,7 +100,9 @@ render, because RmlUi's state is shared and not thread-safe. The main thread
 does not wait for it to deliver pointer or wheel input or to run `idle()`:
 when a frame is in flight, pointer and wheel events are queued (consecutive
 moves, and wheel deltas with the same modifiers, merge) and applied in order on
-the main thread within about a millisecond of the frame ending. Element
+the main thread after the frame ends. If another editor holds the shared lock
+when delivery runs, one coalesced delayed retry remains until the input is
+applied; it needs no further frame or host idle tick. Element
 listeners therefore still run on the main thread, a moment after the event.
 `with_context()`, key and text input apply the queue first and wait for a
 frame; call `flush_input()` where a caller needs earlier events applied now,

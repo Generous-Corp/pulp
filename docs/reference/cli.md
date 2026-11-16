@@ -1527,7 +1527,7 @@ render preconditions, and saving: `missing_option`, `invalid_option`,
 `graph_file_limit` (a probe graph file over 1 MiB; a missing or unreadable
 probe file is `FileUnreadable`), `graph_limit`, `unsupported_node`, `unresolved_node`,
 `ambiguous_node`, `prepare_failed`, `render_failed`, `non_finite_output`,
-`output_failed`, and `saved`. The probe adds `invalid_edge_kind`, `unknown_node`
+`output_failed`, `subgraph_records_unsupported`, and `saved`. The probe adds `invalid_edge_kind`, `unknown_node`
 (a probe source or destination name that does not exist; distinct from the
 typed `UnknownNode`), `invalid_destination_param`, `event_injection_failed`,
 `non_finite_sample` and `unprepared_latency`. Probe attach refusals use the
@@ -1550,6 +1550,23 @@ failures use the typed codes `serialization_refused`, `file_too_large`,
 C++ API and CLI so callers do not need to parse diagnostic text. Save is a
 CLI-only write operation; the MCP `pulp_graph` tool remains read-only.
 
+`save`, `fmt` and `canonicalize` keep a saved-identity document's identity
+envelope: the input is restored through `GraphSerializer::from_saved_document`
+(which refuses a document whose identities or connections do not restore
+exactly) and written back with `GraphSerializer::to_saved_file`, so the result
+is still a valid `pulp graph diff` input. `save --saved-identity` writes the
+envelope for a plain input too, which is how a CLI user produces diff inputs.
+Before it writes, every connection the plain input records must have been
+restored; an edge the tolerant loader skipped (a dangling node, an invalid
+port) is refused with `InvalidDocument` and a `connection_not_restored` message
+(exit 1), and no output is written. A plain `save` without the flag keeps the
+tolerant behaviour.
+A document carrying `subgraphs` records is refused with
+`subgraph_records_unsupported` (exit 1) and left unchanged, because restoring
+those records needs the authoring templates and a plain rewrite would drop every
+subgraph instance. For these three subcommands a missing file is
+`FileUnreadable` and a file over the 64 MiB limit is `ResourceLimit`.
+
 `pulp graph diff BEFORE AFTER [--json]` compares two saved-identity v6
 documents (as written by `GraphSerializer::to_saved_document`) by logical node
 identity, read-only and without loading plugin code. NodeIds are lookup keys
@@ -1570,7 +1587,10 @@ inspector refuses, including a legacy file without the identity envelope, is
 `InvalidDocument` (exit 1) with `refusal` set to the inspector's refusal name
 and `side` set to `before` or `after`: a document without the identity envelope
 is `logical_identity_missing`, and a pre-v4 legacy file is
-`invalid_format_version` (re-save it with the saved-identity writer).
+`invalid_format_version` (a plain save of a simple graph keeps such an older
+format). Both refusals also carry a `hint` naming
+`pulp graph save FILE --output FILE --saved-identity`, which writes the
+envelope.
 Anything other than exactly two files is `missing_input`, and an unknown option
 is `invalid_option` (exit 2). The same comparison is the C++
 `diff_graph_documents` in `pulp/host/graph_history.hpp`, which also provides the

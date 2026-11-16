@@ -27,6 +27,17 @@ if(PULP_BUILD_TESTS)
         "${PULP_ROOT_DIR}/core/host/include" "${PULP_ROOT_DIR}/core/host/src")
     target_link_libraries(pulp-test-isolated-clap-protocol PRIVATE
         pulp::audio pulp::format pulp::midi pulp::state Catch2::Catch2WithMain)
+    if(WIN32)
+        # Worker half of the Windows handshake, driven over a retained channel.
+        add_executable(pulp-test-isolated-clap-windows-peer
+            "${PULP_ROOT_DIR}/test/fixtures/isolated_clap/windows_handshake_peer.cpp")
+        target_include_directories(pulp-test-isolated-clap-windows-peer PRIVATE
+            "${PULP_ROOT_DIR}/core/host/src")
+        target_link_libraries(pulp-test-isolated-clap-protocol PRIVATE pulp::platform)
+        target_compile_definitions(pulp-test-isolated-clap-protocol PRIVATE
+            PULP_ISOLATED_CLAP_WINDOWS_PEER="$<TARGET_FILE:pulp-test-isolated-clap-windows-peer>")
+        add_dependencies(pulp-test-isolated-clap-protocol pulp-test-isolated-clap-windows-peer)
+    endif()
     catch_discover_tests(pulp-test-isolated-clap-protocol)
 endif()
 
