@@ -250,7 +250,8 @@ TEST_CASE("a standalone contract window holds the editor's aspect and limits whi
     bool ran = false;
     REQUIRE(run_window({}, nullptr, [&](NSWindow* window) {
         ran = true;
-        for (const NSSize drag : {NSMakeSize(1000, 400), NSMakeSize(500, 900), NSMakeSize(640, 520)}) {
+        for (const NSSize drag :
+             {NSMakeSize(1000, 400), NSMakeSize(500, 900), NSMakeSize(640, 520)}) {
             const NSSize content = content_after_drag(window, drag.width, drag.height);
             // 4:3 to within a pixel, inside 200x150 .. 800x600.
             REQUIRE(std::abs(content.width - content.height * 4.0 / 3.0) <= 1.0);
@@ -265,8 +266,9 @@ TEST_CASE("a standalone contract window holds the editor's aspect and limits whi
     REQUIRE(ran);
 }
 
-TEST_CASE("a standalone contract window leaves an editor with default hints at the size it asked for",
-          "[standalone][editor-host][standalone-contract][resize-hints]") {
+TEST_CASE(
+    "a standalone contract window leaves an editor with default hints at the size it asked for",
+    "[standalone][editor-host][standalone-contract][resize-hints]") {
     EditorEnvironment env;
     reset_contract_recording();
     contract_config().identity_adjust = true;
@@ -302,7 +304,8 @@ TEST_CASE("a standalone contract window opens inside a small screen at the edito
     // Control: with no injected screen the editor opens at its own size.
     reset_contract_recording();
     NSSize full{};
-    REQUIRE(run_window({}, nullptr, [&](NSWindow* window) { full = window.contentView.frame.size; }));
+    REQUIRE(
+        run_window({}, nullptr, [&](NSWindow* window) { full = window.contentView.frame.size; }));
     REQUIRE(full.width == 400);
     REQUIRE(full.height == 300);
 }

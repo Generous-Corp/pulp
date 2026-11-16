@@ -1026,8 +1026,9 @@ TEST_CASE("a VST3 contract view applies the editor's declared aspect and bounds"
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }
 
-TEST_CASE("a VST3 host that calls onSize without checkSizeConstraint gets the snapped size asked back",
-          "[vst3][editor-host][vst3-contract][resize-hints]") {
+TEST_CASE(
+    "a VST3 host that calls onSize without checkSizeConstraint gets the snapped size asked back",
+    "[vst3][editor-host][vst3-contract][resize-hints]") {
     EditorEnvironment env;
     g_log = {};
     g_config = {};

@@ -150,6 +150,15 @@ and AU v2 (the container's frame):
   does not override it. `detail::constrain_to_hints()` is the same arithmetic as
   a pure function, so a test or a widget can check a size without a host.
 
+A host can also set a size without asking first (VST3 `onSize` without
+`checkSizeConstraint`, CLAP `set_size` without `adjust_size`). The editor then
+gets the constrained size, and the adapter asks the host for that size back
+(`IPlugFrame::resizeView`, `clap_host_gui::request_resize`) so the window does
+not keep a margin the editor never paints; a fixed-size editor keeps the size
+the host gave it. The macOS standalone window holds a live drag to the same
+limits and aspect, and opens inside the screen's usable frame
+(`detail::fit_size_to_area`).
+
 AU v2 has no size negotiation, so a host that resizes the container by hand is
 snapped by the container itself: a resizable editor's frame is moved inside its
 limits and aspect before `set_size()`. A fixed-size editor keeps the host's

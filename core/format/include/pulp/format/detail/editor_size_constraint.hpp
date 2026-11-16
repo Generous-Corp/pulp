@@ -79,8 +79,8 @@ inline void fit_size_to_area(const ViewSize& hints, std::uint32_t& width, std::u
         return;
     if (!editor_resizable(hints))
         return;
-    const double scale = std::min(static_cast<double>(max_width) / width,
-                                  static_cast<double>(max_height) / height);
+    const double scale =
+        std::min(static_cast<double>(max_width) / width, static_cast<double>(max_height) / height);
     auto w = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::floor(width * scale)));
     auto h = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::floor(height * scale)));
     constrain_to_hints(hints, w, h);
