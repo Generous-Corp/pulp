@@ -14,6 +14,11 @@ function(pulp_sample_region_web_sources ROOT OUT)
         # prepared edit validates Control node state, both defined here.
         "${ROOT}/core/host/src/control_index_nodes.cpp"
         "${ROOT}/core/host/src/spectral_graph.cpp"
+        # graph_serializer.cpp saves and restores spectral graph state through
+        # spectral_persistence::read/write, defined here.
+        "${ROOT}/core/host/src/spectral_graph_persistence.cpp"
+        # Spectral persistence encodes asset bytes with runtime::base64_encode.
+        "${ROOT}/core/runtime/src/base64.cpp"
         "${ROOT}/core/host/src/signal_graph_process.cpp"
         "${ROOT}/core/host/src/trigger_graph.cpp"
         "${ROOT}/core/host/src/signal_graph_prepare.cpp"
