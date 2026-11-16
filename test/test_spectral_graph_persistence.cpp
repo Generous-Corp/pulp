@@ -1,11 +1,11 @@
 #include "../examples/g10-routed-consumer/asset_morph_oracle.hpp"
+#include "support/unique_temp_dir.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <choc/text/choc_JSON.h>
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/runtime/base64.hpp>
 #include <pulp/runtime/crypto.hpp>
 
-#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <functional>
@@ -514,13 +514,10 @@ TEST_CASE("Spectral graph saves at the block it is prepared for, not the largest
 
 TEST_CASE("Spectral save refusals name the rule the graph breaks",
           "[host][spectral][replay][negative]") {
-    // A per-run directory, so concurrent suites in other checkouts on one host
-    // never remove each other's file.
-    const auto dir = std::filesystem::temp_directory_path() /
-                     ("pulp-spectral-save-reason-" +
-                      std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    std::filesystem::create_directories(dir);
-    const auto path = dir / "graph.pulpgraph";
+    // A directory of its own, so concurrent suites in other checkouts on one
+    // host never remove each other's file.
+    const pulp::test::ScopedTempDir dir("pulp-spectral-save-reason");
+    const auto path = dir.path / "graph.pulpgraph";
 
     // Control: the same graph saves when it breaks no rule.
     auto graph = fixture();
@@ -556,5 +553,4 @@ TEST_CASE("Spectral save refusals name the rule the graph breaks",
     CHECK(analysis.code == GraphSerializer::SaveResult::Code::serialization_refused);
     CHECK(analysis.error.find("live_analysis is a SpectralAnalysis node") != std::string::npos);
     CHECK(analysis.error.find("live analysis is not persisted") != std::string::npos);
-    std::filesystem::remove_all(dir);
 }
