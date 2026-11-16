@@ -711,6 +711,16 @@ TEST_CASE("an AU v2 contract editor's resize request checks the host's container
         REQUIRE(view.frame.size.width == kept.width);
         REQUIRE(view.frame.size.height == kept.height);
         REQUIRE(still.frame.size.width == 400);
+        // The view and the editor already at the requested size inside a
+        // container of another size: not accepted, since the container has not
+        // followed.
+        [view setFrameSize:NSMakeSize(640, 480)];
+        REQUIRE(view.frame.size.width == 640);
+        REQUIRE(still.frame.size.width == 400);
+        REQUIRE_FALSE(contract_log().context->request_resize({640, 480, 1.0}));
+        // Control: once the container matches, the same request is accepted.
+        [still setFrameSize:NSMakeSize(640, 480)];
+        REQUIRE(contract_log().context->request_resize({640, 480, 1.0}));
         [view removeFromSuperview];
         [view release];
         [still release];

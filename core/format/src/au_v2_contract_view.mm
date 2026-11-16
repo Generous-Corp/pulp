@@ -180,14 +180,17 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
     const FrameSize wanted{static_cast<double>(request_width), static_cast<double>(request_height)};
     const NSRect previous = self.frame;
     const auto current = _session->size();
-    if (pulp::format::detail::same_frame_size({previous.size.width, previous.size.height},
-                                              wanted) &&
-        current.width == request_width && current.height == request_height)
-        return true;
-
     NSView* container = self.superview;
     const NSRect previous_container = container != nil ? container.frame : NSZeroRect;
     const bool follow_container = pulp::format::au::contract_resize_follows_container();
+    // Already at the size: accepted without a change, but by the same rule as
+    // a change, so a host whose container does not match is not told yes.
+    if (current.width == request_width && current.height == request_height &&
+        pulp::format::detail::resize_request_accepted(
+            wanted, {previous.size.width, previous.size.height}, true, follow_container,
+            container != nil && self.window != nil,
+            {previous_container.size.width, previous_container.size.height}))
+        return true;
 
     _editorResizeActive = true;
     _applyingEditorSize = true;
