@@ -122,7 +122,8 @@ class SdlWindowHostImpl : public SdlWindowHost {
         if (texture_)
             SDL_DestroyTexture(texture_);
 #endif
-        if (cursor_) SDL_DestroyCursor(cursor_);
+        if (cursor_)
+            SDL_DestroyCursor(cursor_);
         if (renderer_) SDL_DestroyRenderer(renderer_);
         if (window_) SDL_DestroyWindow(window_);
         SDL_Quit();
@@ -217,9 +218,10 @@ class SdlWindowHostImpl : public SdlWindowHost {
                     case SDL_EVENT_KEY_DOWN:
                     case SDL_EVENT_KEY_UP: {
                         const auto key = key_code(event.key.key);
-                        route_plugin_key(root_, {{key, modifiers(event.key.mod),
-                                                  event.key.down, event.key.repeat},
-                                                 static_cast<int>(key) >= 256, true});
+                        route_plugin_key(root_, {{key, modifiers(event.key.mod), event.key.down,
+                                                  event.key.repeat},
+                                                 static_cast<int>(key) >= 256,
+                                                 true});
                         needs_repaint_ = true;
                         break;
                     }
@@ -251,7 +253,8 @@ class SdlWindowHostImpl : public SdlWindowHost {
                     case SDL_EVENT_MOUSE_MOTION: {
                         pointer_point_ = window_to_root(event.motion.x, event.motion.y);
                         hover_cursor_.set_pointer(pointer_point_);
-                        if (gesture_owns(MousePhase::drag)) break;
+                        if (gesture_owns(MousePhase::drag))
+                            break;
                         if (auto* target = pointer_capture_.live_in(root_))
                             deliver_mouse_drag(root_, target, pointer_point_,
                                                modifiers(SDL_GetModState()), click_count_,
@@ -266,7 +269,8 @@ class SdlWindowHostImpl : public SdlWindowHost {
                         break;
                     case SDL_EVENT_MOUSE_WHEEL: {
                         const auto point = window_to_root(event.wheel.mouse_x, event.wheel.mouse_y);
-                        const float direction = event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -1.f : 1.f;
+                        const float direction =
+                            event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -1.f : 1.f;
                         deliver_mouse_wheel(root_, point, direction * event.wheel.x,
                                             -direction * event.wheel.y,
                                             modifiers(SDL_GetModState()), WheelHost{});
@@ -445,44 +449,67 @@ private:
 
     static uint16_t modifiers(SDL_Keymod state) {
         uint16_t result = 0;
-        if (state & SDL_KMOD_SHIFT) result |= kModShift;
-        if (state & SDL_KMOD_CTRL) result |= kModCtrl;
-        if (state & SDL_KMOD_ALT) result |= kModAlt;
-        if (state & SDL_KMOD_GUI) result |= kModMeta;
+        if (state & SDL_KMOD_SHIFT)
+            result |= kModShift;
+        if (state & SDL_KMOD_CTRL)
+            result |= kModCtrl;
+        if (state & SDL_KMOD_ALT)
+            result |= kModAlt;
+        if (state & SDL_KMOD_GUI)
+            result |= kModMeta;
 #ifdef __APPLE__
-        if (state & SDL_KMOD_GUI) result |= kModCmd;
+        if (state & SDL_KMOD_GUI)
+            result |= kModCmd;
 #endif
         return result;
     }
 
     static KeyCode key_code(SDL_Keycode key) {
         switch (key) {
-            case SDLK_LEFT: return KeyCode::left;
-            case SDLK_RIGHT: return KeyCode::right;
-            case SDLK_UP: return KeyCode::up;
-            case SDLK_DOWN: return KeyCode::down;
-            case SDLK_HOME: return KeyCode::home;
-            case SDLK_END: return KeyCode::end_;
-            case SDLK_PAGEUP: return KeyCode::page_up;
-            case SDLK_PAGEDOWN: return KeyCode::page_down;
-            case SDLK_BACKSPACE: return KeyCode::backspace;
-            case SDLK_DELETE: return KeyCode::delete_;
-            case SDLK_TAB: return KeyCode::tab;
-            case SDLK_RETURN: case SDLK_KP_ENTER: return KeyCode::enter;
-            case SDLK_ESCAPE: return KeyCode::escape;
-            default:
-                if (key >= SDLK_F1 && key <= SDLK_F12)
-                    return static_cast<KeyCode>(static_cast<int>(KeyCode::f1) + key - SDLK_F1);
-                return key >= 32 && key < 127 ? static_cast<KeyCode>(key) : KeyCode::unknown;
+        case SDLK_LEFT:
+            return KeyCode::left;
+        case SDLK_RIGHT:
+            return KeyCode::right;
+        case SDLK_UP:
+            return KeyCode::up;
+        case SDLK_DOWN:
+            return KeyCode::down;
+        case SDLK_HOME:
+            return KeyCode::home;
+        case SDLK_END:
+            return KeyCode::end_;
+        case SDLK_PAGEUP:
+            return KeyCode::page_up;
+        case SDLK_PAGEDOWN:
+            return KeyCode::page_down;
+        case SDLK_BACKSPACE:
+            return KeyCode::backspace;
+        case SDLK_DELETE:
+            return KeyCode::delete_;
+        case SDLK_TAB:
+            return KeyCode::tab;
+        case SDLK_RETURN:
+        case SDLK_KP_ENTER:
+            return KeyCode::enter;
+        case SDLK_ESCAPE:
+            return KeyCode::escape;
+        default:
+            if (key >= SDLK_F1 && key <= SDLK_F12)
+                return static_cast<KeyCode>(static_cast<int>(KeyCode::f1) + key - SDLK_F1);
+            return key >= 32 && key < 127 ? static_cast<KeyCode>(key) : KeyCode::unknown;
         }
     }
 
     static MouseButton mouse_button(Uint8 button) {
         switch (button) {
-            case SDL_BUTTON_LEFT: return MouseButton::left;
-            case SDL_BUTTON_RIGHT: return MouseButton::right;
-            case SDL_BUTTON_MIDDLE: return MouseButton::middle;
-            default: return MouseButton::none;
+        case SDL_BUTTON_LEFT:
+            return MouseButton::left;
+        case SDL_BUTTON_RIGHT:
+            return MouseButton::right;
+        case SDL_BUTTON_MIDDLE:
+            return MouseButton::middle;
+        default:
+            return MouseButton::none;
         }
     }
 
@@ -507,7 +534,8 @@ private:
 
     void pointer_down(const SDL_MouseButtonEvent& event) {
         const auto button = mouse_button(event.button);
-        if (button == MouseButton::none || pointer_button_ != MouseButton::none) return;
+        if (button == MouseButton::none || pointer_button_ != MouseButton::none)
+            return;
         pointer_point_ = window_to_root(event.x, event.y);
         hover_cursor_.set_pointer(pointer_point_);
         if (auto* combo = enabled_open_popup_in(root_)) {
@@ -525,22 +553,27 @@ private:
             }
         }
         const auto overlay = route_press_to_active_overlay(root_, pointer_point_);
-        if (overlay.consume_press) return;
+        if (overlay.consume_press)
+            return;
         auto* target = overlay.routing == OverlayPressRouting::routed
-                           ? overlay.target : root_.hit_test(pointer_point_);
+                           ? overlay.target
+                           : root_.hit_test(pointer_point_);
         pointer_capture_.set(target);
-        if (target) ComboBox::notify_global_click(target);
+        if (target)
+            ComboBox::notify_global_click(target);
         target = pointer_capture_.live_in(root_);
         if (!target || !transfer_input_focus(root_, target)) {
             pointer_capture_.reset();
             return;
         }
         target = pointer_capture_.live_in(root_);
-        if (!target) return;
+        if (!target)
+            return;
         pointer_button_ = button;
         click_count_ = event.clicks;
         SDL_CaptureMouse(true);
-        if (gesture_owns(MousePhase::press)) return;
+        if (gesture_owns(MousePhase::press))
+            return;
         if (button == MouseButton::right && dispatch_context_menu(root_, target, pointer_point_)) {
             pointer_capture_.reset();
             pointer_button_ = MouseButton::none;
@@ -553,7 +586,8 @@ private:
     }
 
     void pointer_up(const SDL_MouseButtonEvent& event) {
-        if (mouse_button(event.button) != pointer_button_) return;
+        if (mouse_button(event.button) != pointer_button_)
+            return;
         pointer_point_ = window_to_root(event.x, event.y);
         const bool claimed = gesture_owns(MousePhase::release);
         auto* target = claimed ? nullptr : pointer_capture_.live_in(root_);
@@ -562,16 +596,18 @@ private:
         MouseUpHost host;
         if (button == MouseButton::left)
             host.fire_click = [](const std::function<void()>& click, const std::string&, uint16_t) {
-                if (click) click();
+                if (click)
+                    click();
             };
-        deliver_mouse_up(root_, target, pointer_point_, modifiers(SDL_GetModState()),
-                         click_count_, host, button);
+        deliver_mouse_up(root_, target, pointer_point_, modifiers(SDL_GetModState()), click_count_,
+                         host, button);
         SDL_CaptureMouse(false);
         needs_repaint_ = true;
     }
 
     bool gesture_owns(MousePhase phase) {
-        if (pointer_button_ != MouseButton::left) return false;
+        if (pointer_button_ != MouseButton::left)
+            return false;
         MouseEvent event;
         event.position = pointer_point_;
         event.window_position = pointer_point_;
@@ -581,13 +617,15 @@ private:
         event.is_down = phase != MousePhase::release;
         auto* target = pointer_capture_.live_in(root_);
         const bool claimed = yield_to_gesture_with_handoff(root_, target, event, click_count_);
-        if (claimed) pointer_capture_.reset();
+        if (claimed)
+            pointer_capture_.reset();
         return claimed;
     }
 
     void publish_cursor() {
         const auto style = hover_cursor_.poll(root_);
-        if (!style) return;
+        if (!style)
+            return;
         if (*style == View::CursorStyle::invisible) {
             SDL_HideCursor();
             return;
@@ -595,23 +633,44 @@ private:
         SDL_ShowCursor();
         SDL_SystemCursor shape = SDL_SYSTEM_CURSOR_DEFAULT;
         switch (*style) {
-            case View::CursorStyle::pointer: shape = SDL_SYSTEM_CURSOR_POINTER; break;
-            case View::CursorStyle::crosshair: shape = SDL_SYSTEM_CURSOR_CROSSHAIR; break;
-            case View::CursorStyle::text: shape = SDL_SYSTEM_CURSOR_TEXT; break;
-            case View::CursorStyle::grab: case View::CursorStyle::grabbing:
-            case View::CursorStyle::multi_directional_resize: shape = SDL_SYSTEM_CURSOR_MOVE; break;
-            case View::CursorStyle::not_allowed: shape = SDL_SYSTEM_CURSOR_NOT_ALLOWED; break;
-            case View::CursorStyle::horizontal_resize: shape = SDL_SYSTEM_CURSOR_EW_RESIZE; break;
-            case View::CursorStyle::vertical_resize: shape = SDL_SYSTEM_CURSOR_NS_RESIZE; break;
-            case View::CursorStyle::top_left_resize: case View::CursorStyle::bottom_right_resize:
-                shape = SDL_SYSTEM_CURSOR_NWSE_RESIZE; break;
-            case View::CursorStyle::top_right_resize: case View::CursorStyle::bottom_left_resize:
-                shape = SDL_SYSTEM_CURSOR_NESW_RESIZE; break;
-            default: break;
+        case View::CursorStyle::pointer:
+            shape = SDL_SYSTEM_CURSOR_POINTER;
+            break;
+        case View::CursorStyle::crosshair:
+            shape = SDL_SYSTEM_CURSOR_CROSSHAIR;
+            break;
+        case View::CursorStyle::text:
+            shape = SDL_SYSTEM_CURSOR_TEXT;
+            break;
+        case View::CursorStyle::grab:
+        case View::CursorStyle::grabbing:
+        case View::CursorStyle::multi_directional_resize:
+            shape = SDL_SYSTEM_CURSOR_MOVE;
+            break;
+        case View::CursorStyle::not_allowed:
+            shape = SDL_SYSTEM_CURSOR_NOT_ALLOWED;
+            break;
+        case View::CursorStyle::horizontal_resize:
+            shape = SDL_SYSTEM_CURSOR_EW_RESIZE;
+            break;
+        case View::CursorStyle::vertical_resize:
+            shape = SDL_SYSTEM_CURSOR_NS_RESIZE;
+            break;
+        case View::CursorStyle::top_left_resize:
+        case View::CursorStyle::bottom_right_resize:
+            shape = SDL_SYSTEM_CURSOR_NWSE_RESIZE;
+            break;
+        case View::CursorStyle::top_right_resize:
+        case View::CursorStyle::bottom_left_resize:
+            shape = SDL_SYSTEM_CURSOR_NESW_RESIZE;
+            break;
+        default:
+            break;
         }
         if (auto* next = SDL_CreateSystemCursor(shape)) {
             SDL_SetCursor(next);
-            if (cursor_) SDL_DestroyCursor(cursor_);
+            if (cursor_)
+                SDL_DestroyCursor(cursor_);
             cursor_ = next;
         }
     }
