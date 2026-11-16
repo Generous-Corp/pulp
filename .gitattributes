@@ -19,3 +19,15 @@
 # outcome.
 docs/status/gpu-vellum-handoff.yaml merge=pulp-gpu-ledger
 docs/validation/gpu-handoff-provenance/receipt.json merge=pulp-gpu-ledger
+
+# Generated registries. linguist-generated collapses them in PR diffs so a review
+# reads the source change, not its derived digest. It does not change merging: a
+# conflict in one is repaired by regenerating from the merged source (the writer
+# is named in each file or in tools/scripts/hotspot_edit_guard.json), never by
+# hand. merge=union is deliberately NOT used on registries: replaying 88
+# conflicted merges, a union of both sides produced a duplicated target or an
+# unbalanced if()/endif() in 5 of 7 mac_platform_tests.cmake conflicts.
+.shipyard/changed-surface-families.toml linguist-generated=true
+tools/agent-capabilities/fingerprints/** linguist-generated=true
+docs/status/agent-capability-surface/** linguist-generated=true
+test/ctest_script_inputs/** linguist-generated=true

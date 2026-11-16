@@ -70,6 +70,10 @@ renderer's device. The `rmlui-metal-demo` example is a small plug-in using this
 path; it remains unavailable when the adapter option or the Vellum Metal
 component is off.
 
+When the Vellum RmlUi SDK provides `NativeContext::warm()`, `RmlUiSurface::attach()`
+calls it after the document loads, so textures, geometry and glyphs are ready
+before the first frame is requested. Older SDKs draw the first frame cold.
+
 The surface context is sized in drawable pixels, the Metal frame scale is 1,
 and the density ratio is the backing scale. Documents that need
 density-scaled text should use `font-size` in `dp` (the example does this)
@@ -87,12 +91,27 @@ renderer, and `RendererHooks::trim` is called so the renderer can free the
 layer, filter and atlas textures it caches. Showing resumes frames and draws
 one, which recompiles everything that was released, so the first visible frame
 is complete.
+### Threading
+
+A frame holds one process-wide lock, `rmlui_mutex()`, for RmlUi's update and
+render, because RmlUi's state is shared and not thread-safe. The main thread
+does not wait for it to deliver pointer or wheel input or to run `idle()`:
+when a frame is in flight, pointer and wheel events are queued (consecutive
+moves, and wheel deltas with the same modifiers, merge) and applied in order on
+the main thread within about a millisecond of the frame ending. Element
+listeners therefore still run on the main thread, a moment after the event.
+`with_context()`, key and text input apply the queue first and wait for a
+frame; call `flush_input()` where a caller needs earlier events applied now,
+as a test does after a click.
 
 ## Proof
 
 - `pulp-test-native-metal-surface`, `-frame-pump`, `-input` and
   `-surface-input` cover the package on the real Metal device in offscreen
   windows. They skip, saying so, without one.
+- `pulp-test-rmlui-native-surface` and `pulp-test-rmlui-native-metal` cover the
+  RmlUi adapter, including the first-frame preparation. They need an installed
+  Vellum RmlUi SDK and no CI lane builds them yet, so run them locally.
 - `pulp-test-native-metal-probe` drives the example through the editor-host
   contract, the path every format adapter takes.
 - `native-metal-probe-clap-host` and `native-metal-probe-au-host` load the
