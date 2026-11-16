@@ -16,8 +16,8 @@
 #include <chrono>
 #include <cmath>
 #include <deque>
-#include <type_traits>
 #include <memory>
+#include <type_traits>
 #include <utility>
 #include <variant>
 
@@ -127,6 +127,8 @@ struct RmlUiSurface::Impl {
     // render thread reads it after each frame to post a drain to the main
     // thread.
     std::atomic<bool> has_queued{false};
+    // Coalesce frame notifications and retries while another surface is busy.
+    std::atomic<bool> drain_posted{false};
     std::atomic<std::uint64_t> queued_total{0};
     // False after teardown, on the main thread; a posted drain holds a copy.
     // The token outlives one attach: a drain posted before a detach may run
@@ -218,13 +220,23 @@ struct RmlUiSurface::Impl {
     }
 
     // Any thread.
-    void post_drain() {
+    void post_drain(bool retry = false) {
+        if (drain_posted.exchange(true))
+            return;
         auto alive = liveness;
         Impl* self = this;
-        dispatch_async(dispatch_get_main_queue(), ^{
-          if (alive->live)
+        auto drain = ^{
+          // The token can outlive Impl after teardown. Do not touch self then.
+          if (alive->live) {
+              self->drain_posted.store(false);
               self->try_drain();
-        });
+          }
+        };
+        if (retry)
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_MSEC),
+                           dispatch_get_main_queue(), drain);
+        else
+            dispatch_async(dispatch_get_main_queue(), drain);
     }
 
     // Main thread, rmlui_mutex() held.
@@ -325,13 +337,18 @@ struct RmlUiSurface::Impl {
     }
 
     // Main thread: apply queued input if the render thread is not in RmlUi.
-    // When it is, that frame posts another drain as it finishes.
+    // Another surface may own the process-wide lock after our last frame.
+    // Keep one delayed retry until delivery, independent of that surface's queue.
     void try_drain() {
+        if (queued.empty())
+            return;
         bool applied = false;
         {
             std::unique_lock lock(rmlui_mutex(), std::try_to_lock);
-            if (!lock.owns_lock())
+            if (!lock.owns_lock()) {
+                post_drain(true);
                 return;
+            }
             applied = drain_queued_locked();
         }
         if (applied && pump)
@@ -359,7 +376,7 @@ struct RmlUiSurface::Impl {
         pump->request_frame();
         // The frame that held the lock may have finished and checked the flag
         // before it was set; if the lock is free now, apply the event here.
-        // If it is held again, that frame checks the flag when it finishes.
+        // If it is held again, retain a retry even if another editor owns it.
         try_drain();
     }
 
@@ -417,6 +434,7 @@ struct RmlUiSurface::Impl {
         }
         if (pump)
             pump->stop();
+        drain_posted.store(false);
         {
             std::lock_guard lock(rmlui_mutex());
             if (context)
@@ -477,8 +495,10 @@ bool RmlUiSurface::attach(void* parent) {
         d.context = std::make_unique<vellum::rmlui::NativeContext>(d.assets, d.renderer);
         const auto g = d.surface->geometry();
         const double s = g.scale > 0.0 ? g.scale : 1.0;
-        const auto w = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.width * s)));
-        const auto h = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.height * s)));
+        const auto w =
+            std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.width * s)));
+        const auto h =
+            std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.height * s)));
         bool ok = d.context->open(w, h) == vellum::rmlui::Status::ok;
         if (ok) {
             vellum::rmlui::NativeContext::Scope scope(*d.context);
