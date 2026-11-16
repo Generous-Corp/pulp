@@ -138,6 +138,23 @@ class RmlUiSurface {
     /// rebuilding what was released, so the first visible frame is complete.
     /// Main thread.
     void visibility_changed(bool visible);
+    /// True while an RmlUi text field holds the keyboard. Main thread.
+    bool text_field_focused() const noexcept;
+    /// A host offers `event` before acting on it itself (a transport shortcut
+    /// on Space, say). Returns true when the surface took it: a text field has
+    /// focus, and RmlUi consumed the key or the key produced text, which is
+    /// delivered to the field. Returns false, without touching RmlUi, when no
+    /// text field has focus, so the host keeps its shortcuts. Repeats and
+    /// releases keep the initial press disposition even if focus changes while
+    /// the key is held. Pointer
+    /// input queued behind a frame is applied first, so a click on a field
+    /// that has not landed yet still decides where the key goes. Main thread.
+    bool offer_key(const pulp::native::KeyEvent& event);
+    /// The editor's window gained or lost keyboard focus. Losing it blurs a
+    /// focused text field (the caret stops showing and the host's keyboard is
+    /// handed back); gaining it focuses that field again, found by its `id`
+    /// attribute, so a field without one is not restored. Main thread.
+    void set_window_focused(bool focused);
     /// The density ratio RmlUi was given: the backing scale when
     /// `density_ratio_supported()`, otherwise 1, and 1 while detached. `px` lengths are always
     /// device pixels; `dp` lengths are `density_ratio()` device pixels. Main

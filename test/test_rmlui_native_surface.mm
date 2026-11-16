@@ -7,6 +7,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/rmlui_native/editor_keys.hpp>
 #include <pulp/rmlui_native/rmlui_surface.hpp>
 
 #include "../integrations/rmlui-native/src/input_drain.hpp"
@@ -595,6 +596,213 @@ TEST_CASE("the surface uses the device the caller's renderer was built on",
     }
 }
 
+namespace {
+
+std::string field_value(Editor& e) {
+    std::string value;
+    e.ui->with_context([&](Rml::Context& ctx) {
+        value = ctx.GetDocument(0)->GetElementById("field")->GetAttribute<Rml::String>("value", "");
+    });
+    return value;
+}
+
+void focus_field(Editor& e) {
+    [e.view() mouseDown:e.mouse(NSEventTypeLeftMouseDown, 190, 115)];
+    [e.view() mouseUp:e.mouse(NSEventTypeLeftMouseUp, 190, 115)];
+    // The click may have been queued behind a frame.
+    e.ui->flush_input();
+}
+
+pulp::format::EditorKeyEvent key_event(pulp::format::EditorKey key, char32_t character = 0,
+                                       std::uint8_t modifiers = 0, bool repeat = false) {
+    pulp::format::EditorKeyEvent event;
+    event.key = key;
+    event.character = character;
+    event.modifiers = modifiers;
+    event.is_repeat = repeat;
+    return event;
+}
+
+} // namespace
+
+TEST_CASE("an offered key is taken only while a text field holds focus",
+          "[native-surface][rmlui][keys]") {
+    REQUIRE_METAL();
+    using pulp::format::EditorKey;
+    using pulp::format::KeyDisposition;
+    @autoreleasepool {
+        Editor e;
+        REQUIRE(e.attach());
+        REQUIRE(e.wait_for([&] { return e.ui->frames() > 0; }));
+
+        // No field focused: Space is the host's (transport), and RmlUi is not
+        // touched.
+        REQUIRE_FALSE(e.ui->text_field_focused());
+        const auto host_press = key_event(EditorKey::space, U' ');
+        REQUIRE(offer_editor_key(*e.ui, host_press) == KeyDisposition::forward);
+        REQUIRE(field_value(e) == "ab");
+
+        focus_field(e);
+        REQUIRE(e.ui->text_field_focused());
+        // A repeat keeps the host's original ownership after focus changes.
+        REQUIRE(offer_editor_key(*e.ui, key_event(EditorKey::space, U' ', 0, true)) ==
+                KeyDisposition::forward);
+        auto host_release = host_press;
+        host_release.is_down = false;
+        REQUIRE(offer_editor_key(*e.ui, host_release) == KeyDisposition::forward);
+        // Space is typed into the field and the host does not see it.
+        REQUIRE(offer_editor_key(*e.ui, key_event(EditorKey::space, U' ')) ==
+                KeyDisposition::consumed);
+        REQUIRE(offer_editor_key(*e.ui, key_event(EditorKey::none, U'\u00e9')) ==
+                KeyDisposition::consumed);
+        REQUIRE(field_value(e) == "ab \xc3\xa9");
+        // An editing key reaches RmlUi as a key.
+        REQUIRE(offer_editor_key(*e.ui, key_event(EditorKey::backspace)) ==
+                KeyDisposition::consumed);
+        REQUIRE(field_value(e) == "ab ");
+        // A command shortcut is the host's, and types nothing.
+        REQUIRE(offer_editor_key(*e.ui, key_event(EditorKey::none, U's',
+                                                  pulp::format::editor_modifier_command)) ==
+                KeyDisposition::forward);
+        REQUIRE(field_value(e) == "ab ");
+        // A release types nothing.
+        auto release = key_event(EditorKey::space, U' ');
+        release.is_down = false;
+        // The release of a key the field took is the field's too.
+        REQUIRE(offer_editor_key(*e.ui, release) == KeyDisposition::consumed);
+        // A release whose press the host took stays the host's, even when a
+        // field gained focus in between.
+        e.ui->with_context(
+            [&](Rml::Context& ctx) { ctx.GetDocument(0)->GetElementById("field")->Blur(); });
+        REQUIRE_FALSE(e.ui->text_field_focused());
+        REQUIRE(offer_editor_key(*e.ui, key_event(EditorKey::space, U' ')) ==
+                KeyDisposition::forward);
+        focus_field(e);
+        REQUIRE(e.ui->text_field_focused());
+        REQUIRE(offer_editor_key(*e.ui, release) == KeyDisposition::forward);
+        // A field-owned printable key inserts its character before the
+        // release, and that release leaves the value unchanged.
+        // (RmlUi does not add a second consecutive space to a field's value, so
+        // clear the trailing one first.)
+        REQUIRE(offer_editor_key(*e.ui, key_event(EditorKey::backspace)) ==
+                KeyDisposition::consumed);
+        REQUIRE(field_value(e) == "ab");
+        auto backspace_up = key_event(EditorKey::backspace);
+        backspace_up.is_down = false;
+        REQUIRE(offer_editor_key(*e.ui, backspace_up) == KeyDisposition::consumed);
+        auto final_space = key_event(EditorKey::space, U' ');
+        REQUIRE(offer_editor_key(*e.ui, final_space) == KeyDisposition::consumed);
+        REQUIRE(field_value(e) == "ab ");
+        e.ui->with_context(
+            [&](Rml::Context& ctx) { ctx.GetDocument(0)->GetElementById("field")->Blur(); });
+        final_space.is_down = false;
+        REQUIRE(offer_editor_key(*e.ui, final_space) == KeyDisposition::consumed);
+        REQUIRE(field_value(e) == "ab ");
+
+        // A field-owned editing key keeps its ownership through repeats and a
+        // blur, too.
+        focus_field(e);
+        REQUIRE(offer_editor_key(*e.ui, key_event(EditorKey::left)) == KeyDisposition::consumed);
+        REQUIRE(offer_editor_key(*e.ui, key_event(EditorKey::left, 0, 0, true)) ==
+                KeyDisposition::consumed);
+        e.ui->with_context(
+            [&](Rml::Context& ctx) { ctx.GetDocument(0)->GetElementById("field")->Blur(); });
+        auto left_release = key_event(EditorKey::left);
+        left_release.is_down = false;
+        REQUIRE(offer_editor_key(*e.ui, left_release) == KeyDisposition::consumed);
+
+        // Printable contract keys have no physical Key value. Their character
+        // identity keeps overlapping presses paired with the right releases.
+        focus_field(e);
+        REQUIRE(offer_editor_key(*e.ui, key_event(EditorKey::none, U'x')) ==
+                KeyDisposition::consumed);
+        REQUIRE(offer_editor_key(*e.ui, key_event(EditorKey::none, U'y')) ==
+                KeyDisposition::consumed);
+        // (Both are typed; a blur may trim the value's trailing space, so the
+        // check is on the typed tail.)
+        const std::string typed = field_value(e);
+        REQUIRE(typed.size() >= 2);
+        REQUIRE(typed.substr(typed.size() - 2) == "xy");
+        auto x_release = key_event(EditorKey::none, U'x');
+        x_release.is_down = false;
+        auto y_release = key_event(EditorKey::none, U'y');
+        y_release.is_down = false;
+        REQUIRE(offer_editor_key(*e.ui, x_release) == KeyDisposition::consumed);
+        REQUIRE(offer_editor_key(*e.ui, y_release) == KeyDisposition::consumed);
+        REQUIRE(field_value(e) == typed);
+        e.ui->detach();
+    }
+}
+
+TEST_CASE("a key press keeps its owner across modifier changes and a lost release",
+          "[native-surface][rmlui][keys]") {
+    REQUIRE_METAL();
+    using pulp::format::EditorKey;
+    using pulp::format::KeyDisposition;
+    @autoreleasepool {
+        Editor e;
+        REQUIRE(e.attach());
+        REQUIRE(e.wait_for([&] { return e.ui->frames() > 0; }));
+        auto blur = [&] {
+            e.ui->with_context(
+                [&](Rml::Context& ctx) { ctx.GetDocument(0)->GetElementById("field")->Blur(); });
+        };
+        // The same physical key (code 0 + 1) with a different composed
+        // character, as Shift changes it.
+        auto key_a = [](char32_t c, bool down, bool repeat, std::uint8_t mods) {
+            auto event = key_event(EditorKey::none, c, mods, repeat);
+            event.is_down = down;
+            event.physical_key = 1;
+            return event;
+        };
+
+        // A host-owned 'a' gains a field and Shift before its repeat and
+        // release: both stay the host's.
+        REQUIRE(offer_editor_key(*e.ui, key_a(U'a', true, false, 0)) == KeyDisposition::forward);
+        focus_field(e);
+        REQUIRE(e.ui->text_field_focused());
+        REQUIRE(
+            offer_editor_key(*e.ui, key_a(U'A', true, true, pulp::format::editor_modifier_shift)) ==
+            KeyDisposition::forward);
+        REQUIRE(offer_editor_key(*e.ui,
+                                 key_a(U'A', false, false, pulp::format::editor_modifier_shift)) ==
+                KeyDisposition::forward);
+        REQUIRE(field_value(e) == "ab");
+
+        // A field-owned shifted 'A' released without Shift is still the field's.
+        REQUIRE(offer_editor_key(*e.ui,
+                                 key_a(U'A', true, false, pulp::format::editor_modifier_shift)) ==
+                KeyDisposition::consumed);
+        REQUIRE(field_value(e) == "abA");
+        blur();
+        REQUIRE(offer_editor_key(*e.ui, key_a(U'a', false, false, 0)) == KeyDisposition::consumed);
+        REQUIRE(field_value(e) == "abA");
+
+        // A consumed Space whose release was lost to window deactivation must
+        // not own the next, host-routed Space press.
+        focus_field(e);
+        auto space = key_event(EditorKey::space, U' ');
+        REQUIRE(offer_editor_key(*e.ui, space) == KeyDisposition::consumed);
+        e.ui->set_window_focused(false);
+        e.ui->set_window_focused(true);
+        blur();
+        REQUIRE_FALSE(e.ui->text_field_focused());
+        REQUIRE(offer_editor_key(*e.ui, space) == KeyDisposition::forward);
+        auto space_repeat = key_event(EditorKey::space, U' ', 0, true);
+        REQUIRE(offer_editor_key(*e.ui, space_repeat) == KeyDisposition::forward);
+        auto space_up = space;
+        space_up.is_down = false;
+        REQUIRE(offer_editor_key(*e.ui, space_up) == KeyDisposition::forward);
+        // A fresh press replaces a stale record with no deactivation in between.
+        focus_field(e);
+        REQUIRE(offer_editor_key(*e.ui, space) == KeyDisposition::consumed);
+        blur();
+        REQUIRE(offer_editor_key(*e.ui, space) == KeyDisposition::forward);
+        REQUIRE(offer_editor_key(*e.ui, space_up) == KeyDisposition::forward);
+        e.ui->detach();
+    }
+}
+
 // A window whose backing scale a test can set, standing in for a display with
 // another scale.
 @interface PulpRmlUiScaleWindow : NSWindow
@@ -803,6 +1011,67 @@ TEST_CASE("pointer input does not wait for a frame the render thread is drawing"
         // Pointer input is not such a caller.
         REQUIRE(p95 < 0.1 * hold_ms);
         e.renderer.draw_delay_us.store(200);
+        e.ui->detach();
+    }
+}
+
+TEST_CASE("contract keys map to pulp-native keys", "[native-surface][rmlui][keys]") {
+    using pulp::format::EditorKey;
+    using pulp::native::Key;
+    REQUIRE(native_key_for(EditorKey::space) == Key::space);
+    REQUIRE(native_key_for(EditorKey::delete_forward) == Key::delete_forward);
+    REQUIRE(native_key_for(EditorKey::page_down) == Key::page_down);
+    REQUIRE(native_key_for(EditorKey::none) == Key::unknown);
+    const auto mapped = native_key_event_for(
+        key_event(EditorKey::none, 0x1F600,
+                  pulp::format::editor_modifier_shift | pulp::format::editor_modifier_alt));
+    REQUIRE(mapped.characters == "\xF0\x9F\x98\x80");
+    REQUIRE(mapped.modifiers == (pulp::native::modifier_shift | pulp::native::modifier_option));
+
+    // A lone surrogate types nothing.
+    REQUIRE(native_key_event_for(key_event(EditorKey::none, 0xD83D)).characters.empty());
+    REQUIRE(native_key_event_for(key_event(EditorKey::none, 0xDE00)).characters.empty());
+}
+
+TEST_CASE("losing window focus blurs the text field and gaining it restores it",
+          "[native-surface][rmlui][keys]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        Editor e;
+        REQUIRE(e.attach());
+        REQUIRE(e.wait_for([&] { return e.ui->frames() > 0; }));
+        focus_field(e);
+        REQUIRE(e.ui->text_field_focused());
+        REQUIRE(e.ui->surface()->text_focus());
+
+        forward_editor_focus(*e.ui, false);
+        REQUIRE_FALSE(e.ui->text_field_focused());
+        REQUIRE_FALSE(e.ui->surface()->text_focus());
+        bool blurred = false;
+        e.ui->with_context([&](Rml::Context& ctx) {
+            blurred = ctx.GetFocusElement() != ctx.GetDocument(0)->GetElementById("field");
+        });
+        REQUIRE(blurred);
+
+        forward_editor_focus(*e.ui, true);
+        REQUIRE(e.ui->text_field_focused());
+        REQUIRE(e.ui->surface()->text_focus());
+
+        // Losing focus twice in a row keeps what the first loss remembered.
+        forward_editor_focus(*e.ui, false);
+        forward_editor_focus(*e.ui, false);
+        REQUIRE_FALSE(e.ui->text_field_focused());
+        forward_editor_focus(*e.ui, true);
+        REQUIRE(e.ui->text_field_focused());
+
+        // With no field focused, gaining focus restores nothing.
+        [e.view() mouseDown:e.mouse(NSEventTypeLeftMouseDown, 250, 180)];
+        [e.view() mouseUp:e.mouse(NSEventTypeLeftMouseUp, 250, 180)];
+        e.ui->flush_input();
+        REQUIRE_FALSE(e.ui->text_field_focused());
+        forward_editor_focus(*e.ui, false);
+        forward_editor_focus(*e.ui, true);
+        REQUIRE_FALSE(e.ui->text_field_focused());
         e.ui->detach();
     }
 }
@@ -1032,104 +1301,64 @@ TEST_CASE("a click queued behind a frame lands before the text typed after it",
     }
 }
 
-TEST_CASE("a hidden editor stops frames and trims GPU memory, and showing it draws a full frame",
-          "[native-surface][rmlui][visibility]") {
+TEST_CASE("a click queued behind a frame decides where an offered key goes",
+          "[native-surface][rmlui][threading][keys]") {
     REQUIRE_METAL();
+    using pulp::format::EditorKey;
+    using pulp::format::KeyDisposition;
     @autoreleasepool {
         Editor e;
         REQUIRE(e.attach());
         REQUIRE(e.wait_for([&] { return e.ui->frames() > 0; }));
-        const int compiled_before = e.renderer.compiled.load();
-        const int rendered_before = e.renderer.rendered.load();
-        REQUIRE(e.renderer.released_geometry.load() == 0);
-        REQUIRE(e.trimmed.load() == 0);
-
-        e.ui->visibility_changed(false);
-        // RmlUi handed back its geometry and textures through the renderer,
-        // and the renderer was told to drop its own caches.
-        REQUIRE(e.renderer.released_geometry.load() > 0);
-        REQUIRE(e.trimmed.load() == 1);
-
-        // Frames stay off while hidden, whatever asks for one and whatever the
-        // window reports.
-        const auto frames = e.ui->frames();
-        for (int i = 0; i < 10; ++i) {
+        e.renderer.draw_delay_us.store(6000);
+        bool queued = false;
+        for (int attempt = 0; attempt < 20 && !queued; ++attempt) {
             e.ui->request_frame();
-            e.ui->idle();
-            [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
+            [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.008]];
+            [e.view() mouseDown:e.mouse(NSEventTypeLeftMouseDown, 190, 115)];
+            [e.view() mouseUp:e.mouse(NSEventTypeLeftMouseUp, 190, 115)];
+            // The click is queued: the field is not focused yet.
+            queued = !e.ui->text_field_focused();
+            if (!queued) {
+                [e.view() mouseDown:e.mouse(NSEventTypeLeftMouseDown, 250, 180)];
+                [e.view() mouseUp:e.mouse(NSEventTypeLeftMouseUp, 250, 180)];
+                e.ui->flush_input();
+            }
         }
-        REQUIRE(e.ui->frames() == frames);
-
-        // Showing draws a complete frame: the geometry RmlUi released is
-        // compiled again and drawn.
-        e.ui->visibility_changed(true);
-        REQUIRE(e.wait_for([&] { return e.ui->frames() > frames; }));
-        REQUIRE(e.renderer.compiled.load() > compiled_before);
-        REQUIRE(e.renderer.rendered.load() > rendered_before);
-        REQUIRE(e.trimmed.load() == 1);
+        REQUIRE(queued);
+        // The user clicked the field, then pressed Space: it is typed into the
+        // field, not handed to the host's transport.
+        REQUIRE(offer_editor_key(*e.ui, key_event(EditorKey::space, U' ')) ==
+                KeyDisposition::consumed);
+        REQUIRE(e.ui->text_field_focused());
+        REQUIRE(field_value(e) == "ab ");
+        e.renderer.draw_delay_us.store(200);
         e.ui->detach();
     }
 }
 
-TEST_CASE("hiding waits for the last submitted frame before releasing GPU resources",
-          "[native-surface][rmlui][visibility]") {
+TEST_CASE("losing window focus blurs a text field that has no id",
+          "[native-surface][rmlui][keys]") {
     REQUIRE_METAL();
     @autoreleasepool {
         Editor e;
         REQUIRE(e.attach());
         REQUIRE(e.wait_for([&] { return e.ui->frames() > 0; }));
-        // The next frame's command buffer waits on an event, so it is still on
-        // the GPU, committed, when the editor is hidden.
-        e.gate_next.store(true);
-        const auto before = e.ui->frames();
-        e.ui->request_frame();
-        REQUIRE(e.wait_for([&] { return e.gated.load() && e.ui->frames() > before; }));
-        REQUIRE(e.gated_cb.status != MTLCommandBufferStatusCompleted);
-        e.renderer.first_release_ns.store(0);
-        std::atomic<long long> signalled_ns{0};
-        id<MTLSharedEvent> gate = e.gate;
-        // Always signalled, so a regression fails the assertions, not the run.
-        std::thread release([&signalled_ns, gate] {
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
-            signalled_ns.store(now_ns());
-            gate.signaledValue = 1;
+        e.ui->with_context(
+            [&](Rml::Context& ctx) { ctx.GetDocument(0)->GetElementById("field")->SetId(""); });
+        e.ui->with_context([&](Rml::Context& ctx) {
+            for (int i = 0; i < ctx.GetDocument(0)->GetNumChildren(); ++i)
+                if (auto* el = ctx.GetDocument(0)->GetChild(i); el->GetTagName() == "input")
+                    el->Focus();
         });
-        e.ui->visibility_changed(false);
-        release.join();
-        REQUIRE(e.trimmed.load() == 1);
-        // Nothing was released, and the renderer was not trimmed, while the
-        // frame could still use it.
-        REQUIRE(e.trim_saw_status.load() == static_cast<int>(MTLCommandBufferStatusCompleted));
-        REQUIRE(e.renderer.first_release_ns.load() >= signalled_ns.load());
+        REQUIRE(e.ui->text_field_focused());
+        forward_editor_focus(*e.ui, false);
+        REQUIRE_FALSE(e.ui->text_field_focused());
+        REQUIRE_FALSE(e.ui->surface()->text_focus());
+        // Nothing to restore by id.
+        forward_editor_focus(*e.ui, true);
+        REQUIRE_FALSE(e.ui->text_field_focused());
         e.ui->detach();
-    }
-}
-
-TEST_CASE("a renderer serves one attached surface at a time",
-          "[native-surface][rmlui][visibility]") {
-    REQUIRE_METAL();
-    @autoreleasepool {
-        Editor a;
-        Editor b;
-        REQUIRE(a.attach());
-        RmlUiSurfaceOptions options;
-        options.document = "probe.rml";
-        options.font_faces = {"font.ttf"};
-        // Hiding a would release this surface's geometry and textures too.
-        RmlUiSurface shared(a.assets, a.renderer, {}, options);
-        REQUIRE_FALSE(shared.attach((__bridge void*)b.window.contentView));
-        REQUIRE_FALSE(shared.attached());
-        REQUIRE(a.wait_for([&] { return a.ui->frames() > 0; }));
-        // Detaching frees the renderer; an attach that fails after taking it
-        // (a missing document) gives it back.
-        a.ui->detach();
-        RmlUiSurface missing(a.assets, a.renderer, {}, {"missing.rml"});
-        REQUIRE_FALSE(missing.attach((__bridge void*)b.window.contentView));
-        REQUIRE(shared.attach((__bridge void*)b.window.contentView));
-        REQUIRE_FALSE(a.attach());
-        shared.detach();
-        REQUIRE(a.attach());
-        a.ui->detach();
     }
 }
 
@@ -1326,4 +1555,105 @@ TEST_CASE("parked cleanup releases holds before joining on exception", "[rmlui][
     CHECK_FALSE(b.renderer.hold_draws.load());
     CHECK(a.surface.detached);
     CHECK(b.surface.detached);
+}
+
+TEST_CASE("a hidden editor stops frames and trims GPU memory, and showing it draws a full frame",
+          "[native-surface][rmlui][visibility]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        Editor e;
+        REQUIRE(e.attach());
+        REQUIRE(e.wait_for([&] { return e.ui->frames() > 0; }));
+        const int compiled_before = e.renderer.compiled.load();
+        const int rendered_before = e.renderer.rendered.load();
+        REQUIRE(e.renderer.released_geometry.load() == 0);
+        REQUIRE(e.trimmed.load() == 0);
+
+        e.ui->visibility_changed(false);
+        // RmlUi handed back its geometry and textures through the renderer,
+        // and the renderer was told to drop its own caches.
+        REQUIRE(e.renderer.released_geometry.load() > 0);
+        REQUIRE(e.trimmed.load() == 1);
+
+        // Frames stay off while hidden, whatever asks for one and whatever the
+        // window reports.
+        const auto frames = e.ui->frames();
+        for (int i = 0; i < 10; ++i) {
+            e.ui->request_frame();
+            e.ui->idle();
+            [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
+        }
+        REQUIRE(e.ui->frames() == frames);
+
+        // Showing draws a complete frame: the geometry RmlUi released is
+        // compiled again and drawn.
+        e.ui->visibility_changed(true);
+        REQUIRE(e.wait_for([&] { return e.ui->frames() > frames; }));
+        REQUIRE(e.renderer.compiled.load() > compiled_before);
+        REQUIRE(e.renderer.rendered.load() > rendered_before);
+        REQUIRE(e.trimmed.load() == 1);
+        e.ui->detach();
+    }
+}
+
+TEST_CASE("hiding waits for the last submitted frame before releasing GPU resources",
+          "[native-surface][rmlui][visibility]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        Editor e;
+        REQUIRE(e.attach());
+        REQUIRE(e.wait_for([&] { return e.ui->frames() > 0; }));
+        // The next frame's command buffer waits on an event, so it is still on
+        // the GPU, committed, when the editor is hidden.
+        e.gate_next.store(true);
+        const auto before = e.ui->frames();
+        e.ui->request_frame();
+        REQUIRE(e.wait_for([&] { return e.gated.load() && e.ui->frames() > before; }));
+        REQUIRE(e.gated_cb.status != MTLCommandBufferStatusCompleted);
+        e.renderer.first_release_ns.store(0);
+        std::atomic<long long> signalled_ns{0};
+        id<MTLSharedEvent> gate = e.gate;
+        // Always signalled, so a regression fails the assertions, not the run.
+        std::thread release([&signalled_ns, gate] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            signalled_ns.store(now_ns());
+            gate.signaledValue = 1;
+        });
+        e.ui->visibility_changed(false);
+        release.join();
+        REQUIRE(e.trimmed.load() == 1);
+        // Nothing was released, and the renderer was not trimmed, while the
+        // frame could still use it.
+        REQUIRE(e.trim_saw_status.load() == static_cast<int>(MTLCommandBufferStatusCompleted));
+        REQUIRE(e.renderer.first_release_ns.load() >= signalled_ns.load());
+        e.ui->detach();
+    }
+}
+
+TEST_CASE("a renderer serves one attached surface at a time",
+          "[native-surface][rmlui][visibility]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        Editor a;
+        Editor b;
+        REQUIRE(a.attach());
+        RmlUiSurfaceOptions options;
+        options.document = "probe.rml";
+        options.font_faces = {"font.ttf"};
+        // Hiding a would release this surface's geometry and textures too.
+        RmlUiSurface shared(a.assets, a.renderer, {}, options);
+        REQUIRE_FALSE(shared.attach((__bridge void*)b.window.contentView));
+        REQUIRE_FALSE(shared.attached());
+        REQUIRE(a.wait_for([&] { return a.ui->frames() > 0; }));
+        // Detaching frees the renderer; an attach that fails after taking it
+        // (a missing document) gives it back.
+        a.ui->detach();
+        RmlUiSurface missing(a.assets, a.renderer, {}, {"missing.rml"});
+        REQUIRE_FALSE(missing.attach((__bridge void*)b.window.contentView));
+        REQUIRE(shared.attach((__bridge void*)b.window.contentView));
+        REQUIRE_FALSE(a.attach());
+        shared.detach();
+        REQUIRE(a.attach());
+        a.ui->detach();
+    }
 }

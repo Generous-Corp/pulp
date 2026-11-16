@@ -100,6 +100,15 @@ it and its tests, and both look like bugs until you know them:
   leaves a host's key routing (Musical Typing) dead, as the plug-in host's
   key-focus etiquette below describes.
 
+- **An RmlUi editor forwards `offer_key` and `focus_changed` through
+  `pulp/rmlui_native/editor_keys.hpp`.** The default `offer_key` returns
+  `forward`, so a text field in an RmlUi editor loses Space to the host's
+  transport unless the editor answers; `offer_editor_key` applies the shared
+  policy (take the key only while a text field has focus) and types the key's
+  character. Repeats and releases keep the initial press disposition through
+  focus changes. A field needs an `id` to be refocused after the window regains
+  focus. It applies queued pointer input before deciding, so a click on a
+  field that has not landed yet still routes the next key into the field.
 - **RmlUi frames hold one process-wide lock; input does not wait for it.**
   `RmlUiSurface` takes `rmlui_mutex()` for a frame's update and render, and
   RmlUi permits no narrower scope. Pointer and wheel events that arrive during
