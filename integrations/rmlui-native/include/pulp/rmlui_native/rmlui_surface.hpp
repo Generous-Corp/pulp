@@ -14,9 +14,17 @@
 ///
 /// Threading: RmlUi's state is process-wide and not thread-safe, so every call
 /// into RmlUi in this binary, from any surface, input or render, holds
-/// `rmlui_mutex()`. A caller that calls RmlUi itself (data models, element
-/// queries) uses `with_context()`, which takes it. Members other than
-/// `with_context()` run on the main thread.
+/// `rmlui_mutex()`; a frame holds it for its update and render. Members other
+/// than `with_context()` run on the main thread.
+///
+/// The main thread does not wait for a frame to deliver pointer or wheel
+/// input or to run `idle()`. When the render thread holds the lock, pointer
+/// and wheel events are queued (consecutive moves and wheel deltas merge) and
+/// applied, in order and on the main thread, within about a millisecond of the
+/// frame ending. Their listeners therefore run on the main thread, a moment
+/// later than the event. `with_context()`, key and text input apply anything
+/// queued first, so they always see earlier events' effects; they, and
+/// `flush_input()`, do wait for a frame.
 
 #include <pulp/native/frame_pump.hpp>
 #include <pulp/native/metal_surface.hpp>
@@ -104,13 +112,18 @@ class RmlUiSurface {
     /// on Space, say). Returns true when the surface took it: a text field has
     /// focus, and RmlUi consumed the key or the key produced text, which is
     /// delivered to the field. Returns false, without touching RmlUi, when no
-    /// text field has focus, so the host keeps its shortcuts. Main thread.
+    /// text field has focus, so the host keeps its shortcuts. Pointer input
+    /// queued behind a frame is applied first, so a click on a field that has
+    /// not landed yet still decides where the key goes. Main thread.
     bool offer_key(const pulp::native::KeyEvent& event);
     /// The editor's window gained or lost keyboard focus. Losing it blurs a
     /// focused text field (the caret stops showing and the host's keyboard is
     /// handed back); gaining it focuses that field again, found by its `id`
     /// attribute, so a field without one is not restored. Main thread.
     void set_window_focused(bool focused);
+    /// Apply pointer and wheel events that were queued behind a frame, now,
+    /// waiting for the frame if one is in flight. Main thread.
+    void flush_input();
     /// Draw one more frame (after a change the caller made through RmlUi).
     void request_frame();
 

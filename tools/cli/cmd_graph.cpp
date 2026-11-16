@@ -45,6 +45,14 @@ std::string patch_code(pulp::host::GraphPatchDiagnostic::Code code) {
     return pulp::host::graph_patch_code_name(code);
 }
 
+// GraphSerializer::from_file reports file failures as text; an oversize file
+// is the same ResourceLimit that validate and diff report for it.
+Code file_load_code(const pulp::host::GraphSerializer::LoadResult& loaded) {
+    if (loaded.error.starts_with("graph file exceeds "))
+        return Code::ResourceLimit;
+    return loaded.error.starts_with("graph file ") ? Code::FileUnreadable : Code::InvalidDocument;
+}
+
 void json_error(const std::string& code, const std::string& message) {
     auto value = choc::value::createObject("GraphError");
     value.addMember("valid", false);
@@ -155,13 +163,14 @@ int probe_graph(const std::vector<std::string>& args) {
     }
     std::ifstream graph_file(args[1], std::ios::binary);
     if (!graph_file)
-        return fail("graph_file_limit",
-                    "probe requires a readable graph file no larger than 1 MiB");
+        return fail(patch_code(Code::FileUnreadable), "graph file is unreadable: " + args[1]);
     std::string text(1024 * 1024 + 1, '\0');
     graph_file.read(text.data(), static_cast<std::streamsize>(text.size()));
     text.resize(static_cast<std::size_t>(graph_file.gcount()));
-    if (text.size() > 1024 * 1024 || graph_file.bad())
-        return fail("graph_file_limit", "graph file exceeds probe limits or could not be read");
+    if (graph_file.bad())
+        return fail(patch_code(Code::FileUnreadable), "graph file could not be read: " + args[1]);
+    if (text.size() > 1024 * 1024)
+        return fail("graph_file_limit", "probe admits graph files no larger than 1 MiB");
     try {
         const auto document = choc::json::parse(text);
         const auto nodes = document["nodes"];
@@ -468,9 +477,7 @@ int report_graph(const std::vector<std::string>& args) {
     load_options.load_plugins = false;
     const auto loaded = pulp::host::GraphSerializer::from_file(graph, args[1], load_options);
     if (!loaded.ok) {
-        json_error(patch_code(loaded.error.starts_with("graph file ") ? Code::FileUnreadable
-                                                                      : Code::InvalidDocument),
-                   loaded.error);
+        json_error(patch_code(file_load_code(loaded)), loaded.error);
         return 1;
     }
     if (!graph.prepare(static_cast<double>(sample_rate), max_block)) {
@@ -882,10 +889,8 @@ int cmd_graph(const std::vector<std::string>& args) {
     } else {
         loaded = pulp::host::GraphSerializer::from_file(*graph_ptr, path, opts);
         if (!loaded.ok) {
-            const auto file_error = loaded.error.starts_with("graph file ");
             if (json)
-                json_error(patch_code(file_error ? Code::FileUnreadable : Code::InvalidDocument),
-                           loaded.error);
+                json_error(patch_code(file_load_code(loaded)), loaded.error);
             else
                 std::cerr << "pulp graph: " << loaded.error << '\n';
             return 1;

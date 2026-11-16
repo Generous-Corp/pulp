@@ -96,7 +96,23 @@ command or control shortcut, a release and any key with no field focused go
 back to the host, so Space still reaches the transport. `focus_changed(false)`
 blurs a focused text field and hands the host's keyboard back;
 `focus_changed(true)` focuses it again, found by its `id`, so a field without
-one is not restored.
+one is not restored. Pointer input queued behind a frame is applied before the
+decision, so a click on a field followed at once by Space types the space.
+
+### Threading
+
+A frame holds one process-wide lock, `rmlui_mutex()`, for RmlUi's update and
+render, because RmlUi's state is shared and not thread-safe. The main thread
+does not wait for it to deliver pointer or wheel input or to run `idle()`:
+when a frame is in flight, pointer and wheel events are queued (consecutive
+moves, and wheel deltas with the same modifiers, merge) and applied in order on
+the main thread within about a millisecond of the frame ending. Element
+listeners therefore still run on the main thread, a moment after the event.
+`with_context()`, key and text input apply the queue first and wait for a
+frame; call `flush_input()` where a caller needs earlier events applied now,
+as a test does after a click. `offer_key()` applies the queue only when input
+is queued, so with nothing pending a key offered with no field focused still
+returns at once without touching RmlUi.
 
 ## Proof
 

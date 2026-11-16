@@ -9,11 +9,17 @@
 #import <AppKit/AppKit.h>
 #import <Metal/Metal.h>
 
+#include <dispatch/dispatch.h>
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <deque>
+#include <type_traits>
+#include <memory>
 #include <utility>
+#include <variant>
 
 #if !__has_feature(objc_arc)
 #error "rmlui_surface_mac.mm must be compiled with -fobjc-arc"
@@ -114,6 +120,20 @@ struct RmlUiSurface::Impl {
     // The text field blurred when the window lost focus, by id.
     std::string refocus_id;
 
+    // Pointer and wheel events the main thread could not apply because the
+    // render thread held rmlui_mutex(). They run, in order, on the main thread
+    // as soon as the lock is free.
+    using QueuedInput = std::variant<PointerEvent, WheelEvent>;
+    std::mutex input_mutex;
+    std::deque<QueuedInput> queued;
+    // Main thread: a retry is already scheduled.
+    bool retry_scheduled = false;
+    // Cleared on the main thread at teardown; a scheduled retry holds a copy.
+    struct Liveness {
+        bool live = true;
+    };
+    std::shared_ptr<Liveness> liveness = std::make_shared<Liveness>();
+
     Impl(vellum::rmlui::AssetProvider& a, Rml::RenderInterface& r, RendererHooks h,
          RmlUiSurfaceOptions o)
         : assets(a), renderer(r), hooks(std::move(h)), options(std::move(o)) {}
@@ -173,59 +193,162 @@ struct RmlUiSurface::Impl {
         }
     }
 
-    void on_pointer(const PointerEvent& e) {
-        {
-            std::lock_guard lock(rmlui_mutex());
-            auto* ctx = context ? context->context() : nullptr;
-            if (!ctx)
-                return;
-            vellum::rmlui::NativeContext::Scope scope(*context);
-            g_pointer_surface = surface.get();
-            const int mods = rml_modifiers_for(e.modifiers);
-            const int x = static_cast<int>(std::lround(e.x * scale));
-            const int y = static_cast<int>(std::lround(e.y * scale));
-            switch (e.kind) {
-            case PointerKind::move:
-            case PointerKind::drag:
-            case PointerKind::enter:
-                ctx->ProcessMouseMove(x, y, mods);
-                break;
-            case PointerKind::down:
-                ctx->ProcessMouseMove(x, y, mods);
-                if (const int b = mouse_button(e); b >= 0)
-                    ctx->ProcessMouseButtonDown(b, mods);
-                break;
-            case PointerKind::up:
-                ctx->ProcessMouseMove(x, y, mods);
-                if (const int b = mouse_button(e); b >= 0)
-                    ctx->ProcessMouseButtonUp(b, mods);
-                break;
-            case PointerKind::leave:
-                ctx->ProcessMouseLeave();
-                break;
-            }
-            g_pointer_surface = nullptr;
-            sync_text_focus_locked();
+    // Main thread, rmlui_mutex() held.
+    void apply_pointer_locked(const PointerEvent& e) {
+        auto* ctx = context ? context->context() : nullptr;
+        if (!ctx)
+            return;
+        vellum::rmlui::NativeContext::Scope scope(*context);
+        g_pointer_surface = surface.get();
+        const int mods = rml_modifiers_for(e.modifiers);
+        const int x = static_cast<int>(std::lround(e.x * scale));
+        const int y = static_cast<int>(std::lround(e.y * scale));
+        switch (e.kind) {
+        case PointerKind::move:
+        case PointerKind::drag:
+        case PointerKind::enter:
+            ctx->ProcessMouseMove(x, y, mods);
+            break;
+        case PointerKind::down:
+            ctx->ProcessMouseMove(x, y, mods);
+            if (const int b = mouse_button(e); b >= 0)
+                ctx->ProcessMouseButtonDown(b, mods);
+            break;
+        case PointerKind::up:
+            ctx->ProcessMouseMove(x, y, mods);
+            if (const int b = mouse_button(e); b >= 0)
+                ctx->ProcessMouseButtonUp(b, mods);
+            break;
+        case PointerKind::leave:
+            ctx->ProcessMouseLeave();
+            break;
         }
+        g_pointer_surface = nullptr;
+    }
+
+    // Main thread, rmlui_mutex() held.
+    void apply_wheel_locked(const WheelEvent& e) {
+        auto* ctx = context ? context->context() : nullptr;
+        if (!ctx)
+            return;
+        vellum::rmlui::NativeContext::Scope scope(*context);
+        // RmlUi's delta is in lines, positive scrolling the content up;
+        // AppKit's is positive moving the content down, in points for a
+        // trackpad.
+        const double line = e.precise ? 16.0 : 1.0;
+        ctx->ProcessMouseWheel(
+            Rml::Vector2f(static_cast<float>(-e.dx / line), static_cast<float>(-e.dy / line)),
+            rml_modifiers_for(e.modifiers));
+    }
+
+    // Main thread, rmlui_mutex() held: apply what was queued, in order.
+    void drain_queued_locked() {
+        std::deque<QueuedInput> batch;
+        {
+            std::lock_guard lock(input_mutex);
+            batch.swap(queued);
+        }
+        for (const auto& item : batch) {
+            if (const auto* p = std::get_if<PointerEvent>(&item))
+                apply_pointer_locked(*p);
+            else
+                apply_wheel_locked(std::get<WheelEvent>(item));
+        }
+        if (!batch.empty())
+            sync_text_focus_locked();
+    }
+
+    // Queue an event for the main thread to apply when the lock is free.
+    // Consecutive moves (or drags) and wheel deltas with the same modifiers
+    // merge, so a long stall keeps the newest position and the full scroll
+    // without growing the queue.
+    void enqueue(QueuedInput item) {
+        std::lock_guard lock(input_mutex);
+        if (!queued.empty()) {
+            auto& back = queued.back();
+            if (auto* p = std::get_if<PointerEvent>(&item)) {
+                auto* q = std::get_if<PointerEvent>(&back);
+                const bool motion = p->kind == PointerKind::move || p->kind == PointerKind::drag;
+                if (q && motion && q->kind == p->kind && q->modifiers == p->modifiers &&
+                    q->buttons_held == p->buttons_held) {
+                    *q = *p;
+                    return;
+                }
+            } else if (auto* w = std::get_if<WheelEvent>(&item)) {
+                auto* q = std::get_if<WheelEvent>(&back);
+                if (q && q->modifiers == w->modifiers && q->precise == w->precise) {
+                    w->dx += q->dx;
+                    w->dy += q->dy;
+                    *q = *w;
+                    return;
+                }
+            }
+        }
+        queued.push_back(std::move(item));
+    }
+
+    // Main thread. Retry after a millisecond: the lock is held for a frame.
+    void schedule_retry() {
+        if (retry_scheduled)
+            return;
+        retry_scheduled = true;
+        auto alive = liveness;
+        Impl* self = this;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_MSEC),
+                       dispatch_get_main_queue(), ^{
+                         if (!alive->live)
+                             return;
+                         self->retry_scheduled = false;
+                         self->try_drain();
+                       });
+    }
+
+    // Main thread: apply queued input if the render thread is not in RmlUi.
+    void try_drain() {
+        {
+            std::unique_lock lock(rmlui_mutex(), std::try_to_lock);
+            if (lock.owns_lock()) {
+                drain_queued_locked();
+                return;
+            }
+        }
+        bool pending;
+        {
+            std::lock_guard lock(input_mutex);
+            pending = !queued.empty();
+        }
+        if (pending)
+            schedule_retry();
+    }
+
+    // Main thread. Never waits for a frame: applied now when the lock is free,
+    // queued otherwise.
+    template <class Event> void submit(const Event& e) {
+        {
+            std::unique_lock lock(rmlui_mutex(), std::try_to_lock);
+            if (lock.owns_lock()) {
+                drain_queued_locked();
+                if constexpr (std::is_same_v<Event, PointerEvent>)
+                    apply_pointer_locked(e);
+                else
+                    apply_wheel_locked(e);
+                sync_text_focus_locked();
+                lock.unlock();
+                pump->request_frame();
+                return;
+            }
+        }
+        enqueue(e);
+        schedule_retry();
         pump->request_frame();
     }
 
+    void on_pointer(const PointerEvent& e) {
+        submit(e);
+    }
+
     void on_wheel(const WheelEvent& e) {
-        {
-            std::lock_guard lock(rmlui_mutex());
-            auto* ctx = context ? context->context() : nullptr;
-            if (!ctx)
-                return;
-            vellum::rmlui::NativeContext::Scope scope(*context);
-            // RmlUi's delta is in lines, positive scrolling the content up;
-            // AppKit's is positive moving the content down, in points for a
-            // trackpad.
-            const double line = e.precise ? 16.0 : 1.0;
-            ctx->ProcessMouseWheel(
-                Rml::Vector2f(static_cast<float>(-e.dx / line), static_cast<float>(-e.dy / line)),
-                rml_modifiers_for(e.modifiers));
-        }
-        pump->request_frame();
+        submit(e);
     }
 
     bool on_key(const KeyEvent& e) {
@@ -236,6 +359,7 @@ struct RmlUiSurface::Impl {
             const int key = rml_key_for(e.key);
             if (!ctx || key == KI::KI_UNKNOWN)
                 return false;
+            drain_queued_locked();
             vellum::rmlui::NativeContext::Scope scope(*context);
             const auto ki = static_cast<KI::KeyIdentifier>(key);
             const int mods = rml_modifiers_for(e.modifiers);
@@ -254,6 +378,7 @@ struct RmlUiSurface::Impl {
             auto* ctx = context ? context->context() : nullptr;
             if (!ctx)
                 return;
+            drain_queued_locked();
             vellum::rmlui::NativeContext::Scope scope(*context);
             ctx->ProcessTextInput(Rml::String(text));
         }
@@ -261,6 +386,13 @@ struct RmlUiSurface::Impl {
     }
 
     void teardown(bool orderly) {
+        liveness->live = false;
+        liveness = std::make_shared<Liveness>();
+        {
+            std::lock_guard lock(input_mutex);
+            queued.clear();
+        }
+        retry_scheduled = false;
         if (surface) {
             if (orderly)
                 surface->detach(); // stops the pump through the release handler
@@ -375,10 +507,13 @@ void RmlUiSurface::idle() {
         return;
     d.surface->poll_visibility();
     d.pump->set_on_screen(d.surface->on_screen().on_screen());
+    // The tick never waits for a frame: a busy lock means this tick leaves
+    // the size and any queued input for the next one.
     bool resized = false;
     {
-        std::lock_guard lock(rmlui_mutex());
-        if (d.context) {
+        std::unique_lock lock(rmlui_mutex(), std::try_to_lock);
+        if (lock.owns_lock() && d.context) {
+            d.drain_queued_locked();
             const auto before = std::make_pair(d.width_px, d.height_px);
             d.sync_size_locked();
             resized = before != std::make_pair(d.width_px, d.height_px);
@@ -394,8 +529,19 @@ bool RmlUiSurface::text_field_focused() const noexcept {
 
 bool RmlUiSurface::offer_key(const KeyEvent& event) {
     auto& d = *impl_;
+    if (!d.context)
+        return false;
+    // A click queued behind a frame may move focus: apply it before deciding,
+    // so the key goes where the user clicked. Only waits when input is queued.
+    bool pending;
+    {
+        std::lock_guard lock(d.input_mutex);
+        pending = !d.queued.empty();
+    }
+    if (pending)
+        flush_input();
     // The shared policy: with no text field focused the host goes first.
-    if (!d.context || route_key(event, d.text_focus) == KeyRoute::host)
+    if (route_key(event, d.text_focus) == KeyRoute::host)
         return false;
     bool taken = d.on_key(event);
     // Text a key produced arrives as text, not as a key, so a host that
@@ -418,6 +564,8 @@ void RmlUiSurface::set_window_focused(bool focused) {
         auto* ctx = d.context ? d.context->context() : nullptr;
         if (!ctx)
             return;
+        // Queued clicks land before the focus they would change is read.
+        d.drain_queued_locked();
         vellum::rmlui::NativeContext::Scope scope(*d.context);
         if (!focused) {
             Rml::Element* field = ctx->GetFocusElement();
@@ -438,6 +586,11 @@ void RmlUiSurface::set_window_focused(bool focused) {
     request_frame();
 }
 
+void RmlUiSurface::flush_input() {
+    std::lock_guard lock(rmlui_mutex());
+    impl_->drain_queued_locked();
+}
+
 void RmlUiSurface::request_frame() {
     if (impl_->pump)
         impl_->pump->request_frame();
@@ -449,6 +602,7 @@ bool RmlUiSurface::with_context(const std::function<void(Rml::Context&)>& fn) {
     auto* ctx = d.context ? d.context->context() : nullptr;
     if (!ctx)
         return false;
+    d.drain_queued_locked();
     vellum::rmlui::NativeContext::Scope scope(*d.context);
     fn(*ctx);
     // The caller may have moved focus (Element::Focus()).

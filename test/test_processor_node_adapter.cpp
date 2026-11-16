@@ -38,6 +38,7 @@
 #include <memory>
 #include <span>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace {
@@ -1973,5 +1974,87 @@ TEST_CASE("Processor node keeps later aux buses on their own ports when an earli
         REQUIRE(outputs[0][frame] == 1.0f);
         REQUIRE(outputs[1][frame] == 1.0f);
         REQUIRE(outputs[2][frame] == 0.0f);
+    }
+}
+
+namespace {
+
+// A generator with no input bus and sixteen mono output buses, as a
+// multi-out drum sampler declares them. Each active bus is filled with its
+// one-based declared index.
+class SixteenOutGenerator final : public Processor {
+  public:
+    PluginDescriptor descriptor() const override {
+        PluginDescriptor d;
+        d.name = "SixteenOutGenerator";
+        d.manufacturer = "Pulp";
+        d.bundle_id = "com.pulp.test.sixteenoutgenerator";
+        d.version = "1.0.0";
+        d.category = PluginCategory::Instrument;
+        d.input_buses.clear();
+        d.output_buses = {{"Out1", 1}};
+        for (int bus = 2; bus <= 16; ++bus)
+            d.output_buses.push_back(
+                {"Out" + std::to_string(bus), 1, true, pulp::format::BusRole::Aux});
+        return d;
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&, const ProcessContext&) override {
+    }
+    void process(pulp::format::ProcessBuffers& buses, pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&, const ProcessContext&) override {
+        for (int index = 1; index <= 16; ++index) {
+            auto* bus = buses.outputs.find_by_name("Out" + std::to_string(index));
+            if (bus == nullptr || !bus->active())
+                continue;
+            for (std::size_t channel = 0; channel < bus->buffer.num_channels(); ++channel)
+                std::fill_n(bus->buffer.channel_ptr(channel), bus->num_samples(),
+                            static_cast<float>(index));
+        }
+    }
+};
+
+} // namespace
+
+TEST_CASE("Processor node with no input bus processes its output buses up to the bus cap",
+          "[format][graph][processor-node][bus-layout]") {
+    constexpr int frames = 4;
+    SixteenOutGenerator processor;
+    pulp::state::StateStore store;
+    bind_processor(processor, store);
+    // The routed block always carries a main input bus, so fifteen output
+    // buses fit beside it; the port count must not promise a sixteenth.
+    REQUIRE(ProcessorNode::routed_output_channels(processor.descriptor()) == 15);
+    ProcessorNode node(processor);
+    PrepareContext prepare;
+    prepare.sample_rate = kSr;
+    prepare.max_buffer_size = frames;
+    prepare.input_channels = 0;
+    prepare.output_channels = 15;
+    REQUIRE(node.prepare(prepare));
+
+    std::array<std::array<float, frames>, 15> outputs;
+    for (auto& channel : outputs)
+        channel.fill(-1.0f);
+    std::array<float*, 15> output_channels{};
+    for (std::size_t channel = 0; channel < outputs.size(); ++channel)
+        output_channels[channel] = outputs[channel].data();
+    pulp::format::ProcessBlock block;
+    block.sample_rate = kSr;
+    block.frame_count = frames;
+    pulp::format::GraphRuntimeNodeProcessContext context;
+    context.routed = true;
+    // A node with no input ports is handed a zero-channel view of the block,
+    // as the executor builds it.
+    std::array<const float*, 1> no_inputs{};
+    context.node_inputs = {no_inputs.data(), 0, frames};
+    context.node_outputs = {output_channels.data(), 15, frames};
+    REQUIRE(ProcessorNode::process_binding(block, context, &node));
+    for (std::size_t channel = 0; channel < outputs.size(); ++channel) {
+        INFO("channel " << channel);
+        for (int frame = 0; frame < frames; ++frame)
+            REQUIRE(outputs[channel][frame] == static_cast<float>(channel + 1));
     }
 }
