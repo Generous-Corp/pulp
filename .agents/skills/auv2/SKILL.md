@@ -300,7 +300,36 @@ per plug-in, and the factory class is exported. Things to keep straight:
   autorelease pool first. Otherwise the view outlives the unit and the
   registry's close runs instead of the view's.
 - AU v2 has no resize request. An editor's `request_resize` moves the
-  container's frame, and the host follows the frame.
+  container's frame, and the host follows the frame, so the request is a small
+  transaction (`requestEditorSize:`): main thread only, never nested (an editor
+  asking again from inside `set_size()` gets false), and accepted only when the
+  editor takes the size and the frame ends at exactly that size
+  (`detail::resize_request_accepted()`). Under Logic
+  (`logic_au_v2_container_resize`) the enclosing container must have followed
+  too. Otherwise restore the editor's captured pre-request size and the frame's
+  origin, then reconcile the frame to the size the editor reports. Do not use
+  the old frame size to restore the editor: an earlier host resize may have
+  been refused, leaving the frame and editor at different sizes. The container
+  branch (a host that resizes its container) is
+  proven only through a test seam, `set_contract_resize_follows_container_for_testing`,
+  compiled under `PULP_AU_V2_TEST_HOOKS` and absent from shipped builds
+  (`pulp-test-au-v2-contract-shipping`); it has not run in a real Logic host.
+  It is the same exact-size rule as the ViewBridge path's
+  `pulp_resize_logic_auv2_editor`, but it does not walk Logic's window
+  hierarchy and does not publish the new size before the frame change.
+  The request is the session's pending editor-origin request, so the transaction
+  acknowledges it through `set_host_size()`: an editor-asked size is exempt from
+  the editor's own limits, and the frame follows only if the editor took it.
+- A host that resizes the container by hand goes through
+  `ContractEditorSession::set_host_size()` in `-setFrameSize:`, as VST3
+  `onSize` and CLAP `set_size` do: the editor takes a size inside its
+  `size_hints()` limits and locked aspect at once, and the frame is moved there
+  by the session's snapped-size request (a `-setFrameSize:` through the
+  `request_resize` hook) only after the host's sizes have been quiet for
+  `kSnapSettleMs`, never inside the host's own call. A fixed-size editor (the
+  default: both minimums unset, or `min == max`) takes no host size: it is told
+  nothing and the frame returns to its size. The arithmetic is
+  `detail::constrain_to_hints()`, a pure function.
 - `pulp-test-au-v2-contract-adapters` builds all three adapter types from
   their real entry macros (one translation unit each, because
   `PULP_REGISTER_PLUGIN` defines a fixed-name registrar) and registers their

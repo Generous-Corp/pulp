@@ -12,6 +12,7 @@
 
 #include <pulp/events/main_thread_dispatcher.hpp>
 #include <pulp/format/editor_host.hpp>
+#include "manual_snap_timer.hpp"
 
 #include <cstdint>
 #include <cstdlib>
@@ -34,6 +35,9 @@ struct ContractEditorLog {
     /// Attach, detach, invalidate and destruction calls made off the main
     /// thread (always 0 where the main thread cannot be told apart).
     int off_main_thread_calls = 0;
+    /// The result of a request_resize() made from inside set_size() (see
+    /// ContractEditorConfig::resize_inside_set_size); unset until one is made.
+    std::optional<bool> nested_resize_result;
 
     bool saw(const std::string& call) const {
         for (const auto& c : calls)
@@ -47,10 +51,22 @@ struct ContractEditorLog {
 struct ContractEditorConfig {
     bool attach_succeeds = true;
     bool fixed_size = false;
+    /// Declare only a preferred size: no bounds, no aspect (a ViewSize default).
+    bool default_hints = false;
+    /// Declare bounds but no aspect ratio.
+    bool free_aspect = false;
+    /// adjust_size() returns the proposal unchanged (the Editor default), so
+    /// the session alone enforces the hints.
+    bool identity_adjust = false;
     bool factory_builds_editor = true;
     bool factory_supports_editor = true;
     /// Whether the editor offers EditorAutomation::capture_png().
     bool captures_frames = true;
+    /// Ask the host for a larger size from inside set_size(), the way an
+    /// editor reacting to a resize might.
+    bool resize_inside_set_size = false;
+    /// set_size() refuses every size (the editor keeps its own).
+    bool refuse_set_size = false;
 };
 
 inline ContractEditorLog& contract_log() {
@@ -129,9 +145,16 @@ class RecordingContractEditor final : public format::Editor {
         return size_;
     }
     bool set_size(const format::EditorSize& size) override {
+        if (contract_config().refuse_set_size)
+            return false;
         if (size.width < 200 || size.height < 150)
             return false;
         size_ = size;
+        if (contract_config().resize_inside_set_size && contract_log().context != nullptr &&
+            !contract_log().nested_resize_result) {
+            contract_log().nested_resize_result = contract_log().context->request_resize(
+                {size.width + 20, size.height + 20, size.scale});
+        }
         contract_log().last_scale = size.scale;
         contract_log().calls.push_back("set_size:" + std::to_string(size.width) + "x" +
                                        std::to_string(size.height));
@@ -145,7 +168,12 @@ class RecordingContractEditor final : public format::Editor {
         hints.min_height = 150;
         hints.max_width = 800;
         hints.max_height = 600;
-        hints.aspect_ratio = 4.0 / 3.0;
+        hints.aspect_ratio = contract_config().free_aspect ? 0.0 : 4.0 / 3.0;
+        if (contract_config().default_hints) {
+            hints.min_width = hints.min_height = 0;
+            hints.max_width = hints.max_height = 0;
+            hints.aspect_ratio = 0.0;
+        }
         if (contract_config().fixed_size) {
             hints.min_width = hints.max_width = 400;
             hints.min_height = hints.max_height = 300;
@@ -153,6 +181,8 @@ class RecordingContractEditor final : public format::Editor {
         return hints;
     }
     format::EditorSize adjust_size(const format::EditorSize& proposed) const override {
+        if (contract_config().identity_adjust)
+            return proposed;
         format::EditorSize adjusted = proposed;
         adjusted.height = proposed.width * 3 / 4;
         return adjusted;

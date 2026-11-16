@@ -516,6 +516,12 @@ straight:
   session's own tick is a main-queue dispatch source, so tests pump the real
   run loop (`test_support::MainLoop`) and wait for ticks rather than count
   posted tasks.
+- Sizing comes from `Editor::size_hints()` through the session, not the adapter:
+  `can_resize` / `get_resize_hints` / `adjust_size` follow
+  `ContractEditorSession::resizable()` and `constrain()`. An editor that declares
+  no minimums is fixed-size (the ViewBridge convention); `aspect_ratio > 0`
+  snaps `adjust_size` to that ratio inside min/max, `0` clamps each axis alone.
+  `detail::constrain_to_hints()` is the pure arithmetic.
 - CLAP has no key callback, so keys reach a contract editor only through its
   own native view.
 - The legacy `gui_set_scale` (the ViewBridge path) returns false and ignores the

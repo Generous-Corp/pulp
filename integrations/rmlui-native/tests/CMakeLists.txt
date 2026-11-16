@@ -13,8 +13,15 @@ if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
     include(Catch)
     # One label: catch_discover_tests splits a quoted list into separate
     # property arguments, so "a;b" would set LABELS to "a" alone.
+    # Timing cases carry [performance]: relative-timing measurements belong
+    # to the label the required lane excludes.
     catch_discover_tests(pulp-test-rmlui-native-surface
+        TEST_SPEC "~[performance]"
         PROPERTIES LABELS rmlui)
+    catch_discover_tests(pulp-test-rmlui-native-surface
+        TEST_SPEC "[performance]"
+        TEST_PREFIX "timing: "
+        PROPERTIES LABELS performance)
 endif()
 
 # Vellum's Metal renderer on the surface, checked against Vellum's

@@ -60,13 +60,6 @@ typedef BOOL (^PulpAUv3ContractResizeRequest)(CGSize size);
                             registry:(pulp::format::ContractSessionRegistry*)registry
                        resizeRequest:(PulpAUv3ContractResizeRequest)resizeRequest;
 
-/// How long the host's sizes must stop changing before a size outside the
-/// editor's limits is published back as a resize request (default 120 ms). The
-/// ask-back never runs inside the host's resize call, and a host still dragging
-/// keeps pushing it back, so a live drag is never fought. 0 asks on the next
-/// main-queue turn.
-@property(nonatomic) NSInteger askBackDelayMs;
-
 /// The open session, or null after -closeEditor.
 - (pulp::format::ContractEditorSession*)session;
 

@@ -27,9 +27,14 @@ The runtime module provides lock-free primitives, logging, assertions, and scope
 and Windows job-object cleanup contract. Create a `RetainedProcessCustody` reservation in the owner's
 finite quarantine before calling `ChildProcess::start_retained()` or
 `start_retained_with_standard_input_channel()`. Linux and other platforms return
-`false` before spawning and report `Unsupported`. Windows supports
-`start_retained()` only; the channel variant refuses before spawning. The ordinary `start()` behavior is
-unchanged.
+`false` before spawning and report `Unsupported`. On Windows the private
+channel is a single-instance local named pipe whose client end is opened and
+connected before the child exists, then inherited as the child's standard
+input. Both ends are overlapped, so the session and the child must use
+overlapped I/O to bound each transfer. The Windows channel variant refuses,
+before reserving or spawning, a request that captures stdout or stderr (nothing
+drains a retained child's output during the session) or that has no positive
+`standard_input_timeout_ms`. The ordinary `start()` behavior is unchanged.
 
 The direct child stays unreaped after exit, reserving its PID and process-group
 identity until descendants have disappeared. `retained_process_observation()`
