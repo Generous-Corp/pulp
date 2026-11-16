@@ -459,9 +459,11 @@ class Editor {
     /// the editor cannot take that size; the host then asks `adjust_size()`.
     virtual bool set_size(const EditorSize& size) = 0;
 
-    /// Preferred, minimum and maximum size and the aspect ratio to hold. Equal
-    /// minimum and maximum mean a fixed-size editor. The default reports the
-    /// current size as preferred and no bounds.
+    /// Preferred, minimum and maximum size and the aspect ratio to hold. An
+    /// editor is resizable only when both minimums are set and the bounds leave
+    /// room: no minimums, or equal minimum and maximum, mean a fixed-size
+    /// editor. The default reports the current size as preferred and no
+    /// bounds, so an editor that does not override this is fixed-size.
     virtual ViewSize size_hints() const {
         const auto s = size();
         ViewSize hints;

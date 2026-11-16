@@ -76,6 +76,9 @@ set_property(TEST script-test-inputs-drift APPEND PROPERTY LABELS gate-inventory
 add_test(NAME script-test-inputs-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_script_test_inputs.py")
+# 105 cases that each run git and a script scan: about a minute on a quiet
+# host, so the 120 s default leaves no room for a loaded sanitizer runner.
+set_tests_properties(script-test-inputs-selftest PROPERTIES TIMEOUT 600)
 # The fragment layout itself, including a real git three-way merge of two
 # independent additions (and its single-file negative control).
 add_test(NAME script-inputs-store-selftest

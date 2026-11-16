@@ -124,6 +124,15 @@ struct StandaloneConfig {
     // gap has to outlast whatever the UI does in response to a press
     // (animation, relayout, a script tick) or the next key lands mid-update.
     int test_key_frame_delay = 20;
+    // The contract editor's window: the usable screen area (points) it must
+    // fit into when non-zero (zero reads the main screen), a hook called with
+    // the native window (an NSWindow* on macOS) before the loop runs, and a
+    // hook called once per frame of the loop. They let a test drive the
+    // window's resize delegate without a visible screen.
+    double test_screen_visible_width = 0.0;
+    double test_screen_visible_height = 0.0;
+    std::function<void(void* native_window)> test_on_editor_window;
+    std::function<void()> test_on_editor_frame;
     // When non-empty, capture a PNG into this directory after every key,
     // named "key-<NN>-<name>.png", plus "key-00-initial.png" before the first
     // press. That per-press series is what turns "the sequence ran" into
