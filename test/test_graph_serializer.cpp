@@ -1771,6 +1771,16 @@ TEST_CASE("GraphSerializer::read_file_bounded verifies the file did not change w
 
     REQUIRE_FALSE(GraphSerializer::read_file_bounded(root / "absent", text, error));
     REQUIRE(error.find("cannot be opened") != std::string::npos);
+
+    // Moving a small std::function may leave its source callable. A read hook
+    // must be consumed exactly once, before its captures can leave scope.
+    write(original);
+    int calls = 0;
+    GraphSerializerTestAccess::set_after_first_read([&](const auto&) { ++calls; });
+    REQUIRE(GraphSerializer::read_file_bounded(path, text, error));
+    REQUIRE(GraphSerializer::read_file_bounded(path, text, error));
+    CHECK(calls == 1);
+    GraphSerializerTestAccess::set_after_first_read({});
     std::filesystem::remove_all(root);
 }
 

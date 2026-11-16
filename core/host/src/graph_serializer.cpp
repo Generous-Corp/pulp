@@ -44,6 +44,7 @@
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 #include <span>
 
@@ -2329,7 +2330,7 @@ bool GraphSerializer::read_file_bounded(const std::filesystem::path& path, std::
         return fail("graph file changed while reading: " + path.string());
     }
     if (g_after_first_read_hook) {
-        auto hook = std::move(g_after_first_read_hook);
+        auto hook = std::exchange(g_after_first_read_hook, {});
         hook(path);
     }
     ec.clear();
