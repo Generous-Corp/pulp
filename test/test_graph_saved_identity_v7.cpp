@@ -45,7 +45,7 @@ const GraphNode* named(const SignalGraph& graph, std::string_view name) {
 std::string id_of(const SignalGraph& graph, std::string_view name) {
     const auto* node = named(graph, name);
     REQUIRE(node != nullptr);
-    return node->authored_id;
+    return node->authored_id.str();
 }
 
 // Input -> A -> B -> Output with two gains that share the name "G".
@@ -92,30 +92,30 @@ TEST_CASE("every created node gets a fresh, well-formed authored ID",
     std::set<std::string> ids;
     for (const auto node : nodes) {
         REQUIRE(node != 0);
-        const auto& id = graph.node(node)->authored_id;
+        const auto& id = graph.node(node)->authored_id.str();
         CHECK(id.size() == 36);
         CHECK(id.rfind("nid-", 0) == 0);
         CHECK(ids.insert(id).second);
     }
     // The serializer reports the same IDs.
     for (const auto& [node, id] : GraphSerializer::saved_node_identities(graph))
-        CHECK(graph.node(node)->authored_id == id);
+        CHECK(graph.node(node)->authored_id.str() == id);
 
     // A second graph built the same way mints different IDs.
     SignalGraph other;
-    CHECK_FALSE(ids.contains(other.node(other.add_gain_node("G"))->authored_id));
+    CHECK_FALSE(ids.contains(other.node(other.add_gain_node("G"))->authored_id.str()));
 }
 
 TEST_CASE("a rename keeps the authored ID and diffs as one changed node",
           "[host][graph][identity][v7]") {
     TwinGraph fixture;
     build_twins(fixture);
-    const auto id = fixture.graph.node(fixture.a)->authored_id;
+    const auto id = fixture.graph.node(fixture.a)->authored_id.str();
     const auto before = GraphSerializer::to_saved_document(fixture.graph);
     const auto legacy_before = GraphSerializerTestAccess::legacy_v6_saved_document(fixture.graph);
 
     REQUIRE(fixture.graph.rename_node(fixture.a, "Renamed: \xC3\xA9t\xC3\xA9 / gain"));
-    CHECK(fixture.graph.node(fixture.a)->authored_id == id);
+    CHECK(fixture.graph.node(fixture.a)->authored_id.str() == id);
     CHECK_FALSE(fixture.graph.rename_node(fixture.a, ""));
     CHECK_FALSE(fixture.graph.rename_node(9999, "missing"));
 
@@ -148,14 +148,14 @@ TEST_CASE("deleting either of two same-named nodes leaves the survivor's ID",
         build_twins(fixture);
         const auto doomed = delete_first ? fixture.a : fixture.b;
         const auto survivor = delete_first ? fixture.b : fixture.a;
-        const auto doomed_id = fixture.graph.node(doomed)->authored_id;
-        const auto survivor_id = fixture.graph.node(survivor)->authored_id;
+        const auto doomed_id = fixture.graph.node(doomed)->authored_id.str();
+        const auto survivor_id = fixture.graph.node(survivor)->authored_id.str();
         const auto before = GraphSerializer::to_saved_document(fixture.graph);
         const auto legacy_before =
             GraphSerializerTestAccess::legacy_v6_saved_document(fixture.graph);
 
         REQUIRE(fixture.graph.remove_node(doomed));
-        CHECK(fixture.graph.node(survivor)->authored_id == survivor_id);
+        CHECK(fixture.graph.node(survivor)->authored_id.str() == survivor_id);
         const auto after = GraphSerializer::to_saved_document(fixture.graph);
         const auto diff = diff_graph_documents(before, after);
         INFO(diff.detail);
@@ -198,7 +198,7 @@ TEST_CASE("authored IDs survive save, load, NodeId renumbering, undo and redo",
     REQUIRE(restored.persisted_node_ids.at(input) != input);
     for (const auto& [old_node, id] : ids) {
         const auto live = restored.persisted_node_ids.at(old_node);
-        CHECK(loaded.node(live)->authored_id == id);
+        CHECK(loaded.node(live)->authored_id.str() == id);
         CHECK(restored.identity_node_ids.at(id) == live);
     }
     CHECK(GraphSerializer::to_saved_document(loaded) != saved);
@@ -208,7 +208,7 @@ TEST_CASE("authored IDs survive save, load, NodeId renumbering, undo and redo",
     GraphEditHistory history;
     auto before = GraphEditHistory::checkpoint(loaded);
     const auto trim = loaded.add_gain_node("Trim");
-    const auto trim_id = loaded.node(trim)->authored_id;
+    const auto trim_id = loaded.node(trim)->authored_id.str();
     REQUIRE(loaded.rename_node(restored.identity_node_ids.at(ids.at(gain)), "Gain 2"));
     REQUIRE(history.commit(std::move(before), loaded, "add trim and rename").ok());
     const auto undone = history.undo(loaded);
@@ -232,15 +232,15 @@ TEST_CASE("a copy gets a new authored ID and a pasted duplicate ID is refused",
     // The same configuration added again is a new node.
     const auto copy = graph.add_gain_node("G");
     REQUIRE(graph.set_node_gain(copy, 0.5f));
-    CHECK(graph.node(copy)->authored_id != graph.node(original)->authored_id);
+    CHECK(graph.node(copy)->authored_id.str() != graph.node(original)->authored_id.str());
     const auto saved = GraphSerializer::to_saved_document(graph);
     REQUIRE(GraphSerializer::inspect_document(saved).ok());
 
     // A record pasted with the ID it was copied from is refused rather than
     // renamed. Node records come first, so the first match is the record.
-    const auto copy_id = graph.node(copy)->authored_id;
+    const auto copy_id = graph.node(copy)->authored_id.str();
     REQUIRE(saved.find(copy_id) < saved.find("\"logical_identities\""));
-    const auto pasted = replace_once(saved, copy_id, graph.node(original)->authored_id);
+    const auto pasted = replace_once(saved, copy_id, graph.node(original)->authored_id.str());
     const auto inspection = GraphSerializer::inspect_document(pasted);
     INFO(inspection.detail);
     CHECK(inspection.refusal == GraphDocumentRefusal::IdentityBindingDuplicate);
@@ -280,7 +280,7 @@ TEST_CASE("names with delimiters and Unicode do not affect authored IDs",
     INFO(restored.error);
     REQUIRE(restored.ok);
     for (const auto node : {p1, p2, composed, decomposed, emoji}) {
-        const auto& id = graph.node(node)->authored_id;
+        const auto& id = graph.node(node)->authored_id.str();
         const auto live = restored.identity_node_ids.at(id);
         CHECK(loaded.node(live)->name == graph.node(node)->name);
     }
@@ -291,8 +291,8 @@ TEST_CASE("v7 inspection refuses planted identity defects", "[host][graph][ident
     TwinGraph fixture;
     build_twins(fixture);
     const auto saved = GraphSerializer::to_saved_document(fixture.graph);
-    const auto a = fixture.graph.node(fixture.a)->authored_id;
-    const auto b = fixture.graph.node(fixture.b)->authored_id;
+    const auto a = fixture.graph.node(fixture.a)->authored_id.str();
+    const auto b = fixture.graph.node(fixture.b)->authored_id.str();
     // Control: the document as written is admitted and restores.
     REQUIRE(GraphSerializer::inspect_document(saved).ok());
     {
@@ -460,7 +460,7 @@ TEST_CASE("v6 migration is deterministic and never guesses continuity",
     INFO(restored.error);
     REQUIRE(restored.ok);
     for (const auto& [v6, live] : restored.identity_node_ids)
-        CHECK(loaded.node(live)->authored_id == map.at(v6));
+        CHECK(loaded.node(live)->authored_id.str() == map.at(v6));
     CHECK(diff_graph_documents(first.document, GraphSerializer::to_saved_document(loaded)).equal());
 
     // A v7 document migrates to itself.

@@ -662,7 +662,7 @@ std::string SignalGraph::mint_authored_id_locked_() {
 
 void SignalGraph::push_node_locked_(GraphNode&& node) {
     if (node.authored_id.empty())
-        node.authored_id = mint_authored_id_locked_();
+        node.authored_id = AuthoredNodeId(mint_authored_id_locked_());
     nodes_.push_back(std::move(node));
 }
 

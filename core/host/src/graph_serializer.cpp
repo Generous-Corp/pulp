@@ -2296,9 +2296,9 @@ saved_identity_document(const SignalGraph& graph,
             for (const auto i : order) {
                 choc::value::Value record(records[i]);
                 const auto found = by_id.find(static_cast<NodeId>(record["id"].getInt64()));
-                if (found == by_id.end() || !valid_authored_id(found->second->authored_id))
+                if (found == by_id.end() || !valid_authored_id(found->second->authored_id.str()))
                     return {};
-                record.addMember("authored_id", found->second->authored_id);
+                record.addMember("authored_id", found->second->authored_id.str());
                 sorted.addArrayElement(record);
             }
             root.setMember("nodes", sorted);
@@ -2315,13 +2315,13 @@ saved_identity_document(const SignalGraph& graph,
         for (const auto* node : nodes) {
             // A graph never holds two equal IDs; refuse rather than write a
             // document inspection would reject.
-            if (!seen.insert(node->authored_id).second)
+            if (!seen.insert(node->authored_id.str()).second)
                 return {};
             auto item = choc::value::createObject("Identity");
-            item.addMember("id", node->authored_id);
+            item.addMember("id", node->authored_id.str());
             item.addMember("node_id", static_cast<int64_t>(node->id));
             identities.addArrayElement(item);
-            bindings.addMember(node->authored_id, static_cast<int64_t>(node->id));
+            bindings.addMember(node->authored_id.str(), static_cast<int64_t>(node->id));
         }
         root.addMember("identity_schema", std::string(kSavedIdentityV7));
         auto logical = choc::value::createObject("LogicalIdentities");
@@ -2435,7 +2435,7 @@ std::unordered_map<NodeId, std::string>
 GraphSerializer::saved_node_identities(const SignalGraph& graph) {
     std::unordered_map<NodeId, std::string> identities;
     for (const auto& node : graph.nodes())
-        identities.emplace(node.id, node.authored_id);
+        identities.emplace(node.id, node.authored_id.str());
     return identities;
 }
 
@@ -4100,7 +4100,7 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
             auto* node = graph.node_mut_locked_(live);
             const auto authored = authored_ids.find(persisted);
             if (node != nullptr && authored != authored_ids.end())
-                node->authored_id = authored->second;
+                node->authored_id = AuthoredNodeId(authored->second);
         }
     }
     result.persisted_node_ids = std::move(id_map);

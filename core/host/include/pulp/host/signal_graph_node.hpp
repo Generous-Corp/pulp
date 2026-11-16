@@ -126,6 +126,32 @@ struct LiveSwapDiagnostics {
 
 // ── Graph Node ──────────────────────────────────────────────────────────
 
+// Immutable authored node identity (see GraphNode::authored_id). Copies share
+// one string, so copying a node, which every prepared snapshot does, never
+// allocates for it.
+class AuthoredNodeId {
+  public:
+    AuthoredNodeId() = default;
+    explicit AuthoredNodeId(std::string id)
+        : id_(id.empty() ? nullptr : std::make_shared<const std::string>(std::move(id))) {}
+    const std::string& str() const noexcept {
+        static const std::string none;
+        return id_ ? *id_ : none;
+    }
+    bool empty() const noexcept {
+        return id_ == nullptr;
+    }
+    friend bool operator==(const AuthoredNodeId& a, const AuthoredNodeId& b) noexcept {
+        return a.str() == b.str();
+    }
+    friend bool operator==(const AuthoredNodeId& a, std::string_view b) noexcept {
+        return a.str() == b;
+    }
+
+  private:
+    std::shared_ptr<const std::string> id_;
+};
+
 struct GraphNode {
     NodeId id;
     NodeType type;
@@ -191,7 +217,7 @@ struct GraphNode {
     // Opaque authored identity, minted on the control thread when the node is
     // created and kept across rename, NodeId renumbering and every restore of
     // a saved-identity v7 document. A new node always gets a new ID.
-    std::string authored_id;
+    AuthoredNodeId authored_id;
 
     PortHandle in(std::string_view port) const;
     PortHandle out(std::string_view port) const;

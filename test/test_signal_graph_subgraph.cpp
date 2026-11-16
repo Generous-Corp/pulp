@@ -606,7 +606,7 @@ TEST_CASE("saved subgraph members are authored IDs and a second instance gets ne
     const auto records = root["subgraphs"];
     std::unordered_set<std::string> ids;
     for (const auto& node : rack.graph.nodes())
-        ids.insert(node.authored_id);
+        ids.insert(node.authored_id.str());
     for (std::uint32_t i = 0; i < records.size(); ++i)
         for (std::uint32_t m = 0; m < records[i]["members"].size(); ++m)
             CHECK(ids.contains(std::string(records[i]["members"][m].getString())));
@@ -616,7 +616,7 @@ TEST_CASE("saved subgraph members are authored IDs and a second instance gets ne
     auto copy = instantiate_subgraph(rack.graph, gain_template(), "voice.b", 3);
     REQUIRE(copy);
     for (const auto node : copy.instance.nodes)
-        CHECK(ids.insert(rack.graph.node(node)->authored_id).second);
+        CHECK(ids.insert(rack.graph.node(node)->authored_id.str()).second);
 
     // Restoring keeps every member's ID.
     SignalGraph restored;
@@ -626,8 +626,8 @@ TEST_CASE("saved subgraph members are authored IDs and a second instance gets ne
         for (std::size_t i = 0; i < instance.nodes.size(); ++i) {
             const auto& original =
                 instance.instance_identity == "voice.a" ? rack.instances[0] : rack.instances[1];
-            CHECK(restored.node(instance.nodes[i])->authored_id ==
-                  rack.graph.node(original.nodes[i])->authored_id);
+            CHECK(restored.node(instance.nodes[i])->authored_id.str() ==
+                  rack.graph.node(original.nodes[i])->authored_id.str());
         }
 }
 
@@ -639,7 +639,7 @@ TEST_CASE("saved subgraph documents written before v7 still restore") {
     const auto legacy_ids = GraphSerializerTestAccess::legacy_v6_identities(rack.graph);
     std::unordered_map<std::string, std::string> v6_of;
     for (const auto& node : rack.graph.nodes())
-        v6_of.emplace(node.authored_id, legacy_ids.at(node.id));
+        v6_of.emplace(node.authored_id.str(), legacy_ids.at(node.id));
     const auto current = choc::json::parse(rack.document);
     auto root = choc::json::parse(GraphSerializerTestAccess::legacy_v6_saved_document(rack.graph));
     auto records = choc::value::createEmptyArray();
@@ -679,8 +679,8 @@ TEST_CASE("saved subgraph documents written before v7 still restore") {
     REQUIRE(again.ok());
     for (std::size_t s = 0; s < 2; ++s)
         for (std::size_t i = 0; i < again.subgraphs[s].nodes.size(); ++i)
-            CHECK(from_migrated.node(again.subgraphs[s].nodes[i])->authored_id ==
-                  restored.node(loaded.subgraphs[s].nodes[i])->authored_id);
+            CHECK(from_migrated.node(again.subgraphs[s].nodes[i])->authored_id.str() ==
+                  restored.node(loaded.subgraphs[s].nodes[i])->authored_id.str());
 }
 
 TEST_CASE("saved subgraph document refuses unknown or duplicate templates before mutation") {
@@ -709,7 +709,7 @@ TEST_CASE("saved subgraph document refuses unknown or duplicate templates before
 std::string quoted_id(const SignalGraph& graph, std::string_view name) {
     for (const auto& node : graph.nodes())
         if (node.name == name)
-            return "\"" + node.authored_id + "\"";
+            return "\"" + node.authored_id.str() + "\"";
     FAIL("no node named " << name);
     return {};
 }
