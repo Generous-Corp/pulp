@@ -646,8 +646,7 @@ std::optional<std::string> saved_record_identity_key(const V& node, std::string&
             detail = "plugin node record " + id + " requires plugin.unique_id";
             return std::nullopt;
         }
-        return identity_key(NodeType::Plugin, name, node["plugin"]["unique_id"].getString(), {},
-                            0);
+        return identity_key(NodeType::Plugin, name, node["plugin"]["unique_id"].getString(), {}, 0);
     }
     if (parsed != NodeType::Custom)
         return identity_key(parsed, name, {}, {}, 0);
@@ -1790,9 +1789,9 @@ bool GraphSerializer::register_migration(int from_version,
 namespace {
 // The plain (non-spectral, no envelope) writer. serialize() owns the choice
 // between it, the spectral writer and the saved-identity envelope.
-std::string plain_document(
-    const SignalGraph& graph,
-    const std::unordered_map<NodeId, std::pair<float,float>>& editor_layout) {
+std::string
+plain_document(const SignalGraph& graph,
+               const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout) {
     bool has_processors = false;
     bool has_typed_ports = false;
     for (const auto& node : graph.nodes()) {
@@ -2098,9 +2097,9 @@ std::string plain_document(
 }
 
 // The plain document wrapped in the saved-identity v6 envelope.
-std::string saved_identity_document(
-    const SignalGraph& graph,
-    const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout) {
+std::string
+saved_identity_document(const SignalGraph& graph,
+                        const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout) {
     const auto raw = plain_document(graph, editor_layout);
     if (raw.empty())
         return {};
@@ -2162,9 +2161,9 @@ std::string serialize(const SignalGraph& graph,
 }
 } // namespace
 
-std::string GraphSerializer::to_json(
-    const SignalGraph& graph,
-    const std::unordered_map<NodeId, std::pair<float,float>>& editor_layout) {
+std::string
+GraphSerializer::to_json(const SignalGraph& graph,
+                         const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout) {
     return serialize(graph, editor_layout, false, nullptr);
 }
 
