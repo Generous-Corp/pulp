@@ -9,6 +9,8 @@
 
 #include <pulp/rmlui_native/rmlui_surface.hpp>
 
+#include "../integrations/rmlui-native/src/input_drain.hpp"
+
 #include <vellum/rmlui/assets.hpp>
 #include <vellum/rmlui/native.hpp>
 
@@ -21,8 +23,10 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <future>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -94,6 +98,8 @@ class MemoryAssets final : public vellum::rmlui::AssetProvider {
     }
 };
 
+long long now_ns();
+
 /// Counts what RmlUi asks of a renderer, and how many threads are inside it.
 class CountingRenderer final : public Rml::RenderInterface {
   public:
@@ -112,6 +118,7 @@ class CountingRenderer final : public Rml::RenderInterface {
         // A test can park the render thread inside a draw, lock held.
         if (hold_draws.load()) {
             parked.store(true);
+            // unbounded-wait: allow DrawCleanup releases this latch on bounded assertion failure.
             while (hold_draws.load())
                 std::this_thread::sleep_for(std::chrono::microseconds(200));
             parked.store(false);
@@ -119,6 +126,7 @@ class CountingRenderer final : public Rml::RenderInterface {
         leave();
     }
     void ReleaseGeometry(Rml::CompiledGeometryHandle) override {
+        mark_release();
         released_geometry.fetch_add(1);
     }
     Rml::TextureHandle LoadTexture(Rml::Vector2i&, const Rml::String&) override {
@@ -128,7 +136,13 @@ class CountingRenderer final : public Rml::RenderInterface {
         return 1;
     }
     void ReleaseTexture(Rml::TextureHandle) override {
+        mark_release();
         released_textures.fetch_add(1);
+    }
+    // When the first release since it was last cleared happened.
+    void mark_release() {
+        long long none = 0;
+        first_release_ns.compare_exchange_strong(none, now_ns());
     }
     void EnableScissorRegion(bool) override {}
     void SetScissorRegion(Rml::Rectanglei) override {}
@@ -139,6 +153,7 @@ class CountingRenderer final : public Rml::RenderInterface {
     std::atomic<int> rendered{0};
     std::atomic<int> released_geometry{0};
     std::atomic<int> released_textures{0};
+    std::atomic<long long> first_release_ns{0};
     std::atomic<int> draw_delay_us{200};
     std::atomic<bool> hold_draws{false};
     std::atomic<bool> parked{false};
@@ -175,6 +190,14 @@ struct Editor {
     std::atomic<int> compiled_at_first_begin{-1};
     std::atomic<int> ended{0};
     std::atomic<int> trimmed{0};
+    /// Set to hold the next frame's command buffer on the GPU until `gate` is
+    /// signalled with 1.
+    std::atomic<bool> gate_next{false};
+    std::atomic<bool> gated{false};
+    id<MTLSharedEvent> gate = nil;
+    id<MTLCommandBuffer> gated_cb = nil;
+    /// The gated command buffer's status when the trim hook ran, or -1.
+    std::atomic<int> trim_saw_status{-1};
     /// Longest span between a frame's begin and end hooks, which run with the
     /// RmlUi lock held: how long a frame keeps everyone else out.
     std::atomic<long long> max_hold_ns{0};
@@ -192,6 +215,13 @@ struct Editor {
         RendererHooks hooks;
         hooks.begin_frame = [this](const FrameTarget& t) {
             last_target = t;
+            if (gate_next.exchange(false)) {
+                id<MTLCommandBuffer> cb = (__bridge id<MTLCommandBuffer>)t.command_buffer;
+                gate = [cb.device newSharedEvent];
+                [cb encodeWaitForEvent:gate value:1];
+                gated_cb = cb;
+                gated.store(true);
+            }
             // Stored before the count moves, so a reader that sees the count
             // sees the value.
             if (begun.load() == 0)
@@ -206,7 +236,11 @@ struct Editor {
             }
             ended.fetch_add(1);
         };
-        hooks.trim = [this] { trimmed.fetch_add(1); };
+        hooks.trim = [this] {
+            if (gated.load())
+                trim_saw_status.store(static_cast<int>(gated_cb.status));
+            trimmed.fetch_add(1);
+        };
         RmlUiSurfaceOptions options;
         options.document = "probe.rml";
         options.font_faces = {"font.ttf"};
@@ -243,6 +277,24 @@ struct Editor {
             [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
         }
         return true;
+    }
+};
+
+// Declared after listeners and before parking a draw: unwinding must release
+// render threads and stop the requester before detaching editors or listeners.
+template <class EditorType> struct DrawCleanup {
+    std::vector<EditorType*> editors;
+    std::atomic<bool> stop{false};
+    std::thread requester;
+
+    ~DrawCleanup() {
+        stop.store(true);
+        for (auto* editor : editors)
+            editor->renderer.hold_draws.store(false);
+        if (requester.joinable())
+            requester.join();
+        for (auto* editor : editors)
+            editor->ui->detach();
     }
 };
 
@@ -514,7 +566,7 @@ TEST_CASE("the surface uses the device the caller's renderer was built on",
 }
 
 TEST_CASE("pointer input does not wait for a frame the render thread is drawing",
-          "[native-surface][rmlui][threading]") {
+          "[native-surface][rmlui][threading][performance]") {
     REQUIRE_METAL();
     @autoreleasepool {
         Editor e;
@@ -557,10 +609,12 @@ TEST_CASE("pointer input does not wait for a frame the render thread is drawing"
         // The instrument can see a stall: a frame held the lock long enough
         // that a caller waiting on it (with_context blocks by design) lost
         // several milliseconds.
+        // Thresholds follow the measured hold rather than a wall-clock number,
+        // so a loaded host moves both sides together.
         REQUIRE(hold_ms > 10.0);
-        REQUIRE(with_context_max > 3.0);
+        REQUIRE(with_context_max > 0.25 * hold_ms);
         // Pointer input is not such a caller.
-        REQUIRE(p95 < 2.0);
+        REQUIRE(p95 < 0.1 * hold_ms);
         e.renderer.draw_delay_us.store(200);
         e.ui->detach();
     }
@@ -577,8 +631,8 @@ TEST_CASE("input queued behind a frame is applied in order and never lost",
         REQUIRE(a.attach());
         REQUIRE(b.attach());
         REQUIRE(a.wait_for([&] { return a.ui->frames() > 0 && b.ui->frames() > 0; }));
-        a.renderer.draw_delay_us.store(2000);
-        b.renderer.draw_delay_us.store(2000);
+        a.renderer.draw_delay_us.store(500);
+        b.renderer.draw_delay_us.store(500);
 
         int clicks_a = 0;
         int clicks_b = 0;
@@ -596,35 +650,44 @@ TEST_CASE("input queued behind a frame is applied in order and never lost",
             ctx.GetDocument(0)->GetElementById("button")->AddEventListener("click", &listener_b);
         });
 
-        // Frames requested from another thread while the main thread delivers
-        // input, idles and queries: the shape of a host driving two editors.
-        std::atomic<bool> stop{false};
-        std::thread requester([&] {
-            while (!stop.load()) {
+        // Park a render thread inside a draw, lock held (one lock serves both
+        // editors), so every event below arrives behind a frame, then let them go. Frames are also
+        // requested from another thread, as a host driving two editors would.
+        DrawCleanup<Editor> cleanup{{&a, &b}};
+        cleanup.requester = std::thread([&] {
+            while (!cleanup.stop.load()) {
                 a.ui->request_frame();
                 b.ui->request_frame();
                 std::this_thread::sleep_for(std::chrono::microseconds(500));
             }
         });
         int sent = 0;
-        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(1200);
-        while (std::chrono::steady_clock::now() < until) {
+        for (int round = 0; round < 15; ++round) {
+            a.renderer.hold_draws.store(true);
+            b.renderer.hold_draws.store(true);
+            a.ui->request_frame();
+            b.ui->request_frame();
+            REQUIRE(
+                a.wait_for([&] { return a.renderer.parked.load() || b.renderer.parked.load(); }));
             for (Editor* e : {&a, &b}) {
                 [e->view() mouseMoved:e->mouse(NSEventTypeMouseMoved, 20, 20)];
                 [e->view() mouseDown:e->mouse(NSEventTypeLeftMouseDown, 20, 20)];
                 [e->view() mouseUp:e->mouse(NSEventTypeLeftMouseUp, 20, 20)];
                 [e->view() mouseMoved:e->mouse(NSEventTypeMouseMoved, 250, 180)];
-                e->ui->idle();
             }
             ++sent;
-            a.ui->with_context([](Rml::Context&) {});
-            [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.002]];
+            a.renderer.hold_draws.store(false);
+            b.renderer.hold_draws.store(false);
+            [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
         }
-        stop.store(true);
-        requester.join();
+        cleanup.stop.store(true);
+        cleanup.requester.join();
         a.ui->flush_input();
         b.ui->flush_input();
-        REQUIRE(sent > 10);
+        REQUIRE(sent == 15);
+        // Something really queued behind a frame, so the claim is about the
+        // queue and not about uncontended delivery.
+        REQUIRE(a.ui->queued_inputs() + b.ui->queued_inputs() > 0);
         // Every click arrived: only moves and wheel deltas ever merge.
         REQUIRE(clicks_a == sent);
         REQUIRE(clicks_b == sent);
@@ -637,6 +700,106 @@ TEST_CASE("input queued behind a frame is applied in order and never lost",
         });
         a.ui->detach();
         b.ui->detach();
+    }
+}
+
+TEST_CASE("queued input retries after another editor consumes the last drain notification",
+          "[native-surface][rmlui][threading]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        Editor a;
+        Editor b;
+        REQUIRE(a.attach());
+        REQUIRE(b.attach());
+        REQUIRE(a.wait_for([&] { return a.ui->frames() > 0 && b.ui->frames() > 0; }));
+        int applied = 0;
+        struct Listener final : Rml::EventListener {
+            int& count;
+            explicit Listener(int& c) : count(c) {}
+            void ProcessEvent(Rml::Event&) override {
+                ++count;
+            }
+        } listener(applied);
+        DrawCleanup<Editor> cleanup{{&a, &b}};
+        a.ui->with_context([&](Rml::Context& ctx) {
+            ctx.GetDocument(0)->GetElementById("button")->AddEventListener("mouseover", &listener);
+        });
+        [a.view() mouseMoved:a.mouse(NSEventTypeMouseMoved, 250, 180)];
+        a.ui->flush_input();
+        [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.3]];
+        a.renderer.hold_draws.store(true);
+        a.ui->request_frame();
+        REQUIRE(a.wait_for([&] { return a.renderer.parked.load(); }));
+        const auto queued_before = a.ui->queued_inputs();
+        [a.view() mouseMoved:a.mouse(NSEventTypeMouseMoved, 20, 20)];
+        REQUIRE(a.ui->queued_inputs() == queued_before + 1);
+        a.renderer.hold_draws.store(false);
+        // Do not pump the main queue: A must finish all requested frames before
+        // B takes the mutex, so A cannot post a later notification to rescue it.
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        const auto finished = a.ui->frames();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        REQUIRE(a.ui->frames() == finished);
+        REQUIRE(a.begun.load() == a.ended.load());
+        b.renderer.hold_draws.store(true);
+        b.ui->request_frame();
+        // Wait without servicing A's main-queue callbacks.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (!b.renderer.parked.load() && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        REQUIRE(b.renderer.parked.load());
+        // Consume A's callbacks with B holding the lock and no input of its
+        // own. The failed attempts must leave a retry behind.
+        [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+        REQUIRE(applied == 0);
+        REQUIRE(a.ui->frames() == finished);
+        REQUIRE(b.ui->queued_inputs() == 0);
+        b.renderer.hold_draws.store(false);
+        REQUIRE(a.wait_for([&] { return applied == 1; }));
+        REQUIRE(a.wait_for([&] { return a.ui->frames() > finished; }));
+        a.ui->with_context([&](Rml::Context& ctx) {
+            ctx.GetDocument(0)->GetElementById("button")->RemoveEventListener("mouseover",
+                                                                              &listener);
+        });
+    }
+}
+
+TEST_CASE("parked draw cleanup releases both editors and joins during unwinding",
+          "[native-surface][rmlui][threading]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        Editor a;
+        Editor b;
+        REQUIRE(a.attach());
+        REQUIRE(b.attach());
+        struct Unwind {};
+        bool parked = false;
+        std::atomic<bool> requester_exited{false};
+        try {
+            DrawCleanup<Editor> cleanup{{&a, &b}};
+            a.renderer.hold_draws.store(true);
+            b.renderer.hold_draws.store(true);
+            cleanup.requester = std::thread([&] {
+                while (!cleanup.stop.load()) {
+                    a.ui->request_frame();
+                    b.ui->request_frame();
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+                requester_exited.store(true);
+            });
+            parked =
+                a.wait_for([&] { return a.renderer.parked.load() || b.renderer.parked.load(); });
+            throw Unwind{};
+        } catch (const Unwind&) {
+        }
+        REQUIRE(parked);
+        REQUIRE(requester_exited.load());
+        REQUIRE_FALSE(a.renderer.hold_draws.load());
+        REQUIRE_FALSE(b.renderer.hold_draws.load());
+        REQUIRE_FALSE(a.renderer.parked.load());
+        REQUIRE_FALSE(b.renderer.parked.load());
+        REQUIRE_FALSE(a.ui->attached());
+        REQUIRE_FALSE(b.ui->attached());
     }
 }
 
@@ -719,4 +882,261 @@ TEST_CASE("a hidden editor stops frames and trims GPU memory, and showing it dra
         REQUIRE(e.trimmed.load() == 1);
         e.ui->detach();
     }
+}
+
+TEST_CASE("hiding waits for the last submitted frame before releasing GPU resources",
+          "[native-surface][rmlui][visibility]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        Editor e;
+        REQUIRE(e.attach());
+        REQUIRE(e.wait_for([&] { return e.ui->frames() > 0; }));
+        // The next frame's command buffer waits on an event, so it is still on
+        // the GPU, committed, when the editor is hidden.
+        e.gate_next.store(true);
+        const auto before = e.ui->frames();
+        e.ui->request_frame();
+        REQUIRE(e.wait_for([&] { return e.gated.load() && e.ui->frames() > before; }));
+        REQUIRE(e.gated_cb.status != MTLCommandBufferStatusCompleted);
+        e.renderer.first_release_ns.store(0);
+        std::atomic<long long> signalled_ns{0};
+        id<MTLSharedEvent> gate = e.gate;
+        // Always signalled, so a regression fails the assertions, not the run.
+        std::thread release([&signalled_ns, gate] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            signalled_ns.store(now_ns());
+            gate.signaledValue = 1;
+        });
+        e.ui->visibility_changed(false);
+        release.join();
+        REQUIRE(e.trimmed.load() == 1);
+        // Nothing was released, and the renderer was not trimmed, while the
+        // frame could still use it.
+        REQUIRE(e.trim_saw_status.load() == static_cast<int>(MTLCommandBufferStatusCompleted));
+        REQUIRE(e.renderer.first_release_ns.load() >= signalled_ns.load());
+        e.ui->detach();
+    }
+}
+
+TEST_CASE("a renderer serves one attached surface at a time",
+          "[native-surface][rmlui][visibility]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        Editor a;
+        Editor b;
+        REQUIRE(a.attach());
+        RmlUiSurfaceOptions options;
+        options.document = "probe.rml";
+        options.font_faces = {"font.ttf"};
+        // Hiding a would release this surface's geometry and textures too.
+        RmlUiSurface shared(a.assets, a.renderer, {}, options);
+        REQUIRE_FALSE(shared.attach((__bridge void*)b.window.contentView));
+        REQUIRE_FALSE(shared.attached());
+        REQUIRE(a.wait_for([&] { return a.ui->frames() > 0; }));
+        // Detaching frees the renderer; an attach that fails after taking it
+        // (a missing document) gives it back.
+        a.ui->detach();
+        RmlUiSurface missing(a.assets, a.renderer, {}, {"missing.rml"});
+        REQUIRE_FALSE(missing.attach((__bridge void*)b.window.contentView));
+        REQUIRE(shared.attach((__bridge void*)b.window.contentView));
+        REQUIRE_FALSE(a.attach());
+        shared.detach();
+        REQUIRE(a.attach());
+        a.ui->detach();
+    }
+}
+
+TEST_CASE("input applied after a frame is drawn without another request",
+          "[native-surface][rmlui][threading]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        Editor e;
+        REQUIRE(e.attach());
+        REQUIRE(e.wait_for([&] { return e.ui->frames() > 0; }));
+        std::atomic<long long> applied_ns{0};
+        struct Listener final : Rml::EventListener {
+            std::atomic<long long>& at;
+            explicit Listener(std::atomic<long long>& a) : at(a) {}
+            void ProcessEvent(Rml::Event&) override {
+                at.store(now_ns());
+            }
+        } listener(applied_ns);
+        e.ui->with_context([&](Rml::Context& ctx) {
+            ctx.GetDocument(0)->GetElementById("button")->AddEventListener("mouseover", &listener);
+        });
+        // Away from the button, and let every frame that asks for settle.
+        [e.view() mouseMoved:e.mouse(NSEventTypeMouseMoved, 250, 180)];
+        e.ui->flush_input();
+        [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.3]];
+
+        // Park the render thread inside a draw, lock held, and send exactly
+        // one event: it queues, and nothing else asks for a frame.
+        DrawCleanup<Editor> cleanup{{&e}};
+        e.renderer.hold_draws.store(true);
+        e.ui->request_frame();
+        REQUIRE(e.wait_for([&] { return e.renderer.parked.load(); }));
+        const auto queued_before = e.ui->queued_inputs();
+        [e.view() mouseMoved:e.mouse(NSEventTypeMouseMoved, 20, 20)];
+        REQUIRE(e.ui->queued_inputs() == queued_before + 1);
+        REQUIRE(applied_ns.load() == 0);
+        e.renderer.hold_draws.store(false);
+        // Keep the main thread from draining while the frames that were
+        // already asked for run and finish: they draw without the event.
+        const long long released_ns = now_ns();
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        REQUIRE(applied_ns.load() == 0);
+        REQUIRE(e.begin_ns.load() > released_ns);
+        REQUIRE(e.wait_for([&] { return applied_ns.load() != 0; }));
+        // Now the drain runs. It must ask for another frame, because every
+        // frame so far drew without the event: one begins after it.
+        REQUIRE(e.wait_for([&] { return e.begin_ns.load() > applied_ns.load(); }, 2.0));
+        e.ui->with_context([&](Rml::Context& ctx) {
+            ctx.GetDocument(0)->GetElementById("button")->RemoveEventListener("mouseover",
+                                                                              &listener);
+        });
+        e.ui->detach();
+    }
+}
+
+TEST_CASE("a size change idle() could not apply is applied by the next with_context",
+          "[native-surface][rmlui][threading]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        Editor e;
+        REQUIRE(e.attach());
+        REQUIRE(e.wait_for([&] { return e.ui->frames() > 0; }));
+        const double scale = e.window.backingScaleFactor;
+        // Park the render thread inside a draw, lock held, then resize and
+        // tick: the tick finds the lock busy and skips the size.
+        DrawCleanup<Editor> cleanup{{&e}};
+        e.renderer.hold_draws.store(true);
+        e.ui->request_frame();
+        REQUIRE(e.wait_for([&] { return e.renderer.parked.load(); }));
+        [e.window setContentSize:NSMakeSize(420, 280)];
+        e.ui->idle();
+        e.renderer.hold_draws.store(false);
+        Rml::Vector2i size;
+        e.ui->with_context([&](Rml::Context& ctx) { size = ctx.GetDimensions(); });
+        REQUIRE(size.x == static_cast<int>(420 * scale));
+        REQUIRE(size.y == static_cast<int>(280 * scale));
+        e.ui->detach();
+    }
+}
+
+TEST_CASE("flush_input on a surface that is not attached does nothing",
+          "[native-surface][rmlui][threading]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        MemoryAssets assets;
+        CountingRenderer renderer;
+        RmlUiSurfaceOptions options;
+        options.document = "probe.rml";
+        options.font_faces = {"font.ttf"};
+        RmlUiSurface fresh(assets, renderer, {}, options);
+        fresh.flush_input();
+        fresh.idle();
+        REQUIRE(fresh.frames() == 0);
+
+        Editor e;
+        REQUIRE(e.attach());
+        REQUIRE(e.wait_for([&] { return e.ui->frames() > 0; }));
+        e.ui->detach();
+        const auto frames = e.ui->frames();
+        e.ui->flush_input();
+        e.ui->with_context([](Rml::Context&) {});
+        REQUIRE(e.ui->frames() == frames);
+    }
+}
+
+// These synchronization contracts do not need a drawable or a Metal device.
+TEST_CASE("contended input drain survives the last notification", "[rmlui][threading][cpu]") {
+    std::mutex mutex;
+    std::promise<void> owns_lock;
+    std::promise<void> release_lock;
+    auto release = release_lock.get_future();
+    auto owned = owns_lock.get_future();
+    std::atomic<bool> owner_timed_out{false};
+    auto other_editor = std::async(std::launch::async, [&] {
+        std::lock_guard lock(mutex);
+        owns_lock.set_value();
+        owner_timed_out.store(release.wait_for(std::chrono::seconds(10)) !=
+                              std::future_status::ready);
+    });
+    const bool acquired = owned.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+    int pending = 3;
+    int delivered = 0;
+    bool retry_posted = false;
+    auto attempt = [&] {
+        return detail::try_drain_input(
+            mutex, [&] { retry_posted = true; },
+            [&] {
+                delivered += pending;
+                pending = 0;
+                return true;
+            });
+    };
+    // Consume the only notification while an unrelated editor holds the lock.
+    // No fatal assertion until the other thread has been released and joined.
+    const bool applied_while_busy = attempt();
+    const int delivered_while_busy = delivered;
+    release_lock.set_value();
+    other_editor.get();
+    REQUIRE(acquired);
+    REQUIRE_FALSE(owner_timed_out.load());
+    CHECK_FALSE(applied_while_busy);
+    CHECK(delivered_while_busy == 0);
+    REQUIRE(retry_posted);
+    // The unrelated editor posts nothing. Only the saved retry can deliver.
+    retry_posted = false;
+    CHECK(attempt());
+    CHECK(delivered == 3);
+    CHECK(pending == 0);
+    CHECK_FALSE(retry_posted);
+}
+
+TEST_CASE("parked cleanup releases holds before joining on exception", "[rmlui][threading][cpu]") {
+    struct ParkedEditor {
+        struct Renderer {
+            std::atomic<bool> hold_draws{true};
+        } renderer;
+        struct Surface {
+            bool detached = false;
+            void detach() {
+                detached = true;
+            }
+        } surface;
+        Surface* ui = &surface;
+    } a, b;
+    std::atomic<bool> exited{false};
+    std::atomic<bool> timed_out{false};
+    struct Unwind {};
+    bool requester_started = false;
+    try {
+        std::promise<void> started;
+        auto ready = started.get_future();
+        DrawCleanup<ParkedEditor> cleanup{{&a, &b}};
+        cleanup.requester = std::thread([&] {
+            started.set_value();
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+            while (!cleanup.stop.load() || a.renderer.hold_draws.load() ||
+                   b.renderer.hold_draws.load()) {
+                if (std::chrono::steady_clock::now() >= deadline) {
+                    timed_out.store(true);
+                    return;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            exited.store(true);
+        });
+        requester_started = ready.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+        throw Unwind{};
+    } catch (const Unwind&) {
+    }
+    CHECK(requester_started);
+    CHECK_FALSE(timed_out.load());
+    CHECK(exited.load());
+    CHECK_FALSE(a.renderer.hold_draws.load());
+    CHECK_FALSE(b.renderer.hold_draws.load());
+    CHECK(a.surface.detached);
+    CHECK(b.surface.detached);
 }

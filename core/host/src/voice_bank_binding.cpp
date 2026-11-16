@@ -16,8 +16,6 @@
 namespace pulp::host {
 namespace {
 
-constexpr std::uint32_t kSlots = kVoiceBankSlots;
-
 // What a slot's idle probe reads. The owner's slot_note() is the same call the
 // bank already makes on the audio thread; a slot is idle when its voice is not
 // active (a releasing voice is still active).
@@ -160,7 +158,7 @@ struct VoiceBankBinding::Impl {
     std::unique_ptr<VoiceBankOwner> owner;
     SignalGraph graph;
     VoiceBankManifest manifest;
-    std::array<SubgraphInstance, kSlots> slots{};
+    std::array<SubgraphInstance, kVoiceBankSlots> slots{};
     midi::MpeVoiceTracker tracker;
     HostEventIngress<SignalGraph::kHostEventIngressCapacity> ingress;
     std::array<HostEventRecord, SignalGraph::kHostEventIngressCapacity> projected{};
@@ -169,16 +167,16 @@ struct VoiceBankBinding::Impl {
     std::uint64_t block_start = 0;
     std::size_t block_frames = 0;
     bool block_open = false;
-    std::array<HeldNoteOff, kSlots> held{};
+    std::array<HeldNoteOff, kVoiceBankSlots> held{};
     std::array<bool, 16> member_sustain{};
     std::array<bool, 2> zone_sustain{};
     bool suppress_note_off = false;
     bool idle_skip = false;
-    std::array<IdleProbeContext, kSlots> idle_probes{};
+    std::array<IdleProbeContext, kVoiceBankSlots> idle_probes{};
     // The slots' voice nodes, fetched once while preparing. Looking a node up in
     // the graph takes the graph mutation lock, which the audio thread must not
     // take, so the counter reads go through these.
-    std::array<std::shared_ptr<format::ProcessorNodeInstance>, kSlots> voice_nodes{};
+    std::array<std::shared_ptr<format::ProcessorNodeInstance>, kVoiceBankSlots> voice_nodes{};
     std::string stereo_port;
 
     Scope scope_for(std::uint8_t channel) const noexcept {
@@ -203,7 +201,7 @@ struct VoiceBankBinding::Impl {
         return zone && (member_sustain[channel] || zone_sustain[zone->is_upper() ? 1 : 0]);
     }
     void prune_stolen_holds() noexcept {
-        for (std::uint32_t slot = 0; slot < kSlots; ++slot) {
+        for (std::uint32_t slot = 0; slot < kVoiceBankSlots; ++slot) {
             auto& hold = held[slot];
             if (hold.active && (hold.epoch != epoch ||
                                 !owner->live(slot, hold.state.note_id,
@@ -212,7 +210,7 @@ struct VoiceBankBinding::Impl {
         }
     }
     void release_unheld() noexcept {
-        for (std::uint32_t slot = 0; slot < kSlots; ++slot) {
+        for (std::uint32_t slot = 0; slot < kVoiceBankSlots; ++slot) {
             auto& hold = held[slot];
             if (!hold.active || pedal_down(hold.state.channel))
                 continue;
@@ -227,7 +225,7 @@ struct VoiceBankBinding::Impl {
         if (suppress_note_off)
             return;
         if (pedal_down(note.channel)) {
-            for (std::uint32_t slot = 0; slot < kSlots; ++slot) {
+            for (std::uint32_t slot = 0; slot < kVoiceBankSlots; ++slot) {
                 if (!owner->live(slot, note.note_id, midi::MpeExpressionEvent::Kind::NoteOff, note))
                     continue;
                 if (!held[slot].active || held[slot].state.note_id != note.note_id)
@@ -245,7 +243,7 @@ struct VoiceBankBinding::Impl {
         (void)tracker.process(midi::MidiEvent::cc(channel, 74, 0));
     }
     void reset_orphan_expression(Scope scope) noexcept {
-        for (std::uint32_t slot = 0; slot < kSlots; ++slot) {
+        for (std::uint32_t slot = 0; slot < kVoiceBankSlots; ++slot) {
             midi::MpeNoteState note{};
             bool releasing = false;
             if (!owner->slot_note(slot, note, releasing) || !covers(scope, note.channel) ||
@@ -270,7 +268,7 @@ struct VoiceBankBinding::Impl {
         suppress_note_off = true;
         all_notes_off(scope);
         suppress_note_off = false;
-        for (std::uint32_t slot = 0; slot < kSlots; ++slot) {
+        for (std::uint32_t slot = 0; slot < kVoiceBankSlots; ++slot) {
             midi::MpeNoteState note{};
             bool releasing = false;
             if (owner->slot_note(slot, note, releasing) && covers(scope, note.channel)) {
@@ -326,7 +324,7 @@ struct VoiceBankBinding::Impl {
     // nullptr on success, otherwise why the write is refused.
     const char* resolve_parameter(std::uint32_t slot_ordinal, const std::string& key, float value,
                                   ResolvedParameter& resolved) {
-        if (slot_ordinal >= kSlots)
+        if (slot_ordinal >= kVoiceBankSlots)
             return "slot is outside the bank";
         auto& slot = slots[slot_ordinal];
         const auto target = slot.parameter_nodes.find(key);
@@ -399,7 +397,7 @@ VoiceBankBinding::prepare(const VoiceTemplateSchema& schema, SubgraphTemplate de
                   "overlapping or invalid MPE zone layout"};
         return {};
     }
-    for (std::uint32_t slot = 0; slot < kSlots; ++slot) {
+    for (std::uint32_t slot = 0; slot < kVoiceBankSlots; ++slot) {
         const auto* identity = owner->slot_state_identity(slot);
         if (identity == nullptr) {
             result = {VoiceBankBindingCode::InvalidManifest, slot, "voice",
@@ -434,7 +432,7 @@ VoiceBankBinding::prepare(const VoiceTemplateSchema& schema, SubgraphTemplate de
                   "output node rejected"};
         return {};
     }
-    for (std::uint32_t slot = 0; slot < kSlots; ++slot) {
+    for (std::uint32_t slot = 0; slot < kVoiceBankSlots; ++slot) {
         auto instance = instantiate_subgraph(bank->impl_->graph, definition,
                                              "voice[" + std::to_string(slot) + "]", slot);
         if (!instance) {
@@ -487,12 +485,12 @@ VoiceBankBinding::prepare(const VoiceTemplateSchema& schema, SubgraphTemplate de
                   "prepared graph rejected the eight-slot candidate"};
         return {};
     }
-    for (std::uint32_t slot = 0; slot < kSlots; ++slot)
+    for (std::uint32_t slot = 0; slot < kVoiceBankSlots; ++slot)
         bank->impl_->voice_nodes[slot] =
             bank->impl_->graph.processor_node_instance(bank->impl_->slots[slot].nodes.front());
     if (idle_skip == VoiceBankIdleSkip::SkipInactiveSlots) {
         // Refuse loudly rather than quietly running without the option.
-        for (std::uint32_t slot = 0; slot < kSlots; ++slot) {
+        for (std::uint32_t slot = 0; slot < kVoiceBankSlots; ++slot) {
             const auto& voice = bank->impl_->voice_nodes[slot];
             if (!voice || !voice->idle_skip_armed()) {
                 result = {VoiceBankBindingCode::InvalidManifest, slot, "voice",
@@ -694,8 +692,8 @@ VoiceBankBindingCode VoiceBankBinding::dispatch_deferred(std::uint64_t epoch, st
                                                          const midi::MpeNoteState& state) noexcept {
     if (epoch != impl_->epoch)
         return VoiceBankBindingCode::StaleEpoch;
-    if (slot >= kSlots || generation == 0 || !impl_->owner->live(slot, generation, kind, state) ||
-        state.note_id != generation)
+    if (slot >= kVoiceBankSlots || generation == 0 ||
+        !impl_->owner->live(slot, generation, kind, state) || state.note_id != generation)
         return VoiceBankBindingCode::StaleGeneration;
     if (!valid_deferred_expression(kind, state, impl_->tracker.member_bend_range(state.channel)))
         return VoiceBankBindingCode::IngressFailure;
@@ -734,7 +732,7 @@ bool VoiceBankBinding::set_slot_parameter(std::uint32_t slot, std::string_view p
 
 std::optional<float> VoiceBankBinding::slot_parameter(std::uint32_t slot,
                                                       std::string_view path) const {
-    if (slot >= kSlots)
+    if (slot >= kVoiceBankSlots)
         return std::nullopt;
     const auto& values = impl_->slots[slot].parameters;
     const auto found = values.find(std::string(path));
@@ -748,7 +746,7 @@ VoiceBankState VoiceBankBinding::capture_state() const {
     state.manifest_sha256 = impl_->manifest.sha256;
     for (const auto& binding : impl_->manifest.bindings) {
         if (binding.spec.target_kind != VoiceBindingTarget::Parameter ||
-            binding.slot_ordinal >= kSlots)
+            binding.slot_ordinal >= kVoiceBankSlots)
             continue;
         const auto& values = impl_->slots[binding.slot_ordinal].parameters;
         const auto found = values.find(binding.spec.target);

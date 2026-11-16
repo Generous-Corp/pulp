@@ -55,7 +55,9 @@ live snapshot. **Never call them from the audio thread.**
   latest-wins when several blocks are published before processing, and is
   consumed exactly once. Publication sequence numbers never use zero (the
   unpublished sentinel), including after 64-bit wrap. A `false` overflow result
-  still publishes the bounded prefix. Preserved `MidiInput` node IDs keep an
+  still publishes the bounded prefix. A block replaced unread is not reported
+  by the return value; `midi_mailbox_counters()` counts it, lock-free from any
+  thread. Preserved `MidiInput` node IDs keep an
   unconsumed publication across an ingress-only gap-free `prepare_swap()`. MIDI
   extraction remains a
   control-side read. If either the current authoring topology or the live

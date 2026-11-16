@@ -80,3 +80,152 @@ TEST_CASE("Isolated CLAP callback emits the completion it validated, not a later
     for (float sample : right)
         REQUIRE(sample == 0.125f);
 }
+
+#if defined(_WIN32) && defined(PULP_ISOLATED_CLAP_WINDOWS_PEER)
+#include "isolated_clap_windows_channel.hpp"
+#include <optional>
+#include <pulp/platform/child_process.hpp>
+#include <thread>
+
+namespace {
+using namespace pulp::host::isolation;
+using pulp::platform::ChildProcess;
+using pulp::platform::ChildProcessInputChannel;
+using pulp::platform::ProcessOptions;
+using pulp::platform::RetainedCleanupStatus;
+using pulp::platform::RetainedProcessCustody;
+using pulp::platform::RetainedProcessState;
+
+constexpr std::uint64_t kTestGeneration = 0x5a17c0de12345678ull;
+
+ControlRecord identity_record() {
+    ControlRecord record;
+    record.plugin_sha256.fill('a');
+    record.worker_sha256.fill('b');
+    record.build.fill('c');
+    record.plugin_sha256.back() = record.worker_sha256.back() = record.build.back() = '\0';
+    return record;
+}
+
+template <typename Predicate>
+bool eventually(Predicate predicate, std::chrono::milliseconds limit) {
+    const auto deadline = std::chrono::steady_clock::now() + limit;
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (predicate())
+            return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    return predicate();
+}
+
+struct PeerLaunch {
+    windows::SharedSection section;
+    RetainedProcessCustody reservation;
+    ChildProcess process;
+    std::optional<ChildProcessInputChannel> channel;
+    int process_id = -1;
+    bool session_ran = false;
+
+    bool start(const char* mode, int timeout_ms = 5000) {
+        if (!section.create(kTestGeneration))
+            return false;
+        ProcessOptions options;
+        options.capture_stdout = options.capture_stderr = false;
+        options.standard_input_timeout_ms = timeout_ms;
+        return process.start_retained_with_standard_input_channel(
+            reservation, PULP_ISOLATED_CLAP_WINDOWS_PEER, {mode},
+            [this](int pid, ChildProcessInputChannel received, auto deadline) {
+                session_ran = true;
+                process_id = pid;
+                if (!windows::parent_hello(received.native_handle(), pid, section,
+                                           identity_record(), deadline))
+                    return false;
+                channel.emplace(std::move(received));
+                return true;
+            },
+            options);
+    }
+};
+} // namespace
+
+TEST_CASE("Windows isolated CLAP handshake shares one section with a retained worker",
+          "[host][isolation][windows]") {
+    PeerLaunch launch;
+    REQUIRE(launch.start("ok"));
+    REQUIRE(launch.channel);
+    auto& completion = launch.section.mapping()->completions[0];
+    REQUIRE(eventually([&] { return completion.ready.load(std::memory_order_acquire) == 1; },
+                       std::chrono::seconds(5)));
+    CHECK(completion.block.generation == kTestGeneration);
+    CHECK(completion.block.audio[0] == 0.5f);
+
+    const auto handle = launch.channel->native_handle();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    ControlRecord destroy;
+    destroy.command = Command::destroy;
+    destroy.generation = kTestGeneration;
+    REQUIRE(windows::send_record(handle, destroy, deadline));
+    ControlRecord reply;
+    REQUIRE(windows::receive_record(handle, reply, deadline));
+    CHECK(reply.command == Command::destroy);
+    CHECK(reply.result == 1);
+    REQUIRE(eventually(
+        [&] {
+            return launch.reservation.retained_process_observation().state ==
+                   RetainedProcessState::Exited;
+        },
+        std::chrono::seconds(5)));
+    CHECK(launch.reservation.retained_process_observation().exit_code == 0);
+    const auto cleaned = launch.reservation.cleanup_retained_process_group(
+        std::chrono::steady_clock::now() + std::chrono::seconds(2));
+    CHECK(cleaned.status == RetainedCleanupStatus::Complete);
+    CHECK(cleaned.child_reaped);
+    CHECK(cleaned.descendants_gone);
+}
+
+TEST_CASE("Windows isolated CLAP section read sees only what the worker wrote",
+          "[host][isolation][windows][negative-control]") {
+    // Instrument control for the shared-section reading above: a worker that
+    // completes the handshake but never writes must leave the completion empty.
+    PeerLaunch launch;
+    REQUIRE(launch.start("skip-write"));
+    auto& completion = launch.section.mapping()->completions[0];
+    CHECK_FALSE(eventually([&] { return completion.ready.load(std::memory_order_acquire) != 0; },
+                           std::chrono::milliseconds(300)));
+    const auto cleaned = launch.reservation.cleanup_retained_process_group(
+        std::chrono::steady_clock::now() + std::chrono::seconds(2));
+    CHECK(cleaned.status == RetainedCleanupStatus::Complete);
+    CHECK(cleaned.descendants_gone);
+}
+
+TEST_CASE("Windows isolated CLAP handshake refuses a defective worker reply",
+          "[host][isolation][windows]") {
+    for (const char* mode : {"wrong-section", "wrong-generation", "wrong-build", "wrong-pid"}) {
+        INFO("mode=" << mode);
+        PeerLaunch launch;
+        CHECK_FALSE(launch.start(mode));
+        CHECK(launch.session_ran);
+        CHECK(launch.process_id > 0);
+        CHECK_FALSE(launch.channel);
+        // A refused handshake leaves no worker behind: cleanup already ran.
+        CHECK(launch.reservation.retained_process_observation().state ==
+              RetainedProcessState::Reaped);
+        const auto receipt = launch.reservation.cleanup_retained_process_group(
+            std::chrono::steady_clock::now() + std::chrono::seconds(2));
+        CHECK(receipt.status == RetainedCleanupStatus::Complete);
+        CHECK(receipt.descendants_gone);
+    }
+}
+
+TEST_CASE("Windows isolated CLAP handshake is bounded by its deadline",
+          "[host][isolation][windows]") {
+    PeerLaunch launch;
+    const auto start = std::chrono::steady_clock::now();
+    CHECK_FALSE(launch.start("silent", 750));
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+    CHECK(elapsed >= std::chrono::milliseconds(700));
+    CHECK(elapsed < std::chrono::seconds(4));
+    CHECK(launch.session_ran);
+    CHECK(launch.reservation.retained_process_observation().state == RetainedProcessState::Reaped);
+}
+#endif

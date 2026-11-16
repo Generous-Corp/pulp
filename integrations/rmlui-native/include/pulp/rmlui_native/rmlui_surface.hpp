@@ -20,8 +20,8 @@
 /// The main thread does not wait for a frame to deliver pointer or wheel
 /// input or to run `idle()`. When the render thread holds the lock, pointer
 /// and wheel events are queued (consecutive moves and wheel deltas merge) and
-/// applied, in order and on the main thread, within about a millisecond of the
-/// frame ending. Their listeners therefore run on the main thread, a moment
+/// applied, in order and on the main thread, after the
+/// frame ends. Their listeners therefore run on the main thread, a moment
 /// later than the event. `with_context()`, key and text input apply anything
 /// queued first, so they always see earlier events' effects; they, and
 /// `flush_input()`, do wait for a frame.
@@ -65,13 +65,13 @@ struct FrameTarget {
 struct RendererHooks {
     std::function<void(const FrameTarget&)> begin_frame;
     std::function<void()> end_frame;
-    /// Called when the editor is hidden, with `rmlui_mutex()` held, so no
-    /// frame is being encoded, after RmlUi has released its compiled geometry
-    /// and textures through the renderer. The GPU may still be finishing the
-    /// previous frame's command buffer, so release resources the usual
-    /// deferred way (drop references, do not wait on the device). Free any GPU
-    /// memory the renderer itself caches (layer, filter and atlas textures);
-    /// it is rebuilt on the next frame. Optional.
+    /// Called when the editor is hidden, with `rmlui_mutex()` held, after
+    /// RmlUi has released its compiled geometry and textures through the
+    /// renderer. No frame of this surface is being encoded or waiting to be
+    /// committed, and its last committed command buffer has completed: the
+    /// surface waits for it before releasing anything. Free any GPU memory the
+    /// renderer itself caches (layer, filter and atlas textures); it is
+    /// rebuilt on the next frame. Optional.
     std::function<void()> trim;
 };
 
@@ -95,10 +95,10 @@ struct RmlUiSurfaceOptions {
 
 class RmlUiSurface {
   public:
-    /// `assets` and `renderer` must outlive the surface. The surface expects
-    /// the renderer to serve it alone: hiding releases the renderer's
-    /// geometry and textures, which a renderer shared with another surface
-    /// would lose too.
+    /// `assets` and `renderer` must outlive the surface. A renderer serves one
+    /// attached surface at a time, because hiding releases the renderer's
+    /// geometry and textures: `attach()` fails while another attached surface
+    /// uses the same renderer, and detaching frees it for another.
     RmlUiSurface(vellum::rmlui::AssetProvider& assets, Rml::RenderInterface& renderer,
                  RendererHooks hooks, RmlUiSurfaceOptions options);
     ~RmlUiSurface();
@@ -107,7 +107,8 @@ class RmlUiSurface {
 
     /// Create the Metal surface in `parent` (`NSView*`), open the RmlUi
     /// context, load the document and start drawing. False, with nothing left
-    /// behind, if any step fails.
+    /// behind, if any step fails or another attached surface uses the
+    /// renderer.
     bool attach(void* parent);
     /// Stop drawing, close the RmlUi context and remove the surface view.
     void detach();
@@ -120,13 +121,18 @@ class RmlUiSurface {
     /// The host hid or showed the editor without detaching it. Hiding stops
     /// frames at once (an `idle()` that follows does not restart them) and
     /// releases RmlUi's compiled geometry and textures and the renderer's own
-    /// caches (`RendererHooks::trim`). Showing resumes frames and draws one,
+    /// caches (`RendererHooks::trim`), once the last frame's command buffer
+    /// has completed, which can take about a frame. Showing resumes frames
+    /// and draws one,
     /// rebuilding what was released, so the first visible frame is complete.
     /// Main thread.
     void visibility_changed(bool visible);
     /// Apply pointer and wheel events that were queued behind a frame, now,
     /// waiting for the frame if one is in flight. Main thread.
     void flush_input();
+    /// Pointer and wheel events queued behind a frame so far (merged events
+    /// count once each as they arrived). For tests and diagnostics.
+    std::uint64_t queued_inputs() const noexcept;
     /// Draw one more frame (after a change the caller made through RmlUi).
     void request_frame();
 

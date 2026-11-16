@@ -46,7 +46,16 @@ if(Python3_Interpreter_FOUND)
     # Uses the in-process reference fixture; needs no C++ build.
     add_test(NAME graph-paced-timing-matrix-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/test_graph_paced_timing_matrix.py")
-    set_tests_properties(graph-paced-timing-matrix-selftest PROPERTIES LABELS "tools;selftest;graph" TIMEOUT 120)
+    # The wall-clock deadline case is registered separately under the
+    # `performance` label: its zero-miss negative control fails on a runner
+    # busy with concurrent tests (sanitizer lanes), and the rest stay gated.
+    set_tests_properties(graph-paced-timing-matrix-selftest PROPERTIES LABELS "tools;selftest;graph" TIMEOUT 120
+        ENVIRONMENT "PULP_SELFTEST_SKIP_WALL_CLOCK=1")
+    add_test(NAME graph-paced-timing-matrix-wall-clock COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/test_graph_paced_timing_matrix.py"
+        MissCounterTest.test_planted_sleep_must_register_misses_and_control_must_not)
+    set_tests_properties(graph-paced-timing-matrix-wall-clock PROPERTIES
+        LABELS "tools;selftest;graph;performance" TIMEOUT 120)
     # macos_merge_group_bootstrap.sh: the merge-group `macos` verdict. A failed
     # or missing dependency fails closed; a cancelled classify (never given a
     # runner) is classified in-job, and the verdict proceeds on that answer.

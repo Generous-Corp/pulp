@@ -2,12 +2,18 @@
 
 #include <pulp/host/graph_serializer.hpp>
 
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace pulp::host {
+
+/// Largest notation (`.pat`) document, and largest graph text a file reload or
+/// probe admits, in bytes. A `.pulpgraph` file loaded on its own is bounded by
+/// GraphSerializer::max_file_bytes instead.
+inline constexpr std::size_t max_graph_notation_bytes = 1024u * 1024u;
 
 /// Control-thread diagnostics shared by notation, strict file validation and tools.
 /// Mutation codes retain GraphResult's spellings. Supplementary fields identify

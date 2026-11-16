@@ -94,11 +94,28 @@ An RmlUi editor forwards the call to `RmlUiSurface::visibility_changed()`:
 frames stop at once, including one already waiting for the frame lock, RmlUi
 releases its compiled geometry and textures through the renderer, and
 `RendererHooks::trim` is called so the renderer can free the layer, filter and
-atlas textures it caches. The trim runs with no frame being encoded, but the
-GPU may still be finishing the previous frame. Showing resumes frames and draws
-one, which recompiles everything that was released, so the first visible frame
-is complete. A surface expects a renderer of its own, since the release calls
-are renderer-wide.
+atlas textures it caches. The trim waits until no frame of the surface is
+being encoded or submitted and its last committed command buffer has completed
+on the GPU (about a frame at most), so nothing released is still in use.
+Showing resumes frames and draws one, which recompiles everything that was
+released, so the first visible frame is complete. The release calls are
+renderer-wide, so a renderer serves one attached surface at a time:
+`attach()` fails while another attached surface uses it.
+
+### Threading
+
+A frame holds one process-wide lock, `rmlui_mutex()`, for RmlUi's update and
+render, because RmlUi's state is shared and not thread-safe. The main thread
+does not wait for it to deliver pointer or wheel input or to run `idle()`:
+when a frame is in flight, pointer and wheel events are queued (consecutive
+moves, and wheel deltas with the same modifiers, merge) and applied in order on
+the main thread after the frame ends. If another editor holds the shared lock
+when delivery runs, one coalesced delayed retry remains until the input is
+applied; it needs no further frame or host idle tick. Element
+listeners therefore still run on the main thread, a moment after the event.
+`with_context()`, key and text input apply the queue first and wait for a
+frame; call `flush_input()` where a caller needs earlier events applied now,
+as a test does after a click.
 
 ## Proof
 
