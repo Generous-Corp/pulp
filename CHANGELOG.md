@@ -9,6 +9,14 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11420"></a>
+## [1.142.0] - 2026-11-16
+
+- release/version bump ([#12419](https://github.com/Generous-Corp/pulp/pull/12419))
+- graph/swarm midi mailbox 20261116 ([#12408](https://github.com/Generous-Corp/pulp/pull/12408))
+- fix/san host scale alloc probe ([#12409](https://github.com/Generous-Corp/pulp/pull/12409))
+- fix/required check machinery review verdict ([#12400](https://github.com/Generous-Corp/pulp/pull/12400))
+
 <a id="v11412"></a>
 ## [1.141.2] - 2026-11-16
 
@@ -13124,6 +13132,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.142.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.142.0
 [1.141.2]: https://github.com/Generous-Corp/pulp/releases/tag/v1.141.2
 [1.141.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.141.1
 [1.141.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.141.0
