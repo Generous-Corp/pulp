@@ -1081,6 +1081,15 @@ TEST_CASE(
         REQUIRE(frame.requests.size() == 1);
     REQUIRE(frame.requests.back() == "667x500");
 
+    // One pixel off the aspect is rounding: the editor takes the host's size
+    // and nothing is asked back.
+    frame.requests.clear();
+    Steinberg::ViewRect one_off(0, 0, 640, 481);
+    REQUIRE(view->onSize(&one_off) == Steinberg::kResultTrue);
+    REQUIRE(g_log.saw("set_size:640x481"));
+    loop.run_for(0.3);
+    REQUIRE(frame.requests.empty());
+
     // A host size already on the aspect asks for nothing.
     frame.requests.clear();
     Steinberg::ViewRect on_aspect(0, 0, 640, 480);
