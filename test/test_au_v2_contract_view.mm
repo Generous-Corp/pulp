@@ -662,6 +662,7 @@ TEST_CASE("an AU v2 contract editor's resize request is not accepted just becaus
 }
 
 // A container that resizes itself to match its subview, the way Logic does.
+static bool g_container_shifts_origin = false;
 @interface PulpTestFollowingContainer : NSView
 @end
 @implementation PulpTestFollowingContainer
@@ -676,6 +677,8 @@ TEST_CASE("an AU v2 contract editor's resize request is not accepted just becaus
 - (void)subviewResized:(NSNotification*)note {
     NSView* subview = note.object;
     [self setFrameSize:subview.frame.size];
+    if (g_container_shifts_origin && subview.frame.origin.x == 0)
+        [subview setFrameOrigin:NSMakePoint(5, 0)];
 }
 - (void)dealloc {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
@@ -723,6 +726,26 @@ TEST_CASE("an AU v2 contract editor's resize request checks the host's container
         [view removeFromSuperview];
         [view release];
         [following release];
+    }
+    reset_contract_recording();
+    @autoreleasepool {
+        // A container that follows the size but moves the view's origin: the
+        // request is rolled back and the frame is restored in full.
+        g_container_shifts_origin = true;
+        PulpTestFollowingContainer* shifting =
+            [[PulpTestFollowingContainer alloc] initWithFrame:NSMakeRect(0, 0, 400, 300)];
+        [window.contentView addSubview:shifting];
+        NSView* view = [open_view(au) retain];
+        REQUIRE(view != nil);
+        [shifting addSubview:view];
+        const auto before = view.frame;
+        REQUIRE_FALSE(contract_log().context->request_resize({640, 480, 1.0}));
+        REQUIRE(view.frame.origin.x == before.origin.x);
+        REQUIRE(view.frame.size.width == before.size.width);
+        g_container_shifts_origin = false;
+        [view removeFromSuperview];
+        [view release];
+        [shifting release];
     }
     pulp::format::au::set_contract_resize_follows_container_for_testing(std::nullopt);
     [window close];
