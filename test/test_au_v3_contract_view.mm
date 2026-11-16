@@ -18,6 +18,7 @@
 #include <pulp/state/store.hpp>
 
 #include <memory>
+#include <utility>
 #include <vector>
 
 using pulp::test_support::contract_config;
@@ -166,7 +167,11 @@ TEST_CASE("AU v3 opens, sizes and closes a contract editor, twice",
         // follows: the view ends inside the limits instead of at 100x100.
         [view setFrameSize:NSMakeSize(100, 100)];
         REQUIRE(contract_log().saw("set_size:200x150"));
-        REQUIRE(resizes.requests.size() == 1);
+        // Never from inside the host's resize call: the ask comes once the
+        // host's sizes stop changing.
+        REQUIRE(resizes.requests.empty());
+        MainLoop loop;
+        REQUIRE(loop.run_until([&] { return resizes.requests.size() == 1; }));
         REQUIRE(resizes.requests[0].width == 200);
         REQUIRE(resizes.requests[0].height == 150);
         REQUIRE(view.frame.size.width == 200);
@@ -250,6 +255,47 @@ TEST_CASE("an AU v3 editor resize the host does not follow is refused",
         [view release];
     }
     REQUIRE(contract_log().live == 0);
+}
+
+namespace {
+// Ten host sizes outside the editor's limits, 16 ms apart, as a live drag
+// delivers them. Returns the requests seen during the burst and after it.
+std::pair<size_t, size_t> drag_burst(NSInteger settle_ms) {
+    FakeInstance instance(true);
+    ResizeLog resizes;
+    resizes.container = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 400, 300)];
+    MainLoop loop;
+    size_t during = 0, after = 0;
+    @autoreleasepool {
+        PULP_AUV3_CONTRACT_VIEW_CLASS* view = [open_view(instance, &resizes) retain];
+        view.askBackDelayMs = settle_ms;
+        [resizes.container addSubview:view];
+        for (int i = 0; i < 10; ++i) {
+            [view setFrameSize:NSMakeSize(100 + i, 100 + i)];
+            loop.run_for(0.016);
+        }
+        during = resizes.requests.size();
+        loop.run_for(0.4);
+        after = resizes.requests.size() - during;
+        [view release];
+    }
+    [resizes.container release];
+    return {during, after};
+}
+} // namespace
+
+TEST_CASE("AU v3 asks the host for the editor's limits only after a drag settles",
+          "[auv3][editor-host][au-v3-contract]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    const auto settled = drag_burst(120);
+    REQUIRE(settled.first == 0);
+    REQUIRE(settled.second == 1);
+    // Control: with no settle time every size asks, so the burst is not quiet
+    // for a reason other than the delay.
+    reset_contract_recording();
+    const auto immediate = drag_burst(0);
+    REQUIRE(immediate.first > 0);
 }
 
 TEST_CASE("an accepted AU v3 resize request never leaves the view different from its parent",
