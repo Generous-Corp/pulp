@@ -79,12 +79,14 @@ larger than a review repair. Findings fixed in the same change are not listed.
   and `cmd_graph.cpp` (probe and diff) each bound and classify file reads.
 - Done meanwhile: `load_graph_patch_file` sizes its buffer from the file instead
   of zero-filling 64 MiB per call, and reports a read failure as
-  `FileUnreadable`; every graph subcommand reports an oversize file as
-  `ResourceLimit` and a missing probe file as `FileUnreadable`.
+  `FileUnreadable`; every graph subcommand except `probe` reports an oversize
+  file as `ResourceLimit`, and a missing probe file is `FileUnreadable`.
+  `probe` keeps `graph_file_limit` for its 1 MiB bound.
 - Still open: one `read_bounded_file(path, limit)` helper with a typed result,
   and a typed code on `GraphSerializer::LoadResult` so the CLI stops
   classifying `from_file` failures by message prefix. The 1 MiB notation bound
-  is still spelled in several places.
+  is named `max_graph_notation_bytes` in `graph_patch.hpp`; the CLI probe still
+  spells it out.
 
 ## Accepted as is
 

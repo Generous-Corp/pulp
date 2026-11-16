@@ -39,6 +39,12 @@ A transport stream-history reset (and prepare) also resets every stateful
 Control node (integrator, slew, hysteresis) to its configured initial state, so
 a seek renders like a fresh graph; a negative reset position is `OutOfRange`,
 and a non-finite index is published as 0 rather than forwarded to a parameter.
+That seek reset calls `CustomNodeType::reset` on the AUDIO thread, from both the
+Control index path and the graph-event path, but only for a type that passes
+`custom_node_reset_runs_on_audio_thread()` (a declared `rt_contract` with an
+audio-callback safety class). A third-party Control-port type that leaves
+`rt_contract` undeclared keeps its state across a seek; declaring it promises
+its `reset` never allocates, locks or blocks.
 
 Port names: a MidiInput/MidiOutput node's single port is named `audio` (the
 first-port name from `populate_named_ports`) with kind MIDI, so do not rename
