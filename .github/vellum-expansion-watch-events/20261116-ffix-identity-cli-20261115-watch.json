@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261116-ffix-identity-cli-20261115-watch",
+  "created_at": "2026-11-16T06:25:51Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "tools/cli/cmd_graph.cpp: pulp graph save --saved-identity now verifies that every connection of a plain input was restored before writing the identity envelope, and refuses otherwise. This is offline graph-document CLI behaviour only; no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-cli-graph-code-parity",
+    "ctest --test-dir build -R pulp-test-graph-serializer",
+    "ctest --test-dir build -R pulp-test-spectral-asset-geometry",
+    "ctest --test-dir build -R pulp-test-spectral-graph-persistence",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
