@@ -33,10 +33,6 @@
     // The last scale handed to the editor, so a scale change is noticed on
     // layout (UIKit's trait callbacks are deprecated for this).
     CGFloat _pushedScale;
-    // Fires the ask-back once the host's sizes stop changing; each host size
-    // replaces it. It holds no reference to this view and is cancelled before
-    // the view goes.
-    dispatch_source_t _askBackTimer;
 }
 
 + (instancetype)openViewForProcessor:(pulp::format::Processor*)processor
@@ -50,7 +46,6 @@
         return nil;
 
     PULP_AUV3_CONTRACT_VIEW_CLASS* view = [[self alloc] initWithFrame:CGRectZero];
-    view.askBackDelayMs = 120;
     view->_resizeRequest = [resizeRequest copy];
 
     pulp::format::ContractEditorSession::HostHooks hooks;
@@ -94,7 +89,6 @@
 }
 
 - (void)closeEditor {
-    [self cancelAskBack];
     if (_session) {
         _session->detach();
         _session.reset();
@@ -131,9 +125,13 @@
     _applyingEditorSize = previous;
 }
 
-// The editor asks the host to resize. AU v3 has no accept or refuse callback:
-// the controller publishes preferredContentSize and resizes its own view, and
-// the host follows. Refused (false) when the controller has none to ask.
+// The editor asks the host to resize (or the session asks for the size it
+// snapped a host size to). AU v3 has no accept or refuse callback: the
+// controller publishes preferredContentSize and resizes its own view, and the
+// host follows. Refused (false) when the controller has none to ask. The
+// session records an editor-origin request before this runs and cancels any
+// pending snapped-size request, so a newer request always supersedes an older
+// one.
 - (BOOL)requestEditorSize:(CGSize)size {
     if (!pulp::format::detail::is_main_thread() || !_resizeRequest || size.width < 1.0 ||
         size.height < 1.0)
@@ -151,62 +149,38 @@
             [self setFrameWithoutEcho:self.superview.bounds.size];
         else
             [self setFrameWithoutEcho:size];
+        // The frame reached the requested size: the host's acknowledgment, so
+        // the editor takes the size it asked for. A host that has not followed
+        // yet acknowledges through hostResizedTo: when it does.
+        const CGSize now = self.frame.size;
+        if (_session && now.width == size.width && now.height == size.height)
+            [self takeHostSize:now];
     }
     return accepted;
+}
+
+// A size the host chose, without asking the editor first. The session gives the
+// editor the size inside its limits at once, takes an acknowledged editor
+// request as is, and asks the host for the snapped size (through the
+// request_resize hook) only after the host has stopped resizing, so a live drag
+// is never fought. A fixed-size editor takes no host size.
+- (void)takeHostSize:(CGSize)size {
+    if (!_session)
+        return;
+    auto width = static_cast<std::uint32_t>(size.width);
+    auto height = static_cast<std::uint32_t>(size.height);
+    if (_session->editor() == nullptr) {
+        _session->set_size(width, height);
+        return;
+    }
+    bool snapped = false;
+    _session->set_host_size(width, height, snapped);
 }
 
 - (void)hostResizedTo:(CGSize)size {
     if (_applyingEditorSize || !_session || size.width < 1.0 || size.height < 1.0)
         return;
-    auto width = static_cast<std::uint32_t>(size.width);
-    auto height = static_cast<std::uint32_t>(size.height);
-    // The editor's own limits apply to a host size. A size outside them is
-    // taken at the nearest size the editor accepts, and that size is published
-    // as the preferred size, so a host that honours it brings the view back
-    // inside the editor's limits.
-    const auto host_width = width;
-    const auto host_height = height;
-    if (!_session->constrain(width, height) || width == 0 || height == 0) {
-        width = host_width;
-        height = host_height;
-    }
-    _session->set_size(width, height);
-    if ((width != host_width || height != host_height) && _resizeRequest) {
-        // Ask the host for the accepted size only once its sizes stop changing,
-        // and never from inside its resize call.
-        [self scheduleAskBack:CGSizeMake(width, height)];
-    } else {
-        [self cancelAskBack];
-    }
-}
-
-- (void)scheduleAskBack:(CGSize)size {
-    [self cancelAskBack];
-    __unsafe_unretained PULP_AUV3_CONTRACT_VIEW_CLASS* me = self;
-    dispatch_source_t timer =
-        dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
-    dispatch_source_set_timer(timer,
-                              dispatch_time(DISPATCH_TIME_NOW, _askBackDelayMs * NSEC_PER_MSEC),
-                              DISPATCH_TIME_FOREVER, 0);
-    dispatch_source_set_event_handler(timer, ^{
-      [me fireAskBack:size];
-    });
-    _askBackTimer = timer;
-    dispatch_resume(timer);
-}
-
-- (void)cancelAskBack {
-    if (_askBackTimer == nil)
-        return;
-    dispatch_source_cancel(_askBackTimer);
-    [_askBackTimer release];
-    _askBackTimer = nil;
-}
-
-- (void)fireAskBack:(CGSize)size {
-    [self cancelAskBack];
-    if (_session)
-        [self requestEditorSize:size];
+    [self takeHostSize:size];
 }
 
 - (void)pushScale {
@@ -226,6 +200,12 @@
 #if TARGET_OS_OSX
 
 - (BOOL)isFlipped {
+    return YES;
+}
+
+// The view takes keys (keyDown:/keyUp: below), so it can be the window's first
+// responder; a key the editor declines continues up the responder chain.
+- (BOOL)acceptsFirstResponder {
     return YES;
 }
 

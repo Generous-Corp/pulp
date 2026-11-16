@@ -11,6 +11,7 @@
 #import <AppKit/AppKit.h>
 
 #include "../core/format/src/au_v3_contract_view.h"
+#include "support/manual_snap_timer.hpp"
 #include "support/recording_contract_editor.hpp"
 
 #include <pulp/format/contract_editor_session.hpp>
@@ -27,6 +28,17 @@ using pulp::test_support::EditorEnvironment;
 using pulp::test_support::MainLoop;
 using pulp::test_support::RecordingContractFactory;
 using pulp::test_support::reset_contract_recording;
+using pulp::test_support::ScopedManualSnapTimer;
+
+// The host's view around the plug-in's: records the keys that reach it.
+@interface PulpAUv3KeyHost : NSView
+@property(nonatomic) int keys;
+@end
+@implementation PulpAUv3KeyHost
+- (void)keyDown:(NSEvent*)event {
+    ++_keys;
+}
+@end
 
 // A window whose backing scale a test changes.
 @interface PulpAUv3TestWindow : NSWindow
@@ -137,6 +149,7 @@ NSEvent* key_event(NSEventType type, unsigned short code, NSString* chars) {
 TEST_CASE("AU v3 opens, sizes and closes a contract editor, twice",
           "[auv3][editor-host][au-v3-contract]") {
     EditorEnvironment env;
+    ScopedManualSnapTimer timer;
     reset_contract_recording();
     FakeInstance instance(true);
     ResizeLog resizes;
@@ -170,8 +183,9 @@ TEST_CASE("AU v3 opens, sizes and closes a contract editor, twice",
         // Never from inside the host's resize call: the ask comes once the
         // host's sizes stop changing.
         REQUIRE(resizes.requests.empty());
-        MainLoop loop;
-        REQUIRE(loop.run_until([&] { return resizes.requests.size() == 1; }));
+        REQUIRE(timer.armed());
+        timer.fire();
+        REQUIRE(resizes.requests.size() == 1);
         REQUIRE(resizes.requests[0].width == 200);
         REQUIRE(resizes.requests[0].height == 150);
         REQUIRE(view.frame.size.width == 200);
@@ -185,8 +199,8 @@ TEST_CASE("AU v3 opens, sizes and closes a contract editor, twice",
         REQUIRE(contract_log().last_scale == 3.0);
 
         // An editor resize request goes to the controller's block, and the
-        // view follows once the host accepts. The editor is not told about the
-        // size it asked for.
+        // view follows once the host accepts. The editor takes the size it
+        // asked for exactly once, when the view reaches it.
         const auto before = contract_log().calls.size();
         REQUIRE(contract_log().context->request_resize({720, 540, 1.0}));
         REQUIRE(resizes.requests.size() == 2);
@@ -194,7 +208,8 @@ TEST_CASE("AU v3 opens, sizes and closes a contract editor, twice",
         REQUIRE(resizes.requests[1].height == 540);
         REQUIRE(view.frame.size.width == 720);
         REQUIRE(view.frame.size.height == 540);
-        REQUIRE(contract_log().calls.size() == before);
+        REQUIRE(contract_log().calls.size() == before + 1);
+        REQUIRE(contract_log().calls.back() == "set_size:720x540");
 
         // Space is offered and continues to the host; any other key is taken.
         [view keyDown:key_event(NSEventTypeKeyDown, 49, @" ")];
@@ -257,45 +272,127 @@ TEST_CASE("an AU v3 editor resize the host does not follow is refused",
     REQUIRE(contract_log().live == 0);
 }
 
-namespace {
-// Ten host sizes outside the editor's limits, 16 ms apart, as a live drag
-// delivers them. Returns the requests seen during the burst and after it.
-std::pair<size_t, size_t> drag_burst(NSInteger settle_ms) {
-    FakeInstance instance(true);
-    ResizeLog resizes;
-    resizes.container = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 400, 300)];
-    MainLoop loop;
-    size_t during = 0, after = 0;
-    @autoreleasepool {
-        PULP_AUV3_CONTRACT_VIEW_CLASS* view = [open_view(instance, &resizes) retain];
-        view.askBackDelayMs = settle_ms;
-        [resizes.container addSubview:view];
-        for (int i = 0; i < 10; ++i) {
-            [view setFrameSize:NSMakeSize(100 + i, 100 + i)];
-            loop.run_for(0.016);
-        }
-        during = resizes.requests.size();
-        loop.run_for(0.4);
-        after = resizes.requests.size() - during;
-        [view release];
-    }
-    [resizes.container release];
-    return {during, after};
-}
-} // namespace
-
 TEST_CASE("AU v3 asks the host for the editor's limits only after a drag settles",
           "[auv3][editor-host][au-v3-contract]") {
     EditorEnvironment env;
+    ScopedManualSnapTimer timer;
     reset_contract_recording();
-    const auto settled = drag_burst(120);
-    REQUIRE(settled.first == 0);
-    REQUIRE(settled.second == 1);
-    // Control: with no settle time every size asks, so the burst is not quiet
-    // for a reason other than the delay.
+    FakeInstance instance(true);
+    ResizeLog resizes;
+    resizes.container = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 400, 300)];
+    @autoreleasepool {
+        PULP_AUV3_CONTRACT_VIEW_CLASS* view = [open_view(instance, &resizes) retain];
+        [resizes.container addSubview:view];
+        // Ten host sizes outside the editor's limits, as a live drag delivers
+        // them: each restarts the settle timer and none asks the host.
+        for (int i = 0; i < 10; ++i)
+            [view setFrameSize:NSMakeSize(100 + i, 100 + i)];
+        REQUIRE(timer.starts() == 10);
+        REQUIRE(timer.delay_ms() == pulp::format::ContractEditorSession::kSnapSettleMs);
+        REQUIRE(resizes.requests.empty());
+        // The settle time elapses: exactly one ask, never from inside a host call.
+        timer.fire();
+        REQUIRE(resizes.requests.size() == 1);
+        timer.fire();
+        REQUIRE(resizes.requests.size() == 1);
+        [view release];
+    }
+    [resizes.container release];
+
+    // Control: with the settle time elapsing after every size, the same burst
+    // asks ten times, so the quiet burst above is the debounce's doing.
     reset_contract_recording();
-    const auto immediate = drag_burst(0);
-    REQUIRE(immediate.first > 0);
+    FakeInstance control(true);
+    ResizeLog control_resizes;
+    control_resizes.container = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 400, 300)];
+    @autoreleasepool {
+        PULP_AUV3_CONTRACT_VIEW_CLASS* view = [open_view(control, &control_resizes) retain];
+        [control_resizes.container addSubview:view];
+        for (int i = 0; i < 10; ++i) {
+            [view setFrameSize:NSMakeSize(100 + i, 100 + i)];
+            timer.fire();
+        }
+        REQUIRE(control_resizes.requests.size() == 10);
+        [view release];
+    }
+    [control_resizes.container release];
+}
+
+TEST_CASE("an accepted AU v3 editor resize supersedes a pending limits ask-back",
+          "[auv3][editor-host][au-v3-contract]") {
+    EditorEnvironment env;
+    ScopedManualSnapTimer timer;
+    reset_contract_recording();
+    FakeInstance instance(true);
+    ResizeLog resizes;
+    resizes.container = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 400, 300)];
+    @autoreleasepool {
+        PULP_AUV3_CONTRACT_VIEW_CLASS* view = [open_view(instance, &resizes) retain];
+        [resizes.container addSubview:view];
+        [view setFrameSize:NSMakeSize(100, 100)];
+        REQUIRE(timer.armed());
+        // The editor asks for a size and the host follows before the settle
+        // time: the older ask-back must not fire and shrink the view.
+        REQUIRE(contract_log().context->request_resize({720, 540, 1.0}));
+        REQUIRE_FALSE(timer.armed());
+        timer.fire();
+        REQUIRE(resizes.requests.size() == 1);
+        REQUIRE(resizes.requests[0].width == 720);
+        REQUIRE(view.frame.size.width == 720);
+        REQUIRE(view.frame.size.height == 540);
+        [view release];
+    }
+    [resizes.container release];
+}
+
+TEST_CASE("an AU v3 contract view takes keys the window routes to it",
+          "[auv3][editor-host][au-v3-contract]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    FakeInstance instance(true);
+    NSWindow* window = make_window();
+    PulpAUv3KeyHost* host = [[PulpAUv3KeyHost alloc] initWithFrame:NSMakeRect(0, 0, 400, 300)];
+    @autoreleasepool {
+        PULP_AUV3_CONTRACT_VIEW_CLASS* view = [open_view(instance) retain];
+        REQUIRE(view != nil);
+        [host addSubview:view];
+        window.contentView = host;
+        // A view that takes keys can be the first responder.
+        REQUIRE([view acceptsFirstResponder]);
+        REQUIRE([window makeFirstResponder:view]);
+        REQUIRE(window.firstResponder == view);
+
+        // Through the window, as AppKit routes a key: a key the editor consumes
+        // stays with the editor, and Space (forwarded) reaches the host.
+        [window sendEvent:[NSEvent keyEventWithType:NSEventTypeKeyDown
+                                                 location:NSZeroPoint
+                                            modifierFlags:0
+                                                timestamp:0
+                                             windowNumber:window.windowNumber
+                                                  context:nil
+                                               characters:@"a"
+                              charactersIgnoringModifiers:@"a"
+                                                isARepeat:NO
+                                                  keyCode:0]];
+        REQUIRE(contract_log().saw("offer:char"));
+        REQUIRE(host.keys == 0);
+        [window sendEvent:[NSEvent keyEventWithType:NSEventTypeKeyDown
+                                                 location:NSZeroPoint
+                                            modifierFlags:0
+                                                timestamp:0
+                                             windowNumber:window.windowNumber
+                                                  context:nil
+                                               characters:@" "
+                              charactersIgnoringModifiers:@" "
+                                                isARepeat:NO
+                                                  keyCode:49]];
+        REQUIRE(contract_log().saw("offer:space"));
+        REQUIRE(host.keys == 1);
+        window.contentView = [[NSView alloc] init];
+        [view release];
+    }
+    [host release];
+    [window release];
 }
 
 TEST_CASE("an accepted AU v3 resize request never leaves the view different from its parent",

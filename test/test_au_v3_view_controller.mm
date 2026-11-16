@@ -163,14 +163,15 @@ TEST_CASE("the AU v3 view controller opens, resizes and closes a contract editor
         REQUIRE(contract_log().saw("set_size:640x480"));
 
         // The editor asks for a size: preferredContentSize and the controller's
-        // view move, and the editor is not echoed its own request.
+        // view move, and the editor takes the size it asked for exactly once.
         const auto calls = contract_log().calls.size();
         REQUIRE(contract_log().context->request_resize({720, 540, 1.0}));
         REQUIRE(controller.preferredContentSize.width == 720);
         REQUIRE(controller.preferredContentSize.height == 540);
         REQUIRE(controller.view.frame.size.width == 720);
         REQUIRE(view.frame.size.width == 720);
-        REQUIRE(contract_log().calls.size() == calls);
+        REQUIRE(contract_log().calls.size() == calls + 1);
+        REQUIRE(contract_log().calls.back() == "set_size:720x540");
 
         contract_log().context->params().begin(kGain);
         REQUIRE([unit pulpStore]->open_gesture_count() == 1);
