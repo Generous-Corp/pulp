@@ -775,6 +775,19 @@ TEST_CASE(
     g_instance = nullptr;
 }
 
+// Forces the host-follows-container answer for one scope and restores host
+// detection in the destructor, so a failing assertion cannot leak it.
+struct ScopedFollowContainer {
+    explicit ScopedFollowContainer(bool follows) {
+        pulp::format::au::set_contract_resize_follows_container_for_testing(follows);
+    }
+    ~ScopedFollowContainer() {
+        pulp::format::au::set_contract_resize_follows_container_for_testing(std::nullopt);
+    }
+    ScopedFollowContainer(const ScopedFollowContainer&) = delete;
+    ScopedFollowContainer& operator=(const ScopedFollowContainer&) = delete;
+};
+
 // A container that resizes itself to match its subview, the way Logic does.
 static bool g_container_shifts_origin = false;
 @interface PulpTestFollowingContainer : NSView
@@ -809,7 +822,7 @@ TEST_CASE("an AU v2 contract editor's resize request checks the host's container
     g_instance = &instance;
     AudioUnit au = fake_audio_unit();
     NSWindow* window = make_window();
-    pulp::format::au::set_contract_resize_follows_container_for_testing(true);
+    ScopedFollowContainer follow(true);
     @autoreleasepool {
         // A container that does not follow: the request is rolled back.
         NSView* still = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 400, 300)];
@@ -893,7 +906,6 @@ TEST_CASE("an AU v2 contract editor's resize request checks the host's container
         [view release];
         [shifting release];
     }
-    pulp::format::au::set_contract_resize_follows_container_for_testing(std::nullopt);
     [window close];
     [window release];
     AudioComponentInstanceDispose(au);
@@ -904,4 +916,39 @@ TEST_CASE("the container-follow test seam is found by the lookup the shipping ch
           "[auv2][editor-host][au-contract][shipping]") {
     CHECK(dlsym(RTLD_DEFAULT, "_ZN4pulp6format2au49set_contract_resize_follows_container_for_"
                               "testingENSt3__18optionalIbEE") != nullptr);
+}
+
+TEST_CASE("an AU v2 editor's own resize request is acknowledged once, then limits apply to the host",
+          "[auv2][editor-host][au-contract][resize-request]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    contract_config().identity_adjust = true;
+    ScopedManualSnapTimer settle;
+    FakeInstance instance(true);
+    g_instance = &instance;
+    AudioUnit au = fake_audio_unit();
+    NSWindow* window = make_window();
+    @autoreleasepool {
+        NSView* view = [open_view(au) retain];
+        REQUIRE(view != nil);
+        [window.contentView addSubview:view];
+        auto* session = pulp::format::au::contract_view_session(view);
+        REQUIRE(session != nullptr);
+        // The editor asks for a size over its own maximum (800x600): it asked,
+        // so it is acknowledged and taken as is.
+        REQUIRE(contract_log().context->request_resize({900, 700, 1.0}));
+        REQUIRE(session->size().width == 900);
+        REQUIRE_FALSE(session->has_pending_resize(900, 700));
+        REQUIRE(view.frame.size.width == 900);
+        // The acknowledgment was used up: the host sending the same size is a
+        // host size again, and the editor's limits apply.
+        [view setFrameSize:NSMakeSize(901, 700)];
+        [view setFrameSize:NSMakeSize(900, 700)];
+        REQUIRE(session->size().width == 800);
+        [view release];
+    }
+    [window close];
+    [window release];
+    AudioComponentInstanceDispose(au);
+    g_instance = nullptr;
 }
