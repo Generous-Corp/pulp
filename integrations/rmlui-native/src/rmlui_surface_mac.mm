@@ -129,6 +129,8 @@ struct RmlUiSurface::Impl {
     std::atomic<bool> has_queued{false};
     std::atomic<std::uint64_t> queued_total{0};
     // False after teardown, on the main thread; a posted drain holds a copy.
+    // The token outlives one attach: a drain posted before a detach may run
+    // after the next attach, where it only applies that attach's own queue.
     struct Liveness {
         bool live = true;
     };
@@ -140,6 +142,8 @@ struct RmlUiSurface::Impl {
 
     // Main thread, rmlui_mutex() held: the context follows the surface size.
     void sync_size_locked() {
+        if (!surface || !context)
+            return;
         const auto g = surface->geometry();
         const double s = g.scale > 0.0 ? g.scale : 1.0;
         const auto w = static_cast<std::uint32_t>(std::lround(g.width * s));
@@ -176,15 +180,25 @@ struct RmlUiSurface::Impl {
     // Render thread.
     void render_frame() {
         @autoreleasepool {
+            // Whatever way this frame ends, input that queued behind it is
+            // handed to the main thread (a no-op when nothing queued).
+            auto post_if_queued = [this] {
+                if (has_queued.load())
+                    post_drain();
+            };
             auto drawable = surface->acquire_drawable();
-            if (!drawable)
+            if (!drawable) {
+                post_if_queued();
                 return;
+            }
             id<MTLCommandBuffer> cb =
                 [(__bridge id<MTLCommandQueue>)surface->command_queue() commandBuffer];
             {
                 std::lock_guard lock(rmlui_mutex());
-                if (!context || !context->is_open())
+                if (!context || !context->is_open()) {
+                    post_if_queued();
                     return;
+                }
                 FrameTarget target{(__bridge void*)cb, drawable.texture(), drawable.width(),
                                    drawable.height(), scale};
                 if (hooks.begin_frame)
@@ -194,13 +208,12 @@ struct RmlUiSurface::Impl {
                 if (hooks.end_frame)
                     hooks.end_frame();
             }
+            // The lock is free: let the main thread apply what queued behind
+            // this frame, before the (slower) present and commit.
+            post_if_queued();
             drawable.present((__bridge void*)cb);
             [cb commit];
             frames.fetch_add(1);
-            // The lock is free: let the main thread apply what queued behind
-            // this frame.
-            if (has_queued.load())
-                post_drain();
         }
     }
 

@@ -503,7 +503,7 @@ TEST_CASE("the surface uses the device the caller's renderer was built on",
 }
 
 TEST_CASE("pointer input does not wait for a frame the render thread is drawing",
-          "[native-surface][rmlui][threading]") {
+          "[native-surface][rmlui][threading][performance]") {
     REQUIRE_METAL();
     @autoreleasepool {
         Editor e;
@@ -754,5 +754,30 @@ TEST_CASE("a size change idle() could not apply is applied by the next with_cont
         REQUIRE(size.x == static_cast<int>(420 * scale));
         REQUIRE(size.y == static_cast<int>(280 * scale));
         e.ui->detach();
+    }
+}
+
+TEST_CASE("flush_input on a surface that is not attached does nothing",
+          "[native-surface][rmlui][threading]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        MemoryAssets assets;
+        CountingRenderer renderer;
+        RmlUiSurfaceOptions options;
+        options.document = "probe.rml";
+        options.font_faces = {"font.ttf"};
+        RmlUiSurface fresh(assets, renderer, {}, options);
+        fresh.flush_input();
+        fresh.idle();
+        REQUIRE(fresh.frames() == 0);
+
+        Editor e;
+        REQUIRE(e.attach());
+        REQUIRE(e.wait_for([&] { return e.ui->frames() > 0; }));
+        e.ui->detach();
+        const auto frames = e.ui->frames();
+        e.ui->flush_input();
+        e.ui->with_context([](Rml::Context&) {});
+        REQUIRE(e.ui->frames() == frames);
     }
 }
