@@ -320,12 +320,20 @@ jobs:
           # lane exists. gate-inventory tests compare manifests generated from
           # the gate configure against this build's inventory, which a
           # sanitizer configure differs from by design.
+          # Installed-SDK consumers (labels sdk / installed-sdk) each stage a
+          # full Debug+ASan install prefix inside build-asan. Dozens of them
+          # exhausted the hosted runner's disk after the build tree had taken
+          # most of it, so this lane leaves them to the UBSan lane, which
+          # builds the same consumers with the producer's instrumentation.
+          # graph-paced-timing-matrix-selftest asserts zero deadline misses on
+          # a wall-clock paced render; instrumentation overhead and the -j
+          # fan-out produce misses in its negative control.
           ctest --test-dir build-asan --output-on-failure \
             --repeat until-pass:2 \
             -j$(sysctl -n hw.ncpu) \
             --timeout 120 \
-            --label-exclude 'validation|slow|performance|bench|quality-lab|gate-inventory' \
-            --exclude-regex 'hover -> click -> drag record/replay produces matching motion fixture|cmake-ios-auv3-configure|cmake-ios-hostapp-links|fdn reverb stays bounded and decaying for every parameter vector|WebSocketChannel echoes a >126-byte message'
+            --label-exclude 'validation|slow|performance|bench|quality-lab|gate-inventory|^sdk$|^installed-sdk$' \
+            --exclude-regex 'graph-paced-timing-matrix-selftest|hover -> click -> drag record/replay produces matching motion fixture|cmake-ios-auv3-configure|cmake-ios-hostapp-links|fdn reverb stays bounded and decaying for every parameter vector|WebSocketChannel echoes a >126-byte message'
 
   tsan:
     needs: resolve-runners
@@ -506,12 +514,15 @@ jobs:
           # lane exists. gate-inventory tests compare manifests generated from
           # the gate configure against this build's inventory, which a
           # sanitizer configure differs from by design.
+          # graph-paced-timing-matrix-selftest asserts zero deadline misses on
+          # a wall-clock paced render; instrumentation overhead and the -j
+          # fan-out produce misses in its negative control.
           ctest --test-dir build-ubsan --output-on-failure \
             --repeat until-pass:2 \
             -j$(sysctl -n hw.ncpu) \
             --timeout 120 \
             --label-exclude 'validation|slow|performance|bench|quality-lab|gate-inventory' \
-            --exclude-regex 'Toolbar add items|deflate empty payload round-trips through raw helpers|IPC named pipe observes abrupt peer death|cmake-ios-auv3-configure|cmake-ios-hostapp-links|MountedVolumeListChangeDetector stop wakes a long poll promptly|ConnectedChildProcess'
+            --exclude-regex 'graph-paced-timing-matrix-selftest|Toolbar add items|deflate empty payload round-trips through raw helpers|IPC named pipe observes abrupt peer death|cmake-ios-auv3-configure|cmake-ios-hostapp-links|MountedVolumeListChangeDetector stop wakes a long poll promptly|ConnectedChildProcess'
 
   rtsan:
     needs: resolve-runners

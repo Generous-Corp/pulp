@@ -180,6 +180,11 @@ Routing is driven entirely by CTest `LABELS`, set in each test's
   that is not drift. `sanitizer-gate-inventory-contract` fails if a test
   registered as `--build-dir ${CMAKE_BINARY_DIR}` with a bare `--check` lacks the
   label, or if a sanitizer ctest run stops excluding it.
+- **`sdk` / `installed-sdk`** — a consumer that stages a full install prefix
+  of the producer build. They run on the required gate and in the UBSan lane;
+  the ASan lane excludes them because the instrumented prefixes exhaust a hosted
+  runner's disk. `graph-paced-timing-matrix-selftest` counts wall-clock deadline
+  misses, so both instrumented lanes exclude it by name; the normal lanes run it.
 - **no special label** — a normal unit/integration test. Runs on the **required
   gate**. This is where the vast majority of tests belong.
 
