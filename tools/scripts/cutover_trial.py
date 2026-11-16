@@ -13,7 +13,11 @@ when its inputs cannot be read.
 The scratch checkout is a detached git worktree created by this script. It
 must be new and must not be the caller's checkout. The build runs through
 tools/ci/governed-build.sh with Ninja's keep-going flag, so one broken target
-does not hide the rest.
+does not hide the rest. Repair writes must resolve inside that scratch tree.
+Relative file includes are resolved from their CMake source directory. Bare
+module names depend on CMake's effective scoped module search path; without
+that evidence they remain unresolved. Ambiguous statements are also left
+untouched, never guessed to be expected cutover deletions.
 """
 from __future__ import annotations
 
@@ -156,58 +160,130 @@ def parse_configure_errors(text: str) -> list[dict]:
         stack = CALL_STACK.search(body)
         message = " ".join(line.strip() for line in body.split("Call Stack")[0].splitlines()
                            if line.strip())
+        source_frames = re.findall(r"^\s+(\S*CMakeLists\.txt):\d+ \(\w+\)",
+                                   body.split("Call Stack", 1)[-1], re.M)
         errors.append({"file": head.group(1), "line": int(head.group(2)), "command": head.group(3),
                        "message": message[:300],
-                       "caller": (stack.group(1), int(stack.group(2))) if stack else None})
+                       "caller": (stack.group(1), int(stack.group(2))) if stack else None,
+                       "source_file": source_frames[-1] if source_frames else None})
     return errors
 
 
-def statement_span(lines: list[str], start: int) -> tuple[int, int]:
-    """Line range [start, end] of the CMake statement beginning at `start`."""
-    depth = 0
-    for index in range(start, len(lines)):
-        code = lines[index].split("#", 1)[0]
-        depth += code.count("(") - code.count(")")
-        if depth <= 0 and (index > start or "(" in code):
-            return start, index
-    return start, len(lines) - 1
+def statement_span(lines: list[str], start: int) -> tuple[int, int] | None:
+    """Find a whole call without interpreting delimiters inside CMake arguments.
+
+    Refuse incomplete syntax or a second command on the closing line: a
+    line-based edit must never consume an adjacent statement.
+    """
+    if not 0 <= start < len(lines):
+        return None
+    text = "\n".join(lines[start:])
+    head = re.match(r"\s*[A-Za-z_][A-Za-z_0-9]*[ \t]*\(", lines[start])
+    if not head:
+        return None
+    pos, depth, quoted = head.end(), 1, False
+    argument_boundary = True
+    while pos < len(text):
+        char = text[pos]
+        if char == "\\":
+            argument_boundary = False
+            pos += 2
+            continue
+        if char == '"':
+            argument_boundary = False
+            quoted = not quoted
+            pos += 1
+            continue
+        if quoted:
+            pos += 1
+            continue
+        bracket = re.match(r"#?\[(=*)\[", text[pos:])
+        if bracket:
+            if char == "[" and not argument_boundary:
+                return None  # Embedded brackets belong to an unquoted argument.
+            close = "]" + bracket.group(1) + "]"
+            end = text.find(close, pos + bracket.end())
+            if end < 0:
+                return None
+            argument_boundary = char == "#"
+            pos = end + len(close)
+            continue
+        if char == "#":
+            end = text.find("\n", pos)
+            if end < 0:
+                return None
+            argument_boundary = True
+            pos = end + 1
+            continue
+        argument_boundary = char.isspace() or char == "("
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                tail = text[pos + 1:].split("\n", 1)[0].strip()
+                # A trailing bracket comment can span further lines; leave it
+                # untouched rather than commenting out only its opening line.
+                if tail and (not tail.startswith("#") or re.match(r"#\[=*\[", tail)):
+                    return None
+                return start, start + text[:pos].count("\n")
+        pos += 1
+    return None
+
+
+def scratch_path(scratch: Path, path: str | Path) -> Path | None:
+    """Resolve before checking containment, including existing symlink parents."""
+    try:
+        root = scratch.resolve()
+        resolved = (root / path).resolve()
+        resolved.relative_to(root)
+    except (ValueError, OSError, RuntimeError):
+        return None
+    return resolved
 
 
 def disable_statement(scratch: Path, rel: str, line: int, why: str) -> dict | None:
-    path = scratch / rel
-    if not path.is_file():
+    path = scratch_path(scratch, rel)
+    if path is None or not path.is_file():
         return None
     lines = path.read_text(encoding="utf-8").split("\n")
-    start, end = statement_span(lines, line - 1)
-    if lines[start].lstrip().startswith(CUTOVER_MARK.strip()):
+    span = statement_span(lines, line - 1)
+    if span is None:
         return None
+    start, end = span
     first = lines[start].strip()
     for index in range(start, end + 1):
         lines[index] = CUTOVER_MARK + lines[index]
     path.write_text("\n".join(lines), encoding="utf-8")
-    return {"file": rel, "line": line, "statement": first[:160], "why": why}
+    return {"file": path.relative_to(scratch.resolve()).as_posix(), "line": line,
+            "statement": first[:160], "why": why}
 
 
 INCLUDE_MISSING = re.compile(r"include could not find requested file:\s*(\S+)")
 
 
-def restore_deleted_module(scratch: Path, message: str, deleted: set[str]) -> dict | None:
+def restore_deleted_module(scratch: Path, message: str, deleted: set[str],
+                           source_dir: Path) -> dict | None:
     """When kept code includes a deleted CMake module, put that module back from
     the original tree so the trial can go on, and report it as a stranded
     dependency instead of dropping the targets that use it."""
     found = INCLUDE_MISSING.search(message)
     if not found:
         return None
-    try:
-        rel = Path(found.group(1)).resolve().relative_to(scratch.resolve()).as_posix()
-    except ValueError:
+    name = Path(found.group(1))
+    # A bare name searches the effective CMAKE_MODULE_PATH, which can change
+    # in project/function scope. Never infer that scope from cache or basenames.
+    if not name.is_absolute() and not name.suffix:
         return None
+    target = scratch_path(scratch, source_dir / name)
+    if target is None or target.exists():
+        return None
+    rel = target.relative_to(scratch.resolve()).as_posix()
     if rel not in deleted or not rel.endswith(".cmake"):
         return None
     shown = run(["git", "-C", str(scratch), "show", f"HEAD:{rel}"])
     if shown.returncode:
         return None
-    target = scratch / rel
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(shown.stdout, encoding="utf-8")
     return {"restored": rel}
@@ -236,17 +312,29 @@ def repair_configure(scratch: Path, configure, limit: int = 300,
             if target in seen:
                 continue
             seen.add(target)
-            restored = restore_deleted_module(scratch, error["message"], deleted or set())
+            # Functions execute in their caller's source directory, even when
+            # defined in a different CMakeLists.txt.
+            source_file = error["source_file"] or (
+                error["file"] if error["file"].endswith("CMakeLists.txt") else None)
+            source_path = scratch_path(scratch, source_file) if source_file else None
+            source_dir = source_path.parent if source_path is not None else None
+            restored = (restore_deleted_module(scratch, error["message"], deleted or set(),
+                                               source_dir)
+                        if source_dir is not None else None)
             if restored:
                 restored.update({"class": "b-stranded-restored", "consumer": f"{target[0]}:{target[1]}",
                                  "why": error["message"], "iteration": iteration})
                 edits.append(restored)
                 progress = True
                 continue
+            missing_include = INCLUDE_MISSING.search(error["message"])
+            if missing_include and not Path(missing_include.group(1)).suffix:
+                continue  # Effective module search scope is unknown; retain the error.
             edit = disable_statement(scratch, target[0], target[1], error["message"])
             if edit:
                 edit["iteration"] = iteration
-                edit["class"] = classify_edit(error["message"], deleted or set())
+                edit["class"] = classify_edit(error["message"], deleted or set(),
+                                              scratch, source_dir)
                 edits.append(edit)
                 progress = True
         if not progress:
@@ -260,7 +348,8 @@ CASCADE = re.compile(r"(No SOURCES given|Cannot specify .* not built by this pro
                      r"Can not find (target|test) to add|cannot create ALIAS)")
 
 
-def classify_edit(message: str, deleted: set[str]) -> str:
+def classify_edit(message: str, deleted: set[str], scratch: Path | None = None,
+                  source_dir: Path | None = None) -> str:
     """a-expected: the statement names a deleted path, so a cutover removes it too.
     b-stranded-consumer: a kept target links a target the deletion removed.
     cascade: a follow-on error from an earlier edit (a target that no longer exists).
@@ -269,9 +358,15 @@ def classify_edit(message: str, deleted: set[str]) -> str:
         return "b-stranded-consumer"
     if CASCADE.search(message):
         return "cascade"
-    if "Cannot find source file" in message or "matches nothing in the checkout" in message \
-            or "does not contain a CMakeLists" in message:
-        return "a-expected"
+    source = re.search(r'Cannot find source file:\s*(?:"([^"]+)"|(\S+))', message)
+    directory = re.search(r'The source directory "([^"]+)" does not contain a CMakeLists', message)
+    missing = ((source.group(1) or source.group(2)) if source else
+               str(Path(directory.group(1)) / "CMakeLists.txt") if directory else None)
+    # Unknown/glob diagnostics do not establish which actual deletion caused it.
+    if missing and scratch is not None and source_dir is not None:
+        resolved = scratch_path(scratch, source_dir / missing)
+        if resolved is not None and resolved.relative_to(scratch.resolve()).as_posix() in deleted:
+            return "a-expected"
     return "unclassified"
 
 
@@ -393,6 +488,9 @@ def delete_paths(scratch: Path, paths: list[str]) -> tuple[int, list[str]]:
     deleted, missing = 0, []
     for rel in paths:
         target = scratch / rel
+        # Unlinking a symlink itself is safe; traversing a symlinked parent is not.
+        if scratch_path(scratch, target.parent) is None:
+            raise InputError(f"deletion path escapes scratch: {rel}")
         if target.is_file() or target.is_symlink():
             target.unlink()
             deleted += 1
@@ -440,10 +538,13 @@ def main(argv: list[str] | None = None) -> int:
                             "-DPULP_BUILD_EXAMPLES=OFF"])
                 return done.returncode == 0, done.stdout + done.stderr
 
-            edits, configure_text, configure_ok = (
-                repair_configure(args.scratch, configure_once,
-                                 deleted=set(inputs["delete_paths"])) if not args.no_repair
-                else ([], *configure_once()))
+            if args.no_repair:
+                configure_ok, configure_text = configure_once()
+                edits = []
+            else:
+                edits, configure_text, configure_ok = repair_configure(
+                    args.scratch, configure_once,
+                    deleted=set(inputs["delete_paths"]) - set(missing))
             data_refs = deleted_data_still_referenced(args.scratch, inputs["delete_paths"])
             (log_dir / "cutover-configure.log").write_text(configure_text, encoding="utf-8")
             build_text, ran, build_returncode = "", False, None

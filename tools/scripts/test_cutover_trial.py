@@ -1,6 +1,8 @@
 import json
 import tempfile
 import unittest
+from unittest import mock
+import subprocess
 from pathlib import Path
 
 import cutover_trial as ct
@@ -109,7 +111,7 @@ class EditClassTests(unittest.TestCase):
                          "b-stranded-consumer")
         self.assertEqual(c('Cannot specify sources for target "pulp-render" which is not built by this project.', set()),
                          "cascade")
-        self.assertEqual(c("Cannot find source file: src/data_display.cpp", set()), "a-expected")
+        self.assertEqual(c("Cannot find source file: src/data_display.cpp", set()), "unclassified")
         self.assertEqual(c("something unforeseen", set()), "unclassified")
 
     def test_disable_statement_comments_the_whole_call_and_is_idempotent(self):
@@ -122,6 +124,217 @@ class EditClassTests(unittest.TestCase):
             self.assertIn("b()", text)
             self.assertEqual(edit["line"], 2)
             self.assertIsNone(ct.disable_statement(root, "CMakeLists.txt", 2, "why"))
+
+
+
+class RepairRegressionTests(unittest.TestCase):
+    def test_external_and_symlink_diagnostics_cannot_write_outside_scratch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp)
+            root = parent / "scratch"
+            root.mkdir()
+            external = parent / "installed.cmake"
+            original = 'include("missing.cmake")\n'
+            external.write_text(original)
+            (root / "linked.cmake").symlink_to(external)
+            for diagnostic in (str(external), "../installed.cmake", "linked.cmake"):
+                with self.subTest(diagnostic=diagnostic):
+                    self.assertIsNone(ct.disable_statement(root, diagnostic, 1, "missing"))
+                    self.assertEqual(external.read_text(), original)
+            local = root / "local.cmake"
+            local.write_text(original)
+            self.assertIsNotNone(ct.disable_statement(root, str(local), 1, "missing"))
+            self.assertTrue(local.read_text().startswith(ct.CUTOVER_MARK))
+
+    def test_statement_lexing_preserves_adjacent_calls(self):
+        statements = ['include("missing#module.cmake")',
+                      'include("missing(module.cmake")',
+                      'include("missing)module.cmake")',
+                      r'include(missing\(module.cmake)',
+                      'include([=[missing#(module.cmake]=])',
+                      'include(#[=[ comment ) #\n still a comment ]=]\n "missing.cmake")',
+                      r'include("missing\"#(module.cmake")']
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "CMakeLists.txt"
+            for statement in statements:
+                with self.subTest(statement=statement):
+                    path.write_text(statement + '\nmessage(STATUS "survives")\n')
+                    self.assertIsNotNone(ct.disable_statement(root, "CMakeLists.txt", 1, "missing"))
+                    self.assertEqual(path.read_text().splitlines()[-1], 'message(STATUS "survives")')
+                    self.assertEqual(path.read_text().count(ct.CUTOVER_MARK), len(statement.splitlines()))
+                    result = ct.run(["cmake", "-P", str(path)])
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn("survives", result.stdout)
+
+    def test_ambiguous_or_invalid_span_is_not_edited(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "CMakeLists.txt"
+            for original, line in [('include("unterminated)\nmessage(ok)\n', 1),
+                                   ('include(x) message(ok)\n', 1),
+                                   ('include(missing[[.cmake)\nset(untouched x]])\n', 1),
+                                   ('include(missing\\ [[.cmake)\nset(untouched x]])\n', 1),
+                                   ('include(missing\\([[.cmake)\nset(untouched x]])\n', 1),
+                                   ('include(x)\n', 0), ('include(x)\n', 99)]:
+                with self.subTest(original=original, line=line):
+                    path.write_text(original)
+                    self.assertIsNone(ct.disable_statement(root, "CMakeLists.txt", line, "missing"))
+                    self.assertEqual(path.read_text(), original)
+
+    def test_relative_deleted_module_is_restored_for_its_cmake_caller(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            module = root / "sub/tools/cmake/Removed.cmake"
+            module.parent.mkdir(parents=True)
+            module.write_text('set(RESTORED yes)\n')
+            (root / "CMakeLists.txt").write_text('cmake_minimum_required(VERSION 3.20)\nproject(fixture NONE)\nadd_subdirectory(sub)\n')
+            (root / "sub/CMakeLists.txt").write_text('include(tools/cmake/Removed.cmake)\nif(NOT RESTORED)\nmessage(FATAL_ERROR "module not restored")\nendif()\n')
+            for args in (["init", "-q"], ["add", "."],
+                         ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"]):
+                done = ct.run(["git", "-C", str(root), *args])
+                self.assertEqual(done.returncode, 0, done.stderr)
+            module.unlink()
+            def configure():
+                done = ct.run(["cmake", "-S", str(root), "-B", str(root / "build")])
+                return done.returncode == 0, done.stdout + done.stderr
+            edits, log, ok = ct.repair_configure(root, configure, deleted={"sub/tools/cmake/Removed.cmake"})
+            self.assertTrue(ok, log)
+            self.assertEqual([e.get("restored") for e in edits], ["sub/tools/cmake/Removed.cmake"])
+            self.assertEqual(module.read_text(), 'set(RESTORED yes)\n')
+
+    def test_classification_requires_actual_deleted_path_in_source_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "sub").mkdir()
+            messages = [('Cannot find source file: src/removed.cpp', 'sub/src/removed.cpp'),
+                        (f'The source directory "{root}/sub/gone" does not contain a CMakeLists.txt file.', 'sub/gone/CMakeLists.txt')]
+            for message, deleted_path in messages:
+                for deleted, expected in [({deleted_path}, "a-expected"), (set(), "unclassified"),
+                                          ({"other/" + deleted_path}, "unclassified")]:
+                    with self.subTest(message=message, deleted=deleted):
+                        cmake = root / "sub/CMakeLists.txt"
+                        cmake.write_text('add_library(gone src/removed.cpp)\n')
+                        configure = mock.Mock(side_effect=[(False, f'CMake Error at sub/CMakeLists.txt:1 (add_library):\n  {message}\n'), (True, '')])
+                        edits, _, ok = ct.repair_configure(root, configure, deleted=deleted)
+                        self.assertTrue(ok)
+                        self.assertEqual(edits[0]["class"], expected)
+
+    def test_nested_include_uses_cmake_source_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "sub").mkdir()
+            (root / "cmake").mkdir()
+            (root / "cmake/helper.cmake").write_text('include(src/Removed.cmake)\n')
+            (root / "sub/src").mkdir()
+            module = root / "sub/src/Removed.cmake"
+            module.write_text("set(RESTORED yes)\n")
+            (root / "CMakeLists.txt").write_text('cmake_minimum_required(VERSION 3.20)\nproject(fixture NONE)\nadd_subdirectory(sub)\n')
+            (root / "sub/CMakeLists.txt").write_text('include(../cmake/helper.cmake)\n')
+            for args in (["init", "-q"], ["add", "."],
+                         ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"]):
+                done = ct.run(["git", "-C", str(root), *args])
+                self.assertEqual(done.returncode, 0, done.stderr)
+            module.unlink()
+            def configure():
+                done = ct.run(["cmake", "-S", str(root), "-B", str(root / "build")])
+                return done.returncode == 0, done.stdout + done.stderr
+            edits, log, ok = ct.repair_configure(root, configure, deleted={"sub/src/Removed.cmake"})
+            self.assertTrue(ok, log)
+            self.assertEqual(edits[0]["restored"], "sub/src/Removed.cmake")
+
+    def test_function_uses_callers_source_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "sub/src").mkdir(parents=True)
+            module = root / "sub/src/Removed.cmake"
+            module.write_text("set(RESTORED yes)\n")
+            (root / "CMakeLists.txt").write_text('cmake_minimum_required(VERSION 3.20)\nproject(fixture NONE)\nfunction(load_module)\ninclude(src/Removed.cmake)\nendfunction()\nadd_subdirectory(sub)\n')
+            (root / "sub/CMakeLists.txt").write_text('load_module()\n')
+            for args in (["init", "-q"], ["add", "."],
+                         ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"]):
+                done = ct.run(["git", "-C", str(root), *args])
+                self.assertEqual(done.returncode, 0, done.stderr)
+            module.unlink()
+            def configure():
+                done = ct.run(["cmake", "-S", str(root), "-B", str(root / "build")])
+                return done.returncode == 0, done.stdout + done.stderr
+            edits, log, ok = ct.repair_configure(root, configure, deleted={"sub/src/Removed.cmake"})
+            self.assertTrue(ok, log)
+            self.assertEqual(edits[0]["restored"], "sub/src/Removed.cmake")
+
+    def test_nested_functions_use_outer_callers_source_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "sub/src").mkdir(parents=True)
+            module = root / "sub/src/Removed.cmake"
+            module.write_text("set(RESTORED yes)\n")
+            (root / "CMakeLists.txt").write_text('cmake_minimum_required(VERSION 3.20)\nproject(fixture NONE)\nfunction(load_inner)\ninclude(src/Removed.cmake)\nendfunction()\nfunction(load_module)\nload_inner()\nendfunction()\nadd_subdirectory(sub)\n')
+            (root / "sub/CMakeLists.txt").write_text('load_module()\n')
+            for args in (["init", "-q"], ["add", "."],
+                         ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"]):
+                done = ct.run(["git", "-C", str(root), *args])
+                self.assertEqual(done.returncode, 0, done.stderr)
+            module.unlink()
+            def configure():
+                done = ct.run(["cmake", "-S", str(root), "-B", str(root / "build")])
+                return done.returncode == 0, done.stdout + done.stderr
+            edits, log, ok = ct.repair_configure(root, configure, deleted={"sub/src/Removed.cmake"})
+            self.assertTrue(ok, log)
+            self.assertEqual(edits[0]["restored"], "sub/src/Removed.cmake")
+
+    def test_unknown_module_search_path_is_unresolved_and_symlinks_are_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "scratch"
+            root.mkdir()
+            module = root / "modules/Removed.cmake"
+            module.parent.mkdir()
+            module.write_text('set(RESTORED yes)\n')
+            (root / "CMakeLists.txt").write_text('cmake_minimum_required(VERSION 3.20)\nproject(fixture NONE)\ninclude(Removed)\n')
+            for args in (["init", "-q"], ["add", "."],
+                         ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"]):
+                done = ct.run(["git", "-C", str(root), *args])
+                self.assertEqual(done.returncode, 0, done.stderr)
+            module.unlink()
+            def configure():
+                done = ct.run(["cmake", "-S", str(root), "-B", str(root / "build"),
+                               "-DCMAKE_MODULE_PATH=" + str(module.parent)])
+                return done.returncode == 0, done.stdout + done.stderr
+            edits, log, ok = ct.repair_configure(root, configure, deleted={"modules/Removed.cmake"})
+            self.assertFalse(ok, log)
+            self.assertEqual(edits, [])
+            self.assertFalse(module.exists())
+            self.assertIn("include(Removed)", (root / "CMakeLists.txt").read_text())
+            module.parent.rmdir()
+            external = Path(tmp) / "external"
+            external.mkdir()
+            (root / "modules").symlink_to(external, target_is_directory=True)
+            self.assertIsNone(ct.restore_deleted_module(root, 'include could not find requested file: modules/Removed.cmake',
+                                                       {"modules/Removed.cmake"}, root))
+            self.assertEqual(list(external.iterdir()), [])
+            outside = external / "Removed.cmake"
+            outside.write_text("preserve me")
+            with self.assertRaises(ct.InputError):
+                ct.delete_paths(root, ["modules/Removed.cmake"])
+            self.assertEqual(outside.read_text(), "preserve me")
+
+    def test_no_repair_reports_configure_success_and_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for ok in (True, False):
+                with self.subTest(ok=ok):
+                    report = root / "report.json"
+                    done = subprocess.CompletedProcess([], 0 if ok else 1, 'configure output', '')
+                    built = subprocess.CompletedProcess([], 0, 'build output', '')
+                    with mock.patch.object(ct, "make_scratch"), mock.patch.object(ct, "delete_paths", return_value=(0, [])), \
+                         mock.patch.object(ct, "deleted_data_still_referenced", return_value=[]), \
+                         mock.patch.object(ct, "run", side_effect=[done, built] if ok else [done]), \
+                         mock.patch.object(ct, "repair_configure", side_effect=AssertionError("repair must not run")):
+                        self.assertEqual(ct.main(["--scratch", str(root / "source"), "--report", str(report), "--no-repair"]), 0)
+                    data = json.loads(report.read_text())
+                    self.assertEqual(data["configure"]["ok"], ok)
+                    self.assertEqual(data["build"]["ran"], ok)
+                    self.assertEqual((root / "cutover-configure.log").read_text(), 'configure output')
 
 
 class InputTests(unittest.TestCase):
