@@ -15,6 +15,33 @@
 
 namespace pulp::format {
 
+namespace {
+
+ContractEditorSession::SnapTimerFactory& snap_timer_factory() {
+    static ContractEditorSession::SnapTimerFactory factory;
+    return factory;
+}
+
+// The default snap timer: a main-thread timer that fires once.
+class MainThreadSnapTimer final : public ContractEditorSession::SnapTimer {
+  public:
+    void start(int delay_ms, std::function<void()> fire) override {
+        timer_.start(delay_ms, std::move(fire));
+    }
+    void stop() override {
+        timer_.stop();
+    }
+
+  private:
+    detail::MainThreadTimer timer_;
+};
+
+} // namespace
+
+void ContractEditorSession::set_snap_timer_factory_for_testing(SnapTimerFactory factory) {
+    snap_timer_factory() = std::move(factory);
+}
+
 class ContractEditorSession::Context final : public EditorContext {
   public:
     Context(ParamPort& port, EditorHostKind kind, HostHooks hooks)
@@ -148,7 +175,9 @@ ContractEditorSession::create(Processor& processor, state::StateStore& store,
 ContractEditorSession::ContractEditorSession(Processor& processor, state::StateStore& store,
                                              HostHooks hooks, IdleSource idle)
     : idle_source_(idle), store_(store), port_(std::make_unique<StateStoreParamPort>(store)),
-      context_(std::make_unique<Context>(*port_, processor.editor_host_kind(), std::move(hooks))) {}
+      context_(std::make_unique<Context>(*port_, processor.editor_host_kind(), std::move(hooks))),
+      snap_timer_(snap_timer_factory() ? snap_timer_factory()()
+                                       : std::make_unique<MainThreadSnapTimer>()) {}
 
 ContractEditorSession::~ContractEditorSession() {
     stop_idle();
@@ -359,8 +388,8 @@ void ContractEditorSession::schedule_snap_request(std::uint32_t width, std::uint
     snap_height_ = height;
     // Restarting the timer on every snapped size is the debounce: the request
     // goes out only after the host has been quiet for kSnapSettleMs.
-    snap_timer_.start(kSnapSettleMs, [this] {
-        snap_timer_.stop();
+    snap_timer_->start(kSnapSettleMs, [this] {
+        snap_timer_->stop();
         if (!context_ || !editor_ || !attached_ || owner_gone_.load())
             return;
         EditorSize size = editor_->size();
@@ -371,7 +400,8 @@ void ContractEditorSession::schedule_snap_request(std::uint32_t width, std::uint
 }
 
 void ContractEditorSession::cancel_snap_request() {
-    snap_timer_.stop();
+    if (snap_timer_)
+        snap_timer_->stop();
 }
 
 KeyDisposition ContractEditorSession::offer_key(const EditorKeyEvent& event) {

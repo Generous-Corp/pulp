@@ -34,6 +34,7 @@ using pulp::test_support::contract_config;
 using pulp::test_support::contract_log;
 using pulp::test_support::EditorEnvironment;
 using pulp::test_support::MainLoop;
+using pulp::test_support::ScopedManualSnapTimer;
 using pulp::test_support::RecordingContractFactory;
 using pulp::test_support::reset_contract_recording;
 
@@ -190,6 +191,7 @@ TEST_CASE("AU v2 opens, sizes and closes a contract editor, twice",
           "[auv2][editor-host][au-contract]") {
     EditorEnvironment env;
     reset_contract_recording();
+    ScopedManualSnapTimer settle;
     FakeInstance instance(true);
     g_instance = &instance;
     AudioUnit au = fake_audio_unit();
@@ -226,7 +228,8 @@ TEST_CASE("AU v2 opens, sizes and closes a contract editor, twice",
         // The editor takes the size inside its bounds at once; the frame is
         // brought there once the host's sizes settle.
         REQUIRE(contract_log().saw("set_size:200x150"));
-        REQUIRE(MainLoop().run_until([&] { return view.frame.size.width == 200; }));
+        settle.fire();
+        REQUIRE(view.frame.size.width == 200);
         REQUIRE(view.frame.size.height == 150);
         REQUIRE(contract_log().calls.size() > calls);
         [view setFrameSize:NSMakeSize(640, 480)];
@@ -279,44 +282,40 @@ TEST_CASE("AU v2 opens, sizes and closes a contract editor, twice",
     g_instance = nullptr;
 }
 
-TEST_CASE(
-    "an AU v2 contract view snaps a host resize to the editor's declared hints once it settles",
-    "[auv2][editor-host][au-contract][resize-hints]") {
+TEST_CASE("an AU v2 contract view snaps a host resize to the editor's declared hints once it settles",
+          "[auv2][editor-host][au-contract][resize-hints]") {
     EditorEnvironment env;
     reset_contract_recording();
     contract_config() = {};
+    ScopedManualSnapTimer settle;
     FakeInstance instance(true);
     g_instance = &instance;
     AudioUnit au = fake_audio_unit();
     NSWindow* window = make_window();
-    MainLoop loop;
     @autoreleasepool {
         contract_config().identity_adjust = true; // the view alone enforces the hints
         NSView* view = [open_view(au) retain];
         REQUIRE(view != nil);
         [window.contentView addSubview:view];
 
-        // The frame is the host's until it stops resizing.
+        // The editor takes the constrained size at once; the frame is the
+        // host's until the sizes settle.
         [view setFrameSize:NSMakeSize(1000, 1000)];
         REQUIRE(view.frame.size.width == 1000);
         REQUIRE(contract_log().saw("set_size:800x600"));
-        REQUIRE(loop.run_until([&] { return view.frame.size.width == 800; }));
+        REQUIRE(settle.armed());
+        settle.fire();
+        REQUIRE(view.frame.size.width == 800);
         REQUIRE(view.frame.size.height == 600);
-        [view setFrameSize:NSMakeSize(640, 300)];
-        REQUIRE(loop.run_until([&] { return view.frame.size.width == 400; }));
-        REQUIRE(view.frame.size.height == 300);
 
-        // A burst of sizes is answered once, after the last.
-        bool stalled = false;
-        for (int i = 0; i < 5; ++i) {
-            const auto before = std::chrono::steady_clock::now();
-            loop.run_for(0.02);
-            stalled |= std::chrono::steady_clock::now() - before > std::chrono::milliseconds(100);
+        // A burst of sizes moves the frame once, after the last.
+        const int starts = settle.starts();
+        for (int i = 0; i < 30; ++i)
             [view setFrameSize:NSMakeSize(900 + i, 500)];
-        }
-        if (!stalled)
-            REQUIRE(view.frame.size.width == 904);
-        REQUIRE(loop.run_until([&] { return view.frame.size.width == 667; }));
+        REQUIRE(settle.starts() >= starts + 30);
+        REQUIRE(view.frame.size.width == 929);
+        settle.fire();
+        REQUIRE(view.frame.size.width == 667);
         REQUIRE(view.frame.size.height == 500);
         [view release];
     }
@@ -327,13 +326,15 @@ TEST_CASE(
         NSView* view = [open_view(au) retain];
         REQUIRE(view != nil);
         [window.contentView addSubview:view];
-        // A fixed-size editor takes no host size: the frame goes back to its
-        // size and the editor is told nothing.
+        // A fixed-size editor takes no host size: it is told nothing and the
+        // frame returns to its size.
         const auto calls = contract_log().calls.size();
         [view setFrameSize:NSMakeSize(900, 700)];
-        REQUIRE(loop.run_until([&] { return view.frame.size.width == 400; }));
-        REQUIRE(view.frame.size.height == 300);
+        REQUIRE(view.frame.size.width == 900);
         REQUIRE(contract_log().calls.size() == calls);
+        settle.fire();
+        REQUIRE(view.frame.size.width == 400);
+        REQUIRE(view.frame.size.height == 300);
         [view release];
     }
     contract_config() = {};

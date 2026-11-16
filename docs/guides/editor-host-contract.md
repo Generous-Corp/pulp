@@ -159,15 +159,16 @@ A host can also set a size without asking first (VST3 `onSize` without
 `checkSizeConstraint`, CLAP `set_size` without `adjust_size`). The editor then
 gets the constrained size, and the adapter asks the host for that size back
 (`IPlugFrame::resizeView`, `clap_host_gui::request_resize`) so the window does
-not keep a margin the editor never paints; a fixed-size editor keeps the size
-the host gave it. The macOS standalone window holds a live drag to the same
+not keep a margin the editor never paints. A fixed-size editor takes no host
+size in any format: it is told nothing, and the host is asked for the editor's
+own size. The macOS standalone window holds a live drag to the same
 limits and aspect, and opens inside the screen's usable frame
 (`detail::fit_size_to_area`).
 
 AU v2 has no size negotiation, so a host that resizes the container by hand is
 snapped by the container itself: a resizable editor's frame is moved inside its
-limits and aspect before `set_size()`. A fixed-size editor keeps the host's
-frame.
+limits and aspect before `set_size()`. A fixed-size editor's frame returns to
+the editor's size and the editor is told nothing.
 
 ## Keys
 

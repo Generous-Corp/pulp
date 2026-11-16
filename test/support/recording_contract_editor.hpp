@@ -12,6 +12,7 @@
 
 #include <pulp/events/main_thread_dispatcher.hpp>
 #include <pulp/format/editor_host.hpp>
+#include "manual_snap_timer.hpp"
 
 #include <cstdint>
 #include <cstdlib>
@@ -291,6 +292,8 @@ struct EditorEnvironment {
     ScopedEnvUnset wayland{"WAYLAND_DISPLAY"};
 #endif
 };
+
+
 
 /// The main thread's event loop, for an editor's own idle tick. On Apple
 /// platforms that tick is a dispatch source on the main queue, so the loop

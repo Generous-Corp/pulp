@@ -198,6 +198,21 @@ class ContractEditorSession : public std::enable_shared_from_this<ContractEditor
     /// How long host sizes must stop before a snapped size is asked back.
     static constexpr int kSnapSettleMs = 120;
 
+    /// The timer behind the snapped-size request: `start()` (re)arms it to call
+    /// `fire` once after `delay_ms` on the main thread, `stop()` cancels it.
+    /// The default is a main-thread timer; a test replaces it to drive the
+    /// debounce without a clock.
+    class SnapTimer {
+      public:
+        virtual ~SnapTimer() = default;
+        virtual void start(int delay_ms, std::function<void()> fire) = 0;
+        virtual void stop() = 0;
+    };
+    using SnapTimerFactory = std::function<std::unique_ptr<SnapTimer>()>;
+    /// Make every session created afterwards take its snap timer from
+    /// `factory`; an empty factory restores the main-thread timer. Main thread.
+    static void set_snap_timer_factory_for_testing(SnapTimerFactory factory);
+
     /// Offer a key. Forward when not attached.
     KeyDisposition offer_key(const EditorKeyEvent& event);
     void focus_changed(bool focused);
@@ -232,7 +247,7 @@ class ContractEditorSession : public std::enable_shared_from_this<ContractEditor
     std::unique_ptr<Editor> editor_;
     bool attached_ = false;
     detail::MainThreadTimer idle_timer_;
-    detail::MainThreadTimer snap_timer_;
+    std::unique_ptr<SnapTimer> snap_timer_;
     std::uint32_t snap_width_ = 0;
     std::uint32_t snap_height_ = 0;
     std::atomic<bool> owner_gone_{false};

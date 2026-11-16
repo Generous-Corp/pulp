@@ -50,8 +50,8 @@ inline bool constrain_to_hints(const ViewSize& hints, std::uint32_t& width, std:
     };
     std::uint32_t w = width;
     if (height_for(w) > height) {
-        w = static_cast<std::uint32_t>(
-            std::max(1.0, std::floor((static_cast<double>(height) + 0.5) * ratio)));
+        w = static_cast<std::uint32_t>(std::clamp(
+            std::floor((static_cast<double>(height) + 0.5) * ratio), 1.0, 2.0e9));
         while (w > 1 && height_for(w) > height)
             --w;
     }
@@ -59,16 +59,16 @@ inline bool constrain_to_hints(const ViewSize& hints, std::uint32_t& width, std:
     // whose own value lies inside the width bounds.
     std::uint32_t lo = hints.min_width;
     {
-        auto from_height = static_cast<std::uint32_t>(
-            std::max(1.0, std::floor((static_cast<double>(hints.min_height) - 0.5) * ratio)));
+        auto from_height = static_cast<std::uint32_t>(std::clamp(
+            std::floor((static_cast<double>(hints.min_height) - 0.5) * ratio), 1.0, 2.0e9));
         while (height_for(from_height) < hints.min_height)
             ++from_height;
         lo = std::max(lo, from_height);
     }
     std::uint32_t hi = hints.max_width > 0 ? hints.max_width : 0x7FFFFFFFu;
     if (hints.max_height > 0) {
-        auto from_height = static_cast<std::uint32_t>(
-            std::ceil((static_cast<double>(hints.max_height) + 0.5) * ratio));
+        auto from_height = static_cast<std::uint32_t>(std::min(
+            2.0e9, std::ceil((static_cast<double>(hints.max_height) + 0.5) * ratio)));
         while (from_height > 1 && height_for(from_height) > hints.max_height)
             --from_height;
         hi = std::min(hi, from_height);

@@ -19,6 +19,7 @@
 #include <pulp/format/editor_host.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/vst3_adapter.hpp>
+#include "support/manual_snap_timer.hpp"
 #include <pulp/format/vst3_contract_view.hpp>
 #include <pulp/state/store.hpp>
 
@@ -34,6 +35,7 @@
 #include <string>
 #include <vector>
 
+using pulp::test_support::ScopedManualSnapTimer;
 using pulp::format::Editor;
 using pulp::format::EditorContext;
 using pulp::format::EditorFactory;
@@ -1033,14 +1035,119 @@ TEST_CASE("a VST3 contract view applies the editor's declared aspect and bounds"
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }
 
-TEST_CASE(
-    "a VST3 host that calls onSize without checkSizeConstraint gets the snapped size asked back "
-    "once its sizes settle",
-    "[vst3][editor-host][vst3-contract][resize-hints]") {
+TEST_CASE("a VST3 host that calls onSize without checkSizeConstraint gets the snapped size asked back "
+          "once its sizes settle",
+          "[vst3][editor-host][vst3-contract][resize-hints]") {
     EditorEnvironment env;
     g_log = {};
     g_config = {};
     g_config.identity_adjust = true; // the session alone enforces the hints
+    ScopedManualSnapTimer settle;
+    HostApp host_app;
+    HostFrame frame;
+    PulpVst3Processor processor(create_contract_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    auto* view = open_contract_view(processor);
+    REQUIRE(view->setFrame(&frame) == Steinberg::kResultTrue);
+    REQUIRE(view->attached(fake_parent(), Steinberg::kPlatformTypeNSView) ==
+            Steinberg::kResultTrue);
+
+    // Off the 4:3 aspect: the editor takes the 4:3 box inside it at once, and
+    // nothing is asked of the host from inside its own call.
+    Steinberg::ViewRect off_aspect(0, 0, 900, 500);
+    HostFrame::inside_host_call = true;
+    REQUIRE(view->onSize(&off_aspect) == Steinberg::kResultTrue);
+    HostFrame::inside_host_call = false;
+    REQUIRE(frame.requests.empty());
+    REQUIRE(g_log.saw("set_size:667x500"));
+    REQUIRE(settle.armed());
+    REQUIRE(settle.delay_ms() == pulp::format::ContractEditorSession::kSnapSettleMs);
+
+    // A drag of 30 more sizes: every one re-arms the settle timer, and the
+    // host is asked for nothing while they keep coming.
+    for (int i = 0; i < 30; ++i) {
+        Steinberg::ViewRect drag(0, 0, 900 + i, 500);
+        HostFrame::inside_host_call = true;
+        REQUIRE(view->onSize(&drag) == Steinberg::kResultTrue);
+        HostFrame::inside_host_call = false;
+    }
+    REQUIRE(settle.starts() == 31);
+    REQUIRE(frame.requests.empty());
+    REQUIRE(frame.requests_inside_host_call == 0);
+
+    // The sizes stop: the last snapped size is asked back, once, from the
+    // settle timer and not from a host call.
+    settle.fire();
+    REQUIRE(frame.requests == std::vector<std::string>{"667x500"});
+    REQUIRE(frame.requests_inside_host_call == 0);
+    REQUIRE_FALSE(settle.armed());
+    settle.fire();
+    REQUIRE(frame.requests.size() == 1);
+
+    // A host that refuses the request leaves the editor on its aspect.
+    frame.accept = false;
+    frame.requests.clear();
+    Steinberg::ViewRect again(0, 0, 700, 300);
+    REQUIRE(view->onSize(&again) == Steinberg::kResultTrue);
+    REQUIRE(g_log.saw("set_size:400x300"));
+    settle.fire();
+    REQUIRE(frame.requests == std::vector<std::string>{"400x300"});
+    frame.accept = true;
+
+    // One pixel off the aspect is rounding: the editor takes the host's size
+    // and nothing is asked back.
+    frame.requests.clear();
+    Steinberg::ViewRect one_off(0, 0, 640, 481);
+    REQUIRE(view->onSize(&one_off) == Steinberg::kResultTrue);
+    REQUIRE(g_log.saw("set_size:640x481"));
+    REQUIRE_FALSE(settle.armed());
+    settle.fire();
+    REQUIRE(frame.requests.empty());
+
+    // A snapped size followed by one that fits cancels the request.
+    Steinberg::ViewRect off_again(0, 0, 700, 300);
+    Steinberg::ViewRect on_aspect(0, 0, 640, 480);
+    REQUIRE(view->onSize(&off_again) == Steinberg::kResultTrue);
+    REQUIRE(settle.armed());
+    REQUIRE(view->onSize(&on_aspect) == Steinberg::kResultTrue);
+    REQUIRE_FALSE(settle.armed());
+    settle.fire();
+    REQUIRE(frame.requests.empty());
+
+    // A request still pending when the view is removed is never made.
+    REQUIRE(view->onSize(&off_again) == Steinberg::kResultTrue);
+    REQUIRE(view->removed() == Steinberg::kResultOk);
+    settle.fire();
+    REQUIRE(frame.requests.empty());
+    view->setFrame(nullptr);
+    view->release();
+
+    // Control: a fixed-size editor takes no host size and is told nothing; the
+    // host is asked for the editor's own size.
+    g_config.default_hints = true;
+    auto* fixed = open_contract_view(processor);
+    fixed->setFrame(&frame);
+    REQUIRE(fixed->attached(fake_parent(), Steinberg::kPlatformTypeNSView) ==
+            Steinberg::kResultTrue);
+    Steinberg::ViewRect fixed_size(0, 0, 700, 300);
+    const auto calls_before = g_log.calls.size();
+    REQUIRE(fixed->onSize(&fixed_size) == Steinberg::kResultTrue);
+    REQUIRE(g_log.calls.size() == calls_before);
+    REQUIRE(frame.requests.empty());
+    settle.fire();
+    REQUIRE(frame.requests == std::vector<std::string>{"400x300"});
+    REQUIRE(fixed->removed() == Steinberg::kResultOk);
+    fixed->setFrame(nullptr);
+    fixed->release();
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("a VST3 host's off-aspect size is asked back on the real main loop",
+          "[vst3][editor-host][vst3-contract][resize-hints][wallclock]") {
+    EditorEnvironment env;
+    g_log = {};
+    g_config = {};
+    g_config.identity_adjust = true;
     HostApp host_app;
     HostFrame frame;
     PulpVst3Processor processor(create_contract_processor);
@@ -1050,80 +1157,14 @@ TEST_CASE(
     REQUIRE(view->setFrame(&frame) == Steinberg::kResultTrue);
     REQUIRE(view->attached(fake_parent(), Steinberg::kPlatformTypeNSView) ==
             Steinberg::kResultTrue);
-
-    // Off the 4:3 aspect: the editor takes the 4:3 box inside it at once.
     Steinberg::ViewRect off_aspect(0, 0, 900, 500);
     REQUIRE(view->onSize(&off_aspect) == Steinberg::kResultTrue);
-    REQUIRE(g_log.saw("set_size:667x500"));
-    // A drag still sending sizes is not fought: nothing is asked while they
-    // keep coming faster than the settle time.
-    // (A gap longer than the settle time on a loaded host is not a drag.)
-    bool stalled = false;
-    for (int i = 0; i < 30; ++i) {
-        const auto before = std::chrono::steady_clock::now();
-        loop.run_for(0.01);
-        stalled |= std::chrono::steady_clock::now() - before > std::chrono::milliseconds(100);
-        Steinberg::ViewRect drag(0, 0, 900 + i, 500);
-        HostFrame::inside_host_call = true;
-        REQUIRE(view->onSize(&drag) == Steinberg::kResultTrue);
-        HostFrame::inside_host_call = false;
-    }
-    // The request never came from inside the host's own onSize call.
-    REQUIRE(frame.requests_inside_host_call == 0);
-    if (!stalled)
-        REQUIRE(frame.requests.empty());
-    // Once they stop, the last snapped size is asked back, once.
+    // Only the positive half is timed: the request arrives, from the main loop.
     REQUIRE(loop.run_until([&] { return !frame.requests.empty(); }));
-    loop.run_for(0.3);
-    // Once settled the request is made once (more only if the host stalled
-    // between drag sizes).
-    if (!stalled)
-        REQUIRE(frame.requests.size() == 1);
-    REQUIRE(frame.requests.back() == "667x500");
-
-    // One pixel off the aspect is rounding: the editor takes the host's size
-    // and nothing is asked back.
-    frame.requests.clear();
-    Steinberg::ViewRect one_off(0, 0, 640, 481);
-    REQUIRE(view->onSize(&one_off) == Steinberg::kResultTrue);
-    REQUIRE(g_log.saw("set_size:640x481"));
-    loop.run_for(0.3);
-    REQUIRE(frame.requests.empty());
-
-    // A host size already on the aspect asks for nothing.
-    frame.requests.clear();
-    Steinberg::ViewRect on_aspect(0, 0, 640, 480);
-    REQUIRE(view->onSize(&on_aspect) == Steinberg::kResultTrue);
-    loop.run_for(0.3);
-    REQUIRE(frame.requests.empty());
-
-    // A snapped size followed by one that fits cancels the request.
-    Steinberg::ViewRect off_again(0, 0, 700, 300);
-    REQUIRE(view->onSize(&off_again) == Steinberg::kResultTrue);
-    REQUIRE(view->onSize(&on_aspect) == Steinberg::kResultTrue);
-    loop.run_for(0.3);
-    REQUIRE(frame.requests.empty());
-
-    // Control: a fixed-size editor keeps the size the host gave it and the
-    // host is never asked for anything.
+    REQUIRE(frame.requests.front() == "667x500");
+    REQUIRE(frame.requests_inside_host_call == 0);
     REQUIRE(view->removed() == Steinberg::kResultOk);
     view->setFrame(nullptr);
     view->release();
-    g_config.default_hints = true;
-    auto* fixed = open_contract_view(processor);
-    fixed->setFrame(&frame);
-    REQUIRE(fixed->attached(fake_parent(), Steinberg::kPlatformTypeNSView) ==
-            Steinberg::kResultTrue);
-    Steinberg::ViewRect fixed_size(0, 0, 700, 300);
-    const auto calls_before = g_log.calls.size();
-    REQUIRE(fixed->onSize(&fixed_size) == Steinberg::kResultTrue);
-    REQUIRE(g_log.calls.size() == calls_before); // the editor is told nothing
-    // The fixed editor takes no host size; the host is asked for its own.
-    REQUIRE_FALSE(g_log.saw("set_size:700x300"));
-    REQUIRE(loop.run_until([&] { return !frame.requests.empty(); }));
-    REQUIRE(frame.requests.back() == "400x300");
-    REQUIRE(fixed->removed() == Steinberg::kResultOk);
-    fixed->setFrame(nullptr);
-    fixed->release();
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }
