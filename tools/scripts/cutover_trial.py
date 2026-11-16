@@ -311,7 +311,6 @@ def repair_configure(scratch: Path, configure, limit: int = 300,
                 ("tools/cmake/", "cmake/")) else (error["file"], error["line"])
             if target in seen:
                 continue
-            seen.add(target)
             # Functions execute in their caller's source directory, even when
             # defined in a different CMakeLists.txt.
             source_file = error["source_file"] or (
@@ -326,7 +325,8 @@ def repair_configure(scratch: Path, configure, limit: int = 300,
                                  "why": error["message"], "iteration": iteration})
                 edits.append(restored)
                 progress = True
-                continue
+                continue  # Restoration is not a completed removal: the caller may need more.
+            seen.add(target)
             missing_include = INCLUDE_MISSING.search(error["message"])
             if missing_include and not Path(missing_include.group(1)).suffix:
                 continue  # Effective module search scope is unknown; retain the error.

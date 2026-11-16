@@ -204,6 +204,35 @@ class RepairRegressionTests(unittest.TestCase):
             self.assertEqual([e.get("restored") for e in edits], ["sub/tools/cmake/Removed.cmake"])
             self.assertEqual(module.read_text(encoding="utf-8"), 'set(RESTORED yes)\n')
 
+    def test_two_deleted_modules_sharing_one_caller_are_both_restored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "cmake").mkdir()
+            names = ("cmake/A.cmake", "cmake/B.cmake")
+            (root / "cmake/A.cmake").write_text("set(HAVE_A yes)\n", encoding="utf-8")
+            (root / "cmake/B.cmake").write_text("set(HAVE_B yes)\n", encoding="utf-8")
+            (root / "cmake/helper.cmake").write_text(
+                "include(cmake/A.cmake)\ninclude(cmake/B.cmake)\n", encoding="utf-8")
+            (root / "CMakeLists.txt").write_text(
+                "cmake_minimum_required(VERSION 3.20)\nproject(fixture NONE)\n"
+                "include(cmake/helper.cmake)\n"
+                "if(NOT HAVE_A OR NOT HAVE_B)\nmessage(FATAL_ERROR \"module not restored\")\nendif()\n",
+                encoding="utf-8")
+            for args in (["init", "-q"], ["add", "."],
+                         ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"]):
+                done = ct.run(["git", "-C", str(root), *args])
+                self.assertEqual(done.returncode, 0, done.stderr)
+            for name in names:
+                (root / name).unlink()
+            def configure():
+                done = ct.run(["cmake", "-S", str(root), "-B", str(root / "build")])
+                return done.returncode == 0, done.stdout + done.stderr
+            edits, log, ok = ct.repair_configure(root, configure, deleted=set(names))
+            self.assertTrue(ok, log)
+            self.assertEqual(sorted(e.get("restored") for e in edits), sorted(names))
+            for name in names:
+                self.assertTrue((root / name).exists())
+
     def test_classification_requires_actual_deleted_path_in_source_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
