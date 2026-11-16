@@ -104,7 +104,9 @@ class RmlUiSurface {
     /// on Space, say). Returns true when the surface took it: a text field has
     /// focus, and RmlUi consumed the key or the key produced text, which is
     /// delivered to the field. Returns false, without touching RmlUi, when no
-    /// text field has focus, so the host keeps its shortcuts. Main thread.
+    /// text field has focus, so the host keeps its shortcuts. A release
+    /// while a field has focus is always taken, mirroring the press. Main
+    /// thread.
     bool offer_key(const pulp::native::KeyEvent& event);
     /// The editor's window gained or lost keyboard focus. Losing it blurs a
     /// focused text field (the caret stops showing and the host's keyboard is

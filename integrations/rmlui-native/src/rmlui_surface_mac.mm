@@ -398,6 +398,10 @@ bool RmlUiSurface::offer_key(const KeyEvent& event) {
     if (!d.context || route_key(event, d.text_focus) == KeyRoute::host)
         return false;
     bool taken = d.on_key(event);
+    // A release mirrors its press: consumed while a field holds focus, so the
+    // host never sees the key-up of a key it was not offered.
+    if (event.kind == KeyKind::up)
+        return true;
     // Text a key produced arrives as text, not as a key, so a host that
     // consumed the key leaves it to the surface to type it.
     const bool command = (event.modifiers & (modifier_command | modifier_control)) != 0;
@@ -421,9 +425,12 @@ void RmlUiSurface::set_window_focused(bool focused) {
         vellum::rmlui::NativeContext::Scope scope(*d.context);
         if (!focused) {
             Rml::Element* field = ctx->GetFocusElement();
-            d.refocus_id = takes_text(field) ? field->GetId() : Rml::String();
-            if (!d.refocus_id.empty())
+            // A repeated loss, with nothing focused, keeps what the first
+            // one remembered.
+            if (takes_text(field) && !field->GetId().empty()) {
+                d.refocus_id = field->GetId();
                 field->Blur();
+            }
         } else if (!d.refocus_id.empty()) {
             for (int i = 0; i < ctx->GetNumDocuments(); ++i) {
                 if (Rml::Element* field = ctx->GetDocument(i)->GetElementById(d.refocus_id)) {

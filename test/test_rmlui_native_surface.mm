@@ -507,7 +507,8 @@ TEST_CASE("an offered key is taken only while a text field holds focus",
         // A release types nothing.
         auto release = key_event(EditorKey::space, U' ');
         release.is_down = false;
-        offer_editor_key(*e.ui, release);
+        // The release of a key the field took is the field's too.
+        REQUIRE(offer_editor_key(*e.ui, release) == KeyDisposition::consumed);
         REQUIRE(field_value(e) == "ab ");
         e.ui->detach();
     }
@@ -525,6 +526,13 @@ TEST_CASE("contract keys map to pulp-native keys", "[native-surface][rmlui][keys
                   pulp::format::editor_modifier_shift | pulp::format::editor_modifier_alt));
     REQUIRE(mapped.characters == "\xF0\x9F\x98\x80");
     REQUIRE(mapped.modifiers == (pulp::native::modifier_shift | pulp::native::modifier_option));
+
+    // A lone surrogate types nothing; a pair combines to one scalar.
+    REQUIRE(native_key_event_for(key_event(EditorKey::none, 0xD83D)).characters.empty());
+    REQUIRE(native_key_event_for(key_event(EditorKey::none, 0xDE00)).characters.empty());
+    REQUIRE(combine_utf16(0xD83D, 0xDE00) == 0x1F600);
+    REQUIRE(combine_utf16(0xDE00, 0xD83D) == 0);
+    REQUIRE(combine_utf16(u'a', 0xDE00) == 0);
 }
 
 TEST_CASE("losing window focus blurs the text field and gaining it restores it",
@@ -550,6 +558,13 @@ TEST_CASE("losing window focus blurs the text field and gaining it restores it",
         forward_editor_focus(*e.ui, true);
         REQUIRE(e.ui->text_field_focused());
         REQUIRE(e.ui->surface()->text_focus());
+
+        // Losing focus twice in a row keeps what the first loss remembered.
+        forward_editor_focus(*e.ui, false);
+        forward_editor_focus(*e.ui, false);
+        REQUIRE_FALSE(e.ui->text_field_focused());
+        forward_editor_focus(*e.ui, true);
+        REQUIRE(e.ui->text_field_focused());
 
         // With no field focused, gaining focus restores nothing.
         [e.view() mouseDown:e.mouse(NSEventTypeLeftMouseDown, 250, 180)];
