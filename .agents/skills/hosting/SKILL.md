@@ -35,6 +35,10 @@ nodes once skipped it and crashed numeric connect. Read the next block's epoch
 and start from `control_index_position()`, and expect prepare or a prepared-edit
 commit to reset it to epoch 1, cursor 0. `control_index_nodes.cpp` is part of
 the curated sample-region web source list, because authoring calls into it.
+A transport stream-history reset (and prepare) also resets every stateful
+Control node (integrator, slew, hysteresis) to its configured initial state, so
+a seek renders like a fresh graph; a negative reset position is `OutOfRange`,
+and a non-finite index is published as 0 rather than forwarded to a parameter.
 
 Port names: a MidiInput/MidiOutput node's single port is named `audio` (the
 first-port name from `populate_named_ports`) with kind MIDI, so do not rename
@@ -154,7 +158,11 @@ live bank use `VoiceBankBinding::restore_state()`, not a loop of
 `set_slot_parameter()`: `restore_voice_bank_state()` knows no authored bounds,
 so a value-by-value replay can refuse halfway and leave the bank half-restored,
 while `restore_state()` checks every value (bounds included) before the first
-write. Saved-bank activation, edit/undo, DAW adapters, and paced
+write. A release through `dispatch_deferred()` also retires the key in the
+bank's MPE tracker, and a graph failure during `render()` silences the whole
+block. `begin_block()` with a block open is `Busy` and `publish()` with no block
+is `StaleEpoch`, matching `HostEventIngress`. Saved-bank activation,
+edit/undo, DAW adapters, and paced
 realtime qualification remain open; do not infer them from the source-installed
 consumer.
 
@@ -3377,6 +3385,11 @@ not advance). A steady-clock forward gap stays in the epoch; a backwards clock
 or a steady/no-steady flip opens a new epoch. Out-of-block times are refused,
 never clamped. The CLAP adapter still feeds the Processor `MidiBuffer`, not this
 projection.
+On a timeline `NewEpoch` (seek or loop), call `SignalGraph::try_reset_events()`
+before opening the next host-event block at the new epoch; it is the only call
+that advances the trigger epoch, and the live generation follows it. The
+unchecked `process()` silences a refused typed-trigger block, while
+`process_checked()` leaves the output untouched and returns the refusal.
 
 VST3 and AU enter the same timeline through `clock_from_vst3()` /
 `clock_from_au()` (plain fields, no SDK). Gotchas: VST3's steady counter is
