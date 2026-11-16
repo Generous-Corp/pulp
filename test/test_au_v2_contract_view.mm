@@ -580,6 +580,53 @@ TEST_CASE("AppKit key events map to the contract's key events",
                 .character == 0);
 }
 
+TEST_CASE("AU v2 acknowledges a fixed editor's resize request", "[auv2][editor-host][resize-ack]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    contract_config().default_hints = true;
+    ScopedManualSnapTimer settle;
+    FakeInstance instance(true);
+    g_instance = &instance;
+    AudioUnit au = fake_audio_unit();
+    @autoreleasepool {
+        NSView* view = [open_view(au) retain];
+        REQUIRE(view != nil);
+        REQUIRE(contract_log().context->request_resize({600, 450, 1.0}));
+        REQUIRE(contract_log().saw("set_size:600x450"));
+        REQUIRE(view.frame.size.width == 600);
+        REQUIRE(view.frame.size.height == 450);
+        REQUIRE_FALSE(settle.armed());
+        [view release];
+    }
+    AudioComponentInstanceDispose(au);
+    g_instance = nullptr;
+}
+
+TEST_CASE("AU v2 reports a refused editor resize request and leaves the frame alone",
+          "[auv2][editor-host][resize-ack]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    contract_config().default_hints = true;
+    ScopedManualSnapTimer settle;
+    FakeInstance instance(true);
+    g_instance = &instance;
+    AudioUnit au = fake_audio_unit();
+    @autoreleasepool {
+        NSView* view = [open_view(au) retain];
+        REQUIRE(view != nil);
+        // The recording editor refuses anything under 200x150.
+        REQUIRE_FALSE(contract_log().context->request_resize({100, 100, 1.0}));
+        REQUIRE(view.frame.size.width == 400);
+        REQUIRE(view.frame.size.height == 300);
+        // The refusal left no pending request behind to acknowledge later.
+        REQUIRE(contract_log().context->request_resize({600, 450, 1.0}));
+        REQUIRE(view.frame.size.width == 600);
+        [view release];
+    }
+    AudioComponentInstanceDispose(au);
+    g_instance = nullptr;
+}
+
 TEST_CASE("AppKit key events carry an astral character whole and drop a lone surrogate",
           "[auv2][editor-host][au-contract]") {
     using pulp::format::au::contract_key_event;
@@ -602,51 +649,4 @@ TEST_CASE("AppKit key events carry an astral character whole and drop a lone sur
     const unichar broken[2] = {high, u'a'};
     REQUIRE(contract_key_event(0, [NSString stringWithCharacters:broken length:2], 0, true, false)
                 .character == 0);
-
-    TEST_CASE("AU v2 acknowledges a fixed editor's resize request",
-              "[auv2][editor-host][resize-ack]") {
-        EditorEnvironment env;
-        reset_contract_recording();
-        contract_config().default_hints = true;
-        ScopedManualSnapTimer settle;
-        FakeInstance instance(true);
-        g_instance = &instance;
-        AudioUnit au = fake_audio_unit();
-        @autoreleasepool {
-            NSView* view = [open_view(au) retain];
-            REQUIRE(view != nil);
-            REQUIRE(contract_log().context->request_resize({600, 450, 1.0}));
-            REQUIRE(contract_log().saw("set_size:600x450"));
-            REQUIRE(view.frame.size.width == 600);
-            REQUIRE(view.frame.size.height == 450);
-            REQUIRE_FALSE(settle.armed());
-            [view release];
-        }
-        AudioComponentInstanceDispose(au);
-        g_instance = nullptr;
-    }
-
-    TEST_CASE("AU v2 reports a refused editor resize request and leaves the frame alone",
-              "[auv2][editor-host][resize-ack]") {
-        EditorEnvironment env;
-        reset_contract_recording();
-        contract_config().default_hints = true;
-        ScopedManualSnapTimer settle;
-        FakeInstance instance(true);
-        g_instance = &instance;
-        AudioUnit au = fake_audio_unit();
-        @autoreleasepool {
-            NSView* view = [open_view(au) retain];
-            REQUIRE(view != nil);
-            // The recording editor refuses anything under 200x150.
-            REQUIRE_FALSE(contract_log().context->request_resize({100, 100, 1.0}));
-            REQUIRE(view.frame.size.width == 400);
-            REQUIRE(view.frame.size.height == 300);
-            // The refusal left no pending request behind to acknowledge later.
-            REQUIRE(contract_log().context->request_resize({600, 450, 1.0}));
-            REQUIRE(view.frame.size.width == 600);
-            [view release];
-        }
-        AudioComponentInstanceDispose(au);
-        g_instance = nullptr;
-    }
+}
