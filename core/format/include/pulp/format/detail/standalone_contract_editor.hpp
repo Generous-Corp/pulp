@@ -48,6 +48,13 @@ struct StandaloneContractEditorOptions {
     std::function<void()> on_transport_key;
     /// Called once per frame of the window's loop, on the UI thread.
     std::function<void()> on_idle;
+    /// The usable area, in points, the window must fit into when it is not
+    /// zero. Zero reads the main screen's visible frame.
+    double screen_visible_width = 0.0;
+    double screen_visible_height = 0.0;
+    /// Called once with the native window (an `NSWindow*` on macOS) before
+    /// the loop runs, so a test can reach its delegate.
+    std::function<void(void* native_window)> on_window_ready;
 };
 
 /// True when this platform can host a contract editor in a native window.
