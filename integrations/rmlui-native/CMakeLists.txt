@@ -20,6 +20,16 @@ check_cxx_source_compiles(
        return 0;
      }"
     PULP_VELLUM_RMLUI_HAS_DENSITY_RATIO)
+# The first-frame preparation (NativeContext::warm) is newer than the density
+# setter; older SDKs simply draw their first frame cold.
+check_cxx_source_compiles(
+    "#include <vellum/rmlui/native.hpp>
+     int main() {
+       vellum::rmlui::NativeContext* context = nullptr;
+       context->warm();
+       return 0;
+     }"
+    PULP_VELLUM_RMLUI_HAS_WARM)
 set(CMAKE_TRY_COMPILE_TARGET_TYPE "${_pulp_try_compile_target_type}")
 unset(_pulp_try_compile_target_type)
 unset(CMAKE_REQUIRED_INCLUDES)
@@ -39,6 +49,9 @@ target_link_libraries(pulp-rmlui-native
         "-framework Metal")
 if(PULP_VELLUM_RMLUI_HAS_DENSITY_RATIO)
     target_compile_definitions(pulp-rmlui-native PRIVATE PULP_VELLUM_RMLUI_HAS_DENSITY_RATIO)
+endif()
+if(PULP_VELLUM_RMLUI_HAS_WARM)
+    target_compile_definitions(pulp-rmlui-native PRIVATE PULP_VELLUM_RMLUI_HAS_WARM)
 endif()
 
 # Vellum's Metal Rml::RenderInterface on the surface, when the Vellum install

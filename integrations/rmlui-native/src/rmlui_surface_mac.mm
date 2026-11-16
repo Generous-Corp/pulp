@@ -475,6 +475,11 @@ bool RmlUiSurface::attach(void* parent) {
 #if defined(PULP_VELLUM_RMLUI_HAS_DENSITY_RATIO)
             d.context->set_density_ratio(static_cast<float>(s));
 #endif
+#if defined(PULP_VELLUM_RMLUI_HAS_WARM)
+            // Textures, geometry and glyphs are prepared here, before the
+            // first frame is requested, so that frame only draws.
+            d.context->warm();
+#endif
         }
     }
     if (!d.context) {

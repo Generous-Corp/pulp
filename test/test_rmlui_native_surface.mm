@@ -256,6 +256,25 @@ TEST_CASE("the document loads and renders through the caller's renderer",
     }
 }
 
+TEST_CASE("the document's first frame is prepared before any frame is drawn",
+          "[native-surface][rmlui][first-frame]") {
+    REQUIRE_METAL();
+#if defined(PULP_VELLUM_RMLUI_HAS_WARM)
+    @autoreleasepool {
+        Editor e;
+        REQUIRE(e.attach());
+        // Attach returns before the display link's first tick. If no frame
+        // has begun yet, the renderer must already have been asked to compile
+        // the document's geometry; a cold first frame would compile it then.
+        if (e.begun.load() == 0)
+            REQUIRE(e.renderer.compiled.load() > 0);
+        e.ui->detach();
+    }
+#else
+    SKIP("the installed Vellum RmlUi SDK has no NativeContext::warm()");
+#endif
+}
+
 TEST_CASE("a missing document or font fails attach and leaves nothing behind",
           "[native-surface][rmlui]") {
     REQUIRE_METAL();
