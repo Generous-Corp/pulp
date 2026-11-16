@@ -190,7 +190,7 @@ class RmlUiNativeLaneSuiteTests(unittest.TestCase):
         program.chmod(0o755)
         return subprocess.run(
             ["bash", str(self.LANE), "run-suite", str(program), str(report)],
-            capture_output=True, text=True, env={**os.environ},
+            capture_output=True, text=True, encoding="utf-8", env={**os.environ},
         )
 
     def test_success_then_crash_without_report_fails(self) -> None:
