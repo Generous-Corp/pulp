@@ -190,8 +190,12 @@ TEST_CASE("X11 plugin host routes pointer input through nested editor windows",
     send_button(ButtonPress, 30, 40, ShiftMask);
     pump_until(1);
     CHECK(probe->events.front().phase == MousePhase::press);
-    CHECK(probe->events.front().position.x == 30);
-    CHECK(probe->events.front().position.y == 40);
+    // X events use physical pixels; the editor receives logical coordinates.
+    // Xvfb's reported DPI need not be exactly 96 even with -dpi 96.
+    const float input_scale = host->scale_factor();
+    REQUIRE(input_scale > 0.0f);
+    CHECK(probe->events.front().position.x == 30.0f / input_scale);
+    CHECK(probe->events.front().position.y == 40.0f / input_scale);
     CHECK(probe->events.front().modifiers == kModShift);
 
     // The motion is outside the child; XGrabPointer must keep it routed to the
@@ -199,8 +203,8 @@ TEST_CASE("X11 plugin host routes pointer input through nested editor windows",
     send_motion(-20, 60, Button1Mask | ControlMask);
     pump_until(2);
     CHECK(probe->events.back().phase == MousePhase::drag);
-    CHECK(probe->events.back().position.x == -20);
-    CHECK(probe->events.back().position.y == 60);
+    CHECK(probe->events.back().position.x == -20.0f / input_scale);
+    CHECK(probe->events.back().position.y == 60.0f / input_scale);
     CHECK(probe->events.back().modifiers == kModCtrl);
 
     send_button(ButtonRelease, -20, 60, Button1Mask);
