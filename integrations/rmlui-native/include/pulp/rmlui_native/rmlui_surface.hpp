@@ -57,6 +57,12 @@ struct FrameTarget {
 struct RendererHooks {
     std::function<void(const FrameTarget&)> begin_frame;
     std::function<void()> end_frame;
+    /// Called, with `rmlui_mutex()` held and no frame in flight, when the
+    /// editor is hidden, after RmlUi has released its compiled geometry and
+    /// textures through the renderer. Free any GPU memory the renderer itself
+    /// caches (layer, filter and atlas textures); it is rebuilt on the next
+    /// frame. Optional.
+    std::function<void()> trim;
 };
 
 struct RmlUiSurfaceOptions {
@@ -98,6 +104,13 @@ class RmlUiSurface {
 
     /// Main-thread tick: visibility and size follow the window.
     void idle();
+    /// The host hid or showed the editor without detaching it. Hiding stops
+    /// frames at once (an `idle()` that follows does not restart them) and
+    /// releases RmlUi's compiled geometry and textures and the renderer's own
+    /// caches (`RendererHooks::trim`). Showing resumes frames and draws one,
+    /// rebuilding what was released, so the first visible frame is complete.
+    /// Main thread.
+    void visibility_changed(bool visible);
     /// Draw one more frame (after a change the caller made through RmlUi).
     void request_frame();
 

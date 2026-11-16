@@ -68,6 +68,15 @@ it and its tests, and both look like bugs until you know them:
   leaves a host's key routing (Musical Typing) dead, as the plug-in host's
   key-focus etiquette below describes.
 
+- **A hidden contract editor's tick stops, and the editor must stop drawing
+  and give memory back itself.** `ContractEditorSession::visibility_changed(false)`
+  stops the self-paced tick (a host-timer tick returns early) and
+  `visibility_changed(true)` ticks once at once. An RmlUi editor forwards the
+  call to `RmlUiSurface::visibility_changed()`, which stops frames (an
+  `idle()` cannot restart them), releases RmlUi's geometry and textures and
+  calls `RendererHooks::trim`. A test must prove the first frame after show is
+  complete (geometry compiled and drawn again), not only that frames resume.
+
 `pulp::native::GlSurface` is the OpenGL counterpart for Windows and X11. On
 macOS only its offscreen backend exists (CGL into a framebuffer object), for
 tests and offline capture. Two things about it are easy to get wrong:

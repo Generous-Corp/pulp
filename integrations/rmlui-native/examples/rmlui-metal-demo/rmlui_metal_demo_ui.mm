@@ -103,6 +103,10 @@ class Editor final : public ::pulp::format::Editor {
         if (ui_)
             ui_->idle();
     }
+    void visibility_changed(bool visible) override {
+        if (ui_)
+            ui_->visibility_changed(visible);
+    }
 
   private:
     void teardown(bool orderly) {

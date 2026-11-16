@@ -759,6 +759,40 @@ TEST_CASE("a contract session whose owner is gone draws no more frames", "[edito
     session->close_for_owner();
 }
 
+TEST_CASE("a hidden contract session's tick does nothing and showing it ticks at once",
+          "[editor-host]") {
+    Fixture f;
+    GainProcessor processor;
+    int idles = 0;
+    TickingFactory factory(idles);
+    auto session = ContractEditorSession::create(processor, f.store, factory, {},
+                                                 ContractEditorSession::IdleSource::host_driven);
+    REQUIRE(session);
+    int parent = 0;
+    REQUIRE(session->attach({NativeParentKind::cocoa_view, &parent, 0}));
+    session->tick();
+    REQUIRE(idles == 1);
+
+    // A host timer that keeps firing while the editor is hidden does no work.
+    session->visibility_changed(false);
+    session->tick();
+    session->tick();
+    REQUIRE(idles == 1);
+    // Hiding twice is no change.
+    session->visibility_changed(false);
+    REQUIRE(idles == 1);
+
+    // Showing ticks once at once, before the host's next timer.
+    session->visibility_changed(true);
+    REQUIRE(idles == 2);
+    session->tick();
+    REQUIRE(idles == 3);
+    // Showing twice is no change.
+    session->visibility_changed(true);
+    REQUIRE(idles == 3);
+    session->close_for_owner();
+}
+
 namespace {
 
 /// Subscribes to the context's ParamPort and records every notification.

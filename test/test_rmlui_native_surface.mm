@@ -110,14 +110,18 @@ class CountingRenderer final : public Rml::RenderInterface {
         std::this_thread::sleep_for(std::chrono::microseconds(200));
         leave();
     }
-    void ReleaseGeometry(Rml::CompiledGeometryHandle) override {}
+    void ReleaseGeometry(Rml::CompiledGeometryHandle) override {
+        released_geometry.fetch_add(1);
+    }
     Rml::TextureHandle LoadTexture(Rml::Vector2i&, const Rml::String&) override {
         return 0;
     }
     Rml::TextureHandle GenerateTexture(Rml::Span<const Rml::byte>, Rml::Vector2i) override {
         return 1;
     }
-    void ReleaseTexture(Rml::TextureHandle) override {}
+    void ReleaseTexture(Rml::TextureHandle) override {
+        released_textures.fetch_add(1);
+    }
     void EnableScissorRegion(bool) override {}
     void SetScissorRegion(Rml::Rectanglei) override {}
 
@@ -125,6 +129,8 @@ class CountingRenderer final : public Rml::RenderInterface {
     static inline std::atomic<int> max_inside{0};
     std::atomic<int> compiled{0};
     std::atomic<int> rendered{0};
+    std::atomic<int> released_geometry{0};
+    std::atomic<int> released_textures{0};
 
   private:
     static void enter() {
@@ -144,6 +150,7 @@ struct Editor {
     CountingRenderer renderer;
     std::atomic<int> begun{0};
     std::atomic<int> ended{0};
+    std::atomic<int> trimmed{0};
     FrameTarget last_target;
     std::unique_ptr<RmlUiSurface> ui;
 
@@ -159,6 +166,7 @@ struct Editor {
             last_target = t;
             begun.fetch_add(1);
         };
+        hooks.trim = [this] { trimmed.fetch_add(1); };
         hooks.end_frame = [this] { ended.fetch_add(1); };
         RmlUiSurfaceOptions options;
         options.document = "probe.rml";
@@ -440,5 +448,44 @@ TEST_CASE("the surface uses the device the caller's renderer was built on",
         REQUIRE_FALSE(view.layer.opaque);
         ui.detach();
         [window close];
+    }
+}
+
+TEST_CASE("a hidden editor stops frames and trims GPU memory, and showing it draws a full frame",
+          "[native-surface][rmlui][visibility]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        Editor e;
+        REQUIRE(e.attach());
+        REQUIRE(e.wait_for([&] { return e.ui->frames() > 0; }));
+        const int compiled_before = e.renderer.compiled.load();
+        const int rendered_before = e.renderer.rendered.load();
+        REQUIRE(e.renderer.released_geometry.load() == 0);
+        REQUIRE(e.trimmed.load() == 0);
+
+        e.ui->visibility_changed(false);
+        // RmlUi handed back its geometry and textures through the renderer,
+        // and the renderer was told to drop its own caches.
+        REQUIRE(e.renderer.released_geometry.load() > 0);
+        REQUIRE(e.trimmed.load() == 1);
+
+        // Frames stay off while hidden, whatever asks for one and whatever the
+        // window reports.
+        const auto frames = e.ui->frames();
+        for (int i = 0; i < 10; ++i) {
+            e.ui->request_frame();
+            e.ui->idle();
+            [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
+        }
+        REQUIRE(e.ui->frames() == frames);
+
+        // Showing draws a complete frame: the geometry RmlUi released is
+        // compiled again and drawn.
+        e.ui->visibility_changed(true);
+        REQUIRE(e.wait_for([&] { return e.ui->frames() > frames; }));
+        REQUIRE(e.renderer.compiled.load() > compiled_before);
+        REQUIRE(e.renderer.rendered.load() > rendered_before);
+        REQUIRE(e.trimmed.load() == 1);
+        e.ui->detach();
     }
 }

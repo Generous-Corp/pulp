@@ -111,6 +111,8 @@ struct RmlUiSurface::Impl {
     std::uint32_t height_px = 0;
     double scale = 1.0;
     bool text_focus = false;
+    // The host hid the editor: frames stay off whatever the window says.
+    bool host_hidden = false;
 
     Impl(vellum::rmlui::AssetProvider& a, Rml::RenderInterface& r, RendererHooks h,
          RmlUiSurfaceOptions o)
@@ -142,6 +144,19 @@ struct RmlUiSurface::Impl {
             text_focus = wants;
             surface->set_text_focus(wants);
         }
+    }
+
+    // Main thread: hand back what the GPU holds for a hidden editor.
+    void trim_gpu_resources() {
+        std::lock_guard lock(rmlui_mutex());
+        if (!context)
+            return;
+        vellum::rmlui::NativeContext::Scope scope(*context);
+        // RmlUi regenerates both on the next render that needs them.
+        Rml::ReleaseCompiledGeometry(&renderer);
+        Rml::ReleaseTextures(&renderer);
+        if (hooks.trim)
+            hooks.trim();
     }
 
     // Render thread.
@@ -276,6 +291,7 @@ struct RmlUiSurface::Impl {
         pump.reset();
         surface.reset();
         text_focus = false;
+        host_hidden = false;
         width_px = height_px = 0;
     }
 };
@@ -371,7 +387,7 @@ void RmlUiSurface::idle() {
     if (!d.surface || !d.pump)
         return;
     d.surface->poll_visibility();
-    d.pump->set_on_screen(d.surface->on_screen().on_screen());
+    d.pump->set_on_screen(d.surface->on_screen().on_screen() && !d.host_hidden);
     bool resized = false;
     {
         std::lock_guard lock(rmlui_mutex());
@@ -383,6 +399,21 @@ void RmlUiSurface::idle() {
     }
     if (resized)
         d.pump->request_frame();
+}
+
+void RmlUiSurface::visibility_changed(bool visible) {
+    auto& d = *impl_;
+    if (!d.surface || !d.pump)
+        return;
+    d.host_hidden = !visible;
+    if (!visible) {
+        d.pump->set_on_screen(false);
+        d.trim_gpu_resources();
+        return;
+    }
+    d.surface->poll_visibility();
+    d.pump->set_on_screen(d.surface->on_screen().on_screen());
+    d.pump->request_frame();
 }
 
 void RmlUiSurface::request_frame() {

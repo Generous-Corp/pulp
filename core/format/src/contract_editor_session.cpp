@@ -162,7 +162,9 @@ ContractEditorSession::~ContractEditorSession() {
 
 void ContractEditorSession::start_idle() {
     stop_idle();
-    if (idle_source_ != IdleSource::self_paced)
+    // A hidden editor draws nothing, so its tick stays stopped until the host
+    // shows it again.
+    if (idle_source_ != IdleSource::self_paced || !visible_)
         return;
     if (!idle_timer_.start(kIdleIntervalMs, [this] { tick(); }))
         runtime::log_error("editor host: no main-thread timer for the editor's idle tick");
@@ -228,6 +230,10 @@ void ContractEditorSession::tick() {
     // Once the owner is gone, draw nothing until the main thread closes the
     // editor: its ports are cut, and a frame would show nothing true.
     if (!editor_ || !attached_ || owner_gone_.load())
+        return;
+    // A host timer keeps firing while the editor is hidden; skip the work. The
+    // tick that follows showing the editor catches up.
+    if (!visible_)
         return;
     // Audio-thread writes and state restores reach the port's listeners only
     // when the main thread drains them.
@@ -324,8 +330,26 @@ void ContractEditorSession::visibility_changed(bool visible) {
     if (context_)
         context_->native_surface().set_visibility(visible ? NativeSurfaceVisibility::visible
                                                           : NativeSurfaceVisibility::hidden);
+    const bool changed = visible_ != visible;
+    // Hide first, so the editor stops drawing before its tick stops; show
+    // first, so the tick that follows finds the editor ready.
+    if (!visible)
+        visible_ = false;
     if (editor_)
         editor_->visibility_changed(visible);
+    if (visible)
+        visible_ = true;
+    if (!changed || !attached_)
+        return;
+    if (visible) {
+        // Resume now rather than a timer interval from now: whatever changed
+        // while hidden (parameters, size, scale) reaches the editor before the
+        // first visible frame.
+        start_idle();
+        tick();
+    } else {
+        stop_idle();
+    }
 }
 
 NativeSurfaceHostState* ContractEditorSession::native_surface_host() {

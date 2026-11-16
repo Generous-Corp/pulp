@@ -75,6 +75,19 @@ and the density ratio is the backing scale. Documents that need
 density-scaled text should use `font-size` in `dp` (the example does this)
 rather than `px`.
 
+### Hiding the editor
+
+A host that hides an editor without detaching it (CLAP `gui_hide`, an AU view
+leaving its window) reaches the editor as `visibility_changed(false)`. The
+contract session then stops its 16 ms idle tick (a host-driven tick does no
+work) until the editor is shown again, and showing it ticks once at once. An
+RmlUi editor forwards the call to `RmlUiSurface::visibility_changed()`: frames
+stop at once, RmlUi releases its compiled geometry and textures through the
+renderer, and `RendererHooks::trim` is called so the renderer can free the
+layer, filter and atlas textures it caches. Showing resumes frames and draws
+one, which recompiles everything that was released, so the first visible frame
+is complete.
+
 ## Proof
 
 - `pulp-test-native-metal-surface`, `-frame-pump`, `-input` and
