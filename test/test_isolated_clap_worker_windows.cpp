@@ -467,8 +467,10 @@ TEST_CASE("Windows isolated CLAP cleanup reaches descendants after leader exit",
         const auto grandchildren = witness.pids("grandchild");
         REQUIRE(children.size() == 1);
         REQUIRE(grandchildren.size() == 1);
-        // Positive control for the liveness probe below.
-        CHECK(live_process(grandchildren[0]));
+        // Positive control for the liveness probe below. An exited leader is
+        // seen by the supervisor, whose cleanup may already have ended both.
+        if (std::string_view(mode) == "descendant")
+            CHECK(live_process(grandchildren[0]));
         buffers.process(*result.slot);
         REQUIRE(buffers.silent());
         const auto cleanup = result.control->stop();
