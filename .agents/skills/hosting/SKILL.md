@@ -1179,9 +1179,13 @@ save/reopen render proof beside the legacy caller-owned route controls.
   writer — audio or control, never concurrent. A `false` return means the live
   node is unavailable or the source was truncated; any retained prefix is
   still published. Publications are latest-wins and one-shot, and sequence
-  wrap skips zero. A gap-free `prepare_swap()` shares the ingress mailbox and
-  consumed sequence for a stable MidiInput NodeId, preserving unconsumed MIDI
-  across the swap. MidiOutput egress remains snapshot-local but uses an ordered,
+  wrap skips zero. A block replaced before any process() read it is lost with
+  both calls returning true; `midi_mailbox_counters()` counts it through
+  `TripleBuffer::write_replacing_unread()`, with the same fields and lifetime
+  as `parameter_mailbox_counters()`. An event there is a short message, SysEx
+  message, UMP packet or MPE expression event. A gap-free `prepare_swap()`
+  shares the ingress mailbox and consumed sequence for a stable MidiInput
+  NodeId, preserving unconsumed MIDI and its counts across the swap. MidiOutput egress remains snapshot-local but uses an ordered,
   fixed four-block SPSC queue: empty blocks cannot overwrite pending output;
   overflow retains the earliest blocks and makes extraction incomplete. When
   the destination lacks short-event, SysEx, or attached UMP-sidecar capacity,
