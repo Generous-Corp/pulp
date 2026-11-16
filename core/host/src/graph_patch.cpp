@@ -613,7 +613,7 @@ std::string GraphPatchCatalog::to_json() const {
 GraphPatchResult parse_graph_patch(std::string_view text, const GraphPatchCatalog& catalog) {
     std::size_t line_number = 0;
     try {
-        if (text.size() > 1024 * 1024)
+        if (text.size() > max_graph_notation_bytes)
             refuse(Code::ResourceLimit, "notation exceeds 1 MiB",
                    "split the patch into smaller graphs");
         auto graph = catalog.make_graph();
@@ -1038,26 +1038,6 @@ GraphPatchResult load_graph_patch_json(std::string_view json, const GraphPatchCa
 }
 GraphPatchResult load_graph_patch_file(const std::filesystem::path& path,
                                        const GraphPatchCatalog& catalog) {
-    std::ifstream file(path, std::ios::binary);
-    if (!file)
-        return {{Code::FileUnreadable,
-                 0,
-                 {},
-                 {},
-                 "cannot read graph file",
-                 "use a readable regular file"},
-                {}};
-    const std::uintmax_t limit =
-        path.extension() == ".pat" ? 1024 * 1024 : GraphSerializer::max_file_bytes;
-    const auto too_large = [] {
-        return GraphPatchResult{{Code::ResourceLimit,
-                                 0,
-                                 {},
-                                 {},
-                                 "graph file exceeds its size limit",
-                                 "use a smaller graph file"},
-                                {}};
-    };
     const auto unreadable = [] {
         return GraphPatchResult{{Code::FileUnreadable,
                                  0,
@@ -1065,6 +1045,20 @@ GraphPatchResult load_graph_patch_file(const std::filesystem::path& path,
                                  {},
                                  "cannot read graph file",
                                  "use a readable regular file"},
+                                {}};
+    };
+    std::ifstream file(path, std::ios::binary);
+    if (!file)
+        return unreadable();
+    const std::uintmax_t limit =
+        path.extension() == ".pat" ? max_graph_notation_bytes : GraphSerializer::max_file_bytes;
+    const auto too_large = [] {
+        return GraphPatchResult{{Code::ResourceLimit,
+                                 0,
+                                 {},
+                                 {},
+                                 "graph file exceeds its size limit",
+                                 "use a smaller graph file"},
                                 {}};
     };
     // Size the buffer from the file instead of zero-filling the whole limit.

@@ -1,0 +1,48 @@
+{
+  "id": "buffered-source-seek-test-producer-race",
+  "title": "Buffered content source seek test waits for its own producer thread instead of racing it",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "44444043-8d30-4ef9-91f9-7e6c272cd5d1",
+  "owned_paths": [
+    "test/test_playback_buffered_content_source.cpp",
+    ".agents/skills/playback/SKILL.md",
+    "docs/status/sequencer-exposure/rows/buffered-source-seek-test-producer-race.json"
+  ],
+  "evidence": [
+    {
+      "path": "test/test_playback_buffered_content_source.cpp",
+      "needles": [
+        "source.stats().ring_available_frames >= kChunkFrames"
+      ]
+    },
+    {
+      "path": ".agents/skills/playback/SKILL.md",
+      "needles": [
+        "also call `pump_background()`"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "This row covers a playback test race fix; it changes no installed SDK surface."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "The buffered-source test is unrelated to timeline editing through the CLI."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation or timeline authority changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No live product control or capability is added."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "A rendering test does not advertise an agent capability."
+    }
+  }
+}

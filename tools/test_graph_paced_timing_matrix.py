@@ -487,6 +487,8 @@ class MissCounterTest(unittest.TestCase):
         late = [(0, 0, period + 1, 1)]
         self.assertEqual(matrix.compute_metrics(late, 48000, 4096)["deadline_misses"], 1)
 
+    @unittest.skipIf(os.environ.get("PULP_SELFTEST_SKIP_WALL_CLOCK") == "1",
+                     "wall-clock case runs in its own performance-labelled entry")
     def test_planted_sleep_must_register_misses_and_control_must_not(self):
         # 4096 frames at 48 kHz is an 85.3 ms period; a 90 ms planted sleep on
         # every second callback overruns exactly those callbacks.
