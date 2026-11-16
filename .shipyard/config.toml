@@ -747,7 +747,8 @@ required_status_checks = [
 #   Vellum trusted freeze                  vellum-trusted-gate.yml
 #   drift-fast                             drift-fast.yml
 #   workflow-lint                          workflow-lint.yml
-#   review-verdict                         review-verdict-merge-group.yml
+#   review-verdict                         review-verdict.yml (pull_request_target),
+#                                          review-verdict-merge-group.yml (merge_group)
 #
 # None of the seven is path-filtered under `pull_request`
 # (`wclap-cloudflare.yml`'s `paths:` sits under `push`, deliberately: a
@@ -763,6 +764,7 @@ workflows = [
     ".github/workflows/vellum-trusted-gate.yml",
     ".github/workflows/drift-fast.yml",
     ".github/workflows/workflow-lint.yml",
+    ".github/workflows/review-verdict.yml",
     ".github/workflows/review-verdict-merge-group.yml",
 ]
 
