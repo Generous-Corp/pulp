@@ -5,11 +5,24 @@
 /// `offer_key` and `focus_changed` as one call each, so an editor does not
 /// decide for itself whether a text field wants a key. Needs `pulp::format-core`
 /// for `editor_host.hpp`.
+///
+/// Only the key and the character the host composed reach the field through
+/// `offer_key`. Option-composed characters, dead keys and input-method text
+/// arrive through the platform's text input, not as an offered key; an editor
+/// whose host offers them must route that text to the surface itself.
 
 #include <pulp/format/editor_host.hpp>
 #include <pulp/rmlui_native/rmlui_surface.hpp>
 
 namespace pulp::rmlui_native {
+
+/// The scalar value of a UTF-16 surrogate pair, for a host that delivers an
+/// astral character (an emoji) as two units; 0 when the pair is not valid.
+inline char32_t combine_utf16(char16_t high, char16_t low) noexcept {
+    if (high < 0xD800 || high > 0xDBFF || low < 0xDC00 || low > 0xDFFF)
+        return 0;
+    return 0x10000 + ((static_cast<char32_t>(high) - 0xD800) << 10) + (low - 0xDC00);
+}
 
 /// The pulp-native key for a contract key, or `Key::unknown`.
 inline pulp::native::Key native_key_for(pulp::format::EditorKey key) noexcept {
@@ -65,7 +78,9 @@ inline pulp::native::KeyEvent native_key_event_for(const pulp::format::EditorKey
         out.modifiers |= pulp::native::modifier_option;
     if (event.modifiers & editor_modifier_command)
         out.modifiers |= pulp::native::modifier_command;
-    if (event.character != 0) {
+    // A lone UTF-16 surrogate is not a scalar value; it would encode as
+    // invalid UTF-8, so it types nothing.
+    if (event.character != 0 && !(event.character >= 0xD800 && event.character <= 0xDFFF)) {
         const char32_t c = event.character;
         if (c < 0x80) {
             out.characters.push_back(static_cast<char>(c));
