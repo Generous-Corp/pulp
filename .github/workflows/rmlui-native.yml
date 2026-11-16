@@ -1,0 +1,97 @@
+name: RmlUi native adapter
+
+# Builds and runs the RmlUi native adapter's surface tests (integrations/
+# rmlui-native, pulp-test-rmlui-native-surface), which no other lane builds:
+# the adapter exists only with PULP_ENABLE_RMLUI_ADAPTER=ON and an installed
+# Vellum RmlUi SDK.
+#
+# Vellum publishes no rmlui SDK artifact yet, so this lane builds Vellum's
+# rmlui/ project at the commit tools/deps/manifest.json pins (vellum-rmlui-sdk)
+# and caches the installed prefix by that commit. When Vellum releases the SDK,
+# pin the artifact and drop the source build.
+#
+# Advisory: it is not a required context. The lane fails when the test program
+# is absent, when a case fails, or when every case skipped (no Metal device).
+# The Metal renderer suite (pulp-test-rmlui-native-metal) is a follow-up.
+
+on:
+  pull_request:
+    paths:
+      - 'integrations/rmlui-native/**'
+      - 'integrations/pulp-native/**'
+      - 'integrations/CMakeLists.txt'
+      - 'test/test_rmlui_native_surface.mm'
+      - 'test/test_native_*.mm'
+      - 'core/format/include/pulp/format/editor_host.hpp'
+      - 'core/format/include/pulp/format/native_surface_host.hpp'
+      - 'core/format/include/pulp/format/contract_editor_session.hpp'
+      - 'core/format/include/pulp/format/detail/appkit_contract_key.hpp'
+      - 'core/format/src/contract_editor_session.cpp'
+      - 'tools/ci/rmlui_native_lane.sh'
+      - 'tools/deps/manifest.json'
+      - '.github/workflows/rmlui-native.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rmlui-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  resolve-advisory-macos:
+    name: Resolve isolated advisory macOS runner
+    runs-on: ubuntu-latest
+    outputs:
+      selector_json: ${{ steps.resolve.outputs.selector_json }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - id: resolve
+        shell: bash
+        env:
+          CONFIGURED_JSON: ${{ vars.PULP_ADVISORY_MACOS_RUNS_ON_JSON }}
+        run: |
+          python3 tools/scripts/resolve_advisory_macos_runner.py \
+            --configured-json "$CONFIGURED_JSON" \
+            --fallback-json '"macos-15"' \
+            --event-name "${{ github.event_name }}"
+
+  rmlui-native:
+    name: RmlUi native adapter tests
+    needs: resolve-advisory-macos
+    # The resolver rejects the required pulp-build* and pulp-preamble* pools;
+    # pull requests stay on the hosted macos-15 fallback, which has Metal.
+    runs-on: ${{ fromJSON(needs.resolve-advisory-macos.outputs.selector_json) }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Read the pinned Vellum commit
+        id: pin
+        run: echo "commit=$(tools/ci/rmlui_native_lane.sh pin)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Vellum RmlUi SDK
+        id: sdk-cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/vellum-rmlui-sdk
+          key: vellum-rmlui-sdk-${{ runner.arch }}-${{ steps.pin.outputs.commit }}-${{ hashFiles('tools/ci/rmlui_native_lane.sh') }}
+
+      - name: Build the Vellum RmlUi SDK
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          vellum="$RUNNER_TEMP/vellum"
+          git init -q "$vellum"
+          git -C "$vellum" remote add origin https://github.com/Generous-Corp/vellum.git
+          git -C "$vellum" fetch -q --depth 1 origin "${{ steps.pin.outputs.commit }}"
+          git -C "$vellum" checkout -q FETCH_HEAD
+          tools/ci/rmlui_native_lane.sh sdk "$vellum" "$RUNNER_TEMP/vellum-rmlui-sdk"
+
+      - name: Fetch external SDKs
+        # Configure requires the VST3 and AudioUnit SDKs even for this adapter.
+        run: ./setup.sh --deps-only
+
+      - name: Build and run the adapter's surface tests
+        run: tools/ci/rmlui_native_lane.sh test "$RUNNER_TEMP/vellum-rmlui-sdk"

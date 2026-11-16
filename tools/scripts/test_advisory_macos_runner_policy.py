@@ -147,6 +147,10 @@ class AdvisoryMacosRunnerPolicyTests(unittest.TestCase):
                 "PULP_ADVISORY_MACOS_RUNS_ON_JSON",
                 ("PULP_LOCAL_MACOS_RUNS_ON_JSON", "PULP_PREAMBLE_RUNS_ON_JSON"),
             ),
+            "rmlui-native.yml": (
+                "PULP_ADVISORY_MACOS_RUNS_ON_JSON",
+                ("PULP_LOCAL_MACOS_RUNS_ON_JSON", "PULP_PREAMBLE_RUNS_ON_JSON"),
+            ),
             "web-plugins.yml": (
                 "PULP_ADVISORY_GPU_MACOS_RUNS_ON_JSON",
                 ("PULP_LOCAL_MACOS_RUNS_ON_JSON", "PULP_PREAMBLE_RUNS_ON_JSON"),

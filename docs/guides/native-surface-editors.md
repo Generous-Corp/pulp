@@ -107,7 +107,9 @@ as a test does after a click.
   windows. They skip, saying so, without one.
 - `pulp-test-rmlui-native-surface` and `pulp-test-rmlui-native-metal` cover the
   RmlUi adapter, including the first-frame preparation. They need an installed
-  Vellum RmlUi SDK and no CI lane builds them yet, so run them locally.
+  Vellum RmlUi SDK. The advisory `rmlui-native` lane builds that SDK from a
+  pinned Vellum commit and runs the surface suite
+  (`tools/ci/rmlui_native_lane.sh`); the Metal suite is run locally.
 - `pulp-test-native-metal-probe` drives the example through the editor-host
   contract, the path every format adapter takes.
 - `native-metal-probe-clap-host` and `native-metal-probe-au-host` load the
