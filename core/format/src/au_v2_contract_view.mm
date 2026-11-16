@@ -158,9 +158,9 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
 // as accepted only when the editor takes the size, the frame ends at exactly
 // that size and origin and, under a host that resizes its enclosing container
 // to match (Logic), the container does too (detail::resize_request_accepted).
-// True always means set_size() followed. Anything else restores the frame in
-// full and tells the editor it kept its previous size; a refused restore
-// leaves the frame at whatever size the editor reports. A size the editor's
+// True always means set_size() followed. Anything else restores the frame's
+// origin and the editor's captured size, then reconciles the frame to whatever
+// size the editor reports, even if it refuses the restore. A size the editor's
 // own limits would change is refused rather than negotiated. Main thread only,
 // and never nested. A frame change the host makes while this runs is swallowed.
 - (bool)requestEditorSize:(const pulp::format::EditorSize&)requested {
@@ -214,16 +214,14 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
         _applyingEditorSize = true;
         [super setFrame:previous];
         _applyingEditorSize = false;
-        if (!_session->set_size(static_cast<std::uint32_t>(previous.size.width),
-                                static_cast<std::uint32_t>(previous.size.height))) {
-            // The editor will not go back to the frame's size: the frame
-            // follows the editor.
-            const auto kept = _session->size();
-            if (kept.width > 0 && kept.height > 0) {
-                _applyingEditorSize = true;
-                [super setFrameSize:NSMakeSize(kept.width, kept.height)];
-                _applyingEditorSize = false;
-            }
+        // A host frame change may have been refused before this request, so
+        // the old frame is not necessarily the editor's original size.
+        _session->set_size(current.width, current.height);
+        const auto kept = _session->size();
+        if (kept.width > 0 && kept.height > 0) {
+            _applyingEditorSize = true;
+            [super setFrameSize:NSMakeSize(kept.width, kept.height)];
+            _applyingEditorSize = false;
         }
     }
     _editorResizeActive = false;

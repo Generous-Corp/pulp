@@ -306,8 +306,11 @@ per plug-in, and the factory class is exported. Things to keep straight:
   editor takes the size and the frame ends at exactly that size
   (`detail::resize_request_accepted()`). Under Logic
   (`logic_au_v2_container_resize`) the enclosing container must have followed
-  too. Otherwise the frame is restored and the editor is told it kept its
-  previous size. The container branch (a host that resizes its container) is
+  too. Otherwise restore the editor's captured pre-request size and the frame's
+  origin, then reconcile the frame to the size the editor reports. Do not use
+  the old frame size to restore the editor: an earlier host resize may have
+  been refused, leaving the frame and editor at different sizes. The container
+  branch (a host that resizes its container) is
   proven only through a test seam, `set_contract_resize_follows_container_for_testing`,
   compiled under `PULP_AU_V2_TEST_HOOKS` and absent from shipped builds
   (`pulp-test-au-v2-contract-shipping`); it has not run in a real Logic host.

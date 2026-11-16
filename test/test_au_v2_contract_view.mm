@@ -707,6 +707,25 @@ TEST_CASE("an AU v2 contract editor's resize request checks the host's container
         REQUIRE(view != nil);
         [still addSubview:view];
         const auto kept = view.frame.size;
+        auto* session = pulp::format::au::contract_view_session(view);
+        REQUIRE(session != nullptr);
+        // The host can shrink the frame below the editor's limits without
+        // changing the editor. A refused request must restore the editor's
+        // captured size, not the mismatched host frame.
+        [view setFrameOrigin:NSMakePoint(7, 9)];
+        [view setFrameSize:NSMakeSize(100, 100)];
+        REQUIRE(view.frame.size.width == 100);
+        REQUIRE(session->size().width == 400);
+        REQUIRE(session->size().height == 300);
+        REQUIRE_FALSE(contract_log().context->request_resize({640, 480, 1.0}));
+        REQUIRE(session->size().width == 400);
+        REQUIRE(session->size().height == 300);
+        REQUIRE(view.frame.size.width == 400);
+        REQUIRE(view.frame.size.height == 300);
+        REQUIRE(view.frame.origin.x == 7);
+        REQUIRE(view.frame.origin.y == 9);
+        REQUIRE(still.frame.size.width == 400);
+        REQUIRE(still.frame.size.height == 300);
         REQUIRE_FALSE(contract_log().context->request_resize({640, 480, 1.0}));
         REQUIRE(view.frame.size.width == kept.width);
         REQUIRE(view.frame.size.height == kept.height);
