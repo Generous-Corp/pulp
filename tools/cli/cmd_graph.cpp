@@ -167,13 +167,21 @@ int probe_graph(const std::vector<std::string>& args) {
     std::ifstream graph_file(args[1], std::ios::binary);
     if (!graph_file)
         return fail(patch_code(Code::FileUnreadable), "graph file is unreadable: " + args[1]);
-    std::string text(1024 * 1024 + 1, '\0');
-    graph_file.read(text.data(), static_cast<std::streamsize>(text.size()));
-    text.resize(static_cast<std::size_t>(graph_file.gcount()));
-    if (graph_file.bad())
+    // The probe shares the reload and notation bound. The buffer is sized from
+    // the file, and the extra byte detects a file that grew while it was read.
+    constexpr auto limit = pulp::host::max_graph_notation_bytes;
+    std::error_code size_error;
+    const auto size = std::filesystem::file_size(args[1], size_error);
+    if (size_error)
         return fail(patch_code(Code::FileUnreadable), "graph file could not be read: " + args[1]);
-    if (text.size() > 1024 * 1024)
-        return fail("graph_file_limit", "probe admits graph files no larger than 1 MiB");
+    if (size > limit)
+        return fail("graph_file_limit",
+                    "probe admits graph files no larger than " + std::to_string(limit) + " bytes");
+    std::string text(static_cast<std::size_t>(size) + 1, '\0');
+    graph_file.read(text.data(), static_cast<std::streamsize>(text.size()));
+    if (graph_file.bad() || static_cast<std::uintmax_t>(graph_file.gcount()) != size)
+        return fail(patch_code(Code::FileUnreadable), "graph file could not be read: " + args[1]);
+    text.resize(static_cast<std::size_t>(size));
     try {
         const auto document = choc::json::parse(text);
         const auto nodes = document["nodes"];

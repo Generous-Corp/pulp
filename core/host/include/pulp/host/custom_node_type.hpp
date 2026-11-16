@@ -413,17 +413,11 @@ struct SampleKernelDescriptor {
 // transport seek: the type has a reset and declares an rt_contract whose
 // safety class admits the audio callback. Every other type keeps its state
 // across a seek, because an undeclared reset may allocate or lock.
+// The class test is the audio module's exhaustive classifier, so a new safety
+// class is decided there once.
 inline bool custom_node_reset_runs_on_audio_thread(const CustomNodeType& type) noexcept {
-    if (!type.reset || !type.rt_contract.declared)
-        return false;
-    switch (type.rt_contract.safety_class) {
-    case audio::RtSafetyClass::AudioCallbackSafe:
-    case audio::RtSafetyClass::AudioCallbackSafeAfterPrepare:
-    case audio::RtSafetyClass::AudioCallbackSafeWithImmutableInputs:
-        return true;
-    default:
-        return false;
-    }
+    return type.reset && type.rt_contract.declared &&
+           audio::rt_safety_class_is_audio_dsp_safe(type.rt_contract.safety_class);
 }
 
 // Validates the runtime non-aliasing precondition before invoking a scalar

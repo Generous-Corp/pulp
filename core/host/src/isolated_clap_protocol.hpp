@@ -93,4 +93,18 @@ inline bool valid_block(const Block& block, std::uint64_t generation,
            block.result == BlockResult::ok && block.reserved == 0;
 }
 
+/// The hello contract on the parent side, shared by every transport: the reply
+/// must echo every binding field the parent sent, with the worker's own process
+/// id and a mapping of exactly kMappingBytes.
+inline bool hello_reply_matches(const ControlRecord& sent, const ControlRecord& reply,
+                                std::uint64_t process_id) noexcept {
+    return reply.command == Command::hello && reply.result == 1 &&
+           reply.generation == sent.generation && reply.process_id == process_id &&
+           reply.payload_bytes == kMappingBytes && reply.payload_bytes == sent.payload_bytes &&
+           reply.volume == sent.volume && reply.file == sent.file &&
+           reply.file_generation == sent.file_generation &&
+           reply.plugin_sha256 == sent.plugin_sha256 && reply.worker_sha256 == sent.worker_sha256 &&
+           reply.build == sent.build;
+}
+
 } // namespace pulp::host::isolation
