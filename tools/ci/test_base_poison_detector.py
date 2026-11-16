@@ -504,7 +504,11 @@ CONTEXT_WORKFLOW = {
     "workflow-lint": ".github/workflows/workflow-lint.yml",
     "review-verdict": ".github/workflows/review-verdict-merge-group.yml",
 }
-WORKFLOWS = tuple(dict.fromkeys(CONTEXT_WORKFLOW.values()))
+# `review-verdict` has two producers, one per event: the pull request head's
+# status comes from review-verdict.yml, the merge group's from the other.
+WORKFLOWS = tuple(
+    dict.fromkeys([*CONTEXT_WORKFLOW.values(), ".github/workflows/review-verdict.yml"])
+)
 ALL_GREEN = {name: "success" for name in FULL_CONTRACT}
 
 # A real `ctest-logs-macos` member: merge_group run 36545528395 (2026-09-29),
