@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <future>
 #include <map>
 #include <memory>
@@ -262,13 +263,21 @@ template <class EditorType> struct DrawCleanup {
 };
 
 bool metal_available() {
+    // The CI lane's negative control: pretend there is no device.
+    if (std::getenv("PULP_FORCE_NO_METAL") != nullptr)
+        return false;
     return MTLCreateSystemDefaultDevice() != nil;
 }
 
+// With PULP_REQUIRE_METAL set (the CI lane sets it), a missing device is a
+// failure, so a runner without Metal cannot turn the whole suite into skips.
 #define REQUIRE_METAL()                                                                            \
     do {                                                                                           \
-        if (!metal_available())                                                                    \
+        if (!metal_available()) {                                                                  \
+            if (std::getenv("PULP_REQUIRE_METAL") != nullptr)                                      \
+                FAIL("no Metal device, and PULP_REQUIRE_METAL is set");                            \
             SKIP("no Metal device on this host; RmlUi on the native surface was not exercised");   \
+        }                                                                                          \
     } while (0)
 
 } // namespace

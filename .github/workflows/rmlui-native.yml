@@ -11,7 +11,9 @@ name: RmlUi native adapter
 # pin the artifact and drop the source build.
 #
 # Advisory: it is not a required context. The lane fails when the test program
-# is absent, when a case fails, or when every case skipped (no Metal device).
+# is absent, when a case fails, or when any case skipped (PULP_REQUIRE_METAL
+# turns a missing Metal device into a failure, and a negative control proves
+# it). Whether the hosted macos-15 runner has a Metal device is unverified.
 # The Metal renderer suite (pulp-test-rmlui-native-metal) is a follow-up.
 
 on:
@@ -20,6 +22,9 @@ on:
       - 'integrations/rmlui-native/**'
       - 'integrations/pulp-native/**'
       - 'integrations/CMakeLists.txt'
+      - 'CMakeLists.txt'
+      - 'setup.sh'
+      - 'tools/ci/governed-build.sh'
       - 'test/test_rmlui_native_surface.mm'
       - 'test/test_native_*.mm'
       - 'core/format/include/pulp/format/editor_host.hpp'
@@ -61,22 +66,26 @@ jobs:
     name: RmlUi native adapter tests
     needs: resolve-advisory-macos
     # The resolver rejects the required pulp-build* and pulp-preamble* pools;
-    # pull requests stay on the hosted macos-15 fallback, which has Metal.
+    # pull requests stay on the hosted macos-15 fallback. Whether that runner
+    # provides a Metal device is unverified; the lane sets PULP_REQUIRE_METAL so
+    # that without one it fails instead of skipping.
     runs-on: ${{ fromJSON(needs.resolve-advisory-macos.outputs.selector_json) }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7.0.1
 
-      - name: Read the pinned Vellum commit
+      - name: Read the pinned Vellum commit and the SDK cache key
         id: pin
-        run: echo "commit=$(tools/ci/rmlui_native_lane.sh pin)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "commit=$(tools/ci/rmlui_native_lane.sh pin)" >> "$GITHUB_OUTPUT"
+          echo "key=$(tools/ci/rmlui_native_lane.sh sdk-key)" >> "$GITHUB_OUTPUT"
 
       - name: Restore the Vellum RmlUi SDK
         id: sdk-cache
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/vellum-rmlui-sdk
-          key: vellum-rmlui-sdk-${{ runner.arch }}-${{ steps.pin.outputs.commit }}-${{ hashFiles('tools/ci/rmlui_native_lane.sh') }}
+          key: vellum-rmlui-sdk-${{ runner.arch }}-${{ steps.pin.outputs.key }}
 
       - name: Build the Vellum RmlUi SDK
         if: steps.sdk-cache.outputs.cache-hit != 'true'
@@ -89,9 +98,20 @@ jobs:
           git -C "$vellum" checkout -q FETCH_HEAD
           tools/ci/rmlui_native_lane.sh sdk "$vellum" "$RUNNER_TEMP/vellum-rmlui-sdk"
 
+      # Saved right after the build, so a red test step does not repeat it.
+      - name: Save the Vellum RmlUi SDK
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ runner.temp }}/vellum-rmlui-sdk
+          key: vellum-rmlui-sdk-${{ runner.arch }}-${{ steps.pin.outputs.key }}
+
       - name: Fetch external SDKs
         # Configure requires the VST3 and AudioUnit SDKs even for this adapter.
         run: ./setup.sh --deps-only
 
       - name: Build and run the adapter's surface tests
         run: tools/ci/rmlui_native_lane.sh test "$RUNNER_TEMP/vellum-rmlui-sdk"
+
+      - name: Negative control (the lane must go red without Metal)
+        run: tools/ci/rmlui_native_lane.sh negative-control
