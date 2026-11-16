@@ -11,6 +11,7 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/host/graph_file_reload.hpp>
 #include <pulp/host/signal_graph_control.hpp>
+#include <pulp/inspect/control_manifest.hpp>
 #include <pulp/inspect/control_signal_graph_executor.hpp>
 #include <semaphore>
 #include <thread>
@@ -658,8 +659,11 @@ TEST_CASE("Graph file executor shares typed refusal and numeric publication with
             return ++checkpoints == 1 ? pulp::inspect::ControlExecutionCheckpoint::Continue
                                       : pulp::inspect::ControlExecutionCheckpoint::Cancelled;
         };
-        REQUIRE(executor(plan, request(patch(0.75f), 0), context).terminal_state ==
-                pulp::inspect::ControlReceiptState::Failed);
+        const auto cancelled = executor(plan, request(patch(0.75f), 0), context);
+        REQUIRE(cancelled.terminal_state == pulp::inspect::ControlReceiptState::Failed);
+        // Not a refusal of the file: no typed detail, so the watch resends it.
+        REQUIRE(cancelled.result.result_code == pulp::inspect::ControlResultCode::Cancelled);
+        REQUIRE(cancelled.result.detail_json == "{}");
         REQUIRE(authority.generation() == 0);
         REQUIRE(GraphSerializer::to_json(*graph) == before);
         audio_is(*graph, 0.125f);
@@ -675,8 +679,13 @@ TEST_CASE("Graph file executor shares typed refusal and numeric publication with
             return ++checkpoints == 1 ? pulp::inspect::ControlExecutionCheckpoint::Continue
                                       : refusal;
         };
-        REQUIRE(executor(plan, request(patch(0.75f), 0), context).terminal_state ==
-                pulp::inspect::ControlReceiptState::Failed);
+        const auto stopped = executor(plan, request(patch(0.75f), 0), context);
+        REQUIRE(stopped.terminal_state == pulp::inspect::ControlReceiptState::Failed);
+        REQUIRE(stopped.result.result_code ==
+                (refusal == pulp::inspect::ControlExecutionCheckpoint::DeadlineExceeded
+                     ? pulp::inspect::ControlResultCode::DeadlineExceeded
+                     : pulp::inspect::ControlResultCode::Cancelled));
+        REQUIRE(stopped.result.detail_json == "{}");
         REQUIRE(authority.generation() == 0);
         REQUIRE(GraphSerializer::to_json(*graph) == before);
         audio_is(*graph, 0.125f);
@@ -811,4 +820,28 @@ TEST_CASE("Baseline alias defenses preserve lifecycle across both preparation mo
     REQUIRE(baseline.releases == 0);
     REQUIRE(GraphSerializer::to_json(graph) == before);
     audio_is(graph, 0.125f);
+}
+
+TEST_CASE("Graph file reload receipt schema lists exactly the reload code names",
+          "[host][graph-file-reload][executor]") {
+    const auto* descriptor =
+        pulp::inspect::resolve_control_operation("dev.pulp.graph/file.reload@1", 1);
+    REQUIRE(descriptor != nullptr);
+    const auto schema = choc::json::parse(descriptor->output_schema_json);
+    const auto values = schema["properties"]["code"]["enum"];
+    std::vector<std::string> documented;
+    for (std::uint32_t i = 0; i < values.size(); ++i)
+        documented.emplace_back(values[i].getString());
+    std::vector<std::string> emitted;
+    for (const auto code :
+         {GraphFileReloadCode::Prepared, GraphFileReloadCode::Committed,
+          GraphFileReloadCode::InvalidDocument, GraphFileReloadCode::UnsupportedContract,
+          GraphFileReloadCode::InvalidMutation, GraphFileReloadCode::PrepareFailed,
+          GraphFileReloadCode::StaleBase, GraphFileReloadCode::CommitFailed})
+        emitted.emplace_back(graph_file_reload_code_name(code));
+    // Control: the schema enum was found and is not empty.
+    REQUIRE(documented.size() == 8);
+    std::sort(documented.begin(), documented.end());
+    std::sort(emitted.begin(), emitted.end());
+    REQUIRE(documented == emitted);
 }

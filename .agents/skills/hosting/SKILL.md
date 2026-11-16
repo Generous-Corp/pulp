@@ -77,6 +77,19 @@ check in `test_isolated_clap_worker.cpp` fails. A refusal must keep the live
 snapshot; `fail_swap_edit_locked_` would silence the whole graph. Checkpoint
 before the node renders: `pause()` is terminal while a graph still renders it.
 
+**Every unsupported proxy call is terminal, so generic graph code must not make
+one.** The isolated slot answers `save_state()`, `set_parameter()` and similar
+calls by latching `unsupported` silence. Generic `SignalGraph` and
+`GraphSerializer` paths therefore check `is_isolated_plugin_slot` before
+forwarding: serialization refuses the whole graph (an identity-only file would
+reload the plugin in-process) and `set_node_parameter` returns false. A new
+generic path that calls into a plugin slot needs the same check.
+
+**The callback reads a completion once.** `CallbackEndpoint::render` copies the
+completion block out of the shared mapping before validating it and emits from
+that copy; reading the mapping twice lets a worker swap in non-finite samples
+after the check.
+
 
 ## Live retuning at a callback boundary
 
@@ -2126,6 +2139,16 @@ Keep these host graph invariants covered by tests:
   rather than memset'ing with a wrapped size_t.
 - MidiInput nodes' `midi_out` is drained at the END of `process()`, not
   the start. Hosts call `inject_midi()` before each `process()` to refill.
+- A routed `ProcessorNode` block always carries a main input bus, even for
+  a Processor that declares none, so a no-input instrument fits at most 15
+  output buses in `BusBufferSet::kMaxBuses`. `prepare()` and
+  `routed_output_channels()` must reserve that slot together, or the port
+  count promises a bus that fails every block.
+- A spectral `.pulpgraph` is admitted against the 64 MiB bank at a block
+  size, and frame edges grow with the block. Saving admits at the block the
+  graph is prepared for; loading admits at the destination's
+  `GraphLimits::max_block_size` (both at most 4096). A graph that fits only
+  at small blocks loads only into a destination whose limits name that block.
 
 ## PluginManagerPanel
 

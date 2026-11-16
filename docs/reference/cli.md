@@ -1518,10 +1518,14 @@ loader and to the CLI and requires identical names.
 | `ParameterOutOfRange`, `RestoreFailed`, `ResourceLimit` | Value, state restore or size limit refusal |
 | `FileUnreadable` | The file is missing or cannot be read |
 
+A file over the 64 MiB graph limit is `ResourceLimit` for every subcommand that
+loads it (`validate`, `inspect`, `fmt`, `render`, `report` and `diff`).
+
 CLI-only codes (no C++ diagnostic equivalent) cover option handling, probe and
 render preconditions, and saving: `missing_option`, `invalid_option`,
 `missing_input`, `missing_output`, `unknown_operation`, `invalid_block_frames`,
-`graph_file_limit`, `graph_limit`, `unsupported_node`, `unresolved_node`,
+`graph_file_limit` (a probe graph file over 1 MiB; a missing or unreadable
+probe file is `FileUnreadable`), `graph_limit`, `unsupported_node`, `unresolved_node`,
 `ambiguous_node`, `prepare_failed`, `render_failed`, `non_finite_output`,
 `output_failed`, and `saved`. The probe adds `invalid_edge_kind`, `unknown_node`
 (a probe source or destination name that does not exist; distinct from the
@@ -1534,9 +1538,7 @@ requires every code the CLI source emits through `fail(...)`, `json_error(...)`,
 `code = ...` or the probe refusal table to appear in this list. Save failures use
 `GraphSerializer::save_code_name` (`serialization_refused`, `file_too_large`,
 `parent_unavailable`, `temporary_unavailable`, `write_failed`, `replace_failed`,
-`directory_sync_failed`). The earlier CLI-only spellings `invalid_graph`,
-`file_unreadable` and lowercase `ok` for graph files are retired: the in-tree
-consumers (this repository's tests) moved to the typed names.
+`directory_sync_failed`).
 
 `pulp graph save INPUT --output OUTPUT --json` loads a graph through the same
 bounded serializer and writes a canonical copy without modifying the input.

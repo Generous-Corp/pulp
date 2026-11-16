@@ -789,6 +789,11 @@ that check runs before `has_editor()`. Things to keep straight:
   alive), then destroy, because the editor's factory belongs to the processor
   about to be reset. `invalidate()` is only for a parent that is already gone.
   Do not move that call after `processor_.reset()`.
+- `IPlugViewContentScaleSupport` exists only on `ContractPlugView`;
+  `PulpPlugView` (the ViewBridge view) does not implement it. Neither view's
+  `attached()`/`removed()` call `visibility_changed`, so the native-surface
+  extension reports visibility unknown on VST3 until a surface polls it.
+  RmlUi and native-surface editors reach VST3 through `ContractPlugView`.
 - `onKeyDown` returns `kResultFalse` for a forwarded key, which is how Space
   stays the host's transport key. Return `kResultTrue` only for `consumed`.
 - VST3 has no idle callback, so the view ticks `Editor::idle()` itself from a
