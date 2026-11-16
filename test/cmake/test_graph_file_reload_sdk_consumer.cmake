@@ -53,26 +53,18 @@ endforeach()
 file(MAKE_DIRECTORY "${_source}/../graph-patch-consumer")
 configure_file("${PULP_SOURCE_DIR}/examples/graph-patch-consumer/hello.hpp"
     "${_source}/../graph-patch-consumer/hello.hpp" COPYONLY)
-# Installed static libraries from an instrumented producer reference the
-# sanitizer runtime, so the consumer compiles and links with the producer's
-# flags, build type, and sanitizer selection.
-set(_args -S "${_source}" -B "${_build}" -G Ninja
+# An instrumented producer (sanitizer or coverage) installs static libraries
+# that reference its runtime, so the consumer must compile and link with the
+# same instrumentation.
+set(_configure_args -S "${_source}" -B "${_build}" -G Ninja
     "-DPulp_DIR=${_prefix}/lib/cmake/Pulp" "-DCMAKE_PREFIX_PATH=${_prefix}"
-    "-DCMAKE_BUILD_TYPE=${_config}"
-    "-DCMAKE_CXX_COMPILER=${PULP_PARENT_CXX_COMPILER}"
+    -DCMAKE_BUILD_TYPE=Release "-DCMAKE_CXX_COMPILER=${PULP_PARENT_CXX_COMPILER}"
     "-DCMAKE_CXX_FLAGS=${PULP_PARENT_CXX_FLAGS} ${PULP_PARENT_INSTRUMENTATION_CXX_FLAGS}"
     "-DCMAKE_EXE_LINKER_FLAGS=${PULP_PARENT_EXE_LINKER_FLAGS} ${PULP_PARENT_INSTRUMENTATION_LINKER_FLAGS}")
-string(TOLOWER "${_config}" _config_lower)
-if(_config_lower STREQUAL "debug")
-    list(APPEND _args -DPULP_ALLOW_DEBUG_SDK=ON)
-endif()
 if(PULP_PARENT_SANITIZER)
-    list(APPEND _args "-DPULP_SANITIZER=${PULP_PARENT_SANITIZER}")
+    list(APPEND _configure_args "-DPULP_SANITIZER=${PULP_PARENT_SANITIZER}")
 endif()
-if(PULP_PARENT_OSX_ARCHITECTURES)
-    list(APPEND _args "-DCMAKE_OSX_ARCHITECTURES=${PULP_PARENT_OSX_ARCHITECTURES}")
-endif()
-run_step(configure "${CMAKE_COMMAND}" ${_args})
+run_step(configure "${CMAKE_COMMAND}" ${_configure_args})
 run_step(build "${CMAKE_COMMAND}" -E env PULP_BUILD_JOBS=1 bash
     "${PULP_SOURCE_DIR}/tools/ci/governed-build.sh" "${CMAKE_COMMAND}" --build "${_build}")
 run_step(consumer "${_build}/graph-file-reload-consumer" "${_fixture}/live.pat")

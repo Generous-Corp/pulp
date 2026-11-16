@@ -416,7 +416,10 @@ commands:
         description: "Emit machine-readable result and error codes. For graph and notation files the code is the C++ GraphPatchDiagnostic name (Ok, SyntaxError, UnknownNode, UnknownPort, KindMismatch, IllegalCycle, Duplicate, InvalidDocument, UnsupportedContract, ParameterOutOfRange, RestoreFailed, ResourceLimit, FileUnreadable); CLI-only codes (missing_option, invalid_option, missing_input, probe/render/save codes) are listed in reference/cli.md#graph"
       - name: --output
         kind: option
-        description: Write the offline render to a float WAV file at the render's sample rate
+        description: "render: write the offline render to a float WAV file at the render's sample rate. save (required): the path the graph document is written to"
+      - name: --saved-identity
+        kind: flag
+        description: "save only: write the saved-identity v6 envelope that graph diff reads; a plain input whose connections did not all restore is refused (InvalidDocument, connection_not_restored). Saved-identity inputs keep the envelope on save, fmt and canonicalize without the flag"
       - name: --input
         kind: option
         description: Audio input WAV for probe (required) and render (required when the graph has an audio_in node, otherwise refused with missing_input); render takes its sample rate, channel count and length from this file

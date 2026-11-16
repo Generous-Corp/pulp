@@ -8901,6 +8901,7 @@ tests = [
   "control-product-b-absence",
   "control-product-b-absence-selftest",
   "control-product-b-rust-cli-absence",
+  "cutover-trial-selftest",
   "decisions-contract-selftest",
   "decisions-contract-validate",
   "deferred-admission-selftest",

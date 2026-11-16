@@ -202,7 +202,13 @@ bool gui_adjust_size(const clap_plugin_t* plugin, uint32_t* width, uint32_t* hei
 
 bool gui_set_size(const clap_plugin_t* plugin, uint32_t width, uint32_t height) {
     auto* session = session_of(plugin);
-    return session != nullptr && session->set_size(width, height);
+    if (session == nullptr)
+        return false;
+    // A host may call set_size without adjust_size first. The editor takes a
+    // size inside its limits and aspect; once the host's sizes settle the
+    // session asks the host for that size back (request_resize).
+    bool snapped = false;
+    return session->set_host_size(width, height, snapped);
 }
 
 bool gui_set_parent(const clap_plugin_t* plugin, const clap_window_t* window) {

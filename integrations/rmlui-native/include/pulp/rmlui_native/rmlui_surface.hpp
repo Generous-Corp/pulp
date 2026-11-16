@@ -20,8 +20,8 @@
 /// The main thread does not wait for a frame to deliver pointer or wheel
 /// input or to run `idle()`. When the render thread holds the lock, pointer
 /// and wheel events are queued (consecutive moves and wheel deltas merge) and
-/// applied, in order and on the main thread, within about a millisecond of the
-/// frame ending. Their listeners therefore run on the main thread, a moment
+/// applied, in order and on the main thread, after the
+/// frame ends. Their listeners therefore run on the main thread, a moment
 /// later than the event. `with_context()`, key and text input apply anything
 /// queued first, so they always see earlier events' effects; they, and
 /// `flush_input()`, do wait for a frame.
@@ -47,6 +47,17 @@ class AssetProvider;
 }
 
 namespace pulp::rmlui_native {
+
+/// Whether this build tells RmlUi the backing scale as its density ratio, so a
+/// length in `dp` is one point. False when the Vellum RmlUi SDK it was built
+/// against has no `set_density_ratio`: `dp` then equals `px`, and a document
+/// sized in `dp` renders at 1/scale of its intended size on a 2x display.
+/// The first `attach()` with this false reports it through the diagnostic sink, once per process (setting a new sink re-arms it).
+bool density_ratio_supported() noexcept;
+
+/// Where the adapter's diagnostics go. Default: standard error. Pass an empty
+/// function to restore it. Call from the main thread, before attaching.
+void set_diagnostic_sink(std::function<void(const std::string&)> sink);
 
 /// The lock every RmlUi call in this binary takes.
 std::mutex& rmlui_mutex();
@@ -106,9 +117,17 @@ class RmlUiSurface {
 
     /// Main-thread tick: visibility and size follow the window.
     void idle();
+    /// The density ratio RmlUi was given: the backing scale when
+    /// `density_ratio_supported()`, otherwise 1, and 1 while detached. `px` lengths are always
+    /// device pixels; `dp` lengths are `density_ratio()` device pixels. Main
+    /// thread.
+    double density_ratio() const noexcept;
     /// Apply pointer and wheel events that were queued behind a frame, now,
     /// waiting for the frame if one is in flight. Main thread.
     void flush_input();
+    /// Pointer and wheel events queued behind a frame so far (merged events
+    /// count once each as they arrived). For tests and diagnostics.
+    std::uint64_t queued_inputs() const noexcept;
     /// Draw one more frame (after a change the caller made through RmlUi).
     void request_frame();
 

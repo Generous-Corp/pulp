@@ -909,6 +909,11 @@ resolution both ways (over-dirty and under-dirty) and confirm it goes red.
   -fno-rtti` and `PULP_COMPILE_EXECUTOR_DISABLE_THREADS=1`, and swept into both
   wasm lanes by the closure gate. Anything that owns a `std::thread` or throws
   belongs in a header or a sibling module, not in `src/`.
+- A `BufferedContentSource` test with `start_background_thread = true` must not
+  also call `pump_background()`: the owned producer thread may have refilled the
+  ring first, so the call returns 0 and the assertion races the thread. Wait
+  (bounded) on `stats().ring_available_frames` instead, or leave the thread off
+  and drive `pump_background()` alone.
 
 ## Publishing a program across a realm boundary
 

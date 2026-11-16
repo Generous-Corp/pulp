@@ -2,6 +2,7 @@
 #pragma once
 #include "isolated_clap_protocol.hpp"
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <type_traits>
 #include <pulp/host/isolated_plugin_slot.hpp>
@@ -43,6 +44,9 @@ class CallbackEndpoint {
             if (entry_state != 1)
                 return IsolationReason::invalid_completion;
             block = completion->block;
+            // Compiler barrier: every later read of the completion uses the
+            // private copy, never a second load from the shared mapping.
+            std::atomic_signal_fence(std::memory_order_seq_cst);
             if (!valid_block(block, generation, sequence_ - 1))
                 return block.result == BlockResult::plugin_error
                            ? IsolationReason::plugin_failed
