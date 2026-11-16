@@ -3545,3 +3545,20 @@ indices, internal edges, parameter set and bounds), and any mismatch clears
 the graph. Bounds and Processor targets always come from the template, so a
 document cannot widen them. `inspect_document` refuses dangling or shared
 members and records outside the v6 envelope, without needing templates.
+
+Saved identity strictness: `inspect_document`, `diff_graph_documents` and
+`from_saved_document` rebuild each node's identity string from its saved record
+(numbered by persisted node id, as the writer does) and refuse a mismatch as
+`identity_binding_unknown`, so an edited identity string cannot bind a node it
+was not written for. A custom node's missing `version` means 1 and a value
+below 1 is refused; the writer records a version below 1 as 1. A spectral graph
+that cannot be saved reports the failing rule through `SaveResult::error`
+(`to_saved_file` refuses it with that reason); the older string-returning
+writer overloads keep returning an empty string. The writer and inspection
+build identity strings through one key function (`identity_key` in
+`graph_serializer.cpp`); change the format there, never in only one side, or
+every saved document is refused. The tolerant loader drops a node record it
+cannot add (a second Control index input, a plugin record without plugin info)
+and lists it in `LoadResult::unrestored_node_ids`; `from_saved_document` and
+the CLI rewrites (`save`, `fmt`, `canonicalize`) refuse such a document as
+`node_not_restored` rather than write a file that silently lost the node.

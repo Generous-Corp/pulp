@@ -631,6 +631,30 @@ TEST_CASE("AU v2 reports a refused editor resize request and leaves the frame al
     g_instance = nullptr;
 }
 
+TEST_CASE("AppKit key events carry an astral character whole and drop a lone surrogate",
+          "[auv2][editor-host][au-contract]") {
+    using pulp::format::au::contract_key_event;
+    // U+1F600 arrives from AppKit as a UTF-16 pair.
+    NSString* emoji = @"\U0001F600";
+    REQUIRE(emoji.length == 2);
+    REQUIRE(contract_key_event(0, emoji, 0, true, false).character == char32_t{0x1F600});
+    // A high surrogate with no low one, a low one alone, and a reversed pair
+    // are not scalar values: they type nothing.
+    const unichar high = 0xD83D;
+    const unichar low = 0xDE00;
+    REQUIRE(contract_key_event(0, [NSString stringWithCharacters:&high length:1], 0, true, false)
+                .character == 0);
+    REQUIRE(contract_key_event(0, [NSString stringWithCharacters:&low length:1], 0, true, false)
+                .character == 0);
+    const unichar reversed[2] = {low, high};
+    REQUIRE(contract_key_event(0, [NSString stringWithCharacters:reversed length:2], 0, true, false)
+                .character == 0);
+    // A high surrogate followed by a non-surrogate is dropped too.
+    const unichar broken[2] = {high, u'a'};
+    REQUIRE(contract_key_event(0, [NSString stringWithCharacters:broken length:2], 0, true, false)
+                .character == 0);
+}
+
 TEST_CASE("an AU v2 contract editor's resize request is guarded and rolled back when refused",
           "[auv2][editor-host][au-contract][resize-request]") {
     EditorEnvironment env;

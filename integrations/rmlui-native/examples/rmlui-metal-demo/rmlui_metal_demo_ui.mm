@@ -3,6 +3,7 @@
 #include "rmlui_metal_demo_processor.hpp"
 
 #include <pulp/format/editor_host.hpp>
+#include <pulp/rmlui_native/editor_keys.hpp>
 #include <pulp/rmlui_native/metal_renderer.hpp>
 #include <pulp/rmlui_native/rmlui_surface.hpp>
 
@@ -102,6 +103,14 @@ class Editor final : public ::pulp::format::Editor {
     void idle() override {
         if (ui_)
             ui_->idle();
+    }
+    void focus_changed(bool focused) override {
+        if (ui_)
+            ::pulp::rmlui_native::forward_editor_focus(*ui_, focused);
+    }
+    ::pulp::format::KeyDisposition offer_key(const ::pulp::format::EditorKeyEvent& event) override {
+        return ui_ ? ::pulp::rmlui_native::offer_editor_key(*ui_, event)
+                   : ::pulp::format::KeyDisposition::forward;
     }
 
   private:
