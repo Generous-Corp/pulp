@@ -677,7 +677,7 @@ static bool g_container_shifts_origin = false;
 - (void)subviewResized:(NSNotification*)note {
     NSView* subview = note.object;
     [self setFrameSize:subview.frame.size];
-    if (g_container_shifts_origin && subview.frame.origin.x == 0)
+    if (g_container_shifts_origin && subview.frame.size.width == 640)
         [subview setFrameOrigin:NSMakePoint(5, 0)];
 }
 - (void)dealloc {
