@@ -629,8 +629,9 @@ TEST_CASE("AppKit key events map to the contract's key events",
                 .character == 0);
 }
 
-TEST_CASE("an AU v2 contract editor's resize request is not accepted just because the frame matches",
-          "[auv2][editor-host][au-contract][resize-request]") {
+TEST_CASE(
+    "an AU v2 contract editor's resize request is not accepted just because the frame matches",
+    "[auv2][editor-host][au-contract][resize-request]") {
     EditorEnvironment env;
     reset_contract_recording();
     FakeInstance instance(true);
@@ -686,7 +687,8 @@ static bool g_container_shifts_origin = false;
 }
 @end
 
-TEST_CASE("an AU v2 contract editor's resize request checks the host's container when the host follows it",
+TEST_CASE("an AU v2 contract editor's resize request checks the host's container when the host "
+          "follows it",
           "[auv2][editor-host][au-contract][resize-request]") {
     EditorEnvironment env;
     reset_contract_recording();

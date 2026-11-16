@@ -167,8 +167,8 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
     if (_session->resizable()) {
         auto limited_width = request_width;
         auto limited_height = request_height;
-        if (!_session->constrain(limited_width, limited_height) ||
-            limited_width != request_width || limited_height != request_height)
+        if (!_session->constrain(limited_width, limited_height) || limited_width != request_width ||
+            limited_height != request_height)
             return false;
     }
     const FrameSize wanted{static_cast<double>(request_width), static_cast<double>(request_height)};
@@ -195,8 +195,8 @@ EditorKeyEvent contract_key_event(unsigned short key_code, NSString* characters,
         container != nil && self.window != nil,
         {after_container.size.width, after_container.size.height});
     if (accepted && follow_container && container != nil && self.window != nil)
-        accepted = pulp::format::detail::same_frame_origin(
-            {after.origin.x, after.origin.y}, {previous.origin.x, previous.origin.y});
+        accepted = pulp::format::detail::same_frame_origin({after.origin.x, after.origin.y},
+                                                           {previous.origin.x, previous.origin.y});
     if (!accepted) {
         // Restore the host-owned parent first, then this view, so the parent's
         // autoresizing mask cannot move an already-restored child twice.
