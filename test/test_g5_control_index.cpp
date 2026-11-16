@@ -1219,6 +1219,55 @@ TEST_CASE("a seek resets a stateful Control node on a graph with no event lane",
     CHECK(render_laneless(graph, steps, seek) == fresh);
 }
 
+TEST_CASE("a negative seek on a graph with no event lane fails closed without a reset",
+          "[graph][control-index][negative-control]") {
+    SignalGraph graph;
+    const auto integrator_type = make_control_integrator_type();
+    REQUIRE(graph.register_custom_node_type(integrator_type));
+    REQUIRE(graph.register_custom_node_type(make_audio_to_control_type()));
+    REQUIRE(graph.register_custom_node_type(make_control_to_audio_type()));
+    const auto audio = graph.add_input_node(1);
+    const auto to_control = graph.add_custom_node("pulp.test.audio-to-control");
+    const auto integrator = graph.add_custom_node(integrator_type.type_id);
+    const auto to_audio = graph.add_custom_node("pulp.test.control-to-audio");
+    const auto sink = graph.add_output_node(1);
+    REQUIRE((to_control != 0 && integrator != 0 && to_audio != 0));
+    REQUIRE(graph.connect(audio, 0, to_control, 0));
+    REQUIRE(graph.connect(graph.node(to_control)->out("value"),
+                          graph.node(integrator)->in(integrator_type.input_ports.front().name)));
+    REQUIRE(graph.connect(graph.node(integrator)->out("value"), graph.node(to_audio)->in("value")));
+    REQUIRE(graph.connect(to_audio, 0, sink, 0));
+    const std::array<float, 3> range{0.0f, 10.0f, 0.0f};
+    REQUIRE(graph.set_custom_node_state(integrator, make_control_scalar_state(range)));
+    REQUIRE(graph.prepare(48000, 4));
+    REQUIRE_FALSE(graph.control_index_position().bound);
+
+    const std::vector<float> steps(4, 0.25f);
+    const std::vector<float> fresh{0.25f, 0.5f, 0.75f, 1.0f};
+    pulp::format::ProcessContext playing;
+    playing.position_samples = 0;
+    REQUIRE(render_laneless(graph, steps, playing) == fresh);
+    playing.position_samples = 4;
+    REQUIRE(render_laneless(graph, steps, playing).back() == 2.0f);
+
+    // A reset to a negative position is out of range: the block is silent and
+    // the integrator keeps the 2.0 it reached, so the next block continues it.
+    pulp::format::ProcessContext bad_seek;
+    bad_seek.reset_requested = true;
+    bad_seek.position_samples = -4;
+    REQUIRE(bad_seek.should_reset_stream_history());
+    CHECK(render_laneless(graph, steps, bad_seek) == std::vector<float>(4, 0.0f));
+    playing.position_samples = 8;
+    CHECK(render_laneless(graph, steps, playing).front() == 2.25f);
+
+    // Control: a seek to a non-negative position still restarts the node.
+    pulp::format::ProcessContext seek;
+    seek.reset_requested = true;
+    seek.position_samples = 0;
+    REQUIRE(seek.should_reset_stream_history());
+    CHECK(render_laneless(graph, steps, seek) == fresh);
+}
+
 TEST_CASE("custom_node_reset_runs_on_audio_thread admits only audio-callback safety classes",
           "[graph][control-index][rt-safety]") {
     auto resets = std::make_shared<int>(0);
