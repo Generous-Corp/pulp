@@ -658,6 +658,25 @@ TEST_CASE("X11 plugin host ignores a stale echo of an earlier resize",
 
 TEST_CASE("X11 popup keyboard navigation restores DAW focus and forwards transport",
           "[view][plugin-view-host][input][keyboard][linux]") {
+    // This fixture proves X input/focus, including on Xvfb servers without
+    // Vulkan presentation. GPU rendering has separate host coverage.
+    struct CpuOnly {
+        std::string previous;
+        bool had_previous = false;
+        CpuOnly() {
+            if (const char* value = std::getenv("PULP_TEST_X11_HOST_CPU_ONLY")) {
+                had_previous = true;
+                previous = value;
+            }
+            setenv("PULP_TEST_X11_HOST_CPU_ONLY", "1", 1);
+        }
+        ~CpuOnly() {
+            if (had_previous)
+                setenv("PULP_TEST_X11_HOST_CPU_ONLY", previous.c_str(), 1);
+            else
+                unsetenv("PULP_TEST_X11_HOST_CPU_ONLY");
+        }
+    } cpu_only;
     Display* daw = open_test_display("popup keyboard routing");
     class FixedRoot : public View {
         void layout_children() override {}
@@ -717,6 +736,9 @@ TEST_CASE("X11 popup keyboard navigation restores DAW focus and forwards transpo
         REQUIRE(XSendEvent(daw, child, False, KeyPressMask, &event));
         XSync(daw, False);
     };
+    INFO("combo bounds " << combo->bounds().x << "," << combo->bounds().y << ","
+                         << combo->bounds().width << "," << combo->bounds().height);
+    INFO("root hit " << (root.hit_test({40, 35}) == combo));
     click();
     pump_until([&] { return combo->is_open(); });
     Window focus = None;
@@ -748,6 +770,12 @@ TEST_CASE("X11 popup keyboard navigation restores DAW focus and forwards transpo
     CHECK(combo->selected() == 1);
     XGetInputFocus(daw, &focus, &revert);
     CHECK(focus == outer);
+    click();
+    pump_until([&] { return combo->is_open(); });
+    XSetInputFocus(daw, outer, RevertToParent, CurrentTime);
+    XSync(daw, False);
+    pump_until([&] { return !combo->is_open(); });
+    CHECK(combo->selected() == 1);
     host.reset();
     XDestroyWindow(daw, outer);
     XCloseDisplay(daw);

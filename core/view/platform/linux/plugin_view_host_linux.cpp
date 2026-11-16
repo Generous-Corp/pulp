@@ -433,6 +433,14 @@ public:
                     break;
                 }
                 if (ev.xfocus.mode == NotifyNormal) {
+                    // Moving focus from an ancestor to this child can queue
+                    // FocusOut/FocusIn on the child too (NotifyPointer). Only
+                    // cancel input if focus has actually left this editor.
+                    Window current = None;
+                    int revert = 0;
+                    XGetInputFocus(display_, &current, &revert);
+                    if (current == child_)
+                        break;
                     keyboard_focus_owned_ = false;
                     ComboBox::close_active_popup(root_);
                     auto* target = pointer_capture_.live_in(root_);
