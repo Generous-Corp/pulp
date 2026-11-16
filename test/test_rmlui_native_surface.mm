@@ -9,6 +9,8 @@
 
 #include <pulp/rmlui_native/rmlui_surface.hpp>
 
+#include "../integrations/rmlui-native/src/input_drain.hpp"
+
 #include <vellum/rmlui/assets.hpp>
 #include <vellum/rmlui/native.hpp>
 
@@ -21,8 +23,10 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <future>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -240,8 +244,8 @@ struct Editor {
 
 // Declared after listeners and before parking a draw: unwinding must release
 // render threads and stop the requester before detaching editors or listeners.
-struct DrawCleanup {
-    std::vector<Editor*> editors;
+template <class EditorType> struct DrawCleanup {
+    std::vector<EditorType*> editors;
     std::atomic<bool> stop{false};
     std::thread requester;
 
@@ -611,7 +615,7 @@ TEST_CASE("input queued behind a frame is applied in order and never lost",
         // Park a render thread inside a draw, lock held (one lock serves both
         // editors), so every event below arrives behind a frame, then let them go. Frames are also
         // requested from another thread, as a host driving two editors would.
-        DrawCleanup cleanup{{&a, &b}};
+        DrawCleanup<Editor> cleanup{{&a, &b}};
         cleanup.requester = std::thread([&] {
             while (!cleanup.stop.load()) {
                 a.ui->request_frame();
@@ -678,7 +682,7 @@ TEST_CASE("queued input retries after another editor consumes the last drain not
                 ++count;
             }
         } listener(applied);
-        DrawCleanup cleanup{{&a, &b}};
+        DrawCleanup<Editor> cleanup{{&a, &b}};
         a.ui->with_context([&](Rml::Context& ctx) {
             ctx.GetDocument(0)->GetElementById("button")->AddEventListener("mouseover", &listener);
         });
@@ -734,7 +738,7 @@ TEST_CASE("parked draw cleanup releases both editors and joins during unwinding"
         bool parked = false;
         std::atomic<bool> requester_exited{false};
         try {
-            DrawCleanup cleanup{{&a, &b}};
+            DrawCleanup<Editor> cleanup{{&a, &b}};
             a.renderer.hold_draws.store(true);
             b.renderer.hold_draws.store(true);
             cleanup.requester = std::thread([&] {
@@ -828,7 +832,7 @@ TEST_CASE("input applied after a frame is drawn without another request",
 
         // Park the render thread inside a draw, lock held, and send exactly
         // one event: it queues, and nothing else asks for a frame.
-        DrawCleanup cleanup{{&e}};
+        DrawCleanup<Editor> cleanup{{&e}};
         e.renderer.hold_draws.store(true);
         e.ui->request_frame();
         REQUIRE(e.wait_for([&] { return e.renderer.parked.load(); }));
@@ -865,7 +869,7 @@ TEST_CASE("a size change idle() could not apply is applied by the next with_cont
         const double scale = e.window.backingScaleFactor;
         // Park the render thread inside a draw, lock held, then resize and
         // tick: the tick finds the lock busy and skips the size.
-        DrawCleanup cleanup{{&e}};
+        DrawCleanup<Editor> cleanup{{&e}};
         e.renderer.hold_draws.store(true);
         e.ui->request_frame();
         REQUIRE(e.wait_for([&] { return e.renderer.parked.load(); }));
@@ -903,4 +907,90 @@ TEST_CASE("flush_input on a surface that is not attached does nothing",
         e.ui->with_context([](Rml::Context&) {});
         REQUIRE(e.ui->frames() == frames);
     }
+}
+
+// These synchronization contracts do not need a drawable or a Metal device.
+TEST_CASE("contended input drain survives the last notification", "[rmlui][threading][cpu]") {
+    std::mutex mutex;
+    std::promise<void> owns_lock;
+    std::promise<void> release_lock;
+    auto release = release_lock.get_future();
+    auto other_editor = std::async(std::launch::async, [&] {
+        std::lock_guard lock(mutex);
+        owns_lock.set_value();
+        release.wait();
+    });
+    owns_lock.get_future().wait();
+    int pending = 3;
+    int delivered = 0;
+    bool retry_posted = false;
+    auto attempt = [&] {
+        return detail::try_drain_input(
+            mutex, [&] { retry_posted = true; },
+            [&] {
+                delivered += pending;
+                pending = 0;
+                return true;
+            });
+    };
+    // Consume the only notification while an unrelated editor holds the lock.
+    // No fatal assertion until the other thread has been released and joined.
+    const bool applied_while_busy = attempt();
+    const int delivered_while_busy = delivered;
+    release_lock.set_value();
+    other_editor.get();
+    CHECK_FALSE(applied_while_busy);
+    CHECK(delivered_while_busy == 0);
+    REQUIRE(retry_posted);
+    // The unrelated editor posts nothing. Only the saved retry can deliver.
+    retry_posted = false;
+    CHECK(attempt());
+    CHECK(delivered == 3);
+    CHECK(pending == 0);
+    CHECK_FALSE(retry_posted);
+}
+
+TEST_CASE("parked cleanup releases holds before joining on exception", "[rmlui][threading][cpu]") {
+    struct ParkedEditor {
+        struct Renderer {
+            std::atomic<bool> hold_draws{true};
+        } renderer;
+        struct Surface {
+            bool detached = false;
+            void detach() {
+                detached = true;
+            }
+        } surface;
+        Surface* ui = &surface;
+    } a, b;
+    std::atomic<bool> exited{false};
+    std::atomic<bool> timed_out{false};
+    struct Unwind {};
+    try {
+        std::promise<void> started;
+        auto ready = started.get_future();
+        DrawCleanup<ParkedEditor> cleanup{{&a, &b}};
+        cleanup.requester = std::thread([&] {
+            started.set_value();
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+            while (!cleanup.stop.load() || a.renderer.hold_draws.load() ||
+                   b.renderer.hold_draws.load()) {
+                if (std::chrono::steady_clock::now() >= deadline) {
+                    timed_out.store(true);
+                    return;
+                }
+                std::this_thread::yield();
+            }
+            exited.store(true);
+        });
+        ready.wait();
+        throw Unwind{};
+    } catch (const Unwind&) {
+    }
+    CHECK_FALSE(timed_out.load());
+    CHECK(exited.load());
+    CHECK_FALSE(a.renderer.hold_draws.load());
+    CHECK_FALSE(b.renderer.hold_draws.load());
+    CHECK(a.surface.detached);
+    CHECK(b.surface.detached);
 }

@@ -2,6 +2,8 @@
 
 #include <pulp/rmlui_native/rmlui_surface.hpp>
 
+#include "input_drain.hpp"
+
 #include <vellum/rmlui/native.hpp>
 
 #include <RmlUi/Core.h>
@@ -342,15 +344,8 @@ struct RmlUiSurface::Impl {
     void try_drain() {
         if (queued.empty())
             return;
-        bool applied = false;
-        {
-            std::unique_lock lock(rmlui_mutex(), std::try_to_lock);
-            if (!lock.owns_lock()) {
-                post_drain(true);
-                return;
-            }
-            applied = drain_queued_locked();
-        }
+        const bool applied = detail::try_drain_input(
+            rmlui_mutex(), [this] { post_drain(true); }, [this] { return drain_queued_locked(); });
         if (applied && pump)
             pump->request_frame();
     }
