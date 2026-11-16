@@ -901,6 +901,31 @@ class WakeTest(unittest.TestCase):
         with self.assertRaisesRegex(matrix.MatrixError, "drifted from fixed origin"):
             matrix.parse_cell_output(text)
 
+    def test_g12_rows_need_exact_targets_and_one_wake_row_each(self):
+        period = 128 * 1_000_000_000 // 48000
+
+        def g12_text(second_target, wakes=True):
+            lines = ["g12_paced_activation_v1",
+                     "G12_CELL rate=48000 frames=128 backend=direct callbacks=2 build_dirty=0 "
+                     "compiled_source=x build_type=Release first_new=1"]
+            for index, target in enumerate((1_000, second_target)):
+                lines.append(f"G12_ROW index={index} sample={index * 128} target_ns={target} "
+                             f"start_ns={target + 50} end_ns={target + 500} audio_class=0 bits=0:128")
+                if wakes:
+                    lines.append(f"G12_WAKE index={index} wake_ns={target - 20_000} spin_cpu_ns=19000 "
+                                 "late=0 overrun=0")
+            return "\n".join(lines) + "\n"
+
+        # The audio oracle rejects this stub, so the raw timing rows are still
+        # read and their schedule is checked exactly.
+        parsed = matrix.parse_g12_output(g12_text(1_000 + period))
+        self.assertEqual(parsed["rows"][1][0], period)
+        self.assertEqual(parsed["rows"][1][4], period - 20_000)
+        with self.assertRaisesRegex(matrix.MatrixError, "drifted from fixed origin"):
+            matrix.parse_g12_output(g12_text(1_000 + period + 1))
+        with self.assertRaisesRegex(matrix.MatrixError, "wake rows missing"):
+            matrix.parse_g12_output(g12_text(1_000 + period, wakes=False))
+
     def test_deadline_request_is_recorded_and_bound(self):
         with tempfile.TemporaryDirectory() as tmp:
             receipt, code = fake_record(Path(tmp))
