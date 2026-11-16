@@ -682,16 +682,17 @@ TEST_CASE("a key press keeps its owner across modifier changes and a lost releas
         REQUIRE(offer_editor_key(*e.ui, key_a(U'a', true, false, 0)) == KeyDisposition::forward);
         focus_field(e);
         REQUIRE(e.ui->text_field_focused());
-        REQUIRE(offer_editor_key(*e.ui, key_a(U'A', true, true, pulp::format::editor_modifier_shift)) ==
-                KeyDisposition::forward);
-        REQUIRE(offer_editor_key(*e.ui, key_a(U'A', false, false,
-                                              pulp::format::editor_modifier_shift)) ==
+        REQUIRE(
+            offer_editor_key(*e.ui, key_a(U'A', true, true, pulp::format::editor_modifier_shift)) ==
+            KeyDisposition::forward);
+        REQUIRE(offer_editor_key(*e.ui,
+                                 key_a(U'A', false, false, pulp::format::editor_modifier_shift)) ==
                 KeyDisposition::forward);
         REQUIRE(field_value(e) == "ab");
 
         // A field-owned shifted 'A' released without Shift is still the field's.
-        REQUIRE(offer_editor_key(*e.ui, key_a(U'A', true, false,
-                                              pulp::format::editor_modifier_shift)) ==
+        REQUIRE(offer_editor_key(*e.ui,
+                                 key_a(U'A', true, false, pulp::format::editor_modifier_shift)) ==
                 KeyDisposition::consumed);
         REQUIRE(field_value(e) == "abA");
         blur();
