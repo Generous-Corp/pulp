@@ -10,27 +10,6 @@ needs.
 
 ## Needs an owner decision
 
-### MIDI input mailbox drops an unread batch with no telemetry
-
-`SignalGraph::inject_midi_into_snapshot_()` (`core/host/src/signal_graph_mailbox.cpp`)
-publishes with `TripleBuffer::write()`. Two `inject_midi()` calls before one
-`process()` lose the first batch: a note-on in batch A followed by its note-off
-in batch B delivers only the note-off. Both calls return true and nothing is
-counted.
-
-The parameter mailbox already reports this case through
-`ParameterMailboxCounters::overwritten`. The MIDI fix needs a public API
-choice:
-
-- mirror it with a `MidiMailboxCounters` struct and a
-  `midi_mailbox_counters(NodeId)` reader, publishing through
-  `write_replacing_unread()`; or
-- return false from `inject_midi()` when an unread batch is replaced. This
-  changes the meaning of an existing return value (today false means only "a
-  prefix was kept"), so callers that treat false as overflow would misreport.
-
-The first option keeps existing callers correct and is the recommended one.
-
 ### One scalar Control library instead of two
 
 `core/signal/include/pulp/signal/control_math.hpp` and
@@ -98,6 +77,15 @@ codes. Case names are ctest names that evidence documents and the paced-matrix
 tooling reference, so renaming them is deferred to a change that updates those
 references together. Tags carrying other program codes (`[g1]`, `[g3]`, `[g4]`,
 `[g7]`, `[g12]`) are outside this slice.
+
+## Resolved since
+
+- MIDI input mailbox drops an unread batch with no telemetry: resolved with
+  the recommended option. `SignalGraph::MidiMailboxCounters` and
+  `midi_mailbox_counters(NodeId)` mirror the parameter mailbox counters, and
+  `inject_midi_into_snapshot_()` publishes through `write_replacing_unread()`.
+  `inject_midi()` keeps its return value. Covered by the test case
+  `SignalGraph MIDI mailbox counts published, overwritten and dropped events`.
 
 ## Nits not taken
 
