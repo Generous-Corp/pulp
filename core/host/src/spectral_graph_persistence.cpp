@@ -136,6 +136,12 @@ bool contains_spectral_nodes(const SignalGraph& graph) {
                        [](const auto& n) { return bool(n.spectral_identity); });
 }
 
+int admission_block_for(const SignalGraph& graph) {
+    const int prepared = graph.prepared_max_block_size();
+    const int block = prepared > 0 ? prepared : graph.limits().max_block_size;
+    return std::clamp(block, 1, max_admission_block);
+}
+
 std::string write(const SignalGraph& graph,
                   const std::unordered_map<NodeId, std::pair<float, float>>& layout) {
     try {
@@ -271,7 +277,7 @@ std::string write(const SignalGraph& graph,
             return {};
         // Saving must not publish a document that the strict typed reader
         // cannot reconstruct, including malformed edge-kind metadata.
-        if (!read(json).result.ok)
+        if (!read(json, admission_block_for(graph)).result.ok)
             return {};
         return json;
     } catch (const std::exception&) {
@@ -279,7 +285,7 @@ std::string write(const SignalGraph& graph,
     }
 }
 
-Candidate read(std::string_view json) {
+Candidate read(std::string_view json, int admission_block) {
     Candidate candidate;
     auto fail = [&](const char* reason) {
         candidate.handled = true;
@@ -347,7 +353,6 @@ Candidate read(std::string_view json) {
         }
         auto graph = std::make_unique<SignalGraph>();
         std::map<std::uint64_t, NodeId> ids;
-        std::set<std::string> names;
         for (const auto n : root["nodes"]) {
             if (!fields(n, {"id", "type", "name", "num_input_ports", "num_output_ports", "gain",
                             "spectral", "layout"}))
@@ -358,8 +363,7 @@ Candidate read(std::string_view json) {
             if (!uint(n["id"], old, std::numeric_limits<NodeId>::max()) || !old ||
                 !text(n["type"], type) || !text(n["name"], name) ||
                 !uint(n["num_input_ports"], in, 64) || !uint(n["num_output_ports"], out, 64) ||
-                !real(n["gain"], gain) || gain != 1 || ids.contains(old) ||
-                !names.insert(name).second)
+                !real(n["gain"], gain) || gain != 1 || ids.contains(old))
                 return fail("invalid or duplicate spectral graph node identity/shape");
             NodeId id = 0;
             if (type == "audio_in" && in == 0 && out > 0 && !n.hasObjectMember("spectral"))
@@ -472,15 +476,17 @@ Candidate read(std::string_view json) {
         if (!contains_spectral_nodes(*graph))
             return fail("spectral envelope has no spectral nodes");
         // Exercise the existing compiler/bank admission on the isolated
-        // candidate, including complete input topology and the 64 MiB/4096
-        // runtime bounds. Return a stopped unprepared authoring graph.
+        // candidate, including complete input topology and the 64 MiB bank
+        // bound at the admission block size. Edge storage grows with the block
+        // size, so a graph admitted at one block can be refused at a larger one.
+        // Return a stopped unprepared authoring graph.
         double rate = 0;
         for (const auto& n : graph->nodes())
             if (n.spectral_identity) {
                 rate = n.spectral_identity->sample_rate();
                 break;
             }
-        if (!graph->prepare(rate, 4096))
+        if (!graph->prepare(rate, admission_block))
             return fail("spectral graph compiler/preparation admission refused");
         if (graph->stop_spectral_controller() != SpectralError::None)
             return fail("spectral candidate could not stop after validation");

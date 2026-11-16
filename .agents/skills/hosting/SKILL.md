@@ -2139,6 +2139,16 @@ Keep these host graph invariants covered by tests:
   rather than memset'ing with a wrapped size_t.
 - MidiInput nodes' `midi_out` is drained at the END of `process()`, not
   the start. Hosts call `inject_midi()` before each `process()` to refill.
+- A routed `ProcessorNode` block always carries a main input bus, even for
+  a Processor that declares none, so a no-input instrument fits at most 15
+  output buses in `BusBufferSet::kMaxBuses`. `prepare()` and
+  `routed_output_channels()` must reserve that slot together, or the port
+  count promises a bus that fails every block.
+- A spectral `.pulpgraph` is admitted against the 64 MiB bank at a block
+  size, and frame edges grow with the block. Saving admits at the block the
+  graph is prepared for; loading admits at the destination's
+  `GraphLimits::max_block_size` (both at most 4096). A graph that fits only
+  at small blocks loads only into a destination whose limits name that block.
 
 ## PluginManagerPanel
 

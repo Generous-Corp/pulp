@@ -2247,7 +2247,11 @@ GraphSerializer::LoadResult GraphSerializer::from_file(SignalGraph& graph,
 GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const std::string& json,
                                                        const GraphLoadOptions& options) {
     LoadResult result;
-    auto spectral = spectral_persistence::read(json);
+    // A destination whose limits name a smaller block admits a spectral graph
+    // at that block, the size it will be prepared for.
+    auto spectral =
+        spectral_persistence::read(json, std::clamp(graph.limits_.max_block_size, 1,
+                                                    spectral_persistence::max_admission_block));
     if (spectral.handled) {
         if (!spectral.result.ok)
             return spectral.result;
