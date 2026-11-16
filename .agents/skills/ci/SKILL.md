@@ -1048,6 +1048,21 @@ looks guilty. It was not: the release-pipeline step needs ~75s and
 `completed_at`) from a green run beside the cancelled one before choosing a
 fix. That suite now runs as its own `generated-version-bump-contract` job.
 
+## The `rmlui-native` lane builds its own Vellum SDK
+
+`.github/workflows/rmlui-native.yml` is advisory and path-filtered. The RmlUi
+native adapter only exists with `PULP_ENABLE_RMLUI_ADAPTER=ON` and an installed
+`VellumRmlUiNative` package, and Vellum publishes no rmlui SDK artifact, so the
+lane builds Vellum's `rmlui/` project (`tools/ci/rmlui_native_lane.sh sdk`) at
+the commit `vellum-rmlui-sdk` pins in `tools/deps/manifest.json`, cached by that
+commit. To move the pin, change the manifest entry (commit, `version`) and the
+`DEPENDENCIES.md` row together, then run the lane by hand first. The test step
+fails on an absent program, a failing case, or any skipped case (skips exit 0
+under Catch2, and three cases need no device, so a Metal-less runner must fail
+through `PULP_REQUIRE_METAL`; the `negative-control` step proves it). It runs on
+the hosted fallback through `resolve_advisory_macos_runner.py`; whether that
+runner has a Metal device is unverified. Never point it at a `pulp-build*` pool.
+
 ## Wait on a blocking waiter, not a poll loop
 
 For an unattended pull request, use `shipyard wait pr <PR> --state merged`

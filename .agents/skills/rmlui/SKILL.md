@@ -65,8 +65,10 @@ A product may supply its own RmlUi build, including a fork, and its own
 
 For Pulp's native Metal adapter, enable `PULP_ENABLE_RMLUI_ADAPTER` only with
 the main Vellum SDK and the matching optional RmlUi SDK prefix in
-`CMAKE_PREFIX_PATH`, exporting `VellumRmlUiNative::Native` and
-`VellumRmlUiNative::Metal`.
+`CMAKE_PREFIX_PATH`, exporting `VellumRmlUi::Native` and
+`VellumRmlUi::Metal`. `find_package(VellumRmlUiNative ...)` names the package,
+but its targets keep the `VellumRmlUi::` namespace: a `VellumRmlUiNative::`
+target does not exist, and only the advisory `rmlui-native` lane builds this adapter to catch it.
 Build a
 `MetalRenderInterface` on the `MetalSurface::device()` and pass
 `metal_renderer_hooks(renderer)` to `RmlUiSurface`; the hooks preserve the
