@@ -30,7 +30,7 @@ GraphFileChange GraphFileWatch::poll_once() {
     const auto extension = path_.extension();
     if (extension != ".pat" && extension != ".pulpgraph")
         return error(Code::UnsupportedFormat);
-    constexpr std::uintmax_t limit = 1024 * 1024;
+    constexpr std::uintmax_t limit = max_graph_notation_bytes;
     std::error_code size_error;
     const auto size = std::filesystem::file_size(path_, size_error);
     if (size_error)
@@ -115,7 +115,7 @@ GraphFileReloadResult GraphFileReloadTransaction::prepare(std::string_view text,
     if (attempted_)
         return {.code = Code::InvalidMutation};
     attempted_ = true;
-    if (text.size() > 1024u * 1024u)
+    if (text.size() > max_graph_notation_bytes)
         return {.code = Code::InvalidDocument,
                 .diagnostic = {.code = GraphPatchDiagnostic::Code::ResourceLimit,
                                .rule = "graph file exceeds 1 MiB",
