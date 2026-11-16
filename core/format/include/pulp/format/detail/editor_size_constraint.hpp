@@ -65,4 +65,27 @@ inline bool constrain_to_hints(const ViewSize& hints, std::uint32_t& width, std:
     return true;
 }
 
+/// An initial size that fits inside a `max_width` x `max_height` area (a
+/// screen's usable frame minus the window chrome). The size shrinks
+/// proportionally, then goes through the hints so a locked aspect and the
+/// minimums still hold; a minimum larger than the area wins over the area. A
+/// size that already fits, a fixed-size editor, and an empty area leave the
+/// size unchanged.
+inline void fit_size_to_area(const ViewSize& hints, std::uint32_t& width, std::uint32_t& height,
+                             std::uint32_t max_width, std::uint32_t max_height) {
+    if (width == 0 || height == 0 || max_width == 0 || max_height == 0)
+        return;
+    if (width <= max_width && height <= max_height)
+        return;
+    if (!editor_resizable(hints))
+        return;
+    const double scale = std::min(static_cast<double>(max_width) / width,
+                                  static_cast<double>(max_height) / height);
+    auto w = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::floor(width * scale)));
+    auto h = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::floor(height * scale)));
+    constrain_to_hints(hints, w, h);
+    width = w;
+    height = h;
+}
+
 } // namespace pulp::format::detail

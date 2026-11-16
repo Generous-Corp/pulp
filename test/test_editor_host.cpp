@@ -1276,3 +1276,28 @@ TEST_CASE("constrain_to_hints clamps each axis alone without an aspect, and refu
     h = 100;
     REQUIRE_FALSE(constrain_to_hints(free_hints, w, h));
 }
+
+TEST_CASE("fit_size_to_area shrinks proportionally inside the hints and leaves fits alone",
+          "[editor-host][resize-hints]") {
+    using pulp::format::detail::fit_size_to_area;
+    const auto locked = bounded_hints(4.0 / 3.0);
+    std::uint32_t w = 800, h = 600;
+    fit_size_to_area(locked, w, h, 300, 222);
+    REQUIRE((w == 296 && h == 222));
+    // A size that fits is untouched.
+    w = 400;
+    h = 300;
+    fit_size_to_area(locked, w, h, 1000, 1000);
+    REQUIRE((w == 400 && h == 300));
+    // The editor's minimum wins over a tiny area.
+    w = 400;
+    h = 300;
+    fit_size_to_area(locked, w, h, 50, 50);
+    REQUIRE((w == 200 && h == 150));
+    // Control: a fixed-size editor is never shrunk.
+    pulp::format::ViewSize defaults;
+    w = 800;
+    h = 600;
+    fit_size_to_area(defaults, w, h, 300, 222);
+    REQUIRE((w == 800 && h == 600));
+}

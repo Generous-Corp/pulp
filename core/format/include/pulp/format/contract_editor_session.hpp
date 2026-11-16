@@ -175,12 +175,19 @@ class ContractEditorSession : public std::enable_shared_from_this<ContractEditor
     bool set_size(std::uint32_t width, std::uint32_t height);
     /// A new content scale at the current size.
     bool set_scale(double scale);
-    /// False only for an editor whose hints fix its size (equal, non-zero
-    /// minimum and maximum on both axes).
+    /// True when the editor's hints leave room to resize: both minimums set
+    /// and not pinned (`detail::editor_resizable`). An editor that declares no
+    /// minimums is fixed-size.
     bool resizable() const;
-    /// Adjust a proposed size through the editor, then clamp it to the hints.
-    /// False when nothing usable results.
+    /// Adjust a proposed size through the editor, then bring it inside the
+    /// hints (locked aspect, min, max). A fixed-size editor answers with its
+    /// own size. False when nothing usable results.
     bool constrain(std::uint32_t& width, std::uint32_t& height) const;
+    /// A size the host chose without asking `constrain()` first: the editor
+    /// takes the constrained size, and `snapped` is true when that differs from
+    /// the host's. The caller can then ask the host for the constrained size
+    /// back. False when the editor refuses it.
+    bool set_host_size(std::uint32_t& width, std::uint32_t& height, bool& snapped);
 
     /// Offer a key. Forward when not attached.
     KeyDisposition offer_key(const EditorKeyEvent& event);

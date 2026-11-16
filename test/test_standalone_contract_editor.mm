@@ -8,13 +8,18 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#import <AppKit/AppKit.h>
+
 #include "support/recording_contract_editor.hpp"
 
+#include <pulp/format/detail/standalone_contract_editor.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/standalone.hpp>
 #include <pulp/state/store.hpp>
 
+#include <cmath>
 #include <filesystem>
+#include <functional>
 #include <fstream>
 #include <iterator>
 #include <memory>
@@ -194,4 +199,110 @@ TEST_CASE("a standalone contract editor that will not build or attach fails the 
     }
     reset_contract_recording();
     REQUIRE_FALSE(std::filesystem::exists(png));
+}
+
+namespace {
+
+// Runs the standalone contract window headless, hands the native window to
+// `on_window`, and calls `on_frame` once from the window's loop.
+bool run_window(pulp::format::detail::StandaloneContractEditorOptions options,
+                std::function<void(NSWindow*)> on_window, std::function<void(NSWindow*)> on_frame) {
+    ContractProcessor processor;
+    pulp::state::StateStore store;
+    processor.set_state_store(&store);
+    processor.define_parameters(store);
+    auto png = temp_png("pulp-standalone-contract-window");
+    options.headless = true;
+    options.screenshot_path = png;
+    options.screenshot_frame_delay = 3;
+    NSWindow* window = nil;
+    options.on_window_ready = [&](void* native) {
+        window = (NSWindow*)native;
+        if (on_window)
+            on_window(window);
+    };
+    bool framed = false;
+    options.on_idle = [&] {
+        if (!framed && window != nil && on_frame) {
+            framed = true;
+            on_frame(window);
+        }
+    };
+    const bool ok = pulp::format::detail::run_standalone_contract_editor(
+        processor, store, *processor.editor_factory(), options);
+    std::filesystem::remove(png);
+    return ok;
+}
+
+NSSize content_after_drag(NSWindow* window, double frame_width, double frame_height) {
+    const NSSize frame = [window.delegate windowWillResize:window
+                                                    toSize:NSMakeSize(frame_width, frame_height)];
+    return [window contentRectForFrameRect:NSMakeRect(0, 0, frame.width, frame.height)].size;
+}
+
+} // namespace
+
+TEST_CASE("a standalone contract window holds the editor's aspect and limits while it is dragged",
+          "[standalone][editor-host][standalone-contract][resize-hints]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    contract_config().identity_adjust = true; // the window alone enforces the hints
+    bool ran = false;
+    REQUIRE(run_window({}, nullptr, [&](NSWindow* window) {
+        ran = true;
+        for (const NSSize drag : {NSMakeSize(1000, 400), NSMakeSize(500, 900), NSMakeSize(640, 520)}) {
+            const NSSize content = content_after_drag(window, drag.width, drag.height);
+            // 4:3 to within a pixel, inside 200x150 .. 800x600.
+            REQUIRE(std::abs(content.width - content.height * 4.0 / 3.0) <= 1.0);
+            REQUIRE(content.width >= 200);
+            REQUIRE(content.width <= 800);
+            REQUIRE(content.height <= 600);
+        }
+        const NSSize big = content_after_drag(window, 3000, 3000);
+        REQUIRE(big.width == 800);
+        REQUIRE(big.height == 600);
+    }));
+    REQUIRE(ran);
+}
+
+TEST_CASE("a standalone contract window leaves an editor with default hints at the size it asked for",
+          "[standalone][editor-host][standalone-contract][resize-hints]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    contract_config().identity_adjust = true;
+    contract_config().default_hints = true;
+    bool ran = false;
+    REQUIRE(run_window({}, nullptr, [&](NSWindow* window) {
+        ran = true;
+        REQUIRE_FALSE((window.styleMask & NSWindowStyleMaskResizable) != 0);
+        // Control for the test above: a fixed-size editor is not snapped.
+        const NSSize content = content_after_drag(window, 1000, 400);
+        REQUIRE(content.width == 1000);
+    }));
+    REQUIRE(ran);
+}
+
+TEST_CASE("a standalone contract window opens inside a small screen at the editor's aspect",
+          "[standalone][editor-host][standalone-contract][resize-hints]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    pulp::format::detail::StandaloneContractEditorOptions small_screen;
+    small_screen.screen_visible_width = 300;
+    small_screen.screen_visible_height = 250;
+    NSSize opened{};
+    REQUIRE(run_window(small_screen, nullptr, [&](NSWindow* window) {
+        opened = window.contentView.frame.size;
+        REQUIRE(window.frame.size.width <= 300);
+        REQUIRE(window.frame.size.height <= 250);
+    }));
+    REQUIRE(opened.width < 400);
+    REQUIRE(opened.width >= 200);
+    REQUIRE(std::abs(opened.width - opened.height * 4.0 / 3.0) <= 1.0);
+
+    // Control: with no injected screen the editor opens at its own size.
+    reset_contract_recording();
+    NSSize full{};
+    REQUIRE(run_window({}, nullptr, [&](NSWindow* window) { full = window.contentView.frame.size; }));
+    REQUIRE(full.width == 400);
+    REQUIRE(full.height == 300);
 }

@@ -120,6 +120,7 @@ class ContractPlugView final : public Steinberg::CPluginView,
     Steinberg::tresult offer(const EditorKeyEvent& event);
 
     PulpVst3Processor* owner_;
+    bool requesting_snapped_size_ = false;
     std::unique_ptr<ContractEditorSession> session_;
 };
 

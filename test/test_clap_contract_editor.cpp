@@ -309,10 +309,12 @@ TEST_CASE("CLAP opens, sizes and closes a contract editor, twice",
     REQUIRE(h == 600);
     REQUIRE(p.gui->set_size(p.plugin, 640, 480));
     REQUIRE(contract_log().saw("set_size:640x480"));
-    REQUIRE_FALSE(p.gui->set_size(p.plugin, 100, 100));
+    // An undersized host size is brought up to the editor's minimum.
+    REQUIRE(p.gui->set_size(p.plugin, 100, 100));
+    REQUIRE(contract_log().saw("set_size:200x150"));
     REQUIRE(p.gui->get_size(p.plugin, &w, &h));
-    REQUIRE(w == 640);
-    REQUIRE(h == 480);
+    REQUIRE(w == 200);
+    REQUIRE(h == 150);
 
     // The host's scale reaches the editor's size and survives a resize.
     REQUIRE(p.gui->set_scale(p.plugin, 2.0));
@@ -622,5 +624,41 @@ TEST_CASE("a CLAP contract editor applies its declared aspect and bounds",
         REQUIRE(h == 300);
         p.gui->destroy(p.plugin);
     }
+    contract_config() = {};
+}
+
+TEST_CASE("a CLAP host that calls set_size without adjust_size gets the snapped size asked back",
+          "[clap][editor-host][clap-contract][resize-hints]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    g_processor_has_factory = true;
+    contract_config() = {};
+    contract_config().identity_adjust = true; // the session alone enforces the hints
+    FakeHost host;
+    OpenPlugin p(host);
+    REQUIRE(p.gui->create(p.plugin, platform_api(), false));
+    const auto window = fake_window();
+    REQUIRE(p.gui->set_parent(p.plugin, &window));
+
+    // Off the 4:3 aspect: the editor takes the 4:3 box inside it and the host
+    // is asked for that box.
+    REQUIRE(p.gui->set_size(p.plugin, 700, 300));
+    REQUIRE(contract_log().saw("set_size:400x300"));
+    REQUIRE(host.resize_requests == std::vector<std::string>{"400x300"});
+
+    // On the aspect: nothing is asked of the host.
+    host.resize_requests.clear();
+    REQUIRE(p.gui->set_size(p.plugin, 640, 480));
+    REQUIRE(host.resize_requests.empty());
+    p.gui->destroy(p.plugin);
+
+    // Control: a fixed-size editor keeps the size the host gave it.
+    contract_config().default_hints = true;
+    REQUIRE(p.gui->create(p.plugin, platform_api(), false));
+    REQUIRE(p.gui->set_parent(p.plugin, &window));
+    REQUIRE(p.gui->set_size(p.plugin, 700, 300));
+    REQUIRE(contract_log().saw("set_size:700x300"));
+    REQUIRE(host.resize_requests.empty());
+    p.gui->destroy(p.plugin);
     contract_config() = {};
 }

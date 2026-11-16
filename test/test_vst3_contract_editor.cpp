@@ -458,11 +458,13 @@ TEST_CASE("VST3 opens, resizes and closes a contract editor, twice",
     Steinberg::ViewRect resized(0, 0, 640, 480);
     REQUIRE(view->onSize(&resized) == Steinberg::kResultTrue);
     REQUIRE(g_log.saw("set_size:640x480"));
+    // An undersized host size is brought up to the editor's minimum.
     Steinberg::ViewRect tiny(0, 0, 100, 100);
-    REQUIRE(view->onSize(&tiny) == Steinberg::kResultFalse);
+    REQUIRE(view->onSize(&tiny) == Steinberg::kResultTrue);
+    REQUIRE(g_log.saw("set_size:200x150"));
     REQUIRE(view->getSize(&rect) == Steinberg::kResultTrue);
-    REQUIRE(rect.getWidth() == 640);
-    REQUIRE(rect.getHeight() == 480);
+    REQUIRE(rect.getWidth() == 200);
+    REQUIRE(rect.getHeight() == 150);
 
     // Space is offered and forwarded, so the host keeps its transport key;
     // a key the editor consumes is reported as handled.
@@ -1021,5 +1023,59 @@ TEST_CASE("a VST3 contract view applies the editor's declared aspect and bounds"
         REQUIRE(fr.getHeight() == 300);
         fixed_view->release();
     }
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("a VST3 host that calls onSize without checkSizeConstraint gets the snapped size asked back",
+          "[vst3][editor-host][vst3-contract][resize-hints]") {
+    EditorEnvironment env;
+    g_log = {};
+    g_config = {};
+    g_config.identity_adjust = true; // the session alone enforces the hints
+    HostApp host_app;
+    HostFrame frame;
+    PulpVst3Processor processor(create_contract_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    auto* view = open_contract_view(processor);
+    REQUIRE(view->setFrame(&frame) == Steinberg::kResultTrue);
+    REQUIRE(view->attached(fake_parent(), Steinberg::kPlatformTypeNSView) ==
+            Steinberg::kResultTrue);
+
+    // Off the 4:3 aspect: the editor takes the 4:3 box inside it and the host
+    // is asked for that box.
+    Steinberg::ViewRect off_aspect(0, 0, 700, 300);
+    REQUIRE(view->onSize(&off_aspect) == Steinberg::kResultTrue);
+    REQUIRE(g_log.saw("set_size:400x300"));
+    REQUIRE(frame.requests == std::vector<std::string>{"400x300"});
+
+    // On the aspect: nothing is asked of the host.
+    frame.requests.clear();
+    Steinberg::ViewRect on_aspect(0, 0, 640, 480);
+    REQUIRE(view->onSize(&on_aspect) == Steinberg::kResultTrue);
+    REQUIRE(frame.requests.empty());
+
+    // A refused request still leaves the editor on its aspect.
+    frame.accept = false;
+    Steinberg::ViewRect again(0, 0, 700, 300);
+    REQUIRE(view->onSize(&again) == Steinberg::kResultTrue);
+    REQUIRE(frame.requests == std::vector<std::string>{"400x300"});
+
+    // Control: a fixed-size editor keeps the size the host gave it.
+    REQUIRE(view->removed() == Steinberg::kResultOk);
+    view->setFrame(nullptr);
+    view->release();
+    g_config.default_hints = true;
+    auto* fixed = open_contract_view(processor);
+    fixed->setFrame(&frame);
+    REQUIRE(fixed->attached(fake_parent(), Steinberg::kPlatformTypeNSView) ==
+            Steinberg::kResultTrue);
+    frame.requests.clear();
+    Steinberg::ViewRect fixed_size(0, 0, 700, 300);
+    REQUIRE(fixed->onSize(&fixed_size) == Steinberg::kResultTrue);
+    REQUIRE(g_log.saw("set_size:700x300"));
+    REQUIRE(frame.requests.empty());
+    REQUIRE(fixed->removed() == Steinberg::kResultOk);
+    fixed->setFrame(nullptr);
+    fixed->release();
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }

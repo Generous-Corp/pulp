@@ -309,6 +309,28 @@ bool ContractEditorSession::constrain(std::uint32_t& width, std::uint32_t& heigh
     return true;
 }
 
+bool ContractEditorSession::set_host_size(std::uint32_t& width, std::uint32_t& height,
+                                          bool& snapped) {
+    snapped = false;
+    if (!editor_ || width == 0 || height == 0)
+        return false;
+    std::uint32_t w = width;
+    std::uint32_t h = height;
+    // A fixed-size editor keeps the size the host gave it: only a resizable
+    // editor's limits move the host's choice.
+    if (resizable() && constrain(w, h) && (w != width || h != height))
+        snapped = true;
+    else {
+        w = width;
+        h = height;
+    }
+    if (!set_size(w, h))
+        return false;
+    width = w;
+    height = h;
+    return true;
+}
+
 KeyDisposition ContractEditorSession::offer_key(const EditorKeyEvent& event) {
     if (!editor_ || !attached_)
         return KeyDisposition::forward;
