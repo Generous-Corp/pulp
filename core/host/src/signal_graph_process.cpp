@@ -13,11 +13,27 @@
 #include <pulp/runtime/log.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <limits>
 #include <span>
 
 namespace pulp::host {
+namespace {
+
+// The compiled graph and every serial and parallel Custom context carry the
+// activation epoch; they always advance together.
+// A template so it can take the private compiled-graph type by deduction.
+template <typename CompiledGraph>
+void set_graph_event_epoch(CompiledGraph& graph, std::uint64_t epoch) noexcept {
+    graph.graph_event_epoch = epoch;
+    for (auto& context : graph.routed.serial.custom_ctx)
+        context.graph_event_epoch = epoch;
+    for (auto& context : graph.routed.parallel.custom_ctx)
+        context.graph_event_epoch = epoch;
+}
+
+} // namespace
 
 ControlProcessResult SignalGraph::process_control_checked(
     audio::BufferView<float>& output, const audio::BufferView<const float>& input,
@@ -57,8 +73,10 @@ ControlProcessResult SignalGraph::process_control_checked(
     std::uint64_t expected_epoch = cg->graph_event_epoch;
     std::uint64_t expected_start = cg->graph_event_lane->counters().cursor;
     if (reset) {
-        if (expected_epoch == std::numeric_limits<std::uint64_t>::max() ||
-            transport->position_samples < 0)
+        // A negative (pre-roll) position has no place on the unsigned clock.
+        if (transport->position_samples < 0)
+            return refuse(ControlProcessResult::OutOfRange);
+        if (expected_epoch == std::numeric_limits<std::uint64_t>::max())
             return refuse(ControlProcessResult::ClockExhausted);
         ++expected_epoch;
         expected_start = static_cast<std::uint64_t>(transport->position_samples);
@@ -73,16 +91,19 @@ ControlProcessResult SignalGraph::process_control_checked(
         if (cg->graph_event_lane->reset(expected_epoch, expected_start) !=
             GraphEventResult::Accepted)
             return refuse(ControlProcessResult::StaleEpoch);
-        cg->graph_event_epoch = expected_epoch;
-        for (auto& context : cg->routed.serial.custom_ctx)
-            context.graph_event_epoch = expected_epoch;
-        for (auto& context : cg->routed.parallel.custom_ctx)
-            context.graph_event_epoch = expected_epoch;
+        set_graph_event_epoch(*cg, expected_epoch);
+        // A stream-history reset restarts the Control program, so stateful
+        // Control nodes return to their configured initial state.
+        for (const auto& reset_node : cg->control_stream_resets)
+            reset_node();
     }
     // Publish the index block only once every admission check has passed, so
     // a refused call leaves the previously admitted block in place.
     auto& state = *cg->control_index_state;
-    std::copy(block.indices.begin(), block.indices.end(), state.indices.begin());
+    // The index output is a Control port that can drive a Processor parameter
+    // directly, so a non-finite index is published as 0, never forwarded.
+    std::transform(block.indices.begin(), block.indices.end(), state.indices.begin(),
+                   [](float index) { return std::isfinite(index) ? index : 0.0f; });
     state.frames = frames;
     bool rendered = false;
     process_snapshot_impl(output, input, static_cast<int>(frames), transport, cg, false, nullptr,
@@ -137,7 +158,17 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
             process_snapshot_impl(output, input, num_samples, transport, nullptr);
             return;
         }
-        (void)process_trigger_snapshot_(output, input, num_samples, transport, read_guard.get());
+        // The unchecked entry has no result to report a refusal through, so
+        // any refused block is silenced rather than left holding stale audio.
+        // process_checked() keeps its untouched-output refusal contract.
+        if (process_trigger_snapshot_(output, input, num_samples, transport, read_guard.get()) !=
+                TriggerGraphResult::Accepted &&
+            num_samples > 0 && output.has_valid_channels()) {
+            const auto frames =
+                std::min(output.num_samples(), static_cast<std::size_t>(num_samples));
+            for (std::size_t c = 0; c < output.num_channels(); ++c)
+                std::fill_n(output.channel_ptr(c), frames, 0.0f);
+        }
         return;
     }
     process_snapshot_impl(output, input, num_samples, transport, read_guard.get());
@@ -223,11 +254,7 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                                 sizeof(float) * static_cast<std::size_t>(num_samples));
                 return;
             }
-            cg->graph_event_epoch = next_epoch;
-            for (auto& context : cg->routed.serial.custom_ctx)
-                context.graph_event_epoch = next_epoch;
-            for (auto& context : cg->routed.parallel.custom_ctx)
-                context.graph_event_epoch = next_epoch;
+            set_graph_event_epoch(*cg, next_epoch);
         }
         const auto result = cg->graph_event_lane->begin_block(
             cg->graph_event_epoch, cg->graph_event_lane->counters().cursor,

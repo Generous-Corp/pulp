@@ -35,7 +35,7 @@ template <typename Fn> std::vector<int> fire_times(int n, Fn&& step) {
 
 } // namespace
 
-TEST_CASE("MapClip retains valid configuration after invalid input", "[signal][mod][g5]") {
+TEST_CASE("MapClip retains valid configuration after invalid input", "[signal][mod]") {
     MapClip map;
     REQUIRE(map.configure(0.0f, 1.0f, 100.0f, 200.0f));
     REQUIRE(map.process(-2.0f) == 100.0f);
@@ -47,7 +47,7 @@ TEST_CASE("MapClip retains valid configuration after invalid input", "[signal][m
     REQUIRE(map.process(std::numeric_limits<float>::quiet_NaN()) == 100.0f);
 }
 
-TEMPLATE_TEST_CASE("MapClip keeps extreme finite intervals bounded", "[signal][mod][g5]", float,
+TEMPLATE_TEST_CASE("MapClip keeps extreme finite intervals bounded", "[signal][mod]", float,
                    double) {
     using T = TestType;
     const auto max = std::numeric_limits<T>::max();
@@ -84,7 +84,7 @@ TEMPLATE_TEST_CASE("MapClip keeps extreme finite intervals bounded", "[signal][m
     REQUIRE(map.process(0) == T{0.5});
 }
 
-TEST_CASE("IndexedControl follows external index and rejects invalid index", "[signal][mod][g5]") {
+TEST_CASE("IndexedControl follows external index and rejects invalid index", "[signal][mod]") {
     IndexedControl reader;
     REQUIRE(reader.process(0.0) == 0.0f);
     const std::array<float, 3> table{0.0f, 1.0f, 0.0f};
@@ -97,7 +97,7 @@ TEST_CASE("IndexedControl follows external index and rejects invalid index", "[s
     REQUIRE(reader.process(std::numeric_limits<double>::quiet_NaN()) == 0.0f);
 }
 
-TEMPLATE_TEST_CASE("IndexedControl interpolates extreme finite samples", "[signal][mod][g5]", float,
+TEMPLATE_TEST_CASE("IndexedControl interpolates extreme finite samples", "[signal][mod]", float,
                    double) {
     using T = TestType;
     const auto max = std::numeric_limits<T>::max();
