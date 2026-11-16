@@ -44,6 +44,7 @@
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 #include <span>
 
@@ -172,6 +173,8 @@ constexpr int kFormatVersion = 6;
 constexpr int kMinInspectedFormatVersion = 4;
 constexpr std::size_t kMaxSerializedSampleRegionConnections = 2'048;
 constexpr std::size_t kMaxSerializedNodes = 512;
+static_assert(GraphSerializer::max_object_members >= kMaxSerializedNodes,
+              "the member bound must admit the writer's own bindings object");
 constexpr std::size_t kMaxSerializedConnections = 16'384;
 
 struct GraphMigrationEntry {
@@ -2278,34 +2281,37 @@ namespace {
 // Lanes and the port fields the connect call records for that lane: MIDI
 // edges ignore both ports and parameter edges ignore the destination port.
 using ConnectionKey =
-    std::tuple<NodeId, PortIndex, NodeId, PortIndex, bool, bool, bool, bool, bool, bool>;
+    std::tuple<NodeId, PortIndex, NodeId, PortIndex, bool, bool, bool, bool, bool, bool, bool>;
 
 ConnectionKey connection_key(NodeId source, PortIndex source_port, NodeId dest, PortIndex dest_port,
                              bool feedback, bool midi, bool automation, bool audio_rate,
-                             bool sidechain, bool control) {
+                             bool sidechain, bool control, bool spectral) {
     const bool parameter = automation || audio_rate;
     return {source,     midi ? PortIndex{0} : source_port,
             dest,       (midi || parameter) ? PortIndex{0} : dest_port,
             feedback,   midi,
             automation, audio_rate,
-            sidechain,  control};
+            sidechain,  control,
+            spectral};
 }
 
 // Every connection a saved document records must exist in the restored graph.
 // The tolerant loader skips a dangling or refused edge, so without this check a
 // saved-identity load would report success with an edge missing. The one
-// permitted omission is the partial-load rule: a parameter edge into an
-// unresolved plugin placeholder. Returns a description of the first edge that
-// is missing, or nullopt.
+// permitted omission is the loader's partial-load rule: a parameter edge from a
+// valid source port into an unresolved plugin placeholder. A `spectral` flag is
+// compared like the other lane flags, so a document that marks an edge spectral
+// is refused when the edge was restored as plain audio. Returns a description of
+// the first edge that is missing, or nullopt.
 template <typename V>
 std::optional<std::string>
-unrestored_connection(const SignalGraph& graph, const V& root,
-                      const std::unordered_map<NodeId, NodeId>& persisted_ids) {
+find_unrestored_connection(const SignalGraph& graph, const V& root,
+                           const std::unordered_map<NodeId, NodeId>& persisted_ids) {
     std::map<ConnectionKey, std::size_t> restored;
     for (const auto& c : graph.connections())
         ++restored[connection_key(c.source_node, c.source_port, c.dest_node, c.dest_port,
                                   c.feedback, c.midi, c.automation, c.audio_rate_modulation,
-                                  c.sidechain, c.control_signal)];
+                                  c.sidechain, c.control_signal, c.spectral)];
     if (!root.hasObjectMember("connections"))
         return std::nullopt;
     const auto& connections = root["connections"];
@@ -2324,31 +2330,50 @@ unrestored_connection(const SignalGraph& graph, const V& root,
             !item.hasObjectMember("dest_node") || !item["source_node"].isInt() ||
             !item["dest_node"].isInt())
             return describe() + " is malformed";
+        if (flag(item, "spectral"))
+            return describe() + " uses the unsupported spectral lane";
         const auto source = persisted_ids.find(static_cast<NodeId>(item["source_node"].getInt64()));
         const auto dest = persisted_ids.find(static_cast<NodeId>(item["dest_node"].getInt64()));
         if (source == persisted_ids.end() || dest == persisted_ids.end())
             return describe() + " names a node the document does not hold";
         const bool automation = flag(item, "automation");
         const bool audio_rate = flag(item, "audio_rate_modulation");
-        const auto key = connection_key(source->second, port(item, "source_port"), dest->second,
-                                        port(item, "dest_port"), flag(item, "feedback"),
-                                        flag(item, "midi"), automation, audio_rate,
-                                        flag(item, "sidechain"), flag(item, "control_signal"));
+        const auto key = connection_key(
+            source->second, port(item, "source_port"), dest->second, port(item, "dest_port"),
+            flag(item, "feedback"), flag(item, "midi"), automation, audio_rate,
+            flag(item, "sidechain"), flag(item, "control_signal"), flag(item, "spectral"));
         if (const auto it = restored.find(key); it != restored.end() && it->second != 0) {
             --it->second;
             continue;
         }
         const auto* target = graph.node(dest->second);
+        const auto* source_node = graph.node(source->second);
+        const bool valid_source =
+            source_node != nullptr && source_node->num_output_ports > 0 &&
+            port(item, "source_port") < static_cast<PortIndex>(source_node->num_output_ports);
         const bool placeholder = target != nullptr && target->type == NodeType::Plugin &&
                                  !target->plugin &&
                                  graph.processor_node_instance(target->id) == nullptr;
-        if ((automation || audio_rate) && placeholder)
+        if ((automation || audio_rate) && placeholder && valid_source)
             continue;
         return describe() + " was not restored (invalid port, cycle, or duplicate edge)";
     }
     return std::nullopt;
 }
 } // namespace
+
+std::optional<std::string>
+GraphSerializer::unrestored_connection(const SignalGraph& graph, const std::string& json,
+                                       const std::unordered_map<NodeId, NodeId>& persisted_ids) {
+    try {
+        const auto root = choc::json::parse(json);
+        if (!root.isObject())
+            return std::string("document is not a graph object");
+        return find_unrestored_connection(graph, root, persisted_ids);
+    } catch (const std::exception& error) {
+        return std::string("document connections cannot be read: ") + error.what();
+    }
+}
 
 GraphSerializer::LoadResult GraphSerializer::from_saved_document(SignalGraph& graph,
                                                                  const std::string& json,
@@ -2392,7 +2417,7 @@ GraphSerializer::LoadResult GraphSerializer::from_saved_document(SignalGraph& gr
                 return result;
             }
         }
-        if (auto missing = unrestored_connection(graph, root, result.persisted_node_ids)) {
+        if (auto missing = find_unrestored_connection(graph, root, result.persisted_node_ids)) {
             graph.clear();
             result.ok = false;
             result.persisted_node_ids.clear();
@@ -2439,7 +2464,7 @@ bool GraphSerializer::read_file_bounded(const std::filesystem::path& path, std::
         return fail("graph file changed while reading: " + path.string());
     }
     if (g_after_first_read_hook) {
-        auto hook = std::move(g_after_first_read_hook);
+        auto hook = std::exchange(g_after_first_read_hook, {});
         hook(path);
     }
     ec.clear();

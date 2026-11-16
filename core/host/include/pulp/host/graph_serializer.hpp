@@ -21,6 +21,7 @@
 #include <filesystem>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -179,10 +180,12 @@ class GraphSerializer {
     // encoded JSON envelope (including base64 state), not decoded payloads.
     static constexpr std::size_t max_file_bytes = 64u * 1024u * 1024u;
     static constexpr std::size_t max_document_depth = 64;
-    // Member bounds checked before parsing. The writer emits at most one
-    // member per node in its largest object (`bindings`), and a document at
-    // the node and connection limits stays far below the total.
-    static constexpr std::size_t max_object_members = 1024;
+    // Member bounds checked before parsing. The largest object a document
+    // holds is `bindings`, one member per node, so the per-object bound must
+    // admit every node a SignalGraph accepts by default (4096); the writer's
+    // own node cap is lower still. A document at the node and connection
+    // limits stays far below the total.
+    static constexpr std::size_t max_object_members = 4096;
     static constexpr std::size_t max_document_members = 1u << 20;
 
     /// Inspect one bounded saved document without loading plugins, invoking
@@ -288,6 +291,18 @@ class GraphSerializer {
     /// after the load started leaves `graph` empty.
     static LoadResult from_saved_document(SignalGraph& graph, const std::string& json,
                                           const GraphLoadOptions& options = {});
+
+    /// Compare a loaded graph with the document it was loaded from. Every
+    /// connection the document records must exist in `graph`, with the same
+    /// lane flags (including `spectral`). The one permitted omission is the
+    /// partial-load rule: a parameter edge from a valid source port into an
+    /// unresolved plugin placeholder. `persisted_ids` maps document node ids to
+    /// live ids, as `LoadResult::persisted_node_ids` does. Returns a
+    /// description of the first edge that is missing, or nullopt. A document
+    /// that does not parse is reported as missing its connections.
+    static std::optional<std::string>
+    unrestored_connection(const SignalGraph& graph, const std::string& json,
+                          const std::unordered_map<NodeId, NodeId>& persisted_ids);
 
     /// Read one graph file under the size bound and verify it did not change
     /// while being read (size growth or a same-size replacement). On failure

@@ -789,6 +789,16 @@ that check runs before `has_editor()`. Things to keep straight:
   alive), then destroy, because the editor's factory belongs to the processor
   about to be reset. `invalidate()` is only for a parent that is already gone.
   Do not move that call after `processor_.reset()`.
+- `canResize` and `checkSizeConstraint` come from the session
+  (`ContractEditorSession::resizable()` / `constrain()`), which applies the
+  editor's `size_hints()`: no minimums means fixed-size, `aspect_ratio > 0`
+  snaps to the ratio inside min/max, `0` clamps each axis alone
+  (`detail::constrain_to_hints()`). An `onSize` the host sends without calling
+  `checkSizeConstraint` goes through `ContractEditorSession::set_host_size()`:
+  the editor gets the constrained size and `IPlugFrame::resizeView` is asked for
+  it once the host's sizes settle (a fixed-size editor takes no host size and
+  the host is asked for its own). Until the host follows, the stored rect is the
+  snapped size while the host's window keeps the size it chose.
 - `IPlugViewContentScaleSupport` exists only on `ContractPlugView`;
   `PulpPlugView` (the ViewBridge view) does not implement it. Neither view's
   `attached()`/`removed()` call `visibility_changed`, so the native-surface

@@ -1556,6 +1556,11 @@ envelope: the input is restored through `GraphSerializer::from_saved_document`
 exactly) and written back with `GraphSerializer::to_saved_file`, so the result
 is still a valid `pulp graph diff` input. `save --saved-identity` writes the
 envelope for a plain input too, which is how a CLI user produces diff inputs.
+Before it writes, every connection the plain input records must have been
+restored; an edge the tolerant loader skipped (a dangling node, an invalid
+port) is refused with `InvalidDocument` and a `connection_not_restored` message
+(exit 1), and no output is written. A plain `save` without the flag keeps the
+tolerant behaviour.
 A document carrying `subgraphs` records is refused with
 `subgraph_records_unsupported` (exit 1) and left unchanged, because restoring
 those records needs the authoring templates and a plain rewrite would drop every

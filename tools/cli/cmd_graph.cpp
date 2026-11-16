@@ -960,6 +960,24 @@ int cmd_graph(const std::vector<std::string>& args) {
         loaded = saved_identity
                      ? pulp::host::GraphSerializer::from_saved_document(*graph_ptr, *text, opts)
                      : pulp::host::GraphSerializer::from_json(*graph_ptr, *text, opts);
+        // Stamping an envelope on a plain document asserts that the written
+        // graph is the document, so the tolerant load must not have dropped an
+        // edge. A spectral document is read strictly and has no envelope form.
+        const bool adds_identity =
+            loaded.ok && !saved_identity && op == "save" &&
+            std::find(args.begin() + 2, args.end(), "--saved-identity") != args.end();
+        const bool spectral =
+            std::any_of(graph_ptr->nodes().begin(), graph_ptr->nodes().end(), [](const auto& node) {
+                return node.spectral_identity.has_value() || node.spectral_stage.has_value();
+            });
+        if (adds_identity && !spectral) {
+            if (auto missing = pulp::host::GraphSerializer::unrestored_connection(
+                    *graph_ptr, *text, loaded.persisted_node_ids)) {
+                loaded.ok = false;
+                loaded.error = "connection_not_restored: " + *missing +
+                               "; the identity envelope would describe a different graph";
+            }
+        }
         if (!loaded.ok) {
             if (json)
                 json_error(patch_code(Code::InvalidDocument), loaded.error);

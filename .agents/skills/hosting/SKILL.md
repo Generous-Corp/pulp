@@ -39,6 +39,12 @@ A transport stream-history reset (and prepare) also resets every stateful
 Control node (integrator, slew, hysteresis) to its configured initial state, so
 a seek renders like a fresh graph; a negative reset position is `OutOfRange`,
 and a non-finite index is published as 0 rather than forwarded to a parameter.
+That seek reset calls `CustomNodeType::reset` on the AUDIO thread, from both the
+Control index path and the graph-event path, but only for a type that passes
+`custom_node_reset_runs_on_audio_thread()` (a declared `rt_contract` with an
+audio-callback safety class). A third-party Control-port type that leaves
+`rt_contract` undeclared keeps its state across a seek; declaring it promises
+its `reset` never allocates, locks or blocks.
 
 Port names: a MidiInput/MidiOutput node's single port is named `audio` (the
 first-port name from `populate_named_ports`) with kind MIDI, so do not rename
@@ -59,6 +65,15 @@ for mode, refusal, custody, checkpoint and terminal-silence contracts. Keep real
 hostile-fixture, endpoint, sibling/PDC and production-mutation controls together.
 Functional callback traps do not establish full realtime or A10 qualification;
 host death and deliberate group escape are outside first-mode custody.
+
+**The Windows worker transport differs from the POSIX one in three places.**
+The control channel is an overlapped named pipe, so every transfer on either
+end must be overlapped and deadline-bounded (`isolated_clap_windows_channel.hpp`);
+a synchronous `ReadFile` on it ignores the deadline. The shared mapping is an
+unnamed section duplicated into the worker with `DuplicateHandle`, and the hello
+record's `file` field carries that child-side handle value instead of a file
+identity, so there is no path to unlink. And the Windows retained channel refuses
+output capture, because nothing drains a retained child's pipes.
 
 **Graph code that calls an isolation helper must also link on the web.** The
 WAM / WebCLAP sample-region profile compiles a curated source list
@@ -1170,9 +1185,13 @@ save/reopen render proof beside the legacy caller-owned route controls.
   writer — audio or control, never concurrent. A `false` return means the live
   node is unavailable or the source was truncated; any retained prefix is
   still published. Publications are latest-wins and one-shot, and sequence
-  wrap skips zero. A gap-free `prepare_swap()` shares the ingress mailbox and
-  consumed sequence for a stable MidiInput NodeId, preserving unconsumed MIDI
-  across the swap. MidiOutput egress remains snapshot-local but uses an ordered,
+  wrap skips zero. A block replaced before any process() read it is lost with
+  both calls returning true; `midi_mailbox_counters()` counts it through
+  `TripleBuffer::write_replacing_unread()`, with the same fields and lifetime
+  as `parameter_mailbox_counters()`. An event there is a short message, SysEx
+  message, UMP packet or MPE expression event. A gap-free `prepare_swap()`
+  shares the ingress mailbox and consumed sequence for a stable MidiInput
+  NodeId, preserving unconsumed MIDI and its counts across the swap. MidiOutput egress remains snapshot-local but uses an ordered,
   fixed four-block SPSC queue: empty blocks cannot overwrite pending output;
   overflow retains the earliest blocks and makes extraction incomplete. When
   the destination lacks short-event, SysEx, or attached UMP-sidecar capacity,
@@ -3509,6 +3528,12 @@ version: the payload stays at the current format, and a v6+ graph is still
 refused. The semantic digest ignores editor layout, so moving a node changes
 the canonical bytes but not the digest. `snapshot_port_identity` replaces the
 old `undo_port_identity` spelling, which returned a snapshot and not an undo.
+
+Saved connection validation must reject a declared spectral lane even when
+ordinary endpoints let the tolerant loader restore it as audio. Spectral
+graphs are unsupported on this identity surface. The partial-load exception
+for parameter edges into unresolved plugins still requires a valid source
+node and output port; a missing plugin cannot excuse an invalid source.
 
 Subgraph instances flatten into ordinary nodes, so a plain saved document
 loses which nodes form which instance. `to_saved_subgraph_document` and

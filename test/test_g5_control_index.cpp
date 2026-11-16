@@ -17,6 +17,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <span>
 #include <string>
 #include <vector>
@@ -1071,6 +1072,96 @@ TEST_CASE("a stateful Control node restarts from its initial state on a seek and
     CHECK(render_control_node_graph(graph, steps).front() == 1.25f);
     REQUIRE(graph.prepare(48000, 4));
     CHECK(render_control_node_graph(graph, steps) == fresh);
+}
+
+namespace {
+
+// A stateful Control pass-through whose reset only counts, so a test can see
+// whether SignalGraph called it from the audio thread on a seek.
+CustomNodeType make_counting_control_type(std::shared_ptr<int> resets, bool declare_rt) {
+    CustomNodeType type;
+    type.type_id = "pulp.test.control-counting-reset";
+    type.num_input_ports = 1;
+    type.num_output_ports = 1;
+    type.input_ports = {{"value", PortKind::Control}};
+    type.output_ports = {{"value", PortKind::Control}};
+    type.create = []() -> void* { return new int(0); };
+    type.destroy = [](void* instance) { delete static_cast<int*>(instance); };
+    type.reset = [resets](void*) { ++*resets; };
+    type.process_instance = [](void*, pulp::audio::BufferView<float>& out,
+                               const pulp::audio::BufferView<const float>& in, int frames) {
+        std::copy_n(in.channel_ptr(0), frames, out.channel_ptr(0));
+    };
+    if (declare_rt) {
+        type.rt_contract.declared = true;
+        type.rt_contract.safety_class = pulp::audio::RtSafetyClass::AudioCallbackSafeAfterPrepare;
+        type.rt_contract.allocation_free = true;
+    }
+    return type;
+}
+
+int resets_after_seek(bool declare_rt) {
+    auto resets = std::make_shared<int>(0);
+    SignalGraph graph;
+    build_control_node_graph(graph, make_counting_control_type(resets, declare_rt));
+    REQUIRE(graph.prepare(48000, 4));
+    const std::vector<float> steps(4, 0.25f);
+    render_control_node_graph(graph, steps);
+    const int before = *resets;
+    std::vector<float> silence(4, 0.0f);
+    std::vector<float> result(4, -100.0f);
+    const float* in_ptr[] = {silence.data()};
+    float* out_ptr[] = {result.data()};
+    pulp::audio::BufferView<const float> input(in_ptr, 1, 4);
+    pulp::audio::BufferView<float> output(out_ptr, 1, 4);
+    pulp::format::ProcessContext seek;
+    seek.reset_requested = true;
+    seek.position_samples = 0;
+    const auto position = graph.control_index_position();
+    REQUIRE(graph.process_control_checked(output, input, {position.epoch + 1, 0, steps}, &seek) ==
+            ControlProcessResult::Accepted);
+    CHECK(result == steps);
+    return *resets - before;
+}
+
+} // namespace
+
+TEST_CASE("a seek resets a Custom Control node only when it declares an audio-safe contract",
+          "[graph][control-index][rt-safety][negative-control]") {
+    // Declared audio-callback-safe: the seek restarts the node.
+    CHECK(resets_after_seek(true) == 1);
+    // No declared contract: the reset might allocate or lock, so the audio
+    // thread never calls it and the node keeps its state across the seek.
+    CHECK(resets_after_seek(false) == 0);
+}
+
+TEST_CASE("custom_node_reset_runs_on_audio_thread admits only audio-callback safety classes",
+          "[graph][control-index][rt-safety]") {
+    auto resets = std::make_shared<int>(0);
+    auto type = make_counting_control_type(resets, true);
+    CHECK(custom_node_reset_runs_on_audio_thread(type));
+    for (const auto safety : {pulp::audio::RtSafetyClass::AudioCallbackSafe,
+                              pulp::audio::RtSafetyClass::AudioCallbackSafeWithImmutableInputs}) {
+        type.rt_contract.safety_class = safety;
+        CHECK(custom_node_reset_runs_on_audio_thread(type));
+    }
+    for (const auto safety :
+         {pulp::audio::RtSafetyClass::ControlThreadOnly,
+          pulp::audio::RtSafetyClass::BackgroundThreadOnly, pulp::audio::RtSafetyClass::OfflineOnly,
+          pulp::audio::RtSafetyClass::RealtimeTelemetryOnly}) {
+        type.rt_contract.safety_class = safety;
+        CHECK_FALSE(custom_node_reset_runs_on_audio_thread(type));
+    }
+    type.rt_contract.safety_class = pulp::audio::RtSafetyClass::AudioCallbackSafe;
+    type.rt_contract.declared = false;
+    CHECK_FALSE(custom_node_reset_runs_on_audio_thread(type));
+    type.rt_contract.declared = true;
+    type.reset = nullptr;
+    CHECK_FALSE(custom_node_reset_runs_on_audio_thread(type));
+    // Every built-in stateful Control node keeps its seek reset.
+    for (const auto& builtin : {make_control_integrator_type(), make_control_slew_type(),
+                                make_control_hysteresis_type(), make_control_indexed_table_type()})
+        CHECK(custom_node_reset_runs_on_audio_thread(builtin));
 }
 
 TEST_CASE("Control blocks publish non-finite indices as zero and refuse negative resets",
