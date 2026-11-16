@@ -455,6 +455,20 @@ TEST_CASE("Every format renders each output bus's own tone and delivers the inpu
 
 TEST_CASE("Every format's audio callback allocates nothing at 2,000 parameters",
           "[host][scale][rt-safety]") {
+#if defined(__SANITIZE_ADDRESS__)
+#define PULP_SCALE_PROBE_UNDER_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define PULP_SCALE_PROBE_UNDER_ASAN 1
+#endif
+#endif
+#ifdef PULP_SCALE_PROBE_UNDER_ASAN
+    // AddressSanitizer routes operator new in every loaded image to its own
+    // runtime, so allocations made inside a hosted bundle never reach this
+    // executable's counting replacement and the control below cannot hold.
+    SKIP("the allocation probe cannot see allocations inside a hosted bundle under "
+         "AddressSanitizer");
+#endif
     constexpr int kBlocks = 256;
     for (const auto& target : targets()) {
         INFO(target.label);
