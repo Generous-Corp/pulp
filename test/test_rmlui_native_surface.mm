@@ -157,6 +157,8 @@ struct Editor {
     MemoryAssets assets;
     CountingRenderer renderer;
     std::atomic<int> begun{0};
+    /// What the renderer had compiled when the first frame began.
+    std::atomic<int> compiled_at_first_begin{-1};
     std::atomic<int> ended{0};
     /// Longest span between a frame's begin and end hooks, which run with the
     /// RmlUi lock held: how long a frame keeps everyone else out.
@@ -175,7 +177,8 @@ struct Editor {
         RendererHooks hooks;
         hooks.begin_frame = [this](const FrameTarget& t) {
             last_target = t;
-            begun.fetch_add(1);
+            if (begun.fetch_add(1) == 0)
+                compiled_at_first_begin.store(renderer.compiled.load());
             begin_ns.store(now_ns());
         };
         hooks.end_frame = [this] {
@@ -255,6 +258,25 @@ TEST_CASE("the document loads and renders through the caller's renderer",
         e.ui->detach();
         REQUIRE(vellum::rmlui::NativeContext::open_instances() == instances);
     }
+}
+
+TEST_CASE("the document's first frame is prepared before any frame is drawn",
+          "[native-surface][rmlui][first-frame]") {
+    REQUIRE_METAL();
+#if defined(PULP_VELLUM_RMLUI_HAS_WARM)
+    @autoreleasepool {
+        Editor e;
+        REQUIRE(e.attach());
+        REQUIRE(e.wait_for([&] { return e.begun.load() > 0; }));
+        // begin_frame runs before RmlUi updates, so geometry compiled by then
+        // was compiled while the document was prepared, not by the first
+        // frame's own update.
+        REQUIRE(e.compiled_at_first_begin.load() > 0);
+        e.ui->detach();
+    }
+#else
+    SKIP("the installed Vellum RmlUi SDK has no NativeContext::warm()");
+#endif
 }
 
 TEST_CASE("a missing document or font fails attach and leaves nothing behind",

@@ -502,8 +502,13 @@ CONTEXT_WORKFLOW = {
     "Vellum trusted freeze": ".github/workflows/vellum-trusted-gate.yml",
     "drift-fast": ".github/workflows/drift-fast.yml",
     "workflow-lint": ".github/workflows/workflow-lint.yml",
+    "review-verdict": ".github/workflows/review-verdict-merge-group.yml",
 }
-WORKFLOWS = tuple(dict.fromkeys(CONTEXT_WORKFLOW.values()))
+# `review-verdict` has two producers, one per event: the pull request head's
+# status comes from review-verdict.yml, the merge group's from the other.
+WORKFLOWS = tuple(
+    dict.fromkeys([*CONTEXT_WORKFLOW.values(), ".github/workflows/review-verdict.yml"])
+)
 ALL_GREEN = {name: "success" for name in FULL_CONTRACT}
 
 # A real `ctest-logs-macos` member: merge_group run 36545528395 (2026-09-29),
@@ -805,7 +810,7 @@ class MainTipObservationTests(unittest.TestCase):
         verdict = detect_live(fake, required=bp.FALLBACK_REQUIRED_CONTEXTS)
         self.assertEqual(verdict.status, bp.STATUS_HEALTHY, verdict.reason)
 
-    def test_the_configured_contract_and_workflows_are_all_six(self) -> None:
+    def test_the_configured_contract_and_workflows_are_all_required(self) -> None:
         try:
             import tomllib  # noqa: F401
         except ImportError:  # Python < 3.11
