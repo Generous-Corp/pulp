@@ -236,6 +236,30 @@ TEST_CASE("GraphSerializer saved documents refuse a connection that does not res
     }
 }
 
+TEST_CASE("GraphSerializer saved documents refuse a spectral edge on ordinary nodes",
+          "[host][serializer][identity][saved-connection-validation]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "Input");
+    const auto output = graph.add_output_node(1, "Output");
+    REQUIRE(graph.connect(input, 0, output, 0));
+    const auto saved = GraphSerializer::to_saved_document(graph);
+    REQUIRE_FALSE(saved.empty());
+
+    SignalGraph control;
+    REQUIRE(GraphSerializer::from_saved_document(control, saved).ok);
+    REQUIRE(control.connections().size() == 1);
+
+    const auto malformed = replace_after(
+        saved, "\"connections\"", "\"source_node\":", "\"spectral\": true, \"source_node\":");
+    REQUIRE(GraphSerializer::inspect_document(malformed).ok());
+    SignalGraph restored;
+    const auto result = GraphSerializer::from_saved_document(restored, malformed);
+    CHECK_FALSE(result.ok);
+    CHECK(result.error.starts_with("connection_not_restored:"));
+    CHECK(restored.nodes().empty());
+    CHECK(result.persisted_node_ids.empty());
+}
+
 TEST_CASE("GraphSerializer refuses an incomplete saved identity envelope",
           "[host][serializer][g3][d5]") {
     // identity_schema without logical_identities/nodes is not a complete envelope.
@@ -1747,6 +1771,16 @@ TEST_CASE("GraphSerializer::read_file_bounded verifies the file did not change w
 
     REQUIRE_FALSE(GraphSerializer::read_file_bounded(root / "absent", text, error));
     REQUIRE(error.find("cannot be opened") != std::string::npos);
+
+    // Moving a small std::function may leave its source callable. A read hook
+    // must be consumed exactly once, before its captures can leave scope.
+    write(original);
+    int calls = 0;
+    GraphSerializerTestAccess::set_after_first_read([&](const auto&) { ++calls; });
+    REQUIRE(GraphSerializer::read_file_bounded(path, text, error));
+    REQUIRE(GraphSerializer::read_file_bounded(path, text, error));
+    CHECK(calls == 1);
+    GraphSerializerTestAccess::set_after_first_read({});
     std::filesystem::remove_all(root);
 }
 
@@ -3244,6 +3278,48 @@ TEST_CASE("GraphSerializer decodes feedback edges and integer layout coordinates
         }
     }
     REQUIRE(saw_gain);
+}
+
+TEST_CASE("GraphSerializer saved placeholder parameter edges require a valid source",
+          "[host][serializer][identity][saved-connection-validation]") {
+    for (const bool audio_rate : {false, true}) {
+        CAPTURE(audio_rate);
+        SignalGraph graph;
+        const auto input = graph.add_input_node(1, "Source");
+        const auto info =
+            make_fake_plugin_info("Missing", "pulp.test.saved-missing", PluginFormat::CLAP, 1, 1);
+        const auto plugin =
+            graph.add_plugin_node(std::make_unique<SerializerSlot>(
+                                      info, std::vector<uint8_t>{},
+                                      audio_rate ? ParamRate::AudioRate : ParamRate::ControlRate),
+                                  1, 1, "Missing");
+        REQUIRE((audio_rate ? graph.connect_audio_rate_modulation(
+                                  input, 0, plugin, SerializerSlot::kParamId, -1.0f, 1.0f)
+                            : graph.connect_automation(input, 0, plugin, SerializerSlot::kParamId,
+                                                       -1.0f, 1.0f)));
+        const auto saved = GraphSerializer::to_saved_document(graph);
+        REQUIRE_FALSE(saved.empty());
+        GraphLoadOptions options;
+        options.load_plugins = false;
+
+        SignalGraph control;
+        const auto partial = GraphSerializer::from_saved_document(control, saved, options);
+        INFO(partial.error);
+        REQUIRE(partial.ok);
+        REQUIRE(control.nodes().size() == 2);
+        REQUIRE(control.connections().empty());
+        REQUIRE(missing_plugins_contain(partial, "clap:pulp.test.saved-missing"));
+
+        const auto malformed =
+            replace_after(saved, "\"connections\"", "\"source_port\": 0", "\"source_port\": 99");
+        REQUIRE(GraphSerializer::inspect_document(malformed).ok());
+        SignalGraph restored;
+        const auto result = GraphSerializer::from_saved_document(restored, malformed, options);
+        CHECK_FALSE(result.ok);
+        CHECK(result.error.starts_with("connection_not_restored:"));
+        CHECK(restored.nodes().empty());
+        CHECK(result.persisted_node_ids.empty());
+    }
 }
 
 TEST_CASE("GraphSerializer serializes and decodes automation connection fields",

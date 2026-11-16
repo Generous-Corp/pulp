@@ -44,6 +44,7 @@
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 #include <span>
 
@@ -2211,6 +2212,8 @@ find_unrestored_connection(const SignalGraph& graph, const V& root,
             !item.hasObjectMember("dest_node") || !item["source_node"].isInt() ||
             !item["dest_node"].isInt())
             return describe() + " is malformed";
+        if (flag(item, "spectral"))
+            return describe() + " uses the unsupported spectral lane";
         const auto source = persisted_ids.find(static_cast<NodeId>(item["source_node"].getInt64()));
         const auto dest = persisted_ids.find(static_cast<NodeId>(item["dest_node"].getInt64()));
         if (source == persisted_ids.end() || dest == persisted_ids.end())
@@ -2226,15 +2229,13 @@ find_unrestored_connection(const SignalGraph& graph, const V& root,
             continue;
         }
         const auto* target = graph.node(dest->second);
+        const auto* source_node = graph.node(source->second);
+        const bool valid_source =
+            source_node != nullptr && source_node->num_output_ports > 0 &&
+            port(item, "source_port") < static_cast<PortIndex>(source_node->num_output_ports);
         const bool placeholder = target != nullptr && target->type == NodeType::Plugin &&
                                  !target->plugin &&
                                  graph.processor_node_instance(target->id) == nullptr;
-        // Mirror the loader: the omission applies only when the source could
-        // have fed the edge, so an invalid source port is still a lost edge.
-        const auto* origin = graph.node(source->second);
-        const auto source_port = port(item, "source_port");
-        const bool valid_source = origin != nullptr && origin->num_output_ports > 0 &&
-                                  source_port < static_cast<PortIndex>(origin->num_output_ports);
         if ((automation || audio_rate) && placeholder && valid_source)
             continue;
         return describe() + " was not restored (invalid port, cycle, or duplicate edge)";
@@ -2345,7 +2346,7 @@ bool GraphSerializer::read_file_bounded(const std::filesystem::path& path, std::
         return fail("graph file changed while reading: " + path.string());
     }
     if (g_after_first_read_hook) {
-        auto hook = std::move(g_after_first_read_hook);
+        auto hook = std::exchange(g_after_first_read_hook, {});
         hook(path);
     }
     ec.clear();
