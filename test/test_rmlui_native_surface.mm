@@ -116,6 +116,8 @@ class CountingRenderer final : public Rml::RenderInterface {
         // A test can park the render thread inside a draw, lock held.
         if (hold_draws.load()) {
             parked.store(true);
+            // unbounded-wait: allow DrawCleanup releases the latch on every exit,
+            // including failure of the main thread's bounded parked-draw assertion.
             while (hold_draws.load())
                 std::this_thread::sleep_for(std::chrono::microseconds(200));
             parked.store(false);
@@ -915,12 +917,15 @@ TEST_CASE("contended input drain survives the last notification", "[rmlui][threa
     std::promise<void> owns_lock;
     std::promise<void> release_lock;
     auto release = release_lock.get_future();
+    auto owned = owns_lock.get_future();
+    std::atomic<bool> owner_timed_out{false};
     auto other_editor = std::async(std::launch::async, [&] {
         std::lock_guard lock(mutex);
         owns_lock.set_value();
-        release.wait();
+        owner_timed_out.store(release.wait_for(std::chrono::seconds(10)) !=
+                              std::future_status::ready);
     });
-    owns_lock.get_future().wait();
+    const bool acquired = owned.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
     int pending = 3;
     int delivered = 0;
     bool retry_posted = false;
@@ -939,6 +944,8 @@ TEST_CASE("contended input drain survives the last notification", "[rmlui][threa
     const int delivered_while_busy = delivered;
     release_lock.set_value();
     other_editor.get();
+    REQUIRE(acquired);
+    REQUIRE_FALSE(owner_timed_out.load());
     CHECK_FALSE(applied_while_busy);
     CHECK(delivered_while_busy == 0);
     REQUIRE(retry_posted);
@@ -966,6 +973,7 @@ TEST_CASE("parked cleanup releases holds before joining on exception", "[rmlui][
     std::atomic<bool> exited{false};
     std::atomic<bool> timed_out{false};
     struct Unwind {};
+    bool requester_started = false;
     try {
         std::promise<void> started;
         auto ready = started.get_future();
@@ -979,14 +987,15 @@ TEST_CASE("parked cleanup releases holds before joining on exception", "[rmlui][
                     timed_out.store(true);
                     return;
                 }
-                std::this_thread::yield();
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
             exited.store(true);
         });
-        ready.wait();
+        requester_started = ready.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
         throw Unwind{};
     } catch (const Unwind&) {
     }
+    CHECK(requester_started);
     CHECK_FALSE(timed_out.load());
     CHECK(exited.load());
     CHECK_FALSE(a.renderer.hold_draws.load());
