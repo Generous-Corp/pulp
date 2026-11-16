@@ -105,6 +105,8 @@ class MemoryAssets final : public vellum::rmlui::AssetProvider {
     }
 };
 
+long long now_ns();
+
 /// Counts what RmlUi asks of a renderer, and how many threads are inside it.
 class CountingRenderer final : public Rml::RenderInterface {
   public:
@@ -130,14 +132,25 @@ class CountingRenderer final : public Rml::RenderInterface {
         }
         leave();
     }
-    void ReleaseGeometry(Rml::CompiledGeometryHandle) override {}
+    void ReleaseGeometry(Rml::CompiledGeometryHandle) override {
+        mark_release();
+        released_geometry.fetch_add(1);
+    }
     Rml::TextureHandle LoadTexture(Rml::Vector2i&, const Rml::String&) override {
         return 0;
     }
     Rml::TextureHandle GenerateTexture(Rml::Span<const Rml::byte>, Rml::Vector2i) override {
         return 1;
     }
-    void ReleaseTexture(Rml::TextureHandle) override {}
+    void ReleaseTexture(Rml::TextureHandle) override {
+        mark_release();
+        released_textures.fetch_add(1);
+    }
+    // When the first release since it was last cleared happened.
+    void mark_release() {
+        long long none = 0;
+        first_release_ns.compare_exchange_strong(none, now_ns());
+    }
     void EnableScissorRegion(bool) override {}
     void SetScissorRegion(Rml::Rectanglei) override {}
 
@@ -145,6 +158,9 @@ class CountingRenderer final : public Rml::RenderInterface {
     static inline std::atomic<int> max_inside{0};
     std::atomic<int> compiled{0};
     std::atomic<int> rendered{0};
+    std::atomic<int> released_geometry{0};
+    std::atomic<int> released_textures{0};
+    std::atomic<long long> first_release_ns{0};
     std::atomic<int> draw_delay_us{200};
     std::atomic<bool> hold_draws{false};
     std::atomic<bool> parked{false};
@@ -180,6 +196,15 @@ struct Editor {
     /// What the renderer had compiled when the first frame began.
     std::atomic<int> compiled_at_first_begin{-1};
     std::atomic<int> ended{0};
+    std::atomic<int> trimmed{0};
+    /// Set to hold the next frame's command buffer on the GPU until `gate` is
+    /// signalled with 1.
+    std::atomic<bool> gate_next{false};
+    std::atomic<bool> gated{false};
+    id<MTLSharedEvent> gate = nil;
+    id<MTLCommandBuffer> gated_cb = nil;
+    /// The gated command buffer's status when the trim hook ran, or -1.
+    std::atomic<int> trim_saw_status{-1};
     /// Longest span between a frame's begin and end hooks, which run with the
     /// RmlUi lock held: how long a frame keeps everyone else out.
     std::atomic<long long> max_hold_ns{0};
@@ -197,6 +222,13 @@ struct Editor {
         RendererHooks hooks;
         hooks.begin_frame = [this](const FrameTarget& t) {
             last_target = t;
+            if (gate_next.exchange(false)) {
+                id<MTLCommandBuffer> cb = (__bridge id<MTLCommandBuffer>)t.command_buffer;
+                gate = [cb.device newSharedEvent];
+                [cb encodeWaitForEvent:gate value:1];
+                gated_cb = cb;
+                gated.store(true);
+            }
             // Stored before the count moves, so a reader that sees the count
             // sees the value.
             if (begun.load() == 0)
@@ -210,6 +242,11 @@ struct Editor {
             while (hold > seen && !max_hold_ns.compare_exchange_weak(seen, hold)) {
             }
             ended.fetch_add(1);
+        };
+        hooks.trim = [this] {
+            if (gated.load())
+                trim_saw_status.store(static_cast<int>(gated_cb.status));
+            trimmed.fetch_add(1);
         };
         RmlUiSurfaceOptions options;
         options.document = "probe.rml";
@@ -1518,4 +1555,105 @@ TEST_CASE("parked cleanup releases holds before joining on exception", "[rmlui][
     CHECK_FALSE(b.renderer.hold_draws.load());
     CHECK(a.surface.detached);
     CHECK(b.surface.detached);
+}
+
+TEST_CASE("a hidden editor stops frames and trims GPU memory, and showing it draws a full frame",
+          "[native-surface][rmlui][visibility]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        Editor e;
+        REQUIRE(e.attach());
+        REQUIRE(e.wait_for([&] { return e.ui->frames() > 0; }));
+        const int compiled_before = e.renderer.compiled.load();
+        const int rendered_before = e.renderer.rendered.load();
+        REQUIRE(e.renderer.released_geometry.load() == 0);
+        REQUIRE(e.trimmed.load() == 0);
+
+        e.ui->visibility_changed(false);
+        // RmlUi handed back its geometry and textures through the renderer,
+        // and the renderer was told to drop its own caches.
+        REQUIRE(e.renderer.released_geometry.load() > 0);
+        REQUIRE(e.trimmed.load() == 1);
+
+        // Frames stay off while hidden, whatever asks for one and whatever the
+        // window reports.
+        const auto frames = e.ui->frames();
+        for (int i = 0; i < 10; ++i) {
+            e.ui->request_frame();
+            e.ui->idle();
+            [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
+        }
+        REQUIRE(e.ui->frames() == frames);
+
+        // Showing draws a complete frame: the geometry RmlUi released is
+        // compiled again and drawn.
+        e.ui->visibility_changed(true);
+        REQUIRE(e.wait_for([&] { return e.ui->frames() > frames; }));
+        REQUIRE(e.renderer.compiled.load() > compiled_before);
+        REQUIRE(e.renderer.rendered.load() > rendered_before);
+        REQUIRE(e.trimmed.load() == 1);
+        e.ui->detach();
+    }
+}
+
+TEST_CASE("hiding waits for the last submitted frame before releasing GPU resources",
+          "[native-surface][rmlui][visibility]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        Editor e;
+        REQUIRE(e.attach());
+        REQUIRE(e.wait_for([&] { return e.ui->frames() > 0; }));
+        // The next frame's command buffer waits on an event, so it is still on
+        // the GPU, committed, when the editor is hidden.
+        e.gate_next.store(true);
+        const auto before = e.ui->frames();
+        e.ui->request_frame();
+        REQUIRE(e.wait_for([&] { return e.gated.load() && e.ui->frames() > before; }));
+        REQUIRE(e.gated_cb.status != MTLCommandBufferStatusCompleted);
+        e.renderer.first_release_ns.store(0);
+        std::atomic<long long> signalled_ns{0};
+        id<MTLSharedEvent> gate = e.gate;
+        // Always signalled, so a regression fails the assertions, not the run.
+        std::thread release([&signalled_ns, gate] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            signalled_ns.store(now_ns());
+            gate.signaledValue = 1;
+        });
+        e.ui->visibility_changed(false);
+        release.join();
+        REQUIRE(e.trimmed.load() == 1);
+        // Nothing was released, and the renderer was not trimmed, while the
+        // frame could still use it.
+        REQUIRE(e.trim_saw_status.load() == static_cast<int>(MTLCommandBufferStatusCompleted));
+        REQUIRE(e.renderer.first_release_ns.load() >= signalled_ns.load());
+        e.ui->detach();
+    }
+}
+
+TEST_CASE("a renderer serves one attached surface at a time",
+          "[native-surface][rmlui][visibility]") {
+    REQUIRE_METAL();
+    @autoreleasepool {
+        Editor a;
+        Editor b;
+        REQUIRE(a.attach());
+        RmlUiSurfaceOptions options;
+        options.document = "probe.rml";
+        options.font_faces = {"font.ttf"};
+        // Hiding a would release this surface's geometry and textures too.
+        RmlUiSurface shared(a.assets, a.renderer, {}, options);
+        REQUIRE_FALSE(shared.attach((__bridge void*)b.window.contentView));
+        REQUIRE_FALSE(shared.attached());
+        REQUIRE(a.wait_for([&] { return a.ui->frames() > 0; }));
+        // Detaching frees the renderer; an attach that fails after taking it
+        // (a missing document) gives it back.
+        a.ui->detach();
+        RmlUiSurface missing(a.assets, a.renderer, {}, {"missing.rml"});
+        REQUIRE_FALSE(missing.attach((__bridge void*)b.window.contentView));
+        REQUIRE(shared.attach((__bridge void*)b.window.contentView));
+        REQUIRE_FALSE(a.attach());
+        shared.detach();
+        REQUIRE(a.attach());
+        a.ui->detach();
+    }
 }

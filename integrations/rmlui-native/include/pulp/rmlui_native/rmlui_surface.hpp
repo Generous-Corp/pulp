@@ -76,6 +76,14 @@ struct FrameTarget {
 struct RendererHooks {
     std::function<void(const FrameTarget&)> begin_frame;
     std::function<void()> end_frame;
+    /// Called when the editor is hidden, with `rmlui_mutex()` held, after
+    /// RmlUi has released its compiled geometry and textures through the
+    /// renderer. No frame of this surface is being encoded or waiting to be
+    /// committed, and its last committed command buffer has completed: the
+    /// surface waits for it before releasing anything. Free any GPU memory the
+    /// renderer itself caches (layer, filter and atlas textures); it is
+    /// rebuilt on the next frame. Optional.
+    std::function<void()> trim;
 };
 
 struct RmlUiSurfaceOptions {
@@ -98,7 +106,10 @@ struct RmlUiSurfaceOptions {
 
 class RmlUiSurface {
   public:
-    /// `assets` and `renderer` must outlive the surface.
+    /// `assets` and `renderer` must outlive the surface. A renderer serves one
+    /// attached surface at a time, because hiding releases the renderer's
+    /// geometry and textures: `attach()` fails while another attached surface
+    /// uses the same renderer, and detaching frees it for another.
     RmlUiSurface(vellum::rmlui::AssetProvider& assets, Rml::RenderInterface& renderer,
                  RendererHooks hooks, RmlUiSurfaceOptions options);
     ~RmlUiSurface();
@@ -107,7 +118,8 @@ class RmlUiSurface {
 
     /// Create the Metal surface in `parent` (`NSView*`), open the RmlUi
     /// context, load the document and start drawing. False, with nothing left
-    /// behind, if any step fails.
+    /// behind, if any step fails or another attached surface uses the
+    /// renderer.
     bool attach(void* parent);
     /// Stop drawing, close the RmlUi context and remove the surface view.
     void detach();
@@ -117,6 +129,15 @@ class RmlUiSurface {
 
     /// Main-thread tick: visibility and size follow the window.
     void idle();
+    /// The host hid or showed the editor without detaching it. Hiding stops
+    /// frames at once (an `idle()` that follows does not restart them) and
+    /// releases RmlUi's compiled geometry and textures and the renderer's own
+    /// caches (`RendererHooks::trim`), once the last frame's command buffer
+    /// has completed, which can take about a frame. Showing resumes frames
+    /// and draws one,
+    /// rebuilding what was released, so the first visible frame is complete.
+    /// Main thread.
+    void visibility_changed(bool visible);
     /// True while an RmlUi text field holds the keyboard. Main thread.
     bool text_field_focused() const noexcept;
     /// A host offers `event` before acting on it itself (a transport shortcut

@@ -93,6 +93,25 @@ size on a 2x display. Configure warns about it, and the first `attach()` reports
 through the diagnostic sink, once per process (standard error by default; `set_diagnostic_sink`
 redirects it).
 
+### Hiding the editor
+
+A host that hides an editor without detaching it (CLAP `gui_hide`, an AU view
+leaving its window) reaches the editor as `visibility_changed(false)`. The
+contract session then stops calling the editor's `idle()` until the editor is
+shown again. It keeps draining the parameter change queue, because the audio
+thread keeps writing and the queue is bounded, and showing ticks once at once.
+An RmlUi editor forwards the call to `RmlUiSurface::visibility_changed()`:
+frames stop at once, including one already waiting for the frame lock, RmlUi
+releases its compiled geometry and textures through the renderer, and
+`RendererHooks::trim` is called so the renderer can free the layer, filter and
+atlas textures it caches. The trim waits until no frame of the surface is
+being encoded or submitted and its last committed command buffer has completed
+on the GPU (about a frame at most), so nothing released is still in use.
+Showing resumes frames and draws one, which recompiles everything that was
+released, so the first visible frame is complete. The release calls are
+renderer-wide, so a renderer serves one attached surface at a time:
+`attach()` fails while another attached surface uses it.
+
 ### Keys and window focus
 
 An RmlUi editor does not decide for itself whether a text field wants a key a

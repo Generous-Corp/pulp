@@ -118,6 +118,17 @@ it and its tests, and both look like bugs until you know them:
   per-draw delay in a counting renderer and times `with_context()` as the
   control.
 
+- **A hidden contract editor gets no `idle()`, and must stop drawing and give
+  memory back itself.** `ContractEditorSession::visibility_changed(false)` skips
+  `Editor::idle()` but keeps draining the parameter change queue (it is
+  bounded and the audio thread keeps writing); `visibility_changed(true)` ticks
+  once at once. An RmlUi editor forwards the call to
+  `RmlUiSurface::visibility_changed()`, which stops frames (an `idle()` cannot
+  restart them, and a frame already waiting for the lock returns early),
+  releases RmlUi's geometry and textures and calls `RendererHooks::trim`. A
+  test must prove the first frame after show is complete (geometry compiled
+  and drawn again) and that nothing recompiles while hidden.
+
 `pulp::native::GlSurface` is the OpenGL counterpart for Windows and X11. On
 macOS only its offscreen backend exists (CGL into a framebuffer object), for
 tests and offline capture. Two things about it are easy to get wrong:

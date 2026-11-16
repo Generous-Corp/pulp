@@ -20,6 +20,8 @@
 #include <cstdio>
 #include <deque>
 #include <memory>
+#include <mutex>
+#include <set>
 #include <map>
 #include <type_traits>
 #include <utility>
@@ -138,6 +140,18 @@ std::mutex& rmlui_mutex() {
     return m;
 }
 
+namespace {
+
+// Renderers an attached surface holds. Hiding releases geometry and textures
+// renderer-wide, so a renderer serves one attached surface at a time.
+// rmlui_mutex() held.
+std::set<const Rml::RenderInterface*>& claimed_renderers() {
+    static std::set<const Rml::RenderInterface*> claimed;
+    return claimed;
+}
+
+} // namespace
+
 struct RmlUiSurface::Impl {
     vellum::rmlui::AssetProvider& assets;
     Rml::RenderInterface& renderer;
@@ -151,6 +165,17 @@ struct RmlUiSurface::Impl {
     std::uint32_t height_px = 0;
     double scale = 1.0;
     bool text_focus = false;
+    // The host hid the editor: frames stay off whatever the window says.
+    std::atomic<bool> host_hidden{false};
+    // Held by a frame from its command buffer's creation until the commit,
+    // and by a trim while it waits for the last committed buffer, so a trim
+    // never frees what an encoded or still-executing frame uses.
+    std::mutex submit_mutex;
+    // The last command buffer a frame committed. submit_mutex held.
+    id<MTLCommandBuffer> last_committed = nil;
+    // This surface holds the claim on `renderer` (claimed_renderers()).
+    // rmlui_mutex() held.
+    bool claims_renderer = false;
     // The disposition of each key press, so repeats and releases keep the
     // original host/client owner even if focus changes while it is held. For
     // contract-only printable keys, `characters` is the stable identity when
@@ -233,6 +258,25 @@ struct RmlUiSurface::Impl {
         }
     }
 
+    // Main thread: hand back what the GPU holds for a hidden editor. Waits
+    // for this surface's last committed frame to finish on the GPU (at most
+    // about one frame), so nothing released is still in use.
+    void trim_gpu_resources() {
+        std::lock_guard submit(submit_mutex);
+        if (last_committed)
+            [last_committed waitUntilCompleted];
+        last_committed = nil;
+        std::lock_guard lock(rmlui_mutex());
+        if (!context)
+            return;
+        vellum::rmlui::NativeContext::Scope scope(*context);
+        // RmlUi regenerates both on the next render that needs them.
+        Rml::ReleaseCompiledGeometry(&renderer);
+        Rml::ReleaseTextures(&renderer);
+        if (hooks.trim)
+            hooks.trim();
+    }
+
     // Render thread.
     void render_frame() {
         @autoreleasepool {
@@ -247,11 +291,16 @@ struct RmlUiSurface::Impl {
                 post_if_queued();
                 return;
             }
+            // Until the commit: a trim waits for this frame rather than
+            // freeing what it is encoding or about to submit.
+            std::unique_lock submit(submit_mutex);
             id<MTLCommandBuffer> cb =
                 [(__bridge id<MTLCommandQueue>)surface->command_queue() commandBuffer];
             {
                 std::lock_guard lock(rmlui_mutex());
-                if (!context || !context->is_open()) {
+                // A frame that was waiting for the lock while the host hid the
+                // editor must not rebuild what the trim just released.
+                if (!context || !context->is_open() || host_hidden.load()) {
                     post_if_queued();
                     return;
                 }
@@ -269,6 +318,8 @@ struct RmlUiSurface::Impl {
             post_if_queued();
             drawable.present((__bridge void*)cb);
             [cb commit];
+            last_committed = cb;
+            submit.unlock();
             frames.fetch_add(1);
         }
     }
@@ -538,10 +589,18 @@ struct RmlUiSurface::Impl {
             if (context)
                 context->close();
             context.reset();
+            if (claims_renderer)
+                claimed_renderers().erase(&renderer);
+            claims_renderer = false;
+        }
+        {
+            std::lock_guard submit(submit_mutex);
+            last_committed = nil;
         }
         pump.reset();
         surface.reset();
         text_focus = false;
+        host_hidden.store(false);
         refocus_id.clear();
         press_dispositions.clear();
         width_px = height_px = 0;
@@ -592,14 +651,18 @@ bool RmlUiSurface::attach(void* parent) {
         // Native captures the system interface when its first instance opens.
         if (vellum::rmlui::NativeContext::open_instances() == 0)
             Rml::SetSystemInterface(&system_interface());
-        d.context = std::make_unique<vellum::rmlui::NativeContext>(d.assets, d.renderer);
+        // One attached surface per renderer: another one's hide would release
+        // this one's geometry and textures.
+        d.claims_renderer = claimed_renderers().insert(&d.renderer).second;
+        if (d.claims_renderer)
+            d.context = std::make_unique<vellum::rmlui::NativeContext>(d.assets, d.renderer);
         const auto g = d.surface->geometry();
         const double s = g.scale > 0.0 ? g.scale : 1.0;
         const auto w =
             std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.width * s)));
         const auto h =
             std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.height * s)));
-        bool ok = d.context->open(w, h) == vellum::rmlui::Status::ok;
+        bool ok = d.context && d.context->open(w, h) == vellum::rmlui::Status::ok;
         if (ok) {
             vellum::rmlui::NativeContext::Scope scope(*d.context);
             for (std::size_t i = 0; i < d.options.font_faces.size() && ok; ++i)
@@ -659,7 +722,7 @@ void RmlUiSurface::idle() {
     if (!d.surface || !d.pump)
         return;
     d.surface->poll_visibility();
-    d.pump->set_on_screen(d.surface->on_screen().on_screen());
+    d.pump->set_on_screen(d.surface->on_screen().on_screen() && !d.host_hidden.load());
     // The tick never waits for a frame: a busy lock means this tick leaves
     // the size and any queued input for the next one.
     bool resized = false;
@@ -675,6 +738,23 @@ void RmlUiSurface::idle() {
     }
     if (resized || applied)
         d.pump->request_frame();
+}
+
+void RmlUiSurface::visibility_changed(bool visible) {
+    auto& d = *impl_;
+    if (!d.surface || !d.pump)
+        return;
+    d.host_hidden.store(!visible);
+    if (!visible) {
+        d.pump->set_on_screen(false);
+        d.trim_gpu_resources();
+        return;
+    }
+    // The host says it is shown: draw now. The next idle() tick narrows that to
+    // what the window reports (occluded, minimised).
+    d.surface->poll_visibility();
+    d.pump->set_on_screen(true);
+    d.pump->request_frame();
 }
 
 bool RmlUiSurface::text_field_focused() const noexcept {

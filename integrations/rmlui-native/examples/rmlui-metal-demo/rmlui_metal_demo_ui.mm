@@ -104,6 +104,10 @@ class Editor final : public ::pulp::format::Editor {
         if (ui_)
             ui_->idle();
     }
+    void visibility_changed(bool visible) override {
+        if (ui_)
+            ui_->visibility_changed(visible);
+    }
     void focus_changed(bool focused) override {
         if (ui_)
             ::pulp::rmlui_native::forward_editor_focus(*ui_, focused);
