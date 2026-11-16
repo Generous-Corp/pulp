@@ -156,7 +156,8 @@ the standalone app without Pulp's view layer, so it also carries no Pulp view,
 render or Dawn code and a package that draws with Dawn brings the only copy;
 that app opens only the package's editor (no Settings tab, musical typing
 keyboard or Audio Inspector, which are Pulp views). AUv3 and AAX outputs still
-link the view stack. `NATIVE_UI`, `UI_SCRIPT`, `GPU_UI`,
+link the view stack; an AUv3 view controller opens the package's editor
+through the contract and builds no Pulp view for it. `NATIVE_UI`, `UI_SCRIPT`, `GPU_UI`,
 `FULL_EDITOR` and `LITE_EDITOR` select Pulp's own view editor, so combining
 any of them with a package stops configuration with
 `UI <package> cannot be combined with ...`. `UI none` selects no package and
@@ -175,8 +176,9 @@ A format whose adapter does not open contract editors yet still builds, but
 without an editor; `pulp_add_plugin()` names those formats in a configure
 warning.
 
-VST3 and CLAP open the editor through the contract whenever
-`editor_factory()` is non-null, and fall back to `create_view()` otherwise. A
+VST3, CLAP and AUv3 (macOS and iOS) open the editor through the contract
+whenever `editor_factory()` is non-null, and fall back to `create_view()`
+otherwise. A
 UI-package plug-in's AU v2 component serves a view-free Cocoa view factory
 (`au_v2_contract_view.mm`) that opens the package's editor. The standalone app
 hosts the contract editor in its own native window (macOS today; other

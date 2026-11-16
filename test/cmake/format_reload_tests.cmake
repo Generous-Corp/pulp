@@ -537,6 +537,23 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_AUSDK)
     target_link_options(pulp-test-au-v2-contract-view PRIVATE -Wl,-export_dynamic)
     catch_discover_tests(pulp-test-au-v2-contract-view)
 
+    # AU v3 contract view (au_v3_contract_view.mm): the view the macOS and iOS
+    # AU v3 view controllers embed for a processor with an editor factory,
+    # compiled with a test-unique class name. No audio unit is needed: it takes
+    # the processor, store and session registry directly.
+    add_executable(pulp-test-au-v3-contract-view
+        test_au_v3_contract_view.mm
+        ${CMAKE_SOURCE_DIR}/core/format/src/au_v3_contract_view.mm)
+    target_link_libraries(pulp-test-au-v3-contract-view PRIVATE
+        pulp::format-core Catch2::Catch2WithMain
+        "-framework AppKit")
+    target_compile_definitions(pulp-test-au-v3-contract-view PRIVATE
+        PULP_AUV3_CONTRACT_VIEW_CLASS=PulpAUv3ContractView_Test)
+    set_target_properties(pulp-test-au-v3-contract-view PROPERTIES CXX_STANDARD 23)
+    target_compile_options(pulp-test-au-v3-contract-view PRIVATE
+        $<$<COMPILE_LANGUAGE:OBJCXX>:-std=gnu++23>)
+    catch_discover_tests(pulp-test-au-v3-contract-view)
+
     # The same module compiled the way a shipped UI-package AU v2 builds it, with
     # no PULP_AU_V2_TEST_HOOKS: the test seam must not be in it.
     add_executable(pulp-test-au-v2-contract-shipping

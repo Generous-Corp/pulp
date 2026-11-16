@@ -3430,6 +3430,25 @@ TEST_CASE("Windows launches give a child only its standard handles",
 TEST_CASE("A concurrent launch never inherits a retained child's private channel endpoint",
           "[runtime][child-process][retained-custody]") {
     using namespace pulp::platform;
+    // Control: the retained child holds the private endpoint as its standard
+    // input, so the probe must see at least one channel pipe there. A probe
+    // that cannot name the pipe would otherwise read every leak as zero.
+    {
+        RetainedProcessCustody reservation;
+        ChildProcess process;
+        std::optional<int> held;
+        REQUIRE(process.start_retained_with_standard_input_channel(
+            reservation, "ping.exe", {"-n", "30", "127.0.0.1"},
+            [&](int pid, ChildProcessInputChannel, auto) {
+                held = private_channel_handles_in(pid);
+                return true;
+            },
+            uncaptured_channel_options()));
+        CHECK(reservation.cleanup_retained_process_group(custody_deadline()).status ==
+              RetainedCleanupStatus::Complete);
+        REQUIRE(held.has_value());
+        CHECK(*held >= 1);
+    }
     std::atomic<bool> stop{false};
     std::atomic<int> sessions{0};
     std::thread retained([&] {
