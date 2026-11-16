@@ -21,6 +21,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <memory>
 #include <string>
 #include <vector>
@@ -152,11 +153,10 @@ bool draw(const char* document, CGFloat scale, Drawn& out, std::string& failure,
         RmlUiSurface ui(assets, renderer, capture.wrap(metal_renderer_hooks(renderer)), options);
         const auto attach_started = std::chrono::steady_clock::now();
         const bool attached = ui.attach((__bridge void*)window.contentView);
-        WARN("attach (document load + warm) took "
-             << std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
-                                                          attach_started)
-                    .count()
-             << " ms");
+        std::fprintf(stderr, "attach (document load + warm) took %.1f ms\n",
+                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
+                                                               attach_started)
+                         .count());
         if (!attached) {
             failure = "attach failed";
         } else {
