@@ -22,7 +22,7 @@ if(PULP_ENABLE_PULP_NATIVE)
     add_subdirectory(pulp-native)
 endif()
 
-# RmlUi on the native surface, over Vellum's installed VellumRmlUiNative::Native.
+# RmlUi on the native surface, over Vellum's installed VellumRmlUi::Native.
 # Off by default: nothing fetches or finds RmlUi unless this is ON. Point
 # CMAKE_PREFIX_PATH at an installed VellumRmlUi package that carries the Native
 # component.
