@@ -490,8 +490,9 @@ A processor whose initialized `editor_factory()` is non-null gets the contract
 alike. The contract GUI lives in `clap_contract_gui.cpp`, which is compiled into
 both `pulp-format-clap-core` and `pulp-format-view`. It sits on a
 `ContractEditorSession` (shared with VST3, AU v2 and the standalone host). It
-is the CLAP path for RmlUi and native-surface editors too, which are
-macOS-only today (`MetalSurface`). Things to keep
+is the CLAP path for RmlUi and native-surface editors too. RmlUi editors, and
+Metal native surfaces, are macOS-only (`pulp-native` also has GL surfaces for
+Win32 and X11, but RmlUi has no renderer on them). Things to keep
 straight:
 
 - The choice is made in `clap_entry.hpp`'s `get_static_extension`, which reads

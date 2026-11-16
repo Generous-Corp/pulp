@@ -38,7 +38,6 @@ hosts today:
 | VST3 content scale | not implemented on `PulpPlugView` | `ContractPlugView` implements it |
 | AU v3 | `au_view_controller_*.mm` | none: the contract is not served |
 
-
 `pulp::native::MetalSurface` is for an editor that brings its own Metal
 renderer and does not go through `ViewBridge`. Two macOS behaviours shape both
 it and its tests, and both look like bugs until you know them:

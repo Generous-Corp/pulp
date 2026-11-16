@@ -1732,6 +1732,7 @@ test_au_midi_output.mm.
 `ContractEditorSession`, unlike VST3, CLAP and AU v2. `pulp_add_plugin(... UI
 <package>)` implies `NO_EDITOR`, but the AUv3 module still links the view
 stack, so an AUv3 built that way has no contract editor (an RmlUi or
-native-surface editor included) and nothing diagnoses it at configure time.
-Do not list `AUv3` in `FORMATS` for such a plug-in until the view controllers
-serve the contract.
+native-surface editor included). `_pulp_warn_ui_package_formats`
+(`tools/cmake/PulpEditorPackage.cmake`) names AUv3 in a configure warning;
+treat that warning as the build having no editor, and do not list `AUv3` in
+`FORMATS` for such a plug-in until the view controllers serve the contract.
