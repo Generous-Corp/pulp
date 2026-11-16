@@ -76,7 +76,7 @@ In this adapter every `px` length, not only text, is a device pixel, because the
 context is sized in drawable pixels; use `dp` (a point) for anything that must
 keep its physical size across backing scales. `dp` only differs from `px` when
 the Vellum RmlUi SDK exports `set_density_ratio` (`density_ratio_supported()`);
-without it the adapter warns at configure and at each attach.
+without it the adapter warns at configure and at the first attach.
 
 ## Licence line
 

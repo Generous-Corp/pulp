@@ -40,6 +40,11 @@ std::function<void(const std::string&)>& diagnostic_sink() {
     return sink;
 }
 
+std::atomic<bool>& density_notice_reported() {
+    static std::atomic<bool> reported{false};
+    return reported;
+}
+
 void diagnose(const std::string& message) {
     if (diagnostic_sink())
         diagnostic_sink()(message);
@@ -122,6 +127,7 @@ bool density_ratio_supported() noexcept {
 
 void set_diagnostic_sink(std::function<void(const std::string&)> sink) {
     diagnostic_sink() = std::move(sink);
+    density_notice_reported().store(false);
 }
 
 std::mutex& rmlui_mutex() {
@@ -514,7 +520,8 @@ bool RmlUiSurface::attach(void* parent) {
         impl_->teardown(true);
         return false;
     }
-    if (!density_ratio_supported())
+    // Once per process: the build either has the setter or it does not.
+    if (!density_ratio_supported() && !density_notice_reported().exchange(true))
         diagnose("the Vellum RmlUi SDK this was built against has no density ratio, so `dp` "
                  "lengths equal `px` and a document sized in `dp` renders at 1/scale of its "
                  "intended size on a high-density display; build against an SDK that exports "
@@ -559,7 +566,7 @@ void RmlUiSurface::idle() {
 }
 
 double RmlUiSurface::density_ratio() const noexcept {
-    return density_ratio_supported() ? impl_->scale : 1.0;
+    return density_ratio_supported() && impl_->context ? impl_->scale : 1.0;
 }
 
 void RmlUiSurface::flush_input() {
