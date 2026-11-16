@@ -59,8 +59,10 @@ renderer does.
 The opt-in `PULP_ENABLE_RMLUI_ADAPTER` package adds
 `pulp::rmlui-native-metal` when the Vellum main SDK and the optional
 `vellum-rmlui-sdk-<version>-darwin-arm64` prefix export
-`VellumRmlUiNative::Native` and `VellumRmlUiNative::Metal`. Put both prefixes in
-`CMAKE_PREFIX_PATH` (the RmlUi prefix alongside the main Vellum prefix).
+`VellumRmlUi::Native` and `VellumRmlUi::Metal`. The package is found as
+`VellumRmlUiNative`, but its targets keep the `VellumRmlUi::` namespace. Put
+both prefixes in `CMAKE_PREFIX_PATH` (the RmlUi prefix alongside the main
+Vellum prefix).
 Construct
 `vellum::rmlui::MetalRenderInterface` with the device returned by the surface,
 then pass `metal_renderer_hooks(renderer)` to `RmlUiSurface`. The hooks give
@@ -161,7 +163,10 @@ returns at once without touching RmlUi.
   windows. They skip, saying so, without one.
 - `pulp-test-rmlui-native-surface` and `pulp-test-rmlui-native-metal` cover the
   RmlUi adapter, including the first-frame preparation. They need an installed
-  Vellum RmlUi SDK and no CI lane builds them yet, so run them locally.
+  Vellum RmlUi SDK. The advisory `rmlui-native` lane builds that SDK from
+  Vellum's `rmlui/` project at a pinned commit (Vellum publishes no release
+  artifact for it yet) and runs the surface suite
+  (`tools/ci/rmlui_native_lane.sh`); the Metal suite is run locally.
 - `pulp-test-native-metal-probe` drives the example through the editor-host
   contract, the path every format adapter takes.
 - `pulp-test-native-surface-clap`, `-vst3`, `-au-v2` and `-au-v3` open the

@@ -1679,6 +1679,27 @@
       ]
     },
     {
+      "name": "vellum-rmlui-sdk",
+      "category": "developer-tooling",
+      "license": "MIT",
+      "version": "97bb7ad9",
+      "source_kind": "external-clone",
+      "repository": "https://github.com/Generous-Corp/vellum.git",
+      "upstream": {
+        "kind": "git-commit",
+        "ref": "97bb7ad9e90714cf37b33263d26392649ebdc48d",
+        "commit": "97bb7ad9e90714cf37b33263d26392649ebdc48d"
+      },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": false,
+      "notes": "Vellum's rmlui/ project, built and installed by the advisory RmlUi native adapter lane (.github/workflows/rmlui-native.yml) so pulp-test-rmlui-native-surface has the VellumRmlUiNative package it links. Test-only: built from a source checkout at this commit on the CI runner (which fetches RmlUi and FreeType itself), cached by commit, never bundled, shipped or required by setup.sh, pulp build or the required gate. A released rmlui-sdk artifact would replace the source build once Vellum publishes one.",
+      "source_files": [
+        "tools/ci/rmlui_native_lane.sh",
+        ".github/workflows/rmlui-native.yml",
+        "DEPENDENCIES.md"
+      ]
+    },
+    {
       "name": "Vitest",
       "category": "developer-tooling",
       "license": "MIT",
