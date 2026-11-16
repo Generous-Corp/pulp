@@ -173,6 +173,8 @@ constexpr int kFormatVersion = 6;
 constexpr int kMinInspectedFormatVersion = 4;
 constexpr std::size_t kMaxSerializedSampleRegionConnections = 2'048;
 constexpr std::size_t kMaxSerializedNodes = 512;
+static_assert(GraphSerializer::max_object_members >= kMaxSerializedNodes,
+              "the member bound must admit the writer's own bindings object");
 constexpr std::size_t kMaxSerializedConnections = 16'384;
 
 struct GraphMigrationEntry {

@@ -125,6 +125,13 @@ std::string object_with_members(std::size_t count) {
 }
 } // namespace
 
+TEST_CASE("GraphSerializer member bound admits every node a graph accepts by default",
+          "[host][serializer][limits]") {
+    // `bindings` holds one member per node, so a per-object bound below the
+    // graph's own node limit would refuse a document the graph could hold.
+    CHECK(GraphSerializer::max_object_members >= SignalGraph{}.limits().max_nodes);
+}
+
 TEST_CASE("GraphSerializer bounds object members before parsing", "[host][serializer][identity]") {
     // Control: an object at the per-object bound is admitted.
     const auto at_limit =

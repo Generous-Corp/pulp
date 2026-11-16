@@ -180,10 +180,12 @@ class GraphSerializer {
     // encoded JSON envelope (including base64 state), not decoded payloads.
     static constexpr std::size_t max_file_bytes = 64u * 1024u * 1024u;
     static constexpr std::size_t max_document_depth = 64;
-    // Member bounds checked before parsing. The writer emits at most one
-    // member per node in its largest object (`bindings`), and a document at
-    // the node and connection limits stays far below the total.
-    static constexpr std::size_t max_object_members = 1024;
+    // Member bounds checked before parsing. The largest object a document
+    // holds is `bindings`, one member per node, so the per-object bound must
+    // admit every node a SignalGraph accepts by default (4096); the writer's
+    // own node cap is lower still. A document at the node and connection
+    // limits stays far below the total.
+    static constexpr std::size_t max_object_members = 4096;
     static constexpr std::size_t max_document_members = 1u << 20;
 
     /// Inspect one bounded saved document without loading plugins, invoking
