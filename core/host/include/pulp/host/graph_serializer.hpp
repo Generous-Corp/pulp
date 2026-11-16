@@ -268,6 +268,13 @@ class GraphSerializer {
         // Persisted node id -> NodeId assigned by this load, for every node
         // the load created. Empty whenever ok is false.
         std::unordered_map<NodeId, NodeId> persisted_node_ids;
+        // Persisted ids of node records this load could not add (for example
+        // a plugin record without plugin info, or a second Control index
+        // input), in document order. Such a node is absent from
+        // persisted_node_ids and from the graph, so writing the graph back
+        // would drop it; a caller that rewrites the document refuses when
+        // this is not empty.
+        std::vector<NodeId> unrestored_node_ids;
     };
 
     // Decode JSON into a freshly cleared graph. Returns LoadResult; the
@@ -283,9 +290,10 @@ class GraphSerializer {
                                 const GraphLoadOptions& options);
 
     /// Validate and restore a saved-identity v6 document. Identity bindings
-    /// are checked before graph mutation, and after restoration every
-    /// identity must name the node its binding's persisted id was restored
-    /// as, and every saved connection must be restored. The one permitted
+    /// are checked before graph mutation, and after restoration every node
+    /// record must be restored, every identity must name the node its
+    /// binding's persisted id was restored as, and every saved connection
+    /// must be restored. The one permitted
     /// omission is the partial-load rule: an automation or audio-rate
     /// modulation edge into an unresolved plugin placeholder. A refusal
     /// after the load started leaves `graph` empty.

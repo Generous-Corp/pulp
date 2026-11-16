@@ -17,6 +17,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 using namespace pulp_test_cli;
@@ -362,6 +363,84 @@ TEST_CASE("graph save --saved-identity refuses a plain document that loses an ed
     CHECK(cli_code(refused) == pulp::host::graph_patch_code_name(Code::InvalidDocument));
     CHECK(refused.stdout_output.find("connection_not_restored") != std::string::npos);
     CHECK_FALSE(fs::exists(refused_out));
+}
+
+TEST_CASE("graph rewrites refuse a plain document that loses an isolated node",
+          "[cli][shellout][graph][parity]") {
+    if (!fs::exists(pulp_binary()))
+        SKIP("pulp not built");
+    const auto dir = unique_temp_dir("pulp-graph-lossy-node");
+    fs::create_directories(dir);
+
+    pulp::host::SignalGraph graph;
+    const auto input = graph.add_input_node(1, "Input");
+    const auto output = graph.add_output_node(1, "Output");
+    REQUIRE(graph.add_control_index_input_node("Index") != 0);
+    REQUIRE(graph.connect(input, 0, output, 0));
+    const auto document = pulp::host::GraphSerializer::to_json(graph);
+    REQUIRE_FALSE(document.empty());
+    const auto good = dir / "good.pulpgraph";
+    std::ofstream(good, std::ios::binary) << document;
+
+    // A second Control index input record, with no edge: the loader cannot add
+    // it (a graph holds one), so only a node-count check can see the loss.
+    const auto original = choc::json::parse(document);
+    auto root = choc::json::parse(document);
+    auto nodes = choc::value::createEmptyArray();
+    bool copied = false;
+    for (std::uint32_t i = 0; i < original["nodes"].size(); ++i) {
+        const auto record = original["nodes"][i];
+        nodes.addArrayElement(record);
+        if (copied || !record.hasObjectMember("custom"))
+            continue;
+        auto node = choc::value::createObject("Node");
+        for (std::uint32_t m = 0; m < record.size(); ++m) {
+            const auto member = record.getObjectMemberAt(m);
+            const std::string_view name = member.name;
+            if (name == "id")
+                node.addMember("id", int64_t{99});
+            else if (name == "name")
+                node.addMember("name", "Index2");
+            else
+                node.addMember(member.name, member.value);
+        }
+        nodes.addArrayElement(node);
+        copied = true;
+    }
+    REQUIRE(copied);
+    root.setMember("nodes", nodes);
+    const auto lossy = dir / "lossy.pulpgraph";
+    std::ofstream(lossy, std::ios::binary) << choc::json::toString(root, true);
+
+    // Control: the intact document still gains the envelope.
+    const auto stamped = dir / "stamped.pulpgraph";
+    const auto ok = run_pulp({"graph", "save", good.string(), "--output", stamped.string(),
+                              "--saved-identity", "--json"});
+    INFO(ok.stdout_output << ok.stderr_output);
+    REQUIRE(ok.exit_code == 0);
+    CHECK(read_text(stamped).find("identity_schema") != std::string::npos);
+
+    const auto refused_out = dir / "refused.pulpgraph";
+    const auto refused = run_pulp({"graph", "save", lossy.string(), "--output",
+                                   refused_out.string(), "--saved-identity", "--json"});
+    INFO(refused.stdout_output << refused.stderr_output);
+    REQUIRE(refused.exit_code == 1);
+    CHECK(cli_code(refused) == pulp::host::graph_patch_code_name(Code::InvalidDocument));
+    CHECK(refused.stdout_output.find("node_not_restored: node record 99") != std::string::npos);
+    CHECK_FALSE(fs::exists(refused_out));
+
+    // Every rewrite refuses it, and fmt leaves the file untouched.
+    const auto plain_out = dir / "plain-out.pulpgraph";
+    const auto plain =
+        run_pulp({"graph", "save", lossy.string(), "--output", plain_out.string(), "--json"});
+    CHECK(plain.exit_code == 1);
+    CHECK(plain.stdout_output.find("node_not_restored") != std::string::npos);
+    CHECK_FALSE(fs::exists(plain_out));
+    const auto before = read_text(lossy);
+    const auto formatted = run_pulp({"graph", "fmt", lossy.string(), "--json"});
+    CHECK(formatted.exit_code == 1);
+    CHECK(formatted.stdout_output.find("node_not_restored") != std::string::npos);
+    CHECK(read_text(lossy) == before);
 }
 
 TEST_CASE("graph save and fmt keep the saved-identity envelope that diff reads",

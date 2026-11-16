@@ -12,6 +12,7 @@
 #include "../core/host/src/graph_serializer_test_access.hpp"
 
 #include <pulp/audio/buffer.hpp>
+#include <pulp/host/control_index_nodes.hpp>
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/sample_region_authoring.hpp>
@@ -28,6 +29,7 @@
 #include <memory>
 #include <new>
 #include <numeric>
+#include <optional>
 #include <set>
 #include <string_view>
 #include <string>
@@ -241,6 +243,122 @@ TEST_CASE("GraphSerializer saved documents refuse a connection that does not res
         CHECK(restored.nodes().empty());
         CHECK(loaded.persisted_node_ids.empty());
     }
+}
+
+namespace {
+// `document` with a copy of its Control index input record under persisted id
+// 99 and the name "Index2", with no edge. A graph holds one index input, so the
+// loader cannot add the copy. A saved-identity document also gets an identity
+// and binding for the copy, so inspection still accepts it.
+std::string with_second_index_input(const std::string& document) {
+    const auto original = choc::json::parse(document);
+    auto root = choc::json::parse(document);
+    auto nodes = choc::value::createEmptyArray();
+    std::optional<choc::value::Value> copy;
+    for (std::uint32_t i = 0; i < original["nodes"].size(); ++i) {
+        const auto record = original["nodes"][i];
+        nodes.addArrayElement(record);
+        if (!record.hasObjectMember("custom") ||
+            record["custom"]["type_id"].getString() != kControlIndexInputTypeId)
+            continue;
+        auto node = choc::value::createObject("Node");
+        for (std::uint32_t m = 0; m < record.size(); ++m) {
+            const auto member = record.getObjectMemberAt(m);
+            const std::string_view name = member.name;
+            if (name == "id")
+                node.addMember("id", int64_t{99});
+            else if (name == "name")
+                node.addMember("name", "Index2");
+            else
+                node.addMember(member.name, member.value);
+        }
+        copy = node;
+    }
+    REQUIRE(copy.has_value());
+    nodes.addArrayElement(*copy);
+    root.setMember("nodes", nodes);
+    if (original.hasObjectMember("logical_identities")) {
+        const auto listed = original["logical_identities"]["identities"];
+        auto entries = choc::value::createEmptyArray();
+        auto bindings = choc::value::createObject("Bindings");
+        std::string index_identity;
+        for (std::uint32_t i = 0; i < listed.size(); ++i) {
+            const std::string id(listed[i]["id"].getString());
+            entries.addArrayElement(listed[i]);
+            bindings.addMember(id, listed[i]["node_id"].getInt64());
+            if (id.starts_with("node:custom:Index:"))
+                index_identity = id;
+        }
+        REQUIRE_FALSE(index_identity.empty());
+        const auto copy_identity =
+            "node:custom:Index2:" + index_identity.substr(std::string("node:custom:Index:").size());
+        auto item = choc::value::createObject("Identity");
+        item.addMember("id", copy_identity);
+        item.addMember("node_id", int64_t{99});
+        entries.addArrayElement(item);
+        bindings.addMember(copy_identity, int64_t{99});
+        auto logical = choc::value::createObject("LogicalIdentities");
+        logical.addMember("profile",
+                          std::string(original["logical_identities"]["profile"].getString()));
+        logical.addMember("identities", entries);
+        root.setMember("logical_identities", logical);
+        root.setMember("bindings", bindings);
+    }
+    return choc::json::toString(root, true);
+}
+} // namespace
+
+TEST_CASE("GraphSerializer reports node records the load could not add",
+          "[host][serializer][identity]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "Input");
+    const auto output = graph.add_output_node(1, "Output");
+    REQUIRE(graph.add_control_index_input_node("Index") != 0);
+    REQUIRE(graph.connect(input, 0, output, 0));
+    const auto plain = GraphSerializer::to_json(graph);
+    const auto saved = GraphSerializer::to_saved_document(graph);
+    REQUIRE_FALSE(plain.empty());
+    REQUIRE_FALSE(saved.empty());
+
+    // Control: the intact documents restore every record.
+    {
+        SignalGraph restored;
+        const auto loaded = GraphSerializer::from_json(restored, plain);
+        INFO(loaded.error);
+        REQUIRE(loaded.ok);
+        CHECK(loaded.unrestored_node_ids.empty());
+        CHECK(loaded.persisted_node_ids.size() == 3);
+        SignalGraph identified;
+        const auto strict = GraphSerializer::from_saved_document(identified, saved);
+        INFO(strict.error);
+        REQUIRE(strict.ok);
+        CHECK(strict.unrestored_node_ids.empty());
+    }
+
+    // The tolerant loader keeps the graph it could build and names the
+    // record it dropped.
+    const auto lossy = with_second_index_input(plain);
+    SignalGraph tolerant;
+    const auto loaded = GraphSerializer::from_json(tolerant, lossy);
+    INFO(loaded.error);
+    REQUIRE(loaded.ok);
+    CHECK(tolerant.nodes().size() == 3);
+    CHECK(loaded.persisted_node_ids.size() == 3);
+    REQUIRE(loaded.unrestored_node_ids.size() == 1);
+    CHECK(loaded.unrestored_node_ids.front() == 99);
+
+    // A saved-identity document that names the dropped node is refused, and
+    // the graph is left empty.
+    const auto lossy_saved = with_second_index_input(saved);
+    REQUIRE(GraphSerializer::inspect_document(lossy_saved).ok());
+    SignalGraph restored;
+    const auto refused = GraphSerializer::from_saved_document(restored, lossy_saved);
+    INFO(refused.error);
+    CHECK_FALSE(refused.ok);
+    CHECK(refused.error.starts_with("node_not_restored: node record 99"));
+    CHECK(restored.nodes().empty());
+    CHECK(refused.persisted_node_ids.empty());
+    CHECK(refused.unrestored_node_ids.empty());
 }
 
 TEST_CASE("GraphSerializer saved documents refuse a spectral edge on ordinary nodes",
