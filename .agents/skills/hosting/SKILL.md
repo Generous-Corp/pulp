@@ -3545,3 +3545,13 @@ indices, internal edges, parameter set and bounds), and any mismatch clears
 the graph. Bounds and Processor targets always come from the template, so a
 document cannot widen them. `inspect_document` refuses dangling or shared
 members and records outside the v6 envelope, without needing templates.
+
+Saved identity strictness: `inspect_document`, `diff_graph_documents` and
+`from_saved_document` rebuild each node's identity string from its saved record
+(numbered by persisted node id, as the writer does) and refuse a mismatch as
+`identity_binding_unknown`, so an edited identity string cannot bind a node it
+was not written for. A custom node's missing `version` means 1 and a value
+below 1 is refused; the writer records a version below 1 as 1. A spectral graph
+that cannot be saved reports the failing rule through `SaveResult::error`
+(`to_saved_file` refuses it with that reason); the older string-returning
+writer overloads keep returning an empty string.
