@@ -4,7 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <limits>
 #include <memory>
-#include <pulp/format/processor.hpp>
+#include <pulp/format/process_context.hpp>
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 #include <pulp/host/signal_graph_runtime.hpp>
 #include <pulp/host/trigger_graph.hpp>
