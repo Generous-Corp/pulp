@@ -367,6 +367,30 @@ TEST_CASE("graph save and fmt keep the saved-identity envelope that diff reads",
         CHECK_FALSE(fs::exists(bare_out));
     }
 
+    // A document the shape preflight refuses (runaway nesting) is refused by
+    // the loader under the same bounds; the rewrite helper must not parse it
+    // first, so it exits cleanly with the typed document code, file unchanged.
+    {
+        const std::string deep = R"({"format_version":5,"subgraphs":)" + std::string(200000, '[') +
+                                 std::string(200000, ']') + "}";
+        const auto deep_path = dir / "deep.pulpgraph";
+        std::ofstream(deep_path, std::ios::binary) << deep;
+        for (const std::string op : {"fmt", "canonicalize", "save"}) {
+            INFO(op);
+            std::vector<std::string> argv{"graph", op, deep_path.string(), "--json"};
+            if (op == "save") {
+                argv.push_back("--output");
+                argv.push_back((dir / "deep-out.pulpgraph").string());
+            }
+            const auto refused_deep = run_pulp(argv);
+            INFO(refused_deep.stdout_output << refused_deep.stderr_output);
+            REQUIRE(refused_deep.exit_code == 1);
+            CHECK(cli_code(refused_deep) != "subgraph_records_unsupported");
+            CHECK(read_text(deep_path) == deep);
+        }
+        CHECK_FALSE(fs::exists(dir / "deep-out.pulpgraph"));
+    }
+
     // A missing input keeps the typed file code on the rewrite path.
     const auto missing = run_pulp({"graph", "fmt", (dir / "absent.pulpgraph").string(), "--json"});
     REQUIRE(missing.exit_code == 1);

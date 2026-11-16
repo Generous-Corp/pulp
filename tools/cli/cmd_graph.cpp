@@ -675,45 +675,52 @@ std::optional<std::string> read_graph_document(const std::string& path, Code& co
     return text;
 }
 
-// True when the document declares the saved-identity envelope or subgraph
-// records, which the plain writer would drop. A document the inspector
-// accepts always qualifies; a legacy document it refuses for a missing
-// envelope never does; anything else is parsed only after the inspector's
-// size and shape preflight passed, and a parse failure is left to the loader.
-bool declares_saved_identity(const std::string& text) {
-    using Refusal = pulp::host::GraphDocumentRefusal;
-    const auto inspection = pulp::host::GraphSerializer::inspect_document(text);
-    if (inspection.ok())
-        return true;
-    switch (inspection.refusal) {
-    case Refusal::LogicalIdentityMissing:
-    case Refusal::EmptyDocument:
-    case Refusal::DocumentTooLarge:
-    case Refusal::NestingLimitExceeded:
-    case Refusal::MemberLimitExceeded:
-    case Refusal::InvalidJson:
-        return false;
-    default:
-        break;
-    }
-    try {
-        const auto root = choc::json::parse(text);
-        return root.isObject() &&
-               (root.hasObjectMember("identity_schema") ||
-                root.hasObjectMember("logical_identities") || root.hasObjectMember("bindings") ||
-                root.hasObjectMember("subgraphs"));
-    } catch (...) {
-        return false;
-    }
-}
+struct RewriteDeclaration {
+    bool saved_identity = false;
+    bool subgraph_records = false;
+};
 
-bool declares_subgraph_records(const std::string& text) {
+// What a rewrite (save/fmt/canonicalize) must not drop: the saved-identity
+// envelope or subgraph records, which the plain writer cannot express. The
+// inspector's size and shape preflight runs once, first; a document it refuses
+// for size, nesting, members or syntax is never parsed here, so the loader
+// refuses it under the same bounds. A legacy document refused only for a
+// missing envelope declares no identity but is still checked for subgraph
+// records. A parse failure is left to the loader.
+RewriteDeclaration declares_rewrite_content(const std::string& text) {
+    using Refusal = pulp::host::GraphDocumentRefusal;
+    RewriteDeclaration out;
+    const auto inspection = pulp::host::GraphSerializer::inspect_document(text);
+    bool parse_envelope = false;
+    if (inspection.ok()) {
+        out.saved_identity = true;
+        parse_envelope = true;
+    } else {
+        switch (inspection.refusal) {
+        case Refusal::EmptyDocument:
+        case Refusal::DocumentTooLarge:
+        case Refusal::NestingLimitExceeded:
+        case Refusal::MemberLimitExceeded:
+        case Refusal::InvalidJson:
+            return out;
+        default:
+            parse_envelope = inspection.refusal != Refusal::LogicalIdentityMissing;
+            break;
+        }
+    }
     try {
         const auto root = choc::json::parse(text);
-        return root.isObject() && root.hasObjectMember("subgraphs");
+        if (!root.isObject())
+            return out;
+        out.subgraph_records = root.hasObjectMember("subgraphs");
+        if (parse_envelope && !out.saved_identity) {
+            out.saved_identity = root.hasObjectMember("identity_schema") ||
+                                 root.hasObjectMember("logical_identities") ||
+                                 root.hasObjectMember("bindings") || out.subgraph_records;
+        }
     } catch (...) {
-        return false;
     }
+    return out;
 }
 
 choc::value::Value string_array(const std::vector<std::string>& values) {
@@ -931,8 +938,9 @@ int cmd_graph(const std::vector<std::string>& args) {
                 std::cerr << "pulp graph: " << message << '\n';
             return 1;
         }
-        saved_identity = declares_saved_identity(*text);
-        if (declares_subgraph_records(*text)) {
+        const auto declared = declares_rewrite_content(*text);
+        saved_identity = declared.saved_identity;
+        if (declared.subgraph_records) {
             const std::string refusal =
                 "the document holds subgraph records, which need the authoring templates to "
                 "rewrite; rewriting it here would drop every subgraph instance";
