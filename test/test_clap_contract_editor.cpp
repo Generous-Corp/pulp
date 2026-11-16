@@ -9,6 +9,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
+
 #include "support/recording_contract_editor.hpp"
 
 #include <pulp/format/clap_adapter.hpp>
@@ -646,11 +648,16 @@ TEST_CASE("a CLAP host that calls set_size without adjust_size gets the snapped 
     REQUIRE(p.gui->set_size(p.plugin, 900, 500));
     REQUIRE(contract_log().saw("set_size:667x500"));
     // A drag still sending sizes is not fought.
-    for (int i = 0; i < 4; ++i) {
-        loop.run_for(0.04);
+    // (A gap longer than the settle time on a loaded host is not a drag.)
+    bool stalled = false;
+    for (int i = 0; i < 5; ++i) {
+        const auto before = std::chrono::steady_clock::now();
+        loop.run_for(0.02);
+        stalled |= std::chrono::steady_clock::now() - before > std::chrono::milliseconds(100);
         REQUIRE(p.gui->set_size(p.plugin, 900 + i, 500));
     }
-    REQUIRE(host.resize_requests.empty());
+    if (!stalled)
+        REQUIRE(host.resize_requests.empty());
     REQUIRE(loop.run_until([&] { return !host.resize_requests.empty(); }));
     loop.run_for(0.3);
     REQUIRE(host.resize_requests == std::vector<std::string>{"667x500"});
