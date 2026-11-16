@@ -3,6 +3,8 @@
 #include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <limits>
+#include <memory>
+#include <pulp/format/process_context.hpp>
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 #include <pulp/host/signal_graph_runtime.hpp>
 #include <pulp/host/trigger_graph.hpp>
@@ -179,6 +181,66 @@ TEST_CASE("Graph-authored Custom callbacks receive ordered writer and reader han
     destination.fill(0.0f);
     graph.process(out, in, 4);
     REQUIRE(destination[0] == 77.0f);
+}
+
+TEST_CASE("A seek on a graph-authored event graph restarts stateful Control nodes",
+          "[events][wiring][negative-control]") {
+    // The event-lane seek path opens a new epoch the same way the Control
+    // index path does, so a stateful Control node in the graph restarts too.
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1);
+    const auto output = graph.add_output_node(1);
+    CustomNodeType events;
+    events.type_id = "test.event-seek.pass";
+    events.num_input_ports = events.num_output_ports = 1;
+    events.process_events = [](auto& out, const auto& in, int frames, const CustomNodeEventBlock&) {
+        std::copy_n(in.channel_ptr(0), frames, out.channel_ptr(0));
+    };
+    auto resets = std::make_shared<int>(0);
+    CustomNodeType control;
+    control.type_id = "test.event-seek.control";
+    control.num_input_ports = 0;
+    control.num_output_ports = 1;
+    control.output_ports = {{"value", PortKind::Control}};
+    control.create = []() -> void* { return new int(0); };
+    control.destroy = [](void* instance) { delete static_cast<int*>(instance); };
+    control.reset = [resets](void*) { ++*resets; };
+    control.process_instance = [](void*, pulp::audio::BufferView<float>& out,
+                                  const pulp::audio::BufferView<const float>&,
+                                  int frames) { std::fill_n(out.channel_ptr(0), frames, 0.0f); };
+    control.rt_contract.declared = true;
+    control.rt_contract.safety_class = pulp::audio::RtSafetyClass::AudioCallbackSafeAfterPrepare;
+    REQUIRE(graph.register_custom_node_type(events));
+    REQUIRE(graph.register_custom_node_type(control));
+    const auto producer = graph.add_custom_node(events.type_id);
+    const auto consumer = graph.add_custom_node(events.type_id);
+    REQUIRE(graph.add_custom_node(control.type_id) != 0);
+    REQUIRE(graph.connect(input, 0, producer, 0));
+    REQUIRE(graph.connect(producer, 0, consumer, 0));
+    REQUIRE(graph.connect(consumer, 0, output, 0));
+    REQUIRE(graph.connect_graph_event({producer, consumer}) == GraphEventBindingResult::Accepted);
+    REQUIRE(graph.prepare(48000.0, 4));
+
+    std::array<float, 4> source{1.0f, 2.0f, 3.0f, 4.0f};
+    std::array<float, 4> destination{};
+    const float* source_ptr = source.data();
+    float* destination_ptr = destination.data();
+    pulp::audio::BufferView<const float> in(&source_ptr, 1, source.size());
+    pulp::audio::BufferView<float> out(&destination_ptr, 1, destination.size());
+    graph.process(out, in, 4);
+    REQUIRE(destination == source);
+    const int before = *resets;
+    // An ordinary block continues the stream.
+    graph.process(out, in, 4);
+    CHECK(*resets == before);
+
+    pulp::format::ProcessContext seek;
+    seek.reset_requested = true;
+    seek.position_samples = 0;
+    destination.fill(0.0f);
+    graph.process(out, in, 4, seek);
+    REQUIRE(destination == source);
+    CHECK(*resets == before + 1);
 }
 
 TEST_CASE("Graph-authored event edge clears when its feed-forward path is disconnected",

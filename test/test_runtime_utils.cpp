@@ -9,10 +9,12 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <pulp/runtime/base64.hpp>
 #include <pulp/runtime/child_process.hpp>
 #include <pulp/runtime/dynamic_library.hpp>
@@ -3142,7 +3144,107 @@ TEST_CASE("Retained failed spawn consumes the reservation without a process iden
     CHECK(fresh.retained_process_observation().state == RetainedProcessState::NotStarted);
 }
 
-TEST_CASE("Retained custody refuses reuse, input, and the unsupported channel before spawning",
+static pulp::platform::ProcessOptions uncaptured_channel_options() {
+    pulp::platform::ProcessOptions options;
+    options.capture_stdout = options.capture_stderr = false;
+    return options;
+}
+
+struct BoundedWrite {
+    bool delivered = false;
+    // The OVERLAPPED had completed when the event and buffers were released.
+    bool settled = false;
+};
+
+// Writes `bytes` on an overlapped handle within `timeout_ms`. A write left
+// pending by a timeout or a failed wait is cancelled and waited for, so the
+// kernel never touches the OVERLAPPED or the buffer after this returns.
+static BoundedWrite bounded_overlapped_write(HANDLE handle, const std::vector<char>& bytes,
+                                             DWORD timeout_ms) {
+    BoundedWrite outcome;
+    OVERLAPPED write{};
+    write.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (write.hEvent == nullptr)
+        return outcome;
+    DWORD written = 0;
+    const auto size = static_cast<DWORD>(bytes.size());
+    if (WriteFile(handle, bytes.data(), size, nullptr, &write)) {
+        outcome.delivered = GetOverlappedResult(handle, &write, &written, FALSE) && written == size;
+    } else if (GetLastError() == ERROR_IO_PENDING) {
+        if (WaitForSingleObject(write.hEvent, timeout_ms) == WAIT_OBJECT_0) {
+            outcome.delivered =
+                GetOverlappedResult(handle, &write, &written, FALSE) && written == size;
+        } else {
+            CancelIoEx(handle, &write);
+            (void)GetOverlappedResult(handle, &write, &written, TRUE);
+        }
+    }
+    outcome.settled = HasOverlappedIoCompleted(&write) != FALSE;
+    CloseHandle(write.hEvent);
+    return outcome;
+}
+
+TEST_CASE("Retained private channel hands a connected duplex endpoint to the session",
+          "[runtime][child-process][retained-custody]") {
+    using namespace pulp::platform;
+    RetainedProcessCustody reservation;
+    ChildProcess process;
+    int leader = -1;
+    std::optional<ChildProcessInputChannel> kept;
+    REQUIRE(process.start_retained_with_standard_input_channel(
+        reservation, "ping.exe", {"-n", "60", "127.0.0.1"},
+        [&](int pid, ChildProcessInputChannel channel, auto deadline) {
+            leader = pid;
+            // The parent endpoint is an overlapped duplex pipe already connected
+            // to the child's standard input, so a bounded write completes.
+            const auto handle = reinterpret_cast<HANDLE>(channel.native_handle());
+            DWORD flags = 0;
+            if (!GetNamedPipeInfo(handle, &flags, nullptr, nullptr, nullptr) ||
+                (flags & PIPE_SERVER_END) == 0 || deadline <= std::chrono::steady_clock::now())
+                return false;
+            const auto write = bounded_overlapped_write(handle, std::vector<char>(1, 'x'), 2000);
+            const bool done = write.delivered && write.settled;
+            if (done)
+                kept.emplace(std::move(channel));
+            return done;
+        },
+        uncaptured_channel_options()));
+    CHECK(leader == process.process_id());
+    CHECK(kept);
+    CHECK(reservation.retained_process_observation().state == RetainedProcessState::Running);
+    const auto cleaned = reservation.cleanup_retained_process_group(custody_deadline());
+    CHECK(cleaned.status == RetainedCleanupStatus::Complete);
+    CHECK(cleaned.child_reaped);
+    CHECK(cleaned.descendants_gone);
+}
+
+TEST_CASE("Retained failed handshake leaves its cleanup receipt with the reservation",
+          "[runtime][child-process][retained-custody]") {
+    using namespace pulp::platform;
+    RetainedProcessCustody reservation;
+    int leader = -1;
+    {
+        ChildProcess process;
+        CHECK_FALSE(process.start_retained_with_standard_input_channel(
+            reservation, "ping.exe", {"-n", "60", "127.0.0.1"},
+            [&](int pid, ChildProcessInputChannel, auto) {
+                leader = pid;
+                return false;
+            },
+            uncaptured_channel_options()));
+        REQUIRE(leader > 0);
+    }
+    RetainedProcessCustody moved;
+    moved = std::move(reservation);
+    CHECK(moved.retained_process_observation().process_id == leader);
+    CHECK(moved.retained_process_observation().state == RetainedProcessState::Reaped);
+    const auto cleaned = moved.cleanup_retained_process_group(custody_deadline());
+    CHECK(cleaned.status == RetainedCleanupStatus::Complete);
+    CHECK(cleaned.child_reaped);
+    CHECK(cleaned.descendants_gone);
+}
+
+TEST_CASE("Retained custody refuses reuse, input, and unsupported channel options before spawning",
           "[runtime][child-process][retained-custody]") {
     using namespace pulp::platform;
     RetainedProcessCustody reservation;
@@ -3154,20 +3256,32 @@ TEST_CASE("Retained custody refuses reuse, input, and the unsupported channel be
     CHECK(reservation.cleanup_retained_process_group(custody_deadline()).status ==
           RetainedCleanupStatus::Complete);
 
-    RetainedProcessCustody channel_reservation;
-    bool called = false;
-    ChildProcess channel_process;
-    CHECK_FALSE(channel_process.start_retained_with_standard_input_channel(
-        channel_reservation, "cmd.exe", {"/c", "exit 0"}, [&](int, ChildProcessInputChannel, auto) {
-            called = true;
-            return true;
-        }));
-    CHECK_FALSE(called);
-    CHECK(channel_process.process_id() == -1);
-    CHECK(channel_reservation.retained_process_observation().state ==
-          RetainedProcessState::NotStarted);
-    CHECK(channel_reservation.cleanup_retained_process_group(custody_deadline()).status ==
-          RetainedCleanupStatus::NotRetained);
+    // Nothing drains a retained child's output during the session, and the
+    // channel needs a positive deadline, so both refuse before reserving.
+    for (int variant = 0; variant < 3; ++variant) {
+        INFO("variant=" << variant);
+        RetainedProcessCustody channel_reservation;
+        bool called = false;
+        ChildProcess channel_process;
+        ProcessOptions channel_options;
+        channel_options.capture_stdout = variant == 0;
+        channel_options.capture_stderr = variant == 1;
+        if (variant == 2)
+            channel_options.standard_input_timeout_ms = 0;
+        CHECK_FALSE(channel_process.start_retained_with_standard_input_channel(
+            channel_reservation, "cmd.exe", {"/c", "exit 0"},
+            [&](int, ChildProcessInputChannel, auto) {
+                called = true;
+                return true;
+            },
+            channel_options));
+        CHECK_FALSE(called);
+        CHECK(channel_process.process_id() == -1);
+        CHECK(channel_reservation.retained_process_observation().state ==
+              RetainedProcessState::NotStarted);
+        CHECK(channel_reservation.cleanup_retained_process_group(custody_deadline()).status ==
+              RetainedCleanupStatus::NotRetained);
+    }
 
     RetainedProcessCustody rejected;
     ChildProcess validated;
@@ -3183,6 +3297,178 @@ TEST_CASE("Retained custody refuses reuse, input, and the unsupported channel be
     CHECK(receipt.process_id == seen);
     CHECK(receipt.state == RetainedProcessState::Reaped);
     CHECK_FALSE(CurrentProcessGroup::capture());
+}
+
+TEST_CASE("Retained private channel cancels a timed-out write before releasing its storage",
+          "[runtime][child-process][retained-custody]") {
+    using namespace pulp::platform;
+    RetainedProcessCustody reservation;
+    ChildProcess process;
+    BoundedWrite write;
+    // ping never reads its standard input, so a write larger than the pipe
+    // buffer stays pending until the bounded wait gives up.
+    REQUIRE(process.start_retained_with_standard_input_channel(
+        reservation, "ping.exe", {"-n", "60", "127.0.0.1"},
+        [&](int, ChildProcessInputChannel channel, auto) {
+            write = bounded_overlapped_write(reinterpret_cast<HANDLE>(channel.native_handle()),
+                                             std::vector<char>(1 << 20, 'x'), 50);
+            return true;
+        },
+        uncaptured_channel_options()));
+    CHECK_FALSE(write.delivered);
+    CHECK(write.settled);
+    const auto cleaned = reservation.cleanup_retained_process_group(custody_deadline());
+    CHECK(cleaned.status == RetainedCleanupStatus::Complete);
+}
+
+namespace {
+// Whether process `pid` holds, at the same handle value, the kernel object
+// `object` names here. An inherited handle keeps its parent's value. Empty when
+// the process cannot be opened, so a probe failure never reads as "absent".
+std::optional<bool> child_holds_object(int pid, HANDLE object) {
+    using Compare = BOOL(WINAPI*)(HANDLE, HANDLE);
+    static const auto compare = reinterpret_cast<Compare>(reinterpret_cast<void*>(
+        GetProcAddress(GetModuleHandleW(L"kernelbase.dll"), "CompareObjectHandles")));
+    if (compare == nullptr || pid <= 0)
+        return std::nullopt;
+    const HANDLE child = OpenProcess(PROCESS_DUP_HANDLE, FALSE, static_cast<DWORD>(pid));
+    if (child == nullptr)
+        return std::nullopt;
+    HANDLE copy = nullptr;
+    const bool duplicated = DuplicateHandle(child, object, GetCurrentProcess(), &copy, 0, FALSE,
+                                            DUPLICATE_SAME_ACCESS) != FALSE;
+    CloseHandle(child);
+    if (!duplicated)
+        return false;
+    const bool same = compare(copy, object) != FALSE;
+    CloseHandle(copy);
+    return same;
+}
+
+// Counts handles in process `pid` that name a ChildProcess private channel
+// pipe. Empty when the process cannot be opened.
+std::optional<int> private_channel_handles_in(int pid) {
+    const HANDLE child = OpenProcess(PROCESS_DUP_HANDLE, FALSE, static_cast<DWORD>(pid));
+    if (child == nullptr)
+        return std::nullopt;
+    int found = 0;
+    alignas(FILE_NAME_INFO) std::byte storage[sizeof(FILE_NAME_INFO) + 512 * sizeof(wchar_t)];
+    for (std::uintptr_t value = 4; value < 0x10000; value += 4) {
+        HANDLE copy = nullptr;
+        if (!DuplicateHandle(child, reinterpret_cast<HANDLE>(value), GetCurrentProcess(), &copy, 0,
+                             FALSE, DUPLICATE_SAME_ACCESS))
+            continue;
+        if (GetFileType(copy) == FILE_TYPE_PIPE) {
+            std::memset(storage, 0, sizeof(storage));
+            auto* info = reinterpret_cast<FILE_NAME_INFO*>(storage);
+            if (GetFileInformationByHandleEx(copy, FileNameInfo, info,
+                                             sizeof(storage) - sizeof(wchar_t))) {
+                const std::wstring_view name(info->FileName,
+                                             info->FileNameLength / sizeof(wchar_t));
+                if (name.find(L"pulp-child-") != std::wstring_view::npos)
+                    ++found;
+            }
+        }
+        CloseHandle(copy);
+    }
+    CloseHandle(child);
+    return found;
+}
+} // namespace
+
+TEST_CASE("Windows launches give a child only its standard handles",
+          "[runtime][child-process][retained-custody]") {
+    using namespace pulp::platform;
+    SECURITY_ATTRIBUTES inheritable{};
+    inheritable.nLength = sizeof(inheritable);
+    inheritable.bInheritHandle = TRUE;
+    // Stands in for any inheritable handle live in this process at launch,
+    // such as the private endpoint of a concurrent retained launch.
+    const HANDLE marker = CreateEventW(&inheritable, TRUE, FALSE, nullptr);
+    REQUIRE(marker != nullptr);
+
+    // Control: an unrestricted launch does inherit it, so the probe can see it.
+    {
+        STARTUPINFOW startup{};
+        startup.cb = sizeof(startup);
+        PROCESS_INFORMATION info{};
+        std::wstring command = L"ping.exe -n 30 127.0.0.1";
+        REQUIRE(CreateProcessW(nullptr, command.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW,
+                               nullptr, nullptr, &startup, &info));
+        const auto held = child_holds_object(static_cast<int>(info.dwProcessId), marker);
+        TerminateProcess(info.hProcess, 1);
+        WaitForSingleObject(info.hProcess, 2000);
+        CloseHandle(info.hThread);
+        CloseHandle(info.hProcess);
+        REQUIRE(held.has_value());
+        CHECK(*held);
+    }
+
+    for (int variant = 0; variant < 3; ++variant) {
+        INFO("variant=" << variant);
+        ChildProcess process;
+        RetainedProcessCustody reservation;
+        ProcessOptions options;
+        options.capture_stdout = options.capture_stderr = variant == 0;
+        const std::vector<std::string> args{"-n", "30", "127.0.0.1"};
+        REQUIRE((variant == 2 ? process.start_retained(reservation, "ping.exe", args, options)
+                              : process.start("ping.exe", args, options)));
+        const auto held = child_holds_object(process.process_id(), marker);
+        if (variant == 2) {
+            CHECK(reservation.cleanup_retained_process_group(custody_deadline()).status ==
+                  RetainedCleanupStatus::Complete);
+        } else {
+            process.cancel();
+            (void)process.wait();
+        }
+        REQUIRE(held.has_value());
+        CHECK_FALSE(*held);
+    }
+    CloseHandle(marker);
+}
+
+TEST_CASE("A concurrent launch never inherits a retained child's private channel endpoint",
+          "[runtime][child-process][retained-custody]") {
+    using namespace pulp::platform;
+    std::atomic<bool> stop{false};
+    std::atomic<int> sessions{0};
+    std::thread retained([&] {
+        while (!stop.load()) {
+            RetainedProcessCustody reservation;
+            ChildProcess process;
+            if (process.start_retained_with_standard_input_channel(
+                    reservation, "ping.exe", {"-n", "30", "127.0.0.1"},
+                    [](int, ChildProcessInputChannel, auto) { return true; },
+                    uncaptured_channel_options()))
+                ++sessions;
+            (void)reservation.cleanup_retained_process_group(custody_deadline());
+        }
+    });
+    int probed = 0;
+    int unreadable = 0;
+    int leaked = 0;
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(4);
+    while (std::chrono::steady_clock::now() < until && leaked == 0) {
+        ChildProcess process;
+        if (!process.start("ping.exe", {"-n", "30", "127.0.0.1"}, uncaptured_channel_options()))
+            continue;
+        const auto found = private_channel_handles_in(process.process_id());
+        process.cancel();
+        (void)process.wait();
+        if (!found) {
+            ++unreadable;
+            continue;
+        }
+        ++probed;
+        leaked += *found;
+    }
+    stop.store(true);
+    retained.join();
+    INFO("probed=" << probed << " sessions=" << sessions.load() << " unreadable=" << unreadable);
+    CHECK(sessions.load() > 0);
+    CHECK(probed > 0);
+    CHECK(unreadable == 0);
+    CHECK(leaked == 0);
 }
 
 #else

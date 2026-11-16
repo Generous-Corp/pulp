@@ -115,7 +115,9 @@ render, because RmlUi's state is shared and not thread-safe. The main thread
 does not wait for it to deliver pointer or wheel input or to run `idle()`:
 when a frame is in flight, pointer and wheel events are queued (consecutive
 moves, and wheel deltas with the same modifiers, merge) and applied in order on
-the main thread within about a millisecond of the frame ending. Element
+the main thread after the frame ends. If another editor holds the shared lock
+when delivery runs, one coalesced delayed retry remains until the input is
+applied; it needs no further frame or host idle tick. Element
 listeners therefore still run on the main thread, a moment after the event.
 `with_context()`, key and text input apply the queue first and wait for a
 frame; call `flush_input()` where a caller needs earlier events applied now,

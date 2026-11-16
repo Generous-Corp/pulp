@@ -20,8 +20,8 @@
 /// The main thread does not wait for a frame to deliver pointer or wheel
 /// input or to run `idle()`. When the render thread holds the lock, pointer
 /// and wheel events are queued (consecutive moves and wheel deltas merge) and
-/// applied, in order and on the main thread, within about a millisecond of the
-/// frame ending. Their listeners therefore run on the main thread, a moment
+/// applied, in order and on the main thread, after the
+/// frame ends. Their listeners therefore run on the main thread, a moment
 /// later than the event. `with_context()`, key and text input apply anything
 /// queued first, so they always see earlier events' effects; they, and
 /// `flush_input()`, do wait for a frame.
@@ -126,6 +126,9 @@ class RmlUiSurface {
     /// Apply pointer and wheel events that were queued behind a frame, now,
     /// waiting for the frame if one is in flight. Main thread.
     void flush_input();
+    /// Pointer and wheel events queued behind a frame so far (merged events
+    /// count once each as they arrived). For tests and diagnostics.
+    std::uint64_t queued_inputs() const noexcept;
     /// Draw one more frame (after a change the caller made through RmlUi).
     void request_frame();
 
