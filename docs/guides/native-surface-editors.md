@@ -73,6 +73,10 @@ component is off.
 When the Vellum RmlUi SDK provides `NativeContext::warm()`, `RmlUiSurface::attach()`
 calls it after the document loads, so textures, geometry and glyphs are ready
 before the first frame is requested. Older SDKs draw the first frame cold.
+`warm()` also renders once outside a frame, which is safe for Vellum's Metal and
+CPU renderers but not for a renderer that draws on every call (RmlUi's GL3
+backend): a custom `Rml::RenderInterface` must draw nothing between frames, or
+the product must build against an SDK without `warm()`.
 
 The surface context is sized in drawable pixels, the Metal frame scale is 1,
 and the density ratio is the backing scale. Documents that need
