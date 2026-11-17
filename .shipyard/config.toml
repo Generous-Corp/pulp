@@ -868,13 +868,17 @@ known_flaky_tests = []
 # same-head re-enqueue of an approved green head when the same failing test
 # ejected another PR's merge group within the window. Once per head, a breaker
 # (a re-admitted head ejected again on the same signature stops that
-# signature) and at most 3 per signature per window; under apply the steward
-# also files one root-cause issue per signature. Bounded trial from
-# 2026-11-17: revert to "shadow" if a re-admitted group fails again on the
-# same signature, or after 2 such re-admissions in 7 days. Shadow had made one
-# decision in 5 days (#12448 with #12374, 2026-11-17 10:04Z, about 54 min
-# before its actual re-enqueue).
+# signature) and, for the trial, at most 1 per signature per 24 h window
+# (Shipyard's default is 3); under apply the steward also files one root-cause
+# issue per signature. Bounded trial from 2026-11-17. The rollback is manual:
+# the steward tick's `flake_requeue` records (decisions, flake_root_cause with
+# its breaker state) are read daily and logged in the fleet interventions log
+# (shipyard-plan/2026-11-16-interventions.md); set this back to "shadow" if a re-admitted group
+# fails again on the same signature, or after 2 re-admissions in 7 days.
+# Shadow had made one decision in 5 days (#12448 with #12374, 2026-11-17
+# 10:04Z, about 54 min before its actual re-enqueue).
 flake_requeue = "apply"
+flake_max_requeues = 1
 
 [base_health]
 # Red-main fix-first is on (Shipyard PR 1279; docs/automated-draining.md in

@@ -3896,10 +3896,12 @@ Two candidate signals were evaluated against live runs and are deliberately
 the steward re-enqueue an approved, green head once, with no new push, when the
 test that ejected its merge group also ejected a different pull request's group
 within 24 hours. The guards are once per head; a breaker, so a re-admitted head
-ejected again on the same signature stops that signature; and a cap of 3
-re-enqueues per signature per window. The steward also files one root-cause
-issue per signature. The trial reverts to `"shadow"` if a re-admitted group
-fails again on the same signature, or after 2 such re-admissions in 7 days. In
+ejected again on the same signature stops that signature; and, for the trial,
+`flake_max_requeues = 1` re-enqueue per signature per window (Shipyard's
+default is 3). The steward also files one root-cause
+issue per signature. The rollback is manual: the steward tick's `flake_requeue` records are
+read daily, and the trial goes back to `"shadow"` if a re-admitted group fails
+again on the same signature, or after 2 re-admissions in 7 days. In
 5 days of shadow it made one decision: #12448, with #12374, at 2026-11-17
 10:04Z, about 54 minutes before that head was actually re-enqueued.
 
