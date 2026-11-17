@@ -604,6 +604,12 @@ pulp_add_test_suite(pulp-test-graph-saved-identity-v7
     SOURCES test_graph_saved_identity_v7.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
 
+# Graph event connections in the saved-identity v7 document: writer,
+# inspection, load-time rebind, diff and history, and subgraph declarations.
+pulp_add_test_suite(pulp-test-graph-event-persistence
+    SOURCES test_graph_event_persistence.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
+
 # G-4 authored voice-bank identity: canonical NFC wire encoding, SHA-256
 # digest, fixed eight-slot bound, and fail-closed malformed target controls.
 pulp_add_test_suite(pulp-test-voice-identity
