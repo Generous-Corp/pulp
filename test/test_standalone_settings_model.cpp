@@ -277,3 +277,107 @@ TEST_CASE("a model config survives a save and a load",
     REQUIRE(rig.model.buffer_size_selected() == 1);
     REQUIRE(rig.model.midi_selected() == 0);
 }
+
+// -- start() and the MIDI input selection ------------------------------------
+
+namespace pulp::format {
+struct StandaloneMidiTestAccess {
+    static void install(StandaloneApp& app, std::function<std::unique_ptr<midi::MidiSystem>()> midi,
+                        std::function<std::unique_ptr<audio::AudioSystem>()> audio) {
+        app.midi_system_factory_ = std::move(midi);
+        app.audio_system_factory_ = std::move(audio);
+    }
+};
+} // namespace pulp::format
+
+namespace {
+
+struct OpenLog {
+    std::vector<std::string> opened;
+};
+
+class LoggingMidiInput final : public midi::MidiInput {
+  public:
+    explicit LoggingMidiInput(OpenLog& log) : log_(log) {}
+    bool open(const std::string& id, midi::MidiInputCallback) override {
+        log_.opened.push_back(id);
+        open_ = true;
+        return true;
+    }
+    void close() override {
+        open_ = false;
+    }
+    bool is_open() const override {
+        return open_;
+    }
+
+  private:
+    OpenLog& log_;
+    bool open_ = false;
+};
+
+class LoggingMidi final : public midi::MidiSystem {
+  public:
+    explicit LoggingMidi(OpenLog& log) : log_(log) {}
+    std::vector<midi::MidiPortInfo> enumerate_inputs() override {
+        return {port("m1", "Keys"), port("m2", "Pads")};
+    }
+    std::vector<midi::MidiPortInfo> enumerate_outputs() override {
+        return {};
+    }
+    std::unique_ptr<midi::MidiInput> create_input() override {
+        return std::make_unique<LoggingMidiInput>(log_);
+    }
+    std::unique_ptr<midi::MidiOutput> create_output() override {
+        return {};
+    }
+
+  private:
+    OpenLog& log_;
+};
+
+class MidiProcessor final : public format::Processor {
+  public:
+    format::PluginDescriptor descriptor() const override {
+        format::PluginDescriptor d;
+        d.name = "Settings Model Midi";
+        d.accepts_midi = true;
+        d.output_buses = {{"Audio Out", 2}};
+        return d;
+    }
+    void define_parameters(state::StateStore&) override {}
+    void prepare(const format::PrepareContext&) override {}
+    void process(audio::BufferView<float>& out, const audio::BufferView<const float>&,
+                 midi::MidiBuffer&, midi::MidiBuffer&, const format::ProcessContext&) override {
+        out.clear();
+    }
+};
+
+std::unique_ptr<format::Processor> make_midi_processor() {
+    return std::make_unique<MidiProcessor>();
+}
+
+std::vector<std::string> midi_ports_opened_by_start(const std::string& midi_input_id) {
+    OpenLog log;
+    format::StandaloneApp app(&make_midi_processor);
+    format::StandaloneMidiTestAccess::install(
+        app, [&log] { return std::make_unique<LoggingMidi>(log); },
+        [] { return format::detail::create_null_audio_system(); });
+    StandaloneConfig cfg;
+    cfg.persist_settings = false;
+    cfg.midi_input_id = midi_input_id;
+    app.set_config(cfg);
+    REQUIRE(app.start());
+    app.stop();
+    return log.opened;
+}
+
+} // namespace
+
+TEST_CASE(
+    "start() opens the chosen MIDI port, the first port for an empty id, and none for kNoMidiInput",
+    "[standalone][settings-model][midi]") {
+    REQUIRE(midi_ports_opened_by_start("m2") == std::vector<std::string>{"m2"});
+    REQUIRE(midi_ports_opened_by_start("") == std::vector<std::string>{"m1"});
+    REQUIRE(midi_ports_opened_by_start(StandaloneConfig::kNoMidiInput).empty());
+}

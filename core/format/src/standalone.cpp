@@ -829,7 +829,7 @@ bool StandaloneApp::start() {
 
     // Set up MIDI input (optional)
     if (desc.accepts_midi) {
-        midi_system_ = midi::create_midi_system();
+        midi_system_ = midi_system_factory_ ? midi_system_factory_() : midi::create_midi_system();
         auto inputs = midi_system_->enumerate_inputs();
         if (!inputs.empty() && config_.midi_input_id != StandaloneConfig::kNoMidiInput) {
             midi_input_ = midi_system_->create_input();

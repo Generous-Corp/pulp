@@ -1036,6 +1036,7 @@
         "core/format/src/standalone_settings_model.cpp",
         "core/format/src/standalone_settings_window_mac.mm",
         "core/format/src/standalone_settings_window_stub.cpp",
+        "core/format/include/pulp/format/standalone_config.hpp",
         "core/format/include/pulp/format/standalone_settings_model.hpp",
         "core/format/include/pulp/format/detail/standalone_settings_window.hpp"
       ]

@@ -410,6 +410,7 @@
       "pulp/format/settings_panel.hpp",
       "pulp/format/spectral_frame_processor.hpp",
       "pulp/format/standalone.hpp",
+      "pulp/format/standalone_config.hpp",
       "pulp/format/standalone_control_host.hpp",
       "pulp/format/standalone_settings.hpp",
       "pulp/format/standalone_settings_model.hpp",

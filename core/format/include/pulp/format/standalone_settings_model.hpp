@@ -18,7 +18,7 @@
 /// audio system enumerates it.
 
 #include <pulp/audio/device.hpp>
-#include <pulp/format/standalone.hpp>
+#include <pulp/format/standalone_config.hpp>
 #include <pulp/midi/device.hpp>
 
 #include <string>
