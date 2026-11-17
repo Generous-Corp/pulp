@@ -106,7 +106,9 @@ An RmlUi editor forwards the call to `RmlUiSurface::visibility_changed()`:
 frames stop at once, including one already waiting for the frame lock, RmlUi
 releases its compiled geometry and textures through the renderer, and
 `RendererHooks::trim` is called so the renderer can free the layer, filter and
-atlas textures it caches. The trim waits until no frame of the surface is
+atlas textures it caches. `metal_renderer_hooks()` fills it from
+`MetalRenderInterface::trim()` when the Vellum SDK has
+`VELLUM_RMLUI_NATIVE_FEATURE_RENDERER_TRIM`; with an older SDK it stays empty. The trim waits until no frame of the surface is
 being encoded or submitted and its last committed command buffer has completed
 on the GPU (about a frame at most), so nothing released is still in use.
 Showing resumes frames and draws one, which recompiles everything that was
