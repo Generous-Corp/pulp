@@ -1,0 +1,76 @@
+{
+  "id": "g4-subgraph-voice-declarations",
+  "title": "The saved-identity v7 document persists fixed-count voice-template declarations",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "g4-subgraph-voice-declarations-20261117",
+  "owned_paths": [
+    "core/host/include/pulp/host/subgraph_persistence.hpp",
+    "core/host/src/graph_serializer.cpp",
+    "core/host/src/subgraph_persistence.cpp",
+    "core/host/src/subgraph_voice_records.hpp",
+    "core/host/src/subgraph_voices.cpp",
+    "test/test_subgraph_voices.cpp",
+    "test/test_graph_event_persistence.cpp",
+    "docs/graph-program-status/G-4.md",
+    "docs/status/sequencer-exposure/rows/g4-subgraph-voice-declarations.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/host/src/subgraph_voices.cpp",
+      "needles": ["validate_voice_declarations", "instantiate_subgraph_voices"]
+    },
+    {
+      "path": "core/host/src/subgraph_persistence.cpp",
+      "needles": ["split_voice_banks", "root.addMember(\"voice_declarations\", declarations);"]
+    },
+    {
+      "path": "test/test_subgraph_voices.cpp",
+      "needles": ["voice bank round-trips through the v7 document with an audio render across voices", "planted voice declaration refusals leave the graph untouched"]
+    },
+    {
+      "path": "docs/graph-program-status/G-4.md",
+      "needles": ["## Fixed-count voice-template declarations (2026-11-17)"]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "instantiate_subgraph_voices, subgraph_voice_identity, kMaxSubgraphVoices, the voice-bank to_saved_subgraph_document overload and SubgraphDocumentLoad::voice_banks are public host APIs; inspect_document refuses malformed, duplicate and dangling voice declarations.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/subgraph_persistence.hpp",
+          "needles": ["struct SubgraphVoiceDeclaration {", "std::vector<SubgraphVoiceBank> voice_banks;"]
+        },
+        {
+          "kind": "test",
+          "path": "test/test_subgraph_voices.cpp",
+          "needles": ["voice banks diff and undo by authored identity"]
+        }
+      ],
+      "authority": {
+        "admission": "read_only",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No CLI command or option is added; pulp graph diff reports the voice_declarations section through its existing sections output."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation, schema, or handler is added."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "Only the authored declaration and declared parameter values are persisted and rebound on the control thread at load; no voice allocation, runtime voice state or audio-thread path is added."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No design-time capability or agent manifest entry is added."
+    }
+  }
+}

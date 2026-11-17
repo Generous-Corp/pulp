@@ -3670,6 +3670,19 @@ A Custom member's state is checked by creating a probe instance, calling
 `load_state`) must carry empty state. The writer applies the same check, so it
 returns an empty string for a member whose live state its type refuses.
 
+Fixed-count voice templates (`instantiate_subgraph_voices`, also in
+`subgraph_persistence.hpp`) expand one template as 1..`kMaxSubgraphVoices`
+voices whose instance identities are derived (`<declaration>.voice.<k>`, index
+k). Each voice saves as an ordinary `subgraphs` record plus one
+`voice_declarations` entry, and restores into
+`SubgraphDocumentLoad::voice_banks`, never into `subgraphs`; pass the banks to
+the four-argument `to_saved_subgraph_document` overload or a re-save drops the
+declaration. Watch out: a graph binds one event edge, so a template that
+declares `event_edge` (itself or in a child) is refused as a voice template
+even for one voice. The declaration is not the `VoiceBankBinding` runtime: no
+allocator state, token, epoch, pedal hold or tail is persisted, and the plain
+`from_saved_document` reader ignores the declaration as it ignores records.
+
 Saved identity strictness: `inspect_document`, `diff_graph_documents` and
 `from_saved_document` rebuild each node's identity string from its saved record
 (numbered by persisted node id, as the writer does) and refuse a mismatch as
