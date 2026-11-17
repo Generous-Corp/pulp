@@ -598,6 +598,12 @@ pulp_add_test_suite(pulp-test-graph-history
     SOURCES test_graph_history.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
 
+# Saved-identity v7: persisted authored node IDs, their validation, and the
+# deterministic v6 migration.
+pulp_add_test_suite(pulp-test-graph-saved-identity-v7
+    SOURCES test_graph_saved_identity_v7.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph)
+
 # G-4 authored voice-bank identity: canonical NFC wire encoding, SHA-256
 # digest, fixed eight-slot bound, and fail-closed malformed target controls.
 pulp_add_test_suite(pulp-test-voice-identity

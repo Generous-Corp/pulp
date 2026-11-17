@@ -2305,7 +2305,7 @@ honest.
 
 ### Undo/redo and diff over saved documents (`graph_history.hpp`)
 
-`GraphEditHistory` stores saved-identity v6 documents, never graph pointers.
+`GraphEditHistory` stores saved-identity v7 documents, never graph pointers.
 Watch out for:
 
 - Undo and redo reload the graph through `from_saved_document`, which
@@ -2334,11 +2334,14 @@ Watch out for:
 - `diff_graph_documents` / `pulp graph diff` compare by authored identity, so
   renumbering alone is equal, including `sample_regions` NodeIds, and the
   reported digests match. `GraphDocument::semantic_digest` from
-  `inspect_document` still hashes raw NodeIds. Identities carry an ordinal in
-  NodeId order, so deleting the first of two same-named nodes shifts the
-  survivor's identity and the diff blames the wrong node. A pre-v4 legacy file is refused as
-  `invalid_format_version`, not `logical_identity_missing`; re-save it with
-  `to_saved_document` first.
+  `inspect_document` still hashes raw NodeIds. In v7 the identity is the
+  node's persisted `authored_id`, so two graphs built the same way are
+  DIFFERENT authored graphs (every node is added and removed): to test
+  renumbering, reload one document, never build two. v6 identities still
+  carry an ordinal in NodeId order (the old misattribution on deleting a
+  same-named node), and a v6/v7 pair is refused rather than compared. A
+  pre-v4 legacy file is refused as `invalid_format_version`, not
+  `logical_identity_missing`; re-save it with `to_saved_document` first.
 
 ## Crash-isolated scanning — and the un-isolated LOAD
 
@@ -3567,12 +3570,21 @@ The `android-build` job runs only on main pushes (it is skipped for
 
 ## Saved identity documents
 
-`GraphSerializer::to_saved_document` wraps the normal graph payload (format
-version unchanged) in the saved-identity envelope; `from_saved_document` checks
-every binding (duplicate, unknown, dangling node id) before it mutates the
-graph. The envelope name `pulp.graph.saved-identity.v6` is not a graph format
-version: the payload stays at the current format, and a v6+ graph is still
-refused. The semantic digest ignores editor layout, so moving a node changes
+`GraphSerializer::to_saved_document` writes saved-identity v7: the graph
+payload at format 7 with each node's `authored_id`, and an envelope binding
+those IDs (design: `docs/graph-program-status/G-3-v7-identity-design.md`);
+`from_saved_document` checks every binding (duplicate, unknown, dangling node
+id) before it mutates the graph. Format 7 exists ONLY with the v7 envelope:
+the plain writer never emits it, and a plain format 7 file is refused, so a
+test that wants "a future version" must use 8. v6 documents
+(`pulp.graph.saved-identity.v6`, formats 4..6) still load with their original
+rules; there is no v6 writer in production, so tests that need a v6 fixture
+use `GraphSerializerTestAccess::legacy_v6_saved_document`. Loading any
+pre-v7 document assigns IDs from a hash of the whole document
+(`migrate_saved_document`'s rule), so the same file always gets the same IDs
+and an edited copy gets entirely new ones. Do not hand-edit a binding key
+with a text replace that also hits the bindings object: a duplicated JSON key
+is refused as `duplicate_json_key` before any identity rule runs. The semantic digest ignores editor layout, so moving a node changes
 the canonical bytes but not the digest. `snapshot_port_identity` replaces the
 old `undo_port_identity` spelling, which returned a snapshot and not an undo.
 

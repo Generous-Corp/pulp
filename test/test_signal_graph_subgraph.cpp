@@ -1,3 +1,5 @@
+#include "../core/host/src/graph_serializer_test_access.hpp"
+
 #include <catch2/catch_test_macros.hpp>
 #include <choc/text/choc_JSON.h>
 #include <pulp/host/signal_graph.hpp>
@@ -10,6 +12,8 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -538,6 +542,10 @@ void require_refused(const std::string& document, const std::string& rule) {
     CHECK(loaded.load.error.find(rule) != std::string::npos);
     CHECK(loaded.subgraphs.empty());
     CHECK(graph.nodes().empty());
+    CHECK(loaded.load.identity_node_ids.empty());
+    CHECK(loaded.load.persisted_node_ids.empty());
+    CHECK(loaded.load.editor_layout.empty());
+    CHECK(loaded.load.unrestored_node_ids.empty());
 }
 
 } // namespace
@@ -595,6 +603,105 @@ TEST_CASE("saved subgraph document restores instances with stable identities") {
     CHECK(flat.nodes().size() == rack.graph.nodes().size());
 }
 
+TEST_CASE("saved subgraph members are authored IDs and a second instance gets new ones") {
+    PersistedRack rack;
+    build_rack(rack);
+    const auto root = choc::json::parse(rack.document);
+    const auto records = root["subgraphs"];
+    std::unordered_set<std::string> ids;
+    for (const auto& node : rack.graph.nodes())
+        ids.insert(node.authored_id.str());
+    for (std::uint32_t i = 0; i < records.size(); ++i)
+        for (std::uint32_t m = 0; m < records[i]["members"].size(); ++m)
+            CHECK(ids.contains(std::string(records[i]["members"][m].getString())));
+
+    // A second instance of the same template is a copy: same names under a
+    // different instance identity, every node with a new authored ID.
+    auto copy = instantiate_subgraph(rack.graph, gain_template(), "voice.b", 3);
+    REQUIRE(copy);
+    for (const auto node : copy.instance.nodes)
+        CHECK(ids.insert(rack.graph.node(node)->authored_id.str()).second);
+
+    // Restoring keeps every member's ID.
+    SignalGraph restored;
+    const auto loaded = from_saved_subgraph_document(restored, rack.document, rack_templates());
+    REQUIRE(loaded.ok());
+    for (const auto& instance : loaded.subgraphs)
+        for (std::size_t i = 0; i < instance.nodes.size(); ++i) {
+            const auto& original =
+                instance.instance_identity == "voice.a" ? rack.instances[0] : rack.instances[1];
+            CHECK(restored.node(instance.nodes[i])->authored_id.str() ==
+                  rack.graph.node(original.nodes[i])->authored_id.str());
+        }
+}
+
+TEST_CASE("saved subgraph documents written before v7 still restore") {
+    PersistedRack rack;
+    build_rack(rack);
+    // Rebuild the document a v6 writer produced: the legacy envelope plus the
+    // same records, with members spelled as structural v6 identities.
+    const auto legacy_ids = GraphSerializerTestAccess::legacy_v6_identities(rack.graph);
+    std::unordered_map<std::string, std::string> v6_of;
+    for (const auto& node : rack.graph.nodes())
+        v6_of.emplace(node.authored_id.str(), legacy_ids.at(node.id));
+    const auto current = choc::json::parse(rack.document);
+    auto root = choc::json::parse(GraphSerializerTestAccess::legacy_v6_saved_document(rack.graph));
+    auto records = choc::value::createEmptyArray();
+    for (std::uint32_t i = 0; i < current["subgraphs"].size(); ++i) {
+        choc::value::Value record(current["subgraphs"][i]);
+        auto members = choc::value::createEmptyArray();
+        for (std::uint32_t m = 0; m < record["members"].size(); ++m)
+            members.addArrayElement(v6_of.at(std::string(record["members"][m].getString())));
+        record.setMember("members", members);
+        records.addArrayElement(record);
+    }
+    root.addMember("subgraphs", records);
+    const auto legacy = choc::json::toString(root, true);
+    const auto inspection = GraphSerializer::inspect_document(legacy);
+    INFO(inspection.detail);
+    REQUIRE(inspection.ok());
+    REQUIRE(inspection.document.profile() == "pulp.graph.saved-identity.v6");
+
+    SignalGraph restored;
+    const auto loaded = from_saved_subgraph_document(restored, legacy, rack_templates());
+    INFO(loaded.load.error);
+    REQUIRE(loaded.ok());
+    REQUIRE(loaded.subgraphs.size() == 2);
+    CHECK(loaded.subgraphs[1].instance_identity == "voice.a");
+    CHECK(restored.node(loaded.subgraphs[1].parameter_nodes.at("gain"))->gain == 0.5f);
+
+    // A v6 member identity is derived from its name, so a v6 record whose
+    // instance identity was renamed no longer matches the names it owns.
+    {
+        SignalGraph refused;
+        const auto renamed =
+            from_saved_subgraph_document(refused,
+                                         replaced(legacy, "\"instance_identity\": \"voice.a\"",
+                                                  "\"instance_identity\": \"voice.z\""),
+                                         rack_templates());
+        INFO(renamed.load.error);
+        CHECK_FALSE(renamed.ok());
+        CHECK(renamed.load.error.find("subgraph_instance_mismatch") != std::string::npos);
+        CHECK(refused.nodes().empty());
+    }
+
+    // The data-only migration translates the members, and the migrated
+    // document restores to the same IDs the v6 load assigned.
+    const auto migrated = GraphSerializer::migrate_saved_document(legacy);
+    INFO(migrated.detail);
+    REQUIRE(migrated.ok());
+    REQUIRE(migrated.migrated);
+    SignalGraph from_migrated;
+    const auto again =
+        from_saved_subgraph_document(from_migrated, migrated.document, rack_templates());
+    INFO(again.load.error);
+    REQUIRE(again.ok());
+    for (std::size_t s = 0; s < 2; ++s)
+        for (std::size_t i = 0; i < again.subgraphs[s].nodes.size(); ++i)
+            CHECK(from_migrated.node(again.subgraphs[s].nodes[i])->authored_id.str() ==
+                  restored.node(loaded.subgraphs[s].nodes[i])->authored_id.str());
+}
+
 TEST_CASE("saved subgraph document refuses unknown or duplicate templates before mutation") {
     PersistedRack rack;
     build_rack(rack);
@@ -617,17 +724,26 @@ TEST_CASE("saved subgraph document refuses unknown or duplicate templates before
     CHECK(graph.nodes().size() == 1);
 }
 
+// The quoted authored ID of the node named `name`.
+std::string quoted_id(const SignalGraph& graph, std::string_view name) {
+    for (const auto& node : graph.nodes())
+        if (node.name == name)
+            return "\"" + node.authored_id.str() + "\"";
+    FAIL("no node named " << name);
+    return {};
+}
+
 TEST_CASE("saved subgraph inspection refuses dangling, shared, and malformed records") {
     PersistedRack rack;
     build_rack(rack);
-    const auto dangling_member =
-        replaced(rack.document, "\"node:gain:voice.a.gain:0\"", "\"node:gain:voice.a.missing:0\"");
+    const auto dangling_member = replaced(rack.document, quoted_id(rack.graph, "voice.a.gain"),
+                                          "\"nid-00000000000000000000000000000000\"");
     CHECK(GraphSerializer::inspect_document(dangling_member).refusal ==
           GraphDocumentRefusal::SubgraphBindingDangling);
     require_refused(dangling_member, "subgraph_binding_dangling");
 
-    const auto shared = replaced(rack.document, "\"node:audio_in:rack.b.filter.in:0\"",
-                                 "\"node:audio_in:voice.a.in:0\"");
+    const auto shared = replaced(rack.document, quoted_id(rack.graph, "rack.b.filter.in"),
+                                 quoted_id(rack.graph, "voice.a.in"));
     CHECK(GraphSerializer::inspect_document(shared).refusal ==
           GraphDocumentRefusal::SubgraphBindingDuplicate);
     require_refused(shared, "subgraph_binding_duplicate");
@@ -647,10 +763,27 @@ TEST_CASE("saved subgraph restore refuses records that do not match their templa
     PersistedRack rack;
     build_rack(rack);
 
-    // A renamed instance no longer matches the nested node names it owns.
-    require_refused(replaced(rack.document, "\"instance_identity\": \"voice.a\"",
-                             "\"instance_identity\": \"voice.z\""),
-                    "subgraph_instance_mismatch");
+    // Members bound in a different order no longer match the template
+    // structure at their positions.
+    {
+        auto root = choc::json::parse(rack.document);
+        const auto records = root["subgraphs"];
+        auto rewritten = choc::value::createEmptyArray();
+        for (std::uint32_t r = 0; r < records.size(); ++r) {
+            choc::value::Value record(records[r]);
+            if (record["instance_identity"].getString() == std::string_view("voice.a")) {
+                const auto members = record["members"];
+                auto swapped = choc::value::createEmptyArray();
+                swapped.addArrayElement(members[2]);
+                swapped.addArrayElement(members[1]);
+                swapped.addArrayElement(members[0]);
+                record.setMember("members", swapped);
+            }
+            rewritten.addArrayElement(record);
+        }
+        root.setMember("subgraphs", rewritten);
+        require_refused(choc::json::toString(root, true), "does not match the template");
+    }
     // Nested child identity and index are bound, not advisory.
     require_refused(replaced(rack.document, "\"template_identity\": \"test.gain\",\n",
                              "\"template_identity\": \"test.other\",\n"),
@@ -666,6 +799,70 @@ TEST_CASE("saved subgraph restore refuses records that do not match their templa
                     "subgraph_state_rejected");
     require_refused(replaced(rack.document, "\"gain\": 0.5", "\"gain\": 0.5,\n \"extra\": 1.0"),
                     "subgraph_state_rejected");
+}
+
+TEST_CASE("a template mismatch after the flattened load returns no graph, instances or maps") {
+    PersistedRack rack;
+    build_rack(rack);
+    // Lay out every node so a stale editor_layout entry would be visible.
+    std::unordered_map<NodeId, std::pair<float, float>> layout;
+    for (const auto& node : rack.graph.nodes())
+        layout.emplace(node.id, std::pair{static_cast<float>(node.id) * 10.0f, 5.0f});
+    const auto document = to_saved_subgraph_document(rack.graph, rack.instances, layout);
+    REQUIRE_FALSE(document.empty());
+    const auto mismatched = replaced(document, "\"template_identity\": \"test.rack\"",
+                                     "\"template_identity\": \"test.gain\"");
+
+    SignalGraph graph;
+    REQUIRE(graph.add_gain_node("existing") != 0);
+    const auto refused = from_saved_subgraph_document(graph, mismatched, rack_templates());
+    INFO(refused.load.error);
+    CHECK_FALSE(refused.ok());
+    CHECK(refused.load.error.find("subgraph_instance_mismatch") != std::string::npos);
+    CHECK(graph.nodes().empty());
+    CHECK(refused.subgraphs.empty());
+    CHECK(refused.load.identity_node_ids.empty());
+    CHECK(refused.load.persisted_node_ids.empty());
+    CHECK(refused.load.editor_layout.empty());
+    CHECK(refused.load.unrestored_node_ids.empty());
+    CHECK(refused.load.missing_plugins.empty());
+
+    // Control: the unedited document fills every map the refusal must empty.
+    SignalGraph control;
+    const auto loaded = from_saved_subgraph_document(control, document, rack_templates());
+    INFO(loaded.load.error);
+    REQUIRE(loaded.ok());
+    CHECK(loaded.load.identity_node_ids.size() == rack.graph.nodes().size());
+    CHECK(loaded.load.persisted_node_ids.size() == rack.graph.nodes().size());
+    CHECK(loaded.load.editor_layout.size() == rack.graph.nodes().size());
+}
+
+TEST_CASE("saved subgraph document restores a member whose display name changed") {
+    PersistedRack rack;
+    build_rack(rack);
+    const auto& voice = rack.instances[0];
+    const auto gain = voice.parameter_nodes.at("gain");
+    REQUIRE(rack.graph.rename_node(gain, "Lead level"));
+    const auto document = to_saved_subgraph_document(rack.graph, rack.instances);
+    REQUIRE_FALSE(document.empty());
+
+    SignalGraph restored;
+    const auto loaded = from_saved_subgraph_document(restored, document, rack_templates());
+    INFO(loaded.load.error);
+    REQUIRE(loaded.ok());
+    REQUIRE(loaded.subgraphs.size() == 2);
+    const auto& again = loaded.subgraphs[1];
+    REQUIRE(again.instance_identity == "voice.a");
+    const auto* node = restored.node(again.parameter_nodes.at("gain"));
+    REQUIRE(node != nullptr);
+    CHECK(node->name == "Lead level");
+    CHECK(node->gain == 0.5f);
+    CHECK(node->authored_id.str() == rack.graph.node(gain)->authored_id.str());
+    // The restored instance saves again with the rename intact.
+    const auto resaved = to_saved_subgraph_document(restored, loaded.subgraphs);
+    REQUIRE_FALSE(resaved.empty());
+    SignalGraph twice;
+    REQUIRE(from_saved_subgraph_document(twice, resaved, rack_templates()).ok());
 }
 
 TEST_CASE("saved subgraph restore refuses an instance whose internal edges changed") {

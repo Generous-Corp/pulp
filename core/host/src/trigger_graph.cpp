@@ -284,7 +284,7 @@ NodeId SignalGraph::add_trigger_producer(const TriggerProducerConfig& config) {
     node.num_output_ports = config.input_channels;
     detail::populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
     const auto id = node.id;
-    nodes_.push_back(std::move(node));
+    push_node_locked_(std::move(node));
     trigger_producers_.emplace(id, config);
     typed_trigger_authoring_.store(true, std::memory_order_release);
     invalidate_live_locked_();
@@ -305,7 +305,7 @@ NodeId SignalGraph::add_trigger_envelope(const TriggerEnvelopeConfig& config) {
     node.num_output_ports = 1;
     detail::populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
     const auto id = node.id;
-    nodes_.push_back(std::move(node));
+    push_node_locked_(std::move(node));
     trigger_envelopes_.emplace(id, config);
     typed_trigger_authoring_.store(true, std::memory_order_release);
     invalidate_live_locked_();
@@ -334,7 +334,7 @@ NodeId SignalGraph::add_trigger_audio_(TriggerAudioConfig config) {
     node.num_output_ports = 1;
     detail::populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
     const auto id = node.id;
-    nodes_.push_back(std::move(node));
+    push_node_locked_(std::move(node));
     trigger_audio_.emplace(id, config);
     typed_trigger_authoring_.store(true, std::memory_order_release);
     invalidate_live_locked_();
