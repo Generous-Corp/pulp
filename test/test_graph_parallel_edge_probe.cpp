@@ -141,7 +141,7 @@ enum class Topology {
     Plain,    // input -> {source, sibling} -> output: one parallel level
     Pdc,      // as Plain with a latent sibling: the source edge is delayed
     Feedback, // a built-in gain feeds itself back, beside a parallel sibling
-    Clobber,  // source -> in-place reader that writes through its input view
+    Clobber,  // gain source -> in-place reader that writes through its input view
     Control,  // source audio drives a destination parameter, plus MIDI and a sibling
     Dense,    // as Control with audio-rate modulation
 };
@@ -172,6 +172,13 @@ struct ProbeGraph {
             REQUIRE(graph.connect(input, 0, source, 0));
             REQUIRE(graph.connect_feedback(source, 0, source, 0));
             REQUIRE(graph.connect(source, 0, output, 0));
+        } else if (t == Topology::Clobber) {
+            // A built-in gain's output is not retained across blocks, so its
+            // sole reader reads it in place; a hosted node's output is retained
+            // and always copied.
+            source = graph.add_gain_node("in-place source");
+            graph.set_node_gain(source, 0.5f);
+            REQUIRE(graph.connect(input, 0, source, 0));
         } else {
             source = add_slot(StageSlot::Mode::Shape, 0.5f, 0, rate, &source_slot);
             REQUIRE(graph.connect(input, 0, source, 0));
@@ -382,6 +389,8 @@ void require_expected_audio(Topology t, const std::vector<GraphRuntimeProbeSampl
             expected = summarize(frames, [&](int f) { return retained[f]; });
             for (int f = 0; f < frames; ++f)
                 retained[f] = 0.5f * (stimulus(timestamp, f) + retained[f]);
+        } else if (t == Topology::Clobber) {
+            expected = summarize(frames, [&](int f) { return 0.5f * stimulus(timestamp, f); });
         } else {
             expected = summarize(frames, [&](int f) {
                 return StageSlot::shape(0.5f, block, stimulus(timestamp, f));
