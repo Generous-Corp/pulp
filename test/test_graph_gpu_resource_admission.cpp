@@ -838,6 +838,23 @@ void require_gpu_host(GraphRig& rig, const GeometryFixture& f) {
         SKIP("no staged Dawn device for the convolver on this host");
 }
 
+/// Skips when both consumers prepared on Dawn but this host executed neither
+/// on a GPU during the warm-up render: a software or virtualised adapter can
+/// report Dawn and a staged device and still complete no GPU block. Call it
+/// after the warm-up render. It skips only when GPU execution is absent; every
+/// assertion that follows still fails on a host that did execute on the GPU.
+void skip_unless_gpu_executed(GraphRig& rig) {
+    const auto neural = rig.neural->transport().delivery_snapshot();
+    const bool convolver_executed =
+        staged_gpu_executed(rig.convolution->transport().capability_report(),
+                            rig.convolution->transport().delivery_snapshot(),
+                            rig.convolution->convolver()->staged_gpu_blocks());
+    if (neural.gpu_blocks == 0 || !convolver_executed)
+        SKIP("host did not execute the consumers on a GPU (neural gpu_blocks "
+             << neural.gpu_blocks << ", convolver staged_gpu_blocks "
+             << rig.convolution->convolver()->staged_gpu_blocks() << ")");
+}
+
 } // namespace
 
 TEST_CASE("a self-reported Dawn status is not provider attestation",
@@ -1028,6 +1045,7 @@ TEST_CASE("two GPU consumers in one graph pass shared admission with measured ge
     REQUIRE(verdict.error == AdmissionError::None);
 
     rig.render(static_cast<std::uint64_t>(fixture.max_block) * 160, fixture.pattern);
+    skip_unless_gpu_executed(rig);
 
     // Geometry and latency are measured, not assumed.
     const auto q_neural = rig.neural->quantum();
@@ -1093,6 +1111,7 @@ TEST_CASE("fault-injected device loss moves both graph consumers to their CPU fa
     REQUIRE(admit(manifest, rig.observe(fixture.sample_rate)).error == AdmissionError::None);
 
     rig.render(64 * 60, fixture.pattern);
+    skip_unless_gpu_executed(rig);
     const auto before_neural = rig.neural->transport().delivery_snapshot();
     REQUIRE(before_neural.gpu_blocks > 0);
     REQUIRE(staged_gpu_executed(rig.convolution->transport().capability_report(),
@@ -1206,6 +1225,7 @@ TEST_CASE("a consumer without a CPU fallback is refused and goes silent on devic
     // What admission prevents: the same loss now produces silence and the
     // output-tolerance control fails.
     rig.render(64 * 60, fixture.pattern);
+    skip_unless_gpu_executed(rig);
     rig.neural->inject_device_loss();
     rig.render(64 * 60, fixture.pattern);
     // The transport selects its fallback slot, which emits zeros without a
@@ -1223,6 +1243,7 @@ TEST_CASE("graph admission controls can fail: misalignment and a planted allocat
     GraphRig rig;
     require_gpu_host(rig, fixture);
     rig.render(64 * 80, fixture.pattern);
+    skip_unless_gpu_executed(rig);
     const auto declared = rig.graph.latency_samples();
     const auto ref = oracle(rig.input, make_ir());
     const double tolerance = 1.0e-4;
