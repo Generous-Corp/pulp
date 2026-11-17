@@ -708,8 +708,9 @@ TEST_CASE("MCP graph passes the CLI diagnostic codes through unchanged", "[mcp][
         const char* code;
         int exit_code;
     };
-    for (const auto& item : {Case{"InvalidDocument", 1}, Case{"FileUnreadable", 1},
-                             Case{"UnknownPort", 1}, Case{"Ok", 0}}) {
+    for (const auto& item :
+         {Case{"InvalidDocument", 1}, Case{"FileUnreadable", 1}, Case{"UnknownPort", 1},
+          Case{"SampleRateMismatch", 1}, Case{"UnsupportedChannelLayout", 1}, Case{"Ok", 0}}) {
         {
             std::ofstream script(cli, std::ios::trunc);
             script << "#!/bin/sh\nprintf '{\"valid\":" << (item.exit_code == 0 ? "true" : "false")

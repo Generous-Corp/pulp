@@ -12,6 +12,27 @@ def run(args, *, data=None, cwd=None):
                           capture_output=True, timeout=30, cwd=cwd)
 
 
+# Spectral analysis -> identity stage -> synthesis between mono boundaries.
+FLOW2 = ('# flow 2\n'
+         'analysis : pulp/spectral_analysis (fft 256, hop 64, channels 1, rate 48000)\n'
+         'in : pulp/audio_in (channels 1)\n'
+         'out : pulp/audio_out (channels 1)\n'
+         'pass : pulp/spectral_stage (fft 256, hop 64, channels 1, rate 48000, kind identity)\n'
+         'synthesis : pulp/spectral_synthesis (fft 256, hop 64, channels 1, rate 48000)\n'
+         'analysis.frames >> pass.frames_in\n'
+         'in.audio >> analysis.audio\n'
+         'pass.frames_out >> synthesis.frames\n'
+         'synthesis.audio >> out.audio\n')
+
+
+def mcp_call(args, request_id, arguments):
+    request = {'jsonrpc': '2.0', 'id': request_id, 'method': 'tools/call',
+               'params': {'name': 'pulp_graph', 'arguments': arguments}}
+    wire = json.dumps(request)
+    mcp = run([args.mcp], data=f'Content-Length: {len(wire)}\r\n\r\n{wire}', cwd=args.root)
+    return json.loads(mcp.stdout.split('\n\n', 1)[1])['result']
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--consumer', type=Path, required=True)
@@ -27,6 +48,12 @@ def main():
         (good + 'gain.audio >> gain.audio\n', 'IllegalCycle'),
         (good.replace('0.25', '1e999'), 'ParameterOutOfRange'),
         (good.replace('gain.audio >> out.audio', 'absent.audio >> out.audio'), 'UnknownNode'),
+        (FLOW2, 'Ok'),
+        (FLOW2.replace(', rate 48000)\nin', ')\nin'), 'SyntaxError'),
+        (FLOW2.replace('channels 1, rate 48000)\nanalysis.frames', 'channels 1, rate 44100)\nanalysis.frames'),
+         'SampleRateMismatch'),
+        (FLOW2.replace('in : pulp/audio_in (channels 1)', 'in : pulp/audio_in (channels 17)'),
+         'UnsupportedChannelLayout'),
     ]
     with tempfile.TemporaryDirectory(prefix='graph-patch-tools-') as temporary:
         directory = Path(temporary)
@@ -80,7 +107,27 @@ def main():
         assert not payload.get('isError', False)
         assert json.loads(payload['content'][0]['text']) == json.loads(run([args.cli, 'graph', 'catalog', '--json']).stdout)
 
-    print('PASS API/CLI/MCP 7 diagnostic controls, catalog without path and notation/save roundtrip')
+        # Flow 2: CLI and MCP fmt print the same canonical text, which is the
+        # input, and a refused document carries the same diagnostic.
+        flow2 = directory / 'flow2.pat'
+        flow2.write_text(FLOW2, encoding='utf-8')
+        cli = run([args.cli, 'graph', 'fmt', flow2, '--json'])
+        assert cli.returncode == 0, cli
+        cli_json = json.loads(cli.stdout)
+        assert cli_json['notation'] == FLOW2, cli_json
+        payload = mcp_call(args, 200, {'path': str(flow2), 'operation': 'fmt'})
+        assert not payload.get('isError', False), payload
+        assert json.loads(payload['content'][0]['text']) == cli_json
+        mismatch = directory / 'flow2-mismatch.pat'
+        mismatch.write_text(FLOW2.replace('rate 48000)\nanalysis.frames', 'rate 44100)\nanalysis.frames'),
+                            encoding='utf-8')
+        cli = run([args.cli, 'graph', 'fmt', mismatch, '--json'])
+        assert cli.returncode == 1 and json.loads(cli.stdout)['code'] == 'SampleRateMismatch', cli
+        payload = mcp_call(args, 201, {'path': str(mismatch), 'operation': 'fmt'})
+        assert payload['isError'] and json.loads(payload['content'][0]['text']) == json.loads(cli.stdout)
+
+    print('PASS API/CLI/MCP 11 diagnostic controls, catalog without path, notation/save roundtrip '
+          'and flow 2 fmt parity')
 
 
 if __name__ == '__main__':

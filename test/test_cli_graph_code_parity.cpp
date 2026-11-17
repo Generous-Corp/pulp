@@ -37,6 +37,18 @@ constexpr const char* kGoodPat = "# flow 1\n"
                                  "out : pulp/audio_out\n"
                                  "input.audio >> out.audio\n";
 
+constexpr const char* kFlow2Pat =
+    "# flow 2\n"
+    "analysis : pulp/spectral_analysis (fft 256, hop 64, channels 1, rate 48000)\n"
+    "in : pulp/audio_in (channels 1)\n"
+    "out : pulp/audio_out (channels 1)\n"
+    "pass : pulp/spectral_stage (fft 256, hop 64, channels 1, rate 48000, kind identity)\n"
+    "synthesis : pulp/spectral_synthesis (fft 256, hop 64, channels 1, rate 48000)\n"
+    "analysis.frames >> pass.frames_in\n"
+    "in.audio >> analysis.audio\n"
+    "pass.frames_out >> synthesis.frames\n"
+    "synthesis.audio >> out.audio\n";
+
 const std::vector<Row>& rows() {
     static const std::vector<Row> table{
         {"valid notation", "ok.pat", kGoodPat, Code::Ok},
@@ -51,6 +63,18 @@ const std::vector<Row>& rows() {
          Code::UnknownPort},
         {"unsupported contract", "contract.pat",
          "# flow 1\ninput : pulp/audio_in\nx : pulp/does_not_exist\ninput.audio >> x.audio\n",
+         Code::UnsupportedContract},
+        {"flow 2 spectral notation", "flow2.pat", kFlow2Pat, Code::Ok},
+        {"flow 2 missing sample rate", "flow2-rate.pat",
+         "# flow 2\na : pulp/spectral_analysis (fft 256, hop 64, channels 1)\n", Code::SyntaxError},
+        {"flow 2 mismatched sample rate", "flow2-mismatch.pat",
+         "# flow 2\na : pulp/spectral_analysis (fft 256, hop 64, channels 1, rate 48000)\n"
+         "s : pulp/spectral_synthesis (fft 256, hop 64, channels 1, rate 44100)\n",
+         Code::SampleRateMismatch},
+        {"flow 2 unsupported channel layout", "flow2-layout.pat",
+         "# flow 2\nin : pulp/audio_in (channels 17)\n", Code::UnsupportedChannelLayout},
+        {"flow 2 mask payload", "flow2-mask.pat",
+         "# flow 2\np : pulp/spectral_stage (fft 256, hop 64, channels 1, rate 48000, kind mask)\n",
          Code::UnsupportedContract},
         {"bad json", "bad.pulpgraph", "{broken", Code::InvalidDocument},
         {"invalid document", "doc.pulpgraph", R"({"format_version":1,"nodes":5})",
@@ -136,6 +160,42 @@ TEST_CASE("graph CLI success code and fmt use the C++ spelling", "[cli][shellout
     const auto fmt_doc = run_pulp({"graph", "fmt", saved.string(), "--json"});
     REQUIRE(fmt_doc.exit_code == 0);
     REQUIRE(cli_code(fmt_doc) == ok);
+}
+
+TEST_CASE("graph CLI fmt prints the C++ canonical notation for flow 1 and flow 2",
+          "[cli][shellout][graph][parity][flow-2]") {
+    if (!fs::exists(pulp_binary()))
+        SKIP("pulp not built");
+    const auto dir = unique_temp_dir("pulp-graph-fmt-flow2");
+    fs::create_directories(dir);
+    for (const std::string text : {std::string(kGoodPat), std::string(kFlow2Pat)}) {
+        INFO(text);
+        const auto path = dir / "doc.pat";
+        std::ofstream(path, std::ios::binary | std::ios::trunc) << text;
+        const auto cpp = pulp::host::load_graph_patch_file(path);
+        REQUIRE(cpp);
+        const auto formatted = pulp::host::format_graph_patch(*cpp.graph);
+        REQUIRE(formatted);
+        REQUIRE(formatted.text.substr(0, 8) == text.substr(0, 8));
+        const auto cli = run_pulp({"graph", "fmt", path.string(), "--json"});
+        INFO(cli.stdout_output << cli.stderr_output);
+        REQUIRE(cli.exit_code == 0);
+        const auto result = choc::json::parse(cli.stdout_output);
+        REQUIRE(std::string(result["notation"].getString()) == formatted.text);
+        const auto plain = run_pulp({"graph", "fmt", path.string()});
+        REQUIRE(plain.exit_code == 0);
+        REQUIRE(plain.stdout_output == formatted.text);
+    }
+    // A refused flow 2 document reports the same diagnostic through fmt.
+    const auto path = dir / "mismatch.pat";
+    std::ofstream(path, std::ios::binary | std::ios::trunc)
+        << "# flow 2\na : pulp/spectral_analysis (fft 256, hop 64, channels 1, rate 48000)\n"
+           "s : pulp/spectral_synthesis (fft 256, hop 64, channels 1, rate 44100)\n";
+    const auto cpp = pulp::host::load_graph_patch_file(path);
+    REQUIRE(cpp.diagnostic.code == Code::SampleRateMismatch);
+    const auto cli = run_pulp({"graph", "fmt", path.string(), "--json"});
+    REQUIRE(cli.exit_code == 1);
+    REQUIRE(cli.stdout_output == pulp::host::graph_patch_diagnostic_json(cpp.diagnostic) + "\n");
 }
 
 TEST_CASE("graph CLI file size and readability codes agree across subcommands",
