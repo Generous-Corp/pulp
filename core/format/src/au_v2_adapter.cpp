@@ -853,6 +853,7 @@ OSStatus PulpAUEffect::Initialize()
     output_ptrs_.reserve(static_cast<std::size_t>(Output(0).GetStreamFormat().mChannelsPerFrame));
 
     warm_render_path();
+    block_timing_.mark_discontinuity();
 
     runtime::log_debug("AU v2: initialized with {} channels at {} Hz", GetNumberOfChannels(),
                        GetSampleRate());
@@ -896,6 +897,12 @@ void PulpAUEffect::warm_render_path() {
     warming_render_path_ = true;
     (void)ProcessBufferLists(flags, *input.get(), *output.get(), frames);
     warming_render_path_ = false;
+}
+
+OSStatus PulpAUEffect::Reset(AudioUnitScope inScope, AudioUnitElement inElement) {
+    const auto result = AUMIDIEffectBase::Reset(inScope, inElement);
+    block_timing_.mark_discontinuity();
+    return result;
 }
 
 void PulpAUEffect::Cleanup()
@@ -991,7 +998,17 @@ OSStatus PulpAUEffect::Render(AudioUnitRenderActionFlags& ioActionFlags,
             sidechain_pulled_ = &sidechain.GetBufferList();
         }
     }
+    // Each Processor call inside this render (one per scheduled-parameter
+    // slice) places itself against this time stamp. A render that reaches no
+    // Processor call (the stock bypass, a missing or failed main input, or
+    // any exit inside ProcessBufferLists) is a skipped block.
+    render_time_ = inTimeStamp;
+    has_render_time_ = true;
+    const auto observed_before = block_timing_.observed_calls();
     const auto result = AUMIDIEffectBase::Render(ioActionFlags, inTimeStamp, nFrames);
+    if (block_timing_.observed_calls() == observed_before)
+        block_timing_.mark_skipped();
+    has_render_time_ = false;
     sidechain_pulled_ = nullptr;
     return result;
 }
@@ -1028,6 +1045,9 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
                                           AudioBufferList& outBuffer,
                                           UInt32 inFramesToProcess)
 {
+    // Every return below that does not reach Processor::process() marks this
+    // call skipped. The Initialize() warm-up is not a host block.
+    ScopedSkipMark skip_mark(block_timing_, !warming_render_path_);
     if (!processor_) {
         detail::zero_audio_buffer_list(&outBuffer);
         return noErr;
@@ -1202,7 +1222,8 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
         GetSampleRate(), static_cast<int>(inFramesToProcess),
         offline_render_.offline());
 
-    apply_host_callbacks_to_process_context(ctx, *this, playhead_prev_);
+    apply_host_callbacks_to_process_context(ctx, *this, playhead_prev_, slice_frame_offset_);
+    block_timing_.publish(ctx, has_render_time_ ? &render_time_ : nullptr, slice_frame_offset_);
 
     // A normal AU render has no scheduled events, while ProcessScheduledSlice
     // prepares a slice-relative queue above. Set it either way so a Processor
@@ -1295,6 +1316,7 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
         if (panic_state_)
             panic_state_->observe_midi_out(midi_out);
     }
+    skip_mark.observed();
 
     // The host ORs kAudioUnitRenderAction_OutputIsSilence into ioActionFlags via
     // AUInputElement::PullInput whenever it renders silence upstream, and

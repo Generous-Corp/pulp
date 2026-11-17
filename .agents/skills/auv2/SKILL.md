@@ -735,6 +735,36 @@ directly—the shared helpers contain exceptions.
 
 `CallHostTransportState` reports `outCurrentSampleInTimeLine` as a `Float64`, and some hosts send a value a hair below the true sample: REAPER reports `13823.9999` for sample `13824`. A `static_cast<int64_t>` truncates it, so `position_samples` steps back one sample and then jumps two on the next block. Convert through `pulp::format::detail::host_sample_position()` (`detail/host_sample_position.hpp`). It returns the nearest sample (`std::round`, independent of the rounding mode), or `nullopt` for a non-finite or out-of-range value; leave `TransportField::SamplePosition` unset in that case.
 
+### Timing facts are per Processor call, not per render
+
+`ProcessContext::timing` (neutral steady counter, transport, discontinuity; see
+`docs/graph-program-status/D4-adapter-timing.md`) is published through
+`BlockTimingPublisher` in `au_v2_common.hpp`, shared by all three adapters.
+Three traps it exists to avoid:
+
+- **`AUEffectBase::Render` calls `ProcessBufferLists` once per scheduled-parameter
+  slice.** Each call must publish `mSampleTime + slice_frame_offset_`, and a
+  playing transport must move by the same offset
+  (`apply_host_callbacks_to_process_context(..., slice_offset)`). Publishing
+  the render's time stamp on every slice makes the second slice overlap the
+  first, so the host timeline opens a new epoch mid-render (and the legacy
+  `transport_jump` fires on every automated block).
+- **`ProcessBufferLists` has no time stamp.** `PulpAUEffect::Render` stashes
+  `inTimeStamp` for the duration of the render. Do not read
+  `CurrentRenderTime()` instead: it is only set by `AUBase::DoRender`, and the
+  in-process tests (and any direct `Render()` caller) never go through it.
+- **Every exit before `process()` is a skip.** `ScopedSkipMark` marks the call
+  skipped on scope exit unless `observed()` ran after `process()`, so a new
+  early return cannot forget it; `PulpAUEffect::Render` also marks a render that
+  reached no Processor call (the stock bypass, a missing main input). Requests
+  `AUBase::DoRender` refuses before `Render()` (oversized, uninitialized) never
+  reach the adapter and cannot be marked. Discontinuity after
+  `Initialize()`/`Reset()` is a generation compare, so a skipped block never
+  consumes a pending reset.
+
+Tests: `test/test_au_v2_process_timing.cpp` (effect via `DoRender` with a host
+input callback, so the real slicing runs).
+
 ### An AU v2 editor learns it is hidden only through its view
 
 There is no view controller, and the Cocoa factory returns the GPU host's own

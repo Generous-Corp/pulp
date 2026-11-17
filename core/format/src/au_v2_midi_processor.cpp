@@ -304,9 +304,17 @@ OSStatus PulpAUMidiProcessor::Initialize()
     midi_in_.set_realtime_capacity_limit(true);
     midi_out_.set_realtime_capacity_limit(true);
 
+    block_timing_.mark_discontinuity();
+
     runtime::log_info("AU v2 MIDI processor: initialized at {} Hz",
                       GetOutput(0)->GetStreamFormat().mSampleRate);
     return noErr;
+}
+
+OSStatus PulpAUMidiProcessor::Reset(AudioUnitScope inScope, AudioUnitElement inElement) {
+    const auto result = MusicDeviceBase::Reset(inScope, inElement);
+    block_timing_.mark_discontinuity();
+    return result;
 }
 
 void PulpAUMidiProcessor::Cleanup()
@@ -366,12 +374,14 @@ OSStatus PulpAUMidiProcessor::Render(AudioUnitRenderActionFlags& ioActionFlags,
                                      const AudioTimeStamp& inTimeStamp,
                                      UInt32 inNumberFrames)
 {
-    (void)inTimeStamp;
-
     // The observer completes a workgroup transition before it returns; this
     // idempotent guard makes every render verify the current publication
     // before any early exit, as the AUv3 render block does.
     render_context_.prepare_for_render();
+
+    // Every return below that does not reach Processor::process(), and the
+    // bypassed and contended paths, mark this render skipped.
+    ScopedSkipMark skip_mark(block_timing_);
 
     // The Processor and its scratch were sized in prepare() to
     // GetMaxFramesPerSlice(). Rejecting an oversized render is the canonical AU
@@ -427,6 +437,7 @@ OSStatus PulpAUMidiProcessor::Render(AudioUnitRenderActionFlags& ioActionFlags,
             GetOutput(0)->GetStreamFormat().mSampleRate,
             static_cast<int>(inNumberFrames), offline_render_.offline());
         apply_host_callbacks_to_process_context(ctx, *this, playhead_prev_);
+        block_timing_.publish(ctx, &inTimeStamp, 0);
 
         param_events_.clear();
         processor_->set_param_events(&param_events_);
@@ -482,6 +493,7 @@ OSStatus PulpAUMidiProcessor::Render(AudioUnitRenderActionFlags& ioActionFlags,
             processor_->process(process_buffers, midi_in_, midi_out_, ctx);
             if (panic_state_)
                 panic_state_->observe_midi_out(midi_out_);
+            skip_mark.observed();
         } else {
             midi_out_.clear();
             midi_out_.clear_sysex();
