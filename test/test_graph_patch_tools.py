@@ -133,13 +133,16 @@ def main():
 
         base = directory / 'diff-base.pat'
         base.write_text(good, encoding='utf-8')
-        trimmed = directory / 'diff-trim.pat'
-        trimmed.write_text(good.replace('0.25', '0.5'), encoding='utf-8')
         before_doc = directory / 'diff-before.pulpgraph'
         after_doc = directory / 'diff-after.pulpgraph'
-        for source, target in ((base, before_doc), (trimmed, after_doc)):
-            assert run([args.cli, 'graph', 'save', source, '--output', target,
-                        '--saved-identity']).returncode == 0
+        assert run([args.cli, 'graph', 'save', base, '--output', before_doc,
+                    '--saved-identity']).returncode == 0
+        # Each independent save mints fresh authored IDs, so the "after"
+        # document is the same document with one node field edited.
+        edited = json.loads(before_doc.read_text(encoding='utf-8'))
+        gain_node = next(n for n in edited['nodes'] if n['type'] == 'gain')
+        gain_node['gain'] = 0.5
+        after_doc.write_text(json.dumps(edited), encoding='utf-8')
         plain_doc = directory / 'diff-plain.pulpgraph'
         assert run([args.cli, 'graph', 'save', base, '--output', plain_doc]).returncode == 0
         watched = [before_doc, after_doc, plain_doc]
