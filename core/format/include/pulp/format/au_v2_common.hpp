@@ -17,6 +17,7 @@
 
 #include <AudioUnitSDK/AUBase.h>
 
+#include <cmath>
 #include <cstddef>
 #include <AudioToolbox/AudioUnitProperties.h>
 
@@ -225,9 +226,14 @@ inline void apply_host_callbacks_to_process_context(ProcessContext& ctx, const a
     Float64 beat = 0.0;
     Float64 tempo = 0.0;
     if (unit.CallHostBeatAndTempo(&beat, &tempo) == noErr) {
-        ctx.position_beats = beat;
-        ctx.transport_validity.set(TransportField::BeatPosition);
-        if (tempo > 0.0) {
+        // A non-finite beat or tempo from the host is not a position or a
+        // rate: it is left unknown rather than carried into slice advance and
+        // bar derivation.
+        if (std::isfinite(beat)) {
+            ctx.position_beats = beat;
+            ctx.transport_validity.set(TransportField::BeatPosition);
+        }
+        if (std::isfinite(tempo) && tempo > 0.0) {
             ctx.tempo_bpm = tempo;
             ctx.transport_validity.set(TransportField::Tempo);
         }

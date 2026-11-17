@@ -130,7 +130,8 @@ inline bool classify_ordinary_loop_wrap(
 /// Adapters that already have a host-provided bar (VST3
 /// `barPositionMusic`) should write `ctx.bar` directly and skip this
 /// helper. Skips work safely when the time signature is degenerate
-/// (numerator <= 0 or denominator <= 0) by leaving `ctx.bar` at 0.
+/// (numerator <= 0 or denominator <= 0), or the beat position is non-finite
+/// or beyond the int64 bar range, by leaving `ctx.bar` at 0.
 inline void derive_bar_from_beats(ProcessContext& ctx) noexcept {
     if (ctx.time_sig_numerator <= 0 || ctx.time_sig_denominator <= 0) {
         ctx.bar = 0;
@@ -143,6 +144,13 @@ inline void derive_bar_from_beats(ProcessContext& ctx) noexcept {
         return;
     }
     const double bar_d = std::floor(ctx.position_beats / beats_per_bar);
+    // A non-finite or out-of-range position has no representable bar; the
+    // conversion would be undefined, so the bar stays 0.
+    constexpr double kBarLimit = 9223372036854775808.0; // 2^63
+    if (!std::isfinite(bar_d) || bar_d >= kBarLimit || bar_d < -kBarLimit) {
+        ctx.bar = 0;
+        return;
+    }
     ctx.bar = static_cast<int64_t>(bar_d);
 }
 
