@@ -75,7 +75,8 @@ class FactoryPresetTable {
     void set_directory(const std::filesystem::path& dir);
 
     /// Callback run when the host selects a declared program; receives the
-    /// program's index. May be empty.
+    /// program's index. Runs on whichever thread the host sets the preset
+    /// from, so it must not assume the main thread. May be empty.
     using ProgramSelect = std::function<void(std::size_t)>;
 
     /// Declare programs in code, for a plug-in whose presets are not files.

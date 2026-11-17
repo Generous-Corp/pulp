@@ -1395,9 +1395,17 @@ OSStatus PulpAUEffect::GetPresets(CFArrayRef* outData) const {
 void PulpAUEffect::set_programs(std::vector<std::string> names,
                                 FactoryPresetTable::ProgramSelect on_select) {
     factory_presets_.set_programs(std::move(names), std::move(on_select));
-    if (const AUPreset* first = factory_presets_.preset_at(0);
-        first != nullptr && factory_presets_.program_count() > 0)
+    // Rebuilding renumbers the table, so the record a host may already hold as
+    // the present preset can name a slot that no longer exists. Re-point it:
+    // at the first declared program, or back to the untitled state when none
+    // are declared.
+    const AUPreset* first = factory_presets_.preset_at(0);
+    if (first != nullptr && factory_presets_.program_count() > 0) {
         SetAFactoryPresetAsCurrent(*first);
+    } else {
+        AUPreset untitled{-1, CFSTR("Untitled")};
+        NewCustomPresetSet(untitled);
+    }
 }
 
 OSStatus PulpAUEffect::NewFactoryPresetSet(const AUPreset& inNewFactoryPreset) {
@@ -1413,6 +1421,12 @@ OSStatus PulpAUEffect::NewFactoryPresetSet(const AUPreset& inNewFactoryPreset) {
     // the host relabels its menu and the plug-in keeps its old parameters.
     // The store's host bridge notifies the host of every value that moved.
     if (!factory_presets_.load(index))
+        return kAudioUnitErr_InvalidPropertyValue;
+
+    // A select callback may have redeclared programs, which frees the records
+    // `canonical` pointed at. Look the entry up again before using it.
+    canonical = factory_presets_.preset_at(index);
+    if (canonical == nullptr)
         return kAudioUnitErr_InvalidPropertyValue;
 
     // Make OUR record current rather than the host's copy. The host may pass a

@@ -2269,6 +2269,108 @@ TEST_CASE("AU v2 instrument without declared programs keeps the untitled present
     CFRelease(current.presetName);
 }
 
+TEST_CASE("AU v2 instrument re-points the present preset when programs are redeclared",
+          "[au][au-v2][presets][programs]") {
+    ScopedPresetFactory factory;
+    pulp::format::au::PulpAUInstrument unit(nullptr);
+    unit.set_programs({"a", "b"});
+    REQUIRE(select_preset(unit, 1) == noErr);
+    AUPreset current = present_preset(unit);
+    REQUIRE(current.presetNumber == 1);
+    CFRelease(current.presetName);
+
+    // Slot 1 no longer exists: the present preset must not keep naming it.
+    unit.set_programs({"x"});
+    current = present_preset(unit);
+    REQUIRE(current.presetNumber == 0);
+    REQUIRE(preset_name(current) == "x");
+    CFRelease(current.presetName);
+
+    // An empty declaration returns to the untitled state.
+    unit.set_programs({});
+    REQUIRE(unit.factory_preset_table().size() == 0);
+    current = present_preset(unit);
+    REQUIRE(current.presetNumber == -1);
+    REQUIRE(preset_name(current) == "Untitled");
+    CFRelease(current.presetName);
+    REQUIRE(select_preset(unit, 0) != noErr);
+}
+
+TEST_CASE("AU v2 instrument survives a select callback that redeclares programs",
+          "[au][au-v2][presets][programs]") {
+    ScopedPresetFactory factory;
+    pulp::format::au::PulpAUInstrument unit(nullptr);
+    pulp::format::au::PulpAUInstrument* self = &unit;
+    // The callback's own captures must outlive the redeclaration that replaces
+    // it: a weak observer of a captured token reports whether they did.
+    auto token = std::make_shared<int>(1);
+    const std::weak_ptr<int> watcher = token;
+    bool captures_alive = false;
+    unit.set_programs({"a", "b"},
+                      [self, token = std::move(token), watcher, &captures_alive](std::size_t) {
+                          self->set_programs({"only"});
+                          captures_alive = !watcher.expired();
+                      });
+
+    // Slot 1 vanished while its own callback ran, so the selection is refused
+    // and the present preset reflects the new declaration.
+    REQUIRE(select_preset(unit, 1) != noErr);
+    REQUIRE(captures_alive);
+    AUPreset current = present_preset(unit);
+    REQUIRE(current.presetNumber == 0);
+    REQUIRE(preset_name(current) == "only");
+    CFRelease(current.presetName);
+}
+
+TEST_CASE("AU v2 instrument state round trip keeps the program name without re-running it",
+          "[au][au-v2][presets][programs]") {
+    ScopedPresetFactory factory;
+    CFPropertyListRef saved = nullptr;
+    {
+        pulp::format::au::PulpAUInstrument unit(nullptr);
+        unit.set_programs({"a", "b"});
+        REQUIRE(select_preset(unit, 1) == noErr);
+        REQUIRE(unit.SaveState(&saved) == noErr);
+    }
+    REQUIRE(saved != nullptr);
+
+    pulp::format::au::PulpAUInstrument restored(nullptr);
+    int calls = 0;
+    restored.set_programs({"a", "b"}, [&](std::size_t) { ++calls; });
+    REQUIRE(restored.RestoreState(saved) == noErr);
+    CFRelease(saved);
+
+    // Restoring state is not a program selection: the callback stays quiet and
+    // the host sees the saved name under the user-state number -1 rather than a
+    // slot id that could have shifted.
+    REQUIRE(calls == 0);
+    AUPreset current = present_preset(restored);
+    REQUIRE(current.presetNumber == -1);
+    REQUIRE(preset_name(current) == "b");
+    CFRelease(current.presetName);
+}
+
+TEST_CASE("AU v2 effect publishes a code-declared program",
+          "[au][au-v2][presets][programs]") {
+    ScopedPresetFactory factory;
+    pulp::format::au::PulpAUEffect effect(nullptr);
+    std::vector<std::size_t> selected;
+    effect.set_programs({"default"}, [&](std::size_t n) { selected.push_back(n); });
+
+    REQUIRE(effect.factory_preset_table().size() == 1);
+    AUPreset current{};
+    REQUIRE(effect.DispatchGetProperty(kAudioUnitProperty_PresentPreset, kAudioUnitScope_Global, 0,
+                                       &current) == noErr);
+    REQUIRE(current.presetNumber == 0);
+    REQUIRE(preset_name(current) == "default");
+    CFRelease(current.presetName);
+
+    AUPreset selection{0, CFSTR("host-supplied")};
+    REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_PresentPreset, kAudioUnitScope_Global, 0,
+                                       &selection, sizeof(selection)) == noErr);
+    REQUIRE(selected == std::vector<std::size_t>{0});
+}
+
 // ===========================================================================
 // Initialize() warm-up: one render over silence that stops right after
 // validation and buffer wiring. It must not run the Processor or settle a

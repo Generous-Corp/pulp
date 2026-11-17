@@ -154,8 +154,10 @@ const AUPreset* FactoryPresetTable::preset_at(std::size_t index) const noexcept 
 
 bool FactoryPresetTable::load(std::size_t index) {
     if (index < programs_.size()) {
-        if (on_select_)
-            on_select_(index);
+        // Run a copy: the callback may redeclare programs, which would destroy
+        // the function object it is executing from.
+        if (const ProgramSelect select = on_select_)
+            select(index);
         return true;
     }
     index -= programs_.size();
