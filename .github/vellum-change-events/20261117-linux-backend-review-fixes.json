@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "event_id": "20261117-linux-backend-review-fixes",
+  "kind": "change",
+  "created_at": "2026-11-17T21:08:32Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "Adds accessibility_set_window_geometry to the Linux AT-SPI provider API so Component geometry follows the window host's viewport transform and the window's screen origin. The declaration is Linux-only and additive; no existing signature changes and no API or authority boundary moves. Pulp-only: Vellum receives it by re-transferring the fixed Pulp files after review.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R pulp-test-accessibility-tree",
+    "ctest --test-dir build -R pulp-test-linux-backends",
+    "ctest --test-dir build -R pulp-test-linux-pure-helpers"
+  ],
+  "disposition": "pulp-only"
+}
