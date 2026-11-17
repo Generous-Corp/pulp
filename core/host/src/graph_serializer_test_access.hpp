@@ -22,6 +22,10 @@ struct GraphSerializerTestAccess {
     // The next ordinary load throws std::bad_alloc while parsing the original
     // document, before any migration or authored ID planning.
     static void fail_next_document_parse() noexcept;
+    // The next load of a document with event_connections throws
+    // std::bad_alloc while rebinding them, after every node and connection
+    // was restored.
+    static void fail_next_event_rebind() noexcept;
     // The saved-identity v6 document a pre-v7 writer produced for `graph`
     // (structural identities, no authored IDs). Production code has no v6
     // writer; tests use this to build legacy fixtures.

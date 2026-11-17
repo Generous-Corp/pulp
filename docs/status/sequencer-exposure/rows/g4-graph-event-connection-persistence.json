@@ -1,0 +1,121 @@
+{
+  "id": "g4-graph-event-connection-persistence",
+  "title": "The saved-identity v7 document persists the graph event connection and subgraph event declarations",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "g4-graph-event-connection-persistence-20261117",
+  "owned_paths": [
+    "core/host/include/pulp/host/graph_serializer.hpp",
+    "core/host/include/pulp/host/graph_history.hpp",
+    "core/host/include/pulp/host/signal_graph_subgraph.hpp",
+    "core/host/src/graph_serializer.cpp",
+    "core/host/src/graph_serializer_test_access.hpp",
+    "core/host/src/graph_history.cpp",
+    "core/host/src/signal_graph_subgraph.cpp",
+    "core/host/src/subgraph_persistence.cpp",
+    "tools/cli/cmd_graph.cpp",
+    "test/test_graph_event_persistence.cpp",
+    "test/test_cli_graph_code_parity.cpp",
+    "docs/graph-program-status/G-4.md",
+    "docs/status/sequencer-exposure/rows/g4-graph-event-connection-persistence.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/host/src/graph_serializer.cpp",
+      "needles": ["validate_event_connections", "event_connection_not_restored", "root.addMember(\"event_connections\", events);"]
+    },
+    {
+      "path": "core/host/src/graph_serializer_test_access.hpp",
+      "needles": ["static void fail_next_event_rebind() noexcept;"]
+    },
+    {
+      "path": "core/host/src/graph_history.cpp",
+      "needles": ["diff.event_connections_added"]
+    },
+    {
+      "path": "core/host/src/subgraph_persistence.cpp",
+      "needles": ["instance_event_edge_matches"]
+    },
+    {
+      "path": "test/test_graph_event_persistence.cpp",
+      "needles": ["a graph event connection round-trips through the saved-identity v7 document", "planted event connection negatives are refused and the positive control loads", "subgraph event connection restore refuses lost, re-pointed and undeclared connections"]
+    },
+    {
+      "path": "docs/graph-program-status/G-4.md",
+      "needles": ["## Typed event connections in the v7 document (2026-11-17)"]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "to_saved_document writes event_connections, inspect_document refuses malformed, dangling and repeated records, the loaders rebind them through connect_graph_event, SubgraphTemplate::event_edge declares one, and GraphDocumentDiff reports event_connections_added, _removed and _changed; all are public host APIs.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/graph_serializer.hpp",
+          "needles": ["EventConnectionDangling", "EventConnectionDuplicate"]
+        },
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/signal_graph_subgraph.hpp",
+          "needles": ["struct SubgraphEventEdgeSpec {", "std::optional<SubgraphEventEdgeSpec> event_edge;"]
+        },
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/graph_history.hpp",
+          "needles": ["std::vector<std::string> event_connections_added;"]
+        },
+        {
+          "kind": "test",
+          "path": "test/test_graph_event_persistence.cpp",
+          "needles": ["the document diff and edit history track the event connection by authored identity"]
+        }
+      ],
+      "authority": {
+        "admission": "read_only",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "exposed",
+      "rationale": "pulp graph diff reports event_connections (added, removed, changed) in its JSON and text output; no new command or option is added.",
+      "evidence": [
+        {
+          "kind": "cli_handler",
+          "path": "tools/cli/cmd_graph.cpp",
+          "needles": ["result.addMember(\"event_connections\", events);"]
+        },
+        {
+          "kind": "test",
+          "path": "test/test_cli_graph_code_parity.cpp",
+          "needles": ["graph diff reports a graph event connection by authored identity"]
+        },
+        {
+          "kind": "cli_definition",
+          "path": "tools/cli/cmd_graph.cpp",
+          "needles": ["diff: pulp graph diff <before.pulpgraph> <after.pulpgraph> [--json]"]
+        }
+      ],
+      "authority": {
+        "admission": "read_only",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation, schema, or handler is added; MCP graph diff relays the CLI JSON unchanged."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "Only the authored binding is persisted and rebound on the control thread at load; no published event, trace, queue content, runtime operation or audio-thread path is added."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No design-time capability or agent manifest entry is added."
+    }
+  }
+}

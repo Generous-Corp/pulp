@@ -63,6 +63,7 @@ struct NodeRecord {
 struct DocumentView {
     std::map<std::string, NodeRecord> nodes;
     std::map<std::string, std::string> connections;
+    std::map<std::string, std::string> event_connections;
     std::map<std::string, std::string> sections;
     std::string digest;
     std::string profile;
@@ -70,7 +71,8 @@ struct DocumentView {
 
 bool is_identity_section(std::string_view name) {
     return name == "nodes" || name == "connections" || name == "processors" ||
-           name == "identity_schema" || name == "logical_identities" || name == "bindings";
+           name == "identity_schema" || name == "logical_identities" || name == "bindings" ||
+           name == "event_connections";
 }
 
 template <typename V> std::int64_t node_id_of(const V& value) {
@@ -144,6 +146,11 @@ std::string view_digest(const DocumentView& view) {
     }
     for (const auto& [key, attributes] : view.connections) {
         field("connection");
+        field(key);
+        field(attributes);
+    }
+    for (const auto& [key, attributes] : view.event_connections) {
+        field("event_connection");
         field(key);
         field(attributes);
     }
@@ -262,6 +269,21 @@ std::optional<GraphDocumentDiffCode> read_document(std::string_view json, Docume
             for (std::size_t i = 0; i < attributes.size(); ++i)
                 view.connections.emplace(i == 0 ? key : key + " #" + std::to_string(i + 1),
                                          std::move(attributes[i]));
+        }
+    }
+    // Inspection admits event_connections only in a v7 document, whose
+    // endpoints are already authored identities, and refuses a repeated
+    // record, so each key names one record.
+    if (root.hasObjectMember("event_connections") && root["event_connections"].isArray()) {
+        const auto& events = root["event_connections"];
+        for (std::uint32_t i = 0; i < events.size(); ++i) {
+            const auto& e = events[i];
+            const auto key = std::string(e["producer"].getString()) + "[" +
+                             std::to_string(node_id_of(e["source_port"])) + "] => " +
+                             std::string(e["consumer"].getString()) + "[" +
+                             std::to_string(node_id_of(e["destination_port"])) + "]";
+            view.event_connections[key] =
+                "{\"kind\":" + std::to_string(node_id_of(e["kind"])) + "}";
         }
     }
     for (std::uint32_t m = 0; m < root.size(); ++m) {
@@ -401,6 +423,12 @@ GraphDocumentDiff diff_graph_documents(std::string_view before, std::string_view
                      [&](const std::string& key, const std::string& a, const std::string& b) {
                          if (a != b)
                              diff.connections_changed.push_back(key);
+                     });
+        compare_maps(lhs.event_connections, rhs.event_connections, diff.event_connections_added,
+                     diff.event_connections_removed,
+                     [&](const std::string& key, const std::string& a, const std::string& b) {
+                         if (a != b)
+                             diff.event_connections_changed.push_back(key);
                      });
         std::vector<std::string> sections_added, sections_removed;
         compare_maps(lhs.sections, rhs.sections, sections_added, sections_removed,
