@@ -665,6 +665,13 @@ def expand_literal_selection(
     return expanded
 
 
+class CTestTests(list):
+    """The ``tests`` array of a ctest listing, carrying the document's call-stack
+    graph so a caller can ask which CMake file registered a test."""
+
+    backtrace_graph: Any = None
+
+
 def load_ctest_json(build_dir: Path) -> list[dict[str, Any]]:
     result = subprocess.run(
         ["ctest", "--test-dir", str(build_dir), "--show-only=json-v1"],
@@ -676,7 +683,9 @@ def load_ctest_json(build_dir: Path) -> list[dict[str, Any]]:
     tests = payload.get("tests")
     if not isinstance(tests, list):
         raise InventoryError("CTest JSON has no tests array")
-    return tests
+    listing = CTestTests(tests)
+    listing.backtrace_graph = payload.get("backtraceGraph")
+    return listing
 
 
 def source_root_for_build(build_dir: Path) -> Path:
@@ -722,6 +731,10 @@ class Target:
     sources: list[str]
     dependencies: list[str] = field(default_factory=list)
     artifacts: list[str] = field(default_factory=list)
+    # Every CMake file on the call stack that defined the target (absolute,
+    # normalized): the file holding add_executable and the files that
+    # include() or call into it.
+    definition_files: frozenset[str] = frozenset()
 
     @property
     def is_test(self) -> bool:
@@ -752,6 +765,9 @@ class CTestEntry:
     name: str
     command: list[str]
     properties: dict[str, Any]
+    # Every CMake file on the call stack that registered the test (absolute,
+    # normalized). Empty for a Catch2 case ctest reads from a discovery file.
+    registered_files: frozenset[str] = frozenset()
 
 
 # A test names a file in more forms than a bare argument: a CMake script takes
@@ -914,6 +930,28 @@ def codemodel_reply_mtime(build_dir: Path) -> float | None:
         return None
 
 
+def backtrace_files(graph: Any, index: Any) -> frozenset[str]:
+    """The files on the call stack a file-API or ctest ``backtrace`` index names.
+
+    Both CMake JSON documents share one shape: ``nodes`` (``file`` index,
+    ``parent`` index) and ``files``. A stack runs from the add_executable or
+    add_test call outward through every include() and function call.
+    """
+    if not isinstance(graph, dict) or not isinstance(index, int):
+        return frozenset()
+    nodes, files = graph.get("nodes") or [], graph.get("files") or []
+    found: set[str] = set()
+    seen: set[int] = set()
+    while isinstance(index, int) and 0 <= index < len(nodes) and index not in seen:
+        seen.add(index)
+        node = nodes[index]
+        slot = node.get("file")
+        if isinstance(slot, int) and 0 <= slot < len(files) and isinstance(files[slot], str):
+            found.add(os.path.normpath(files[slot]))
+        index = node.get("parent")
+    return frozenset(found)
+
+
 def load_codemodel_targets(build_dir: Path) -> CodeModel:
     """Parse the file-API reply into a name-keyed target graph.
 
@@ -973,6 +1011,7 @@ def load_codemodel_targets(build_dir: Path) -> CodeModel:
             sources=[os.path.normpath(s["path"]) for s in raw.get("sources", [])],
             dependencies=deps,
             artifacts=artifacts,
+            definition_files=backtrace_files(raw.get("backtraceGraph"), raw.get("backtrace")),
         )
     return CodeModel(targets=targets, source_root=source_root, build_root=build_root)
 
@@ -1200,7 +1239,8 @@ def header_owners(build_dir: Path, model: CodeModel, headers: set[str]) -> dict[
 # ── ctest inventory for projection ──
 
 
-def projection_ctest_entries(tests: Iterable[dict[str, Any]]) -> list[CTestEntry]:
+def projection_ctest_entries(tests: Iterable[dict[str, Any]],
+                             graph: Any = None) -> list[CTestEntry]:
     """The authoritative corpus (same name/label exclusions as the exact-head
     plan) as lightweight entries; malformed registrations are skipped rather
     than refused, because a build command must not fail on inventory shape."""
@@ -1219,13 +1259,15 @@ def projection_ctest_entries(tests: Iterable[dict[str, Any]]) -> list[CTestEntry
             name=test.get("name", ""),
             command=[str(c) for c in (test.get("command") or [])],
             properties=props,
+            registered_files=backtrace_files(graph, test.get("backtrace")),
         ))
     return entries
 
 
 def load_projection_ctest_entries(build_dir: Path) -> list[CTestEntry] | None:
     try:
-        return projection_ctest_entries(load_ctest_json(build_dir))
+        tests = load_ctest_json(build_dir)
+        return projection_ctest_entries(tests, getattr(tests, "backtrace_graph", None))
     except (OSError, subprocess.CalledProcessError, json.JSONDecodeError, InventoryError):
         return None
 
@@ -1302,6 +1344,107 @@ def test_dependents(name: str, rev: dict[str, set[str]], model: CodeModel) -> se
     return {d for d in rev.get(name, set()) if d in model.targets and model.targets[d].is_test}
 
 
+# ── test registration fragments ──
+#
+# A change to a CMake file is global by default: it may alter any target. The
+# files under test/cmake/ are mostly test registrations, and CMake records, in
+# both the file-API target records and the ctest listing, the call stack that
+# defined each target and registered each test. A registration file that only
+# defines its own targets and tests therefore selects exactly those, plus what
+# depends on the targets it defines. Anything the call stacks cannot show stays
+# global: a file that defines a function or macro another file calls, sets a
+# variable another file reads, or touches directory, cache or global state.
+
+REGISTRATION_FRAGMENT_RE = re.compile(r"^test/cmake/(?:fragments/)?[^/]+\.cmake$")
+# The aggregator that include()s every fragment: it sits on every fragment's
+# call stack, so a change to it reaches all of them.
+SHARED_FRAGMENT_NAMES = frozenset({"fragments.cmake"})
+_CMAKE_COMMENT = re.compile(r"#.*")
+_CMAKE_DEFINES_COMMAND = re.compile(r"^\s*(?:function|macro)\s*\(\s*(\w+)", re.M | re.I)
+_CMAKE_SETS_VARIABLE = re.compile(r"^\s*set\s*\(\s*([A-Za-z]\w*)", re.M | re.I)
+_CMAKE_GLOBAL_STATE = re.compile(
+    r"^\s*(?:include_directories|add_compile_options|add_compile_definitions|add_definitions"
+    r"|link_libraries|link_directories|add_subdirectory|option)\s*\("
+    r"|^\s*set\s*\(\s*CMAKE_\w+"
+    r"|^\s*set\s*\([^)]*\bCACHE\b"
+    r"|^\s*set_property\s*\(\s*(?:GLOBAL|DIRECTORY)\b", re.M | re.I)
+
+
+def _test_cmake_texts(source_root: str) -> dict[str, str]:
+    """Comment-stripped text of every CMake file under test/, by relative path."""
+    root = Path(source_root) / "test"
+    texts: dict[str, str] = {}
+    for path in [root / "CMakeLists.txt", *sorted(root.glob("cmake/*.cmake")),
+                 *sorted(root.glob("cmake/fragments/*.cmake"))]:
+        try:
+            texts[path.relative_to(source_root).as_posix()] = _CMAKE_COMMENT.sub(
+                "", path.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            continue
+    return texts
+
+
+def shared_fragment_reason(rel: str, texts: dict[str, str]) -> str | None:
+    """Why a registration file cannot be treated as owning only its own tests,
+    or None when nothing outside its own call stacks can depend on it."""
+    text = texts.get(rel)
+    if text is None:
+        return "unreadable"
+    if os.path.basename(rel) in SHARED_FRAGMENT_NAMES:
+        return "aggregates every fragment"
+    if _CMAKE_GLOBAL_STATE.search(text):
+        return "touches directory, cache or global state"
+    others = {name: body for name, body in texts.items() if name != rel}
+    for name in set(_CMAKE_DEFINES_COMMAND.findall(text)):
+        call = re.compile(r"^\s*" + re.escape(name) + r"\s*\(", re.M | re.I)
+        if any(call.search(body) for body in others.values()):
+            return f"defines {name}(), called from another file"
+    for name in set(_CMAKE_SETS_VARIABLE.findall(text)):
+        word = re.compile(r"\b" + re.escape(name) + r"\b")
+        if any(word.search(body) for body in others.values()):
+            return f"sets {name}, read by another file"
+    return None
+
+
+def fragment_projection(files: Iterable[str], model: "CodeModel",
+                        inventory: list["CTestEntry"],
+                        index: dict[str, set[str]]) -> dict[str, tuple[set[str], set[str]]]:
+    """Changed CMake files whose reach is fully known: path -> (tests, targets).
+
+    A file absent from the result is global."""
+    texts: dict[str, str] | None = None
+    rev: dict[str, set[str]] | None = None
+    result: dict[str, tuple[set[str], set[str]]] = {}
+    for rel in files:
+        if not REGISTRATION_FRAGMENT_RE.match(rel):
+            continue
+        absolute = os.path.normpath(os.path.join(model.source_root, rel))
+        registered = [e for e in inventory if absolute in e.registered_files]
+        defined = {t.name for t in model.targets.values() if absolute in t.definition_files}
+        scripted = {e.name for e in inventory if absolute in command_path_refs(e.command)}
+        if not registered and not defined:
+            if scripted:  # a `cmake -P` script: only the tests that run it read it
+                result[rel] = (scripted, set())
+            continue
+        if texts is None:
+            texts = _test_cmake_texts(model.source_root)
+        if shared_fragment_reason(rel, texts) is not None:
+            continue
+        if rev is None:
+            rev = reverse_dependencies(model)
+        targets = set(defined)
+        pending = list(defined)
+        while pending:  # whatever links a target this file defines is rebuilt with it
+            for dependent in rev.get(pending.pop(), ()):
+                if dependent not in targets:
+                    targets.add(dependent)
+                    pending.append(dependent)
+        for entry in registered:
+            targets |= command_owners(entry.command, index) | declared_targets(entry)
+        result[rel] = ({e.name for e in registered} | scripted, targets)
+    return result
+
+
 def family_projection(families: Iterable[dict[str, Any]], changed: Iterable[str]
                       ) -> tuple[set[str], set[str]]:
     """Tests and build targets the Shipyard policy families declare for the
@@ -1368,6 +1511,15 @@ def project_affected(model: CodeModel, changed: list[str], deleted: list[str],
         build_system = [f for f in changed + deleted if is_build_system_file(f)]
     else:
         build_system = list(stale_build_system)
+    # A registration fragment that provably reaches only its own tests and
+    # targets is not a build-system change. Without an inventory nothing can
+    # prove that, so the caller's staleness verdict stands.
+    fragments: dict[str, tuple[set[str], set[str]]] = {}
+    if inventory is not None:
+        fragments = fragment_projection(
+            [f for f in changed if is_build_system_file(f)], model, inventory,
+            artifact_index(model))
+    build_system = [f for f in build_system if f not in fragments]
     if build_system:
         return all_selection(f"build system changed: {build_system[0]}", changed, total,
                              total_tests, threshold)
@@ -1387,7 +1539,13 @@ def project_affected(model: CodeModel, changed: list[str], deleted: list[str],
     unmapped: list[str] = []
     resolved = 0
     file_selected_tests: set[str] = set()
+    fragment_selected_tests: set[str] = set()
     for rel in changed:
+        if rel in fragments:
+            resolved += 1
+            fragment_selected_tests |= fragments[rel][0]
+            selected |= fragments[rel][1]
+            continue
         ext = os.path.splitext(rel)[1]
         owners = set(source_owners.get(rel, ()))
         if not owners and deps_db is not None:
@@ -1444,7 +1602,8 @@ def project_affected(model: CodeModel, changed: list[str], deleted: list[str],
                 by_test_target.setdefault(owner, set()).add(entry.name)
             if any(ref in changed_abs for ref in refs):
                 file_selected_tests.add(entry.name)
-        tests: set[str] = set(file_selected_tests) | (family_tests & known_names)
+        tests: set[str] = (set(file_selected_tests) | (family_tests & known_names)
+                           | (fragment_selected_tests & known_names))
         for name in selected:
             tests |= by_test_target.get(name, set())
         tests, fixture_targets = follow_fixtures(tests, inventory, index)

@@ -65,6 +65,13 @@ GRAPH = [
 ]
 
 
+def _stack(source_root: Path, files: list[str]) -> dict:
+    """A CMake backtraceGraph for one call stack, innermost file first."""
+    nodes = [{"file": i, **({"parent": i + 1} if i + 1 < len(files) else {})}
+             for i in range(len(files))]
+    return {"files": [str(source_root / f) for f in files], "nodes": nodes}
+
+
 def write_reply(build_dir: Path, source_root: Path, graph: list[dict]) -> None:
     reply = build_dir / at.CODEMODEL_REPLY_RELATIVE
     reply.mkdir(parents=True, exist_ok=True)
@@ -81,6 +88,8 @@ def write_reply(build_dir: Path, source_root: Path, graph: list[dict]) -> None:
             "sources": [{"path": s} for s in t["sources"]],
             "dependencies": [{"id": ids[d]} for d in t["deps"]],
             "artifacts": [{"path": a} for a in t["artifacts"]],
+            **({"backtrace": 0, "backtraceGraph": _stack(source_root, t["defined_in"])}
+               if t.get("defined_in") else {}),
         }))
     (reply / "codemodel-v2.json").write_text(json.dumps({
         "kind": "codemodel",
@@ -558,6 +567,144 @@ class CommandLine(unittest.TestCase):
         self.assertEqual(payload["mode"], "focused")
         self.assertEqual(payload["targets"],
                          ["pulp-test-knob", "pulp-test-widgets", "pulp-test-widgets-label", "pulp-view-core"])
+
+
+FRAGMENT_STACK = ["test/cmake/{}.cmake", "test/CMakeLists.txt"]
+
+
+class FragmentFixture:
+    """Two test programs, each defined and registered by its own test/cmake file."""
+
+    def __init__(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "src"
+        self.build = self.root / "build"
+        self.build.mkdir(parents=True)
+        graph = [
+            _target("pulp-runtime", "STATIC_LIBRARY", "core/runtime", ["core/runtime/src/log.cpp"]),
+            _target("pulp-test-knob", "EXECUTABLE", "test", ["test/test_knob.cpp"],
+                    ["pulp-runtime"], ["test/pulp-test-knob"]),
+            _target("pulp-test-label", "EXECUTABLE", "test", ["test/test_label.cpp"],
+                    ["pulp-runtime"], ["test/pulp-test-label"]),
+            _target("pulp-fixture-lib", "STATIC_LIBRARY", "test", ["test/harness/lib.cpp"]),
+            _target("pulp-test-uses-lib", "EXECUTABLE", "test", ["test/test_uses_lib.cpp"],
+                    ["pulp-fixture-lib"], ["test/pulp-test-uses-lib"]),
+        ]
+        for t in graph:
+            if t["name"] == "pulp-test-knob":
+                t["defined_in"] = [f.format("knob_tests") for f in FRAGMENT_STACK]
+            elif t["name"] == "pulp-test-label":
+                t["defined_in"] = [f.format("label_tests") for f in FRAGMENT_STACK]
+            elif t["name"] == "pulp-fixture-lib":
+                t["defined_in"] = [f.format("lib_tests") for f in FRAGMENT_STACK]
+        write_reply(self.build, self.root, graph)
+        self.model = at.load_codemodel_targets(self.build)
+
+        def exe(rel: str) -> str:
+            return str(self.build / rel)
+
+        nodes, files = [], []
+        for owner in ("knob_tests", "label_tests", "lib_tests"):
+            stack = _stack(self.root, [f.format(owner) for f in FRAGMENT_STACK])
+            base = len(files)
+            files += stack["files"]
+            nodes += [{"file": base + n["file"], **({"parent": len(nodes) + 1}
+                                                    if "parent" in n else {})}
+                      for n in stack["nodes"]]
+        self.tests = [
+            {"name": "Knob sprite", "backtrace": 0,
+             "command": [exe("test/pulp-test-knob"), "Knob sprite"]},
+            {"name": "Label wraps", "backtrace": 2,
+             "command": [exe("test/pulp-test-label"), "Label wraps"]},
+            {"name": "uses-lib", "backtrace": 4,
+             "command": [exe("test/pulp-test-uses-lib")]},
+            {"name": "knob-script", "command": [
+                "cmake", f"-DCHECK={self.root / 'test/cmake/check_knob.cmake'}", "-P",
+                str(self.root / "test/cmake/check_knob.cmake")]},
+        ]
+        # Each test stack is two nodes: the file that called add_test, then its includer.
+        self.inventory = at.projection_ctest_entries(
+            self.tests, {"files": files, "nodes": nodes})
+        for rel, text in {
+            "test/cmake/knob_tests.cmake": "add_executable(pulp-test-knob test/test_knob.cpp)\n"
+                                           "add_test(NAME knob COMMAND pulp-test-knob)\n",
+            "test/cmake/label_tests.cmake": "add_executable(pulp-test-label test/test_label.cpp)\n",
+            "test/cmake/lib_tests.cmake": "add_library(pulp-fixture-lib STATIC test/harness/lib.cpp)\n",
+            "test/cmake/check_knob.cmake": "message(STATUS ok)\n",
+            "test/CMakeLists.txt": "include(cmake/knob_tests.cmake)\n",
+        }.items():
+            self.touch(rel, text)
+
+    def touch(self, rel: str, content: str) -> None:
+        path = self.root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+
+    def select(self, changed: list[str], deleted: list[str] = ()) -> at.Selection:
+        return at.project_affected(self.model, changed, list(deleted), None, self.inventory, 1.0)
+
+
+class RegistrationFragments(unittest.TestCase):
+    def setUp(self) -> None:
+        self.fx = FragmentFixture()
+        self.addCleanup(self.fx.tmp.cleanup)
+
+    def test_a_fragment_selects_only_its_own_tests_and_targets(self) -> None:
+        sel = self.fx.select(["test/cmake/knob_tests.cmake"])
+        self.assertEqual(sel.mode, "focused")
+        self.assertEqual(sel.tests, ["Knob sprite"])
+        self.assertEqual(sel.targets, ["pulp-test-knob"])
+
+    def test_a_target_defined_in_a_fragment_selects_what_links_it(self) -> None:
+        sel = self.fx.select(["test/cmake/lib_tests.cmake"])
+        self.assertEqual(sel.mode, "focused")
+        self.assertEqual(sel.targets, ["pulp-fixture-lib", "pulp-test-uses-lib"])
+        self.assertEqual(sel.tests, ["uses-lib"])
+
+    def test_a_cmake_script_selects_the_tests_that_run_it(self) -> None:
+        sel = self.fx.select(["test/cmake/check_knob.cmake"])
+        self.assertEqual(sel.mode, "focused")
+        self.assertEqual(sel.tests, ["knob-script"])
+
+    def test_a_fragment_and_a_source_select_both(self) -> None:
+        sel = self.fx.select(["test/cmake/label_tests.cmake", "test/test_knob.cpp"])
+        self.assertEqual(sel.mode, "focused")
+        self.assertEqual(sel.tests, ["Knob sprite", "Label wraps"])
+
+    def test_shared_and_unknown_cmake_files_stay_global(self) -> None:
+        self.fx.touch("test/cmake/other.cmake", "message(STATUS x)\n")
+        for path in ("test/CMakeLists.txt", "test/cmake/fragments.cmake", "test/cmake/other.cmake",
+                     "tools/cmake/PulpTest.cmake", "CMakeLists.txt"):
+            sel = self.fx.select(["test/cmake/knob_tests.cmake", path])
+            self.assertEqual(sel.mode, "all", path)
+            self.assertIn("build system", sel.reason)
+
+    def test_a_deleted_fragment_stays_global(self) -> None:
+        sel = self.fx.select(["test/cmake/knob_tests.cmake"], deleted=["test/cmake/label_tests.cmake"])
+        self.assertEqual(sel.mode, "all")
+
+    def test_a_fragment_other_files_depend_on_stays_global(self) -> None:
+        cases = {
+            "function": "function(knob_helper)\nendfunction()\n",
+            "variable": "set(KNOB_FLAGS -DX)\n",
+            "cache": "set(KNOB_OPT ON CACHE BOOL \"\")\n",
+            "directory": "include_directories(test/include)\n",
+            "option": "option(KNOB_WIDE \"\" OFF)\n",
+        }
+        self.fx.touch("test/cmake/label_tests.cmake", "knob_helper()\nmessage(${KNOB_FLAGS})\n")
+        for name, text in cases.items():
+            self.fx.touch("test/cmake/knob_tests.cmake", text)
+            sel = self.fx.select(["test/cmake/knob_tests.cmake"])
+            self.assertEqual(sel.mode, "all", name)
+
+    def test_without_an_inventory_a_fragment_stays_global(self) -> None:
+        sel = at.project_affected(self.fx.model, ["test/cmake/knob_tests.cmake"], [], None, None, 1.0)
+        self.assertEqual(sel.mode, "all")
+
+    def test_a_stale_fragment_is_not_trusted(self) -> None:
+        sel = at.project_affected(self.fx.model, ["test/cmake/knob_tests.cmake"], [], None, None,
+                                  1.0, ["test/cmake/knob_tests.cmake"])
+        self.assertEqual(sel.mode, "all")
 
 
 if __name__ == "__main__":
