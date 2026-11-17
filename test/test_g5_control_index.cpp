@@ -344,13 +344,13 @@ TEST_CASE("Control scalar rules pin zero division, finite extremes, and reset",
 TEST_CASE("Control stages expose pure and stateful finite partition-stable forms",
           "[signal][control-index]") {
     using pulp::signal::control_clamp;
-    using pulp::signal::control_maximum;
-    using pulp::signal::control_minimum;
-    using pulp::signal::control_safe_divide;
-    CHECK(control_minimum(std::numeric_limits<float>::infinity(), 2.0f) == 0.0f);
-    CHECK(control_maximum(-std::numeric_limits<float>::infinity(), 2.0f) == 2.0f);
+    using pulp::signal::control_max;
+    using pulp::signal::control_min;
+    using pulp::signal::safe_control_divide;
+    CHECK(control_min(std::numeric_limits<float>::infinity(), 2.0f) == 0.0f);
+    CHECK(control_max(-std::numeric_limits<float>::infinity(), 2.0f) == 2.0f);
     CHECK(control_clamp(std::numeric_limits<float>::quiet_NaN(), -1.0f, 1.0f) == 0.0f);
-    CHECK(control_safe_divide(1.0f, 0.0f) == 0.0f);
+    CHECK(safe_control_divide(1.0f, 0.0f) == 0.0f);
     CHECK(pulp::signal::map_clip(0.5f, 0.0f, 1.0f, 10.0f, 20.0f) == 15.0f);
 
     CHECK_FALSE(
