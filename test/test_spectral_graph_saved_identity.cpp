@@ -659,9 +659,9 @@ TEST_CASE("Spectral v7 asset morph refuses embedded bytes that contradict the co
     auto assets = choc::value::createEmptyArray();
     for (const auto row : forged["spectral_assets"]) {
         auto record = choc::value::Value(row);
-        const auto material = "pulp.analyzed-spectral-asset.v1\n" +
-                              std::to_string(row["source_samples"].getInt64()) + "\n" +
-                              claimed_contract + "\n" + std::string(row["bytes_sha256"].getString());
+        const auto material =
+            "pulp.analyzed-spectral-asset.v1\n" + std::to_string(row["source_samples"].getInt64()) +
+            "\n" + claimed_contract + "\n" + std::string(row["bytes_sha256"].getString());
         const auto id = pulp::runtime::sha256_hex(material);
         renamed.emplace_back(std::string(row["id"].getString()), id);
         record.setMember("id", id);
