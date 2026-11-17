@@ -113,9 +113,9 @@ TEST_CASE("Graph reload malformed unsupported and failed prepare preserve live s
     SECTION("compile preflight rejects candidate node count") {
         text = patch(0.75f) + "extra : pulp/gain\n";
     }
-    SECTION("strict saved mono boundary is unrepresentable") {
+    SECTION("saved graph with a non-identifier node name is unrepresentable") {
         SignalGraph unsupported;
-        auto in = unsupported.add_input_node(1), out = unsupported.add_output_node(1);
+        auto in = unsupported.add_input_node(2, "bad name"), out = unsupported.add_output_node(2);
         REQUIRE(unsupported.connect(in, 0, out, 0));
         text = GraphSerializer::to_json(unsupported);
         format = GraphFileFormat::Pulpgraph;
