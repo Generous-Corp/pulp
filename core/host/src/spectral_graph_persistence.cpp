@@ -581,7 +581,9 @@ Candidate read(std::string_view json, int admission_block) {
                         return fail("analyzed spectral asset extent/contract mismatch");
                     const auto added =
                         graph->add_spectral_asset_morph_v1(aa.bytes, bb.bytes, aa.length, name);
-                    if (!added)
+                    // The factory derives the identity from the embedded bytes;
+                    // a row that claims another contract is refused.
+                    if (!added || graph->node(added.value->node)->spectral_identity != shape)
                         return fail("canonical spectral asset validation/factory refused");
                     id = added.value->node;
                     aa.used = bb.used = true;

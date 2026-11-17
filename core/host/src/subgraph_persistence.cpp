@@ -343,6 +343,10 @@ std::string to_saved_subgraph_document(
     const auto document = GraphSerializer::to_saved_document(graph, editor_layout);
     if (document.empty())
         return {};
+    // No records: the saved document is already complete. A spectral v7
+    // envelope is closed, so it must not gain an empty `subgraphs` member.
+    if (subgraphs.empty())
+        return document;
     try {
         auto root = choc::json::parse(document);
         auto records = choc::value::createEmptyArray();

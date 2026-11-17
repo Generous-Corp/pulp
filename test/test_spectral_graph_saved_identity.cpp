@@ -19,6 +19,7 @@
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/subgraph_persistence.hpp>
 #include <pulp/runtime/base64.hpp>
+#include <pulp/runtime/crypto.hpp>
 
 #include <bit>
 #include <cmath>
@@ -612,6 +613,85 @@ TEST_CASE("Malformed v7 spectral documents are refused before the caller's graph
     }
 }
 
+TEST_CASE("Spectral v7 asset morph refuses embedded bytes that contradict the contract",
+          "[host][spectral][saved-identity][negative]") {
+    // The 48000 Hz fixture supplies the contract the forgery claims.
+    const auto claimed = choc::json::parse(GraphSerializer::to_saved_document(*morph_fixture()));
+    std::string claimed_contract, claimed_bits;
+    for (const auto row : claimed["spectral_assets"])
+        claimed_contract = std::string(row["contract_hex"].getString());
+    for (const auto n : claimed["nodes"])
+        if (n["type"].getString() == "spectral_asset_morph")
+            claimed_bits = std::string(n["spectral"]["identity"]["sample_rate_bits"].getString());
+    REQUIRE_FALSE(claimed_contract.empty());
+    REQUIRE_FALSE(claimed_bits.empty());
+
+    // A real 44100 Hz morph feeding a 44100 Hz synthesis: the typed
+    // connections are consistent with the embedded bytes.
+    const auto a44 = asset_oracle::encode(morph_inputs().a, 44100);
+    const auto b44 = asset_oracle::encode(morph_inputs().b, 44100);
+    SignalGraph real;
+    const auto control = real.add_input_node(1, "control");
+    const auto morph = real.add_spectral_asset_morph_v1(a44.view(), b44.view(), 769, "assets");
+    REQUIRE(morph);
+    const auto shape = *SpectralIdentity::make(256, 64, 1, 44100).value;
+    const auto synthesis = real.add_spectral_synthesis(shape, "synthesis");
+    REQUIRE(synthesis);
+    const auto output = real.add_output_node(1, "audio");
+    REQUIRE(real.connect(real.node(control)->out("audio"), morph.value->morph));
+    REQUIRE(real.connect(morph.value->frames, synthesis.value->frames));
+    REQUIRE(real.connect(synthesis.value->audio[0], real.node(output)->in("audio")));
+    const auto saved = GraphSerializer::to_saved_document(real);
+    REQUIRE_FALSE(saved.empty());
+    Bystander old;
+    {
+        SignalGraph fresh;
+        const auto loaded = GraphSerializer::from_saved_document(fresh, saved);
+        INFO(loaded.error);
+        REQUIRE(loaded.ok);
+    }
+
+    // Forge: the morph row and both asset rows claim the 48000 Hz contract
+    // (asset IDs and references made self-consistent) while the embedded
+    // bytes stay 44100 Hz. Only the node's identity check can refuse this.
+    auto forged = choc::json::parse(saved);
+    std::vector<std::pair<std::string, std::string>> renamed;
+    auto assets = choc::value::createEmptyArray();
+    for (const auto row : forged["spectral_assets"]) {
+        auto record = choc::value::Value(row);
+        const auto material = "pulp.analyzed-spectral-asset.v1\n" +
+                              std::to_string(row["source_samples"].getInt64()) + "\n" +
+                              claimed_contract + "\n" + std::string(row["bytes_sha256"].getString());
+        const auto id = pulp::runtime::sha256_hex(material);
+        renamed.emplace_back(std::string(row["id"].getString()), id);
+        record.setMember("id", id);
+        record.setMember("contract_hex", claimed_contract);
+        assets.addArrayElement(record);
+    }
+    forged.setMember("spectral_assets", assets);
+    auto nodes = choc::value::createEmptyArray();
+    for (const auto n : forged["nodes"]) {
+        auto record = choc::value::Value(n);
+        if (n["type"].getString() == "spectral_asset_morph") {
+            auto spectral = choc::value::Value(n["spectral"]);
+            auto identity = choc::value::Value(n["spectral"]["identity"]);
+            identity.setMember("sample_rate_bits", claimed_bits);
+            spectral.setMember("identity", identity);
+            spectral.setMember("contract_hex", claimed_contract);
+            for (const auto& [from, to] : renamed) {
+                if (spectral["asset_a"].getString() == from)
+                    spectral.setMember("asset_a", to);
+                if (spectral["asset_b"].getString() == from)
+                    spectral.setMember("asset_b", to);
+            }
+            record.setMember("spectral", spectral);
+        }
+        nodes.addArrayElement(record);
+    }
+    forged.setMember("nodes", nodes);
+    refused_untouched(old, choc::json::toString(forged, true));
+}
+
 TEST_CASE("Spectral v7 loads refuse resource exhaustion and injected allocation failures",
           "[host][spectral][saved-identity][negative][allocation]") {
     const Geometry g{256, 100, 2};
@@ -760,6 +840,17 @@ TEST_CASE("Spectral graph families stay closed to history and mixed nodes",
     instance.nodes = {plain.nodes().front().id};
     REQUIRE_FALSE(to_saved_subgraph_document(plain, {&instance, 1}).empty());
     REQUIRE_FALSE(to_saved_subgraph_document(*fixture.graph, {}).empty());
+    // The empty-record document is the plain saved document and loads back.
+    {
+        const auto empty_records = to_saved_subgraph_document(*fixture.graph, {});
+        REQUIRE(empty_records == GraphSerializer::to_saved_document(*fixture.graph));
+        REQUIRE(choc::json::parse(empty_records).hasObjectMember("subgraphs") == false);
+        SignalGraph reloaded;
+        const auto loaded = from_saved_subgraph_document(reloaded, empty_records, {});
+        INFO(loaded.load.error);
+        REQUIRE(loaded.load.ok);
+        REQUIRE(loaded.subgraphs.empty());
+    }
     instance.nodes = {fixture.graph->nodes().front().id};
     REQUIRE(to_saved_subgraph_document(*fixture.graph, {&instance, 1}).empty());
     // A non-spectral node makes the graph a mixed family, which no spectral
