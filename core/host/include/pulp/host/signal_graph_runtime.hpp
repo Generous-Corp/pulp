@@ -338,10 +338,8 @@ class SignalGraph : public format::AudioWorkgroupClient {
         return control_index_refusals_.load(std::memory_order_relaxed);
     }
     /// Start one absolute-sample host-event block for the active prepared
-    /// trigger generation. The caller must publish before process_checked();
-    /// the graph consumes the block exactly once during checked projection.
-    /// A block longer than the generation's prepared frame limit is refused
-    /// with `OutOfRange`, because process_checked() could never render it.
+    /// trigger generation; publish before process_checked(), which consumes it
+    /// once. A block over the prepared frame limit is refused (`OutOfRange`).
     HostEventResult begin_host_event_block(std::uint64_t epoch, std::uint64_t sample_start,
                                            std::size_t frames) noexcept;
     /// Publish one immutable MIDI/UMP record into the prepared graph-owned
