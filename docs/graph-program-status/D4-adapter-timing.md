@@ -1,8 +1,8 @@
 # D4: adapters publish neutral timing facts
 
-Status: **PARTIAL**. CLAP, VST3, AU v3 and LV2 publish the facts and the host
-projection consumes them; AU v2 does not publish them yet, and no graph runtime
-consumes them yet (see "Remaining work").
+Status: **PARTIAL**. CLAP, VST3, AU v3, AU v2 and LV2 publish the facts and
+the host projection consumes them; no graph runtime consumes them yet (see
+"Remaining work").
 
 ## Rule
 
@@ -34,7 +34,7 @@ The field is appended to `ProcessContext`, so existing offsets do not move.
 | VST3 | `continousTimeSamples` when `kContTimeValid` is set and it is non-negative; `kNeedContinousTimeSamples` is now requested | `projectTimeSamples` whenever a context is supplied | first observed block after `setActive(true)` or `setProcessing(true)` |
 | AU v3 | rounded `mSampleTime` when `kAudioTimeStampSampleTimeValid` is set, representable and non-negative | `transportStateBlock` position when the block returned YES | first observed block after `allocateRenderResources` or `-reset` |
 | LV2 | none (LV2 defines no counter) | latched `time:frame` at the block start; each `time:Position` applies only the fields it carries, and a mid-block position is moved back along the piecewise speed path (a speed change applies from its own frame) | first `run()` after instantiation or `activate()`, or after a host block clamped to the prepared maximum |
-| AU v2 | not published | not published | not published |
+| AU v2 | render `mSampleTime` (same validity and rounding as AU v3) plus the call's offset into the render, so each scheduled-parameter slice of an effect render starts where the previous one ended | `CallHostTransportState` position when the callback succeeds, advanced by the slice offset while playing | first observed call after `Initialize()` or `Reset()` (effect, instrument and MIDI processor) |
 
 In every adapter a block that skips the Processor (bypass, a refused layout,
 or state-restore contention), or a host block longer than the prepared maximum
@@ -45,7 +45,23 @@ rejects an oversized block instead of clamping it and counts the rejection as
 a skip; its `-reset` also invalidates the multi-output render cache, so a
 repeated time stamp after a reset renders afresh.
 
-The legacy `transport_jump` / `should_reset_dsp_state()` flags are unchanged.
+AU v2 marks a skip with a scope guard on every Processor call
+(`ScopedSkipMark`), so any return before `process()` counts, and the effect
+also marks a render that reached no Processor call at all (the stock
+`kAudioUnitProperty_BypassEffect` path, or a missing or failed main input
+inside `AUEffectBase::Render`). A request that `AUBase::DoRender` refuses
+before it reaches the adapter (uninitialized, more frames than the maximum,
+a wrong buffer count) is invisible to the adapter: with a counter the next
+block measures it as a gap, without one it is reported as continuous.
+Discontinuity is a generation the control thread bumps and the render thread
+compares, so a `Reset()` that races a render, or a skipped block after a
+reset, is never lost.
+
+The legacy `transport_jump` / `should_reset_dsp_state()` flags are unchanged,
+except that an AU v2 effect slice now reports the transport (samples, and
+beats when the tempo is known) at the slice's first frame while playing.
+Before, every slice after the first repeated the render's position, so a
+playing transport read as a jump on each sliced render.
 
 ## Host projection
 
@@ -105,21 +121,25 @@ refuses both. The policies stay separate; only the arithmetic is shared.
   block without the rate fact), a mid-block `time:Position`, partial and
   multiple Positions in one block, speed changes, stops and starts inside a
   block, numeric boundaries, and a clamped tail.
+- `test/test_au_v2_process_timing.cpp`: the real AU v2 effect through
+  `AUBase::DoRender` with a host input callback and host transport callbacks,
+  and the instrument and MIDI processor through `Render()`: activation, invalid
+  sample time, stopped transport, missing transport callback, a sliced render
+  (counter and transport advance per slice, no legacy jump), five slice
+  partitions with and without a counter that place every frame at the same
+  absolute sample (with an unadvanced-slice negative control), `Reset()` and
+  re-initialization, the stock bypass and the Bypass parameter with and without
+  a counter (with a no-skip negative control), a skip that must not consume a
+  pending reset, and the MIDI processor's oversized render. No AU host loads
+  these units; the SDK classes are constructed in process.
 - `examples/process-timing-consumer`: an installed-SDK consumer of the public
   headers, also built in-tree as `process-timing-public-consumer`.
 
 ## Remaining work
 
-1. **AU v2.** `AUEffectBase::Render` can call `ProcessBufferLists` several
-   times per render for scheduled parameter slices, so the steady counter and a
-   playing transport must advance by each slice's offset inside the render.
-   The effect path also has no timestamp at `ProcessBufferLists`; it needs the
-   render timestamp stashed in `PulpAUEffect::Render`. Then: publish the
-   `CallHostTransportState` position from
-   `apply_host_callbacks_to_process_context()`, the slice-adjusted
-   `mSampleTime` from the effect, instrument and MIDI-processor render paths,
-   and a discontinuity from `Initialize()` and `Reset()` in all three classes,
-   with traces through `test_au_plugin_state.mm` covering a sliced render.
+1. **AU v2 in a real host.** The adapter traces run against SDK classes in
+   process; no AU v2 host (Logic, auval with transport) has been driven here.
+   The `DoRender` refusals above are unobservable by design.
 2. **Graph consumption.** `SignalGraph::begin_host_event_block()` and
    `reset_host_event_ingress()` take the prepared trigger generation's epoch,
    not a `HostBlockTimeline` epoch. Mapping a timeline `NewEpoch` onto a graph
