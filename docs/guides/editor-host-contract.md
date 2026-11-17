@@ -6,10 +6,14 @@ in `pulp::format-core`, it names no view, canvas, render or GPU type, and it
 adds nothing to a processor that does not use it.
 
 The existing editor path (`Processor::has_editor()`, `create_view()` and
-`ViewBridge`, described in [ViewBridge](view-bridge.md)) is unchanged. The
-format adapters do not consume the contract yet; a processor that provides a
-factory today is ready for them, and keeps working through the existing path
-until they do.
+`ViewBridge`, described in [ViewBridge](view-bridge.md)) is unchanged. The VST3
+(`ContractPlugView`), CLAP (the contract `clap_plugin_gui`), AU v2
+(`au_v2_contract_view.mm`), AU v3 (macOS and iOS, `au_v3_contract_view.mm`) and
+standalone adapters open a processor's editor through the contract whenever it
+returns a factory from `editor_factory()`, and keep the existing path for a
+processor that does not. On iOS the AU v3 path is compile-checked only. AU v2 chooses at build time (a `UI <package>` plug-in links the contract view,
+and a `create_view()` plug-in keeps its ViewBridge view); the other adapters
+choose at run time.
 
 ## The pieces
 
@@ -48,8 +52,8 @@ A plug-in's editor is wired per plug-in, never by a process-wide registration.
 binary that returns the named UI package's `EditorFactory`, the way a VST3
 plug-in supplies its own view from `createView()`. Several plug-ins loaded into
 one host process therefore never share or override each other's editor choice.
-That generator is not built yet; until it is, a processor provides a factory by
-overriding `Processor::editor_factory()`.
+A processor can also provide a factory by overriding
+`Processor::editor_factory()`.
 
 ## Extending the contract
 
@@ -130,6 +134,52 @@ port.begin(kGain);
 port.set(kGain, 0.75f);
 port.end(kGain);
 ```
+
+## Sizing
+
+`Editor::size_hints()` is how an editor tells every format what the host may do
+with its window. The session applies it the same way in VST3 (`canResize`,
+`checkSizeConstraint`), CLAP (`can_resize`, `get_resize_hints`, `adjust_size`)
+and AU v2 (the container's frame):
+
+- **Fixed size** is the default. An editor is resizable only when both minimums
+  are set and the bounds leave room (not `min == max` on both axes). An editor
+  that declares only a preferred size is fixed, as a ViewBridge editor is.
+- **Locked aspect.** With `aspect_ratio > 0` a proposed size snaps to the
+  largest box at that ratio that fits the request, then moves inside min/max
+  without leaving the ratio.
+- **Free resize.** With `aspect_ratio == 0` each axis is clamped to its own
+  min/max.
+- `Editor::adjust_size()` runs first; the hints still hold for an editor that
+  does not override it. `detail::constrain_to_hints()` is the same arithmetic as
+  a pure function, so a test or a widget can check a size without a host.
+
+A host can also set a size without asking first (VST3 `onSize` without
+`checkSizeConstraint`, CLAP `set_size` without `adjust_size`). The editor then
+gets the constrained size, and the adapter asks the host for that size back
+(`IPlugFrame::resizeView`, `clap_host_gui::request_resize`) so the window does
+not keep a margin the editor never paints. A fixed-size editor takes no
+unsolicited host size in any format: it is told nothing, and the host is asked for the editor's
+own size. The macOS standalone window holds a live drag to the same
+limits and aspect, and opens inside the screen's usable frame
+(`detail::fit_size_to_area`).
+
+AU v2 has no size negotiation, so a host that resizes the container by hand goes
+through the same call: during a drag the frame stays at the host's size and the
+editor gets the constrained size at once, and the frame moves there later
+through the debounced request. A fixed-size editor's frame returns to
+the editor's size and the editor is told nothing.
+
+### Editor-origin resize acknowledgments
+
+A fixed-size editor still may request a new layout through
+`EditorContext::request_resize`. Fixed sizing prevents unsolicited host resizes;
+it does not discard the host's acknowledgment of an editor request. The session
+recognizes that acknowledgment whether it arrives inside the request hook or
+later. A new editor request supersedes any pending debounced host correction.
+The standalone host delivers the accepted size to the editor before moving the
+window, returns failure if the editor refuses it, and suppresses the resulting
+native frame echo.
 
 ## Keys
 

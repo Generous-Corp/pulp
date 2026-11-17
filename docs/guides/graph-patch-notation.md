@@ -16,12 +16,14 @@ finish registration before use and do not access a catalog concurrently.
 The default CLI/MCP catalog contains audio input/output, gain and MIDI boundary
 constructors. It also lists the four spectral constructors
 (`pulp/spectral_analysis`, `pulp/spectral_stage`, `pulp/spectral_synthesis`,
-`pulp/spectral_asset_morph`) with `notation_state` set to
-`unsupported_typed_api_only`, the owning `constructor` and the `probe_identity`
-(FFT 256, hop 64, mono, 48 kHz) their ports were read from. Audio port count
-follows the identity's channel count. These rows are for discovery: a patch
-that declares one is refused with the C++ constructor to use instead. Application Processor factories belong to the application's C++
-catalog; the tools do not load arbitrary plugin binaries or code from notation.
+`pulp/spectral_asset_morph`) with the owning `constructor` and the
+`probe_identity` (FFT 256, hop 64, mono, 48 kHz) their ports were read from.
+Audio port count follows the identity's channel count. The analysis, stage and
+synthesis rows have `notation_state` `flow_2_arguments` and list their
+`flow_2_arguments`; the audio boundary rows list `channels`. The asset morph row
+stays `unsupported_typed_api_only`. Application Processor factories belong to
+the application's C++ catalog; the tools do not load arbitrary plugin binaries
+or code from notation.
 
 The installed consumer uses the following ten-line patch. Its Processor's
 existing descriptor declares MIDI capabilities and its StateStore declares
@@ -87,6 +89,60 @@ control-rate automation API, with an unsmoothed Replace route. A source in
 This is a range mapping, not an additive modulation promise. Runtime clamping
 and event consumption remain the existing Processor adapter's responsibility.
 
+## Flow 2: constructor arguments
+
+A document that starts with `# flow 2` accepts everything flow 1 accepts plus a
+parenthesized argument list after a built-in type. Flow 1 parsing is unchanged:
+a `# flow 1` document with an argument list is still a `SyntaxError` (invalid
+type key), and flow 1 still refuses spectral keys with the owning constructor.
+
+```text
+# flow 2
+analysis : pulp/spectral_analysis (fft 256, hop 63, channels 1, rate 48000)
+in : pulp/audio_in (channels 1)
+out : pulp/audio_out (channels 1)
+pass : pulp/spectral_stage (fft 256, hop 63, channels 1, rate 48000, kind identity)
+synthesis : pulp/spectral_synthesis (fft 256, hop 63, channels 1, rate 48000)
+analysis.frames >> pass.frames_in
+in.audio >> analysis.audio
+pass.frames_out >> synthesis.frames
+synthesis.audio >> out.audio
+```
+
+- `pulp/audio_in` and `pulp/audio_out` take `channels C`, 1 to 16. Without an
+  argument list a boundary is stereo, as in flow 1. Channel `0` is the port
+  `audio`; channel `k` is `ink` (input side) or `outk` (output side).
+- `pulp/spectral_analysis` and `pulp/spectral_synthesis` take
+  `fft N, hop H, channels C, rate R`; `pulp/spectral_stage` also takes
+  `kind identity`. N is a power of two from 256 to 16384, H is 1 to N / 2, C is
+  1 to 16 and R is the sample rate in Hz. Every argument is required, in any
+  order, each once. Frame edges use the named ports `frames`, `frames_in` and
+  `frames_out`.
+- The sample rate is explicit. Every spectral node in a document declares the
+  same rate; a different rate is `SampleRateMismatch` on the line that
+  disagrees. `prepare()` at any other rate fails with the spectral error
+  `IdentityMismatch`, so a host cannot run the graph at a rate the text did not
+  name.
+- Canonical output writes arguments in the order above, writes the rate in the
+  shortest spelling that reproduces its exact bits, and omits `(channels 2)`.
+  The formatter writes `# flow 1` whenever a graph needs no flow 2 spelling, so
+  existing documents keep their exact text.
+
+Large payloads stay in JSON. A real-mask stage carries channels x bins gains
+(at least 129); `kind mask` is refused and the formatter refuses a mask stage
+with the gain count, never writing a stage that would drop its mask. Codec asset
+nodes (`pulp/spectral_asset_morph`, asset sources) are refused the same way;
+`GraphSerializer` embeds their assets with their hashes. Flow 2 codes:
+
+| Code | Cause |
+|------|-------|
+| `SyntaxError` | Malformed or unknown argument, a missing argument, or a missing `rate` |
+| `Duplicate` | An argument given twice |
+| `ParameterOutOfRange` | FFT size, hop or rate outside its domain |
+| `SampleRateMismatch` | Two spectral nodes declare different rates |
+| `UnsupportedChannelLayout` | A channel count outside 1 to 16 |
+| `UnsupportedContract` | A mask stage, an asset node, or a version other than 1 |
+
 ## Public API and tools
 
 Include `<pulp/host/graph_patch.hpp>` and link installed `Pulp::host`.
@@ -103,8 +159,8 @@ pulp graph save patch.pat --output patch.pulpgraph
 pulp graph fmt patch.pulpgraph --notation
 ```
 
-MCP `pulp_graph` supports `validate`, `fmt` and `catalog` with the same CLI
-implementation; `catalog` needs no path. `fmt` is read-only. Diagnostics share
+MCP `pulp_graph` supports `validate`, `fmt`, `catalog` and `diff` with the same CLI
+implementation; `catalog` needs no path, and `diff` takes `before` and `after`. `fmt` is read-only. Diagnostics share
 `valid`, `code`, `line`, `node`, `port`, `rule`, `suggested_fix` and `message`
 across the public API and tools. Wrong port, wrong kind, instantaneous cycle,
 duplicate, invalid number/range and unsupported state failures are explicit.
@@ -128,16 +184,17 @@ numeric values use round-trippable float spellings. IDs are regenerated;
 notation preserves authored topology and supported values, not editor layout,
 prepared runtime history, publication policy or native DSP qualification.
 
-Spectral graphs have no notation contract: build them in C++ through the
-`SignalGraph::add_spectral_*` constructors. `GraphSerializer` saves only the
-bounded asset-replay subset (Audio boundaries, the two-asset morph source,
-identity/mask stages and synthesis; see
+Spectral analysis, identity stage and synthesis graphs are spelled in flow 2
+(above). `GraphSerializer` saves only the bounded asset-replay subset (Audio
+boundaries, the two-asset morph source, identity/mask stages and synthesis; see
 [spectral asset replay](spectral-asset-replay.md)) and refuses every other
-spectral graph, including one with an analysis node.
+spectral graph, including one with an analysis node, so a flow 2 analysis graph
+has no `.pulpgraph` form yet and `pulp graph save` refuses it.
 
-The notation profile refuses hosted binary plugins, spectral nodes, sample
-regions, opaque Processor/custom state, non-stereo audio boundaries,
-non-default node scalars outside Gain, feedback, sidechain, dense modulation,
+The notation profile refuses hosted binary plugins, spectral mask stages and
+asset nodes, sample regions, opaque Processor/custom state, audio boundaries
+outside 1 to 16 channels, non-default node scalars outside Gain, feedback,
+sidechain, dense modulation,
 and sparse ranges that cannot be expressed exactly as a depth. Symbolic enum
 values and duplicate port-name suffixes are not implemented in this profile;
 use exact unique runtime names and numeric values. A type not constructible in

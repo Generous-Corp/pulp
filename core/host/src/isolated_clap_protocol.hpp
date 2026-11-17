@@ -5,7 +5,17 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <string_view>
+#include <system_error>
 #include <type_traits>
+
+// Platforms with a worker transport. Every other platform refuses before spawning.
+#if defined(__APPLE__) && defined(__aarch64__)
+#define PULP_ISOLATED_CLAP_POSIX_TRANSPORT 1
+#elif defined(_WIN32) && (defined(_M_X64) || defined(__x86_64__))
+#define PULP_ISOLATED_CLAP_WINDOWS_TRANSPORT 1
+#endif
 
 namespace pulp::host::isolation {
 
@@ -13,8 +23,12 @@ inline constexpr std::uint32_t kAbi = 1;
 inline constexpr std::uint32_t kMagic = 0x4739434c;
 inline constexpr std::size_t kMappingBytes = 8192;
 inline constexpr std::size_t kCheckpointBytes = 1 << 20;
+inline constexpr std::uint32_t kSampleRate = 48000;
 inline constexpr std::uint32_t kFrames = 64;
 inline constexpr std::uint32_t kChannels = 2;
+// The single supported profile (stereo, 64 frames, 48 kHz), named on the worker
+// command line. The name is shared by every transport.
+inline constexpr const char* kProfileName = "MacClapStereo64V1";
 inline constexpr std::uint32_t kSlots = 3;
 
 enum class BlockResult : std::uint32_t { ok = 1, plugin_error, invalid_audio };
@@ -64,8 +78,11 @@ enum class Command : std::uint32_t {
     destroy
 };
 
-// Local arm64 ABI only. The lifecycle channel is private and inherited; records
-// are fixed width and carry no addresses. Payloads are independently capped.
+// Local ABI only: both ends are built from the same sources for one platform
+// (Apple arm64 or Windows x64). The lifecycle channel is private and inherited;
+// records are fixed width and carry no addresses, except the Windows section
+// handle value, which is meaningful only inside the named worker process.
+// Payloads are independently capped.
 struct ControlRecord {
     std::uint32_t magic = kMagic;
     std::uint32_t abi = kAbi;
@@ -88,6 +105,54 @@ inline bool valid_block(const Block& block, std::uint64_t generation,
     return block.generation == generation && block.sequence == sequence &&
            block.frames == kFrames && block.channels == kChannels &&
            block.result == BlockResult::ok && block.reserved == 0;
+}
+
+/// The hello contract on the parent side, shared by every transport: the reply
+/// must echo every binding field the parent sent, with the worker's own process
+/// id and a mapping of exactly kMappingBytes.
+inline bool hello_reply_matches(const ControlRecord& sent, const ControlRecord& reply,
+                                std::uint64_t process_id) noexcept {
+    return reply.command == Command::hello && reply.result == 1 &&
+           reply.generation == sent.generation && reply.process_id == process_id &&
+           reply.payload_bytes == kMappingBytes && reply.payload_bytes == sent.payload_bytes &&
+           reply.volume == sent.volume && reply.file == sent.file &&
+           reply.file_generation == sent.file_generation &&
+           reply.plugin_sha256 == sent.plugin_sha256 && reply.worker_sha256 == sent.worker_sha256 &&
+           reply.build == sent.build;
+}
+
+/// A fixed record field as text, ending at its first NUL or at its full width.
+inline std::string_view record_text(const std::array<char, 65>& field) noexcept {
+    std::size_t size = 0;
+    while (size < field.size() && field[size] != '\0')
+        ++size;
+    return {field.data(), size};
+}
+
+/// The hello contract on the worker side, shared by every transport: the header
+/// fields a worker checks before it touches the shared mapping.
+inline bool hello_header_ok(const ControlRecord& hello) noexcept {
+    return hello.command == Command::hello && hello.generation != 0 &&
+           hello.payload_bytes == kMappingBytes;
+}
+
+/// The identity a worker proves before any vendor code runs: its own executable
+/// hash, the plugin hash and the build fingerprint equal what the parent bound.
+inline bool hello_identity_matches(const ControlRecord& hello, std::string_view worker_sha256,
+                                   std::string_view plugin_sha256,
+                                   std::string_view build) noexcept {
+    return record_text(hello.worker_sha256) == worker_sha256 &&
+           record_text(hello.plugin_sha256) == plugin_sha256 && record_text(hello.build) == build;
+}
+
+/// The file whose bytes identify a CLAP selection. A macOS bundle is hashed by
+/// its executable while the bundle root is still what CLAP init receives; a
+/// plain module file (every Windows .clap) is hashed as itself.
+inline std::filesystem::path clap_hash_path(const std::filesystem::path& selection) {
+    std::error_code ec;
+    if (std::filesystem::is_directory(selection, ec))
+        return selection / "Contents" / "MacOS" / selection.stem();
+    return selection;
 }
 
 } // namespace pulp::host::isolation

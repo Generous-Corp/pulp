@@ -6957,6 +6957,13 @@ because instrumented static libraries retain runtime references. The strict
 shipping verifier remains unchanged and still rejects external compiler
 runtimes for ordinary release artifacts.
 
+The ASan lane leaves out tests labelled `sdk` or `installed-sdk`. Each one
+stages a complete Debug+ASan install prefix inside the build tree, and on a
+hosted runner that exhausts the disk after the instrumented build has taken most
+of it. UBSan runs the same consumers. The paced-timing matrix self-test
+(`graph-paced-timing-matrix-selftest`) is excluded from ASan and UBSan because
+its zero-deadline-miss control measures the instrumentation, not the code.
+
 | Variable | Default label when unset | Example (dedicated sanitizer VM label) |
 |---|---|---|
 | `PULP_SANITIZER_ASAN_RUNS_ON_JSON` | `macos-14` | `gh variable set PULP_SANITIZER_ASAN_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-sanitizer-vm-macos"]'` |

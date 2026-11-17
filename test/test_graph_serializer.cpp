@@ -12,6 +12,7 @@
 #include "../core/host/src/graph_serializer_test_access.hpp"
 
 #include <pulp/audio/buffer.hpp>
+#include <pulp/host/control_index_nodes.hpp>
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/sample_region_authoring.hpp>
@@ -28,6 +29,7 @@
 #include <memory>
 #include <new>
 #include <numeric>
+#include <optional>
 #include <set>
 #include <string_view>
 #include <string>
@@ -113,6 +115,283 @@ TEST_CASE("GraphSerializer inspection refuses identity and parser hazards",
     CHECK(hostile_depth.refusal == GraphDocumentRefusal::NestingLimitExceeded);
 }
 
+namespace {
+std::string object_with_members(std::size_t count) {
+    std::string doc = R"({"document_schema":"pulp.graph.authored-io-gain.v1","v":{)";
+    for (std::size_t i = 0; i < count; ++i) {
+        if (i)
+            doc.push_back(',');
+        doc += "\"k" + std::to_string(i) + "\":0";
+    }
+    return doc + "}}";
+}
+} // namespace
+
+TEST_CASE("GraphSerializer member bound admits every node a graph accepts by default",
+          "[host][serializer][limits]") {
+    // `bindings` holds one member per node, so a per-object bound below the
+    // graph's own node limit would refuse a document the graph could hold.
+    CHECK(GraphSerializer::max_object_members >= SignalGraph{}.limits().max_nodes);
+}
+
+TEST_CASE("GraphSerializer bounds object members before parsing", "[host][serializer][identity]") {
+    // Control: an object at the per-object bound is admitted.
+    const auto at_limit =
+        GraphSerializer::inspect_document(object_with_members(GraphSerializer::max_object_members));
+    INFO(at_limit.detail);
+    CHECK(at_limit.ok());
+
+    // One member over the bound, and a document far over it, are refused
+    // before the parser's per-member duplicate scan runs.
+    const auto over = GraphSerializer::inspect_document(
+        object_with_members(GraphSerializer::max_object_members + 1));
+    CHECK(over.refusal == GraphDocumentRefusal::MemberLimitExceeded);
+    const auto hostile = object_with_members(200'000);
+    CHECK(GraphSerializer::inspect_document(hostile).refusal ==
+          GraphDocumentRefusal::MemberLimitExceeded);
+
+    // The total bound: many objects, each under the per-object bound.
+    std::string many = R"({"document_schema":"pulp.graph.authored-io-gain.v1","v":[)";
+    const std::size_t per = 1000;
+    const std::size_t objects = GraphSerializer::max_document_members / per + 1;
+    for (std::size_t o = 0; o < objects; ++o) {
+        many += o ? ",{" : "{";
+        for (std::size_t i = 0; i < per; ++i)
+            many += (i ? ",\"" : "\"") + std::to_string(i) + "\":0";
+        many.push_back('}');
+    }
+    many += "]}";
+    CHECK(GraphSerializer::inspect_document(many).refusal ==
+          GraphDocumentRefusal::MemberLimitExceeded);
+
+    // Colons inside strings are not members.
+    const auto colons = GraphSerializer::inspect_document(
+        R"({"document_schema":"pulp.graph.authored-io-gain.v1","text":")" + std::string(5000, ':') +
+        "\"}");
+    CHECK(colons.ok());
+
+    // The loader applies the same bound, and leaves the graph untouched.
+    SignalGraph graph;
+    graph.add_gain_node("Kept");
+    const auto loaded = GraphSerializer::from_json(graph, hostile);
+    CHECK_FALSE(loaded.ok);
+    CHECK(loaded.error.find("member_limit_exceeded") != std::string::npos);
+    CHECK(graph.nodes().size() == 1);
+}
+
+namespace {
+// Replaces the first occurrence of `from` after `after` in `text`.
+std::string replace_after(std::string text, std::string_view after, std::string_view from,
+                          std::string_view to) {
+    const auto start = text.find(after);
+    REQUIRE(start != std::string::npos);
+    const auto at = text.find(from, start);
+    REQUIRE(at != std::string::npos);
+    text.replace(at, from.size(), to);
+    return text;
+}
+} // namespace
+
+TEST_CASE("GraphSerializer saved documents refuse a connection that does not restore",
+          "[host][serializer][identity]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "Input");
+    const auto gain = graph.add_gain_node("Gain");
+    const auto output = graph.add_output_node(1, "Output");
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+    const auto saved = GraphSerializer::to_saved_document(graph);
+    REQUIRE_FALSE(saved.empty());
+    REQUIRE(GraphSerializer::inspect_document(saved).ok());
+
+    // Control: the unmodified document restores with both edges.
+    {
+        SignalGraph restored;
+        const auto loaded = GraphSerializer::from_saved_document(restored, saved);
+        INFO(loaded.error);
+        REQUIRE(loaded.ok);
+        CHECK(restored.connections().size() == 2);
+    }
+
+    const std::string port_value =
+        choc::json::toString(choc::json::parse(saved)["connections"][0]["source_port"], false);
+    const std::string dest_value =
+        choc::json::toString(choc::json::parse(saved)["connections"][0]["dest_node"], false);
+    const std::vector<std::pair<const char*, std::string>> cases{
+        {"out-of-range source port",
+         replace_after(saved, "\"connections\"", "\"source_port\": " + port_value,
+                       "\"source_port\": 9")},
+        {"dangling destination",
+         replace_after(saved, "\"connections\"", "\"dest_node\": " + dest_value,
+                       "\"dest_node\": 77")},
+    };
+    for (const auto& [name, document] : cases) {
+        INFO(name);
+        REQUIRE(document != saved);
+        // Inspection does not check endpoints; the restore must.
+        REQUIRE(GraphSerializer::inspect_document(document).ok());
+        // The tolerant loader keeps its partial-load behaviour.
+        SignalGraph tolerant;
+        REQUIRE(GraphSerializer::from_json(tolerant, document).ok);
+        CHECK(tolerant.connections().size() == 1);
+
+        SignalGraph restored;
+        const auto loaded = GraphSerializer::from_saved_document(restored, document);
+        INFO(loaded.error);
+        CHECK_FALSE(loaded.ok);
+        CHECK(loaded.error.starts_with("connection_not_restored:"));
+        CHECK(restored.nodes().empty());
+        CHECK(loaded.persisted_node_ids.empty());
+    }
+}
+
+namespace {
+// `document` with a copy of its Control index input record under persisted id
+// 99 and the name "Index2", with no edge. A graph holds one index input, so the
+// loader cannot add the copy. A saved-identity document also gets an identity
+// and binding for the copy, so inspection still accepts it.
+std::string with_second_index_input(const std::string& document) {
+    const auto original = choc::json::parse(document);
+    auto root = choc::json::parse(document);
+    auto nodes = choc::value::createEmptyArray();
+    std::optional<choc::value::Value> copy;
+    for (std::uint32_t i = 0; i < original["nodes"].size(); ++i) {
+        const auto record = original["nodes"][i];
+        nodes.addArrayElement(record);
+        if (!record.hasObjectMember("custom") ||
+            record["custom"]["type_id"].getString() != kControlIndexInputTypeId)
+            continue;
+        auto node = choc::value::createObject("Node");
+        for (std::uint32_t m = 0; m < record.size(); ++m) {
+            const auto member = record.getObjectMemberAt(m);
+            const std::string_view name = member.name;
+            if (name == "id")
+                node.addMember("id", int64_t{99});
+            else if (name == "name")
+                node.addMember("name", "Index2");
+            else if (name == "authored_id")
+                node.addMember("authored_id", "nid-index2-copy");
+            else
+                node.addMember(member.name, member.value);
+        }
+        copy = node;
+    }
+    REQUIRE(copy.has_value());
+    nodes.addArrayElement(*copy);
+    root.setMember("nodes", nodes);
+    if (original.hasObjectMember("logical_identities")) {
+        const auto listed = original["logical_identities"]["identities"];
+        auto entries = choc::value::createEmptyArray();
+        auto bindings = choc::value::createObject("Bindings");
+        std::string index_identity;
+        for (std::uint32_t i = 0; i < listed.size(); ++i) {
+            const std::string id(listed[i]["id"].getString());
+            entries.addArrayElement(listed[i]);
+            bindings.addMember(id, listed[i]["node_id"].getInt64());
+            if (id.starts_with("node:custom:Index:"))
+                index_identity = id;
+        }
+        // A v7 copy carries its own authored ID; a v6 copy's identity is
+        // rebuilt from its name.
+        const bool v7 = copy->hasObjectMember("authored_id");
+        REQUIRE((v7 || !index_identity.empty()));
+        const auto copy_identity =
+            v7 ? std::string("nid-index2-copy")
+               : "node:custom:Index2:" +
+                     index_identity.substr(std::string("node:custom:Index:").size());
+        auto item = choc::value::createObject("Identity");
+        item.addMember("id", copy_identity);
+        item.addMember("node_id", int64_t{99});
+        entries.addArrayElement(item);
+        bindings.addMember(copy_identity, int64_t{99});
+        auto logical = choc::value::createObject("LogicalIdentities");
+        logical.addMember("profile",
+                          std::string(original["logical_identities"]["profile"].getString()));
+        logical.addMember("identities", entries);
+        root.setMember("logical_identities", logical);
+        root.setMember("bindings", bindings);
+    }
+    return choc::json::toString(root, true);
+}
+} // namespace
+
+TEST_CASE("GraphSerializer reports node records the load could not add",
+          "[host][serializer][identity]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "Input");
+    const auto output = graph.add_output_node(1, "Output");
+    REQUIRE(graph.add_control_index_input_node("Index") != 0);
+    REQUIRE(graph.connect(input, 0, output, 0));
+    const auto plain = GraphSerializer::to_json(graph);
+    const auto saved = GraphSerializer::to_saved_document(graph);
+    REQUIRE_FALSE(plain.empty());
+    REQUIRE_FALSE(saved.empty());
+
+    // Control: the intact documents restore every record.
+    {
+        SignalGraph restored;
+        const auto loaded = GraphSerializer::from_json(restored, plain);
+        INFO(loaded.error);
+        REQUIRE(loaded.ok);
+        CHECK(loaded.unrestored_node_ids.empty());
+        CHECK(loaded.persisted_node_ids.size() == 3);
+        SignalGraph identified;
+        const auto strict = GraphSerializer::from_saved_document(identified, saved);
+        INFO(strict.error);
+        REQUIRE(strict.ok);
+        CHECK(strict.unrestored_node_ids.empty());
+    }
+
+    // The tolerant loader keeps the graph it could build and names the
+    // record it dropped.
+    const auto lossy = with_second_index_input(plain);
+    SignalGraph tolerant;
+    const auto loaded = GraphSerializer::from_json(tolerant, lossy);
+    INFO(loaded.error);
+    REQUIRE(loaded.ok);
+    CHECK(tolerant.nodes().size() == 3);
+    CHECK(loaded.persisted_node_ids.size() == 3);
+    REQUIRE(loaded.unrestored_node_ids.size() == 1);
+    CHECK(loaded.unrestored_node_ids.front() == 99);
+
+    // A saved-identity document that names the dropped node is refused, and
+    // the graph is left empty.
+    const auto lossy_saved = with_second_index_input(saved);
+    REQUIRE(GraphSerializer::inspect_document(lossy_saved).ok());
+    SignalGraph restored;
+    const auto refused = GraphSerializer::from_saved_document(restored, lossy_saved);
+    INFO(refused.error);
+    CHECK_FALSE(refused.ok);
+    CHECK(refused.error.starts_with("node_not_restored: node record 99"));
+    CHECK(restored.nodes().empty());
+    CHECK(refused.persisted_node_ids.empty());
+    CHECK(refused.unrestored_node_ids.empty());
+}
+
+TEST_CASE("GraphSerializer saved documents refuse a spectral edge on ordinary nodes",
+          "[host][serializer][identity][saved-connection-validation]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "Input");
+    const auto output = graph.add_output_node(1, "Output");
+    REQUIRE(graph.connect(input, 0, output, 0));
+    const auto saved = GraphSerializer::to_saved_document(graph);
+    REQUIRE_FALSE(saved.empty());
+
+    SignalGraph control;
+    REQUIRE(GraphSerializer::from_saved_document(control, saved).ok);
+    REQUIRE(control.connections().size() == 1);
+
+    const auto malformed = replace_after(
+        saved, "\"connections\"", "\"source_node\":", "\"spectral\": true, \"source_node\":");
+    REQUIRE(GraphSerializer::inspect_document(malformed).ok());
+    SignalGraph restored;
+    const auto result = GraphSerializer::from_saved_document(restored, malformed);
+    CHECK_FALSE(result.ok);
+    CHECK(result.error.starts_with("connection_not_restored:"));
+    CHECK(restored.nodes().empty());
+    CHECK(result.persisted_node_ids.empty());
+}
+
 TEST_CASE("GraphSerializer refuses an incomplete saved identity envelope",
           "[host][serializer][g3][d5]") {
     // identity_schema without logical_identities/nodes is not a complete envelope.
@@ -122,11 +401,25 @@ TEST_CASE("GraphSerializer refuses an incomplete saved identity envelope",
         const auto refused = GraphSerializer::inspect_document(doc);
         CHECK(refused.refusal == GraphDocumentRefusal::IdentityEnvelopeInvalid);
     }
-    REQUIRE(GraphSerializer::current_format_version() == 6);
+    const auto v7 = GraphSerializer::inspect_document(
+        R"({"identity_schema":"pulp.graph.saved-identity.v7","bindings":{},"format_version":7})");
+    CHECK(v7.refusal == GraphDocumentRefusal::IdentityEnvelopeInvalid);
+    REQUIRE(GraphSerializer::current_format_version() == 7);
+
+    // Format 7 is the v7 document only, and the v7 envelope is format 7 only.
+    const auto v6_at_7 = GraphSerializer::inspect_document(
+        R"({"identity_schema":"pulp.graph.saved-identity.v6","bindings":{},"format_version":7})");
+    CHECK(v6_at_7.refusal == GraphDocumentRefusal::IdentityEnvelopeInvalid);
+    const auto v7_at_6 = GraphSerializer::inspect_document(
+        R"({"identity_schema":"pulp.graph.saved-identity.v7","bindings":{},"format_version":6})");
+    CHECK(v7_at_6.refusal == GraphDocumentRefusal::IdentityEnvelopeInvalid);
 
     const auto next = GraphSerializer::inspect_document(
-        R"({"identity_schema":"pulp.graph.saved-identity.v6","bindings":{},"format_version":7})");
+        R"({"identity_schema":"pulp.graph.saved-identity.v6","bindings":{},"format_version":8})");
     CHECK(next.refusal == GraphDocumentRefusal::UnsupportedFutureVersion);
+    const auto unknown = GraphSerializer::inspect_document(
+        R"({"identity_schema":"pulp.graph.saved-identity.v8","bindings":{},"format_version":7})");
+    CHECK(unknown.refusal == GraphDocumentRefusal::UnsupportedDocumentProfile);
 }
 
 TEST_CASE("GraphSerializer saved identity writer validates and restores",
@@ -141,7 +434,8 @@ TEST_CASE("GraphSerializer saved identity writer validates and restores",
     REQUIRE_FALSE(saved.empty());
     const auto inspected = GraphSerializer::inspect_document(saved);
     REQUIRE(inspected.ok());
-    CHECK(inspected.document.profile() == "pulp.graph.saved-identity.v6");
+    CHECK(inspected.document.profile() == "pulp.graph.saved-identity.v7");
+    CHECK(inspected.document.format_version() == 7);
     CHECK(saved.find("identity_schema") != std::string::npos);
 
     SignalGraph restored;
@@ -151,7 +445,7 @@ TEST_CASE("GraphSerializer saved identity writer validates and restores",
     CHECK(restored.nodes().size() == graph.nodes().size());
 
     auto dangling = saved;
-    const auto binding = dangling.find("node:");
+    const auto binding = dangling.find("\"logical_identities\"");
     REQUIRE(binding != std::string::npos);
     const auto node_id = dangling.find("\"node_id\":", binding);
     REQUIRE(node_id != std::string::npos);
@@ -1591,6 +1885,52 @@ TEST_CASE("GraphSerializer rejects same-size replacement without mutating the ca
     std::filesystem::remove_all(root);
 }
 
+TEST_CASE("GraphSerializer::read_file_bounded verifies the file did not change while read",
+          "[host][serializer][file][concurrency][negative]") {
+    const auto root = std::filesystem::temp_directory_path() / "pulp-graph-bounded-read";
+    std::filesystem::remove_all(root);
+    REQUIRE(std::filesystem::create_directories(root));
+    const auto path = root / "graph.pulpgraph";
+    const std::string original = R"({"format_version":2,"nodes":[],"connections":[]})";
+    const auto write = [&](const std::string& text) {
+        std::ofstream(path, std::ios::binary | std::ios::trunc) << text;
+    };
+
+    std::string text, error;
+    write(original);
+    REQUIRE(GraphSerializer::read_file_bounded(path, text, error));
+    REQUIRE(text == original);
+
+    // Control: the source accepts the file above, so the failures below come
+    // from the change detection, not from the document.
+    GraphSerializerTestAccess::set_after_first_read(
+        [&](const auto&) { std::ofstream(path, std::ios::binary | std::ios::app) << "\n"; });
+    REQUIRE_FALSE(GraphSerializer::read_file_bounded(path, text, error));
+    REQUIRE(error.find("changed while reading") != std::string::npos);
+    REQUIRE(text.empty());
+
+    write(original);
+    auto swapped = original;
+    swapped[swapped.find("2")] = '3';
+    GraphSerializerTestAccess::set_after_first_read([&](const auto&) { write(swapped); });
+    REQUIRE_FALSE(GraphSerializer::read_file_bounded(path, text, error));
+    REQUIRE(error.find("changed while reading") != std::string::npos);
+
+    REQUIRE_FALSE(GraphSerializer::read_file_bounded(root / "absent", text, error));
+    REQUIRE(error.find("cannot be opened") != std::string::npos);
+
+    // Moving a small std::function may leave its source callable. A read hook
+    // must be consumed exactly once, before its captures can leave scope.
+    write(original);
+    int calls = 0;
+    GraphSerializerTestAccess::set_after_first_read([&](const auto&) { ++calls; });
+    REQUIRE(GraphSerializer::read_file_bounded(path, text, error));
+    REQUIRE(GraphSerializer::read_file_bounded(path, text, error));
+    CHECK(calls == 1);
+    GraphSerializerTestAccess::set_after_first_read({});
+    std::filesystem::remove_all(root);
+}
+
 TEST_CASE("GraphSerializer rejects non-object roots and malformed field types",
           "[host][serializer][issue-643]") {
     SignalGraph root_dst;
@@ -1681,7 +2021,7 @@ TEST_CASE("GraphSerializer fails closed before loading missing or future graph v
 
     SignalGraph future_version;
     auto future_result = GraphSerializer::from_json(future_version, R"({
-  "format_version": 7,
+  "format_version": 8,
   "nodes": [
     {
       "id": 1,
@@ -1694,7 +2034,7 @@ TEST_CASE("GraphSerializer fails closed before loading missing or future graph v
   "connections": []
 })");
     REQUIRE_FALSE(future_result.ok);
-    REQUIRE(future_result.error.find("unsupported graph format_version 7") != std::string::npos);
+    REQUIRE(future_result.error.find("unsupported graph format_version 8") != std::string::npos);
     REQUIRE(future_version.nodes().empty());
 }
 
@@ -1764,7 +2104,7 @@ TEST_CASE("GraphSerializer rejects graph migrations that do not advance versions
 
 TEST_CASE("GraphSerializer rejects invalid graph migration registrations",
           "[host][serializer][migration]") {
-    REQUIRE(GraphSerializer::current_format_version() == 6);
+    REQUIRE(GraphSerializer::current_format_version() == 7);
     REQUIRE_FALSE(GraphSerializer::register_migration(
         2, 2,
         [](const std::string& source_json, std::string& migrated_json) {
@@ -3087,6 +3427,48 @@ TEST_CASE("GraphSerializer decodes feedback edges and integer layout coordinates
     REQUIRE(saw_gain);
 }
 
+TEST_CASE("GraphSerializer saved placeholder parameter edges require a valid source",
+          "[host][serializer][identity][saved-connection-validation]") {
+    for (const bool audio_rate : {false, true}) {
+        CAPTURE(audio_rate);
+        SignalGraph graph;
+        const auto input = graph.add_input_node(1, "Source");
+        const auto info =
+            make_fake_plugin_info("Missing", "pulp.test.saved-missing", PluginFormat::CLAP, 1, 1);
+        const auto plugin =
+            graph.add_plugin_node(std::make_unique<SerializerSlot>(
+                                      info, std::vector<uint8_t>{},
+                                      audio_rate ? ParamRate::AudioRate : ParamRate::ControlRate),
+                                  1, 1, "Missing");
+        REQUIRE((audio_rate ? graph.connect_audio_rate_modulation(
+                                  input, 0, plugin, SerializerSlot::kParamId, -1.0f, 1.0f)
+                            : graph.connect_automation(input, 0, plugin, SerializerSlot::kParamId,
+                                                       -1.0f, 1.0f)));
+        const auto saved = GraphSerializer::to_saved_document(graph);
+        REQUIRE_FALSE(saved.empty());
+        GraphLoadOptions options;
+        options.load_plugins = false;
+
+        SignalGraph control;
+        const auto partial = GraphSerializer::from_saved_document(control, saved, options);
+        INFO(partial.error);
+        REQUIRE(partial.ok);
+        REQUIRE(control.nodes().size() == 2);
+        REQUIRE(control.connections().empty());
+        REQUIRE(missing_plugins_contain(partial, "clap:pulp.test.saved-missing"));
+
+        const auto malformed =
+            replace_after(saved, "\"connections\"", "\"source_port\": 0", "\"source_port\": 99");
+        REQUIRE(GraphSerializer::inspect_document(malformed).ok());
+        SignalGraph restored;
+        const auto result = GraphSerializer::from_saved_document(restored, malformed, options);
+        CHECK_FALSE(result.ok);
+        CHECK(result.error.starts_with("connection_not_restored:"));
+        CHECK(restored.nodes().empty());
+        CHECK(result.persisted_node_ids.empty());
+    }
+}
+
 TEST_CASE("GraphSerializer serializes and decodes automation connection fields",
           "[host][serializer][issue-643]") {
     SignalGraph src;
@@ -3334,4 +3716,86 @@ TEST_CASE("PluginInfo format is deterministic when default-constructed",
     auto* info = new (storage) pulp::host::PluginInfo;
     CHECK(info->format == pulp::host::PluginFormat::VST3);
     info->~PluginInfo();
+}
+
+TEST_CASE("GraphSerializer saved documents compare the spectral lane flag",
+          "[host][serializer][identity]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "Input");
+    const auto output = graph.add_output_node(1, "Output");
+    REQUIRE(graph.connect(input, 0, output, 0));
+    const auto saved = GraphSerializer::to_saved_document(graph);
+    REQUIRE_FALSE(saved.empty());
+
+    // Control: the unmodified document restores its plain edge.
+    {
+        SignalGraph restored;
+        const auto loaded = GraphSerializer::from_saved_document(restored, saved);
+        INFO(loaded.error);
+        REQUIRE(loaded.ok);
+        CHECK(restored.connections().size() == 1);
+    }
+
+    // A document that marks the edge spectral describes a different edge than
+    // the plain one the ordinary loader restores.
+    const auto marked = replace_after(saved, "\"connections\"", "\"sidechain\": false",
+                                      "\"sidechain\": false, \"spectral\": true");
+    REQUIRE(GraphSerializer::inspect_document(marked).ok());
+    SignalGraph tolerant;
+    REQUIRE(GraphSerializer::from_json(tolerant, marked).ok);
+    REQUIRE(tolerant.connections().size() == 1);
+    CHECK_FALSE(tolerant.connections().front().spectral);
+
+    SignalGraph restored;
+    const auto loaded = GraphSerializer::from_saved_document(restored, marked);
+    INFO(loaded.error);
+    CHECK_FALSE(loaded.ok);
+    CHECK(loaded.error.starts_with("connection_not_restored:"));
+    CHECK(restored.nodes().empty());
+}
+
+TEST_CASE("GraphSerializer exempts only a valid-source parameter edge into a placeholder",
+          "[host][serializer][identity]") {
+    SignalGraph graph;
+    const auto source = graph.add_input_node(1, "Automation Source");
+    auto info = make_fake_plugin_info("Missing Target", "pulp.test.identity.missing-target",
+                                      PluginFormat::CLAP, 1, 1);
+    const auto plugin =
+        graph.add_plugin_node(std::make_unique<SerializerSlot>(info), 1, 1, "Missing Target");
+    REQUIRE(graph.connect_automation(source, 0, plugin, SerializerSlot::kParamId, -1.0f, 1.0f));
+    const auto saved = GraphSerializer::to_saved_document(graph);
+    REQUIRE_FALSE(saved.empty());
+
+    // Control: the plugin does not resolve on load, so the parameter edge into
+    // its placeholder is the permitted partial-load omission.
+    {
+        SignalGraph restored;
+        const auto loaded = GraphSerializer::from_saved_document(restored, saved);
+        INFO(loaded.error);
+        REQUIRE(loaded.ok);
+        REQUIRE(missing_plugins_contain(loaded, "clap:pulp.test.identity.missing-target"));
+        CHECK(restored.connections().empty());
+        CHECK_FALSE(
+            GraphSerializer::unrestored_connection(restored, saved, loaded.persisted_node_ids));
+    }
+
+    // The same edge from a source port that does not exist could never have
+    // been restored, so the omission does not cover it.
+    const auto bad_source =
+        replace_after(saved, "\"connections\"", "\"source_port\": 0", "\"source_port\": 7");
+    REQUIRE(bad_source != saved);
+    SignalGraph tolerant;
+    const auto plain = GraphSerializer::from_json(tolerant, bad_source);
+    REQUIRE(plain.ok);
+    const auto missing =
+        GraphSerializer::unrestored_connection(tolerant, bad_source, plain.persisted_node_ids);
+    REQUIRE(missing);
+    CHECK(missing->find("saved connection 0") != std::string::npos);
+
+    SignalGraph restored;
+    const auto loaded = GraphSerializer::from_saved_document(restored, bad_source);
+    INFO(loaded.error);
+    CHECK_FALSE(loaded.ok);
+    CHECK(loaded.error.starts_with("connection_not_restored:"));
+    CHECK(restored.nodes().empty());
 }

@@ -13,9 +13,11 @@
 #include <pulp/signal/indexed_control.hpp>
 #include <pulp/state/param_cursor.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <span>
 #include <string>
 #include <vector>
@@ -342,13 +344,13 @@ TEST_CASE("Control scalar rules pin zero division, finite extremes, and reset",
 TEST_CASE("Control stages expose pure and stateful finite partition-stable forms",
           "[signal][control-index]") {
     using pulp::signal::control_clamp;
-    using pulp::signal::control_maximum;
-    using pulp::signal::control_minimum;
-    using pulp::signal::control_safe_divide;
-    CHECK(control_minimum(std::numeric_limits<float>::infinity(), 2.0f) == 0.0f);
-    CHECK(control_maximum(-std::numeric_limits<float>::infinity(), 2.0f) == 2.0f);
+    using pulp::signal::control_max;
+    using pulp::signal::control_min;
+    using pulp::signal::safe_control_divide;
+    CHECK(control_min(std::numeric_limits<float>::infinity(), 2.0f) == 0.0f);
+    CHECK(control_max(-std::numeric_limits<float>::infinity(), 2.0f) == 2.0f);
     CHECK(control_clamp(std::numeric_limits<float>::quiet_NaN(), -1.0f, 1.0f) == 0.0f);
-    CHECK(control_safe_divide(1.0f, 0.0f) == 0.0f);
+    CHECK(safe_control_divide(1.0f, 0.0f) == 0.0f);
     CHECK(pulp::signal::map_clip(0.5f, 0.0f, 1.0f, 10.0f, 20.0f) == 15.0f);
 
     CHECK_FALSE(
@@ -500,7 +502,7 @@ TEST_CASE("numeric connections and persistence keep working on trigger nodes",
 }
 
 TEST_CASE("G-5 trigger chain uses a real feedback edge across block partitions",
-          "[g5][trigger][feedback]") {
+          "[trigger][feedback]") {
     const auto render = [](std::span<const int> partitions) {
         SignalGraph graph;
         const auto input = graph.add_input_node(1);
@@ -598,16 +600,24 @@ TEST_CASE("restored Control index graphs prepare and future formats name the fix
     auto future = json;
     const auto at = future.find("\"format_version\": 5");
     REQUIRE(at != std::string::npos);
-    future.replace(at, std::string("\"format_version\": 5").size(), "\"format_version\": 7");
+    future.replace(at, std::string("\"format_version\": 5").size(), "\"format_version\": 8");
     SignalGraph refused;
     const auto newer = GraphSerializer::from_json(refused, future);
     REQUIRE_FALSE(newer.ok);
-    CHECK(newer.error.find("unsupported graph format_version 7") != std::string::npos);
-    CHECK(newer.error.find("upgrade Pulp, or re-export the graph at format 6 or lower") !=
+    CHECK(newer.error.find("unsupported graph format_version 8") != std::string::npos);
+    CHECK(newer.error.find("upgrade Pulp, or re-export the graph at format 7 or lower") !=
+          std::string::npos);
+
+    // Format 7 exists only as a saved-identity v7 document.
+    auto unenveloped = json;
+    unenveloped.replace(at, std::string("\"format_version\": 5").size(), "\"format_version\": 7");
+    const auto plain_v7 = GraphSerializer::from_json(refused, unenveloped);
+    REQUIRE_FALSE(plain_v7.ok);
+    CHECK(plain_v7.error.find("without the pulp.graph.saved-identity.v7 envelope") !=
           std::string::npos);
 
     const auto inspected = GraphSerializer::inspect_document(
-        R"({"identity_schema":"pulp.graph.saved-identity.v6","format_version":7})");
+        R"({"identity_schema":"pulp.graph.saved-identity.v6","format_version":8})");
     CHECK(inspected.refusal == GraphDocumentRefusal::UnsupportedFutureVersion);
     CHECK(inspected.detail.find("upgrade Pulp") != std::string::npos);
 }
@@ -817,7 +827,7 @@ TEST_CASE("Control table drives dense AudioRate Processor parameter in both seri
     }
 }
 
-TEST_CASE("MapClip maps non-finite input to the output minimum", "[signal][g5][control-index]") {
+TEST_CASE("MapClip maps non-finite input to the output minimum", "[signal][control-index]") {
     const float nan = std::numeric_limits<float>::quiet_NaN();
     const float inf = std::numeric_limits<float>::infinity();
     // Zero lies mid-interval, so zero-substitution would not return 100.
@@ -1035,4 +1045,350 @@ TEST_CASE("hysteresis, slew, max and safe-divide Control nodes render their rule
         CHECK(run_binary_node(make_control_safe_divide_type(), {1.0f, 1.0f, 6.0f},
                               {0.0f, nan, 3.0f}) == std::vector<float>{0.0f, 0.0f, 2.0f});
     }
+}
+
+TEST_CASE("a stateful Control node restarts from its initial state on a seek and on prepare",
+          "[graph][control-index][negative-control]") {
+    SignalGraph graph;
+    const auto integrator = build_control_node_graph(graph, make_control_integrator_type());
+    const std::array<float, 3> range{0.0f, 10.0f, 0.0f};
+    REQUIRE(graph.set_custom_node_state(integrator, make_control_scalar_state(range)));
+    REQUIRE(graph.prepare(48000, 4));
+    const std::vector<float> steps(4, 0.25f);
+    const std::vector<float> fresh{0.25f, 0.5f, 0.75f, 1.0f};
+    REQUIRE(render_control_node_graph(graph, steps) == fresh);
+    // The stream continues across ordinary blocks.
+    CHECK(render_control_node_graph(graph, steps).front() == 1.25f);
+
+    // A seek opens the next epoch at the transport position; the program
+    // renders as it did from a fresh graph rather than continuing from 2.0.
+    std::vector<float> silence(4, 0.0f);
+    std::vector<float> result(4, -100.0f);
+    const float* in_ptr[] = {silence.data()};
+    float* out_ptr[] = {result.data()};
+    pulp::audio::BufferView<const float> input(in_ptr, 1, 4);
+    pulp::audio::BufferView<float> output(out_ptr, 1, 4);
+    pulp::format::ProcessContext seek;
+    seek.reset_requested = true;
+    seek.position_samples = 0;
+    const auto position = graph.control_index_position();
+    REQUIRE(graph.process_control_checked(output, input, {position.epoch + 1, 0, steps}, &seek) ==
+            ControlProcessResult::Accepted);
+    CHECK(result == fresh);
+
+    // Re-prepare restarts the clock at epoch 1, cursor 0, and the node with it.
+    CHECK(render_control_node_graph(graph, steps).front() == 1.25f);
+    REQUIRE(graph.prepare(48000, 4));
+    CHECK(render_control_node_graph(graph, steps) == fresh);
+}
+
+namespace {
+
+// A stateful Control pass-through whose reset only counts, so a test can see
+// whether SignalGraph called it from the audio thread on a seek.
+CustomNodeType make_counting_control_type(std::shared_ptr<int> resets, bool declare_rt) {
+    CustomNodeType type;
+    type.type_id = "pulp.test.control-counting-reset";
+    type.num_input_ports = 1;
+    type.num_output_ports = 1;
+    type.input_ports = {{"value", PortKind::Control}};
+    type.output_ports = {{"value", PortKind::Control}};
+    type.create = []() -> void* { return new int(0); };
+    type.destroy = [](void* instance) { delete static_cast<int*>(instance); };
+    type.reset = [resets](void*) { ++*resets; };
+    type.process_instance = [](void*, pulp::audio::BufferView<float>& out,
+                               const pulp::audio::BufferView<const float>& in, int frames) {
+        std::copy_n(in.channel_ptr(0), frames, out.channel_ptr(0));
+    };
+    if (declare_rt) {
+        type.rt_contract.declared = true;
+        type.rt_contract.safety_class = pulp::audio::RtSafetyClass::AudioCallbackSafeAfterPrepare;
+        type.rt_contract.allocation_free = true;
+    }
+    return type;
+}
+
+int resets_after_seek(bool declare_rt) {
+    auto resets = std::make_shared<int>(0);
+    SignalGraph graph;
+    build_control_node_graph(graph, make_counting_control_type(resets, declare_rt));
+    REQUIRE(graph.prepare(48000, 4));
+    const std::vector<float> steps(4, 0.25f);
+    render_control_node_graph(graph, steps);
+    const int before = *resets;
+    std::vector<float> silence(4, 0.0f);
+    std::vector<float> result(4, -100.0f);
+    const float* in_ptr[] = {silence.data()};
+    float* out_ptr[] = {result.data()};
+    pulp::audio::BufferView<const float> input(in_ptr, 1, 4);
+    pulp::audio::BufferView<float> output(out_ptr, 1, 4);
+    pulp::format::ProcessContext seek;
+    seek.reset_requested = true;
+    seek.position_samples = 0;
+    const auto position = graph.control_index_position();
+    REQUIRE(graph.process_control_checked(output, input, {position.epoch + 1, 0, steps}, &seek) ==
+            ControlProcessResult::Accepted);
+    CHECK(result == steps);
+    return *resets - before;
+}
+
+} // namespace
+
+TEST_CASE("a seek resets a Custom Control node only when it declares an audio-safe contract",
+          "[graph][control-index][rt-safety][negative-control]") {
+    // Declared audio-callback-safe: the seek restarts the node.
+    CHECK(resets_after_seek(true) == 1);
+    // No declared contract: the reset might allocate or lock, so the audio
+    // thread never calls it and the node keeps its state across the seek.
+    CHECK(resets_after_seek(false) == 0);
+}
+
+namespace {
+
+// One-port converters so a Control chain can run from an ordinary audio input
+// with no Control index input and no graph-event edge, so no event lane.
+CustomNodeType make_audio_to_control_type() {
+    CustomNodeType type;
+    type.type_id = "pulp.test.audio-to-control";
+    type.num_input_ports = 1;
+    type.num_output_ports = 1;
+    type.input_ports = {{"audio", PortKind::Audio}};
+    type.output_ports = {{"value", PortKind::Control}};
+    type.process = [](pulp::audio::BufferView<float>& out,
+                      const pulp::audio::BufferView<const float>& in,
+                      int frames) { std::copy_n(in.channel_ptr(0), frames, out.channel_ptr(0)); };
+    return type;
+}
+
+CustomNodeType make_control_to_audio_type() {
+    CustomNodeType type;
+    type.type_id = "pulp.test.control-to-audio";
+    type.num_input_ports = 1;
+    type.num_output_ports = 1;
+    type.input_ports = {{"value", PortKind::Control}};
+    type.output_ports = {{"audio", PortKind::Audio}};
+    type.process = [](pulp::audio::BufferView<float>& out,
+                      const pulp::audio::BufferView<const float>& in,
+                      int frames) { std::copy_n(in.channel_ptr(0), frames, out.channel_ptr(0)); };
+    return type;
+}
+
+std::vector<float> render_laneless(SignalGraph& graph, std::vector<float> values,
+                                   const pulp::format::ProcessContext& transport) {
+    std::vector<float> result(values.size(), -100.0f);
+    const float* in_ptr[] = {values.data()};
+    float* out_ptr[] = {result.data()};
+    pulp::audio::BufferView<const float> input(in_ptr, 1, values.size());
+    pulp::audio::BufferView<float> output(out_ptr, 1, values.size());
+    graph.process(output, input, static_cast<int>(values.size()), transport);
+    return result;
+}
+
+} // namespace
+
+TEST_CASE("a seek resets a stateful Control node on a graph with no event lane",
+          "[graph][control-index][negative-control]") {
+    SignalGraph graph;
+    const auto integrator_type = make_control_integrator_type();
+    REQUIRE(graph.register_custom_node_type(integrator_type));
+    REQUIRE(graph.register_custom_node_type(make_audio_to_control_type()));
+    REQUIRE(graph.register_custom_node_type(make_control_to_audio_type()));
+    const auto audio = graph.add_input_node(1);
+    const auto to_control = graph.add_custom_node("pulp.test.audio-to-control");
+    const auto integrator = graph.add_custom_node(integrator_type.type_id);
+    const auto to_audio = graph.add_custom_node("pulp.test.control-to-audio");
+    const auto sink = graph.add_output_node(1);
+    REQUIRE((to_control != 0 && integrator != 0 && to_audio != 0));
+    REQUIRE(graph.connect(audio, 0, to_control, 0));
+    REQUIRE(graph.connect(graph.node(to_control)->out("value"),
+                          graph.node(integrator)->in(integrator_type.input_ports.front().name)));
+    REQUIRE(graph.connect(graph.node(integrator)->out("value"), graph.node(to_audio)->in("value")));
+    REQUIRE(graph.connect(to_audio, 0, sink, 0));
+    const std::array<float, 3> range{0.0f, 10.0f, 0.0f};
+    REQUIRE(graph.set_custom_node_state(integrator, make_control_scalar_state(range)));
+    REQUIRE(graph.prepare(48000, 4));
+    // No Control index input and no graph-event edge: the Control-only entry
+    // point is unbound, so this graph runs through process() alone.
+    REQUIRE_FALSE(graph.control_index_position().bound);
+
+    const std::vector<float> steps(4, 0.25f);
+    const std::vector<float> fresh{0.25f, 0.5f, 0.75f, 1.0f};
+    pulp::format::ProcessContext playing;
+    playing.position_samples = 0;
+    REQUIRE(render_laneless(graph, steps, playing) == fresh);
+    // Negative control: an ordinary block continues the stream.
+    playing.position_samples = 4;
+    CHECK(render_laneless(graph, steps, playing).front() == 1.25f);
+
+    pulp::format::ProcessContext seek;
+    seek.reset_requested = true;
+    seek.position_samples = 0;
+    REQUIRE(seek.should_reset_stream_history());
+    CHECK(render_laneless(graph, steps, seek) == fresh);
+}
+
+TEST_CASE("a negative seek on a graph with no event lane fails closed without a reset",
+          "[graph][control-index][negative-control]") {
+    SignalGraph graph;
+    const auto integrator_type = make_control_integrator_type();
+    REQUIRE(graph.register_custom_node_type(integrator_type));
+    REQUIRE(graph.register_custom_node_type(make_audio_to_control_type()));
+    REQUIRE(graph.register_custom_node_type(make_control_to_audio_type()));
+    const auto audio = graph.add_input_node(1);
+    const auto to_control = graph.add_custom_node("pulp.test.audio-to-control");
+    const auto integrator = graph.add_custom_node(integrator_type.type_id);
+    const auto to_audio = graph.add_custom_node("pulp.test.control-to-audio");
+    const auto sink = graph.add_output_node(1);
+    REQUIRE((to_control != 0 && integrator != 0 && to_audio != 0));
+    REQUIRE(graph.connect(audio, 0, to_control, 0));
+    REQUIRE(graph.connect(graph.node(to_control)->out("value"),
+                          graph.node(integrator)->in(integrator_type.input_ports.front().name)));
+    REQUIRE(graph.connect(graph.node(integrator)->out("value"), graph.node(to_audio)->in("value")));
+    REQUIRE(graph.connect(to_audio, 0, sink, 0));
+    const std::array<float, 3> range{0.0f, 10.0f, 0.0f};
+    REQUIRE(graph.set_custom_node_state(integrator, make_control_scalar_state(range)));
+    REQUIRE(graph.prepare(48000, 4));
+    REQUIRE_FALSE(graph.control_index_position().bound);
+
+    const std::vector<float> steps(4, 0.25f);
+    const std::vector<float> fresh{0.25f, 0.5f, 0.75f, 1.0f};
+    pulp::format::ProcessContext playing;
+    playing.position_samples = 0;
+    REQUIRE(render_laneless(graph, steps, playing) == fresh);
+    playing.position_samples = 4;
+    REQUIRE(render_laneless(graph, steps, playing).back() == 2.0f);
+
+    // A reset to a negative position is out of range: the block is silent and
+    // the integrator keeps the 2.0 it reached, so the next block continues it.
+    pulp::format::ProcessContext bad_seek;
+    bad_seek.reset_requested = true;
+    bad_seek.position_samples = -4;
+    REQUIRE(bad_seek.should_reset_stream_history());
+    CHECK(render_laneless(graph, steps, bad_seek) == std::vector<float>(4, 0.0f));
+    playing.position_samples = 8;
+    CHECK(render_laneless(graph, steps, playing).front() == 2.25f);
+
+    // Control: a seek to a non-negative position still restarts the node.
+    pulp::format::ProcessContext seek;
+    seek.reset_requested = true;
+    seek.position_samples = 0;
+    REQUIRE(seek.should_reset_stream_history());
+    CHECK(render_laneless(graph, steps, seek) == fresh);
+}
+
+TEST_CASE("custom_node_reset_runs_on_audio_thread admits only audio-callback safety classes",
+          "[graph][control-index][rt-safety]") {
+    auto resets = std::make_shared<int>(0);
+    auto type = make_counting_control_type(resets, true);
+    CHECK(custom_node_reset_runs_on_audio_thread(type));
+    for (const auto safety : {pulp::audio::RtSafetyClass::AudioCallbackSafe,
+                              pulp::audio::RtSafetyClass::AudioCallbackSafeWithImmutableInputs}) {
+        type.rt_contract.safety_class = safety;
+        CHECK(custom_node_reset_runs_on_audio_thread(type));
+    }
+    for (const auto safety :
+         {pulp::audio::RtSafetyClass::ControlThreadOnly,
+          pulp::audio::RtSafetyClass::BackgroundThreadOnly, pulp::audio::RtSafetyClass::OfflineOnly,
+          pulp::audio::RtSafetyClass::RealtimeTelemetryOnly}) {
+        type.rt_contract.safety_class = safety;
+        CHECK_FALSE(custom_node_reset_runs_on_audio_thread(type));
+    }
+    type.rt_contract.safety_class = pulp::audio::RtSafetyClass::AudioCallbackSafe;
+    type.rt_contract.declared = false;
+    CHECK_FALSE(custom_node_reset_runs_on_audio_thread(type));
+    type.rt_contract.declared = true;
+    type.reset = nullptr;
+    CHECK_FALSE(custom_node_reset_runs_on_audio_thread(type));
+    // Every built-in stateful Control node keeps its seek reset.
+    for (const auto& builtin : {make_control_integrator_type(), make_control_slew_type(),
+                                make_control_hysteresis_type(), make_control_indexed_table_type()})
+        CHECK(custom_node_reset_runs_on_audio_thread(builtin));
+}
+
+TEST_CASE("Control blocks publish non-finite indices as zero and refuse negative resets",
+          "[graph][control-index][negative-control]") {
+    SignalGraph graph;
+    REQUIRE(graph.add_control_index_input_node() != 0);
+    REQUIRE(graph.prepare(48000, 4));
+    std::array<float, 4> audio{1, 2, 3, 4};
+    std::array<float, 4> result{9, 9, 9, 9};
+    const float* in_ptr[] = {audio.data()};
+    float* out_ptr[] = {result.data()};
+    pulp::audio::BufferView<const float> input(in_ptr, 1, 4);
+    pulp::audio::BufferView<float> output(out_ptr, 1, 4);
+    // A pre-roll position is a range error, not clock exhaustion.
+    const std::array<float, 4> indices{0, 1, 2, 3};
+    pulp::format::ProcessContext preroll;
+    preroll.reset_requested = true;
+    preroll.position_samples = -64;
+    CHECK(graph.process_control_checked(output, input, {2, 0, indices}, &preroll) ==
+          ControlProcessResult::OutOfRange);
+    CHECK((result == std::array<float, 4>{9, 9, 9, 9}));
+    CHECK(graph.control_index_position().epoch == 1);
+    CHECK(graph.process_control_checked(output, input, {1, 0, indices}) ==
+          ControlProcessResult::Accepted);
+}
+
+TEST_CASE("map-clip and hysteresis nodes treat non-finite input like their pure stages",
+          "[graph][control-index][negative-control]") {
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+    const std::array<float, 4> map{-1.0f, 1.0f, 100.0f, 200.0f};
+    // Zero lies mid-interval, so substituting zero would give 150.
+    const auto mapped =
+        run_unary_node(make_control_map_clip_type(), make_control_scalar_state(map), {nan, inf});
+    CHECK(mapped == std::vector<float>{pulp::signal::map_clip(nan, -1.0f, 1.0f, 100.0f, 200.0f),
+                                       pulp::signal::map_clip(inf, -1.0f, 1.0f, 100.0f, 200.0f)});
+    CHECK(mapped.front() == 100.0f);
+
+    // High at 0.8, then non-finite samples: the pure step holds the prior
+    // state, and so does the node; substituting zero would release it.
+    const std::vector<float> held{0.8f, nan, -inf, inf, 0.2f};
+    const auto rendered = run_unary_node(make_control_hysteresis_type(), {}, held);
+    bool prior = false;
+    std::vector<float> expected;
+    for (const float sample : held) {
+        prior = pulp::signal::hysteresis_step(sample, 0.5f, 0.25f, prior);
+        expected.push_back(prior ? 1.0f : 0.0f);
+    }
+    CHECK(expected == std::vector<float>{1, 1, 1, 1, 0});
+    CHECK(rendered == expected);
+}
+
+TEST_CASE("built-in Control nodes declare an allocation-free realtime contract",
+          "[graph][control-index][rt-safety]") {
+    for (const auto& type :
+         {make_control_min_type(), make_control_max_type(), make_control_safe_divide_type(),
+          make_control_map_clip_type(), make_control_hysteresis_type(),
+          make_control_integrator_type(), make_control_slew_type(),
+          make_control_indexed_table_type(), make_control_index_input_type()}) {
+        INFO(type.type_id);
+        CHECK(type.rt_contract.declared);
+        CHECK(type.rt_contract.safety_class ==
+              pulp::audio::RtSafetyClass::AudioCallbackSafeAfterPrepare);
+        CHECK(type.rt_contract.allocation_free);
+        CHECK_FALSE(type.rt_contract.loop_bound.empty());
+    }
+}
+
+TEST_CASE("a non-finite Control index never reaches a Control consumer",
+          "[graph][control-index][negative-control]") {
+    // Pass-through node: forwards its Control input unchanged, so the probe
+    // output is exactly the index the graph published.
+    CustomNodeType pass;
+    pass.type_id = "pulp.test.control-pass";
+    pass.num_input_ports = 1;
+    pass.num_output_ports = 1;
+    pass.input_ports = {{"value", PortKind::Control}};
+    pass.output_ports = {{"value", PortKind::Control}};
+    pass.process = [](pulp::audio::BufferView<float>& out,
+                      const pulp::audio::BufferView<const float>& in,
+                      int frames) { std::copy_n(in.channel_ptr(0), frames, out.channel_ptr(0)); };
+    SignalGraph graph;
+    build_control_node_graph(graph, pass);
+    REQUIRE(graph.prepare(48000, 4));
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+    CHECK(render_control_node_graph(graph, {0.5f, nan, inf, -inf}) ==
+          std::vector<float>{0.5f, 0.0f, 0.0f, 0.0f});
 }

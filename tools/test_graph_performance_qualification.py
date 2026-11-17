@@ -245,7 +245,8 @@ def fake_activation_receipt(directory: Path) -> Path:
                         f"executor_blocks={16 if backend == 'routed' else 0} parallel_levels=0 parallel_enabled=0 walk_fallbacks=0 execution_failures=0 "
                         f"node_audio_bytes={24 * frames} automation_bytes=0 delay_bytes=0 spectral_bytes=0 "
                         f"prepared_bytes={24 * frames} row_stride=72 row_bytes=1152 audio_bytes={64 * frames} "
-                        f"io_bytes={8 * frames} harness_payload_bytes={1152 + 72 * frames} misses=0")
+                        f"io_bytes={8 * frames} wake_stride=56 wake_bytes=896 "
+                        f"harness_payload_bytes={1152 + 72 * frames + 896} misses=0")
                 raw = directory / f"{rate}-{frames}-{backend}.txt"
                 raw.write_text("\n".join(["g12_paced_activation_v1", meta, *rows]) + "\n", encoding="utf-8")
                 err = raw.with_suffix(".stderr")
@@ -254,7 +255,7 @@ def fake_activation_receipt(directory: Path) -> Path:
                 cell.pop("callbacks")
                 cell.update(returncode=0, raw_stdout=artifact(raw), raw_stderr=artifact(err))
                 cells.append(cell)
-    receipt = {"schema": "pulp.graph_paced_activation_receipt.v1", "fixture": "g12_paced_activation_v1",
+    receipt = {"schema": "pulp.graph_paced_activation_receipt.v2", "fixture": "g12_paced_activation_v1",
                "status": "PARTIAL", "mode": "pilot", "timing_qualified": False,
                "measurement_contract": copy.deepcopy(gq.ACTIVATION_CONTRACT), "callback_count": 16,
                "source_sha": gq._source_sha(directory),
@@ -334,6 +335,10 @@ class PacedActivationQualification(unittest.TestCase):
                 ("debug", "build_type=Release", "build_type=Debug"),
                 ("memory", "node_audio_bytes=768", "node_audio_bytes=769"),
                 ("harness", "audio_bytes=2048", "audio_bytes=2049"),
+                ("wake stride", "wake_stride=56", "wake_stride=48"),
+                ("wake payload", "wake_bytes=896", "wake_bytes=0"),
+                # A payload total that leaves the wake records out of the sum.
+                ("payload omits wakes", "harness_payload_bytes=4352", "harness_payload_bytes=3456"),
                 ("schedule", "target_ns=1000000000", "target_ns=999999900"),
                 ("short audio", "3f000000:32", "3f000000:31"),
             )

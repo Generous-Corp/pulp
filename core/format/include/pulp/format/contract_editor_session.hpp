@@ -155,7 +155,9 @@ class ContractEditorSession : public std::enable_shared_from_this<ContractEditor
     IdleSource idle_source() const {
         return idle_source_;
     }
-    /// One idle tick: Editor::idle() while attached.
+    /// One idle tick: drains the parameter listener queues, then calls
+    /// Editor::idle() while attached and visible. A hidden editor gets no
+    /// Editor::idle(); showing it ticks once at once.
     void tick();
 
     /// Be closed by `registry` when its adapter instance goes away first. The
@@ -175,12 +177,47 @@ class ContractEditorSession : public std::enable_shared_from_this<ContractEditor
     bool set_size(std::uint32_t width, std::uint32_t height);
     /// A new content scale at the current size.
     bool set_scale(double scale);
-    /// False only for an editor whose hints fix its size (equal, non-zero
-    /// minimum and maximum on both axes).
+    /// True when the editor's hints leave room to resize: both minimums set
+    /// and not pinned (`detail::editor_resizable`). An editor that declares no
+    /// minimums is fixed-size.
     bool resizable() const;
-    /// Adjust a proposed size through the editor, then clamp it to the hints.
-    /// False when nothing usable results.
+    /// Adjust a proposed size through the editor, then bring it inside the
+    /// hints (locked aspect, min, max). A fixed-size editor answers with its
+    /// own size. False when nothing usable results.
     bool constrain(std::uint32_t& width, std::uint32_t& height) const;
+
+    /// True while an editor-origin resize request for exactly this size awaits
+    /// the host's acknowledgment through set_host_size().
+    bool has_pending_resize(std::uint32_t width, std::uint32_t height) const;
+    /// A size the host chose without asking `constrain()` first: the editor
+    /// always takes the constrained size, and `snapped` is true when that
+    /// differs from the host's by more than a pixel. Once host sizes stop arriving for `kSnapSettleMs`, the
+    /// session asks the host for the snapped size through the
+    /// `request_resize` hook, from the main loop and never from inside the
+    /// host's own call or while a drag is still sending sizes; a later size
+    /// that already fits cancels the request. A difference of one pixel is
+    /// given to the editor but not asked back. A fixed-size editor takes no host size at all: it keeps its
+    /// own, and the host is asked for that size the same way. False when the
+    /// editor refuses a size.
+    bool set_host_size(std::uint32_t& width, std::uint32_t& height, bool& snapped);
+
+    /// How long host sizes must stop before a snapped size is asked back.
+    static constexpr int kSnapSettleMs = 120;
+
+    /// The timer behind the snapped-size request: `start()` (re)arms it to call
+    /// `fire` once after `delay_ms` on the main thread, `stop()` cancels it.
+    /// The default is a main-thread timer; a test replaces it to drive the
+    /// debounce without a clock.
+    class SnapTimer {
+      public:
+        virtual ~SnapTimer() = default;
+        virtual void start(int delay_ms, std::function<void()> fire) = 0;
+        virtual void stop() = 0;
+    };
+    using SnapTimerFactory = std::function<std::unique_ptr<SnapTimer>()>;
+    /// Make every session created afterwards take its snap timer from
+    /// `factory`; an empty factory restores the main-thread timer. Main thread.
+    static void set_snap_timer_factory_for_testing(SnapTimerFactory factory);
 
     /// Offer a key. Forward when not attached.
     KeyDisposition offer_key(const EditorKeyEvent& event);
@@ -204,6 +241,8 @@ class ContractEditorSession : public std::enable_shared_from_this<ContractEditor
     void start_idle();
     void stop_idle();
     void destroy_editor();
+    void schedule_snap_request(std::uint32_t width, std::uint32_t height);
+    void cancel_snap_request();
 
     IdleSource idle_source_;
     // Declared in dependency order so the editor is destroyed first, then the
@@ -214,6 +253,11 @@ class ContractEditorSession : public std::enable_shared_from_this<ContractEditor
     std::unique_ptr<Editor> editor_;
     bool attached_ = false;
     detail::MainThreadTimer idle_timer_;
+    // False while the host has the editor hidden: the editor gets no idle().
+    bool visible_ = true;
+    std::unique_ptr<SnapTimer> snap_timer_;
+    std::uint32_t snap_width_ = 0;
+    std::uint32_t snap_height_ = 0;
     std::atomic<bool> owner_gone_{false};
 };
 

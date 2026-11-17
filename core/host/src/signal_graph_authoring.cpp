@@ -6,18 +6,22 @@
 
 #include <pulp/format/processor.hpp>
 #include <pulp/host/signal_graph.hpp>
+#include "signal_graph_authored_id_internal.hpp"
 #include "signal_graph_ports_internal.hpp"
 
 #include <pulp/host/control_index_nodes.hpp>
 #include <pulp/host/isolated_plugin_slot.hpp>
+#include <pulp/runtime/crypto.hpp>
 #include <pulp/runtime/log.hpp>
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <functional>
 #include <memory>
 #include <queue>
+#include <random>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -319,7 +323,7 @@ NodeId SignalGraph::add_input_node(int channels, const std::string& name) {
     node.name = name;
     node.num_output_ports = channels;
     detail::populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
-    nodes_.push_back(std::move(node));
+    push_node_locked_(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
 }
@@ -334,7 +338,7 @@ NodeId SignalGraph::add_output_node(int channels, const std::string& name) {
     node.name = name;
     node.num_input_ports = channels;
     detail::populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
-    nodes_.push_back(std::move(node));
+    push_node_locked_(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
 }
@@ -352,7 +356,7 @@ NodeId SignalGraph::add_plugin_node(const PluginInfo& info) {
     node.plugin = std::shared_ptr<PluginSlot>(PluginSlot::load(info));
     node.plugin_info = info; // preserve identity even if load failed
     detail::populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
-    nodes_.push_back(std::move(node));
+    push_node_locked_(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
 }
@@ -372,7 +376,7 @@ NodeId SignalGraph::add_unresolved_plugin_node(const PluginInfo& info, int num_i
     node.plugin_info.num_inputs = num_inputs;
     node.plugin_info.num_outputs = num_outputs;
     detail::populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
-    nodes_.push_back(std::move(node));
+    push_node_locked_(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
 }
@@ -397,7 +401,7 @@ NodeId SignalGraph::add_plugin_node(std::unique_ptr<PluginSlot> slot, int num_in
         node.plugin_info.num_outputs = num_outputs;
     }
     detail::populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
-    nodes_.push_back(std::move(node));
+    push_node_locked_(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
 }
@@ -447,7 +451,7 @@ NodeId SignalGraph::add_processor_node(std::shared_ptr<format::ProcessorNodeInst
         if (descriptor.produces_midi)
             node.output_ports.push_back({id, 0, true, "midi", PortKind::Midi,
                                          diagnostic_graph_identity_, authoring_generation_ + 1});
-        nodes_.push_back(std::move(node));
+        push_node_locked_(std::move(node));
         ++next_id_;
     } catch (...) {
         processor_nodes_.erase(id);
@@ -504,7 +508,7 @@ NodeId SignalGraph::add_gain_node(const std::string& name) {
     node.num_input_ports = 2;
     node.num_output_ports = 2;
     detail::populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
-    nodes_.push_back(std::move(node));
+    push_node_locked_(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
 }
@@ -519,7 +523,7 @@ NodeId SignalGraph::add_midi_input_node(const std::string& name) {
     node.name = name;
     node.num_output_ports = 1;
     detail::populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
-    nodes_.push_back(std::move(node));
+    push_node_locked_(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
 }
@@ -534,7 +538,7 @@ NodeId SignalGraph::add_midi_output_node(const std::string& name) {
     node.name = name;
     node.num_input_ports = 1;
     detail::populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
-    nodes_.push_back(std::move(node));
+    push_node_locked_(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
 }
@@ -624,9 +628,108 @@ SignalGraph::add_unresolved_custom_node(std::string_view type_id, int version, i
     node.custom_type_version = version;
     detail::populate_named_ports(node, diagnostic_graph_identity_, authoring_generation_ + 1);
     apply_custom_port_descriptors(node, input_ports, output_ports);
-    nodes_.push_back(std::move(node));
+    push_node_locked_(std::move(node));
     invalidate_live_locked_();
     return nodes_.back().id;
+}
+
+namespace detail {
+
+namespace {
+
+std::uint64_t mix_authored_id_word(std::uint64_t value) noexcept {
+    // splitmix64 finalizer: a bijection, so distinct inputs stay distinct.
+    value += 0x9e3779b97f4a7c15ULL;
+    value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    value = (value ^ (value >> 27)) * 0x94d049bb133111ebULL;
+    return value ^ (value >> 31);
+}
+
+} // namespace
+
+AuthoredIdSalt authored_id_salt_from(std::uint64_t clock_word, std::uintptr_t graph_address,
+                                     std::uint64_t graph_identity) noexcept {
+    // For a fixed clock word, salt[0] is a bijection of the identity; for a
+    // fixed identity, salt[1] is a bijection of the address.
+    const auto identity = mix_authored_id_word(graph_identity);
+    return {mix_authored_id_word(clock_word ^ identity),
+            mix_authored_id_word(static_cast<std::uint64_t>(graph_address) ^
+                                 mix_authored_id_word(identity))};
+}
+
+std::uint64_t authored_id_clock_word() noexcept {
+    return static_cast<std::uint64_t>(std::chrono::system_clock::now().time_since_epoch().count());
+}
+
+AuthoredIdSalt authored_id_salt_without_entropy(std::uintptr_t graph_address,
+                                                std::uint64_t graph_identity) noexcept {
+    return authored_id_salt_from(authored_id_clock_word(), graph_address, graph_identity);
+}
+
+std::string authored_id_from_salt(const AuthoredIdSalt& salt, std::uint64_t counter) {
+    std::string preimage = "pulp.graph.authored-id.fresh.v1";
+    for (const auto word : {salt[0], salt[1], counter}) {
+        preimage.push_back('\0');
+        preimage += std::to_string(word);
+    }
+    return "nid-" + runtime::sha256_hex(preimage).substr(0, 32);
+}
+
+} // namespace detail
+
+// A fresh authored ID hashes a per-graph salt with a counter, so two graphs
+// (for example two sessions editing copies of one document) never mint the
+// same ID for different nodes. The salt is drawn on first use, on the control
+// thread, under the mutation lock.
+std::string SignalGraph::mint_authored_id_locked_() {
+    if (!authored_id_seeded_) {
+        const auto address = reinterpret_cast<std::uintptr_t>(this);
+        detail::AuthoredIdSalt salt{};
+#if defined(__EMSCRIPTEN__)
+        // std::random_device reads crypto.getRandomValues, which an
+        // AudioWorklet global scope lacks; the JavaScript ReferenceError it
+        // throws is not a C++ exception and would escape the catch below.
+        salt = detail::authored_id_salt_without_entropy(address, diagnostic_graph_identity_);
+#else
+        try {
+            std::random_device device;
+            for (auto& word : salt)
+                word = (static_cast<std::uint64_t>(device()) << 32) ^ device();
+        } catch (...) {
+            salt = detail::authored_id_salt_without_entropy(address, diagnostic_graph_identity_);
+        }
+#endif
+        authored_id_salt_[0] = salt[0];
+        authored_id_salt_[1] = salt[1];
+        authored_id_seeded_ = true;
+    }
+    return detail::authored_id_from_salt({authored_id_salt_[0], authored_id_salt_[1]},
+                                         ++authored_id_counter_);
+}
+
+void SignalGraph::push_node_locked_(GraphNode&& node) {
+    if (node.authored_id.empty())
+        node.authored_id = AuthoredNodeId(mint_authored_id_locked_());
+    nodes_.push_back(std::move(node));
+}
+
+bool SignalGraph::rename_node(NodeId id, const std::string& name) {
+    GraphMutationLock mutation_lock(*this);
+    if (name.empty() || refuse_spectral_mutation_())
+        return false;
+    auto* node = node_mut_locked_(id);
+    if (!node)
+        return false;
+    // The name is authoring metadata: the live snapshot keeps playing, and an
+    // outstanding PreparedTopologyEdit (which copied the old name) goes stale.
+    node->name = name;
+    // A Processor node's plugin identity name is its node name: the
+    // serializer writes plugin_info.name and a restore rebuilds it from the
+    // node name, so the two stay equal or a reload changes the document.
+    if (processor_nodes_.contains(id))
+        node->plugin_info.name = name;
+    ++authoring_generation_;
+    return true;
 }
 
 bool SignalGraph::remove_node(NodeId id) {

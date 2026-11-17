@@ -13,22 +13,25 @@ item is decided and implemented; section 2 records the decisions.
 
 ### Current behavior (origin/main)
 
-- `GraphSerializer::to_json` returns an empty string for any graph that holds a
-  spectral node (`core/host/src/graph_serializer.cpp`, the `spectral_identity`
-  check at the top of `to_json`).
-  The A3 replay branch (`graph/a3-spectral-persist-20261115`, not yet on main)
-  instead saves a bounded format-6 subset: Audio boundaries, the two-asset
-  morph with embedded canonical asset bytes, identity/mask stages and
-  synthesis. It does not persist analysis nodes. Accepting it answers the
-  embedded-versus-sidecar and format-version questions below.
-- The strict JSON loader refuses `spectral*` node types and `spectral` edges;
-  notation formatting refuses spectral nodes and frame edges
-  (`core/host/src/graph_patch.cpp`). The bake path refuses with "spectral graph
+- `GraphSerializer::to_json` saves a bounded format-6 subset for a graph that
+  holds spectral nodes (`core/host/src/spectral_graph_persistence.cpp`): Audio
+  boundaries, the two-asset morph with embedded canonical asset bytes,
+  identity/mask stages and synthesis. It does not persist analysis nodes, and
+  it returns an empty string for a spectral graph outside that subset or one
+  the reader cannot prepare. This settled the embedded-versus-sidecar and
+  format-version questions below: assets are embedded and spectral graphs are
+  written at format 6. See `docs/guides/spectral-asset-replay.md`.
+- The strict JSON loader refuses `spectral*` node types and `spectral` edges.
+  Notation `# flow 2` now spells analysis, identity stage, synthesis and
+  boundary channel counts with an explicit sample rate, and refuses masks and
+  assets (see [D6a-flow2-notation.md](D6a-flow2-notation.md)); flow 1 still
+  refuses spectral keys. The bake path refuses with "spectral graph
   persistence is not admitted" (`core/host/src/baked_graph_processor.cpp`).
-- Notation has no constructor-argument syntax. A declaration is
+- Flow 1 has no constructor-argument syntax. A declaration is
   `name : type [@ version]`; values are set afterwards as `node.param = value`
   against a parameter catalog. A spectral node's identity (FFT size, hop,
-  channels, sample rate) is a construction argument, not a parameter.
+  channels, sample rate) is a construction argument, not a parameter; flow 2
+  adds the argument list for it.
 
 ### What a node needs to round-trip
 
@@ -78,10 +81,8 @@ against `core/host/src/graph_patch.cpp` on origin/main, these gaps remain:
 - `SignalGraphPreparedTopologyEdit` offers analysis, stage and synthesis but no
   asset-morph constructor, so the catalog's asset-morph row has no
   prepared-edit counterpart.
-- Notation boundaries are stereo only: formatting refuses an input or output
-  boundary that is not two channels, and the default catalog builds both with
-  `add_input_node(2)` / `add_output_node(2)`. There is no mono or bus-layout
-  boundary spelling.
+- Flow 1 boundaries are stereo only. Flow 2 spells `channels C` from 1 to 16;
+  there is still no bus-layout boundary spelling.
 - Notation has no subgraph-template syntax.
 - Persistence of every spectral node is the owner decision in this section.
 
@@ -123,8 +124,10 @@ them.
 5. **Hops that do not divide N:** refused. The rule names the refusal
    (`hop_does_not_divide_fft_size`, "hop does not divide the fft size") and the
    public call returns `UnsupportedOperation`.
-6. **Persistence:** still refused. `GraphSerializer::to_json` returns an empty
-   string for a graph holding the source at any geometry.
+6. **Persistence:** a complete graph holding the source (source, synthesis and
+   output) saves through the format-6 spectral subset. A graph the reader
+   cannot prepare, such as the source alone, is still not saveable, and
+   `GraphSerializer::to_json` returns an empty string for it.
 
 ### Current behavior on this branch
 
@@ -178,7 +181,8 @@ probe and asserts zero allocations.
 - Refuses non-dividing hops (256/100, 512/96 stereo, 1024/3) by name, with a
   dividing hop at the same size as the control; refuses geometry the codec
   cannot carry; refuses channel, hop and frame-count mismatches with
-  `IdentityMismatch`; and checks that persistence stays refused.
+  `IdentityMismatch`; and checks that an incomplete graph holding the source
+  is not saveable.
 - Bounds retained assets at N=4096/H=2048 with 8 channels: two streams of 240
   frames fit the 64 MiB bank and two of 260 are refused with
   `CapacityExceeded`.
@@ -192,10 +196,13 @@ geometry carries its own status and that every status has a distinct reason.
 - The catalog's asset-morph row is built at the probe identity (FFT 256, hop
   64, mono) and does not state the admitted range.
 - `SignalGraphPreparedTopologyEdit` has no asset-morph constructor.
-- A dedicated single-stream source (choice 1a) and an input-free clock are not
-  built; reopen them if a consumer needs an exact pass-through source.
-- Non-dividing hops need the analysis-grid frame count
-  `floor((L - 1) / H) + floor((N - 1) / H) + 1`, a `ceil(N / H)` drain and a
-  cutoff proven against the synthesis engine before they can be admitted.
+- The dedicated single-stream source and its input-free clock are built:
+  `SignalGraph::add_spectral_asset_source_v1` (see `S6-codec-source.md`).
+  Choice 1(b), passing one stream twice to the morph, is no longer needed for
+  a plain source.
+- Non-dividing hops are admitted for the single-stream source through the
+  versioned finite-stream policy `analysis_grid_v2` (see `S6-codec-source.md`).
+  The morph keeps `dividing_hop_v1` because its per-hop control average lines
+  up with each frame's window end only when H divides N.
 - Paced realtime qualification at large geometry is not measured: a frame at
   N=16384 with 16 channels morphs about 131k bins in one callback.

@@ -9,6 +9,149 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11510"></a>
+## [1.151.0] - 2026-11-17
+
+- release/version bump ([#12478](https://github.com/Generous-Corp/pulp/pull/12478))
+- graph/au2 timing 20261116 ([#12466](https://github.com/Generous-Corp/pulp/pull/12466))
+- graph/fix wam crypto 20261117 ([#12474](https://github.com/Generous-Corp/pulp/pull/12474))
+- graph/fix p4 gpu 20261117 ([#12477](https://github.com/Generous-Corp/pulp/pull/12477))
+- graph/s1 persist 20261116 ([#12472](https://github.com/Generous-Corp/pulp/pull/12472))
+- graph/d6a flow2 20261116 ([#12470](https://github.com/Generous-Corp/pulp/pull/12470))
+- release/version bump ([#12471](https://github.com/Generous-Corp/pulp/pull/12471))
+- graph/small bundle 20261116 ([#12469](https://github.com/Generous-Corp/pulp/pull/12469))
+- graph/s4 reset 20261116 ([#12468](https://github.com/Generous-Corp/pulp/pull/12468))
+- vellum platform closure export ([#12463](https://github.com/Generous-Corp/pulp/pull/12463))
+
+<a id="v11500"></a>
+## [1.150.0] - 2026-11-17
+
+- release/version bump ([#12465](https://github.com/Generous-Corp/pulp/pull/12465))
+- graph/d1 v7 identity 20261116 ([#12444](https://github.com/Generous-Corp/pulp/pull/12444))
+
+<a id="v11490"></a>
+## [1.149.0] - 2026-11-17
+
+- release/version bump ([#12460](https://github.com/Generous-Corp/pulp/pull/12460))
+- graph/d4 timing 20261116 ([#12451](https://github.com/Generous-Corp/pulp/pull/12451))
+- graph/s3 probes 20261116 ([#12452](https://github.com/Generous-Corp/pulp/pull/12452))
+- feat/vellum closure web split ([#12456](https://github.com/Generous-Corp/pulp/pull/12456))
+- graph/d8 windows worker 20261116 ([#12447](https://github.com/Generous-Corp/pulp/pull/12447))
+- fix/linux popup keyboard cursors 20261116 ([#12443](https://github.com/Generous-Corp/pulp/pull/12443))
+- graph/d3 scalar 20261116 ([#12445](https://github.com/Generous-Corp/pulp/pull/12445))
+
+<a id="v11480"></a>
+## [1.148.0] - 2026-11-17
+
+- release/version bump ([#12455](https://github.com/Generous-Corp/pulp/pull/12455))
+- graph/d7 wake 20261116 ([#12446](https://github.com/Generous-Corp/pulp/pull/12446))
+- graph/s6 source 20261116 ([#12453](https://github.com/Generous-Corp/pulp/pull/12453))
+
+<a id="v11472"></a>
+## [1.147.2] - 2026-11-17
+
+- release/version bump ([#12450](https://github.com/Generous-Corp/pulp/pull/12450))
+- fix/linux editor input recovery 20261116 ([#12441](https://github.com/Generous-Corp/pulp/pull/12441))
+
+<a id="v11471"></a>
+## [1.147.1] - 2026-11-16
+
+- release/version bump ([#12442](https://github.com/Generous-Corp/pulp/pull/12442))
+
+<a id="v11470"></a>
+## [1.147.0] - 2026-11-16
+
+- release/version bump ([#12439](https://github.com/Generous-Corp/pulp/pull/12439))
+- feature/rmlui native ci lane ([#12424](https://github.com/Generous-Corp/pulp/pull/12424))
+- feature/native surface format host tests ([#12376](https://github.com/Generous-Corp/pulp/pull/12376))
+- feature/rmlui hide trim ([#12401](https://github.com/Generous-Corp/pulp/pull/12401))
+- fix/sanitizer lanes consumer disk ([#12432](https://github.com/Generous-Corp/pulp/pull/12432))
+- release/version bump ([#12435](https://github.com/Generous-Corp/pulp/pull/12435))
+- feature/auv3 contract editor ([#12370](https://github.com/Generous-Corp/pulp/pull/12370))
+- graph/final fixes 20261116 ([#12431](https://github.com/Generous-Corp/pulp/pull/12431))
+- graph/swarm identity strict 20261116 ([#12428](https://github.com/Generous-Corp/pulp/pull/12428))
+- feature/rmlui key offer focus ([#12373](https://github.com/Generous-Corp/pulp/pull/12373))
+
+<a id="v11450"></a>
+## [1.145.0] - 2026-11-16
+
+- release/version bump ([#12430](https://github.com/Generous-Corp/pulp/pull/12430))
+- fix/au v2 contract resize transaction ([#12383](https://github.com/Generous-Corp/pulp/pull/12383))
+
+<a id="v11440"></a>
+## [1.144.0] - 2026-11-16
+
+- release/version bump ([#12425](https://github.com/Generous-Corp/pulp/pull/12425))
+- graph/ffix identity cli 20261115 ([#12374](https://github.com/Generous-Corp/pulp/pull/12374))
+- feature/rmlui density ratio loud ([#12378](https://github.com/Generous-Corp/pulp/pull/12378))
+- feature/cutover trial edits ([#12399](https://github.com/Generous-Corp/pulp/pull/12399))
+- graph/paced selftest flake 20261116 ([#12422](https://github.com/Generous-Corp/pulp/pull/12422))
+- fix/san script inputs selftest timeout ([#12411](https://github.com/Generous-Corp/pulp/pull/12411))
+- fix/contract editor size hints ([#12385](https://github.com/Generous-Corp/pulp/pull/12385))
+
+<a id="v11430"></a>
+## [1.143.0] - 2026-11-16
+
+- release/version bump ([#12421](https://github.com/Generous-Corp/pulp/pull/12421))
+- fix/rmlui queued input redraw ([#12397](https://github.com/Generous-Corp/pulp/pull/12397))
+- fix/san paced timing split ([#12412](https://github.com/Generous-Corp/pulp/pull/12412))
+- graph/rereview main 20261116 ([#12415](https://github.com/Generous-Corp/pulp/pull/12415))
+- graph/swarm windows worker 20261116 ([#12410](https://github.com/Generous-Corp/pulp/pull/12410))
+- fix/san graph file reload consumer flags ([#12407](https://github.com/Generous-Corp/pulp/pull/12407))
+- fix/san seek production test race ([#12418](https://github.com/Generous-Corp/pulp/pull/12418))
+
+<a id="v11420"></a>
+## [1.142.0] - 2026-11-16
+
+- release/version bump ([#12419](https://github.com/Generous-Corp/pulp/pull/12419))
+- graph/swarm midi mailbox 20261116 ([#12408](https://github.com/Generous-Corp/pulp/pull/12408))
+- fix/san host scale alloc probe ([#12409](https://github.com/Generous-Corp/pulp/pull/12409))
+- fix/required check machinery review verdict ([#12400](https://github.com/Generous-Corp/pulp/pull/12400))
+
+<a id="v11412"></a>
+## [1.141.2] - 2026-11-16
+
+- release/version bump ([#12406](https://github.com/Generous-Corp/pulp/pull/12406))
+- feature/rmlui warm followups ([#12398](https://github.com/Generous-Corp/pulp/pull/12398))
+- ci/review verdict pr producer ([#12395](https://github.com/Generous-Corp/pulp/pull/12395))
+
+<a id="v11411"></a>
+## [1.141.1] - 2026-11-16
+
+- release/version bump ([#12394](https://github.com/Generous-Corp/pulp/pull/12394))
+- fix/web spectral persistence ([#12384](https://github.com/Generous-Corp/pulp/pull/12384))
+
+<a id="v11410"></a>
+## [1.141.0] - 2026-11-16
+
+- release/version bump ([#12392](https://github.com/Generous-Corp/pulp/pull/12392))
+- ci/ruleset mirror live ([#12391](https://github.com/Generous-Corp/pulp/pull/12391))
+- fix/rmlui warm first frame ([#12386](https://github.com/Generous-Corp/pulp/pull/12386))
+- graph/p4 two consumer 20261115 ([#12335](https://github.com/Generous-Corp/pulp/pull/12335))
+- release/version bump ([#12387](https://github.com/Generous-Corp/pulp/pull/12387))
+- graph/ffix control events 20261115 ([#12382](https://github.com/Generous-Corp/pulp/pull/12382))
+- graph/ffix spectral buses 20261115 ([#12381](https://github.com/Generous-Corp/pulp/pull/12381))
+- graph/ffix probes worker 20261115 ([#12379](https://github.com/Generous-Corp/pulp/pull/12379))
+- fix/pr dispatch allowlist ([#12375](https://github.com/Generous-Corp/pulp/pull/12375))
+- docs/contract editor skills sync ([#12377](https://github.com/Generous-Corp/pulp/pull/12377))
+- feature/rmlui narrow render lock ([#12372](https://github.com/Generous-Corp/pulp/pull/12372))
+
+<a id="v11392"></a>
+## [1.139.2] - 2026-11-15
+
+- release/version bump ([#12369](https://github.com/Generous-Corp/pulp/pull/12369))
+- infra/merge friendly registries ([#12349](https://github.com/Generous-Corp/pulp/pull/12349))
+- fix/graphite intel msaa1 ([#12358](https://github.com/Generous-Corp/pulp/pull/12358))
+- fix/a2t history repin 20261115 ([#12355](https://github.com/Generous-Corp/pulp/pull/12355))
+- codex/release platform naming 20261115 ([#12353](https://github.com/Generous-Corp/pulp/pull/12353))
+
+<a id="v11391"></a>
+## [1.139.1] - 2026-11-15
+
+- release/version bump ([#12351](https://github.com/Generous-Corp/pulp/pull/12351))
+- graph/a3 spectral persist 20261115 ([#12338](https://github.com/Generous-Corp/pulp/pull/12338))
+- fix/coremidi input close drain ([#12331](https://github.com/Generous-Corp/pulp/pull/12331))
+
 <a id="v11390"></a>
 ## [1.139.0] - 2026-11-15
 
@@ -13080,6 +13223,22 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.151.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.151.0
+[1.150.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.150.0
+[1.149.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.149.0
+[1.148.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.148.0
+[1.147.2]: https://github.com/Generous-Corp/pulp/releases/tag/v1.147.2
+[1.147.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.147.1
+[1.147.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.147.0
+[1.145.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.145.0
+[1.144.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.144.0
+[1.143.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.143.0
+[1.142.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.142.0
+[1.141.2]: https://github.com/Generous-Corp/pulp/releases/tag/v1.141.2
+[1.141.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.141.1
+[1.141.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.141.0
+[1.139.2]: https://github.com/Generous-Corp/pulp/releases/tag/v1.139.2
+[1.139.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.139.1
 [1.139.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.139.0
 [1.138.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.138.0
 [1.137.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.137.0

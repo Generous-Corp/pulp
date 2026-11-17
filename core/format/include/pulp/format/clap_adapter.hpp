@@ -347,6 +347,16 @@ struct PulpClapPlugin {
     // exposes reset as a one-block ProcessContext signal rather than a virtual
     // callback, so carry that request to exactly the next process block.
     bool reset_requested = false;
+    // Set by clap_activate() and clap_reset(): the next block the Processor
+    // observes does not follow the last one it saw, so its
+    // `ProcessContext::timing.discontinuity` is raised. Cleared only once a
+    // block has actually reached Processor::process().
+    bool timing_discontinuity_pending = false;
+    // Set when a block skipped the Processor (bypass or state-restore
+    // contention) or rendered only the prepared prefix of a longer host block.
+    // A host without `steady_time` gives the next observed block no way to
+    // measure the skip, so that block is marked discontinuous.
+    bool timing_block_skipped = false;
     // A bypassed or render-contended block may contain an unreplayable note
     // lifecycle event. Reconcile adapter and processor ownership together on
     // the next block that actually reaches Processor::process().

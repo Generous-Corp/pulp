@@ -207,10 +207,19 @@ tresult PLUGIN_API ContractPlugView::onSize(ViewRect* newSize) {
         return kInvalidArgument;
     if (!session_ || newSize->getWidth() <= 0 || newSize->getHeight() <= 0)
         return kResultFalse;
-    if (!session_->set_size(static_cast<std::uint32_t>(newSize->getWidth()),
-                            static_cast<std::uint32_t>(newSize->getHeight())))
+    // A host that lets the user drag its window frame may call onSize without
+    // asking checkSizeConstraint. The editor still gets a size inside its
+    // limits and aspect; once the host's sizes settle the session asks the
+    // host for that size back (resizeView), so the window does not keep a
+    // margin the editor never paints.
+    auto width = static_cast<std::uint32_t>(newSize->getWidth());
+    auto height = static_cast<std::uint32_t>(newSize->getHeight());
+    bool snapped = false;
+    if (!session_->set_host_size(width, height, snapped))
         return kResultFalse;
-    return CPluginView::onSize(newSize);
+    ViewRect applied(0, 0, static_cast<int32>(width), static_cast<int32>(height));
+    const auto result = CPluginView::onSize(&applied);
+    return result;
 }
 
 tresult PLUGIN_API ContractPlugView::setContentScaleFactor(ScaleFactor factor) {

@@ -3,6 +3,8 @@
 #include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <limits>
+#include <memory>
+#include <pulp/format/process_context.hpp>
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 #include <pulp/host/signal_graph_runtime.hpp>
 #include <pulp/host/trigger_graph.hpp>
@@ -131,7 +133,7 @@ TriggerCounters counters(SignalGraph& g) {
 } // namespace
 
 TEST_CASE("Graph-authored Custom callbacks receive ordered writer and reader handles",
-          "[g5][events][wiring]") {
+          "[events][wiring]") {
     SignalGraph graph;
     const auto input = graph.add_input_node(1);
     const auto output = graph.add_output_node(1);
@@ -181,8 +183,68 @@ TEST_CASE("Graph-authored Custom callbacks receive ordered writer and reader han
     REQUIRE(destination[0] == 77.0f);
 }
 
+TEST_CASE("A seek on a graph-authored event graph restarts stateful Control nodes",
+          "[events][wiring][negative-control]") {
+    // The event-lane seek path opens a new epoch the same way the Control
+    // index path does, so a stateful Control node in the graph restarts too.
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1);
+    const auto output = graph.add_output_node(1);
+    CustomNodeType events;
+    events.type_id = "test.event-seek.pass";
+    events.num_input_ports = events.num_output_ports = 1;
+    events.process_events = [](auto& out, const auto& in, int frames, const CustomNodeEventBlock&) {
+        std::copy_n(in.channel_ptr(0), frames, out.channel_ptr(0));
+    };
+    auto resets = std::make_shared<int>(0);
+    CustomNodeType control;
+    control.type_id = "test.event-seek.control";
+    control.num_input_ports = 0;
+    control.num_output_ports = 1;
+    control.output_ports = {{"value", PortKind::Control}};
+    control.create = []() -> void* { return new int(0); };
+    control.destroy = [](void* instance) { delete static_cast<int*>(instance); };
+    control.reset = [resets](void*) { ++*resets; };
+    control.process_instance = [](void*, pulp::audio::BufferView<float>& out,
+                                  const pulp::audio::BufferView<const float>&,
+                                  int frames) { std::fill_n(out.channel_ptr(0), frames, 0.0f); };
+    control.rt_contract.declared = true;
+    control.rt_contract.safety_class = pulp::audio::RtSafetyClass::AudioCallbackSafeAfterPrepare;
+    REQUIRE(graph.register_custom_node_type(events));
+    REQUIRE(graph.register_custom_node_type(control));
+    const auto producer = graph.add_custom_node(events.type_id);
+    const auto consumer = graph.add_custom_node(events.type_id);
+    REQUIRE(graph.add_custom_node(control.type_id) != 0);
+    REQUIRE(graph.connect(input, 0, producer, 0));
+    REQUIRE(graph.connect(producer, 0, consumer, 0));
+    REQUIRE(graph.connect(consumer, 0, output, 0));
+    REQUIRE(graph.connect_graph_event({producer, consumer}) == GraphEventBindingResult::Accepted);
+    REQUIRE(graph.prepare(48000.0, 4));
+
+    std::array<float, 4> source{1.0f, 2.0f, 3.0f, 4.0f};
+    std::array<float, 4> destination{};
+    const float* source_ptr = source.data();
+    float* destination_ptr = destination.data();
+    pulp::audio::BufferView<const float> in(&source_ptr, 1, source.size());
+    pulp::audio::BufferView<float> out(&destination_ptr, 1, destination.size());
+    graph.process(out, in, 4);
+    REQUIRE(destination == source);
+    const int before = *resets;
+    // An ordinary block continues the stream.
+    graph.process(out, in, 4);
+    CHECK(*resets == before);
+
+    pulp::format::ProcessContext seek;
+    seek.reset_requested = true;
+    seek.position_samples = 0;
+    destination.fill(0.0f);
+    graph.process(out, in, 4, seek);
+    REQUIRE(destination == source);
+    CHECK(*resets == before + 1);
+}
+
 TEST_CASE("Graph-authored event edge clears when its feed-forward path is disconnected",
-          "[g5][events][wiring][negative-control]") {
+          "[events][wiring][negative-control]") {
     SignalGraph graph;
     CustomNodeType type;
     type.type_id = "test.g5.graph-event-disconnect";
@@ -212,7 +274,7 @@ TEST_CASE("Graph-authored event edge clears when its feed-forward path is discon
 }
 
 TEST_CASE("Graph-authored event admission refuses unsupported roles and fanout",
-          "[g5][events][wiring][negative-control]") {
+          "[events][wiring][negative-control]") {
     SignalGraph graph;
     const auto input = graph.add_input_node(1);
     const auto output = graph.add_output_node(1);
@@ -234,7 +296,7 @@ TEST_CASE("Graph-authored event admission refuses unsupported roles and fanout",
 }
 
 TEST_CASE("Graph-authored event admission requires a connected forward path",
-          "[g5][events][wiring][negative-control]") {
+          "[events][wiring][negative-control]") {
     auto make_type = [] {
         CustomNodeType type;
         type.type_id = "test.g5.graph-event-path";
@@ -323,7 +385,7 @@ TEST_CASE("Typed trigger pair preserves sample and tie order across partitions",
 }
 
 TEST_CASE("Host ingress binds to the checked trigger epoch and block cursor",
-          "[trigger][g5][host-ingress]") {
+          "[trigger][host-ingress]") {
     Fixture fixture{2, 32, true};
     Block block;
     HostEventRecord event;
@@ -373,8 +435,41 @@ TEST_CASE("Host ingress binds to the checked trigger epoch and block cursor",
     CHECK(fixture.graph.host_event_trace().empty());
 }
 
+TEST_CASE("Host ingress delivers events in the epoch a typed reset opens",
+          "[trigger][host-ingress][negative-control]") {
+    // try_reset_events() is the only way to advance the controller epoch, so a
+    // host seek or loop must be able to open and project a host-event block in
+    // the new epoch. A generation still bound to the install epoch refuses the
+    // projection as StaleGeneration and never delivers the note.
+    Fixture fixture{2, 32, true};
+    Block block;
+    REQUIRE(fixture.graph.try_reset_events() == TriggerGraphResult::Accepted);
+    const auto reset = counters(fixture.graph);
+    REQUIRE(reset.epoch == 2);
+
+    HostEventRecord event;
+    event.epoch = reset.epoch;
+    event.absolute_sample = reset.cursor + 3;
+    event.producer_sequence = 1;
+    event.producer = fixture.producer;
+    event.midi = pulp::midi::MidiEvent::note_on(1, 64, 90);
+    REQUIRE(fixture.graph.begin_host_event_block(reset.epoch, reset.cursor, 4) ==
+            HostEventResult::Accepted);
+    REQUIRE(fixture.graph.publish_host_event(event) == HostEventResult::Accepted);
+    REQUIRE(fixture.graph.process_checked(block.out, block.in, 4) == TriggerGraphResult::Accepted);
+    CHECK(counters(fixture.graph).cursor == reset.cursor + 4);
+
+    pulp::midi::MidiBuffer delivered;
+    delivered.reserve(4);
+    delivered.set_realtime_capacity_limit(true);
+    REQUIRE(fixture.graph.extract_midi(fixture.midi_out, delivered));
+    REQUIRE(delivered.size() == 1);
+    CHECK(delivered[0].sample_offset == 3);
+    CHECK(delivered[0].is_note_on());
+}
+
 TEST_CASE("Host ingress refuses a block whose frames differ from the ingress window",
-          "[trigger][g5][host-ingress][negative-control]") {
+          "[trigger][host-ingress][negative-control]") {
     // The ingress window is fixed by begin_host_event_block(). Processing a
     // shorter block must not project records past that block's end: they would
     // carry sample_offset >= frames and be delivered early while the cursor
@@ -418,7 +513,7 @@ TEST_CASE("Host ingress refuses a block whose frames differ from the ingress win
 }
 
 TEST_CASE("Host ingress projection refusal seals the active block",
-          "[trigger][g5][host-ingress][negative-control]") {
+          "[trigger][host-ingress][negative-control]") {
     // This generation deliberately has no admitted MidiInput destination. A
     // published host block must refuse as Unbound, then seal the ingress so a
     // later block is not wedged behind Busy.
@@ -447,7 +542,7 @@ TEST_CASE("Host ingress projection refusal seals the active block",
 }
 
 TEST_CASE("Host ingress preflights MPE fanout and retries without tracker mutation",
-          "[trigger][g5][host-ingress][mpe][negative-control]") {
+          "[trigger][host-ingress][mpe][negative-control]") {
     Fixture fixture{2, 8, true};
     Block block;
     auto& tracker = Access::host_projection_tracker(fixture.graph);
@@ -527,6 +622,34 @@ TEST_CASE("Typed render preflight preserves output and clock", "[trigger]") {
     CHECK(std::all_of(block.output.begin(), block.output.end(), [](float v) { return v == 91; }));
     CHECK(counters(fixture.graph).cursor == 0);
     CHECK(counters(fixture.graph).sequence == 0);
+}
+
+TEST_CASE("Unchecked typed process silences a refused block", "[trigger][negative-control]") {
+    // process() discards the typed result, so a refusal must not leave the
+    // host's previous buffer contents in place to be played again.
+    Fixture fixture;
+    Block block;
+    pulp::format::ProcessContext seek;
+    seek.reset_requested = true;
+    block.output.fill(91);
+    fixture.graph.process(block.out, block.in, 4, seek);
+    CHECK(std::all_of(block.output.begin(), block.output.begin() + 4,
+                      [](float v) { return v == 0.0f; }));
+    CHECK(block.output[4] == 91);
+    CHECK(counters(fixture.graph).cursor == 0);
+
+    block.output.fill(91);
+    fixture.graph.set_canonical_executor_routing_enabled(false);
+    fixture.graph.process(block.out, block.in, 4);
+    CHECK(std::all_of(block.output.begin(), block.output.begin() + 4,
+                      [](float v) { return v == 0.0f; }));
+    fixture.graph.set_canonical_executor_routing_enabled(true);
+
+    // The checked entry still reports the refusal and leaves output untouched.
+    block.output.fill(91);
+    fixture.graph.set_canonical_executor_routing_enabled(false);
+    CHECK(fixture.graph.process_checked(block.out, block.in, 4) == TriggerGraphResult::Mode);
+    CHECK(block.output[0] == 91);
 }
 
 TEST_CASE("Typed emission attempts and overflow have distinct budgets", "[trigger]") {

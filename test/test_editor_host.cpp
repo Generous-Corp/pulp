@@ -10,6 +10,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/format/contract_editor_session.hpp>
+#include <pulp/format/detail/au_v2_resize_accept.hpp>
+#include <pulp/format/detail/editor_size_constraint.hpp>
 #include <pulp/format/editor_host.hpp>
 #include <pulp/format/editor_package.hpp>
 #include <pulp/format/host_parameter_edit.hpp>
@@ -759,6 +761,92 @@ TEST_CASE("a contract session whose owner is gone draws no more frames", "[edito
     session->close_for_owner();
 }
 
+TEST_CASE("a hidden contract session's tick does nothing and showing it ticks at once",
+          "[editor-host]") {
+    Fixture f;
+    GainProcessor processor;
+    int idles = 0;
+    TickingFactory factory(idles);
+    auto session = ContractEditorSession::create(processor, f.store, factory, {},
+                                                 ContractEditorSession::IdleSource::host_driven);
+    REQUIRE(session);
+    int parent = 0;
+    REQUIRE(session->attach({NativeParentKind::cocoa_view, &parent, 0}));
+    session->tick();
+    REQUIRE(idles == 1);
+
+    // A host timer that keeps firing while the editor is hidden does not idle
+    // the editor.
+    session->visibility_changed(false);
+    session->tick();
+    session->tick();
+    REQUIRE(idles == 1);
+    // Hiding twice is no change.
+    session->visibility_changed(false);
+    REQUIRE(idles == 1);
+
+    // Showing ticks once at once, before the host's next timer.
+    session->visibility_changed(true);
+    REQUIRE(idles == 2);
+    session->tick();
+    REQUIRE(idles == 3);
+    // Showing twice is no change.
+    session->visibility_changed(true);
+    REQUIRE(idles == 3);
+    session->close_for_owner();
+}
+
+TEST_CASE("a session hidden, detached and attached again ticks its editor", "[editor-host]") {
+    Fixture f;
+    GainProcessor processor;
+    int idles = 0;
+    TickingFactory factory(idles);
+    auto session = ContractEditorSession::create(processor, f.store, factory, {},
+                                                 ContractEditorSession::IdleSource::host_driven);
+    REQUIRE(session);
+    int parent = 0;
+    REQUIRE(session->attach({NativeParentKind::cocoa_view, &parent, 0}));
+    session->visibility_changed(false);
+    session->tick();
+    REQUIRE(idles == 0);
+    // The hidden state belongs to the attach that was hidden.
+    session->detach();
+    REQUIRE(session->attach({NativeParentKind::cocoa_view, &parent, 0}));
+    session->tick();
+    REQUIRE(idles == 1);
+    session->close_for_owner();
+}
+
+TEST_CASE("a hidden contract session keeps draining the audio-thread change queue",
+          "[editor-host]") {
+    Fixture f;
+    GainProcessor processor;
+    int idles = 0;
+    TickingFactory factory(idles);
+    auto session = ContractEditorSession::create(processor, f.store, factory, {},
+                                                 ContractEditorSession::IdleSource::host_driven);
+    REQUIRE(session);
+    int parent = 0;
+    REQUIRE(session->attach({NativeParentKind::cocoa_view, &parent, 0}));
+    auto token = f.store.add_listener([](ParamID, float) {}, pulp::state::ListenerThread::Main);
+    const auto capacity = f.store.rt_listener_queue_telemetry().capacity;
+    REQUIRE(capacity > 0);
+
+    session->visibility_changed(false);
+    // The audio thread keeps writing while the editor is hidden; the host's
+    // timer keeps ticking. Several queues' worth must pass without overflow.
+    for (std::size_t round = 0; round < 6; ++round) {
+        for (std::size_t i = 0; i < capacity / 2; ++i)
+            f.store.set_value_rt(kGain, static_cast<float>(i % 100) * 0.01f);
+        session->tick();
+    }
+    REQUIRE(f.store.rt_listener_queue_telemetry().overflow_count == 0);
+    REQUIRE(idles == 0);
+    session->visibility_changed(true);
+    REQUIRE(idles == 1);
+    session->close_for_owner();
+}
+
 namespace {
 
 /// Subscribes to the context's ParamPort and records every notification.
@@ -1182,4 +1270,183 @@ TEST_CASE("an observation that outlives its host state is inert", "[editor-host]
     // Cancelling must not reach the destroyed state (ASan holds this).
     observation.reset();
     REQUIRE_FALSE(observation);
+}
+
+TEST_CASE("an AU v2 resize request is accepted only at the exact size the host followed",
+          "[editor-host][resize-request]") {
+    using pulp::format::detail::FrameSize;
+    using pulp::format::detail::resize_request_accepted;
+    const FrameSize wanted{720, 540};
+    const FrameSize other{700, 540};
+    // The frame took it and the editor agreed.
+    REQUIRE(resize_request_accepted(wanted, wanted, true, false, true, other));
+    // Within the half-point tolerance.
+    REQUIRE(resize_request_accepted(wanted, {720.3, 539.8}, true, false, false, other));
+    // The editor refused.
+    REQUIRE_FALSE(resize_request_accepted(wanted, wanted, false, false, true, wanted));
+    // The frame ended elsewhere.
+    REQUIRE_FALSE(resize_request_accepted(wanted, other, true, false, true, wanted));
+    // A host that resizes its container must have done so; one that does not
+    // is not asked to.
+    REQUIRE_FALSE(resize_request_accepted(wanted, wanted, true, true, true, other));
+    REQUIRE(resize_request_accepted(wanted, wanted, true, true, true, wanted));
+    REQUIRE(resize_request_accepted(wanted, wanted, true, true, false, other));
+    // The origin check is separate from the size check.
+    using pulp::format::detail::FramePoint;
+    using pulp::format::detail::same_frame_origin;
+    REQUIRE(same_frame_origin({0, 0}, {0.3, -0.2}));
+    REQUIRE_FALSE(same_frame_origin({0, 0}, {5, 0}));
+    REQUIRE_FALSE(same_frame_origin({0, 0}, {0, 5}));
+}
+
+// ── Size constraint arithmetic ───────────────────────────────────────────────
+
+namespace {
+pulp::format::ViewSize bounded_hints(double aspect) {
+    pulp::format::ViewSize h;
+    h.preferred_width = 400;
+    h.preferred_height = 300;
+    h.min_width = 200;
+    h.min_height = 150;
+    h.max_width = 800;
+    h.max_height = 600;
+    h.aspect_ratio = aspect;
+    return h;
+}
+} // namespace
+
+TEST_CASE("an editor is resizable only when it declares minimums with room to move",
+          "[editor-host][resize-hints]") {
+    using pulp::format::detail::editor_resizable;
+    pulp::format::ViewSize defaults;
+    REQUIRE_FALSE(editor_resizable(defaults));
+    auto bounded = bounded_hints(0.0);
+    REQUIRE(editor_resizable(bounded));
+    auto only_width = bounded;
+    only_width.min_height = 0;
+    REQUIRE_FALSE(editor_resizable(only_width));
+    auto pinned = bounded;
+    pinned.min_width = pinned.max_width = 400;
+    pinned.min_height = pinned.max_height = 300;
+    REQUIRE_FALSE(editor_resizable(pinned));
+    auto unbounded_max = bounded;
+    unbounded_max.max_width = unbounded_max.max_height = 0;
+    REQUIRE(editor_resizable(unbounded_max));
+}
+
+TEST_CASE("constrain_to_hints holds a locked aspect and the bounds together",
+          "[editor-host][resize-hints]") {
+    using pulp::format::detail::constrain_to_hints;
+    const auto locked = bounded_hints(4.0 / 3.0);
+    std::uint32_t w = 1000, h = 1000;
+    REQUIRE(constrain_to_hints(locked, w, h));
+    REQUIRE((w == 800 && h == 600));
+    w = 640;
+    h = 300;
+    REQUIRE(constrain_to_hints(locked, w, h));
+    REQUIRE((w == 400 && h == 300));
+    w = 480;
+    h = 900;
+    REQUIRE(constrain_to_hints(locked, w, h));
+    REQUIRE((w == 480 && h == 360));
+    w = 100;
+    h = 100;
+    REQUIRE(constrain_to_hints(locked, w, h));
+    REQUIRE((w == 200 && h == 150));
+    // A request already on the ratio and in bounds is untouched.
+    w = 640;
+    h = 480;
+    REQUIRE(constrain_to_hints(locked, w, h));
+    REQUIRE((w == 640 && h == 480));
+
+    // A tall ratio whose height bound is the tighter one.
+    auto tall = bounded_hints(0.5);
+    tall.min_width = 100;
+    tall.min_height = 200;
+    tall.max_width = 400;
+    tall.max_height = 600;
+    w = 900;
+    h = 900;
+    REQUIRE(constrain_to_hints(tall, w, h));
+    REQUIRE((w == 300 && h == 600));
+}
+
+TEST_CASE("constrain_to_hints clamps each axis alone without an aspect, and refuses a fixed editor",
+          "[editor-host][resize-hints]") {
+    using pulp::format::detail::constrain_to_hints;
+    const auto free_hints = bounded_hints(0.0);
+    std::uint32_t w = 1000, h = 100;
+    REQUIRE(constrain_to_hints(free_hints, w, h));
+    REQUIRE((w == 800 && h == 150));
+
+    // Control: the same request through a fixed-size editor reports nothing
+    // to constrain and leaves the arguments alone.
+    pulp::format::ViewSize defaults;
+    w = 1000;
+    h = 100;
+    REQUIRE_FALSE(constrain_to_hints(defaults, w, h));
+    REQUIRE((w == 1000 && h == 100));
+    w = 0;
+    h = 100;
+    REQUIRE_FALSE(constrain_to_hints(free_hints, w, h));
+}
+
+TEST_CASE("fit_size_to_area shrinks proportionally inside the hints and leaves fits alone",
+          "[editor-host][resize-hints]") {
+    using pulp::format::detail::fit_size_to_area;
+    const auto locked = bounded_hints(4.0 / 3.0);
+    std::uint32_t w = 800, h = 600;
+    fit_size_to_area(locked, w, h, 300, 222);
+    REQUIRE((w == 296 && h == 222));
+    // A size that fits is untouched.
+    w = 400;
+    h = 300;
+    fit_size_to_area(locked, w, h, 1000, 1000);
+    REQUIRE((w == 400 && h == 300));
+    // The editor's minimum wins over a tiny area.
+    w = 400;
+    h = 300;
+    fit_size_to_area(locked, w, h, 50, 50);
+    REQUIRE((w == 200 && h == 150));
+    // Control: a fixed-size editor is never shrunk.
+    pulp::format::ViewSize defaults;
+    w = 800;
+    h = 600;
+    fit_size_to_area(defaults, w, h, 300, 222);
+    REQUIRE((w == 800 && h == 600));
+}
+
+TEST_CASE("constrain_to_hints is stable: a second pass over its result changes nothing",
+          "[editor-host][resize-hints]") {
+    using pulp::format::detail::constrain_to_hints;
+    for (const double ratio : {1.0, 0.5, 4.0 / 3.0, 16.0 / 9.0, 2.39, 1.618}) {
+        auto hints = bounded_hints(ratio);
+        hints.min_width = 100;
+        hints.min_height = 100;
+        hints.max_width = 900;
+        hints.max_height = 700;
+        for (std::uint32_t w = 50; w <= 1100; w += 7) {
+            for (std::uint32_t h = 50; h <= 900; h += 11) {
+                std::uint32_t a = w, b = h;
+                REQUIRE(constrain_to_hints(hints, a, b));
+                REQUIRE(a >= hints.min_width);
+                REQUIRE(a <= hints.max_width);
+                REQUIRE(b >= hints.min_height);
+                REQUIRE(b <= hints.max_height);
+                std::uint32_t a2 = a, b2 = b;
+                REQUIRE(constrain_to_hints(hints, a2, b2));
+                REQUIRE((a2 == a && b2 == b));
+            }
+        }
+    }
+    // The case that jittered before: 16:9 with a 100x100 minimum.
+    auto wide = bounded_hints(16.0 / 9.0);
+    wide.min_width = 100;
+    wide.min_height = 100;
+    wide.max_width = wide.max_height = 0;
+    std::uint32_t w = 255, h = 143;
+    REQUIRE(constrain_to_hints(wide, w, h));
+    const auto first_w = w, first_h = h;
+    REQUIRE(constrain_to_hints(wide, w, h));
+    REQUIRE((w == first_w && h == first_h));
 }

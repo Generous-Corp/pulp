@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261116-s2-mcp-diff-20261116-watch",
+  "created_at": "2026-11-16T22:04:35Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "pulp_graph gains a read-only diff operation that delegates to the existing pulp-cpp graph diff over saved graph documents; it touches only MCP transport, tests and docs, and no design-import, Chromium, rendering or packaging authority moves.",
+  "tests": [
+    "python3 test/test_graph_patch_tools.py",
+    "ctest --test-dir build -R pulp-test-mcp-server",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

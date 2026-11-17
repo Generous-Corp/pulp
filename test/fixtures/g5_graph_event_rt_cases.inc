@@ -77,19 +77,22 @@ struct PacedObservation {
     std::size_t missed_deadlines = 0;
 };
 
+// Drives `callback(index, tick)` on the calling thread at the fixed-origin
+// schedule kept by the shared deadline driver, the same driver the paced
+// matrix cells use. Returns the wake settings the driver used.
 template <class Callback>
-void for_each_fixed_origin_callback(std::size_t block_frames, double sample_rate, std::size_t count,
-                                    Callback&& callback) {
-    using clock = std::chrono::steady_clock;
-    const auto period =
-        std::chrono::duration<double>(static_cast<double>(block_frames) / sample_rate);
-    const auto origin = clock::now() + std::chrono::milliseconds(10);
-    for (std::size_t i = 0; i < count; ++i) {
-        const auto target = origin + std::chrono::duration_cast<clock::duration>(period * i);
-        std::this_thread::sleep_until(target);
-        callback(i, target, clock::now());
-    }
+pulp::test::paced::WakeSettings
+for_each_fixed_origin_callback(std::size_t block_frames, std::uint64_t sample_rate,
+                               std::size_t count, const pulp::test::paced::WakeConfig& wake,
+                               Callback&& callback) {
+    pulp::test::paced::SystemWakePlatform platform;
+    pulp::test::paced::DeadlineDriver driver(platform, sample_rate, block_frames, wake);
+    driver.start();
+    for (std::size_t i = 0; i < count; ++i)
+        callback(i, driver.wait(i));
+    return driver.settings();
 }
+
 
 void escape_control() {
     // RT_ESCAPE_INJECTION: confirm_failure plants an actual callback escape here.
@@ -238,8 +241,10 @@ PacedObservation render_paced(std::size_t block_frames, bool routed) {
         const auto period =
             std::chrono::duration<double>(static_cast<double>(block_frames) / 48000.0);
         for_each_fixed_origin_callback(
-            block_frames, 48000.0, observation.callback_us.size(),
-            [&](std::size_t i, clock::time_point target, clock::time_point before) {
+            block_frames, 48000, observation.callback_us.size(), {},
+            [&](std::size_t i, const pulp::test::paced::DeadlineTick& tick) {
+                const auto target = pulp::test::paced::steady_at_ns(tick.target_ns);
+                const auto before = pulp::test::paced::steady_at_ns(tick.start_ns);
                 observation.wake_jitter_us[i] =
                     std::chrono::duration<double, std::micro>(before - target).count();
                 const float* source_ptr = source.data();
@@ -284,7 +289,7 @@ double p99(std::array<double, 128> values) {
 using namespace g5_rt_fixture;
 
 TEST_CASE("G5 graph event callbacks keep fixed storage across both serial backends",
-          "[host][graph][g5][events][rt]") {
+          "[host][graph][events][rt]") {
     std::array<Observation, 4> baseline{};
     constexpr std::array<std::size_t, 4> sizes{64, 128, 256, 4096};
     for (std::size_t index = 0; index < sizes.size(); ++index) {
@@ -325,7 +330,7 @@ TEST_CASE("G5 graph event callbacks keep fixed storage across both serial backen
 }
 
 TEST_CASE("G5 callback reset retires a queued graph event without allocating",
-          "[host][graph][g5][events][rt]") {
+          "[host][graph][events][rt]") {
     for (const bool routed : {false, true}) {
         for (const bool reset_requested : {false, true}) {
             struct ResetState {
@@ -408,7 +413,7 @@ TEST_CASE("G5 callback reset retires a queued graph event without allocating",
     }
 }
 
-TEST_CASE("G5 graph event callback paced measurement", "[.][host][graph][g5][events][rt][paced]") {
+TEST_CASE("G5 graph event callback paced measurement", "[.][host][graph][events][rt][paced]") {
     constexpr std::array<std::size_t, 4> sizes{64, 128, 256, 4096};
     for (const auto frames : sizes) {
         for (const bool routed : {false, true}) {
@@ -432,7 +437,7 @@ TEST_CASE("G5 graph event callback paced measurement", "[.][host][graph][g5][eve
 // Paced-timing matrix cell: the same producer/consumer graph-event chain under
 // a configurable fixed-origin callback count. Timing runs carry no scoped
 // resource probes; the oracle is the delivered payload on every block.
-TEST_CASE("G5 graph event paced matrix cell", "[.][host][graph][g5][events][paced-matrix]") {
+TEST_CASE("G5 graph event paced matrix cell", "[.][host][graph][events][paced-matrix]") {
     const auto config = pulp::test::paced::read_config("routed", 128);
     REQUIRE((config.variant == "direct" || config.variant == "routed"));
     REQUIRE(config.rate == 48000);
@@ -602,6 +607,10 @@ struct Observation {
     SignalGraph::PreparedStats prepared{};
     std::size_t first_new = kCallbacks;
     std::size_t missed_deadlines = 0;
+    // Wake records kept beside the rows so the row layout the activation
+    // receipt binds stays fixed.
+    std::vector<pulp::test::paced::DeadlineTick> wakes;
+    pulp::test::paced::WakeSettings wake;
 };
 
 bool exact_transition(const Observation& observation, std::size_t expected_first_new) {
@@ -669,7 +678,8 @@ Observation run(bool routed, double rate = kRate, std::size_t frames = kBlockFra
                 std::size_t callbacks = kCallbacks, bool probes = true,
                 std::string_view fault = {},
                 pulp::test::paced::SchedRequest sched = pulp::test::paced::SchedRequest::none,
-                pulp::test::paced::SchedReceipt* sched_out = nullptr) {
+                pulp::test::paced::SchedReceipt* sched_out = nullptr,
+                const pulp::test::paced::WakeConfig& wake = {}) {
     const auto control = analyzer_control();
     SignalGraph graph;
     const auto gain = prepare_gain_graph(graph, routed, rate, frames);
@@ -681,6 +691,8 @@ Observation run(bool routed, double rate = kRate, std::size_t frames = kBlockFra
     observation.frames = frames;
     observation.rows = std::vector<CallbackRow>(callbacks);
     observation.audio_bits.resize(callbacks * frames);
+    observation.wakes.resize(callbacks);
+    observation.wake.backend = wake.backend;
     observation.first_new = callbacks;
     observation.prepare_start_ns = ns(clock::now());
     REQUIRE(edit->prepare(rate, static_cast<int>(frames)) ==
@@ -700,9 +712,11 @@ Observation run(bool routed, double rate = kRate, std::size_t frames = kBlockFra
             sched_refused.store(true, std::memory_order_release);
             return;
         }
-        for_each_fixed_origin_callback(
-            frames, rate, callbacks,
-            [&](std::size_t i, clock::time_point target, clock::time_point before) {
+        observation.wake = for_each_fixed_origin_callback(
+            frames, static_cast<std::uint64_t>(rate), callbacks, wake,
+            [&](std::size_t i, const pulp::test::paced::DeadlineTick& tick) {
+                const auto target = pulp::test::paced::steady_at_ns(tick.target_ns);
+                const auto before = pulp::test::paced::steady_at_ns(tick.start_ns);
                 const float* source_ptr = source.data();
                 float* destination_ptr = destination.data();
                 pulp::audio::BufferView<const float> in(&source_ptr, 1, frames);
@@ -726,6 +740,7 @@ Observation run(bool routed, double rate = kRate, std::size_t frames = kBlockFra
                 row.end_ns = ns(after);
                 row.audio = classify(destination.data(), frames);
                 observation.rows[i] = row;
+                observation.wakes[i] = tick;
                 for (std::size_t f = 0; f < frames; ++f)
                     observation.audio_bits[i * frames + f] = std::bit_cast<std::uint32_t>(destination[f]);
                 completed.store(i + 1, std::memory_order_release);
@@ -820,9 +835,11 @@ TEST_CASE("G12 prepared gain activation has one exact audio transition under pac
                   << " first_new_sample=" << observed.rows[observed.first_new].first_sample
                   << " latency_samples=" << observed.latency_samples
                   << " prepared_buffer_bytes=" << observed.prepared.total_prepared_buffer_bytes
-                  << " harness_payload_bytes=" << observed.rows.capacity() * sizeof(CallbackRow) +
-                                             observed.audio_bits.capacity() * sizeof(std::uint32_t) +
-                                             2 * kBlockFrames * sizeof(float)
+                  << " harness_payload_bytes="
+                  << observed.rows.capacity() * sizeof(CallbackRow) +
+                         observed.audio_bits.capacity() * sizeof(std::uint32_t) +
+                         2 * kBlockFrames * sizeof(float) +
+                         observed.wakes.capacity() * sizeof(pulp::test::paced::DeadlineTick)
                   << " missed_deadlines=" << observed.missed_deadlines << '\n';
         for (const auto& row : observed.rows)
             std::cout << "G12 raw routed=" << routed << " index=" << row.index
@@ -951,16 +968,22 @@ TEST_CASE("G12 paced activation receipt cell", "[.][host][graph][g12][activation
         ? std::getenv("G12_ACTIVATION_FAULT") : "";
     REQUIRE((fault.empty() || fault == "omit_commit" || fault == "wrong_gain"));
     pulp::test::paced::SchedReceipt sched;
+    const auto wake = pulp::test::paced::read_wake_config();
+    // Injected lateness is a matrix-cell negative only; this row format binds
+    // the exact activation transition.
+    REQUIRE(wake.inject_late_us == 0);
     const auto observed = run(backend == "routed", static_cast<double>(rate), frames,
                               callbacks, false, fault, pulp::test::paced::read_sched_request(),
-                              &sched);
+                              &sched, wake);
     pulp::test::paced::print_sched(sched);
+    pulp::test::paced::print_wake(observed.wake);
     if (sched.refused())
         FAIL("callback-thread scheduling request refused: " << sched.reason);
     const auto& p = observed.prepared;
     const auto row_bytes = observed.rows.capacity() * sizeof(CallbackRow);
     const auto audio_bytes = observed.audio_bits.capacity() * sizeof(std::uint32_t);
     const auto io_bytes = 2 * frames * sizeof(float);
+    const auto wake_bytes = observed.wakes.capacity() * sizeof(pulp::test::paced::DeadlineTick);
     std::cout << "g12_paced_activation_v1\nG12_CELL rate=" << rate << " frames=" << frames
               << " backend=" << backend << " callbacks=" << callbacks
               << " compiled_source=" << pulp::runtime::kGitSha
@@ -999,7 +1022,9 @@ TEST_CASE("G12 paced activation receipt cell", "[.][host][graph][g12][activation
               << " prepared_bytes=" << p.total_prepared_buffer_bytes
               << " row_stride=" << sizeof(CallbackRow) << " row_bytes=" << row_bytes
               << " audio_bytes=" << audio_bytes << " io_bytes=" << io_bytes
-              << " harness_payload_bytes=" << row_bytes + audio_bytes + io_bytes
+              << " wake_stride=" << sizeof(pulp::test::paced::DeadlineTick)
+              << " wake_bytes=" << wake_bytes
+              << " harness_payload_bytes=" << row_bytes + audio_bytes + io_bytes + wake_bytes
               << " misses=" << observed.missed_deadlines << '\n';
     for (const auto& row : observed.rows) {
         std::cout << "G12_ROW index=" << row.index << " sample=" << row.first_sample
@@ -1016,6 +1041,11 @@ TEST_CASE("G12 paced activation receipt cell", "[.][host][graph][g12][activation
             f = end;
         }
         std::cout << '\n';
+        const auto& tick = observed.wakes[row.index];
+        std::cout << "G12_WAKE index=" << row.index << " wake_ns=" << tick.kernel_wake_ns
+                  << " spin_cpu_ns=" << tick.spin_cpu_ns
+                  << " late=" << static_cast<int>(tick.lateness)
+                  << " overrun=" << (tick.spin_overrun ? 1 : 0) << '\n';
     }
     REQUIRE(observed.commit_result == SignalGraph::PreparedTopologyEdit::Result::Committed);
     CHECK(exact_transition(observed, observed.first_new));

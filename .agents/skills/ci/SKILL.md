@@ -326,6 +326,11 @@ required fixture's setup test even under `-LE`, so no ordinary test may require
 a gpu-proof fixture. With the proof ON the gate selects exactly the tests it
 selects with it OFF. `pulp_gpu_proof_begin()`/`pulp_gpu_proof_end()` bracket
 each proof block, and `end` is a configure error outside the proof option.
+Register proof binaries with `add_test`, never `pulp_add_test_suite` or
+`catch_discover_tests`: discovered cases come from a `TEST_INCLUDE_FILES`
+script after the build, so `end` cannot label them, the configure-time
+allowlist check cannot see them, and they run in the gate. `end` is a
+configure error when a proof block adds such a script.
 Hardware receipts stay owner-run on m3.
 
 ## A2T structural evidence is produced only by the required macOS PR job
@@ -1048,6 +1053,21 @@ looks guilty. It was not: the release-pipeline step needs ~75s and
 `completed_at`) from a green run beside the cancelled one before choosing a
 fix. That suite now runs as its own `generated-version-bump-contract` job.
 
+## The `rmlui-native` lane builds its own Vellum SDK
+
+`.github/workflows/rmlui-native.yml` is advisory and path-filtered. The RmlUi
+native adapter only exists with `PULP_ENABLE_RMLUI_ADAPTER=ON` and an installed
+`VellumRmlUiNative` package, and Vellum publishes no rmlui SDK artifact, so the
+lane builds Vellum's `rmlui/` project (`tools/ci/rmlui_native_lane.sh sdk`) at
+the commit `vellum-rmlui-sdk` pins in `tools/deps/manifest.json`, cached by that
+commit. To move the pin, change the manifest entry (commit, `version`) and the
+`DEPENDENCIES.md` row together, then run the lane by hand first. The test step
+fails on an absent program, a failing case, or any skipped case (skips exit 0
+under Catch2, and three cases need no device, so a Metal-less runner must fail
+through `PULP_REQUIRE_METAL`; the `negative-control` step proves it). It runs on
+the hosted fallback through `resolve_advisory_macos_runner.py`; whether that
+runner has a Metal device is unverified. Never point it at a `pulp-build*` pool.
+
 ## Wait on a blocking waiter, not a poll loop
 
 For an unattended pull request, use `shipyard wait pr <PR> --state merged`
@@ -1607,6 +1627,15 @@ Two things worth keeping straight when reading that lane:
   `[rt-safety]` and the TSan name-regex lane all still run, because catching
   that class is the reason the lane exists. A failing race test there is a
   finding, not label noise.
+- **Installed-SDK consumers and disk.** Each `sdk` / `installed-sdk` test stages
+  a full instrumented install prefix inside the build tree. On a hosted macOS
+  runner that exhausted the disk (`No space left on device`) late in the ASan
+  pass, so ASan excludes those labels and UBSan keeps them. A consumer script
+  must pass the producer's build type, `PULP_PARENT_INSTRUMENTATION_*` flags and
+  sanitizer to its configure, or the link fails on missing runtime symbols.
+- **A wall-clock deadline test needs a name exclusion.**
+  `graph-paced-timing-matrix-selftest` is unlabelled; its zero-miss control
+  fails under instrumentation, so both lanes exclude it by name.
 - **A timing-sensitive test is not always labelled.** `Runtime clock transitions
   preserve invariant measured latency` (`[clock][latency]`) and `drift wanders
   the pitch slowly at ~the commanded RMS` (`[drift]`) time out under ASan while
@@ -13760,3 +13789,24 @@ with `-k 0`, and uploads a JSON report grouped by capability-ledger row. Notes:
   whose head does not contain that commit (checked with Vellum's compare
   endpoint before anything is downloaded); the workflow sets it to the commit
   that introduced the `ParamModel` surface `integrations/pulp-vellum` builds on.
+
+## Exporting a platform's Vellum closure
+
+`vellum-platform-closure.yml` (`workflow_dispatch` and `workflow_call`) is the one
+place a non-Darwin closure is produced. It configures the checkout for the
+platform, runs `tools/scripts/vellum_closure.py manifest` per unit and uploads
+the manifests with an `export.json`. The commit it records is its own
+`GITHUB_SHA`, so dispatch it on `main`: Vellum's provenance lane refuses a
+commit that is not on Pulp main.
+
+- The defaults are linux-x64. Another platform passes `platform`,
+  `runs_on_json`, `toolchain_command`, `skia_platform` and `renderer_asset`.
+- The configure is the plain Release GPU Skia one the Darwin closures came
+  from. Adding options changes the closure and the record's options digest.
+- The artifact is the input to Vellum's `tools/mirror/write_platform_record.py`;
+  Vellum CI never re-runs this export, so a platform's record is only as
+  reproducible as this workflow at the recorded commit.
+- The runner image name comes from `/etc/os-release` and the version from the
+  hosted runner's `ImageVersion` (`vellum_closure.py export-meta`, which also
+  records `ImageOS`). A self-hosted runner or VM sets no `ImageVersion`; the
+  step then fails rather than recording a blank or placeholder image.

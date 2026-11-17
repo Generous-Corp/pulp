@@ -130,6 +130,10 @@ public:
     OSStatus Initialize() override;
     void Cleanup() override;
 
+    /// A host reset breaks the timeline the Processor last saw, so the next
+    /// observed block reports `ProcessContext::timing.discontinuity`.
+    OSStatus Reset(AudioUnitScope inScope, AudioUnitElement inElement) override;
+
     bool StreamFormatWritable(AudioUnitScope scope, AudioUnitElement element) override;
     bool CanScheduleParameters() const noexcept override;
 
@@ -320,6 +324,10 @@ private:
     // `ProcessContext`. Default-constructed so the first Render() call
     // after Initialize() reports no changes.
     detail::PlayheadSnapshot playhead_prev_{};
+    // Neutral timing facts for each Render(): the render's mSampleTime, the
+    // host transport, and a discontinuity after Initialize(), Reset() or a
+    // skipped block without a sample counter.
+    BlockTimingPublisher block_timing_;
 
     // Host offline-render intent (kAudioUnitProperty_OfflineRender), written by
     // the host before a faster-than-realtime bounce and read each render block.

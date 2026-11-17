@@ -29,9 +29,13 @@
 
 #include <algorithm>
 #include <array>
+#include <cfloat>
+#include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <limits>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -56,6 +60,40 @@ static_assert(lv2_adapter::kAtomPortMinimumSize >=
               "lv2:minimumSize must cover a full block of outgoing MIDI");
 
 // ── time:Position decode ─────────────────────────────────────────────────
+
+/// A host-supplied count of frames (or bars) as an integer, truncated toward
+/// zero the way an integer `time:frame` is. Nullopt when the value is not
+/// finite or does not fit in int64_t, so a hostile or corrupt value is
+/// refused rather than converted with undefined behavior.
+inline std::optional<int64_t> lv2_checked_int64(double value) noexcept {
+    if (!std::isfinite(value))
+        return std::nullopt;
+    const double whole = std::trunc(value);
+    // 2^63 is exact in a double; int64_t holds [-2^63, 2^63).
+    constexpr double kLimit = 9223372036854775808.0;
+    if (whole < -kLimit || whole >= kLimit)
+        return std::nullopt;
+    return static_cast<int64_t>(whole);
+}
+
+/// `a + b` and `a - b`, or nullopt when the result does not fit in int64_t.
+inline std::optional<int64_t> lv2_checked_add(int64_t a, int64_t b) noexcept {
+    if ((b > 0 && a > std::numeric_limits<int64_t>::max() - b) ||
+        (b < 0 && a < std::numeric_limits<int64_t>::min() - b))
+        return std::nullopt;
+    return a + b;
+}
+inline std::optional<int64_t> lv2_checked_sub(int64_t a, int64_t b) noexcept {
+    if ((b < 0 && a > std::numeric_limits<int64_t>::max() + b) ||
+        (b > 0 && a < std::numeric_limits<int64_t>::min() + b))
+        return std::nullopt;
+    return a - b;
+}
+
+/// True when @p value is finite and representable as a float.
+inline bool lv2_float_representable(double value) noexcept {
+    return std::isfinite(value) && std::fabs(value) <= static_cast<double>(FLT_MAX);
+}
 
 /// Read a numeric atom body as a double, whatever integer or float type the
 /// host chose for it. Returns false for a type this adapter does not model, in
@@ -100,7 +138,8 @@ inline bool read_numeric_atom(const LV2_Atom* atom, const lv2_adapter::Lv2TimeUr
 
 /// Decode a `time:Position` object into @p out, overwriting only the
 /// properties the host actually sent. Returns false when @p obj is not a
-/// time:Position, leaving @p out untouched.
+/// time:Position, leaving @p out untouched. A property whose value is not
+/// finite or does not fit its field is skipped, as an unmodeled type is.
 ///
 /// Allocation-free: the whole walk is over the host's buffer.
 inline bool decode_time_position(const LV2_Atom_Object* obj, const lv2_adapter::Lv2TimeUrids& urids,
@@ -117,49 +156,203 @@ inline bool decode_time_position(const LV2_Atom_Object* obj, const lv2_adapter::
             continue;
         const LV2_URID key = prop->key;
         if (urids.time_speed != 0 && key == urids.time_speed) {
-            out.speed = static_cast<float>(numeric);
-            out.has_speed = true;
+            if (lv2_float_representable(numeric)) {
+                out.speed = static_cast<float>(numeric);
+                out.has_speed = true;
+            }
         } else if (urids.time_frame != 0 && key == urids.time_frame) {
-            out.frame = static_cast<int64_t>(numeric);
-            out.has_frame = true;
+            if (const auto frame = lv2_checked_int64(numeric)) {
+                out.frame = *frame;
+                out.has_frame = true;
+            }
         } else if (urids.time_bar != 0 && key == urids.time_bar) {
-            out.bar = static_cast<int64_t>(numeric);
-            out.has_bar = true;
+            if (const auto bar = lv2_checked_int64(numeric)) {
+                out.bar = *bar;
+                out.has_bar = true;
+            }
         } else if (urids.time_beat != 0 && key == urids.time_beat) {
-            out.beat = numeric;
-            out.has_beat = true;
+            if (std::isfinite(numeric)) {
+                out.beat = numeric;
+                out.has_beat = true;
+            }
         } else if (urids.time_beats_per_bar != 0 && key == urids.time_beats_per_bar) {
-            out.beats_per_bar = static_cast<float>(numeric);
-            out.has_beats_per_bar = true;
+            if (lv2_float_representable(numeric)) {
+                out.beats_per_bar = static_cast<float>(numeric);
+                out.has_beats_per_bar = true;
+            }
         } else if (urids.time_beat_unit != 0 && key == urids.time_beat_unit) {
-            out.beat_unit = static_cast<int32_t>(numeric);
-            out.has_beat_unit = true;
+            if (std::isfinite(numeric) &&
+                numeric >= static_cast<double>(std::numeric_limits<int32_t>::min()) &&
+                numeric <= static_cast<double>(std::numeric_limits<int32_t>::max())) {
+                out.beat_unit = static_cast<int32_t>(numeric);
+                out.has_beat_unit = true;
+            }
         } else if (urids.time_beats_per_minute != 0 && key == urids.time_beats_per_minute) {
-            out.beats_per_minute = static_cast<float>(numeric);
-            out.has_beats_per_minute = true;
+            if (lv2_float_representable(numeric)) {
+                out.beats_per_minute = static_cast<float>(numeric);
+                out.has_beats_per_minute = true;
+            }
         }
     }
     return true;
 }
 
-/// Advance a latched transport by one block of @p n_samples while it is
-/// rolling, so the position keeps moving between the Positions a host chooses
-/// to send. A stopped transport is left where it is.
-inline void advance_time_position(lv2_adapter::Lv2TimePosition& pos, uint32_t n_samples,
-                                  double sample_rate) noexcept {
-    if (!pos.has_speed || pos.speed == 0.0f)
-        return;
-    if (n_samples == 0)
-        return;
-    const double frames = static_cast<double>(n_samples) * static_cast<double>(pos.speed);
-    if (pos.has_frame) {
-        pos.frame += static_cast<int64_t>(frames);
+/// One run() block's view of the host transport.
+///
+/// Constructed from the retained latch, which describes the block's first
+/// frame. Each `time:Position` in the block is applied with only the
+/// properties it carried, at the frame it was delivered. The transport moves
+/// piecewise: between two events it runs at the speed (and tempo) in effect
+/// after the earlier one, so a rate change inside the block applies from its
+/// own frame onward, never retroactively.
+///
+/// `block_start()` is what the block publishes: positions (`time:frame`,
+/// `time:beat`) supplied mid-block are moved back to the first frame along
+/// that piecewise path, and the speed is the one in effect at the first frame.
+/// Fields a Position omits keep their retained, advanced values. Tempo, bar and
+/// time signature are not positions and take the last value delivered.
+/// `next_block_start()` is the latch for the following block, advanced over
+/// the whole host block.
+///
+/// When a rate is unknown up to an event that supplies it (the first Position
+/// ever, or one arriving after the host omitted it), the new rate is taken to
+/// have held from the block's first frame. An event time outside the block,
+/// or earlier than a previous event, is not a frame offset into this block
+/// (for example a sequence in beat units) and is placed at the previous
+/// event's frame. A position whose normalized value overflows int64_t, or is
+/// not finite, is published as unavailable rather than wrapped.
+class Lv2BlockTransport {
+  public:
+    Lv2BlockTransport(const lv2_adapter::Lv2TimePosition& latch, uint32_t host_frames,
+                      double sample_rate) noexcept
+        : start_(latch), host_frames_(static_cast<int64_t>(host_frames)),
+          sample_rate_(std::isfinite(sample_rate) && sample_rate > 0.0 ? sample_rate : 0.0),
+          speed_known_(latch.has_speed), speed_(latch.has_speed ? latch.speed : 0.0),
+          bpm_known_(latch.has_beats_per_minute),
+          bpm_(latch.has_beats_per_minute ? latch.beats_per_minute : 0.0) {}
+
+    /// Apply one decoded Position. @p fresh carries only the properties this
+    /// event supplied; @p event_frame is its frame offset into the block.
+    void apply(const lv2_adapter::Lv2TimePosition& fresh, int64_t event_frame) noexcept {
+        const int64_t at =
+            (event_frame >= offset_ && event_frame < host_frames_) ? event_frame : offset_;
+        advance_to(at);
+
+        if (fresh.has_speed) {
+            const double speed = fresh.speed;
+            if (!speed_known_ || at == 0) {
+                start_.speed = fresh.speed;
+                start_.has_speed = true;
+                elapsed_frames_ = static_cast<double>(at) * speed;
+                speed_known_ = true;
+                speed_ = speed;
+                elapsed_beats_ = elapsed_frames_ * beats_per_frame();
+            } else {
+                if (speed != speed_)
+                    rate_changed_ = true;
+                speed_ = speed;
+            }
+        }
+        if (fresh.has_beats_per_minute) {
+            start_.beats_per_minute = fresh.beats_per_minute;
+            start_.has_beats_per_minute = true;
+            const bool backfill = !bpm_known_ || at == 0;
+            bpm_known_ = true;
+            bpm_ = fresh.beats_per_minute;
+            if (backfill)
+                elapsed_beats_ = elapsed_frames_ * beats_per_frame();
+        }
+        if (fresh.has_frame) {
+            const auto moved = lv2_checked_int64(elapsed_frames_);
+            const auto frame = moved ? lv2_checked_sub(fresh.frame, *moved) : std::nullopt;
+            start_.has_frame = frame.has_value();
+            start_.frame = frame.value_or(0);
+        }
+        if (fresh.has_beat) {
+            const double beat = fresh.beat - elapsed_beats_;
+            start_.has_beat = std::isfinite(beat);
+            start_.beat = start_.has_beat ? beat : 0.0;
+        }
+        if (fresh.has_bar) {
+            start_.bar = fresh.bar;
+            start_.has_bar = true;
+        }
+        if (fresh.has_beats_per_bar) {
+            start_.beats_per_bar = fresh.beats_per_bar;
+            start_.has_beats_per_bar = true;
+        }
+        if (fresh.has_beat_unit) {
+            start_.beat_unit = fresh.beat_unit;
+            start_.has_beat_unit = true;
+        }
     }
-    if (pos.has_beat && pos.has_beats_per_minute && sample_rate > 0.0 &&
-        pos.beats_per_minute > 0.0f) {
-        pos.beat += (frames / sample_rate) * (static_cast<double>(pos.beats_per_minute) / 60.0);
+
+    /// The transport at the block's first frame.
+    [[nodiscard]] const lv2_adapter::Lv2TimePosition& block_start() const noexcept {
+        return start_;
     }
-}
+
+    /// True when a Position changed the speed after the block's first frame,
+    /// so the block did not move at one rate.
+    [[nodiscard]] bool rate_changed() const noexcept {
+        return rate_changed_;
+    }
+
+    /// The transport at the first frame of the next block: the block start
+    /// advanced over every host frame of this block at the piecewise rates.
+    [[nodiscard]] lv2_adapter::Lv2TimePosition next_block_start() const noexcept {
+        Lv2BlockTransport end = *this;
+        end.advance_to(host_frames_);
+        lv2_adapter::Lv2TimePosition next = start_;
+        if (speed_known_)
+            next.speed = static_cast<float>(speed_);
+        if (next.has_frame) {
+            const auto moved = lv2_checked_int64(end.elapsed_frames_);
+            const auto frame = moved ? lv2_checked_add(next.frame, *moved) : std::nullopt;
+            next.has_frame = frame.has_value();
+            next.frame = frame.value_or(0);
+        }
+        if (next.has_beat) {
+            const double beat = next.beat + end.elapsed_beats_;
+            next.has_beat = std::isfinite(beat);
+            next.beat = next.has_beat ? beat : 0.0;
+        }
+        return next;
+    }
+
+  private:
+    // Beats per transport frame at the current tempo, or zero when the tempo
+    // or sample rate cannot move the beat position.
+    double beats_per_frame() const noexcept {
+        if (!bpm_known_ || !(bpm_ > 0.0) || sample_rate_ <= 0.0)
+            return 0.0;
+        return bpm_ / (60.0 * sample_rate_);
+    }
+
+    void advance_to(int64_t frame) noexcept {
+        if (frame > offset_ && speed_known_) {
+            const double moved = static_cast<double>(frame - offset_) * speed_;
+            elapsed_frames_ += moved;
+            elapsed_beats_ += moved * beats_per_frame();
+        }
+        if (frame > offset_)
+            offset_ = frame;
+    }
+
+    lv2_adapter::Lv2TimePosition start_;
+    int64_t host_frames_ = 0;
+    double sample_rate_ = 0.0;
+    // Frame offset of the last applied event; the current rates hold from here.
+    int64_t offset_ = 0;
+    bool speed_known_ = false;
+    double speed_ = 0.0;
+    bool bpm_known_ = false;
+    double bpm_ = 0.0;
+    // Transport frames and beats moved between the block start and `offset_`.
+    double elapsed_frames_ = 0.0;
+    double elapsed_beats_ = 0.0;
+    bool rate_changed_ = false;
+};
 
 /// Project a decoded `time:Position` onto the neutral transport every adapter
 /// hands the shared ProcessContext mapper.
@@ -183,8 +376,8 @@ inline boundary::HostTransport to_host_transport(const lv2_adapter::Lv2TimePosit
         transport.position_samples = pos.frame;
         transport.validity.set(TransportField::SamplePosition);
     }
-    const bool time_sig =
-        pos.has_beats_per_bar && pos.has_beat_unit && pos.beats_per_bar > 0.0f && pos.beat_unit > 0;
+    const bool time_sig = pos.has_beats_per_bar && pos.has_beat_unit && pos.beats_per_bar > 0.0f &&
+                          pos.beats_per_bar < 2147483648.0f && pos.beat_unit > 0;
     if (time_sig) {
         transport.time_sig_numerator = static_cast<int>(pos.beats_per_bar);
         transport.time_sig_denominator = static_cast<int>(pos.beat_unit);
@@ -385,8 +578,11 @@ inline void connect_port(LV2_Handle handle, uint32_t port, void* data) {
     }
 }
 
-inline void activate(LV2_Handle) {
-    // Nothing needed — processor is prepared at instantiation
+inline void activate(LV2_Handle handle) {
+    // The processor is prepared at instantiation. Activation only breaks the
+    // timeline: the first run() after it is a discontinuity.
+    if (auto* inst = static_cast<lv2_adapter::PulpLv2Instance*>(handle))
+        inst->timing_discontinuity_pending = true;
 }
 
 // Write a MidiBuffer into an LV2_Atom_Sequence output port. Uses the standard
@@ -562,6 +758,10 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
         // ignored here; LV2 variable-length event support is not wired yet.
         inst->midi_in.clear();
         inst->midi_out.clear();
+        // Every Position in the block is applied where it was delivered; the
+        // tracker spans the whole host block, including any tail past the
+        // prepared maximum, because the host timeline moved over all of it.
+        Lv2BlockTransport block_transport(inst->transport, requested_samples, inst->sample_rate);
         bool transport_received = false;
         if (inst->midi_in_atom && inst->urid_atom_sequence && inst->urid_midi_event) {
             const auto* seq = static_cast<const LV2_Atom_Sequence*>(inst->midi_in_atom);
@@ -582,45 +782,54 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
                         continue;
                     }
                     // Transport. The host delivers time:Position on the same
-                    // sequence as MIDI; a block can carry several (a seek mid
-                    // block), and the last one wins for this block's context.
+                    // sequence as MIDI; a block can carry several (a seek or a
+                    // rate change mid block). Each is decoded on its own, so
+                    // only the properties it carried are applied.
                     const bool is_object =
                         (time_urids.atom_object != 0 && ev->body.type == time_urids.atom_object) ||
                         (time_urids.atom_blank != 0 && ev->body.type == time_urids.atom_blank);
                     if (!is_object)
                         continue;
                     const auto* obj = reinterpret_cast<const LV2_Atom_Object*>(&ev->body);
-                    if (decode_time_position(obj, time_urids, inst->transport)) {
-                        inst->has_transport = true;
+                    lv2_adapter::Lv2TimePosition fresh{};
+                    if (decode_time_position(obj, time_urids, fresh)) {
+                        block_transport.apply(fresh, ev->time.frames);
                         transport_received = true;
                     }
                 }
             }
         }
 
-        // Project the latched transport onto this block, then let the shared
-        // mapper derive the bar and the change flags. Extrapolate only when the
-        // host sent nothing new this block — a Position that just arrived is
-        // already positioned at the block start. The latch sits at the previous
-        // block's start, so it advances by the previous block's length.
+        // Publish the transport at this block's first frame, then let the
+        // shared mapper derive the bar and the change flags. The latch moves
+        // on to the next block's first frame.
+        if (transport_received)
+            inst->has_transport = true;
         if (inst->has_transport) {
-            if (!transport_received) {
-                advance_time_position(inst->transport, inst->previous_block_samples,
-                                      inst->sample_rate);
-            }
-            boundary::apply_host_transport(proc_ctx, to_host_transport(inst->transport),
-                                           inst->playhead_prev);
+            const auto& start = block_transport.block_start();
+            boundary::apply_host_transport(proc_ctx, to_host_transport(start), inst->playhead_prev);
+            // Neutral timing facts: LV2 has no monotonic counter, so only the
+            // block-start time:frame and time:speed are published. A block
+            // whose speed changed part way through did not move at one rate.
+            proc_ctx.timing = format::lv2_process_timing(
+                start.has_frame, start.frame, start.has_speed, static_cast<double>(start.speed),
+                inst->timing_discontinuity_pending);
+            if (block_transport.rate_changed() && proc_ctx.timing.transport_moving)
+                proc_ctx.timing.playback_rate = format::PlaybackRate::NonUnit;
+            inst->transport = block_transport.next_block_start();
         } else {
             // No transport ever seen: still run the diff so the snapshot tracks
             // block size and the validity mask stays honestly empty.
             boundary::apply_host_transport(proc_ctx, boundary::HostTransport{},
                                            inst->playhead_prev);
+            proc_ctx.timing.discontinuity = inst->timing_discontinuity_pending;
         }
-
-        inst->previous_block_samples = n_samples;
 
         inst->processor->process(process_buffers, inst->midi_in, inst->midi_out,
                                  proc_ctx);
+        // A tail past the prepared maximum never reached the Processor, so
+        // the next block does not follow the last frame it saw.
+        inst->timing_discontinuity_pending = requested_samples > n_samples;
 
         // Serialize outgoing MIDI back to the LV2 atom output port.
         write_midi_out_to_sequence(

@@ -9,6 +9,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
+
 #include "support/recording_contract_editor.hpp"
 
 #include <pulp/format/clap_adapter.hpp>
@@ -35,6 +37,7 @@ using pulp::test_support::EditorEnvironment;
 using pulp::test_support::MainLoop;
 using pulp::test_support::RecordingContractFactory;
 using pulp::test_support::reset_contract_recording;
+using pulp::test_support::ScopedManualSnapTimer;
 
 namespace {
 
@@ -130,6 +133,8 @@ struct FakeHost {
     bool offers_timers = false;
     bool refuse_timers = false;
     bool accept_resize = true;
+    bool inside_host_call = false;
+    int requests_inside_host_call = 0;
     std::vector<std::string> resize_requests;
     int dirty_marks = 0;
     std::vector<clap_id> live_timers;
@@ -165,6 +170,8 @@ struct FakeHost {
         gui.request_resize = [](const clap_host_t* h, uint32_t w, uint32_t hh) {
             auto* self = static_cast<FakeHost*>(h->host_data);
             self->resize_requests.push_back(std::to_string(w) + "x" + std::to_string(hh));
+            if (self->inside_host_call)
+                ++self->requests_inside_host_call;
             return self->accept_resize;
         };
         gui.request_show = [](const clap_host_t*) { return false; };
@@ -309,10 +316,12 @@ TEST_CASE("CLAP opens, sizes and closes a contract editor, twice",
     REQUIRE(h == 600);
     REQUIRE(p.gui->set_size(p.plugin, 640, 480));
     REQUIRE(contract_log().saw("set_size:640x480"));
-    REQUIRE_FALSE(p.gui->set_size(p.plugin, 100, 100));
+    // An undersized host size is brought up to the editor's minimum.
+    REQUIRE(p.gui->set_size(p.plugin, 100, 100));
+    REQUIRE(contract_log().saw("set_size:200x150"));
     REQUIRE(p.gui->get_size(p.plugin, &w, &h));
-    REQUIRE(w == 640);
-    REQUIRE(h == 480);
+    REQUIRE(w == 200);
+    REQUIRE(h == 150);
 
     // The host's scale reaches the editor's size and survives a resize.
     REQUIRE(p.gui->set_scale(p.plugin, 2.0));
@@ -562,4 +571,232 @@ TEST_CASE("CLAP offers the contract GUI only to a processor with an editor facto
         REQUIRE(p.gui != nullptr);
     }
     g_processor_has_factory = true;
+}
+
+TEST_CASE("a CLAP contract editor applies its declared aspect and bounds",
+          "[clap][editor-host][clap-contract][resize-hints]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    g_processor_has_factory = true;
+    contract_config() = {};
+    contract_config().identity_adjust = true; // the session alone enforces the hints
+    FakeHost host;
+    OpenPlugin p(host);
+    REQUIRE(p.gui->create(p.plugin, platform_api(), false));
+
+    REQUIRE(p.gui->can_resize(p.plugin));
+    clap_gui_resize_hints_t hints{};
+    REQUIRE(p.gui->get_resize_hints(p.plugin, &hints));
+    REQUIRE(hints.preserve_aspect_ratio);
+
+    uint32_t w = 1000, h = 1000;
+    REQUIRE(p.gui->adjust_size(p.plugin, &w, &h));
+    REQUIRE(w == 800);
+    REQUIRE(h == 600);
+    w = 640;
+    h = 300;
+    REQUIRE(p.gui->adjust_size(p.plugin, &w, &h));
+    REQUIRE(w == 400);
+    REQUIRE(h == 300);
+    w = 100;
+    h = 100;
+    REQUIRE(p.gui->adjust_size(p.plugin, &w, &h));
+    REQUIRE(w == 200);
+    REQUIRE(h == 150);
+    p.gui->destroy(p.plugin);
+
+    SECTION("without an aspect, each axis is clamped on its own") {
+        contract_config().free_aspect = true;
+        REQUIRE(p.gui->create(p.plugin, platform_api(), false));
+        REQUIRE(p.gui->get_resize_hints(p.plugin, &hints));
+        REQUIRE_FALSE(hints.preserve_aspect_ratio);
+        w = 1000;
+        h = 100;
+        REQUIRE(p.gui->adjust_size(p.plugin, &w, &h));
+        REQUIRE(w == 800);
+        REQUIRE(h == 150);
+        p.gui->destroy(p.plugin);
+    }
+    SECTION("an editor with default hints is fixed-size") {
+        contract_config().default_hints = true;
+        REQUIRE(p.gui->create(p.plugin, platform_api(), false));
+        REQUIRE_FALSE(p.gui->can_resize(p.plugin));
+        REQUIRE(p.gui->get_resize_hints(p.plugin, &hints));
+        REQUIRE_FALSE(hints.can_resize_horizontally);
+        REQUIRE_FALSE(hints.can_resize_vertically);
+        w = 900;
+        h = 900;
+        REQUIRE(p.gui->adjust_size(p.plugin, &w, &h));
+        REQUIRE(w == 400);
+        REQUIRE(h == 300);
+        p.gui->destroy(p.plugin);
+    }
+    contract_config() = {};
+}
+
+TEST_CASE("a CLAP host that calls set_size without adjust_size gets the snapped size asked back "
+          "once its sizes settle",
+          "[clap][editor-host][clap-contract][resize-hints]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    g_processor_has_factory = true;
+    contract_config() = {};
+    contract_config().identity_adjust = true; // the session alone enforces the hints
+    ScopedManualSnapTimer settle;
+    FakeHost host;
+    OpenPlugin p(host);
+    REQUIRE(p.gui->create(p.plugin, platform_api(), false));
+    const auto window = fake_window();
+    REQUIRE(p.gui->set_parent(p.plugin, &window));
+
+    // Off the 4:3 aspect: the editor takes the 4:3 box inside it at once, and
+    // nothing is asked of the host from inside its own call.
+    host.inside_host_call = true;
+    REQUIRE(p.gui->set_size(p.plugin, 900, 500));
+    host.inside_host_call = false;
+    REQUIRE(host.resize_requests.empty());
+    REQUIRE(contract_log().saw("set_size:667x500"));
+    REQUIRE(settle.armed());
+    REQUIRE(settle.delay_ms() == pulp::format::ContractEditorSession::kSnapSettleMs);
+
+    // A drag of 30 more sizes asks for nothing while it keeps coming.
+    for (int i = 0; i < 30; ++i) {
+        host.inside_host_call = true;
+        REQUIRE(p.gui->set_size(p.plugin, 900 + i, 500));
+        host.inside_host_call = false;
+    }
+    REQUIRE(settle.starts() == 31);
+    REQUIRE(host.resize_requests.empty());
+
+    // The sizes stop: the last snapped size is asked back once, from the
+    // settle timer.
+    settle.fire();
+    REQUIRE(host.resize_requests == std::vector<std::string>{"667x500"});
+    REQUIRE(host.requests_inside_host_call == 0);
+    settle.fire();
+    REQUIRE(host.resize_requests.size() == 1);
+
+    // A host that refuses the request leaves the editor on its aspect.
+    host.accept_resize = false;
+    host.resize_requests.clear();
+    REQUIRE(p.gui->set_size(p.plugin, 700, 300));
+    REQUIRE(contract_log().saw("set_size:400x300"));
+    settle.fire();
+    REQUIRE(host.resize_requests == std::vector<std::string>{"400x300"});
+    host.accept_resize = true;
+
+    // One pixel off the aspect is not asked back, but the editor still gets
+    // the constrained size, never one outside its limits; on the aspect asks
+    // for nothing.
+    host.resize_requests.clear();
+    REQUIRE(p.gui->set_size(p.plugin, 640, 481));
+    REQUIRE(contract_log().saw("set_size:640x480"));
+    REQUIRE_FALSE(settle.armed());
+    REQUIRE(p.gui->set_size(p.plugin, 199, 150));
+    REQUIRE(contract_log().saw("set_size:200x150"));
+    REQUIRE_FALSE(contract_log().saw("set_size:199x150"));
+    REQUIRE(p.gui->set_size(p.plugin, 801, 601));
+    REQUIRE(contract_log().saw("set_size:800x600"));
+    REQUIRE_FALSE(contract_log().saw("set_size:801x601"));
+    REQUIRE_FALSE(settle.armed());
+    REQUIRE(p.gui->set_size(p.plugin, 640, 480));
+    settle.fire();
+    REQUIRE(host.resize_requests.empty());
+    p.gui->destroy(p.plugin);
+
+    // Control: a fixed-size editor takes no host size and is told nothing; the
+    // host is asked for the editor's own size.
+    contract_config().default_hints = true;
+    REQUIRE(p.gui->create(p.plugin, platform_api(), false));
+    REQUIRE(p.gui->set_parent(p.plugin, &window));
+    const auto calls_before = contract_log().calls.size();
+    REQUIRE(p.gui->set_size(p.plugin, 700, 300));
+    REQUIRE(contract_log().calls.size() == calls_before);
+    REQUIRE(host.resize_requests.empty());
+    settle.fire();
+    REQUIRE(host.resize_requests == std::vector<std::string>{"400x300"});
+    p.gui->destroy(p.plugin);
+    contract_config() = {};
+}
+
+TEST_CASE("a CLAP host's off-aspect size is asked back on the real main loop",
+          "[clap][editor-host][clap-contract][resize-hints][wallclock]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    g_processor_has_factory = true;
+    contract_config() = {};
+    contract_config().identity_adjust = true;
+    FakeHost host;
+    OpenPlugin p(host);
+    MainLoop loop;
+    REQUIRE(p.gui->create(p.plugin, platform_api(), false));
+    const auto window = fake_window();
+    REQUIRE(p.gui->set_parent(p.plugin, &window));
+    host.inside_host_call = true;
+    REQUIRE(p.gui->set_size(p.plugin, 900, 500));
+    host.inside_host_call = false;
+    // Only the positive half is timed: the request arrives, from the main loop.
+    REQUIRE(loop.run_until([&] { return !host.resize_requests.empty(); }));
+    REQUIRE(host.resize_requests.front() == "667x500");
+    REQUIRE(host.requests_inside_host_call == 0);
+    p.gui->destroy(p.plugin);
+    contract_config() = {};
+}
+
+TEST_CASE("CLAP acknowledges editor-origin resizing with fixed user sizing",
+          "[clap][editor-host][resize-ack]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    g_processor_has_factory = true;
+    contract_config().default_hints = true;
+    ScopedManualSnapTimer settle;
+    FakeHost host;
+    OpenPlugin p(host);
+    REQUIRE(p.gui->create(p.plugin, platform_api(), false));
+    const auto window = fake_window();
+    REQUIRE(p.gui->set_parent(p.plugin, &window));
+    auto* session = pulp::format::clap_adapter::contract_gui_session(p.plugin);
+    REQUIRE(contract_log().context->request_resize({600, 450, 1.0}));
+    REQUIRE(session->size().width == 400); // acceptance is not acknowledgment
+    // A refused replacement cannot erase an earlier accepted request.
+    host.accept_resize = false;
+    REQUIRE_FALSE(contract_log().context->request_resize({700, 525, 1.0}));
+    host.accept_resize = true;
+    REQUIRE(p.gui->set_size(p.plugin, 600, 450));
+    REQUIRE(session->size().width == 600);
+    REQUIRE(session->size().height == 450);
+    REQUIRE(contract_log().saw("set_size:600x450"));
+    REQUIRE_FALSE(settle.armed());
+    // Consumed once: an unsolicited resize remains fixed, even at an old size.
+    REQUIRE(p.gui->set_size(p.plugin, 400, 300));
+    REQUIRE(session->size().width == 600);
+    settle.fire();
+    REQUIRE(host.resize_requests.back() == "600x450");
+    host.accept_resize = false;
+    REQUIRE_FALSE(contract_log().context->request_resize({700, 525, 1.0}));
+    REQUIRE(p.gui->set_size(p.plugin, 700, 525));
+    REQUIRE(session->size().width == 600);
+    p.gui->destroy(p.plugin);
+}
+
+TEST_CASE("an editor request cancels an older CLAP correction before acknowledgment",
+          "[clap][editor-host][resize-ack]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    g_processor_has_factory = true;
+    contract_config().identity_adjust = true;
+    ScopedManualSnapTimer settle;
+    FakeHost host;
+    OpenPlugin p(host);
+    REQUIRE(p.gui->create(p.plugin, platform_api(), false));
+    const auto window = fake_window();
+    REQUIRE(p.gui->set_parent(p.plugin, &window));
+    REQUIRE(p.gui->set_size(p.plugin, 900, 500));
+    REQUIRE(settle.armed());
+    REQUIRE(contract_log().context->request_resize({640, 480, 1.0}));
+    REQUIRE_FALSE(settle.armed());
+    settle.fire();
+    REQUIRE(host.resize_requests == std::vector<std::string>{"640x480"});
+    REQUIRE(p.gui->set_size(p.plugin, 640, 480));
+    p.gui->destroy(p.plugin);
 }

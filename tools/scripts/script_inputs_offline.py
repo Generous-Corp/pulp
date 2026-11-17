@@ -881,6 +881,23 @@ def gate_targets(root: Path, known: set[str]) -> set[str]:
     return out
 
 
+def gate_conditions(root: Path, known: set[str]) -> set[str]:
+    """if() conditions, as written, that enclose an executable the gate
+    inventory already has: the gate configure evidently enters them, so a new
+    executable under the same condition is registered there too."""
+    out: set[str] = set()
+    for f in parsed(root):
+        for call in f.calls:
+            if call.command not in ("add_executable", SUITE_HELPER, "pulp_add_test_group"):
+                continue
+            if not (_exe_names(call) & known):
+                continue
+            conds = _branch_conditions(call, f.calls)
+            if conds:
+                out |= {" ".join(c) for c in conds}
+    return out
+
+
 def check_new_executables(root: Path, base: str, head: str, changed: set[str], doc: dict,
                           report: Report) -> None:
     """A test executable the range adds needs an executables/ fragment."""
@@ -890,6 +907,7 @@ def check_new_executables(root: Path, base: str, head: str, changed: set[str], d
              | set((doc.get("executable_targets") or {}).values()))
     merge_base = _git(root, "merge-base", base, head).strip()
     trusted: set[str] | None = None
+    entered: set[str] | None = None
     defined = {c.args[0] for g in parsed(root) for c in g.calls
                if c.command in ("add_executable", SUITE_HELPER, "pulp_add_test_group") and c.args}
     for path in sorted(f for f in changed if f.startswith("test/")
@@ -937,8 +955,10 @@ def check_new_executables(root: Path, base: str, head: str, changed: set[str], d
             conds = _branch_conditions(call, f.calls)
             if trusted is None:
                 trusted = gate_targets(root, known)
+                entered = gate_conditions(root, known)
             terms = [(_target_terms(c), c) for c in conds or []]
-            unknown = [" ".join(c) for t, c in terms if t is None or not t <= trusted]
+            unknown = [" ".join(c) for t, c in terms
+                       if (t is None or not t <= trusted) and " ".join(c) not in entered]
             if conds is None or unknown:
                 guard = "an else branch" if conds is None else f"if({unknown[0]})"
                 report.not_checked.append(f"{where}: {name} has no fragment, but it sits under "

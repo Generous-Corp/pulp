@@ -394,6 +394,10 @@ FAKE_FIXTURE = """#!{python}
 # request is obtained, the malformed one refused); "fallback" ignores the
 # request and reports default scheduling, which the runner must reject;
 # "deny" refuses every real-time request, like a host without real-time rights.
+# PULP_FAKE_WAKE picks how it treats the wake request: "honour" reports the
+# requested backend and guard; "fallback" reports the sleep-until baseline
+# whatever was asked; "overrun" flags a spin overrun on the first callback;
+# "fail" records a kernel wait failure.
 import os, sys
 sys.path.insert(0, {tools!r})
 import graph_paced_timing_matrix as m
@@ -421,6 +425,41 @@ if sched.split()[3] == "status=refused":
 text = m.reference_cell_output(env["PULP_PACED_VARIANT"], int(env["PULP_PACED_RATE"]),
                                int(env["PULP_PACED_FRAMES"]), int(env["PULP_PACED_CALLBACKS"]), 0, 1)
 text = text.replace("fixture=python-reference", "fixture={fixture}").replace(reference, sched)
+wake_behaviour = env.get("PULP_FAKE_WAKE", "honour")
+backend = env.get("PULP_PACED_WAKE", "deadline-spin")
+period = int(env["PULP_PACED_FRAMES"]) * 1000000000 // int(env["PULP_PACED_RATE"])
+bound = m.guard_bound_ns(period)
+old_wake = next(l for l in text.splitlines() if l.startswith(m.WAKE_TRAILER + " "))
+inject = dict(inject_late_us=int(env.get("PULP_PACED_INJECT_LATE_US", "0")),
+              inject_late_every=int(env.get("PULP_PACED_INJECT_LATE_EVERY", "1")))
+if wake_behaviour == "fallback" or backend == "sleep-until":
+    wake = m.format_wake_line("sleep-until", "sleep_until", "none", guard_bound_ns=bound, **inject)
+else:
+    failures = 1 if wake_behaviour == "fail" else 0
+    if "PULP_PACED_WAKE_GUARD_NS" in env:
+        guard, source, extra = int(env["PULP_PACED_WAKE_GUARD_NS"]), "fixed", {{}}
+    else:
+        samples = int(env.get("PULP_PACED_WAKE_CALIBRATION", "64"))
+        p99 = 7000
+        guard = min(max(p99 + m.GUARD_MARGIN_NS, m.MIN_GUARD_NS), bound)
+        source = "calibrated"
+        extra = dict(calibration_samples=samples, calibration_p50_ns=3000, calibration_p99_ns=p99,
+                     calibration_max_ns=9000, guard_clamped=int(p99 + m.GUARD_MARGIN_NS > bound))
+    limit = int(env.get("PULP_PACED_WAKE_SPIN_LIMIT_NS", "0")) or 2 * guard + m.GUARD_MARGIN_NS
+    wake = m.format_wake_line("deadline-spin", "mach_wait_until", source, guard_ns=guard,
+                              guard_bound_ns=bound, spin_limit_ns=limit, timebase_numer=125,
+                              timebase_denom=3, cpu_clock_resolution_ns=1000,
+                              wait_failures=failures,
+                              clock_mapping_skew_ns=50000 if wake_behaviour == "skewed" else 0,
+                              **inject, **extra)
+text = text.replace(old_wake, wake)
+if wake_behaviour == "overrun":
+    lines = text.splitlines()
+    first = next(i for i, l in enumerate(lines) if l.startswith("P 0 "))
+    parts = lines[first].split()
+    parts[-1] = "1"
+    lines[first] = " ".join(parts)
+    text = "\\n".join(lines) + "\\n"
 text = text.replace("build_type=python", "build_type={stamp}")
 sys.stdout.write(text + "All tests passed (1 assertion in 1 test case)\\n")
 """
@@ -477,28 +516,89 @@ class CompiledBuildTypeTest(unittest.TestCase):
             matrix.validate_receipt(path)
 
 
+def control_failure(control_misses, attempts, planted_floor, noise_ceiling):
+    """Why the unplanted control runs fail, or None when they pass.
+
+    Every attempt must stay at or under `noise_ceiling`, well below the
+    `planted_floor` misses the planted run must show, and at least one of at
+    most `attempts` runs must be clean. Requiring only one clean run would let
+    an instrument that falsely reports misses on most runs pass."""
+    if not control_misses or len(control_misses) > attempts:
+        return "expected 1 to %d control attempts, got %d" % (attempts, len(control_misses))
+    if noise_ceiling >= planted_floor:
+        return "noise ceiling %d must be below the planted floor %d" % (noise_ceiling, planted_floor)
+    noisy = [m for m in control_misses if m > noise_ceiling]
+    if noisy:
+        return ("an unplanted attempt reported %s misses, above the noise ceiling of %d "
+                "(misses per attempt: %s)" % (noisy, noise_ceiling, control_misses))
+    if min(control_misses) != 0:
+        return ("the unplanted run must be clean in at least one of %d attempts "
+                "(misses per attempt: %s)" % (attempts, control_misses))
+    return None
+
+
 class MissCounterTest(unittest.TestCase):
+    CONTROL_ATTEMPTS = 4
+    PLANTED_MIN_MISSES = 4
+    # Host noise may add a genuine miss to an unplanted run; more than this in
+    # any attempt is the instrument, not the host.
+    CONTROL_NOISE_CEILING = 1
+
+    def test_control_rule_bounds_every_attempt_and_needs_one_clean_run(self):
+        def verdict(misses):
+            return control_failure(misses, self.CONTROL_ATTEMPTS, self.PLANTED_MIN_MISSES,
+                                   self.CONTROL_NOISE_CEILING)
+        self.assertIsNone(verdict([0]))
+        self.assertIsNone(verdict([1, 0]))
+        self.assertIsNone(verdict([1, 1, 1, 0]))
+        # An instrument that reports planted-sized misses on some runs fails
+        # even when a later attempt comes back clean.
+        self.assertIsNotNone(verdict([3, 0]))
+        self.assertIsNotNone(verdict([4, 4, 4, 0]))
+        # No clean attempt at all fails.
+        self.assertIsNotNone(verdict([1, 1, 1, 1]))
+        self.assertIsNotNone(verdict([]))
+        self.assertIsNotNone(verdict([0, 0, 0, 0, 0]))
+
     def test_deadline_rule_boundary(self):
         period = 4096 * 1_000_000_000 // 48000
-        exact = [(0, 0, 4096 * 1_000_000_000 // 48000, 1)]
+        exact = [(0, 0, 4096 * 1_000_000_000 // 48000, 1, 0, 0, 0, 0)]
         # end - target == one block (rounded down to ns) is on time ...
         self.assertEqual(matrix.compute_metrics(exact, 48000, 4096)["deadline_misses"], 0)
         # ... one nanosecond past the exact block boundary is a miss.
-        late = [(0, 0, period + 1, 1)]
+        late = [(0, 0, period + 1, 1, 0, 0, 0, 0)]
         self.assertEqual(matrix.compute_metrics(late, 48000, 4096)["deadline_misses"], 1)
 
+    @unittest.skipIf(os.environ.get("PULP_SELFTEST_SKIP_WALL_CLOCK") == "1",
+                     "wall-clock case runs in its own performance-labelled entry")
     def test_planted_sleep_must_register_misses_and_control_must_not(self):
         # 4096 frames at 48 kHz is an 85.3 ms period; a 90 ms planted sleep on
         # every second callback overruns exactly those callbacks.
         with tempfile.TemporaryDirectory() as tmp:
             planted, _ = record(Path(tmp) / "planted", planted_sleep_us=90_000, planted_every=2)
-            control, _ = record(Path(tmp) / "control")
         misses = planted["cells"][0]["metrics"]["deadline_misses"]
-        self.assertGreaterEqual(misses, 4, "instrument failed to see a planted overrun")
+        self.assertGreaterEqual(misses, self.PLANTED_MIN_MISSES,
+                                "instrument failed to see a planted overrun")
         self.assertIn("planted_fault", planted["disqualifiers"])
         self.assertGreater(planted["cells"][0]["metrics"]["duration_ns"]["max"], 90_000_000)
-        self.assertEqual(control["cells"][0]["metrics"]["deadline_misses"], 0,
-                         "negative control: the unplanted run must be clean")
+
+        # Negative control: an unplanted run must report no misses. The control
+        # records real callbacks, so one slow scheduling slice on a loaded or
+        # sanitizer-instrumented runner can add a genuine miss that is host
+        # noise, not an instrument false positive. Every attempt must stay
+        # under the noise ceiling, at least one of CONTROL_ATTEMPTS must be
+        # clean, and none may carry a planted-fault disqualifier.
+        control_misses = []
+        for attempt in range(self.CONTROL_ATTEMPTS):
+            with tempfile.TemporaryDirectory() as tmp:
+                control, _ = record(Path(tmp) / "control")
+            self.assertNotIn("planted_fault", control["disqualifiers"])
+            control_misses.append(control["cells"][0]["metrics"]["deadline_misses"])
+            if control_misses[-1] == 0:
+                break
+        failure = control_failure(control_misses, self.CONTROL_ATTEMPTS, self.PLANTED_MIN_MISSES,
+                                  self.CONTROL_NOISE_CEILING)
+        self.assertIsNone(failure, "negative control: %s" % failure)
 
 
 class QualificationRuleTest(unittest.TestCase):
@@ -511,7 +611,8 @@ class QualificationRuleTest(unittest.TestCase):
                           "callbacks": matrix.QUALIFICATION_CALLBACKS, "returncode": 0,
                           "compiled_source": "a" * 40, "build_dirty": 0, "build_type": "Release",
                           "scheduling": {"status": "obtained", "obtained": "time_constraint"},
-                          "metrics": {"thresholds_met": True}})
+                          "wake": {"wait_failures": 0, "clock_mapping_skew_ns": 0},
+                          "metrics": {"thresholds_met": True, "spin_overruns": 0}})
         return {"mode": "qualification", "status": "COMPLETE",
                 "requested": {"callbacks": matrix.QUALIFICATION_CALLBACKS,
                               "fixtures": list(matrix.QUALIFYING_FIXTURES), "frames_filter": None},
@@ -520,6 +621,7 @@ class QualificationRuleTest(unittest.TestCase):
                               "before": {"admitted": True}, "after": {"admitted": True}},
                 "build_profile": {"CMAKE_BUILD_TYPE": "Release", "PULP_SANITIZER": ""},
                 "scheduling": {"requested": "realtime", "refusal": None},
+                "wake": {"requested": dict(matrix.DEFAULT_WAKE_REQUEST)},
                 "source": {"sha": "a" * 40, "dirty": False}, "cells": cells}
 
     def test_ideal_run_qualifies_and_each_single_defect_disqualifies(self):
@@ -537,6 +639,13 @@ class QualificationRuleTest(unittest.TestCase):
             "scheduling_refused": lambda r: r["scheduling"].__setitem__("refusal", {"reason": "x"}),
             "scheduling_not_obtained:": lambda r: r["cells"][4]["scheduling"].update(
                 status="not_requested", obtained="timeshare"),
+            "wake_backend_not_deadline": lambda r: r["wake"]["requested"].__setitem__(
+                "backend", "sleep-until"),
+            "injected_lateness": lambda r: r["wake"]["requested"].__setitem__("inject_late_us", 500),
+            "spin_overrun:": lambda r: r["cells"][5]["metrics"].__setitem__("spin_overruns", 1),
+            "wake_wait_failed:": lambda r: r["cells"][6]["wake"].__setitem__("wait_failures", 1),
+            "clock_mapping_skewed:": lambda r: r["cells"][7]["wake"].__setitem__(
+                "clock_mapping_skew_ns", matrix.MAX_CLOCK_MAPPING_SKEW_NS + 1),
         }
         for reason, mutate in defects.items():
             receipt = self.ideal()
@@ -546,24 +655,27 @@ class QualificationRuleTest(unittest.TestCase):
 
 
 def fake_record(tmp: Path, *, fixture="g6-voice-bank", scheduling="realtime", behaviour="honour",
-                mode="short", callbacks=8, source_root=ROOT, frames_filter=frozenset({128})):
+                mode="short", callbacks=8, source_root=ROOT, frames_filter=frozenset({128}),
+                wake=None, wake_behaviour="honour"):
     build = tmp / "build"
     install_fake(build, fixture)
     fixtures = list(matrix.QUALIFYING_FIXTURES) if mode == "qualification" else [fixture]
-    previous = os.environ.get("PULP_FAKE_SCHED")
+    previous = {k: os.environ.get(k) for k in ("PULP_FAKE_SCHED", "PULP_FAKE_WAKE")}
     os.environ["PULP_FAKE_SCHED"] = behaviour
+    os.environ["PULP_FAKE_WAKE"] = wake_behaviour
     try:
         return matrix.record_matrix(
             mode=mode, source_root=source_root, build_dir=build, output_dir=tmp / "out",
             fixtures=fixtures, callbacks=callbacks,
             frames_filter=None if mode == "qualification" else set(frames_filter),
             planted_sleep_us=0, planted_every=1, max_load_per_cpu=matrix.DEFAULT_MAX_LOAD_PER_CPU,
-            timeout_seconds=120, scheduling=scheduling, load_reader=QUIET)
+            timeout_seconds=120, scheduling=scheduling, wake=wake, load_reader=QUIET)
     finally:
-        if previous is None:
-            os.environ.pop("PULP_FAKE_SCHED", None)
-        else:
-            os.environ["PULP_FAKE_SCHED"] = previous
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 class SchedulingTest(unittest.TestCase):
@@ -694,6 +806,236 @@ class SchedulingTest(unittest.TestCase):
                             mode="qualification", callbacks=matrix.QUALIFICATION_CALLBACKS,
                             source_root=clean_repo(Path(tmp)))
 
+def wake_row(target, start, end, wake, spin_cpu=0, late=0, overrun=0, ok=1):
+    return (target, start, end, ok, wake, spin_cpu, late, overrun)
+
+
+DEADLINE_WAKE = matrix.parse_wake_line(matrix.format_wake_line(
+    "deadline-spin", "mach_wait_until", "fixed", guard_ns=50_000,
+    guard_bound_ns=matrix.guard_bound_ns(2_666_666), spin_limit_ns=110_000))
+
+
+class WakeTest(unittest.TestCase):
+    """The wake driver's settings and per-row wake records are recorded, bound and checked."""
+
+    def test_wake_line_must_be_internally_consistent(self):
+        bound = matrix.guard_bound_ns(2_666_666)
+        calibrated = dict(guard_bound_ns=bound, spin_limit_ns=2 * 17_000 + 10_000, calibration_samples=64,
+                          calibration_p50_ns=3_000, calibration_p99_ns=7_000, calibration_max_ns=9_000)
+        good = matrix.format_wake_line("deadline-spin", "mach_wait_until", "calibrated",
+                                       guard_ns=20_000, **calibrated)
+        self.assertEqual(matrix.parse_wake_line(good)["guard_ns"], 20_000)
+        for line, message in (
+            # The guard must be the clamped p99 + margin the calibration implies.
+            (matrix.format_wake_line("deadline-spin", "mach_wait_until", "calibrated", guard_ns=25_000,
+                                     **calibrated), "calibrated guard disagrees"),
+            (matrix.format_wake_line("deadline-spin", "mach_wait_until", "calibrated", guard_ns=20_000,
+                                     guard_clamped=1, **calibrated), "calibrated guard disagrees"),
+            (matrix.format_wake_line("sleep-until", "mach_wait_until", "fixed", guard_ns=1,
+                                     spin_limit_ns=1), "deadline-spin backend"),
+            (matrix.format_wake_line("sleep-until", "sleep_until", "none", guard_ns=5),
+             "without a guard disagrees"),
+            (matrix.format_wake_line("deadline-spin", "mach_wait_until", "fixed", guard_ns=1,
+                                     spin_limit_ns=0), "spin limit out of range"),
+            (matrix.format_wake_line("deadline-spin", "mach_wait_until", "fixed", guard_ns=1,
+                                     spin_limit_ns=5, calibration_samples=3), "fixed guard"),
+            (good.replace("backend=deadline-spin", "backend=busy-wait"), "unknown wake backend"),
+            (good + "\n" + good, "exactly one wake line"),
+            ("", "exactly one wake line"),
+            (good.replace("guard_ns=20000", "guard_ns=x"), "malformed wake integer"),
+            (good.replace("clock_mapping_skew_ns=0", "clock_mapping_skew_ns=-1"),
+             "wake settings out of range"),
+            (good.replace(" clock_mapping_skew_ns=0", ""), "malformed wake line"),
+        ):
+            with self.subTest(line=line):
+                with self.assertRaisesRegex(matrix.MatrixError, message):
+                    matrix.parse_wake_line(line)
+
+    def test_row_wake_fields_must_agree_with_lateness(self):
+        period = 2_666_666
+        good = [wake_row(0, 10, 500, -40_000, spin_cpu=39_000),
+                wake_row(period, period + 2_000_000, period + 2_000_400, period + 2_000_000, late=1),
+                wake_row(2 * period, 2 * period + 70_000, 2 * period + 70_400, 2 * period + 60_000, late=2)]
+        matrix.check_wake_rows(good, DEADLINE_WAKE, 48000, 128)
+        metrics = matrix.compute_metrics(good, 48000, 128)
+        self.assertEqual((metrics["late_entries"], metrics["kernel_overshoots"], metrics["spin_overruns"]),
+                         (1, 1, 0))
+        self.assertEqual(metrics["kernel_wake_ns"]["min"], -40_000)
+        self.assertEqual(metrics["spin_cpu_ns"]["total"], 39_000)
+        self.assertEqual(metrics["spin_wall_ns"]["max"], 40_010)
+        for row, message in (
+            (wake_row(0, 10, 500, 5), "on-time wake after its target"),
+            (wake_row(0, 10, 500, -5, late=2), "kernel overshoot recorded before"),
+            (wake_row(0, 10, 500, 5, late=1), "late entry recorded"),
+            (wake_row(0, 10, 500, 20), "wake fields inconsistent"),
+            (wake_row(0, 10, 500, -5, spin_cpu=-1), "wake fields inconsistent"),
+            (wake_row(0, 10, 500, -5, late=3), "wake fields inconsistent"),
+        ):
+            with self.subTest(row=row):
+                with self.assertRaisesRegex(matrix.MatrixError, message):
+                    matrix.check_wake_rows([row], DEADLINE_WAKE, 48000, 128)
+        sleep = matrix.parse_wake_line(matrix.format_wake_line(
+            "sleep-until", "sleep_until", "none", guard_bound_ns=matrix.guard_bound_ns(period)))
+        matrix.check_wake_rows([wake_row(0, 10, 500, 10, late=2)], sleep, 48000, 128)
+        with self.assertRaisesRegex(matrix.MatrixError, "sleep-until rows cannot carry a spin"):
+            matrix.check_wake_rows([wake_row(0, 10, 500, -5, spin_cpu=3)], sleep, 48000, 128)
+        with self.assertRaisesRegex(matrix.MatrixError, "guard bound disagrees with the period"):
+            matrix.check_wake_rows(good, DEADLINE_WAKE, 48000, 256)
+
+    def test_late_entry_keeps_the_original_target_and_fails_the_wake_bar(self):
+        # A late callback that kept its target shows its lateness as start
+        # error; a receipt that reset the target to the late start would hide
+        # it, and the fixed-origin parser rejects that.
+        period = 2_666_666
+        rows = [wake_row(i * period, i * period + 100, i * period + 600, i * period - 30_000, 29_000)
+                for i in range(100)]
+        self.assertTrue(matrix.compute_metrics(rows, 48000, 128)["thresholds_met"])
+        late = list(rows)
+        for i in range(0, 100, 10):
+            late[i] = wake_row(i * period, i * period + 300_000, i * period + 300_500,
+                               i * period + 300_000, late=1)
+        metrics = matrix.compute_metrics(late, 48000, 128)
+        self.assertEqual(metrics["late_entries"], 10)
+        self.assertFalse(metrics["thresholds_met"])
+        text = "\n".join([matrix.CELL_HEADER,
+                          "PACED_CELL fixture=g6-voice-bank variant=eight-slot rate=48000 frames=128 "
+                          "callbacks=2 planted_sleep_us=0 planted_every=1 compiled_source=x "
+                          "build_type=Release build_dirty=0",
+                          "P 0 0 100 600 1 -30000 29000 0 0",
+                          # Target reset to the late start instead of i x period.
+                          "P 1 2966666 2966666 2967000 1 2966666 0 1 0",
+                          "PACED_END rows=2 oracle_failures=0"])
+        with self.assertRaisesRegex(matrix.MatrixError, "drifted from fixed origin"):
+            matrix.parse_cell_output(text)
+
+    def test_g12_rows_need_exact_targets_and_one_wake_row_each(self):
+        period = 128 * 1_000_000_000 // 48000
+
+        def g12_text(second_target, wakes=True):
+            lines = ["g12_paced_activation_v1",
+                     "G12_CELL rate=48000 frames=128 backend=direct callbacks=2 build_dirty=0 "
+                     "compiled_source=x build_type=Release first_new=1"]
+            for index, target in enumerate((1_000, second_target)):
+                lines.append(f"G12_ROW index={index} sample={index * 128} target_ns={target} "
+                             f"start_ns={target + 50} end_ns={target + 500} audio_class=0 bits=0:128")
+                if wakes:
+                    lines.append(f"G12_WAKE index={index} wake_ns={target - 20_000} spin_cpu_ns=19000 "
+                                 "late=0 overrun=0")
+            return "\n".join(lines) + "\n"
+
+        # The audio oracle rejects this stub, so the raw timing rows are still
+        # read and their schedule is checked exactly.
+        parsed = matrix.parse_g12_output(g12_text(1_000 + period))
+        self.assertEqual(parsed["rows"][1][0], period)
+        self.assertEqual(parsed["rows"][1][4], period - 20_000)
+        with self.assertRaisesRegex(matrix.MatrixError, "drifted from fixed origin"):
+            matrix.parse_g12_output(g12_text(1_000 + period + 1))
+        with self.assertRaisesRegex(matrix.MatrixError, "wake rows missing"):
+            matrix.parse_g12_output(g12_text(1_000 + period, wakes=False))
+
+    def test_deadline_request_is_recorded_and_bound(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            receipt, code = fake_record(Path(tmp))
+            self.assertEqual(code, 0)
+            self.assertEqual(receipt["schema"], "pulp.graph_paced_timing_matrix_receipt.v3")
+            self.assertEqual(receipt["wake"]["requested"], matrix.DEFAULT_WAKE_REQUEST)
+            cell = receipt["cells"][0]
+            self.assertEqual((cell["wake"]["backend"], cell["wake"]["guard_source"]),
+                             ("deadline-spin", "calibrated"))
+            for key in ("kernel_wake_ns", "spin_wall_ns", "spin_cpu_ns"):
+                self.assertIn("p99", cell["metrics"][key])
+            self.assertFalse([d for d in receipt["disqualifiers"] if d.startswith(("wake_", "spin_",
+                                                                                     "injected"))])
+            path = Path(tmp) / "out" / "receipt.json"
+            matrix.validate_receipt(path)
+            original = path.read_text(encoding="utf-8")
+            tampers = (
+                (lambda r: r["cells"][0]["wake"].__setitem__("guard_ns", 1),
+                 "cell wake disagrees with raw output"),
+                (lambda r: r["cells"][0]["metrics"]["spin_cpu_ns"].__setitem__("total", 12345),
+                 "cell metrics disagrees with raw output"),
+                (lambda r: r["wake"]["requested"].__setitem__("guard_ns", 12345),
+                 "cell wake disagrees with the requested wake"),
+                (lambda r: r["wake"].__setitem__("rule", "anything"), "wake rule text changed"),
+                (lambda r: r["wake"]["requested"].__setitem__("backend", "busy-wait"),
+                 "unknown wake backend"),
+            )
+            for mutate, message in tampers:
+                with self.subTest(message=message):
+                    changed = json.loads(original)
+                    mutate(changed)
+                    path.write_text(json.dumps(resign(changed)), encoding="utf-8")
+                    with self.assertRaisesRegex(matrix.MatrixError, message):
+                        matrix.validate_receipt(path)
+            # Unsigned edits to the receipt or to a raw row are caught by digest.
+            changed = json.loads(original)
+            changed["cells"][0]["wake"]["guard_ns"] = 1
+            path.write_text(json.dumps(changed), encoding="utf-8")
+            with self.assertRaisesRegex(matrix.MatrixError, "receipt digest mismatch"):
+                matrix.validate_receipt(path)
+            path.write_text(original, encoding="utf-8")
+            raw = Path(tmp) / "out" / receipt["cells"][0]["raw_stdout"]["path"]
+            raw.write_text(raw.read_text(encoding="utf-8").replace("wait_failures=0", "wait_failures=1"),
+                           encoding="utf-8")
+            with self.assertRaisesRegex(matrix.MatrixError, "raw output digest mismatch"):
+                matrix.validate_receipt(path)
+
+    def test_fixed_guard_and_spin_limit_requests_reach_the_cell(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            receipt, code = fake_record(Path(tmp), wake={"guard_ns": 80_000, "spin_limit_ns": 300_000})
+            self.assertEqual(code, 0)
+            cell = receipt["cells"][0]["wake"]
+            self.assertEqual((cell["guard_source"], cell["guard_ns"], cell["spin_limit_ns"]),
+                             ("fixed", 80_000, 300_000))
+            matrix.validate_receipt(Path(tmp) / "out" / "receipt.json")
+
+    def test_wake_fallback_to_sleep_until_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(matrix.MatrixError, "cell wake request mismatch"):
+                fake_record(Path(tmp), wake_behaviour="fallback")
+
+    def test_baseline_injection_overrun_and_wait_failure_never_qualify(self):
+        tag = "g6-voice-bank/eight-slot/48000/128"
+        for kwargs, reason in (
+            (dict(wake={"backend": "sleep-until"}), "wake_backend_not_deadline"),
+            (dict(wake={"inject_late_us": 4_000, "inject_late_every": 3}), "injected_lateness"),
+            (dict(wake_behaviour="overrun"), f"spin_overrun:{tag}"),
+            (dict(wake_behaviour="fail"), f"wake_wait_failed:{tag}"),
+            (dict(wake_behaviour="skewed"), f"clock_mapping_skewed:{tag}"),
+        ):
+            with self.subTest(reason=reason), tempfile.TemporaryDirectory() as tmp:
+                receipt, code = fake_record(Path(tmp), **kwargs)
+                self.assertEqual(code, 0)
+                self.assertIn(reason, receipt["disqualifiers"])
+                path = Path(tmp) / "out" / "receipt.json"
+                matrix.validate_receipt(path)
+                # The disqualifier is recomputed from the raw rows; erasing it fails.
+                changed = json.loads(path.read_text(encoding="utf-8"))
+                changed["disqualifiers"].remove(reason)
+                changed["timing_qualified"] = not changed["disqualifiers"]
+                path.write_text(json.dumps(resign(changed)), encoding="utf-8")
+                with self.assertRaisesRegex(matrix.MatrixError, "disqualifiers disagree"):
+                    matrix.validate_receipt(path)
+
+    def test_qualification_refuses_baseline_wake_and_injected_lateness(self):
+        for wake, message in (({"backend": "sleep-until"}, "deadline-spin wake backend"),
+                              ({"inject_late_us": 100}, "injected lateness")):
+            with self.subTest(message=message), tempfile.TemporaryDirectory() as tmp:
+                with self.assertRaisesRegex(matrix.MatrixError, message):
+                    fake_record(Path(tmp), mode="qualification", wake=wake,
+                                callbacks=matrix.QUALIFICATION_CALLBACKS,
+                                source_root=clean_repo(Path(tmp)))
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(matrix.MatrixError, "not supported by the g12-activation"):
+                fake_record(Path(tmp), fixture="g12-activation", wake={"inject_late_us": 100},
+                            callbacks=16)
+        for bad in ({"spin_limit_ns": 0}, {"guard_ns": -1}, {"calibration_samples": 5000},
+                    {"inject_late_every": 0}, {"jitter": 1}):
+            with self.subTest(bad=bad):
+                with self.assertRaises(matrix.MatrixError):
+                    matrix._wake_request(bad)
+
+
 @unittest.skipUnless(os.environ.get("PULP_PACED_MATRIX_BUILD_DIR"),
                      "set PULP_PACED_MATRIX_BUILD_DIR to a Release build to run the C++ planted negative")
 class CompiledPlantedNegativeTest(unittest.TestCase):
@@ -731,6 +1073,57 @@ class CompiledPlantedNegativeTest(unittest.TestCase):
                 self.assertEqual(refused["cells"], [])
                 self.assertEqual(refused["scheduling"]["refusal"]["scheduling"]["status"], "refused")
                 matrix.validate_receipt(Path(tmp) / "refused" / "receipt.json")
+
+    def test_compiled_wake_backends_record_kernel_wake_start_and_spin_separately(self):
+        build = Path(os.environ["PULP_PACED_MATRIX_BUILD_DIR"]).resolve()
+        for backend in ("deadline-spin", "sleep-until"):
+            with self.subTest(backend=backend), tempfile.TemporaryDirectory() as tmp:
+                receipt, code = matrix.record_matrix(
+                    mode="short", source_root=ROOT, build_dir=build, output_dir=Path(tmp),
+                    fixtures=["noop-wake", "g12-activation"], callbacks=16, frames_filter={128},
+                    planted_sleep_us=0, planted_every=1, max_load_per_cpu=0.25, timeout_seconds=300,
+                    wake={"backend": backend})
+                self.assertEqual(code, 0)
+                matrix.validate_receipt(Path(tmp) / "receipt.json")
+                for cell in receipt["cells"]:
+                    wake, metrics = cell["wake"], cell["metrics"]
+                    self.assertEqual(wake["backend"], backend)
+                    self.assertEqual(metrics["spin_overruns"], 0)
+                    if backend == "deadline-spin":
+                        self.assertEqual(wake["guard_source"], "calibrated")
+                        self.assertGreater(wake["guard_ns"], 0)
+                        if platform.system() == "Darwin":
+                            self.assertEqual(wake["kernel_wait"], "mach_wait_until")
+                        # The kernel wakes ahead of the target and the spin costs CPU.
+                        self.assertLess(metrics["kernel_wake_ns"]["p50"], 0)
+                        self.assertGreater(metrics["spin_cpu_ns"]["total"], 0)
+                    else:
+                        self.assertEqual((wake["guard_source"], wake["guard_ns"]), ("none", 0))
+                        self.assertEqual(metrics["spin_cpu_ns"]["total"], 0)
+                        self.assertIn("wake_backend_not_deadline", receipt["disqualifiers"])
+
+    def test_compiled_injected_lateness_keeps_the_schedule(self):
+        build = Path(os.environ["PULP_PACED_MATRIX_BUILD_DIR"]).resolve()
+        results = {}
+        for inject in (0, 5_000):
+            with tempfile.TemporaryDirectory() as tmp:
+                receipt, code = matrix.record_matrix(
+                    mode="short", source_root=ROOT, build_dir=build, output_dir=Path(tmp),
+                    fixtures=["noop-wake"], callbacks=16, frames_filter={128}, planted_sleep_us=0,
+                    planted_every=1, max_load_per_cpu=0.25, timeout_seconds=300,
+                    wake={"inject_late_us": inject, "inject_late_every": 4})
+                self.assertEqual(code, 0)
+                # Validation re-parses every target against the fixed origin.
+                matrix.validate_receipt(Path(tmp) / "receipt.json")
+                results[inject] = receipt
+        late = [c["metrics"]["late_entries"] for c in results[5_000]["cells"]]
+        control = [c["metrics"]["late_entries"] for c in results[0]["cells"]]
+        # Callbacks 4, 8 and 12 lose 5 ms (more than a block); callback 0 is
+        # absorbed by the 10 ms lead before the origin.
+        self.assertTrue(all(n >= 3 for n in late), late)
+        self.assertTrue(all(n < 3 for n in control), control)
+        self.assertIn("injected_lateness", results[5_000]["disqualifiers"])
+        self.assertTrue(all(not c["metrics"]["thresholds_met"] for c in results[5_000]["cells"]))
 
     def test_g12_build_stamp_is_not_an_oracle_failure_but_audio_is(self):
         build = Path(os.environ["PULP_PACED_MATRIX_BUILD_DIR"]).resolve()

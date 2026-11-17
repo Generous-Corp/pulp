@@ -67,7 +67,7 @@ std::vector<GraphAuthoredEvent> render_one(GraphAuthoredEventLane<16>& lane,
 } // namespace
 
 TEST_CASE("G5 host ingress projects absolute MIDI records without retiming",
-          "[host][graph][g5][events]") {
+          "[host][graph][events]") {
     HostEventIngress<4> ingress;
     REQUIRE(ingress.begin_block(3, 100, 8) == HostEventResult::Accepted);
     REQUIRE(ingress.publish(midi_event(3, 102, 2, 11, pulp::midi::MidiEvent::note_on(1, 62, 90))) ==
@@ -100,7 +100,7 @@ TEST_CASE("G5 host ingress projects absolute MIDI records without retiming",
 }
 
 TEST_CASE("G5 host ingress rejects output-capacity and sequence mutations",
-          "[host][graph][g5][events][negative-control]") {
+          "[host][graph][events][negative-control]") {
     HostEventIngress<2> ingress;
     REQUIRE(ingress.begin_block(1, 0, 4) == HostEventResult::Accepted);
     REQUIRE(ingress.publish(midi_event(1, 0, 1, 9, pulp::midi::MidiEvent::note_on(0, 60, 1))) ==
@@ -119,7 +119,7 @@ TEST_CASE("G5 host ingress rejects output-capacity and sequence mutations",
 }
 
 TEST_CASE("G5 host ingress retries a refused projection without losing order",
-          "[host][graph][g5][events]") {
+          "[host][graph][events]") {
     HostEventIngress<4> ingress;
     REQUIRE(ingress.begin_block(1, 32, 4) == HostEventResult::Accepted);
     const auto first = midi_event(1, 32, 9, 4, pulp::midi::MidiEvent::note_on(1, 60, 100));
@@ -153,7 +153,7 @@ TEST_CASE("G5 host ingress retries a refused projection without losing order",
 }
 
 TEST_CASE("G5 host ingress drops staged records at an epoch boundary",
-          "[host][graph][g5][events][negative-control]") {
+          "[host][graph][events][negative-control]") {
     HostEventIngress<4> ingress;
     REQUIRE(ingress.begin_block(1, 100, 4) == HostEventResult::Accepted);
     REQUIRE(ingress.publish(midi_event(1, 110, 1, 9, pulp::midi::MidiEvent::note_on(0, 60, 1))) ==
@@ -171,7 +171,7 @@ TEST_CASE("G5 host ingress drops staged records at an epoch boundary",
 }
 
 TEST_CASE("G5 host ingress evicts staged records passed by a forward sample jump",
-          "[host][graph][g5][events][negative-control]") {
+          "[host][graph][events][negative-control]") {
     HostEventIngress<4> ingress;
     REQUIRE(ingress.begin_block(1, 100, 4) == HostEventResult::Accepted);
     REQUIRE(ingress.publish(midi_event(1, 110, 1, 9, pulp::midi::MidiEvent::note_on(0, 60, 1))) ==
@@ -194,7 +194,7 @@ TEST_CASE("G5 host ingress evicts staged records passed by a forward sample jump
     REQUIRE(ingress.end_block() == HostEventResult::Accepted);
 }
 
-TEST_CASE("G5 MPE sidecar preserves projected sample offsets", "[host][graph][g5][mpe]") {
+TEST_CASE("G5 MPE sidecar preserves projected sample offsets", "[host][graph][mpe]") {
     HostEventIngress<4> ingress;
     REQUIRE(ingress.begin_block(1, 40, 8) == HostEventResult::Accepted);
     auto note = midi_event(1, 43, 1, 3, pulp::midi::MidiEvent::note_on(1, 60, 100));
@@ -223,7 +223,7 @@ TEST_CASE("G5 MPE sidecar preserves projected sample offsets", "[host][graph][g5
 }
 
 TEST_CASE("G5 host projection preserves absolute offsets and sidecars",
-          "[host][graph][g5][events][mpe][ump]") {
+          "[host][graph][events][mpe][ump]") {
     std::array<HostEventRecord, 3> records{};
     records[0] = midi_event(1, 43, 1, 3, pulp::midi::MidiEvent::note_on(1, 60, 100));
     records[1] = midi_event(1, 45, 2, 3, pulp::midi::MidiEvent::pitch_bend(1, 10'000));
@@ -259,7 +259,7 @@ TEST_CASE("G5 host projection preserves absolute offsets and sidecars",
 }
 
 TEST_CASE("G5 host projection refuses retiming and preserves destinations",
-          "[host][graph][g5][events][negative-control]") {
+          "[host][graph][events][negative-control]") {
     std::array<HostEventRecord, 1> late{
         midi_event(1, 39, 1, 3, pulp::midi::MidiEvent::note_on(1, 60, 100))};
     pulp::midi::MidiBuffer midi;
@@ -276,7 +276,7 @@ TEST_CASE("G5 host projection refuses retiming and preserves destinations",
 }
 
 TEST_CASE("G5 host projection preflights bounded MPE fanout",
-          "[host][graph][g5][mpe][negative-control]") {
+          "[host][graph][mpe][negative-control]") {
     pulp::midi::MpeVoiceTracker tracker;
     for (std::uint8_t note = 0; note < pulp::midi::MpeVoiceTracker::kMaxNotes; ++note)
         REQUIRE(tracker.process(pulp::midi::MidiEvent::note_on(1, note, 100)));
@@ -297,7 +297,7 @@ TEST_CASE("G5 host projection preflights bounded MPE fanout",
 }
 
 TEST_CASE("G5 host projection preflights pending MPE release on an empty block",
-          "[host][graph][g5][mpe][negative-control]") {
+          "[host][graph][mpe][negative-control]") {
     pulp::midi::MpeVoiceTracker tracker;
     REQUIRE(tracker.process(pulp::midi::MidiEvent::note_on(1, 60, 100)));
     tracker.on_note_lifecycle = [](const pulp::midi::MpeNoteState*,
@@ -319,7 +319,7 @@ TEST_CASE("G5 host projection preflights pending MPE release on an empty block",
 }
 
 TEST_CASE("G5 host projection preflights pending release plus event bound",
-          "[host][graph][g5][mpe][negative-control]") {
+          "[host][graph][mpe][negative-control]") {
     pulp::midi::MpeVoiceTracker tracker;
     REQUIRE(tracker.process(pulp::midi::MidiEvent::note_on(1, 60, 100)));
     tracker.on_note_lifecycle = [](const pulp::midi::MpeNoteState*,
@@ -346,7 +346,7 @@ TEST_CASE("G5 host projection preflights pending release plus event bound",
 }
 
 TEST_CASE("G5 host projection flushes a pending MPE release at full capacity",
-          "[host][graph][g5][mpe]") {
+          "[host][graph][mpe]") {
     pulp::midi::MpeVoiceTracker tracker;
     REQUIRE(tracker.process(pulp::midi::MidiEvent::note_on(1, 60, 100)));
     tracker.on_note_lifecycle = [](const pulp::midi::MpeNoteState*,
@@ -372,7 +372,7 @@ TEST_CASE("G5 host projection flushes a pending MPE release at full capacity",
 }
 
 TEST_CASE("G5 host projection preserves all destinations on pending MPE rejection",
-          "[host][graph][g5][mpe][ump][negative-control]") {
+          "[host][graph][mpe][ump][negative-control]") {
     pulp::midi::MpeVoiceTracker tracker;
     REQUIRE(tracker.process(pulp::midi::MidiEvent::note_on(1, 60, 100)));
     tracker.on_note_lifecycle = [](const pulp::midi::MpeNoteState*,
@@ -428,7 +428,7 @@ TEST_CASE("G5 host projection preserves all destinations on pending MPE rejectio
     REQUIRE(tracker.pending_note_off_count() == 1);
 }
 
-TEST_CASE("G5 graph-authored event lane is partition invariant", "[host][graph][g5][events]") {
+TEST_CASE("G5 graph-authored event lane is partition invariant", "[host][graph][events]") {
     GraphAuthoredEventLane<16> whole;
     GraphAuthoredEventLane<16> split;
     const std::array<std::size_t, 16> one{8};
@@ -444,7 +444,7 @@ TEST_CASE("G5 graph-authored event lane is partition invariant", "[host][graph][
 }
 
 TEST_CASE("G5 graph-authored event lane has checked refusal and attempt budget",
-          "[host][graph][g5][events][negative-control]") {
+          "[host][graph][events][negative-control]") {
     GraphAuthoredEventLane<4> lane;
     REQUIRE(lane.reset(1) == GraphEventResult::Accepted);
     REQUIRE(lane.begin_block(1, 8, 1) == GraphEventResult::Accepted);
@@ -474,7 +474,7 @@ TEST_CASE("G5 graph-authored event lane has checked refusal and attempt budget",
 }
 
 TEST_CASE("G5 graph-authored lane recovers after cursor exhaustion",
-          "[host][graph][g5][events][negative-control]") {
+          "[host][graph][events][negative-control]") {
     GraphAuthoredEventLane<2> lane;
     REQUIRE(lane.reset(1) == GraphEventResult::Accepted);
     pulp::host::detail::GraphEventLaneTestAccess::set_cursor(
@@ -495,7 +495,7 @@ TEST_CASE("G5 graph-authored lane recovers after cursor exhaustion",
 }
 
 TEST_CASE("G5 graph-authored lane refuses reused epochs and far-future budget aliasing",
-          "[host][graph][g5][events][negative-control]") {
+          "[host][graph][events][negative-control]") {
     GraphAuthoredEventLane<4> lane;
     REQUIRE(lane.reset(1) == GraphEventResult::Accepted);
     REQUIRE(lane.reset(1) == GraphEventResult::StaleEpoch);
@@ -515,7 +515,7 @@ TEST_CASE("G5 graph-authored lane refuses reused epochs and far-future budget al
 }
 
 TEST_CASE("G5 graph-authored lane queues one-block lookahead with stable ordering",
-          "[host][graph][g5][events][queued]") {
+          "[host][graph][events][queued]") {
     GraphAuthoredEventLane<4> lane;
     REQUIRE(lane.reset(1) == GraphEventResult::Accepted);
     REQUIRE(lane.begin_block(1, 0, 2) == GraphEventResult::Accepted);
@@ -551,7 +551,7 @@ TEST_CASE("G5 graph-authored lane queues one-block lookahead with stable orderin
 }
 
 TEST_CASE("G5 graph-authored lane refuses horizon overflow and reset retires pending",
-          "[host][graph][g5][events][queued][negative-control]") {
+          "[host][graph][events][queued][negative-control]") {
     GraphAuthoredEventLane<2> lane;
     REQUIRE(lane.reset(1) == GraphEventResult::Accepted);
     REQUIRE(lane.begin_block(1, 0, 1) == GraphEventResult::Accepted);
@@ -571,7 +571,7 @@ TEST_CASE("G5 graph-authored lane refuses horizon overflow and reset retires pen
 }
 
 TEST_CASE("G5 callback writer and reader expose one borrowed sorted workflow",
-          "[host][graph][g5][events][wiring]") {
+          "[host][graph][events][wiring]") {
     GraphAuthoredEventLane<8> lane;
     REQUIRE(lane.reset(7) == GraphEventResult::Accepted);
     REQUIRE(lane.begin_block(7, 0, 4) == GraphEventResult::Accepted);
@@ -589,7 +589,7 @@ TEST_CASE("G5 callback writer and reader expose one borrowed sorted workflow",
 }
 
 TEST_CASE("G5 lane budgets attempts and accepted records per canonical sample",
-          "[host][graph][g5][events][negative-control]") {
+          "[host][graph][events][negative-control]") {
     GraphAuthoredEventLane<4> lane;
     REQUIRE(lane.reset(1) == GraphEventResult::Accepted);
     REQUIRE(lane.begin_block(1, 0, 2) == GraphEventResult::Accepted);
@@ -608,7 +608,7 @@ TEST_CASE("G5 lane budgets attempts and accepted records per canonical sample",
 }
 
 TEST_CASE("G5 lane enforces accepted cap across lookahead and block boundary",
-          "[host][graph][g5][events][queued][negative-control]") {
+          "[host][graph][events][queued][negative-control]") {
     GraphAuthoredEventLane<4> lane;
     REQUIRE(lane.reset(1) == GraphEventResult::Accepted);
     REQUIRE(lane.begin_block(1, 0, 1) == GraphEventResult::Accepted);
@@ -630,7 +630,7 @@ TEST_CASE("G5 lane enforces accepted cap across lookahead and block boundary",
 }
 
 TEST_CASE("G5 lane aborts a failed phase and recovers on the next block",
-          "[host][graph][g5][events][negative-control]") {
+          "[host][graph][events][negative-control]") {
     GraphAuthoredEventLane<4> lane;
     REQUIRE(lane.reset(1) == GraphEventResult::Accepted);
     REQUIRE(lane.begin_block(1, 0, 1) == GraphEventResult::Accepted);
@@ -644,7 +644,7 @@ TEST_CASE("G5 lane aborts a failed phase and recovers on the next block",
 }
 
 TEST_CASE("G5 lane aborts a producer-only early exit before the next block",
-          "[host][graph][g5][events][negative-control]") {
+          "[host][graph][events][negative-control]") {
     GraphAuthoredEventLane<4> lane;
     REQUIRE(lane.reset(1) == GraphEventResult::Accepted);
     REQUIRE(lane.begin_block(1, 0, 1) == GraphEventResult::Accepted);

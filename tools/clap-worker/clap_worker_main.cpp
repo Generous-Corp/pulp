@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: MIT
 #include "isolated_clap_channel.hpp"
+#include "isolated_clap_windows_channel.hpp"
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/midi/ump_buffer.hpp>
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/runtime/memory_mapped_file.hpp>
 
-#if defined(PULP_ISOLATED_CLAP_SUPPORTED) && defined(__APPLE__) && defined(__aarch64__)
+#if defined(PULP_ISOLATED_CLAP_SUPPORTED) &&                                                       \
+    (defined(PULP_ISOLATED_CLAP_POSIX_TRANSPORT) || defined(PULP_ISOLATED_CLAP_WINDOWS_TRANSPORT))
 #include <algorithm>
 #include <clap/clap.h>
 #include <clap/ext/audio-ports.h>
@@ -22,6 +24,154 @@ namespace {
 using namespace pulp;
 using namespace host::isolation;
 using Clock = std::chrono::steady_clock;
+constexpr auto kControlDeadline = std::chrono::seconds(5);
+
+// The worker end of the private control channel, which is its standard input,
+// and the shared mapping it adopts during hello. Only hello differs between
+// transports; the load, lifecycle and block loop below are shared.
+#if defined(PULP_ISOLATED_CLAP_POSIX_TRANSPORT)
+class Transport {
+  public:
+    enum class Poll { idle, readable, closed, failed };
+    // argv: worker, mapping path, plugin, descriptor, profile.
+    static constexpr int kArguments = 5;
+
+    bool send(const ControlRecord& record, Deadline deadline) {
+        return send_record(STDIN_FILENO, record, deadline);
+    }
+    bool receive(ControlRecord& record, Deadline deadline) {
+        return receive_record(STDIN_FILENO, record, deadline);
+    }
+    bool move(void* data, std::size_t size, bool sending, Deadline deadline) {
+        return transfer(STDIN_FILENO, data, size, sending, deadline);
+    }
+    Poll poll() {
+        pollfd channel{STDIN_FILENO, POLLIN, 0};
+        const auto polled = ::poll(&channel, 1, 0);
+        if (polled < 0 && errno != EINTR)
+            return Poll::failed;
+        if (channel.revents & (POLLHUP | POLLERR | POLLNVAL))
+            return Poll::closed;
+        return (channel.revents & POLLIN) ? Poll::readable : Poll::idle;
+    }
+    void idle_wait() {
+        std::this_thread::sleep_for(std::chrono::microseconds(50));
+    }
+    static std::filesystem::path own_executable(char** argv) {
+        std::error_code ec;
+        return std::filesystem::canonical(argv[0], ec);
+    }
+
+    /// Receives hello and maps the file it names. Returns 0 or the exit code.
+    int receive_hello(char** argv, ControlRecord& hello, Deadline deadline) {
+        // A socket's SIGPIPE policy is per descriptor; it cannot change host policy.
+        int no_sigpipe = 1;
+        if (::setsockopt(STDIN_FILENO, SOL_SOCKET, SO_NOSIGPIPE, &no_sigpipe, sizeof(no_sigpipe)))
+            return 65;
+        if (!receive(hello, deadline) || !hello_header_ok(hello))
+            return 66;
+        if (!mapping_.open_no_follow(argv[1], runtime::MapMode::ReadWrite, kMappingBytes) ||
+            mapping_.size() != kMappingBytes)
+            return 67;
+        auto identity = mapping_.opened_file_identity();
+        if (!identity.valid || identity.volume != hello.volume || identity.file != hello.file ||
+            identity.generation != hello.file_generation ||
+            !mapping_.path_refers_to_open_file(argv[1]))
+            return 68;
+        shared_ = reinterpret_cast<Mapping*>(mapping_.mutable_data());
+        if (shared_->magic != kMagic || shared_->abi != kAbi ||
+            shared_->generation != hello.generation)
+            return 69;
+        return 0;
+    }
+    std::uint64_t process_id() const {
+        return static_cast<std::uint64_t>(::getpid());
+    }
+    Mapping* shared() const {
+        return shared_;
+    }
+
+  private:
+    runtime::MemoryMappedFile mapping_;
+    Mapping* shared_ = nullptr;
+};
+#else
+using windows::Deadline;
+class Transport {
+  public:
+    enum class Poll { idle, readable, closed, failed };
+    // argv: worker, plugin, descriptor, profile. The section arrives as a handle.
+    static constexpr int kArguments = 4;
+
+    Transport() {
+        // A high-resolution timer keeps the prepared loop's idle wait near the
+        // POSIX 50 us poll; Sleep would round up to the scheduler tick.
+        timer_ = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+                                        TIMER_ALL_ACCESS);
+    }
+    ~Transport() {
+        if (timer_ != nullptr)
+            CloseHandle(timer_);
+    }
+    Transport(const Transport&) = delete;
+    Transport& operator=(const Transport&) = delete;
+
+    bool send(const ControlRecord& record, Deadline deadline) {
+        return windows::send_record(channel_, record, deadline);
+    }
+    bool receive(ControlRecord& record, Deadline deadline) {
+        return windows::receive_record(channel_, record, deadline);
+    }
+    bool move(void* data, std::size_t size, bool sending, Deadline deadline) {
+        return windows::transfer(channel_, data, size, sending, deadline);
+    }
+    Poll poll() {
+        DWORD available = 0;
+        if (!PeekNamedPipe(reinterpret_cast<HANDLE>(channel_), nullptr, 0, nullptr, &available,
+                           nullptr))
+            return GetLastError() == ERROR_BROKEN_PIPE ? Poll::closed : Poll::failed;
+        return available != 0 ? Poll::readable : Poll::idle;
+    }
+    void idle_wait() {
+        LARGE_INTEGER due{};
+        due.QuadPart = -500; // 50 us, relative, in 100 ns units.
+        if (timer_ != nullptr && SetWaitableTimerEx(timer_, &due, 0, nullptr, nullptr, nullptr, 0))
+            WaitForSingleObject(timer_, INFINITE);
+        else
+            SwitchToThread();
+    }
+    static std::filesystem::path own_executable(char**) {
+        std::wstring path(32768, L'\0');
+        const DWORD size =
+            GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
+        if (size == 0 || size >= path.size())
+            return {};
+        path.resize(size);
+        std::error_code ec;
+        return std::filesystem::canonical(path, ec);
+    }
+
+    /// Receives hello and adopts the section it names. Returns 0 or the exit code.
+    int receive_hello(char**, ControlRecord& hello, Deadline deadline) {
+        if (channel_ == 0 || channel_ == reinterpret_cast<std::intptr_t>(INVALID_HANDLE_VALUE))
+            return 65;
+        if (!windows::worker_receive_hello(channel_, section_, hello, deadline))
+            return 66;
+        return 0;
+    }
+    std::uint64_t process_id() const {
+        return GetCurrentProcessId();
+    }
+    Mapping* shared() const {
+        return section_.mapping();
+    }
+
+  private:
+    std::intptr_t channel_ = reinterpret_cast<std::intptr_t>(GetStdHandle(STD_INPUT_HANDLE));
+    windows::SharedSection section_;
+    HANDLE timer_ = nullptr;
+};
+#endif
 
 struct Native : host::NativeHandleVisitor {
     const clap_plugin_t* plugin = nullptr;
@@ -90,50 +240,37 @@ bool save(const clap_plugin_t* plugin, std::vector<std::uint8_t>& bytes) {
 }
 
 int run(int argc, char** argv) {
-    if (argc != 5 || std::strcmp(argv[4], "MacClapStereo64V1") != 0)
+    if (argc != Transport::kArguments || std::strcmp(argv[argc - 1], kProfileName) != 0)
         return 64;
-    // A socket's SIGPIPE policy is per descriptor; it cannot change host policy.
-    int no_sigpipe = 1;
-    if (::setsockopt(STDIN_FILENO, SOL_SOCKET, SO_NOSIGPIPE, &no_sigpipe, sizeof(no_sigpipe)))
-        return 65;
+    const char* const plugin_path = argv[argc - 3];
+    const char* const descriptor = argv[argc - 2];
+    Transport channel;
     ControlRecord hello;
-    auto deadline = Clock::now() + std::chrono::seconds(5);
-    if (!receive_record(STDIN_FILENO, hello, deadline) || hello.command != Command::hello ||
-        hello.generation == 0 || hello.payload_bytes != kMappingBytes)
-        return 66;
-    runtime::MemoryMappedFile mapping;
-    if (!mapping.open_no_follow(argv[1], runtime::MapMode::ReadWrite, kMappingBytes) ||
-        mapping.size() != kMappingBytes)
-        return 67;
-    auto identity = mapping.opened_file_identity();
-    if (!identity.valid || identity.volume != hello.volume || identity.file != hello.file ||
-        identity.generation != hello.file_generation || !mapping.path_refers_to_open_file(argv[1]))
-        return 68;
-    auto* shared = reinterpret_cast<Mapping*>(mapping.mutable_data());
-    if (shared->magic != kMagic || shared->abi != kAbi || shared->generation != hello.generation)
-        return 69;
+    auto deadline = Clock::now() + kControlDeadline;
+    if (const int refused = channel.receive_hello(argv, hello, deadline))
+        return refused;
+    auto* shared = channel.shared();
     const auto worker_hash =
-        runtime::sha256_file_hex(std::filesystem::canonical(argv[0]), std::uint64_t{1} << 32);
+        runtime::sha256_file_hex(Transport::own_executable(argv), std::uint64_t{1} << 32);
     const auto plugin_hash =
-        runtime::sha256_file_hex(clap_hash_path(argv[2]), std::uint64_t{1} << 32);
-    if (!worker_hash || !plugin_hash || *worker_hash != hello.worker_sha256.data() ||
-        *plugin_hash != hello.plugin_sha256.data() ||
-        std::string_view(hello.build.data()) != PULP_CLAP_WORKER_BUILD)
+        runtime::sha256_file_hex(clap_hash_path(plugin_path), std::uint64_t{1} << 32);
+    if (!worker_hash || !plugin_hash ||
+        !hello_identity_matches(hello, *worker_hash, *plugin_hash, PULP_CLAP_WORKER_BUILD))
         return 70;
-    // Mapping handshake precedes vendor loading, so the parent can unlink it
-    // even when the vendor's factory never returns.
-    hello.process_id = static_cast<std::uint64_t>(::getpid());
+    // Mapping handshake precedes vendor loading, so the parent can release the
+    // mapping name (POSIX) even when the vendor's factory never returns.
+    hello.process_id = channel.process_id();
     hello.result = 1;
-    if (!send_record(STDIN_FILENO, hello, deadline))
+    if (!channel.send(hello, deadline))
         return 71;
-    host::PluginSelection selection{argv[2], {"clap", argv[3]}};
+    host::PluginSelection selection{plugin_path, {"clap", descriptor}};
     auto loaded = host::PluginSlot::load_exact(selection);
     if (!std::holds_alternative<std::unique_ptr<host::PluginSlot>>(loaded.value))
         return 72;
     auto slot = std::move(std::get<std::unique_ptr<host::PluginSlot>>(loaded.value));
     Native native;
     slot->accept(native);
-    auto after_hash = runtime::sha256_file_hex(clap_hash_path(argv[2]), std::uint64_t{1} << 32);
+    auto after_hash = runtime::sha256_file_hex(clap_hash_path(plugin_path), std::uint64_t{1} << 32);
     if (!after_hash || after_hash != plugin_hash || !admitted(native.plugin))
         return 73;
     host::PluginHostSettings settings;
@@ -142,34 +279,33 @@ int run(int argc, char** argv) {
         return 74;
     slot->set_preferred_channel_layout(2, 2);
     hello.result = 2;
-    if (!send_record(STDIN_FILENO, hello, Clock::now() + std::chrono::seconds(5)))
+    if (!channel.send(hello, Clock::now() + kControlDeadline))
         return 75;
 
-    audio::Buffer<float> input(2, 64), output(2, 64);
+    audio::Buffer<float> input(kChannels, kFrames), output(kChannels, kFrames);
     midi::MidiBuffer midi_in, midi_out;
     host::ParameterEventQueue params;
     bool prepared = false;
     std::uint64_t sequence = 0;
     for (;;) {
-        pollfd channel{STDIN_FILENO, POLLIN, 0};
-        const auto polled = ::poll(&channel, 1, 0);
-        if (polled < 0 && errno != EINTR)
+        const auto polled = channel.poll();
+        if (polled == Transport::Poll::failed)
             return 76;
-        if (channel.revents & (POLLHUP | POLLERR | POLLNVAL))
+        if (polled == Transport::Poll::closed)
             return 77;
-        if (channel.revents & POLLIN) {
+        if (polled == Transport::Poll::readable) {
             ControlRecord request;
-            deadline = Clock::now() + std::chrono::seconds(5);
-            if (!receive_record(STDIN_FILENO, request, deadline) ||
-                request.generation != hello.generation || request.payload_bytes > kCheckpointBytes)
-                return 78;
+            deadline = Clock::now() + kControlDeadline;
+            if (!channel.receive(request, deadline) || request.generation != hello.generation ||
+                request.payload_bytes > kCheckpointBytes)
+                return 86;
             auto reply = request;
             reply.result = 0;
             reply.payload_bytes = 0;
             std::vector<std::uint8_t> state;
             switch (request.command) {
             case Command::prepare:
-                if (!prepared && slot->prepare(48000, 64) && admitted(native.plugin)) {
+                if (!prepared && slot->prepare(kSampleRate, kFrames) && admitted(native.plugin)) {
                     prepared = true;
                     reply.result = 1;
                 }
@@ -188,7 +324,7 @@ int run(int argc, char** argv) {
                 break;
             case Command::restore:
                 state.resize(static_cast<std::size_t>(request.payload_bytes));
-                if (!transfer(STDIN_FILENO, state.data(), state.size(), false, deadline))
+                if (!channel.move(state.data(), state.size(), false, deadline))
                     return 79;
                 if (!prepared && slot->restore_state(state))
                     reply.result = 1;
@@ -198,26 +334,26 @@ int run(int argc, char** argv) {
                     slot->release();
                 slot.reset();
                 reply.result = 1;
-                if (!send_record(STDIN_FILENO, reply, deadline))
+                if (!channel.send(reply, deadline))
                     return 80;
                 return 0;
             default:
                 return 81;
             }
-            if (!send_record(STDIN_FILENO, reply, deadline))
+            if (!channel.send(reply, deadline))
                 return 82;
             if (request.command == Command::checkpoint && reply.result &&
-                !transfer(STDIN_FILENO, state.data(), state.size(), true, deadline))
+                !channel.move(state.data(), state.size(), true, deadline))
                 return 83;
         }
         if (!prepared) {
-            std::this_thread::sleep_for(std::chrono::microseconds(50));
+            channel.idle_wait();
             continue;
         }
         auto& request = shared->requests[sequence % kSlots];
         // Acquire exclusive payload ownership from the callback producer.
         if (request.ready.load(std::memory_order_acquire) == 0) {
-            std::this_thread::sleep_for(std::chrono::microseconds(50));
+            channel.idle_wait();
             continue;
         }
         const Block block = request.block;
@@ -238,7 +374,7 @@ int run(int argc, char** argv) {
         if (midi_out.ump())
             midi_out.ump()->clear();
         slot->begin_process();
-        slot->process(out, in, midi_in, midi_out, params, 64);
+        slot->process(out, in, midi_in, midi_out, params, static_cast<int>(kFrames));
         Block result;
         result.generation = hello.generation;
         result.sequence = sequence;

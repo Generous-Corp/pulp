@@ -2,12 +2,18 @@
 
 #include <pulp/host/graph_serializer.hpp>
 
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace pulp::host {
+
+/// Largest notation (`.pat`) document, and largest graph text a file reload or
+/// probe admits, in bytes. A `.pulpgraph` file loaded on its own is bounded by
+/// GraphSerializer::max_file_bytes instead.
+inline constexpr std::size_t max_graph_notation_bytes = 1024u * 1024u;
 
 /// Control-thread diagnostics shared by notation, strict file validation and tools.
 /// Mutation codes retain GraphResult's spellings. Supplementary fields identify
@@ -26,7 +32,9 @@ struct GraphPatchDiagnostic {
         ParameterOutOfRange,
         RestoreFailed,
         ResourceLimit,
-        FileUnreadable
+        FileUnreadable,
+        SampleRateMismatch,
+        UnsupportedChannelLayout
     };
     Code code = Code::Ok;
     std::size_t line = 0;
@@ -82,6 +90,10 @@ class GraphPatchCatalog {
 /// `~> parameter @ depth` maps [0,1] to [range.min, min+depth*span] through the
 /// existing sparse automation route. Dense, additive and smoothed routes are
 /// explicitly unsupported in this notation profile.
+/// A `# flow 2` document also accepts constructor arguments: audio boundary
+/// channel counts and the spectral analysis, identity stage and synthesis
+/// identity with an explicit sample rate, which preparation must match. The
+/// formatter writes `# flow 1` whenever a graph needs no flow 2 spelling.
 GraphPatchResult parse_graph_patch(std::string_view text, const GraphPatchCatalog& catalog = {});
 GraphPatchText format_graph_patch(const SignalGraph& graph, const GraphPatchCatalog& catalog = {});
 

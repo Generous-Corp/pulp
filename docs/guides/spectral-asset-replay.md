@@ -1,8 +1,10 @@
 # Save and replay a two-asset spectral morph
 
-The finite mono profile-1 morph can be saved as a bounded `.pulpgraph` file.
-It keeps the existing FFT-256/hop-64 runtime, direct live Audio control input,
-typed stages and synthesis. Loading reconstructs a stopped authoring graph;
+The finite profile-1 morph can be saved as a bounded `.pulpgraph` file. It
+keeps the geometry decoded from its assets (FFT N a power of two from 256 to
+16384, a hop that divides N and is at most N/2, 1 to 16 channels), direct live
+Audio control input, typed stages and synthesis. Node ids identify nodes in the
+file; node names are labels and may repeat. Loading reconstructs a stopped authoring graph;
 the caller prepares it before rendering.
 
 ```cpp
@@ -47,13 +49,31 @@ format-5 readers refuse instead of loading spectral nodes as unresolved Custom
 nodes and dropping the embedded assets on re-save. Ordinary v5 files migrate to
 v6 in memory without changing their bytes.
 
+A spectral graph is saveable only when it is complete. The writer refuses, and
+`to_file` reports `serialization_refused`, when the graph holds a
+`SpectralAnalysis` node (live analysis is not persisted; only the asset source
+is), a node gain other than 1, a non-finite editor layout coordinate, or a
+chain the reader cannot prepare at the saved rate at its admission block (see
+below; for example a source with no synthesis or output yet). Repeated node
+names are allowed. `SaveResult::error` names the rule that failed after the
+`graph serialization failed:` prefix. A spectral graph also has no saved-identity
+envelope: `to_saved_document` returns an empty string for it and
+`to_saved_file` refuses it with that reason, so `pulp graph diff` and
+`GraphEditHistory` do not cover spectral graphs.
+
 Before replacing a destination, the reader validates the complete envelope,
 asset digests and references, exact contracts and shapes, typed connections,
 and existing compiler/bank admission. Corrupt, missing, mismatched, unsupported
 or oversized data leaves the previous authoring and prepared state unchanged.
 A running spectral controller must be stopped before replacement. Saved graph
 files remain bounded at 64 MiB; prepared spectral storage remains bounded at
-64 MiB and blocks at 4096 samples. Arbitrary seeks, loops and hot asset
+64 MiB and blocks at 4096 samples. Frame edge storage grows with the block
+size, so admission is checked at a block size. Saving checks the block the
+graph is prepared for, or its `GraphLimits::max_block_size` (at most 4096) when
+it is not prepared. Loading checks the destination's
+`GraphLimits::max_block_size`, at most 4096: a graph that fits the bank only at
+smaller blocks loads into a destination whose limits name that block, and is
+refused by one that may be prepared at 4096. Arbitrary seeks, loops and hot asset
 replacement remain unsupported.
 
 The replay fixture keeps `graph.pulpgraph`, `asset-a.sfrm`, `asset-b.sfrm` and

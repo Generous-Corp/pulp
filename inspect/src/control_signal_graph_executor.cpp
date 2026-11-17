@@ -15,6 +15,17 @@ ControlExecutionOutcome fail(ControlResultCode code, std::string explanation) {
     return {.terminal_state = ControlReceiptState::Failed,
             .result = {.result_code = code, .explanation = std::move(explanation)}};
 }
+
+// A request stopped by its checkpoint was never refused by the graph: it
+// carries no typed detail, so a caller resends it instead of treating the file
+// as rejected.
+ControlExecutionOutcome checkpoint_failure(ControlExecutionCheckpoint checkpoint) {
+    if (checkpoint == ControlExecutionCheckpoint::DeadlineExceeded)
+        return fail(ControlResultCode::DeadlineExceeded,
+                    "graph file reload deadline expired before publication; live graph retained");
+    return fail(ControlResultCode::Cancelled,
+                "graph file reload was cancelled before publication; live graph retained");
+}
 } // namespace
 
 ControlOperationExecutor
@@ -47,17 +58,23 @@ make_control_signal_graph_executor(ControlSignalGraphAuthorityResolver resolve) 
                                 "graph file request is malformed");
                 const auto text = params["text"].getString();
                 const auto format = params["format"].getString();
-                if (text.size() > 1024 * 1024 || (format != "notation" && format != "pulpgraph"))
+                if (text.size() > host::max_graph_notation_bytes ||
+                    (format != "notation" && format != "pulpgraph"))
                     return fail(ControlResultCode::InvalidRequest,
                                 "graph file format or bound is invalid");
+                auto stopped = ControlExecutionCheckpoint::Continue;
                 const auto result = authority->reload_graph_file(
                     text,
                     format == "notation" ? host::GraphFileFormat::Notation
                                          : host::GraphFileFormat::Pulpgraph,
                     static_cast<std::uint64_t>(params["expected_generation"].getInt64()),
-                    [&context] {
-                        return context.checkpoint() == ControlExecutionCheckpoint::Continue;
+                    [&context, &stopped] {
+                        stopped = context.checkpoint();
+                        return stopped == ControlExecutionCheckpoint::Continue;
                     });
+                if (stopped != ControlExecutionCheckpoint::Continue &&
+                    result.code == host::GraphFileReloadCode::CommitFailed)
+                    return checkpoint_failure(stopped);
                 auto detail = choc::value::createObject("");
                 detail.addMember("receipt_id", plan.receipt_id.value);
                 detail.addMember("code", host::graph_file_reload_code_name(result.code));

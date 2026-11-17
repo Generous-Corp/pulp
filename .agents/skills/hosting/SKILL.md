@@ -35,6 +35,18 @@ nodes once skipped it and crashed numeric connect. Read the next block's epoch
 and start from `control_index_position()`, and expect prepare or a prepared-edit
 commit to reset it to epoch 1, cursor 0. `control_index_nodes.cpp` is part of
 the curated sample-region web source list, because authoring calls into it.
+A transport stream-history reset (and prepare) also resets every stateful
+Control node (integrator, slew, hysteresis) to its configured initial state, so
+a seek renders like a fresh graph; a negative reset position is `OutOfRange`,
+and a non-finite index is published as 0 rather than forwarded to a parameter.
+That seek reset calls `CustomNodeType::reset` on the AUDIO thread, from the
+Control index path, the graph-event path, and plain `process()` on a graph with
+no event lane (a Control chain fed by an ordinary audio source has no lane and
+no epoch, yet still resets), but only for a type that passes
+`custom_node_reset_runs_on_audio_thread()` (a declared `rt_contract` with an
+audio-callback safety class). A third-party Control-port type that leaves
+`rt_contract` undeclared keeps its state across a seek; declaring it promises
+its `reset` never allocates, locks or blocks.
 
 Port names: a MidiInput/MidiOutput node's single port is named `audio` (the
 first-port name from `populate_named_ports`) with kind MIDI, so do not rename
@@ -56,6 +68,31 @@ hostile-fixture, endpoint, sibling/PDC and production-mutation controls together
 Functional callback traps do not establish full realtime or A10 qualification;
 host death and deliberate group escape are outside first-mode custody.
 
+**The Windows worker transport differs from the POSIX one in three places.**
+The control channel is an overlapped named pipe, so every transfer on either
+end must be overlapped and deadline-bounded (`isolated_clap_windows_channel.hpp`);
+a synchronous `ReadFile` on it ignores the deadline. The shared mapping is an
+unnamed section duplicated into the worker with `DuplicateHandle`, and the hello
+record's `file` field carries that child-side handle value instead of a file
+identity, so there is no path to unlink. And the Windows retained channel refuses
+output capture, because nothing drains a retained child's pipes.
+
+**The worker owns that section value only once it maps.** `SharedSection::adopt`
+closes the value right after a successful map (the view keeps the section alive)
+and never closes a value that does not map, because a hostile or stale hello can
+name another live worker handle such as its control pipe. Never close the
+duplicated value from the parent with `DUPLICATE_CLOSE_SOURCE`: it races the
+worker's own close and can hit a reused value. A failed hello is followed by
+terminating the job, which releases what the worker never adopted. Prove the
+Windows callback with the import-table traps in
+`test/fixtures/isolated_clap/windows_callback_traps.cpp` (Pulp and the static
+CRT resolve through the test executable's table), not with macOS interposer
+evidence, and keep their negative control beside any new kind. The traps are
+per process and `catch_discover_tests` runs every case in its own process, so a
+case that measures a callback must install them itself (the test's
+`CallbackProbe` does on construction); a case relying on an earlier case's
+install reports clean counts with no traps in place when run alone.
+
 **Graph code that calls an isolation helper must also link on the web.** The
 WAM / WebCLAP sample-region profile compiles a curated source list
 (`tools/cmake/PulpSampleRegionWebSources.cmake`), not `pulp-host`, and
@@ -76,6 +113,19 @@ adoption restarts every sibling's PDC ring at zero, and the bit-exact sibling
 check in `test_isolated_clap_worker.cpp` fails. A refusal must keep the live
 snapshot; `fail_swap_edit_locked_` would silence the whole graph. Checkpoint
 before the node renders: `pause()` is terminal while a graph still renders it.
+
+**Every unsupported proxy call is terminal, so generic graph code must not make
+one.** The isolated slot answers `save_state()`, `set_parameter()` and similar
+calls by latching `unsupported` silence. Generic `SignalGraph` and
+`GraphSerializer` paths therefore check `is_isolated_plugin_slot` before
+forwarding: serialization refuses the whole graph (an identity-only file would
+reload the plugin in-process) and `set_node_parameter` returns false. A new
+generic path that calls into a plugin slot needs the same check.
+
+**The callback reads a completion once.** `CallbackEndpoint::render` copies the
+completion block out of the shared mapping before validating it and emits from
+that copy; reading the mapping twice lets a worker swap in non-finite samples
+after the check.
 
 
 ## Live retuning at a callback boundary
@@ -141,7 +191,11 @@ live bank use `VoiceBankBinding::restore_state()`, not a loop of
 `set_slot_parameter()`: `restore_voice_bank_state()` knows no authored bounds,
 so a value-by-value replay can refuse halfway and leave the bank half-restored,
 while `restore_state()` checks every value (bounds included) before the first
-write. Saved-bank activation, edit/undo, DAW adapters, and paced
+write. A release through `dispatch_deferred()` also retires the key in the
+bank's MPE tracker, and a graph failure during `render()` silences the whole
+block. `begin_block()` with a block open is `Busy` and `publish()` with no block
+is `StaleEpoch`, matching `HostEventIngress`. Saved-bank activation,
+edit/undo, DAW adapters, and paced
 realtime qualification remain open; do not infer them from the source-installed
 consumer.
 
@@ -551,6 +605,51 @@ and `signal_graph_reference_walk.cpp` remains the independent execution oracle.
 The authoring extraction changes source ownership, not the graph's public
 contract or real-time lock rules. Recheck the host graph and executor parity
 suites after moving a method across these translation units.
+
+### Graph code runs inside a WebAssembly AudioWorklet
+
+`tools/cmake/PulpSampleRegionWebSources.cmake` compiles the graph sources,
+including `signal_graph_authoring.cpp`, into the sample-region WAM DSP, which
+runs in `AudioWorkletGlobalScope`. That scope has no `crypto` and no
+`performance`, so under Emscripten `std::random_device` throws a JavaScript
+`ReferenceError` from `crypto.getRandomValues` (it passes straight through a
+C++ `catch (...)`), and `steady_clock::now()` fails on the missing
+`performance.now()`. `system_clock` maps to `Date.now()` and is safe. Node
+creation mints an authored ID, so its per-graph salt comes from the
+entropy-free helpers in `signal_graph_authored_id_internal.hpp` under
+`__EMSCRIPTEN__`. Before adding an entropy or clock read to any source in that
+list, check the built worklet module for `getRandomValues`; the
+`test/sample_region_web` browser proof mints IDs inside a worklet and fails
+with the `ReferenceError` if one returns.
+
+### Feed a trigger graph from the host timeline through `HostTimelineBinding`
+
+A trigger graph's host ingress takes the trigger controller's own epoch and
+requires each block to start exactly at the graph's cursor, which counts
+rendered samples. A `HostBlockTimeline` epoch or window start cannot be passed
+to `begin_host_event_block()` directly: after a host gap the timeline jumps
+forward and the graph refuses the block (`OutOfRange`). `HostTimelineBinding`
+maps each window onto the graph's live epoch and cursor and resets the graph,
+the voice bank and staged parameters together on a timeline `NewEpoch`. Two
+rules follow from the rendered-sample clock: graph records are accepted for the
+current block only (a staged future record would be retimed by a later gap),
+and the graph reset runs after the voice epoch is reserved and before any
+commit, because it is the one reset step another thread can make fail (`Busy`
+while the ingress block is open). `VoiceBankBinding::activate()` is a
+control-thread call; the audio owner resets a bank with
+`reserve_event_reset()` / `commit_event_reset()`.
+
+### Edge probes publish once per block, from the calling thread
+
+Every edge probe kind observes into a per-block stage in the executor and is
+pushed to its ring only after the last node (serial) or the final level
+barrier (parallel), on the thread that called `process()`. Never push to a
+probe ring from inside a node gather: on the levelized walk that runs on a
+worker and gives the SPSC ring a second producer. Capture an audio source in
+the task that ran the source node, not after the barrier: a built-in gain's
+sole reader reads its output in place and may write through its input view.
+A hosted plug-in's output is retained across blocks and always copied to its
+reader, so a test that needs an in-place source must use a built-in node.
 
 ### A hosted device's latency is discovered once, on the control thread
 
@@ -1149,9 +1248,13 @@ save/reopen render proof beside the legacy caller-owned route controls.
   writer — audio or control, never concurrent. A `false` return means the live
   node is unavailable or the source was truncated; any retained prefix is
   still published. Publications are latest-wins and one-shot, and sequence
-  wrap skips zero. A gap-free `prepare_swap()` shares the ingress mailbox and
-  consumed sequence for a stable MidiInput NodeId, preserving unconsumed MIDI
-  across the swap. MidiOutput egress remains snapshot-local but uses an ordered,
+  wrap skips zero. A block replaced before any process() read it is lost with
+  both calls returning true; `midi_mailbox_counters()` counts it through
+  `TripleBuffer::write_replacing_unread()`, with the same fields and lifetime
+  as `parameter_mailbox_counters()`. An event there is a short message, SysEx
+  message, UMP packet or MPE expression event. A gap-free `prepare_swap()`
+  shares the ingress mailbox and consumed sequence for a stable MidiInput
+  NodeId, preserving unconsumed MIDI and its counts across the swap. MidiOutput egress remains snapshot-local but uses an ordered,
   fixed four-block SPSC queue: empty blocks cannot overwrite pending output;
   overflow retains the earliest blocks and makes extraction incomplete. When
   the destination lacks short-event, SysEx, or attached UMP-sidecar capacity,
@@ -2126,6 +2229,16 @@ Keep these host graph invariants covered by tests:
   rather than memset'ing with a wrapped size_t.
 - MidiInput nodes' `midi_out` is drained at the END of `process()`, not
   the start. Hosts call `inject_midi()` before each `process()` to refill.
+- A routed `ProcessorNode` block always carries a main input bus, even for
+  a Processor that declares none, so a no-input instrument fits at most 15
+  output buses in `BusBufferSet::kMaxBuses`. `prepare()` and
+  `routed_output_channels()` must reserve that slot together, or the port
+  count promises a bus that fails every block.
+- A spectral `.pulpgraph` is admitted against the 64 MiB bank at a block
+  size, and frame edges grow with the block. Saving admits at the block the
+  graph is prepared for; loading admits at the destination's
+  `GraphLimits::max_block_size` (both at most 4096). A graph that fits only
+  at small blocks loads only into a destination whose limits name that block.
 
 ## PluginManagerPanel
 
@@ -2225,7 +2338,7 @@ honest.
 
 ### Undo/redo and diff over saved documents (`graph_history.hpp`)
 
-`GraphEditHistory` stores saved-identity v6 documents, never graph pointers.
+`GraphEditHistory` stores saved-identity v7 documents, never graph pointers.
 Watch out for:
 
 - Undo and redo reload the graph through `from_saved_document`, which
@@ -2254,11 +2367,14 @@ Watch out for:
 - `diff_graph_documents` / `pulp graph diff` compare by authored identity, so
   renumbering alone is equal, including `sample_regions` NodeIds, and the
   reported digests match. `GraphDocument::semantic_digest` from
-  `inspect_document` still hashes raw NodeIds. Identities carry an ordinal in
-  NodeId order, so deleting the first of two same-named nodes shifts the
-  survivor's identity and the diff blames the wrong node. A pre-v4 legacy file is refused as
-  `invalid_format_version`, not `logical_identity_missing`; re-save it with
-  `to_saved_document` first.
+  `inspect_document` still hashes raw NodeIds. In v7 the identity is the
+  node's persisted `authored_id`, so two graphs built the same way are
+  DIFFERENT authored graphs (every node is added and removed): to test
+  renumbering, reload one document, never build two. v6 identities still
+  carry an ordinal in NodeId order (the old misattribution on deleting a
+  same-named node), and a v6/v7 pair is refused rather than compared. A
+  pre-v4 legacy file is refused as `invalid_format_version`, not
+  `logical_identity_missing`; re-save it with `to_saved_document` first.
 
 ## Crash-isolated scanning — and the un-isolated LOAD
 
@@ -3278,7 +3394,9 @@ activates at one render boundary, and requires control-side finalization.
 Snapshot-bound access must use the controller-aware snapshot lease, and live
 processor-provider mutation must refuse in spectral mode even when the legacy
 `live_slot_` is empty. Query prepared geometry from the active snapshot.
-Keep graph persistence and arbitrary stage registration refused; PARTIAL status
+Keep arbitrary stage registration refused, and keep graph persistence limited
+to the format-6 spectral subset (no analysis nodes; the graph must prepare);
+PARTIAL status
 does not establish notation coverage or realtime timing qualification.
 
 `SpectralRuntimeBank::prepare` walks each node's input chain to its analysis or
@@ -3292,17 +3410,34 @@ hangs until then. Do not register a second ctest entry for the same case under a
 shorter `TIMEOUT`: the duplicate-registration check refuses two budgets for one
 command.
 
-A finite spectral source's EOF values (frame count, routed cutoff, `N / H`
-drain, bin count, component stride) come from `SpectralFiniteStreamRule` in
+A finite spectral source's EOF values (frame count, drain, routed cutoff, bin
+count, component stride) come from `SpectralFiniteStreamRule` in
 `core/host/src/spectral_finite_stream_internal.hpp`; do not reintroduce 64,
-129, 258 or 320 literals in the asset-morph path. The closed form
-`ceil((L + N - H) / H)` matches the analysis grid only when the hop divides the
-FFT size (N=256, H=100, L=1 gives 2 against the grid's 3), even though the codec
-and `SpectralIdentity` accept such hops, so the rule refuses them. Test any EOF
-change against `spectral_frame_engine_first_frame_start` walking the grid, not
-against the formula itself. The rule's `static_assert` turns a broken rounding
-into a compile error, which `confirm_failure.sh` reports as INCONCLUSIVE; break
-a different term to exercise the runtime test.
+129, 258 or 320 literals in a source path. The rule is versioned.
+`analysis_grid_v2` (the default) counts `floor((L - 1) / H) + floor((N - 1) / H)
++ 1` frames, drains `ceil(N / H)` zero frames and derives the cutoff from L
+alone as `(N + H) + floor((L - 1) / H) * H + N`. `dividing_hop_v1` gives the
+same values but refuses a hop that does not divide N; the old closed form
+`ceil((L + N - H) / H)` with an `N / H` drain is only right there (N=256,
+H=100, L=1 gives 2 frames against the grid's 3). The guarded synthesis engine
+makes a sample final only once a frame starting after it has been synthesized,
+which is why the drain must reach the last window's end; the rule test proves
+that against the engine, not the formula. Test any EOF change against
+`spectral_frame_engine_first_frame_start` walking the grid. The rule's
+`static_assert` turns a broken rounding into a compile error, which
+`confirm_failure.sh` reports as INCONCLUSIVE; break a different term to
+exercise the runtime test.
+
+The two-asset morph stays on `dividing_hop_v1`, and so do its saved assets:
+frame f averages control hop f and is published at sample `(f + 1) * H`, while
+synthesis needs it at its window end `f * H + (N - floor((N - 1) / H) * H)`;
+the two agree only when H divides N. The single-stream source
+(`add_spectral_asset_source_v1`) has no input and publishes each frame in the
+block that reaches its window end, the analysis timeline, so it runs at every
+hop v2 admits. A graph with no audio input still needs an input `BufferView`
+that carries the block length (`BufferView<const float>(nullptr, 0, count)`):
+a default-constructed view has zero samples and the routed path renders
+nothing, silently.
 
 The asset-morph source builds its rule from the decoded stream's geometry, so it
 runs at any admitted (N, H, C). Its endpoint scratch is a per-node vector sized
@@ -3354,6 +3489,11 @@ not advance). A steady-clock forward gap stays in the epoch; a backwards clock
 or a steady/no-steady flip opens a new epoch. Out-of-block times are refused,
 never clamped. The CLAP adapter still feeds the Processor `MidiBuffer`, not this
 projection.
+On a timeline `NewEpoch` (seek or loop), call `SignalGraph::try_reset_events()`
+before opening the next host-event block at the new epoch; it is the only call
+that advances the trigger epoch, and the live generation follows it. The
+unchecked `process()` silences a refused typed-trigger block, while
+`process_checked()` leaves the output untouched and returns the refusal.
 
 VST3 and AU enter the same timeline through `clock_from_vst3()` /
 `clock_from_au()` (plain fields, no SDK). Gotchas: VST3's steady counter is
@@ -3410,13 +3550,20 @@ only when the node has exactly one output, so stereo built-ins need explicit
 `node.audio` and `node.out1` ports. User-facing walkthroughs live in
 `docs/guides/graph-first-steps.md` and `docs/guides/graph-notation-cookbook.md`.
 
-Spectral constructors appear in the catalog as `unsupported_typed_api_only`
-rows built at a fixed probe identity (FFT 256, hop 64, mono, 48 kHz), so their
-audio port counts are for that identity only. A catalog row is not proof a key
-is constructible from notation: `instantiate()` returns 0 for spectral keys and
-`parse_graph_patch` refuses them before instantiation. Never suggest
-`GraphSerializer` as the fix for a spectral refusal; `to_json` returns an empty
-string for any graph with a spectral node.
+Spectral constructor catalog rows are built at a fixed probe identity (FFT 256,
+hop 64, mono, 48 kHz), so their audio port counts are for that identity only.
+`instantiate()` returns 0 for spectral keys: only `# flow 2` constructs them,
+through `graph_patch_constructors.cpp`, from explicit `fft`, `hop`, `channels`
+and `rate` arguments (stages add `kind identity`). Flow 1 parsing must stay
+byte-for-byte unchanged, so argument handling runs only when the header is
+`# flow 2`, and the formatter emits `# flow 1` for every graph that needs no
+argument. One document has one sample rate (`SampleRateMismatch` otherwise);
+`prepare()` at a different rate fails with `IdentityMismatch`. Mask gains and
+codec assets never go into notation: refuse them with the payload size and send
+the author to saved-graph JSON. `GraphSerializer::to_json` still returns an empty
+string for an analysis graph, so do not suggest it as the save path for one, and
+name built-in boundary types from their constructor probe rather than from a
+whole-graph serialization.
 
 ### Transactional graph-file development reload
 
@@ -3463,22 +3610,71 @@ The `android-build` job runs only on main pushes (it is skipped for
 
 ## Saved identity documents
 
-`GraphSerializer::to_saved_document` wraps the normal graph payload (format
-version unchanged) in the saved-identity envelope; `from_saved_document` checks
-every binding (duplicate, unknown, dangling node id) before it mutates the
-graph. The envelope name `pulp.graph.saved-identity.v6` is not a graph format
-version: the payload stays at the current format, and a v6+ graph is still
-refused. The semantic digest ignores editor layout, so moving a node changes
+`GraphSerializer::to_saved_document` writes saved-identity v7: the graph
+payload at format 7 with each node's `authored_id`, and an envelope binding
+those IDs (design: `docs/graph-program-status/G-3-v7-identity-design.md`);
+`from_saved_document` checks every binding (duplicate, unknown, dangling node
+id) before it mutates the graph. Format 7 exists ONLY with the v7 envelope:
+the plain writer never emits it, and a plain format 7 file is refused, so a
+test that wants "a future version" must use 8. v6 documents
+(`pulp.graph.saved-identity.v6`, formats 4..6) still load with their original
+rules; there is no v6 writer in production, so tests that need a v6 fixture
+use `GraphSerializerTestAccess::legacy_v6_saved_document`. Loading any
+pre-v7 document assigns IDs from a hash of the whole document
+(`migrate_saved_document`'s rule), so the same file always gets the same IDs
+and an edited copy gets entirely new ones. Do not hand-edit a binding key
+with a text replace that also hits the bindings object: a duplicated JSON key
+is refused as `duplicate_json_key` before any identity rule runs. The semantic digest ignores editor layout, so moving a node changes
 the canonical bytes but not the digest. `snapshot_port_identity` replaces the
 old `undo_port_identity` spelling, which returned a snapshot and not an undo.
+
+Saved connection validation must reject a declared spectral lane even when
+ordinary endpoints let the tolerant loader restore it as audio. Spectral
+graphs are unsupported on this identity surface. The partial-load exception
+for parameter edges into unresolved plugins still requires a valid source
+node and output port; a missing plugin cannot excuse an invalid source.
 
 Subgraph instances flatten into ordinary nodes, so a plain saved document
 loses which nodes form which instance. `to_saved_subgraph_document` and
 `from_saved_subgraph_document` (`subgraph_persistence.hpp`) add a `subgraphs`
 record list that names members by logical identity, never NodeId. Restore
 needs the caller's templates: each record is checked against a fresh scratch
-expansion of its template (member type and nested name, child identities and
-indices, internal edges, parameter set and bounds), and any mismatch clears
-the graph. Bounds and Processor targets always come from the template, so a
-document cannot widen them. `inspect_document` refuses dangling or shared
-members and records outside the v6 envelope, without needing templates.
+expansion of its template (member type and nested name, port kinds, exact
+Custom type and version, exact Processor graph type, child identities and
+indices, every semantic field of internal edges, parameter set and bounds, and
+Custom state its type accepts). Bounds and Processor targets always come from
+the template, so a document cannot widen them. `inspect_document` refuses
+dangling or shared members and records outside the v6 envelope, without
+needing templates.
+
+Gotchas for subgraph restore. The whole document is loaded and rebound on a
+candidate graph first, and only a passing candidate is loaded into the
+caller's graph, so a refusal normally leaves the caller's graph untouched;
+only a second pass that behaves differently clears it. Both passes need the
+custom node types: the candidate and every scratch expansion copy them from
+the caller's graph with `GraphSerializer::copy_custom_node_types`, so register
+Custom types on the graph BEFORE calling the restore, or every Custom member
+is refused as an expansion mismatch. Processor factories, restore registries
+and Custom `create`/`load_state`/`destroy` therefore run several times per
+restore on the control thread; they must be repeatable and side-effect free.
+A Custom member's state is checked by creating a probe instance, calling
+`load_state` and destroying it; a stateless type (no `create` or no
+`load_state`) must carry empty state. The writer applies the same check, so it
+returns an empty string for a member whose live state its type refuses.
+
+Saved identity strictness: `inspect_document`, `diff_graph_documents` and
+`from_saved_document` rebuild each node's identity string from its saved record
+(numbered by persisted node id, as the writer does) and refuse a mismatch as
+`identity_binding_unknown`, so an edited identity string cannot bind a node it
+was not written for. A custom node's missing `version` means 1 and a value
+below 1 is refused; the writer records a version below 1 as 1. A spectral graph
+that cannot be saved reports the failing rule through `SaveResult::error`
+(`to_saved_file` refuses it with that reason); the older string-returning
+writer overloads keep returning an empty string. The writer and inspection
+build identity strings through one key function (`identity_key` in
+`graph_serializer.cpp`); change the format there, never in only one side, or
+every saved document is refused. The tolerant loader drops a node record it
+cannot add (a second Control index input, a plugin record without plugin info)
+and lists it in `LoadResult::unrestored_node_ids`; `from_saved_document` and
+the CLI rewrites (`save`, `fmt`, `canonicalize`) refuse such a document as
+`node_not_restored` rather than write a file that silently lost the node.

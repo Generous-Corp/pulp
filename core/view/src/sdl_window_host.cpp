@@ -10,6 +10,10 @@
 #include <pulp/view/drag_drop.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/host_frame_pump.hpp>
+#include <pulp/view/hover_cursor.hpp>
+#include <pulp/view/plugin_key_routing.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
+#include <pulp/view/ui_components.hpp>
 #ifdef PULP_HAS_SKIA
 #include "include/core/SkCanvas.h"
 #include "include/core/SkColorType.h"
@@ -118,6 +122,8 @@ class SdlWindowHostImpl : public SdlWindowHost {
         if (texture_)
             SDL_DestroyTexture(texture_);
 #endif
+        if (cursor_)
+            SDL_DestroyCursor(cursor_);
         if (renderer_) SDL_DestroyRenderer(renderer_);
         if (window_) SDL_DestroyWindow(window_);
         SDL_Quit();
@@ -179,6 +185,7 @@ class SdlWindowHostImpl : public SdlWindowHost {
         if (!window_ || !renderer_) return;
 
         show();
+        SDL_StartTextInput(window_);
         register_dispatcher();
 
         // Attach the OS-native accessibility provider for this root. On Linux
@@ -208,29 +215,65 @@ class SdlWindowHostImpl : public SdlWindowHost {
                     case SDL_EVENT_WINDOW_EXPOSED:
                         needs_repaint_ = true;
                         break;
+                    case SDL_EVENT_KEY_DOWN:
+                    case SDL_EVENT_KEY_UP: {
+                        const auto key = key_code(event.key.key);
+                        route_plugin_key(root_, {{key, modifiers(event.key.mod), event.key.down,
+                                                  event.key.repeat},
+                                                 static_cast<int>(key) >= 256,
+                                                 true});
+                        needs_repaint_ = true;
+                        break;
+                    }
+                    case SDL_EVENT_TEXT_INPUT:
+                        if (auto* focus = focused_input_under_root(root_);
+                            focus && focus->accepts_text_input())
+                            deliver_text_input(*focus, {event.text.text});
+                        needs_repaint_ = true;
+                        break;
+                    case SDL_EVENT_WINDOW_FOCUS_LOST:
+                        cancel_pointer();
+                        break;
+                    case SDL_EVENT_WINDOW_MOUSE_ENTER: {
+                        float x = 0, y = 0;
+                        SDL_GetMouseState(&x, &y);
+                        hover_cursor_.set_pointer(window_to_root(x, y));
+                        needs_repaint_ = true;
+                        break;
+                    }
+                    case SDL_EVENT_WINDOW_MOUSE_LEAVE:
+                        SDL_ShowCursor();
+                        hover_cursor_.clear_pointer();
+                        root_.simulate_hover({-1, -1});
+                        needs_repaint_ = true;
+                        break;
                     case SDL_EVENT_MOUSE_BUTTON_DOWN:
-                        if (event.button.button == SDL_BUTTON_LEFT) {
-                            drag_start_ = window_to_root(event.button.x, event.button.y);
-                            drag_active_ = true;
-                        }
+                        pointer_down(event.button);
                         break;
-                    case SDL_EVENT_MOUSE_MOTION:
-                        if (drag_active_ && (event.motion.state & SDL_BUTTON_LMASK)) {
-                            root_.simulate_drag(drag_start_,
-                                                window_to_root(event.motion.x, event.motion.y), 1);
-                            needs_repaint_ = true;
-                        }
+                    case SDL_EVENT_MOUSE_MOTION: {
+                        pointer_point_ = window_to_root(event.motion.x, event.motion.y);
+                        hover_cursor_.set_pointer(pointer_point_);
+                        if (gesture_owns(MousePhase::drag))
+                            break;
+                        if (auto* target = pointer_capture_.live_in(root_))
+                            deliver_mouse_drag(root_, target, pointer_point_,
+                                               modifiers(SDL_GetModState()), click_count_,
+                                               PointerType::mouse, 0.5f, pointer_button_);
+                        else
+                            deliver_hover_move(root_, pointer_point_, modifiers(SDL_GetModState()));
+                        needs_repaint_ = true;
                         break;
-                    case SDL_EVENT_MOUSE_BUTTON_UP: {
-                        const auto point = window_to_root(event.button.x, event.button.y);
-                        View::SimulatedPointer pointer;
-                        pointer.button =
-                            event.button.button == SDL_BUTTON_RIGHT    ? MouseButton::right
-                            : event.button.button == SDL_BUTTON_MIDDLE ? MouseButton::middle
-                                                                       : MouseButton::left;
-                        root_.simulate_click(point, pointer);
-                        if (event.button.button == SDL_BUTTON_LEFT)
-                            drag_active_ = false;
+                    }
+                    case SDL_EVENT_MOUSE_BUTTON_UP:
+                        pointer_up(event.button);
+                        break;
+                    case SDL_EVENT_MOUSE_WHEEL: {
+                        const auto point = window_to_root(event.wheel.mouse_x, event.wheel.mouse_y);
+                        const float direction =
+                            event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -1.f : 1.f;
+                        deliver_mouse_wheel(root_, point, direction * event.wheel.x,
+                                            -direction * event.wheel.y,
+                                            modifiers(SDL_GetModState()), WheelHost{});
                         needs_repaint_ = true;
                         break;
                     }
@@ -289,6 +332,7 @@ class SdlWindowHostImpl : public SdlWindowHost {
             }
 
             drain_dispatcher_tasks();
+            publish_cursor();
 
             // Service inbound accessibility IPC (Linux AT-SPI registry / Orca
             // method calls on the exported View tree). Cheap when no assistive
@@ -318,6 +362,8 @@ class SdlWindowHostImpl : public SdlWindowHost {
             SDL_Delay(16); // ~60fps
         }
 
+        cancel_pointer();
+        SDL_StopTextInput(window_);
         shutdown_accessibility(accessibility_handle_);
         accessibility_handle_ = nullptr;
         shutdown_dispatcher();
@@ -394,8 +440,240 @@ private:
     Point pending_drop_pos_{0, 0};
     // Per-window drop hover state (owned here, not a process global).
     DragSession drag_session_;
-    Point drag_start_{0, 0};
-    bool drag_active_ = false;
+    ViewCapture pointer_capture_;
+    MouseButton pointer_button_ = MouseButton::none;
+    Point pointer_point_{};
+    int click_count_ = 1;
+    HoverCursorTracker hover_cursor_;
+    SDL_Cursor* cursor_ = nullptr;
+
+    static uint16_t modifiers(SDL_Keymod state) {
+        uint16_t result = 0;
+        if (state & SDL_KMOD_SHIFT)
+            result |= kModShift;
+        if (state & SDL_KMOD_CTRL)
+            result |= kModCtrl;
+        if (state & SDL_KMOD_ALT)
+            result |= kModAlt;
+        if (state & SDL_KMOD_GUI)
+            result |= kModMeta;
+#ifdef __APPLE__
+        if (state & SDL_KMOD_GUI)
+            result |= kModCmd;
+#endif
+        return result;
+    }
+
+    static KeyCode key_code(SDL_Keycode key) {
+        switch (key) {
+        case SDLK_LEFT:
+            return KeyCode::left;
+        case SDLK_RIGHT:
+            return KeyCode::right;
+        case SDLK_UP:
+            return KeyCode::up;
+        case SDLK_DOWN:
+            return KeyCode::down;
+        case SDLK_HOME:
+            return KeyCode::home;
+        case SDLK_END:
+            return KeyCode::end_;
+        case SDLK_PAGEUP:
+            return KeyCode::page_up;
+        case SDLK_PAGEDOWN:
+            return KeyCode::page_down;
+        case SDLK_BACKSPACE:
+            return KeyCode::backspace;
+        case SDLK_DELETE:
+            return KeyCode::delete_;
+        case SDLK_TAB:
+            return KeyCode::tab;
+        case SDLK_RETURN:
+        case SDLK_KP_ENTER:
+            return KeyCode::enter;
+        case SDLK_ESCAPE:
+            return KeyCode::escape;
+        default:
+            if (key >= SDLK_F1 && key <= SDLK_F12)
+                return static_cast<KeyCode>(static_cast<int>(KeyCode::f1) + key - SDLK_F1);
+            return key >= 32 && key < 127 ? static_cast<KeyCode>(key) : KeyCode::unknown;
+        }
+    }
+
+    static MouseButton mouse_button(Uint8 button) {
+        switch (button) {
+        case SDL_BUTTON_LEFT:
+            return MouseButton::left;
+        case SDL_BUTTON_RIGHT:
+            return MouseButton::right;
+        case SDL_BUTTON_MIDDLE:
+            return MouseButton::middle;
+        default:
+            return MouseButton::none;
+        }
+    }
+
+    void cancel_pointer() {
+        auto* target = pointer_capture_.live_in(root_);
+        pointer_capture_.reset();
+        const auto button = std::exchange(pointer_button_, MouseButton::none);
+        if (button == MouseButton::left) {
+            MouseEvent event;
+            event.position = pointer_point_;
+            event.window_position = pointer_point_;
+            event.phase = MousePhase::release;
+            event.is_cancelled = true;
+            root_.dispatch_gesture_pointer_event(event);
+        }
+        if (target)
+            deliver_mouse_cancel(root_, target, pointer_point_, modifiers(SDL_GetModState()),
+                                 click_count_, button);
+        SDL_CaptureMouse(false);
+        needs_repaint_ = true;
+    }
+
+    void pointer_down(const SDL_MouseButtonEvent& event) {
+        const auto button = mouse_button(event.button);
+        if (button == MouseButton::none || pointer_button_ != MouseButton::none)
+            return;
+        pointer_point_ = window_to_root(event.x, event.y);
+        hover_cursor_.set_pointer(pointer_point_);
+        if (auto* combo = enabled_open_popup_in(root_)) {
+            float x = 0, y = 0, w = 0, h = 0;
+            if (combo->dropdown_window_rect(x, y, w, h) &&
+                Rect{x, y, w, h}.contains(pointer_point_)) {
+                pointer_capture_.set(combo);
+                pointer_button_ = button;
+                click_count_ = event.clicks;
+                SDL_CaptureMouse(true);
+                deliver_mouse_down(root_, combo, pointer_point_, modifiers(SDL_GetModState()),
+                                   click_count_, true, button);
+                needs_repaint_ = true;
+                return;
+            }
+        }
+        const auto overlay = route_press_to_active_overlay(root_, pointer_point_);
+        if (overlay.consume_press)
+            return;
+        auto* target = overlay.routing == OverlayPressRouting::routed
+                           ? overlay.target
+                           : root_.hit_test(pointer_point_);
+        pointer_capture_.set(target);
+        if (target)
+            ComboBox::notify_global_click(target);
+        target = pointer_capture_.live_in(root_);
+        if (!target || !transfer_input_focus(root_, target)) {
+            pointer_capture_.reset();
+            return;
+        }
+        target = pointer_capture_.live_in(root_);
+        if (!target)
+            return;
+        pointer_button_ = button;
+        click_count_ = event.clicks;
+        SDL_CaptureMouse(true);
+        if (gesture_owns(MousePhase::press))
+            return;
+        if (button == MouseButton::right && dispatch_context_menu(root_, target, pointer_point_)) {
+            pointer_capture_.reset();
+            pointer_button_ = MouseButton::none;
+            SDL_CaptureMouse(false);
+        } else if (!deliver_mouse_down(root_, pointer_capture_.live_in(root_), pointer_point_,
+                                       modifiers(SDL_GetModState()), click_count_, true, button)) {
+            cancel_pointer();
+        }
+        needs_repaint_ = true;
+    }
+
+    void pointer_up(const SDL_MouseButtonEvent& event) {
+        if (mouse_button(event.button) != pointer_button_)
+            return;
+        pointer_point_ = window_to_root(event.x, event.y);
+        const bool claimed = gesture_owns(MousePhase::release);
+        auto* target = claimed ? nullptr : pointer_capture_.live_in(root_);
+        pointer_capture_.reset();
+        const auto button = std::exchange(pointer_button_, MouseButton::none);
+        MouseUpHost host;
+        if (button == MouseButton::left)
+            host.fire_click = [](const std::function<void()>& click, const std::string&, uint16_t) {
+                if (click)
+                    click();
+            };
+        deliver_mouse_up(root_, target, pointer_point_, modifiers(SDL_GetModState()), click_count_,
+                         host, button);
+        SDL_CaptureMouse(false);
+        needs_repaint_ = true;
+    }
+
+    bool gesture_owns(MousePhase phase) {
+        if (pointer_button_ != MouseButton::left)
+            return false;
+        MouseEvent event;
+        event.position = pointer_point_;
+        event.window_position = pointer_point_;
+        event.button = pointer_button_;
+        event.modifiers = modifiers(SDL_GetModState());
+        event.phase = phase;
+        event.is_down = phase != MousePhase::release;
+        auto* target = pointer_capture_.live_in(root_);
+        const bool claimed = yield_to_gesture_with_handoff(root_, target, event, click_count_);
+        if (claimed)
+            pointer_capture_.reset();
+        return claimed;
+    }
+
+    void publish_cursor() {
+        const auto style = hover_cursor_.poll(root_);
+        if (!style)
+            return;
+        if (*style == View::CursorStyle::invisible) {
+            SDL_HideCursor();
+            return;
+        }
+        SDL_ShowCursor();
+        SDL_SystemCursor shape = SDL_SYSTEM_CURSOR_DEFAULT;
+        switch (*style) {
+        case View::CursorStyle::pointer:
+            shape = SDL_SYSTEM_CURSOR_POINTER;
+            break;
+        case View::CursorStyle::crosshair:
+            shape = SDL_SYSTEM_CURSOR_CROSSHAIR;
+            break;
+        case View::CursorStyle::text:
+            shape = SDL_SYSTEM_CURSOR_TEXT;
+            break;
+        case View::CursorStyle::grab:
+        case View::CursorStyle::grabbing:
+        case View::CursorStyle::multi_directional_resize:
+            shape = SDL_SYSTEM_CURSOR_MOVE;
+            break;
+        case View::CursorStyle::not_allowed:
+            shape = SDL_SYSTEM_CURSOR_NOT_ALLOWED;
+            break;
+        case View::CursorStyle::horizontal_resize:
+            shape = SDL_SYSTEM_CURSOR_EW_RESIZE;
+            break;
+        case View::CursorStyle::vertical_resize:
+            shape = SDL_SYSTEM_CURSOR_NS_RESIZE;
+            break;
+        case View::CursorStyle::top_left_resize:
+        case View::CursorStyle::bottom_right_resize:
+            shape = SDL_SYSTEM_CURSOR_NWSE_RESIZE;
+            break;
+        case View::CursorStyle::top_right_resize:
+        case View::CursorStyle::bottom_left_resize:
+            shape = SDL_SYSTEM_CURSOR_NESW_RESIZE;
+            break;
+        default:
+            break;
+        }
+        if (auto* next = SDL_CreateSystemCursor(shape)) {
+            SDL_SetCursor(next);
+            if (cursor_)
+                SDL_DestroyCursor(cursor_);
+            cursor_ = next;
+        }
+    }
 
     struct DispatcherQueueState {
         mutable std::mutex mutex;

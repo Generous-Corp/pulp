@@ -1,12 +1,17 @@
 #include "../examples/g10-routed-consumer/asset_morph_oracle.hpp"
+#include "support/unique_temp_dir.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <choc/text/choc_JSON.h>
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/runtime/base64.hpp>
 #include <pulp/runtime/crypto.hpp>
 
+#include <cmath>
+#include <filesystem>
 #include <functional>
+#include <limits>
 #include <map>
+#include <string>
 
 namespace {
 using namespace pulp::host;
@@ -19,7 +24,7 @@ const Inputs& inputs() {
     static Inputs value;
     return value;
 }
-std::unique_ptr<SignalGraph> fixture(bool stages = false) {
+std::unique_ptr<SignalGraph> fixture(bool stages = false, const char* identity_name = "identity") {
     auto graph = std::make_unique<SignalGraph>();
     const auto input = graph->add_input_node(1, "control");
     const auto source =
@@ -29,7 +34,7 @@ std::unique_ptr<SignalGraph> fixture(bool stages = false) {
     auto frames = source.value->frames;
     if (stages) {
         const auto identity = graph->add_spectral_stage(
-            shape, *QualifiedSpectralStage::identity_v1(shape).value, "identity");
+            shape, *QualifiedSpectralStage::identity_v1(shape).value, identity_name);
         REQUIRE(identity);
         REQUIRE(graph->connect(frames, identity.value->frames_in));
         frames = identity.value->frames_out;
@@ -374,7 +379,9 @@ bool pre_spectral_reader_admits(const std::string& json) {
 
 TEST_CASE("Spectral saves use a graph format the pre-spectral reader refuses",
           "[host][spectral][replay][compat]") {
-    REQUIRE(GraphSerializer::current_format_version() == 6);
+    // Spectral documents stay at format 6; format 7 is the saved-identity v7
+    // document, which a spectral graph does not have.
+    REQUIRE(GraphSerializer::current_format_version() == 7);
     for (bool stages : {false, true}) {
         const auto json = GraphSerializer::to_json(*fixture(stages));
         REQUIRE_FALSE(json.empty());
@@ -394,4 +401,158 @@ TEST_CASE("Spectral saves use a graph format the pre-spectral reader refuses",
     const auto plain = GraphSerializer::to_json(ordinary);
     REQUIRE_FALSE(plain.empty());
     CHECK(pre_spectral_reader_admits(plain));
+}
+
+TEST_CASE("Malformed ordinary graphs keep the ordinary loader's error",
+          "[host][spectral][replay][negative]") {
+    const std::vector<std::string> plain{
+        R"({"format_version":5,"nodes":[{"id":1,"type":"gain")",
+        "[1,2,3]",
+        R"({"format_version":5,"nodes":[5],"connections":[]})",
+    };
+    for (const auto& document : plain) {
+        INFO(document);
+        SignalGraph graph;
+        graph.add_gain_node("Kept");
+        const auto result = GraphSerializer::from_json(graph, document);
+        INFO(result.error);
+        REQUIRE_FALSE(result.ok);
+        CHECK(result.error.find("spectral") == std::string::npos);
+    }
+    SignalGraph truncated;
+    const auto parse = GraphSerializer::from_json(truncated, plain[0]);
+    CHECK(parse.error.starts_with("JSON parse failed"));
+
+    // Control: a document that names spectral content still gets the
+    // spectral reader's error.
+    const auto good = GraphSerializer::to_json(*fixture());
+    REQUIRE_FALSE(good.empty());
+    auto wrong_version = good;
+    replace(wrong_version, "\"format_version\": 6", "\"format_version\": 5");
+    SignalGraph graph;
+    const auto spectral = GraphSerializer::from_json(graph, wrong_version);
+    REQUIRE_FALSE(spectral.ok);
+    CHECK(spectral.error.find("spectral") != std::string::npos);
+}
+
+TEST_CASE("Spectral graph with repeated node names saves and reloads", "[host][spectral][replay]") {
+    // Node ids identify nodes in the saved document; a name is a label, and
+    // the authoring factories accept repeated ones.
+    auto graph = fixture(true, "mask");
+    const auto json = GraphSerializer::to_json(*graph);
+    REQUIRE_FALSE(json.empty());
+    SignalGraph loaded;
+    const auto result = GraphSerializer::from_json(loaded, json);
+    INFO(result.error);
+    REQUIRE(result.ok);
+    REQUIRE(GraphSerializer::to_json(loaded) == json);
+    REQUIRE(loaded.prepare(48000, 4096));
+    const auto control = timeline();
+    REQUIRE_NOTHROW(asset_oracle::compare(render(loaded, control, 0),
+                                          asset_oracle::expected(inputs().a, inputs().b, control)));
+}
+
+namespace {
+// Silent canonical asset bytes for an arbitrary dividing geometry.
+pulp::signal::EncodedSpectralStream silent_asset(pulp::signal::SpectralStreamGeometry geometry,
+                                                 std::size_t source_samples) {
+    const auto frames =
+        (source_samples + geometry.fft_size - geometry.hop + geometry.hop - 1) / geometry.hop;
+    auto stream = pulp::signal::make_spectral_stream(geometry, frames);
+    REQUIRE(stream);
+    auto bytes = pulp::signal::encode_spectral_stream(*stream.value);
+    REQUIRE(bytes);
+    return std::move(*bytes.value);
+}
+} // namespace
+
+TEST_CASE("Spectral graph saves at the block it is prepared for, not the largest block",
+          "[host][spectral][replay][limits]") {
+    // FFT 4096, hop 16, four channels: two retained assets and two frame edges
+    // fit the 64 MiB bank at 512-sample blocks, but the edges alone grow past
+    // what remains at 4096-sample blocks.
+    constexpr std::size_t length = 256;
+    const pulp::signal::SpectralStreamGeometry geometry{4096, 16, 4, 48000};
+    const auto a = silent_asset(geometry, length);
+    const auto b = silent_asset(geometry, length);
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "control");
+    const auto source = graph.add_spectral_asset_morph_v1(a.view(), b.view(), length, "assets");
+    INFO(int(source.error));
+    REQUIRE(source);
+    const auto shape = *SpectralIdentity::make(4096, 16, 4, 48000).value;
+    const auto stage = graph.add_spectral_stage(
+        shape, *QualifiedSpectralStage::identity_v1(shape).value, "identity");
+    REQUIRE(stage);
+    const auto synthesis = graph.add_spectral_synthesis(shape, "synthesis");
+    REQUIRE(synthesis);
+    const auto output = graph.add_output_node(4, "audio");
+    REQUIRE(graph.connect(graph.node(input)->out("audio"), source.value->morph));
+    REQUIRE(graph.connect(source.value->frames, stage.value->frames_in));
+    REQUIRE(graph.connect(stage.value->frames_out, synthesis.value->frames));
+    for (int channel = 0; channel < 4; ++channel)
+        REQUIRE(graph.connect(synthesis.value->audio[channel],
+                              graph.node(output)->input_ports[channel]));
+
+    REQUIRE_FALSE(graph.prepare(48000, 4096));
+    REQUIRE(graph.prepare(48000, 512));
+    REQUIRE(graph.stop_spectral_controller() == SpectralError::None);
+    const auto json = GraphSerializer::to_json(graph);
+    REQUIRE_FALSE(json.empty());
+
+    // A destination that declares the block it will be prepared for loads the
+    // graph; one that may be prepared at 4096 samples refuses it up front.
+    SignalGraph loaded;
+    auto limits = loaded.limits();
+    limits.max_block_size = 512;
+    loaded.set_limits(limits);
+    const auto result = GraphSerializer::from_json(loaded, json);
+    INFO(result.error);
+    REQUIRE(result.ok);
+    REQUIRE(loaded.prepare(48000, 512));
+    SignalGraph unbounded;
+    REQUIRE_FALSE(GraphSerializer::from_json(unbounded, json).ok);
+}
+
+TEST_CASE("Spectral save refusals name the rule the graph breaks",
+          "[host][spectral][replay][negative]") {
+    // A directory of its own, so concurrent suites in other checkouts on one
+    // host never remove each other's file.
+    const pulp::test::ScopedTempDir dir("pulp-spectral-save-reason");
+    const auto path = dir.path / "graph.pulpgraph";
+
+    // Control: the same graph saves when it breaks no rule.
+    auto graph = fixture();
+    const auto saved = GraphSerializer::to_file(*graph, path);
+    INFO(saved.error);
+    REQUIRE(saved.ok);
+
+    const auto id = graph->nodes().front().id;
+    const auto off_canvas = GraphSerializer::to_file(
+        *graph, path, {{id, {std::numeric_limits<float>::quiet_NaN(), 0.0f}}});
+    CHECK_FALSE(off_canvas.ok);
+    CHECK(off_canvas.code == GraphSerializer::SaveResult::Code::serialization_refused);
+    CHECK(off_canvas.error.find("non-finite editor position") != std::string::npos);
+
+    const auto envelope = GraphSerializer::to_saved_file(*graph, path);
+    CHECK_FALSE(envelope.ok);
+    CHECK(envelope.error.find("no saved-identity envelope") != std::string::npos);
+
+    graph->add_gain_node("unsupported_mix");
+    const auto mixed = GraphSerializer::to_file(*graph, path);
+    CHECK_FALSE(mixed.ok);
+    CHECK(mixed.code == GraphSerializer::SaveResult::Code::serialization_refused);
+    CHECK(mixed.error.find("unsupported_mix") != std::string::npos);
+    CHECK(mixed.error.find("not an audio input, audio output or spectral node") !=
+          std::string::npos);
+
+    // A live analysis node has its own rule, not the generic node-type one.
+    auto analysed = fixture();
+    const auto shape = *SpectralIdentity::make(256, 64, 1, 48000).value;
+    REQUIRE(analysed->add_spectral_analysis(shape, "live_analysis"));
+    const auto analysis = GraphSerializer::to_file(*analysed, path);
+    CHECK_FALSE(analysis.ok);
+    CHECK(analysis.code == GraphSerializer::SaveResult::Code::serialization_refused);
+    CHECK(analysis.error.find("live_analysis is a SpectralAnalysis node") != std::string::npos);
+    CHECK(analysis.error.find("live analysis is not persisted") != std::string::npos);
 }

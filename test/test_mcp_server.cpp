@@ -708,8 +708,9 @@ TEST_CASE("MCP graph passes the CLI diagnostic codes through unchanged", "[mcp][
         const char* code;
         int exit_code;
     };
-    for (const auto& item : {Case{"InvalidDocument", 1}, Case{"FileUnreadable", 1},
-                             Case{"UnknownPort", 1}, Case{"Ok", 0}}) {
+    for (const auto& item :
+         {Case{"InvalidDocument", 1}, Case{"FileUnreadable", 1}, Case{"UnknownPort", 1},
+          Case{"SampleRateMismatch", 1}, Case{"UnsupportedChannelLayout", 1}, Case{"Ok", 0}}) {
         {
             std::ofstream script(cli, std::ios::trunc);
             script << "#!/bin/sh\nprintf '{\"valid\":" << (item.exit_code == 0 ? "true" : "false")
@@ -723,6 +724,94 @@ TEST_CASE("MCP graph passes the CLI diagnostic codes through unchanged", "[mcp][
         REQUIRE(response.find(item.exit_code == 0 ? "\"isError\":false" : "\"isError\":true") !=
                 std::string::npos);
     }
+#endif
+}
+
+namespace {
+struct ScopedGraphExecutable {
+    explicit ScopedGraphExecutable(const std::filesystem::path& executable) {
+        configure_graph_executable(executable.string());
+    }
+    ~ScopedGraphExecutable() {
+        configure_graph_executable("");
+    }
+};
+} // namespace
+
+TEST_CASE("MCP graph diff delegates to the matched CLI and maps only refusals to errors",
+          "[mcp][tools][graph][diff]") {
+#if defined(_WIN32)
+    SKIP("fake extensionless pulp-cpp is only executable on POSIX");
+#else
+    TempDir project;
+    const auto bin = project.path / "bin";
+    std::filesystem::create_directories(bin);
+    const auto sibling = bin / "pulp-cpp";
+    {
+        // Echoes argv as JSON text. A BEFORE argument containing "refuse" exits
+        // 1 like a CLI refusal; anything else exits 0 like a comparison, even
+        // one that reports differences.
+        std::ofstream script(sibling);
+        script << "#!/bin/sh\n"
+               << "printf '{\"argv\":\"'\n"
+               << "for arg in \"$@\"; do printf '[%s]' \"$arg\"; done\n"
+               << "printf '\"}'\n"
+               << "case \"$3\" in *refuse*) exit 1;; esac\n"
+               << "exit 0\n";
+    }
+    std::filesystem::permissions(sibling,
+                                 std::filesystem::perms::owner_exec |
+                                     std::filesystem::perms::owner_read |
+                                     std::filesystem::perms::owner_write,
+                                 std::filesystem::perm_options::add);
+    ScopedGraphExecutable executable(bin / "pulp-mcp");
+
+    const auto tools = handle_request(R"JSON({"jsonrpc":"2.0","id":80,"method":"tools/list"})JSON");
+    require_contains(tools, R"JSON("catalog","diff"])JSON");
+    require_contains(tools, R"JSON("before":{"type":"string")JSON");
+
+    // Before and after reach the CLI in order, as separate argv entries (a
+    // shell metacharacter is data), with the CLI's own --json.
+    const auto ok = handle_request(tool_call(
+        "81", "pulp_graph",
+        R"JSON({"operation":"diff","before":"a b;$(x).pulpgraph","after":"later.pulpgraph"})JSON"));
+    require_contains(ok, "[graph][diff][a b;$(x).pulpgraph][later.pulpgraph][--json]");
+    REQUIRE(ok.find("\"isError\":false") != std::string::npos);
+
+    // Control: a CLI refusal is an MCP error.
+    const auto refused = handle_request(tool_call(
+        "82", "pulp_graph",
+        R"JSON({"operation":"diff","before":"refuse.pulpgraph","after":"later.pulpgraph"})JSON"));
+    REQUIRE(refused.find("\"isError\":true") != std::string::npos);
+
+    // Input mistakes are refused here as the CLI would, without running it.
+    for (const auto& arguments :
+         {R"JSON({"operation":"diff","before":"a.pulpgraph"})JSON",
+          R"JSON({"operation":"diff","after":"a.pulpgraph"})JSON",
+          R"JSON({"operation":"diff","before":"","after":"a.pulpgraph"})JSON"}) {
+        const auto response = handle_request(tool_call("83", "pulp_graph", arguments));
+        require_contains(response, "missing_input");
+        REQUIRE(response.find("\"isError\":true") != std::string::npos);
+        REQUIRE(response.find("argv") == std::string::npos);
+    }
+    for (const auto& arguments :
+         {R"JSON({"operation":"diff","path":"a.pulpgraph","before":"a","after":"b"})JSON",
+          R"JSON({"operation":"diff","before":"a","after":"b","input":"x.wav"})JSON",
+          R"JSON({"operation":"diff","before":"a","after":"b","plan":true})JSON"}) {
+        const auto response = handle_request(tool_call("84", "pulp_graph", arguments));
+        require_contains(response, "invalid_option");
+        REQUIRE(response.find("\"isError\":true") != std::string::npos);
+        REQUIRE(response.find("argv") == std::string::npos);
+    }
+
+    // Without a matched sibling the tool fails closed rather than falling back
+    // to PATH or the working directory.
+    std::filesystem::remove(sibling);
+    const auto missing = handle_request(
+        tool_call("85", "pulp_graph",
+                  R"JSON({"operation":"diff","before":"a.pulpgraph","after":"b.pulpgraph"})JSON"));
+    require_contains(missing, "matched sibling pulp-cpp is unavailable");
+    REQUIRE(missing.find("\"isError\":true") != std::string::npos);
 #endif
 }
 

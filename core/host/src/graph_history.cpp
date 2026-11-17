@@ -65,6 +65,7 @@ struct DocumentView {
     std::map<std::string, std::string> connections;
     std::map<std::string, std::string> sections;
     std::string digest;
+    std::string profile;
 };
 
 bool is_identity_section(std::string_view name) {
@@ -169,10 +170,11 @@ std::optional<GraphDocumentDiffCode> read_document(std::string_view json, Docume
     const auto root = choc::json::parse(json);
     if (!root.hasObjectMember("identity_schema")) {
         refusal = GraphDocumentRefusal::LogicalIdentityMissing;
-        detail = "document has no saved-identity v6 envelope; re-save it with "
-                 "GraphSerializer::to_saved_document";
+        detail = "document has no saved-identity envelope; re-save it with "
+                 "GraphSerializer::to_saved_file or pulp graph save --saved-identity";
         return GraphDocumentDiffCode::LogicalIdentityMissing;
     }
+    view.profile = std::string(inspection.document.profile());
 
     std::unordered_map<std::int64_t, std::string> identity_of;
     const auto& identities = root["logical_identities"]["identities"];
@@ -362,6 +364,18 @@ GraphDocumentDiff diff_graph_documents(std::string_view before, std::string_view
             return diff;
         }
         reading_after = false;
+        // v6 structural identities and v7 authored IDs name nodes in
+        // different spaces; matching them would report every node as
+        // replaced. The v6 side must be migrated first.
+        if (lhs.profile != rhs.profile) {
+            diff.code = GraphDocumentDiffCode::AfterRefused;
+            diff.refusal = GraphDocumentRefusal::UnsupportedDocumentProfile;
+            diff.detail = "after: identity schema " + rhs.profile + " differs from before's " +
+                          lhs.profile +
+                          "; migrate the v6 document with "
+                          "GraphSerializer::migrate_saved_document first";
+            return diff;
+        }
         diff.before_digest = lhs.digest;
         diff.after_digest = rhs.digest;
         compare_maps(lhs.nodes, rhs.nodes, diff.nodes_added, diff.nodes_removed,

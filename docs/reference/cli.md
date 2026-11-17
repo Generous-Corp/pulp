@@ -1517,13 +1517,19 @@ loader and to the CLI and requires identical names.
 | `UnsupportedContract` | Unregistered type or version, or an unsupported contract |
 | `ParameterOutOfRange`, `RestoreFailed`, `ResourceLimit` | Value, state restore or size limit refusal |
 | `FileUnreadable` | The file is missing or cannot be read |
+| `SampleRateMismatch` | Spectral nodes in one `# flow 2` document declare different sample rates |
+| `UnsupportedChannelLayout` | A `# flow 2` channel count outside 1 to 16 |
+
+A file over the 64 MiB graph limit is `ResourceLimit` for every subcommand that
+loads it (`validate`, `inspect`, `fmt`, `render`, `report` and `diff`).
 
 CLI-only codes (no C++ diagnostic equivalent) cover option handling, probe and
 render preconditions, and saving: `missing_option`, `invalid_option`,
 `missing_input`, `missing_output`, `unknown_operation`, `invalid_block_frames`,
-`graph_file_limit`, `graph_limit`, `unsupported_node`, `unresolved_node`,
+`graph_file_limit` (a probe graph file over 1 MiB; a missing or unreadable
+probe file is `FileUnreadable`), `graph_limit`, `unsupported_node`, `unresolved_node`,
 `ambiguous_node`, `prepare_failed`, `render_failed`, `non_finite_output`,
-`output_failed`, and `saved`. The probe adds `invalid_edge_kind`, `unknown_node`
+`output_failed`, `subgraph_records_unsupported`, and `saved`. The probe adds `invalid_edge_kind`, `unknown_node`
 (a probe source or destination name that does not exist; distinct from the
 typed `UnknownNode`), `invalid_destination_param`, `event_injection_failed`,
 `non_finite_sample` and `unprepared_latency`. Probe attach refusals use the
@@ -1534,9 +1540,7 @@ requires every code the CLI source emits through `fail(...)`, `json_error(...)`,
 `code = ...` or the probe refusal table to appear in this list. Save failures use
 `GraphSerializer::save_code_name` (`serialization_refused`, `file_too_large`,
 `parent_unavailable`, `temporary_unavailable`, `write_failed`, `replace_failed`,
-`directory_sync_failed`). The earlier CLI-only spellings `invalid_graph`,
-`file_unreadable` and lowercase `ok` for graph files are retired: the in-tree
-consumers (this repository's tests) moved to the typed names.
+`directory_sync_failed`).
 
 `pulp graph save INPUT --output OUTPUT --json` loads a graph through the same
 bounded serializer and writes a canonical copy without modifying the input.
@@ -1548,10 +1552,40 @@ failures use the typed codes `serialization_refused`, `file_too_large`,
 C++ API and CLI so callers do not need to parse diagnostic text. Save is a
 CLI-only write operation; the MCP `pulp_graph` tool remains read-only.
 
-`pulp graph diff BEFORE AFTER [--json]` compares two saved-identity v6
-documents (as written by `GraphSerializer::to_saved_document`) by logical node
-identity, read-only and without loading plugin code. NodeIds are lookup keys
-only, so two files that differ only in NodeId numbering compare equal. The JSON
+`save`, `fmt` and `canonicalize` keep a saved-identity document's identity
+envelope: the input is restored through `GraphSerializer::from_saved_document`
+(which refuses a document whose identities or connections do not restore
+exactly) and written back with `GraphSerializer::to_saved_file`, so the result
+is still a valid `pulp graph diff` input. The written document is always
+saved-identity v7 (format 7, a persisted authored ID per node); a v6 input is
+written as its deterministic migration, the same IDs
+`GraphSerializer::migrate_saved_document` assigns, so rewriting the same v6
+file twice gives the same bytes. `save --saved-identity` writes the
+envelope for a plain input too, which is how a CLI user produces diff inputs;
+its IDs are derived from the input document, so they are deterministic too.
+Before it writes, every connection the plain input records must have been
+restored; an edge the tolerant loader skipped (a dangling node, an invalid
+port) is refused with `InvalidDocument` and a `connection_not_restored` message
+(exit 1), and no output is written. A plain `save` without the flag keeps the
+tolerant behaviour for edges. Every rewrite refuses an input with a node record
+the loader could not add (for example a second Control index input, or a plugin
+record without plugin info), with `InvalidDocument` and a `node_not_restored`
+message (exit 1), because the written file would silently lose that node.
+A document carrying `subgraphs` records is refused with
+`subgraph_records_unsupported` (exit 1) and left unchanged, because restoring
+those records needs the authoring templates and a plain rewrite would drop every
+subgraph instance. For these three subcommands a missing file is
+`FileUnreadable` and a file over the 64 MiB limit is `ResourceLimit`.
+
+`pulp graph diff BEFORE AFTER [--json]` compares two saved-identity documents
+of the same schema (v7 as written by `GraphSerializer::to_saved_document`, or
+two legacy v6 files) by logical node identity, read-only and without loading
+plugin code. In v7 the identity is the node's persisted authored ID, so a
+renamed node is one changed node and deleting one of two same-named nodes
+leaves the other's identity alone. NodeIds are lookup keys only, so two files
+that differ only in NodeId numbering compare equal. A v6 file and a v7 file are
+refused (`InvalidDocument`, refusal `unsupported_document_profile`); rewrite
+the v6 file first. The JSON
 result reports `code` (`Ok`), `equal`, a numbering-independent digest of each
 compared document (`before_digest`, `after_digest`; equal documents have equal
 digests), `nodes`
@@ -1568,7 +1602,10 @@ inspector refuses, including a legacy file without the identity envelope, is
 `InvalidDocument` (exit 1) with `refusal` set to the inspector's refusal name
 and `side` set to `before` or `after`: a document without the identity envelope
 is `logical_identity_missing`, and a pre-v4 legacy file is
-`invalid_format_version` (re-save it with the saved-identity writer).
+`invalid_format_version` (a plain save of a simple graph keeps such an older
+format). Both refusals also carry a `hint` naming
+`pulp graph save FILE --output FILE --saved-identity`, which writes the
+envelope.
 Anything other than exactly two files is `missing_input`, and an unknown option
 is `invalid_option` (exit 2). The same comparison is the C++
 `diff_graph_documents` in `pulp/host/graph_history.hpp`, which also provides the
@@ -1589,8 +1626,16 @@ at 48 kHz when no input is given. Unknown or repeated options are refused with
 largest absolute output sample over all channels, so a silent render is visible
 without reading the WAV. Unresolved node types, prepare failures and non-finite
 output (`non_finite_output`) return exit 1. The MCP `pulp_graph` tool exposes the read-only `inspect`,
-`validate`, `explain`, `render`, `probe`, `report` and `catalog` operations, and `fmt` forced to
+`validate`, `explain`, `diff`, `render`, `probe`, `report` and `catalog` operations, and `fmt` forced to
 `--notation`, so it prints and never writes; file writing stays in the CLI.
+
+MCP `pulp_graph` operation `diff` takes `before` and `after` (not `path`) and runs the matched
+sibling `pulp-cpp graph diff BEFORE AFTER --json`, so its text is the CLI JSON byte for byte. The
+process starts without a shell, with a 30-second deadline and a 2 MiB output cap. A comparison that
+finds differences exits 0 and is a successful result; `isError: true` means a refusal (CLI exit 1 or
+2: `FileUnreadable`, `ResourceLimit`, `InvalidDocument` with `side`, `missing_input`,
+`invalid_option`) or a failed or truncated process. The CLI keeps its exit contract (0 for any
+completed comparison); there is no diff-style exit code.
 
 `pulp graph report FILE [--sample-rate 48000] [--max-block-size 512]
 [--block-size N] [--measure-blocks 16]` prepares the saved graph without loading
@@ -1634,7 +1679,10 @@ See [edge probe limits and lifecycle](../guides/graph-edge-probes.md).
 ### SignalGraph notation
 
 `pulp graph catalog --json` projects the default runtime node catalog,
-including typed-API-only spectral constructor rows that notation refuses.
+including the spectral constructor rows and the `flow_2_arguments` each takes.
+`# flow 2` documents spell audio boundary channel counts and spectral analysis,
+identity stage and synthesis identities with an explicit sample rate; mask and
+asset payloads stay in saved-graph JSON.
 `pulp graph validate FILE.pat --json` uses shared typed strict diagnostics;
 `.pulpgraph` validation checks every original connection. `pulp graph fmt
 FILE.pat` prints canonical notation, and `pulp graph fmt FILE.pulpgraph

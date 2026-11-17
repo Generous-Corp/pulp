@@ -65,15 +65,20 @@ A product may supply its own RmlUi build, including a fork, and its own
 
 For Pulp's native Metal adapter, enable `PULP_ENABLE_RMLUI_ADAPTER` only with
 the main Vellum SDK and the matching optional RmlUi SDK prefix in
-`CMAKE_PREFIX_PATH`, exporting `VellumRmlUiNative::Native` and
-`VellumRmlUiNative::Metal`.
+`CMAKE_PREFIX_PATH`, exporting `VellumRmlUi::Native` and
+`VellumRmlUi::Metal`. `find_package(VellumRmlUiNative ...)` names the package,
+but its targets keep the `VellumRmlUi::` namespace: a `VellumRmlUiNative::`
+target does not exist, and only the advisory `rmlui-native` lane builds this adapter to catch it.
 Build a
 `MetalRenderInterface` on the `MetalSurface::device()` and pass
 `metal_renderer_hooks(renderer)` to `RmlUiSurface`; the hooks preserve the
 drawable viewport and backing scale and clear each drawable before RmlUi draws.
 The `rmlui-metal-demo` example is the smoke path for this wiring.
-Use `dp` units for text sizes when a document is rendered at multiple backing
-scales; `px` text is intentionally density-independent in RmlUi.
+In this adapter every `px` length, not only text, is a device pixel, because the
+context is sized in drawable pixels; use `dp` (a point) for anything that must
+keep its physical size across backing scales. `dp` only differs from `px` when
+the Vellum RmlUi SDK exports `set_density_ratio` (`density_ratio_supported()`);
+without it the adapter warns at configure and at the first attach.
 
 ## Licence line
 

@@ -1,5 +1,6 @@
 #include <pulp/format/contract_editor_session.hpp>
 
+#include <pulp/format/detail/editor_size_constraint.hpp>
 #include <pulp/format/detail/main_thread_timer.hpp>
 #include <pulp/format/native_surface_host.hpp>
 
@@ -10,14 +11,42 @@
 
 #include <algorithm>
 #include <atomic>
+#include <optional>
 #include <utility>
 
 namespace pulp::format {
 
+namespace {
+
+ContractEditorSession::SnapTimerFactory& snap_timer_factory() {
+    static ContractEditorSession::SnapTimerFactory factory;
+    return factory;
+}
+
+// The default snap timer: a main-thread timer that fires once.
+class MainThreadSnapTimer final : public ContractEditorSession::SnapTimer {
+  public:
+    void start(int delay_ms, std::function<void()> fire) override {
+        timer_.start(delay_ms, std::move(fire));
+    }
+    void stop() override {
+        timer_.stop();
+    }
+
+  private:
+    detail::MainThreadTimer timer_;
+};
+
+} // namespace
+
+void ContractEditorSession::set_snap_timer_factory_for_testing(SnapTimerFactory factory) {
+    snap_timer_factory() = std::move(factory);
+}
+
 class ContractEditorSession::Context final : public EditorContext {
   public:
-    Context(ParamPort& port, EditorHostKind kind, HostHooks hooks)
-        : port_(port), kind_(kind), hooks_(std::move(hooks)) {}
+    Context(ContractEditorSession& session, ParamPort& port, EditorHostKind kind, HostHooks hooks)
+        : session_(session), port_(port), kind_(kind), hooks_(std::move(hooks)) {}
 
     ParamPort& params() override {
         return port_;
@@ -28,7 +57,39 @@ class ContractEditorSession::Context final : public EditorContext {
     bool request_resize(const EditorSize& size) override {
         if (owner_gone_.load() || !hooks_.request_resize || size.width == 0 || size.height == 0)
             return false;
-        return hooks_.request_resize(size);
+        // Install before calling the host: VST3 and AU may acknowledge inside
+        // the hook, while CLAP can acknowledge later through set_size.
+        const auto previous_request = pending_resize_;
+        const auto request_id = ++resize_request_id_;
+        pending_resize_ = size;
+        session_.cancel_snap_request();
+        const bool accepted = hooks_.request_resize(size);
+        if (!accepted && resize_request_id_ == request_id)
+            pending_resize_ = previous_request;
+        return accepted;
+    }
+    bool acknowledge_resize(std::uint32_t width, std::uint32_t height) {
+        if (!pending_resize_ || pending_resize_->width != width ||
+            pending_resize_->height != height)
+            return false;
+        pending_resize_.reset();
+        return true;
+    }
+    bool has_pending_resize(std::uint32_t width, std::uint32_t height) const {
+        return pending_resize_ && pending_resize_->width == width &&
+               pending_resize_->height == height;
+    }
+    const std::optional<EditorSize>& pending_resize() const {
+        return pending_resize_;
+    }
+    void cancel_resize_request() {
+        ++resize_request_id_;
+        pending_resize_.reset();
+    }
+    bool request_correction(const EditorSize& size) {
+        // The editor already took this size. A correction is not a new
+        // editor-origin request and must not grant a future resize exemption.
+        return !owner_gone_.load() && hooks_.request_resize && hooks_.request_resize(size);
     }
     bool host_action(const HostActionRequest& request) override {
         if (owner_gone_.load())
@@ -51,6 +112,9 @@ class ContractEditorSession::Context final : public EditorContext {
     }
 
   private:
+    ContractEditorSession& session_;
+    std::optional<EditorSize> pending_resize_;
+    std::uint64_t resize_request_id_ = 0;
     ParamPort& port_;
     EditorHostKind kind_;
     HostHooks hooks_;
@@ -147,10 +211,14 @@ ContractEditorSession::create(Processor& processor, state::StateStore& store,
 ContractEditorSession::ContractEditorSession(Processor& processor, state::StateStore& store,
                                              HostHooks hooks, IdleSource idle)
     : idle_source_(idle), store_(store), port_(std::make_unique<StateStoreParamPort>(store)),
-      context_(std::make_unique<Context>(*port_, processor.editor_host_kind(), std::move(hooks))) {}
+      context_(
+          std::make_unique<Context>(*this, *port_, processor.editor_host_kind(), std::move(hooks))),
+      snap_timer_(snap_timer_factory() ? snap_timer_factory()()
+                                       : std::make_unique<MainThreadSnapTimer>()) {}
 
 ContractEditorSession::~ContractEditorSession() {
     stop_idle();
+    cancel_snap_request();
     // Destroyed while attached: the host tore its window down without an
     // orderly detach.
     if (editor_ && attached_)
@@ -187,18 +255,25 @@ bool ContractEditorSession::attach(const NativeParent& parent) {
         runtime::log_error("editor host: the editor did not attach to the host window");
         return false;
     }
+    // A new attach starts visible: the surface a previous attach hid is gone,
+    // and a host that attaches a hidden editor says so with visibility_changed.
+    visible_ = true;
     attached_ = true;
     start_idle();
     return true;
 }
 
 void ContractEditorSession::detach() {
+    if (context_)
+        context_->cancel_resize_request();
     stop_idle();
+    cancel_snap_request();
     // Closing the window mid-drag must still balance every begin.
     if (port_)
         port_->release_all();
     if (editor_ && attached_)
         editor_->detach();
+    visible_ = true;
     attached_ = false;
 }
 
@@ -211,13 +286,16 @@ void ContractEditorSession::close_for_owner() {
 
 void ContractEditorSession::invalidate() {
     stop_idle();
+    cancel_snap_request();
     if (editor_)
         editor_->invalidate();
+    visible_ = true;
     attached_ = false;
     destroy_editor();
 }
 
 void ContractEditorSession::destroy_editor() {
+    cancel_snap_request();
     editor_.reset();
     context_.reset();
     // Destroying the port releases every gesture it still holds.
@@ -236,7 +314,11 @@ void ContractEditorSession::tick() {
         store_.pump_listeners();
         store_.reconcile_restore_listeners();
     }
-    editor_->idle();
+    // A hidden editor draws nothing: the queue above still drains (the audio
+    // thread keeps writing and the queue is bounded), but the editor's own
+    // tick is skipped until the host shows it again.
+    if (visible_)
+        editor_->idle();
 }
 
 EditorSize ContractEditorSession::size() const {
@@ -277,36 +359,118 @@ bool ContractEditorSession::set_scale(double scale) {
 }
 
 bool ContractEditorSession::resizable() const {
-    if (!editor_)
-        return false;
-    const auto h = editor_->size_hints();
-    const bool fixed = h.min_width > 0 && h.min_width == h.max_width && h.min_height > 0 &&
-                       h.min_height == h.max_height;
-    return !fixed;
+    return editor_ && detail::editor_resizable(editor_->size_hints());
 }
 
 bool ContractEditorSession::constrain(std::uint32_t& width, std::uint32_t& height) const {
     if (!editor_ || width == 0 || height == 0)
         return false;
+    const auto hints = editor_->size_hints();
+    if (!detail::editor_resizable(hints)) {
+        // An accepted editor-origin request is the one size a fixed editor
+        // will take next: a host that negotiates inside the request (VST3
+        // checkSizeConstraint, CLAP adjust_size) must see it, without
+        // consuming the acknowledgment that set_host_size matches.
+        if (context_ && context_->pending_resize()) {
+            const auto& pending = *context_->pending_resize();
+            if (pending.width == width && pending.height == height)
+                return true;
+        }
+        // A fixed-size editor has one size, whatever the host proposes.
+        const auto fixed = size();
+        if (fixed.width == 0 || fixed.height == 0)
+            return false;
+        width = fixed.width;
+        height = fixed.height;
+        return true;
+    }
     EditorSize proposed = editor_->size();
     proposed.width = width;
     proposed.height = height;
-    auto adjusted = editor_->adjust_size(proposed);
-    const auto h = editor_->size_hints();
-    auto clamp = [](std::uint32_t v, std::uint32_t lo, std::uint32_t hi) {
-        if (lo > 0 && v < lo)
-            v = lo;
-        if (hi > 0 && v > hi)
-            v = hi;
-        return v;
-    };
-    adjusted.width = clamp(adjusted.width, h.min_width, h.max_width);
-    adjusted.height = clamp(adjusted.height, h.min_height, h.max_height);
-    if (adjusted.width == 0 || adjusted.height == 0)
+    const auto adjusted = editor_->adjust_size(proposed);
+    // The editor's own say first; the declared hints (aspect, min, max) still
+    // hold for an editor that does not override adjust_size().
+    std::uint32_t w = adjusted.width;
+    std::uint32_t h = adjusted.height;
+    if (!detail::constrain_to_hints(hints, w, h))
         return false;
-    width = adjusted.width;
-    height = adjusted.height;
+    width = w;
+    height = h;
     return true;
+}
+
+bool ContractEditorSession::has_pending_resize(std::uint32_t width, std::uint32_t height) const {
+    return context_ && context_->has_pending_resize(width, height);
+}
+
+bool ContractEditorSession::set_host_size(std::uint32_t& width, std::uint32_t& height,
+                                          bool& snapped) {
+    snapped = false;
+    if (!editor_ || width == 0 || height == 0)
+        return false;
+    // User resizing and acknowledgment of an editor's request are distinct.
+    // In particular, fixed user sizing still permits editor-driven layout changes.
+    if (context_->acknowledge_resize(width, height)) {
+        cancel_snap_request();
+        return set_size(width, height);
+    }
+    // One pixel is rounding, not a different size: it is never snapped.
+    auto differs = [](std::uint32_t a, std::uint32_t b) { return (a > b ? a - b : b - a) > 1; };
+    if (!resizable()) {
+        // A fixed-size editor has one size, whatever the host sends: it takes
+        // nothing, and the host is asked for the size it has.
+        const auto fixed = size();
+        if (fixed.width == 0 || fixed.height == 0)
+            return false;
+        snapped = differs(fixed.width, width) || differs(fixed.height, height);
+        width = fixed.width;
+        height = fixed.height;
+        if (snapped)
+            schedule_snap_request(width, height);
+        else
+            cancel_snap_request();
+        return true;
+    }
+    // The editor always gets the constrained size, even a pixel outside its
+    // limits; the tolerance only decides whether the host is asked for it back.
+    std::uint32_t w = width;
+    std::uint32_t h = height;
+    if (constrain(w, h))
+        snapped = differs(w, width) || differs(h, height);
+    else {
+        w = width;
+        h = height;
+    }
+    if (!set_size(w, h))
+        return false;
+    width = w;
+    height = h;
+    if (snapped)
+        schedule_snap_request(w, h);
+    else
+        cancel_snap_request();
+    return true;
+}
+
+void ContractEditorSession::schedule_snap_request(std::uint32_t width, std::uint32_t height) {
+    snap_width_ = width;
+    snap_height_ = height;
+    // Restarting the timer on every snapped size is the debounce: the request
+    // goes out only after the host has been quiet for kSnapSettleMs.
+    snap_timer_->start(kSnapSettleMs, [this] {
+        snap_timer_->stop();
+        if (!context_ || !editor_ || !attached_ || owner_gone_.load())
+            return;
+        EditorSize size = editor_->size();
+        size.width = snap_width_;
+        size.height = snap_height_;
+        context_->request_correction(size);
+    });
+}
+
+void ContractEditorSession::cancel_snap_request() {
+    if (snap_timer_)
+        snap_timer_->stop();
 }
 
 KeyDisposition ContractEditorSession::offer_key(const EditorKeyEvent& event) {
@@ -324,8 +488,19 @@ void ContractEditorSession::visibility_changed(bool visible) {
     if (context_)
         context_->native_surface().set_visibility(visible ? NativeSurfaceVisibility::visible
                                                           : NativeSurfaceVisibility::hidden);
+    const bool changed = visible_ != visible;
+    // Hide first, so the editor stops drawing before its idle stops; show
+    // last, so the tick that follows finds the editor ready.
+    if (!visible)
+        visible_ = false;
     if (editor_)
         editor_->visibility_changed(visible);
+    if (visible)
+        visible_ = true;
+    // Showing ticks at once: whatever changed while hidden (parameters, size,
+    // scale) reaches the editor before the first visible frame.
+    if (changed && visible && attached_)
+        tick();
 }
 
 NativeSurfaceHostState* ContractEditorSession::native_surface_host() {

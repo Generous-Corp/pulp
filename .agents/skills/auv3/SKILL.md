@@ -46,10 +46,11 @@ not edit `au_v2_adapter.cpp` as part of AU v3 work.**
 | Forward declaration used by entry / view | `core/format/src/au_audio_unit.h` |
 | Component entry factory | `core/format/src/au_entry.mm` |
 | iOS AUv3 extension view controller | `core/format/src/au_view_controller_ios.mm` (also mapped to `ios` + `view-bridge` skills) |
+| Contract-editor view (both controllers) | `core/format/src/au_v3_contract_view.{h,mm}` |
 | iOS AU audio session helper | `core/format/src/ios_audio_session.cpp`, `core/format/include/pulp/format/ios_audio_session.{h,hpp}` |
 | Info.plist template (AU component bundle) | `tools/cmake/PulpInfoPlist.au.in` |
 | AudioUnitSDK fetch (used primarily by AU v2 but shared utilities reach AU v3) | `external/AudioUnitSDK` (Apache 2.0) |
-| Tests | `test/test_ios_audio_session.cpp`, `test/test_ios_background_audio_flag.cpp` (iOS-specific); AU v3 shares state / processor tests with CLAP / VST3 |
+| Tests | `test/test_ios_audio_session.cpp`, `test/test_ios_background_audio_flag.cpp` (iOS-specific); `test/test_au_v3_contract_view.mm` (the contract view), `test/test_au_v3_view_controller.mm` (the macOS controller over a real `PulpAudioUnit`); AU v3 shares state / processor tests with CLAP / VST3 |
 | CLI validator invocation | `tools/cli/cmd_validate.cpp` — runs `auval` via the `auval-<name>` CTest target |
 
 There is no `PulpAU3.cmake`; AU v3 targets are wired directly in the
@@ -274,6 +275,20 @@ parallel busses. Route it through `boundary::render_bypass_passthrough`
 The AU v3 render block can't be driven in stock CI (needs a live host), so the
 bypass logic is covered by the shared `test_adapter_boundary_parity.cpp`
 `[bypass]` fixture the helper is exercised through.
+
+`ctx.timing` publishes the rounded `timestamp->mSampleTime` (when
+`kAudioTimeStampSampleTimeValid` is set) as the steady counter and the
+`transportStateBlock` position as the transport. `allocateRenderResources` and
+the `-reset` override raise `timing_discontinuity_pending` (an atomic: both run
+off the render thread). Every early return that skips the Processor (bypass,
+`failClosed`, state-restore contention, a missing processor or output list,
+the oversized-block rejection, and the multi-output block's own refusals) sets
+`timing_block_skipped`; keep that true for any new early return, or a host
+without a valid `mSampleTime` will see the skipped samples retimed onto a
+contiguous window. `-reset` also bumps `reset_generation`, which the
+multi-output cache compares before reusing a render: without it a host that
+resets and renders the same time stamp again gets pre-reset audio and the
+Processor never sees the reset.
 
 ### MPE routing
 
@@ -985,7 +1000,65 @@ in the plugin's source dir). The CMake helper auto-discovers and
 links it into the framework. Mirrors `PULP_CLAP_PLUGIN` and
 `PULP_AU_INSTRUMENT`.
 
+### Contract editors (`UI <package>`)
+
+A processor whose `editor_factory()` is non-null (a plug-in built with
+`pulp_add_plugin(... UI <package>)`) gets its editor through the editor-host
+contract, as VST3, CLAP and AU v2 do. Both controllers choose at run time, in
+`rebuildEditorIfReady`, before any ViewBridge is created; a processor with no
+factory keeps the ViewBridge editor untouched.
+
+- **One view owns the session.** `PulpAUv3ContractView`
+  (`au_v3_contract_view.mm`, an NSView on macOS and a UIView on iOS) owns a
+  `ContractEditorSession` and is the editor's `NativeParent` for its whole
+  life. The controller adds it to its view with a flexible-size autoresizing
+  mask, so a host resize reaches `Editor::set_size()` through the view's
+  frame (`setFrameSize:` on macOS, `layoutSubviews` on iOS). Backing scale,
+  window visibility and, on macOS, key events reach the editor from the same
+  view; a declined key goes up the responder chain.
+- **Size is published, not negotiated.** AU v3 has no accept or refuse
+  callback. The controller sets `preferredContentSize` to the editor's size at
+  attach, and the editor's `request_resize` publishes the new size (resizing
+  the controller's view on macOS) and returns true. The view sets its own
+  frame under a guard, so the editor is never echoed its own request.
+- **The audio unit closes what the view still holds.** `PulpAudioUnit` owns a
+  `ContractSessionRegistry` (`-pulpContractSessions`), declared after the
+  bridge, and the controller registers each session. A host that releases the
+  unit before the controller gets the editor detached in order (gestures
+  released, never invalidated). The controller retains the unit, so this is
+  the off-order path.
+- **No view stack needed by the editor.** The framework still links the view
+  stack (the ViewBridge path lives in the same controller), but the contract
+  view names no view, canvas or render type.
+- **iOS is compile-checked only.** `au_view_controller_ios.mm` and the UIView
+  half of `au_v3_contract_view.mm` are syntax-checked against the iOS
+  Simulator SDK; no test runs them. On iOS the resize block publishes
+  `preferredContentSize` only, so after an accepted request the view takes its
+  superview's bounds (never the requested size) and the host's layout drives
+  the rest.
+- **Host limits apply.** A host size outside the editor's limits goes through
+  `ContractEditorSession::constrain()`; the nearest accepted size reaches the
+  editor and is published as the resize request, so a host that honours it
+  brings the view back inside the limits.
+- **Test it with the real controller.** `test_au_v3_view_controller.mm`
+  compiles `au_adapter.mm` and `au_view_controller_mac.mm` into a test, binds
+  the principal class to a real `PulpAudioUnit` over a registered processor and
+  asserts the view hierarchy, `preferredContentSize` and teardown against the
+  recording editor.
+
 ## Gotchas
+
+### Setting `preferredContentSize` leaves a pending autorelease on the controller
+
+Setting `preferredContentSize` on an `AUViewController` leaves one extra
+retain on it, so `retainCount` reads 2 after `viewDidLoad`. It is a pending
+autorelease, not a leak: the controller deallocs when the run loop's pool next
+drains (checked with a bare subclass: dealloc fires one run-loop turn after the
+last release). A test that releases a controller and asserts teardown must spin
+the run loop first. Rebinding a controller to another audio unit closes its
+contract editor through `rebuildEditorIfReady` -> `closeContractEditor`; an
+audio unit released with its editor still open closes it through the unit's
+`ContractSessionRegistry`.
 
 ### `transportStateBlock`'s sample position is a double — round it, never truncate
 
@@ -1724,3 +1797,15 @@ widths the host settled on. `MIDIOutputNames` reports "MIDI Out" only for a
 descriptor with `produces_midi`: a host installs `MIDIOutputEventBlock` only for
 a unit that reports an output. Tests: test_au_multibus.mm,
 test_au_midi_output.mm.
+
+## A `UI <package>` editor in AU v3
+
+Both view controllers consult `Processor::editor_factory()` in
+`rebuildEditorIfReady` and open a `ContractEditorSession` through
+`PulpAUv3ContractView` when it is non-null (see "Contract editors" above), so
+an AUv3 built with `pulp_add_plugin(... UI <package>)` has its package's editor
+(an RmlUi or native-surface editor included). The module still links the view
+stack for the ViewBridge path, and the iOS path is compile-checked only.
+`_pulp_warn_ui_package_formats` (`tools/cmake/PulpEditorPackage.cmake`) does not
+name AUv3, because `AUv3` is in `_PULP_CONTRACT_EDITOR_FORMATS`; it still names
+the formats whose adapters serve no contract editor (LV2, AAX).

@@ -32,7 +32,9 @@ namespace pulp::format {
 // mixing/PDC and serial scratch reuse. Feedback observes the retained slot read
 // in this block, before current output is captured for the next block.
 // Configured before publication through an EdgeProbeCell. The ring has one
-// audio-thread producer and one control-thread reader.
+// producer, the thread that calls the executor, which publishes after the
+// block's last node on both the serial and the levelized parallel walk, and
+// one control-thread reader.
 struct GraphRuntimeAudioEdgeProbe {
     static_assert(std::atomic<std::uint64_t>::is_always_lock_free &&
                   std::atomic<bool>::is_always_lock_free);
@@ -1002,18 +1004,21 @@ public:
     // accumulates into the shared output bus) or has a single node runs serially.
     // `levels` must be the levelization of `snapshot`'s plan and `workers` must be
     // started; pool/midi/automation must fit() the snapshot as for process_routed.
-    GraphRuntimeExecutorResult process_parallel(
-        ProcessBlock& block,
-        const GraphRuntimeSnapshot& snapshot,
-        const graph::GraphRuntimeLevelization& levels,
-        GraphRuntimeBufferPool& pool,
-        GraphRuntimeWorkerPool& workers,
-        GraphRuntimeMidiScratch* midi = nullptr,
-        GraphRuntimeAutomationScratch* automation = nullptr,
-        std::span<const graph::GraphTimedCommand> commands = {},
-        std::span<GraphRuntimeCommandDecision> command_results = {},
-        GraphRuntimeCommandHandler command_handler = {},
-        GraphRuntimeEventSink event_sink = {}) noexcept;
+    // `edge_probes` observe the same points process_routed does: each node task
+    // writes its probe observation into storage owned by this call, and the
+    // calling thread publishes every observation once after the final level
+    // barrier, so each probe ring keeps the calling thread as its one producer.
+    // A block that fails publishes no observation; probe clocks still advance.
+    GraphRuntimeExecutorResult
+    process_parallel(ProcessBlock& block, const GraphRuntimeSnapshot& snapshot,
+                     const graph::GraphRuntimeLevelization& levels, GraphRuntimeBufferPool& pool,
+                     GraphRuntimeWorkerPool& workers, GraphRuntimeMidiScratch* midi = nullptr,
+                     GraphRuntimeAutomationScratch* automation = nullptr,
+                     std::span<const graph::GraphTimedCommand> commands = {},
+                     std::span<GraphRuntimeCommandDecision> command_results = {},
+                     GraphRuntimeCommandHandler command_handler = {},
+                     GraphRuntimeEventSink event_sink = {},
+                     GraphRuntimeEdgeProbeSet* edge_probes = nullptr) noexcept;
 
     GraphRuntimeExecutorStats stats() const noexcept;
     void reset_stats() noexcept;

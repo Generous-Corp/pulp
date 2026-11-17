@@ -731,6 +731,12 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                 } else if (type->process) {
                     cg->custom_processors[n.id] = type->process;
                 }
+                if (has_control_port && n.custom_instance &&
+                    custom_node_reset_runs_on_audio_thread(*type)) {
+                    auto inst = n.custom_instance;
+                    auto fn = type->reset;
+                    cg->control_stream_resets.push_back([inst, fn] { fn(inst.get()); });
+                }
                 if (n.custom_type_id == kControlIndexInputTypeId &&
                     n.custom_type_version == kControlIndexInputVersion) {
                     cg->control_index_state = std::make_shared<detail::ControlIndexInputState>();

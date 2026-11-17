@@ -34,6 +34,7 @@ target_sources(pulp-host PRIVATE
     src/plugin_slot.cpp
     src/graph_serializer.cpp
     src/graph_patch.cpp
+    src/graph_patch_constructors.cpp
     src/graph_file_reload.cpp
     src/spectral_graph_persistence.cpp
     src/graph_identity.cpp
@@ -41,6 +42,7 @@ target_sources(pulp-host PRIVATE
     src/voice_identity.cpp
     src/voice_template.cpp
     src/voice_bank_binding.cpp
+    src/host_timeline_binding.cpp
     src/scan_blacklist.cpp
     src/scan_cache.cpp
     src/background_scanner.cpp
@@ -303,7 +305,8 @@ set(_clap_worker_inputs
     "${PULP_ROOT_DIR}/core/host/src/isolated_plugin_slot.cpp"
     "${PULP_ROOT_DIR}/core/host/src/isolated_clap_protocol.hpp"
     "${PULP_ROOT_DIR}/core/host/src/isolated_clap_channel.hpp"
-    "${PULP_ROOT_DIR}/core/host/src/isolated_clap_endpoint.hpp")
+    "${PULP_ROOT_DIR}/core/host/src/isolated_clap_endpoint.hpp"
+    "${PULP_ROOT_DIR}/core/host/src/isolated_clap_windows_channel.hpp")
 execute_process(COMMAND git -C "${PULP_ROOT_DIR}" rev-parse HEAD
     OUTPUT_VARIABLE _clap_worker_source_head OUTPUT_STRIP_TRAILING_WHITESPACE
     ERROR_QUIET)
@@ -319,7 +322,9 @@ set_property(SOURCE src/isolated_plugin_slot.cpp APPEND PROPERTY COMPILE_DEFINIT
 
 set_property(TARGET pulp-host PROPERTY PULP_CLAP_WORKER_FINGERPRINT "${_clap_worker_fingerprint}")
 
-if(APPLE AND NOT IOS AND PULP_HAS_CLAP AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+# Live isolation: Apple arm64 and Windows x64. The sources refuse elsewhere.
+if(PULP_HAS_CLAP AND ((APPLE AND NOT IOS AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64") OR
+                      (WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")))
     set_property(SOURCE src/isolated_plugin_slot.cpp APPEND PROPERTY COMPILE_DEFINITIONS
         PULP_ISOLATED_CLAP_SUPPORTED=1)
 endif()

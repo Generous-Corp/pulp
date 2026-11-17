@@ -13,12 +13,25 @@ include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpControlShipping.cmake)
 macro(pulp_gpu_proof_begin)
     get_property(_pulp_gpu_proof_tests_before DIRECTORY PROPERTY TESTS)
     get_property(_pulp_gpu_proof_targets_before DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+    get_property(_pulp_gpu_proof_includes_before DIRECTORY PROPERTY TEST_INCLUDE_FILES)
 endmacro()
 function(pulp_gpu_proof_end)
     if(NOT PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
         message(FATAL_ERROR "pulp_gpu_proof_end() outside an exact-provider proof block: "
                             "only PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF targets are gpu-proof")
     endif()
+    # Catch discovery (pulp_add_test_suite, catch_discover_tests) registers its
+    # cases from a TEST_INCLUDE_FILES script after the build, so they are not
+    # in the TESTS property below and would reach every gate selection without
+    # the gpu-proof label. Proof blocks register with add_test instead.
+    get_property(_includes DIRECTORY PROPERTY TEST_INCLUDE_FILES)
+    foreach(_include IN LISTS _includes)
+        if(NOT _include IN_LIST _pulp_gpu_proof_includes_before)
+            message(FATAL_ERROR "pulp_gpu_proof_end(): a proof block registered "
+                                "build-time discovered tests (${_include}), which cannot carry "
+                                "the gpu-proof label; register the proof binary with add_test")
+        endif()
+    endforeach()
     get_property(_tests DIRECTORY PROPERTY TESTS)
     foreach(_test IN LISTS _tests)
         if(_test IN_LIST _pulp_gpu_proof_tests_before)
@@ -964,6 +977,46 @@ pulp_add_test_suite(pulp-test-gpu-neural-realtime-node
 pulp_add_test_suite(pulp-test-gpu-neural-model-factory
     SOURCES test_gpu_neural_model_factory.cpp
     LIBRARIES pulp::gpu-audio pulp::audio)
+
+# Two independent GPU consumers (WaveNet neural node and staged convolver) as
+# SignalGraph processor nodes under one test-local resource admission
+# manifest, with measured geometry, injected device loss and planted
+# negatives. Needs a real Dawn device, so it is hardware evidence: registered
+# only under PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF and labelled gpu-proof, which
+# keeps it out of every required CI selection. Owner-run on a physical GPU.
+# One add_test for the whole binary, not Catch discovery: discovered cases are
+# registered after the build, where pulp_gpu_proof_end() cannot label them.
+# Catch exits 4 when every selected case skips, which ctest reports as skipped.
+if(TARGET pulp::gpu-device AND PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
+    pulp_gpu_proof_begin()
+    add_executable(pulp-test-graph-gpu-resource-admission
+        test_graph_gpu_resource_admission.cpp harness/rt_allocation_probe.cpp)
+    target_link_libraries(pulp-test-graph-gpu-resource-admission PRIVATE
+        pulp::gpu-audio pulp::audio pulp::host pulp::format pulp::runtime
+        Threads::Threads Catch2::Catch2WithMain)
+    target_include_directories(pulp-test-graph-gpu-resource-admission PRIVATE
+        ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+    add_test(NAME pulp-test-graph-gpu-resource-admission
+        COMMAND pulp-test-graph-gpu-resource-admission "~[device-free]")
+    set_tests_properties(pulp-test-graph-gpu-resource-admission PROPERTIES
+        RESOURCE_LOCK pulp_gpu
+        SKIP_RETURN_CODE 4
+        TIMEOUT 300)
+    pulp_gpu_proof_end()
+endif()
+
+# The same source's device-free admission-policy cases ([device-free]) need no
+# GPU, so they also run in every ordinary macOS build, outside the gpu-proof
+# label.
+if(TARGET pulp::gpu-device AND PULP_MACOS)
+    pulp_add_test_suite(pulp-test-graph-gpu-resource-admission-policy
+        SOURCES test_graph_gpu_resource_admission.cpp harness/rt_allocation_probe.cpp
+        LIBRARIES pulp::gpu-audio pulp::audio pulp::host pulp::format pulp::runtime
+                  Threads::Threads
+        INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src
+        TEST_SPEC "[device-free]"
+        TEST_PREFIX "device-free: ")
+endif()
 
 # Shadow placement (Inline, Worker, None, Auto) for the neural node.
 pulp_add_test_suite(pulp-test-gpu-neural-shadow-policy

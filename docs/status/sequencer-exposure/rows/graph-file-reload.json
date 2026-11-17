@@ -18,7 +18,8 @@
         "load_graph_patch_json",
         "edit_->prepare",
         "edit_->commit()",
-        "baseline_open_"
+        "baseline_open_",
+        "max_graph_notation_bytes"
       ]
     },
     {
@@ -26,6 +27,12 @@
       "needles": [
         "revoke_after_publication",
         "renewal refused"
+      ]
+    },
+    {
+      "path": "test/test_graph_file_reload.cpp",
+      "needles": [
+        "Graph file reload receipt schema lists exactly the reload code names"
       ]
     }
   ],

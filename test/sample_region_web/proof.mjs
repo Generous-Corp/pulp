@@ -153,8 +153,20 @@ async function renderWam(kind, restored = null) {
   wam.audioNode.disconnect(); source.disconnect();
   return { saved, params, first: output.slice(preroll, preroll + block) };
 }
+// Mints authored node IDs inside the AudioWorklet global scope the WAM DSP
+// runs in. That scope has no crypto.getRandomValues, so a graph that seeds its
+// authored-ID salt from an entropy device fails here before any audio runs.
+async function wamAuthoredIdMint() {
+  const context = new OfflineAudioContext(1, 128, RATE);
+  await context.audioWorklet.addModule('/region/mint-probe-processor.js');
+  const node = new AudioWorkletNode(context, 'sample-region-mint-probe');
+  const reply = await timeout(new Promise(resolve => { node.port.onmessage = event => resolve(event.data); }), 'WAM authored-ID probe');
+  if (reply.error) throw new Error(`WAM authored-ID probe threw: ${reply.error}`);
+  check(reply.result === 36, `WAM worklet mints distinct well-formed authored IDs (probe ${reply.result})`);
+}
 try {
   await webclap();
+  await wamAuthoredIdMint();
   const original = await renderWam('region');
   const fresh = await renderWam('region', original.saved);
   check(JSON.stringify(fresh.params) === JSON.stringify(original.params), 'WAM reload catalog parity');

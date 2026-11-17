@@ -487,6 +487,21 @@ runs the sibling CLI, so these messages reach MCP unchanged. The shell-out test
 is `pulp graph probe refusals name the cause and the fix` in
 `test/test_cli_shellout.cpp`.
 
+### MCP `pulp_graph diff` is the CLI diff, not a second comparison
+
+`handle_graph_diff` in `tools/mcp/mcp_tools.cpp` runs the matched sibling
+`pulp-cpp graph diff BEFORE AFTER --json` through `ChildProcess` (no shell,
+30 s deadline, 2 MiB output cap) and returns its text unchanged. The operation
+takes `before` and `after`, never `path`, and refuses probe-only options. A
+comparison that finds differences exits 0 and is NOT `isError`; only a CLI
+refusal (exit 1 or 2) or a failed process is. Keep the CLI's default exit
+contract: a diff-style exit code, if ever wanted, must be opt-in. Parity
+(equality, semantic and layout-only change, side attribution, missing,
+oversized and malformed inputs, no input modified) is asserted against the
+real binaries in `test/test_graph_patch_tools.py`; argv forwarding and error
+mapping are in `MCP graph diff delegates to the matched CLI` in
+`test/test_mcp_server.cpp`.
+
 ### `pulp graph render` must be driven by its input and report its level
 
 `render_graph()` in `tools/cli/cmd_graph.cpp` decodes `--input` through the
@@ -503,6 +518,19 @@ WAV rate all follow the input file; do not reintroduce a fixed 48 kHz. The MCP
 `pulp_graph render` forwards `input` (never `--output`). The shell-out test
 `pulp graph render drives audio_in from --input and refuses silent renders`
 checks every output sample, so a size-only WAV check is not enough.
+
+### `pulp graph` rewrites must not drop what the plain writer cannot express
+
+`save`, `fmt` and `canonicalize` in `tools/cli/cmd_graph.cpp` rewrite a
+`.pulpgraph`. `GraphSerializer::to_file` writes `to_json`, which has no
+saved-identity envelope and no `subgraphs` records, so routing an envelope
+document through `from_file` + `to_file` exits 0 while destroying the only
+input `pulp graph diff` accepts. The rewrite path detects the envelope,
+restores through `from_saved_document` and writes `to_saved_file`; records that
+need authoring templates are refused (`subgraph_records_unsupported`) rather
+than stripped. A new rewrite mode needs the same check, and its shell-out test
+must diff the CLI's own output, not a file the C++ API wrote: the diff tests
+once passed while no CLI command could produce a diff input.
 
 ## Adding a CLI Command — Full Checklist
 
@@ -4323,7 +4351,13 @@ Graph and notation load failures print `graph_patch_code_name` verbatim (`Ok`,
 `InvalidDocument`, `FileUnreadable`, ...); never rewrite a code in
 `cmd_graph.cpp` (an earlier `invalid_graph` rewrite made the CLI disagree with
 the C++ API). New CLI-only codes go in the `docs/reference/cli.md` table, and a
-new C++ code needs a row in `test/test_cli_graph_code_parity.cpp`.
+new C++ code needs a row in `test/test_cli_graph_code_parity.cpp`, the code list
+in `docs/status/cli-commands.yaml` and, when MCP must agree, a fixture in
+`test/test_graph_patch_tools.py` (which only runs inside the installed-SDK
+ctest `cmake-graph-patch-sdk-consumer`; that ctest needs a full build and a
+clean committed tree). `# flow 2` documents need no CLI change: `fmt` prints
+whatever header the formatter chose, so assert the CLI text equals
+`format_graph_patch` rather than hard-coding `# flow 1`.
 
 ### Transactional graph-file development reload
 

@@ -143,3 +143,69 @@ if(PULP_BUILD_TESTS AND (TARGET PulpNativeMetalProbe_CLAP OR TARGET PulpNativeMe
             ENVIRONMENT_MODIFICATION "${_probe_env}")
     endif()
 endif()
+
+# The probe's editor opened through each plug-in format's own adapter, in an
+# offscreen window on the system Metal device: the AU v2 contract view, the
+# VST3 contract view, the CLAP contract GUI and the macOS AU v3 view controller.
+# Each asserts the same lifecycle (support/native_surface_format_checks.hpp): the
+# editor attaches at its size, the first frame carries the gain colour at the
+# drawable's size, a host resize round trip moves the drawable and returns, and
+# a close then reopen starts clean. A test skips, saying so, without a Metal
+# device.
+if(PULP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
+    include(Catch)
+    function(_pulp_native_format_host_test name)
+        cmake_parse_arguments(T "" "" "SOURCES;LIBRARIES;DEFINITIONS;LABEL" ${ARGN})
+        add_executable(${name} ${T_SOURCES})
+        # Only the test's own translation unit is ARC; the adapter sources
+        # compiled into it keep their own memory management.
+        list(GET T_SOURCES 0 _test_source)
+        set_source_files_properties(${_test_source} PROPERTIES COMPILE_OPTIONS -fobjc-arc)
+        target_include_directories(${name} PRIVATE ${PROJECT_SOURCE_DIR}/test)
+        target_link_libraries(${name} PRIVATE
+            pulp-native-metal-probe-ui pulp::native Catch2::Catch2WithMain ${T_LIBRARIES}
+            "-framework AppKit" "-framework ImageIO" "-framework Metal"
+            "-framework AudioToolbox" "-framework AudioUnit" "-framework CoreAudioKit")
+        if(T_DEFINITIONS)
+            target_compile_definitions(${name} PRIVATE ${T_DEFINITIONS})
+        endif()
+        set_target_properties(${name} PROPERTIES CXX_STANDARD 23)
+        target_compile_options(${name} PRIVATE
+            $<$<COMPILE_LANGUAGE:OBJCXX>:-std=gnu++23>)
+        catch_discover_tests(${name}
+            PROPERTIES LABELS "native-surface;editor-host;format-host;${T_LABEL}")
+    endfunction()
+
+    set(_fmt_src ${PROJECT_SOURCE_DIR}/core/format/src)
+    if(TARGET pulp::format-clap-core AND TARGET clap)
+        _pulp_native_format_host_test(pulp-test-native-surface-clap
+            SOURCES ${PROJECT_SOURCE_DIR}/test/test_native_surface_clap.mm
+            LIBRARIES pulp::format-clap-core clap
+            LABEL clap)
+    endif()
+    if(PULP_HAS_VST3)
+        _pulp_native_format_host_test(pulp-test-native-surface-vst3
+            SOURCES ${PROJECT_SOURCE_DIR}/test/test_native_surface_vst3.mm
+            LIBRARIES pulp::format-core
+            LABEL vst3)
+    endif()
+    if(PULP_HAS_AUSDK)
+        _pulp_native_format_host_test(pulp-test-native-surface-au-v2
+            SOURCES ${PROJECT_SOURCE_DIR}/test/test_native_surface_au_v2.mm
+                    ${_fmt_src}/au_v2_contract_view.mm
+            LIBRARIES pulp::format-core ausdk
+            DEFINITIONS
+                PULP_AU_CONTRACT_VIEW_FACTORY_CLASS=PulpAUContractViewFactory_NativeSurface
+                PULP_AU_CONTRACT_HOST_VIEW_CLASS=PulpAUContractHostView_NativeSurface
+            LABEL auv2)
+        if(NOT PULP_IOS AND TARGET pulp::view)
+            _pulp_native_format_host_test(pulp-test-native-surface-au-v3
+                SOURCES ${PROJECT_SOURCE_DIR}/test/test_native_surface_au_v3.mm
+                        ${_fmt_src}/au_adapter.mm
+                        ${_fmt_src}/au_view_controller_mac.mm
+                        ${_fmt_src}/au_v3_contract_view.mm
+                LIBRARIES pulp::format pulp::view ausdk
+                LABEL auv3)
+        endif()
+    endif()
+endif()

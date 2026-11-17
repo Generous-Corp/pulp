@@ -300,20 +300,57 @@ per plug-in, and the factory class is exported. Things to keep straight:
   autorelease pool first. Otherwise the view outlives the unit and the
   registry's close runs instead of the view's.
 - AU v2 has no resize request. An editor's `request_resize` moves the
-  container's frame, and the host follows the frame.
+  container's frame, and the host follows the frame, so the request is a small
+  transaction (`requestEditorSize:`): main thread only, never nested (an editor
+  asking again from inside `set_size()` gets false), and accepted only when the
+  editor takes the size and the frame ends at exactly that size
+  (`detail::resize_request_accepted()`). Under Logic
+  (`logic_au_v2_container_resize`) the enclosing container must have followed
+  too. Otherwise restore the editor's captured pre-request size and the frame's
+  origin, then reconcile the frame to the size the editor reports. Do not use
+  the old frame size to restore the editor: an earlier host resize may have
+  been refused, leaving the frame and editor at different sizes. The container
+  branch (a host that resizes its container) is
+  proven only through a test seam, `set_contract_resize_follows_container_for_testing`,
+  compiled under `PULP_AU_V2_TEST_HOOKS` and absent from shipped builds
+  (`pulp-test-au-v2-contract-shipping`); it has not run in a real Logic host.
+  It is the same exact-size rule as the ViewBridge path's
+  `pulp_resize_logic_auv2_editor`, but it does not walk Logic's window
+  hierarchy and does not publish the new size before the frame change.
+  The request is the session's pending editor-origin request, so the transaction
+  acknowledges it through `set_host_size()`: an editor-asked size is exempt from
+  the editor's own limits, and the frame follows only if the editor took it.
+- A host that resizes the container by hand goes through
+  `ContractEditorSession::set_host_size()` in `-setFrameSize:`, as VST3
+  `onSize` and CLAP `set_size` do: the editor takes a size inside its
+  `size_hints()` limits and locked aspect at once, and the frame is moved there
+  by the session's snapped-size request (a `-setFrameSize:` through the
+  `request_resize` hook) only after the host's sizes have been quiet for
+  `kSnapSettleMs`, never inside the host's own call. A fixed-size editor (the
+  default: both minimums unset, or `min == max`) takes no host size: it is told
+  nothing and the frame returns to its size. The arithmetic is
+  `detail::constrain_to_hints()`, a pure function.
 - `pulp-test-au-v2-contract-adapters` builds all three adapter types from
   their real entry macros (one translation unit each, because
   `PULP_REGISTER_PLUGIN` defines a fixed-name registrar) and registers their
   `<Class>Factory` functions with `AudioComponentRegister`. Use it when you need
   a real adapter instance in-process without a bundle.
 - The AppKit key mapping lives in `detail/appkit_contract_key.hpp`, shared with
-  the standalone contract window.
+  the standalone contract window. AppKit delivers an astral character (an
+  emoji) as a UTF-16 pair: the helper combines a valid pair into one scalar and
+  drops a lone surrogate, so a key's `character` is always a scalar value
+  (`[auv2]` "carry an astral character whole" case).
 - `au::contract_view_session(ns_view)` (declared in `au_v2_common.hpp`) reaches
   an open contract view's session, and through it the editor's
   `EditorAutomation`, from an in-process host. A harness that opens contract
   views must give each open/close round its own `@autoreleasepool`. AppKit
   autoreleases the view on a resize, and without a draining pool (a bare
   `main`) the view never deallocates, so the editor never closes.
+- An RmlUi or native Metal surface is a child `NSView` of this container with
+  an autoresizing mask on both axes, so it follows the container's frame; it
+  watches its own window for occlusion and scale. It has no first-frame
+  present with the Core Animation transaction that the ViewBridge GPU host
+  uses.
 - A `create_view()` AU (PULP_AU_GUI) keeps the ViewBridge factory even when its
   processor overrides `editor_factory()`. Only view-free UI-package AUs serve the
   contract view.
@@ -706,6 +743,36 @@ directly—the shared helpers contain exceptions.
 ### The host's timeline sample position is a double — round it, never truncate
 
 `CallHostTransportState` reports `outCurrentSampleInTimeLine` as a `Float64`, and some hosts send a value a hair below the true sample: REAPER reports `13823.9999` for sample `13824`. A `static_cast<int64_t>` truncates it, so `position_samples` steps back one sample and then jumps two on the next block. Convert through `pulp::format::detail::host_sample_position()` (`detail/host_sample_position.hpp`). It returns the nearest sample (`std::round`, independent of the rounding mode), or `nullopt` for a non-finite or out-of-range value; leave `TransportField::SamplePosition` unset in that case.
+
+### Timing facts are per Processor call, not per render
+
+`ProcessContext::timing` (neutral steady counter, transport, discontinuity; see
+`docs/graph-program-status/D4-adapter-timing.md`) is published through
+`BlockTimingPublisher` in `au_v2_common.hpp`, shared by all three adapters.
+Three traps it exists to avoid:
+
+- **`AUEffectBase::Render` calls `ProcessBufferLists` once per scheduled-parameter
+  slice.** Each call must publish `mSampleTime + slice_frame_offset_`, and a
+  playing transport must move by the same offset
+  (`apply_host_callbacks_to_process_context(..., slice_offset)`). Publishing
+  the render's time stamp on every slice makes the second slice overlap the
+  first, so the host timeline opens a new epoch mid-render (and the legacy
+  `transport_jump` fires on every automated block).
+- **`ProcessBufferLists` has no time stamp.** `PulpAUEffect::Render` stashes
+  `inTimeStamp` for the duration of the render. Do not read
+  `CurrentRenderTime()` instead: it is only set by `AUBase::DoRender`, and the
+  in-process tests (and any direct `Render()` caller) never go through it.
+- **Every exit before `process()` is a skip.** `ScopedSkipMark` marks the call
+  skipped on scope exit unless `observed()` ran after `process()`, so a new
+  early return cannot forget it; `PulpAUEffect::Render` also marks a render that
+  reached no Processor call (the stock bypass, a missing main input). Requests
+  `AUBase::DoRender` refuses before `Render()` (oversized, uninitialized) never
+  reach the adapter and cannot be marked. Discontinuity after
+  `Initialize()`/`Reset()` is a generation compare, so a skipped block never
+  consumes a pending reset.
+
+Tests: `test/test_au_v2_process_timing.cpp` (effect via `DoRender` with a host
+input callback, so the real slicing runs).
 
 ### An AU v2 editor learns it is hidden only through its view
 

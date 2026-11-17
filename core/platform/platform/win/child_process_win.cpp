@@ -4,8 +4,11 @@
 #ifdef _WIN32
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <cwchar>
+#include <iterator>
 #include <future>
 #include <mutex>
 #include <thread>
@@ -14,6 +17,8 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+
+#include "duplex_channel_win.hpp"
 
 namespace pulp::platform {
 
@@ -474,14 +479,11 @@ bool ChildProcess::start_retained(RetainedProcessCustody& custody, const std::st
                                   const ProcessOptions& options) {
     return start_impl(command, args, options, nullptr, nullptr, nullptr, &custody);
 }
-// The private duplex channel is not available on Windows, so the channel
-// variant refuses before reserving or spawning.
-bool ChildProcess::start_retained_with_standard_input_channel(RetainedProcessCustody&,
-                                                              const std::string&,
-                                                              const std::vector<std::string>&,
-                                                              const StandardInputChannelSession&,
-                                                              const ProcessOptions&) {
-    return false;
+bool ChildProcess::start_retained_with_standard_input_channel(
+    RetainedProcessCustody& custody, const std::string& command,
+    const std::vector<std::string>& args, const StandardInputChannelSession& session,
+    const ProcessOptions& options) {
+    return start_impl(command, args, options, nullptr, nullptr, &session, &custody);
 }
 bool ChildProcess::start_joined_to_current_group(const CurrentProcessGroup&, JoinedChildCustody&,
                                                  const std::string&,
@@ -530,7 +532,11 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
                               JoinedChildCustody* joined_custody) {
     if (joined_group || joined_custody)
         return false;
-    if (standard_input_session)
+    // The duplex channel is retained-only on Windows. Output capture is refused
+    // with it because nothing drains a retained child's pipes during the session.
+    if (standard_input_session &&
+        (!custody || !*standard_input_session || options.standard_input_timeout_ms <= 0 ||
+         options.capture_stdout || options.capture_stderr))
         return false;
     if (custody && (custody->impl_ || standard_input || standard_input_provider))
         return false;
@@ -567,8 +573,10 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
         custody->impl_ = impl_;
     }
 
-    if ((has_standard_input && (options.standard_input_timeout_ms <= 0 ||
-                                !impl_->standard_input.create_input())) ||
+    DuplexChannel duplex;
+    if ((standard_input_session && !duplex.create()) ||
+        (has_standard_input &&
+         (options.standard_input_timeout_ms <= 0 || !impl_->standard_input.create_input())) ||
         (options.capture_stdout && !impl_->stdout_pipe.create()) ||
         (options.capture_stderr && !impl_->stderr_pipe.create())) {
         impl_->standard_input.close_all();
@@ -602,15 +610,28 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
     SECURITY_ATTRIBUTES sa{};
     sa.nLength = sizeof(sa);
     sa.bInheritHandle = TRUE;
-    HANDLE null_stdin = INVALID_HANDLE_VALUE;
+    HANDLE owned_stdin = INVALID_HANDLE_VALUE;
     HANDLE null_stdout = INVALID_HANDLE_VALUE;
     HANDLE null_stderr = INVALID_HANDLE_VALUE;
 
-    si.hStdInput = has_standard_input ? impl_->standard_input.read_end
-                                      : GetStdHandle(STD_INPUT_HANDLE);
+    if (standard_input_session) {
+        si.hStdInput = duplex.child;
+    } else if (has_standard_input) {
+        si.hStdInput = impl_->standard_input.read_end;
+    } else {
+        // The handle list below admits only inheritable handles, and the
+        // parent's own standard input need not be one, so the child receives
+        // an inheritable duplicate that is closed after the launch.
+        const HANDLE parent_stdin = GetStdHandle(STD_INPUT_HANDLE);
+        if (is_valid_handle(parent_stdin) &&
+            !DuplicateHandle(GetCurrentProcess(), parent_stdin, GetCurrentProcess(), &owned_stdin,
+                             0, TRUE, DUPLICATE_SAME_ACCESS))
+            owned_stdin = INVALID_HANDLE_VALUE;
+        si.hStdInput = owned_stdin;
+    }
     if (!is_valid_handle(si.hStdInput)) {
-        null_stdin = open_null_device(GENERIC_READ, sa);
-        si.hStdInput = null_stdin;
+        owned_stdin = open_null_device(GENERIC_READ, sa);
+        si.hStdInput = owned_stdin;
     }
 
     if (options.capture_stdout) {
@@ -631,8 +652,8 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
         impl_->standard_input.close_all();
         impl_->stdout_pipe.close_all();
         impl_->stderr_pipe.close_all();
-        if (is_valid_handle(null_stdin))
-            CloseHandle(null_stdin);
+        if (is_valid_handle(owned_stdin))
+            CloseHandle(owned_stdin);
         if (is_valid_handle(null_stdout))
             CloseHandle(null_stdout);
         if (is_valid_handle(null_stderr))
@@ -641,14 +662,20 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
         return false;
     }
 
+    // Every launch names exactly the handles its child receives. Inheritance
+    // stays enabled for those three, but any other inheritable handle live in
+    // this process at the same moment (another launch's pipe ends, or the
+    // private duplex endpoint of a concurrent retained launch) stays here.
     SIZE_T attributes_size = 0;
     std::vector<std::byte> attributes;
     std::vector<HANDLE> inherited;
     DWORD creation_flags = CREATE_NO_WINDOW;
     bool attributes_initialized = false;
-    if (has_standard_input) {
+    {
         si.cb = sizeof(startup);
         inherited = {si.hStdInput, si.hStdOutput, si.hStdError};
+        std::sort(inherited.begin(), inherited.end());
+        inherited.erase(std::unique(inherited.begin(), inherited.end()), inherited.end());
         InitializeProcThreadAttributeList(nullptr, 1, 0, &attributes_size);
         attributes.resize(attributes_size);
         startup.lpAttributeList = reinterpret_cast<PPROC_THREAD_ATTRIBUTE_LIST>(attributes.data());
@@ -663,8 +690,8 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
             impl_->standard_input.close_all();
             impl_->stdout_pipe.close_all();
             impl_->stderr_pipe.close_all();
-            if (is_valid_handle(null_stdin))
-                CloseHandle(null_stdin);
+            if (is_valid_handle(owned_stdin))
+                CloseHandle(owned_stdin);
             if (is_valid_handle(null_stdout))
                 CloseHandle(null_stdout);
             if (is_valid_handle(null_stderr))
@@ -683,9 +710,14 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
         creation_flags |= CREATE_SUSPENDED;
     }
 
+    // The client end becomes inheritable only now, so the window in which an
+    // unrelated CreateProcess in this process could inherit it spans this
+    // launch call and nothing before it.
+    const bool duplex_ready = !standard_input_session || duplex.make_child_inheritable();
+
     PROCESS_INFORMATION pi{};
     BOOL ok =
-        (custody && retained_job == nullptr)
+        ((custody && retained_job == nullptr) || !duplex_ready)
             ? FALSE
             : CreateProcessA(nullptr, cmdline.data(), nullptr, nullptr,
                              TRUE, // inherit handles
@@ -698,10 +730,11 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
         DeleteProcThreadAttributeList(startup.lpAttributeList);
 
     impl_->standard_input.close_read();
+    duplex.close_child();
     impl_->stdout_pipe.close_write();
     impl_->stderr_pipe.close_write();
-    if (is_valid_handle(null_stdin))
-        CloseHandle(null_stdin);
+    if (is_valid_handle(owned_stdin))
+        CloseHandle(owned_stdin);
     if (is_valid_handle(null_stdout))
         CloseHandle(null_stdout);
     if (is_valid_handle(null_stderr))
@@ -752,6 +785,25 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
             return false;
         }
         CloseHandle(pi.hThread);
+        if (!standard_input_session)
+            return true;
+        const auto deadline = std::chrono::steady_clock::now() +
+                              std::chrono::milliseconds(options.standard_input_timeout_ms);
+        ChildProcessInputChannel channel(reinterpret_cast<std::intptr_t>(duplex.release_parent()));
+        lock.unlock();
+        bool completed = false;
+        try {
+            completed = (*standard_input_session)(static_cast<int>(pi.dwProcessId),
+                                                  std::move(channel), deadline);
+        } catch (...) {
+            completed = false;
+        }
+        if (!completed || std::chrono::steady_clock::now() >= deadline) {
+            // The receipt stays with the reservation, as after a rejected validator.
+            (void)impl_->cleanup_retained(std::chrono::steady_clock::now() +
+                                          std::chrono::seconds(2));
+            return false;
+        }
         return true;
     }
     CloseHandle(pi.hThread);

@@ -138,6 +138,15 @@ struct CustomNodeType {
     // state, call save_state/load_state from non-audio control paths (graph not
     // live, or after invalidate + re-prepare).
     //
+    // `reset` runs on the main thread when a baked graph prepares the node.
+    // It also runs on the AUDIO thread when SignalGraph handles a transport
+    // seek for a graph whose Custom nodes carry Control ports, so a stateful
+    // Control node restarts from its initial state. That audio-thread reset is
+    // made only for types whose rt_contract is declared with an audio-callback
+    // safety class (see custom_node_reset_runs_on_audio_thread below); such a
+    // reset must be real-time-safe (no allocation, locking or I/O). A type
+    // without that declaration keeps its state across the seek instead.
+    //
     // Parallel routing concurrency: the framework owns one DISTINCT instance per
     // node, so two nodes of the same type never share instance state. But under
     // levelized parallel routing, process_instance for sibling nodes in a level
@@ -399,6 +408,17 @@ struct SampleKernelDescriptor {
 
     bool is_valid_registration() const noexcept;
 };
+
+// True when SignalGraph may call `type.reset` on the audio thread for a
+// transport seek: the type has a reset and declares an rt_contract whose
+// safety class admits the audio callback. Every other type keeps its state
+// across a seek, because an undeclared reset may allocate or lock.
+// The class test is the audio module's exhaustive classifier, so a new safety
+// class is decided there once.
+inline bool custom_node_reset_runs_on_audio_thread(const CustomNodeType& type) noexcept {
+    return type.reset && type.rt_contract.declared &&
+           audio::rt_safety_class_is_audio_dsp_safe(type.rt_contract.safety_class);
+}
 
 // Validates the runtime non-aliasing precondition before invoking a scalar
 // callback. Zero-sized ranges may be null; every non-zero range must be present.

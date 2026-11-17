@@ -371,6 +371,10 @@ struct EditorKeyEvent {
     std::uint8_t modifiers = 0; ///< `EditorKeyModifier` bits
     bool is_down = true;        ///< false for a key release
     bool is_repeat = false;     ///< an auto-repeat of a held key
+    /// Stable identity of the physical key, the same on its down, repeats and
+    /// up whatever the modifiers or layout do to `character`. 0 when the host
+    /// has none; the platform code plus one (so a code of 0 stays distinct).
+    std::uint32_t physical_key = 0;
 };
 
 /// The editor's answer to an offered key.
@@ -455,9 +459,11 @@ class Editor {
     /// the editor cannot take that size; the host then asks `adjust_size()`.
     virtual bool set_size(const EditorSize& size) = 0;
 
-    /// Preferred, minimum and maximum size and the aspect ratio to hold. Equal
-    /// minimum and maximum mean a fixed-size editor. The default reports the
-    /// current size as preferred and no bounds.
+    /// Preferred, minimum and maximum size and the aspect ratio to hold. An
+    /// editor is resizable only when both minimums are set and the bounds leave
+    /// room: no minimums, or equal minimum and maximum, mean a fixed-size
+    /// editor. The default reports the current size as preferred and no
+    /// bounds, so an editor that does not override this is fixed-size.
     virtual ViewSize size_hints() const {
         const auto s = size();
         ViewSize hints;

@@ -9,6 +9,10 @@
     "core/host/src/graph_history.cpp",
     "test/test_graph_history.cpp",
     "test/test_cli_graph_code_parity.cpp",
+    "test/test_graph_patch_tools.py",
+    "test/test_mcp_server.cpp",
+    "tools/mcp/mcp_tools.cpp",
+    "tools/mcp/pulp_mcp.cpp",
     "tools/cli/cmd_graph.cpp",
     "docs/graph-program-status/G-3.md",
     "docs/status/sequencer-exposure/rows/g3-graph-edit-history-diff.json"
@@ -20,11 +24,11 @@
     },
     {
       "path": "core/host/src/graph_history.cpp",
-      "needles": ["GraphHistoryCode::Diverged", "snapshot_port_identity", "GraphHistoryCode::PortIdentityMismatch", "result.rolled_back"]
+      "needles": ["GraphHistoryCode::Diverged", "snapshot_port_identity", "GraphHistoryCode::PortIdentityMismatch", "result.rolled_back", "pulp graph save --saved-identity"]
     },
     {
       "path": "test/test_graph_history.cpp",
-      "needles": ["graph edit history refuses to undo over an unrecorded edit", "graph document diff compares by logical identity, not NodeId", "graph edit history refuses a restore that would leave a node unresolved"]
+      "needles": ["graph edit history refuses to undo over an unrecorded edit", "graph document diff compares by logical identity, not NodeId", "graph edit history refuses a restore that would leave a node unresolved", "saved document inspection rebuilds identities for every node kind", "saved document inspection refuses identities that name other nodes", "saved document inspection rebuilds identities the loader would assign"]
     },
     {
       "path": "docs/graph-program-status/G-3.md",
@@ -34,7 +38,7 @@
   "surfaces": {
     "installed_sdk": {
       "disposition": "exposed",
-      "rationale": "GraphEditHistory and diff_graph_documents are public host APIs over saved-identity v6 documents; they hold no pointer into a live graph and the diff is data-only.",
+      "rationale": "GraphEditHistory and diff_graph_documents are public host APIs over saved-identity documents (v7 written, v6 still read); they hold no pointer into a live graph and the diff is data-only.",
       "evidence": [
         {
           "kind": "sdk_header",
@@ -56,7 +60,7 @@
     },
     "offline_timeline_cli": {
       "disposition": "exposed",
-      "rationale": "pulp graph diff reads two bounded saved documents and reports their logical-identity differences; it never loads plugin code or writes files.",
+      "rationale": "pulp graph diff reads two bounded saved documents and reports their logical-identity differences; it never loads plugin code or writes files. Its inputs come from pulp graph save --saved-identity, and save, fmt and canonicalize keep an input's identity envelope.",
       "evidence": [
         {
           "kind": "cli_handler",
@@ -68,13 +72,18 @@
           "path": "test/test_cli_graph_code_parity.cpp",
           "needles": [
             "graph diff compares saved documents by logical identity",
-            "graph CLI success code and fmt use the C++ spelling"
+            "graph CLI success code and fmt use the C++ spelling",
+            "graph save and fmt keep the saved-identity envelope that diff reads",
+            "graph CLI file size and readability codes agree across subcommands",
+            "A file of exactly the bound is read and judged as a document instead.",
+            "graph CLI fmt prints the C++ canonical notation for flow 1 and flow 2",
+            "flow 2 mismatched sample rate"
           ]
         },
         {
           "kind": "cli_definition",
           "path": "tools/cli/cmd_graph.cpp",
-          "needles": ["diff: pulp graph diff <before.pulpgraph> <after.pulpgraph> [--json]"]
+          "needles": ["diff: pulp graph diff <before.pulpgraph> <after.pulpgraph> [--json]", "save: --output path [--saved-identity]"]
         }
       ],
       "authority": {
@@ -85,8 +94,31 @@
       }
     },
     "offline_timeline_mcp": {
-      "disposition": "not_applicable",
-      "rationale": "No MCP operation, schema, or handler is added; the pulp_graph tool does not expose diff."
+      "disposition": "exposed",
+      "rationale": "The pulp_graph MCP tool exposes operation diff with explicit before and after paths. It runs the matched sibling pulp-cpp graph diff --json (the CLI implementation) without a shell, with a 30 second deadline and a 2 MiB output cap; a comparison that finds differences is a successful result and only a refusal is an MCP error.",
+      "evidence": [
+        {
+          "kind": "mcp_definition",
+          "path": "tools/mcp/mcp_tools.cpp",
+          "needles": ["handle_graph_diff", "\"graph\", \"diff\", before, after"]
+        },
+        {
+          "kind": "mcp_handler",
+          "path": "tools/mcp/mcp_tools.hpp",
+          "needles": ["handle_graph"]
+        },
+        {
+          "kind": "test",
+          "path": "test/test_graph_patch_tools.py",
+          "needles": ["def check_diff", "diff parity"]
+        }
+      ],
+      "authority": {
+        "admission": "read_only",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
     },
     "live_product_control": {
       "disposition": "not_applicable",

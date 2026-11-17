@@ -455,6 +455,20 @@ native-core processors forward it as `playhead_frames`, so leaving it at the
 default 0 makes CLAP-only playhead-sensitive processors think every block
 starts at the song origin.
 
+`ctx.timing` (`format::ProcessTiming`) carries the neutral timing facts the
+host event timeline projects: `clap_process_t::steady_time` when it is
+non-negative, the same seconds-derived transport sample (decoded once by
+`format::clap_sectime_to_samples()`, which divides by the 2^31 factor before
+the single rounding), and a discontinuity on the first block the Processor
+observes after `clap_activate()` / `clap_reset()`. The warm-up render inside
+`clap_activate()` must not consume that flag, so the pending flags clear only
+after `Processor::process()` ran. A bypassed, contended or layout-refused block
+sets `timing_block_skipped`, and so does a host block longer than the prepared
+maximum (only its prefix reached the Processor). That marks the next block
+discontinuous only when the host sends no `steady_time` (with one, the
+projection measures the gap).
+Coverage: `test_clap_process_timing.cpp`.
+
 ### Render mode (`clap.render`)
 
 The adapter offers `CLAP_EXT_RENDER` from `clap_get_extension()`:
@@ -489,7 +503,10 @@ A processor whose initialized `editor_factory()` is non-null gets the contract
 `clap_plugin_gui` instead of the `create_view()` one, in GUI and view-free builds
 alike. The contract GUI lives in `clap_contract_gui.cpp`, which is compiled into
 both `pulp-format-clap-core` and `pulp-format-view`. It sits on a
-`ContractEditorSession` (shared with VST3, and with AU next). Things to keep
+`ContractEditorSession` (shared with VST3, AU v2 and the standalone host). It
+is the CLAP path for RmlUi and native-surface editors too. RmlUi editors, and
+Metal native surfaces, are macOS-only (`pulp-native` also has GL surfaces for
+Win32 and X11, but RmlUi has no renderer on them). Things to keep
 straight:
 
 - The choice is made in `clap_entry.hpp`'s `get_static_extension`, which reads
@@ -513,8 +530,17 @@ straight:
   session's own tick is a main-queue dispatch source, so tests pump the real
   run loop (`test_support::MainLoop`) and wait for ticks rather than count
   posted tasks.
+- Sizing comes from `Editor::size_hints()` through the session, not the adapter:
+  `can_resize` / `get_resize_hints` / `adjust_size` follow
+  `ContractEditorSession::resizable()` and `constrain()`. An editor that declares
+  no minimums is fixed-size (the ViewBridge convention); `aspect_ratio > 0`
+  snaps `adjust_size` to that ratio inside min/max, `0` clamps each axis alone.
+  `detail::constrain_to_hints()` is the pure arithmetic.
 - CLAP has no key callback, so keys reach a contract editor only through its
   own native view.
+- The legacy `gui_set_scale` (the ViewBridge path) returns false and ignores the
+  host's scale; the contract GUI forwards it to the editor
+  (`ContractEditorSession::set_scale`).
 - WebCLAP (`PULP_WCLAP`) leaves the contract GUI out; `PulpWclap.cmake`'s source
   list carries no contract code.
 

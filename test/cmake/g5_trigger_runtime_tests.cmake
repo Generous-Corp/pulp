@@ -9,7 +9,8 @@ if(TARGET pulp-host)
     pulp_add_test_group(pulp-test-group-trigger-graph LIBRARIES pulp::host)
     pulp_add_test_suite(pulp-test-trigger-graph GROUP pulp-test-group-trigger-graph
         SOURCES test_trigger_graph.cpp test_g5_host_event_contract.cpp
-                harness/rt_allocation_probe.cpp LIBRARIES pulp::host
+                test_paced_deadline_driver.cpp harness/rt_allocation_probe.cpp
+        LIBRARIES pulp::host
         PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
 endif()
 if(TARGET pulp-host AND TARGET clap)
@@ -27,4 +28,10 @@ if(TARGET pulp-host AND TARGET clap)
         SOURCES test_g5_host_event_timestamps.cpp test_g5_host_event_timestamps_vst3_au.cpp
                 test_g5_host_event_timestamps_lv2.cpp
         LIBRARIES ${_g5_host_timestamp_libs})
+endif()
+if(TARGET pulp-host)
+    pulp_add_test_suite(pulp-test-host-timeline-binding
+        SOURCES test_host_timeline_binding.cpp harness/rt_allocation_probe.cpp
+        LIBRARIES pulp::host
+        PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
 endif()

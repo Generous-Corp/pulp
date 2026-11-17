@@ -407,16 +407,19 @@ commands:
       - name: after
         kind: positional
         required: false
-        description: "diff only: the AFTER saved-identity document. Read-only comparison by logical node identity; JSON reports code Ok, equal, nodes, connections, layout_changed and sections_changed, or InvalidDocument with refusal and side"
+        description: "diff only: the AFTER saved-identity document (MCP pulp_graph diff takes before and after and runs this same command; differences are a successful result, only refusals are MCP errors). Read-only comparison by logical node identity; JSON reports code Ok, equal, nodes, connections, layout_changed and sections_changed, or InvalidDocument with refusal and side"
       - name: --notation
         kind: flag
         description: Format a supported saved graph as canonical notation
       - name: --json
         kind: flag
-        description: "Emit machine-readable result and error codes. For graph and notation files the code is the C++ GraphPatchDiagnostic name (Ok, SyntaxError, UnknownNode, UnknownPort, KindMismatch, IllegalCycle, Duplicate, InvalidDocument, UnsupportedContract, ParameterOutOfRange, RestoreFailed, ResourceLimit, FileUnreadable); CLI-only codes (missing_option, invalid_option, missing_input, probe/render/save codes) are listed in reference/cli.md#graph"
+        description: "Emit machine-readable result and error codes. For graph and notation files the code is the C++ GraphPatchDiagnostic name (Ok, SyntaxError, UnknownNode, UnknownPort, KindMismatch, IllegalCycle, Duplicate, InvalidDocument, UnsupportedContract, ParameterOutOfRange, RestoreFailed, ResourceLimit, FileUnreadable, SampleRateMismatch, UnsupportedChannelLayout); CLI-only codes (missing_option, invalid_option, missing_input, probe/render/save codes) are listed in reference/cli.md#graph"
       - name: --output
         kind: option
-        description: Write the offline render to a float WAV file at the render's sample rate
+        description: "render: write the offline render to a float WAV file at the render's sample rate. save (required): the path the graph document is written to"
+      - name: --saved-identity
+        kind: flag
+        description: "save only: write the saved-identity v7 envelope (persisted authored node IDs) that graph diff reads; a plain input whose connections did not all restore is refused (InvalidDocument, connection_not_restored); save, fmt and canonicalize refuse an input with a node record the loader could not add (InvalidDocument, node_not_restored). Saved-identity inputs keep the envelope on save, fmt and canonicalize without the flag"
       - name: --input
         kind: option
         description: Audio input WAV for probe (required) and render (required when the graph has an audio_in node, otherwise refused with missing_input); render takes its sample rate, channel count and length from this file

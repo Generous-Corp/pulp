@@ -59,8 +59,10 @@ renderer does.
 The opt-in `PULP_ENABLE_RMLUI_ADAPTER` package adds
 `pulp::rmlui-native-metal` when the Vellum main SDK and the optional
 `vellum-rmlui-sdk-<version>-darwin-arm64` prefix export
-`VellumRmlUiNative::Native` and `VellumRmlUiNative::Metal`. Put both prefixes in
-`CMAKE_PREFIX_PATH` (the RmlUi prefix alongside the main Vellum prefix).
+`VellumRmlUi::Native` and `VellumRmlUi::Metal`. The package is found as
+`VellumRmlUiNative`, but its targets keep the `VellumRmlUi::` namespace. Put
+both prefixes in `CMAKE_PREFIX_PATH` (the RmlUi prefix alongside the main
+Vellum prefix).
 Construct
 `vellum::rmlui::MetalRenderInterface` with the device returned by the surface,
 then pass `metal_renderer_hooks(renderer)` to `RmlUiSurface`. The hooks give
@@ -70,18 +72,110 @@ renderer's device. The `rmlui-metal-demo` example is a small plug-in using this
 path; it remains unavailable when the adapter option or the Vellum Metal
 component is off.
 
+When the Vellum RmlUi SDK provides `NativeContext::warm()`, `RmlUiSurface::attach()`
+calls it after the document loads, so textures, geometry and glyphs are ready
+before the first frame is requested. Older SDKs draw the first frame cold.
+`warm()` also renders once outside a frame, which is safe for Vellum's Metal and
+CPU renderers but not for a renderer that draws on every call (RmlUi's GL3
+backend): a custom `Rml::RenderInterface` must draw nothing between frames, or
+the product must build against an SDK without `warm()`.
+
 The surface context is sized in drawable pixels, the Metal frame scale is 1,
-and the density ratio is the backing scale. Documents that need
-density-scaled text should use `font-size` in `dp` (the example does this)
-rather than `px`.
+and the density ratio is the backing scale. Every `px` length, not only text,
+is a device pixel: a `100px` box is 100 device pixels (50 points at 2x), while
+pointer positions arrive in points and are scaled to device pixels, so hit
+testing agrees with layout in either unit. A `dp` length is one point
+(`density_ratio()` device pixels). Size anything that must keep its physical
+size across displays in `dp` (the example does this).
+
+The density ratio needs a Vellum RmlUi SDK that exports
+`NativeContext::set_density_ratio`. Without it `density_ratio_supported()` is
+false, `dp` equals `px`, and a `dp` document renders at 1/scale of its intended
+size on a 2x display. Configure warns about it, and the first `attach()` reports it
+through the diagnostic sink, once per process (standard error by default; `set_diagnostic_sink`
+redirects it).
+
+### Hiding the editor
+
+A host that hides an editor without detaching it (CLAP `gui_hide`, an AU view
+leaving its window) reaches the editor as `visibility_changed(false)`. The
+contract session then stops calling the editor's `idle()` until the editor is
+shown again. It keeps draining the parameter change queue, because the audio
+thread keeps writing and the queue is bounded, and showing ticks once at once.
+An RmlUi editor forwards the call to `RmlUiSurface::visibility_changed()`:
+frames stop at once, including one already waiting for the frame lock, RmlUi
+releases its compiled geometry and textures through the renderer, and
+`RendererHooks::trim` is called so the renderer can free the layer, filter and
+atlas textures it caches. The trim waits until no frame of the surface is
+being encoded or submitted and its last committed command buffer has completed
+on the GPU (about a frame at most), so nothing released is still in use.
+Showing resumes frames and draws one, which recompiles everything that was
+released, so the first visible frame is complete. The release calls are
+renderer-wide, so a renderer serves one attached surface at a time:
+`attach()` fails while another attached surface uses it.
+
+### Keys and window focus
+
+An RmlUi editor does not decide for itself whether a text field wants a key a
+host offers before its own accelerators. `pulp/rmlui_native/editor_keys.hpp`
+(with `pulp::format-core`) gives the two contract members as one call each:
+
+```cpp
+KeyDisposition offer_key(const EditorKeyEvent& e) override {
+    return pulp::rmlui_native::offer_editor_key(*ui_, e);
+}
+void focus_changed(bool focused) override {
+    pulp::rmlui_native::forward_editor_focus(*ui_, focused);
+}
+```
+
+`offer_key` returns `consumed` only while a text field has focus and takes the
+key: RmlUi consumed it, or it produced text, which is typed into the field. A
+command or control shortcut and any key with no field focused go
+back to the host, so Space still reaches the transport. Repeats and releases
+keep the initial press disposition, even when focus moves while the key is
+held. `focus_changed(false)` blurs a focused text field and hands the
+host's keyboard back; `focus_changed(true)` focuses it again, found by its
+`id` (a field without one is blurred but not restored). Pointer input queued behind a frame is applied before the
+decision, so a click on a field followed at once by Space types the space.
+
+### Threading
+
+A frame holds one process-wide lock, `rmlui_mutex()`, for RmlUi's update and
+render, because RmlUi's state is shared and not thread-safe. The main thread
+does not wait for it to deliver pointer or wheel input or to run `idle()`:
+when a frame is in flight, pointer and wheel events are queued (consecutive
+moves, and wheel deltas with the same modifiers, merge) and applied in order on
+the main thread after the frame ends. If another editor holds the shared lock
+when delivery runs, one coalesced delayed retry remains until the input is
+applied; it needs no further frame or host idle tick. Element
+listeners therefore still run on the main thread, a moment after the event.
+`with_context()`, key and text input apply the queue first and wait for a
+frame; call `flush_input()` where a caller needs earlier events applied now,
+as a test does after a click. `offer_key()` applies the queue only when input
+is queued, so with nothing pending a key offered with no field focused still
+returns at once without touching RmlUi.
 
 ## Proof
 
 - `pulp-test-native-metal-surface`, `-frame-pump`, `-input` and
   `-surface-input` cover the package on the real Metal device in offscreen
   windows. They skip, saying so, without one.
+- `pulp-test-rmlui-native-surface` and `pulp-test-rmlui-native-metal` cover the
+  RmlUi adapter, including the first-frame preparation. They need an installed
+  Vellum RmlUi SDK. The advisory `rmlui-native` lane builds that SDK from
+  Vellum's `rmlui/` project at a pinned commit (Vellum publishes no release
+  artifact for it yet) and runs the surface suite
+  (`tools/ci/rmlui_native_lane.sh`); the Metal suite is run locally.
 - `pulp-test-native-metal-probe` drives the example through the editor-host
   contract, the path every format adapter takes.
+- `pulp-test-native-surface-clap`, `-vst3`, `-au-v2` and `-au-v3` open the
+  probe through each format's own adapter (the CLAP contract GUI, the VST3
+  contract view, the AU v2 contract view and the macOS AU v3 view controller)
+  in an offscreen window. Each asserts the same lifecycle through
+  `support/native_surface_format_checks.hpp`: the editor attaches at its size,
+  the first frame carries the gain colour at the drawable's size, a host resize
+  moves the drawable and back, and a close then reopen starts clean.
 - `native-metal-probe-clap-host` and `native-metal-probe-au-host` load the
   built plug-in in-process as CLAP and AU hosts do. They install nothing, so
   they run headless.

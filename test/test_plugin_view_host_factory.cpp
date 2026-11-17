@@ -21,9 +21,11 @@
 #if defined(PULP_TEST_HAS_X11)
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
+#include <X11/keysym.h>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <pulp/view/ui_components.hpp>
 #include <string>
 #include <thread>
 #include <utility>
@@ -188,8 +190,12 @@ TEST_CASE("X11 plugin host routes pointer input through nested editor windows",
     send_button(ButtonPress, 30, 40, ShiftMask);
     pump_until(1);
     CHECK(probe->events.front().phase == MousePhase::press);
-    CHECK(probe->events.front().position.x == 30);
-    CHECK(probe->events.front().position.y == 40);
+    // X events use physical pixels; the editor receives logical coordinates.
+    // Xvfb's reported DPI need not be exactly 96 even with -dpi 96.
+    const float input_scale = host->scale_factor();
+    REQUIRE(input_scale > 0.0f);
+    CHECK(probe->events.front().position.x == 30.0f / input_scale);
+    CHECK(probe->events.front().position.y == 40.0f / input_scale);
     CHECK(probe->events.front().modifiers == kModShift);
 
     // The motion is outside the child; XGrabPointer must keep it routed to the
@@ -197,8 +203,8 @@ TEST_CASE("X11 plugin host routes pointer input through nested editor windows",
     send_motion(-20, 60, Button1Mask | ControlMask);
     pump_until(2);
     CHECK(probe->events.back().phase == MousePhase::drag);
-    CHECK(probe->events.back().position.x == -20);
-    CHECK(probe->events.back().position.y == 60);
+    CHECK(probe->events.back().position.x == -20.0f / input_scale);
+    CHECK(probe->events.back().position.y == 60.0f / input_scale);
     CHECK(probe->events.back().modifiers == kModCtrl);
 
     send_button(ButtonRelease, -20, 60, Button1Mask);
@@ -292,7 +298,7 @@ void send_pointer_event(Display* dpy, Window target, int type, int x, int y,
                           ? PointerMotionMask
                           : (type == ButtonPress ? ButtonPressMask : ButtonReleaseMask);
     XSendEvent(dpy, target, False, mask, &ev);
-    XFlush(dpy);
+    XSync(dpy, False);
 }
 
 } // namespace
@@ -331,20 +337,30 @@ TEST_CASE("X11 plugin host runs the XDND target handshake into dispatch_drop",
     Window inner = XCreateSimpleWindow(src, outer, 11, 13, 240, 190, 0, 0, 0);
     XMapWindow(src, outer);
     XMapWindow(src, inner);
-    XFlush(src);
+    // The host reparents from another connection; flushing does not establish
+    // that the server has created these parent windows yet.
+    XSync(src, False);
     host->attach_to_parent(reinterpret_cast<void*>(static_cast<uintptr_t>(inner)));
     Window child = static_cast<Window>(reinterpret_cast<uintptr_t>(host->native_handle()));
     REQUIRE(child != 0);
 
     host->set_scale_factor(1.0f);
+    auto pump_until = [&](int expected, const int& observed) {
+        for (int i = 0; i < 100 && observed < expected; ++i) {
+            host->pump_x_events();
+            if (observed < expected)
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        REQUIRE(observed == expected);
+    };
     constexpr int child_local_x = 40;
     constexpr int child_local_y = 30;
     send_pointer_event(src, child, ButtonPress, child_local_x, child_local_y);
-    host->pump_x_events();
+    pump_until(1, zone->pointer_downs);
     send_pointer_event(src, child, MotionNotify, child_local_x + 15, child_local_y + 5);
-    host->pump_x_events();
+    pump_until(1, zone->pointer_drags);
     send_pointer_event(src, child, ButtonRelease, child_local_x + 15, child_local_y + 5);
-    host->pump_x_events();
+    pump_until(1, zone->pointer_ups);
     CHECK(zone->pointer_downs == 1);
     CHECK(zone->pointer_drags == 1);
     CHECK(zone->pointer_ups == 1);
@@ -652,6 +668,150 @@ TEST_CASE("X11 plugin host ignores a stale echo of an earlier resize",
     host.reset();
     unsetenv("PULP_TEST_X11_HOST_CPU_ONLY");
     XCloseDisplay(daw);
+}
+
+TEST_CASE("X11 popup keyboard navigation restores DAW focus and forwards transport",
+          "[view][plugin-view-host][input][keyboard][linux]") {
+    // This fixture proves X input/focus, including on Xvfb servers without
+    // Vulkan presentation. GPU rendering has separate host coverage.
+    struct CpuOnly {
+        std::string previous;
+        bool had_previous = false;
+        CpuOnly() {
+            if (const char* value = std::getenv("PULP_TEST_X11_HOST_CPU_ONLY")) {
+                had_previous = true;
+                previous = value;
+            }
+            setenv("PULP_TEST_X11_HOST_CPU_ONLY", "1", 1);
+        }
+        ~CpuOnly() {
+            if (had_previous)
+                setenv("PULP_TEST_X11_HOST_CPU_ONLY", previous.c_str(), 1);
+            else
+                unsetenv("PULP_TEST_X11_HOST_CPU_ONLY");
+        }
+    } cpu_only;
+    for (const float scale : {1.0f, 2.0f}) {
+        CAPTURE(scale);
+        Display* daw = open_test_display("popup keyboard routing");
+        class FixedRoot : public View {
+            void layout_children() override {}
+        } root;
+        root.set_bounds({0, 0, 400, 300});
+        auto owned = std::make_unique<ComboBox>();
+        auto* combo = owned.get();
+        combo->set_bounds({20, 20, 120, 30});
+        combo->set_items({"One", "Two", "Three"});
+        root.add_child(std::move(owned));
+        register_platform_plugin_view_host();
+        PluginViewHost::Options options;
+        options.size = {400, 300};
+        options.use_gpu = false;
+        auto host = PluginViewHost::create(root, options);
+        REQUIRE(host);
+        host->set_scale_factor(scale); // deliberate scale; pointer coords are physical
+        const Window outer =
+            XCreateSimpleWindow(daw, DefaultRootWindow(daw), 0, 0, 400, 300, 0, 0, 0);
+        XSelectInput(daw, outer, KeyPressMask | KeyReleaseMask);
+        XMapWindow(daw, outer);
+        XSync(daw, False);
+        host->attach_to_parent(reinterpret_cast<void*>(static_cast<uintptr_t>(outer)));
+        const Window child =
+            static_cast<Window>(reinterpret_cast<uintptr_t>(host->native_handle()));
+        XSync(daw, False);
+        XSetInputFocus(daw, outer, RevertToParent, CurrentTime);
+        XSync(daw, False);
+        auto pump_until = [&](auto predicate) {
+            for (int i = 0; i < 100 && !predicate(); ++i) {
+                host->pump_x_events();
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            }
+            REQUIRE(predicate());
+        };
+        auto click = [&] {
+            for (int type : {ButtonPress, ButtonRelease}) {
+                XEvent event{};
+                event.xbutton.type = type;
+                event.xbutton.display = daw;
+                event.xbutton.window = child;
+                event.xbutton.root = DefaultRootWindow(daw);
+                event.xbutton.button = Button1;
+                event.xbutton.x = static_cast<int>(40 * scale);
+                event.xbutton.y = static_cast<int>(35 * scale);
+                event.xbutton.same_screen = True;
+                REQUIRE(XSendEvent(daw, child, False,
+                                   type == ButtonPress ? ButtonPressMask : ButtonReleaseMask,
+                                   &event));
+            }
+            XSync(daw, False);
+        };
+        auto key = [&](KeySym symbol) {
+            XEvent event{};
+            event.xkey.type = KeyPress;
+            event.xkey.display = daw;
+            event.xkey.window = child;
+            event.xkey.root = DefaultRootWindow(daw);
+            event.xkey.keycode = XKeysymToKeycode(daw, symbol);
+            event.xkey.same_screen = True;
+            REQUIRE(XSendEvent(daw, child, False, KeyPressMask, &event));
+            XSync(daw, False);
+        };
+        INFO("combo bounds " << combo->bounds().x << "," << combo->bounds().y << ","
+                             << combo->bounds().width << "," << combo->bounds().height);
+        INFO("root hit " << (root.hit_test({40, 35}) == combo));
+        click();
+        pump_until([&] { return combo->is_open(); });
+        Window focus = None;
+        int revert = 0;
+        XGetInputFocus(daw, &focus, &revert);
+        REQUIRE(focus == child);
+        key(XK_Down);
+        pump_until([&] { return combo->hovered_index() == 1; });
+        key(XK_Return);
+        pump_until([&] { return !combo->is_open(); });
+        CHECK(combo->selected() == 1);
+        XGetInputFocus(daw, &focus, &revert);
+        CHECK(focus == outer);
+        click();
+        pump_until([&] { return combo->is_open(); });
+        key(XK_space);
+        pump_until([&] {
+            XSync(daw, False);
+            return XPending(daw) > 0;
+        });
+        XEvent forwarded{};
+        XNextEvent(daw, &forwarded);
+        CHECK(forwarded.type == KeyPress);
+        CHECK(forwarded.xkey.window == outer);
+        CHECK(XLookupKeysym(&forwarded.xkey, 0) == XK_space);
+        REQUIRE(combo->is_open());
+        key(XK_Escape);
+        pump_until([&] { return !combo->is_open(); });
+        CHECK(combo->selected() == 1);
+        XGetInputFocus(daw, &focus, &revert);
+        CHECK(focus == outer);
+        click();
+        pump_until([&] { return combo->is_open(); });
+        XSetInputFocus(daw, outer, RevertToParent, CurrentTime);
+        XSync(daw, False);
+        pump_until([&] { return !combo->is_open(); });
+        CHECK(combo->selected() == 1);
+        // DAW already focused the editor window: nothing to borrow or restore,
+        // but an open popup must still receive its navigation keys.
+        XSetInputFocus(daw, child, RevertToParent, CurrentTime);
+        XSync(daw, False);
+        click();
+        pump_until([&] { return combo->is_open(); });
+        key(XK_Down);
+        pump_until([&] { return combo->hovered_index() == 2; });
+        key(XK_Escape);
+        pump_until([&] { return !combo->is_open(); });
+        XGetInputFocus(daw, &focus, &revert);
+        CHECK(focus == child);
+        host.reset();
+        XDestroyWindow(daw, outer);
+        XCloseDisplay(daw);
+    }
 }
 
 #endif // PULP_TEST_HAS_X11

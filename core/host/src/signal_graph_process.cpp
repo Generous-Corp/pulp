@@ -13,11 +13,31 @@
 #include <pulp/runtime/log.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <limits>
 #include <span>
 
 namespace pulp::host {
+namespace {
+
+// Opens a new stream-history epoch after a transport seek. The compiled graph
+// and every serial and parallel Custom context carry the activation epoch, and
+// they always advance together; stateful Control nodes restart from their
+// configured initial state in the same step, whichever entry point saw the
+// seek. A template so it can take the private compiled-graph type by deduction.
+template <typename CompiledGraph>
+void begin_stream_history_epoch(CompiledGraph& graph, std::uint64_t epoch) noexcept {
+    graph.graph_event_epoch = epoch;
+    for (auto& context : graph.routed.serial.custom_ctx)
+        context.graph_event_epoch = epoch;
+    for (auto& context : graph.routed.parallel.custom_ctx)
+        context.graph_event_epoch = epoch;
+    for (const auto& reset_node : graph.control_stream_resets)
+        reset_node();
+}
+
+} // namespace
 
 ControlProcessResult SignalGraph::process_control_checked(
     audio::BufferView<float>& output, const audio::BufferView<const float>& input,
@@ -57,8 +77,10 @@ ControlProcessResult SignalGraph::process_control_checked(
     std::uint64_t expected_epoch = cg->graph_event_epoch;
     std::uint64_t expected_start = cg->graph_event_lane->counters().cursor;
     if (reset) {
-        if (expected_epoch == std::numeric_limits<std::uint64_t>::max() ||
-            transport->position_samples < 0)
+        // A negative (pre-roll) position has no place on the unsigned clock.
+        if (transport->position_samples < 0)
+            return refuse(ControlProcessResult::OutOfRange);
+        if (expected_epoch == std::numeric_limits<std::uint64_t>::max())
             return refuse(ControlProcessResult::ClockExhausted);
         ++expected_epoch;
         expected_start = static_cast<std::uint64_t>(transport->position_samples);
@@ -73,16 +95,15 @@ ControlProcessResult SignalGraph::process_control_checked(
         if (cg->graph_event_lane->reset(expected_epoch, expected_start) !=
             GraphEventResult::Accepted)
             return refuse(ControlProcessResult::StaleEpoch);
-        cg->graph_event_epoch = expected_epoch;
-        for (auto& context : cg->routed.serial.custom_ctx)
-            context.graph_event_epoch = expected_epoch;
-        for (auto& context : cg->routed.parallel.custom_ctx)
-            context.graph_event_epoch = expected_epoch;
+        begin_stream_history_epoch(*cg, expected_epoch);
     }
     // Publish the index block only once every admission check has passed, so
     // a refused call leaves the previously admitted block in place.
     auto& state = *cg->control_index_state;
-    std::copy(block.indices.begin(), block.indices.end(), state.indices.begin());
+    // The index output is a Control port that can drive a Processor parameter
+    // directly, so a non-finite index is published as 0, never forwarded.
+    std::transform(block.indices.begin(), block.indices.end(), state.indices.begin(),
+                   [](float index) { return std::isfinite(index) ? index : 0.0f; });
     state.frames = frames;
     bool rendered = false;
     process_snapshot_impl(output, input, static_cast<int>(frames), transport, cg, false, nullptr,
@@ -137,7 +158,17 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
             process_snapshot_impl(output, input, num_samples, transport, nullptr);
             return;
         }
-        (void)process_trigger_snapshot_(output, input, num_samples, transport, read_guard.get());
+        // The unchecked entry has no result to report a refusal through, so
+        // any refused block is silenced rather than left holding stale audio.
+        // process_checked() keeps its untouched-output refusal contract.
+        if (process_trigger_snapshot_(output, input, num_samples, transport, read_guard.get()) !=
+                TriggerGraphResult::Accepted &&
+            num_samples > 0 && output.has_valid_channels()) {
+            const auto frames =
+                std::min(output.num_samples(), static_cast<std::size_t>(num_samples));
+            for (std::size_t c = 0; c < output.num_channels(); ++c)
+                std::fill_n(output.channel_ptr(c), frames, 0.0f);
+        }
         return;
     }
     process_snapshot_impl(output, input, num_samples, transport, read_guard.get());
@@ -223,11 +254,7 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                                 sizeof(float) * static_cast<std::size_t>(num_samples));
                 return;
             }
-            cg->graph_event_epoch = next_epoch;
-            for (auto& context : cg->routed.serial.custom_ctx)
-                context.graph_event_epoch = next_epoch;
-            for (auto& context : cg->routed.parallel.custom_ctx)
-                context.graph_event_epoch = next_epoch;
+            begin_stream_history_epoch(*cg, next_epoch);
         }
         const auto result = cg->graph_event_lane->begin_block(
             cg->graph_event_epoch, cg->graph_event_lane->counters().cursor,
@@ -235,6 +262,20 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
         if (result != GraphEventResult::Accepted)
             return;
         graph_event_guard.active = true;
+    } else if (transport && transport->should_reset_stream_history()) {
+        // A graph with no event lane has no event clock or epoch to advance,
+        // but its stateful Control nodes still restart on a seek, so it
+        // renders like a fresh graph exactly as a graph with a lane does.
+        // A negative reset position is out of range on both paths: the block
+        // fails closed as silence and no node is reset.
+        if (transport->position_samples < 0) {
+            for (std::size_t c = 0; c < output.num_channels(); ++c)
+                std::memset(output.channel_ptr(c), 0,
+                            sizeof(float) * static_cast<std::size_t>(num_samples));
+            return;
+        }
+        for (const auto& reset_node : cg->control_stream_resets)
+            reset_node();
     }
     if (cg->spectral)
         cg->spectral->begin_block();
@@ -247,16 +288,21 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
     auto* const control_edge_probe = cg->control_edge_probe.load();
     auto* const event_edge_probe = cg->event_edge_probe.load();
     // Snapshot-owned instrumentation never survives a transport discontinuity
-    // or a switch to a backend this source-side serial tap does not observe.
+    // or a switch to a backend that does not observe. The routed serial walk
+    // and the levelized parallel walk share one observation and publication
+    // point, so switching between them keeps the probe and its clock.
     const bool probe_epoch_broken = (transport && transport->reset_requested) ||
-                                    !canonical_executor_routing_enabled() ||
-                                    parallel_routing_enabled() || anticipation_enabled();
-    if (audio_edge_probe && probe_epoch_broken)
-        audio_edge_probe->samples.detach();
-    if (control_edge_probe && probe_epoch_broken)
-        control_edge_probe->samples.detach();
-    if (event_edge_probe && probe_epoch_broken)
-        event_edge_probe->samples.detach();
+                                    !canonical_executor_routing_enabled() || anticipation_enabled();
+    const auto stop_edge_probes = [&]() noexcept {
+        if (audio_edge_probe)
+            audio_edge_probe->samples.detach();
+        if (control_edge_probe)
+            control_edge_probe->samples.detach();
+        if (event_edge_probe)
+            event_edge_probe->samples.detach();
+    };
+    if (probe_epoch_broken)
+        stop_edge_probes();
     if (cg->sample_region_bank) {
         sample_region_admission = cg->sample_region_bank->domain().try_admit(
             cg->sample_region_bank->binding_generation());
@@ -594,12 +640,20 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
 
             if (use_parallel && cg->routed.parallel.valid && worker_pool_.running() &&
                 cg->routed.parallel.pool.fits(cg->routed.parallel.snapshot, frames32)) {
+                // Probe indices resolve on the serial plan; attach refuses a
+                // parallel plan that names the edge differently.
+                format::GraphRuntimeEdgeProbeSet parallel_edge_probes{
+                    audio_edge_probe,
+                    control_edge_probe,
+                    event_edge_probe,
+                };
                 const auto dispatch = dispatch_routed([&] {
                     return executor_.process_parallel(
                         block, cg->routed.parallel.snapshot, cg->routed.parallel.levelization,
                         cg->routed.parallel.pool, worker_pool_,
                         has_midi ? &cg->routed.midi : nullptr,
-                        has_automation ? &cg->routed.automation : nullptr);
+                        has_automation ? &cg->routed.automation : nullptr, {}, {}, {}, {},
+                        &parallel_edge_probes);
                 });
                 if (dispatch == RoutedDispatchResult::success) {
                     if (control_rendered != nullptr)
@@ -612,6 +666,9 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                     return;
                 }
                 routed_eligible_dispatch_failed = true; // setup failed; safe to retry
+                // A retry on another backend would observe and clock this block
+                // a second time, so the probes stop instead.
+                stop_edge_probes();
             }
 
             if (use_serial && cg->routed.serial.valid &&

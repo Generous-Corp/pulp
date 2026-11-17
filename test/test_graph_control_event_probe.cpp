@@ -176,11 +176,11 @@ TEST_CASE("G7 control probes cover lifecycle refusals, dense attachment, and res
     REQUIRE(unprepared.graph.attach_control_edge_probe(wrong_kind, unprepared.plugin,
                                                        ProbeSlot::kParam) ==
             pulp::host::SignalGraph::EdgeProbeStatus::UnsupportedKind);
-    unprepared.graph.set_parallel_routing_enabled(true);
+    unprepared.graph.set_anticipation_enabled(true);
     REQUIRE(
         unprepared.graph.attach_control_edge_probe(source, unprepared.plugin, ProbeSlot::kParam) ==
         pulp::host::SignalGraph::EdgeProbeStatus::UnsupportedExecution);
-    unprepared.graph.set_parallel_routing_enabled(false);
+    unprepared.graph.set_anticipation_enabled(false);
     REQUIRE(
         unprepared.graph.attach_control_edge_probe(source, unprepared.plugin, ProbeSlot::kParam) ==
         pulp::host::SignalGraph::EdgeProbeStatus::Attached);
@@ -248,10 +248,10 @@ TEST_CASE("G7 event probes cover lifecycle, identity, reset detach, and publicat
             pulp::host::SignalGraph::EdgeProbeStatus::UnsupportedKind);
     REQUIRE(graph.attach_event_edge_probe(source, graph.node(other)->in("audio")) ==
             pulp::host::SignalGraph::EdgeProbeStatus::MissingEdge);
-    graph.set_parallel_routing_enabled(true);
+    graph.set_anticipation_enabled(true);
     REQUIRE(graph.attach_event_edge_probe(source, destination) ==
             pulp::host::SignalGraph::EdgeProbeStatus::UnsupportedExecution);
-    graph.set_parallel_routing_enabled(false);
+    graph.set_anticipation_enabled(false);
     REQUIRE(graph.attach_event_edge_probe(source, destination) ==
             pulp::host::SignalGraph::EdgeProbeStatus::Attached);
     const auto identity = graph.event_edge_probe_identity();
@@ -435,6 +435,36 @@ TEST_CASE("G7 dense control probe observes PDC history rather than current sourc
     }
 }
 
+TEST_CASE("Audio edge probe selects the audio edge beside an automation edge on the same ports",
+          "[host][graph][probe]") {
+    using Status = pulp::host::SignalGraph::EdgeProbeStatus;
+    pulp::host::SignalGraph graph;
+    const auto input = graph.add_input_node(1, "source");
+    const auto plugin = graph.add_plugin_node(
+        std::make_unique<ProbeSlot>(pulp::host::ParamRate::ControlRate), 1, 1, "destination");
+    const auto output = graph.add_output_node(1, "output");
+    // The automation edge is connected first, so it precedes the audio edge
+    // with the same source port and destination port index 0.
+    REQUIRE(graph.connect_automation(input, 0, plugin, ProbeSlot::kParam, 0.0f, 1.0f));
+    REQUIRE(graph.connect(input, 0, plugin, 0));
+    REQUIRE(graph.connect(plugin, 0, output, 0));
+    graph.set_canonical_executor_routing_enabled(true);
+    REQUIRE(graph.prepare(48000.0, 8));
+    REQUIRE(graph.attach_audio_edge_probe(graph.node(input)->out("audio"),
+                                          graph.node(plugin)->in("audio")) == Status::Attached);
+    process_audio(graph);
+    pulp::graph::GraphRuntimeProbeSample sample;
+    REQUIRE(graph.read_audio_edge_probe(sample));
+    REQUIRE(sample.kind == pulp::graph::GraphRuntimeProbeKind::Audio);
+    REQUIRE(sample.peak == 0.5f);
+    // The runtime plan keeps authored connection order: index 0 is the
+    // automation edge and index 1 the audio edge the probe must report.
+    REQUIRE(sample.edge_index == 1);
+    // The control probe on the same ports still selects the automation edge.
+    REQUIRE(graph.attach_control_edge_probe(graph.node(input)->out("audio"), plugin,
+                                            ProbeSlot::kParam) == Status::Attached);
+}
+
 TEST_CASE("Edge probe detach while process() is pinned parks the probe until the reader leaves",
           "[host][graph][g7][probe][rt-safety]") {
     using Status = pulp::host::SignalGraph::EdgeProbeStatus;
@@ -504,6 +534,19 @@ TEST_CASE("Edge probe attach/detach hammered against a running process() stays c
             blocks.fetch_add(1, std::memory_order_relaxed);
         }
     });
+
+    // Start hammering only once process() is running, so the cycles overlap
+    // it even on a loaded host that schedules the audio thread late.
+    for (int spins = 0; spins < 5'000'000 && blocks.load(std::memory_order_relaxed) == 0; ++spins)
+        std::this_thread::yield();
+    const bool audio_started = blocks.load(std::memory_order_relaxed) > 0;
+    if (!audio_started) {
+        // Never let a fatal assertion unwind past a joinable thread (that would
+        // std::terminate instead of reporting a failure): stop and join first.
+        stop.store(true, std::memory_order_release);
+        audio.join();
+    }
+    REQUIRE(audio_started);
 
     constexpr int kCycles = 2000;
     int attached = 0;

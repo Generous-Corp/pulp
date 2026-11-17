@@ -5,12 +5,39 @@
 #include <pulp/host/spectral_graph.hpp>
 #include <pulp/signal/spectral_frame_engine.hpp>
 #include "spectral_asset_morph_internal.hpp"
+#include "spectral_asset_source_internal.hpp"
 
 #include <array>
 #include <limits>
 #include <memory>
 
 namespace pulp::host {
+
+// The graph error an engine's guarded split result latches on a node. Each
+// engine cause keeps a distinct graph code where one exists; a block the
+// engine refuses as larger than it was prepared for is a capacity failure.
+constexpr SpectralError to_spectral_error(signal::SpectralSplitResult result) noexcept {
+    using R = signal::SpectralSplitResult;
+    switch (result) {
+    case R::Ok:
+        return SpectralError::None;
+    case R::NotPrepared:
+        return SpectralError::UnsupportedOperation;
+    case R::InvalidBlock:
+    case R::CapacityExceeded:
+        return SpectralError::CapacityExceeded;
+    case R::InvalidFrame:
+        return SpectralError::InvalidFrame;
+    case R::ChronologyExhausted:
+        return SpectralError::ChronologyExhausted;
+    case R::NonfiniteSynthesis:
+    case R::StreamStopped:
+        return SpectralError::SynthesisOverflow;
+    case R::OutputUnderrun:
+        return SpectralError::OutputUnderrun;
+    }
+    return SpectralError::UnsupportedOperation;
+}
 
 class SpectralRuntimeBank {
   public:
@@ -29,6 +56,7 @@ class SpectralRuntimeBank {
         std::optional<QualifiedSpectralStage> stage;
         std::shared_ptr<const SpectralAssetMorphConfig> retained_assets;
         SpectralAssetMorphState asset_morph;
+        std::shared_ptr<const SpectralAssetSourceConfig> retained_source;
         std::uint64_t finite_frames = std::numeric_limits<std::uint64_t>::max();
         std::int64_t finite_cutoff = std::numeric_limits<std::int64_t>::max();
         std::unique_ptr<signal::SpectralFrameEngine> engine;
@@ -46,7 +74,7 @@ class SpectralRuntimeBank {
         Node(const GraphNode& n)
             : id(n.id), type(n.type), identity(*n.spectral_identity),
               contract(identity.frame_contract()), stage(n.spectral_stage),
-              retained_assets(n.spectral_asset_morph) {
+              retained_assets(n.spectral_asset_morph), retained_source(n.spectral_asset_source) {
             asset_morph.assets = retained_assets.get();
         }
         void error(SpectralError e) noexcept {
@@ -139,6 +167,21 @@ class SpectralRuntimeBank {
                             break;
                     }
                 }
+            } else if (n.type == NodeType::SpectralAssetSource && n.fatal_origin == limit) {
+                // Publish each frame in the block that reaches its window end,
+                // the block in which analysis would publish it and synthesis
+                // first consumes it.
+                while (n.sequence < n.finite_frames &&
+                       n.origin + n.identity.fft_size() <= n.output_clock + count) {
+                    if (!n.retained_source->frame(n.sequence, n.origin, n.working) ||
+                        !n.valid_bins(n.working)) {
+                        n.fatal(n.origin, SpectralError::InvalidFrame);
+                        break;
+                    }
+                    n.publish();
+                    if (n.fatal_origin != limit || !n.advance())
+                        break;
+                }
             } else if (n.type == NodeType::SpectralAnalysis && n.fatal_origin == limit) {
                 std::array<const float*, 16> inputs{};
                 for (int c = 0; c < channels; ++c)
@@ -157,7 +200,7 @@ class SpectralRuntimeBank {
                         n.advance();
                     });
                 if (result != signal::SpectralSplitResult::Ok)
-                    n.fatal(n.origin, SpectralError::ChronologyExhausted);
+                    n.fatal(n.origin, to_spectral_error(result));
             } else if (n.type != NodeType::SpectralAnalysis && n.fatal_origin == limit) {
                 const auto* batch = ctx.spectral_input;
                 const auto decoded_contract =
@@ -174,7 +217,7 @@ class SpectralRuntimeBank {
                     if (batch->fatal && n.origin >= batch->fatal_origin) {
                         if (n.type == NodeType::SpectralSynthesis)
                             n.engine->stop_synthesis_guarded();
-                        n.fatal(batch->fatal_origin, SpectralError::CapacityExceeded);
+                        n.fatal(batch->fatal_origin, SpectralError::UpstreamFatal);
                         break;
                     }
                     while (cursor < batch->count && batch->stamps[cursor].sequence < n.sequence) {
@@ -222,10 +265,10 @@ class SpectralRuntimeBank {
                         std::array<const std::complex<float>*, 16> frames{};
                         for (int c = 0; c < channels; ++c)
                             frames[c] = n.working.data() + c * bins;
-                        if (n.engine->synthesize_frame_guarded(frames.data()) !=
-                            signal::SpectralSplitResult::Ok) {
+                        if (const auto result = n.engine->synthesize_frame_guarded(frames.data());
+                            result != signal::SpectralSplitResult::Ok) {
                             n.engine->stop_synthesis_guarded();
-                            n.fatal(n.origin, SpectralError::SynthesisOverflow);
+                            n.fatal(n.origin, to_spectral_error(result));
                             break;
                         }
                     }
