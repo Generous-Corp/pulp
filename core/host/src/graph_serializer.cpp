@@ -12,6 +12,7 @@
 #include "graph_load_refusal.hpp"
 #include "graph_serializer_test_access.hpp"
 #include "spectral_graph_persistence.hpp"
+#include "subgraph_voice_records.hpp"
 
 // The web DSP builds (Emscripten for WAM, plain clang targeting wasm32 for
 // WebCLAP) compile this serializer without the plugin scanner and have no
@@ -1875,6 +1876,16 @@ GraphDocumentInspection GraphSerializer::inspect_document(std::string_view json)
                 if (result.refusal != GraphDocumentRefusal::None)
                     return result;
             }
+            if (root.hasObjectMember("voice_declarations")) {
+                result.refusal =
+                    detail::validate_voice_declarations(root.getView(), saved_v7, result.detail);
+                if (result.refusal != GraphDocumentRefusal::None)
+                    return result;
+            }
+        } else if (root.hasObjectMember("voice_declarations")) {
+            result.refusal = GraphDocumentRefusal::SubgraphRecordInvalid;
+            result.detail = "voice_declarations requires the saved-identity v7 envelope";
+            return result;
         } else if (root.hasObjectMember("subgraphs")) {
             result.refusal = GraphDocumentRefusal::SubgraphRecordInvalid;
             result.detail = "subgraph records require a saved-identity envelope";

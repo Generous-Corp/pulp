@@ -17,6 +17,7 @@ target_sources(pulp-host PRIVATE
     src/spectral_graph.cpp
     src/signal_graph_subgraph.cpp
     src/subgraph_persistence.cpp
+    src/subgraph_voices.cpp
     src/signal_graph_process.cpp
     src/signal_graph_diagnostics.cpp
     src/signal_graph_control.cpp
