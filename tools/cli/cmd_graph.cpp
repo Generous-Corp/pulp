@@ -97,8 +97,8 @@ std::pair<std::string, std::string> probe_refusal(pulp::host::SignalGraph::EdgeP
                     "connections and control for automation connections"};
     case Status::UnsupportedExecution:
         return {"UnsupportedExecution",
-                "edge probes attach only to the serial routed executor; disable parallel routing "
-                "and anticipation, then prepare the graph again"};
+                "edge probes attach only to the routed serial or parallel executor; enable "
+                "canonical routing, disable anticipation, then prepare the graph again"};
     case Status::Busy:
         return {"Busy", "a live swap edit is open, or eight displaced probes are still parked "
                         "because a snapshot holder or running process() pins them; commit or "
