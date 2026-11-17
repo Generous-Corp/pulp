@@ -65,6 +65,41 @@ the cursor:
   is re-mapped onto the new graph epoch at the next block and counted in
   `graph_remaps`; it does not reset the other families.
 
+### Failed and oversized graph blocks
+
+The graph refuses a host block in two different ways, and the binding treats
+each to match what the graph actually did:
+
+- **Refused before the graph touched the block** (for example `Busy` on the
+  diagnostic gate, or short buffers): the graph's ingress block is still open,
+  so the binding block stays open and `render()` can be retried.
+- **`ProcessingFailure`**: a refused projection seals the graph's ingress
+  block, restores the block's records and leaves the graph cursor in place.
+  The refusals behind it (MIDI or UMP capacity, the MPE fan-out preflight, the
+  mailbox copy) fail identically on a retry, so keeping the block open would
+  stall. The binding closes the block as a failed graph block: it clears the
+  graph ingress (the binding only ever stages graph records inside the
+  current block, so this drops exactly that block's records), zeroes the
+  graph output when the cursor did not move, still renders the voice bank, and
+  counts it in `graph_failed_blocks`. The next block maps onto the unmoved
+  graph cursor and carries only its own records at their own offsets, so they
+  are neither replayed a block late nor stacked onto the next block. If the
+  ingress cannot be cleared at that moment (gate contention), the next
+  `begin_block()` clears it first or refuses as a skipped block.
+- **Oversized block**: `SignalGraph::begin_host_event_block()` now refuses a
+  block longer than the live trigger generation's prepared frame limit with
+  `OutOfRange`. Before, it accepted the block, `process_checked()` then
+  refused it with `Frames` before projecting, and the ingress block (and the
+  binding block) stayed open forever. The binding consumes such a block as a
+  skipped block, like any other post-transaction refusal.
+
+The MPE fan-out preflight in `project_host_events_()` reserves
+`count * (kMaxNotes + 2)` = 130 sidecar slots per projected record against a
+1024-slot sidecar, so any graph block with 8 or more MIDI records (an 8-note
+chord) is refused with `ProcessingFailure`. The binding now handles that
+coherently, but the records of such a block are dropped; the preflight bound
+itself is unchanged (see "Remaining work").
+
 ### Realtime fix found on the way
 
 `derive_mpe()` rebinds the caller's MPE tracker on every block on the audio
@@ -72,6 +107,8 @@ thread. Through `bind_tracker_to_buffer()` (whose captures do not fit
 `std::function`'s inline storage) every trigger-graph host-event block that
 carried MIDI allocated four times. `midi::bind_tracker_to_sink()` forwards
 identically through a one-pointer capture, and `derive_mpe()` now uses it.
+`derive_mpe()` binds those callbacks to a sink on its own stack, so it now
+unbinds them on every return path; a later tracker call reaches no sink.
 
 ## Evidence
 
@@ -102,6 +139,19 @@ identically through a one-pointer capture, and `derive_mpe()` now uses it.
   free with a positive control that the probe sees an oversized
   `std::function` capture.
 - A payload/sequence mutation changes only the graph MIDI trace.
+- A block of 8 projected MIDI records fails in the graph; the binding closes
+  it with silent graph output, the graph cursor unmoved, and the next block
+  delivering only its own record at its own offset, with the graph clock and
+  the mapping advancing together afterwards. Negative control: 7 records are
+  accepted and delivered. Before the fix the next block failed too (the 8
+  restored records plus the new one) and nothing was delivered.
+- A 64-frame block on a graph prepared for 32 is refused at open as a skipped
+  block; the following 32-frame block opens and delivers its record. Before
+  the fix the binding stayed open and every later block was refused `Busy`.
+  The graph refuses `kGraphMaxFrames + 1` at `begin_host_event_block()` and
+  accepts `kGraphMaxFrames`.
+- `derive_mpe()` leaves no tracker callback bound after success and after a
+  refusal, and a later tracker call does not reach the sidecar.
 
 `tools/scripts/confirm_failure.sh` on the committed tree: CONFIRMED for six
 planted breaks (graph refusal ignored in the transaction, graph cursor mapping
@@ -152,3 +202,13 @@ trigger in-tree consumers.
    rule that the two execution modes never share a binding.
 4. **Lock/free probes and an installed-prefix consumer** for the rows under
    "Not checked".
+5. **Tighten the MPE fan-out preflight.** `count * (kMaxNotes + 2)` refuses
+   any graph block with 8 or more MIDI records. A bound in terms of the
+   tracker's active notes (each record adds at most one) would admit ordinary
+   chords, but it must be proven against every `MpeVoiceTracker` emission
+   path before it replaces the conservative bound.
+6. **An abort path for persistent pre-projection refusals.** `Mode` (for
+   example anticipation or parallel routing enabled) and `ClockExhausted`
+   leave the graph ingress block open, and the binding has no way to seal it
+   without a graph-side abort; such a binding stays `Busy` until the mode is
+   cleared.

@@ -38,7 +38,8 @@
 /// were, so the same block can be retried.
 ///
 /// Opening the block after the transaction can still be refused (for example
-/// when another thread holds the graph's diagnostic gate). Such a block is
+/// when another thread holds the graph's diagnostic gate, or when the block is
+/// longer than the frame limit a bound family was prepared for). Such a block is
 /// consumed on the timeline as a skipped block: the caller renders silence
 /// and does not call `render()`. The next block re-maps the graph cursor, so
 /// the skip cannot misplace later records.
@@ -103,6 +104,9 @@ struct HostTimelineBindingCounters {
     std::uint64_t parameters_reset = 0;
     /// Staged parameter records a host gap skipped.
     std::uint64_t parameters_skipped = 0;
+    /// Blocks the graph failed with `ProcessingFailure`. Their graph records
+    /// are dropped rather than delivered late by the next block.
+    std::uint64_t graph_failed_blocks = 0;
 };
 
 struct HostTimelineRenderResult {
@@ -154,7 +158,17 @@ class HostTimelineBinding final {
 
     /// Render the open block: the graph through `process_checked()` and the
     /// voice bank into `voice_stereo`. Each pointer must be non-null exactly
-    /// when that family is bound. The block is closed whatever the result.
+    /// when that family is bound.
+    ///
+    /// A refused call leaves the block open so it can be retried: missing or
+    /// short buffers, and a graph refusal made before the graph touched the
+    /// block (for example `Busy` while another thread holds its diagnostic
+    /// gate). Any other result closes the block. A graph `ProcessingFailure`
+    /// closes it as a failed graph block: the graph rendered nothing it can
+    /// replay, so the binding drops the block's graph records (counted in
+    /// `graph_failed_blocks`), zeroes `graph_output` when the graph cursor did
+    /// not move, and still renders the voice bank. The next block maps onto
+    /// the unmoved graph cursor and carries only its own records.
     HostTimelineRenderResult render(audio::BufferView<float>* graph_output,
                                     const audio::BufferView<const float>* graph_input,
                                     audio::BufferView<float>* voice_stereo) noexcept;
@@ -181,6 +195,7 @@ class HostTimelineBinding final {
   private:
     HostEventResult check_window_(const HostEventRecord& record) const noexcept;
     void evict_parameters_before_(std::uint64_t sample) noexcept;
+    void drop_failed_graph_block_(audio::BufferView<float>& output) noexcept;
 
     SignalGraph* graph_ = nullptr;
     VoiceBankBinding* voices_ = nullptr;
@@ -194,6 +209,7 @@ class HostTimelineBinding final {
     bool has_block_ = false;
     bool open_ = false;
     bool reset_requested_ = false;
+    bool graph_discard_pending_ = false;
 };
 
 } // namespace pulp::host

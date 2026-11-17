@@ -2,6 +2,7 @@
 
 #include <pulp/host/signal_graph_runtime.hpp>
 
+#include <algorithm>
 #include <limits>
 
 namespace pulp::host {
@@ -120,6 +121,14 @@ HostEventResult HostTimelineBinding::begin_block(const HostBlockClock& clock,
         mapped_graph_epoch_ = graph_clock.epoch;
         block.graph_epoch = graph_clock.epoch;
         block.graph_sample_start = graph_clock.cursor;
+        // A failed block's records could not be dropped when it closed; drop
+        // them before this block opens so they are not delivered here.
+        if (graph_discard_pending_) {
+            const auto result = graph_->reset_host_event_ingress(graph_clock.epoch);
+            if (result == HostEventResult::Busy)
+                return refuse_block(result);
+            graph_discard_pending_ = false;
+        }
     }
     if (voices_ != nullptr) {
         if (const auto result = voices_->begin_block(window.sample_start, window.frames);
@@ -278,6 +287,8 @@ HostTimelineBinding::render(audio::BufferView<float>* graph_output,
             graph_->process_checked(*graph_output, *graph_input, static_cast<int>(frames));
         if (graph_refused_before_projection(result.graph))
             return result;
+        if (result.graph == TriggerGraphResult::ProcessingFailure)
+            drop_failed_graph_block_(*graph_output);
     }
     if (voices_ != nullptr) {
         result.voice = voices_->render(*voice_stereo, block_.timeline.sample_start, frames);
@@ -295,6 +306,26 @@ HostTimelineBinding::render(audio::BufferView<float>* graph_output,
     parameter_count_ = keep;
     open_ = false;
     return result;
+}
+
+void HostTimelineBinding::drop_failed_graph_block_(audio::BufferView<float>& output) noexcept {
+    ++counters_.graph_failed_blocks;
+    // A refused projection restores the block's records and leaves the graph
+    // cursor where it was, so a cursor that has not moved means the graph
+    // rendered nothing: hand the caller silence instead of a stale buffer.
+    TriggerCounters clock;
+    if (graph_->trigger_counters(clock) == TriggerGraphResult::Accepted &&
+        clock.epoch == block_.graph_epoch && clock.cursor == block_.graph_sample_start) {
+        for (std::size_t channel = 0; channel < output.num_channels(); ++channel)
+            std::fill_n(output.channel_ptr(channel), block_.timeline.frames, 0.0f);
+    }
+    // Retrying the restored records fails the same way, and the next block
+    // maps onto the same graph cursor, so keeping them would replay them a
+    // block late and stack them onto the next block's records. The binding
+    // only ever stages graph records inside the current block, so clearing
+    // the ingress drops exactly this block's records.
+    graph_discard_pending_ =
+        graph_->reset_host_event_ingress(block_.graph_epoch) == HostEventResult::Busy;
 }
 
 void HostTimelineBinding::evict_parameters_before_(std::uint64_t sample) noexcept {

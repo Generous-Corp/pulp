@@ -769,6 +769,14 @@ HostEventResult SignalGraph::begin_host_event_block(std::uint64_t epoch, std::ui
     // ahead of its checked serial cursor.
     if (sample_start > cursor)
         return HostEventResult::OutOfRange;
+    // process_checked() refuses a block longer than the prepared generation
+    // with Frames before it projects, which would leave this ingress block
+    // open with no way to seal it. Refuse it here, before anything opens.
+    if (frames > pin->trigger_state->max_frames ||
+        frames > static_cast<std::size_t>(std::max(pin->max_block_size, 0))) {
+        ++trigger_controller_->host_counters.refused;
+        return HostEventResult::OutOfRange;
+    }
     const auto result = trigger_controller_->host_ingress.begin_block(epoch, sample_start, frames);
     if (result == HostEventResult::Accepted) {
         trigger_controller_->host_counters.epoch = epoch;
