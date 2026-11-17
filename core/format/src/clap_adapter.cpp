@@ -10,6 +10,7 @@
 #include <pulp/format/editor_prewarm.hpp>
 #include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/max_block_contract.hpp>
+#include <pulp/format/process_timing.hpp>
 #include <pulp/format/mpe_expression.hpp>
 #include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/ara.hpp>
@@ -27,6 +28,7 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <optional>
 
 namespace pulp::format::clap_adapter {
 
@@ -172,9 +174,8 @@ boundary::HostTransport decode_clap_transport(const clap_event_transport_t* tr,
             static_cast<double>(tr->song_pos_beats) / CLAP_BEATTIME_FACTOR;
     }
     if (flags & CLAP_TRANSPORT_HAS_SECONDS_TIMELINE) {
-        const double seconds =
-            static_cast<double>(tr->song_pos_seconds) / CLAP_SECTIME_FACTOR;
-        if (const auto position = detail::host_sample_position(seconds * sample_rate)) {
+        static_assert(pulp::format::kClapSectimeFactor == CLAP_SECTIME_FACTOR);
+        if (const auto position = pulp::format::clap_sectime_to_samples(tr->song_pos_seconds, sample_rate)) {
             transport.validity.set(TransportField::SamplePosition);
             transport.position_samples = *position;
         }
@@ -575,6 +576,8 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     self->playhead_prev = {};
     self->reset_requested = false;
     self->sidecar_reconcile_requested = false;
+    self->timing_discontinuity_pending = true;
+    self->timing_block_skipped = false;
 
     // This activate IS the window the latency is allowed to move in, and the
     // only one `clap_host_latency->changed()` may be called from
@@ -627,6 +630,7 @@ void clap_reset(const clap_plugin_t* plugin) {
     self->playhead_prev = {};
     self->reset_requested = true;
     self->sidecar_reconcile_requested = false;
+    self->timing_discontinuity_pending = true;
 }
 
 bool clap_param_modulation_lane(const PulpClapPlugin& self,
@@ -1129,6 +1133,18 @@ static pulp::format::ProcessContext clap_phase_build_context(
     // Apply the neutral transport and diff against the previous block. Stateful;
     // updates `self->playhead_prev` in place.
     boundary::apply_host_transport(ctx, transport, self->playhead_prev);
+
+    // Neutral timing facts. The transport sample is the one decoded above from
+    // `song_pos_seconds`; the steady clock is `steady_time` as the host sent it
+    // (CLAP uses -1 for "none"). Pure: the pending flags are consumed only once
+    // the Processor has observed the block.
+    const bool has_steady = process->steady_time >= 0;
+    std::optional<std::int64_t> transport_sample;
+    if (transport.validity.has(pulp::format::TransportField::SamplePosition))
+        transport_sample = transport.position_samples;
+    ctx.timing = pulp::format::clap_process_timing(
+        process->steady_time, transport_sample, transport.is_playing,
+        self->timing_discontinuity_pending || (self->timing_block_skipped && !has_steady));
     return ctx;
 }
 
@@ -1753,6 +1769,8 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     // Reject a host block that differs from the topology selected during
     // activation before publishing any host storage to the Processor.
     if (!clap_phase_validate_layout(self, process, original_num_samples)) {
+        if (!self->warming_render_path)
+            self->timing_block_skipped = true;
         return CLAP_PROCESS_CONTINUE;
     }
 
@@ -2156,6 +2174,7 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     if (bypassed || !render_lock) {
         clap_phase_bypass_passthrough(self, process, in_channels, out_channels,
                                       main_output_f64, original_num_samples);
+        self->timing_block_skipped = true;
     } else {
         clap_phase_run_processor(self, process, process_buffers, process_buffers64,
                                  ctx, native_f64, out_channels, main_output_f64,
@@ -2165,6 +2184,8 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         // A bypassed or state-restore-contended block skips the processor and
         // must preserve the request for the next real render.
         self->reset_requested = false;
+        self->timing_discontinuity_pending = false;
+        self->timing_block_skipped = false;
     }
 
     clap_phase_clear_constant_mask(process);

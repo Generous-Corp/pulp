@@ -7,7 +7,7 @@ if(TARGET pulp-host AND TARGET clap)
         list(APPEND _process_timing_libs vst3-sdk)
     endif()
     pulp_add_test_suite(pulp-test-process-timing
-        SOURCES test_process_timing.cpp
+        SOURCES test_process_timing.cpp test_clap_process_timing.cpp
         LIBRARIES ${_process_timing_libs}
         COMPILE_DEFINITIONS PULP_CLAP_GUI=1)
 endif()
