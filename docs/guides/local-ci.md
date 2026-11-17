@@ -3890,6 +3890,19 @@ Two candidate signals were evaluated against live runs and are deliberately
   A same-configuration verdict on each base would make the rule checkable and
   would have cleared all four.
 
+### One flake re-enqueue when the same test ejected two pull requests
+
+`[auto_merge] flake_requeue = "apply"` (a bounded trial from 2026-11-17) lets
+the steward re-enqueue an approved, green head once, with no new push, when the
+test that ejected its merge group also ejected a different pull request's group
+within 24 hours. The guards are once per head; a breaker, so a re-admitted head
+ejected again on the same signature stops that signature; and a cap of 3
+re-enqueues per signature per window. The steward also files one root-cause
+issue per signature. The trial reverts to `"shadow"` if a re-admitted group
+fails again on the same signature, or after 2 such re-admissions in 7 days. In
+5 days of shadow it made one decision: #12448, with #12374, at 2026-11-17
+10:04Z, about 54 minutes before that head was actually re-enqueued.
+
 ### One same-head retry after a network ejection
 
 `.shipyard/config.toml` also opts Pulp into Shipyard's environment re-enqueue:
