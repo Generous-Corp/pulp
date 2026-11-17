@@ -288,16 +288,21 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
     auto* const control_edge_probe = cg->control_edge_probe.load();
     auto* const event_edge_probe = cg->event_edge_probe.load();
     // Snapshot-owned instrumentation never survives a transport discontinuity
-    // or a switch to a backend this source-side serial tap does not observe.
+    // or a switch to a backend that does not observe. The routed serial walk
+    // and the levelized parallel walk share one observation and publication
+    // point, so switching between them keeps the probe and its clock.
     const bool probe_epoch_broken = (transport && transport->reset_requested) ||
-                                    !canonical_executor_routing_enabled() ||
-                                    parallel_routing_enabled() || anticipation_enabled();
-    if (audio_edge_probe && probe_epoch_broken)
-        audio_edge_probe->samples.detach();
-    if (control_edge_probe && probe_epoch_broken)
-        control_edge_probe->samples.detach();
-    if (event_edge_probe && probe_epoch_broken)
-        event_edge_probe->samples.detach();
+                                    !canonical_executor_routing_enabled() || anticipation_enabled();
+    const auto stop_edge_probes = [&]() noexcept {
+        if (audio_edge_probe)
+            audio_edge_probe->samples.detach();
+        if (control_edge_probe)
+            control_edge_probe->samples.detach();
+        if (event_edge_probe)
+            event_edge_probe->samples.detach();
+    };
+    if (probe_epoch_broken)
+        stop_edge_probes();
     if (cg->sample_region_bank) {
         sample_region_admission = cg->sample_region_bank->domain().try_admit(
             cg->sample_region_bank->binding_generation());
@@ -635,12 +640,20 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
 
             if (use_parallel && cg->routed.parallel.valid && worker_pool_.running() &&
                 cg->routed.parallel.pool.fits(cg->routed.parallel.snapshot, frames32)) {
+                // Probe indices resolve on the serial plan; attach refuses a
+                // parallel plan that names the edge differently.
+                format::GraphRuntimeEdgeProbeSet parallel_edge_probes{
+                    audio_edge_probe,
+                    control_edge_probe,
+                    event_edge_probe,
+                };
                 const auto dispatch = dispatch_routed([&] {
                     return executor_.process_parallel(
                         block, cg->routed.parallel.snapshot, cg->routed.parallel.levelization,
                         cg->routed.parallel.pool, worker_pool_,
                         has_midi ? &cg->routed.midi : nullptr,
-                        has_automation ? &cg->routed.automation : nullptr);
+                        has_automation ? &cg->routed.automation : nullptr, {}, {}, {}, {},
+                        &parallel_edge_probes);
                 });
                 if (dispatch == RoutedDispatchResult::success) {
                     if (control_rendered != nullptr)
@@ -653,6 +666,9 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                     return;
                 }
                 routed_eligible_dispatch_failed = true; // setup failed; safe to retry
+                // A retry on another backend would observe and clock this block
+                // a second time, so the probes stop instead.
+                stop_edge_probes();
             }
 
             if (use_serial && cg->routed.serial.valid &&
