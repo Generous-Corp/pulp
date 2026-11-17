@@ -2412,7 +2412,7 @@ class WebSplitFixture:
         subprocess.run(["git", "-C", str(sdk), "-c", "user.name=t", "-c", "user.email=t@example.invalid",
                         "-c", "commit.gpgsign=false", "commit", "-q", "-m", "x"], check=True)
         self.sdk_commit = subprocess.run(["git", "-C", str(sdk), "rev-parse", "HEAD"], check=True,
-                                         capture_output=True, text=True).stdout.strip()
+                                         capture_output=True, text=True, encoding="utf-8").stdout.strip()
         (self.build / "CMakeCache.txt").write_text(
             "CMAKE_BUILD_TYPE:STRING=Release\n"
             f"CMAKE_TOOLCHAIN_FILE:FILEPATH={sdk}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake\n",
