@@ -4351,7 +4351,13 @@ Graph and notation load failures print `graph_patch_code_name` verbatim (`Ok`,
 `InvalidDocument`, `FileUnreadable`, ...); never rewrite a code in
 `cmd_graph.cpp` (an earlier `invalid_graph` rewrite made the CLI disagree with
 the C++ API). New CLI-only codes go in the `docs/reference/cli.md` table, and a
-new C++ code needs a row in `test/test_cli_graph_code_parity.cpp`.
+new C++ code needs a row in `test/test_cli_graph_code_parity.cpp`, the code list
+in `docs/status/cli-commands.yaml` and, when MCP must agree, a fixture in
+`test/test_graph_patch_tools.py` (which only runs inside the installed-SDK
+ctest `cmake-graph-patch-sdk-consumer`; that ctest needs a full build and a
+clean committed tree). `# flow 2` documents need no CLI change: `fmt` prints
+whatever header the formatter chose, so assert the CLI text equals
+`format_graph_patch` rather than hard-coding `# flow 1`.
 
 ### Transactional graph-file development reload
 

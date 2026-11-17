@@ -12,7 +12,8 @@ add_test(NAME a2-modular-instrument-positive COMMAND pulp-a2-modular-instrument)
 set_tests_properties(a2-modular-instrument-positive PROPERTIES
     LABELS "examples;installed-sdk;graph;a2"
     PASS_REGULAR_EXPRESSION "A2 modular instrument verified")
-foreach(_defect unknown-template out-of-range-level edited-level skewed-clock)
+foreach(_defect unknown-template out-of-range-level edited-level skewed-clock
+        missing-custom-type custom-version custom-state)
     add_test(NAME a2-modular-instrument-${_defect}
         COMMAND pulp-a2-modular-instrument --planted-${_defect})
     set_tests_properties(a2-modular-instrument-${_defect} PROPERTIES

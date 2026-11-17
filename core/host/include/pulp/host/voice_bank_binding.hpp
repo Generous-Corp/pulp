@@ -199,6 +199,24 @@ class VoiceBankBinding final {
     // empty or oversized window; publish returns StaleEpoch with no open block.
     HostEventResult begin_block(std::uint64_t first_sample, std::size_t frames) noexcept;
     HostEventResult publish(const HostEventRecord& event) noexcept;
+    // Audio-owner reset in two steps, so a caller that resets several event
+    // families together can refuse the whole transaction before any of them
+    // changes. reserve_event_reset() claims a fresh epoch and changes nothing
+    // else; it refuses inside an open block (Busy) and when the epoch sequence
+    // is exhausted (Overflow). commit_event_reset() applies the epoch the most
+    // recent reserve returned: every voice is cut, and the tracker, held
+    // releases, pedals and staged records are cleared, so records and deferred
+    // tokens of the old epoch are refused as stale from then on. A commit with
+    // any other epoch, or a second commit of the same one, is refused with
+    // StaleEpoch; a commit inside an open block is refused with Busy. Neither
+    // step allocates or locks. Slot parameters and release-tail DSP state are
+    // not reset, exactly as for activate().
+    HostEventResult reserve_event_reset(std::uint64_t& epoch) noexcept;
+    HostEventResult commit_event_reset(std::uint64_t epoch) noexcept;
+    // Close an open block without rendering it, for a caller whose sibling
+    // event family refused the same block. Staged future records stay staged.
+    // Returns StaleEpoch when no block is open.
+    HostEventResult abort_block() noexcept;
     // On GraphExecutionFailure the whole block is silenced and closed.
     VoiceBankBindingCode render(audio::BufferView<float>& stereo, std::uint64_t first_sample,
                                 std::size_t frames) noexcept;

@@ -129,9 +129,9 @@ the qualification scope described below.
 - Extend callback-resource evidence beyond the C++ `new` probe (activation,
   reset and 300 callbacks): it is not a malloc interposer, lock/I/O audit or
   timing receipt.
-- Add notation authoring coverage. The patch catalog now lists the spectral
-  constructors as typed-API-only rows and notation refuses them with the owning
-  constructor; persistence and notation spelling wait on the owner decisions in
+- Notation authoring coverage: `# flow 2` spells analysis, identity stage and
+  synthesis (see [`D6a-flow2-notation.md`](D6a-flow2-notation.md)); JSON
+  persistence of analysis graphs and mask/asset spelling remain open in
   [`G-10-notation-and-codec-source-proposal.md`](G-10-notation-and-codec-source-proposal.md).
   Runtime infrastructure registry rows deliberately do not claim a
   generator-facing spectral capability.

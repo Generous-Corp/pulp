@@ -2,10 +2,13 @@
 #include <pulp/host/subgraph_persistence.hpp>
 
 #include "graph_load_refusal.hpp"
+#include "subgraph_custom_member.hpp"
+#include "subgraph_persistence_test_access.hpp"
 
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <map>
@@ -17,7 +20,35 @@
 namespace pulp::host {
 namespace {
 
-using EdgeKey = std::tuple<NodeId, PortIndex, NodeId, PortIndex, bool, bool>;
+// Armed by SubgraphPersistenceTestAccess: the countdown names the rebind call
+// (1 = the next one) that throws std::bad_alloc.
+std::atomic<std::size_t> g_fail_rebind_countdown{0};
+
+// Every semantic field of a Connection, so an internal edge that changed role
+// (feedback, MIDI, sidechain, modulation, spectral, Control) or modulation
+// target is a different edge, not the same edge with other flags.
+using EdgeKey = std::tuple<NodeId, PortIndex, NodeId, PortIndex, bool, bool, bool, bool, bool, bool,
+                           bool, std::uint32_t, float, float, float, int>;
+
+EdgeKey edge_key(const Connection& edge, NodeId source, NodeId destination) {
+    const bool modulation = edge.automation || edge.audio_rate_modulation;
+    return {source,
+            edge.source_port,
+            destination,
+            edge.dest_port,
+            edge.midi,
+            edge.feedback,
+            edge.automation,
+            edge.audio_rate_modulation,
+            edge.sidechain,
+            edge.spectral,
+            edge.control_signal,
+            modulation ? edge.automation_param_id : 0u,
+            modulation ? edge.automation_range_lo : 0.0f,
+            modulation ? edge.automation_range_hi : 0.0f,
+            modulation ? edge.automation_smoothing_ms : 0.0f,
+            modulation ? static_cast<int>(edge.automation_mix) : 0};
+}
 
 template <typename V> double json_number(const V& value) {
     if (value.isInt32() || value.isInt64())
@@ -40,13 +71,19 @@ PortHandle live_port(const SignalGraph& graph, NodeId node, const PortHandle& li
     return {};
 }
 
+// Internal edges of `members`, with each endpoint mapped through `rename`
+// (identity when empty).
 std::multiset<EdgeKey> internal_edges(const SignalGraph& graph,
-                                      const std::unordered_set<NodeId>& members) {
+                                      const std::unordered_set<NodeId>& members,
+                                      const std::unordered_map<NodeId, NodeId>& rename = {}) {
+    const auto mapped = [&](NodeId node) {
+        const auto found = rename.find(node);
+        return found == rename.end() ? node : found->second;
+    };
     std::multiset<EdgeKey> edges;
     for (const auto& edge : graph.connections()) {
         if (members.contains(edge.source_node) && members.contains(edge.dest_node))
-            edges.emplace(edge.source_node, edge.source_port, edge.dest_node, edge.dest_port,
-                          edge.midi, edge.feedback);
+            edges.insert(edge_key(edge, mapped(edge.source_node), mapped(edge.dest_node)));
     }
     return edges;
 }
@@ -103,26 +140,49 @@ bool instance_handles_live(const SignalGraph& graph, const SubgraphInstance& ins
     return true;
 }
 
-bool same_ports(const std::vector<PortHandle>& want, const std::vector<PortHandle>& have) {
+bool same_ports(const std::vector<PortHandle>& want, const std::vector<PortHandle>& have,
+                bool match_names) {
     return std::equal(want.begin(), want.end(), have.begin(), have.end(),
-                      [](const PortHandle& a, const PortHandle& b) {
-                          return a.index == b.index && a.kind == b.kind && a.output == b.output;
+                      [&](const PortHandle& a, const PortHandle& b) {
+                          return a.index == b.index && a.kind == b.kind && a.output == b.output &&
+                                 (!match_names || a.name == b.name);
                       });
 }
 
+// A Custom member is resolved (its exact type and version are registered with
+// the port shape the node has) and its opaque state is state that type
+// accepts. The writer and the restore both apply it, so a document that
+// passes the writer also passes the restore.
+bool custom_member_loadable(const SignalGraph& graph, NodeId id) {
+    const auto* node = graph.node(id);
+    if (!node || node->type != NodeType::Custom)
+        return false;
+    const auto* type = graph.custom_node_type(node->custom_type_id, node->custom_type_version);
+    return type && type->num_input_ports == node->num_input_ports &&
+           type->num_output_ports == node->num_output_ports &&
+           detail::custom_member_state_accepted(*type, graph.custom_node_state(id));
+}
+
 // A restored member matches its template node structurally: type, port
-// shape, and for a Processor the descriptor it was built from. The member's
-// position in the record is its stable template member key, so its display
-// name is not compared when `match_names` is false.
+// shape and kinds, for a Custom node its exact type, version and port names,
+// and for a Processor the graph type it was restored as and the descriptor it
+// was built from. The member's position in the record is its stable template
+// member key, so its display name is not compared when `match_names` is
+// false.
 bool member_matches(const SignalGraph& scratch, NodeId want_id, const SignalGraph& graph,
                     NodeId have_id, bool match_names) {
     const auto* want = scratch.node(want_id);
     const auto* have = graph.node(have_id);
     if (!want || !have || want->type != have->type ||
         want->num_input_ports != have->num_input_ports ||
-        want->num_output_ports != have->num_output_ports ||
-        !same_ports(want->input_ports, have->input_ports) ||
-        !same_ports(want->output_ports, have->output_ports))
+        want->num_output_ports != have->num_output_ports)
+        return false;
+    const bool custom = want->type == NodeType::Custom;
+    if (!same_ports(want->input_ports, have->input_ports, custom) ||
+        !same_ports(want->output_ports, have->output_ports, custom))
+        return false;
+    if (custom && (want->custom_type_id != have->custom_type_id ||
+                   want->custom_type_version != have->custom_type_version))
         return false;
     if (match_names && want->name != have->name)
         return false;
@@ -134,7 +194,9 @@ bool member_matches(const SignalGraph& scratch, NodeId want_id, const SignalGrap
         const auto a = want_processor->descriptor();
         const auto b = have_processor->descriptor();
         if (a.bundle_id != b.bundle_id || a.version != b.version ||
-            a.manufacturer != b.manufacturer)
+            a.manufacturer != b.manufacturer ||
+            want_processor->graph_type_id() != have_processor->graph_type_id() ||
+            want_processor->graph_type_version() != have_processor->graph_type_version())
             return false;
     }
     return true;
@@ -156,8 +218,15 @@ bool rebind_instance(SignalGraph& graph, const SubgraphTemplate& definition,
         refusal.error = "subgraph_instance_mismatch: " + instance_identity + ": " + rule;
         return false;
     };
+    if (const auto armed = g_fail_rebind_countdown.load(std::memory_order_acquire);
+        armed != 0 && g_fail_rebind_countdown.fetch_sub(1, std::memory_order_acq_rel) == 1)
+        throw std::bad_alloc();
 
+    // The scratch expansion resolves Custom members against the same
+    // registry the document was loaded with.
     SignalGraph scratch;
+    if (!GraphSerializer::copy_custom_node_types(graph, scratch))
+        return mismatch("the graph's custom node types could not be staged for the template");
     auto expansion = instantiate_subgraph(scratch, definition, instance_identity, instance_index);
     if (!expansion)
         return mismatch("template expansion was rejected: " + expansion.result.rule);
@@ -179,6 +248,17 @@ bool rebind_instance(SignalGraph& graph, const SubgraphTemplate& definition,
         live_of.emplace(expected.nodes[i], found->second);
         live_members.insert(found->second);
     }
+    // Structure first, then state: a Custom member's opaque state must be
+    // state its registered type accepts, or the instance would only fail at
+    // its first prepare().
+    for (std::uint32_t i = 0; i < members.size(); ++i) {
+        const auto live = live_of.at(expected.nodes[i]);
+        if (graph.node(live)->type == NodeType::Custom && !custom_member_loadable(graph, live)) {
+            refusal.error = "subgraph_state_rejected: " + instance_identity + ": Custom member " +
+                            std::to_string(i) + " state was refused by its registered type";
+            return false;
+        }
+    }
 
     std::unordered_map<std::string, std::uint32_t> child_indices;
     std::unordered_map<std::string, std::string> child_templates;
@@ -195,11 +275,7 @@ bool rebind_instance(SignalGraph& graph, const SubgraphTemplate& definition,
         return mismatch("nested child identities do not match the template");
 
     std::unordered_set<NodeId> scratch_members(expected.nodes.begin(), expected.nodes.end());
-    std::multiset<EdgeKey> wanted;
-    for (const auto& [source, sport, dest, dport, midi, feedback] :
-         internal_edges(scratch, scratch_members))
-        wanted.emplace(live_of.at(source), sport, live_of.at(dest), dport, midi, feedback);
-    if (wanted != internal_edges(graph, live_members))
+    if (internal_edges(scratch, scratch_members, live_of) != internal_edges(graph, live_members))
         return mismatch("internal edges do not match the template");
 
     out = expected;
@@ -245,9 +321,16 @@ std::string to_saved_subgraph_document(
             instance.nodes.empty() ||
             !ordered.emplace(instance.instance_identity, &instance).second)
             return {};
-        for (const auto node : instance.nodes)
+        for (const auto node : instance.nodes) {
             if (!identities.contains(node) || !claimed.insert(node).second)
                 return {};
+            // Restore refuses an unresolved Custom member or state its type
+            // refuses, so writing one would produce a document that cannot
+            // load.
+            const auto* value = graph.node(node);
+            if (value && value->type == NodeType::Custom && !custom_member_loadable(graph, node))
+                return {};
+        }
         if (!instance_handles_live(graph, instance))
             return {};
     }
@@ -307,79 +390,121 @@ std::string to_saved_subgraph_document(
     }
 }
 
+namespace {
+
+// Load `json` into `graph` and rebind every record. Returns the restored
+// instances ordered by identity, or nullopt with `refusal` set. Does not clean
+// up `graph`; the caller decides whether it was the candidate or the live
+// graph.
+std::optional<std::vector<SubgraphInstance>>
+load_and_rebind(SignalGraph& graph, const std::string& json, const choc::value::ValueView& records,
+                const std::unordered_map<std::string, const SubgraphTemplate*>& by_identity,
+                bool match_names, const GraphLoadOptions& options,
+                GraphSerializer::LoadResult& load, Refusal& refusal) {
+    load = GraphSerializer::from_saved_document(graph, json, options);
+    if (!load.ok) {
+        refusal.error = load.error;
+        return std::nullopt;
+    }
+    // Members name the document's identities: authored IDs in v7, the
+    // structural identities in v6.
+    std::map<std::string, SubgraphInstance> restored;
+    for (std::uint32_t i = 0; i < records.size(); ++i) {
+        const auto record = records[i];
+        const auto& definition =
+            *by_identity.at(std::string(record["template_identity"].getString()));
+        SubgraphInstance instance;
+        if (!rebind_instance(graph, definition, record, load.identity_node_ids, match_names,
+                             instance, refusal))
+            return std::nullopt;
+        restored.emplace(instance.instance_identity, std::move(instance));
+    }
+    std::vector<SubgraphInstance> ordered;
+    ordered.reserve(restored.size());
+    for (auto& [identity, instance] : restored)
+        ordered.push_back(std::move(instance));
+    return ordered;
+}
+
+} // namespace
+
 SubgraphDocumentLoad from_saved_subgraph_document(SignalGraph& graph, const std::string& json,
                                                   std::span<const SubgraphTemplate> templates,
                                                   const GraphLoadOptions& options) {
     SubgraphDocumentLoad out;
-    std::unordered_map<std::string, const SubgraphTemplate*> by_identity;
-    for (const auto& definition : templates) {
-        if (definition.identity.empty() ||
-            !by_identity.emplace(definition.identity, &definition).second) {
-            out.load.error = "subgraph_template_duplicate: template identities must be unique "
-                             "and non-empty";
-            return out;
-        }
-    }
-
-    const auto inspection = GraphSerializer::inspect_document(json);
-    if (!inspection.ok()) {
-        out.load.error =
-            std::string(graph_document_refusal_name(inspection.refusal)) + ": " + inspection.detail;
-        return out;
-    }
-
-    // Every refusal after the flattened load starts goes through refuse(), so
-    // the graph, the instances and every map the load returned are empty.
-    bool load_started = false;
+    // Every refusal goes through refuse(). Until the live load starts the
+    // caller's graph is untouched and stays so; from then on it is cleared,
+    // and the instances and every map the load returned are emptied.
+    bool live_load_started = false;
     const auto refuse = [&](std::string error) {
-        detail::refuse_load(out.load, load_started ? &graph : nullptr, std::move(error));
+        detail::refuse_load(out.load, live_load_started ? &graph : nullptr, std::move(error));
         out.subgraphs.clear();
         return std::move(out);
     };
     try {
-        const auto root = choc::json::parse(json);
-        const bool has_records = root.hasObjectMember("subgraphs");
-        if (has_records) {
-            const auto& records = root["subgraphs"];
-            for (std::uint32_t i = 0; i < records.size(); ++i) {
-                const auto identity = std::string(records[i]["template_identity"].getString());
-                if (!by_identity.contains(identity)) {
-                    out.load.error = "subgraph_template_unknown: no template named " + identity;
-                    return out;
-                }
-            }
+        std::unordered_map<std::string, const SubgraphTemplate*> by_identity;
+        for (const auto& definition : templates) {
+            if (definition.identity.empty() ||
+                !by_identity.emplace(definition.identity, &definition).second)
+                return refuse("subgraph_template_duplicate: template identities must be unique "
+                              "and non-empty");
         }
 
-        load_started = true;
-        out.load = GraphSerializer::from_saved_document(graph, json, options);
-        if (!out.load.ok || !has_records)
-            return out;
+        const auto inspection = GraphSerializer::inspect_document(json);
+        if (!inspection.ok())
+            return refuse(std::string(graph_document_refusal_name(inspection.refusal)) + ": " +
+                          inspection.detail);
 
-        // Members name the document's identities: authored IDs in v7, the
-        // structural identities in v6.
-        const auto& live_by_identity = out.load.identity_node_ids;
+        const auto root = choc::json::parse(json);
+        if (!root.hasObjectMember("subgraphs")) {
+            live_load_started = true;
+            out.load = GraphSerializer::from_saved_document(graph, json, options);
+            return out;
+        }
+        const auto& records = root["subgraphs"];
+        for (std::uint32_t i = 0; i < records.size(); ++i) {
+            const auto identity = std::string(records[i]["template_identity"].getString());
+            if (!by_identity.contains(identity))
+                return refuse("subgraph_template_unknown: no template named " + identity);
+        }
         const bool match_names =
             inspection.document.profile() != std::string_view("pulp.graph.saved-identity.v7");
 
-        const auto& records = root["subgraphs"];
-        std::map<std::string, SubgraphInstance> restored;
-        for (std::uint32_t i = 0; i < records.size(); ++i) {
-            const auto record = records[i];
-            const auto& definition =
-                *by_identity.at(std::string(record["template_identity"].getString()));
-            SubgraphInstance instance;
+        // The candidate: the whole document is loaded and every record
+        // rebound on a scratch graph that carries the caller's custom node
+        // types. Any refusal here returns before the caller's graph is
+        // touched. Processor factories and restore registries therefore run
+        // for the candidate and again for the live graph.
+        {
+            SignalGraph candidate;
+            if (!GraphSerializer::copy_custom_node_types(graph, candidate))
+                return refuse("subgraph_instance_mismatch: the graph's custom node types could "
+                              "not be staged for a candidate restore");
+            GraphSerializer::LoadResult candidate_load;
             Refusal refusal;
-            if (!rebind_instance(graph, definition, record, live_by_identity, match_names, instance,
-                                 refusal))
+            if (!load_and_rebind(candidate, json, records, by_identity, match_names, options,
+                                 candidate_load, refusal))
                 return refuse(std::move(refusal.error));
-            restored.emplace(instance.instance_identity, std::move(instance));
         }
-        for (auto& [identity, instance] : restored)
-            out.subgraphs.push_back(std::move(instance));
+
+        // The live load repeats what the candidate proved. It can still fail
+        // when a factory or restore callback behaves differently the second
+        // time; that refusal clears the graph like any refused load.
+        live_load_started = true;
+        Refusal refusal;
+        auto restored = load_and_rebind(graph, json, records, by_identity, match_names, options,
+                                        out.load, refusal);
+        if (!restored)
+            return refuse(std::move(refusal.error));
+        out.subgraphs = std::move(*restored);
         return out;
     } catch (const std::exception& error) {
         return refuse(std::string("subgraph_instance_mismatch: ") + error.what());
     }
+}
+
+void SubgraphPersistenceTestAccess::fail_rebind_call(std::size_t call) noexcept {
+    g_fail_rebind_countdown.store(call, std::memory_order_release);
 }
 
 } // namespace pulp::host

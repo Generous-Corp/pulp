@@ -34,6 +34,7 @@ target_sources(pulp-host PRIVATE
     src/plugin_slot.cpp
     src/graph_serializer.cpp
     src/graph_patch.cpp
+    src/graph_patch_constructors.cpp
     src/graph_file_reload.cpp
     src/spectral_graph_persistence.cpp
     src/graph_identity.cpp
@@ -41,6 +42,7 @@ target_sources(pulp-host PRIVATE
     src/voice_identity.cpp
     src/voice_template.cpp
     src/voice_bank_binding.cpp
+    src/host_timeline_binding.cpp
     src/scan_blacklist.cpp
     src/scan_cache.cpp
     src/background_scanner.cpp

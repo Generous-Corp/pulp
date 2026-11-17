@@ -73,9 +73,14 @@ identity check.
 
 ## Remainder
 
-- Narrow the inheritable window of the duplex child end in
-  `child_process_win.cpp` (create it non-inheritable and mark it inheritable only
-  for `CreateProcess`), or state the limit in `docs/reference/runtime.md`.
+- The duplex child end is created non-inheritable and marked inheritable
+  immediately before the one `CreateProcess` that names it, so the window in
+  which a non-`ChildProcess` `CreateProcess(bInheritHandles=TRUE)` in the same
+  process could inherit it is that call alone. It cannot be closed entirely: a
+  handle named in `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` must be inheritable when
+  `CreateProcess` runs, and stdin is fixed at creation. The flag is pinned
+  deterministically (`[duplex-inheritance]`); a concurrent leak during the call
+  is not testable deterministically and is not claimed closed.
 - Windows realtime pacing: the worker keeps pace for hundreds of blocks on the
   4-vCPU VM, not thousands. Qualifying it needs a quiet Windows host and probably
   worker thread priority or MMCSS registration; it is a host-time item.

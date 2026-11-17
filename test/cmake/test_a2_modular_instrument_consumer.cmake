@@ -38,7 +38,7 @@ _a2_run("ctest" "${CMAKE_CTEST_COMMAND}" --test-dir "${_build}"
     -C "${_config}" --output-on-failure --no-tests=error)
 execute_process(COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${_build}" -C "${_config}" -N
     OUTPUT_VARIABLE _listing)
-if(NOT _listing MATCHES "Total Tests: 5([^0-9]|$)")
-    message(FATAL_ERROR "A2 consumer expected five tests:\n${_listing}")
+if(NOT _listing MATCHES "Total Tests: 8([^0-9]|$)")
+    message(FATAL_ERROR "A2 consumer expected eight tests:\n${_listing}")
 endif()
 message(STATUS "a2_modular_instrument_consumer_verified=true")

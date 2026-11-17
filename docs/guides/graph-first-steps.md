@@ -20,8 +20,10 @@ tools/ci/governed-build.sh cmake --build build --target pulp-cli pulp-rust-cli
 
 Save this as `first.pat`. The first line must be `# flow 1`. The default
 catalog (`pulp graph catalog --json`) has audio in/out, `pulp/gain` and MIDI
-in/out. It also lists spectral constructors marked
-`unsupported_typed_api_only`; those are built in C++, not in a patch. The audio boundaries and `pulp/gain` are stereo, so their two channels
+in/out. It also lists spectral constructors; analysis, identity stage and
+synthesis take `# flow 2` constructor arguments (see
+[the notation guide](graph-patch-notation.md#flow-2-constructor-arguments)),
+and the asset morph is built in C++, not in a patch. The audio boundaries and `pulp/gain` are stereo, so their two channels
 are the ports `audio` and `out1` (outputs) or `audio` and `in1` (inputs).
 
 ```text
@@ -54,12 +56,18 @@ automatable parameter, so `input.audio ~> gain1.gain @ 0.5` is refused; see the
 ```sh
 pulp graph validate first.pat
 # valid: true
-# format_version: 5
+# format_version: 7
 # nodes: 3
 # connections: 4
 
 pulp graph save first.pat --output first.pulpgraph
 ```
+
+`format_version` in the `validate` output is the newest document format this
+build writes. A plain `save` keeps a simple graph in the oldest format that can
+hold it (`"format_version": 2` for this patch); `save --saved-identity` writes
+the current one. The guide's check pins only the `validate` line against the
+CLI.
 
 Add `--json` to `validate` for a machine-readable verdict (`"valid"`, `"code"`,
 and on failure `"line"`, `"rule"`, `"suggested_fix"`).

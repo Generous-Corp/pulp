@@ -1,7 +1,7 @@
 {
   "domain": "host",
   "source": "core/host/include/pulp/host/graph_patch.hpp",
-  "fingerprint": "sha256:bcecbee760825b751e6ebea5395e837856fe31610b14d863365c4499f2e4af12",
+  "fingerprint": "sha256:a4010e1e7a7505296458636379659563322a54c0c6f715b3708d5bb2584cd4cc",
   "include": "pulp/host/graph_patch.hpp",
   "disposition": "infrastructure",
   "capability_keys": [],
