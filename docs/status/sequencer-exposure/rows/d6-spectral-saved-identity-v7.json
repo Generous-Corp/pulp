@@ -79,6 +79,11 @@
           "kind": "test",
           "path": "test/test_cli_graph_spectral_saved_identity.cpp",
           "needles": ["graph save --saved-identity writes the spectral v7 document"]
+        },
+        {
+          "kind": "cli_definition",
+          "path": "tools/cli/cmd_graph.cpp",
+          "needles": ["save: --output path [--saved-identity]"]
         }
       ],
       "authority": {
