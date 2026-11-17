@@ -72,6 +72,7 @@ def _stack(source_root: Path, files: list[str]) -> dict:
     return {"files": [str(source_root / f) for f in files], "nodes": nodes}
 
 
+# The file API records a target's call-stack files relative to the source root.
 def write_reply(build_dir: Path, source_root: Path, graph: list[dict]) -> None:
     reply = build_dir / at.CODEMODEL_REPLY_RELATIVE
     reply.mkdir(parents=True, exist_ok=True)
@@ -88,7 +89,7 @@ def write_reply(build_dir: Path, source_root: Path, graph: list[dict]) -> None:
             "sources": [{"path": s} for s in t["sources"]],
             "dependencies": [{"id": ids[d]} for d in t["deps"]],
             "artifacts": [{"path": a} for a in t["artifacts"]],
-            **({"backtrace": 0, "backtraceGraph": _stack(source_root, t["defined_in"])}
+            **({"backtrace": 0, "backtraceGraph": _stack(Path(), t["defined_in"])}
                if t.get("defined_in") else {}),
         }))
     (reply / "codemodel-v2.json").write_text(json.dumps({

@@ -930,7 +930,7 @@ def codemodel_reply_mtime(build_dir: Path) -> float | None:
         return None
 
 
-def backtrace_files(graph: Any, index: Any) -> frozenset[str]:
+def backtrace_files(graph: Any, index: Any, root: str = "") -> frozenset[str]:
     """The files on the call stack a file-API or ctest ``backtrace`` index names.
 
     Both CMake JSON documents share one shape: ``nodes`` (``file`` index,
@@ -947,7 +947,8 @@ def backtrace_files(graph: Any, index: Any) -> frozenset[str]:
         node = nodes[index]
         slot = node.get("file")
         if isinstance(slot, int) and 0 <= slot < len(files) and isinstance(files[slot], str):
-            found.add(os.path.normpath(files[slot]))
+            # The file API records paths relative to the source root; ctest, absolute.
+            found.add(os.path.normpath(os.path.join(root, files[slot])))
         index = node.get("parent")
     return frozenset(found)
 
@@ -1011,7 +1012,7 @@ def load_codemodel_targets(build_dir: Path) -> CodeModel:
             sources=[os.path.normpath(s["path"]) for s in raw.get("sources", [])],
             dependencies=deps,
             artifacts=artifacts,
-            definition_files=backtrace_files(raw.get("backtraceGraph"), raw.get("backtrace")),
+            definition_files=backtrace_files(raw.get("backtraceGraph"), raw.get("backtrace"), source_root),
         )
     return CodeModel(targets=targets, source_root=source_root, build_root=build_root)
 
