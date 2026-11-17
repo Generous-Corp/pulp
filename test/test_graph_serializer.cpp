@@ -269,6 +269,8 @@ std::string with_second_index_input(const std::string& document) {
                 node.addMember("id", int64_t{99});
             else if (name == "name")
                 node.addMember("name", "Index2");
+            else if (name == "authored_id")
+                node.addMember("authored_id", "nid-index2-copy");
             else
                 node.addMember(member.name, member.value);
         }
@@ -289,9 +291,14 @@ std::string with_second_index_input(const std::string& document) {
             if (id.starts_with("node:custom:Index:"))
                 index_identity = id;
         }
-        REQUIRE_FALSE(index_identity.empty());
+        // A v7 copy carries its own authored ID; a v6 copy's identity is
+        // rebuilt from its name.
+        const bool v7 = copy->hasObjectMember("authored_id");
+        REQUIRE((v7 || !index_identity.empty()));
         const auto copy_identity =
-            "node:custom:Index2:" + index_identity.substr(std::string("node:custom:Index:").size());
+            v7 ? std::string("nid-index2-copy")
+               : "node:custom:Index2:" +
+                     index_identity.substr(std::string("node:custom:Index:").size());
         auto item = choc::value::createObject("Identity");
         item.addMember("id", copy_identity);
         item.addMember("node_id", int64_t{99});
@@ -394,11 +401,25 @@ TEST_CASE("GraphSerializer refuses an incomplete saved identity envelope",
         const auto refused = GraphSerializer::inspect_document(doc);
         CHECK(refused.refusal == GraphDocumentRefusal::IdentityEnvelopeInvalid);
     }
-    REQUIRE(GraphSerializer::current_format_version() == 6);
+    const auto v7 = GraphSerializer::inspect_document(
+        R"({"identity_schema":"pulp.graph.saved-identity.v7","bindings":{},"format_version":7})");
+    CHECK(v7.refusal == GraphDocumentRefusal::IdentityEnvelopeInvalid);
+    REQUIRE(GraphSerializer::current_format_version() == 7);
+
+    // Format 7 is the v7 document only, and the v7 envelope is format 7 only.
+    const auto v6_at_7 = GraphSerializer::inspect_document(
+        R"({"identity_schema":"pulp.graph.saved-identity.v6","bindings":{},"format_version":7})");
+    CHECK(v6_at_7.refusal == GraphDocumentRefusal::IdentityEnvelopeInvalid);
+    const auto v7_at_6 = GraphSerializer::inspect_document(
+        R"({"identity_schema":"pulp.graph.saved-identity.v7","bindings":{},"format_version":6})");
+    CHECK(v7_at_6.refusal == GraphDocumentRefusal::IdentityEnvelopeInvalid);
 
     const auto next = GraphSerializer::inspect_document(
-        R"({"identity_schema":"pulp.graph.saved-identity.v6","bindings":{},"format_version":7})");
+        R"({"identity_schema":"pulp.graph.saved-identity.v6","bindings":{},"format_version":8})");
     CHECK(next.refusal == GraphDocumentRefusal::UnsupportedFutureVersion);
+    const auto unknown = GraphSerializer::inspect_document(
+        R"({"identity_schema":"pulp.graph.saved-identity.v8","bindings":{},"format_version":7})");
+    CHECK(unknown.refusal == GraphDocumentRefusal::UnsupportedDocumentProfile);
 }
 
 TEST_CASE("GraphSerializer saved identity writer validates and restores",
@@ -413,7 +434,8 @@ TEST_CASE("GraphSerializer saved identity writer validates and restores",
     REQUIRE_FALSE(saved.empty());
     const auto inspected = GraphSerializer::inspect_document(saved);
     REQUIRE(inspected.ok());
-    CHECK(inspected.document.profile() == "pulp.graph.saved-identity.v6");
+    CHECK(inspected.document.profile() == "pulp.graph.saved-identity.v7");
+    CHECK(inspected.document.format_version() == 7);
     CHECK(saved.find("identity_schema") != std::string::npos);
 
     SignalGraph restored;
@@ -423,7 +445,7 @@ TEST_CASE("GraphSerializer saved identity writer validates and restores",
     CHECK(restored.nodes().size() == graph.nodes().size());
 
     auto dangling = saved;
-    const auto binding = dangling.find("node:");
+    const auto binding = dangling.find("\"logical_identities\"");
     REQUIRE(binding != std::string::npos);
     const auto node_id = dangling.find("\"node_id\":", binding);
     REQUIRE(node_id != std::string::npos);
@@ -1999,7 +2021,7 @@ TEST_CASE("GraphSerializer fails closed before loading missing or future graph v
 
     SignalGraph future_version;
     auto future_result = GraphSerializer::from_json(future_version, R"({
-  "format_version": 7,
+  "format_version": 8,
   "nodes": [
     {
       "id": 1,
@@ -2012,7 +2034,7 @@ TEST_CASE("GraphSerializer fails closed before loading missing or future graph v
   "connections": []
 })");
     REQUIRE_FALSE(future_result.ok);
-    REQUIRE(future_result.error.find("unsupported graph format_version 7") != std::string::npos);
+    REQUIRE(future_result.error.find("unsupported graph format_version 8") != std::string::npos);
     REQUIRE(future_version.nodes().empty());
 }
 
@@ -2082,7 +2104,7 @@ TEST_CASE("GraphSerializer rejects graph migrations that do not advance versions
 
 TEST_CASE("GraphSerializer rejects invalid graph migration registrations",
           "[host][serializer][migration]") {
-    REQUIRE(GraphSerializer::current_format_version() == 6);
+    REQUIRE(GraphSerializer::current_format_version() == 7);
     REQUIRE_FALSE(GraphSerializer::register_migration(
         2, 2,
         [](const std::string& source_json, std::string& migrated_json) {

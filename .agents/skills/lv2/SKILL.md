@@ -191,6 +191,27 @@ at `time:speed == 1`. Fill its `frame` with the block-start position, and
 convert event times through `lv2_event_block_time()`, which refuses a
 beat-time sequence instead of reading the `beats` double as frames.
 
+The adapter publishes the latched transport on `ctx.timing`
+(`format::lv2_process_timing()`): `time:speed == 1` is `PlaybackRate::Unit`,
+any other moving speed is `NonUnit`, which the projection never compares with
+the block length. There is never a steady counter. `activate()` marks the next
+`run()` as a discontinuity, because the latch survives deactivation.
+
+A `time:Position` event at frame `t > 0` describes the transport at `t`, not at
+the block start. `Lv2BlockTransport` applies each event with only the
+properties it carried (decode into a fresh `Lv2TimePosition`, never into the
+latch) and moves its `time:frame` / `time:beat` back to the block start along
+the piecewise speed and tempo path: a speed change at `t` applies from `t`
+onward, so rewinding by the new speed misplaces the block. Fields an event
+omits keep the retained values, which advance over every host block whether or
+not a Position arrived. The published speed is the one in effect at the first
+frame; a block whose speed changed mid-way reports `NonUnit`. Event times
+outside the block, or earlier than a previous event, are placed at the previous
+event's frame. Host values that are not finite or do not fit their field are
+refused at decode, and a normalized frame that overflows is published as
+unavailable. A host block longer than the prepared maximum advances the latch
+by the whole host block and marks the next `run()` discontinuous.
+
 ### The unit traps in `time:`
 
 - **`time:beat` counts beats of `time:beatUnit`, not quarter notes.** Pulp's

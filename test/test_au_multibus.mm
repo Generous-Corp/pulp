@@ -46,6 +46,8 @@ struct SeenBlock {
     std::vector<SeenBus> inputs;
     std::vector<SeenBus> outputs;
     int blocks = 0;
+    // `ProcessContext::timing.discontinuity` of every observed block.
+    std::vector<bool> discontinuities;
 };
 SeenBlock g_seen;
 
@@ -79,8 +81,9 @@ class MultiBusProcessor : public pulp::format::Processor {
                  const pulp::format::ProcessContext&) override {}
 
     void process(pulp::format::ProcessBuffers& audio, pulp::midi::MidiBuffer&,
-                 pulp::midi::MidiBuffer&, const pulp::format::ProcessContext&) override {
+                 pulp::midi::MidiBuffer&, const pulp::format::ProcessContext& ctx) override {
         ++g_seen.blocks;
+        g_seen.discontinuities.push_back(ctx.timing.discontinuity);
         g_seen.inputs.clear();
         g_seen.outputs.clear();
         for (std::size_t i = 0; i < audio.inputs.size(); ++i) {
@@ -289,6 +292,44 @@ TEST_CASE("AU v3 renders every output bus and routes every input bus", "[au][auv
         extra.storage[0].fill(9.0f);
         REQUIRE(block(&flags, &timestamp, kFrames, 3, extra.list(), nullptr, pull) == noErr);
         REQUIRE(extra.storage[0][0] == 0.0f);
+
+        [unit deallocateRenderResources];
+        [unit release];
+    }
+}
+
+TEST_CASE("AU v3 reset renders a repeated multi-output time stamp afresh",
+          "[au][auv3][bus][process-timing]") {
+    @autoreleasepool {
+        ScopedFactoryRegistration registration(create_multibus);
+        PulpAudioUnit* unit = make_unit('TstB');
+        g_seen = {};
+        NSError* error = nil;
+        REQUIRE([unit allocateRenderResourcesAndReturnError:&error]);
+
+        AUInternalRenderBlock block = [unit internalRenderBlock];
+        AudioUnitRenderActionFlags flags = 0;
+        AudioTimeStamp timestamp{};
+        timestamp.mFlags = kAudioTimeStampSampleTimeValid;
+        timestamp.mSampleTime = 0;
+        OutputList main(2), stem_a(2);
+
+        REQUIRE(block(&flags, &timestamp, kFrames, 0, main.list(), nullptr, nil) == noErr);
+        REQUIRE(block(&flags, &timestamp, kFrames, 1, stem_a.list(), nullptr, nil) == noErr);
+        timestamp.mSampleTime = kFrames;
+        REQUIRE(block(&flags, &timestamp, kFrames, 0, main.list(), nullptr, nil) == noErr);
+        REQUIRE(g_seen.blocks == 2);
+
+        // The host resets and renders the same time stamp and frame count
+        // again. That is a new render after a timeline break, not a request
+        // for another bus of the block already rendered.
+        [unit reset];
+        REQUIRE(block(&flags, &timestamp, kFrames, 0, main.list(), nullptr, nil) == noErr);
+        REQUIRE(g_seen.blocks == 3);
+        REQUIRE(g_seen.discontinuities == std::vector<bool>{true, false, true});
+        // Its other buses still come from that one fresh render.
+        REQUIRE(block(&flags, &timestamp, kFrames, 1, stem_a.list(), nullptr, nil) == noErr);
+        REQUIRE(g_seen.blocks == 3);
 
         [unit deallocateRenderResources];
         [unit release];
