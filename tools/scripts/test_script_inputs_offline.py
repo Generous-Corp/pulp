@@ -56,8 +56,13 @@ class OfflineTests(unittest.TestCase):
         self.write(SUITES, "if(TARGET pulp-host)\n"
                            "    pulp_add_test_suite(pulp-test-trigger-graph\n"
                            "        SOURCES test_trigger_graph.cpp LIBRARIES pulp::host)\n"
+                           "endif()\n"
+                           "if(PULP_HAS_UI AND NOT PULP_IOS)\n"
+                           "    pulp_add_test_suite(pulp-test-trigger-ui\n"
+                           "        SOURCES test_trigger_ui.cpp)\n"
                            "endif()\n")
         self.write("test/test_trigger_graph.cpp", "int x = 0;\n")
+        self.write("test/test_trigger_ui.cpp", "int u = 0;\n")
         # The CLI target (run by ctest as pulp-cpp) and a suite that shells out.
         self.write(CLI, "add_executable(pulp-cli\n    cli_main.cpp\n    cli_sdk.cpp\n)\n")
         self.write("tools/cli/cli_main.cpp", "int main() { return 0; }\n")
@@ -83,7 +88,7 @@ class OfflineTests(unittest.TestCase):
                 "entry": SELFTEST, "inputs": [SELFTEST], "kind": "python"}},
             "executables_scanned_for": ["data", "spawns"],
             "executables_scanned": ["pulp-cpp", "pulp-test-cli-shellout-loop",
-                                    "pulp-test-trigger-graph"],
+                                    "pulp-test-trigger-graph", "pulp-test-trigger-ui"],
             "executable_targets": {"pulp-cpp": "pulp-cli"},
             "executables": {"pulp-cpp": {
                 "data": "none", "inputs": [], "kind": "compiled", "runtime_targets": [],
@@ -358,8 +363,28 @@ class OfflineTests(unittest.TestCase):
         self.commit("test: add a proof suite")
         rc, _, err = self.run_main()
         self.assertEqual(rc, 0)
-        self.assertIn("NOT CHECKED test/cmake/trigger_tests.cmake:6: pulp-test-gpu-proof", err)
+        self.assertIn("NOT CHECKED test/cmake/trigger_tests.cmake:10: pulp-test-gpu-proof", err)
         self.assertIn("if(PULP_ENABLE_GPU_PROOF)", err)
+
+    def test_suite_under_a_guard_the_gate_already_enters_needs_a_fragment(self) -> None:
+        # The same condition already guards a scanned suite, so the gate
+        # configure enters it: a new suite there is a missing fragment, not
+        # a NOT CHECKED line CI would later fail.
+        self.append(SUITES, "if(PULP_HAS_UI AND NOT PULP_IOS)\n"
+                            "    pulp_add_test_suite(pulp-test-trigger-ui-extra\n"
+                            "        SOURCES test_trigger_ui_extra.cpp)\n"
+                            "endif()\n")
+        self.write("test/test_trigger_ui_extra.cpp", "int e = 0;\n")
+        self.commit("test: add a suite under an entered guard")
+        rc, _, err = self.run_main()
+        self.assertEqual(rc, 1, err)
+        self.assertNotIn("NOT CHECKED test/cmake/trigger_tests.cmake", err)
+        self.assertIn("executables/pulp-test-trigger-ui-extra.json", err)
+        rc, _, _ = self.run_main("--write")
+        self.assertEqual(rc, 0)
+        self.commit("test: regenerate the fragment")
+        rc, _, err = self.run_main()
+        self.assertEqual(rc, 0, err)
 
     def test_not_gated_marker_excludes_a_new_suite(self) -> None:
         self.append(SUITES, "# script-inputs: not-gated hardware only\n"
