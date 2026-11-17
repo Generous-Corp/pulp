@@ -157,7 +157,10 @@ unbinds them on every return path; a later tracker call reaches no sink.
 planted breaks (graph refusal ignored in the transaction, graph cursor mapping
 replaced by the timeline start, the stale timeline-epoch check removed,
 `derive_mpe()` back on `bind_tracker_to_buffer()`, the voice reset token check
-removed, staged parameters kept across a reset).
+removed, staged parameters kept across a reset). Four more for the failed and
+oversized block handling: the failed-block drop not called from `render()`,
+the graph ingress clear skipped, the graph's open-time frame-limit check
+disabled, and `derive_mpe()` leaving `on_note_lifecycle` bound.
 
 Existing suites still pass: trigger graph, host signal graph, voice bank
 binding, MPE, host-event timestamps, control index, and the g5, p1 and
