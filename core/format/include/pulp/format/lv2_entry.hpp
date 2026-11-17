@@ -294,7 +294,9 @@ class Lv2BlockTransport {
 
     /// True when a Position changed the speed after the block's first frame,
     /// so the block did not move at one rate.
-    [[nodiscard]] bool rate_changed() const noexcept { return rate_changed_; }
+    [[nodiscard]] bool rate_changed() const noexcept {
+        return rate_changed_;
+    }
 
     /// The transport at the first frame of the next block: the block start
     /// advanced over every host frame of this block at the piecewise rates.
@@ -805,8 +807,7 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
             inst->has_transport = true;
         if (inst->has_transport) {
             const auto& start = block_transport.block_start();
-            boundary::apply_host_transport(proc_ctx, to_host_transport(start),
-                                           inst->playhead_prev);
+            boundary::apply_host_transport(proc_ctx, to_host_transport(start), inst->playhead_prev);
             // Neutral timing facts: LV2 has no monotonic counter, so only the
             // block-start time:frame and time:speed are published. A block
             // whose speed changed part way through did not move at one rate.

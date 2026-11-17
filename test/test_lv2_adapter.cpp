@@ -1526,8 +1526,8 @@ struct Lv2TransportHarness {
 
     Lv2TransportHarness() {
         g_lv2_time = {};
-        handle.handle =
-            lv2_generic::instantiate(&lv2_generic::g_lv2_descriptor, 48000.0, "", features.features);
+        handle.handle = lv2_generic::instantiate(&lv2_generic::g_lv2_descriptor, 48000.0, "",
+                                                 features.features);
         REQUIRE(handle.handle != nullptr);
         inst = static_cast<PulpLv2Instance*>(handle.handle);
         lv2_generic::connect_port(handle.handle, 0, input.data());
@@ -1535,7 +1535,9 @@ struct Lv2TransportHarness {
         lv2_generic::connect_port(handle.handle, 2, seq.as_seq());
     }
 
-    const lv2_adapter::Lv2TimeUrids& urids() const { return inst->time_urids; }
+    const lv2_adapter::Lv2TimeUrids& urids() const {
+        return inst->time_urids;
+    }
 
     TimePositionEvent position(int64_t frame_offset) const {
         return TimePositionEvent(urids().atom_object, urids().time_position, frame_offset);
