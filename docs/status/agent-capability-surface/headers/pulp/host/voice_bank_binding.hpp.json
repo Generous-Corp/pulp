@@ -1,7 +1,7 @@
 {
   "domain": "host",
   "source": "core/host/include/pulp/host/voice_bank_binding.hpp",
-  "fingerprint": "sha256:50a120b964cf044b640595f4b51d7302c345ea8e6c78a851345e8370669cedcc",
+  "fingerprint": "sha256:362af2c4fdc765cb0467f42e2882c155204f7441163dc0b951b245670cd74b55",
   "include": "pulp/host/voice_bank_binding.hpp",
   "disposition": "infrastructure",
   "capability_keys": [],

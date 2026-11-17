@@ -1,8 +1,9 @@
 # D4: adapters publish neutral timing facts
 
 Status: **PARTIAL**. CLAP, VST3, AU v3, AU v2 and LV2 publish the facts and
-the host projection consumes them; no graph runtime consumes them yet (see
-"Remaining work").
+the host projection consumes them. A graph runtime consumes the projection
+through `host::HostTimelineBinding` (`S4-reset-transaction.md`); see
+"Remaining work".
 
 ## Rule
 
@@ -140,11 +141,12 @@ refuses both. The policies stay separate; only the arithmetic is shared.
 1. **AU v2 in a real host.** The adapter traces run against SDK classes in
    process; no AU v2 host (Logic, auval with transport) has been driven here.
    The `DoRender` refusals above are unobservable by design.
-2. **Graph consumption.** `SignalGraph::begin_host_event_block()` and
-   `reset_host_event_ingress()` take the prepared trigger generation's epoch,
-   not a `HostBlockTimeline` epoch. Mapping a timeline `NewEpoch` onto a graph
-   ingress reset is the reset-transaction design in the S4 item; wire it there
-   rather than here.
+2. **Graph consumption.** Done by `host::HostTimelineBinding`: it owns the
+   `HostBlockTimeline`, maps a timeline `NewEpoch` onto one reset transaction
+   across the graph ingress, the voice bank and staged parameters, and maps
+   each window onto the graph's own epoch and cursor. See
+   `S4-reset-transaction.md`. Adapters still do not drive the binding
+   themselves; a graph-owning Processor does.
 3. **Adapter event-time checks still owned by the legacy paths.** CLAP and
    VST3 copy event times into `sample_offset` without a bound check, and the
    AU v3 MIDI path still clamps. The projection refuses those offsets, but a

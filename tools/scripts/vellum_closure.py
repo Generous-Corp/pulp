@@ -2150,6 +2150,65 @@ def cmd_manifest(args: argparse.Namespace) -> int:
     return 0
 
 
+# ── Export metadata ────────────────────────────────────────────────────────
+# What the platform-closure workflow records beside the manifests so Vellum can
+# write the platform record from the artifact: the platform, the commit, the
+# runner image and the renderer asset. The image is the one thing the exporter
+# cannot read from the build, and a blank or placeholder image would let a
+# record claim a reproducibility it does not have, so an image that is not
+# fully named is refused.
+UNNAMED_IMAGE = {"", "unknown", "none", "null", "n/a"}
+EXPORT_PLATFORM_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
+
+
+def os_release_image_name(text: str) -> str:
+    """`<ID>-<VERSION_ID>` from an os-release file, or '' when it names neither."""
+    fields = {}
+    for line in text.splitlines():
+        key, sep, value = line.partition("=")
+        if sep:
+            fields[key.strip()] = value.strip().strip("\"'")
+    if fields.get("ID") and fields.get("VERSION_ID"):
+        return f"{fields['ID']}-{fields['VERSION_ID']}"
+    return ""
+
+
+def export_metadata(environ: dict, platform: str, renderer_asset: str,
+                    image_name_input: str = "", os_release: str = "") -> dict:
+    """The export.json document, or SystemExit when the runner image is not fully named."""
+    sha = environ.get("GITHUB_SHA", "")
+    if not FULL_SHA_RE.match(sha):
+        raise SystemExit("GITHUB_SHA is not a full commit id")
+    if not EXPORT_PLATFORM_RE.fullmatch(platform):
+        raise SystemExit(f"{platform!r} is not a platform key")
+    version = environ.get("ImageVersion", "").strip()
+    image_os = environ.get("ImageOS", "").strip()
+    name = image_name_input.strip() or os_release_image_name(os_release)
+    if version.lower() in UNNAMED_IMAGE:
+        raise SystemExit("the runner image declares no ImageVersion (a self-hosted runner or VM does not set it); "
+                         "a record cannot name an image it cannot identify")
+    if name.lower() in UNNAMED_IMAGE:
+        raise SystemExit("the runner image has no name: /etc/os-release gives none, so pass runner_image_name")
+    document = {
+        "platform": platform,
+        "pulp_sha": sha,
+        "runner_image": {"name": name, "version": version},
+        "renderer_asset_name": renderer_asset,
+    }
+    if image_os:
+        document["image_os"] = image_os
+    return document
+
+
+def cmd_export_meta(args: argparse.Namespace) -> int:
+    release = Path("/etc/os-release")
+    text = release.read_text(encoding="utf-8", errors="replace") if release.is_file() else ""
+    document = export_metadata(dict(os.environ), args.platform, args.renderer_asset, args.image_name, text)
+    Path(args.output).write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(f"export_meta={args.output} image={document['runner_image']['name']} {document['runner_image']['version']}")
+    return 0
+
+
 # ── Web split ──────────────────────────────────────────────────────────────
 # The browser build has no unit targets: PulpWebUi.cmake compiles curated
 # core/ source lists straight into one executable. The split reads that
@@ -3172,6 +3231,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("manifest"); p.add_argument("--source-root", required=True); p.add_argument("--build-dir", required=True); p.add_argument("--target", action="append"); p.add_argument("--unit-manifest"); p.add_argument("--unit"); p.add_argument("--output", required=True); p.set_defaults(func=cmd_manifest)
+    p = sub.add_parser("export-meta"); p.add_argument("--platform", required=True); p.add_argument("--renderer-asset", required=True); p.add_argument("--image-name", default=""); p.add_argument("--output", required=True); p.set_defaults(func=cmd_export_meta)
     p = sub.add_parser("web-manifest"); p.add_argument("--source-root", required=True); p.add_argument("--build-dir", required=True); p.add_argument("--executable", required=True); p.add_argument("--unit-manifest", required=True); p.add_argument("--output-dir", required=True); p.add_argument("--ownership-build-dir", required=True); p.add_argument("--entry-prefix", action="append"); p.add_argument("--kept-target", action="append"); p.set_defaults(func=cmd_web_manifest)
     p = sub.add_parser("js-manifest"); p.add_argument("--source-root", required=True); p.add_argument("--unit", default="design-import"); p.add_argument("--output", required=True); p.set_defaults(func=cmd_js_manifest)
     p = sub.add_parser("gate"); p.add_argument("--manifest", action="append", required=True); p.add_argument("--allow", action="append", default=[]); p.add_argument("--allow-include-edge", action="append", default=[], type=_include_edge); p.add_argument("--allow-include-prefix", action="append", default=[]); p.add_argument("--allow-root-prefix", action="append", default=[]); p.add_argument("--allowlist"); p.add_argument("--generate", action="store_true"); p.add_argument("--source-root"); p.add_argument("--build-dir"); p.add_argument("--target", action="append"); p.add_argument("--unit-manifest"); p.set_defaults(func=cmd_gate, report_only=False)
