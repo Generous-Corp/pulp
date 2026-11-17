@@ -29,3 +29,9 @@ if(TARGET pulp-host AND TARGET clap)
                 test_g5_host_event_timestamps_lv2.cpp
         LIBRARIES ${_g5_host_timestamp_libs})
 endif()
+if(TARGET pulp-host)
+    pulp_add_test_suite(pulp-test-host-timeline-binding
+        SOURCES test_host_timeline_binding.cpp harness/rt_allocation_probe.cpp
+        LIBRARIES pulp::host
+        PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
+endif()

@@ -622,6 +622,23 @@ list, check the built worklet module for `getRandomValues`; the
 `test/sample_region_web` browser proof mints IDs inside a worklet and fails
 with the `ReferenceError` if one returns.
 
+### Feed a trigger graph from the host timeline through `HostTimelineBinding`
+
+A trigger graph's host ingress takes the trigger controller's own epoch and
+requires each block to start exactly at the graph's cursor, which counts
+rendered samples. A `HostBlockTimeline` epoch or window start cannot be passed
+to `begin_host_event_block()` directly: after a host gap the timeline jumps
+forward and the graph refuses the block (`OutOfRange`). `HostTimelineBinding`
+maps each window onto the graph's live epoch and cursor and resets the graph,
+the voice bank and staged parameters together on a timeline `NewEpoch`. Two
+rules follow from the rendered-sample clock: graph records are accepted for the
+current block only (a staged future record would be retimed by a later gap),
+and the graph reset runs after the voice epoch is reserved and before any
+commit, because it is the one reset step another thread can make fail (`Busy`
+while the ingress block is open). `VoiceBankBinding::activate()` is a
+control-thread call; the audio owner resets a bank with
+`reserve_event_reset()` / `commit_event_reset()`.
+
 ### Edge probes publish once per block, from the calling thread
 
 Every edge probe kind observes into a per-block stage in the executor and is

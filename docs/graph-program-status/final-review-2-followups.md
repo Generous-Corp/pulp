@@ -33,13 +33,15 @@ save path belong to the open saved-identity change and are not repeated here.
   aliases and an embedded telemetry member), which needs a capability
   fingerprint refresh and a consumer review of its own.
 
-### The private channel is inheritable until the child end is closed
-- Where: `duplex.child` in `child_process_win.cpp` is inheritable from
-  `CreateFileW` until `close_child()`. A `CreateProcess` with
-  `bInheritHandles=TRUE` made outside `ChildProcess` during that window inherits
-  it (in-tree only in CLI delegation paths).
-- Next step: create the child end non-inheritable and mark it inheritable only
-  for the handle list, or state the limit in `docs/reference/runtime.md`.
+### The private channel is inheritable only for the launch call
+- Where: `duplex.child` in `duplex_channel_win.hpp`. It is created
+  non-inheritable and `make_child_inheritable()` runs immediately before the
+  `CreateProcess` in `child_process_win.cpp`; `close_child()` follows the call.
+- Remaining exposure: a `CreateProcess` with `bInheritHandles=TRUE` made outside
+  `ChildProcess` on another thread during that one call still inherits it. The
+  handle-list contract requires the handle to be inheritable then, so this
+  cannot be removed, only kept to the call. No deterministic test can race a
+  foreign launch; the flag states are pinned by `[duplex-inheritance]`.
 
 ### `atomic_signal_fence` is described as a compiler barrier
 - Where: `isolated_clap_endpoint.hpp`. It works with current Clang, but the
