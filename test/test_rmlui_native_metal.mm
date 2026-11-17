@@ -13,6 +13,7 @@
 #include <pulp/rmlui_native/metal_renderer.hpp>
 
 #include <vellum/rmlui/image_compare.hpp>
+#include <vellum/rmlui/native.hpp>
 
 #include <RmlUi/Core/Context.h>
 
@@ -300,4 +301,74 @@ TEST_CASE("a 2x context left at a 1x density ratio fails the parity check",
         INFO("mean " << difference.mean << ", within " << difference.within);
         REQUIRE_FALSE(vellum::rmlui::within_renderer_tolerance(difference));
     }
+}
+
+TEST_CASE("hiding the editor trims the renderer once, and showing it draws the same frame",
+          "[native-surface][rmlui][metal][visibility]") {
+    REQUIRE_METAL();
+#if !(defined(VELLUM_RMLUI_NATIVE_API_VERSION) &&                                                 \
+      (VELLUM_RMLUI_NATIVE_FEATURES & VELLUM_RMLUI_NATIVE_FEATURE_RENDERER_TRIM))
+    SKIP("this Vellum RmlUi SDK has no renderer trim");
+#else
+    @autoreleasepool {
+        [NSApplication sharedApplication];
+        PulpRmlMetalTestWindow* window = [[PulpRmlMetalTestWindow alloc]
+            initWithContentRect:NSMakeRect(0, 0, golden::kWidthPoints, golden::kHeightPoints)
+                      styleMask:NSWindowStyleMaskBorderless
+                        backing:NSBackingStoreBuffered
+                          defer:NO];
+        window.releasedWhenClosed = NO;
+        window.testScale = 1.0;
+        id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+        golden::GoldenAssets assets(PULP_RMLUI_GOLDEN_FONT);
+        vellum::rmlui::MetalRenderInterface renderer(device);
+        REQUIRE(renderer.valid());
+        FrameCapture capture;
+        auto inner = metal_renderer_hooks(renderer);
+        auto hooks = capture.wrap(inner);
+        std::atomic<int> trims{0};
+        hooks.trim = [&] {
+            trims.fetch_add(1);
+            inner.trim();
+        };
+        RmlUiSurfaceOptions options;
+        options.document = golden::kDocuments[0].name;
+        options.font_faces = {golden::kFontAsset};
+        options.device = (__bridge void*)device;
+        options.rate_cap_hz = 120.0;
+        RmlUiSurface ui(assets, renderer, hooks, options);
+        REQUIRE(ui.attach((__bridge void*)window.contentView));
+        const auto capture_frame = [&] {
+            capture.done.store(false);
+            capture.wanted.store(true);
+            ui.request_frame();
+            REQUIRE(wait_for([&] { return capture.done.load(); }));
+            return capture.rgba();
+        };
+        // Two frames, as the reference renders twice, so layout has settled.
+        REQUIRE(wait_for([&] { return ui.frames() >= 1; }));
+        ui.request_frame();
+        REQUIRE(wait_for([&] { return ui.frames() >= 2; }));
+        const auto before = capture_frame();
+        REQUIRE(golden::covered_fraction(before) > 0.9);
+        // Control: the frames left render targets cached, so a trim has
+        // something to release.
+        REQUIRE(renderer.cached_target_bytes() > 0);
+        REQUIRE(trims.load() == 0);
+
+        ui.visibility_changed(false);
+        REQUIRE(trims.load() == 1);
+        REQUIRE(renderer.cached_target_bytes() == 0);
+
+        const auto frames = ui.frames();
+        ui.visibility_changed(true);
+        REQUIRE(wait_for([&] { return ui.frames() > frames; }));
+        REQUIRE(renderer.cached_target_bytes() > 0);
+        const auto after = capture_frame();
+        REQUIRE(after == before);
+        REQUIRE(trims.load() == 1);
+        ui.detach();
+        [window close];
+    }
+#endif
 }
