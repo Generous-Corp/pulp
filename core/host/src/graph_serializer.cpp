@@ -42,6 +42,7 @@
 #include <numeric>
 #include <optional>
 #include <queue>
+#include <set>
 #include <sstream>
 #include <tuple>
 #include <unordered_map>
@@ -60,6 +61,7 @@ std::atomic<bool> g_fail_next_replace{false};
 std::atomic<bool> g_fail_next_authored_id_plan{false};
 std::atomic<bool> g_fail_next_identity_record{false};
 std::atomic<bool> g_fail_next_document_parse{false};
+std::atomic<bool> g_fail_next_event_rebind{false};
 
 // Bounds nesting depth and object member counts in one linear scan before the
 // document reaches the parser. Each member of an object has exactly one ':'
@@ -665,6 +667,88 @@ GraphDocumentRefusal validate_subgraph_records(const V& records,
         }
     }
     return GraphDocumentRefusal::None;
+}
+
+// The members of one event connection record. A record with any other
+// member is refused, so a field this reader does not restore is never
+// dropped silently.
+constexpr std::string_view kEventConnectionMembers[] = {"producer", "consumer", "source_port",
+                                                        "destination_port", "kind"};
+
+// Event connection records name their producer and consumer by logical
+// identity. Values are data only here; the binding rules (event-capable
+// Custom endpoints, a feed-forward path, one connection per graph) are
+// applied by SignalGraph::connect_graph_event when the document loads.
+template <typename V>
+GraphDocumentRefusal validate_event_connections(const V& records, bool saved_v7,
+                                                const std::unordered_set<std::string>& identities,
+                                                std::string& detail) {
+    if (!saved_v7) {
+        detail = "event_connections requires the saved-identity v7 envelope";
+        return GraphDocumentRefusal::EventConnectionInvalid;
+    }
+    if (!records.isArray()) {
+        detail = "event_connections must be an array of connection records";
+        return GraphDocumentRefusal::EventConnectionInvalid;
+    }
+    std::set<std::tuple<std::string, std::string, std::int64_t, std::int64_t, std::int64_t>> seen;
+    for (std::uint32_t i = 0; i < records.size(); ++i) {
+        const auto& record = records[i];
+        const auto where = "event connection " + std::to_string(i);
+        if (!record.isObject() || record.size() != std::size(kEventConnectionMembers)) {
+            detail = where + " requires exactly producer, consumer, source_port, "
+                             "destination_port and kind";
+            return GraphDocumentRefusal::EventConnectionInvalid;
+        }
+        for (const auto name : kEventConnectionMembers) {
+            if (!record.hasObjectMember(name)) {
+                detail = where + " is missing " + std::string(name);
+                return GraphDocumentRefusal::EventConnectionInvalid;
+            }
+        }
+        if (!is_nonempty_string(record["producer"]) || !is_nonempty_string(record["consumer"])) {
+            detail = where + " producer and consumer must be logical identity strings";
+            return GraphDocumentRefusal::EventConnectionInvalid;
+        }
+        for (const auto name : {"source_port", "destination_port", "kind"}) {
+            if (!is_json_integer(record[name]) || record[name].getInt64() < 0 ||
+                record[name].getInt64() > std::numeric_limits<std::uint8_t>::max()) {
+                detail = where + " " + name + " must be an integer in 0..255";
+                return GraphDocumentRefusal::EventConnectionInvalid;
+            }
+        }
+        const auto producer = std::string(record["producer"].getString());
+        const auto consumer = std::string(record["consumer"].getString());
+        for (const auto* endpoint : {&producer, &consumer}) {
+            if (!identities.contains(*endpoint)) {
+                detail = where + " names unknown logical identity " + *endpoint;
+                return GraphDocumentRefusal::EventConnectionDangling;
+            }
+        }
+        if (!seen.emplace(producer, consumer, record["source_port"].getInt64(),
+                          record["destination_port"].getInt64(), record["kind"].getInt64())
+                 .second) {
+            detail = where + " repeats the connection " + producer + " -> " + consumer;
+            return GraphDocumentRefusal::EventConnectionDuplicate;
+        }
+    }
+    return GraphDocumentRefusal::None;
+}
+
+const char* event_binding_name(GraphEventBindingResult result) noexcept {
+    switch (result) {
+    case GraphEventBindingResult::Accepted:
+        return "accepted";
+    case GraphEventBindingResult::Cardinality:
+        return "cardinality";
+    case GraphEventBindingResult::Binding:
+        return "binding";
+    case GraphEventBindingResult::Feedback:
+        return "feedback";
+    case GraphEventBindingResult::Mode:
+        return "mode";
+    }
+    return "binding";
 }
 
 const char* format_str(PluginFormat f) {
@@ -1399,6 +1483,10 @@ void GraphSerializerTestAccess::fail_next_document_parse() noexcept {
     g_fail_next_document_parse.store(true, std::memory_order_release);
 }
 
+void GraphSerializerTestAccess::fail_next_event_rebind() noexcept {
+    g_fail_next_event_rebind.store(true, std::memory_order_release);
+}
+
 const char* graph_document_refusal_name(GraphDocumentRefusal refusal) noexcept {
     switch (refusal) {
     case GraphDocumentRefusal::None:
@@ -1443,6 +1531,12 @@ const char* graph_document_refusal_name(GraphDocumentRefusal refusal) noexcept {
         return "node_id_invalid";
     case GraphDocumentRefusal::MemberLimitExceeded:
         return "member_limit_exceeded";
+    case GraphDocumentRefusal::EventConnectionInvalid:
+        return "event_connection_invalid";
+    case GraphDocumentRefusal::EventConnectionDangling:
+        return "event_connection_dangling";
+    case GraphDocumentRefusal::EventConnectionDuplicate:
+        return "event_connection_duplicate";
     case GraphDocumentRefusal::AllocationFailed:
         return "allocation_failed";
     }
@@ -1775,9 +1869,19 @@ GraphDocumentInspection GraphSerializer::inspect_document(std::string_view json)
                 if (result.refusal != GraphDocumentRefusal::None)
                     return result;
             }
+            if (root.hasObjectMember("event_connections")) {
+                result.refusal = validate_event_connections(root["event_connections"], saved_v7,
+                                                            known, result.detail);
+                if (result.refusal != GraphDocumentRefusal::None)
+                    return result;
+            }
         } else if (root.hasObjectMember("subgraphs")) {
             result.refusal = GraphDocumentRefusal::SubgraphRecordInvalid;
             result.detail = "subgraph records require a saved-identity envelope";
+            return result;
+        } else if (root.hasObjectMember("event_connections")) {
+            result.refusal = GraphDocumentRefusal::EventConnectionInvalid;
+            result.detail = "event_connections requires the saved-identity v7 envelope";
             return result;
         }
         if (format_version == 0 && profile.empty()) {
@@ -2346,6 +2450,24 @@ saved_identity_document(const SignalGraph& graph,
         logical.addMember("identities", identities);
         root.addMember("logical_identities", logical);
         root.addMember("bindings", bindings);
+        // The authored event binding only; published events, traces and
+        // queue contents belong to a prepared generation and are never saved.
+        // A graph without one writes no member, so its document is unchanged.
+        if (const auto edge = graph.graph_event_edge()) {
+            const auto* producer = graph.node(edge->producer);
+            const auto* consumer = graph.node(edge->consumer);
+            if (producer == nullptr || consumer == nullptr)
+                return {};
+            auto record = choc::value::createObject("EventConnection");
+            record.addMember("producer", producer->authored_id.str());
+            record.addMember("consumer", consumer->authored_id.str());
+            record.addMember("source_port", static_cast<int64_t>(edge->source_port));
+            record.addMember("destination_port", static_cast<int64_t>(edge->destination_port));
+            record.addMember("kind", static_cast<int64_t>(edge->kind));
+            auto events = choc::value::createEmptyArray();
+            events.addArrayElement(record);
+            root.addMember("event_connections", events);
+        }
         return choc::json::toString(root, true);
     } catch (...) {
         return {};
@@ -2357,7 +2479,7 @@ saved_identity_document(const SignalGraph& graph,
 std::string
 legacy_v6_document(const SignalGraph& graph,
                    const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout) {
-    if (spectral_persistence::contains_spectral_nodes(graph))
+    if (spectral_persistence::contains_spectral_nodes(graph) || graph.graph_event_edge())
         return {};
     const auto raw = plain_document(graph, editor_layout);
     if (raw.empty())
@@ -2414,6 +2536,13 @@ std::string serialize(const SignalGraph& graph,
                       bool saved_identity, std::string* reason) {
     if (reason)
         reason->clear();
+    // Only the saved-identity document names event connection endpoints by
+    // authored ID; any other format would drop the connection.
+    if (!saved_identity && graph.graph_event_edge()) {
+        if (reason)
+            *reason = "a graph event connection persists only in the saved-identity document";
+        return {};
+    }
     if (spectral_persistence::contains_spectral_nodes(graph)) {
         if (saved_identity) {
             if (reason)
@@ -3150,6 +3279,12 @@ GraphSerializer::LoadResult GraphSerializer::load_json_(SignalGraph& graph, cons
                            std::string(kSavedIdentityV7) + " envelope";
             return result;
         }
+    }
+    if (original->isObject() && original->hasObjectMember("event_connections") &&
+        !declares_v7(*original)) {
+        result.error = "event_connection_invalid: event_connections requires the "
+                       "saved-identity v7 envelope";
+        return result;
     }
     if (original->isObject()) {
         // A planning failure (for example an allocation failure) must not
@@ -4165,6 +4300,45 @@ GraphSerializer::LoadResult GraphSerializer::load_json_(SignalGraph& graph, cons
             const auto authored = authored_ids.find(persisted);
             if (node != nullptr && authored != authored_ids.end())
                 node->authored_id = AuthoredNodeId(authored->second);
+        }
+    }
+    if (root.hasObjectMember("event_connections")) {
+        // Rebound last, once every node carries its authored ID and every
+        // connection is restored, so the binding sees the path it requires.
+        // Inspection already refused a malformed, dangling or repeated
+        // record; what remains is the graph's own binding rule.
+        if (g_fail_next_event_rebind.exchange(false, std::memory_order_acq_rel))
+            throw std::bad_alloc();
+        std::unordered_map<std::string, NodeId> live_by_authored;
+        for (const auto& [persisted, live] : id_map)
+            if (const auto authored = authored_ids.find(persisted); authored != authored_ids.end())
+                live_by_authored.emplace(authored->second, live);
+        const auto& events = root["event_connections"];
+        for (std::uint32_t i = 0; i < events.size(); ++i) {
+            const auto& record = events[i];
+            const auto producer = std::string(record["producer"].getString());
+            const auto consumer = std::string(record["consumer"].getString());
+            const auto label = producer + " -> " + consumer;
+            const auto p = live_by_authored.find(producer);
+            const auto c = live_by_authored.find(consumer);
+            if (p == live_by_authored.end() || c == live_by_authored.end()) {
+                result.error =
+                    "event_connection_not_restored: an endpoint of " + label + " was not restored";
+                return result;
+            }
+            GraphAuthoredEventEdge edge;
+            edge.producer = p->second;
+            edge.consumer = c->second;
+            edge.source_port = static_cast<std::uint8_t>(record["source_port"].getInt64());
+            edge.destination_port =
+                static_cast<std::uint8_t>(record["destination_port"].getInt64());
+            edge.kind = static_cast<std::uint8_t>(record["kind"].getInt64());
+            if (const auto bound = graph.connect_graph_event(edge);
+                bound != GraphEventBindingResult::Accepted) {
+                result.error = "event_connection_not_restored: " + label + " was refused (" +
+                               event_binding_name(bound) + ")";
+                return result;
+            }
         }
     }
     result.persisted_node_ids = std::move(id_map);

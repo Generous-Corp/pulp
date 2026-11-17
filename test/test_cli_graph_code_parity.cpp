@@ -383,6 +383,49 @@ TEST_CASE("graph diff compares saved documents by logical identity",
     CHECK(cli_code(one) == "missing_input");
 }
 
+TEST_CASE("graph diff reports a graph event connection by authored identity",
+          "[cli][shellout][graph][parity]") {
+    if (!fs::exists(pulp_binary()))
+        SKIP("pulp not built");
+    const auto dir = unique_temp_dir("pulp-graph-diff-events");
+    fs::create_directories(dir);
+
+    pulp::host::SignalGraph graph;
+    pulp::host::CustomNodeType type;
+    type.type_id = "test.cli.graph-event";
+    type.num_input_ports = type.num_output_ports = 1;
+    type.process_events = [](auto&, const auto&, int, const pulp::host::CustomNodeEventBlock&) {};
+    REQUIRE(graph.register_custom_node_type(type));
+    const auto input = graph.add_input_node(1, "Input");
+    const auto producer = graph.add_custom_node(type.type_id, 1, "Producer");
+    const auto consumer = graph.add_custom_node(type.type_id, 1, "Consumer");
+    REQUIRE(graph.connect(input, 0, producer, 0));
+    REQUIRE(graph.connect(producer, 0, consumer, 0));
+    const auto before = dir / "before.pulpgraph";
+    std::ofstream(before, std::ios::binary)
+        << pulp::host::GraphSerializer::to_saved_document(graph);
+    REQUIRE(graph.connect_graph_event({producer, consumer}) ==
+            pulp::host::GraphEventBindingResult::Accepted);
+    const auto after = dir / "after.pulpgraph";
+    std::ofstream(after, std::ios::binary) << pulp::host::GraphSerializer::to_saved_document(graph);
+    const auto ids = pulp::host::GraphSerializer::saved_node_identities(graph);
+    const auto key = ids.at(producer) + "[0] => " + ids.at(consumer) + "[0]";
+
+    const auto changed = run_pulp({"graph", "diff", before.string(), after.string(), "--json"});
+    INFO(changed.stdout_output << changed.stderr_output);
+    REQUIRE(changed.exit_code == 0);
+    const auto report = choc::json::parse(changed.stdout_output);
+    CHECK_FALSE(report["equal"].getBool());
+    REQUIRE(report["event_connections"]["added"].size() == 1);
+    CHECK(std::string(report["event_connections"]["added"][0].getString()) == key);
+    CHECK(report["sections_changed"].size() == 0);
+    CHECK(report["connections"]["added"].size() == 0);
+
+    const auto text = run_pulp({"graph", "diff", after.string(), before.string()});
+    REQUIRE(text.exit_code == 0);
+    CHECK(text.stdout_output.find("- event connection " + key) != std::string::npos);
+}
+
 TEST_CASE("graph save --saved-identity refuses a plain document that loses an edge",
           "[cli][shellout][graph][parity]") {
     if (!fs::exists(pulp_binary()))
