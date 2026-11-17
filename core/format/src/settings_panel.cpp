@@ -402,13 +402,14 @@ void SettingsPanel::apply_config() {
 }
 
 void SettingsPanel::poll() {
-    if (devices_changed_.exchange(false, std::memory_order_relaxed)) {
+    const bool devices_changed = devices_changed_.exchange(false, std::memory_order_relaxed);
+    const bool midi_changed = midi_changed_.exchange(false, std::memory_order_relaxed);
+    if (devices_changed || midi_changed) {
+        // Both systems can report one hotplug transaction before the next UI
+        // tick. Enumerate them together so the model resolves one coherent
+        // snapshot and each backend is queried only once per poll.
         model_.refresh(audio_sys_, midi_sys_);
         sync_selectors();
-    }
-    if (midi_changed_.exchange(false, std::memory_order_relaxed)) {
-        model_.refresh(audio_sys_, midi_sys_);
-        sync_midi_list();
     }
 
     // Device and MIDI hotplug are event-driven and must stay current while the
