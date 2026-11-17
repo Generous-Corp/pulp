@@ -273,6 +273,8 @@ void StandaloneSettingsModel::select_midi(int index) {
     if (index < 0)
         return;
     midi_selected_ = index;
+    // An explicit choice, even of the None row, is no longer a placeholder.
+    midi_none_implicit_ = false;
     if (options_.midi_includes_none) {
         config_.midi_input_id = index == 0 ? std::string(kNoMidiInputId)
                                            : midi_ports_[static_cast<size_t>(index - 1)].id;
@@ -328,6 +330,9 @@ StandaloneConfig StandaloneSettingsModel::config() const {
         }
     } else if (midi_selected_ >= 0 && midi_selected_ < static_cast<int>(midi_ports_.size())) {
         out.midi_input_id = midi_ports_[static_cast<size_t>(midi_selected_)].id;
+    } else if (midi_selected_ < 0 && config_.midi_input_id == kNoMidiInputId) {
+        // The variant without a None row still keeps an existing "no MIDI" choice.
+        out.midi_input_id = kNoMidiInputId;
     }
     return out;
 }

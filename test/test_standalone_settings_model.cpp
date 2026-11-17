@@ -632,3 +632,30 @@ TEST_CASE("stop() and destruction close only this app's settings window",
     app_b.stop();
     REQUIRE(closed_b == 1);
 }
+
+TEST_CASE("choosing None with no ports keeps the no-MIDI sentinel",
+          "[standalone][settings-model][midi]") {
+    Rig rig;
+    rig.midi.ports.clear();
+    rig.load({});
+    REQUIRE(rig.model.config().midi_input_id.empty());
+    rig.model.select_midi(0);
+    REQUIRE(rig.model.config().midi_input_id == StandaloneConfig::kNoMidiInput);
+}
+
+TEST_CASE("the no-None variant keeps an existing no-MIDI choice through an unrelated Apply",
+          "[standalone][settings-model][midi]") {
+    Rig rig;
+    StandaloneSettingsModel::Options options;
+    options.midi_includes_none = false;
+    StandaloneSettingsModel panel{options};
+    StandaloneConfig cfg;
+    cfg.midi_input_id = StandaloneConfig::kNoMidiInput;
+    panel.set_config(cfg);
+    panel.refresh(&rig.audio, &rig.midi);
+    REQUIRE(panel.midi_selected() == -1);
+    panel.select_sample_rate(0); // unrelated change
+    REQUIRE(panel.config().midi_input_id == StandaloneConfig::kNoMidiInput);
+    panel.select_midi(1);
+    REQUIRE(panel.config().midi_input_id == "m2");
+}
