@@ -12,19 +12,10 @@ needs.
 
 ### One scalar Control library instead of two
 
-`core/signal/include/pulp/signal/control_math.hpp` and
-`core/signal/include/pulp/signal/indexed_control.hpp` both export finite
-min/max, safe divide and integrator steps under near-identical names
-(`control_min` / `control_minimum`, `safe_control_divide` /
-`control_safe_divide`, `ControlIntegratorT` / `integrator_step`).
-`signal::Hysteresis` and `signal::Slew` have no production user; the graph
-nodes use `HystereticTriggerDetect` and `SlewLimiterT`.
-
-The behavioural part of this finding is fixed: the map-clip and hysteresis
-nodes now treat non-finite input as `map_clip()` and `hysteresis_step()` do,
-and a test drives the node and the pure step with the same input. Deleting or
-aliasing one set of public names is an API removal and needs the owner to pick
-the surviving names.
+Resolved by consolidation without removal: `control_math.hpp` is canonical
+and the redundant `indexed_control.hpp` spellings are deprecated forwarding
+wrappers. Their removal waits for an announced breaking SDK release; see
+`D3-scalar-control-consolidation.md`.
 
 ### Result vocabularies
 

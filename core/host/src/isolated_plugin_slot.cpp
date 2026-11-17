@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "isolated_clap_channel.hpp"
 #include "isolated_clap_endpoint.hpp"
+#include "isolated_clap_windows_channel.hpp"
 #include "plugin_slot_process_request.hpp"
 #include <algorithm>
 #include <array>
@@ -16,16 +17,41 @@
 #include <pulp/runtime/memory_mapped_file.hpp>
 #include <thread>
 
-#if defined(PULP_ISOLATED_CLAP_SUPPORTED) && defined(__APPLE__) && defined(__aarch64__)
+// The live isolation paths: a file-backed mapping and a socketpair on Apple
+// arm64, an unnamed section and a duplex pipe on Windows x64. Each shares the
+// protocol, callback endpoint and retained process custody.
+#if defined(PULP_ISOLATED_CLAP_SUPPORTED) && defined(PULP_ISOLATED_CLAP_POSIX_TRANSPORT)
+#define PULP_ISOLATED_CLAP_LIVE 1
+#define PULP_ISOLATED_CLAP_LIVE_POSIX 1
 #include <fcntl.h>
 #include <pulp/platform/child_process.hpp>
 #include <sys/stat.h>
 #include <unistd.h>
+#elif defined(PULP_ISOLATED_CLAP_SUPPORTED) && defined(PULP_ISOLATED_CLAP_WINDOWS_TRANSPORT)
+#define PULP_ISOLATED_CLAP_LIVE 1
+#define PULP_ISOLATED_CLAP_LIVE_WINDOWS 1
+#include <pulp/platform/child_process.hpp>
 #endif
 
 namespace pulp::host {
 using namespace isolation;
+#if defined(PULP_ISOLATED_CLAP_LIVE_WINDOWS)
+using namespace isolation::windows;
+#endif
 using Clock = std::chrono::steady_clock;
+
+namespace {
+#if defined(PULP_ISOLATED_CLAP_LIVE_POSIX)
+using NativeChannel = int;
+#elif defined(PULP_ISOLATED_CLAP_LIVE_WINDOWS)
+using NativeChannel = std::intptr_t;
+#endif
+#if defined(PULP_ISOLATED_CLAP_LIVE)
+NativeChannel native_channel(const platform::ChildProcessInputChannel& channel) noexcept {
+    return static_cast<NativeChannel>(channel.native_handle());
+}
+#endif
+} // namespace
 
 namespace {
 // One lifecycle exchange with the worker (prepare, checkpoint, restore,
@@ -45,6 +71,9 @@ namespace detail {
 struct IsolatedClapSession {
     IsolatedClapOptions options;
     runtime::MemoryMappedFile mapping;
+#if defined(PULP_ISOLATED_CLAP_LIVE_WINDOWS)
+    SharedSection section;
+#endif
     Mapping* shared = nullptr;
     std::string mapping_path;
     const std::uint64_t generation;
@@ -60,7 +89,7 @@ struct IsolatedClapSession {
     std::mutex control_mutex;
     std::vector<std::uint8_t> checkpoint_bytes;
     std::string checkpoint_digest;
-#if defined(PULP_ISOLATED_CLAP_SUPPORTED) && defined(__APPLE__) && defined(__aarch64__)
+#if defined(PULP_ISOLATED_CLAP_LIVE)
     platform::RetainedProcessCustody custody;
     platform::ChildProcess process;
     std::optional<platform::ChildProcessInputChannel> channel;
@@ -68,7 +97,7 @@ struct IsolatedClapSession {
     explicit IsolatedClapSession(IsolatedClapOptions config, std::uint64_t id)
         : options(std::move(config)), generation(id) {}
     ~IsolatedClapSession() {
-#if defined(PULP_ISOLATED_CLAP_SUPPORTED) && defined(__APPLE__) && defined(__aarch64__)
+#if defined(PULP_ISOLATED_CLAP_LIVE_POSIX)
         if (!mapping_path.empty())
             ::unlink(mapping_path.c_str());
 #endif
@@ -91,7 +120,7 @@ struct IsolatedClapSession {
     }
     bool exchange(Command command, std::vector<std::uint8_t>* received = nullptr,
                   const std::vector<std::uint8_t>* sent = nullptr) {
-#if defined(PULP_ISOLATED_CLAP_SUPPORTED) && defined(__APPLE__) && defined(__aarch64__)
+#if defined(PULP_ISOLATED_CLAP_LIVE)
         std::lock_guard lock(control_mutex);
         if (!channel || cleanup.load(std::memory_order_acquire) != IsolationCleanup::pending ||
             fault.load(std::memory_order_acquire) != 0)
@@ -101,7 +130,7 @@ struct IsolatedClapSession {
         request.command = command;
         request.generation = generation;
         request.payload_bytes = sent ? sent->size() : 0;
-        const auto fd = static_cast<int>(channel->native_handle());
+        const auto fd = native_channel(*channel);
         ControlRecord reply;
         bool ok = send_record(fd, request, deadline);
         if (ok && sent)
@@ -169,7 +198,7 @@ void release_reservation(const std::shared_ptr<Session>& session) {
 
 void cleanup_session(const std::shared_ptr<Session>& session,
                      Clock::time_point deadline = Clock::now() + kDefaultCleanupDeadline) {
-#if defined(PULP_ISOLATED_CLAP_SUPPORTED) && defined(__APPLE__) && defined(__aarch64__)
+#if defined(PULP_ISOLATED_CLAP_LIVE)
     std::lock_guard lock(session->control_mutex);
     const auto observed = session->custody.retained_process_observation();
     // The reservation is released before cleanup reads complete: reserve()
@@ -198,7 +227,7 @@ void cleanup_session(const std::shared_ptr<Session>& session,
 }
 
 void supervise(std::shared_ptr<Session> session) {
-#if defined(PULP_ISOLATED_CLAP_SUPPORTED) && defined(__APPLE__) && defined(__aarch64__)
+#if defined(PULP_ISOLATED_CLAP_LIVE)
     while (!session->stop_requested.load(std::memory_order_acquire) &&
            session->fault.load(std::memory_order_acquire) == 0) {
         const auto observation = session->custody.retained_process_observation();
@@ -372,7 +401,29 @@ class IsolatedSlot final : public detail::RequestDrivenSlot {
     bool ever_prepared_ = false;
 };
 
-#if defined(PULP_ISOLATED_CLAP_SUPPORTED) && defined(__APPLE__) && defined(__aarch64__)
+#if defined(PULP_ISOLATED_CLAP_LIVE)
+// The identity fields both transports bind in the hello record.
+ControlRecord bound_hello(const Session& session) {
+    ControlRecord hello;
+    hello.generation = session.generation;
+    hello.payload_bytes = kMappingBytes;
+    std::copy_n(session.options.plugin_sha256.data(), 64, hello.plugin_sha256.data());
+    std::copy_n(session.options.worker_sha256.data(), 64, hello.worker_sha256.data());
+    constexpr std::string_view build = PULP_CLAP_WORKER_BUILD;
+    std::copy(build.begin(), build.end(), hello.build.begin());
+    return hello;
+}
+
+// After hello the worker loads the vendor module; it reports the load with
+// result 2 under its own lifecycle deadline.
+bool receive_load_report(NativeChannel channel, const ControlRecord& hello) {
+    ControlRecord reply;
+    return receive_record(channel, reply, Clock::now() + kLifecycleExchangeDeadline) &&
+           reply.result == 2 && reply.generation == hello.generation && reply.build == hello.build;
+}
+#endif
+
+#if defined(PULP_ISOLATED_CLAP_LIVE_POSIX)
 bool launch(const std::shared_ptr<Session>& session) {
     std::array<char, 256> path{};
     const auto temporary = (std::filesystem::temp_directory_path() / "pulp-clap-XXXXXXXX").string();
@@ -408,16 +459,10 @@ bool launch(const std::shared_ptr<Session>& session) {
             int no_sigpipe = 1;
             if (::setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &no_sigpipe, sizeof(no_sigpipe)))
                 return false;
-            ControlRecord hello;
-            hello.generation = session->generation;
-            hello.payload_bytes = kMappingBytes;
+            ControlRecord hello = bound_hello(*session);
             hello.volume = identity.volume;
             hello.file = identity.file;
             hello.file_generation = identity.generation;
-            std::copy_n(session->options.plugin_sha256.data(), 64, hello.plugin_sha256.data());
-            std::copy_n(session->options.worker_sha256.data(), 64, hello.worker_sha256.data());
-            constexpr std::string_view build = PULP_CLAP_WORKER_BUILD;
-            std::copy(build.begin(), build.end(), hello.build.begin());
             ControlRecord reply;
             if (!send_record(fd, hello, deadline) || !receive_record(fd, reply, deadline) ||
                 !hello_reply_matches(hello, reply, static_cast<std::uint64_t>(pid)))
@@ -425,10 +470,36 @@ bool launch(const std::shared_ptr<Session>& session) {
             if (::unlink(session->mapping_path.c_str()) != 0)
                 return false;
             session->mapping_path.clear();
-            // The load phase receives its own five-second control deadline.
-            deadline = Clock::now() + kLifecycleExchangeDeadline;
-            if (!receive_record(fd, reply, deadline) || reply.result != 2 ||
-                reply.generation != hello.generation || reply.build != hello.build)
+            if (!receive_load_report(fd, hello))
+                return false;
+            session->channel.emplace(std::move(channel));
+            return true;
+        },
+        options);
+}
+#elif defined(PULP_ISOLATED_CLAP_LIVE_WINDOWS)
+bool launch(const std::shared_ptr<Session>& session) {
+    // The section exists before the worker does and reaches it only as a handle
+    // duplicated into that one process during hello.
+    if (!session->section.create(session->generation))
+        return false;
+    session->shared = session->section.mapping();
+    platform::ProcessOptions options;
+    options.capture_stdout = options.capture_stderr = false;
+    options.standard_input_timeout_ms = 5000;
+    return session->process.start_retained_with_standard_input_channel(
+        session->custody, session->options.worker_path,
+        {session->options.selection.path, session->options.selection.type.descriptor_id,
+         kProfileName},
+        [session](int pid, platform::ChildProcessInputChannel channel, Deadline deadline) {
+            session->worker_pid = pid;
+            const auto handle = native_channel(channel);
+            const ControlRecord hello = bound_hello(*session);
+            if (!parent_hello(handle, pid, session->section, hello, deadline))
+                return false;
+            // parent_hello sent the record with the duplicated section value; the
+            // load report echoes its generation and build.
+            if (!receive_load_report(handle, hello))
                 return false;
             session->channel.emplace(std::move(channel));
             return true;
@@ -504,7 +575,7 @@ std::vector<std::uint8_t> IsolatedClapControl::accepted_checkpoint() const {
 }
 
 IsolatedClapResult load_isolated_clap(const IsolatedClapOptions& requested) {
-#if defined(PULP_ISOLATED_CLAP_SUPPORTED) && defined(__APPLE__) && defined(__aarch64__)
+#if defined(PULP_ISOLATED_CLAP_LIVE)
     if (validate_plugin_type_identity(requested.selection.type) ||
         requested.plugin_sha256.size() != 64 || requested.worker_sha256.size() != 64)
         return {{}, {}, IsolationReason::identity_mismatch};
@@ -514,10 +585,17 @@ IsolatedClapResult load_isolated_clap(const IsolatedClapOptions& requested) {
     if (ec)
         return {{}, {}, IsolationReason::identity_mismatch};
     options.worker_path = std::filesystem::canonical(options.worker_path, ec).string();
+#if defined(PULP_ISOLATED_CLAP_LIVE_POSIX)
     struct stat worker_stat{};
     if (ec || ::stat(options.worker_path.c_str(), &worker_stat) || !S_ISREG(worker_stat.st_mode) ||
         (worker_stat.st_mode & (S_IWGRP | S_IWOTH)) || ::access(options.worker_path.c_str(), X_OK))
         return {{}, {}, IsolationReason::worker_missing};
+#else
+    // Windows has no mode bits to check here; the worker is bound by its hash
+    // below, which the worker proves again from its own module before loading.
+    if (ec || !std::filesystem::is_regular_file(options.worker_path, ec) || ec)
+        return {{}, {}, IsolationReason::worker_missing};
+#endif
     if (runtime::sha256_file_hex(clap_hash_path(options.selection.path), std::uint64_t{1} << 32) !=
             options.plugin_sha256 ||
         runtime::sha256_file_hex(options.worker_path, std::uint64_t{1} << 32) !=

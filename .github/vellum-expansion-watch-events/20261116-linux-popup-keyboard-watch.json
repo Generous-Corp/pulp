@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261116-linux-popup-keyboard-watch",
+  "created_at": "2026-11-16T22:15:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "The Pulp-owned X11 plugin host borrows keyboard focus only for an open native dropdown, forwards unhandled keys to the prior DAW window, restores focus on close, and publishes native hover cursors. No framework source authority changes.",
+  "tests": [
+    "X11 popup keyboard navigation restores DAW focus and forwards transport",
+    "X11 plugin host routes pointer input through nested editor windows"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

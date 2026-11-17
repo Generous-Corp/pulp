@@ -195,7 +195,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         'include': 'pulp/host/isolated_plugin_slot.hpp',
-        'fingerprint': 'sha256:80ec7a2ac99dab05a379b47ad2d0d4b49a5a31e8dd1c8e15765d5002d748957a',
+        'fingerprint': 'sha256:a3bb9a088ea5c179c217c5d8469dcd748527ff0fd1ade401ca3f2feb82a4fd82',
         'disposition': 'infrastructure',
         'capability_keys': [],
         'rationale': 'Opt-in MacClapStereo64V1 hosted worker, bounded lifecycle control and control-thread checkpoint recovery of a terminal graph node; no generator capability or full realtime qualification claim.',
@@ -341,7 +341,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/indexed_control.hpp",
-        "fingerprint": "sha256:4481ae3f91a73bc7ace938ae6ab92579ceb37a1320db1e6433e35157f808507c",
+        "fingerprint": "sha256:f0238a4e2e3013e9d409b4e84efa6cf1f5cb78e7a63540dc4e2e6c59422d7c53",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -363,7 +363,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/control_math.hpp",
-        "fingerprint": "sha256:51948a38e0ccfa2804f44fa2a344fcd17d51cac71951163f64d78f169ea8da33",
+        "fingerprint": "sha256:04807e619e5252d20b2c1d71a2e0d5704bfa773628ce445ae04ee5ed22d1cd1c",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

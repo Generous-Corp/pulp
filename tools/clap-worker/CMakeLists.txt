@@ -10,7 +10,12 @@ target_include_directories(pulp-clap-worker PRIVATE "${PULP_ROOT_DIR}/core/host/
 target_link_libraries(pulp-clap-worker PRIVATE pulp::host pulp::runtime)
 target_compile_definitions(pulp-clap-worker PRIVATE
     PULP_CLAP_WORKER_BUILD="${_clap_worker_fingerprint}")
-if(APPLE AND NOT IOS AND PULP_HAS_CLAP AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+set(_pulp_isolated_clap_windows OFF)
+if(WIN32 AND PULP_HAS_CLAP AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
+    set(_pulp_isolated_clap_windows ON)
+endif()
+if((APPLE AND NOT IOS AND PULP_HAS_CLAP AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64") OR
+   _pulp_isolated_clap_windows)
     target_compile_definitions(pulp-clap-worker PRIVATE PULP_ISOLATED_CLAP_SUPPORTED=1)
 endif()
 if(PULP_HAS_CLAP)
@@ -97,4 +102,35 @@ if(PULP_BUILD_TESTS AND APPLE AND PULP_HAS_CLAP AND CMAKE_SYSTEM_PROCESSOR MATCH
             "-DPULP_PARENT_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS} ${_pulp_g9_instrumentation_link_flags}"
             -P "${PULP_ROOT_DIR}/test/cmake/test_g9_isolated_clap_sdk_consumer.cmake")
     set_tests_properties(cmake-g9-isolated-clap-sdk-consumer PROPERTIES TIMEOUT 600 LABELS "installed-sdk;host")
+endif()
+
+# The Windows worker suite: the production worker, a mismatched-build worker
+# and the lifecycle fixture as a plain .clap module, driven through the public
+# loader. It is owner-run on the Windows Server VM (docs/guides/isolated-clap-worker.md).
+if(PULP_BUILD_TESTS AND _pulp_isolated_clap_windows)
+    add_executable(pulp-test-clap-worker-mismatched clap_worker_main.cpp)
+    target_include_directories(pulp-test-clap-worker-mismatched PRIVATE "${PULP_ROOT_DIR}/core/host/src")
+    target_link_libraries(pulp-test-clap-worker-mismatched PRIVATE pulp::host pulp::runtime clap)
+    target_compile_definitions(pulp-test-clap-worker-mismatched PRIVATE
+        PULP_ISOLATED_CLAP_SUPPORTED=1
+        PULP_CLAP_WORKER_BUILD="0000000000000000000000000000000000000000000000000000000000000000")
+    add_library(pulp-isolated-clap-fixture MODULE "${PULP_ROOT_DIR}/test/fixtures/isolated_clap/plugin.cpp")
+    target_link_libraries(pulp-isolated-clap-fixture PRIVATE clap)
+    set_target_properties(pulp-isolated-clap-fixture PROPERTIES PREFIX "" SUFFIX ".clap")
+    add_executable(pulp-test-isolated-clap-worker-windows
+        "${PULP_ROOT_DIR}/test/test_isolated_clap_worker_windows.cpp"
+        "${PULP_ROOT_DIR}/test/fixtures/isolated_clap/windows_callback_traps.cpp"
+        "${PULP_ROOT_DIR}/test/harness/rt_allocation_probe.cpp")
+    target_link_libraries(pulp-test-isolated-clap-worker-windows PRIVATE pulp::host Catch2::Catch2WithMain)
+    target_include_directories(pulp-test-isolated-clap-worker-windows PRIVATE
+        "${PULP_ROOT_DIR}/core/host/src" "${PULP_ROOT_DIR}/test")
+    target_compile_definitions(pulp-test-isolated-clap-worker-windows PRIVATE
+        PULP_ISOLATED_CLAP_FIXTURE="$<TARGET_FILE:pulp-isolated-clap-fixture>"
+        PULP_CLAP_WORKER_PATH="$<TARGET_FILE:pulp-clap-worker>"
+        PULP_MISMATCHED_CLAP_WORKER_PATH="$<TARGET_FILE:pulp-test-clap-worker-mismatched>")
+    add_dependencies(pulp-test-isolated-clap-worker-windows
+        pulp-isolated-clap-fixture pulp-clap-worker pulp-test-clap-worker-mismatched)
+    catch_discover_tests(pulp-test-isolated-clap-worker-windows PROPERTIES
+        TIMEOUT 120
+        RESOURCE_LOCK pulp_realtime_worker_pool)
 endif()

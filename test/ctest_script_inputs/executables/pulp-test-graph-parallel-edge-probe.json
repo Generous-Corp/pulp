@@ -1,0 +1,16 @@
+{
+ "name": "pulp-test-graph-parallel-edge-probe",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [],
+  "sources": [],
+  "spawning_sources": [
+   "test/test_graph_parallel_edge_probe.cpp"
+  ],
+  "spawns": "undeclared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}

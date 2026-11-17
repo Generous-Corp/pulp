@@ -19,6 +19,30 @@ bool valid_probe_port(const SignalGraph& graph, const PortHandle& handle, bool o
     });
 }
 
+// Probes resolve their plan indices on the serial routed plan. The levelized
+// parallel walk runs a reuse-free snapshot built from the same graph, so when
+// it is live the edge must name the same endpoints at the same index there;
+// otherwise the parallel walk would observe a different edge, and attach
+// refuses.
+template <typename Compiled>
+bool parallel_plan_agrees(const Compiled& cg, std::uint32_t edge) noexcept {
+    if (!cg.routed.parallel.valid)
+        return true;
+    const auto& serial = cg.routed.serial.snapshot.plan();
+    const auto& parallel = cg.routed.parallel.snapshot.plan();
+    if (edge >= serial.connections.size() || edge >= parallel.connections.size() ||
+        serial.nodes.size() != parallel.nodes.size())
+        return false;
+    const auto& a = serial.connections[edge];
+    const auto& b = parallel.connections[edge];
+    return a.source_index == b.source_index && a.dest_index == b.dest_index &&
+           a.source_port == b.source_port && a.dest_port == b.dest_port &&
+           a.feedback == b.feedback && a.kind == b.kind &&
+           a.automation.param_id == b.automation.param_id &&
+           serial.nodes[a.source_index].id == parallel.nodes[b.source_index].id &&
+           serial.nodes[a.dest_index].id == parallel.nodes[b.dest_index].id;
+}
+
 // Free probes displaced from the live snapshot once nothing can still hold
 // them. process() pins through the slot reader count; ExecutionSnapshot renders
 // and other keepalives hold the snapshot itself, so a use count above the
@@ -68,10 +92,8 @@ SignalGraph::EdgeProbeStatus SignalGraph::attach_audio_edge_probe(const PortHand
     const auto& cg = live_slot_.live();
     if (!cg)
         return EdgeProbeStatus::Unprepared;
-    if (!canonical_executor_routing_enabled() || parallel_routing_enabled() ||
-        anticipation_enabled() || !cg->routed.serial.valid ||
-        cg->pdc_execution_domain == PdcExecutionDomain::Legacy ||
-        cg->pdc_execution_domain == PdcExecutionDomain::RoutedParallel)
+    if (!canonical_executor_routing_enabled() || anticipation_enabled() ||
+        !cg->routed.serial.valid || cg->pdc_execution_domain == PdcExecutionDomain::Legacy)
         return EdgeProbeStatus::UnsupportedExecution;
     if (source.kind != PortKind::Audio || destination.kind != PortKind::Audio)
         return EdgeProbeStatus::UnsupportedKind;
@@ -101,6 +123,8 @@ SignalGraph::EdgeProbeStatus SignalGraph::attach_audio_edge_probe(const PortHand
             // Replacing a published probe parks it; refuse rather than grow
             // the parked list while a snapshot holder blocks reclamation.
             reclaim_parked_edge_probes(live_slot_);
+            if (!parallel_plan_agrees(*cg, j))
+                return EdgeProbeStatus::UnsupportedExecution;
             if (!cg->audio_edge_probe.can_park())
                 return EdgeProbeStatus::Busy;
             auto probe = std::make_unique<format::GraphRuntimeAudioEdgeProbe>();
@@ -180,10 +204,8 @@ SignalGraph::EdgeProbeStatus SignalGraph::attach_control_edge_probe(const PortHa
     const auto& cg = live_slot_.live();
     if (!cg)
         return EdgeProbeStatus::Unprepared;
-    if (!canonical_executor_routing_enabled() || parallel_routing_enabled() ||
-        anticipation_enabled() || !cg->routed.serial.valid ||
-        cg->pdc_execution_domain == PdcExecutionDomain::Legacy ||
-        cg->pdc_execution_domain == PdcExecutionDomain::RoutedParallel)
+    if (!canonical_executor_routing_enabled() || anticipation_enabled() ||
+        !cg->routed.serial.valid || cg->pdc_execution_domain == PdcExecutionDomain::Legacy)
         return EdgeProbeStatus::UnsupportedExecution;
     if (source.kind != PortKind::Audio)
         return EdgeProbeStatus::UnsupportedKind;
@@ -207,6 +229,8 @@ SignalGraph::EdgeProbeStatus SignalGraph::attach_control_edge_probe(const PortHa
             // Replacing a published probe parks it; refuse rather than grow
             // the parked list while a snapshot holder blocks reclamation.
             reclaim_parked_edge_probes(live_slot_);
+            if (!parallel_plan_agrees(*cg, j))
+                return EdgeProbeStatus::UnsupportedExecution;
             if (!cg->control_edge_probe.can_park())
                 return EdgeProbeStatus::Busy;
             auto probe = std::make_unique<format::GraphRuntimeControlEdgeProbe>();
@@ -280,10 +304,8 @@ SignalGraph::EdgeProbeStatus SignalGraph::attach_event_edge_probe(const PortHand
     const auto& cg = live_slot_.live();
     if (!cg)
         return EdgeProbeStatus::Unprepared;
-    if (!canonical_executor_routing_enabled() || parallel_routing_enabled() ||
-        anticipation_enabled() || !cg->routed.serial.valid ||
-        cg->pdc_execution_domain == PdcExecutionDomain::Legacy ||
-        cg->pdc_execution_domain == PdcExecutionDomain::RoutedParallel)
+    if (!canonical_executor_routing_enabled() || anticipation_enabled() ||
+        !cg->routed.serial.valid || cg->pdc_execution_domain == PdcExecutionDomain::Legacy)
         return EdgeProbeStatus::UnsupportedExecution;
     if (source.kind != PortKind::Midi || destination.kind != PortKind::Midi)
         return EdgeProbeStatus::UnsupportedKind;
@@ -302,6 +324,8 @@ SignalGraph::EdgeProbeStatus SignalGraph::attach_event_edge_probe(const PortHand
             // Replacing a published probe parks it; refuse rather than grow
             // the parked list while a snapshot holder blocks reclamation.
             reclaim_parked_edge_probes(live_slot_);
+            if (!parallel_plan_agrees(*cg, j))
+                return EdgeProbeStatus::UnsupportedExecution;
             if (!cg->event_edge_probe.can_park())
                 return EdgeProbeStatus::Busy;
             auto probe = std::make_unique<format::GraphRuntimeEventEdgeProbe>();

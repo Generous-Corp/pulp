@@ -1837,10 +1837,10 @@ class GateFailClosedTests(unittest.TestCase):
         self.assertEqual(rc, 0, out)
 
     def test_schema_is_required(self):
-        for schema in (..., "garbage", "pulp.vellum.closure.v2"):
+        for schema in (..., "garbage", "pulp.vellum.closure.v3"):
             rc, out = self.gate({"schema": schema})
             self.assertEqual(rc, 1, out)
-            self.assertIn("closure schema must be pulp.vellum.closure.v1", out)
+            self.assertIn("closure schema must be pulp.vellum.closure.v1 or pulp.vellum.closure.v2", out)
 
     def test_missing_source_root_fails(self):
         for root in (..., "", "/nonexistent/vellum-closure-root"):
@@ -2317,6 +2317,404 @@ class MirrorEdgeRootTests(unittest.TestCase):
                       {"namespace": ["pu|lp"], "include": ["pulp"], "target": ["pulp"]}):
             with self.subTest(roots=roots), self.assertRaises(SystemExit):
                 self.generator.table_roots({"roots": roots})
+
+
+class WebSplitFixture:
+    """A source tree, a fake Emscripten configure and a fake native configure.
+
+    The tree has core/ sources for two units, a core/view/audio directory that
+    only a Pulp-kept target compiles, and an entry source in the demo
+    directory. Each build directory holds what CMake's file API writes; the
+    Emscripten one also holds a cache, a CMakeSystem.cmake and an emsdk
+    checkout, which is how the configure's identity is read.
+    """
+
+    UNITS = {"schema": "pulp.vellum.d3-units.v1", "units": [
+        {"name": "gpu-device", "targets": ["pulp-gpu-device"]},
+        {"name": "render-2d", "targets": ["pulp-render"]},
+        {"name": "view-core", "targets": ["pulp-view-core"]},
+    ]}
+    FLAGS = ("-O2 -sEXPORTED_FUNCTIONS=['_malloc','_demo_init','_never_defined','_calls_it','_pulp_web_on_key'] "
+             "-sEXPORTED_RUNTIME_METHODS=['ccall']")
+
+    def __init__(self, root: Path, kind: str = "EXECUTABLE", extra_sources: tuple[str, ...] = (),
+                 extra_claims: dict[str, list[str]] | None = None):
+        self.root = root
+        self.source = root / "src"
+        self.build = root / "build"
+        self.native = root / "native"
+        files = {
+            "core/render/CMakeLists.txt": "add_library(pulp-render)\nadd_library(pulp-gpu-device)\n",
+            "core/render/src/surface.cpp": "int surface() { return 1; }\n",
+            "core/render/src/loop.cpp": "int loop() { return 2; }\n",
+            "core/view/CMakeLists.txt": "add_library(pulp-view-core)\n",
+            "core/view/src/view.cpp": (
+                "#include <pulp/render/surface.hpp>\n"
+                "#include <yoga/Yoga.h>\n"
+                "EM_JS(void, pulp_web_flash, (int n), { console.log(n); });\n"
+                "EMSCRIPTEN_KEEPALIVE void pulp_web_on_key(const char* key, int down) {}\n"
+                "void helper() {\n  free(nullptr);\n  if (calls_it(1)) {\n  }\n}\n"),
+            "core/view/audio/CMakeLists.txt": "add_library(pulp-view-audio)\n",
+            "core/view/audio/src/meter.cpp": "int meter() { return 3; }\n",
+            "core/render/include/pulp/render/surface.hpp": "#pragma once\n",
+            "core/signal/include/pulp/signal/fft.hpp": "#pragma once\n",
+            "demo/entry.cpp": "extern \"C\" int demo_init() { return 0; }\n",
+        }
+        for rel, text in files.items():
+            path = self.source / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+        self.units = root / "units.json"
+        self.units.write_text(json.dumps(self.UNITS), encoding="utf-8")
+        self._web_build(kind, extra_sources)
+        self._native_build(extra_claims or {})
+
+    def _reply(self, build: Path, targets: list[dict]) -> None:
+        reply = build / ".cmake/api/v1/reply"
+        reply.mkdir(parents=True)
+        for index, target in enumerate(targets):
+            (reply / f"target-{index}.json").write_text(json.dumps(target), encoding="utf-8")
+        (reply / "codemodel-v2-1.json").write_text(json.dumps({
+            "paths": {"source": str(self.source if build == self.native else self.source), "build": str(build)},
+            "configurations": [{"name": "Release", "targets": [
+                {"jsonFile": f"target-{i}.json"} for i in range(len(targets))]}]}), encoding="utf-8")
+        (reply / "index-1.json").write_text(json.dumps({"reply": {
+            "codemodel-v2": {"kind": "codemodel", "jsonFile": "codemodel-v2-1.json"}}}), encoding="utf-8")
+
+    def _web_build(self, kind: str, extra_sources: tuple[str, ...]) -> None:
+        sources = ["core/render/src/surface.cpp", "core/render/src/loop.cpp", "core/view/src/view.cpp",
+                   "demo/entry.cpp", *extra_sources]
+        common = [0, 2, *range(3, len(sources))]
+        fragments = [{"fragment": "-O3 -DNDEBUG -std=gnu++20"}, {"fragment": "-O2"}]
+        includes = [{"path": str(self.source / "core/render/include")},
+                    {"path": str(self.source / "core/signal/include")},
+                    {"path": str(self.source / "demo")}]
+        defines = [{"define": "PULP_ENABLE_JS=0"}]
+        self._reply(self.build, [{
+            "name": "DemoUi", "id": "DemoUi::@1", "type": kind, "paths": {"source": "demo", "build": "demo"},
+            "sources": [{"path": str(self.source / rel)} for rel in sources],
+            "sourceGroups": [{"sourceIndexes": list(range(len(sources)))}],
+            "compileGroups": [
+                {"language": "CXX", "sourceIndexes": common, "includes": includes, "defines": defines,
+                 "compileCommandFragments": fragments},
+                # loop.cpp carries a per-source option, as css_weight_font_manager.cpp does.
+                {"language": "CXX", "sourceIndexes": [1], "includes": includes, "defines": defines,
+                 "compileCommandFragments": [*fragments, {"fragment": "-fno-rtti"}]}],
+            "dependencies": [],
+            "link": {"commandFragments": [{"fragment": self.FLAGS, "role": "flags"}]},
+        }])
+        sdk = self.root / "emsdk"
+        (sdk / "upstream/emscripten").mkdir(parents=True)
+        (sdk / "upstream/emscripten/emscripten-version.txt").write_text('"6.0.2"\n', encoding="utf-8")
+        subprocess.run(["git", "init", "-q", str(sdk)], check=True)
+        (sdk / "emsdk.py").write_text("# emsdk\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(sdk), "add", "emsdk.py"], check=True)
+        subprocess.run(["git", "-C", str(sdk), "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+                        "-c", "commit.gpgsign=false", "commit", "-q", "-m", "x"], check=True)
+        self.sdk_commit = subprocess.run(["git", "-C", str(sdk), "rev-parse", "HEAD"], check=True,
+                                         capture_output=True, text=True, encoding="utf-8").stdout.strip()
+        (self.build / "CMakeCache.txt").write_text(
+            "CMAKE_BUILD_TYPE:STRING=Release\n"
+            f"CMAKE_TOOLCHAIN_FILE:FILEPATH={sdk}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake\n",
+            encoding="utf-8")
+        system = self.build / "CMakeFiles/3.30.0"
+        system.mkdir(parents=True)
+        (system / "CMakeSystem.cmake").write_text(
+            'set(CMAKE_SYSTEM_NAME "Emscripten")\nset(CMAKE_SYSTEM_PROCESSOR "x86")\n', encoding="utf-8")
+
+    def _native_build(self, extra_claims: dict[str, list[str]]) -> None:
+        def target(name, directory, sources):
+            return {"name": name, "id": f"{name}::@1", "type": "STATIC_LIBRARY",
+                    "paths": {"source": directory, "build": directory},
+                    "sources": [{"path": s} for s in sources]}
+        claims = {"pulp-render": ["core/render/src/surface.cpp"], "pulp-gpu-device": [],
+                  "pulp-view-core": ["core/view/src/view.cpp"],
+                  "pulp-view-audio": ["core/view/audio/src/meter.cpp"]}
+        for name, extra in extra_claims.items():
+            claims[name] = [*claims[name], *extra]
+        dirs = {"pulp-render": "core/render", "pulp-gpu-device": "core/render",
+                "pulp-view-core": "core/view", "pulp-view-audio": "core/view/audio"}
+        self._reply(self.native, [target(n, dirs[n], claims[n]) for n in claims])
+
+    def split(self, **kwargs):
+        from vellum_closure import web_split
+        kwargs.setdefault("entry_prefixes", ["demo/"])
+        return web_split(self.source, self.build, "DemoUi", self.units, self.native, **kwargs)
+
+
+class WebSplitTests(unittest.TestCase):
+    def fixture(self, **kwargs):
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        return WebSplitFixture(Path(td.name), **kwargs)
+
+    def targets_of(self, result):
+        return {unit: {t["name"]: t["sources"] for t in manifest["targets"]}
+                for unit, manifest in result["units"].items()}
+
+    def test_a_source_the_native_configure_compiles_is_owned_by_that_target(self):
+        result = self.fixture().split()
+        self.assertEqual(self.targets_of(result), {
+            "render-2d": {"pulp-render": ["core/render/src/loop.cpp", "core/render/src/surface.cpp"]},
+            "view-core": {"pulp-view-core": ["core/view/src/view.cpp"]},
+        })
+        self.assertEqual(result["entry_sources"], ["demo/entry.cpp"])
+        for manifest in result["units"].values():
+            self.assertEqual(manifest["schema"], "pulp.vellum.closure.v2")
+            self.assertNotIn("platform", manifest)
+
+    def test_a_web_only_file_takes_the_directory_target_named_for_it(self):
+        # loop.cpp is compiled by no native target; core/render holds
+        # pulp-render and pulp-gpu-device, and the one named for the directory wins.
+        result = self.fixture().split()
+        self.assertIn("core/render/src/loop.cpp", self.targets_of(result)["render-2d"]["pulp-render"])
+        self.assertNotIn("gpu-device", result["units"])
+
+    def test_the_longest_directory_prefix_decides_a_web_only_file(self):
+        from vellum_closure import web_source_owner
+        dirs = {"pulp-render": "core/render", "pulp-view-core": "core/view", "pulp-deep": "core/view/src/deep"}
+        self.assertEqual(web_source_owner("core/view/src/deep/x.cpp", {}, dirs, set(dirs)), ("unit", "pulp-deep"))
+        self.assertEqual(web_source_owner("core/view/src/x.cpp", {}, dirs, set(dirs)), ("unit", "pulp-view-core"))
+        self.assertEqual(web_source_owner("core/signal/x.cpp", {}, dirs, set(dirs))[0], "error")
+
+    def test_only_the_directory_name_breaks_a_tie_between_unit_targets(self):
+        from vellum_closure import web_directory_target, web_source_owner
+        # Two unit targets share a directory and neither is named for it: an error.
+        dirs = {"pulp-a": "core/shared", "pulp-b": "core/shared"}
+        self.assertEqual(web_source_owner("core/shared/x.cpp", {}, dirs, set(dirs))[0], "error")
+        self.assertIsNone(web_directory_target("core/shared", dirs))
+        # One named for the directory wins; a second one named for it is still a tie.
+        dirs = {"pulp-shared": "core/shared", "pulp-b": "core/shared"}
+        self.assertEqual(web_source_owner("core/shared/x.cpp", {}, dirs, set(dirs)), ("unit", "pulp-shared"))
+        self.assertIsNone(web_directory_target("core/shared", ["pulp-shared", "pulp-shared-core"]))
+        # A directory only one unit target claims never consults the name.
+        self.assertEqual(web_source_owner("core/solo/x.cpp", {}, {"pulp-other": "core/solo"}, {"pulp-other"}),
+                         ("unit", "pulp-other"))
+        self.assertEqual(web_directory_target("core/solo", ["pulp-other"]), "pulp-other")
+
+    def test_a_file_two_unit_targets_claim_is_refused(self):
+        fixture = self.fixture(extra_claims={"pulp-gpu-device": ["core/render/src/surface.cpp"]})
+        with self.assertRaisesRegex(SystemExit, "claimed by two unit targets: pulp-gpu-device, pulp-render"):
+            fixture.split()
+
+    def test_a_pulp_kept_file_compiled_into_the_executable_is_refused(self):
+        fixture = self.fixture(extra_sources=("core/view/audio/src/meter.cpp",))
+        with self.assertRaisesRegex(SystemExit, "compiled by Pulp-kept target pulp-view-audio"):
+            fixture.split()
+
+    def test_a_named_kept_target_reports_its_files_without_exporting_them(self):
+        fixture = self.fixture(extra_sources=("core/view/audio/src/meter.cpp",))
+        result = fixture.split(kept_targets=["pulp-view-audio"])
+        self.assertEqual(result["kept_sources"], [{"source": "core/view/audio/src/meter.cpp", "targets": ["pulp-view-audio"]}])
+        exported = {s for targets in self.targets_of(result).values() for srcs in targets.values() for s in srcs}
+        self.assertNotIn("core/view/audio/src/meter.cpp", exported)
+
+    def test_a_source_outside_core_needs_an_entry_prefix(self):
+        with self.assertRaisesRegex(SystemExit, "demo/entry.cpp is outside core/"):
+            self.fixture().split(entry_prefixes=[])
+
+    def test_only_an_executable_is_split(self):
+        with self.assertRaisesRegex(SystemExit, "not an EXECUTABLE"):
+            self.fixture(kind="STATIC_LIBRARY").split()
+
+    def test_an_absent_executable_is_refused(self):
+        from vellum_closure import web_split
+        fixture = self.fixture()
+        with self.assertRaisesRegex(SystemExit, "no target named Other"):
+            web_split(fixture.source, fixture.build, "Other", fixture.units, fixture.native)
+
+    def test_a_configure_without_an_emsdk_checkout_is_refused(self):
+        fixture = self.fixture()
+        shutil.rmtree(fixture.root / "emsdk/.git")
+        with self.assertRaisesRegex(SystemExit, "recorded emsdk commit"):
+            fixture.split()
+
+    def test_the_configure_identity_names_the_architecture_and_the_emsdk(self):
+        fixture = self.fixture()
+        identity = fixture.split()["units"]["view-core"]["configure"]["identity"]
+        self.assertEqual((identity["system"], identity["processor"]), ("Emscripten", "wasm32"))
+        self.assertEqual(identity["emsdk"], {"version": "6.0.2", "commit": fixture.sdk_commit})
+
+    def test_a_per_source_option_survives_into_the_manifest(self):
+        result = self.fixture().split()
+        self.assertEqual(result["units"]["render-2d"]["source_compile_options"], [
+            {"source": "core/render/src/loop.cpp", "options": ["-fno-rtti"], "definitions": [], "include_dirs": []}])
+        self.assertEqual(result["units"]["view-core"]["source_compile_options"], [])
+
+    def test_link_exports_are_c_names_from_the_flags_and_the_sources_only(self):
+        result = self.fixture().split()
+        rows = result["units"]["view-core"]["link_exports"]
+        self.assertEqual(
+            [(r["name"], r["kind"], r["source"]) for r in rows],
+            [("pulp_web_flash", "em_js", "core/view/src/view.cpp"),
+             ("pulp_web_on_key", "exported_function", None),
+             ("pulp_web_on_key", "keepalive", "core/view/src/view.cpp")])
+        # An exported name no unit source defines (libc's malloc, a name nothing
+        # defines, the entry's own function) is the entry's, never a unit's.
+        self.assertEqual(result["entry_exports"], ["calls_it", "demo_init", "malloc", "never_defined"])
+        for manifest in result["units"].values():
+            self.assertFalse({"malloc", "never_defined", "free", "calls_it", "demo_init"} & {r["name"] for r in manifest["link_exports"]})
+
+    def test_a_call_to_a_libc_function_is_not_a_definition(self):
+        from vellum_closure import web_link_exports
+        fixture = self.fixture()
+        rows, entry = web_link_exports(fixture.source, {"core/view/src/view.cpp": "pulp-view-core"},
+                                       "-sEXPORTED_FUNCTIONS=['_free']")
+        self.assertEqual(entry, ["free"])
+        self.assertNotIn("free", [r["name"] for r in rows.get("pulp-view-core", [])])
+
+    def test_include_roots_no_unit_carries_are_dropped(self):
+        result = self.fixture().split()
+        self.assertEqual(result["dropped_include_dirs"], ["core/signal/include", "demo"])
+        for manifest in result["units"].values():
+            self.assertFalse([d for d in manifest["public_include_dirs"] if "signal" in d])
+
+    def test_a_unit_links_the_units_and_libraries_its_sources_include(self):
+        links = {t["name"]: t["link_targets"] for m in self.fixture().split()["units"].values() for t in m["targets"]}
+        self.assertEqual(links["pulp-view-core"], ["pulp-render"])
+
+    def test_the_manifest_is_byte_identical_when_run_twice(self):
+        fixture = self.fixture()
+        first = json.dumps(fixture.split()["units"], sort_keys=True)
+        second = json.dumps(fixture.split()["units"], sort_keys=True)
+        self.assertEqual(first, second)
+
+    def test_the_command_needs_both_file_api_replies(self):
+        from vellum_closure import cmd_web_manifest
+        fixture = self.fixture()
+        with tempfile.TemporaryDirectory() as td:
+            for build, native in ((td, fixture.native), (fixture.build, td)):
+                args = Namespace(source_root=str(fixture.source), build_dir=str(build), executable="DemoUi",
+                                 unit_manifest=str(fixture.units), output_dir=td, ownership_build_dir=str(native),
+                                 entry_prefix=None, kept_target=None)
+                with self.assertRaisesRegex(SystemExit, "no CMake file-api reply"):
+                    cmd_web_manifest(args)
+
+    def test_the_command_writes_an_index_and_identical_bytes_on_a_second_run(self):
+        from vellum_closure import cmd_web_manifest
+        fixture = self.fixture()
+        outputs = []
+        for name in ("one", "two"):
+            out = fixture.root / name
+            with contextlib.redirect_stdout(io.StringIO()):
+                cmd_web_manifest(Namespace(
+                    source_root=str(fixture.source), build_dir=str(fixture.build), executable="DemoUi",
+                    unit_manifest=str(fixture.units), output_dir=str(out),
+                    ownership_build_dir=str(fixture.native), entry_prefix=["demo/"], kept_target=None))
+            outputs.append({p.name: p.read_bytes() for p in out.iterdir()})
+        self.assertEqual(outputs[0], outputs[1])
+        index = json.loads(outputs[0]["web-split.json"])
+        self.assertEqual(sorted(index["units"]), ["render-2d", "view-core"])
+        import hashlib
+        for row in index["units"].values():
+            self.assertEqual(row["sha256"], hashlib.sha256(outputs[0][row["manifest"]]).hexdigest())
+
+    def test_a_split_manifest_passes_the_shape_check_and_v1_cannot_carry_link_exports(self):
+        from vellum_closure import closure_shape_violations
+        manifest = self.fixture().split()["units"]["view-core"]
+        self.assertEqual(closure_shape_violations(manifest), [])
+        self.assertTrue(closure_shape_violations({**manifest, "schema": "pulp.vellum.closure.v1"}))
+        self.assertTrue(closure_shape_violations({**manifest, "schema": "pulp.vellum.closure.v3"}))
+
+    def test_link_export_rows_are_checked(self):
+        from vellum_closure import link_export_violations
+        good = [{"name": "a", "kind": "em_js", "source": "x.cpp"}, {"name": "b", "kind": "exported_function", "source": None}]
+        self.assertEqual(link_export_violations(good), [])
+        for bad in (
+            [{"name": "_b", "kind": "exported_function", "source": None}],
+            [{"name": "b", "kind": "exported_function", "source": "x.cpp"}],
+            [{"name": "a", "kind": "em_js", "source": None}],
+            [{"name": "a", "kind": "other", "source": "x.cpp"}],
+            [{"name": "b", "kind": "exported_function", "source": None}, {"name": "a", "kind": "em_js", "source": "x.cpp"}],
+            [good[0], good[0]],
+            [{"name": "a", "kind": "em_js"}],
+        ):
+            with self.subTest(bad=bad):
+                self.assertTrue(link_export_violations(bad))
+
+
+class CxxCompilerOptionsTests(unittest.TestCase):
+    """The compiler identity a configure records, read from CMakeCXXCompiler.cmake."""
+
+    def record(self, compiler_id=None, simulate_id=None):
+        from vellum_closure import configure_record
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        build = Path(td.name)
+        if compiler_id is not None:
+            directory = build / "CMakeFiles/3.30.0"
+            directory.mkdir(parents=True)
+            text = f'set(CMAKE_CXX_COMPILER_ID "{compiler_id}")\n'
+            if simulate_id is not None:
+                text += f'set(CMAKE_CXX_SIMULATE_ID "{simulate_id}")\n'
+            (directory / "CMakeCXXCompiler.cmake").write_text(text, encoding="utf-8")
+        return configure_record(build)
+
+    def compiler(self, record):
+        return {k: v for k, v in record["options"].items() if k in ("CMAKE_CXX_COMPILER_ID", "CMAKE_CXX_SIMULATE_ID", "MSVC")}
+
+    def test_clang_is_not_msvc(self):
+        self.assertEqual(self.compiler(self.record("AppleClang", "")),
+                         {"CMAKE_CXX_COMPILER_ID": "AppleClang", "CMAKE_CXX_SIMULATE_ID": "", "MSVC": "0"})
+        self.assertEqual(self.compiler(self.record("Clang"))["MSVC"], "0")
+
+    def test_msvc_is_msvc(self):
+        self.assertEqual(self.compiler(self.record("MSVC", "")),
+                         {"CMAKE_CXX_COMPILER_ID": "MSVC", "CMAKE_CXX_SIMULATE_ID": "", "MSVC": "1"})
+
+    def test_clang_cl_simulates_msvc(self):
+        self.assertEqual(self.compiler(self.record("Clang", "MSVC")),
+                         {"CMAKE_CXX_COMPILER_ID": "Clang", "CMAKE_CXX_SIMULATE_ID": "MSVC", "MSVC": "1"})
+
+    def test_a_configure_with_no_detected_compiler_records_none(self):
+        self.assertEqual(self.compiler(self.record()), {})
+
+    def test_the_options_digest_follows_the_recorded_compiler(self):
+        a, b = self.record("Clang", ""), self.record("Clang", "MSVC")
+        self.assertNotEqual(a["options_sha256"], b["options_sha256"])
+        from vellum_closure import configure_options_sha256
+        self.assertEqual(b["options_sha256"], configure_options_sha256(b["options"]))
+
+    def test_the_options_that_were_there_before_are_untouched(self):
+        # Only the three compiler keys are new; with no compiler recorded the
+        # record is exactly what it was, so its digest does not move.
+        plain = self.record()
+        self.assertEqual(set(plain["options"]), set())
+        with_compiler = self.record("Clang", "")
+        self.assertEqual({k for k in with_compiler["options"]} - {"CMAKE_CXX_COMPILER_ID", "CMAKE_CXX_SIMULATE_ID", "MSVC"}, set())
+
+
+class EmsdkIdentityTests(unittest.TestCase):
+    ROOT = "/opt/emsdk/upstream/emscripten"
+
+    def probe(self, version="6.0.2", present=True):
+        def read_text(path):
+            if not present or not path.endswith("/emscripten-version.txt"):
+                raise OSError(path)
+            return f'"{version}"\n'
+        return {"exists": lambda p: True, "read_text": read_text}
+
+    def test_a_sysroot_header_is_owned_by_the_emscripten_release(self):
+        from vellum_closure import system_identity
+        row = system_identity(f"{self.ROOT}/cache/sysroot/include/emscripten/html5.h", self.probe())
+        self.assertEqual(row["path"], "@system/emsdk/6.0.2/include/emscripten/html5.h")
+        self.assertEqual((row["provider"], row["pin"]), ("emsdk", "6.0.2"))
+        row = system_identity(f"{self.ROOT}/system/include/emscripten/em_js.h", self.probe())
+        self.assertEqual(row["path"], "@system/emsdk/6.0.2/include/emscripten/em_js.h")
+
+    def test_a_header_outside_an_emscripten_tree_has_no_identity(self):
+        from vellum_closure import system_identity
+        self.assertIsNone(system_identity("/tmp/other/cache/sysroot/include/x.h", self.probe()))
+        self.assertIsNone(system_identity(f"{self.ROOT}/src/library.js", self.probe()))
+
+    def test_a_tree_that_declares_no_release_has_no_identity(self):
+        from vellum_closure import system_identity
+        self.assertIsNone(system_identity(f"{self.ROOT}/cache/sysroot/include/x.h", self.probe(present=False)))
+        self.assertIsNone(system_identity(f"{self.ROOT}/cache/sysroot/include/x.h", self.probe(version="latest")))
+
+    def test_the_provider_is_one_the_closure_accepts(self):
+        from vellum_closure import SYSTEM_PROVIDERS
+        self.assertIn("emsdk", SYSTEM_PROVIDERS)
 
 
 if __name__ == "__main__":

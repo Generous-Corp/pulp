@@ -13,8 +13,8 @@ save path belong to the open saved-identity change and are not repeated here.
 
 ### The Windows transport has no CI lane
 - Where: the `_WIN32` cases in `test/test_runtime_utils.cpp`
-  (`[retained-custody]`) and `test/test_isolated_clap_protocol.cpp`
-  (`[windows]`).
+  (`[retained-custody]`), `test/test_isolated_clap_protocol.cpp`
+  (`[windows]`) and the whole of `test/test_isolated_clap_worker_windows.cpp`.
 - Why deferred: the PR-head `windows` check is an alias, and the Windows leg of
   `build.yml` runs only on an explicit dispatch with an opted-in runner. No
   scheduled Windows lane exists to register the cases on. The decision is
@@ -33,22 +33,6 @@ save path belong to the open saved-identity change and are not repeated here.
   aliases and an embedded telemetry member), which needs a capability
   fingerprint refresh and a consumer review of its own.
 
-### Worker-side hello header check is duplicated
-- Where: the Windows `worker_receive_hello` and the POSIX checks in
-  `tools/clap-worker/clap_worker_main.cpp`. The parent-side reply check is now
-  shared as `hello_reply_matches` in `isolated_clap_protocol.hpp`.
-- Next step: a `worker_hello_header_ok(const ControlRecord&)` beside it, called
-  from both workers.
-
-### Section adoption closes an unowned handle on failure
-- Where: `SharedSection::adopt` in `isolated_clap_windows_channel.hpp` calls
-  `reset()` after a failed map, which closes whatever handle value the hello
-  named. `parent_hello` leaves the duplicated section handle in the worker when
-  the exchange fails.
-- Why harmless today: the parent kills the worker after any failed hello.
-- Next step: adopt only after the map succeeds, and close the duplicated handle
-  in the worker with `DUPLICATE_CLOSE_SOURCE` on a failed exchange.
-
 ### The private channel is inheritable until the child end is closed
 - Where: `duplex.child` in `child_process_win.cpp` is inheritable from
   `CreateFileW` until `close_child()`. A `CreateProcess` with
@@ -63,10 +47,10 @@ save path belong to the open saved-identity change and are not repeated here.
 - Next step: copy through a `volatile` or an explicit `std::memcpy` into a local
   and say why.
 
-### Worker deadlines and exit codes are literals
-- Where: `std::chrono::seconds(5)` and exit codes 64 to 86 in
-  `tools/clap-worker/clap_worker_main.cpp`, and the `seconds(2)` cleanup
-  deadline in the Windows `start_impl`.
+### Worker exit codes and the Windows cleanup deadline are literals
+- Where: exit codes 64 to 86 in `tools/clap-worker/clap_worker_main.cpp` (its
+  control deadline is now the named `kControlDeadline`), and the `seconds(2)`
+  cleanup deadline in the Windows `start_impl`.
 
 ### Test names keep phase prefixes
 - Where: the "G5"/"G6" prefixes in `test_voice_bank_binding.cpp` and

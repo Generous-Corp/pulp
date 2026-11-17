@@ -25,3 +25,8 @@ pulp_add_test_suite(pulp-test-graph-control-event-probe
     SOURCES test_graph_control_event_probe.cpp
     LIBRARIES pulp::host
     PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
+
+pulp_add_test_suite(pulp-test-graph-parallel-edge-probe
+    SOURCES test_graph_parallel_edge_probe.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::host
+    PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
