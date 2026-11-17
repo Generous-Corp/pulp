@@ -638,7 +638,7 @@ class FragmentFixture:
     def touch(self, rel: str, content: str) -> None:
         path = self.root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content)
+        path.write_text(content, encoding="utf-8")
 
     def select(self, changed: list[str], deleted: list[str] = ()) -> at.Selection:
         return at.project_affected(self.model, changed, list(deleted), None, self.inventory, 1.0)
