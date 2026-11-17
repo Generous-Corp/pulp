@@ -14,6 +14,11 @@ struct GraphSerializerTestAccess {
     static void set_after_first_read(std::function<void(const std::filesystem::path&)> hook);
     static void fail_next_write() noexcept;
     static void fail_next_replace() noexcept;
+    // The next ordinary load throws std::bad_alloc while planning authored IDs.
+    static void fail_next_authored_id_plan() noexcept;
+    // The next from_saved_document throws std::bad_alloc while recording an
+    // identity's restored NodeId.
+    static void fail_next_identity_record() noexcept;
     // The saved-identity v6 document a pre-v7 writer produced for `graph`
     // (structural identities, no authored IDs). Production code has no v6
     // writer; tests use this to build legacy fixtures.

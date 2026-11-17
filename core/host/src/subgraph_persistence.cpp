@@ -101,13 +101,53 @@ bool instance_handles_live(const SignalGraph& graph, const SubgraphInstance& ins
     return true;
 }
 
+bool same_ports(const std::vector<PortHandle>& want, const std::vector<PortHandle>& have) {
+    return std::equal(want.begin(), want.end(), have.begin(), have.end(),
+                      [](const PortHandle& a, const PortHandle& b) {
+                          return a.index == b.index && a.kind == b.kind && a.output == b.output;
+                      });
+}
+
+// A restored member matches its template node structurally: type, port
+// shape, and for a Processor the descriptor it was built from. The member's
+// position in the record is its stable template member key, so its display
+// name is not compared when `match_names` is false.
+bool member_matches(const SignalGraph& scratch, NodeId want_id, const SignalGraph& graph,
+                    NodeId have_id, bool match_names) {
+    const auto* want = scratch.node(want_id);
+    const auto* have = graph.node(have_id);
+    if (!want || !have || want->type != have->type ||
+        want->num_input_ports != have->num_input_ports ||
+        want->num_output_ports != have->num_output_ports ||
+        !same_ports(want->input_ports, have->input_ports) ||
+        !same_ports(want->output_ports, have->output_ports))
+        return false;
+    if (match_names && want->name != have->name)
+        return false;
+    const auto want_processor = scratch.processor_node_instance(want_id);
+    const auto have_processor = graph.processor_node_instance(have_id);
+    if (static_cast<bool>(want_processor) != static_cast<bool>(have_processor))
+        return false;
+    if (want_processor) {
+        const auto a = want_processor->descriptor();
+        const auto b = have_processor->descriptor();
+        if (a.bundle_id != b.bundle_id || a.version != b.version ||
+            a.manufacturer != b.manufacturer)
+            return false;
+    }
+    return true;
+}
+
 // Rebuild one instance against a fresh expansion of its template. The scratch
 // graph is the authority for structure, ports, bounds, and Processor targets;
 // the record contributes only identities and declared parameter values.
+// Members of a v7 document are bound by authored ID and record position, so a
+// renamed member still restores; a v6 member identity is derived from its
+// name, so v6 records keep the name comparison.
 bool rebind_instance(SignalGraph& graph, const SubgraphTemplate& definition,
                      const choc::value::ValueView& record,
                      const std::unordered_map<std::string, NodeId>& live_by_identity,
-                     SubgraphInstance& out, Refusal& refusal) {
+                     bool match_names, SubgraphInstance& out, Refusal& refusal) {
     const auto instance_identity = std::string(record["instance_identity"].getString());
     const auto instance_index = static_cast<std::uint32_t>(record["instance_index"].getInt64());
     const auto mismatch = [&](const std::string& rule) {
@@ -131,11 +171,9 @@ bool rebind_instance(SignalGraph& graph, const SubgraphTemplate& definition,
         const auto found = live_by_identity.find(std::string(members[i].getString()));
         if (found == live_by_identity.end())
             return mismatch("member identity was not restored");
-        const auto* want = scratch.node(expected.nodes[i]);
-        const auto* have = graph.node(found->second);
-        if (!want || !have || want->type != have->type || want->name != have->name)
+        if (!member_matches(scratch, expected.nodes[i], graph, found->second, match_names))
             return mismatch("member " + std::to_string(i) +
-                            " does not match the template node type or nested key");
+                            " does not match the template node structure or nested key");
         live_of.emplace(expected.nodes[i], found->second);
         live_members.insert(found->second);
     }
@@ -309,6 +347,8 @@ SubgraphDocumentLoad from_saved_subgraph_document(SignalGraph& graph, const std:
         // Members name the document's identities: authored IDs in v7, the
         // structural identities in v6.
         const auto& live_by_identity = out.load.identity_node_ids;
+        const bool match_names =
+            inspection.document.profile() != std::string_view("pulp.graph.saved-identity.v7");
 
         const auto& records = root["subgraphs"];
         std::map<std::string, SubgraphInstance> restored;
@@ -318,7 +358,8 @@ SubgraphDocumentLoad from_saved_subgraph_document(SignalGraph& graph, const std:
                 *by_identity.at(std::string(record["template_identity"].getString()));
             SubgraphInstance instance;
             Refusal refusal;
-            if (!rebind_instance(graph, definition, record, live_by_identity, instance, refusal)) {
+            if (!rebind_instance(graph, definition, record, live_by_identity, match_names, instance,
+                                 refusal)) {
                 graph.clear();
                 out.load.ok = false;
                 out.load.error = std::move(refusal.error);

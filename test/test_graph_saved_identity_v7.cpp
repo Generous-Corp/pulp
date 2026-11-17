@@ -10,6 +10,8 @@
 #include <pulp/host/signal_graph_runtime.hpp>
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 #include <map>
 #include <set>
 #include <string>
@@ -519,4 +521,130 @@ TEST_CASE("legacy v6 and plain documents keep loading", "[host][graph][identity]
     CHECK(loaded.error.find("requires format_version 7") != std::string::npos);
     // Control: without it the legacy document loads.
     CHECK(GraphSerializer::from_saved_document(target, legacy).ok);
+}
+
+TEST_CASE("an ordinary load refuses a format 7 document whose envelope is incomplete",
+          "[host][graph][identity][v7]") {
+    TwinGraph fixture;
+    build_twins(fixture);
+    const auto saved = GraphSerializer::to_saved_document(fixture.graph);
+    const auto edited = [&](auto&& edit) {
+        auto copy = choc::json::parse(saved);
+        edit(copy);
+        return choc::json::toString(copy, true);
+    };
+    const auto without = [&](std::string_view member) {
+        return edited([&](choc::value::Value& doc) {
+            auto rebuilt = choc::value::createObject("");
+            for (std::uint32_t i = 0; i < doc.size(); ++i) {
+                const auto item = doc.getObjectMemberAt(i);
+                if (std::string_view(item.name) != member)
+                    rebuilt.addMember(item.name, item.value);
+            }
+            doc = rebuilt;
+        });
+    };
+    struct Case {
+        std::string name;
+        std::string document;
+    };
+    const std::vector<Case> cases = {
+        {"no logical_identities", without("logical_identities")},
+        {"no bindings", without("bindings")},
+        {"no logical_identities or bindings", edited([&](choc::value::Value& doc) {
+             auto rebuilt = choc::value::createObject("");
+             for (std::uint32_t i = 0; i < doc.size(); ++i) {
+                 const auto item = doc.getObjectMemberAt(i);
+                 const std::string_view name(item.name);
+                 if (name != "logical_identities" && name != "bindings")
+                     rebuilt.addMember(item.name, item.value);
+             }
+             doc = rebuilt;
+         })},
+        {"v6 identity profile under a v7 schema", edited([](choc::value::Value& doc) {
+             choc::value::Value identities(doc["logical_identities"]);
+             identities.setMember("profile", "pulp.graph.saved-identity.v6");
+             doc.setMember("logical_identities", identities);
+         })},
+    };
+
+    const auto path = std::filesystem::temp_directory_path() / "pulp-graph-v7-envelope.pulpgraph";
+    for (const auto& planted : cases) {
+        INFO(planted.name);
+        // Control on the instrument: the inspector refuses each document.
+        CHECK_FALSE(GraphSerializer::inspect_document(planted.document).ok());
+
+        SignalGraph target;
+        const auto keep = target.add_gain_node("Keep");
+        const auto from_json = GraphSerializer::from_json(target, planted.document);
+        INFO(from_json.error);
+        CHECK_FALSE(from_json.ok);
+        CHECK(target.nodes().size() == 1);
+        CHECK(target.node(keep) != nullptr);
+
+        {
+            std::ofstream out(path, std::ios::binary | std::ios::trunc);
+            out << planted.document;
+        }
+        const auto from_file = GraphSerializer::from_file(target, path);
+        INFO(from_file.error);
+        CHECK_FALSE(from_file.ok);
+        CHECK(target.nodes().size() == 1);
+        CHECK(target.node(keep) != nullptr);
+    }
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+
+    // Control: the complete document loads through both readers.
+    SignalGraph control;
+    REQUIRE(GraphSerializer::from_json(control, saved).ok);
+    CHECK(control.nodes().size() == 4);
+}
+
+TEST_CASE("a failure planning authored IDs refuses the load and leaves the graph",
+          "[host][graph][identity][v7]") {
+    TwinGraph fixture;
+    build_twins(fixture);
+    const auto saved = GraphSerializer::to_saved_document(fixture.graph);
+
+    SignalGraph target;
+    const auto keep = target.add_gain_node("Keep");
+    GraphSerializerTestAccess::fail_next_authored_id_plan();
+    const auto refused = GraphSerializer::from_json(target, saved);
+    INFO(refused.error);
+    CHECK_FALSE(refused.ok);
+    CHECK(refused.error.starts_with("authored_id planning failed:"));
+    CHECK(target.nodes().size() == 1);
+    CHECK(target.node(keep) != nullptr);
+
+    // Control: without the injected failure the same load keeps every ID.
+    const auto loaded = GraphSerializer::from_json(target, saved);
+    INFO(loaded.error);
+    REQUIRE(loaded.ok);
+    CHECK(id_of(target, "Input") == id_of(fixture.graph, "Input"));
+}
+
+TEST_CASE("a failure after a saved document restored leaves no graph and no identity map",
+          "[host][graph][identity][v7]") {
+    TwinGraph fixture;
+    build_twins(fixture);
+    const auto saved = GraphSerializer::to_saved_document(fixture.graph);
+
+    SignalGraph target;
+    REQUIRE(target.add_gain_node("Keep") != 0);
+    GraphSerializerTestAccess::fail_next_identity_record();
+    const auto refused = GraphSerializer::from_saved_document(target, saved);
+    INFO(refused.error);
+    CHECK_FALSE(refused.ok);
+    CHECK(refused.error.starts_with("identity_envelope_invalid:"));
+    CHECK(target.nodes().empty());
+    CHECK(refused.identity_node_ids.empty());
+    CHECK(refused.persisted_node_ids.empty());
+    CHECK(refused.editor_layout.empty());
+
+    // Control: without the injected failure the same load records every ID.
+    const auto loaded = GraphSerializer::from_saved_document(target, saved);
+    INFO(loaded.error);
+    REQUIRE(loaded.ok);
+    CHECK(loaded.identity_node_ids.size() == 4);
 }

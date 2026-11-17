@@ -624,6 +624,43 @@ TEST_CASE("graph edit history never wipes a Processor graph it cannot restore",
     CHECK(node_named(fixture.graph, "Trim")->gain == 1.0f);
 }
 
+TEST_CASE("a renamed Processor round-trips and its history replays without divergence",
+          "[host][graph][history]") {
+    ProcessorGraph fixture;
+    build_processor_graph(fixture);
+    LevelRegistry registry([](int) { return false; });
+    GraphEditHistory history;
+    auto before = GraphEditHistory::checkpoint(fixture.graph);
+    REQUIRE(fixture.graph.rename_node(fixture.processor, "Level 2"));
+    CHECK(fixture.graph.node(fixture.processor)->plugin_info.name == "Level 2");
+    REQUIRE(history.commit(std::move(before), fixture.graph, "rename").ok());
+
+    // A reload of the renamed graph writes the same document.
+    const auto saved = GraphSerializer::to_saved_document(fixture.graph);
+    SignalGraph reloaded;
+    const auto loaded = GraphSerializer::from_saved_document(reloaded, saved, registry.options);
+    INFO(loaded.error);
+    REQUIRE(loaded.ok);
+    const auto resaved = GraphSerializer::to_saved_document(reloaded, loaded.editor_layout);
+    CHECK(diff_graph_documents(saved, resaved).equal());
+    CHECK(node_named(reloaded, "Level 2")->plugin_info.name == "Level 2");
+
+    const auto undone = history.undo(fixture.graph, registry.options);
+    INFO(undone.detail);
+    REQUIRE(undone.ok());
+    CHECK(node_named(fixture.graph, "Level") != nullptr);
+    const auto redone = history.redo(fixture.graph, registry.options);
+    INFO(redone.detail);
+    REQUIRE(redone.ok());
+    REQUIRE(node_named(fixture.graph, "Level 2") != nullptr);
+    CHECK(node_named(fixture.graph, "Level 2")->plugin_info.name == "Level 2");
+    const auto again = history.undo(fixture.graph, registry.options);
+    INFO(again.detail);
+    CHECK(again.code != GraphHistoryCode::Diverged);
+    REQUIRE(again.ok());
+    CHECK(node_named(fixture.graph, "Level") != nullptr);
+}
+
 TEST_CASE("graph edit history reports rolled_back only for a faithful rollback",
           "[host][graph][history]") {
     ProcessorGraph fixture;

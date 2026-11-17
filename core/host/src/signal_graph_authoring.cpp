@@ -676,6 +676,11 @@ bool SignalGraph::rename_node(NodeId id, const std::string& name) {
     // The name is authoring metadata: the live snapshot keeps playing, and an
     // outstanding PreparedTopologyEdit (which copied the old name) goes stale.
     node->name = name;
+    // A Processor node's plugin identity name is its node name: the
+    // serializer writes plugin_info.name and a restore rebuilds it from the
+    // node name, so the two stay equal or a reload changes the document.
+    if (processor_nodes_.contains(id))
+        node->plugin_info.name = name;
     ++authoring_generation_;
     return true;
 }

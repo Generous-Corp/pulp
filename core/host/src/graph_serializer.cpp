@@ -37,6 +37,7 @@
 #include <fstream>
 #include <limits>
 #include <map>
+#include <new>
 #include <numeric>
 #include <optional>
 #include <queue>
@@ -55,6 +56,8 @@ namespace {
 std::function<void(const std::filesystem::path&)> g_after_first_read_hook;
 std::atomic<bool> g_fail_next_write{false};
 std::atomic<bool> g_fail_next_replace{false};
+std::atomic<bool> g_fail_next_authored_id_plan{false};
+std::atomic<bool> g_fail_next_identity_record{false};
 
 // Bounds nesting depth and object member counts in one linear scan before the
 // document reaches the parser. Each member of an object has exactly one ':'
@@ -1380,6 +1383,14 @@ void GraphSerializerTestAccess::fail_next_write() noexcept {
 
 void GraphSerializerTestAccess::fail_next_replace() noexcept {
     g_fail_next_replace.store(true, std::memory_order_release);
+}
+
+void GraphSerializerTestAccess::fail_next_authored_id_plan() noexcept {
+    g_fail_next_authored_id_plan.store(true, std::memory_order_release);
+}
+
+void GraphSerializerTestAccess::fail_next_identity_record() noexcept {
+    g_fail_next_identity_record.store(true, std::memory_order_release);
 }
 
 const char* graph_document_refusal_name(GraphDocumentRefusal refusal) noexcept {
@@ -2766,6 +2777,9 @@ GraphSerializer::LoadResult GraphSerializer::from_saved_document(SignalGraph& gr
         result.error = std::move(error);
         return result;
     };
+    // Once from_json is called the caller's graph may already be replaced, so
+    // any later failure, including an exception, goes through refuse().
+    bool load_started = false;
     try {
         const auto root = choc::json::parse(json);
         if (!root.hasObjectMember("identity_schema")) {
@@ -2773,6 +2787,7 @@ GraphSerializer::LoadResult GraphSerializer::from_saved_document(SignalGraph& gr
             return result;
         }
         const bool v7 = identity_schema_of(root) == kSavedIdentityV7;
+        load_started = true;
         result = from_json(graph, json, options);
         if (!result.ok)
             return result;
@@ -2798,14 +2813,19 @@ GraphSerializer::LoadResult GraphSerializer::from_saved_document(SignalGraph& gr
                 return refuse("identity_binding_unknown: logical identity " + id +
                               " does not name the node restored from node_id " +
                               std::to_string(persisted));
+            if (g_fail_next_identity_record.exchange(false, std::memory_order_acq_rel))
+                throw std::bad_alloc();
             result.identity_node_ids.emplace(id, live->second);
         }
         if (auto missing = find_unrestored_connection(graph, root, result.persisted_node_ids))
             return refuse("connection_not_restored: " + *missing);
         return result;
     } catch (const std::exception& error) {
-        result.ok = false;
-        result.error = std::string("identity_envelope_invalid: ") + error.what();
+        auto detail = std::string("identity_envelope_invalid: ") + error.what();
+        if (load_started)
+            return refuse(std::move(detail));
+        result = LoadResult{};
+        result.error = std::move(detail);
         return result;
     }
 }
@@ -3066,18 +3086,46 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
     int source_format_version = 0;
     std::unordered_map<NodeId, std::string> authored_ids;
     std::optional<std::string> authored_error;
+    std::optional<choc::value::Value> original;
     try {
-        const auto original = choc::json::parse(json);
-        if (original.isObject() && original.hasObjectMember("format_version"))
-            source_format_version = graph_format_version(original).value_or(0);
-        if (original.isObject())
-            authored_error = plan_authored_ids(original, json, authored_ids);
+        original = choc::json::parse(json);
     } catch (...) {
         // migrate_graph_json reports the parser error below.
     }
+    if (original && original->isObject() && original->hasObjectMember("format_version"))
+        source_format_version = graph_format_version(*original).value_or(0);
     std::string readable_json = json;
     if (!migrate_graph_json(readable_json, result.error)) {
         return result;
+    }
+    // Format 7 is written only as a complete saved-identity v7 document, so an
+    // original format 7 document must pass the same envelope rules as
+    // inspect_document before any of it loads.
+    if (source_format_version == kSavedIdentityV7FormatVersion) {
+        const auto inspection = inspect_document(json);
+        if (!inspection.ok()) {
+            result.error = std::string(graph_document_refusal_name(inspection.refusal)) + ": " +
+                           inspection.detail;
+            return result;
+        }
+        if (inspection.document.profile() != kSavedIdentityV7) {
+            result.error = "unsupported graph format_version 7 without the " +
+                           std::string(kSavedIdentityV7) + " envelope";
+            return result;
+        }
+    }
+    if (original && original->isObject()) {
+        // A planning failure (for example an allocation failure) must not
+        // look like success with freshly minted IDs; refuse before the graph
+        // is touched.
+        try {
+            if (g_fail_next_authored_id_plan.exchange(false, std::memory_order_acq_rel))
+                throw std::bad_alloc();
+            authored_error = plan_authored_ids(*original, json, authored_ids);
+        } catch (const std::exception& error) {
+            result.error = std::string("authored_id planning failed: ") + error.what();
+            return result;
+        }
     }
     if (authored_error) {
         result.error = std::move(*authored_error);
