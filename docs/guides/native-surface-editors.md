@@ -72,13 +72,13 @@ renderer's device. The `rmlui-metal-demo` example is a small plug-in using this
 path; it remains unavailable when the adapter option or the Vellum Metal
 component is off.
 
-When the Vellum RmlUi SDK provides `NativeContext::warm()`, `RmlUiSurface::attach()`
-calls it after the document loads, so textures, geometry and glyphs are ready
-before the first frame is requested. Older SDKs draw the first frame cold.
-`warm()` also renders once outside a frame, which is safe for Vellum's Metal and
-CPU renderers but not for a renderer that draws on every call (RmlUi's GL3
-backend): a custom `Rml::RenderInterface` must draw nothing between frames, or
-the product must build against an SDK without `warm()`.
+`RmlUiSurface::attach()` calls `NativeContext::warm()` after the document loads,
+so textures, geometry and glyphs are ready before the first frame is requested.
+The SDK is required to provide it: configure fails when it does not (see the
+SDK requirement below). `warm()` renders once outside a frame, which is safe for
+Vellum's Metal and CPU renderers but not for a renderer that draws on every call
+(RmlUi's GL3 backend): a custom `Rml::RenderInterface` must draw nothing between
+frames.
 
 The surface context is sized in drawable pixels, the Metal frame scale is 1,
 and the density ratio is the backing scale. Every `px` length, not only text,
