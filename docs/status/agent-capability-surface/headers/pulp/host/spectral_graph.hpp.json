@@ -1,7 +1,7 @@
 {
   "domain": "host",
   "source": "core/host/include/pulp/host/spectral_graph.hpp",
-  "fingerprint": "sha256:9d82053bacdd5bf400f6b0dc2b36160c2c1af7319f9387b419a3181b670de1c1",
+  "fingerprint": "sha256:79671d5f9f092329bd1992091ff7def390ce342890a8fcf4ab00f8fd411a3da1",
   "include": "pulp/host/spectral_graph.hpp",
   "disposition": "infrastructure",
   "capability_keys": [],
