@@ -40,3 +40,15 @@ if(TARGET pulp-host)
         PASS_REGULAR_EXPRESSION "process-timing-consumer PASS checks=[0-9]+"
         FAIL_REGULAR_EXPRESSION "process-timing-consumer FAIL")
 endif()
+
+# The same facts through the real AU v2 effect, instrument and MIDI-processor
+# adapters. Links ausdk and compiles at C++23 like the other AudioUnitSDK
+# suites, because the adapter headers include AudioUnitSDK headers.
+if(APPLE AND NOT PULP_IOS AND PULP_HAS_AUSDK AND TARGET pulp-host)
+    pulp_add_test_suite(pulp-test-au-v2-process-timing
+        LIBRARIES pulp::host pulp::format pulp::midi ausdk
+                  "-framework AudioToolbox"
+                  "-framework CoreFoundation"
+                  "-framework CoreMIDI")
+    set_target_properties(pulp-test-au-v2-process-timing PROPERTIES CXX_STANDARD 23)
+endif()
