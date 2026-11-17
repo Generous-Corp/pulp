@@ -31,6 +31,7 @@
 #include <pulp/format/state_restore_gate.hpp>
 #include <pulp/format/detail/midi_out_offset.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
+#include <pulp/format/process_timing.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
 #include <pulp/state/listener_token.hpp>
@@ -211,10 +212,16 @@ private:
 /// callbacks through AUBase during render, but keeping the mapping here lets
 /// every adapter share one contract and lets tests install HostCallbackInfo
 /// without constructing a full AudioComponentInstance.
-inline void apply_host_callbacks_to_process_context(
-    ProcessContext& ctx,
-    const ausdk::AUBase& unit,
-    detail::PlayheadSnapshot& previous) noexcept {
+///
+/// `slice_offset` is the first frame of this Processor call within the host
+/// render. The host callbacks describe the render's first frame, so a playing
+/// transport is moved forward by the offset (samples, and beats when the tempo
+/// is known) before the playhead diff runs; a stopped transport stays where the
+/// host left it. An effect that splits a render into scheduled-parameter
+/// slices therefore reports each slice as following the one before it.
+inline void apply_host_callbacks_to_process_context(ProcessContext& ctx, const ausdk::AUBase& unit,
+                                                    detail::PlayheadSnapshot& previous,
+                                                    UInt32 slice_offset = 0) noexcept {
     Float64 beat = 0.0;
     Float64 tempo = 0.0;
     if (unit.CallHostBeatAndTempo(&beat, &tempo) == noErr) {
@@ -263,6 +270,20 @@ inline void apply_host_callbacks_to_process_context(
         }
     }
 
+    if (slice_offset > 0 && ctx.has_transport(TransportField::Playing) && ctx.is_playing) {
+        const auto step = static_cast<std::int64_t>(slice_offset);
+        if (ctx.has_transport(TransportField::SamplePosition)) {
+            if (ctx.position_samples <= std::numeric_limits<std::int64_t>::max() - step)
+                ctx.position_samples += step;
+            else
+                ctx.transport_validity.set(TransportField::SamplePosition, false);
+        }
+        if (ctx.has_transport(TransportField::BeatPosition) &&
+            ctx.has_transport(TransportField::Tempo) && ctx.sample_rate > 0.0)
+            ctx.position_beats +=
+                static_cast<double>(slice_offset) * ctx.tempo_bpm / (60.0 * ctx.sample_rate);
+    }
+
     static mach_timebase_info_data_t timebase = {0, 0};
     if (timebase.denom == 0) mach_timebase_info(&timebase);
     if (timebase.denom != 0) {
@@ -280,6 +301,105 @@ inline void apply_host_callbacks_to_process_context(
     detail::compute_playhead_changes(
         ctx, previous, detail::TransportDiffMode::FieldValidity);
 }
+
+/// Neutral timing facts (`ProcessContext::timing`) for one AU v2 Processor
+/// call, shared by the effect, instrument and MIDI-processor adapters.
+///
+/// The steady counter is the render `AudioTimeStamp::mSampleTime` plus the
+/// call's offset into the render, so the scheduled-parameter slices of one
+/// effect render occupy consecutive samples. The transport is the
+/// `CallHostTransportState` position that
+/// `apply_host_callbacks_to_process_context()` already placed on the context
+/// (advanced by the same offset while playing). AU reports no playback rate.
+///
+/// Discontinuity: `Initialize()` and `Reset()` call `mark_discontinuity()`
+/// from the host's control thread, which bumps a generation; the render thread
+/// reports a discontinuity until a Processor call observes the current
+/// generation. A render or slice that exits without calling the Processor
+/// calls `mark_skipped()`; the next observed call is then discontinuous only
+/// when it has no steady counter to measure the skip. Atomics and plain
+/// render-thread fields only, so every member is safe on the audio thread.
+class BlockTimingPublisher {
+  public:
+    /// Control thread: the next observed call does not follow the last one.
+    void mark_discontinuity() noexcept {
+        generation_.fetch_add(1, std::memory_order_acq_rel);
+    }
+
+    /// Render thread: a render or slice exited without calling the Processor.
+    void mark_skipped() noexcept {
+        skipped_ = true;
+    }
+
+    /// Render thread: write `ctx.timing` for a call that starts `slice_offset`
+    /// frames into the render whose time stamp is `render_time` (nullptr when
+    /// the call has no render time stamp). Call after
+    /// `apply_host_callbacks_to_process_context()`.
+    void publish(ProcessContext& ctx, const AudioTimeStamp* render_time,
+                 UInt32 slice_offset) noexcept {
+        const std::uint32_t flags = render_time ? render_time->mFlags : 0u;
+        const double sample_time =
+            render_time ? render_time->mSampleTime + static_cast<double>(slice_offset) : 0.0;
+        ctx.timing = au_process_timing(flags, sample_time, false, false, 0.0, false, false);
+        if (ctx.has_transport(TransportField::SamplePosition)) {
+            ctx.timing.has_transport_sample = true;
+            ctx.timing.transport_sample = ctx.position_samples;
+            ctx.timing.transport_moving =
+                ctx.has_transport(TransportField::Playing) && ctx.is_playing;
+        }
+        pending_generation_ = generation_.load(std::memory_order_acquire);
+        ctx.timing.discontinuity = pending_generation_ != observed_generation_ ||
+                                   (skipped_ && !ctx.timing.has_steady_sample);
+    }
+
+    /// Render thread: the Processor observed the facts the last `publish()`
+    /// wrote.
+    void mark_observed() noexcept {
+        observed_generation_ = pending_generation_;
+        skipped_ = false;
+        ++observed_calls_;
+    }
+
+    /// Render thread: Processor calls observed so far, so a render can tell
+    /// whether any of its slices reached the Processor.
+    std::uint64_t observed_calls() const noexcept {
+        return observed_calls_;
+    }
+
+  private:
+    // Starts one ahead of `observed_generation_`: the first call after
+    // construction is discontinuous.
+    std::atomic<std::uint64_t> generation_{1};
+    std::uint64_t pending_generation_ = 0;
+    std::uint64_t observed_generation_ = 0;
+    std::uint64_t observed_calls_ = 0;
+    bool skipped_ = false;
+};
+
+/// Marks the enclosing render or slice skipped on scope exit unless
+/// `observed()` ran, so every early return is covered without a mark at each
+/// exit. `armed = false` (an internal warm-up call) marks nothing.
+class ScopedSkipMark {
+  public:
+    explicit ScopedSkipMark(BlockTimingPublisher& timing, bool armed = true) noexcept
+        : timing_(timing), armed_(armed) {}
+    ScopedSkipMark(const ScopedSkipMark&) = delete;
+    ScopedSkipMark& operator=(const ScopedSkipMark&) = delete;
+    ~ScopedSkipMark() {
+        if (armed_)
+            timing_.mark_skipped();
+    }
+    /// The Processor observed this call's facts.
+    void observed() noexcept {
+        if (armed_)
+            timing_.mark_observed();
+        armed_ = false;
+    }
+
+  private:
+    BlockTimingPublisher& timing_;
+    bool armed_;
+};
 
 inline Float64 tail_samples_to_seconds(int tail_samples,
                                        double sample_rate) noexcept {
