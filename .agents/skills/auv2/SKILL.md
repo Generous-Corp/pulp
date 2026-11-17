@@ -425,7 +425,10 @@ Things that bite:
   leaves `PresentPreset` at `{-1, "Untitled"}` and hosts such as REAPER show
   "No preset". Declaring programs again, or `set_directory`, rebuilds the
   `AUPreset` records, so do both straight after construction, before a host
-  holds an array.
+  holds an array. Declaring again also re-points the present preset (first
+  program, or "Untitled" for an empty list), and a select callback runs from a
+  copy so it may redeclare. A saved state restores the program name under
+  number -1 and never re-runs the callback.
 - The preset load writes the `StateStore` outside `ScopedHostParamWrite`, so the
   `wire_host_parameter_bridge` listener fires and the host learns every value
   that moved. That is deliberate — suppressing it would leave the host's
