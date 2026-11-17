@@ -252,10 +252,10 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         'include': 'pulp/host/signal_graph_subgraph.hpp',
-        'fingerprint': 'sha256:2aed03e2e63370d4a8c2af2b7f41d28375a3a70de891ef4e09b692b1b87dca02',
+        'fingerprint': 'sha256:cecde9b9ffd3e961b5ed568b6bdfe8d1fa2934765187173ed7fdb5d6e537a4dc',
         'disposition': 'infrastructure',
         'capability_keys': [],
-        'rationale': 'Control-thread authored subgraph expansion and exact Processor parameter binding; the bounded G6 runtime is still partial.',
+        'rationale': 'Control-thread authored subgraph expansion with exact Processor and Custom members and exact Processor parameter binding; the bounded G6 runtime is still partial.',
     },
     {
         'include': 'pulp/host/voice_bank_binding.hpp',
