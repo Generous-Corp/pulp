@@ -13,6 +13,7 @@ export async function serve({ repo, wamDir, wclapDir, baselineWamDir, baselineWc
     ['/gain/module.wasm', [gainWclap, 'PulpGain.wasm']],
     ['/region/wam-dsp.js', [wam, 'SampleRegionAllpassWorklet.js']],
     ['/gain/wam-dsp.js', [gainWam, 'PulpGainWorklet.js']],
+    ['/region/mint-probe-processor.js', [fixture, 'mint-probe-processor.js']],
   ]);
   for (const name of ['wam-plugin.js', 'wam-runtime.mjs', 'wclap-host.mjs', 'wclap-wasi.mjs'])
     routes.set(`/host/${name}`, [source, `core/format/src/wasm/${name}`]);
