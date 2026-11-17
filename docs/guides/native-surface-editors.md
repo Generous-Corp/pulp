@@ -88,12 +88,12 @@ testing agrees with layout in either unit. A `dp` length is one point
 (`density_ratio()` device pixels). Size anything that must keep its physical
 size across displays in `dp` (the example does this).
 
-The density ratio needs a Vellum RmlUi SDK that exports
-`NativeContext::set_density_ratio`. Without it `density_ratio_supported()` is
-false, `dp` equals `px`, and a `dp` document renders at 1/scale of its intended
-size on a 2x display. Configure warns about it, and the first `attach()` reports it
-through the diagnostic sink, once per process (standard error by default; `set_diagnostic_sink`
-redirects it).
+The adapter needs a Vellum RmlUi SDK from Vellum commit `37777f3` on, which
+defines `VELLUM_RMLUI_NATIVE_API_VERSION` and the feature bits for the density
+ratio, `NativeContext::warm()` and the renderer `trim()` in `native.hpp`. The
+configure checks the macros and fails with a message when the SDK is older, so
+`dp` can never silently draw at 1/scale of its size. The `vellum-rmlui-sdk` pin
+in `tools/deps/manifest.json` names the commit the CI lane builds.
 
 ### Hiding the editor
 
@@ -107,8 +107,7 @@ frames stop at once, including one already waiting for the frame lock, RmlUi
 releases its compiled geometry and textures through the renderer, and
 `RendererHooks::trim` is called so the renderer can free the layer, filter and
 atlas textures it caches. `metal_renderer_hooks()` fills it from
-`MetalRenderInterface::trim()` when the Vellum SDK has
-`VELLUM_RMLUI_NATIVE_FEATURE_RENDERER_TRIM`; with an older SDK it stays empty. The trim waits until no frame of the surface is
+`MetalRenderInterface::trim()`. The trim waits until no frame of the surface is
 being encoded or submitted and its last committed command buffer has completed
 on the GPU (about a frame at most), so nothing released is still in use.
 Showing resumes frames and draws one, which recompiles everything that was

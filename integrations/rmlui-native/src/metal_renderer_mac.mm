@@ -3,8 +3,6 @@
 
 #include <pulp/rmlui_native/metal_renderer.hpp>
 
-#include <vellum/rmlui/native.hpp>
-
 namespace pulp::rmlui_native {
 
 vellum::rmlui::MetalFrameTarget metal_frame_target(const FrameTarget& frame) {
@@ -25,14 +23,9 @@ RendererHooks metal_renderer_hooks(vellum::rmlui::MetalRenderInterface& renderer
         renderer.begin_frame(metal_frame_target(frame));
     };
     hooks.end_frame = [&renderer] { renderer.end_frame(); };
-#if defined(VELLUM_RMLUI_NATIVE_API_VERSION) &&                                                    \
-    (VELLUM_RMLUI_NATIVE_FEATURES & VELLUM_RMLUI_NATIVE_FEATURE_RENDERER_TRIM)
     // The surface hides an editor with no frame being encoded and after the last
-    // committed frame has completed, which is what trim() asks for. An older
-    // Vellum without the feature bit leaves its render targets until it is
-    // destroyed.
+    // committed frame has completed, which is what trim() asks for.
     hooks.trim = [&renderer] { renderer.trim(); };
-#endif
     return hooks;
 }
 

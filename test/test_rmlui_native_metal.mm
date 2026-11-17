@@ -306,10 +306,6 @@ TEST_CASE("a 2x context left at a 1x density ratio fails the parity check",
 TEST_CASE("hiding the editor trims the renderer once, and showing it draws the same frame",
           "[native-surface][rmlui][metal][visibility]") {
     REQUIRE_METAL();
-#if !(defined(VELLUM_RMLUI_NATIVE_API_VERSION) &&                                                  \
-      (VELLUM_RMLUI_NATIVE_FEATURES & VELLUM_RMLUI_NATIVE_FEATURE_RENDERER_TRIM))
-    SKIP("this Vellum RmlUi SDK has no renderer trim");
-#else
     @autoreleasepool {
         [NSApplication sharedApplication];
         PulpRmlMetalTestWindow* window = [[PulpRmlMetalTestWindow alloc]
@@ -370,5 +366,4 @@ TEST_CASE("hiding the editor trims the renderer once, and showing it draws the s
         ui.detach();
         [window close];
     }
-#endif
 }
