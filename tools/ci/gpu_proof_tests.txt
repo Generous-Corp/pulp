@@ -25,3 +25,4 @@ pulp-gpu-shared-io-private-convolution-probe
 pulp-gpu-shared-io-private-convolution-submit-scope-negative-control
 pulp-gpu-shared-spectral-probe
 pulp-test-gpu-dawn-shared-io-provider-conformance
+pulp-test-graph-gpu-resource-admission
