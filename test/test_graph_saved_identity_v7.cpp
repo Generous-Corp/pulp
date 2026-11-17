@@ -2,6 +2,7 @@
 // deterministic migration from v6 documents.
 
 #include "../core/host/src/graph_serializer_test_access.hpp"
+#include "../core/host/src/signal_graph_authored_id_internal.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 #include <choc/text/choc_JSON.h>
@@ -108,6 +109,55 @@ TEST_CASE("every created node gets a fresh, well-formed authored ID",
     // A second graph built the same way mints different IDs.
     SignalGraph other;
     CHECK_FALSE(ids.contains(other.node(other.add_gain_node("G"))->authored_id.str()));
+}
+
+TEST_CASE("the entropy-free authored-ID salt separates graphs deterministically",
+          "[host][graph][identity][v7][wasm]") {
+    using detail::authored_id_from_salt;
+    using detail::authored_id_salt_from;
+    constexpr std::uint64_t clock = 1'763'000'000'000'000'000ULL;
+    constexpr std::uintptr_t address = 0x10'0000;
+    constexpr std::uint64_t identity = 7;
+
+    // Same inputs, same salt and IDs: nothing but the arguments is read, so
+    // no entropy device and no clock contributes.
+    const auto salt = authored_id_salt_from(clock, address, identity);
+    CHECK(salt == authored_id_salt_from(clock, address, identity));
+    CHECK(authored_id_from_salt(salt, 1) == authored_id_from_salt(salt, 1));
+
+    // Each input alone separates two graphs. A WebAssembly build that loads
+    // the same module twice can repeat an address, so the identity must
+    // separate graphs by itself, and the other way round.
+    const auto first = authored_id_from_salt(salt, 1);
+    CHECK(first != authored_id_from_salt(authored_id_salt_from(clock, address + 64, identity), 1));
+    CHECK(first != authored_id_from_salt(authored_id_salt_from(clock, address, identity + 1), 1));
+    CHECK(first != authored_id_from_salt(authored_id_salt_from(clock + 1, address, identity), 1));
+
+    // Address and identity cannot cancel each other out.
+    std::set<detail::AuthoredIdSalt> salts;
+    for (std::uint64_t i = 0; i < 64; ++i)
+        for (std::uintptr_t a = 0; a < 64; ++a)
+            salts.insert(authored_id_salt_from(clock, address + a * 16, identity + i));
+    CHECK(salts.size() == 64 * 64);
+
+    // Many mints from one salt are unique and well formed.
+    std::set<std::string> ids;
+    for (std::uint64_t counter = 1; counter <= 10'000; ++counter) {
+        const auto id = authored_id_from_salt(salt, counter);
+        REQUIRE(id.size() == 36);
+        REQUIRE(id.rfind("nid-", 0) == 0);
+        REQUIRE(ids.insert(id).second);
+    }
+
+    // Two live graphs seeded without entropy (as under Emscripten) differ.
+    SignalGraph a;
+    SignalGraph b;
+    const auto a_salt = detail::authored_id_salt_without_entropy(
+        reinterpret_cast<std::uintptr_t>(&a), a.authoring_receipt().graph_identity);
+    const auto b_salt = detail::authored_id_salt_without_entropy(
+        reinterpret_cast<std::uintptr_t>(&b), b.authoring_receipt().graph_identity);
+    CHECK(a_salt != b_salt);
+    CHECK(authored_id_from_salt(a_salt, 1) != authored_id_from_salt(b_salt, 1));
 }
 
 TEST_CASE("a rename keeps the authored ID and diffs as one changed node",

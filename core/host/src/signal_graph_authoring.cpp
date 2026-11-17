@@ -6,6 +6,7 @@
 
 #include <pulp/format/processor.hpp>
 #include <pulp/host/signal_graph.hpp>
+#include "signal_graph_authored_id_internal.hpp"
 #include "signal_graph_ports_internal.hpp"
 
 #include <pulp/host/control_index_nodes.hpp>
@@ -632,32 +633,78 @@ SignalGraph::add_unresolved_custom_node(std::string_view type_id, int version, i
     return nodes_.back().id;
 }
 
-// A fresh authored ID hashes a per-graph random salt with a counter, so two
-// graphs (for example two sessions editing copies of one document) never
-// mint the same ID for different nodes. The salt is drawn on first use, on
-// the control thread, under the mutation lock.
-std::string SignalGraph::mint_authored_id_locked_() {
-    if (!authored_id_seeded_) {
-        try {
-            std::random_device device;
-            for (auto& word : authored_id_salt_)
-                word = (static_cast<std::uint64_t>(device()) << 32) ^ device();
-        } catch (...) {
-            // No entropy source: mix the clock with this graph's address and
-            // diagnostic identity, which still differ between live graphs.
-            authored_id_salt_[0] = static_cast<std::uint64_t>(
-                std::chrono::steady_clock::now().time_since_epoch().count());
-            authored_id_salt_[1] =
-                reinterpret_cast<std::uintptr_t>(this) ^ (diagnostic_graph_identity_ << 17);
-        }
-        authored_id_seeded_ = true;
-    }
+namespace detail {
+
+namespace {
+
+std::uint64_t mix_authored_id_word(std::uint64_t value) noexcept {
+    // splitmix64 finalizer: a bijection, so distinct inputs stay distinct.
+    value += 0x9e3779b97f4a7c15ULL;
+    value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    value = (value ^ (value >> 27)) * 0x94d049bb133111ebULL;
+    return value ^ (value >> 31);
+}
+
+} // namespace
+
+AuthoredIdSalt authored_id_salt_from(std::uint64_t clock_word, std::uintptr_t graph_address,
+                                     std::uint64_t graph_identity) noexcept {
+    // For a fixed clock word, salt[0] is a bijection of the identity; for a
+    // fixed identity, salt[1] is a bijection of the address.
+    const auto identity = mix_authored_id_word(graph_identity);
+    return {mix_authored_id_word(clock_word ^ identity),
+            mix_authored_id_word(static_cast<std::uint64_t>(graph_address) ^
+                                 mix_authored_id_word(identity))};
+}
+
+std::uint64_t authored_id_clock_word() noexcept {
+    return static_cast<std::uint64_t>(std::chrono::system_clock::now().time_since_epoch().count());
+}
+
+AuthoredIdSalt authored_id_salt_without_entropy(std::uintptr_t graph_address,
+                                                std::uint64_t graph_identity) noexcept {
+    return authored_id_salt_from(authored_id_clock_word(), graph_address, graph_identity);
+}
+
+std::string authored_id_from_salt(const AuthoredIdSalt& salt, std::uint64_t counter) {
     std::string preimage = "pulp.graph.authored-id.fresh.v1";
-    for (const auto word : {authored_id_salt_[0], authored_id_salt_[1], ++authored_id_counter_}) {
+    for (const auto word : {salt[0], salt[1], counter}) {
         preimage.push_back('\0');
         preimage += std::to_string(word);
     }
     return "nid-" + runtime::sha256_hex(preimage).substr(0, 32);
+}
+
+} // namespace detail
+
+// A fresh authored ID hashes a per-graph salt with a counter, so two graphs
+// (for example two sessions editing copies of one document) never mint the
+// same ID for different nodes. The salt is drawn on first use, on the control
+// thread, under the mutation lock.
+std::string SignalGraph::mint_authored_id_locked_() {
+    if (!authored_id_seeded_) {
+        const auto address = reinterpret_cast<std::uintptr_t>(this);
+        detail::AuthoredIdSalt salt{};
+#if defined(__EMSCRIPTEN__)
+        // std::random_device reads crypto.getRandomValues, which an
+        // AudioWorklet global scope lacks; the JavaScript ReferenceError it
+        // throws is not a C++ exception and would escape the catch below.
+        salt = detail::authored_id_salt_without_entropy(address, diagnostic_graph_identity_);
+#else
+        try {
+            std::random_device device;
+            for (auto& word : salt)
+                word = (static_cast<std::uint64_t>(device()) << 32) ^ device();
+        } catch (...) {
+            salt = detail::authored_id_salt_without_entropy(address, diagnostic_graph_identity_);
+        }
+#endif
+        authored_id_salt_[0] = salt[0];
+        authored_id_salt_[1] = salt[1];
+        authored_id_seeded_ = true;
+    }
+    return detail::authored_id_from_salt({authored_id_salt_[0], authored_id_salt_[1]},
+                                         ++authored_id_counter_);
 }
 
 void SignalGraph::push_node_locked_(GraphNode&& node) {
