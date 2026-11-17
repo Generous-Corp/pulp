@@ -414,7 +414,6 @@ struct VoiceBankBinding::Impl {
         tracker.on_note_on = [this](const midi::MpeNoteState& note) {
             owner->dispatch({0, midi::MpeExpressionEvent::Kind::NoteOn, note});
             prune_stolen_holds();
-            observe_drains();
         };
         tracker.on_note_off = [this](const midi::MpeNoteState& note) { note_off(note); };
         tracker.on_pitch_bend = [this](const midi::MpeNoteState& note) {
