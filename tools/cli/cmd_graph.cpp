@@ -837,6 +837,11 @@ int diff_graphs(const std::vector<std::string>& args) {
         connections.addMember("removed", string_array(diff.connections_removed));
         connections.addMember("changed", string_array(diff.connections_changed));
         result.addMember("connections", connections);
+        auto events = choc::value::createObject("EventConnections");
+        events.addMember("added", string_array(diff.event_connections_added));
+        events.addMember("removed", string_array(diff.event_connections_removed));
+        events.addMember("changed", string_array(diff.event_connections_changed));
+        result.addMember("event_connections", events);
         result.addMember("layout_changed", string_array(diff.layout_changed));
         result.addMember("sections_changed", string_array(diff.sections_changed));
         std::cout << choc::json::toString(result) << '\n';
@@ -858,6 +863,12 @@ int diff_graphs(const std::vector<std::string>& args) {
         std::cout << "- connection " << key << '\n';
     for (const auto& key : diff.connections_changed)
         std::cout << "~ connection " << key << '\n';
+    for (const auto& key : diff.event_connections_added)
+        std::cout << "+ event connection " << key << '\n';
+    for (const auto& key : diff.event_connections_removed)
+        std::cout << "- event connection " << key << '\n';
+    for (const auto& key : diff.event_connections_changed)
+        std::cout << "~ event connection " << key << '\n';
     for (const auto& name : diff.sections_changed)
         std::cout << "~ section " << name << '\n';
     for (const auto& id : diff.layout_changed)

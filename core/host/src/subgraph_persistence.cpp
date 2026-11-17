@@ -93,6 +93,27 @@ struct Refusal {
     std::string error;
 };
 
+// The graph's event connection, as the subgraph value type.
+std::optional<SubgraphEventEdge> graph_event_connection(const SignalGraph& graph) {
+    const auto edge = graph.graph_event_edge();
+    if (!edge)
+        return std::nullopt;
+    return SubgraphEventEdge{edge->producer, edge->consumer, edge->source_port,
+                             edge->destination_port, edge->kind};
+}
+
+// The instance's declared event connection is the graph's, and the graph
+// holds no undeclared event connection between two of its members. The
+// writer and the restore both apply it, so a document that passes the writer
+// also passes the restore.
+bool instance_event_edge_matches(const std::optional<SubgraphEventEdge>& declared,
+                                 const std::optional<SubgraphEventEdge>& live,
+                                 const std::unordered_set<NodeId>& members) {
+    if (declared)
+        return live == declared;
+    return !live || !members.contains(live->producer) || !members.contains(live->consumer);
+}
+
 // The value a declared parameter has in the live graph: the target Gain
 // node's gain, or the target Processor parameter. The instance's own
 // `parameters` map is only a cache of the last restore and goes stale as
@@ -279,7 +300,22 @@ bool rebind_instance(SignalGraph& graph, const SubgraphTemplate& definition,
     if (internal_edges(scratch, scratch_members, live_of) != internal_edges(graph, live_members))
         return mismatch("internal edges do not match the template");
 
+    // The template's event connection, mapped onto the restored members,
+    // must be the graph's; a lost, re-pointed or undeclared one refuses.
+    auto declared_event = expected.event_edge;
+    if (declared_event) {
+        declared_event->producer = live_of.at(declared_event->producer);
+        declared_event->consumer = live_of.at(declared_event->consumer);
+    }
+    if (!instance_event_edge_matches(declared_event, graph_event_connection(graph), live_members))
+        return mismatch(declared_event
+                            ? "the template's event connection was not restored between its "
+                              "declared members"
+                            : "an event connection between members is not declared by the "
+                              "template");
+
     out = expected;
+    out.event_edge = declared_event;
     out.nodes.clear();
     for (const auto id : expected.nodes)
         out.nodes.push_back(live_of.at(id));
@@ -333,6 +369,12 @@ std::string to_saved_subgraph_document(
                 return {};
         }
         if (!instance_handles_live(graph, instance))
+            return {};
+        // Restore refuses an instance whose declared event connection is
+        // gone or re-pointed, or an undeclared one between its members.
+        if (!instance_event_edge_matches(
+                instance.event_edge, graph_event_connection(graph),
+                std::unordered_set<NodeId>(instance.nodes.begin(), instance.nodes.end())))
             return {};
     }
 
@@ -465,12 +507,17 @@ SubgraphDocumentLoad from_saved_subgraph_document(SignalGraph& graph, const std:
                           inspection.detail);
 
         const auto root = choc::json::parse(json);
-        if (!root.hasObjectMember("subgraphs")) {
+        // A document with neither records nor event connections loads
+        // directly. Event connections take the candidate path, so a binding
+        // the graph refuses leaves the caller's graph untouched.
+        if (!root.hasObjectMember("subgraphs") && !root.hasObjectMember("event_connections")) {
             live_load_started = true;
             out.load = GraphSerializer::from_saved_document(graph, json, options);
             return out;
         }
-        const auto& records = root["subgraphs"];
+        const auto no_records = choc::value::createEmptyArray();
+        const choc::value::ValueView records =
+            root.hasObjectMember("subgraphs") ? root["subgraphs"] : no_records.getView();
         for (std::uint32_t i = 0; i < records.size(); ++i) {
             const auto identity = std::string(records[i]["template_identity"].getString());
             if (!by_identity.contains(identity))

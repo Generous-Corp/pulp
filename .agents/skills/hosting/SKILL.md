@@ -2390,6 +2390,14 @@ Watch out for:
   same-named node), and a v6/v7 pair is refused rather than compared. A
   pre-v4 legacy file is refused as `invalid_format_version`, not
   `logical_identity_missing`; re-save it with `to_saved_document` first.
+- A graph event connection (`connect_graph_event`) persists ONLY in the
+  saved-identity v7 document (`event_connections`, endpoints by authored ID).
+  `to_json`/`to_file` refuse a graph that holds one rather than drop it, and a
+  load rebinds it through `connect_graph_event` last, so the graph's own rules
+  refuse it (an unregistered Custom endpoint type refuses the whole load, not
+  just the edge). A graph holds one event edge, so a `SubgraphTemplate` that
+  declares `event_edge` expands at most once per graph. The diff reports it in
+  `event_connections_*`, never in `sections_changed`.
 
 ## Crash-isolated scanning — and the un-isolated LOAD
 
