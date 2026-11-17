@@ -6,9 +6,9 @@
 // the stored frames, and against grid-walk counts for the explicit end.
 
 #include "harness/rt_allocation_probe.hpp"
-#include "harness/spectral_stream_oracle.hpp"
 #include "spectral_asset_morph_internal.hpp"
 #include "spectral_asset_source_internal.hpp"
+#include "spectral_stream_oracle.hpp"
 
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/signal_graph.hpp>
