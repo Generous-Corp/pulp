@@ -11,6 +11,8 @@
    "docs/status/consumption-profiles.json",
    "docs/status/consumption-profiles.schema.json",
    "inspect/src",
+   "test/CMakeLists.txt",
+   "test/cmake",
    "test/cmake/pr_fast_tests.cmake",
    "test/ctest_script_inputs",
    "test/fixtures",

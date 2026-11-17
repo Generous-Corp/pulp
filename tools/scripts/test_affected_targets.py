@@ -641,8 +641,11 @@ class FragmentFixture:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
 
-    def select(self, changed: list[str], deleted: list[str] = ()) -> at.Selection:
-        return at.project_affected(self.model, changed, list(deleted), None, self.inventory, 1.0)
+    def select(self, changed: list[str], deleted: list[str] = (),
+               base_texts: dict[str, str] | None = None) -> at.Selection:
+        kwargs = {"base_texts": base_texts} if base_texts is not None else {}
+        return at.project_affected(self.model, changed, list(deleted), None, self.inventory, 1.0,
+                                   **kwargs)
 
 
 class RegistrationFragments(unittest.TestCase):
@@ -697,6 +700,39 @@ class RegistrationFragments(unittest.TestCase):
             self.fx.touch("test/cmake/knob_tests.cmake", text)
             sel = self.fx.select(["test/cmake/knob_tests.cmake"])
             self.assertEqual(sel.mode, "all", name)
+
+    def test_cross_target_mutations_and_includes_stay_global(self) -> None:
+        cases = {
+            "target": "target_compile_definitions(pulp-test-label PRIVATE FLAG)\n",
+            "test-properties": "set_tests_properties(Label wraps PROPERTIES TIMEOUT 5)\n",
+            "target-property": "set_property(TARGET pulp-test-label PROPERTY FOO bar)\n",
+            "include": "include(shared-options.cmake)\n",
+            "unknown": "custom-project-command.with-dot()\n",
+        }
+        for name, text in cases.items():
+            self.fx.touch("test/cmake/knob_tests.cmake", text)
+            sel = self.fx.select(["test/cmake/knob_tests.cmake"])
+            self.assertEqual(sel.mode, "all", name)
+
+    def test_removed_shared_assignment_stays_global(self) -> None:
+        self.fx.touch("test/cmake/label_tests.cmake", "message(${KNOB_FLAGS.with-dot})\n")
+        self.fx.touch("test/cmake/knob_tests.cmake",
+                      "add_executable(pulp-test-knob test/test_knob.cpp)\n")
+        base_texts = {
+            "test/cmake/knob_tests.cmake":
+                "set(KNOB_FLAGS.with-dot -DX)\n"
+                "add_executable(pulp-test-knob test/test_knob.cpp)\n",
+            "test/cmake/label_tests.cmake": "message(${KNOB_FLAGS.with-dot})\n",
+        }
+        sel = self.fx.select(["test/cmake/knob_tests.cmake"], base_texts=base_texts)
+        self.assertEqual(sel.mode, "all")
+
+    def test_dual_use_script_with_configure_side_effect_stays_global(self) -> None:
+        self.fx.touch("test/cmake/check_knob.cmake",
+                      "set(CMAKE_CXX_FLAGS \"${CMAKE_CXX_FLAGS} -DGLOBAL\")\n"
+                      "message(STATUS ok)\n")
+        sel = self.fx.select(["test/cmake/check_knob.cmake"])
+        self.assertEqual(sel.mode, "all")
 
     def test_without_an_inventory_a_fragment_stays_global(self) -> None:
         sel = at.project_affected(self.fx.model, ["test/cmake/knob_tests.cmake"], [], None, None, 1.0)

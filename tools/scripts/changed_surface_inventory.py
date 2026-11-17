@@ -1361,31 +1361,70 @@ REGISTRATION_FRAGMENT_RE = re.compile(r"^test/cmake/(?:fragments/)?[^/]+\.cmake$
 # call stack, so a change to it reaches all of them.
 SHARED_FRAGMENT_NAMES = frozenset({"fragments.cmake"})
 _CMAKE_COMMENT = re.compile(r"#.*")
-_CMAKE_DEFINES_COMMAND = re.compile(r"^\s*(?:function|macro)\s*\(\s*(\w+)", re.M | re.I)
-_CMAKE_SETS_VARIABLE = re.compile(r"^\s*set\s*\(\s*([A-Za-z]\w*)", re.M | re.I)
+_CMAKE_COMMAND_NAME = r"[A-Za-z_][A-Za-z0-9_.-]*"
+_CMAKE_DEFINES_COMMAND = re.compile(
+    rf"^\s*(?:function|macro)\s*\(\s*({_CMAKE_COMMAND_NAME})", re.M | re.I)
+_CMAKE_SETS_VARIABLE = re.compile(
+    rf"^\s*set\s*\(\s*({_CMAKE_COMMAND_NAME})", re.M | re.I)
 _CMAKE_GLOBAL_STATE = re.compile(
     r"^\s*(?:include_directories|add_compile_options|add_compile_definitions|add_definitions"
     r"|link_libraries|link_directories|add_subdirectory|option)\s*\("
     r"|^\s*set\s*\(\s*CMAKE_\w+"
     r"|^\s*set\s*\([^)]*\bCACHE\b"
-    r"|^\s*set_property\s*\(\s*(?:GLOBAL|DIRECTORY)\b", re.M | re.I)
+    r"|^\s*set_property\s*\(\s*(?:GLOBAL|DIRECTORY)\b"
+    r"|^\s*(?:include|configure_file|file|execute_process|add_custom_command|add_custom_target)\s*\("
+    r"|^\s*(?:set_tests_properties|set_target_properties|set_source_files_properties)\s*\("
+    r"|^\s*target_[A-Za-z0-9_.-]+\s*\(", re.M | re.I)
+
+# Commands that only describe the registration owned by this file. Anything
+# else is conservatively treated as shared: an unrecognized command may be a
+# project macro that mutates a target, directory, or cache outside its stack.
+_CMAKE_LOCAL_COMMANDS = frozenset({
+    "add_executable", "add_library", "add_test", "pulp_add_test_suite",
+    "pulp_add_test_group", "pulp_dsp_series_catalog_suite", "pulp_dsp_series_signal_suite",
+    "catch_discover_tests", "message", "set", "unset", "list", "cmake_parse_arguments",
+    "cmake_minimum_required", "function", "macro", "endfunction", "endmacro",
+    "if", "elseif", "else", "endif", "foreach", "endforeach", "while", "endwhile",
+    "break", "continue", "return",
+})
+_CMAKE_COMMAND = re.compile(rf"^\s*({_CMAKE_COMMAND_NAME})\s*\(", re.M)
 
 
-def _test_cmake_texts(source_root: str) -> dict[str, str]:
+def _test_cmake_texts(source_root: str, ref: str | None = None) -> dict[str, str]:
     """Comment-stripped text of every CMake file under test/, by relative path."""
     root = Path(source_root) / "test"
-    texts: dict[str, str] = {}
-    for path in [root / "CMakeLists.txt", *sorted(root.glob("cmake/*.cmake")),
-                 *sorted(root.glob("cmake/fragments/*.cmake"))]:
+    if ref is not None:
         try:
-            texts[path.relative_to(source_root).as_posix()] = _CMAKE_COMMENT.sub(
-                "", path.read_text(encoding="utf-8", errors="replace"))
+            listed = subprocess.run(
+                ["git", "ls-tree", "-r", "--name-only", ref, "--", "test/CMakeLists.txt", "test/cmake"],
+                cwd=source_root, capture_output=True, text=True, encoding="utf-8", check=True,
+            ).stdout.splitlines()
+        except (OSError, subprocess.CalledProcessError):
+            return {}
+        paths = [Path(source_root) / rel for rel in listed if rel.endswith(".cmake") or rel.endswith("CMakeLists.txt")]
+    else:
+        paths = [root / "CMakeLists.txt", *sorted(root.glob("cmake/*.cmake")),
+                 *sorted(root.glob("cmake/fragments/*.cmake"))]
+    texts: dict[str, str] = {}
+    for path in paths:
+        try:
+            rel = path.relative_to(source_root).as_posix()
+            if ref is None:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            else:
+                text = subprocess.run(
+                    ["git", "show", f"{ref}:{rel}"], cwd=source_root,
+                    capture_output=True, text=True, encoding="utf-8", check=True,
+                ).stdout
+            texts[rel] = _CMAKE_COMMENT.sub("", text)
         except OSError:
+            continue
+        except subprocess.CalledProcessError:
             continue
     return texts
 
 
-def shared_fragment_reason(rel: str, texts: dict[str, str]) -> str | None:
+def _shared_fragment_reason_current(rel: str, texts: dict[str, str]) -> str | None:
     """Why a registration file cannot be treated as owning only its own tests,
     or None when nothing outside its own call stacks can depend on it."""
     text = texts.get(rel)
@@ -1395,6 +1434,10 @@ def shared_fragment_reason(rel: str, texts: dict[str, str]) -> str | None:
         return "aggregates every fragment"
     if _CMAKE_GLOBAL_STATE.search(text):
         return "touches directory, cache or global state"
+    commands = {name.lower() for name in _CMAKE_COMMAND.findall(text)}
+    unknown = sorted(commands - _CMAKE_LOCAL_COMMANDS)
+    if unknown:
+        return f"uses unrecognized CMake command {unknown[0]}"
     others = {name: body for name, body in texts.items() if name != rel}
     for name in set(_CMAKE_DEFINES_COMMAND.findall(text)):
         call = re.compile(r"^\s*" + re.escape(name) + r"\s*\(", re.M | re.I)
@@ -1407,9 +1450,28 @@ def shared_fragment_reason(rel: str, texts: dict[str, str]) -> str | None:
     return None
 
 
+def shared_fragment_reason(rel: str, texts: dict[str, str],
+                           base_texts: dict[str, str] | None = None) -> str | None:
+    """Return a shared-state reason for either side of the changed file.
+
+    A removal can be unsafe even when the current file looks local, so inspect
+    the merge-base text as well whenever it is available.
+    """
+    reason = _shared_fragment_reason_current(rel, texts)
+    if reason is not None:
+        return reason
+    if base_texts is not None and rel in base_texts:
+        reason = _shared_fragment_reason_current(rel, base_texts)
+        if reason is not None:
+            return f"base version {reason}"
+    return None
+
+
 def fragment_projection(files: Iterable[str], model: "CodeModel",
                         inventory: list["CTestEntry"],
-                        index: dict[str, set[str]]) -> dict[str, tuple[set[str], set[str]]]:
+                        index: dict[str, set[str]],
+                        base_texts: dict[str, str] | None = None
+                        ) -> dict[str, tuple[set[str], set[str]]]:
     """Changed CMake files whose reach is fully known: path -> (tests, targets).
 
     A file absent from the result is global."""
@@ -1423,13 +1485,13 @@ def fragment_projection(files: Iterable[str], model: "CodeModel",
         registered = [e for e in inventory if absolute in e.registered_files]
         defined = {t.name for t in model.targets.values() if absolute in t.definition_files}
         scripted = {e.name for e in inventory if absolute in command_path_refs(e.command)}
+        if texts is None:
+            texts = _test_cmake_texts(model.source_root)
+        if shared_fragment_reason(rel, texts, base_texts) is not None:
+            continue
         if not registered and not defined:
             if scripted:  # a `cmake -P` script: only the tests that run it read it
                 result[rel] = (scripted, set())
-            continue
-        if texts is None:
-            texts = _test_cmake_texts(model.source_root)
-        if shared_fragment_reason(rel, texts) is not None:
             continue
         if rev is None:
             rev = reverse_dependencies(model)
@@ -1494,7 +1556,8 @@ def project_affected(model: CodeModel, changed: list[str], deleted: list[str],
                      deps_db: dict[str, set[str]] | None, inventory: list[CTestEntry] | None,
                      threshold: float = DEFAULT_PROJECTION_THRESHOLD,
                      stale_build_system: list[str] | None = None,
-                     families: Iterable[dict[str, Any]] = ()) -> Selection:
+                     families: Iterable[dict[str, Any]] = (),
+                     base_texts: dict[str, str] | None = None) -> Selection:
     """Map the diff to a Selection.
 
     ``deps_db`` is the header -> targets map from :func:`header_owners` (None
@@ -1519,7 +1582,7 @@ def project_affected(model: CodeModel, changed: list[str], deleted: list[str],
     if inventory is not None:
         fragments = fragment_projection(
             [f for f in changed if is_build_system_file(f)], model, inventory,
-            artifact_index(model))
+            artifact_index(model), base_texts)
     build_system = [f for f in build_system if f not in fragments]
     if build_system:
         return all_selection(f"build system changed: {build_system[0]}", changed, total,
@@ -1660,8 +1723,9 @@ def project_working_diff(build_dir: Path, source_root: Path | None, base: str,
     headers = {f for f in changed if os.path.splitext(f)[1] in HEADER_EXTENSIONS}
     deps_db = header_owners(build_dir, model, headers)
     inventory = load_projection_ctest_entries(build_dir) if with_tests else None
+    base_texts = _test_cmake_texts(str(root), base)
     return project_affected(model, changed, deleted, deps_db, inventory, threshold, stale,
-                            families)
+                            families, base_texts)
 
 
 # ── Configuration-neutral registration projection ──

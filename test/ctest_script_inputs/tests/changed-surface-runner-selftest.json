@@ -8,6 +8,8 @@
    "core/host/include",
    "docs/status",
    "inspect/src",
+   "test/CMakeLists.txt",
+   "test/cmake",
    "test/cmake/cmake_smoke_tests.cmake",
    "test/cmake/test_pulp_add_sparkle.cmake",
    "test/cmake/test_wgpu_native_pin.cmake",
