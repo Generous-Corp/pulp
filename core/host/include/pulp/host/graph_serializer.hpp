@@ -56,7 +56,7 @@ enum class GraphDocumentRefusal : std::uint8_t {
     SubgraphRecordInvalid,
     SubgraphBindingDangling,
     SubgraphBindingDuplicate,
-    // A node id in a saved-identity v6 document (a node record, identity
+    // A node id in a saved-identity document (a node record, identity
     // entry, or binding) is not an integer in 1..NodeId max, or two node
     // records share one id.
     NodeIdInvalid,
@@ -191,20 +191,46 @@ class GraphSerializer {
     /// Inspect one bounded saved document without loading plugins, invoking
     /// factories, restoring state, preparing, or writing a file. Legacy
     /// format-version documents without an explicit identity envelope are
-    /// refused with LogicalIdentityMissing.
+    /// refused with LogicalIdentityMissing. Both saved-identity v6 (structural
+    /// identities, validated by the v6 rules) and v7 (persisted authored node
+    /// IDs, format_version 7) are admitted; see
+    /// docs/graph-program-status/G-3-v7-identity-design.md.
     static GraphDocumentInspection inspect_document(std::string_view json);
 
-    /// Add the saved-identity v6 envelope to the existing graph document.
-    /// The graph payload and its format version are byte-compatible with
-    /// to_json; the envelope binds deterministic authored identities to nodes.
+    /// Write the saved-identity v7 document: the graph payload at
+    /// format_version 7, each node record carrying its authored_id, and an
+    /// envelope binding those IDs to the persisted node ids.
     static std::string to_saved_document(
         const SignalGraph& graph,
         const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout = {});
 
-    /// Deterministic authored identity for every current node, the same
+    /// The authored ID of every current node (GraphNode::authored_id), the
     /// values to_saved_document records. NodeIds are lookup keys only and
     /// never enter an identity string.
     static std::unordered_map<NodeId, std::string> saved_node_identities(const SignalGraph& graph);
+
+    /// Result of migrate_saved_document. `document` is empty on refusal.
+    struct SavedDocumentMigration {
+        GraphDocumentRefusal refusal = GraphDocumentRefusal::None;
+        std::string detail;
+        std::string document;
+        // Each v6 identity and the authored ID it migrated to, sorted by the
+        // v6 identity. Empty when the input was already v7.
+        std::vector<std::pair<std::string, std::string>> identity_map;
+        // False when the input was already a v7 document (returned as is).
+        bool migrated = false;
+        bool ok() const noexcept {
+            return refusal == GraphDocumentRefusal::None;
+        }
+    };
+
+    /// Data-only migration of a saved-identity v6 document to v7. The input
+    /// is inspected with the v6 rules; each node gets an authored ID derived
+    /// from the source document's digest and its v6 identity, so the same
+    /// document always migrates to the same IDs and two documents that differ
+    /// in anything never share one. Loading a v6 document assigns these same
+    /// IDs. Never loads plugins, never writes a file.
+    static SavedDocumentMigration migrate_saved_document(std::string_view json);
 
     using MigrationFn =
         std::function<bool(const std::string& source_json,
@@ -254,6 +280,9 @@ class GraphSerializer {
     // Result of a load attempt. Plugins that couldn't be re-resolved show
     // up in `missing_plugins` with their original identity tuple — the
     // graph still loads but those nodes have null PluginSlots.
+    // A refused load (ok == false) carries only its error: every list and
+    // map below is empty, and a load refused after it began replacing the
+    // caller's graph leaves that graph empty.
     struct LoadResult {
         bool ok = false;
         std::string error;                        // populated when ok == false
@@ -275,6 +304,10 @@ class GraphSerializer {
         // would drop it; a caller that rewrites the document refuses when
         // this is not empty.
         std::vector<NodeId> unrestored_node_ids;
+        // from_saved_document only: each logical identity the document names
+        // (a v7 authored ID, or a v6 structural identity) -> NodeId assigned by
+        // this load. Empty whenever ok is false.
+        std::unordered_map<std::string, NodeId> identity_node_ids;
     };
 
     // Decode JSON into a freshly cleared graph. Returns LoadResult; the
@@ -284,19 +317,22 @@ class GraphSerializer {
     // plugins per GraphLoadOptions, then PluginSlot::load), then walk
     // connections and replay them. The overload without options uses the
     // defaults: standard roots only, no blacklist, no scanning, unrooted
-    // paths refused.
+    // paths refused. Each restored node takes the authored_id its format 7
+    // record carries; a node from an older document takes the ID
+    // migrate_saved_document's rule derives from the whole document.
     static LoadResult from_json(SignalGraph& graph, const std::string& json);
     static LoadResult from_json(SignalGraph& graph, const std::string& json,
                                 const GraphLoadOptions& options);
 
-    /// Validate and restore a saved-identity v6 document. Identity bindings
+    /// Validate and restore a saved-identity v6 or v7 document. Identity bindings
     /// are checked before graph mutation, and after restoration every node
     /// record must be restored, every identity must name the node its
     /// binding's persisted id was restored as, and every saved connection
-    /// must be restored. The one permitted
-    /// omission is the partial-load rule: an automation or audio-rate
-    /// modulation edge into an unresolved plugin placeholder. A refusal
-    /// after the load started leaves `graph` empty.
+    /// must be restored. A v7 document restores each node's authored ID; a
+    /// v6 document restores the IDs migrate_saved_document assigns. The one
+    /// permitted omission is the partial-load rule: an automation or
+    /// audio-rate modulation edge into an unresolved plugin placeholder. A
+    /// refusal after the load started leaves `graph` empty.
     static LoadResult from_saved_document(SignalGraph& graph, const std::string& json,
                                           const GraphLoadOptions& options = {});
 
@@ -328,6 +364,12 @@ class GraphSerializer {
     /// document exactly as `from` would without touching `from`. Returns
     /// false when `to` refuses a registration.
     static bool copy_custom_node_types(const SignalGraph& from, SignalGraph& to);
+
+  private:
+    // The body of from_json. Sets `graph_touched` once it starts replacing
+    // the caller's graph; from_json routes every refusal through one cleanup.
+    static LoadResult load_json_(SignalGraph& graph, const std::string& json,
+                                 const GraphLoadOptions& options, bool& graph_touched);
 };
 
 } // namespace pulp::host

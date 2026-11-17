@@ -1,0 +1,107 @@
+{
+  "id": "g3-saved-identity-v7",
+  "title": "Saved-identity v7 persists an immutable authored ID per graph node",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "g3-saved-identity-v7-20261116",
+  "owned_paths": [
+    "core/host/include/pulp/host/signal_graph_node.hpp",
+    "core/host/src/signal_graph_authoring.cpp",
+    "core/host/src/spectral_graph.cpp",
+    "core/host/src/trigger_graph.cpp",
+    "core/host/src/graph_serializer.cpp",
+    "core/host/src/graph_serializer_test_access.hpp",
+    "test/test_graph_saved_identity_v7.cpp",
+    "docs/graph-program-status/G-3-v7-identity-design.md",
+    "docs/status/sequencer-exposure/rows/g3-saved-identity-v7.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/host/include/pulp/host/signal_graph_node.hpp",
+      "needles": ["class AuthoredNodeId", "AuthoredNodeId authored_id;"]
+    },
+    {
+      "path": "core/host/src/signal_graph_authoring.cpp",
+      "needles": ["SignalGraph::mint_authored_id_locked_", "SignalGraph::push_node_locked_", "SignalGraph::rename_node"]
+    },
+    {
+      "path": "core/host/src/spectral_graph.cpp",
+      "needles": ["push_node_locked_(std::move(n));"]
+    },
+    {
+      "path": "core/host/src/graph_serializer.cpp",
+      "needles": ["pulp.graph.saved-identity.v7", "GraphSerializer::migrate_saved_document", "plan_authored_ids", "migrated_authored_id"]
+    },
+    {
+      "path": "test/test_graph_saved_identity_v7.cpp",
+      "needles": ["a rename keeps the authored ID and diffs as one changed node", "deleting either of two same-named nodes leaves the survivor's ID", "v7 inspection refuses planted identity defects", "v6 migration is deterministic and never guesses continuity"]
+    },
+    {
+      "path": "docs/graph-program-status/G-3-v7-identity-design.md",
+      "needles": ["## Migration v6 to v7", "## Version policy"]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "GraphNode::authored_id, SignalGraph::rename_node, GraphSerializer::migrate_saved_document and LoadResult::identity_node_ids are public host APIs; to_saved_document writes format 7 and inspect_document validates v7 binding consistency while keeping the v6 rules.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/graph_serializer.hpp",
+          "needles": ["static SavedDocumentMigration migrate_saved_document(std::string_view json);", "identity_node_ids"]
+        },
+        {
+          "kind": "test",
+          "path": "test/test_graph_saved_identity_v7.cpp",
+          "needles": ["authored IDs survive save, load, NodeId renumbering, undo and redo"]
+        }
+      ],
+      "authority": {
+        "admission": "read_only",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "exposed",
+      "rationale": "pulp graph save, fmt and canonicalize write saved-identity v7; a v6 input is rewritten as its deterministic migration, and pulp graph diff refuses a v6/v7 pair. No new command or option is added.",
+      "evidence": [
+        {
+          "kind": "cli_handler",
+          "path": "tools/cli/cmd_graph.cpp",
+          "needles": ["GraphSerializer::from_saved_document(*graph_ptr, *text, opts)"]
+        },
+        {
+          "kind": "test",
+          "path": "test/test_cli_graph_code_parity.cpp",
+          "needles": ["graph rewrites migrate a v6 document deterministically and keep v7 IDs"]
+        },
+        {
+          "kind": "cli_definition",
+          "path": "tools/cli/cmd_graph.cpp",
+          "needles": ["save: --output path [--saved-identity]"]
+        }
+      ],
+      "authority": {
+        "admission": "read_only",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation, schema, or handler is added; the pulp_graph tool does not read or write saved-identity documents."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "IDs are minted on the control thread at node creation; no runtime operation, executor authority or audio-thread path is added."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No design-time capability or agent manifest entry is added."
+    }
+  }
+}

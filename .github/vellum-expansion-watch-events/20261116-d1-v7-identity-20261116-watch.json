@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261116-d1-v7-identity-20261116-watch",
+  "created_at": "2026-11-16T23:18:51Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Saved-identity v7 graph documents: GraphNode gains a persisted authored ID, the graph serializer writes format 7 with those IDs and migrates v6 documents data-only, and the graph CLI reference and status docs describe it. The watched paths are host graph serialization and its docs; no design-import, Chromium, rendering or packaging code, contract or authority changes.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-cli-graph-code-parity",
+    "ctest --test-dir build -R pulp-test-g5-control-index",
+    "ctest --test-dir build -R pulp-test-graph-history",
+    "ctest --test-dir build -R pulp-test-graph-saved-identity-v7",
+    "ctest --test-dir build -R GraphSerializer",
+    "ctest --test-dir build -R pulp-test-signal-graph-subgraph",
+    "ctest --test-dir build -R pulp-test-spectral-graph-persistence",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
