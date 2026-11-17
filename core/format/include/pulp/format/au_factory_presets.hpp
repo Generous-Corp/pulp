@@ -26,6 +26,7 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -73,7 +74,26 @@ class FactoryPresetTable {
     /// this straight after construction; tests use it to stage a fixture.
     void set_directory(const std::filesystem::path& dir);
 
-    /// Number of factory presets the host can select.
+    /// Callback run when the host selects a declared program; receives the
+    /// program's index. Runs on whichever thread the host sets the preset
+    /// from, so it must not assume the main thread. May be empty.
+    using ProgramSelect = std::function<void(std::size_t)>;
+
+    /// Declare programs in code, for a plug-in whose presets are not files.
+    /// They are published as factory presets numbered `0..names.size()-1` in
+    /// the order given, ahead of any preset file, whose entries follow. A
+    /// declared program carries no parameter values: selecting it runs
+    /// @p on_select (when set) and nothing else. Replaces any earlier
+    /// declaration. Main thread only.
+    void set_programs(std::vector<std::string> names, ProgramSelect on_select = {});
+
+    /// Number of programs declared through `set_programs`.
+    std::size_t program_count() const noexcept {
+        return programs_.size();
+    }
+
+    /// Number of factory presets the host can select: declared programs
+    /// followed by bundle preset files.
     std::size_t size() const noexcept {
         return entries_.size();
     }
@@ -81,7 +101,8 @@ class FactoryPresetTable {
     /// UTF-8 display name of preset @p index, or empty when out of range.
     std::string name_at(std::size_t index) const;
 
-    /// Load preset @p index into the bound StateStore. False when the index is
+    /// Select preset @p index. A declared program runs its select callback; a
+    /// file preset is loaded into the bound StateStore. False when the index is
     /// out of range, nothing is bound, or the file could not be read.
     ///
     /// Deliberately does NOT take the adapter's `StateRestoreGate`: a preset
@@ -119,11 +140,13 @@ class FactoryPresetTable {
     // The PresetManager holds the StateStore reference; the table itself
     // never touches the store directly.
     std::unique_ptr<state::PresetManager> presets_;
-    // Parallel arrays, same order and length: `entries_[i].presetName` is a
-    // +1 CFStringRef this table releases, and `infos_[i]` is the preset
-    // `load(i)` reads.
+    // `entries_[i].presetName` is a +1 CFStringRef this table releases. The
+    // first `programs_.size()` entries are declared programs; entry
+    // `programs_.size() + j` is the file preset `infos_[j]`.
     std::vector<AUPreset> entries_;
     std::vector<state::PresetInfo> infos_;
+    std::vector<std::string> programs_;
+    ProgramSelect on_select_;
 };
 
 } // namespace pulp::format::au

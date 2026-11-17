@@ -118,6 +118,13 @@ bool validate_template(const SubgraphTemplate& definition, std::size_t depth,
         }
     }
 
+    if (definition.event_edge &&
+        (definition.event_edge->producer.empty() || definition.event_edge->consumer.empty() ||
+         definition.event_edge->producer == definition.event_edge->consumer)) {
+        active.erase(&definition);
+        return false;
+    }
+
     std::unordered_set<std::string> child_keys;
     for (const auto& child : definition.children) {
         if (child.key.empty() || !child.definition || !child_keys.insert(child.key).second ||
@@ -138,6 +145,8 @@ struct ExpansionContext {
     // All child exposed ports are retained by their stable namespaced key so a
     // parent can re-expose them or connect them to one of its own built-ins.
     std::unordered_map<std::string, PortHandle> exposed;
+    // A specific rule for the refusal, when one is known.
+    std::string failure;
 };
 
 std::string scoped(const std::string& prefix, std::string_view key);
@@ -275,6 +284,36 @@ bool expand_template(ExpansionContext& context, const SubgraphTemplate& definiti
             !context.graph.connect(source, destination))
             return false;
     }
+
+    // Bound after this level's edges (and every child's), so the
+    // feed-forward path connect_graph_event requires is in place.
+    if (definition.event_edge) {
+        const auto& spec = *definition.event_edge;
+        const auto label = scoped(prefix, spec.producer) + " -> " + scoped(prefix, spec.consumer);
+        const auto producer = context.nodes.find(scoped(prefix, spec.producer));
+        const auto consumer = context.nodes.find(scoped(prefix, spec.consumer));
+        if (producer == context.nodes.end() || consumer == context.nodes.end()) {
+            context.failure = "event connection " + label + " names an unknown member";
+            return false;
+        }
+        if (context.instance.event_edge) {
+            context.failure =
+                "event connection " + label + " is a second event connection in one expansion";
+            return false;
+        }
+        GraphAuthoredEventEdge edge;
+        edge.producer = producer->second;
+        edge.consumer = consumer->second;
+        edge.source_port = spec.source_port;
+        edge.destination_port = spec.destination_port;
+        edge.kind = spec.kind;
+        if (context.graph.connect_graph_event(edge) != GraphEventBindingResult::Accepted) {
+            context.failure = "event connection " + label + " was refused by the graph";
+            return false;
+        }
+        context.instance.event_edge = SubgraphEventEdge{
+            edge.producer, edge.consumer, edge.source_port, edge.destination_port, edge.kind};
+    }
     return depth <= kMaxNestedDepth;
 }
 
@@ -287,6 +326,7 @@ void clear_instance(SubgraphInstance& instance) {
     instance.parameter_bounds.clear();
     instance.child_template_identities.clear();
     instance.child_instance_indices.clear();
+    instance.event_edge.reset();
 }
 
 bool bind_parameters(ExpansionContext& context, const SubgraphTemplate& definition,
@@ -428,7 +468,9 @@ SubgraphExpansionResult instantiate_subgraph(SignalGraph& graph, const SubgraphT
     if (!expand_template(context, definition, {}, 0) || !bind_parameters(context, definition, {})) {
         rollback();
         out.result = boundary(GraphResult::Code::UnknownPort,
-                              "nested template expansion or binding was rejected",
+                              context.failure.empty()
+                                  ? std::string("nested template expansion or binding was rejected")
+                                  : context.failure,
                               "fix the child declaration or exposed endpoint");
         return out;
     }
