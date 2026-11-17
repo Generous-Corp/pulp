@@ -606,6 +606,23 @@ The authoring extraction changes source ownership, not the graph's public
 contract or real-time lock rules. Recheck the host graph and executor parity
 suites after moving a method across these translation units.
 
+### Feed a trigger graph from the host timeline through `HostTimelineBinding`
+
+A trigger graph's host ingress takes the trigger controller's own epoch and
+requires each block to start exactly at the graph's cursor, which counts
+rendered samples. A `HostBlockTimeline` epoch or window start cannot be passed
+to `begin_host_event_block()` directly: after a host gap the timeline jumps
+forward and the graph refuses the block (`OutOfRange`). `HostTimelineBinding`
+maps each window onto the graph's live epoch and cursor and resets the graph,
+the voice bank and staged parameters together on a timeline `NewEpoch`. Two
+rules follow from the rendered-sample clock: graph records are accepted for the
+current block only (a staged future record would be retimed by a later gap),
+and the graph reset runs after the voice epoch is reserved and before any
+commit, because it is the one reset step another thread can make fail (`Busy`
+while the ingress block is open). `VoiceBankBinding::activate()` is a
+control-thread call; the audio owner resets a bank with
+`reserve_event_reset()` / `commit_event_reset()`.
+
 ### Edge probes publish once per block, from the calling thread
 
 Every edge probe kind observes into a per-block stage in the executor and is
@@ -3534,13 +3551,20 @@ only when the node has exactly one output, so stereo built-ins need explicit
 `node.audio` and `node.out1` ports. User-facing walkthroughs live in
 `docs/guides/graph-first-steps.md` and `docs/guides/graph-notation-cookbook.md`.
 
-Spectral constructors appear in the catalog as `unsupported_typed_api_only`
-rows built at a fixed probe identity (FFT 256, hop 64, mono, 48 kHz), so their
-audio port counts are for that identity only. A catalog row is not proof a key
-is constructible from notation: `instantiate()` returns 0 for spectral keys and
-`parse_graph_patch` refuses them before instantiation. Never suggest
-`GraphSerializer` as the fix for a spectral refusal; `to_json` returns an empty
-string for any graph with a spectral node.
+Spectral constructor catalog rows are built at a fixed probe identity (FFT 256,
+hop 64, mono, 48 kHz), so their audio port counts are for that identity only.
+`instantiate()` returns 0 for spectral keys: only `# flow 2` constructs them,
+through `graph_patch_constructors.cpp`, from explicit `fft`, `hop`, `channels`
+and `rate` arguments (stages add `kind identity`). Flow 1 parsing must stay
+byte-for-byte unchanged, so argument handling runs only when the header is
+`# flow 2`, and the formatter emits `# flow 1` for every graph that needs no
+argument. One document has one sample rate (`SampleRateMismatch` otherwise);
+`prepare()` at a different rate fails with `IdentityMismatch`. Mask gains and
+codec assets never go into notation: refuse them with the payload size and send
+the author to saved-graph JSON. `GraphSerializer::to_json` still returns an empty
+string for an analysis graph, so do not suggest it as the save path for one, and
+name built-in boundary types from their constructor probe rather than from a
+whole-graph serialization.
 
 ### Transactional graph-file development reload
 
@@ -3616,11 +3640,28 @@ loses which nodes form which instance. `to_saved_subgraph_document` and
 `from_saved_subgraph_document` (`subgraph_persistence.hpp`) add a `subgraphs`
 record list that names members by logical identity, never NodeId. Restore
 needs the caller's templates: each record is checked against a fresh scratch
-expansion of its template (member type and nested name, child identities and
-indices, internal edges, parameter set and bounds), and any mismatch clears
-the graph. Bounds and Processor targets always come from the template, so a
-document cannot widen them. `inspect_document` refuses dangling or shared
-members and records outside the v6 envelope, without needing templates.
+expansion of its template (member type and nested name, port kinds, exact
+Custom type and version, exact Processor graph type, child identities and
+indices, every semantic field of internal edges, parameter set and bounds, and
+Custom state its type accepts). Bounds and Processor targets always come from
+the template, so a document cannot widen them. `inspect_document` refuses
+dangling or shared members and records outside the v6 envelope, without
+needing templates.
+
+Gotchas for subgraph restore. The whole document is loaded and rebound on a
+candidate graph first, and only a passing candidate is loaded into the
+caller's graph, so a refusal normally leaves the caller's graph untouched;
+only a second pass that behaves differently clears it. Both passes need the
+custom node types: the candidate and every scratch expansion copy them from
+the caller's graph with `GraphSerializer::copy_custom_node_types`, so register
+Custom types on the graph BEFORE calling the restore, or every Custom member
+is refused as an expansion mismatch. Processor factories, restore registries
+and Custom `create`/`load_state`/`destroy` therefore run several times per
+restore on the control thread; they must be repeatable and side-effect free.
+A Custom member's state is checked by creating a probe instance, calling
+`load_state` and destroying it; a stateless type (no `create` or no
+`load_state`) must carry empty state. The writer applies the same check, so it
+returns an empty string for a member whose live state its type refuses.
 
 Saved identity strictness: `inspect_document`, `diff_graph_documents` and
 `from_saved_document` rebuild each node's identity string from its saved record

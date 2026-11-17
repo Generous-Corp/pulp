@@ -1,0 +1,81 @@
+{
+  "id": "s4-host-timeline-reset",
+  "title": "One audio-owner reset transaction maps the host block timeline onto graph, voice and parameter events",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "s4-host-timeline-reset-20261116",
+  "owned_paths": [
+    "core/host/include/pulp/host/host_timeline_binding.hpp",
+    "core/host/src/host_timeline_binding.cpp",
+    "test/test_host_timeline_binding.cpp",
+    "docs/graph-program-status/S4-reset-transaction.md",
+    "docs/status/sequencer-exposure/rows/s4-host-timeline-reset.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/host/include/pulp/host/host_timeline_binding.hpp",
+      "needles": ["class HostTimelineBinding final", "HostEventResult publish_graph_event(const HostEventRecord& record) noexcept;", "void request_reset() noexcept"]
+    },
+    {
+      "path": "core/host/src/host_timeline_binding.cpp",
+      "needles": ["voices_->reserve_event_reset(voice_epoch)", "graph_->try_reset_events()", "block.graph_sample_start = graph_clock.cursor;"]
+    },
+    {
+      "path": "test/test_host_timeline_binding.cpp",
+      "needles": ["Host timeline binding keeps four families partition invariant across resets", "A refused reset leaves every family and the timeline unchanged", "Binding callbacks and resets do not allocate"]
+    },
+    {
+      "path": "docs/graph-program-status/S4-reset-transaction.md",
+      "needles": ["### Reset transaction", "## Remaining work"]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "host_timeline_binding.hpp is a public host header installed with the host subsystem; VoiceBankBinding gains reserve_event_reset, commit_event_reset and abort_block, and the MPE buffer gains bind_tracker_to_sink. The in-tree consumer drives the public API only.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/host_timeline_binding.hpp",
+          "needles": ["HostEventResult begin_block(const HostBlockClock& clock, HostTimelineBlock& out) noexcept;"]
+        },
+        {
+          "kind": "sdk_target",
+          "path": "tools/cmake/PulpInstallRules.cmake",
+          "needles": ["list(APPEND _pulp_sdk_header_subsystems host)"]
+        },
+        {
+          "kind": "test",
+          "path": "test/test_host_timeline_binding.cpp",
+          "needles": ["A reset refuses old epochs and generations in every family"]
+        }
+      ],
+      "authority": {
+        "admission": "read_only",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "This slice adds an in-process audio-owner binding; no offline timeline command creates, drives or resets it."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool, schema or handler is added."
+    },
+    "live_product_control": {
+      "disposition": "gap",
+      "rationale": "The binding is a C++ seam a graph-owning Processor drives from its process callback. No format adapter or product control drives it yet, so a musician cannot reach it through a host; this row does not claim that.",
+      "dependencies": [
+        "bounded-trigger-runtime"
+      ],
+      "owner": "s4-host-timeline-reset"
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "Event timing and reset are runtime infrastructure, not a generator-facing capability."
+    }
+  }
+}

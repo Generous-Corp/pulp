@@ -237,6 +237,14 @@ next block. Retrigger is a reattack, not glide: because the old generation's
 NoteOff is dispatched first, `MpeVoiceAllocator::last_was_glide()` remains false.
 Only genuinely overlapping held notes on a member channel count as glide.
 
+`bind_tracker_to_buffer()` is a setup-time call: its callbacks capture three
+references, which do not fit `std::function`'s inline storage, so each bind
+allocates. Code that rebinds a caller-owned tracker for every block on the
+audio thread (as `host::derive_mpe()` does) must use `bind_tracker_to_sink()`
+with a `MpeTrackerSink` instead; its one-pointer captures bind without
+allocating. The tracker keeps pointing at the sink after the call returns, so
+the sink must outlive every tracker call made through those callbacks.
+
 The generic sidecar cannot own a processor-specific allocator. At deactivation,
 adapters call `Processor::release()` before resetting the tracker, so an MPE
 processor must call `MpeVoiceAllocator::reset_all()` from `release()`. For an

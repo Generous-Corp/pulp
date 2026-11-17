@@ -71,7 +71,9 @@
             "graph CLI success code and fmt use the C++ spelling",
             "graph save and fmt keep the saved-identity envelope that diff reads",
             "graph CLI file size and readability codes agree across subcommands",
-            "A file of exactly the bound is read and judged as a document instead."
+            "A file of exactly the bound is read and judged as a document instead.",
+            "graph CLI fmt prints the C++ canonical notation for flow 1 and flow 2",
+            "flow 2 mismatched sample rate"
           ]
         },
         {

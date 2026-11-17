@@ -5,6 +5,7 @@
 #include <pulp/host/spectral_graph.hpp>
 #include <pulp/signal/spectral_frame_codec.hpp>
 
+#include "graph_patch_constructors.hpp"
 #include "graph_patch_grammar.hpp"
 
 #include <algorithm>
@@ -294,10 +295,10 @@ const Factory builtins[] = {
     +[](SignalGraph& g, const std::string& n) { return g.add_gain_node(n); },
     +[](SignalGraph& g, const std::string& n) { return g.add_midi_input_node(n); },
     +[](SignalGraph& g, const std::string& n) { return g.add_midi_output_node(n); }};
-// Spectral constructors are typed C++ APIs only: identity, closed stage values
-// and owned codec assets have no notation or saved-graph spelling. The catalog
-// projects their ports from real constructions at one probe identity so tools
-// can discover them; notation refuses each key with its owning constructor.
+// Spectral constructors. Flow 1 refuses each key with its owning constructor;
+// flow 2 spells analysis, identity stage and synthesis with their identity
+// arguments, while codec assets stay typed-API and saved-graph only. The
+// catalog projects their ports from real constructions at one probe identity.
 struct SpectralConstructor {
     const char* key;
     const char* constructor;
@@ -359,6 +360,14 @@ std::string type_key(const SignalGraph& g, const GraphNode& n) {
         return std::string(p->graph_type_id());
     if (n.type == NodeType::Custom)
         return n.custom_type_id;
+    // Built-in types are named from a probe of their own constructor, so a
+    // graph the serializer cannot write (a spectral one) still names them.
+    for (const auto factory : builtins) {
+        SignalGraph probe;
+        const auto id = factory(probe, "probe");
+        if (probe.node(id)->type == n.type)
+            return "pulp/" + serialized_type(probe);
+    }
     const auto document = choc::json::parse(GraphSerializer::to_json(g));
     for (const auto node : document["nodes"])
         if (node["id"].getInt64() == n.id)
@@ -412,6 +421,8 @@ const char* graph_patch_code_name(Code code) noexcept {
         PATCH_CODE(RestoreFailed);
         PATCH_CODE(ResourceLimit);
         PATCH_CODE(FileUnreadable);
+        PATCH_CODE(SampleRateMismatch);
+        PATCH_CODE(UnsupportedChannelLayout);
 #undef PATCH_CODE
     }
     return "InvalidDocument";
@@ -573,10 +584,20 @@ std::string GraphPatchCatalog::to_json() const {
         row.addMember("notation_state", opaque ? "unsupported_opaque_state" : "parameters_only");
         return row;
     };
+    auto arguments = [](std::initializer_list<const char*> keys) {
+        auto list = choc::value::createEmptyArray();
+        for (const auto* key : keys)
+            list.addArrayElement(key);
+        return list;
+    };
     for (const auto factory : builtins) {
         SignalGraph g;
         const auto id = factory(g, "probe");
-        rows.addArrayElement(add(g, id, "pulp/" + serialized_type(g), 1));
+        auto row = add(g, id, "pulp/" + serialized_type(g), 1);
+        const auto type = g.node(id)->type;
+        if (type == NodeType::AudioInput || type == NodeType::AudioOutput)
+            row.setMember("flow_2_arguments", arguments({"channels"}));
+        rows.addArrayElement(row);
     }
     for (const auto& c : spectral_constructors) {
         SignalGraph g;
@@ -584,7 +605,16 @@ std::string GraphPatchCatalog::to_json() const {
         if (!id)
             continue;
         auto row = add(g, id, c.key, 1);
-        row.setMember("notation_state", "unsupported_typed_api_only");
+        const auto key = std::string_view(c.key);
+        if (key == "pulp/spectral_asset_morph") {
+            row.setMember("notation_state", "unsupported_typed_api_only");
+        } else {
+            row.setMember("notation_state", "flow_2_arguments");
+            row.setMember("flow_2_arguments",
+                          key == "pulp/spectral_stage"
+                              ? arguments({"fft", "hop", "channels", "rate", "kind"})
+                              : arguments({"fft", "hop", "channels", "rate"}));
+        }
         row.setMember("constructor", c.constructor);
         auto identity = choc::value::createObject("SpectralProbeIdentity");
         identity.addMember("fft_size", spectral_probe_fft);
@@ -629,6 +659,8 @@ GraphPatchResult parse_graph_patch(std::string_view text, const GraphPatchCatalo
         static const std::regex local_name("[A-Za-z_][A-Za-z0-9_]*");
         static const std::regex setting(patch_grammar::setting);
         bool header = false;
+        int flow = 0;
+        patch_constructors::DocumentRate document_rate;
         std::istringstream input{std::string(text)};
         std::string raw;
         while (std::getline(input, raw)) {
@@ -637,10 +669,11 @@ GraphPatchResult parse_graph_patch(std::string_view text, const GraphPatchCatalo
                 refuse(Code::ResourceLimit, "line exceeds 16384 bytes", "shorten the line");
             const auto original = trim(raw);
             if (original.starts_with("# flow ")) {
-                if (header || !names.empty() || original != "# flow 1")
+                if (header || !names.empty() || (original != "# flow 1" && original != "# flow 2"))
                     refuse(Code::SyntaxError, "unsupported or misplaced flow version",
-                           "start with exactly # flow 1");
+                           "start with exactly # flow 1, or # flow 2 for constructor arguments");
                 header = true;
+                flow = original == "# flow 2" ? 2 : 1;
                 continue;
             }
             const auto line = split(raw, "#").front();
@@ -658,7 +691,16 @@ GraphPatchResult parse_graph_patch(std::string_view text, const GraphPatchCatalo
                            "use a unique node name", name);
                 if (names.size() >= 128)
                     refuse(Code::ResourceLimit, "more than 128 nodes", "split the patch");
-                const auto typed = split(declarations[1], "@");
+                // Flow 2 strips a trailing argument list; flow 1 reads the
+                // declaration text exactly as before.
+                std::string type_text = declarations[1];
+                patch_constructors::Arguments arguments;
+                if (flow == 2)
+                    if (auto d = patch_constructors::split_arguments(declarations[1], type_text,
+                                                                     arguments);
+                        !d)
+                        refuse(d.code, d.rule, d.suggested_fix, name);
+                const auto typed = split(type_text, "@");
                 if (typed.size() > 2)
                     refuse(Code::SyntaxError, "invalid type version", "use type @ integer");
                 int version = 1;
@@ -677,6 +719,23 @@ GraphPatchResult parse_graph_patch(std::string_view text, const GraphPatchCatalo
                     !std::regex_match(name + " : " + key, declaration))
                     refuse(Code::SyntaxError, "invalid type key",
                            "use Plugin/Module or quote the exact catalog type id");
+                if (flow == 2 && patch_constructors::owns(key)) {
+                    if (typed.size() == 2 && version != 1)
+                        refuse(Code::UnsupportedContract, "unregistered type/version '" + key + "'",
+                               "built-in constructors have version 1", name);
+                    NodeId id = 0;
+                    if (auto d = patch_constructors::construct(*graph, key, arguments, name,
+                                                               document_rate, id);
+                        !d)
+                        refuse(d.code, d.rule, d.suggested_fix, name);
+                    names.emplace(name, id);
+                    continue;
+                }
+                if (arguments.present)
+                    refuse(Code::SyntaxError, "type '" + key + "' takes no constructor arguments",
+                           "remove the parenthesized list; only audio boundaries and spectral "
+                           "constructors take arguments",
+                           name);
                 if (const auto* spectral = spectral_constructor(key))
                     refuse(Code::UnsupportedContract,
                            "spectral node '" + key + "' has no notation contract",
@@ -764,7 +823,9 @@ GraphPatchText format_graph_patch(const SignalGraph& graph, const GraphPatchCata
         if (!graph.sample_regions().empty())
             refuse(Code::UnsupportedContract, "sample regions have no notation contract",
                    "use the sample-region API and GraphSerializer");
-        std::string declarations = "# flow 1\n", wiring, tuning;
+        std::string declarations, wiring, tuning;
+        bool flow2 = false;
+        patch_constructors::DocumentRate document_rate;
         std::map<NodeId, std::string> names;
         std::set<std::string> unique;
         static const std::regex identifier("[A-Za-z_][A-Za-z0-9_]*");
@@ -776,22 +837,24 @@ GraphPatchText format_graph_patch(const SignalGraph& graph, const GraphPatchCata
                 refuse(Code::UnsupportedContract, "node names must be unique ASCII identifiers",
                        "rename nodes before formatting", n.name);
             names.emplace(n.id, n.name);
-            if (n.type == NodeType::AudioInput && n.num_output_ports != 2)
-                refuse(Code::UnsupportedContract, "notation input boundary is stereo",
-                       "use the saved graph API for other channel layouts", n.name);
-            if (n.type == NodeType::AudioOutput && n.num_input_ports != 2)
-                refuse(Code::UnsupportedContract, "notation output boundary is stereo",
-                       "use the saved graph API for other channel layouts", n.name);
+            // Non-stereo boundaries and spectral identities need flow 2
+            // constructor arguments; every other node keeps its flow 1 text.
+            std::string spelled;
+            if (auto d = patch_constructors::spell(n, document_rate, spelled); !d)
+                refuse(d.code, d.rule, d.suggested_fix, n.name);
+            if (!spelled.empty()) {
+                if (n.gain != 1.0f)
+                    refuse(Code::UnsupportedContract,
+                           "non-Gain node scalar has no notation spelling",
+                           "use GraphSerializer to retain this scalar", n.name);
+                flow2 = true;
+                declarations += n.name + " : " + spelled + "\n";
+                continue;
+            }
             if (n.type == NodeType::Plugin && !graph.is_processor_node(n.id))
                 refuse(Code::UnsupportedContract,
                        "hosted plugin identity/state is not a registered Processor",
                        "use GraphSerializer for hosted plugin state", n.name);
-            if (n.spectral_identity)
-                refuse(Code::UnsupportedContract,
-                       "spectral node has no notation or saved-graph contract",
-                       "keep spectral graphs in C++ through the SignalGraph::add_spectral_* "
-                       "constructors listed by the catalog",
-                       n.name);
             if (n.type == NodeType::Custom && !graph.custom_node_state(n.id).empty())
                 refuse(Code::UnsupportedContract, "opaque custom state has no notation contract",
                        "use GraphSerializer and the owning typed API", n.name);
@@ -828,9 +891,10 @@ GraphPatchText format_graph_patch(const SignalGraph& graph, const GraphPatchCata
             if (c.control_signal)
                 refuse(Code::UnsupportedContract, "Control edge has no notation spelling",
                        "use GraphSerializer (format v5) to save Control edges");
-            if (c.feedback || c.sidechain || c.spectral || c.audio_rate_modulation)
+            // Spectral frame edges are named typed edges between flow 2 nodes.
+            if (c.feedback || c.sidechain || c.audio_rate_modulation)
                 refuse(Code::UnsupportedContract, "edge contract has no lossless notation spelling",
-                       "use GraphSerializer for feedback, sidechain, spectral or dense modulation");
+                       "use GraphSerializer for feedback, sidechain or dense modulation");
             if (c.midi) {
                 if (!midi_capable(graph, c.source_node, true) ||
                     !midi_capable(graph, c.dest_node, false))
@@ -881,7 +945,8 @@ GraphPatchText format_graph_patch(const SignalGraph& graph, const GraphPatchCata
         std::sort(edge_lines.begin(), edge_lines.end());
         for (const auto& line : edge_lines)
             wiring += line;
-        const auto text = declarations + wiring + tuning;
+        const auto text =
+            std::string(flow2 ? "# flow 2\n" : "# flow 1\n") + declarations + wiring + tuning;
         // Refuse graphs outside the parser's bounds and capabilities, including
         // a serialized instantaneous cycle or a value a StateStore had clamped.
         auto checked = parse_graph_patch(text, catalog);

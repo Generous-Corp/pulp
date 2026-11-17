@@ -2,6 +2,8 @@
 #include <pulp/host/signal_graph_subgraph.hpp>
 #include <pulp/format/processor_node_adapter.hpp>
 
+#include "subgraph_custom_member.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <string>
@@ -19,7 +21,25 @@ GraphResult boundary(GraphResult::Code code, std::string rule, std::string fix =
 
 bool valid_node_type(NodeType type) {
     return type == NodeType::AudioInput || type == NodeType::AudioOutput ||
-           type == NodeType::Gain || type == NodeType::Plugin;
+           type == NodeType::Gain || type == NodeType::Plugin || type == NodeType::Custom;
+}
+
+// The type-specific fields of a node spec are set exactly for its own type.
+bool node_fields_match_type(const SubgraphNodeSpec& node) {
+    const bool processor_fields = node.processor_factory || !node.processor_type_id.empty() ||
+                                  !node.processor_descriptor_version.empty() ||
+                                  node.processor_type_version != 0;
+    const bool custom_fields =
+        !node.custom_type_id.empty() || node.custom_type_version != 0 || !node.custom_state.empty();
+    switch (node.type) {
+    case NodeType::Plugin:
+        return !custom_fields && node.processor_factory && !node.processor_type_id.empty() &&
+               !node.processor_descriptor_version.empty() && node.processor_type_version > 0;
+    case NodeType::Custom:
+        return !processor_fields && !node.custom_type_id.empty() && node.custom_type_version > 0;
+    default:
+        return !processor_fields && !custom_fields;
+    }
 }
 
 NodeId add_node(SignalGraph& graph, const SubgraphNodeSpec& spec, const std::string& name,
@@ -39,6 +59,15 @@ NodeId add_node(SignalGraph& graph, const SubgraphNodeSpec& spec, const std::str
     }
     case NodeType::Plugin:
         return graph.add_processor_node(std::move(processor), name);
+    case NodeType::Custom: {
+        const auto id = graph.add_custom_node(spec.custom_type_id, spec.custom_type_version, name);
+        if (id != 0 && !spec.custom_state.empty() &&
+            !graph.set_custom_node_state(id, spec.custom_state)) {
+            graph.remove_node(id);
+            return 0;
+        }
+        return id;
+    }
     default:
         return 0;
     }
@@ -54,12 +83,7 @@ bool validate_template(const SubgraphTemplate& definition, std::size_t depth,
     for (const auto& node : definition.nodes) {
         if (node.key.empty() || !valid_node_type(node.type) || node.channels <= 0 ||
             !std::isfinite(node.gain) || !node_keys.insert(node.key).second ||
-            (node.type == NodeType::Plugin &&
-             (!node.processor_factory || node.processor_type_id.empty() ||
-              node.processor_descriptor_version.empty() || node.processor_type_version <= 0)) ||
-            (node.type != NodeType::Plugin &&
-             (node.processor_factory || !node.processor_type_id.empty() ||
-              !node.processor_descriptor_version.empty() || node.processor_type_version != 0))) {
+            !node_fields_match_type(node)) {
             active.erase(&definition);
             return false;
         }
@@ -140,6 +164,24 @@ bool preflight_processors(ExpansionContext& context, const SubgraphTemplate& def
     for (const auto& child : definition.children)
         if (!preflight_processors(context, *child.definition, scoped(prefix, child.key),
                                   instance_index))
+            return false;
+    return true;
+}
+
+// Every Custom member names a type registered on the graph at its exact
+// version, and its initial state is state that type accepts. Runs before any
+// graph mutation, so a missing type or refused state leaves the graph as it
+// was.
+bool preflight_custom_members(const SignalGraph& graph, const SubgraphTemplate& definition) {
+    for (const auto& spec : definition.nodes) {
+        if (spec.type != NodeType::Custom)
+            continue;
+        const auto* type = graph.custom_node_type(spec.custom_type_id, spec.custom_type_version);
+        if (!type || !detail::custom_member_state_accepted(*type, spec.custom_state))
+            return false;
+    }
+    for (const auto& child : definition.children)
+        if (!preflight_custom_members(graph, *child.definition))
             return false;
     return true;
 }
@@ -293,6 +335,40 @@ bool bind_parameters(ExpansionContext& context, const SubgraphTemplate& definiti
 
 } // namespace
 
+namespace detail {
+
+bool custom_member_state_accepted(const CustomNodeType& type,
+                                  const std::vector<std::uint8_t>& state) noexcept {
+    if (state.empty())
+        return true;
+    if (!type.create || !type.load_state)
+        return false;
+    void* instance = nullptr;
+    try {
+        instance = type.create();
+    } catch (...) {
+        return false;
+    }
+    if (instance == nullptr)
+        return false;
+    bool accepted = false;
+    try {
+        accepted = type.load_state(instance, state);
+    } catch (...) {
+        accepted = false;
+    }
+    if (type.destroy) {
+        try {
+            type.destroy(instance);
+        } catch (...) {
+            accepted = false;
+        }
+    }
+    return accepted;
+}
+
+} // namespace detail
+
 SubgraphState SubgraphInstance::save_state() const {
     return {template_identity, instance_identity,         instance_index,
             parameters,        child_template_identities, child_instance_indices};
@@ -331,6 +407,13 @@ SubgraphExpansionResult instantiate_subgraph(SignalGraph& graph, const SubgraphT
         return out;
     }
 
+    if (!preflight_custom_members(graph, definition)) {
+        out.result = boundary(GraphResult::Code::UnknownNode,
+                              "Custom node type is not registered at its exact version, or its "
+                              "initial state was refused",
+                              "register the type on this graph or fix the member state");
+        return out;
+    }
     ExpansionContext context{graph, out.instance};
     if (!preflight_processors(context, definition, {}, instance_index)) {
         out.result = boundary(GraphResult::Code::UnknownNode,

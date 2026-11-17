@@ -3511,3 +3511,35 @@ TEST_CASE("Retained process custody refuses unsupported platforms without spawni
     CHECK_FALSE(CurrentProcessGroup::capture());
 }
 #endif
+
+#if defined(_WIN32)
+#include "../core/platform/platform/win/duplex_channel_win.hpp"
+
+namespace {
+bool handle_is_inheritable(HANDLE handle) {
+    DWORD flags = 0;
+    REQUIRE(GetHandleInformation(handle, &flags) != FALSE);
+    return (flags & HANDLE_FLAG_INHERIT) != 0;
+}
+} // namespace
+
+TEST_CASE("The private duplex client end is inheritable only after it is marked for launch",
+          "[runtime][child-process][retained-custody][duplex-inheritance]") {
+    pulp::platform::DuplexChannel channel;
+    REQUIRE(channel.create());
+    REQUIRE(channel.child != INVALID_HANDLE_VALUE);
+
+    // Between create and launch nothing in this process can pass it on.
+    CHECK_FALSE(handle_is_inheritable(channel.child));
+    // The server end is never inheritable.
+    CHECK_FALSE(handle_is_inheritable(channel.parent));
+
+    REQUIRE(channel.make_child_inheritable());
+    CHECK(handle_is_inheritable(channel.child));
+    CHECK_FALSE(handle_is_inheritable(channel.parent));
+
+    channel.close_child();
+    CHECK(channel.child == INVALID_HANDLE_VALUE);
+    CHECK_FALSE(channel.make_child_inheritable());
+}
+#endif
