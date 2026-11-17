@@ -344,13 +344,13 @@ TEST_CASE("Control scalar rules pin zero division, finite extremes, and reset",
 TEST_CASE("Control stages expose pure and stateful finite partition-stable forms",
           "[signal][control-index]") {
     using pulp::signal::control_clamp;
-    using pulp::signal::control_maximum;
-    using pulp::signal::control_minimum;
-    using pulp::signal::control_safe_divide;
-    CHECK(control_minimum(std::numeric_limits<float>::infinity(), 2.0f) == 0.0f);
-    CHECK(control_maximum(-std::numeric_limits<float>::infinity(), 2.0f) == 2.0f);
+    using pulp::signal::control_max;
+    using pulp::signal::control_min;
+    using pulp::signal::safe_control_divide;
+    CHECK(control_min(std::numeric_limits<float>::infinity(), 2.0f) == 0.0f);
+    CHECK(control_max(-std::numeric_limits<float>::infinity(), 2.0f) == 2.0f);
     CHECK(control_clamp(std::numeric_limits<float>::quiet_NaN(), -1.0f, 1.0f) == 0.0f);
-    CHECK(control_safe_divide(1.0f, 0.0f) == 0.0f);
+    CHECK(safe_control_divide(1.0f, 0.0f) == 0.0f);
     CHECK(pulp::signal::map_clip(0.5f, 0.0f, 1.0f, 10.0f, 20.0f) == 15.0f);
 
     CHECK_FALSE(
@@ -600,16 +600,24 @@ TEST_CASE("restored Control index graphs prepare and future formats name the fix
     auto future = json;
     const auto at = future.find("\"format_version\": 5");
     REQUIRE(at != std::string::npos);
-    future.replace(at, std::string("\"format_version\": 5").size(), "\"format_version\": 7");
+    future.replace(at, std::string("\"format_version\": 5").size(), "\"format_version\": 8");
     SignalGraph refused;
     const auto newer = GraphSerializer::from_json(refused, future);
     REQUIRE_FALSE(newer.ok);
-    CHECK(newer.error.find("unsupported graph format_version 7") != std::string::npos);
-    CHECK(newer.error.find("upgrade Pulp, or re-export the graph at format 6 or lower") !=
+    CHECK(newer.error.find("unsupported graph format_version 8") != std::string::npos);
+    CHECK(newer.error.find("upgrade Pulp, or re-export the graph at format 7 or lower") !=
+          std::string::npos);
+
+    // Format 7 exists only as a saved-identity v7 document.
+    auto unenveloped = json;
+    unenveloped.replace(at, std::string("\"format_version\": 5").size(), "\"format_version\": 7");
+    const auto plain_v7 = GraphSerializer::from_json(refused, unenveloped);
+    REQUIRE_FALSE(plain_v7.ok);
+    CHECK(plain_v7.error.find("without the pulp.graph.saved-identity.v7 envelope") !=
           std::string::npos);
 
     const auto inspected = GraphSerializer::inspect_document(
-        R"({"identity_schema":"pulp.graph.saved-identity.v6","format_version":7})");
+        R"({"identity_schema":"pulp.graph.saved-identity.v6","format_version":8})");
     CHECK(inspected.refusal == GraphDocumentRefusal::UnsupportedFutureVersion);
     CHECK(inspected.detail.find("upgrade Pulp") != std::string::npos);
 }

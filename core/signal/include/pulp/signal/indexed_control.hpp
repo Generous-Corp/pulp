@@ -3,41 +3,49 @@
 /// @file indexed_control.hpp
 /// Bounded scalar control utilities for caller-owned, sample-indexed workflows.
 /// The caller supplies the time index on every sample; no clock or scheduler is
-/// hidden in these utilities. Configure them off the audio thread.
+/// hidden in these utilities. Configure them off the audio thread. The shared
+/// scalar operations (finite replacement, min, max, clamp, safe divide and the
+/// integrator step) live in control_math.hpp, which this header includes.
 
 #include <algorithm>
 #include <cmath>
 #include <concepts>
 #include <cstddef>
 #include <limits>
+#include <pulp/signal/control_math.hpp>
 #include <span>
 
 namespace pulp::signal {
 
-/// Replace a non-finite control sample with zero at a scalar boundary.
+// Deprecated spellings of the canonical scalar operations in
+// control_math.hpp. Each forwards to its canonical function and returns
+// bit-identical results; they are removed only at an announced breaking SDK
+// release. Migration: finite_control_sample -> finite_control,
+// control_minimum -> control_min, control_maximum -> control_max,
+// control_safe_divide -> safe_control_divide.
+
 template <std::floating_point SampleType>
+[[deprecated("use pulp::signal::finite_control from pulp/signal/control_math.hpp")]]
 inline SampleType finite_control_sample(SampleType value) noexcept {
-    return std::isfinite(value) ? value : SampleType{0};
+    return finite_control(value);
 }
 
-/// Pure bounded scalar stages. Bounds are ordered by the caller and non-finite
-/// inputs become zero, so a control lane never propagates NaN or infinity.
 template <std::floating_point SampleType>
+[[deprecated("use pulp::signal::control_min from pulp/signal/control_math.hpp")]]
 inline SampleType control_minimum(SampleType a, SampleType b) noexcept {
-    return std::min(finite_control_sample(a), finite_control_sample(b));
+    return control_min(a, b);
 }
 
 template <std::floating_point SampleType>
+[[deprecated("use pulp::signal::control_max from pulp/signal/control_math.hpp")]]
 inline SampleType control_maximum(SampleType a, SampleType b) noexcept {
-    return std::max(finite_control_sample(a), finite_control_sample(b));
+    return control_max(a, b);
 }
 
 template <std::floating_point SampleType>
-inline SampleType control_clamp(SampleType value, SampleType minimum, SampleType maximum) noexcept {
-    const auto lo = finite_control_sample(minimum);
-    const auto hi = finite_control_sample(maximum);
-    const auto input = finite_control_sample(value);
-    return std::clamp(input, std::min(lo, hi), std::max(lo, hi));
+[[deprecated("use pulp::signal::safe_control_divide from pulp/signal/control_math.hpp")]]
+inline SampleType control_safe_divide(SampleType numerator, SampleType denominator) noexcept {
+    return safe_control_divide(numerator, denominator);
 }
 
 /// Pure interval mapping with endpoint clipping. An invalid input interval or
@@ -46,10 +54,10 @@ inline SampleType control_clamp(SampleType value, SampleType minimum, SampleType
 template <std::floating_point SampleType>
 inline SampleType map_clip(SampleType value, SampleType input_min, SampleType input_max,
                            SampleType output_min, SampleType output_max) noexcept {
-    input_min = finite_control_sample(input_min);
-    input_max = finite_control_sample(input_max);
-    output_min = finite_control_sample(output_min);
-    output_max = finite_control_sample(output_max);
+    input_min = finite_control(input_min);
+    input_max = finite_control(input_max);
+    output_min = finite_control(output_min);
+    output_max = finite_control(output_max);
     if (!(input_max > input_min))
         return output_min;
     // A non-finite value keeps MapClipT's historical contract: output minimum.
@@ -65,18 +73,6 @@ inline SampleType map_clip(SampleType value, SampleType input_min, SampleType in
                           : (value * SampleType{0.5} - input_min * SampleType{0.5}) /
                                 (input_max * SampleType{0.5} - input_min * SampleType{0.5});
     return std::lerp(output_min, output_max, unit);
-}
-
-template <std::floating_point SampleType>
-SampleType control_safe_divide(SampleType numerator, SampleType denominator) noexcept {
-    numerator = finite_control_sample(numerator);
-    denominator = finite_control_sample(denominator);
-    if (denominator == SampleType{0})
-        return SampleType{0};
-    const long double quotient =
-        static_cast<long double>(numerator) / static_cast<long double>(denominator);
-    const auto limit = static_cast<long double>(std::numeric_limits<SampleType>::max());
-    return static_cast<SampleType>(std::clamp(quotient, -limit, limit));
 }
 
 /// Pure Schmitt step. `high` latches true, `low` releases it, and the prior
@@ -119,29 +115,15 @@ template <std::floating_point SampleType = float> class HysteresisT {
     bool high_state_ = false;
 };
 
-/// Pure one-sample integrator step. The increment is clamped to finite zero
-/// before addition and the result is bounded to [minimum, maximum].
-template <std::floating_point SampleType>
-inline SampleType integrator_step(SampleType state, SampleType increment, SampleType minimum,
-                                  SampleType maximum) noexcept {
-    const auto lo = finite_control_sample(minimum);
-    const auto hi = finite_control_sample(maximum);
-    const auto bounded_state = control_clamp(state, lo, hi);
-    const auto sum = static_cast<long double>(bounded_state) +
-                     static_cast<long double>(finite_control_sample(increment));
-    return static_cast<SampleType>(std::clamp(sum, static_cast<long double>(std::min(lo, hi)),
-                                              static_cast<long double>(std::max(lo, hi))));
-}
-
 /// Pure linear slew step. Rates are output units per sample; a zero rate holds
 /// the current value, and a non-finite target is treated as zero.
 template <std::floating_point SampleType>
 inline SampleType slew_step(SampleType current, SampleType target, SampleType rise_rate,
                             SampleType fall_rate) noexcept {
-    current = finite_control_sample(current);
-    target = finite_control_sample(target);
-    rise_rate = std::max(SampleType{}, finite_control_sample(rise_rate));
-    fall_rate = std::max(SampleType{}, finite_control_sample(fall_rate));
+    current = finite_control(current);
+    target = finite_control(target);
+    rise_rate = std::max(SampleType{}, finite_control(rise_rate));
+    fall_rate = std::max(SampleType{}, finite_control(fall_rate));
     const auto delta = target - current;
     if (delta == SampleType{})
         return target;
@@ -155,11 +137,11 @@ inline SampleType slew_step(SampleType current, SampleType target, SampleType ri
 template <std::floating_point SampleType = float> class SlewT {
   public:
     void set_rates(SampleType rise_per_sample, SampleType fall_per_sample) noexcept {
-        rise_rate_ = std::max(SampleType{}, finite_control_sample(rise_per_sample));
-        fall_rate_ = std::max(SampleType{}, finite_control_sample(fall_per_sample));
+        rise_rate_ = std::max(SampleType{}, finite_control(rise_per_sample));
+        fall_rate_ = std::max(SampleType{}, finite_control(fall_per_sample));
     }
     void reset(SampleType value = SampleType{}) noexcept {
-        value_ = finite_control_sample(value);
+        value_ = finite_control(value);
     }
     SampleType process(SampleType target) noexcept {
         value_ = slew_step(value_, target, rise_rate_, fall_rate_);

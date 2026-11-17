@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: MIT
 #include "isolated_clap_endpoint.hpp"
+#include <algorithm>
 #include <array>
 #include <catch2/catch_test_macros.hpp>
+#include <filesystem>
+#include <fstream>
 #include <limits>
+#include <string>
 using namespace pulp;
 using namespace pulp::host;
 TEST_CASE("Isolated CLAP callback validates adversarial peer publications", "[host][isolation]") {
@@ -127,6 +131,53 @@ TEST_CASE("Isolated CLAP hello reply must echo every binding field", "[host][iso
     auto echoed = good;
     echoed.payload_bytes = odd.payload_bytes;
     CHECK_FALSE(hello_reply_matches(odd, echoed, pid));
+}
+
+TEST_CASE("Isolated CLAP worker hello checks are shared by every transport", "[host][isolation]") {
+    using namespace host::isolation;
+    ControlRecord hello;
+    hello.command = Command::hello;
+    hello.generation = 9;
+    hello.payload_bytes = kMappingBytes;
+    CHECK(hello_header_ok(hello));
+    auto wrong = hello;
+    wrong.command = Command::prepare;
+    CHECK_FALSE(hello_header_ok(wrong));
+    wrong = hello;
+    wrong.generation = 0;
+    CHECK_FALSE(hello_header_ok(wrong));
+    wrong = hello;
+    wrong.payload_bytes = kMappingBytes - 1;
+    CHECK_FALSE(hello_header_ok(wrong));
+
+    const std::string worker(64, 'b'), plugin(64, 'a'), build(64, 'c');
+    std::copy(worker.begin(), worker.end(), hello.worker_sha256.begin());
+    std::copy(plugin.begin(), plugin.end(), hello.plugin_sha256.begin());
+    std::copy(build.begin(), build.end(), hello.build.begin());
+    CHECK(hello_identity_matches(hello, worker, plugin, build));
+    CHECK_FALSE(hello_identity_matches(hello, plugin, worker, build));
+    CHECK_FALSE(hello_identity_matches(hello, worker, plugin, worker));
+    CHECK_FALSE(hello_identity_matches(hello, worker.substr(1), plugin, build));
+    // A field without a terminator is read at its full width, never past it.
+    hello.build.fill('c');
+    CHECK(record_text(hello.build).size() == hello.build.size());
+    CHECK_FALSE(hello_identity_matches(hello, worker, plugin, build));
+}
+
+TEST_CASE("Isolated CLAP hashes a plain module file as itself", "[host][isolation]") {
+    using namespace host::isolation;
+    const auto file = std::filesystem::temp_directory_path() / "pulp-isolated-clap-hash-probe.clap";
+    {
+        std::ofstream(file) << "module";
+    }
+    CHECK(clap_hash_path(file) == file);
+    const auto bundle =
+        std::filesystem::temp_directory_path() / "pulp-isolated-clap-hash-probe-dir.clap";
+    std::filesystem::create_directories(bundle);
+    CHECK(clap_hash_path(bundle) ==
+          bundle / "Contents" / "MacOS" / "pulp-isolated-clap-hash-probe-dir");
+    std::filesystem::remove(file);
+    std::filesystem::remove(bundle);
 }
 
 #if defined(_WIN32) && defined(PULP_ISOLATED_CLAP_WINDOWS_PEER)
@@ -321,5 +372,63 @@ TEST_CASE("Windows isolated CLAP handshake is bounded by its deadline",
     CHECK(elapsed < std::chrono::seconds(4));
     CHECK(launch.session_ran);
     CHECK(launch.reservation.retained_process_observation().state == RetainedProcessState::Reaped);
+}
+TEST_CASE("Windows isolated CLAP section adoption never closes a handle it cannot map",
+          "[host][isolation][windows]") {
+    // A hello may name any value; one that does not map as a full section can
+    // be another live handle of the worker, such as its control channel.
+    const HANDLE event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    REQUIRE(event != nullptr);
+    const HANDLE small = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
+                                            static_cast<DWORD>(kMappingBytes / 2), nullptr);
+    REQUIRE(small != nullptr);
+    for (const HANDLE foreign : {event, small}) {
+        windows::SharedSection section;
+        CHECK_FALSE(
+            section.adopt(static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(foreign))));
+        CHECK(section.mapping() == nullptr);
+        section.reset();
+        DWORD flags = 0;
+        CHECK(GetHandleInformation(foreign, &flags));
+    }
+    CHECK(SetEvent(event));
+    CHECK(CloseHandle(small));
+    CHECK(CloseHandle(event));
+}
+
+TEST_CASE("Windows isolated CLAP adopted section value is closed exactly once",
+          "[host][isolation][windows]") {
+    windows::SharedSection parent;
+    REQUIRE(parent.create(kTestGeneration));
+    const auto value = parent.duplicate_into(static_cast<int>(GetCurrentProcessId()));
+    REQUIRE(value != 0);
+    const auto handle = reinterpret_cast<HANDLE>(static_cast<std::uintptr_t>(value));
+    windows::SharedSection worker;
+    REQUIRE(worker.adopt(value));
+    REQUIRE(worker.mapping() != nullptr);
+    // The view is what keeps the section alive in the worker: both views see
+    // the same bytes, and the duplicated value itself is already closed.
+    parent.mapping()->requests[1].ready.store(7, std::memory_order_release);
+    CHECK(worker.mapping()->requests[1].ready.load(std::memory_order_acquire) == 7);
+    CHECK(worker.mapping()->generation == kTestGeneration);
+    DWORD flags = 0;
+    CHECK_FALSE(GetHandleInformation(handle, &flags));
+    // Occupy the freed value with an unrelated handle; releasing the adopted
+    // section must leave that handle open rather than close the value again.
+    std::vector<HANDLE> events;
+    HANDLE reused = nullptr;
+    for (int attempt = 0; attempt < 256 && reused == nullptr; ++attempt) {
+        const HANDLE event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        REQUIRE(event != nullptr);
+        events.push_back(event);
+        if (event == handle)
+            reused = event;
+    }
+    REQUIRE(reused != nullptr);
+    worker.reset();
+    CHECK(GetHandleInformation(reused, &flags));
+    CHECK(SetEvent(reused));
+    for (const HANDLE event : events)
+        CloseHandle(event);
 }
 #endif

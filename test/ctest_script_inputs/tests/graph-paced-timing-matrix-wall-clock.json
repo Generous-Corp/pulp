@@ -5,6 +5,7 @@
   "inputs": [
    "test/fixtures/g5_graph_event_rt_cases.inc",
    "test/test_graph_r2_measurement.cpp",
+   "test/test_paced_deadline_driver.cpp",
    "test/test_routed_spectral_ports.cpp",
    "test/test_signal_graph_executor_parity.cpp",
    "test/test_voice_bank_binding.cpp",

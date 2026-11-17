@@ -1,7 +1,7 @@
 # Observe one SignalGraph edge
 
 `SignalGraph::attach_audio_edge_probe` observes one named audio edge on the
-serial executor. Ordinary and sidechain edges record source-side peak and RMS
+routed serial executor or the levelized parallel executor. Ordinary and sidechain edges record source-side peak and RMS
 before downstream mixing or delay compensation; a feedback edge records the
 retained input before the current capture, timestamped at the receiving block.
 `attach_control_edge_probe` and `attach_event_edge_probe` observe automation
@@ -61,11 +61,28 @@ the discontinuity to start a new observation.
 
 An audio probe returns `UnsupportedKind` for MIDI/event and control/parameter
 edges; feedback and sidechain audio edges are observed as described above.
-Parallel, legacy and anticipative execution return `UnsupportedExecution` for
-every probe kind. Missing edges, invalid named handles, unprepared graphs
+Legacy and anticipative execution, and a disabled routed executor, return
+`UnsupportedExecution` for every probe kind. Missing edges, invalid named handles, unprepared graphs
 and an active swap edit have separate statuses. Sample-region internal edges
 that have no serial-plan edge are unsupported. No measurement work runs without
-an attached probe; an unattached serial node checks only a null pointer.
+an attached probe; an unattached node checks only a null pointer.
+
+## Parallel routing
+
+With parallel routing enabled, every probe kind observes the same point as on
+the serial walk, inside the task that runs the observed node: an audio source
+right after its node runs (before an in-place reader can write through its
+input view), a control or event edge in its destination's gather, and a
+feedback edge's retained slot after the last level and before capture. Each
+task writes its observation into storage owned by that block; after the final
+level barrier the thread that called `process()` publishes every observation
+once, so each ring keeps that thread as its only producer. Records equal the
+serial walk's record for record (sequence, timestamp, values), including with
+delay compensation, feedback and ragged block sizes, and switching between the
+serial and parallel walks keeps the attachment and its clock. A block that
+fails on either walk publishes no record of any kind. Attach refuses with
+`UnsupportedExecution` when the parallel plan does not name the edge at the
+same plan index as the serial plan.
 
 The focused `[edge-probe]` tests use public graph APIs to check source-versus-output
 identity, audio equivalence, timestamp/overflow accounting, reset/topology behavior,
@@ -88,7 +105,7 @@ count, the first event's status and offset, and the source buffer's drop count
 (`payload_count`, `payload_status`, `payload_offset`, `payload_dropped`).
 
 Both use the same 256-record ring, identity, reset/reattach and quiesce rules as
-audio probes, and both refuse parallel routing with `UnsupportedExecution`.
+audio probes, and both observe the parallel walk as described below.
 
 ## Observe a saved graph offline
 

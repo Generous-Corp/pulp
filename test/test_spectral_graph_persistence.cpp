@@ -379,7 +379,9 @@ bool pre_spectral_reader_admits(const std::string& json) {
 
 TEST_CASE("Spectral saves use a graph format the pre-spectral reader refuses",
           "[host][spectral][replay][compat]") {
-    REQUIRE(GraphSerializer::current_format_version() == 6);
+    // Spectral documents stay at format 6; format 7 is the saved-identity v7
+    // document, which a spectral graph does not have.
+    REQUIRE(GraphSerializer::current_format_version() == 7);
     for (bool stages : {false, true}) {
         const auto json = GraphSerializer::to_json(*fixture(stages));
         REQUIRE_FALSE(json.empty());

@@ -2,11 +2,14 @@
 
 // Value-owned graph edit history and logical-identity document diff.
 //
-// Both surfaces work on saved-identity v6 documents (GraphSerializer::
-// to_saved_document), so a recorded state never holds a pointer into a live
-// SignalGraph and survives any later mutation. NodeIds are lookup keys only:
-// documents are compared by authored node identity, so two documents that
-// differ only in NodeId numbering or editor layout are semantically equal.
+// Both surfaces work on saved-identity documents (GraphSerializer::
+// to_saved_document writes v7), so a recorded state never holds a pointer
+// into a live SignalGraph and survives any later mutation. NodeIds are lookup
+// keys only: documents are compared by authored node identity (the persisted
+// authored ID in v7, the structural identity in v6), so two documents that
+// differ only in NodeId numbering or editor layout are semantically equal,
+// and a renamed node is one changed node. A v6 and a v7 document are not
+// compared with each other.
 
 #include <pulp/host/graph_identity.hpp>
 #include <pulp/host/graph_serializer.hpp>
@@ -29,11 +32,13 @@ using GraphEditorLayout = std::unordered_map<NodeId, std::pair<float, float>>;
 
 enum class GraphDocumentDiffCode : std::uint8_t {
     Ok,
-    // One side was refused by GraphSerializer::inspect_document; the refusal
-    // and the side are recorded on the result.
+    // One side was refused by GraphSerializer::inspect_document, or the two
+    // sides use different identity schemas (refusal
+    // UnsupportedDocumentProfile on AfterRefused); the refusal and the side
+    // are recorded on the result.
     BeforeRefused,
     AfterRefused,
-    // A side is a valid document without the saved-identity v6 envelope, so
+    // A side is a valid document without a saved-identity envelope, so
     // its nodes have no authored identity to compare by.
     LogicalIdentityMissing,
     AllocationFailed,

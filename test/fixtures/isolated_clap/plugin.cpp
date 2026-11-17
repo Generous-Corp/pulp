@@ -16,7 +16,20 @@
 #include <filesystem>
 #include <limits>
 #include <thread>
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <io.h>
+#include <process.h>
+#include <windows.h>
+#include <tlhelp32.h>
+#else
 #include <unistd.h>
+#endif
 
 namespace {
 enum class Mode {
@@ -90,6 +103,26 @@ struct Instance {
     bool spawned = false;
     mutable unsigned saves = 0;
 };
+#if defined(_WIN32)
+void witness_line(const char* stage, long pid, long parent, uint32_t frames) {
+    const char* path = std::getenv("PULP_G9_WITNESS");
+    if (!path)
+        return;
+    const int fd =
+        ::_open(path, _O_WRONLY | _O_APPEND | _O_CREAT | _O_BINARY, _S_IREAD | _S_IWRITE);
+    if (fd < 0)
+        return;
+    char line[160];
+    const int size =
+        std::snprintf(line, sizeof(line), "%s %ld %ld %u\n", stage, pid, parent, frames);
+    if (size > 0)
+        (void)::_write(fd, line, static_cast<unsigned>(size));
+    ::_close(fd);
+}
+void witness(const char* stage, uint32_t frames = 0) {
+    witness_line(stage, static_cast<long>(GetCurrentProcessId()), 0, frames);
+}
+#else
 void witness(const char* stage, uint32_t frames = 0) {
     const char* path = std::getenv("PULP_G9_WITNESS");
     if (!path)
@@ -105,9 +138,62 @@ void witness(const char* stage, uint32_t frames = 0) {
         (void)::write(fd, line, static_cast<std::size_t>(size));
     ::close(fd);
 }
+#endif
 [[noreturn]] void hang() {
     for (;;)
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
+}
+#if defined(_WIN32)
+// Abort without the error-reporting path, which can hold a dying process open.
+[[noreturn]] void die() {
+    TerminateProcess(GetCurrentProcess(), 3);
+    std::abort();
+}
+[[noreturn]] void leave() {
+    TerminateProcess(GetCurrentProcess(), 0);
+    std::abort();
+}
+// A child (cmd) that starts a grandchild (ping), both long-lived. The witness
+// records both process ids; the grandchild is found by its parent id.
+void descendants() {
+    char command[] = "cmd.exe /d /c ping -n 600 127.0.0.1 >nul";
+    STARTUPINFOA startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION child{};
+    if (!CreateProcessA(nullptr, command, nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr,
+                        nullptr, &startup, &child))
+        die();
+    CloseHandle(child.hThread);
+    CloseHandle(child.hProcess);
+    witness_line("descendant", static_cast<long>(child.dwProcessId),
+                 static_cast<long>(GetCurrentProcessId()), 0);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < deadline) {
+        const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snapshot != INVALID_HANDLE_VALUE) {
+            PROCESSENTRY32 entry{};
+            entry.dwSize = sizeof(entry);
+            for (BOOL more = Process32First(snapshot, &entry); more;
+                 more = Process32Next(snapshot, &entry)) {
+                if (entry.th32ParentProcessID == child.dwProcessId) {
+                    witness_line("grandchild", static_cast<long>(entry.th32ProcessID),
+                                 static_cast<long>(child.dwProcessId), 0);
+                    CloseHandle(snapshot);
+                    return;
+                }
+            }
+            CloseHandle(snapshot);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    die();
+}
+#else
+[[noreturn]] void die() {
+    std::abort();
+}
+[[noreturn]] void leave() {
+    ::_exit(0);
 }
 void descendants() {
     int ready[2];
@@ -130,16 +216,17 @@ void descendants() {
         std::abort();
     ::close(ready[0]);
 }
+#endif
 [[noreturn]] void fault(const char* stage, uint32_t frames = 0) {
     witness(stage, frames);
-    std::abort();
+    die();
 }
 bool init(const clap_plugin_t* p) {
     witness("load");
     if (std::getenv("PULP_G9_CONSTRUCTION_EXIT"))
         std::thread([] {
             std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-            ::_exit(0);
+            leave();
         }).detach();
     if (static_cast<const Instance*>(p->plugin_data)->mode == Mode::load_hang)
         hang();
@@ -172,15 +259,14 @@ void stop(const clap_plugin_t*) {}
 void reset(const clap_plugin_t*) {}
 clap_process_status process(const clap_plugin_t* p, const clap_process_t* ctx) {
     auto* i = static_cast<Instance*>(p->plugin_data);
-    const auto started = std::chrono::steady_clock::now();
     witness("process", ctx->frames_count);
     if (i->mode == Mode::process_abort)
-        std::abort();
+        die();
     if ((i->mode == Mode::descendant || i->mode == Mode::exited_leader) && !i->spawned) {
         i->spawned = true;
         descendants();
         if (i->mode == Mode::exited_leader)
-            ::_exit(0);
+            leave();
         hang();
     }
     if (i->mode == Mode::never_return) {
@@ -213,16 +299,6 @@ clap_process_status process(const clap_plugin_t* p, const clap_process_t* ctx) {
     for (uint32_t c = 0; c < 2; ++c)
         for (uint32_t n = 0; n < ctx->frames_count; ++n)
             out.data32[c][n] = i->gain * in.data32[c][n];
-    if (false) {
-        const auto us = std::chrono::duration_cast<std::chrono::microseconds>(
-                            std::chrono::steady_clock::now() - started)
-                            .count();
-        std::fprintf(stderr,
-                     "G9_CALLBACK_STAGE=process-timed pid=%ld ppid=%ld frames=%u elapsed_us=%lld\n",
-                     static_cast<long>(getpid()), static_cast<long>(getppid()), ctx->frames_count,
-                     static_cast<long long>(us));
-        std::fflush(stderr);
-    }
     if (i->mode == Mode::sysex_output) {
         const std::uint8_t bytes[]{0xf0, 0x7d, 0x01, 0xf7};
         const clap_event_midi_sysex_t event{{sizeof(clap_event_midi_sysex_t), 0,

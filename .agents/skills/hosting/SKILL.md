@@ -77,6 +77,22 @@ record's `file` field carries that child-side handle value instead of a file
 identity, so there is no path to unlink. And the Windows retained channel refuses
 output capture, because nothing drains a retained child's pipes.
 
+**The worker owns that section value only once it maps.** `SharedSection::adopt`
+closes the value right after a successful map (the view keeps the section alive)
+and never closes a value that does not map, because a hostile or stale hello can
+name another live worker handle such as its control pipe. Never close the
+duplicated value from the parent with `DUPLICATE_CLOSE_SOURCE`: it races the
+worker's own close and can hit a reused value. A failed hello is followed by
+terminating the job, which releases what the worker never adopted. Prove the
+Windows callback with the import-table traps in
+`test/fixtures/isolated_clap/windows_callback_traps.cpp` (Pulp and the static
+CRT resolve through the test executable's table), not with macOS interposer
+evidence, and keep their negative control beside any new kind. The traps are
+per process and `catch_discover_tests` runs every case in its own process, so a
+case that measures a callback must install them itself (the test's
+`CallbackProbe` does on construction); a case relying on an earlier case's
+install reports clean counts with no traps in place when run alone.
+
 **Graph code that calls an isolation helper must also link on the web.** The
 WAM / WebCLAP sample-region profile compiles a curated source list
 (`tools/cmake/PulpSampleRegionWebSources.cmake`), not `pulp-host`, and
@@ -589,6 +605,18 @@ and `signal_graph_reference_walk.cpp` remains the independent execution oracle.
 The authoring extraction changes source ownership, not the graph's public
 contract or real-time lock rules. Recheck the host graph and executor parity
 suites after moving a method across these translation units.
+
+### Edge probes publish once per block, from the calling thread
+
+Every edge probe kind observes into a per-block stage in the executor and is
+pushed to its ring only after the last node (serial) or the final level
+barrier (parallel), on the thread that called `process()`. Never push to a
+probe ring from inside a node gather: on the levelized walk that runs on a
+worker and gives the SPSC ring a second producer. Capture an audio source in
+the task that ran the source node, not after the barrier: a built-in gain's
+sole reader reads its output in place and may write through its input view.
+A hosted plug-in's output is retained across blocks and always copied to its
+reader, so a test that needs an in-place source must use a built-in node.
 
 ### A hosted device's latency is discovered once, on the control thread
 
@@ -2277,7 +2305,7 @@ honest.
 
 ### Undo/redo and diff over saved documents (`graph_history.hpp`)
 
-`GraphEditHistory` stores saved-identity v6 documents, never graph pointers.
+`GraphEditHistory` stores saved-identity v7 documents, never graph pointers.
 Watch out for:
 
 - Undo and redo reload the graph through `from_saved_document`, which
@@ -2306,11 +2334,14 @@ Watch out for:
 - `diff_graph_documents` / `pulp graph diff` compare by authored identity, so
   renumbering alone is equal, including `sample_regions` NodeIds, and the
   reported digests match. `GraphDocument::semantic_digest` from
-  `inspect_document` still hashes raw NodeIds. Identities carry an ordinal in
-  NodeId order, so deleting the first of two same-named nodes shifts the
-  survivor's identity and the diff blames the wrong node. A pre-v4 legacy file is refused as
-  `invalid_format_version`, not `logical_identity_missing`; re-save it with
-  `to_saved_document` first.
+  `inspect_document` still hashes raw NodeIds. In v7 the identity is the
+  node's persisted `authored_id`, so two graphs built the same way are
+  DIFFERENT authored graphs (every node is added and removed): to test
+  renumbering, reload one document, never build two. v6 identities still
+  carry an ordinal in NodeId order (the old misattribution on deleting a
+  same-named node), and a v6/v7 pair is refused rather than compared. A
+  pre-v4 legacy file is refused as `invalid_format_version`, not
+  `logical_identity_missing`; re-save it with `to_saved_document` first.
 
 ## Crash-isolated scanning — and the un-isolated LOAD
 
@@ -3346,17 +3377,34 @@ hangs until then. Do not register a second ctest entry for the same case under a
 shorter `TIMEOUT`: the duplicate-registration check refuses two budgets for one
 command.
 
-A finite spectral source's EOF values (frame count, routed cutoff, `N / H`
-drain, bin count, component stride) come from `SpectralFiniteStreamRule` in
+A finite spectral source's EOF values (frame count, drain, routed cutoff, bin
+count, component stride) come from `SpectralFiniteStreamRule` in
 `core/host/src/spectral_finite_stream_internal.hpp`; do not reintroduce 64,
-129, 258 or 320 literals in the asset-morph path. The closed form
-`ceil((L + N - H) / H)` matches the analysis grid only when the hop divides the
-FFT size (N=256, H=100, L=1 gives 2 against the grid's 3), even though the codec
-and `SpectralIdentity` accept such hops, so the rule refuses them. Test any EOF
-change against `spectral_frame_engine_first_frame_start` walking the grid, not
-against the formula itself. The rule's `static_assert` turns a broken rounding
-into a compile error, which `confirm_failure.sh` reports as INCONCLUSIVE; break
-a different term to exercise the runtime test.
+129, 258 or 320 literals in a source path. The rule is versioned.
+`analysis_grid_v2` (the default) counts `floor((L - 1) / H) + floor((N - 1) / H)
++ 1` frames, drains `ceil(N / H)` zero frames and derives the cutoff from L
+alone as `(N + H) + floor((L - 1) / H) * H + N`. `dividing_hop_v1` gives the
+same values but refuses a hop that does not divide N; the old closed form
+`ceil((L + N - H) / H)` with an `N / H` drain is only right there (N=256,
+H=100, L=1 gives 2 frames against the grid's 3). The guarded synthesis engine
+makes a sample final only once a frame starting after it has been synthesized,
+which is why the drain must reach the last window's end; the rule test proves
+that against the engine, not the formula. Test any EOF change against
+`spectral_frame_engine_first_frame_start` walking the grid. The rule's
+`static_assert` turns a broken rounding into a compile error, which
+`confirm_failure.sh` reports as INCONCLUSIVE; break a different term to
+exercise the runtime test.
+
+The two-asset morph stays on `dividing_hop_v1`, and so do its saved assets:
+frame f averages control hop f and is published at sample `(f + 1) * H`, while
+synthesis needs it at its window end `f * H + (N - floor((N - 1) / H) * H)`;
+the two agree only when H divides N. The single-stream source
+(`add_spectral_asset_source_v1`) has no input and publishes each frame in the
+block that reaches its window end, the analysis timeline, so it runs at every
+hop v2 admits. A graph with no audio input still needs an input `BufferView`
+that carries the block length (`BufferView<const float>(nullptr, 0, count)`):
+a default-constructed view has zero samples and the routed path renders
+nothing, silently.
 
 The asset-morph source builds its rule from the decoded stream's geometry, so it
 runs at any admitted (N, H, C). Its endpoint scratch is a per-node vector sized
@@ -3522,12 +3570,21 @@ The `android-build` job runs only on main pushes (it is skipped for
 
 ## Saved identity documents
 
-`GraphSerializer::to_saved_document` wraps the normal graph payload (format
-version unchanged) in the saved-identity envelope; `from_saved_document` checks
-every binding (duplicate, unknown, dangling node id) before it mutates the
-graph. The envelope name `pulp.graph.saved-identity.v6` is not a graph format
-version: the payload stays at the current format, and a v6+ graph is still
-refused. The semantic digest ignores editor layout, so moving a node changes
+`GraphSerializer::to_saved_document` writes saved-identity v7: the graph
+payload at format 7 with each node's `authored_id`, and an envelope binding
+those IDs (design: `docs/graph-program-status/G-3-v7-identity-design.md`);
+`from_saved_document` checks every binding (duplicate, unknown, dangling node
+id) before it mutates the graph. Format 7 exists ONLY with the v7 envelope:
+the plain writer never emits it, and a plain format 7 file is refused, so a
+test that wants "a future version" must use 8. v6 documents
+(`pulp.graph.saved-identity.v6`, formats 4..6) still load with their original
+rules; there is no v6 writer in production, so tests that need a v6 fixture
+use `GraphSerializerTestAccess::legacy_v6_saved_document`. Loading any
+pre-v7 document assigns IDs from a hash of the whole document
+(`migrate_saved_document`'s rule), so the same file always gets the same IDs
+and an edited copy gets entirely new ones. Do not hand-edit a binding key
+with a text replace that also hits the bindings object: a duplicated JSON key
+is refused as `duplicate_json_key` before any identity rule runs. The semantic digest ignores editor layout, so moving a node changes
 the canonical bytes but not the digest. `snapshot_port_identity` replaces the
 old `undo_port_identity` spelling, which returned a snapshot and not an undo.
 
