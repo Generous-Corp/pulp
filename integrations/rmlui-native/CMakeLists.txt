@@ -4,49 +4,41 @@
 
 find_package(VellumRmlUiNative CONFIG REQUIRED COMPONENTS Native Metal)
 
-# Older Vellum RmlUi SDKs do not expose the density setter. Detect the method
-# at configure time so the adapter remains source-compatible with those SDKs.
+# The adapter needs the density ratio (dp lengths follow the backing scale),
+# NativeContext::warm() (the first frame is prepared at attach) and the
+# renderer trim() (a hidden editor hands its render targets back). Vellum
+# reports them through the API macros in native.hpp, defined from the commit
+# 37777f3 of the Vellum repository on. An older SDK would silently draw `dp`
+# at 1/scale of its size, so the configure fails instead of building without it.
 include(CheckCXXSourceCompiles)
 get_target_property(_vellum_rmlui_native_includes VellumRmlUi::Native
     INTERFACE_INCLUDE_DIRECTORIES)
 set(CMAKE_REQUIRED_INCLUDES "${_vellum_rmlui_native_includes}")
 set(_pulp_try_compile_target_type "${CMAKE_TRY_COMPILE_TARGET_TYPE}")
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+unset(PULP_VELLUM_RMLUI_API_OK CACHE)
 check_cxx_source_compiles(
     "#include <vellum/rmlui/native.hpp>
-     int main() {
-       vellum::rmlui::NativeContext* context = nullptr;
-       (void) context->set_density_ratio(1.0f);
-       return 0;
-     }"
-    PULP_VELLUM_RMLUI_HAS_DENSITY_RATIO)
-# The first-frame preparation (NativeContext::warm) is newer than the density
-# setter; older SDKs simply draw their first frame cold.
-check_cxx_source_compiles(
-    "#include <vellum/rmlui/native.hpp>
-     int main() {
-       vellum::rmlui::NativeContext* context = nullptr;
-       context->warm();
-       return 0;
-     }"
-    PULP_VELLUM_RMLUI_HAS_WARM)
-# The probe is compile-only and cached: a later SDK change needs a fresh
-# configure (or the cache entry removed) to be seen.
-if(PULP_VELLUM_RMLUI_HAS_WARM)
-    message(STATUS "rmlui-native: NativeContext::warm() available; the first frame is prepared at attach")
-else()
-    message(STATUS "rmlui-native: NativeContext::warm() not in this Vellum RmlUi SDK; the first frame draws cold")
-endif()
+     #if !defined(VELLUM_RMLUI_NATIVE_API_VERSION) || VELLUM_RMLUI_NATIVE_API_VERSION < 1
+     #error \"the Vellum RmlUi SDK defines no API version\"
+     #endif
+     #define PULP_NEEDED (VELLUM_RMLUI_NATIVE_FEATURE_DENSITY_RATIO | VELLUM_RMLUI_NATIVE_FEATURE_WARM | VELLUM_RMLUI_NATIVE_FEATURE_RENDERER_TRIM)
+     #if (VELLUM_RMLUI_NATIVE_FEATURES & PULP_NEEDED) != PULP_NEEDED
+     #error \"the Vellum RmlUi SDK lacks a feature the adapter needs\"
+     #endif
+     int main() { return 0; }"
+    PULP_VELLUM_RMLUI_API_OK)
 set(CMAKE_TRY_COMPILE_TARGET_TYPE "${_pulp_try_compile_target_type}")
-if(NOT PULP_VELLUM_RMLUI_HAS_DENSITY_RATIO)
-    message(WARNING "rmlui-native: this Vellum RmlUi SDK has no "
-        "NativeContext::set_density_ratio. The adapter cannot apply the backing scale, so "
-        "`dp` lengths equal `px` and a document sized in `dp` renders at 1/scale of its "
-        "intended size on a high-density display. Build against a Vellum RmlUi SDK that "
-        "exports it; each attach reports this at run time too.")
-endif()
 unset(_pulp_try_compile_target_type)
 unset(CMAKE_REQUIRED_INCLUDES)
+if(NOT PULP_VELLUM_RMLUI_API_OK)
+    message(FATAL_ERROR "rmlui-native: the Vellum RmlUi SDK on CMAKE_PREFIX_PATH is older than "
+        "Vellum commit 37777f3 (no VELLUM_RMLUI_NATIVE_API_VERSION, or missing the density "
+        "ratio, warm or renderer trim feature). Without the density ratio the adapter would "
+        "draw `dp` lengths at 1/scale of their size on a high-density display. Use a Vellum "
+        "RmlUi SDK built from the commit pinned as vellum-rmlui-sdk in tools/deps/manifest.json, "
+        "or later.")
+endif()
 
 add_library(pulp-rmlui-native STATIC src/rmlui_surface_mac.mm)
 add_library(pulp::rmlui-native ALIAS pulp-rmlui-native)
@@ -61,12 +53,6 @@ target_link_libraries(pulp-rmlui-native
     PRIVATE
         "-framework AppKit"
         "-framework Metal")
-if(PULP_VELLUM_RMLUI_HAS_DENSITY_RATIO)
-    target_compile_definitions(pulp-rmlui-native PRIVATE PULP_VELLUM_RMLUI_HAS_DENSITY_RATIO)
-endif()
-if(PULP_VELLUM_RMLUI_HAS_WARM)
-    target_compile_definitions(pulp-rmlui-native PRIVATE PULP_VELLUM_RMLUI_HAS_WARM)
-endif()
 
 # Vellum's Metal Rml::RenderInterface on the surface, when the Vellum install
 # was built with VELLUM_RMLUI_METAL=ON.

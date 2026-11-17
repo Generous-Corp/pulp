@@ -373,7 +373,6 @@ TEST_CASE("the document loads and renders through the caller's renderer",
 TEST_CASE("the document's first frame is prepared before any frame is drawn",
           "[native-surface][rmlui][first-frame]") {
     REQUIRE_METAL();
-#if defined(PULP_VELLUM_RMLUI_HAS_WARM)
     @autoreleasepool {
         Editor e;
         REQUIRE(e.attach());
@@ -384,9 +383,6 @@ TEST_CASE("the document's first frame is prepared before any frame is drawn",
         REQUIRE(e.compiled_at_first_begin.load() > 0);
         e.ui->detach();
     }
-#else
-    SKIP("the installed Vellum RmlUi SDK has no NativeContext::warm()");
-#endif
 }
 
 TEST_CASE("a missing document or font fails attach and leaves nothing behind",
@@ -912,21 +908,14 @@ TEST_CASE("px lengths are device pixels and dp lengths follow the density ratio"
         REQUIRE(ui.density_ratio() == 1.0);
 
         // 2x: a px length stays 100 device pixels (50 points), so the pointer
-        // at 60 points is outside it. A dp length is a point: 200 device pixels
-        // with a density ratio, so the pointer is inside; without one it is
-        // 100 device pixels and the document renders half size.
+        // at 60 points is outside it. A dp length is a point: 200 device
+        // pixels, so the pointer is inside.
         measure(2.0, px, dp, hover_px, hover_dp);
         REQUIRE(px == 100.0f);
         REQUIRE_FALSE(hover_px);
-        if (density_ratio_supported()) {
-            REQUIRE(ui.density_ratio() == 2.0);
-            REQUIRE(dp == 200.0f);
-            REQUIRE(hover_dp);
-        } else {
-            REQUIRE(ui.density_ratio() == 1.0);
-            REQUIRE(dp == 100.0f);
-            REQUIRE_FALSE(hover_dp);
-        }
+        REQUIRE(ui.density_ratio() == 2.0);
+        REQUIRE(dp == 200.0f);
+        REQUIRE(hover_dp);
 
         // Back to 1x: nothing stays scaled.
         measure(1.0, px, dp, hover_px, hover_dp);
@@ -937,35 +926,15 @@ TEST_CASE("px lengths are device pixels and dp lengths follow the density ratio"
     }
 }
 
-TEST_CASE("an attach without a density ratio says so once, and one with it does not",
-          "[native-surface][rmlui][scale]") {
+TEST_CASE("the density ratio reads 1 while detached", "[native-surface][rmlui][scale]") {
     REQUIRE_METAL();
     @autoreleasepool {
-        std::vector<std::string> messages;
-        set_diagnostic_sink([&](const std::string& m) { messages.push_back(m); });
-        // Declared after `messages`: restores the sink on an assertion unwind too,
-        // before `messages` is destroyed.
-        struct SinkReset {
-            ~SinkReset() {
-                set_diagnostic_sink({});
-            }
-        } sink_reset;
-        for (int i = 0; i < 2; ++i) {
-            Editor e;
-            REQUIRE(e.attach());
-            REQUIRE(e.ui->density_ratio() > 0.0);
-            e.ui->detach();
-            // Detached: no stale scale.
-            REQUIRE(e.ui->density_ratio() == 1.0);
-        }
-        set_diagnostic_sink({});
-        if (density_ratio_supported()) {
-            REQUIRE(messages.empty());
-        } else {
-            REQUIRE(messages.size() == 1);
-            REQUIRE(messages[0].find("density ratio") != std::string::npos);
-            REQUIRE(messages[0].find("dp") != std::string::npos);
-        }
+        Editor e;
+        REQUIRE(e.attach());
+        REQUIRE(e.ui->density_ratio() > 0.0);
+        e.ui->detach();
+        // No stale scale.
+        REQUIRE(e.ui->density_ratio() == 1.0);
     }
 }
 
