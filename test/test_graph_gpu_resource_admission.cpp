@@ -849,11 +849,10 @@ void skip_unless_gpu_executed(GraphRig& rig) {
         staged_gpu_executed(rig.convolution->transport().capability_report(),
                             rig.convolution->transport().delivery_snapshot(),
                             rig.convolution->convolver()->staged_gpu_blocks());
-    if (neural.gpu_blocks == 0 || !convolver_executed) {
-        UNSCOPED_INFO("neural gpu_blocks " << neural.gpu_blocks << ", convolver staged_gpu_blocks "
-                                           << rig.convolution->convolver()->staged_gpu_blocks());
-        SKIP("host did not execute the consumers on a GPU");
-    }
+    if (neural.gpu_blocks == 0 || !convolver_executed)
+        SKIP("host did not execute the consumers on a GPU (neural gpu_blocks "
+             << neural.gpu_blocks << ", convolver staged_gpu_blocks "
+             << rig.convolution->convolver()->staged_gpu_blocks() << ")");
 }
 
 } // namespace
