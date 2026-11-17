@@ -194,7 +194,14 @@ while `restore_state()` checks every value (bounds included) before the first
 write. A release through `dispatch_deferred()` also retires the key in the
 bank's MPE tracker, and a graph failure during `render()` silences the whole
 block. `begin_block()` with a block open is `Busy` and `publish()` with no block
-is `StaleEpoch`, matching `HostEventIngress`. Saved-bank activation,
+is `StaleEpoch`, matching `HostEventIngress`. On a reset the bank cuts every
+voice (`HardCut`) unless `set_retirement_policy()` opted into `DrainRetired`;
+a drain deadline is counted in rendered frames and `render()` splits its graph
+slices at it, so do not move the cut to a block boundary (that breaks
+partition invariance). A drain is tied to its generation: a steal or All Sound
+Off clears it, otherwise the old deadline would cut the replacement note. The
+owner's `reset()` is skipped while anything drains, so an owner that needs it
+must tolerate it running later. Saved-bank activation,
 edit/undo, DAW adapters, and paced
 realtime qualification remain open; do not infer them from the source-installed
 consumer.

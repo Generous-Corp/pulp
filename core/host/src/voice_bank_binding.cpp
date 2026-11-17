@@ -149,6 +149,13 @@ struct VoiceBankBinding::Impl {
         midi::MpeNoteState state{};
         bool active = false;
     };
+    // One retired voice draining toward its finite tail. Indexed by slot, so
+    // the table is preallocated with the bank.
+    struct Drain {
+        midi::MpeNoteGeneration generation = 0;
+        std::uint32_t remaining = 0;
+        bool active = false;
+    };
     struct Scope {
         std::uint8_t channel = 0;
         bool manager = false;
@@ -173,6 +180,9 @@ struct VoiceBankBinding::Impl {
     std::array<bool, 2> zone_sustain{};
     bool suppress_note_off = false;
     bool idle_skip = false;
+    VoiceBankRetirementPolicy retirement{};
+    VoiceBankRetirementStats retirement_counts{};
+    std::array<Drain, kVoiceBankSlots> drains{};
     std::array<IdleProbeContext, kVoiceBankSlots> idle_probes{};
     // The slots' voice nodes, fetched once while preparing. Looking a node up in
     // the graph takes the graph mutation lock, which the audio thread must not
@@ -200,6 +210,58 @@ struct VoiceBankBinding::Impl {
     bool pedal_down(std::uint8_t channel) const noexcept {
         const auto* zone = tracker.config().zone_for_channel(channel);
         return zone && (member_sustain[channel] || zone_sustain[zone->is_upper() ? 1 : 0]);
+    }
+    std::uint32_t draining() const noexcept {
+        std::uint32_t count = 0;
+        for (const auto& drain : drains)
+            count += drain.active ? 1u : 0u;
+        return count;
+    }
+    // A drained voice that is no longer active finished on its own; one whose
+    // slot now holds another generation, or a voice that is not releasing,
+    // was stolen. Neither may be cut later in that slot's name.
+    void observe_drain(std::uint32_t slot) noexcept {
+        auto& drain = drains[slot];
+        if (!drain.active)
+            return;
+        midi::MpeNoteState note{};
+        bool releasing = false;
+        if (!owner->slot_note(slot, note, releasing)) {
+            ++retirement_counts.finished;
+            drain = {};
+        } else if (note.note_id != drain.generation || !releasing) {
+            ++retirement_counts.interrupted;
+            drain = {};
+        }
+    }
+    void observe_drains() noexcept {
+        for (std::uint32_t slot = 0; slot < kVoiceBankSlots; ++slot)
+            observe_drain(slot);
+    }
+    // Charge `frames` rendered frames to every drain; a drain whose tail is
+    // used up is cut now, on its exact frame.
+    void advance_drains(std::size_t frames) noexcept {
+        for (std::uint32_t slot = 0; slot < kVoiceBankSlots; ++slot) {
+            observe_drain(slot);
+            auto& drain = drains[slot];
+            if (!drain.active)
+                continue;
+            drain.remaining -= static_cast<std::uint32_t>(frames);
+            if (drain.remaining != 0)
+                continue;
+            if (owner->retire_slot(slot, drain.generation))
+                ++retirement_counts.cut_at_tail;
+            else
+                ++retirement_counts.finished;
+            drain = {};
+        }
+    }
+    // Largest frame count that ends no later than the nearest drain deadline.
+    std::size_t until_next_deadline(std::size_t frames) const noexcept {
+        for (const auto& drain : drains)
+            if (drain.active && drain.remaining < frames)
+                frames = drain.remaining;
+        return frames;
     }
     void prune_stolen_holds() noexcept {
         for (std::uint32_t slot = 0; slot < kVoiceBankSlots; ++slot) {
@@ -247,8 +309,8 @@ struct VoiceBankBinding::Impl {
         for (std::uint32_t slot = 0; slot < kVoiceBankSlots; ++slot) {
             midi::MpeNoteState note{};
             bool releasing = false;
-            if (!owner->slot_note(slot, note, releasing) || !covers(scope, note.channel) ||
-                (!releasing && !held[slot].active))
+            if (drains[slot].active || !owner->slot_note(slot, note, releasing) ||
+                !covers(scope, note.channel) || (!releasing && !held[slot].active))
                 continue;
             note.pitch_bend_semitones = 0.0f;
             note.pressure = 0.0f;
@@ -275,6 +337,10 @@ struct VoiceBankBinding::Impl {
             if (owner->slot_note(slot, note, releasing) && covers(scope, note.channel)) {
                 (void)owner->retire_slot(slot, note.note_id);
                 held[slot] = {};
+                if (drains[slot].active) {
+                    ++retirement_counts.interrupted;
+                    drains[slot] = {};
+                }
             }
         }
         if (scope.manager) {
@@ -348,6 +414,7 @@ struct VoiceBankBinding::Impl {
         tracker.on_note_on = [this](const midi::MpeNoteState& note) {
             owner->dispatch({0, midi::MpeExpressionEvent::Kind::NoteOn, note});
             prune_stolen_holds();
+            observe_drains();
         };
         tracker.on_note_off = [this](const midi::MpeNoteState& note) { note_off(note); };
         tracker.on_pitch_bend = [this](const midi::MpeNoteState& note) {
@@ -529,7 +596,7 @@ bool VoiceBankBinding::activate(VoiceBankBindingResult& result) noexcept {
     }
     reset_idle_confirmations();
     impl_->tracker.reset();
-    impl_->owner->reset();
+    retire_voices();
     impl_->held.fill({});
     impl_->member_sustain.fill(false);
     impl_->zone_sustain.fill(false);
@@ -557,7 +624,7 @@ HostEventResult VoiceBankBinding::commit_event_reset(std::uint64_t epoch) noexce
     impl_->reserved_epoch = 0;
     reset_idle_confirmations();
     impl_->tracker.reset();
-    impl_->owner->reset();
+    retire_voices();
     impl_->held.fill({});
     impl_->member_sustain.fill(false);
     impl_->zone_sustain.fill(false);
@@ -684,16 +751,27 @@ VoiceBankBindingCode VoiceBankBinding::render(audio::BufferView<float>& stereo,
         return VoiceBankBindingCode::GraphExecutionFailure;
     };
     std::size_t offset = 0;
+    // Render up to `end`, splitting at every drain deadline so a retired voice
+    // is cut on the same frame whatever the block partition.
+    const auto advance = [&](std::size_t end) {
+        while (offset < end) {
+            const auto length = impl_->until_next_deadline(end - offset);
+            auto slice = stereo.slice(offset, length);
+            audio::BufferView<const float> input(nullptr, 0, length);
+            impl_->graph.process(slice, input, static_cast<int>(length));
+            if (impl_->graph.routed_only_execution_failures() != failures_before)
+                return false;
+            impl_->advance_drains(length);
+            offset += length;
+        }
+        return true;
+    };
     for (std::size_t index = 0; index < count;) {
         const auto at = static_cast<std::size_t>(impl_->projected[index].absolute_sample -
                                                  static_cast<std::int64_t>(first_sample));
         if (at > offset) {
-            auto slice = stereo.slice(offset, at - offset);
-            audio::BufferView<const float> input(nullptr, 0, at - offset);
-            impl_->graph.process(slice, input, static_cast<int>(at - offset));
-            if (impl_->graph.routed_only_execution_failures() != failures_before)
+            if (!advance(at))
                 return fail_graph();
-            offset = at;
         }
         do {
             const auto& record = impl_->projected[index];
@@ -710,13 +788,8 @@ VoiceBankBindingCode VoiceBankBinding::render(audio::BufferView<float>& stereo,
                  static_cast<std::uint64_t>(impl_->projected[index].absolute_sample) ==
                      first_sample + at);
     }
-    if (offset < frames) {
-        auto slice = stereo.slice(offset, frames - offset);
-        audio::BufferView<const float> input(nullptr, 0, frames - offset);
-        impl_->graph.process(slice, input, static_cast<int>(frames - offset));
-        if (impl_->graph.routed_only_execution_failures() != failures_before)
-            return fail_graph();
-    }
+    if (offset < frames && !advance(frames))
+        return fail_graph();
     (void)impl_->ingress.end_block();
     impl_->block_open = false;
     return VoiceBankBindingCode::Ok;
@@ -727,6 +800,10 @@ VoiceBankBindingCode VoiceBankBinding::dispatch_deferred(std::uint64_t epoch, st
                                                          const midi::MpeNoteState& state) noexcept {
     if (epoch != impl_->epoch)
         return VoiceBankBindingCode::StaleEpoch;
+    // A retired voice belongs to no epoch, so no token may address it.
+    if (slot < kVoiceBankSlots && impl_->drains[slot].active &&
+        impl_->drains[slot].generation == generation)
+        return VoiceBankBindingCode::StaleGeneration;
     if (slot >= kVoiceBankSlots || generation == 0 ||
         !impl_->owner->live(slot, generation, kind, state) || state.note_id != generation)
         return VoiceBankBindingCode::StaleGeneration;
@@ -827,6 +904,76 @@ bool VoiceBankBinding::restore_state(const VoiceBankState& state, VoiceBankBindi
     }
     result = {};
     return true;
+}
+
+bool VoiceBankBinding::set_retirement_policy(const VoiceBankRetirementPolicy& policy,
+                                             VoiceBankBindingResult& result) noexcept {
+    if (impl_->block_open) {
+        result = {VoiceBankBindingCode::InvalidBlock, 0, {}, "retirement policy inside a block"};
+        return false;
+    }
+    const bool drain = policy.mode == VoiceBankRetirement::DrainRetired;
+    const bool valid = drain ? policy.capacity >= 1 && policy.capacity <= kVoiceBankSlots &&
+                                   policy.tail_frames >= 1 &&
+                                   policy.tail_frames <= kVoiceBankMaxRetirementTailFrames
+                             : policy.mode == VoiceBankRetirement::HardCut &&
+                                   policy.capacity == 0 && policy.tail_frames == 0;
+    if (!valid) {
+        result = {VoiceBankBindingCode::InvalidState, 0, "retirement",
+                  "capacity or tail is outside the policy's range"};
+        return false;
+    }
+    impl_->observe_drains();
+    if (impl_->draining() != 0) {
+        result = {VoiceBankBindingCode::InvalidState, 0, "retirement",
+                  "a retired voice is still draining"};
+        return false;
+    }
+    impl_->retirement = policy;
+    result = {};
+    return true;
+}
+
+VoiceBankRetirementPolicy VoiceBankBinding::retirement_policy() const noexcept {
+    return impl_->retirement;
+}
+
+VoiceBankRetirementStats VoiceBankBinding::retirement_stats() const noexcept {
+    auto stats = impl_->retirement_counts;
+    stats.draining = impl_->draining();
+    return stats;
+}
+
+void VoiceBankBinding::retire_voices() noexcept {
+    auto& bank = *impl_;
+    if (bank.retirement.mode == VoiceBankRetirement::HardCut) {
+        bank.owner->reset();
+        return;
+    }
+    // Drains still running from an earlier reset keep their deadlines and
+    // count against the capacity.
+    bank.observe_drains();
+    auto draining = bank.draining();
+    for (std::uint32_t slot = 0; slot < kVoiceBankSlots; ++slot) {
+        if (bank.drains[slot].active)
+            continue;
+        midi::MpeNoteState note{};
+        bool releasing = false;
+        if (!bank.owner->slot_note(slot, note, releasing))
+            continue;
+        if (draining >= bank.retirement.capacity) {
+            (void)bank.owner->retire_slot(slot, note.note_id);
+            ++bank.retirement_counts.refused;
+            continue;
+        }
+        if (!releasing)
+            bank.owner->dispatch({0, midi::MpeExpressionEvent::Kind::NoteOff, note});
+        bank.drains[slot] = {note.note_id, bank.retirement.tail_frames, true};
+        ++bank.retirement_counts.drained;
+        ++draining;
+    }
+    if (draining == 0)
+        bank.owner->reset();
 }
 
 std::uint64_t VoiceBankBinding::idle_skipped_blocks() const noexcept {
