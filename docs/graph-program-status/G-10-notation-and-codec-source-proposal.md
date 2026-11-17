@@ -195,10 +195,13 @@ geometry carries its own status and that every status has a distinct reason.
 - The catalog's asset-morph row is built at the probe identity (FFT 256, hop
   64, mono) and does not state the admitted range.
 - `SignalGraphPreparedTopologyEdit` has no asset-morph constructor.
-- A dedicated single-stream source (choice 1a) and an input-free clock are not
-  built; reopen them if a consumer needs an exact pass-through source.
-- Non-dividing hops need the analysis-grid frame count
-  `floor((L - 1) / H) + floor((N - 1) / H) + 1`, a `ceil(N / H)` drain and a
-  cutoff proven against the synthesis engine before they can be admitted.
+- The dedicated single-stream source and its input-free clock are built:
+  `SignalGraph::add_spectral_asset_source_v1` (see `S6-codec-source.md`).
+  Choice 1(b), passing one stream twice to the morph, is no longer needed for
+  a plain source.
+- Non-dividing hops are admitted for the single-stream source through the
+  versioned finite-stream policy `analysis_grid_v2` (see `S6-codec-source.md`).
+  The morph keeps `dividing_hop_v1` because its per-hop control average lines
+  up with each frame's window end only when H divides N.
 - Paced realtime qualification at large geometry is not measured: a frame at
   N=16384 with 16 channels morphs about 131k bins in one callback.

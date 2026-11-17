@@ -292,7 +292,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         'capability_keys': [],
         'rationale': 'Existing executor lowering infrastructure with graph-owned opaque spectral resolver; no public native spectral-stage registration or notation capability.',
     },
-    {'include': 'pulp/host/spectral_graph.hpp', 'fingerprint': 'sha256:9d82053bacdd5bf400f6b0dc2b36160c2c1af7319f9387b419a3181b670de1c1', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Runtime-only typed spectral ports; notation and complete qualification remain PARTIAL.'},
+    {'include': 'pulp/host/spectral_graph.hpp', 'fingerprint': 'sha256:79671d5f9f092329bd1992091ff7def390ce342890a8fcf4ab00f8fd411a3da1', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Runtime-only typed spectral ports; notation and complete qualification remain PARTIAL.'},
 
     {'include': 'pulp/midi/synthesiser.hpp', 'fingerprint': 'sha256:2611124e14f31cf1481b9605e99d6bdff7c46fe751073ff1922b01e73e97522c', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Polyphonic voice allocator used by instrument processors; reviewed when panic() was added. Not a generator-facing capability.'},
     {'include': 'pulp/midi/panic.hpp', 'fingerprint': 'sha256:5de1b463081d7a2bb4c01c83886bc2b341d54b492c43259dace4a944b67e5495', 'disposition': 'infrastructure', 'capability_keys': [], 'rationale': 'Pure MIDI 1.0 panic message generation and held-note offs used by processors and adapters; not a generator-facing capability.'},

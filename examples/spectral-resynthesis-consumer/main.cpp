@@ -1,14 +1,19 @@
 // Installed-SDK spectral resynthesis consumer: analysis -> stage -> synthesis
-// through the public routed spectral graph seams. It records the frame geometry,
-// measures latency, the finite tail, partition invariance and reconstruction
-// error, and runs negative controls that each check must reject.
+// through the public routed spectral graph seams, then one decoded codec stream
+// -> synthesis at a hop that does not divide the FFT size. It records the frame
+// geometry, measures latency, the finite tail and explicit stream end, partition
+// invariance and reconstruction error, and runs negative controls that each
+// check must reject.
 #include <pulp/graph/spectral_frame.hpp>
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/signal/spectral_frame_codec.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <complex>
 #include <cstdint>
 #include <cstdio>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -128,6 +133,112 @@ double residual_ratio(const Channels& in, const Channels& out, int delay, double
         worst = std::max(worst, error / energy);
     }
     return worst;
+}
+
+// Single-stream source geometry: the hop does not divide the FFT size.
+constexpr int kSourceFft = 512, kSourceHop = 96, kSourceLength = 1500, kSourceTotal = 4096;
+
+struct SourceGrid {
+    std::int64_t first = 0;   // first analysis start, the smallest hop multiple above -N
+    std::uint64_t frames = 0; // starts whose window overlaps [0, L)
+    std::uint64_t drain = 0;  // zero frames until a start reaches the last window's end
+    std::int64_t cutoff = 0;  // N + H delay plus the last window's end
+};
+
+// Walk the analysis grid sample by sample; no closed form.
+SourceGrid walk_grid(int n, int h, int length) {
+    SourceGrid grid;
+    while (grid.first - h > -n)
+        grid.first -= h;
+    std::int64_t end = 0;
+    for (auto s = grid.first; s < length; s += h)
+        if (s + n > 0) {
+            ++grid.frames;
+            end = s + n;
+        }
+    while (std::int64_t(grid.drain) * h < n)
+        ++grid.drain;
+    grid.cutoff = n + h + end;
+    return grid;
+}
+
+double hann(int i, int n) {
+    return 0.5 - 0.5 * std::cos(2.0 * M_PI * i / (n - 1));
+}
+
+// Double-precision DFT of each grid frame, stored as the codec's floats.
+pulp::signal::EncodedSpectralStream encode_source(const Channels& in, const SourceGrid& grid) {
+    const int n = kSourceFft, bins = n / 2 + 1;
+    auto stream = pulp::signal::make_spectral_stream(
+        {std::uint32_t(n), std::uint32_t(kSourceHop), std::uint16_t(kChannels), kRate},
+        grid.frames);
+    require(bool(stream), "single-stream codec frames");
+    std::vector<double> x(n);
+    for (std::uint64_t f = 0; f < grid.frames; ++f) {
+        const auto start = grid.first + std::int64_t(f) * kSourceHop;
+        require(stream.value->frames[f].origin == start, "codec frame origin on the grid");
+        for (int c = 0; c < kChannels; ++c) {
+            for (int i = 0; i < n; ++i) {
+                const auto t = start + i;
+                x[i] = t >= 0 && t < kSourceLength ? in[c][t] * hann(i, n) : 0.0;
+            }
+            for (int k = 0; k < bins; ++k) {
+                double re = 0, im = 0;
+                for (int i = 0; i < n; ++i) {
+                    const double w = 2.0 * M_PI * double((std::int64_t(k) * i) % n) / n;
+                    re += x[i] * std::cos(w);
+                    im -= x[i] * std::sin(w);
+                }
+                const auto p = (f * kChannels + c) * 2ull * bins + 2ull * k;
+                stream.value->components[p] = float(re);
+                stream.value->components[p + 1] = k == 0 || k == bins - 1 ? 0.0f : float(im);
+            }
+        }
+    }
+    auto bytes = pulp::signal::encode_spectral_stream(*stream.value);
+    require(bool(bytes), "single-stream codec encode");
+    return std::move(*bytes.value);
+}
+
+struct SourceRender {
+    Channels out;
+    SpectralFiniteStreamEnd end;
+    int reported_latency = 0;
+};
+
+SourceRender render_source(std::span<const std::uint8_t> asset, std::uint64_t length,
+                           int partition) {
+    SignalGraph graph;
+    const auto output = graph.add_output_node(kChannels);
+    auto source = graph.add_spectral_asset_source_v1(asset, length, "source");
+    require(bool(source), "single-stream source admitted at its grid length");
+    const auto shape = *SpectralIdentity::make(kSourceFft, kSourceHop, kChannels, kRate).value;
+    require(graph.node(source.value->node)->spectral_identity == shape,
+            "source geometry follows the decoded stream");
+    const auto synthesis = *graph.add_spectral_synthesis(shape, "resynthesis").value;
+    require(bool(graph.connect(source.value->frames, synthesis.frames)), "source -> synthesis");
+    for (int c = 0; c < kChannels; ++c)
+        require(bool(graph.connect(synthesis.node, c, output, c)), "synthesis -> out");
+    require(graph.prepare(kRate, 4096), "source prepare");
+    SourceRender r;
+    r.end = source.value->end;
+    r.reported_latency = graph.latency_samples();
+    r.out.assign(kChannels, std::vector<float>(kSourceTotal));
+    for (int pos = 0; pos < kSourceTotal;) {
+        const int count =
+            std::min(kSourceTotal - pos, partition ? partition : 1 + (pos * 17 + 5) % 4096);
+        float* op[kChannels];
+        for (int c = 0; c < kChannels; ++c)
+            op[c] = r.out[c].data() + pos;
+        // No audio input: the host block only supplies the sample timeline.
+        pulp::audio::BufferView<const float> iv(nullptr, 0, count);
+        pulp::audio::BufferView<float> ov(op, kChannels, count);
+        graph.process(ov, iv, count);
+        pos += count;
+    }
+    require(graph.spectral_error() == SpectralError::None, "source: no sticky spectral error");
+    require(graph.routed_walk_fallbacks() == 0, "source: no routed walk fallback");
+    return r;
 }
 
 int argmax_abs(const std::vector<float>& y) {
@@ -254,6 +365,63 @@ int main(int argc, char** argv) {
         require(ref.fallbacks == 0 && band_ref.fallbacks == 0, "no routed walk fallback");
         require(render(identity, src, 64, true).out == ref.out, "parallel request == serial");
         std::printf("cpu: routed_walk_fallbacks=0 parallel_request_identical=1\n");
+
+        // (6) Single decoded stream: the consumer analyzes its own audio on its
+        // own walked grid, hands the stream to the source with its exact length,
+        // and checks the explicit end, delay, reconstruction and silence.
+        const auto grid = walk_grid(kSourceFft, kSourceHop, kSourceLength);
+        require(kSourceFft % kSourceHop != 0 && grid.cutoff + kSourceFft < kSourceTotal,
+                "source geometry exercises a non-dividing hop and its whole tail");
+        Channels source_in(kChannels, std::vector<float>(kSourceLength));
+        for (int i = 0; i < kSourceLength; ++i) {
+            source_in[0][i] = 0.3f * std::sin(2.0 * M_PI * 37 * i / kSourceFft);
+            source_in[1][i] = 0.2f * std::cos(0.0213 * i) + 0.05f * std::sin(0.31 * i);
+        }
+        source_in[0][kSourceLength - 1] = source_in[1][kSourceLength - 1] = 0.8f;
+        const auto asset = encode_source(source_in, grid);
+        std::uint64_t stated_length = kSourceLength;
+        if (mode == "--planted-source-length")
+            stated_length += kSourceHop; // a length whose grid holds another frame count
+        SourceGrid expected = grid;
+        if (mode == "--planted-source-count") // the dividing-hop closed form
+            expected.frames =
+                (kSourceLength + kSourceFft - kSourceHop + kSourceHop - 1) / kSourceHop;
+        if (mode == "--planted-source-drain") // the dividing-hop drain
+            expected.drain = kSourceFft / kSourceHop;
+        const auto plain = render_source(asset.view(), stated_length, 64);
+        require(plain.end.policy_version == 2 && plain.end.source_samples == stated_length,
+                "source end names its policy and length");
+        require(plain.end.frame_count == expected.frames, "source frame count == analysis grid");
+        require(plain.end.drain_frames == expected.drain, "source drain == walked drain");
+        require(std::int64_t(plain.end.render_frames) == expected.cutoff,
+                "source cutoff == delay + last window end");
+        require(plain.reported_latency == kSourceFft + kSourceHop, "source latency N+H");
+        const int SD = plain.reported_latency;
+        for (int p : {4096, 37, 0})
+            require(render_source(asset.view(), stated_length, p).out == plain.out,
+                    "source partition invariance");
+        double source_energy = 0, source_error = 0;
+        for (int c = 0; c < kChannels; ++c)
+            for (int i = 0; i < kSourceTotal; ++i) {
+                const double wanted =
+                    i >= SD && i < SD + kSourceLength ? source_in[c][i - SD] : 0.0;
+                if (i < SD || i >= expected.cutoff)
+                    require(plain.out[c][i] == 0.0f, "source silence outside [D, cutoff)");
+                else if (i < SD + kSourceLength) {
+                    source_energy += wanted * wanted;
+                    source_error += (plain.out[c][i] - wanted) * (plain.out[c][i] - wanted);
+                }
+            }
+        const double source_residual = source_error / source_energy;
+        require(source_residual < kIdentityTolerance, "source reconstruction within -100 dB");
+        require(std::abs(plain.out[0][SD + kSourceLength - 1] - 0.8f) < 1e-4,
+                "source final sample reconstructed");
+        std::printf("source: fft=%d hop=%d L=%d policy=%u frames=%llu drain=%llu cutoff=%llu "
+                    "residual=%.3g\n",
+                    kSourceFft, kSourceHop, kSourceLength, plain.end.policy_version,
+                    (unsigned long long)plain.end.frame_count,
+                    (unsigned long long)plain.end.drain_frames,
+                    (unsigned long long)plain.end.render_frames, source_residual);
 
         std::printf("pulp.spectral-resynthesis-consumer.v1: all checks passed\n");
         return 0;
