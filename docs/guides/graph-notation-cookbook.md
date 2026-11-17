@@ -32,7 +32,7 @@ gain1.gain = 0.5
 ```text
 $ pulp graph validate first.pat
 valid: true
-format_version: 6
+format_version: 7
 nodes: 3
 connections: 4
 ```

@@ -54,7 +54,7 @@ automatable parameter, so `input.audio ~> gain1.gain @ 0.5` is refused; see the
 ```sh
 pulp graph validate first.pat
 # valid: true
-# format_version: 6
+# format_version: 7
 # nodes: 3
 # connections: 4
 
@@ -62,9 +62,10 @@ pulp graph save first.pat --output first.pulpgraph
 ```
 
 `format_version` in the `validate` output is the newest document format this
-build writes. `save` keeps a plain graph in the oldest format that can hold it,
-so the saved file may state a smaller number; the guide's check pins only the
-`validate` line against the CLI.
+build writes. A plain `save` keeps a simple graph in the oldest format that can
+hold it (`"format_version": 2` for this patch); `save --saved-identity` writes
+the current one. The guide's check pins only the `validate` line against the
+CLI.
 
 Add `--json` to `validate` for a machine-readable verdict (`"valid"`, `"code"`,
 and on failure `"line"`, `"rule"`, `"suggested_fix"`).
