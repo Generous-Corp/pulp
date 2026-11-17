@@ -2453,6 +2453,118 @@ TEST_CASE("AU v3 transport jumps request processor reset through ProcessContext"
     }
 }
 
+TEST_CASE("AU v3 publishes render timing facts and marks activation and reset",
+          "[au][auv3][transport][process-timing]") {
+    @autoreleasepool {
+        AudioComponentDescription desc{};
+        desc.componentType = kAudioUnitType_Effect;
+        desc.componentSubType = 'TTim';
+        desc.componentManufacturer = 'Plup';
+
+        ScopedFactoryRegistration registration(create_effect_processor);
+
+        NSError* error = nil;
+        PulpAudioUnit* unit =
+            [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                       options:0
+                                                         error:&error];
+        REQUIRE(unit != nil);
+        auto* processor = g_last_effect_processor;
+        REQUIRE(processor != nullptr);
+
+        NSError* allocate_error = nil;
+        REQUIRE([unit allocateRenderResourcesAndReturnError:&allocate_error]);
+
+        constexpr UInt32 kFrames = 8;
+        float left[kFrames] = {};
+        float right[kFrames] = {};
+        struct StereoBufferList {
+            AudioBufferList list;
+            AudioBuffer extra[1];
+        } output{};
+        output.list.mNumberBuffers = 2;
+        output.list.mBuffers[0].mNumberChannels = 1;
+        output.list.mBuffers[0].mDataByteSize = kFrames * sizeof(float);
+        output.list.mBuffers[0].mData = left;
+        output.list.mBuffers[1].mNumberChannels = 1;
+        output.list.mBuffers[1].mDataByteSize = kFrames * sizeof(float);
+        output.list.mBuffers[1].mData = right;
+
+        __block double transport_position = 511.9999;  // rounds to 512
+        __block BOOL moving = YES;
+        unit.transportStateBlock = ^BOOL(AUHostTransportStateFlags* transport_flags,
+                                         double* sample_position, double* cycle_start,
+                                         double* cycle_end) {
+            if (transport_flags) *transport_flags = moving ? AUHostTransportStateMoving : 0;
+            if (sample_position) *sample_position = transport_position;
+            if (cycle_start) *cycle_start = 0.0;
+            if (cycle_end) *cycle_end = 0.0;
+            return YES;
+        };
+
+        AUInternalRenderBlock block = [unit internalRenderBlock];
+        REQUIRE(block != nil);
+        auto render = [&](UInt32 flags_in, double sample_time) {
+            AudioUnitRenderActionFlags flags = 0;
+            AudioTimeStamp timestamp{};
+            timestamp.mFlags = flags_in;
+            timestamp.mSampleTime = sample_time;
+            REQUIRE(block(&flags, &timestamp, kFrames, 0, &output.list, nullptr, nil) == noErr);
+            return processor->last_context.timing;
+        };
+
+        const auto first = render(kAudioTimeStampSampleTimeValid, 4096.0);
+        REQUIRE(first.discontinuity);
+        REQUIRE(first.has_steady_sample);
+        REQUIRE(first.steady_sample == 4096);
+        REQUIRE(first.has_transport_sample);
+        REQUIRE(first.transport_sample == 512);
+        REQUIRE(first.transport_moving);
+        REQUIRE(first.playback_rate == pulp::format::PlaybackRate::Unknown);
+        REQUIRE(processor->last_context.position_samples == first.transport_sample);
+
+        transport_position = 520.0;
+        const auto second = render(kAudioTimeStampSampleTimeValid, 4104.0);
+        REQUIRE_FALSE(second.discontinuity);
+        REQUIRE(second.steady_sample == 4104);
+
+        // An invalid sample time publishes no counter; a stopped transport is
+        // still reported, as not moving.
+        moving = NO;
+        const auto unclocked = render(0, 4112.0);
+        REQUIRE_FALSE(unclocked.has_steady_sample);
+        REQUIRE(unclocked.has_transport_sample);
+        REQUIRE_FALSE(unclocked.transport_moving);
+
+        // A host reset marks exactly the next block.
+        [unit reset];
+        const auto after_reset = render(kAudioTimeStampSampleTimeValid, 4120.0);
+        REQUIRE(after_reset.discontinuity);
+        REQUIRE_FALSE(render(kAudioTimeStampSampleTimeValid, 4128.0).discontinuity);
+
+        // A bypassed block skips the Processor. With a valid counter the next
+        // block can measure the skip itself; without one it is marked.
+        unit.shouldBypassEffect = YES;
+        (void)render(kAudioTimeStampSampleTimeValid, 4136.0);
+        unit.shouldBypassEffect = NO;
+        REQUIRE_FALSE(render(kAudioTimeStampSampleTimeValid, 4144.0).discontinuity);
+        unit.shouldBypassEffect = YES;
+        (void)render(0, 0.0);
+        unit.shouldBypassEffect = NO;
+        REQUIRE(render(0, 0.0).discontinuity);
+        REQUIRE_FALSE(render(0, 0.0).discontinuity);
+
+        // Re-allocation is a new activation.
+        [unit deallocateRenderResources];
+        REQUIRE([unit allocateRenderResourcesAndReturnError:&allocate_error]);
+        block = [unit internalRenderBlock];
+        REQUIRE(render(kAudioTimeStampSampleTimeValid, 0.0).discontinuity);
+
+        [unit deallocateRenderResources];
+        [unit release];
+    }
+}
+
 // ── Offline rendering ────────────────────────────────────────────────────────
 //
 // A host bouncing faster than realtime (Logic's bounce, REAPER's render) tells

@@ -291,6 +291,16 @@ struct AUBridge {
     // render-block invocation reports no changes.
     detail::PlayheadSnapshot playhead_prev;
 
+    // Raised by allocateRenderResources and -reset: the next block the
+    // Processor observes does not follow the last one it saw, so its
+    // `ProcessContext::timing.discontinuity` is set. Written on the host's
+    // control thread, consumed on the render thread.
+    std::atomic<bool> timing_discontinuity_pending{true};
+    // Render thread only: a block skipped the Processor (bypass, refusal or
+    // state-restore contention). Without a valid mSampleTime the next observed
+    // block cannot measure the skip, so it is marked discontinuous.
+    bool timing_block_skipped = false;
+
     // Host accommodations, resolved once at init via the runtime policy.
     HostQuirks host_quirks{};
 };
@@ -1151,6 +1161,7 @@ struct ScopedAuV3HostWriting {
 
 - (BOOL)allocateRenderResourcesAndReturnError:(NSError **)outError {
     if (![super allocateRenderResourcesAndReturnError:outError]) return NO;
+    _bridge.timing_discontinuity_pending.store(true, std::memory_order_release);
 
     _bridge.sample_rate = _outputBus.format.sampleRate;
     _bridge.max_frames = self.maximumFramesToRender;
@@ -1239,6 +1250,12 @@ struct ScopedAuV3HostWriting {
     pulp::runtime::log_info("AU: render resources at {} Hz, {} frames",
         _bridge.sample_rate, _bridge.max_frames);
     return YES;
+}
+
+// A host reset breaks the timeline the Processor last saw.
+- (void)reset {
+    [super reset];
+    _bridge.timing_discontinuity_pending.store(true, std::memory_order_release);
 }
 
 - (void)deallocateRenderResources {
@@ -1360,6 +1377,7 @@ struct ScopedAuV3HostWriting {
                 ? static_cast<UInt32>(bridge->output_channels)
                 : 0;
         const auto failClosed = [&] {
+            bridge->timing_block_skipped = true;
             pulp::format::detail::zero_audio_buffer_list(outputData);
             if (actionFlags) *actionFlags |= kAudioUnitRenderAction_OutputIsSilence;
             bridge->processor->set_sidechain(nullptr);
@@ -1789,6 +1807,7 @@ struct ScopedAuV3HostWriting {
             // implementorValueProvider reads the store live, so the host
             // reflects the settled value on its next poll.
             bridge->store.reset_triggers_rt();
+            bridge->timing_block_skipped = true;
             return noErr;
         }
 
@@ -1840,6 +1859,9 @@ struct ScopedAuV3HostWriting {
                     pulp::format::TransportField::BeatPosition);
             }
         }
+        bool timing_has_transport = false;
+        bool timing_transport_moving = false;
+        double timing_transport_position = 0.0;
         if (transportStateBlock) {
             AUHostTransportStateFlags transport_flags = 0;
             double current_sample_position = 0.0;
@@ -1851,6 +1873,9 @@ struct ScopedAuV3HostWriting {
                 &cycle_start_beat_position,
                 &cycle_end_beat_position);
             if (ok) {
+                timing_has_transport = true;
+                timing_transport_moving = (transport_flags & AUHostTransportStateMoving) != 0;
+                timing_transport_position = current_sample_position;
                 ctx.is_playing =
                     (transport_flags & AUHostTransportStateMoving) != 0;
                 ctx.is_recording =
@@ -1892,6 +1917,18 @@ struct ScopedAuV3HostWriting {
         pulp::format::detail::compute_playhead_changes(
             ctx, bridge->playhead_prev,
             pulp::format::detail::TransportDiffMode::FieldValidity);
+
+        // Neutral timing facts: mSampleTime is the render counter (it keeps
+        // running across seeks), the transport callback's position is the
+        // transport. AU reports no playback rate. A skipped block is a
+        // discontinuity only when there is no counter to measure it.
+        ctx.timing = pulp::format::au_process_timing(
+            timestamp ? timestamp->mFlags : 0u, timestamp ? timestamp->mSampleTime : 0.0,
+            timing_has_transport, timing_transport_moving, timing_transport_position, false,
+            false);
+        ctx.timing.discontinuity =
+            bridge->timing_discontinuity_pending.load(std::memory_order_acquire) ||
+            (bridge->timing_block_skipped && !ctx.timing.has_steady_sample);
 
         // One entry per declared bus, so ProcessBusBufferInfo::index equals the
         // descriptor index. Entries for a bus without channels stay empty and
@@ -2038,6 +2075,7 @@ struct ScopedAuV3HostWriting {
             pulp::format::passthrough_block(output_view, input_view);
             bridge->processor->set_sidechain(nullptr);
             bridge->store.reset_triggers_rt();
+            bridge->timing_block_skipped = true;
             return noErr;
         }
 
@@ -2080,6 +2118,9 @@ struct ScopedAuV3HostWriting {
             if (bridge->panic_state)
                 bridge->panic_state->observe_midi_out(midi_out);
         }
+        // The Processor observed this block's timing facts.
+        bridge->timing_discontinuity_pending.store(false, std::memory_order_release);
+        bridge->timing_block_skipped = false;
 
         // Return trigger / momentary params (panic, reset, tap) to their
         // default now that the Processor has observed this block, so the
