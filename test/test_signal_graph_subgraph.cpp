@@ -1,15 +1,21 @@
 #include "../core/host/src/graph_serializer_test_access.hpp"
+#include "../core/host/src/subgraph_persistence_test_access.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 #include <choc/text/choc_JSON.h>
+#include <pulp/host/processor_restore.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/signal_graph_subgraph.hpp>
 #include <pulp/host/subgraph_persistence.hpp>
 #include <pulp/host/voice_identity.hpp>
 #include <pulp/format/processor.hpp>
 
+#include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
+#include <span>
+#include <stdexcept>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -801,7 +807,7 @@ TEST_CASE("saved subgraph restore refuses records that do not match their templa
                     "subgraph_state_rejected");
 }
 
-TEST_CASE("a template mismatch after the flattened load returns no graph, instances or maps") {
+TEST_CASE("a template mismatch found on the candidate leaves the graph and returns no maps") {
     PersistedRack rack;
     build_rack(rack);
     // Lay out every node so a stale editor_layout entry would be visible.
@@ -814,12 +820,17 @@ TEST_CASE("a template mismatch after the flattened load returns no graph, instan
                                      "\"template_identity\": \"test.gain\"");
 
     SignalGraph graph;
-    REQUIRE(graph.add_gain_node("existing") != 0);
+    const auto existing = graph.add_gain_node("existing");
+    REQUIRE(existing != 0);
     const auto refused = from_saved_subgraph_document(graph, mismatched, rack_templates());
     INFO(refused.load.error);
     CHECK_FALSE(refused.ok());
     CHECK(refused.load.error.find("subgraph_instance_mismatch") != std::string::npos);
-    CHECK(graph.nodes().empty());
+    // The mismatch is found on the candidate, so the caller's graph keeps
+    // exactly what it had.
+    REQUIRE(graph.nodes().size() == 1);
+    CHECK(graph.nodes().front().id == existing);
+    CHECK(graph.nodes().front().name == "existing");
     CHECK(refused.subgraphs.empty());
     CHECK(refused.load.identity_node_ids.empty());
     CHECK(refused.load.persisted_node_ids.empty());
@@ -982,4 +993,553 @@ TEST_CASE("saved subgraph writer refuses handles that predate a reload") {
     INFO(loaded.load.error);
     REQUIRE(loaded.ok());
     CHECK_FALSE(to_saved_subgraph_document(restored, loaded.subgraphs).empty());
+}
+
+namespace {
+
+// A stateful Custom member: one Audio input and output, scaled by a trim kept
+// in its 4-byte opaque state. load_state accepts a finite trim in [0, 4].
+struct TrimCounters {
+    int created = 0;
+    int destroyed = 0;
+};
+TrimCounters g_trim;
+
+std::vector<std::uint8_t> trim_state(float value) {
+    std::vector<std::uint8_t> bytes(sizeof(float));
+    std::memcpy(bytes.data(), &value, sizeof(float));
+    return bytes;
+}
+
+CustomNodeType trim_type(int version = 1) {
+    CustomNodeType type;
+    type.type_id = "test.trim";
+    type.version = version;
+    type.num_input_ports = 1;
+    type.num_output_ports = 1;
+    type.create = [] {
+        ++g_trim.created;
+        return static_cast<void*>(new float(1.0f));
+    };
+    type.destroy = [](void* instance) {
+        ++g_trim.destroyed;
+        delete static_cast<float*>(instance);
+    };
+    type.process_instance = [](void* instance, pulp::audio::BufferView<float>& out,
+                               const pulp::audio::BufferView<const float>& in, int frames) {
+        const float trim = *static_cast<float*>(instance);
+        for (int i = 0; i < frames; ++i)
+            out.channel_ptr(0)[i] = in.channel_ptr(0)[i] * trim;
+    };
+    type.save_state = [](void* instance) { return trim_state(*static_cast<float*>(instance)); };
+    type.load_state = [](void* instance, const std::vector<std::uint8_t>& bytes) {
+        float value = 0.0f;
+        if (bytes.size() != sizeof(float))
+            return false;
+        std::memcpy(&value, bytes.data(), sizeof(float));
+        if (!std::isfinite(value) || value < 0.0f || value > 4.0f)
+            return false;
+        *static_cast<float*>(instance) = value;
+        return true;
+    };
+    return type;
+}
+
+// trim -> gain, with the trim's input and the gain's output exposed.
+SubgraphTemplate trim_strip_template() {
+    SubgraphTemplate t;
+    t.identity = "test.trim-strip";
+    SubgraphNodeSpec trim;
+    trim.key = "trim";
+    trim.type = NodeType::Custom;
+    trim.custom_type_id = "test.trim";
+    trim.custom_type_version = 1;
+    trim.custom_state = trim_state(1.0f);
+    t.nodes = {trim, {"gain", NodeType::Gain, 1, 1.0f}};
+    t.edges = {{"trim", 0, "gain", 0}};
+    t.exposed_ports = {{"input", "trim", 0, false, PortKind::Audio},
+                       {"output", "gain", 0, true, PortKind::Audio}};
+    t.parameters = {{"gain", "gain", 1.0f, 0.0f, 2.0f}};
+    return t;
+}
+
+SubgraphTemplate trim_rack_template() {
+    SubgraphTemplate parent;
+    parent.identity = "test.trim-rack";
+    parent.children = {{"strip", std::make_shared<SubgraphTemplate>(trim_strip_template()), 2}};
+    parent.exposed_ports = {{"input", "strip.input", 0, false, PortKind::Audio},
+                            {"output", "strip.output", 0, true, PortKind::Audio}};
+    return parent;
+}
+
+std::vector<SubgraphTemplate> trim_templates() {
+    return {trim_rack_template()};
+}
+
+constexpr float kTrim = 0.5f;
+constexpr float kRackGain = 1.5f;
+
+struct TrimRack {
+    SignalGraph graph;
+    std::vector<SubgraphInstance> instances;
+    std::string document;
+};
+
+// input -> rack.a (trim 0.5, gain 1.5) -> output.
+void build_trim_rack(TrimRack& rack) {
+    REQUIRE(rack.graph.register_custom_node_type(trim_type()));
+    auto expansion = instantiate_subgraph(rack.graph, trim_rack_template(), "rack.a", 7);
+    REQUIRE(expansion);
+    auto& instance = expansion.instance;
+    REQUIRE(rack.graph.set_custom_node_state(instance.nodes.front(), trim_state(kTrim)));
+    auto state = instance.save_state();
+    state.parameters.at("strip.gain") = kRackGain;
+    REQUIRE(restore_subgraph_state(rack.graph, instance, state));
+    const auto in = rack.graph.add_input_node(1);
+    const auto out = rack.graph.add_output_node(1);
+    REQUIRE(rack.graph.connect(in, 0, instance.ports.at("input").node, 0));
+    REQUIRE(rack.graph.connect(instance.ports.at("output").node, 0, out, 0));
+    rack.instances = {instance};
+    rack.document = to_saved_subgraph_document(rack.graph, rack.instances);
+    REQUIRE_FALSE(rack.document.empty());
+}
+
+// Render eight frames of ones through a prepared graph.
+std::array<float, 8> render_ones(SignalGraph& graph) {
+    REQUIRE(graph.prepare(48000.0, 8));
+    std::array<float, 8> ones{}, out{};
+    ones.fill(1.0f);
+    const float* ip[] = {ones.data()};
+    float* op[] = {out.data()};
+    pulp::audio::BufferView<const float> input(ip, 1, ones.size());
+    pulp::audio::BufferView<float> output(op, 1, out.size());
+    graph.process(output, input, static_cast<int>(out.size()));
+    return out;
+}
+
+std::string base64(const std::vector<std::uint8_t>& bytes) {
+    static constexpr char kTable[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string text;
+    for (std::size_t i = 0; i < bytes.size(); i += 3) {
+        const std::uint32_t chunk =
+            (std::uint32_t(bytes[i]) << 16) |
+            (i + 1 < bytes.size() ? std::uint32_t(bytes[i + 1]) << 8 : 0u) |
+            (i + 2 < bytes.size() ? std::uint32_t(bytes[i + 2]) : 0u);
+        text += kTable[(chunk >> 18) & 63];
+        text += kTable[(chunk >> 12) & 63];
+        text += i + 1 < bytes.size() ? kTable[(chunk >> 6) & 63] : '=';
+        text += i + 2 < bytes.size() ? kTable[chunk & 63] : '=';
+    }
+    return text;
+}
+
+// Rewrite the `custom` member of every node whose Custom type is test.trim.
+template <typename Edit> std::string edit_trim_node(const std::string& document, Edit edit) {
+    auto root = choc::json::parse(document);
+    auto nodes = choc::value::createEmptyArray();
+    for (std::uint32_t i = 0; i < root["nodes"].size(); ++i) {
+        choc::value::Value node(root["nodes"][i]);
+        if (node.hasObjectMember("custom") &&
+            node["custom"]["type_id"].getString() == std::string_view("test.trim")) {
+            choc::value::Value custom(node["custom"]);
+            edit(custom);
+            node.setMember("custom", custom);
+        }
+        nodes.addArrayElement(node);
+    }
+    root.setMember("nodes", nodes);
+    return choc::json::toString(root, true);
+}
+
+// A refused restore of a Custom document into a graph that already holds one
+// node leaves that node, and nothing else, and returns no instance or map.
+void require_custom_refused(const std::string& document, const std::string& rule,
+                            const std::vector<CustomNodeType>& types = {trim_type()}) {
+    SignalGraph graph;
+    for (const auto& type : types)
+        REQUIRE(graph.register_custom_node_type(type));
+    const auto existing = graph.add_gain_node("existing");
+    REQUIRE(existing != 0);
+    const auto loaded = from_saved_subgraph_document(graph, document, trim_templates());
+    INFO(loaded.load.error);
+    CHECK_FALSE(loaded.ok());
+    CHECK(loaded.load.error.find(rule) != std::string::npos);
+    CHECK(loaded.subgraphs.empty());
+    CHECK(loaded.load.identity_node_ids.empty());
+    CHECK(loaded.load.persisted_node_ids.empty());
+    REQUIRE(graph.nodes().size() == 1);
+    CHECK(graph.nodes().front().id == existing);
+}
+
+} // namespace
+
+TEST_CASE("subgraph expands a Custom member at its exact type, version and state") {
+    g_trim = {};
+    SignalGraph graph;
+    REQUIRE(graph.register_custom_node_type(trim_type()));
+    auto expansion = instantiate_subgraph(graph, trim_strip_template(), "strip.a");
+    INFO(expansion.result.rule);
+    REQUIRE(expansion);
+    const auto* trim = graph.node(expansion.instance.nodes.front());
+    REQUIRE(trim != nullptr);
+    CHECK(trim->type == NodeType::Custom);
+    CHECK(trim->custom_type_id == "test.trim");
+    CHECK(trim->custom_type_version == 1);
+    CHECK(graph.custom_node_state(trim->id) == trim_state(1.0f));
+    // The state probe destroys every instance it creates.
+    CHECK(g_trim.created > 0);
+    CHECK(g_trim.created == g_trim.destroyed);
+}
+
+TEST_CASE("subgraph refuses Custom members before changing the graph") {
+    const auto require_unchanged = [](SignalGraph& graph, const SubgraphTemplate& t) {
+        const auto before = graph.nodes().size();
+        const auto expansion = instantiate_subgraph(graph, t, "strip.a");
+        CHECK_FALSE(expansion);
+        CHECK(expansion.result.rule.starts_with("subgraph boundary:"));
+        CHECK(expansion.instance.nodes.empty());
+        CHECK(graph.nodes().size() == before);
+    };
+    SECTION("the type is not registered") {
+        SignalGraph graph;
+        require_unchanged(graph, trim_strip_template());
+    }
+    SECTION("only another version is registered") {
+        SignalGraph graph;
+        REQUIRE(graph.register_custom_node_type(trim_type(2)));
+        require_unchanged(graph, trim_strip_template());
+    }
+    SECTION("the initial state is refused by the type") {
+        SignalGraph graph;
+        REQUIRE(graph.register_custom_node_type(trim_type()));
+        auto t = trim_strip_template();
+        t.nodes.front().custom_state = trim_state(9.0f);
+        g_trim = {};
+        require_unchanged(graph, t);
+        CHECK(g_trim.created == 1);
+        CHECK(g_trim.destroyed == 1);
+    }
+    SECTION("a stateless type is given state") {
+        SignalGraph graph;
+        auto stateless = trim_type();
+        stateless.create = nullptr;
+        stateless.destroy = nullptr;
+        stateless.process_instance = nullptr;
+        stateless.save_state = nullptr;
+        stateless.load_state = nullptr;
+        stateless.process = [](pulp::audio::BufferView<float>&,
+                               const pulp::audio::BufferView<const float>&, int) {};
+        REQUIRE(graph.register_custom_node_type(stateless));
+        require_unchanged(graph, trim_strip_template());
+    }
+    SECTION("the type throws while the state is probed") {
+        SignalGraph graph;
+        auto throwing = trim_type();
+        throwing.load_state = [](void*, const std::vector<std::uint8_t>&) -> bool {
+            throw std::runtime_error("probe");
+        };
+        REQUIRE(graph.register_custom_node_type(throwing));
+        g_trim = {};
+        require_unchanged(graph, trim_strip_template());
+        CHECK(g_trim.created == g_trim.destroyed);
+        auto failing_create = trim_type();
+        failing_create.create = []() -> void* { throw std::bad_alloc(); };
+        REQUIRE(graph.register_custom_node_type(failing_create));
+        require_unchanged(graph, trim_strip_template());
+    }
+    SECTION("type-specific fields are set for another node type") {
+        SignalGraph graph;
+        REQUIRE(graph.register_custom_node_type(trim_type()));
+        auto custom_with_processor = trim_strip_template();
+        custom_with_processor.nodes.front().processor_type_id = "test.two-param";
+        require_unchanged(graph, custom_with_processor);
+        auto gain_with_custom = gain_template();
+        gain_with_custom.nodes[1].custom_type_id = "test.trim";
+        require_unchanged(graph, gain_with_custom);
+        auto unversioned = trim_strip_template();
+        unversioned.nodes.front().custom_type_version = 0;
+        require_unchanged(graph, unversioned);
+    }
+    SECTION("control: the registered type expands") {
+        SignalGraph graph;
+        REQUIRE(graph.register_custom_node_type(trim_type()));
+        CHECK(instantiate_subgraph(graph, trim_strip_template(), "strip.a"));
+    }
+}
+
+TEST_CASE("saved subgraph document round-trips a nested Custom member with its state and audio") {
+    TrimRack rack;
+    build_trim_rack(rack);
+    const auto inspection = GraphSerializer::inspect_document(rack.document);
+    REQUIRE(inspection.ok());
+
+    SignalGraph restored;
+    REQUIRE(restored.register_custom_node_type(trim_type()));
+    const auto loaded = from_saved_subgraph_document(restored, rack.document, trim_templates());
+    INFO(loaded.load.error);
+    REQUIRE(loaded.ok());
+    REQUIRE(loaded.subgraphs.size() == 1);
+    const auto& instance = loaded.subgraphs.front();
+    CHECK(instance.instance_identity == "rack.a");
+    CHECK(instance.instance_index == 7);
+    CHECK(instance.child_template_identities.at("strip") == "test.trim-strip");
+    CHECK(instance.child_instance_indices.at("strip") == 2);
+    CHECK(instance.parameters.at("strip.gain") == kRackGain);
+    const auto* trim = restored.node(instance.nodes.front());
+    REQUIRE(trim != nullptr);
+    CHECK(trim->type == NodeType::Custom);
+    CHECK(trim->custom_type_id == "test.trim");
+    CHECK(trim->custom_type_version == 1);
+    CHECK(trim->authored_id.str() == rack.graph.node(rack.instances[0].nodes.front())->authored_id.str());
+    CHECK(restored.custom_node_state(trim->id) == trim_state(kTrim));
+    CHECK(instance.ports.at("input").kind == PortKind::Audio);
+
+    // Re-saving the restore keeps the semantic digest.
+    const auto resaved = to_saved_subgraph_document(restored, loaded.subgraphs);
+    REQUIRE_FALSE(resaved.empty());
+    const auto again = GraphSerializer::inspect_document(resaved);
+    REQUIRE(again.ok());
+    CHECK(again.document.semantic_digest() == inspection.document.semantic_digest());
+
+    // Audio replay: the restored member renders trim * gain like the original.
+    const auto original = render_ones(rack.graph);
+    const auto replayed = render_ones(restored);
+    CHECK(original == replayed);
+    for (const float sample : replayed)
+        CHECK(sample == kTrim * kRackGain);
+}
+
+TEST_CASE("saved subgraph restore refuses Custom members it cannot rebuild exactly") {
+    TrimRack rack;
+    build_trim_rack(rack);
+
+    SECTION("control: the unedited document restores beside two registered versions") {
+        SignalGraph graph;
+        REQUIRE(graph.register_custom_node_type(trim_type()));
+        REQUIRE(graph.register_custom_node_type(trim_type(2)));
+        const auto loaded = from_saved_subgraph_document(graph, rack.document, trim_templates());
+        INFO(loaded.load.error);
+        CHECK(loaded.ok());
+    }
+    SECTION("the factory is missing") {
+        require_custom_refused(rack.document, "subgraph_instance_mismatch", {});
+    }
+    SECTION("the document names another registered version") {
+        const auto edited = edit_trim_node(rack.document, [](choc::value::Value& custom) {
+            custom.setMember("version", static_cast<std::int64_t>(2));
+        });
+        require_custom_refused(edited, "does not match the template", {trim_type(), trim_type(2)});
+    }
+    SECTION("the member state is refused by its type") {
+        const auto edited = edit_trim_node(rack.document, [](choc::value::Value& custom) {
+            custom.setMember("state_b64", base64(trim_state(9.0f)));
+        });
+        g_trim = {};
+        require_custom_refused(edited, "subgraph_state_rejected");
+        CHECK(g_trim.created == g_trim.destroyed);
+    }
+    SECTION("control: an in-range state edit reaches the member") {
+        const auto edited = edit_trim_node(rack.document, [](choc::value::Value& custom) {
+            custom.setMember("state_b64", base64(trim_state(2.0f)));
+        });
+        SignalGraph graph;
+        REQUIRE(graph.register_custom_node_type(trim_type()));
+        const auto loaded = from_saved_subgraph_document(graph, edited, trim_templates());
+        INFO(loaded.load.error);
+        REQUIRE(loaded.ok());
+        CHECK(graph.custom_node_state(loaded.subgraphs.front().nodes.front()) == trim_state(2.0f));
+    }
+    SECTION("membership is altered") {
+        auto root = choc::json::parse(rack.document);
+        choc::value::Value record(root["subgraphs"][0]);
+        auto members = choc::value::createEmptyArray();
+        members.addArrayElement(record["members"][1]);
+        record.setMember("members", members);
+        auto records = choc::value::createEmptyArray();
+        records.addArrayElement(record);
+        root.setMember("subgraphs", records);
+        require_custom_refused(choc::json::toString(root, true), "member count");
+    }
+    SECTION("an internal edge is lost") {
+        auto root = choc::json::parse(rack.document);
+        const auto trim = std::string(root["subgraphs"][0]["members"][0].getString());
+        const auto bindings = root["bindings"];
+        const auto trim_node = bindings[trim].getInt64();
+        auto connections = choc::value::createEmptyArray();
+        for (std::uint32_t i = 0; i < root["connections"].size(); ++i)
+            if (root["connections"][i]["source_node"].getInt64() != trim_node)
+                connections.addArrayElement(root["connections"][i]);
+        REQUIRE(connections.size() + 1 == root["connections"].size());
+        root.setMember("connections", connections);
+        require_custom_refused(choc::json::toString(root, true), "internal edges");
+    }
+    SECTION("an internal edge changes role") {
+        auto root = choc::json::parse(rack.document);
+        const auto trim = std::string(root["subgraphs"][0]["members"][0].getString());
+        const auto trim_node = root["bindings"][trim].getInt64();
+        auto connections = choc::value::createEmptyArray();
+        for (std::uint32_t i = 0; i < root["connections"].size(); ++i) {
+            choc::value::Value edge(root["connections"][i]);
+            if (edge["source_node"].getInt64() == trim_node)
+                edge.setMember("feedback", true);
+            connections.addArrayElement(edge);
+        }
+        root.setMember("connections", connections);
+        require_custom_refused(choc::json::toString(root, true), "internal edges");
+    }
+}
+
+TEST_CASE("saved subgraph writer refuses Custom members a restore would refuse") {
+    TrimRack rack;
+    build_trim_rack(rack);
+    const auto trim = rack.instances[0].nodes.front();
+    REQUIRE(rack.graph.set_custom_node_state(trim, trim_state(9.0f)));
+    CHECK(to_saved_subgraph_document(rack.graph, rack.instances).empty());
+    REQUIRE(rack.graph.set_custom_node_state(trim, trim_state(3.0f)));
+    CHECK_FALSE(to_saved_subgraph_document(rack.graph, rack.instances).empty());
+}
+
+TEST_CASE("saved subgraph restore binds the exact Processor graph type") {
+    SignalGraph graph;
+    auto expansion = instantiate_subgraph(graph, two_param_template(), "two.a");
+    REQUIRE(expansion);
+    const auto document = to_saved_subgraph_document(graph, {&expansion.instance, 1});
+    REQUIRE_FALSE(document.empty());
+
+    // The document records the Processor under the template's graph type.
+    // Restoring it as another registered version of that type is a different
+    // member even though the descriptor is the same.
+    const auto restore = [&](const std::string& json, int version) {
+        ProcessorRestoreRegistry registry;
+        REQUIRE(registry.register_type(
+                    {{"test.two-param", version},
+                     1,
+                     TwoParamProcessor{}.descriptor().default_input_channels(),
+                     TwoParamProcessor{}.descriptor().default_output_channels(),
+                     TwoParamProcessor{}.descriptor().node_capabilities,
+                     [] {
+                         return pulp::format::ProcessorNodeInstance::create(
+                             std::make_unique<TwoParamProcessor>());
+                     }}) == ProcessorRestoreCode::Restored);
+        GraphLoadOptions options;
+        options.processor_registry = &registry;
+        options.processor_allowlist = {{"test.two-param", version}};
+        SignalGraph target;
+        const std::vector<SubgraphTemplate> templates{two_param_template()};
+        const auto loaded = from_saved_subgraph_document(target, json, templates, options);
+        return std::pair{loaded.ok(), loaded.load.error};
+    };
+    const auto [ok, error] = restore(document, 2);
+    INFO(error);
+    CHECK(ok);
+
+    auto root = choc::json::parse(document);
+    auto processors = choc::value::createEmptyArray();
+    for (std::uint32_t i = 0; i < root["processors"].size(); ++i) {
+        choc::value::Value record(root["processors"][i]);
+        record.setMember("type_version", static_cast<std::int64_t>(3));
+        processors.addArrayElement(record);
+    }
+    root.setMember("processors", processors);
+    const auto [edited_ok, edited_error] = restore(choc::json::toString(root, true), 3);
+    INFO(edited_error);
+    CHECK_FALSE(edited_ok);
+    CHECK(edited_error.find("does not match the template") != std::string::npos);
+}
+
+TEST_CASE("saved subgraph restore refuses a template past the nesting limit") {
+    // Nine nested levels exceed the expansion depth, so a document saved from
+    // a shallow declaration cannot be rebound to a deeper one of that name.
+    auto deepest = std::make_shared<SubgraphTemplate>(gain_template());
+    for (int level = 0; level < 9; ++level) {
+        auto parent = std::make_shared<SubgraphTemplate>();
+        parent->identity = "test.level" + std::to_string(level);
+        parent->children = {{"child", deepest, 0}};
+        deepest = parent;
+    }
+    SignalGraph probe;
+    CHECK_FALSE(instantiate_subgraph(probe, *deepest, "deep.a"));
+    CHECK(probe.nodes().empty());
+
+    SignalGraph shallow_graph;
+    auto shallow = *deepest;
+    shallow.children = {{"child", std::make_shared<SubgraphTemplate>(gain_template()), 0}};
+    auto expansion = instantiate_subgraph(shallow_graph, shallow, "deep.a");
+    REQUIRE(expansion);
+    const auto document = to_saved_subgraph_document(shallow_graph, {&expansion.instance, 1});
+    REQUIRE_FALSE(document.empty());
+
+    SignalGraph graph;
+    const std::vector<SubgraphTemplate> deep{*deepest};
+    const auto loaded = from_saved_subgraph_document(graph, document, deep);
+    INFO(loaded.load.error);
+    CHECK_FALSE(loaded.ok());
+    CHECK(loaded.load.error.find("subgraph_instance_mismatch") != std::string::npos);
+    CHECK(graph.nodes().empty());
+    // Control: the shallow declaration restores the same document.
+    const std::vector<SubgraphTemplate> same{shallow};
+    CHECK(from_saved_subgraph_document(graph, document, same).ok());
+}
+
+TEST_CASE("saved subgraph restore survives injected failures on either graph") {
+    TrimRack rack;
+    build_trim_rack(rack);
+    const auto prepare_target = [](SignalGraph& graph) {
+        REQUIRE(graph.register_custom_node_type(trim_type()));
+        const auto existing = graph.add_gain_node("existing");
+        REQUIRE(existing != 0);
+        return existing;
+    };
+    const auto require_empty_result = [](const SubgraphDocumentLoad& loaded) {
+        CHECK_FALSE(loaded.ok());
+        CHECK(loaded.subgraphs.empty());
+        CHECK(loaded.load.identity_node_ids.empty());
+        CHECK(loaded.load.persisted_node_ids.empty());
+        CHECK(loaded.load.editor_layout.empty());
+        CHECK(loaded.load.missing_custom_node_types.empty());
+    };
+
+    SECTION("the candidate's rebind throws: the graph keeps what it had") {
+        SignalGraph graph;
+        const auto existing = prepare_target(graph);
+        SubgraphPersistenceTestAccess::fail_rebind_call(1);
+        const auto loaded = from_saved_subgraph_document(graph, rack.document, trim_templates());
+        SubgraphPersistenceTestAccess::fail_rebind_call(0);
+        INFO(loaded.load.error);
+        require_empty_result(loaded);
+        CHECK(loaded.load.error.starts_with("subgraph_instance_mismatch"));
+        REQUIRE(graph.nodes().size() == 1);
+        CHECK(graph.nodes().front().id == existing);
+    }
+    SECTION("the candidate's flattened load throws: the graph keeps what it had") {
+        SignalGraph graph;
+        const auto existing = prepare_target(graph);
+        GraphSerializerTestAccess::fail_next_identity_record();
+        const auto loaded = from_saved_subgraph_document(graph, rack.document, trim_templates());
+        INFO(loaded.load.error);
+        require_empty_result(loaded);
+        REQUIRE(graph.nodes().size() == 1);
+        CHECK(graph.nodes().front().id == existing);
+    }
+    SECTION("the live rebind throws after the candidate passed: the graph is cleared") {
+        SignalGraph graph;
+        prepare_target(graph);
+        // One record: call 1 is the candidate, call 2 the live graph.
+        SubgraphPersistenceTestAccess::fail_rebind_call(2);
+        const auto loaded = from_saved_subgraph_document(graph, rack.document, trim_templates());
+        SubgraphPersistenceTestAccess::fail_rebind_call(0);
+        INFO(loaded.load.error);
+        require_empty_result(loaded);
+        CHECK(graph.nodes().empty());
+    }
+    SECTION("control: without an injected failure the same restore succeeds") {
+        SignalGraph graph;
+        prepare_target(graph);
+        const auto loaded = from_saved_subgraph_document(graph, rack.document, trim_templates());
+        INFO(loaded.load.error);
+        REQUIRE(loaded.ok());
+        CHECK(loaded.subgraphs.size() == 1);
+        CHECK(graph.nodes().size() == rack.graph.nodes().size());
+    }
 }
