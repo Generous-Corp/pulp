@@ -253,6 +253,9 @@ class SignalGraph : public format::AudioWorkgroupClient {
     add_spectral_asset_morph_v1(std::span<const std::uint8_t> asset_a,
                                 std::span<const std::uint8_t> asset_b, std::uint64_t source_samples,
                                 const std::string& name);
+    SpectralResult<SpectralAssetSourcePorts>
+    add_spectral_asset_source_v1(std::span<const std::uint8_t> asset, std::uint64_t source_samples,
+                                 const std::string& name);
     SpectralResult<SpectralStagePorts> add_spectral_stage(SpectralIdentity identity,
                                                           QualifiedSpectralStage stage,
                                                           const std::string& name);

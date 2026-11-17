@@ -17,6 +17,7 @@
 namespace pulp::host {
 
 class SpectralAssetMorphConfig;
+class SpectralAssetSourceConfig;
 
 // ── Node types ──────────────────────────────────────────────────────────
 
@@ -32,6 +33,7 @@ enum class NodeType {
     SpectralStage,
     SpectralSynthesis,
     SpectralAssetMorph,
+    SpectralAssetSource,
 };
 
 enum class PortKind : uint8_t { Audio, Sidechain, Midi, Event, Control, Param, Spectral };
@@ -213,6 +215,7 @@ struct GraphNode {
     std::optional<graph::SpectralIdentity> spectral_identity;
     std::optional<graph::QualifiedSpectralStage> spectral_stage;
     std::shared_ptr<const SpectralAssetMorphConfig> spectral_asset_morph;
+    std::shared_ptr<const SpectralAssetSourceConfig> spectral_asset_source;
 
     // Opaque authored identity, minted on the control thread when the node is
     // created and kept across rename, NodeId renumbering and every restore of

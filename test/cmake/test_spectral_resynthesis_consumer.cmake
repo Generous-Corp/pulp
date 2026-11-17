@@ -44,6 +44,6 @@ endif()
 execute_process(COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${_build}"
     -C "${PULP_PARENT_BUILD_TYPE}" -N
     OUTPUT_VARIABLE _listing)
-if(NOT _listing MATCHES "Total Tests: 4([^0-9]|$)")
-    message(FATAL_ERROR "Spectral resynthesis consumer expected four tests:\n${_listing}")
+if(NOT _listing MATCHES "Total Tests: 7([^0-9]|$)")
+    message(FATAL_ERROR "Spectral resynthesis consumer expected seven tests:\n${_listing}")
 endif()

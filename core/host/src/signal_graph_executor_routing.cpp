@@ -283,6 +283,7 @@ bool node_eligible(const GraphNode& node) noexcept {
         case NodeType::SpectralAnalysis:
         case NodeType::SpectralStage:
         case NodeType::SpectralAssetMorph:
+        case NodeType::SpectralAssetSource:
         case NodeType::SpectralSynthesis:
         // MidiInput / MidiOutput carry no audio and run as no-op nodes on the
         // routed path; the host bridges their mailboxes around process_routed,
@@ -353,7 +354,8 @@ ExecutorPlanShape make_executor_plan_shape(
             node.type == NodeType::Plugin || node.type == NodeType::Custom;
         if (node.spectral_identity) {
             spec.spectral_input_ports = node.type != NodeType::SpectralAnalysis &&
-                                        node.type != NodeType::SpectralAssetMorph;
+                                        node.type != NodeType::SpectralAssetMorph &&
+                                        node.type != NodeType::SpectralAssetSource;
             spec.spectral_output_ports = node.type != NodeType::SpectralSynthesis;
             if (node.type == NodeType::SpectralSynthesis)
                 spec.latency_samples =

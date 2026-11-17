@@ -20,6 +20,17 @@ Two modes:
   host. The run is refused before any cell starts when the host's 1-minute
   load is above the admission threshold.
 
+Every cell waits through the shared fixed-origin deadline driver
+(``test/harness/paced_deadline_driver.hpp``). Its default ``deadline-spin``
+backend waits in the kernel on an absolute deadline (``mach_wait_until`` on
+macOS, ``clock_nanosleep`` with ``TIMER_ABSTIME`` on Linux) until a calibrated,
+bounded guard before the target, then spins on the measurement clock to the
+target; a late callback keeps its original target. Each raw row records the
+kernel wake, the callback start and the spin CPU cost separately, and a
+``PACED_WAKE`` line records the backend, guard, spin limit, calibration and
+clock conversion. ``--wake sleep-until`` is the plain ``sleep_until`` A/B
+baseline and never qualifies.
+
 Each cell's callback thread requests real-time scheduling by default (a Mach
 time-constraint policy on macOS, SCHED_FIFO on Linux) and reads the class it
 actually obtained back from the kernel into a ``PACED_SCHED`` line. When the
@@ -48,8 +59,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-SCHEMA = "pulp.graph_paced_timing_matrix_receipt.v2"
-CELL_HEADER = "pulp_paced_timing_cell_v1"
+SCHEMA = "pulp.graph_paced_timing_matrix_receipt.v3"
+CELL_HEADER = "pulp_paced_timing_cell_v2"
 QUALIFICATION_CALLBACKS = 100000
 SHORT_CALLBACKS = 32
 SHORT_CALLBACK_RANGE = (8, 512)
@@ -64,7 +75,10 @@ TIMING_RULE = (
     "than target + one block), zero oracle failures, nearest-rank p99 callback duration < 70% "
     "of the block period and nearest-rank p99 absolute wake < 0.1 sample; the run must request "
     "realtime scheduling and every registered fixture cell's callback thread must have obtained "
-    "and read back a real-time class (time_constraint or fifo)")
+    "and read back a real-time class (time_constraint or fifo); the run must request the "
+    "deadline-spin wake backend with no injected lateness, and no cell may record a spin "
+    "overrun, a kernel wait failure or a kernel clock mapping wider than "
+    "clock_mapping_skew_ns 20 us")
 
 ADMISSION_RULE = ("admit when os.getloadavg()[0] <= max_load_per_cpu x os.cpu_count(); "
                   "qualification refuses to start otherwise and is disqualified when the "
@@ -85,6 +99,44 @@ SCHEDULING_RULE = (
     "which runs no callback, and the run stops with status REFUSED in every mode; "
     "realtime-invalid is a malformed request the kernel must reject (negative control); none "
     "keeps default scheduling and never qualifies")
+
+
+WAKE_TRAILER = "PACED_WAKE"
+WAKE_BACKENDS = ("deadline-spin", "sleep-until")
+QUALIFYING_WAKE = "deadline-spin"
+WAKE_GUARD_SOURCES = ("calibrated", "fixed", "none")
+WAKE_INT_FIELDS = ("guard_ns", "guard_bound_ns", "guard_clamped", "spin_limit_ns",
+                   "calibration_samples", "calibration_p50_ns", "calibration_p99_ns",
+                   "calibration_max_ns", "timebase_numer", "timebase_denom",
+                   "cpu_clock_resolution_ns", "inject_late_us", "inject_late_every",
+                   "wait_failures", "clock_mapping_skew_ns")
+WAKE_STR_FIELDS = ("backend", "kernel_wait", "guard_source")
+# Mirrors paced_deadline_driver.hpp.
+MIN_GUARD_NS = 20_000
+MAX_GUARD_NS = 2_000_000
+GUARD_MARGIN_NS = 10_000
+MAX_CALIBRATION_SAMPLES = 4096
+MAX_CLOCK_MAPPING_SKEW_NS = 20_000
+DEFAULT_CALIBRATION_SAMPLES = 64
+LATE_ON_TIME, LATE_ENTERED, LATE_KERNEL_OVERSHOT = 0, 1, 2
+WAKE_RULE = (
+    "each cell's callback thread waits through the shared fixed-origin deadline driver: callback i "
+    "targets origin + i x frames x 1e9 / rate ns in integers and a late callback keeps its "
+    "original target; deadline-spin waits in the kernel on an absolute deadline (mach_wait_until "
+    "on macOS, clock_nanosleep TIMER_ABSTIME on Linux) until guard_ns before the target, then "
+    "spins on the measurement clock to the target, falling back to a kernel wait when the spin "
+    "outlives spin_limit_ns (a spin overrun); kernel wait retries after the first return share the "
+    "spin limit and the spin CPU cost; the kernel deadline mapping brackets one native clock read "
+    "between two measurement clock reads and records the bracket width as clock_mapping_skew_ns; "
+    "a calibrated guard is the nearest-rank p99 "
+    "overshoot of calibration_samples 200 us kernel waits plus 10 us, clamped to [20 us, "
+    "clamp(period / 4, 20 us, 2 ms)]; each row records the kernel wake, the callback start and "
+    "the thread CPU time spent spinning; sleep-until is the plain sleep_until A/B baseline and "
+    "never qualifies; injected lateness sleeps before every Nth wait and never qualifies")
+
+
+def guard_bound_ns(period_ns: int) -> int:
+    return min(max(period_ns // 4, MIN_GUARD_NS), MAX_GUARD_NS)
 
 
 class MatrixError(ValueError):
@@ -123,6 +175,10 @@ FIXTURES: dict[str, Fixture] = {f.name: f for f in (
     Fixture("g10-routed-spectral", "test/pulp-test-routed-spectral-ports",
             "G10 routed spectral paced matrix cell", "test/test_routed_spectral_ports.cpp",
             ("identity-mask",), (48000,), (64, 128, 256, 4096), "cell"),
+    # Empty callback: the A/B baseline for the wake backends. Never qualifies.
+    Fixture("noop-wake", "test/pulp-test-group-trigger-graph", "Paced no-op wake cell",
+            "test/test_paced_deadline_driver.cpp", ("noop",), (44100, 48000, 96000),
+            (32, 64, 128, 256), "cell", qualifying=False),
     Fixture("g12-activation", "test/pulp-test-group-trigger-graph",
             "G12 paced activation receipt cell", "test/fixtures/g5_graph_event_rt_cases.inc",
             ("direct", "routed"), (44100, 48000, 96000), (32, 64, 128, 256), "g12",
@@ -219,11 +275,15 @@ CELL_META_STR = ("fixture", "variant", "compiled_source", "build_type")
 
 
 def parse_cell_output(stdout: str) -> dict[str, Any]:
-    """Parse the shared ``pulp_paced_timing_cell_v1`` format into meta + raw rows."""
+    """Parse the shared ``pulp_paced_timing_cell_v2`` format into meta + raw rows.
+
+    A row is (target, start, end, ok, wake, spin_cpu, late, overrun), all
+    offsets from the fixed origin in nanoseconds.
+    """
     lines = stdout.splitlines()
     _require(lines.count(CELL_HEADER) == 1, "cell header missing or duplicated")
     meta: dict[str, Any] | None = None
-    rows: list[tuple[int, int, int, int]] = []
+    rows: list[tuple[int, ...]] = []
     end: dict[str, int] | None = None
     for line in lines:
         if line.startswith("PACED_CELL "):
@@ -238,13 +298,14 @@ def parse_cell_output(stdout: str) -> dict[str, Any]:
             meta["extras"] = fields
         elif line.startswith("P "):
             parts = line.split()
-            _require(len(parts) == 6, "malformed callback row")
+            _require(len(parts) == 10, "malformed callback row")
             try:
-                index, target, start, finish, ok = (int(p) for p in parts[1:])
+                index, target, start, finish, ok, wake, spin_cpu, late, overrun = (
+                    int(p) for p in parts[1:])
             except ValueError as exc:
                 raise MatrixError("malformed callback row integer") from exc
             _require(index == len(rows) and ok in (0, 1), "callback row index/ok mismatch")
-            rows.append((target, start, finish, ok))
+            rows.append((target, start, finish, ok, wake, spin_cpu, late, overrun))
         elif line.startswith("PACED_END "):
             _require(end is None, "duplicate PACED_END line")
             try:
@@ -255,10 +316,85 @@ def parse_cell_output(stdout: str) -> dict[str, Any]:
     _require(end.get("rows") == len(rows) == meta["callbacks"], "callback row count mismatch")
     _require(end.get("oracle_failures") == sum(1 for r in rows if r[3] == 0),
              "oracle failure count disagrees with rows")
-    for i, (target, _start, _end, _ok) in enumerate(rows):
-        _require(target == i * meta["frames"] * 1_000_000_000 // meta["rate"],
+    for i, row in enumerate(rows):
+        _require(row[0] == i * meta["frames"] * 1_000_000_000 // meta["rate"],
                  "callback schedule drifted from fixed origin")
     return {"meta": meta, "rows": rows}
+
+
+def format_wake_line(backend: str, kernel_wait: str, guard_source: str, **fields: int) -> str:
+    """The ``PACED_WAKE`` line in the format the C++ harness prints."""
+    values = {k: 0 for k in WAKE_INT_FIELDS}
+    values.update(timebase_numer=1, timebase_denom=1, inject_late_every=1)
+    values.update(fields)
+    _require(set(values) == set(WAKE_INT_FIELDS), "unknown wake field")
+    return (f"{WAKE_TRAILER} backend={backend} kernel_wait={kernel_wait} guard_source={guard_source} "
+            + " ".join(f"{k}={values[k]}" for k in WAKE_INT_FIELDS))
+
+
+def parse_wake_line(stdout: str) -> dict[str, Any]:
+    """The wake settings the callback thread printed, checked for internal consistency."""
+    lines = [line for line in stdout.splitlines() if line.startswith(WAKE_TRAILER + " ")]
+    _require(len(lines) == 1, "raw output must carry exactly one wake line")
+    fields = dict(_TOKEN.findall(lines[0]))
+    _require(set(fields) == set(WAKE_INT_FIELDS + WAKE_STR_FIELDS), "malformed wake line")
+    try:
+        wake: dict[str, Any] = {k: int(fields[k]) for k in WAKE_INT_FIELDS}
+    except ValueError as exc:
+        raise MatrixError("malformed wake integer") from exc
+    wake.update({k: fields[k] for k in WAKE_STR_FIELDS})
+    _require(wake["backend"] in WAKE_BACKENDS and wake["guard_source"] in WAKE_GUARD_SOURCES,
+             "unknown wake backend or guard source")
+    _require(wake["inject_late_every"] >= 1 and wake["inject_late_us"] >= 0 and
+             wake["wait_failures"] >= 0 and wake["guard_clamped"] in (0, 1) and
+             wake["clock_mapping_skew_ns"] >= 0 and
+             wake["timebase_numer"] > 0 and wake["timebase_denom"] > 0,
+             "wake settings out of range")
+    if wake["guard_source"] == "none":
+        # The sleep-until baseline, or a cell refused before its driver started.
+        # A refused cell never started its driver and reports "none".
+        expected_wait = ("sleep_until", "none") if wake["backend"] == "sleep-until" else ("none",)
+        _require(wake["kernel_wait"] in expected_wait and wake["guard_ns"] == 0 and
+                 wake["spin_limit_ns"] == 0 and wake["calibration_samples"] == 0,
+                 "wake line without a guard disagrees with its backend")
+        return wake
+    _require(wake["backend"] == "deadline-spin" and wake["kernel_wait"] not in ("none", ""),
+             "a guarded wake must use the deadline-spin backend")
+    _require(wake["guard_ns"] >= 0 and wake["spin_limit_ns"] > 0, "wake guard or spin limit out of range")
+    if wake["guard_source"] == "fixed":
+        _require(wake["calibration_samples"] == 0 and wake["guard_clamped"] == 0,
+                 "a fixed guard carries no calibration")
+    else:
+        samples = wake["calibration_samples"]
+        _require(0 <= samples <= MAX_CALIBRATION_SAMPLES, "calibration sample count out of range")
+        wanted = (wake["calibration_p99_ns"] + GUARD_MARGIN_NS) if samples else wake["guard_bound_ns"]
+        _require(wake["guard_ns"] == min(max(wanted, MIN_GUARD_NS), wake["guard_bound_ns"]) and
+                 wake["guard_clamped"] == int(wanted > wake["guard_bound_ns"]),
+                 "calibrated guard disagrees with its calibration")
+        _require(not samples or 0 <= wake["calibration_p50_ns"] <= wake["calibration_p99_ns"] <=
+                 wake["calibration_max_ns"], "calibration percentiles out of order")
+    return wake
+
+
+def check_wake_rows(rows: list[tuple[int, ...]], wake: dict[str, Any], rate: int, frames: int) -> None:
+    """Every row's wake fields agree with the wake settings and with each other."""
+    period = frames * 1_000_000_000 // rate
+    if rows:
+        # Only a driver that ran prints a bound; it is fixed by the period.
+        _require(wake["guard_bound_ns"] == guard_bound_ns(period), "wake guard bound disagrees with the period")
+        _require(wake["kernel_wait"] != "none", "rows recorded without a wake driver")
+    for target, start, _end, _ok, kernel_wake, spin_cpu, late, overrun in rows:
+        _require(late in (LATE_ON_TIME, LATE_ENTERED, LATE_KERNEL_OVERSHOT) and overrun in (0, 1) and
+                 spin_cpu >= 0 and kernel_wake <= start, "callback wake fields inconsistent")
+        if late == LATE_ON_TIME:
+            _require(kernel_wake <= target, "on-time wake after its target")
+        elif late == LATE_KERNEL_OVERSHOT:
+            _require(kernel_wake > target, "kernel overshoot recorded before its target")
+        else:
+            _require(kernel_wake >= target and kernel_wake == start, "late entry recorded before its target")
+        if wake["backend"] == "sleep-until":
+            _require(spin_cpu == 0 and overrun == 0 and kernel_wake == start,
+                     "sleep-until rows cannot carry a spin")
 
 
 def format_sched_line(requested: str, obtained: str, status: str, reason: str = "none", *,
@@ -323,13 +459,27 @@ def parse_g12_output(stdout: str) -> dict[str, Any]:
     _require(len(callbacks) > 0, "G12 cell has no callback rows")
     origin = int(callbacks[0]["target_ns"])
     rate, frames = int(meta_in["rate"]), int(meta_in["frames"])
+    wakes = []
+    for line in stdout.splitlines():
+        if line.startswith("G12_WAKE "):
+            fields = dict(_TOKEN.findall(line))
+            _require(set(fields) == {"index", "wake_ns", "spin_cpu_ns", "late", "overrun"},
+                     "malformed G12 wake row")
+            try:
+                wakes.append({k: int(v) for k, v in fields.items()})
+            except ValueError as exc:
+                raise MatrixError("malformed G12 wake row integer") from exc
+    _require(len(wakes) == len(callbacks) and
+             all(w["index"] == i for i, w in enumerate(wakes)), "G12 wake rows missing or out of order")
     rows = []
     for i, row in enumerate(callbacks):
         target = int(row["target_ns"]) - origin
-        _require(abs(target - i * frames * 1_000_000_000 // rate) <= 1,
+        _require(target == i * frames * 1_000_000_000 // rate,
                  "G12 callback schedule drifted from fixed origin")
+        wake = wakes[i]
         rows.append((target, int(row["start_ns"]) - origin, int(row["end_ns"]) - origin,
-                     1 if oracle_ok else 0))
+                     1 if oracle_ok else 0, wake["wake_ns"] - origin, wake["spin_cpu_ns"],
+                     wake["late"], wake["overrun"]))
     meta = {"fixture": "g12-activation", "variant": str(meta_in["backend"]), "rate": rate,
             "frames": frames, "callbacks": int(meta_in["callbacks"]), "planted_sleep_us": 0,
             "planted_every": 1, "build_dirty": int(meta_in["build_dirty"]),
@@ -420,19 +570,30 @@ def raw_cell_view(fixture: Fixture, stdout: str) -> dict[str, Any]:
     view.update(provenance)
     view["admission"] = parse_admission_trailer(stdout)
     view["scheduling"] = parse_sched_line(stdout)
+    view["wake"] = parse_wake_line(stdout)
+    check_wake_rows(parsed["rows"], view["wake"], meta["rate"], meta["frames"])
     return view
 
 
 RAW_BOUND_CELL_FIELDS = ("fixture", "variant", "rate", "frames", "callbacks", "compiled_source",
-                         "build_type", "build_dirty", "extras", "returncode", "metrics", "scheduling")
+                         "build_type", "build_dirty", "extras", "returncode", "metrics", "scheduling",
+                         "wake")
 
 
-def compute_metrics(rows: list[tuple[int, int, int, int]], rate: int, frames: int) -> dict[str, Any]:
+def compute_metrics(rows: list[tuple[int, ...]], rate: int, frames: int) -> dict[str, Any]:
     _require(bool(rows), "cell has no callbacks")
     block_ns = frames * 1_000_000_000
     durations, wakes, misses, failures = [], [], 0, 0
+    kernel_wakes, spin_walls, spin_cpus = [], [], []
+    late_counts = {LATE_ON_TIME: 0, LATE_ENTERED: 0, LATE_KERNEL_OVERSHOT: 0}
+    overruns = 0
     previous_end = None
-    for target, start, end, ok in rows:
+    for target, start, end, ok, kernel_wake, spin_cpu, late, overrun in rows:
+        kernel_wakes.append(kernel_wake - target)
+        spin_walls.append(start - kernel_wake)
+        spin_cpus.append(spin_cpu)
+        late_counts[late] = late_counts.get(late, 0) + 1
+        overruns += overrun
         _require(target <= start <= end, "callback timestamps inconsistent")
         _require(previous_end is None or previous_end <= start, "callbacks overlap")
         previous_end = end
@@ -449,6 +610,18 @@ def compute_metrics(rows: list[tuple[int, int, int, int]], rate: int, frames: in
         "wake_ns": {"p50": nearest_rank(wakes, .5), "p99": nearest_rank(wakes, .99), "max": max(wakes)},
         "deadline_misses": misses,
         "oracle_failures": failures,
+        # Kernel wake relative to the target (negative: woke before it, as the
+        # guard intends), the spin from kernel wake to callback start, and the
+        # thread CPU the spin consumed. Diagnostics only; the bar is wake_ns.
+        "kernel_wake_ns": {"min": min(kernel_wakes), "p50": nearest_rank(kernel_wakes, .5),
+                           "p99": nearest_rank(kernel_wakes, .99), "max": max(kernel_wakes)},
+        "spin_wall_ns": {"p50": nearest_rank(spin_walls, .5), "p99": nearest_rank(spin_walls, .99),
+                         "max": max(spin_walls)},
+        "spin_cpu_ns": {"p50": nearest_rank(spin_cpus, .5), "p99": nearest_rank(spin_cpus, .99),
+                        "max": max(spin_cpus), "total": sum(spin_cpus)},
+        "late_entries": late_counts[LATE_ENTERED],
+        "kernel_overshoots": late_counts[LATE_KERNEL_OVERSHOT],
+        "spin_overruns": overruns,
     }
     metrics["thresholds_met"] = bool(
         metrics["duration_ns"]["p99"] * rate * 10 < 7 * block_ns and
@@ -473,23 +646,32 @@ def reference_cell_output(variant: str, rate: int, frames: int, callbacks: int,
     accumulator = 0.0
     for i in range(callbacks):
         target = i * frames * 1_000_000_000 // rate
-        delay = origin + target - time.monotonic_ns()
+        entry = time.monotonic_ns()
+        delay = origin + target - entry
         if delay > 0:
             time.sleep(delay / 1e9)
         start = time.monotonic_ns()
+        # A plain sleep: the start is the wake and nothing spins.
+        if delay <= 0:
+            late, start = LATE_ENTERED, entry
+        else:
+            late = LATE_KERNEL_OVERSHOT if start > origin + target else LATE_ON_TIME
         for j in range(64):  # token workload
             accumulator += j * 0.5
         if planted_sleep_us and i % planted_every == 0:
             time.sleep(planted_sleep_us / 1e6)
         end = time.monotonic_ns()
-        rows.append((target, start - origin, end - origin, 1 if math.isfinite(accumulator) else 0))
+        rows.append((target, start - origin, end - origin, 1 if math.isfinite(accumulator) else 0,
+                     start - origin, 0, late, 0))
     out = [CELL_HEADER,
            f"PACED_CELL fixture=python-reference variant={variant} rate={rate} frames={frames} "
            f"callbacks={callbacks} planted_sleep_us={planted_sleep_us} planted_every={planted_every} "
            f"compiled_source=none build_type=python build_dirty=0",
            # The in-process reference never requests scheduling.
-           format_sched_line("none", "unknown", "not_requested")]
-    out += [f"P {i} {t} {s} {e} {ok}" for i, (t, s, e, ok) in enumerate(rows)]
+           format_sched_line("none", "unknown", "not_requested"),
+           format_wake_line("sleep-until", "sleep_until", "none",
+                            guard_bound_ns=guard_bound_ns(frames * 1_000_000_000 // rate))]
+    out += [f"P {i} " + " ".join(str(v) for v in row) for i, row in enumerate(rows)]
     out.append(f"PACED_END rows={len(rows)} oracle_failures={sum(1 for r in rows if r[3] == 0)}")
     return "\n".join(out) + "\n"
 
@@ -505,10 +687,43 @@ def cell_timeout(rate: int, frames: int, callbacks: int, planted_sleep_us: int,
     return 1.5 * (expected_cell_seconds(rate, frames, callbacks) + planted) + 120.0
 
 
+DEFAULT_WAKE_REQUEST = {"backend": QUALIFYING_WAKE, "guard_ns": None, "spin_limit_ns": None,
+                        "calibration_samples": DEFAULT_CALIBRATION_SAMPLES, "inject_late_us": 0,
+                        "inject_late_every": 1}
+
+
+def _wake_request(wake: dict[str, Any] | None) -> dict[str, Any]:
+    request = dict(DEFAULT_WAKE_REQUEST)
+    request.update(wake or {})
+    _require(set(request) == set(DEFAULT_WAKE_REQUEST), "unknown wake request field")
+    _require(request["backend"] in WAKE_BACKENDS, "unknown wake backend")
+    for key in ("guard_ns", "spin_limit_ns"):
+        _require(request[key] is None or (type(request[key]) is int and request[key] >= 0),
+                 f"invalid wake {key}")
+    _require(request["spin_limit_ns"] != 0, "a zero spin limit is not a request; omit it to derive one")
+    _require(type(request["calibration_samples"]) is int and
+             0 <= request["calibration_samples"] <= MAX_CALIBRATION_SAMPLES and
+             type(request["inject_late_us"]) is int and request["inject_late_us"] >= 0 and
+             type(request["inject_late_every"]) is int and request["inject_late_every"] >= 1,
+             "wake request out of range")
+    return request
+
+
 def _cell_env(fixture: Fixture, variant: str, rate: int, frames: int, callbacks: int,
-              planted_sleep_us: int, planted_every: int, scheduling: str = "realtime") -> dict[str, str]:
+              planted_sleep_us: int, planted_every: int, scheduling: str = "realtime",
+              wake: dict[str, Any] | None = None) -> dict[str, str]:
     env = {k: v for k, v in os.environ.items() if not k.startswith(("PULP_PACED_", "G12_"))}
     env["PULP_PACED_SCHED"] = scheduling
+    request = _wake_request(wake)
+    env["PULP_PACED_WAKE"] = request["backend"]
+    env["PULP_PACED_WAKE_CALIBRATION"] = str(request["calibration_samples"])
+    if request["guard_ns"] is not None:
+        env["PULP_PACED_WAKE_GUARD_NS"] = str(request["guard_ns"])
+    if request["spin_limit_ns"] is not None:
+        env["PULP_PACED_WAKE_SPIN_LIMIT_NS"] = str(request["spin_limit_ns"])
+    if request["inject_late_us"]:
+        env["PULP_PACED_INJECT_LATE_US"] = str(request["inject_late_us"])
+        env["PULP_PACED_INJECT_LATE_EVERY"] = str(request["inject_late_every"])
     if fixture.row_format == "g12":
         env.update(G12_ACTIVATION_RATE=str(rate), G12_ACTIVATION_FRAMES=str(frames),
                    G12_ACTIVATION_CALLBACKS=str(callbacks), G12_ACTIVATION_BACKEND=variant)
@@ -625,6 +840,11 @@ def disqualifiers_for(receipt: dict[str, Any]) -> list[str]:
         reasons.append("scheduling_not_realtime_request")
     if scheduling["refusal"] is not None:
         reasons.append("scheduling_refused")
+    wake_request = receipt["wake"]["requested"]
+    if wake_request["backend"] != QUALIFYING_WAKE:
+        reasons.append("wake_backend_not_deadline")
+    if wake_request["inject_late_us"]:
+        reasons.append("injected_lateness")
     for cell in receipt["cells"]:
         tag = f"{cell['fixture']}/{cell['variant']}/{cell['rate']}/{cell['frames']}"
         if cell["returncode"] != 0:
@@ -644,6 +864,12 @@ def disqualifiers_for(receipt: dict[str, Any]) -> list[str]:
             reasons.append(f"short_cell:{tag}")
         if not cell["metrics"]["thresholds_met"]:
             reasons.append(f"thresholds_failed:{tag}")
+        if cell["metrics"]["spin_overruns"]:
+            reasons.append(f"spin_overrun:{tag}")
+        if cell["wake"]["wait_failures"]:
+            reasons.append(f"wake_wait_failed:{tag}")
+        if cell["wake"]["clock_mapping_skew_ns"] > MAX_CLOCK_MAPPING_SKEW_NS:
+            reasons.append(f"clock_mapping_skewed:{tag}")
     return reasons
 
 
@@ -668,15 +894,20 @@ def record_matrix(*, mode: str, source_root: Path, build_dir: Path, output_dir: 
                   fixtures: list[str], callbacks: int, frames_filter: set[int] | None,
                   planted_sleep_us: int, planted_every: int, max_load_per_cpu: float,
                   timeout_seconds: float | None, scheduling: str = "realtime",
+                  wake: dict[str, Any] | None = None,
                   load_reader: Callable[[], tuple[list[float], int]] = read_load) -> tuple[dict[str, Any], int]:
     _require(mode in ("short", "qualification"), "unknown mode")
     _require(scheduling in SCHED_REQUESTS, "unknown scheduling request")
+    wake_request = _wake_request(wake)
     _require(all(name in FIXTURES for name in fixtures), "unknown fixture")
     if mode == "qualification":
         _require(callbacks == QUALIFICATION_CALLBACKS, "qualification requires 100000 callbacks per cell")
         _require(not planted_sleep_us, "qualification cannot carry a planted fault")
         _require(all(FIXTURES[name].qualifying for name in fixtures), "reference fixture is not admissible")
         _require(scheduling == "realtime", "qualification requires realtime scheduling")
+        _require(wake_request["backend"] == QUALIFYING_WAKE,
+                 "qualification requires the deadline-spin wake backend")
+        _require(not wake_request["inject_late_us"], "qualification cannot carry injected lateness")
     else:
         lo, hi = SHORT_CALLBACK_RANGE
         _require(lo <= callbacks <= hi, f"short mode requires {lo}..{hi} callbacks")
@@ -686,6 +917,8 @@ def record_matrix(*, mode: str, source_root: Path, build_dir: Path, output_dir: 
                  "planted fault is not supported by the g12-activation row format")
     if any(FIXTURES[n].row_format == "g12" for n in fixtures):
         _require(callbacks >= 16, "g12-activation requires at least 16 callbacks")
+        _require(not wake_request["inject_late_us"],
+                 "injected lateness is not supported by the g12-activation row format")
 
     load, ncpu = load_reader()
     before = admission_verdict(load, ncpu, max_load_per_cpu)
@@ -707,6 +940,7 @@ def record_matrix(*, mode: str, source_root: Path, build_dir: Path, output_dir: 
                       "frames_filter": sorted(frames_filter) if frames_filter else None},
         "planted": {"sleep_us": planted_sleep_us, "every": planted_every},
         "scheduling": {"rule": SCHEDULING_RULE, "requested": scheduling, "refusal": None},
+        "wake": {"rule": WAKE_RULE, "requested": wake_request},
         "cells": [],
     }
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -728,7 +962,8 @@ def record_matrix(*, mode: str, source_root: Path, build_dir: Path, output_dir: 
             exe_sha = executable_hashes.setdefault(fixture.executable, sha256_file(executable))
             result = subprocess.run([str(executable), fixture.test_case],
                                     env=_cell_env(fixture, variant, rate, frames, callbacks,
-                                                  planted_sleep_us, planted_every, scheduling),
+                                                  planted_sleep_us, planted_every, scheduling,
+                                                  wake_request),
                                     capture_output=True, text=True, encoding="utf-8",
                                     errors="replace", timeout=timeout_seconds or cell_timeout(
                                         rate, frames, callbacks, planted_sleep_us, planted_every))
@@ -765,6 +1000,10 @@ def record_matrix(*, mode: str, source_root: Path, build_dir: Path, output_dir: 
                 return receipt, REFUSED_EXIT
         parsed = parse_raw(fixture, stdout)
         meta = parsed["meta"]
+        wake_settings = parse_wake_line(stdout)
+        check_wake_rows(parsed["rows"], wake_settings, rate, frames)
+        if fixture.row_format != "reference":
+            check_wake_request(wake_settings, wake_request, f"cell wake request mismatch for {stem}")
         _require((meta["fixture"], meta["variant"], meta["rate"], meta["frames"], meta["callbacks"]) ==
                  (fixture.name, variant, rate, frames, callbacks), f"cell identity mismatch for {stem}")
         receipt["cells"].append({
@@ -777,12 +1016,35 @@ def record_matrix(*, mode: str, source_root: Path, build_dir: Path, output_dir: 
             "raw_stdout": {"path": raw_path.name, "sha256": sha256_file(raw_path)},
             "metrics": compute_metrics(parsed["rows"], rate, frames),
             "scheduling": sched,
+            "wake": wake_settings,
         })
     load, ncpu = load_reader()
     receipt["admission"]["after"] = admission_verdict(load, ncpu, max_load_per_cpu)
     receipt["status"] = "COMPLETE"
     _write(output_dir, _finish(receipt))
     return receipt, 0
+
+
+def check_wake_request(settings: dict[str, Any], request: dict[str, Any], message: str) -> None:
+    """A cell's printed wake settings must be the ones the run requested."""
+    _require(settings["backend"] == request["backend"] and
+             settings["inject_late_us"] == request["inject_late_us"] and
+             (not request["inject_late_us"] or
+              settings["inject_late_every"] == request["inject_late_every"]), message)
+    if request["backend"] == "sleep-until":
+        _require(settings["guard_source"] == "none", message)
+        return
+    if request["guard_ns"] is None:
+        _require(settings["guard_source"] == "calibrated" and
+                 settings["calibration_samples"] <= request["calibration_samples"] and
+                 request["calibration_samples"] - settings["calibration_samples"] <=
+                 settings["wait_failures"], message)
+    else:
+        _require(settings["guard_source"] == "fixed" and settings["guard_ns"] == request["guard_ns"],
+                 message)
+    expected_limit = (2 * settings["guard_ns"] + GUARD_MARGIN_NS if request["spin_limit_ns"] is None
+                      else request["spin_limit_ns"])
+    _require(settings["spin_limit_ns"] == expected_limit, message)
 
 
 def _write(output_dir: Path, receipt: dict[str, Any]) -> Path:
@@ -796,11 +1058,11 @@ def _write(output_dir: Path, receipt: dict[str, Any]) -> Path:
 SOURCE_FIELDS = {"sha", "dirty", "tracked_changes", "untracked_count", "untracked_digest",
                  "untracked_paths"}
 REQUIRED_TOP = {"schema", "tool", "mode", "status", "timing_rule", "source", "build_profile",
-                "host_identity_class", "admission", "requested", "planted", "scheduling", "cells",
-                "totals", "disqualifiers", "timing_qualified", "receipt_sha256"}
+                "host_identity_class", "admission", "requested", "planted", "scheduling", "wake",
+                "cells", "totals", "disqualifiers", "timing_qualified", "receipt_sha256"}
 REQUIRED_CELL = {"fixture", "variant", "rate", "frames", "callbacks", "test_case", "executable",
                  "executable_sha256", "source_file", "compiled_source", "build_type", "build_dirty",
-                 "extras", "returncode", "raw_stdout", "metrics", "scheduling"}
+                 "extras", "returncode", "raw_stdout", "metrics", "scheduling", "wake"}
 REFUSAL_FIELDS = {"fixture", "variant", "rate", "frames", "returncode", "scheduling", "raw_stdout"}
 
 
@@ -835,6 +1097,18 @@ def _validate_scheduling(path: Path, receipt: dict[str, Any]) -> None:
              "refusing cell must have failed and match its process trailer")
     provenance = parse_provenance_trailers(stdout)
     _require(provenance["source_sha"] == receipt["source"]["sha"], "refusal source disagrees with raw output")
+
+
+def _validate_wake(receipt: dict[str, Any]) -> None:
+    """The wake request is well formed and legal for the recorded mode."""
+    wake = receipt["wake"]
+    _require(isinstance(wake, dict) and set(wake) == {"rule", "requested"}, "wake fields mismatch")
+    _require(wake["rule"] == WAKE_RULE, "wake rule text changed")
+    _require(isinstance(wake["requested"], dict) and wake["requested"] == _wake_request(wake["requested"]),
+             "malformed wake request")
+    if receipt["mode"] == "qualification":
+        _require(wake["requested"]["backend"] == QUALIFYING_WAKE and not wake["requested"]["inject_late_us"],
+                 "qualification receipt has a baseline wake or injected lateness")
 
 
 def _validate_admission(receipt: dict[str, Any]) -> None:
@@ -900,6 +1174,7 @@ def validate_receipt(path: Path) -> dict[str, Any]:
     _validate_admission(receipt)
     _validate_mode(receipt)
     _validate_scheduling(path, receipt)
+    _validate_wake(receipt)
     _require("hostname" not in json.dumps(receipt["host_identity_class"]).lower(),
              "host identity must be a class, not a hostname")
     _require(receipt["status"] in ("COMPLETE", "REFUSED"), "unknown status")
@@ -940,6 +1215,8 @@ def validate_receipt(path: Path) -> dict[str, Any]:
             _require(view["scheduling"]["requested"] == receipt["scheduling"]["requested"] and
                      view["scheduling"]["status"] != "refused",
                      "cell scheduling disagrees with the requested class")
+            check_wake_request(view["wake"], receipt["wake"]["requested"],
+                               "cell wake disagrees with the requested wake")
         _require(view["cmake_build_type"] == receipt["build_profile"]["CMAKE_BUILD_TYPE"] and
                  view["pulp_sanitizer"] == receipt["build_profile"]["PULP_SANITIZER"],
                  "build profile disagrees with raw output")
@@ -992,6 +1269,17 @@ def parser() -> argparse.ArgumentParser:
     rec.add_argument("--scheduling", choices=SCHED_REQUESTS, default="realtime",
                      help="callback-thread scheduling request; none never qualifies and "
                           "realtime-invalid is the refusal negative control")
+    rec.add_argument("--wake", choices=WAKE_BACKENDS, default=QUALIFYING_WAKE,
+                     help="callback wake backend; sleep-until is the A/B baseline and never qualifies")
+    rec.add_argument("--wake-guard-ns", type=int, default=None,
+                     help="fixed kernel-wake guard; default calibrates it on the callback thread")
+    rec.add_argument("--wake-spin-limit-ns", type=int, default=None,
+                     help="spin bound; default is 2 x guard + 10 us")
+    rec.add_argument("--wake-calibration", type=int, default=DEFAULT_CALIBRATION_SAMPLES,
+                     help="kernel waits sampled to calibrate the guard")
+    rec.add_argument("--inject-late-us", type=int, default=0,
+                     help="injected lateness negative: sleep before every Nth wait (never qualifies)")
+    rec.add_argument("--inject-late-every", type=int, default=1)
     rec.add_argument("--plan", action="store_true",
                      help="print the cells and expected paced wall time, then exit")
     rec.add_argument("--timeout-seconds", type=float, default=None,
@@ -1006,7 +1294,8 @@ def summary_lines(receipt: dict[str, Any]) -> list[str]:
              f"timing_qualified={str(receipt['timing_qualified']).lower()} "
              f"admission_before={receipt['admission']['before']['verdict']} "
              f"load_before={receipt['admission']['before']['load']} "
-             f"scheduling={receipt['scheduling']['requested']}"]
+             f"scheduling={receipt['scheduling']['requested']} "
+             f"wake={receipt['wake']['requested']['backend']}"]
     for cell in receipt["cells"]:
         m = cell["metrics"]
         lines.append(f"cell {cell['fixture']}/{cell['variant']} rate={cell['rate']} frames={cell['frames']} "
@@ -1014,7 +1303,12 @@ def summary_lines(receipt: dict[str, Any]) -> list[str]:
                      f"oracle_failures={m['oracle_failures']} p50_us={m['duration_ns']['p50'] / 1000:.1f} "
                      f"p99_us={m['duration_ns']['p99'] / 1000:.1f} max_us={m['duration_ns']['max'] / 1000:.1f} "
                      f"period_us={m['period_ns'] / 1000:.1f} wake_p99_us={m['wake_ns']['p99'] / 1000:.1f} "
-                     f"sched={cell['scheduling']['obtained']}/{cell['scheduling']['status']}")
+                     f"sched={cell['scheduling']['obtained']}/{cell['scheduling']['status']} "
+                     f"guard_us={cell['wake']['guard_ns'] / 1000:.1f} "
+                     f"kernel_wake_p99_us={m['kernel_wake_ns']['p99'] / 1000:.1f} "
+                     f"spin_cpu_p99_us={m['spin_cpu_ns']['p99'] / 1000:.1f} "
+                     f"late={m['late_entries']} overshoots={m['kernel_overshoots']} "
+                     f"overruns={m['spin_overruns']}")
     lines.append(f"totals {json.dumps(receipt['totals'], sort_keys=True)}")
     lines.append(f"disqualifiers={','.join(receipt['disqualifiers']) or 'none'}")
     return lines
@@ -1045,7 +1339,11 @@ def main(argv: Iterable[str] | None = None) -> int:
             callbacks=callbacks, frames_filter=set(args.frames) if args.frames else None,
             planted_sleep_us=args.planted_sleep_us, planted_every=args.planted_every,
             max_load_per_cpu=args.max_load_per_cpu, timeout_seconds=args.timeout_seconds,
-            scheduling=args.scheduling)
+            scheduling=args.scheduling,
+            wake={"backend": args.wake, "guard_ns": args.wake_guard_ns,
+                  "spin_limit_ns": args.wake_spin_limit_ns,
+                  "calibration_samples": args.wake_calibration,
+                  "inject_late_us": args.inject_late_us, "inject_late_every": args.inject_late_every})
         for line in summary_lines(receipt):
             print(line)
         print(f"receipt={args.output_dir.resolve() / 'receipt.json'}")
