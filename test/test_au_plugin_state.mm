@@ -2557,6 +2557,24 @@ TEST_CASE("AU v3 publishes render timing facts and marks activation and reset",
         REQUIRE(render(0, 0.0).discontinuity);
         REQUIRE_FALSE(render(0, 0.0).discontinuity);
 
+        // A render refused before the Processor runs is a skipped block too:
+        // an oversized block, and a request with no output buffer list.
+        {
+            AudioUnitRenderActionFlags flags = 0;
+            AudioTimeStamp timestamp{};
+            REQUIRE(block(&flags, &timestamp, unit.maximumFramesToRender + 1, 0, &output.list,
+                          nullptr, nil) == kAudioUnitErr_TooManyFramesToProcess);
+        }
+        REQUIRE(render(0, 0.0).discontinuity);
+        REQUIRE_FALSE(render(0, 0.0).discontinuity);
+        {
+            AudioUnitRenderActionFlags flags = 0;
+            AudioTimeStamp timestamp{};
+            REQUIRE(block(&flags, &timestamp, kFrames, 0, nullptr, nullptr, nil) == noErr);
+        }
+        REQUIRE(render(0, 0.0).discontinuity);
+        REQUIRE_FALSE(render(0, 0.0).discontinuity);
+
         // Re-allocation is a new activation.
         [unit deallocateRenderResources];
         REQUIRE([unit allocateRenderResourcesAndReturnError:&allocate_error]);

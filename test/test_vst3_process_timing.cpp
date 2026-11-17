@@ -299,6 +299,21 @@ TEST_CASE("VST3 seeks, loops, stopped transport, gaps and clock changes",
                               HostBlockBoundary::Continuous});
 }
 
+TEST_CASE("VST3 marks the block after a clamped tail discontinuous",
+          "[process-timing][vst3][skipped]") {
+    Vst3Host host;
+    host.run({.has_context = false});
+    host.run({.has_context = false, .frames = 2 * kMaxFrames}); // renders only kMaxFrames
+    host.run({.has_context = false});
+    host.run({.has_context = false});
+    REQUIRE(host.observed.size() == 4);
+    REQUIRE(host.observed[1].ctx.num_samples == kMaxFrames);
+    REQUIRE_FALSE(host.observed[1].ctx.timing.discontinuity);
+    // The Processor never saw the tail and there is no counter to measure it.
+    REQUIRE(host.observed[2].ctx.timing.discontinuity);
+    REQUIRE_FALSE(host.observed[3].ctx.timing.discontinuity);
+}
+
 TEST_CASE("VST3 timing projects identically for every block partition",
           "[process-timing][vst3][partition]") {
     const std::vector<std::int64_t> event_samples{0, 5, 63, 64, 130, 255};

@@ -679,8 +679,9 @@ class PulpVst3Processor : public Steinberg::Vst::SingleComponentEffect,
     // Processor::process().
     std::atomic<bool> timing_discontinuity_pending_{false};
     // Audio thread only: a block skipped the Processor (bypass, layout refusal
-    // or state-restore contention). Without a continuous-time counter the next
-    // observed block cannot measure the skip, so it is marked discontinuous.
+    // or state-restore contention) or rendered only the prepared prefix of a
+    // longer host block. Without a continuous-time counter the next observed
+    // block cannot measure the skip, so it is marked discontinuous.
     bool timing_block_skipped_ = false;
 
     // MainThreadDispatcher backend token. Acquired in initialize(),

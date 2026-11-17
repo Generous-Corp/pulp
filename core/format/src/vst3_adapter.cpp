@@ -3151,9 +3151,11 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             panic_state_->observe_midi_out(midi_out_);
     }
     if (!warming_render_path_) {
-        // The Processor observed this block's timing facts.
+        // The Processor observed this block's timing facts. A host block
+        // longer than the prepared maximum rendered only its prefix; the tail
+        // is a skip the next block must acknowledge.
         timing_discontinuity_pending_.store(false, std::memory_order_release);
-        timing_block_skipped_ = false;
+        timing_block_skipped_ = num_samples < original_num_samples;
     }
     // VST3 puts the obligation to declare output silence on the plugin, and a
     // host is free to propagate its input silenceFlags into the output buffers

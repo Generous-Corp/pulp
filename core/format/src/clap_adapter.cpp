@@ -2186,7 +2186,9 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         // must preserve the request for the next real render.
         self->reset_requested = false;
         self->timing_discontinuity_pending = false;
-        self->timing_block_skipped = false;
+        // A host block longer than the prepared maximum rendered only its
+        // prefix: the tail is a skip the next block must acknowledge.
+        self->timing_block_skipped = num_samples < original_num_samples;
     }
 
     clap_phase_clear_constant_mask(process);

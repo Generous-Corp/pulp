@@ -261,25 +261,21 @@ struct PulpLv2Instance {
     LV2_URID urid_state_blob = 0;      // kStateBlobUri
     Lv2TimeUrids time_urids{};
 
-    // Latched host transport. LV2 hosts are not required to send a
-    // `time:Position` every cycle — some send one only when the transport
-    // changes — so the last one received is retained and its position fields
-    // advanced by the block length while `speed` is non-zero. A fresh Position
-    // always overwrites the extrapolation, so a host that does send one per
+    // Latched host transport at the first frame of the next run() block. LV2
+    // hosts are not required to send a `time:Position` every cycle (some send
+    // one only when the transport changes), so the last state is retained and
+    // carried over each whole host block at the speed in effect, including any
+    // speed change a Position made part way through. A fresh Position
+    // overwrites only the properties it carries, so a host that sends one per
     // cycle never drifts. Without the latch a stale sample position would read
     // as a seek on every block and reset tempo-synced DSP continuously.
     Lv2TimePosition transport{};
     bool has_transport = false;
-    // Frames the previous run() rendered. The latched position describes the
-    // previous block's first frame, so it advances by that block's length, not
-    // the current one's; advancing by the current length would put the
-    // position off by the difference whenever the host changes block size,
-    // which the playhead diff reads as a transport jump.
-    uint32_t previous_block_samples = 0;
     // Raised at instantiation and by activate(): the next run() does not
     // follow the last block the Processor saw, so its
     // `ProcessContext::timing.discontinuity` is set. Cleared once a block has
-    // reached Processor::process().
+    // reached Processor::process(), unless part of that host block was past
+    // the prepared maximum and never rendered.
     bool timing_discontinuity_pending = true;
 
     // Previous-block transport snapshot backing the shared change-flag diff

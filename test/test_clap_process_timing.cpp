@@ -347,6 +347,18 @@ TEST_CASE("CLAP blocks the Processor never saw are measured or marked",
         (void)control.feed(host.observed[0]);
         REQUIRE(control.feed(stripped).boundary == HostBlockBoundary::Continuous);
     }
+    SECTION("a block clamped to the prepared maximum leaves its tail unseen") {
+        ClapHost host;
+        host.run(-1, 64, std::nullopt);
+        host.run(-1, 2 * kMaxFrames, std::nullopt); // renders only kMaxFrames
+        host.run(-1, 64, std::nullopt);
+        host.run(-1, 64, std::nullopt);
+        REQUIRE(host.observed.size() == 4);
+        REQUIRE(host.observed[1].ctx.num_samples == static_cast<int>(kMaxFrames));
+        REQUIRE_FALSE(host.observed[1].ctx.timing.discontinuity);
+        REQUIRE(host.observed[2].ctx.timing.discontinuity);
+        REQUIRE_FALSE(host.observed[3].ctx.timing.discontinuity);
+    }
 }
 
 TEST_CASE("CLAP clock-source changes open a new epoch", "[process-timing][clap][clock]") {

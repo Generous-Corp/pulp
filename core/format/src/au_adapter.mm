@@ -196,6 +196,11 @@ struct AUBridge {
     bool multi_cache_valid = false;
     Float64 multi_cache_sample_time = 0.0;
     AUAudioFrameCount multi_cache_frames = 0;
+    // -reset bumps `reset_generation` on the host's control thread; a cached
+    // render is reused only while it was produced in the current generation,
+    // so a reset is never answered with audio rendered before it.
+    std::atomic<std::uint64_t> reset_generation{0};
+    std::uint64_t multi_cache_generation = 0;
     // Dual-tracked bypass.
     //   * `bypass_param_id != 0` means the plugin declared a "Bypass"
     //     parameter; the AUAudioUnit's `shouldBypassEffect` reads/writes
@@ -1256,6 +1261,9 @@ struct ScopedAuV3HostWriting {
 - (void)reset {
     [super reset];
     _bridge.timing_discontinuity_pending.store(true, std::memory_order_release);
+    // Invalidate the multi-output render cache from the render thread's side:
+    // the next request renders afresh even at a repeated time stamp.
+    _bridge.reset_generation.fetch_add(1, std::memory_order_acq_rel);
 }
 
 - (void)deallocateRenderResources {
@@ -1340,7 +1348,11 @@ struct ScopedAuV3HostWriting {
             (void)bridge->audio_workgroup_client->prepare_audio_workgroup_for_render();
         }
 
+        // Every exit before Processor::process() marks the block skipped, so a
+        // following block without a valid mSampleTime is reported as
+        // discontinuous rather than as the next contiguous one.
         if (!bridge->processor) {
+            bridge->timing_block_skipped = true;
             if (outputData) {
                 for (UInt32 i = 0; i < outputData->mNumberBuffers; ++i) {
                     if (outputData->mBuffers[i].mData) {
@@ -1350,7 +1362,10 @@ struct ScopedAuV3HostWriting {
             }
             return noErr;
         }
-        if (!outputData) return noErr;
+        if (!outputData) {
+            bridge->timing_block_skipped = true;
+            return noErr;
+        }
         // Max-block contract for AU v3 is REJECT, not clamp. Unlike the
         // push-based adapters (CLAP/VST3 clamp+zero-fill; AAX grows its offline
         // scratch), AU renders through a pull graph: pullInputBlock feeds
@@ -1362,6 +1377,7 @@ struct ScopedAuV3HostWriting {
         // upholds the frameCount <= max_frames invariant the scratch asserts
         // below rely on.
         if (frameCount > bridge->max_frames) {
+            bridge->timing_block_skipped = true;
             return kAudioUnitErr_TooManyFramesToProcess;
         }
 
@@ -2218,7 +2234,9 @@ struct ScopedAuV3HostWriting {
           return silence();
 
       const bool timed = timestamp && (timestamp->mFlags & kAudioTimeStampSampleTimeValid) != 0;
+      const std::uint64_t generation = bridge->reset_generation.load(std::memory_order_acquire);
       const bool rendered = timed && bridge->multi_cache_valid &&
+                            bridge->multi_cache_generation == generation &&
                             bridge->multi_cache_sample_time == timestamp->mSampleTime &&
                             bridge->multi_cache_frames == frameCount;
 
@@ -2228,10 +2246,14 @@ struct ScopedAuV3HostWriting {
               : 0;
       if (!rendered) {
           bridge->multi_cache_valid = false;
-          if (frameCount > bridge->max_frames)
+          if (frameCount > bridge->max_frames) {
+              bridge->timing_block_skipped = true;
               return kAudioUnitErr_TooManyFramesToProcess;
-          if (mainChans == 0)
+          }
+          if (mainChans == 0) {
+              bridge->timing_block_skipped = true;
               return silence();
+          }
 
           // Aux buses start silent so a bypassed or failed block leaves them so.
           std::fill(bridge->aux_output_storage.begin(), bridge->aux_output_storage.end(), 0.0f);
@@ -2253,6 +2275,7 @@ struct ScopedAuV3HostWriting {
           if (timed) {
               bridge->multi_cache_sample_time = timestamp->mSampleTime;
               bridge->multi_cache_frames = frameCount;
+              bridge->multi_cache_generation = generation;
           }
       }
 
