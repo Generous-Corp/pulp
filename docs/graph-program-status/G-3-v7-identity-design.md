@@ -31,7 +31,9 @@ type/version identity, and from any content digest.
   (drawn once per graph, lazily) and a per-graph counter, so two sessions that
   edit the same document never mint the same ID for different nodes.
 - The ID is immutable: `GraphNode` is only reachable through const accessors,
-  no API changes it, and `SignalGraph::rename_node` changes the name only.
+  no API changes it, and `SignalGraph::rename_node` changes the name only
+  (for a Processor node, the plugin identity name follows the node name,
+  because a restore rebuilds it from the node name).
 - `GraphSerializer::saved_node_identities` returns these IDs. History, diff,
   `qualified_port_identities` and subgraph persistence key on them.
 
@@ -58,7 +60,15 @@ A v7 document is the plain graph payload plus the envelope, with:
   `pulp.graph.saved-identity.v7`.
 - Each node record carries `authored_id`; each `logical_identities.identities`
   entry is `{id: <authored_id>, node_id}` and `bindings` maps the same ID to
-  the same persisted node id. `subgraphs[].members` name authored IDs.
+  the same persisted node id. `subgraphs[].members` name authored IDs, and
+  a member's position in that list is its stable template member key: a v7
+  restore checks each member's type, port shape and Processor descriptor
+  against the template node at that position, never its display name, so a
+  renamed member restores. v6 member identities derive from names, so a v6
+  restore still compares names.
+- The ordinary reader (`from_json`, `from_file`) runs the same inspection
+  rules on an original format 7 document, so an incomplete or inconsistent
+  v7 envelope is refused there too.
 
 Inspection of a v7 document validates binding consistency: every record has a
 well-formed `authored_id`; IDs are unique; every node has exactly one identity
