@@ -67,11 +67,11 @@ TEST_CASE("CLAP fixed-point seconds convert back to the exact host sample",
     const std::array<double, 4> rates{44100.0, 48000.0, 88200.0, 96000.0};
     // Positions across a day of audio, including ones whose seconds value is
     // not a terminating binary fraction at 44.1 kHz.
-    const std::array<std::int64_t, 8> samples{0, 1, 63, 441, 44099, 13823, 158760000,
-                                              4147200000};
+    const std::array<std::int64_t, 8> samples{0, 1, 63, 441, 44099, 13823, 158760000, 4147200000};
     for (const double rate : rates) {
         for (const auto sample : samples) {
-            const auto decoded = format::clap_sectime_to_samples(host_sectime_for(sample, rate), rate);
+            const auto decoded =
+                format::clap_sectime_to_samples(host_sectime_for(sample, rate), rate);
             INFO("rate " << rate << " sample " << sample);
             REQUIRE(decoded.has_value());
             REQUIRE(*decoded == sample);
@@ -89,8 +89,7 @@ TEST_CASE("CLAP fixed-point seconds convert back to the exact host sample",
     // Refusals: no sample rate, or a position past int64.
     REQUIRE_FALSE(format::clap_sectime_to_samples(CLAP_SECTIME_FACTOR, 0.0).has_value());
     REQUIRE_FALSE(format::clap_sectime_to_samples(CLAP_SECTIME_FACTOR, -1.0).has_value());
-    REQUIRE_FALSE(format::clap_sectime_to_samples(std::numeric_limits<std::int64_t>::max(),
-                                                  1.0e12)
+    REQUIRE_FALSE(format::clap_sectime_to_samples(std::numeric_limits<std::int64_t>::max(), 1.0e12)
                       .has_value());
     // Negative control: truncating instead of rounding loses a sample at
     // positions whose fixed-point seconds land a hair below the integer.
@@ -104,8 +103,7 @@ TEST_CASE("CLAP fixed-point seconds convert back to the exact host sample",
     REQUIRE(truncation_losses > 0);
 }
 
-TEST_CASE("format builders publish only what the host supplied",
-          "[process-timing][format]") {
+TEST_CASE("format builders publish only what the host supplied", "[process-timing][format]") {
     SECTION("CLAP") {
         const auto none = format::clap_process_timing(-1, std::nullopt, true, false);
         REQUIRE_FALSE(none.has_steady_sample);
@@ -137,16 +135,15 @@ TEST_CASE("format builders publish only what the host supplied",
         REQUIRE_FALSE(varispeed.transport_tracks_samples());
     }
     SECTION("AU") {
-        const auto rounded = format::au_process_timing(format::kAuTimeStampSampleTimeValid,
-                                                       13823.9999, true, true, 511.9999, false,
-                                                       false);
+        const auto rounded = format::au_process_timing(
+            format::kAuTimeStampSampleTimeValid, 13823.9999, true, true, 511.9999, false, false);
         REQUIRE(rounded.steady_sample == 13824);
         REQUIRE(rounded.transport_sample == 512);
         const auto invalid = format::au_process_timing(0, 13824.0, false, true, 0.0, false, false);
         REQUIRE_FALSE(invalid.has_steady_sample);
         REQUIRE_FALSE(invalid.has_transport_sample);
-        const auto nan = format::au_process_timing(format::kAuTimeStampSampleTimeValid, NAN,
-                                                   true, true, INFINITY, false, false);
+        const auto nan = format::au_process_timing(format::kAuTimeStampSampleTimeValid, NAN, true,
+                                                   true, INFINITY, false, false);
         REQUIRE_FALSE(nan.has_steady_sample);
         REQUIRE_FALSE(nan.has_transport_sample);
     }
@@ -206,16 +203,16 @@ TEST_CASE("the AU raw offset is shared by the clamping and the refusing policy",
         {kImmediate + 5, 5},
         {1010, 10},
         {1000 + kFrames - 1, kFrames - 1},
-        {1000 + kFrames, kFrames},   // one past the block
-        {990, -10},                  // before the block
-        {kImmediate + 4095, 4095},   // last immediate slot
+        {1000 + kFrames, kFrames}, // one past the block
+        {990, -10},                // before the block
+        {kImmediate + 4095, 4095}, // last immediate slot
     }};
     for (const auto& c : cases) {
         INFO("event " << c.event);
         const auto raw = format::detail::au_event_raw_offset(c.event, kImmediate, 1000.0);
         REQUIRE(raw == c.raw);
-        const auto legacy = format::detail::au_event_block_offset(c.event, kImmediate, 1000.0,
-                                                                  kFrames);
+        const auto legacy =
+            format::detail::au_event_block_offset(c.event, kImmediate, 1000.0, kFrames);
         std::uint32_t block_time = 0;
         const auto refused = host::au_event_block_time(c.event, timing, block_time);
         if (*c.raw >= 0 && *c.raw < kFrames) {
@@ -276,8 +273,8 @@ TEST_CASE("an oversized host block is refused whole and accepted in chunks",
                 if (t < offset || t >= offset + sizes[i])
                     continue;
                 std::int64_t absolute = 0;
-                REQUIRE(timeline.project(window, static_cast<std::uint32_t>(t - offset), absolute) ==
-                        HostEventResult::Accepted);
+                REQUIRE(timeline.project(window, static_cast<std::uint32_t>(t - offset),
+                                         absolute) == HostEventResult::Accepted);
                 reference.push_back(absolute);
             }
             offset += sizes[i];
@@ -348,8 +345,7 @@ TEST_CASE("LV2 varispeed playback is not read as a seek on every block",
             ctx.timing = format::lv2_process_timing(true, frame, true, 0.5, block == 0);
             if (!honour_rate)
                 ctx.timing.playback_rate = PlaybackRate::Unknown; // planted: rate dropped
-            REQUIRE(host::advance_from_context(timeline, ctx, window) ==
-                    HostEventResult::Accepted);
+            REQUIRE(host::advance_from_context(timeline, ctx, window) == HostEventResult::Accepted);
             boundaries.push_back(timeline.last_boundary());
             frame += kFrames / 2;
         }

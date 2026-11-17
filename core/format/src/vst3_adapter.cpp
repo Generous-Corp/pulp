@@ -134,13 +134,10 @@ inline bool is_declared_note_expr_type(NoteExpressionTypeID id) {
 // advanced in place, so a first block after construction raises no spurious
 // change flags. A host that supplies no process context leaves every transport
 // field at its ProcessContext default; only the change-flag diff still runs.
-pulp::format::ProcessContext build_process_context(
-    const ProcessData& data,
-    const ProcessSetup& setup,
-    int32 num_samples,
-    pulp::format::detail::PlayheadSnapshot& playhead_prev,
-    bool timing_discontinuity,
-    bool timing_block_skipped) {
+pulp::format::ProcessContext
+build_process_context(const ProcessData& data, const ProcessSetup& setup, int32 num_samples,
+                      pulp::format::detail::PlayheadSnapshot& playhead_prev,
+                      bool timing_discontinuity, bool timing_block_skipped) {
     pulp::format::ProcessContext ctx;
     ctx.sample_rate = setup.sampleRate;
     ctx.num_samples = num_samples;
@@ -233,9 +230,9 @@ pulp::format::ProcessContext build_process_context(
     // playback rate. A skipped block is a discontinuity only when there is no
     // steady clock to measure it.
     const auto* pc = data.processContext;
-    ctx.timing = pulp::format::vst3_process_timing(
-        pc != nullptr, pc ? pc->state : 0u, pc ? pc->projectTimeSamples : 0,
-        pc ? pc->continousTimeSamples : 0, false, false);
+    ctx.timing = pulp::format::vst3_process_timing(pc != nullptr, pc ? pc->state : 0u,
+                                                   pc ? pc->projectTimeSamples : 0,
+                                                   pc ? pc->continousTimeSamples : 0, false, false);
     ctx.timing.discontinuity =
         timing_discontinuity || (timing_block_skipped && !ctx.timing.has_steady_sample);
     return ctx;
@@ -3079,9 +3076,9 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // onto midi_in_ and sort the combined controller+note stream.
     process_decode_input_events(data);
 
-    auto ctx = build_process_context(
-        data, processSetup, num_samples, playhead_prev_,
-        timing_discontinuity_pending_.load(std::memory_order_acquire), timing_block_skipped_);
+    auto ctx = build_process_context(data, processSetup, num_samples, playhead_prev_,
+                                     timing_discontinuity_pending_.load(std::memory_order_acquire),
+                                     timing_block_skipped_);
 
     // Prove no state restore is installing underneath this block. setState may
     // arrive on the main thread while the host keeps calling process() —

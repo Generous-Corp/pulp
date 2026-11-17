@@ -108,8 +108,12 @@ class HostApp final : public Steinberg::Vst::IHostApplication {
         *obj = nullptr;
         return Steinberg::kNoInterface;
     }
-    Steinberg::uint32 PLUGIN_API addRef() override { return 1; }
-    Steinberg::uint32 PLUGIN_API release() override { return 1; }
+    Steinberg::uint32 PLUGIN_API addRef() override {
+        return 1;
+    }
+    Steinberg::uint32 PLUGIN_API release() override {
+        return 1;
+    }
 };
 
 struct Block {
@@ -205,7 +209,8 @@ struct Binding {
     HostEventIngress<64> ingress;
     std::uint64_t sequence = 0;
 
-    HostBlockBoundary feed(const ObservedBlock& block, std::vector<HostEventResult>* results = nullptr,
+    HostBlockBoundary feed(const ObservedBlock& block,
+                           std::vector<HostEventResult>* results = nullptr,
                            std::vector<std::int64_t>* projected = nullptr,
                            HostBlockWindow* window_out = nullptr) {
         HostBlockWindow window;
@@ -215,9 +220,9 @@ struct Binding {
                 HostEventResult::Accepted);
         for (const auto offset : block.offsets) {
             HostEventRecord record;
-            auto result = host::make_record_from_block_offset(
-                timeline, window, offset, 1, ++sequence, midi::MidiEvent::note_on(0, 60, 100),
-                record);
+            auto result =
+                host::make_record_from_block_offset(timeline, window, offset, 1, ++sequence,
+                                                    midi::MidiEvent::note_on(0, 60, 100), record);
             if (result == HostEventResult::Accepted)
                 result = ingress.publish(record);
             if (results)
@@ -238,8 +243,7 @@ struct Binding {
 
 } // namespace
 
-TEST_CASE("VST3 requests and publishes the continuous-time counter",
-          "[process-timing][vst3]") {
+TEST_CASE("VST3 requests and publishes the continuous-time counter", "[process-timing][vst3]") {
     using PCR = Steinberg::Vst::IProcessContextRequirements;
     REQUIRE((format::vst3::kProcessContextRequirements & PCR::kNeedContinousTimeSamples) != 0);
 
@@ -256,8 +260,7 @@ TEST_CASE("VST3 requests and publishes the continuous-time counter",
     REQUIRE(first.transport_moving);
     REQUIRE(first.playback_rate == format::PlaybackRate::Unknown);
     REQUIRE_FALSE(host.observed[1].ctx.timing.discontinuity);
-    REQUIRE(host.observed[1].ctx.timing.transport_sample ==
-            host.observed[1].ctx.position_samples);
+    REQUIRE(host.observed[1].ctx.timing.transport_sample == host.observed[1].ctx.position_samples);
 
     // A processing restart is a discontinuity for exactly the next block.
     (void)host.processor.setProcessing(false);
@@ -271,15 +274,15 @@ TEST_CASE("VST3 requests and publishes the continuous-time counter",
 TEST_CASE("VST3 seeks, loops, stopped transport, gaps and clock changes",
           "[process-timing][vst3][boundaries]") {
     Vst3Host host;
-    host.run({.continuous = 0, .project = 100});         // activation
-    host.run({.continuous = 64, .project = 164});        // continuous
-    host.run({.continuous = 128, .project = 7000});      // seek while playing
-    host.run({.continuous = 192, .project = 2000});      // cycle wrap
-    host.run({.playing = false, .continuous = 256, .project = 2064});  // stopped
-    host.run({.playing = false, .continuous = 320, .project = 50});    // relocate stopped
-    host.run({.playing = false, .continuous = 1000, .project = 50});   // host skipped
-    host.run({.playing = false, .project = 50});         // kContTimeValid drops out
-    host.run({.has_context = false});                    // no context at all
+    host.run({.continuous = 0, .project = 100});                      // activation
+    host.run({.continuous = 64, .project = 164});                     // continuous
+    host.run({.continuous = 128, .project = 7000});                   // seek while playing
+    host.run({.continuous = 192, .project = 2000});                   // cycle wrap
+    host.run({.playing = false, .continuous = 256, .project = 2064}); // stopped
+    host.run({.playing = false, .continuous = 320, .project = 50});   // relocate stopped
+    host.run({.playing = false, .continuous = 1000, .project = 50});  // host skipped
+    host.run({.playing = false, .project = 50});                      // kContTimeValid drops out
+    host.run({.has_context = false});                                 // no context at all
     REQUIRE(host.observed.size() == 9);
     REQUIRE_FALSE(host.observed[7].ctx.timing.has_steady_sample);
     REQUIRE_FALSE(host.observed[8].ctx.timing.has_transport_sample);
@@ -299,8 +302,8 @@ TEST_CASE("VST3 seeks, loops, stopped transport, gaps and clock changes",
 TEST_CASE("VST3 timing projects identically for every block partition",
           "[process-timing][vst3][partition]") {
     const std::vector<std::int64_t> event_samples{0, 5, 63, 64, 130, 255};
-    const std::vector<std::vector<int>> partitions{{256}, {64, 64, 64, 64}, {100, 100, 56},
-                                                   {1, 127, 128}};
+    const std::vector<std::vector<int>> partitions{
+        {256}, {64, 64, 64, 64}, {100, 100, 56}, {1, 127, 128}};
     std::vector<std::vector<std::int64_t>> projections;
     for (const auto& partition : partitions) {
         Vst3Host host;
@@ -338,8 +341,8 @@ TEST_CASE("VST3 event offsets outside the block are refused, never clamped",
     (void)binding.feed(host.observed[0], &results, &projected);
     // The adapter sorts the decoded stream by offset before the Processor
     // sees it.
-    REQUIRE(results == std::vector<HostEventResult>{
-                           HostEventResult::OutOfRange, HostEventResult::Accepted,
-                           HostEventResult::Accepted, HostEventResult::OutOfRange});
+    REQUIRE(results ==
+            std::vector<HostEventResult>{HostEventResult::OutOfRange, HostEventResult::Accepted,
+                                         HostEventResult::Accepted, HostEventResult::OutOfRange});
     REQUIRE(projected == std::vector<std::int64_t>{0, 31});
 }

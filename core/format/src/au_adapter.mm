@@ -1379,7 +1379,8 @@ struct ScopedAuV3HostWriting {
         const auto failClosed = [&] {
             bridge->timing_block_skipped = true;
             pulp::format::detail::zero_audio_buffer_list(outputData);
-            if (actionFlags) *actionFlags |= kAudioUnitRenderAction_OutputIsSilence;
+            if (actionFlags)
+                *actionFlags |= kAudioUnitRenderAction_OutputIsSilence;
             bridge->processor->set_sidechain(nullptr);
             bridge->store.reset_triggers_rt();
             return noErr;
@@ -1924,8 +1925,7 @@ struct ScopedAuV3HostWriting {
         // discontinuity only when there is no counter to measure it.
         ctx.timing = pulp::format::au_process_timing(
             timestamp ? timestamp->mFlags : 0u, timestamp ? timestamp->mSampleTime : 0.0,
-            timing_has_transport, timing_transport_moving, timing_transport_position, false,
-            false);
+            timing_has_transport, timing_transport_moving, timing_transport_position, false, false);
         ctx.timing.discontinuity =
             bridge->timing_discontinuity_pending.load(std::memory_order_acquire) ||
             (bridge->timing_block_skipped && !ctx.timing.has_steady_sample);

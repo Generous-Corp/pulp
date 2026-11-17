@@ -171,8 +171,8 @@ inline void advance_time_position(lv2_adapter::Lv2TimePosition& pos, uint32_t n_
 inline void rewind_time_position_to_block_start(lv2_adapter::Lv2TimePosition& pos,
                                                 int64_t event_frame, uint32_t block_frames,
                                                 double sample_rate) noexcept {
-    if (event_frame <= 0 || event_frame >= static_cast<int64_t>(block_frames) ||
-        !pos.has_speed || pos.speed == 0.0f)
+    if (event_frame <= 0 || event_frame >= static_cast<int64_t>(block_frames) || !pos.has_speed ||
+        pos.speed == 0.0f)
         return;
     const double frames = static_cast<double>(event_frame) * static_cast<double>(pos.speed);
     if (pos.has_frame)

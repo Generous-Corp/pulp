@@ -80,8 +80,12 @@ class TimelineOwner {
         return result;
     }
 
-    const HostBlockTimeline& timeline() const { return timeline_; }
-    HostEventIngress<16>& ingress() { return ingress_; }
+    const HostBlockTimeline& timeline() const {
+        return timeline_;
+    }
+    HostEventIngress<16>& ingress() {
+        return ingress_;
+    }
 
   private:
     HostBlockTimeline timeline_;
@@ -202,8 +206,8 @@ void oversized_blocks_are_refused_or_chunked() {
     std::size_t offset = 0;
     std::vector<HostBlockBoundary> boundaries;
     while (offset < whole.frames) {
-        const auto frames = std::min<std::size_t>(pulp::host::kHostBlockMaxFrames,
-                                                  whole.frames - offset);
+        const auto frames =
+            std::min<std::size_t>(pulp::host::kHostBlockMaxFrames, whole.frames - offset);
         HostBlockClock chunk;
         check(pulp::host::host_block_chunk(whole, offset, frames, chunk) ==
                   HostEventResult::Accepted,

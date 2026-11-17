@@ -175,7 +175,8 @@ boundary::HostTransport decode_clap_transport(const clap_event_transport_t* tr,
     }
     if (flags & CLAP_TRANSPORT_HAS_SECONDS_TIMELINE) {
         static_assert(pulp::format::kClapSectimeFactor == CLAP_SECTIME_FACTOR);
-        if (const auto position = pulp::format::clap_sectime_to_samples(tr->song_pos_seconds, sample_rate)) {
+        if (const auto position =
+                pulp::format::clap_sectime_to_samples(tr->song_pos_seconds, sample_rate)) {
             transport.validity.set(TransportField::SamplePosition);
             transport.position_samples = *position;
         }

@@ -1396,8 +1396,7 @@ TEST_CASE("LV2 run() publishes neutral timing facts and marks activation",
     lv2_generic::activate(handle.handle);
     prepare_sequence(seq, inst->urid_atom_sequence);
     lv2_generic::run(handle.handle, 32);
-    REQUIRE(g_lv2_time.contexts.back().timing ==
-            ProcessTiming{.discontinuity = true});
+    REQUIRE(g_lv2_time.contexts.back().timing == ProcessTiming{.discontinuity = true});
 
     // Half-speed playback: time:frame moves half a block per block.
     uint32_t capacity = prepare_sequence(seq, inst->urid_atom_sequence);

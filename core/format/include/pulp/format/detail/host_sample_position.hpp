@@ -51,9 +51,9 @@ inline constexpr std::int64_t kAuImmediateWindow = 4096;
 /// The result is not range-checked. Each caller applies its own policy: the
 /// legacy MIDI path clamps (`au_event_block_offset`), while the host timeline
 /// refuses anything outside the block (`pulp::host::au_event_block_time`).
-inline std::optional<std::int64_t> au_event_raw_offset(std::int64_t event_sample_time,
-                                                       std::int64_t immediate,
-                                                       std::optional<double> block_sample_time) noexcept {
+inline std::optional<std::int64_t>
+au_event_raw_offset(std::int64_t event_sample_time, std::int64_t immediate,
+                    std::optional<double> block_sample_time) noexcept {
     if (event_sample_time >= immediate && event_sample_time < immediate + kAuImmediateWindow)
         return event_sample_time - immediate;
     if (!block_sample_time)
@@ -74,9 +74,8 @@ inline std::optional<std::int64_t> au_event_raw_offset(std::int64_t event_sample
 inline std::int32_t au_event_block_offset(std::int64_t event_sample_time, std::int64_t immediate,
                                           std::optional<double> block_sample_time,
                                           std::uint32_t frame_count) noexcept {
-    const std::int64_t offset =
-        au_event_raw_offset(event_sample_time, immediate, block_sample_time)
-            .value_or(event_sample_time);
+    const std::int64_t offset = au_event_raw_offset(event_sample_time, immediate, block_sample_time)
+                                    .value_or(event_sample_time);
     if (offset < 0)
         return 0;
     if (frame_count > 0 && offset >= static_cast<std::int64_t>(frame_count))

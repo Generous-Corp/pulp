@@ -2464,10 +2464,9 @@ TEST_CASE("AU v3 publishes render timing facts and marks activation and reset",
         ScopedFactoryRegistration registration(create_effect_processor);
 
         NSError* error = nil;
-        PulpAudioUnit* unit =
-            [[PulpAudioUnit alloc] initWithComponentDescription:desc
-                                                       options:0
-                                                         error:&error];
+        PulpAudioUnit* unit = [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                                          options:0
+                                                                            error:&error];
         REQUIRE(unit != nil);
         auto* processor = g_last_effect_processor;
         REQUIRE(processor != nullptr);
@@ -2490,17 +2489,21 @@ TEST_CASE("AU v3 publishes render timing facts and marks activation and reset",
         output.list.mBuffers[1].mDataByteSize = kFrames * sizeof(float);
         output.list.mBuffers[1].mData = right;
 
-        __block double transport_position = 511.9999;  // rounds to 512
+        __block double transport_position = 511.9999; // rounds to 512
         __block BOOL moving = YES;
-        unit.transportStateBlock = ^BOOL(AUHostTransportStateFlags* transport_flags,
-                                         double* sample_position, double* cycle_start,
-                                         double* cycle_end) {
-            if (transport_flags) *transport_flags = moving ? AUHostTransportStateMoving : 0;
-            if (sample_position) *sample_position = transport_position;
-            if (cycle_start) *cycle_start = 0.0;
-            if (cycle_end) *cycle_end = 0.0;
-            return YES;
-        };
+        unit.transportStateBlock =
+            ^BOOL(AUHostTransportStateFlags* transport_flags, double* sample_position,
+                  double* cycle_start, double* cycle_end) {
+              if (transport_flags)
+                  *transport_flags = moving ? AUHostTransportStateMoving : 0;
+              if (sample_position)
+                  *sample_position = transport_position;
+              if (cycle_start)
+                  *cycle_start = 0.0;
+              if (cycle_end)
+                  *cycle_end = 0.0;
+              return YES;
+            };
 
         AUInternalRenderBlock block = [unit internalRenderBlock];
         REQUIRE(block != nil);

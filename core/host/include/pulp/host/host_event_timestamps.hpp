@@ -137,7 +137,8 @@ inline constexpr HostBlockClock clock_from_process_timing(const format::ProcessT
 /// Map the context a format adapter handed `Processor::process()` onto
 /// `HostBlockClock`. A non-positive `num_samples` maps to zero frames, which
 /// `advance()` refuses.
-inline constexpr HostBlockClock clock_from_process_context(const format::ProcessContext& ctx) noexcept {
+inline constexpr HostBlockClock
+clock_from_process_context(const format::ProcessContext& ctx) noexcept {
     return clock_from_process_timing(
         ctx.timing, ctx.num_samples > 0 ? static_cast<std::size_t>(ctx.num_samples) : 0);
 }
@@ -452,8 +453,7 @@ struct Vst3BlockTiming {
 inline constexpr HostBlockClock clock_from_vst3(const Vst3BlockTiming& timing) noexcept {
     return clock_from_process_timing(
         format::vst3_process_timing(timing.has_process_context, timing.state,
-                                    timing.project_time_samples,
-                                    timing.continuous_time_samples,
+                                    timing.project_time_samples, timing.continuous_time_samples,
                                     timing.transport_non_unit_rate, timing.discontinuity),
         timing.num_samples > 0 ? static_cast<std::size_t>(timing.num_samples) : 0);
 }
@@ -509,9 +509,8 @@ struct AuBlockTiming {
 /// while moving at unit rate (`transport_non_unit_rate` unset).
 inline HostBlockClock clock_from_au(const AuBlockTiming& timing) noexcept {
     return clock_from_process_timing(
-        format::au_process_timing(timing.timestamp_flags, timing.sample_time,
-                                  timing.has_transport, timing.transport_moving,
-                                  timing.transport_sample_position,
+        format::au_process_timing(timing.timestamp_flags, timing.sample_time, timing.has_transport,
+                                  timing.transport_moving, timing.transport_sample_position,
                                   timing.transport_non_unit_rate, timing.discontinuity),
         timing.frames);
 }
@@ -574,10 +573,10 @@ struct Lv2BlockTiming {
 /// compared with the block length and a relocation at that speed is not
 /// detected unless the adapter sets `discontinuity`.
 inline constexpr HostBlockClock clock_from_lv2(const Lv2BlockTiming& timing) noexcept {
-    return clock_from_process_timing(
-        format::lv2_process_timing(timing.has_frame, timing.frame, timing.has_speed, timing.speed,
-                                   timing.discontinuity),
-        timing.sample_count);
+    return clock_from_process_timing(format::lv2_process_timing(timing.has_frame, timing.frame,
+                                                                timing.has_speed, timing.speed,
+                                                                timing.discontinuity),
+                                     timing.sample_count);
 }
 
 /// Convert an LV2 atom event's time stamp to a block-relative time.

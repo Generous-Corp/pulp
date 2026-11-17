@@ -152,8 +152,7 @@ struct ClapHost {
             tr.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
             tr.flags = CLAP_TRANSPORT_HAS_SECONDS_TIMELINE |
                        (transport->playing ? CLAP_TRANSPORT_IS_PLAYING : 0u);
-            const long double seconds =
-                static_cast<long double>(transport->sample) / kSampleRate;
+            const long double seconds = static_cast<long double>(transport->sample) / kSampleRate;
             tr.song_pos_seconds =
                 static_cast<clap_sectime>(std::llround(seconds * CLAP_SECTIME_FACTOR));
         }
@@ -193,9 +192,9 @@ struct Binding {
                                     trace.window.frames) == HostEventResult::Accepted);
         for (const auto offset : block.offsets) {
             HostEventRecord record;
-            auto result = host::make_record_from_block_offset(
-                timeline, trace.window, offset, 1, ++sequence,
-                midi::MidiEvent::note_on(0, 60, 100), record);
+            auto result =
+                host::make_record_from_block_offset(timeline, trace.window, offset, 1, ++sequence,
+                                                    midi::MidiEvent::note_on(0, 60, 100), record);
             if (result == HostEventResult::Accepted)
                 result = ingress.publish(record);
             trace.results.push_back(result);
@@ -279,16 +278,16 @@ TEST_CASE("CLAP timing projects identically for every block partition",
 TEST_CASE("CLAP seeks, loops, stopped transport and skipped blocks place blocks correctly",
           "[process-timing][clap][boundaries]") {
     ClapHost host;
-    host.run(0, 64, HostTransport{1000, true});         // activation
-    host.run(64, 64, HostTransport{1064, true});        // continuous
-    host.run(128, 64, HostTransport{9000, true});       // seek while playing
-    host.run(192, 64, HostTransport{9064, true});       // continuous after seek
-    host.run(256, 64, HostTransport{4000, true});       // loop wrap back to loop start
-    host.run(320, 64, HostTransport{4064, false});      // stop
-    host.run(384, 64, HostTransport{20000, false});     // relocate while stopped
-    host.run(1024, 64, HostTransport{20000, false});    // host skipped blocks
-    host.run(1088, 64, HostTransport{20000, true});     // play again
-    host.run(1280, 64, HostTransport{20192, true});     // playing gap: transport and counter agree
+    host.run(0, 64, HostTransport{1000, true});      // activation
+    host.run(64, 64, HostTransport{1064, true});     // continuous
+    host.run(128, 64, HostTransport{9000, true});    // seek while playing
+    host.run(192, 64, HostTransport{9064, true});    // continuous after seek
+    host.run(256, 64, HostTransport{4000, true});    // loop wrap back to loop start
+    host.run(320, 64, HostTransport{4064, false});   // stop
+    host.run(384, 64, HostTransport{20000, false});  // relocate while stopped
+    host.run(1024, 64, HostTransport{20000, false}); // host skipped blocks
+    host.run(1088, 64, HostTransport{20000, true});  // play again
+    host.run(1280, 64, HostTransport{20192, true});  // playing gap: transport and counter agree
     REQUIRE(host.observed.size() == 10);
 
     Binding binding;
@@ -378,9 +377,9 @@ TEST_CASE("CLAP event offsets outside the block are refused, never clamped",
     REQUIRE(host.observed[0].offsets.size() == 4);
     Binding binding;
     const auto trace = binding.feed(host.observed[0]);
-    REQUIRE(trace.results == std::vector<HostEventResult>{
-                                 HostEventResult::Accepted, HostEventResult::Accepted,
-                                 HostEventResult::OutOfRange, HostEventResult::OutOfRange});
+    REQUIRE(trace.results ==
+            std::vector<HostEventResult>{HostEventResult::Accepted, HostEventResult::Accepted,
+                                         HostEventResult::OutOfRange, HostEventResult::OutOfRange});
     REQUIRE(trace.projected == std::vector<std::int64_t>{0, 63});
 }
 
@@ -395,8 +394,8 @@ TEST_CASE("CLAP records timed against a retired epoch are refused",
     // A record built against the old window, then the seek.
     HostEventRecord stale;
     REQUIRE(binding.timeline.make_record(before.window, 20, 1, 99,
-                                         midi::MidiEvent::note_on(0, 61, 100), stale) ==
-            HostEventResult::Accepted);
+                                         midi::MidiEvent::note_on(0, 61, 100),
+                                         stale) == HostEventResult::Accepted);
     const auto after = binding.feed(host.observed[1]);
     REQUIRE(after.boundary == HostBlockBoundary::NewEpoch);
     REQUIRE(after.projected == std::vector<std::int64_t>{10});
