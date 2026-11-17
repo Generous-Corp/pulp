@@ -3534,13 +3534,20 @@ only when the node has exactly one output, so stereo built-ins need explicit
 `node.audio` and `node.out1` ports. User-facing walkthroughs live in
 `docs/guides/graph-first-steps.md` and `docs/guides/graph-notation-cookbook.md`.
 
-Spectral constructors appear in the catalog as `unsupported_typed_api_only`
-rows built at a fixed probe identity (FFT 256, hop 64, mono, 48 kHz), so their
-audio port counts are for that identity only. A catalog row is not proof a key
-is constructible from notation: `instantiate()` returns 0 for spectral keys and
-`parse_graph_patch` refuses them before instantiation. Never suggest
-`GraphSerializer` as the fix for a spectral refusal; `to_json` returns an empty
-string for any graph with a spectral node.
+Spectral constructor catalog rows are built at a fixed probe identity (FFT 256,
+hop 64, mono, 48 kHz), so their audio port counts are for that identity only.
+`instantiate()` returns 0 for spectral keys: only `# flow 2` constructs them,
+through `graph_patch_constructors.cpp`, from explicit `fft`, `hop`, `channels`
+and `rate` arguments (stages add `kind identity`). Flow 1 parsing must stay
+byte-for-byte unchanged, so argument handling runs only when the header is
+`# flow 2`, and the formatter emits `# flow 1` for every graph that needs no
+argument. One document has one sample rate (`SampleRateMismatch` otherwise);
+`prepare()` at a different rate fails with `IdentityMismatch`. Mask gains and
+codec assets never go into notation: refuse them with the payload size and send
+the author to saved-graph JSON. `GraphSerializer::to_json` still returns an empty
+string for an analysis graph, so do not suggest it as the save path for one, and
+name built-in boundary types from their constructor probe rather than from a
+whole-graph serialization.
 
 ### Transactional graph-file development reload
 

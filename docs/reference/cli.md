@@ -1517,6 +1517,8 @@ loader and to the CLI and requires identical names.
 | `UnsupportedContract` | Unregistered type or version, or an unsupported contract |
 | `ParameterOutOfRange`, `RestoreFailed`, `ResourceLimit` | Value, state restore or size limit refusal |
 | `FileUnreadable` | The file is missing or cannot be read |
+| `SampleRateMismatch` | Spectral nodes in one `# flow 2` document declare different sample rates |
+| `UnsupportedChannelLayout` | A `# flow 2` channel count outside 1 to 16 |
 
 A file over the 64 MiB graph limit is `ResourceLimit` for every subcommand that
 loads it (`validate`, `inspect`, `fmt`, `render`, `report` and `diff`).
@@ -1669,7 +1671,10 @@ See [edge probe limits and lifecycle](../guides/graph-edge-probes.md).
 ### SignalGraph notation
 
 `pulp graph catalog --json` projects the default runtime node catalog,
-including typed-API-only spectral constructor rows that notation refuses.
+including the spectral constructor rows and the `flow_2_arguments` each takes.
+`# flow 2` documents spell audio boundary channel counts and spectral analysis,
+identity stage and synthesis identities with an explicit sample rate; mask and
+asset payloads stay in saved-graph JSON.
 `pulp graph validate FILE.pat --json` uses shared typed strict diagnostics;
 `.pulpgraph` validation checks every original connection. `pulp graph fmt
 FILE.pat` prints canonical notation, and `pulp graph fmt FILE.pulpgraph

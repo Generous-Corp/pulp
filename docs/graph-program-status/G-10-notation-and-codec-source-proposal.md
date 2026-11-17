@@ -21,14 +21,17 @@ item is decided and implemented; section 2 records the decisions.
   the reader cannot prepare. This settled the embedded-versus-sidecar and
   format-version questions below: assets are embedded and spectral graphs are
   written at format 6. See `docs/guides/spectral-asset-replay.md`.
-- The strict JSON loader refuses `spectral*` node types and `spectral` edges;
-  notation formatting refuses spectral nodes and frame edges
-  (`core/host/src/graph_patch.cpp`). The bake path refuses with "spectral graph
+- The strict JSON loader refuses `spectral*` node types and `spectral` edges.
+  Notation `# flow 2` now spells analysis, identity stage, synthesis and
+  boundary channel counts with an explicit sample rate, and refuses masks and
+  assets (see [D6a-flow2-notation.md](D6a-flow2-notation.md)); flow 1 still
+  refuses spectral keys. The bake path refuses with "spectral graph
   persistence is not admitted" (`core/host/src/baked_graph_processor.cpp`).
-- Notation has no constructor-argument syntax. A declaration is
+- Flow 1 has no constructor-argument syntax. A declaration is
   `name : type [@ version]`; values are set afterwards as `node.param = value`
   against a parameter catalog. A spectral node's identity (FFT size, hop,
-  channels, sample rate) is a construction argument, not a parameter.
+  channels, sample rate) is a construction argument, not a parameter; flow 2
+  adds the argument list for it.
 
 ### What a node needs to round-trip
 
@@ -78,10 +81,8 @@ against `core/host/src/graph_patch.cpp` on origin/main, these gaps remain:
 - `SignalGraphPreparedTopologyEdit` offers analysis, stage and synthesis but no
   asset-morph constructor, so the catalog's asset-morph row has no
   prepared-edit counterpart.
-- Notation boundaries are stereo only: formatting refuses an input or output
-  boundary that is not two channels, and the default catalog builds both with
-  `add_input_node(2)` / `add_output_node(2)`. There is no mono or bus-layout
-  boundary spelling.
+- Flow 1 boundaries are stereo only. Flow 2 spells `channels C` from 1 to 16;
+  there is still no bus-layout boundary spelling.
 - Notation has no subgraph-template syntax.
 - Persistence of every spectral node is the owner decision in this section.
 

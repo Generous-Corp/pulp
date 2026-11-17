@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261117-d6a-flow2-20261116-watch",
+  "created_at": "2026-11-17T07:14:33Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Graph patch notation gains # flow 2 constructor arguments for audio boundaries and spectral analysis, identity stage and synthesis, two diagnostic codes, and CLI/MCP parity tests. The change is confined to the control-thread notation parser and formatter in core/host and its docs and tests; no design-import, Chromium, rendering or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-cli-graph-code-parity",
+    "ctest --test-dir build -R pulp-test-graph-patch",
+    "ctest --test-dir build -R cmake-graph-patch-sdk-consumer",
+    "ctest --test-dir build -R pulp-test-mcp-server",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
