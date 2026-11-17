@@ -198,10 +198,19 @@ the block length. There is never a steady counter. `activate()` marks the next
 `run()` as a discontinuity, because the latch survives deactivation.
 
 A `time:Position` event at frame `t > 0` describes the transport at `t`, not at
-the block start. `rewind_time_position_to_block_start()` moves it back by
-`t * speed` before latching; applying it unrewound shifts the playhead by `t`
-and reads as a seek. Event times outside `[0, sample_count)` are left alone
-rather than reinterpreted.
+the block start. `Lv2BlockTransport` applies each event with only the
+properties it carried (decode into a fresh `Lv2TimePosition`, never into the
+latch) and moves its `time:frame` / `time:beat` back to the block start along
+the piecewise speed and tempo path: a speed change at `t` applies from `t`
+onward, so rewinding by the new speed misplaces the block. Fields an event
+omits keep the retained values, which advance over every host block whether or
+not a Position arrived. The published speed is the one in effect at the first
+frame; a block whose speed changed mid-way reports `NonUnit`. Event times
+outside the block, or earlier than a previous event, are placed at the previous
+event's frame. Host values that are not finite or do not fit their field are
+refused at decode, and a normalized frame that overflows is published as
+unavailable. A host block longer than the prepared maximum advances the latch
+by the whole host block and marks the next `run()` discontinuous.
 
 ### The unit traps in `time:`
 

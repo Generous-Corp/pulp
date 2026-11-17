@@ -731,7 +731,10 @@ counter the host event timeline needs to tell a seek from skipped blocks. That
 requirement test also checks it. `setActive(true)` and `setProcessing(true)`
 raise `ctx.timing.discontinuity` for the next observed block;
 `SingleComponentEffect::setProcessing` answers `kNotImplemented`, and the
-override keeps that answer. Coverage: `test_vst3_process_timing.cpp`.
+override keeps that answer. A skipped block, or a host block clamped to the
+prepared maximum, sets `timing_block_skipped_`, which marks the next block
+discontinuous when no continuous-time counter can measure the unrendered
+samples. Coverage: `test_vst3_process_timing.cpp`.
 
 **If you teach `build_process_context` a new `kXxxValid` bit, add its
 `kNeed*` flag in the same change.** The test *VST3 requests every

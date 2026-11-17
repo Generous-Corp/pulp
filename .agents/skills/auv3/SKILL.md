@@ -281,9 +281,14 @@ bypass logic is covered by the shared `test_adapter_boundary_parity.cpp`
 `transportStateBlock` position as the transport. `allocateRenderResources` and
 the `-reset` override raise `timing_discontinuity_pending` (an atomic: both run
 off the render thread). Every early return that skips the Processor (bypass,
-`failClosed`, state-restore contention) sets `timing_block_skipped`; keep that
-true for any new early return, or a host without a valid `mSampleTime` will
-see the skipped samples retimed onto a contiguous window.
+`failClosed`, state-restore contention, a missing processor or output list,
+the oversized-block rejection, and the multi-output block's own refusals) sets
+`timing_block_skipped`; keep that true for any new early return, or a host
+without a valid `mSampleTime` will see the skipped samples retimed onto a
+contiguous window. `-reset` also bumps `reset_generation`, which the
+multi-output cache compares before reusing a render: without it a host that
+resets and renders the same time stamp again gets pre-reset audio and the
+Processor never sees the reset.
 
 ### MPE routing
 

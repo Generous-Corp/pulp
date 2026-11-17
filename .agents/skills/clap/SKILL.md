@@ -463,8 +463,10 @@ the single rounding), and a discontinuity on the first block the Processor
 observes after `clap_activate()` / `clap_reset()`. The warm-up render inside
 `clap_activate()` must not consume that flag, so the pending flags clear only
 after `Processor::process()` ran. A bypassed, contended or layout-refused block
-sets `timing_block_skipped`, which marks the next block discontinuous only when
-the host sends no `steady_time` (with one, the projection measures the gap).
+sets `timing_block_skipped`, and so does a host block longer than the prepared
+maximum (only its prefix reached the Processor). That marks the next block
+discontinuous only when the host sends no `steady_time` (with one, the
+projection measures the gap).
 Coverage: `test_clap_process_timing.cpp`.
 
 ### Render mode (`clap.render`)

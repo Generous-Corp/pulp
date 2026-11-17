@@ -33,13 +33,17 @@ The field is appended to `ProcessContext`, so existing offsets do not move.
 | CLAP | `clap_process_t::steady_time` when non-negative | `song_pos_seconds` converted from 2^31 fixed point with `clap_sectime_to_samples()` (exact for host-derived values; the same decode feeds `position_samples`) | first observed block after `clap_activate()` or `clap_reset()` |
 | VST3 | `continousTimeSamples` when `kContTimeValid` is set and it is non-negative; `kNeedContinousTimeSamples` is now requested | `projectTimeSamples` whenever a context is supplied | first observed block after `setActive(true)` or `setProcessing(true)` |
 | AU v3 | rounded `mSampleTime` when `kAudioTimeStampSampleTimeValid` is set, representable and non-negative | `transportStateBlock` position when the block returned YES | first observed block after `allocateRenderResources` or `-reset` |
-| LV2 | none (LV2 defines no counter) | latched `time:frame`; a mid-block `time:Position` is rewound to the block start by `event_frame * speed` | first `run()` after instantiation or `activate()` |
+| LV2 | none (LV2 defines no counter) | latched `time:frame` at the block start; each `time:Position` applies only the fields it carries, and a mid-block position is moved back along the piecewise speed path (a speed change applies from its own frame) | first `run()` after instantiation or `activate()`, or after a host block clamped to the prepared maximum |
 | AU v2 | not published | not published | not published |
 
 In every adapter a block that skips the Processor (bypass, a refused layout,
-or state-restore contention) marks the next observed block discontinuous only
-when that block has no steady counter to measure the skip. With a counter, the
-projection sees the skip as a gap in the same epoch.
+or state-restore contention), or a host block longer than the prepared maximum
+of which only the prefix was rendered, marks the next observed block
+discontinuous only when that block has no steady counter to measure the skip.
+With a counter, the projection sees the skip as a gap in the same epoch. AU v3
+rejects an oversized block instead of clamping it and counts the rejection as
+a skip; its `-reset` also invalidates the multi-output render cache, so a
+repeated time stamp after a reset renders afresh.
 
 The legacy `transport_jump` / `should_reset_dsp_state()` flags are unchanged.
 
@@ -93,10 +97,14 @@ refuses both. The policies stay separate; only the arithmetic is shared.
   `kNeedContinousTimeSamples` because the decoder consumes it.
 - `test/test_au_plugin_state.mm`: the real AU v3 render block through
   activation, fractional transport, invalid sample time, stopped transport,
-  reset, bypass with and without a counter, and re-allocation.
+  reset, bypass with and without a counter, oversized and output-less renders,
+  and re-allocation. `test/test_au_multibus.mm` resets between two renders of
+  one time stamp and requires a fresh Processor call.
 - `test/test_lv2_adapter.cpp`: the real LV2 `run()` through activation and
   re-activation, half-speed playback projected in one epoch (and as a seek per
-  block without the rate fact), and a mid-block `time:Position`.
+  block without the rate fact), a mid-block `time:Position`, partial and
+  multiple Positions in one block, speed changes, stops and starts inside a
+  block, numeric boundaries, and a clamped tail.
 - `examples/process-timing-consumer`: an installed-SDK consumer of the public
   headers, also built in-tree as `process-timing-public-consumer`.
 
