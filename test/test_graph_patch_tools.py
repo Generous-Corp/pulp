@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Public installed API / CLI / MCP diagnostics and notation parity."""
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -107,6 +108,109 @@ def main():
         assert not payload.get('isError', False)
         assert json.loads(payload['content'][0]['text']) == json.loads(run([args.cli, 'graph', 'catalog', '--json']).stdout)
 
+        # Diff: the MCP operation is the CLI's `graph diff --json` on the same
+        # inputs. Every case compares the MCP text to the CLI JSON and maps the
+        # CLI exit code to isError (a comparison with differences is not one).
+        def mcp_diff(arguments, ident):
+            request = {'jsonrpc': '2.0', 'id': ident, 'method': 'tools/call',
+                       'params': {'name': 'pulp_graph',
+                                  'arguments': dict(arguments, operation='diff')}}
+            wire = json.dumps(request)
+            mcp = run([args.mcp], data=f'Content-Length: {len(wire)}\r\n\r\n{wire}', cwd=args.root)
+            payload = json.loads(mcp.stdout.split('\n\n', 1)[1])['result']
+            return payload, json.loads(payload['content'][0]['text'])
+
+        def check_diff(before, after, expect_rc, ident):
+            cli = run([args.cli, 'graph', 'diff', before, after, '--json'])
+            assert cli.returncode == expect_rc, (before, after, cli)
+            payload, text = mcp_diff({'before': str(before), 'after': str(after)}, ident)
+            assert text == json.loads(cli.stdout), (text, cli.stdout)
+            assert payload.get('isError', False) == (expect_rc != 0), payload
+            return text
+
+        def digest(path):
+            return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+        base = directory / 'diff-base.pat'
+        base.write_text(good, encoding='utf-8')
+        before_doc = directory / 'diff-before.pulpgraph'
+        after_doc = directory / 'diff-after.pulpgraph'
+        assert run([args.cli, 'graph', 'save', base, '--output', before_doc,
+                    '--saved-identity']).returncode == 0
+        # Each independent save mints fresh authored IDs, so the "after"
+        # document is the same document with one node field edited.
+        edited = json.loads(before_doc.read_text(encoding='utf-8'))
+        gain_node = next(n for n in edited['nodes'] if n['type'] == 'gain')
+        gain_node['gain'] = 0.5
+        after_doc.write_text(json.dumps(edited), encoding='utf-8')
+        plain_doc = directory / 'diff-plain.pulpgraph'
+        assert run([args.cli, 'graph', 'save', base, '--output', plain_doc]).returncode == 0
+        watched = [before_doc, after_doc, plain_doc]
+        digests = [digest(path) for path in watched]
+
+        # Semantic change, with before/after attribution that flips with the
+        # argument order.
+        forward = check_diff(before_doc, after_doc, 0, 200)
+        assert forward['equal'] is False
+        assert forward['nodes']['changed'][0]['fields'] == ['gain']
+        backward = check_diff(after_doc, before_doc, 0, 201)
+        assert backward['before_digest'] == forward['after_digest']
+        assert backward['after_digest'] == forward['before_digest']
+        assert forward['before_digest'] != forward['after_digest']
+
+        # Control: identical documents compare equal and succeed.
+        assert check_diff(before_doc, before_doc, 0, 202)['equal'] is True
+
+        # Layout alone is reported but is not a semantic difference.
+        moved = json.loads(before_doc.read_text(encoding='utf-8'))
+        moved['nodes'][0]['layout'] = {'x': 3.0, 'y': 4.0}
+        moved_doc = directory / 'diff-moved.pulpgraph'
+        moved_doc.write_text(json.dumps(moved), encoding='utf-8')
+        layout = check_diff(before_doc, moved_doc, 0, 203)
+        assert layout['equal'] is True and len(layout['layout_changed']) == 1, layout
+        assert layout['nodes']['changed'] == []
+
+        # Refusals: the missing envelope on each side, attributed to the side.
+        refused_before = check_diff(plain_doc, after_doc, 1, 204)
+        assert refused_before['code'] == 'InvalidDocument'
+        assert refused_before['side'] == 'before'
+        assert refused_before['refusal'] in ('logical_identity_missing', 'invalid_format_version'), refused_before
+        refused_after = check_diff(before_doc, plain_doc, 1, 205)
+        assert refused_after['side'] == 'after'
+
+        # Malformed identities and documents.
+        broken_identity = json.loads(before_doc.read_text(encoding='utf-8'))
+        broken_identity['logical_identities'] = {'bogus': 'not-an-identity'}
+        broken_doc = directory / 'diff-broken-identity.pulpgraph'
+        broken_doc.write_text(json.dumps(broken_identity), encoding='utf-8')
+        malformed = check_diff(broken_doc, after_doc, 1, 206)
+        assert malformed['side'] == 'before' and malformed['code'] == 'InvalidDocument'
+        not_json = directory / 'diff-not-json.pulpgraph'
+        not_json.write_text('{broken', encoding='utf-8')
+        assert check_diff(before_doc, not_json, 1, 207)['side'] == 'after'
+
+        # Missing and oversized inputs, each side.
+        absent = directory / 'diff-absent.pulpgraph'
+        assert check_diff(absent, after_doc, 1, 208)['code'] == 'FileUnreadable'
+        assert check_diff(before_doc, absent, 1, 209)['code'] == 'FileUnreadable'
+        oversized = directory / 'diff-oversized.pulpgraph'
+        with open(oversized, 'wb') as handle:
+            handle.truncate(64 * 1024 * 1024 + 1)
+        assert check_diff(oversized, after_doc, 1, 210)['code'] == 'ResourceLimit'
+        assert check_diff(before_doc, oversized, 1, 211)['code'] == 'ResourceLimit'
+
+        # Input mistakes the CLI refuses with exit 2 are MCP errors here.
+        payload, text = mcp_diff({'before': str(before_doc)}, 212)
+        assert payload['isError'] and text['code'] == 'missing_input'
+        cli = run([args.cli, 'graph', 'diff', before_doc, '--json'])
+        assert cli.returncode == 2 and json.loads(cli.stdout) == text
+        payload, text = mcp_diff({'path': str(before_doc), 'before': str(before_doc),
+                                  'after': str(after_doc)}, 213)
+        assert payload['isError'] and text['code'] == 'invalid_option'
+
+        # No operation above modified any input.
+        assert [digest(path) for path in watched] == digests
+
         # Flow 2: CLI and MCP fmt print the same canonical text, which is the
         # input, and a refused document carries the same diagnostic.
         flow2 = directory / 'flow2.pat'
@@ -115,7 +219,7 @@ def main():
         assert cli.returncode == 0, cli
         cli_json = json.loads(cli.stdout)
         assert cli_json['notation'] == FLOW2, cli_json
-        payload = mcp_call(args, 200, {'path': str(flow2), 'operation': 'fmt'})
+        payload = mcp_call(args, 220, {'path': str(flow2), 'operation': 'fmt'})
         assert not payload.get('isError', False), payload
         assert json.loads(payload['content'][0]['text']) == cli_json
         mismatch = directory / 'flow2-mismatch.pat'
@@ -123,11 +227,11 @@ def main():
                             encoding='utf-8')
         cli = run([args.cli, 'graph', 'fmt', mismatch, '--json'])
         assert cli.returncode == 1 and json.loads(cli.stdout)['code'] == 'SampleRateMismatch', cli
-        payload = mcp_call(args, 201, {'path': str(mismatch), 'operation': 'fmt'})
+        payload = mcp_call(args, 221, {'path': str(mismatch), 'operation': 'fmt'})
         assert payload['isError'] and json.loads(payload['content'][0]['text']) == json.loads(cli.stdout)
 
-    print('PASS API/CLI/MCP 11 diagnostic controls, catalog without path, notation/save roundtrip '
-          'and flow 2 fmt parity')
+    print('PASS API/CLI/MCP 11 diagnostic controls, catalog without path, notation/save roundtrip, '
+          'flow 2 fmt parity and diff parity')
 
 
 if __name__ == '__main__':
