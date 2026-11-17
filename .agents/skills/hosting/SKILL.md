@@ -87,7 +87,11 @@ terminating the job, which releases what the worker never adopted. Prove the
 Windows callback with the import-table traps in
 `test/fixtures/isolated_clap/windows_callback_traps.cpp` (Pulp and the static
 CRT resolve through the test executable's table), not with macOS interposer
-evidence, and keep their negative control beside any new kind.
+evidence, and keep their negative control beside any new kind. The traps are
+per process and `catch_discover_tests` runs every case in its own process, so a
+case that measures a callback must install them itself (the test's
+`CallbackProbe` does on construction); a case relying on an earlier case's
+install reports clean counts with no traps in place when run alone.
 
 **Graph code that calls an isolation helper must also link on the web.** The
 WAM / WebCLAP sample-region profile compiles a curated source list

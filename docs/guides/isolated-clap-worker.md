@@ -153,8 +153,13 @@ stalled worker; bounded lifecycle hangs; failed state saves with a recovery
 control; descendant cleanup after leader exit; and a killed worker beside a
 bit-exact in-process sibling. Every callback runs inside operator-new counting
 and import-table traps on the test executable for heap, lock, wait, pipe I/O,
-handle and process calls (Pulp and the static CRT resolve through that table);
-a negative control proves each trap kind sees deliberate calls. These are
+handle and process calls (Pulp and the static CRT resolve through that table).
+Every measuring case installs the traps itself and requires one import per
+kind to be redirected before its first callback, because ctest runs each case
+in its own process. Two negative controls make deliberate calls inside a
+measured scope: one counts every kind, process calls included (`OpenProcess`
+on the test process), and one runs alone to prove a probe arms the traps
+without any other case having run. These are
 functional checks on the callback, not realtime qualification. A hidden
 `[.paced]` case paces callbacks at the real block period and prints how many
 blocks completed before the first fault; on the 4-vCPU Windows Server VM the
@@ -164,15 +169,19 @@ pacing is unqualified.
 No CI lane runs the Windows cases: the pull-request `windows` check does not
 build them and no scheduled Windows lane exists. They are owner-run on the
 Windows Server VM, from a git checkout (with an empty `planning` directory), in
-a Visual Studio x64 developer prompt (Build Tools, Ninja, `cl`):
+an x64 developer prompt from the Visual Studio 18 Build Tools (Ninja, `cl`). On
+the VM those live at `C:\VS18BuildTools`; the Visual Studio 2022 directory there
+is not the toolchain these receipts used:
 
 ```bat
+call C:\VS18BuildTools\VC\Auxiliary\Build\vcvars64.bat
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -DPULP_BUILD_EXAMPLES=OFF -DPULP_ENABLE_GPU=OFF -DPULP_BUILD_WEBVIEW=OFF
 cmake --build build -j 3 --target pulp-test-group-core-runtime-http pulp-test-isolated-clap-protocol pulp-test-isolated-clap-worker-windows
 build\test\pulp-test-group-core-runtime-http.exe "[retained-custody]"
 build\tools\clap-worker\pulp-test-isolated-clap-protocol.exe
 build\tools\clap-worker\pulp-test-isolated-clap-worker-windows.exe
 build\tools\clap-worker\pulp-test-isolated-clap-worker-windows.exe "[.paced]"
+ctest --test-dir build -R "Windows (isolated CLAP|callback)" --output-on-failure
 ```
 
 ## Reproducing the controls
