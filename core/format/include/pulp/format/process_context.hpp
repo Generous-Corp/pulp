@@ -6,6 +6,7 @@
 // include it directly.
 
 #include <pulp/format/process_block.hpp>
+#include <pulp/format/process_timing.hpp>
 #include <pulp/format/transport_fields.hpp>
 #include <cstdint>
 
@@ -242,6 +243,16 @@ struct ProcessContext {
     /// coherent loop range plus enough beat/tempo timing to predict the wrapped
     /// position. Missing or inconsistent metadata leaves it false.
     bool ordinary_loop_wrap = false;
+
+    /// Neutral timing facts for this block: the host's monotonic sample
+    /// counter, the transport sample position, whether the transport moves at
+    /// a known rate, and whether the adapter knows the block does not follow
+    /// the previous one. See `process_timing.hpp` for each format's sources.
+    /// The adapter publishes facts only; a consumer that owns an event
+    /// timeline projects them with `pulp::host::HostBlockTimeline`. A context
+    /// built without an adapter leaves every fact unavailable.
+    /// Kept after the original data members so existing field offsets do not move.
+    ProcessTiming timing{};
 
     constexpr bool has_transport(TransportField field) const noexcept {
         return transport_validity.has(field);

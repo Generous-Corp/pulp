@@ -37,10 +37,10 @@
 /// `au_event_block_time()`, and `lv2_event_block_time()` convert their event
 /// times to block-relative times without clamping.
 ///
-/// There is no CLAP mapping helper. A CLAP caller sets `steady_sample` from
-/// `clap_process_t::steady_time` directly; CLAP reports its transport only in
-/// seconds or beats (`clap_event_transport_t`), so a caller that wants a
-/// transport sample must convert and round it itself, and an inexact rounding
+/// CLAP needs no separate helper: the CLAP adapter publishes
+/// `clap_process_t::steady_time` and the `song_pos_seconds` transport,
+/// converted from CLAP's 2^31 fixed point with `format::clap_sectime_to_samples()`,
+/// on `ProcessContext::timing`. A transport rounding that is not exact still
 /// reads as a seek.
 ///
 /// Transport comparison assumes unit-rate playback. LV2 reports `time:speed`
@@ -51,15 +51,31 @@
 /// `transport_non_unit_rate` on `Vst3BlockTiming` / `AuBlockTiming` when it
 /// knows the rate is not 1, and the transport is then treated as not playing.
 ///
+/// Format adapters publish the same facts, already decoded, on
+/// `format::ProcessContext::timing`; `clock_from_process_context()` turns a
+/// context into a `HostBlockClock`, so a Processor that owns an event timeline
+/// (for example one hosting a `SignalGraph`) advances one `HostBlockTimeline`
+/// per block from the context it receives. The per-format helpers above map
+/// through the same `format::*_process_timing()` builders the adapters use.
+///
+/// A host block longer than `kHostBlockMaxFrames` is refused by `advance()`
+/// with `OutOfRange`. A caller that must accept one splits it with
+/// `host_block_chunk()` into consecutive sub-blocks of at most that length;
+/// each chunk is a contiguous block of the same timeline, so the absolute
+/// samples are identical to delivering the chunks as separate host blocks.
+///
 /// Everything here is fixed-size, `noexcept`, and allocation-free, so it may
 /// run on the audio thread. It owns no queue and schedules nothing.
 
 #include <pulp/format/detail/host_sample_position.hpp>
+#include <pulp/format/process_context.hpp>
+#include <pulp/format/process_timing.hpp>
 #include <pulp/host/graph_event_contract.hpp>
 
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 
 namespace pulp::host {
 
@@ -98,6 +114,67 @@ enum class HostBlockBoundary : std::uint8_t {
 
 /// Largest block the projection accepts; equals `HostEventIngress`'s window bound.
 inline constexpr std::size_t kHostBlockMaxFrames = 4096;
+
+/// Map neutral adapter timing facts for a block of `frames` samples onto
+/// `HostBlockClock`. A transport counts as playing only while it moves at a
+/// rate that is not known to differ from one sample per frame; a stopped or
+/// varispeed transport is still reported but is never compared.
+inline constexpr HostBlockClock clock_from_process_timing(const format::ProcessTiming& timing,
+                                                          std::size_t frames) noexcept {
+    HostBlockClock clock;
+    clock.frames = frames;
+    clock.discontinuity = timing.discontinuity;
+    if (timing.has_steady_sample && timing.steady_sample >= 0)
+        clock.steady_sample = timing.steady_sample;
+    if (timing.has_transport_sample) {
+        clock.has_transport_sample = true;
+        clock.transport_sample = timing.transport_sample;
+        clock.transport_playing = timing.transport_tracks_samples();
+    }
+    return clock;
+}
+
+/// Map the context a format adapter handed `Processor::process()` onto
+/// `HostBlockClock`. A non-positive `num_samples` maps to zero frames, which
+/// `advance()` refuses.
+inline constexpr HostBlockClock clock_from_process_context(const format::ProcessContext& ctx) noexcept {
+    return clock_from_process_timing(
+        ctx.timing, ctx.num_samples > 0 ? static_cast<std::size_t>(ctx.num_samples) : 0);
+}
+
+/// The clock of frames `[offset, offset + frames)` of a host block, for a
+/// caller that splits a block longer than `kHostBlockMaxFrames`. The steady
+/// counter, and the transport while it is playing, advance by `offset`; a
+/// stopped or varispeed transport is reported where the host left it. Only the
+/// chunk at offset zero carries the block's discontinuity. An empty chunk, one
+/// that does not fit in the block or in `kHostBlockMaxFrames`, or a counter
+/// that would overflow is refused with `OutOfRange` and leaves `out`
+/// untouched. Event times are made chunk-relative by subtracting `offset`.
+inline HostEventResult host_block_chunk(const HostBlockClock& block, std::size_t offset,
+                                        std::size_t frames, HostBlockClock& out) noexcept {
+    if (frames == 0 || frames > kHostBlockMaxFrames || offset > block.frames ||
+        frames > block.frames - offset)
+        return HostEventResult::OutOfRange;
+    constexpr auto kMax = static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+    if (offset > kMax)
+        return HostEventResult::OutOfRange;
+    const auto step = static_cast<std::int64_t>(offset);
+    HostBlockClock chunk = block;
+    chunk.frames = frames;
+    chunk.discontinuity = block.discontinuity && offset == 0;
+    if (block.steady_sample >= 0) {
+        if (block.steady_sample > std::numeric_limits<std::int64_t>::max() - step)
+            return HostEventResult::OutOfRange;
+        chunk.steady_sample = block.steady_sample + step;
+    }
+    if (block.has_transport_sample && block.transport_playing) {
+        if ((step > 0 && block.transport_sample > std::numeric_limits<std::int64_t>::max() - step))
+            return HostEventResult::OutOfRange;
+        chunk.transport_sample = block.transport_sample + step;
+    }
+    out = chunk;
+    return HostEventResult::Accepted;
+}
 
 class HostBlockTimeline final {
   public:
@@ -273,6 +350,28 @@ class HostBlockTimeline final {
     bool prev_transport_valid_ = false;
 };
 
+/// Place the block a format adapter handed `Processor::process()` on
+/// `timeline`, from the neutral facts on `ctx.timing`. This is the per-block
+/// step of a Processor or host binding that owns an event timeline. A block
+/// longer than `kHostBlockMaxFrames` is refused with `OutOfRange`; split it
+/// with `host_block_chunk()` first.
+inline HostEventResult advance_from_context(HostBlockTimeline& timeline,
+                                            const format::ProcessContext& ctx,
+                                            HostBlockWindow& window) noexcept {
+    return timeline.advance(clock_from_process_context(ctx), window);
+}
+
+/// Build a `HostEventRecord` from a signed block-relative offset, such as the
+/// `midi::MidiEvent::sample_offset` an adapter delivered with the block. A
+/// negative offset, or one at or past the window's frame count, is refused
+/// with `OutOfRange` and never clamped; `out` is written only on success.
+inline HostEventResult make_record_from_block_offset(const HostBlockTimeline& timeline,
+                                                     const HostBlockWindow& window,
+                                                     std::int64_t offset, std::uint32_t producer,
+                                                     std::uint64_t producer_sequence,
+                                                     const midi::MidiEvent& event,
+                                                     HostEventRecord& out) noexcept;
+
 // ---------------------------------------------------------------------------
 // Format timing inputs
 //
@@ -295,10 +394,23 @@ inline HostEventResult host_block_time_from_offset(std::int64_t offset,
     return HostEventResult::Accepted;
 }
 
+inline HostEventResult make_record_from_block_offset(const HostBlockTimeline& timeline,
+                                                     const HostBlockWindow& window,
+                                                     std::int64_t offset, std::uint32_t producer,
+                                                     std::uint64_t producer_sequence,
+                                                     const midi::MidiEvent& event,
+                                                     HostEventRecord& out) noexcept {
+    std::uint32_t block_time = 0;
+    if (const auto result = host_block_time_from_offset(offset, block_time);
+        result != HostEventResult::Accepted)
+        return result;
+    return timeline.make_record(window, block_time, producer, producer_sequence, event, out);
+}
+
 /// `Steinberg::Vst::ProcessContext::StatesAndFlags::kPlaying`.
-inline constexpr std::uint32_t kVst3ContextPlaying = 1u << 1;
+inline constexpr std::uint32_t kVst3ContextPlaying = format::kVst3ContextPlaying;
 /// `Steinberg::Vst::ProcessContext::StatesAndFlags::kContTimeValid`.
-inline constexpr std::uint32_t kVst3ContextContTimeValid = 1u << 17;
+inline constexpr std::uint32_t kVst3ContextContTimeValid = format::kVst3ContextContTimeValid;
 
 /// One VST3 `process()` call's timing facts.
 ///
@@ -338,27 +450,21 @@ struct Vst3BlockTiming {
 /// transport. A non-positive `numSamples` maps to zero frames, which
 /// `advance()` refuses.
 inline constexpr HostBlockClock clock_from_vst3(const Vst3BlockTiming& timing) noexcept {
-    HostBlockClock clock;
-    clock.frames = timing.num_samples > 0 ? static_cast<std::size_t>(timing.num_samples) : 0;
-    clock.discontinuity = timing.discontinuity;
-    if (!timing.has_process_context)
-        return clock;
-    if ((timing.state & kVst3ContextContTimeValid) != 0 && timing.continuous_time_samples >= 0)
-        clock.steady_sample = timing.continuous_time_samples;
-    clock.has_transport_sample = true;
-    clock.transport_sample = timing.project_time_samples;
-    clock.transport_playing =
-        (timing.state & kVst3ContextPlaying) != 0 && !timing.transport_non_unit_rate;
-    return clock;
+    return clock_from_process_timing(
+        format::vst3_process_timing(timing.has_process_context, timing.state,
+                                    timing.project_time_samples,
+                                    timing.continuous_time_samples,
+                                    timing.transport_non_unit_rate, timing.discontinuity),
+        timing.num_samples > 0 ? static_cast<std::size_t>(timing.num_samples) : 0);
 }
 
 /// `kAudioTimeStampSampleTimeValid` from CoreAudioTypes.
-inline constexpr std::uint32_t kAuTimeStampSampleTimeValid = 1u << 0;
+inline constexpr std::uint32_t kAuTimeStampSampleTimeValid = format::kAuTimeStampSampleTimeValid;
 /// `AUEventSampleTimeImmediate` from AudioToolbox: event times in
 /// `[immediate, immediate + kAuImmediateWindow)` are already block offsets.
 inline constexpr std::int64_t kAuEventSampleTimeImmediate =
     static_cast<std::int64_t>(0xffffffff00000000ULL);
-inline constexpr std::int64_t kAuImmediateWindow = 4096;
+inline constexpr std::int64_t kAuImmediateWindow = format::detail::kAuImmediateWindow;
 
 /// One Audio Unit render call's timing facts (AUv2 `Render` / AUv3 render
 /// block).
@@ -392,18 +498,6 @@ struct AuBlockTiming {
     bool transport_non_unit_rate = false;
 };
 
-namespace detail {
-/// Nearest integer sample to a host double, using the same rounding the AU
-/// adapters apply to host positions (REAPER reports 13823.9999 for 13824).
-inline bool au_host_sample(double samples, std::int64_t& out) noexcept {
-    const auto rounded = format::detail::host_sample_position(samples);
-    if (!rounded)
-        return false;
-    out = *rounded;
-    return true;
-}
-} // namespace detail
-
 /// Map an Audio Unit render call onto `HostBlockClock`.
 ///
 /// `mSampleTime` is the host's render sample counter, which keeps running
@@ -414,19 +508,12 @@ inline bool au_host_sample(double samples, std::int64_t& out) noexcept {
 /// succeeded and the position is representable; it counts as playing only
 /// while moving at unit rate (`transport_non_unit_rate` unset).
 inline HostBlockClock clock_from_au(const AuBlockTiming& timing) noexcept {
-    HostBlockClock clock;
-    clock.frames = timing.frames;
-    clock.discontinuity = timing.discontinuity;
-    std::int64_t sample = 0;
-    if ((timing.timestamp_flags & kAuTimeStampSampleTimeValid) != 0 &&
-        detail::au_host_sample(timing.sample_time, sample) && sample >= 0)
-        clock.steady_sample = sample;
-    if (timing.has_transport && detail::au_host_sample(timing.transport_sample_position, sample)) {
-        clock.has_transport_sample = true;
-        clock.transport_sample = sample;
-        clock.transport_playing = timing.transport_moving && !timing.transport_non_unit_rate;
-    }
-    return clock;
+    return clock_from_process_timing(
+        format::au_process_timing(timing.timestamp_flags, timing.sample_time,
+                                  timing.has_transport, timing.transport_moving,
+                                  timing.transport_sample_position,
+                                  timing.transport_non_unit_rate, timing.discontinuity),
+        timing.frames);
 }
 
 /// Convert an AUv3 render event's `eventSampleTime` to a block-relative time.
@@ -440,23 +527,14 @@ inline HostBlockClock clock_from_au(const AuBlockTiming& timing) noexcept {
 inline HostEventResult au_event_block_time(std::int64_t event_sample_time,
                                            const AuBlockTiming& timing,
                                            std::uint32_t& block_time) noexcept {
-    std::int64_t offset = 0;
-    if (event_sample_time >= kAuEventSampleTimeImmediate &&
-        event_sample_time < kAuEventSampleTimeImmediate + kAuImmediateWindow) {
-        offset = event_sample_time - kAuEventSampleTimeImmediate;
-    } else {
-        std::int64_t start = 0;
-        if ((timing.timestamp_flags & kAuTimeStampSampleTimeValid) == 0 ||
-            !detail::au_host_sample(timing.sample_time, start))
-            return HostEventResult::OutOfRange;
-        if ((start > 0 && event_sample_time < std::numeric_limits<std::int64_t>::min() + start) ||
-            (start < 0 && event_sample_time > std::numeric_limits<std::int64_t>::max() + start))
-            return HostEventResult::OutOfRange;
-        offset = event_sample_time - start;
-    }
-    if (offset < 0 || offset >= static_cast<std::int64_t>(timing.frames))
+    std::optional<double> block_sample_time;
+    if ((timing.timestamp_flags & kAuTimeStampSampleTimeValid) != 0)
+        block_sample_time = timing.sample_time;
+    const auto offset = format::detail::au_event_raw_offset(
+        event_sample_time, kAuEventSampleTimeImmediate, block_sample_time);
+    if (!offset || *offset < 0 || *offset >= static_cast<std::int64_t>(timing.frames))
         return HostEventResult::OutOfRange;
-    block_time = static_cast<std::uint32_t>(offset);
+    block_time = static_cast<std::uint32_t>(*offset);
     return HostEventResult::Accepted;
 }
 
@@ -496,15 +574,10 @@ struct Lv2BlockTiming {
 /// compared with the block length and a relocation at that speed is not
 /// detected unless the adapter sets `discontinuity`.
 inline constexpr HostBlockClock clock_from_lv2(const Lv2BlockTiming& timing) noexcept {
-    HostBlockClock clock;
-    clock.frames = timing.sample_count;
-    clock.discontinuity = timing.discontinuity;
-    if (!timing.has_frame)
-        return clock;
-    clock.has_transport_sample = true;
-    clock.transport_sample = timing.frame;
-    clock.transport_playing = timing.has_speed && timing.speed == 1.0;
-    return clock;
+    return clock_from_process_timing(
+        format::lv2_process_timing(timing.has_frame, timing.frame, timing.has_speed, timing.speed,
+                                   timing.discontinuity),
+        timing.sample_count);
 }
 
 /// Convert an LV2 atom event's time stamp to a block-relative time.

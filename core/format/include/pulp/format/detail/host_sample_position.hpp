@@ -10,6 +10,8 @@
 // forward on the next block, so the position is rounded to the nearest sample.
 // The same rounding places AUv3 render events within the block and stamps
 // AUv3 MIDI output, and bounds CLAP's seconds-to-samples conversion.
+// `au_event_raw_offset()` is the event placement both the legacy MIDI path
+// and the host event timeline share; each applies its own range policy.
 //
 // Header-only and SDK-free so it is unit-testable without the AU SDK.
 
@@ -34,27 +36,47 @@ inline std::optional<std::int64_t> host_sample_position(double samples) noexcept
     return static_cast<std::int64_t>(rounded);
 }
 
+/// Width of the `AUEventSampleTimeImmediate` window: event times in
+/// [immediate, immediate + kAuImmediateWindow) are already block offsets.
+inline constexpr std::int64_t kAuImmediateWindow = 4096;
+
+/// The unbounded offset of an AUv3 render event from its block's first frame,
+/// or nullopt when the event cannot be placed. `immediate` is
+/// AUEventSampleTimeImmediate. A time inside the immediate window is already an
+/// offset. Any other time is absolute on the `mSampleTime` axis and is placed
+/// against `block_sample_time` rounded to the nearest sample; when the block
+/// time is absent or unrepresentable, or the difference overflows, the event
+/// cannot be placed.
+///
+/// The result is not range-checked. Each caller applies its own policy: the
+/// legacy MIDI path clamps (`au_event_block_offset`), while the host timeline
+/// refuses anything outside the block (`pulp::host::au_event_block_time`).
+inline std::optional<std::int64_t> au_event_raw_offset(std::int64_t event_sample_time,
+                                                       std::int64_t immediate,
+                                                       std::optional<double> block_sample_time) noexcept {
+    if (event_sample_time >= immediate && event_sample_time < immediate + kAuImmediateWindow)
+        return event_sample_time - immediate;
+    if (!block_sample_time)
+        return std::nullopt;
+    const auto start = host_sample_position(*block_sample_time);
+    // Portable overflow check (MSVC builds this header too).
+    if (!start || (*start > 0 && event_sample_time < INT64_MIN + *start) ||
+        (*start < 0 && event_sample_time > INT64_MAX + *start))
+        return std::nullopt;
+    return event_sample_time - *start;
+}
+
 /// An AUv3 render event's offset into the block, clamped to
-/// [0, frame_count - 1]. `immediate` is AUEventSampleTimeImmediate: times in
-/// [immediate, immediate + 4096) are already block offsets. Otherwise the
-/// offset is the event time minus the block's start, `block_sample_time`
-/// rounded to the nearest sample; when the block time is unavailable or
-/// unrepresentable (or the difference overflows), the event time itself is
-/// taken as the offset.
+/// [0, frame_count - 1]. The offset is `au_event_raw_offset()`; when that
+/// cannot place the event, the event time itself is taken as the offset. This
+/// is the legacy MIDI delivery policy: an out-of-block time is moved to the
+/// nearest block edge rather than dropped.
 inline std::int32_t au_event_block_offset(std::int64_t event_sample_time, std::int64_t immediate,
                                           std::optional<double> block_sample_time,
                                           std::uint32_t frame_count) noexcept {
-    constexpr std::int64_t kImmediateWindow = 4096;
-    std::int64_t offset = event_sample_time;
-    if (event_sample_time >= immediate && event_sample_time < immediate + kImmediateWindow) {
-        offset = event_sample_time - immediate;
-    } else if (block_sample_time) {
-        // Portable overflow check (MSVC builds this header too).
-        const auto start = host_sample_position(*block_sample_time);
-        if (start && !(*start > 0 && event_sample_time < INT64_MIN + *start) &&
-            !(*start < 0 && event_sample_time > INT64_MAX + *start))
-            offset = event_sample_time - *start;
-    }
+    const std::int64_t offset =
+        au_event_raw_offset(event_sample_time, immediate, block_sample_time)
+            .value_or(event_sample_time);
     if (offset < 0)
         return 0;
     if (frame_count > 0 && offset >= static_cast<std::int64_t>(frame_count))
