@@ -835,9 +835,11 @@ TEST_CASE("G12 prepared gain activation has one exact audio transition under pac
                   << " first_new_sample=" << observed.rows[observed.first_new].first_sample
                   << " latency_samples=" << observed.latency_samples
                   << " prepared_buffer_bytes=" << observed.prepared.total_prepared_buffer_bytes
-                  << " harness_payload_bytes=" << observed.rows.capacity() * sizeof(CallbackRow) +
-                                             observed.audio_bits.capacity() * sizeof(std::uint32_t) +
-                                             2 * kBlockFrames * sizeof(float)
+                  << " harness_payload_bytes="
+                  << observed.rows.capacity() * sizeof(CallbackRow) +
+                         observed.audio_bits.capacity() * sizeof(std::uint32_t) +
+                         2 * kBlockFrames * sizeof(float) +
+                         observed.wakes.capacity() * sizeof(pulp::test::paced::DeadlineTick)
                   << " missed_deadlines=" << observed.missed_deadlines << '\n';
         for (const auto& row : observed.rows)
             std::cout << "G12 raw routed=" << routed << " index=" << row.index
@@ -981,6 +983,7 @@ TEST_CASE("G12 paced activation receipt cell", "[.][host][graph][g12][activation
     const auto row_bytes = observed.rows.capacity() * sizeof(CallbackRow);
     const auto audio_bytes = observed.audio_bits.capacity() * sizeof(std::uint32_t);
     const auto io_bytes = 2 * frames * sizeof(float);
+    const auto wake_bytes = observed.wakes.capacity() * sizeof(pulp::test::paced::DeadlineTick);
     std::cout << "g12_paced_activation_v1\nG12_CELL rate=" << rate << " frames=" << frames
               << " backend=" << backend << " callbacks=" << callbacks
               << " compiled_source=" << pulp::runtime::kGitSha
@@ -1019,7 +1022,9 @@ TEST_CASE("G12 paced activation receipt cell", "[.][host][graph][g12][activation
               << " prepared_bytes=" << p.total_prepared_buffer_bytes
               << " row_stride=" << sizeof(CallbackRow) << " row_bytes=" << row_bytes
               << " audio_bytes=" << audio_bytes << " io_bytes=" << io_bytes
-              << " harness_payload_bytes=" << row_bytes + audio_bytes + io_bytes
+              << " wake_stride=" << sizeof(pulp::test::paced::DeadlineTick)
+              << " wake_bytes=" << wake_bytes
+              << " harness_payload_bytes=" << row_bytes + audio_bytes + io_bytes + wake_bytes
               << " misses=" << observed.missed_deadlines << '\n';
     for (const auto& row : observed.rows) {
         std::cout << "G12_ROW index=" << row.index << " sample=" << row.first_sample

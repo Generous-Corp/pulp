@@ -695,7 +695,7 @@ def record(args: argparse.Namespace) -> int:
 
 # The paced publication lane has its own type and dimensions. The offline v2
 # receipt above continues to require its original 40 cells and batch semantics.
-ACTIVATION_SCHEMA = "pulp.graph_paced_activation_receipt.v1"
+ACTIVATION_SCHEMA = "pulp.graph_paced_activation_receipt.v2"
 ACTIVATION_FIXTURE = "g12_paced_activation_v1"
 ACTIVATION_SOURCE = Path("test/fixtures/g5_graph_event_rt_cases.inc")
 ACTIVATION_RATES = (44100, 48000, 96000)
@@ -709,14 +709,16 @@ ACTIVATION_CONTRACT = {
     "audio": "mono float32 input 0.5; gain 0.5 then 1; every sample retained as lossless hex RLE",
     "schedule": "fixed original origin; late callback never resets the schedule",
     "timing": "nearest-rank p99 callback duration <70% block; p99 absolute wake <0.1 sample; zero deadline misses",
-    "resources": "prepared buffer components and retained harness payload; excludes stack/allocator/RSS",
+    "resources": "prepared buffer components and retained harness payload (callback rows, audio, I/O "
+                 "and wake records); excludes stack/allocator/RSS",
     "safety": "timing runs use no scoped probes; RTSan is separate source/binary-bound evidence",
     "scope": "three nodes/two edges, zero voices/grains/PDC; not WCET or full G12 qualification",
 }
 ACTIVATION_META = frozenset("rate frames backend callbacks prepare_start_ns prepare_end_ns request_ns return_ns "
     "committed first_new first_new_sample latency_samples snapshot_latency snapshot_nodes snapshot_edges "
     "node_latencies edge_delays nodes edges voices grains probes node_audio_bytes automation_bytes delay_bytes "
-    "spectral_bytes prepared_bytes row_stride row_bytes audio_bytes io_bytes harness_payload_bytes misses "
+    "spectral_bytes prepared_bytes row_stride row_bytes audio_bytes io_bytes wake_stride wake_bytes "
+    "harness_payload_bytes misses "
     "executor_blocks parallel_levels parallel_enabled walk_fallbacks execution_failures "
     "compiled_source build_type build_dirty".split())
 
@@ -805,7 +807,9 @@ def validate_activation_cell(cell: dict[str, Any]) -> dict[str, Any]:
              meta["prepared_bytes"] == frames * 6 * 4, "prepared buffer components mismatch")
     _require(meta["row_stride"] == 72 and meta["row_bytes"] == count * meta["row_stride"] and
              meta["audio_bytes"] == count * frames * 4 and meta["io_bytes"] == 2 * frames * 4 and
-             meta["harness_payload_bytes"] == meta["row_bytes"] + meta["audio_bytes"] + meta["io_bytes"],
+             meta["wake_stride"] == 56 and meta["wake_bytes"] == count * meta["wake_stride"] and
+             meta["harness_payload_bytes"] == meta["row_bytes"] + meta["audio_bytes"] + meta["io_bytes"] +
+             meta["wake_bytes"],
              "harness retained payload mismatch")
     durations, wake = [], []
     misses = 0

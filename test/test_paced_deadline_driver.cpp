@@ -20,13 +20,20 @@ using pulp::test::paced::WakeConfig;
 
 // A scripted clock: every clock read costs `read_cost_ns`, a kernel wait wakes
 // `overshoot_ns` after its deadline, and each spin step burns `relax_ns` of
-// both wall and thread CPU time.
+// both wall and thread CPU time. Each kernel call burns `kernel_call_ns` of
+// wall and CPU time. `native_skew_ns` models a clock mapping that converts
+// every deadline that much early: the wait wakes before the measurement-clock
+// deadline, and a wait on a deadline the native clock has passed returns at
+// once.
 struct ScriptedPlatform {
     std::int64_t now = 1'000'000'000;
     std::int64_t cpu = 0;
     std::int64_t read_cost_ns = 100;
     std::int64_t overshoot_ns = 5'000;
     std::int64_t relax_ns = 200;
+    std::int64_t kernel_call_ns = 0;
+    std::int64_t native_skew_ns = 0;
+    std::int64_t mapping_skew_ns = 0;
     bool fail_kernel_wait = false;
     std::vector<std::int64_t> kernel_deadlines;
     std::vector<std::int64_t> sleeps;
@@ -37,11 +44,17 @@ struct ScriptedPlatform {
     }
     bool kernel_wait_until(std::int64_t deadline) {
         kernel_deadlines.push_back(deadline);
+        now += kernel_call_ns;
+        cpu += kernel_call_ns;
         if (fail_kernel_wait)
             return false;
-        if (now < deadline)
-            now = deadline + overshoot_ns;
+        const auto native_deadline = deadline - native_skew_ns;
+        if (now < native_deadline)
+            now = native_deadline + overshoot_ns;
         return true;
+    }
+    std::int64_t clock_mapping_skew_ns() const {
+        return mapping_skew_ns;
     }
     void sleep_until_ns(std::int64_t deadline) {
         sleeps.push_back(deadline);
@@ -266,6 +279,82 @@ TEST_CASE("Paced deadline driver bounds the spin and still never starts early",
     CHECK(quiet.sleeps.empty());
 }
 
+TEST_CASE("Paced deadline driver bounds and accounts kernel retries under a skewed clock mapping",
+          "[paced][deadline-driver]") {
+    // Every kernel deadline lands 1 ms early, so after the first wake each
+    // retry returns at once until the measurement clock reaches the guard.
+    ScriptedPlatform platform;
+    platform.native_skew_ns = 1'000'000;
+    platform.mapping_skew_ns = 1'000'000;
+    platform.overshoot_ns = 0;
+    platform.kernel_call_ns = 400;
+    ScriptedDriver driver(platform, kRate, kFrames, fixed_guard(50'000));
+    CHECK(driver.settings().clock_mapping_skew_ns == 1'000'000);
+    const auto limit = driver.settings().spin_limit_ns;
+    const auto retry_cost = platform.kernel_call_ns + platform.read_cost_ns;
+    driver.start();
+    for (std::size_t i = 0; i < 4; ++i) {
+        platform.kernel_deadlines.clear();
+        platform.sleeps.clear();
+        const auto tick = driver.wait(i);
+        INFO("index=" << i);
+        CHECK(tick.spin_overrun);
+        CHECK(tick.kernel_retries > 0);
+        // The retries stop at the spin limit, not at the guard deadline.
+        CHECK(tick.kernel_retries <= static_cast<std::uint32_t>(limit / retry_cost + 2));
+        CHECK(platform.kernel_deadlines.size() == tick.kernel_retries + 1u);
+        // Their CPU cost is recorded as spin cost.
+        CHECK(tick.spin_cpu_ns >=
+              static_cast<std::int64_t>(tick.kernel_retries) * platform.kernel_call_ns);
+        // The overrun falls back to a blocking wait and still never starts early.
+        REQUIRE(platform.sleeps.size() == 1);
+        CHECK(platform.sleeps.front() == tick.target_ns);
+        CHECK(tick.start_ns >= tick.target_ns);
+        CHECK(tick.kernel_wake_ns <= tick.start_ns);
+    }
+
+    // Control: the same retry cost with an exact mapping issues one wait.
+    ScriptedPlatform exact;
+    exact.overshoot_ns = 0;
+    exact.kernel_call_ns = 400;
+    ScriptedDriver control(exact, kRate, kFrames, fixed_guard(50'000));
+    CHECK(control.settings().clock_mapping_skew_ns == 0);
+    control.start();
+    const auto tick = control.wait(0);
+    CHECK_FALSE(tick.spin_overrun);
+    CHECK(tick.kernel_retries == 0);
+    CHECK(exact.kernel_deadlines.size() == 1);
+}
+
+TEST_CASE("Paced clock mapping keeps a narrow bracket and flags a preempted one",
+          "[paced][deadline-driver]") {
+    using pulp::test::paced::bracket_clock_mapping;
+    // The first bracket was preempted for 5 ms; the second is 200 ns wide.
+    const std::vector<std::int64_t> steady{0, 5'000'000, 6'000'000, 6'000'200};
+    std::size_t at = 0;
+    std::uint64_t native_reads = 0;
+    const auto mapping = bracket_clock_mapping([&] { return steady.at(at++); },
+                                               [&] { return ++native_reads * 1000; });
+    CHECK(mapping.ok);
+    CHECK(mapping.attempts == 2);
+    CHECK(mapping.skew_ns == 200);
+    CHECK(mapping.steady_ns == 6'000'100);
+    CHECK(mapping.native == 2000);
+
+    // Every bracket is preempted: the narrowest is kept and flagged.
+    std::int64_t t = 0;
+    const auto skewed = bracket_clock_mapping(
+        [&] {
+            t += 50'000;
+            return t;
+        },
+        [] { return std::uint64_t{7}; });
+    CHECK_FALSE(skewed.ok);
+    CHECK(skewed.attempts == pulp::test::paced::kClockMappingAttempts);
+    CHECK(skewed.skew_ns == 50'000);
+    CHECK(skewed.skew_ns > pulp::test::paced::kMaxClockMappingSkewNs);
+}
+
 TEST_CASE("Paced deadline driver counts kernel wait failures and still honours the target",
           "[paced][deadline-driver]") {
     ScriptedPlatform platform;
@@ -339,6 +428,9 @@ TEST_CASE("Paced deadline driver on the system clock releases every callback at 
     pulp::test::paced::SystemWakePlatform platform;
     pulp::test::paced::DeadlineDriver driver(platform, kRate, kFrames, WakeConfig{});
     const auto& settings = driver.settings();
+    CHECK(platform.clock_mapping().attempts >= 1);
+    CHECK(settings.clock_mapping_skew_ns == platform.clock_mapping_skew_ns());
+    CHECK(settings.clock_mapping_skew_ns >= 0);
     CHECK(settings.guard_source == "calibrated");
     CHECK(settings.guard_ns >= pulp::test::paced::kMinGuardNs);
     CHECK(settings.guard_ns <= settings.guard_bound_ns);

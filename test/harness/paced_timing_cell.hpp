@@ -306,7 +306,8 @@ inline void print_wake(const WakeSettings& wake) {
               << " cpu_clock_resolution_ns=" << wake.cpu_clock_resolution_ns
               << " inject_late_us=" << wake.inject_late_us
               << " inject_late_every=" << wake.inject_late_every
-              << " wait_failures=" << wake.wait_failures << '\n';
+              << " wait_failures=" << wake.wait_failures
+              << " clock_mapping_skew_ns=" << wake.clock_mapping_skew_ns << '\n';
 }
 
 inline std::uint64_t env_integer(const char* key, std::uint64_t fallback) {

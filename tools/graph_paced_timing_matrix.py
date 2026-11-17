@@ -77,7 +77,8 @@ TIMING_RULE = (
     "realtime scheduling and every registered fixture cell's callback thread must have obtained "
     "and read back a real-time class (time_constraint or fifo); the run must request the "
     "deadline-spin wake backend with no injected lateness, and no cell may record a spin "
-    "overrun or a kernel wait failure")
+    "overrun, a kernel wait failure or a kernel clock mapping wider than "
+    "clock_mapping_skew_ns 20 us")
 
 ADMISSION_RULE = ("admit when os.getloadavg()[0] <= max_load_per_cpu x os.cpu_count(); "
                   "qualification refuses to start otherwise and is disqualified when the "
@@ -108,13 +109,14 @@ WAKE_INT_FIELDS = ("guard_ns", "guard_bound_ns", "guard_clamped", "spin_limit_ns
                    "calibration_samples", "calibration_p50_ns", "calibration_p99_ns",
                    "calibration_max_ns", "timebase_numer", "timebase_denom",
                    "cpu_clock_resolution_ns", "inject_late_us", "inject_late_every",
-                   "wait_failures")
+                   "wait_failures", "clock_mapping_skew_ns")
 WAKE_STR_FIELDS = ("backend", "kernel_wait", "guard_source")
 # Mirrors paced_deadline_driver.hpp.
 MIN_GUARD_NS = 20_000
 MAX_GUARD_NS = 2_000_000
 GUARD_MARGIN_NS = 10_000
 MAX_CALIBRATION_SAMPLES = 4096
+MAX_CLOCK_MAPPING_SKEW_NS = 20_000
 DEFAULT_CALIBRATION_SAMPLES = 64
 LATE_ON_TIME, LATE_ENTERED, LATE_KERNEL_OVERSHOT = 0, 1, 2
 WAKE_RULE = (
@@ -123,7 +125,10 @@ WAKE_RULE = (
     "original target; deadline-spin waits in the kernel on an absolute deadline (mach_wait_until "
     "on macOS, clock_nanosleep TIMER_ABSTIME on Linux) until guard_ns before the target, then "
     "spins on the measurement clock to the target, falling back to a kernel wait when the spin "
-    "outlives spin_limit_ns (a spin overrun); a calibrated guard is the nearest-rank p99 "
+    "outlives spin_limit_ns (a spin overrun); kernel wait retries after the first return share the "
+    "spin limit and the spin CPU cost; the kernel deadline mapping brackets one native clock read "
+    "between two measurement clock reads and records the bracket width as clock_mapping_skew_ns; "
+    "a calibrated guard is the nearest-rank p99 "
     "overshoot of calibration_samples 200 us kernel waits plus 10 us, clamped to [20 us, "
     "clamp(period / 4, 20 us, 2 ms)]; each row records the kernel wake, the callback start and "
     "the thread CPU time spent spinning; sleep-until is the plain sleep_until A/B baseline and "
@@ -342,6 +347,7 @@ def parse_wake_line(stdout: str) -> dict[str, Any]:
              "unknown wake backend or guard source")
     _require(wake["inject_late_every"] >= 1 and wake["inject_late_us"] >= 0 and
              wake["wait_failures"] >= 0 and wake["guard_clamped"] in (0, 1) and
+             wake["clock_mapping_skew_ns"] >= 0 and
              wake["timebase_numer"] > 0 and wake["timebase_denom"] > 0,
              "wake settings out of range")
     if wake["guard_source"] == "none":
@@ -862,6 +868,8 @@ def disqualifiers_for(receipt: dict[str, Any]) -> list[str]:
             reasons.append(f"spin_overrun:{tag}")
         if cell["wake"]["wait_failures"]:
             reasons.append(f"wake_wait_failed:{tag}")
+        if cell["wake"]["clock_mapping_skew_ns"] > MAX_CLOCK_MAPPING_SKEW_NS:
+            reasons.append(f"clock_mapping_skewed:{tag}")
     return reasons
 
 

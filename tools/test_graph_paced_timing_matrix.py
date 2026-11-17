@@ -449,7 +449,9 @@ else:
     wake = m.format_wake_line("deadline-spin", "mach_wait_until", source, guard_ns=guard,
                               guard_bound_ns=bound, spin_limit_ns=limit, timebase_numer=125,
                               timebase_denom=3, cpu_clock_resolution_ns=1000,
-                              wait_failures=failures, **inject, **extra)
+                              wait_failures=failures,
+                              clock_mapping_skew_ns=50000 if wake_behaviour == "skewed" else 0,
+                              **inject, **extra)
 text = text.replace(old_wake, wake)
 if wake_behaviour == "overrun":
     lines = text.splitlines()
@@ -609,7 +611,7 @@ class QualificationRuleTest(unittest.TestCase):
                           "callbacks": matrix.QUALIFICATION_CALLBACKS, "returncode": 0,
                           "compiled_source": "a" * 40, "build_dirty": 0, "build_type": "Release",
                           "scheduling": {"status": "obtained", "obtained": "time_constraint"},
-                          "wake": {"wait_failures": 0},
+                          "wake": {"wait_failures": 0, "clock_mapping_skew_ns": 0},
                           "metrics": {"thresholds_met": True, "spin_overruns": 0}})
         return {"mode": "qualification", "status": "COMPLETE",
                 "requested": {"callbacks": matrix.QUALIFICATION_CALLBACKS,
@@ -642,6 +644,8 @@ class QualificationRuleTest(unittest.TestCase):
             "injected_lateness": lambda r: r["wake"]["requested"].__setitem__("inject_late_us", 500),
             "spin_overrun:": lambda r: r["cells"][5]["metrics"].__setitem__("spin_overruns", 1),
             "wake_wait_failed:": lambda r: r["cells"][6]["wake"].__setitem__("wait_failures", 1),
+            "clock_mapping_skewed:": lambda r: r["cells"][7]["wake"].__setitem__(
+                "clock_mapping_skew_ns", matrix.MAX_CLOCK_MAPPING_SKEW_NS + 1),
         }
         for reason, mutate in defects.items():
             receipt = self.ideal()
@@ -839,6 +843,9 @@ class WakeTest(unittest.TestCase):
             (good + "\n" + good, "exactly one wake line"),
             ("", "exactly one wake line"),
             (good.replace("guard_ns=20000", "guard_ns=x"), "malformed wake integer"),
+            (good.replace("clock_mapping_skew_ns=0", "clock_mapping_skew_ns=-1"),
+             "wake settings out of range"),
+            (good.replace(" clock_mapping_skew_ns=0", ""), "malformed wake line"),
         ):
             with self.subTest(line=line):
                 with self.assertRaisesRegex(matrix.MatrixError, message):
@@ -994,6 +1001,7 @@ class WakeTest(unittest.TestCase):
             (dict(wake={"inject_late_us": 4_000, "inject_late_every": 3}), "injected_lateness"),
             (dict(wake_behaviour="overrun"), f"spin_overrun:{tag}"),
             (dict(wake_behaviour="fail"), f"wake_wait_failed:{tag}"),
+            (dict(wake_behaviour="skewed"), f"clock_mapping_skewed:{tag}"),
         ):
             with self.subTest(reason=reason), tempfile.TemporaryDirectory() as tmp:
                 receipt, code = fake_record(Path(tmp), **kwargs)

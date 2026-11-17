@@ -14,7 +14,16 @@
 // thread, after its scheduling class is applied, from the observed kernel
 // wake overshoot, and is clamped to a bound derived from the block period.
 // The spin is bounded too: a spin that outlives its limit falls back to a
-// kernel wait for the target and is flagged as an overrun.
+// kernel wait for the target and is flagged as an overrun. Kernel-wait retries
+// after the first return count as spin work: they share the spin limit and the
+// spin CPU cost, because a wait on a deadline the kernel already considers
+// passed returns at once and would otherwise busy-wait unaccounted.
+//
+// The kernel deadline is converted from the measurement clock through one
+// mapping sampled at construction. The two clocks are read separately, so the
+// mapping brackets the native read between two measurement reads and retries
+// until the bracket is narrow; the residual skew is recorded so a run with a
+// skewed mapping can be disqualified rather than trusted.
 //
 // "sleep-until" keeps the plain std::this_thread::sleep_until wait. It exists
 // only as the A/B baseline for the deadline backend and never qualifies.
@@ -83,6 +92,11 @@ inline constexpr std::int64_t kGuardMarginNs = 10'000;
 inline constexpr std::int64_t kCalibrationWaitNs = 200'000;
 inline constexpr std::uint32_t kMaxCalibrationSamples = 4096;
 
+// Widest accepted bracket around the native clock read when mapping the
+// measurement clock onto the kernel's absolute-deadline clock.
+inline constexpr std::int64_t kMaxClockMappingSkewNs = 20'000;
+inline constexpr int kClockMappingAttempts = 16;
+
 inline std::int64_t guard_bound_ns(std::int64_t period_ns) {
     return std::clamp<std::int64_t>(period_ns / 4, kMinGuardNs, kMaxGuardNs);
 }
@@ -106,7 +120,50 @@ struct WakeSettings {
     std::uint64_t inject_late_us = 0;
     std::uint64_t inject_late_every = 1;
     int wait_failures = 0;
+    // Width of the narrowest measurement-clock bracket around the native read
+    // that fixed the kernel deadline mapping. Above kMaxClockMappingSkewNs the
+    // mapping may bias every kernel deadline and the run is disqualified.
+    std::int64_t clock_mapping_skew_ns = 0;
 };
+
+// A measurement-clock instant paired with a native-clock instant. The native
+// read happened somewhere inside a bracket `skew_ns` wide; `steady_ns` is the
+// bracket midpoint, so the pairing error is at most half the skew.
+struct ClockMapping {
+    std::int64_t steady_ns = 0;
+    std::uint64_t native = 0;
+    std::int64_t skew_ns = 0;
+    int attempts = 0;
+    bool ok = false;
+};
+
+// Samples steady, native, steady up to `attempts` times and keeps the narrowest
+// bracket, stopping early once one is within `max_skew_ns`. `ok` is false when
+// no bracket was narrow enough: a preemption landed inside every attempt.
+template <class ReadSteady, class ReadNative>
+ClockMapping bracket_clock_mapping(ReadSteady&& read_steady, ReadNative&& read_native,
+                                   std::int64_t max_skew_ns = kMaxClockMappingSkewNs,
+                                   int attempts = kClockMappingAttempts) {
+    ClockMapping best;
+    bool have = false;
+    for (int i = 0; i < std::max(1, attempts); ++i) {
+        const std::int64_t before = read_steady();
+        const std::uint64_t native = read_native();
+        const std::int64_t after = read_steady();
+        const auto skew = std::max<std::int64_t>(0, after - before);
+        best.attempts = i + 1;
+        if (!have || skew < best.skew_ns) {
+            have = true;
+            best.steady_ns = before + skew / 2;
+            best.native = native;
+            best.skew_ns = skew;
+        }
+        if (skew <= max_skew_ns)
+            break;
+    }
+    best.ok = best.skew_ns <= max_skew_ns;
+    return best;
+}
 
 // How a callback met its target.
 enum class Lateness : std::uint8_t {
@@ -126,6 +183,8 @@ struct DeadlineTick {
     std::int64_t spin_cpu_ns = 0;
     Lateness lateness = Lateness::on_time;
     bool spin_overrun = false;
+    // Kernel waits issued after the first one returned before its deadline.
+    std::uint32_t kernel_retries = 0;
 };
 
 // Real platform: steady_clock is the measurement clock; the kernel wait uses
@@ -140,14 +199,32 @@ class SystemWakePlatform {
             numer_ = timebase.numer;
             denom_ = timebase.denom;
         }
-        mach_origin_ = mach_absolute_time();
-        steady_origin_ns_ = now_ns();
+        mapping_ = bracket_clock_mapping([this] { return now_ns(); },
+                                         [] { return std::uint64_t{mach_absolute_time()}; });
+        mach_origin_ = mapping_.native;
+        steady_origin_ns_ = mapping_.steady_ns;
 #elif defined(__linux__)
-        timespec now{};
-        clock_gettime(CLOCK_MONOTONIC, &now);
-        monotonic_origin_ns_ = static_cast<std::int64_t>(now.tv_sec) * 1'000'000'000 + now.tv_nsec;
-        steady_origin_ns_ = now_ns();
+        mapping_ = bracket_clock_mapping(
+            [this] { return now_ns(); },
+            [] {
+                timespec now{};
+                clock_gettime(CLOCK_MONOTONIC, &now);
+                return static_cast<std::uint64_t>(
+                    static_cast<std::int64_t>(now.tv_sec) * 1'000'000'000 + now.tv_nsec);
+            });
+        monotonic_origin_ns_ = static_cast<std::int64_t>(mapping_.native);
+        steady_origin_ns_ = mapping_.steady_ns;
+#else
+        mapping_.ok = true;
+        mapping_.attempts = 1;
 #endif
+    }
+
+    const ClockMapping& clock_mapping() const {
+        return mapping_;
+    }
+    std::int64_t clock_mapping_skew_ns() const {
+        return mapping_.skew_ns;
     }
 
     std::int64_t now_ns() const {
@@ -244,6 +321,7 @@ class SystemWakePlatform {
     std::uint64_t numer_ = 1;
     std::uint64_t denom_ = 1;
     std::int64_t steady_origin_ns_ = 0;
+    ClockMapping mapping_;
 #if defined(__APPLE__)
     std::uint64_t mach_origin_ = 0;
 #elif defined(__linux__)
@@ -266,6 +344,7 @@ template <class Platform> class BasicDeadlineDriver {
         settings_.timebase_denom = platform.timebase_denom();
         settings_.cpu_clock_resolution_ns = platform.cpu_clock_resolution_ns();
         settings_.guard_bound_ns = guard_bound_ns(period_ns());
+        settings_.clock_mapping_skew_ns = platform.clock_mapping_skew_ns();
         if (config.backend == WakeBackend::sleep_until) {
             settings_.kernel_wait = "sleep_until";
             return;
@@ -334,20 +413,38 @@ template <class Platform> class BasicDeadlineDriver {
             return tick;
         }
         const auto wake_deadline = tick.target_ns - settings_.guard_ns;
+        auto now = entry;
+        bool kernel_ok = true;
+        if (now < wake_deadline) {
+            kernel_ok = platform_.kernel_wait_until(wake_deadline);
+            if (!kernel_ok)
+                ++settings_.wait_failures;
+            now = platform_.now_ns();
+        }
+        // From the first kernel return to the release everything is spin
+        // work: one budget, one CPU measurement.
+        const auto spin_start = now;
+        const auto cpu_before = platform_.thread_cpu_ns();
         // A kernel wait can return early; wait again until the guard deadline.
-        for (auto now = entry; now < wake_deadline; now = platform_.now_ns()) {
+        // A deadline biased early by a skewed clock mapping makes each retry
+        // return at once, so retries are bounded by the spin limit.
+        while (kernel_ok && now < wake_deadline) {
+            if (now - spin_start > settings_.spin_limit_ns) {
+                tick.spin_overrun = true;
+                break;
+            }
+            ++tick.kernel_retries;
             if (!platform_.kernel_wait_until(wake_deadline)) {
                 ++settings_.wait_failures;
                 break;
             }
+            now = platform_.now_ns();
         }
-        tick.kernel_wake_ns = platform_.now_ns();
+        tick.kernel_wake_ns = now;
         tick.lateness =
             tick.kernel_wake_ns > tick.target_ns ? Lateness::kernel_overshot : Lateness::on_time;
-        const auto cpu_before = platform_.thread_cpu_ns();
-        auto now = platform_.now_ns();
-        while (now < tick.target_ns) {
-            if (now - tick.kernel_wake_ns > settings_.spin_limit_ns) {
+        while (!tick.spin_overrun && now < tick.target_ns) {
+            if (now - spin_start > settings_.spin_limit_ns) {
                 tick.spin_overrun = true;
                 break;
             }
