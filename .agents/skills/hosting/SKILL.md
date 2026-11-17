@@ -68,6 +68,15 @@ hostile-fixture, endpoint, sibling/PDC and production-mutation controls together
 Functional callback traps do not establish full realtime or A10 qualification;
 host death and deliberate group escape are outside first-mode custody.
 
+**The child-process session deadline is enforced again after the session
+callback returns.** `start_retained_with_standard_input_channel` rejects a
+session that completed after `standard_input_timeout_ms`, whatever deadlines the
+callback used inside it. The isolated launch carries two exchanges (hello, then
+the load report), so its session is `kLaunchSessionBudget` (two exchange
+budgets) and each exchange takes `launch_exchange_deadline(now, session)`. Give
+any new exchange inside a launch its own budget the same way and grow the session
+budget with it, or a slow earlier phase silently shortens the later one.
+
 **The Windows worker transport differs from the POSIX one in three places.**
 The control channel is an overlapped named pipe, so every transfer on either
 end must be overlapped and deadline-bounded (`isolated_clap_windows_channel.hpp`);
