@@ -21,16 +21,16 @@
 // X connection; we only create/reparent/map/blit on the UI thread. Visual is
 // CopyFromParent so colormap/depth match the parent.
 
-#include <pulp/view/plugin_view_host.hpp>
-#include <pulp/view/plugin_frame_renderer.hpp>  // shared with the Windows host
-#include <pulp/view/repaint_damage.hpp>  // compute_effective_damage (platform-free)
+#include <pulp/view/drag_drop.hpp>
 #include <pulp/view/host_frame_pump.hpp>
-#include <pulp/view/pointer_dispatch.hpp>
-#include <pulp/view/plugin_key_routing.hpp>
 #include <pulp/view/hover_cursor.hpp>
+#include <pulp/view/plugin_frame_renderer.hpp> // shared with the Windows host
+#include <pulp/view/plugin_key_routing.hpp>
+#include <pulp/view/plugin_view_host.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
+#include <pulp/view/repaint_damage.hpp> // compute_effective_damage (platform-free)
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/window_host.hpp>
-#include <pulp/view/drag_drop.hpp>
 
 #include "xdnd_parse.hpp"
 #include "x11_resize_echo.hpp"
@@ -51,25 +51,25 @@
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/trace.hpp>
 
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
 #include <X11/Xatom.h>
-#include <X11/keysym.h>
+#include <X11/Xlib.h>
+#include <X11/Xresource.h> // Xrm* — Xft.dpi lookup for HiDPI scale (L9)
+#include <X11/Xutil.h>
 #include <X11/cursorfont.h>
-#include <X11/Xresource.h>  // Xrm* — Xft.dpi lookup for HiDPI scale (L9)
+#include <X11/keysym.h>
 
 #include <atomic>
+#include <chrono> // XDND source drag deadline
 #include <cmath>
-#include <chrono>   // XDND source drag deadline
 #include <cstdint>
-#include <cstdlib>  // atof, malloc/free
+#include <cstdlib> // atof, malloc/free
 #include <cstring>
-#include <unistd.h>  // usleep (XDND source poll loop)
 #include <functional>
 #include <memory>
-#include <utility>
 #include <mutex>
 #include <string>
+#include <unistd.h> // usleep (XDND source poll loop)
+#include <utility>
 #include <vector>
 
 namespace pulp::view {
