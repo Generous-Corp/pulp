@@ -650,9 +650,9 @@ TEST_CASE("Spectral v7 loads refuse resource exhaustion and injected allocation 
     REQUIRE(result.error.find("destination graph limits") != std::string::npos);
     limited.untouched();
 
-    // The spectral bank bound at the destination's admission block: FFT 16384,
-    // hop 64, sixteen channels fits 64 MiB at 512-sample blocks but not at 4096.
-    AnalysisGraph big(Geometry{16384, 64, 16}, 48000, mask_gains(Geometry{16384, 64, 16}));
+    // The spectral bank bound at the destination's admission block: FFT 1024,
+    // hop 8, sixteen channels fits 64 MiB at 512-sample blocks but not at 4096.
+    AnalysisGraph big(Geometry{1024, 8, 16}, 48000, mask_gains(Geometry{1024, 8, 16}));
     REQUIRE_FALSE(big.graph->prepare(48000, 4096));
     REQUIRE(big.graph->prepare(48000, 512));
     REQUIRE(big.graph->stop_spectral_controller() == SpectralError::None);
