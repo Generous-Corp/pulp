@@ -40,12 +40,14 @@ its settings control when the request is declined.
 
 `pulp::standalone-contract` (the standalone of a UI package) opens a small
 native window on macOS, from the editor's request or from the app menu item
-"Audio/MIDI Settings…" (Cmd+,). It lists the output device, the input device
-(hidden when the processor has no audio input), the sample rate
+"Audio/MIDI Settings…" (Cmd+,). It lists the output device, the audio input
+(an on/off choice over the system default input device, hidden when the
+processor has no audio input; the backends open one device, so there is no
+per-input picker), the sample rate
 (`StandaloneConfig::allowed_sample_rates` when set), the buffer size
 (`allowed_buffer_sizes`), the MIDI input (with "None") and the output latency.
 Apply restarts audio through `StandaloneApp::apply_config()`, which saves the
-selection for the next launch. Device lists come from the audio and MIDI
+selection for the next launch. A failed Apply puts the last working config back so audio keeps running; the window, the SDK's `apply_config()` and a later Apply never report success while audio is stopped. A device or port that has disappeared is not re-applied: each row's value comes from the row's own selection. Device lists come from the audio and MIDI
 systems, so `PULP_AUDIO_DEVICE=null` shows the null device.
 
 An app with its own settings UI replaces the opener:
