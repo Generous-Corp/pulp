@@ -3843,8 +3843,11 @@ TEST_CASE("SignalGraph edge probe rejects unsupported identities and execution m
         missing.kind = kind;
         REQUIRE(graph.attach_audio_edge_probe(missing, destination) == Status::UnsupportedKind);
     }
+    // The levelized parallel walk observes the same point, so enabling it is
+    // not a refusal; anticipation and a disabled routed executor are.
     graph.set_parallel_routing_enabled(true);
-    REQUIRE(graph.attach_audio_edge_probe(source, destination) == Status::UnsupportedExecution);
+    REQUIRE(graph.attach_audio_edge_probe(source, destination) == Status::Attached);
+    graph.detach_audio_edge_probe();
     graph.set_parallel_routing_enabled(false);
     graph.set_anticipation_enabled(true);
     REQUIRE(graph.attach_audio_edge_probe(source, destination) == Status::UnsupportedExecution);
