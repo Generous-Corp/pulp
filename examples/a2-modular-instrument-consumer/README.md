@@ -12,7 +12,7 @@ and its Control timing survive a save and restore.
   through their exposed ports.
 - **Control time:** one `ControlIndexInput` drives an indexed coefficient table
   whose `value` output modulates both filters at audio rate.
-- **Saved state:** `to_saved_subgraph_document` writes the saved-identity v6
+- **Saved state:** `to_saved_subgraph_document` writes the saved-identity v7
   document. Every render restores that document into a fresh graph with
   `from_saved_subgraph_document`, the template, and an exact-version
   `ProcessorRestoreRegistry`.
