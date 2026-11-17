@@ -421,6 +421,12 @@ bool DBus::Reader::read_byte(unsigned char& out) {
     if (d.iter_get_arg_type(iter_) != kTypeByte) return false;
     unsigned char v = 0; d.iter_get_basic(iter_, &v); out = v; d.iter_next(iter_); return true;
 }
+bool DBus::Reader::read_bool(bool& out) {
+    if (!owner_ || !owner_->impl_ || !iter_) return false;
+    auto& d = *owner_->impl_;
+    if (d.iter_get_arg_type(iter_) != kTypeBool) return false;
+    unsigned v = 0; d.iter_get_basic(iter_, &v); out = v != 0; d.iter_next(iter_); return true;
+}
 int DBus::Reader::arg_type() const {
     if (!owner_ || !owner_->impl_ || !iter_) return kTypeInvalid;
     return owner_->impl_->iter_get_arg_type(iter_);
@@ -1008,6 +1014,7 @@ bool DBus::Reader::read_int32(int&) { return false; }
 bool DBus::Reader::read_uint32(unsigned&) { return false; }
 bool DBus::Reader::read_double(double&) { return false; }
 bool DBus::Reader::read_byte(unsigned char&) { return false; }
+bool DBus::Reader::read_bool(bool&) { return false; }
 int  DBus::Reader::arg_type() const { return 0; }
 bool DBus::Reader::next() { return false; }
 bool DBus::Reader::recurse(Reader&) { return false; }

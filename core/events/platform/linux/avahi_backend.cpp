@@ -227,11 +227,15 @@ bool load_api(pulp::runtime::DynamicLibrary& lib, AvahiApi& api) {
 
 class AvahiBackend;
 
-// Resolver context lives until the resolver fires. Owned by the
-// resolver pointer; freed in resolve_callback after the result is
-// dispatched.
+// Resolver context. Owned by the backend's pending set from the moment
+// the resolver is created until its callback fires or the browse that
+// started it is stopped, whichever comes first. `generation` names the
+// browse that started the resolver, so a result that outlives its browse
+// is dropped instead of reported into whichever browse runs next.
 struct ResolveContext {
     AvahiBackend* self = nullptr;
+    AvahiServiceResolver* resolver = nullptr;
+    uint64_t generation = 0;
     std::string name;
     std::string type;
     std::string domain;
@@ -256,7 +260,16 @@ public:
             threaded_poll_ = nullptr;
             return;
         }
-        api_.threaded_poll_start(threaded_poll_);
+        // The browse and resolver callbacks run on the poll's thread, so a
+        // backend whose thread did not start can never deliver a result. Fail
+        // initialization and release what was created rather than install a
+        // backend that looks valid and does nothing.
+        if (api_.threaded_poll_start(threaded_poll_) != 0) {
+            api_.client_free(client_);
+            client_ = nullptr;
+            api_.threaded_poll_free(threaded_poll_);
+            threaded_poll_ = nullptr;
+        }
     }
 
     ~AvahiBackend() override {
@@ -265,11 +278,7 @@ public:
         if (threaded_poll_) api_.threaded_poll_stop(threaded_poll_);
         if (client_) api_.client_free(client_);
         if (threaded_poll_) api_.threaded_poll_free(threaded_poll_);
-        // ResolveContexts are deleted inside resolve_callback once the
-        // resolver fires; if we're tearing down before any callback we
-        // accept that ~AvahiBackend before client_free leaves them in
-        // limbo. client_free + resolver_free invalidate them so the
-        // ABI guarantees no further callbacks.
+        // stop() above freed every pending resolver and its context.
     }
 
     bool valid() const { return client_ != nullptr; }
@@ -278,27 +287,34 @@ public:
                 NetworkServiceDiscovery& owner) override {
         if (!client_) return;
         // Tear down any prior browse so callers can browse() again.
-        {
-            std::lock_guard<std::mutex> lock(state_mutex_);
-        }
         stop_browse();
 
-        std::lock_guard<std::mutex> lock(state_mutex_);
-        owner_ = &owner;
-        browse_type_.assign(service_type);
-
+        // Lock order is poll lock, then state_mutex_: Avahi runs every callback
+        // with the poll lock held and the callbacks take state_mutex_, so this
+        // path takes the poll lock first and never holds state_mutex_ while
+        // waiting for it.
+        const std::string type(service_type);
         api_.threaded_poll_lock(threaded_poll_);
-        browse_ = api_.service_browser_new(
+        {
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            owner_ = &owner;
+            browse_type_ = type;
+        }
+        AvahiServiceBrowser* browser = api_.service_browser_new(
             client_,
             AVAHI_IF_UNSPEC,
             AVAHI_PROTO_UNSPEC,
-            browse_type_.c_str(),
+            type.c_str(),
             /*domain*/ nullptr,
             AVAHI_LOOKUP_NO_LOOKUP_FLAGS,
             &AvahiBackend::browse_callback,
             this);
+        {
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            browse_ = browser;
+            if (!browser) owner_ = nullptr;
+        }
         api_.threaded_poll_unlock(threaded_poll_);
-        if (!browse_) owner_ = nullptr;
     }
 
     void stop() override {
@@ -390,19 +406,41 @@ public:
     }
 
 private:
+    // Ends the current browse: frees the browser and every resolver it
+    // started, with their contexts, and starts a new generation so nothing
+    // already in flight can report into a later browse. Takes the poll lock
+    // before state_mutex_, the same order the Avahi callbacks run in.
     void stop_browse() {
+        if (!threaded_poll_) return;
+        api_.threaded_poll_lock(threaded_poll_);
         AvahiServiceBrowser* b = nullptr;
+        std::vector<ResolveContext*> pending;
         {
             std::lock_guard<std::mutex> lock(state_mutex_);
             b = browse_;
             browse_ = nullptr;
             owner_ = nullptr;
+            ++generation_;
+            pending.swap(pending_);
         }
-        if (b && threaded_poll_) {
-            api_.threaded_poll_lock(threaded_poll_);
-            api_.service_browser_free(b);
-            api_.threaded_poll_unlock(threaded_poll_);
+        if (b) api_.service_browser_free(b);
+        for (ResolveContext* ctx : pending) {
+            if (ctx->resolver) api_.service_resolver_free(ctx->resolver);
+            delete ctx;
         }
+        api_.threaded_poll_unlock(threaded_poll_);
+    }
+
+    // Detaches `ctx` from the pending set; false when a stop already took it.
+    bool take_pending(ResolveContext* ctx) {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        for (auto it = pending_.begin(); it != pending_.end(); ++it) {
+            if (*it == ctx) {
+                pending_.erase(it);
+                return true;
+            }
+        }
+        return false;
     }
 
     static void client_callback(AvahiClient* /*c*/, AvahiClientState /*state*/,
@@ -426,9 +464,11 @@ private:
         auto* self = static_cast<AvahiBackend*>(userdata);
         if (!self) return;
         NetworkServiceDiscovery* owner = nullptr;
+        uint64_t generation = 0;
         {
             std::lock_guard<std::mutex> lock(self->state_mutex_);
             owner = self->owner_;
+            generation = self->generation_;
         }
         if (!owner || !name || !type) return;
 
@@ -441,11 +481,13 @@ private:
         }
         if (event != AVAHI_BROWSER_NEW) return;
 
-        // Resolve to get hostname / port / TXT. The resolver
-        // delivers exactly one callback on the same poll thread; we
-        // free the resolver and the heap context inside it.
+        // Resolve to get hostname / port / TXT. The resolver delivers one
+        // callback on the same poll thread, which frees it and the context;
+        // a stop of this browse frees them first. The poll lock is held here,
+        // so the resolver cannot fire before it is recorded below.
         auto* ctx = new ResolveContext;
         ctx->self = self;
+        ctx->generation = generation;
         ctx->name = name;
         ctx->type = type;
         ctx->domain = domain ? domain : "";
@@ -461,7 +503,13 @@ private:
             AVAHI_LOOKUP_NO_LOOKUP_FLAGS,
             &AvahiBackend::resolve_callback,
             ctx);
-        if (!r) delete ctx;
+        if (!r) {
+            delete ctx;
+            return;
+        }
+        ctx->resolver = r;
+        std::lock_guard<std::mutex> lock(self->state_mutex_);
+        self->pending_.push_back(ctx);
     }
 
     static void resolve_callback(
@@ -469,15 +517,18 @@ private:
         AvahiResolverEvent event, const char* /*name*/, const char* /*type*/,
         const char* /*domain*/, const char* host_name, const AvahiAddress* a,
         uint16_t port, AvahiStringList* txt, int /*flags*/, void* userdata) {
-        auto ctx_holder = std::unique_ptr<ResolveContext>(
-            static_cast<ResolveContext*>(userdata));
-        if (!ctx_holder) return;
-        AvahiBackend* self = ctx_holder->self;
-        if (event == AVAHI_RESOLVER_FOUND && self) {
+        auto* raw = static_cast<ResolveContext*>(userdata);
+        if (!raw) return;
+        AvahiBackend* self = raw->self;
+        // A stop frees the resolver and context itself, so a callback that
+        // finds its context gone has nothing left to do.
+        if (!self->take_pending(raw)) return;
+        std::unique_ptr<ResolveContext> ctx_holder(raw);
+        if (event == AVAHI_RESOLVER_FOUND) {
             NetworkServiceDiscovery* owner = nullptr;
             {
                 std::lock_guard<std::mutex> lock(self->state_mutex_);
-                owner = self->owner_;
+                if (self->generation_ == ctx_holder->generation) owner = self->owner_;
             }
             if (owner) {
                 NetworkServiceDiscovery::Service svc;
@@ -516,7 +567,7 @@ private:
                 owner->notify_service_found(svc);
             }
         }
-        if (self && r) self->api_.service_resolver_free(r);
+        if (r) self->api_.service_resolver_free(r);
     }
 
     std::unique_ptr<pulp::runtime::DynamicLibrary> lib_;
@@ -528,6 +579,10 @@ private:
     NetworkServiceDiscovery* owner_ = nullptr;
     std::string browse_type_;
     AvahiServiceBrowser* browse_ = nullptr;
+    // Bumped by every stop; resolvers started under an older generation never
+    // report. pending_ holds the resolvers still waiting for their callback.
+    uint64_t generation_ = 0;
+    std::vector<ResolveContext*> pending_;
     AvahiEntryGroup* entry_group_ = nullptr;
 };
 

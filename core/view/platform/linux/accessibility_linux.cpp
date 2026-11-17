@@ -61,6 +61,7 @@
 #if defined(__linux__) && !defined(__ANDROID__)
 
 #include <cassert>
+#include "atspi_text_offsets.hpp"
 #include <pulp/view/accessibility.hpp>
 #include <pulp/view/accessibility_provider.hpp>
 #include <pulp/view/view.hpp>
@@ -99,11 +100,15 @@ constexpr const char* kToolkitName    = "Pulp";
 constexpr const char* kToolkitVersion = "1.0";
 constexpr const char* kAtspiVersion   = "2.1";
 
-// org.a11y.atspi.Component CoordType: 0 = screen, 1 = window. Pulp's View
-// bounds are window-relative (no live screen origin without the native window),
-// so window coords are the honest answer; screen-coord GetExtents falls back to
-// the same window-relative box (a host that knows the window origin can offset).
-constexpr uint32_t kCoordWindow = 1;
+// org.a11y.atspi.Component CoordType: 0 = screen, 1 = window, 2 = parent. View
+// bounds are in the root view's space; the host reports where that root sits in
+// its window (a scale and offset when it is letterboxed) and where the window
+// sits on screen through accessibility_set_window_geometry(). Window
+// coordinates apply the viewport transform; screen coordinates add the origin.
+// Until the origin has been reported, and for parent coordinates, the call fails
+// with NotSupported rather than answering in the wrong space. See atspi::root_rect_in.
+using atspi::kCoordScreen;
+using atspi::kCoordWindow;
 
 // ── Accessible-tree node ─────────────────────────────────────────────────────
 //
@@ -166,217 +171,43 @@ struct AtspiProvider {
         return v;
     }
 
-    // Append an AT-SPI object reference (so) = (bus_name, object_path) into a
-    // reply. AT-SPI addresses every accessible as this struct.
-    void append_object_ref(DBus::Writer& w, const std::string& name,
-                           const std::string& path) {
-        auto s = w.open_struct();
-        DBus::Writer sw = w.sub(s);
-        sw.append_string(name);
-        sw.append_object_path(path.empty() ? kNullPath : path);
-        w.close_container(s);
-    }
-    // Reference to one of OUR objects, addressed at our own unique bus name.
-    void append_self_ref(DBus::Writer& w, int index) {
-        append_object_ref(w, bus.unique_name(), path_for_index(index));
-    }
+    // Where the root view sits in the window and where the window sits on
+    // screen, set by the host.
+    atspi::WindowGeometry geometry;
 
-    // ── State ────────────────────────────────────────────────────────────────
-
-    // GetState returns au (array of two uint32 = the 64-bit state bitfield).
-    void append_state(DBus::Writer& w, int index) {
-        atspi::StateSet st = atspi::default_states();
-        if (index > 0 && index < static_cast<int>(nodes_.size())) {
-            if (View* v = view_at(index)) {
-                if (v->focusable()) atspi::set_state(st, atspi::kStateFocusable);
-                if (v->has_focus()) atspi::set_state(st, atspi::kStateFocused);
-                // AT-SPI has no "value" for a checkbox: CHECKED / PRESSED /
-                // INDETERMINATE STATE bits are how Orca announces it. Without
-                // them a Pulp Checkbox announced "check box <name>" and no
-                // state. Resolved through the same helper every other bridge
-                // uses (accessibility_toggle_state).
-                st = atspi::with_toggle_state(st, accessibility_toggle_state(*v),
-                                              !v->access_checked().empty());
-                st = atspi::with_editable(st, accessibility_text_editable(*v));
-            }
+    // Read the next CoordType argument, or answer the call with NotSupported
+    // when this window cannot answer in that space.
+    bool coord_type_for_call(DBus::CallContext& ctx, uint32_t& coord_type) {
+        unsigned value = 0;
+        if (!ctx.args().read_uint32(value) || !atspi::coord_type_available(value, geometry)) {
+            ctx.error("org.freedesktop.DBus.Error.NotSupported",
+                      "this coordinate space is not available for this window");
+            return false;
         }
-        auto a = w.open_array("u");
-        DBus::Writer aw = w.sub(a);
-        aw.append_uint32(st.low);
-        aw.append_uint32(st.high);
-        w.close_container(a);
+        coord_type = value;
+        return true;
     }
 
-    // ── Tree construction (DFS with re-parenting onto nearest accessible) ─────
-
-    void build_node(View& v, int parent_index) {
-        int my_index = parent_index;
-        if (is_accessibility_element(v)) {
-            AccessNode node;
-            node.view.set(&v);
-            node.parent_index = parent_index;
-            my_index = static_cast<int>(nodes_.size());
-            nodes_.push_back(node);
-            view_to_index_[&v] = my_index;
-            nodes_[static_cast<size_t>(parent_index)].children.push_back(my_index);
-        }
-        for (size_t i = 0; i < v.child_count(); ++i) {
-            if (View* child = v.child_at(i)) build_node(*child, my_index);
-        }
-    }
-
-    void rebuild_tree() {
-        nodes_.clear();
-        view_to_index_.clear();
-        // index 0 = the application root (no View; it IS the application).
-        nodes_.push_back(AccessNode{});
-        if (!root) return;
-        // The root View itself is the application accessible (index 0), matching
-        // snapshot_accessibility_tree / mac / Windows which never expose the
-        // root View as a child object — its children become the top-level
-        // accessibles.
-        for (size_t i = 0; i < root->child_count(); ++i) {
-            if (View* child = root->child_at(i)) build_node(*child, 0);
-        }
-    }
-
-    // ── org.a11y.atspi.Accessible (any object) ────────────────────────────────
-
-    bool handle_accessible(DBus::CallContext& ctx, int index) {
-        const std::string& m = ctx.member();
-        const bool is_root = (index == 0);
-        AccessNode& node = nodes_[static_cast<size_t>(index)];
-        View* view = is_root ? nullptr : view_at(index);
-
-        if (m == "GetRole") {
-            ctx.reply().append_uint32(
-                is_root ? atspi::kRoleApplication
-                        : atspi::role_to_atspi_role(
-                              view ? view->access_role() : View::AccessRole::none));
-            return true;
-        }
-        if (m == "GetRoleName") {
-            ctx.reply().append_string(
-                is_root ? "application"
-                        : atspi::role_to_atspi_role_name(
-                              view ? view->access_role() : View::AccessRole::none));
-            return true;
-        }
-        if (m == "GetLocalizedRoleName") {
-            ctx.reply().append_string(
-                is_root ? "application"
-                        : atspi::role_to_atspi_role_name(
-                              view ? view->access_role() : View::AccessRole::none));
-            return true;
-        }
-        if (m == "GetChildCount") {
-            ctx.reply().append_int32(static_cast<int>(node.children.size()));
-            return true;
-        }
-        if (m == "GetChildren") {
-            // a(so) — child object references.
-            DBus::Writer w = ctx.reply();
-            auto a = w.open_array("(so)");
-            DBus::Writer aw = w.sub(a);
-            for (int child : node.children) append_self_ref(aw, child);
-            w.close_container(a);
-            return true;
-        }
-        if (m == "GetChildAtIndex") {
-            int i = 0;
-            ctx.args().read_int32(i);
-            DBus::Writer w = ctx.reply();
-            if (i >= 0 && i < static_cast<int>(node.children.size())) {
-                append_self_ref(w, node.children[static_cast<size_t>(i)]);
-            } else {
-                append_object_ref(w, "", kNullPath);  // (so) null reference
-            }
-            return true;
-        }
-        if (m == "GetIndexInParent") {
-            int result = -1;
-            if (!is_root) {
-                const AccessNode& parent =
-                    nodes_[static_cast<size_t>(node.parent_index)];
-                for (size_t i = 0; i < parent.children.size(); ++i) {
-                    if (parent.children[i] == index) {
-                        result = static_cast<int>(i);
-                        break;
-                    }
-                }
-            }
-            ctx.reply().append_int32(result);
-            return true;
-        }
-        if (m == "GetState") {
-            DBus::Writer w = ctx.reply();
-            append_state(w, index);
-            return true;
-        }
-        if (m == "GetInterfaces") {
-            DBus::Writer w = ctx.reply();
-            auto a = w.open_array("s");
-            DBus::Writer aw = w.sub(a);
-            aw.append_string(kIfaceAccessible);
-            if (is_root) {
-                aw.append_string(kIfaceApplication);
-            } else {
-                aw.append_string(kIfaceComponent);
-                // Exactly the interfaces the View can actually serve
-                // (accessibility_interfaces): Value for a numeric range
-                // (slider/meter/progress bar), Text for a string value — a
-                // TextEditor's content or a ComboBox's selected item. AT-SPI has
-                // no string-value interface, so a role like ENTRY or COMBO_BOX
-                // with neither interface exported reads back NOTHING: Orca
-                // announces "entry" plus the name and falls silent.
-                const atspi_ifaces ifs = interfaces_for(index);
-                if (ifs.value) aw.append_string(kIfaceValue);
-                if (ifs.text)  aw.append_string(kIfaceText);
-            }
-            w.close_container(a);
-            return true;
-        }
-        if (m == "GetApplication") {
-            // (so) — the application root object.
-            DBus::Writer w = ctx.reply();
-            append_self_ref(w, 0);
-            return true;
-        }
-        if (m == "GetAttributes") {
-            // a{ss} — none.
-            DBus::Writer w = ctx.reply();
-            auto a = w.open_array("{ss}");
-            w.close_container(a);
-            return true;
-        }
-        if (m == "GetRelationSet") {
-            // a(ua(so)) — none.
-            DBus::Writer w = ctx.reply();
-            auto a = w.open_array("(ua(so))");
-            w.close_container(a);
-            return true;
-        }
-        return false;  // decline → UnknownMethod
-    }
-
-    // ── org.a11y.atspi.Component (per-widget objects) ─────────────────────────
-    //
     // Root-relative bounds: walk parent chain summing bounds().x/y (mirrors the
     // mac accessibilityFrame loop + the Windows view_to_screen_rect loop), then
     // the View's own width/height. These are window-relative coordinates.
 
-    void compute_extents(View* v, int& x, int& y, int& w, int& h) {
+    // The View's rectangle in root-view space.
+    void root_rect(View* v, float& x, float& y, float& w, float& h) {
         x = y = w = h = 0;
         if (!v) return;
-        float rx = 0, ry = 0;
         for (View* cur = v; cur; cur = cur->parent()) {
-            rx += cur->bounds().x;
-            ry += cur->bounds().y;
+            x += cur->bounds().x;
+            y += cur->bounds().y;
         }
-        x = static_cast<int>(rx);
-        y = static_cast<int>(ry);
-        w = static_cast<int>(v->bounds().width);
-        h = static_cast<int>(v->bounds().height);
+        w = v->bounds().width;
+        h = v->bounds().height;
+    }
+
+    atspi::PixelRect extents_in(View* v, uint32_t coord_type) {
+        float x, y, w, h;
+        root_rect(v, x, y, w, h);
+        return atspi::root_rect_in(x, y, w, h, coord_type, geometry);
     }
 
     bool handle_component(DBus::CallContext& ctx, int index) {
@@ -385,36 +216,36 @@ struct AtspiProvider {
         const std::string& m = ctx.member();
 
         if (m == "GetExtents") {
-            // (u coord_type) -> (iiii x,y,w,h). We report window-relative box
-            // regardless of the requested coord type (no live screen origin).
-            int x, y, w, h;
-            compute_extents(v, x, y, w, h);
+            // (u coord_type) -> (iiii x,y,w,h), in the requested coordinate space.
+            uint32_t space = 0;
+            if (!coord_type_for_call(ctx, space)) return true;
+            const atspi::PixelRect r = extents_in(v, space);
             DBus::Writer rw = ctx.reply();
             auto s = rw.open_struct();
             DBus::Writer sw = rw.sub(s);
-            sw.append_int32(x);
-            sw.append_int32(y);
-            sw.append_int32(w);
-            sw.append_int32(h);
+            sw.append_int32(r.x);
+            sw.append_int32(r.y);
+            sw.append_int32(r.width);
+            sw.append_int32(r.height);
             rw.close_container(s);
             return true;
         }
         if (m == "GetPosition") {
-            // (u coord_type) -> ii x,y
-            int x, y, w, h;
-            compute_extents(v, x, y, w, h);
+            // (u coord_type) -> ii x,y, in the requested coordinate space.
+            uint32_t space = 0;
+            if (!coord_type_for_call(ctx, space)) return true;
+            const atspi::PixelRect r = extents_in(v, space);
             DBus::Writer rw = ctx.reply();
-            rw.append_int32(x);
-            rw.append_int32(y);
+            rw.append_int32(r.x);
+            rw.append_int32(r.y);
             return true;
         }
         if (m == "GetSize") {
-            // () -> ii w,h
-            int x, y, w, h;
-            compute_extents(v, x, y, w, h);
+            // () -> ii w,h, as the window shows it.
+            const atspi::PixelRect r = extents_in(v, kCoordWindow);
             DBus::Writer rw = ctx.reply();
-            rw.append_int32(w);
-            rw.append_int32(h);
+            rw.append_int32(r.width);
+            rw.append_int32(r.height);
             return true;
         }
         if (m == "Contains") {
@@ -422,9 +253,10 @@ struct AtspiProvider {
             int px = 0, py = 0;
             ctx.args().read_int32(px);
             ctx.args().read_int32(py);
-            int x, y, w, h;
-            compute_extents(v, x, y, w, h);
-            const bool inside = px >= x && px < x + w && py >= y && py < y + h;
+            uint32_t space = 0;
+            if (!coord_type_for_call(ctx, space)) return true;
+            const atspi::PixelRect r = extents_in(v, space);
+            const bool inside = px >= r.x && px < r.x + r.width && py >= r.y && py < r.y + r.height;
             ctx.reply().append_bool(inside);
             return true;
         }
@@ -582,19 +414,16 @@ struct AtspiProvider {
         if (!interfaces_for(index).text) return false;
         const std::string& m = ctx.member();
         const std::string text = text_for(index);
-        const int n = static_cast<int>(text.size());
+        // AT-SPI offsets and counts are characters; the text and the View's
+        // selection are UTF-8 bytes. Convert at this boundary only.
+        const int n = atspi_text::character_count(text);
 
         if (m == "GetText") {
             int start = 0, end = -1;
             ctx.args().read_int32(start);
             ctx.args().read_int32(end);
-            if (start < 0) start = 0;
-            if (end < 0 || end > n) end = n;   // -1 = "to the end", per AT-SPI
-            const std::string slice =
-                start >= end ? std::string{}
-                             : text.substr(static_cast<size_t>(start),
-                                           static_cast<size_t>(end - start));
-            ctx.reply().append_string(slice);
+            // -1 = "to the end", per AT-SPI
+            ctx.reply().append_string(atspi_text::substring(text, start, end));
             return true;
         }
         if (m == "GetCharacterCount") {   // some clients call it as a method
@@ -602,7 +431,7 @@ struct AtspiProvider {
             return true;
         }
         if (m == "GetCaretOffset") {
-            ctx.reply().append_int32(caret_for(index));
+            ctx.reply().append_int32(atspi_text::character_index_of_byte(text, caret_for(index)));
             return true;
         }
         if (m == "SetCaretOffset") {
@@ -611,7 +440,9 @@ struct AtspiProvider {
             bool ok = false;
             if (AccessibilityTextInterface* tif = text_iface(index)) {
                 if (off >= 0 && off <= n) {
-                    tif->set_selection(off, off);
+                    const int byte_off = static_cast<int>(
+                        atspi_text::byte_offset_of_character(text, off));
+                    tif->set_selection(byte_off, byte_off);
                     ok = true;
                 }
             }
@@ -621,10 +452,7 @@ struct AtspiProvider {
         if (m == "GetCharacterAtOffset") {
             int off = 0;
             ctx.args().read_int32(off);
-            const int c = (off >= 0 && off < n)
-                ? static_cast<int>(static_cast<unsigned char>(text[static_cast<size_t>(off)]))
-                : 0;
-            ctx.reply().append_int32(c);
+            ctx.reply().append_int32(static_cast<int>(atspi_text::code_point_at(text, off)));
             return true;
         }
         if (m == "GetNSelections") {
@@ -642,8 +470,8 @@ struct AtspiProvider {
             int start = 0, end = 0;
             if (AccessibilityTextInterface* tif = text_iface(index); tif && which == 0) {
                 const auto sel = tif->get_selection();
-                start = sel.first;
-                end = sel.second;
+                start = atspi_text::character_index_of_byte(text, sel.first);
+                end = atspi_text::character_index_of_byte(text, sel.second);
             }
             DBus::Writer w = ctx.reply();
             w.append_int32(start);
@@ -685,10 +513,11 @@ struct AtspiProvider {
         }
         if (iface == kIfaceText && interfaces_for(index).text) {
             if (prop == "CharacterCount") {
-                return variant_int32(w, static_cast<int>(text_for(index).size()));
+                return variant_int32(w, atspi_text::character_count(text_for(index)));
             }
             if (prop == "CaretOffset") {
-                return variant_int32(w, caret_for(index));
+                return variant_int32(w, atspi_text::character_index_of_byte(
+                                            text_for(index), caret_for(index)));
             }
         }
         if (iface == kIfaceValue) {
@@ -725,6 +554,17 @@ struct AtspiProvider {
         if (iface == kIfaceAccessible) {
             const std::string nm = name_for(index);
             entry("Name", [&](DBus::Writer& ew) { variant_string(ew, nm); });
+            entry("Description", [&](DBus::Writer& ew) { variant_string(ew, ""); });
+            entry("Parent", [&](DBus::Writer& ew) {
+                auto v = ew.open_variant("(so)");
+                DBus::Writer vw = ew.sub(v);
+                if (is_root) {
+                    append_object_ref(vw, registry_parent_name, registry_parent_path);
+                } else {
+                    append_self_ref(vw, node.parent_index);
+                }
+                ew.close_container(v);
+            });
             entry("ChildCount", [&](DBus::Writer& ew) {
                 variant_int32(ew, static_cast<int>(node.children.size()));
             });
@@ -737,8 +577,9 @@ struct AtspiProvider {
                   [&](DBus::Writer& ew) { variant_string(ew, kAtspiVersion); });
             entry("Id", [&](DBus::Writer& ew) { variant_int32(ew, app_id); });
         } else if (iface == kIfaceText && interfaces_for(index).text) {
-            const int count = static_cast<int>(text_for(index).size());
-            const int caret = caret_for(index);
+            const std::string text = text_for(index);
+            const int count = atspi_text::character_count(text);
+            const int caret = atspi_text::character_index_of_byte(text, caret_for(index));
             entry("CharacterCount",
                   [&](DBus::Writer& ew) { variant_int32(ew, count); });
             entry("CaretOffset",
@@ -960,6 +801,8 @@ struct AtspiProvider {
 }  // namespace
 
 void* init_accessibility(View& root, void* /*native_window*/) {
+    // The native window handle is not used: the window's geometry comes from the
+    // host through accessibility_set_window_geometry().
     // Honest-fail ladder: no libdbus, no session bus, or no a11y daemon → return
     // a benign non-null handle (matching the historic stub) so callers can
     // unconditionally pair it with shutdown_accessibility(), but do no work.
@@ -1018,6 +861,18 @@ void shutdown_accessibility(void* handle) {
 }
 
 // Pump the a11y connection so the registry's inbound method calls are serviced.
+void accessibility_set_window_geometry(void* handle, int screen_x, int screen_y, float scale,
+                                       float offset_x, float offset_y) {
+    if (handle == reinterpret_cast<void*>(static_cast<uintptr_t>(1)) || !handle) return;
+    auto* p = static_cast<AtspiProvider*>(handle);
+    p->geometry.screen_origin_known = true;
+    p->geometry.screen_x = screen_x;
+    p->geometry.screen_y = screen_y;
+    p->geometry.scale = scale > 0.0f ? scale : 1.0f;
+    p->geometry.offset_x = offset_x;
+    p->geometry.offset_y = offset_y;
+}
+
 void accessibility_pump(void* handle) {
     if (handle == reinterpret_cast<void*>(static_cast<uintptr_t>(1)) || !handle) return;
     static_cast<AtspiProvider*>(handle)->bus.dispatch(0);

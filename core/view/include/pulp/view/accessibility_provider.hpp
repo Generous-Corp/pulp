@@ -109,6 +109,15 @@ void notify_accessibility_focus_changed(void* handle, View& target);
 void notify_accessibility_name_changed(void* handle, View& target);
 
 #if defined(__linux__) && !defined(__ANDROID__)
+/// Linux AT-SPI: tell the provider where the window's top-left sits on screen
+/// and how the root view sits in the window (window position = root position *
+/// `scale` + (`offset_x`, `offset_y`); scale 1 and offset 0 when the root fills
+/// the window), so Component calls report the geometry users see. Until a host
+/// calls this, a screen-coordinate request fails with NotSupported. A no-op on a
+/// null or sentinel handle.
+void accessibility_set_window_geometry(void* handle, int screen_x, int screen_y, float scale,
+                                       float offset_x, float offset_y);
+
 /// TEST-ONLY (Linux AT-SPI). Build the same accessible-object tree the
 /// production provider exports, but on the plain SESSION bus rather than the
 /// desktop a11y bus — so a loopback test under a headless `dbus-run-session`

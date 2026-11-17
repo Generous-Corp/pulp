@@ -16,6 +16,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <utility>
@@ -616,6 +617,197 @@ TEST_CASE("Linux AT-SPI exports a per-widget Accessible + Component tree",
     REQUIRE(gain_raw->bounds().width == 200);
     REQUIRE(panel_raw->access_role() == View::AccessRole::group);
 
+    shutdown_accessibility(handle);
+}
+
+// ── Linux AT-SPI component geometry and GetAll loopback ─────────────────────
+//
+// The same tree as above, exported on the session bus. A screen request is
+// refused until the host reports where the window sits; the geometry the host
+// reports then decides every Component answer: window position follows the
+// root's viewport scale and offset, screen position adds the window origin.
+
+namespace {
+
+struct ComponentExtents {
+    bool ok = false;
+    int x = 0, y = 0, w = 0, h = 0;
+};
+
+ComponentExtents component_extents(void* handle, const std::string& server,
+                                   const std::string& path, uint32_t coord_type) {
+    ComponentExtents out;
+    out.ok = run_client_call(handle, [&] {
+        DBus client;
+        if (!client.connect_session()) return false;
+        return client.call_method(
+            server, path, kIfaceComponent, "GetExtents",
+            [&](DBus::Writer& w) { w.append_uint32(coord_type); },
+            [&](DBus::Reader& r) {
+                DBus::Reader st;
+                if (r.recurse(st)) {
+                    st.read_int32(out.x);
+                    st.read_int32(out.y);
+                    st.read_int32(out.w);
+                    st.read_int32(out.h);
+                }
+            });
+    });
+    return out;
+}
+
+// 1 inside, 0 outside, -1 when the call failed.
+int component_contains(void* handle, const std::string& server, const std::string& path,
+                       int px, int py, uint32_t coord_type) {
+    bool inside = false;
+    const bool ok = run_client_call(handle, [&] {
+        DBus client;
+        if (!client.connect_session()) return false;
+        return client.call_method(
+            server, path, kIfaceComponent, "Contains",
+            [&](DBus::Writer& w) {
+                w.append_int32(px);
+                w.append_int32(py);
+                w.append_uint32(coord_type);
+            },
+            [&](DBus::Reader& r) { r.read_bool(inside); });
+    });
+    return ok ? (inside ? 1 : 0) : -1;
+}
+
+// root (none) > Panel (group, 10,40) > container (none, 5,5) > Gain (slider, 20,30 200x24)
+struct GainTree {
+    Probe root;
+    GainTree() {
+        root.set_bounds({0, 0, 400, 300});
+        auto panel = std::make_unique<Probe>();
+        panel->set_access_role(View::AccessRole::group);
+        panel->set_access_label("Panel");
+        panel->set_bounds({10, 40, 380, 200});
+        auto container = std::make_unique<Probe>();
+        container->set_bounds({5, 5, 370, 190});
+        auto gain = std::make_unique<Probe>();
+        gain->set_access_role(View::AccessRole::slider);
+        gain->set_access_label("Gain");
+        gain->set_bounds({20, 30, 200, 24});
+        container->add_child(std::move(gain));
+        panel->add_child(std::move(container));
+        root.add_child(std::move(panel));
+    }
+};
+
+// The wire path of the Gain slider: the root's first child is Panel, whose first
+// child is Gain.
+bool find_gain_path(void* handle, const std::string& server, std::string& gain_path) {
+    WireNode root_node, panel_node;
+    return run_client_call(handle, [&] {
+               if (!read_node(server, kRootPath, root_node) || root_node.child_paths.size() != 1)
+                   return false;
+               if (!read_node(server, root_node.child_paths[0], panel_node) ||
+                   panel_node.child_paths.size() != 1)
+                   return false;
+               gain_path = panel_node.child_paths[0];
+               return true;
+           });
+}
+
+}  // namespace
+
+TEST_CASE("Linux AT-SPI screen coordinates follow the window origin and viewport",
+          "[view][accessibility][atspi][linux]") {
+    if (!DBus::library_available()) SKIP("libdbus not available");
+    {
+        DBus probe;
+        if (!probe.connect_session()) SKIP("no session bus (run under dbus-run-session)");
+    }
+    GainTree tree;
+    std::string server;
+    void* handle = init_accessibility_on_session_bus_for_test(tree.root, &server);
+    if (!handle) SKIP("could not export on session bus");
+    std::string gain;
+    REQUIRE(find_gain_path(handle, server, gain));
+
+    // Until the host reports where the window sits, a screen request is refused
+    // instead of answered in window space.
+    CHECK_FALSE(component_extents(handle, server, gain, atspi::kCoordScreen).ok);
+
+    // A window at (100,200) whose root fills it: screen = window + origin.
+    accessibility_set_window_geometry(handle, 100, 200, 1.0f, 0.0f, 0.0f);
+    const auto on_screen = component_extents(handle, server, gain, atspi::kCoordScreen);
+    REQUIRE(on_screen.ok);
+    CHECK(on_screen.x == 135);
+    CHECK(on_screen.y == 275);
+    CHECK(on_screen.w == 200);
+    CHECK(on_screen.h == 24);
+    const auto in_window = component_extents(handle, server, gain, atspi::kCoordWindow);
+    REQUIRE(in_window.ok);
+    CHECK(in_window.x == 35);
+    CHECK(in_window.y == 75);
+    // Hit tests use the same space.
+    CHECK(component_contains(handle, server, gain, 140, 280, atspi::kCoordScreen) == 1);
+    CHECK(component_contains(handle, server, gain, 140, 280, atspi::kCoordWindow) == 0);
+    CHECK(component_contains(handle, server, gain, 40, 80, atspi::kCoordWindow) == 1);
+    CHECK(component_contains(handle, server, gain, 40, 80, atspi::kCoordScreen) == 0);
+    // Parent-relative coordinates are not offered.
+    CHECK_FALSE(component_extents(handle, server, gain, 2).ok);
+
+    // The same window showing the root at 2x, centred (offset 100,50): the
+    // slider's window position is (35,75)*2 + (100,50) and its size doubles.
+    accessibility_set_window_geometry(handle, 100, 200, 2.0f, 100.0f, 50.0f);
+    const auto scaled_window = component_extents(handle, server, gain, atspi::kCoordWindow);
+    REQUIRE(scaled_window.ok);
+    CHECK(scaled_window.x == 170);
+    CHECK(scaled_window.y == 200);
+    CHECK(scaled_window.w == 400);
+    CHECK(scaled_window.h == 48);
+    const auto scaled_screen = component_extents(handle, server, gain, atspi::kCoordScreen);
+    REQUIRE(scaled_screen.ok);
+    CHECK(scaled_screen.x == 270);
+    CHECK(scaled_screen.y == 400);
+    // A point inside the drawn slider is inside; the root-space position is not.
+    CHECK(component_contains(handle, server, gain, 300, 450, atspi::kCoordScreen) == 1);
+    CHECK(component_contains(handle, server, gain, 135, 275, atspi::kCoordScreen) == 0);
+
+    shutdown_accessibility(handle);
+}
+
+TEST_CASE("Linux AT-SPI Properties.GetAll returns every property Get serves",
+          "[view][accessibility][atspi][linux]") {
+    if (!DBus::library_available()) SKIP("libdbus not available");
+    {
+        DBus probe;
+        if (!probe.connect_session()) SKIP("no session bus (run under dbus-run-session)");
+    }
+    GainTree tree;
+    std::string server;
+    void* handle = init_accessibility_on_session_bus_for_test(tree.root, &server);
+    if (!handle) SKIP("could not export on session bus");
+    std::string gain;
+    REQUIRE(find_gain_path(handle, server, gain));
+
+    std::vector<std::string> keys;
+    const bool ok = run_client_call(handle, [&] {
+        DBus client;
+        if (!client.connect_session()) return false;
+        return client.call_method(
+            server, gain, kIfaceProperties, "GetAll",
+            [](DBus::Writer& w) { w.append_string(kIfaceAccessible); },
+            [&](DBus::Reader& r) {
+                DBus::Reader array;
+                if (!r.recurse(array)) return;
+                while (array.arg_type() != 0) {
+                    DBus::Reader entry;
+                    std::string key;
+                    if (array.recurse(entry) && entry.read_string(key)) keys.push_back(key);
+                    if (!array.next()) break;
+                }
+            });
+    });
+    REQUIRE(ok);
+    for (const char* wanted : {"Name", "Description", "Parent", "ChildCount"}) {
+        INFO("property " << wanted);
+        CHECK(std::find(keys.begin(), keys.end(), std::string(wanted)) != keys.end());
+    }
     shutdown_accessibility(handle);
 }
 

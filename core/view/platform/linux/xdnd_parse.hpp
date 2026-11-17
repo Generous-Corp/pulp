@@ -11,6 +11,7 @@
 
 #include <pulp/view/geometry.hpp>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -153,6 +154,64 @@ inline Point root_to_child_local(int root_x, int root_y, int child_origin_x,
                                  int child_origin_y) {
     return {static_cast<float>(root_x - child_origin_x),
             static_cast<float>(root_y - child_origin_y)};
+}
+
+// ── Source-side reply validation ─────────────────────────────────────────
+//
+// A drag source hears XdndStatus and XdndFinished from whatever target it last
+// addressed. A reply is the current target's only when data.l[0] names that
+// target; a delayed reply from a target the pointer already left, or any reply
+// before a target exists, must not change the drag.
+
+// The oldest XDND version the source drives; older targets are treated as not
+// XDND-aware, since they predate XdndFinished.
+inline constexpr int kMinSourceVersion = 3;
+// The newest version the source speaks.
+inline constexpr int kMaxSourceVersion = 5;
+
+// The version to negotiate with a target that advertises `advertised`, or 0
+// when the target is too old to drive.
+/// One reading of the pointer: its root-space position and whether the primary
+/// button is down.
+struct PointerSample {
+    int x = 0;
+    int y = 0;
+    bool primary_down = false;
+};
+
+/// What a new pointer reading means for a drag in progress.
+enum class PointerChange { none, moved, released };
+
+/// Compares two readings of the pointer. A drag follows the pointer by polling
+/// it, because the pointer cannot be grabbed here: the button press that starts
+/// a drag leaves SDL's connection holding the implicit grab, and a grab asked
+/// for on any other connection fails. Release wins over movement, so the drop
+/// goes to the target the last position reached.
+inline PointerChange pointer_change(const PointerSample& previous, const PointerSample& now) {
+    if (previous.primary_down && !now.primary_down) return PointerChange::released;
+    if (now.x != previous.x || now.y != previous.y) return PointerChange::moved;
+    return PointerChange::none;
+}
+
+inline int negotiated_version(int advertised) {
+    if (advertised < kMinSourceVersion) return 0;
+    return advertised < kMaxSourceVersion ? advertised : kMaxSourceVersion;
+}
+
+// True when an XdndStatus from `sender` is the current target's.
+inline bool status_is_from_target(unsigned long sender, unsigned long target) {
+    return target != 0 && sender == target;
+}
+
+// The drop outcome carried by an XdndFinished, or nullopt when the message
+// must be ignored (no drop sent yet, or not from the current target). Only
+// version 5 and later define the success bit in data.l[1]; an earlier target
+// finishing the transfer is a success.
+inline std::optional<bool> finished_outcome(unsigned long sender, unsigned long target,
+                                            bool dropped, int version, long flags) {
+    if (!dropped || !status_is_from_target(sender, target)) return std::nullopt;
+    if (version >= 5) return (flags & 1L) != 0;
+    return true;
 }
 
 }  // namespace pulp::view::xdnd
