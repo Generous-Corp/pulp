@@ -77,6 +77,22 @@ record's `file` field carries that child-side handle value instead of a file
 identity, so there is no path to unlink. And the Windows retained channel refuses
 output capture, because nothing drains a retained child's pipes.
 
+**The worker owns that section value only once it maps.** `SharedSection::adopt`
+closes the value right after a successful map (the view keeps the section alive)
+and never closes a value that does not map, because a hostile or stale hello can
+name another live worker handle such as its control pipe. Never close the
+duplicated value from the parent with `DUPLICATE_CLOSE_SOURCE`: it races the
+worker's own close and can hit a reused value. A failed hello is followed by
+terminating the job, which releases what the worker never adopted. Prove the
+Windows callback with the import-table traps in
+`test/fixtures/isolated_clap/windows_callback_traps.cpp` (Pulp and the static
+CRT resolve through the test executable's table), not with macOS interposer
+evidence, and keep their negative control beside any new kind. The traps are
+per process and `catch_discover_tests` runs every case in its own process, so a
+case that measures a callback must install them itself (the test's
+`CallbackProbe` does on construction); a case relying on an earlier case's
+install reports clean counts with no traps in place when run alone.
+
 **Graph code that calls an isolation helper must also link on the web.** The
 WAM / WebCLAP sample-region profile compiles a curated source list
 (`tools/cmake/PulpSampleRegionWebSources.cmake`), not `pulp-host`, and

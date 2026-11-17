@@ -5,23 +5,14 @@
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
-#include <filesystem>
 
-#if defined(__APPLE__)
+#if defined(PULP_ISOLATED_CLAP_POSIX_TRANSPORT)
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 namespace pulp::host::isolation {
 using Deadline = std::chrono::steady_clock::time_point;
-
-// Hash executable bytes while preserving the bundle root passed to CLAP init.
-inline std::filesystem::path clap_hash_path(const std::filesystem::path& selection) {
-    std::error_code ec;
-    if (std::filesystem::is_directory(selection, ec))
-        return selection / "Contents" / "MacOS" / selection.stem();
-    return selection;
-}
 
 // Control path only. Every syscall is nonblocking; poll consumes the one
 // absolute deadline, including partial transfers and EINTR.
