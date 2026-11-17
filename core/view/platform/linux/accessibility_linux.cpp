@@ -188,11 +188,204 @@ struct AtspiProvider {
         return true;
     }
 
-    // Root-relative bounds: walk parent chain summing bounds().x/y (mirrors the
-    // mac accessibilityFrame loop + the Windows view_to_screen_rect loop), then
-    // the View's own width/height. These are window-relative coordinates.
+    // Append an AT-SPI object reference (so) = (bus_name, object_path) into a
+    // reply. AT-SPI addresses every accessible as this struct.
+    void append_object_ref(DBus::Writer& w, const std::string& name,
+                           const std::string& path) {
+        auto s = w.open_struct();
+        DBus::Writer sw = w.sub(s);
+        sw.append_string(name);
+        sw.append_object_path(path.empty() ? kNullPath : path);
+        w.close_container(s);
+    }
+    // Reference to one of OUR objects, addressed at our own unique bus name.
+    void append_self_ref(DBus::Writer& w, int index) {
+        append_object_ref(w, bus.unique_name(), path_for_index(index));
+    }
 
-    // The View's rectangle in root-view space.
+    // ── State ────────────────────────────────────────────────────────────────
+
+    // GetState returns au (array of two uint32 = the 64-bit state bitfield).
+    void append_state(DBus::Writer& w, int index) {
+        atspi::StateSet st = atspi::default_states();
+        if (index > 0 && index < static_cast<int>(nodes_.size())) {
+            if (View* v = view_at(index)) {
+                if (v->focusable()) atspi::set_state(st, atspi::kStateFocusable);
+                if (v->has_focus()) atspi::set_state(st, atspi::kStateFocused);
+                // AT-SPI has no "value" for a checkbox: CHECKED / PRESSED /
+                // INDETERMINATE STATE bits are how Orca announces it. Without
+                // them a Pulp Checkbox announced "check box <name>" and no
+                // state. Resolved through the same helper every other bridge
+                // uses (accessibility_toggle_state).
+                st = atspi::with_toggle_state(st, accessibility_toggle_state(*v),
+                                              !v->access_checked().empty());
+                st = atspi::with_editable(st, accessibility_text_editable(*v));
+            }
+        }
+        auto a = w.open_array("u");
+        DBus::Writer aw = w.sub(a);
+        aw.append_uint32(st.low);
+        aw.append_uint32(st.high);
+        w.close_container(a);
+    }
+
+    // ── Tree construction (DFS with re-parenting onto nearest accessible) ─────
+
+    void build_node(View& v, int parent_index) {
+        int my_index = parent_index;
+        if (is_accessibility_element(v)) {
+            AccessNode node;
+            node.view.set(&v);
+            node.parent_index = parent_index;
+            my_index = static_cast<int>(nodes_.size());
+            nodes_.push_back(node);
+            view_to_index_[&v] = my_index;
+            nodes_[static_cast<size_t>(parent_index)].children.push_back(my_index);
+        }
+        for (size_t i = 0; i < v.child_count(); ++i) {
+            if (View* child = v.child_at(i)) build_node(*child, my_index);
+        }
+    }
+
+    void rebuild_tree() {
+        nodes_.clear();
+        view_to_index_.clear();
+        // index 0 = the application root (no View; it IS the application).
+        nodes_.push_back(AccessNode{});
+        if (!root) return;
+        // The root View itself is the application accessible (index 0), matching
+        // snapshot_accessibility_tree / mac / Windows which never expose the
+        // root View as a child object — its children become the top-level
+        // accessibles.
+        for (size_t i = 0; i < root->child_count(); ++i) {
+            if (View* child = root->child_at(i)) build_node(*child, 0);
+        }
+    }
+
+    // ── org.a11y.atspi.Accessible (any object) ────────────────────────────────
+
+    bool handle_accessible(DBus::CallContext& ctx, int index) {
+        const std::string& m = ctx.member();
+        const bool is_root = (index == 0);
+        AccessNode& node = nodes_[static_cast<size_t>(index)];
+        View* view = is_root ? nullptr : view_at(index);
+
+        if (m == "GetRole") {
+            ctx.reply().append_uint32(
+                is_root ? atspi::kRoleApplication
+                        : atspi::role_to_atspi_role(
+                              view ? view->access_role() : View::AccessRole::none));
+            return true;
+        }
+        if (m == "GetRoleName") {
+            ctx.reply().append_string(
+                is_root ? "application"
+                        : atspi::role_to_atspi_role_name(
+                              view ? view->access_role() : View::AccessRole::none));
+            return true;
+        }
+        if (m == "GetLocalizedRoleName") {
+            ctx.reply().append_string(
+                is_root ? "application"
+                        : atspi::role_to_atspi_role_name(
+                              view ? view->access_role() : View::AccessRole::none));
+            return true;
+        }
+        if (m == "GetChildCount") {
+            ctx.reply().append_int32(static_cast<int>(node.children.size()));
+            return true;
+        }
+        if (m == "GetChildren") {
+            // a(so) — child object references.
+            DBus::Writer w = ctx.reply();
+            auto a = w.open_array("(so)");
+            DBus::Writer aw = w.sub(a);
+            for (int child : node.children) append_self_ref(aw, child);
+            w.close_container(a);
+            return true;
+        }
+        if (m == "GetChildAtIndex") {
+            int i = 0;
+            ctx.args().read_int32(i);
+            DBus::Writer w = ctx.reply();
+            if (i >= 0 && i < static_cast<int>(node.children.size())) {
+                append_self_ref(w, node.children[static_cast<size_t>(i)]);
+            } else {
+                append_object_ref(w, "", kNullPath);  // (so) null reference
+            }
+            return true;
+        }
+        if (m == "GetIndexInParent") {
+            int result = -1;
+            if (!is_root) {
+                const AccessNode& parent =
+                    nodes_[static_cast<size_t>(node.parent_index)];
+                for (size_t i = 0; i < parent.children.size(); ++i) {
+                    if (parent.children[i] == index) {
+                        result = static_cast<int>(i);
+                        break;
+                    }
+                }
+            }
+            ctx.reply().append_int32(result);
+            return true;
+        }
+        if (m == "GetState") {
+            DBus::Writer w = ctx.reply();
+            append_state(w, index);
+            return true;
+        }
+        if (m == "GetInterfaces") {
+            DBus::Writer w = ctx.reply();
+            auto a = w.open_array("s");
+            DBus::Writer aw = w.sub(a);
+            aw.append_string(kIfaceAccessible);
+            if (is_root) {
+                aw.append_string(kIfaceApplication);
+            } else {
+                aw.append_string(kIfaceComponent);
+                // Exactly the interfaces the View can actually serve
+                // (accessibility_interfaces): Value for a numeric range
+                // (slider/meter/progress bar), Text for a string value — a
+                // TextEditor's content or a ComboBox's selected item. AT-SPI has
+                // no string-value interface, so a role like ENTRY or COMBO_BOX
+                // with neither interface exported reads back NOTHING: Orca
+                // announces "entry" plus the name and falls silent.
+                const atspi_ifaces ifs = interfaces_for(index);
+                if (ifs.value) aw.append_string(kIfaceValue);
+                if (ifs.text)  aw.append_string(kIfaceText);
+            }
+            w.close_container(a);
+            return true;
+        }
+        if (m == "GetApplication") {
+            // (so) — the application root object.
+            DBus::Writer w = ctx.reply();
+            append_self_ref(w, 0);
+            return true;
+        }
+        if (m == "GetAttributes") {
+            // a{ss} — none.
+            DBus::Writer w = ctx.reply();
+            auto a = w.open_array("{ss}");
+            w.close_container(a);
+            return true;
+        }
+        if (m == "GetRelationSet") {
+            // a(ua(so)) — none.
+            DBus::Writer w = ctx.reply();
+            auto a = w.open_array("(ua(so))");
+            w.close_container(a);
+            return true;
+        }
+        return false;  // decline → UnknownMethod
+    }
+
+    // ── org.a11y.atspi.Component (per-widget objects) ─────────────────────────
+    //
+    // The View's rectangle in root-view space: the parent chain's bounds summed
+    // (mirrors the mac accessibilityFrame loop and the Windows view_to_screen_rect
+    // loop), then the View's own width and height.
     void root_rect(View* v, float& x, float& y, float& w, float& h) {
         x = y = w = h = 0;
         if (!v) return;
