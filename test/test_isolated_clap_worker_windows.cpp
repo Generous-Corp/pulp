@@ -48,11 +48,32 @@ IsolatedClapOptions options(const std::string& mode = "healthy") {
             file_hash(PULP_CLAP_WORKER_PATH)};
 }
 
+// One import per trap kind. Each must be redirected before any callback is
+// measured, so a zero count never comes from an uninstalled trap.
+constexpr const char* kRequiredImports[] = {"HeapAlloc",           "AcquireSRWLockExclusive",
+                                            "WaitForSingleObject", "PeekNamedPipe",
+                                            "CloseHandle",         "OpenProcess"};
+
+// Installs the import-table traps in this process and requires each kind's
+// import to be redirected. Catch2 cases run as separate processes under
+// ctest, so every measuring case installs them itself.
+void require_traps() {
+    const auto& redirected = traps::install();
+    for (const auto* name : kRequiredImports) {
+        INFO("import=" << name);
+        REQUIRE(std::find(redirected.begin(), redirected.end(), name) != redirected.end());
+    }
+}
+
 // Every callback below runs inside both probes: operator new counting and the
 // import-table traps for heap, lock, wait, pipe I/O, handle and process calls.
+// Constructing a probe installs the traps, outside any measured scope.
 struct CallbackProbe {
     unsigned allocations = 0;
     traps::Counts calls;
+    CallbackProbe() {
+        require_traps();
+    }
     void add(const test::ScopedRtProcessProbe& probe, const traps::Scope& scope) {
         allocations += static_cast<unsigned>(probe.allocation_count());
         const auto seen = scope.counts();
@@ -63,6 +84,18 @@ struct CallbackProbe {
         return allocations == 0 && calls.total() == 0;
     }
 };
+
+// Runs one callback inside both probes and returns its duration.
+template <typename Callback>
+std::chrono::nanoseconds measure(CallbackProbe& probe, Callback&& callback) {
+    traps::Scope scope;
+    test::ScopedRtProcessProbe allocations;
+    const auto begin = std::chrono::steady_clock::now();
+    callback();
+    const auto elapsed = std::chrono::steady_clock::now() - begin;
+    probe.add(allocations, scope);
+    return elapsed;
+}
 
 struct Buffers {
     audio::Buffer<float> input{2, 64}, output{2, 64};
@@ -78,15 +111,8 @@ struct Buffers {
     void process(PluginSlot& slot, int frames = 64) {
         auto in = static_cast<const audio::Buffer<float>&>(input).view();
         auto out = output.view();
-        std::chrono::nanoseconds elapsed{};
-        {
-            traps::Scope scope;
-            test::ScopedRtProcessProbe allocations;
-            const auto begin = std::chrono::steady_clock::now();
-            slot.process(out, in, midi_in, midi_out, params, frames);
-            elapsed = std::chrono::steady_clock::now() - begin;
-            probe.add(allocations, scope);
-        }
+        const auto elapsed =
+            measure(probe, [&] { slot.process(out, in, midi_in, midi_out, params, frames); });
         worst = std::max(worst, elapsed);
     }
     bool silent() const {
@@ -198,12 +224,7 @@ TEST_CASE("Windows callback traps observe each kind they claim to cover",
           "[host][isolation][windows][negative-control]") {
     // Instrument control: every later zero count is meaningful only if the
     // traps see these calls when they are made on purpose.
-    const auto& redirected = traps::install();
-    for (const auto* name : {"HeapAlloc", "AcquireSRWLockExclusive", "WaitForSingleObject",
-                             "PeekNamedPipe", "CloseHandle"}) {
-        INFO("import=" << name);
-        CHECK(std::find(redirected.begin(), redirected.end(), name) != redirected.end());
-    }
+    require_traps();
     traps::Counts seen;
     unsigned allocations = 0;
     {
@@ -221,6 +242,10 @@ TEST_CASE("Windows callback traps observe each kind they claim to cover",
         DWORD available = 0;
         PeekNamedPipe(event, nullptr, 0, nullptr, &available, nullptr);
         CloseHandle(event);
+        const HANDLE self =
+            OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, GetCurrentProcessId());
+        if (self != nullptr)
+            CloseHandle(self);
         seen = scope.counts();
         allocations = static_cast<unsigned>(probe.allocation_count());
     }
@@ -229,12 +254,32 @@ TEST_CASE("Windows callback traps observe each kind they claim to cover",
     CHECK(seen[traps::Kind::wait] >= 1);
     CHECK(seen[traps::Kind::io] >= 1);
     CHECK(seen[traps::Kind::handle] >= 2);
+    CHECK(seen[traps::Kind::process] >= 1);
     CHECK(allocations >= 1);
+}
+
+TEST_CASE("Windows callback probes install the traps in a case of their own",
+          "[host][isolation][windows][negative-control]") {
+    // Run alone, as ctest runs each case, no other case has installed the
+    // traps. A probe must still count deliberate calls in its measured scope.
+    CallbackProbe probe;
+    measure(probe, [] {
+        const HANDLE event = CreateEventW(nullptr, TRUE, TRUE, nullptr);
+        WaitForSingleObject(event, 0);
+        CloseHandle(event);
+        const HANDLE self =
+            OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, GetCurrentProcessId());
+        if (self != nullptr)
+            CloseHandle(self);
+    });
+    CHECK(probe.calls[traps::Kind::wait] >= 1);
+    CHECK(probe.calls[traps::Kind::handle] >= 2);
+    CHECK(probe.calls[traps::Kind::process] >= 1);
+    CHECK_FALSE(probe.clean());
 }
 
 TEST_CASE("Windows isolated CLAP real worker adds one block with bound identity",
           "[host][isolation][windows]") {
-    traps::install();
     Witness witness;
     const auto config = options();
     auto result = load_isolated_clap(config);
@@ -337,7 +382,6 @@ TEST_CASE("Windows isolated CLAP refuses identity mismatches before vendor code"
 
 TEST_CASE("Windows isolated CLAP malformed and partial completions latch silence",
           "[host][isolation][windows]") {
-    traps::install();
     struct Expectation {
         const char* mode;
         std::vector<IsolationReason> reasons;
@@ -375,7 +419,6 @@ TEST_CASE("Windows isolated CLAP malformed and partial completions latch silence
 
 TEST_CASE("Windows isolated CLAP stalled worker never stretches the callback",
           "[host][isolation][windows]") {
-    traps::install();
     auto result = load_isolated_clap(options("overrun"));
     REQUIRE(result);
     REQUIRE(result.slot->prepare(48000, 64));
@@ -481,6 +524,7 @@ TEST_CASE("Windows isolated CLAP cleanup reaches descendants after leader exit",
                     children[0], grandchildren[0], static_cast<int>(cleanup), survived ? 1 : 0);
         REQUIRE(cleanup == IsolationCleanup::complete);
         REQUIRE_FALSE(survived);
+        CHECK(buffers.probe.clean());
     }
 }
 
@@ -532,15 +576,7 @@ SiblingRender render_with_sibling(IsolatedClapResult& isolated, bool kill_worker
         }
         auto in = static_cast<const audio::Buffer<float>&>(source).view();
         auto out = rendered.view();
-        std::chrono::nanoseconds elapsed{};
-        {
-            traps::Scope scope;
-            test::ScopedRtProcessProbe allocations;
-            const auto begin = std::chrono::steady_clock::now();
-            graph.process(out, in, 64);
-            elapsed = std::chrono::steady_clock::now() - begin;
-            result.probe.add(allocations, scope);
-        }
+        const auto elapsed = measure(result.probe, [&] { graph.process(out, in, 64); });
         if (kill_worker && block >= kKillAfterBlock)
             result.worst_post_kill_callback = std::max(result.worst_post_kill_callback, elapsed);
         for (std::size_t c = 0; c < 2; ++c)
@@ -557,7 +593,6 @@ SiblingRender render_with_sibling(IsolatedClapResult& isolated, bool kill_worker
 
 TEST_CASE("Windows isolated CLAP killed worker keeps in-process sibling bit-exact",
           "[host][isolation][windows]") {
-    traps::install();
     auto healthy = load_isolated_clap(options());
     const auto reference = render_with_sibling(healthy, false);
     REQUIRE(reference.before_release.reason == IsolationReason::none);
