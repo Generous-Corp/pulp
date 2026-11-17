@@ -41,24 +41,42 @@ FakeAvahi& fake() {
     return f;
 }
 
-AvahiThreadedPoll* poll_new() { return reinterpret_cast<AvahiThreadedPoll*>(0x10); }
-void poll_free(AvahiThreadedPoll*) { ++fake().poll_frees; }
-AvahiPoll* poll_get(AvahiThreadedPoll*) { return reinterpret_cast<AvahiPoll*>(0x20); }
-int poll_start(AvahiThreadedPoll*) { return fake().poll_start_result; }
-int poll_stop(AvahiThreadedPoll*) { return 0; }
-void poll_lock(AvahiThreadedPoll*) { fake().poll_mutex.lock(); }
-void poll_unlock(AvahiThreadedPoll*) { fake().poll_mutex.unlock(); }
+AvahiThreadedPoll* poll_new() {
+    return reinterpret_cast<AvahiThreadedPoll*>(0x10);
+}
+void poll_free(AvahiThreadedPoll*) {
+    ++fake().poll_frees;
+}
+AvahiPoll* poll_get(AvahiThreadedPoll*) {
+    return reinterpret_cast<AvahiPoll*>(0x20);
+}
+int poll_start(AvahiThreadedPoll*) {
+    return fake().poll_start_result;
+}
+int poll_stop(AvahiThreadedPoll*) {
+    return 0;
+}
+void poll_lock(AvahiThreadedPoll*) {
+    fake().poll_mutex.lock();
+}
+void poll_unlock(AvahiThreadedPoll*) {
+    fake().poll_mutex.unlock();
+}
 AvahiClient* client_new(const AvahiPoll*, int, AvahiClientCallback, void*, int*) {
     return reinterpret_cast<AvahiClient*>(0x30);
 }
-void client_free(AvahiClient*) { ++fake().client_frees; }
+void client_free(AvahiClient*) {
+    ++fake().client_frees;
+}
 AvahiServiceBrowser* browser_new(AvahiClient*, AvahiIfIndex, AvahiProtocol, const char*,
                                  const char*, int, AvahiServiceBrowserCallback cb, void* ud) {
     fake().browse_cb = cb;
     fake().browse_userdata = ud;
     return reinterpret_cast<AvahiServiceBrowser*>(0x40);
 }
-int browser_free(AvahiServiceBrowser*) { return 0; }
+int browser_free(AvahiServiceBrowser*) {
+    return 0;
+}
 AvahiServiceResolver* resolver_new(AvahiClient*, AvahiIfIndex, AvahiProtocol, const char*,
                                    const char*, const char*, AvahiProtocol, int,
                                    AvahiServiceResolverCallback cb, void* ud) {
@@ -73,7 +91,9 @@ int resolver_free(AvahiServiceResolver* r) {
     fake().freed_resolvers.push_back(r);
     return 0;
 }
-char* address_snprint(char*, size_t, const AvahiAddress*) { return nullptr; }
+char* address_snprint(char*, size_t, const AvahiAddress*) {
+    return nullptr;
+}
 
 AvahiApi fake_api() {
     AvahiApi api;
@@ -142,7 +162,7 @@ TEST_CASE("avahi backend fails initialization when the poll thread does not star
     // Browsing and registering on an invalid backend do nothing.
     failed->stop();
     failed.reset();
-    CHECK(fake().client_frees == 1);  // the destructor frees nothing a second time
+    CHECK(fake().client_frees == 1); // the destructor frees nothing a second time
     CHECK(fake().poll_frees == 1);
 }
 
@@ -182,10 +202,11 @@ TEST_CASE("avahi browse and resolver callbacks do not deadlock", "[platform][lin
     CHECK(worker_done);
     CHECK(browser_done);
     if (!worker_done || !browser_done)
-        std::_Exit(1);  // a deadlocked pair cannot be joined
+        std::_Exit(1); // a deadlocked pair cannot be joined
 }
 
-TEST_CASE("avahi stop frees pending resolvers and drops their results", "[platform][linux][backends]") {
+TEST_CASE("avahi stop frees pending resolvers and drops their results",
+          "[platform][linux][backends]") {
     auto backend = make_backend();
     NetworkServiceDiscovery owner_a;
     int found_a = 0;
@@ -237,7 +258,9 @@ FakeNotify& notify() {
     return f;
 }
 
-int n_init(const char*) { return notify().init_result; }
+int n_init(const char*) {
+    return notify().init_result;
+}
 NotifyNotificationOpaque* n_new(const char*, const char*, const char*) {
     return reinterpret_cast<NotifyNotificationOpaque*>(notify().next++ * 16);
 }
@@ -249,14 +272,16 @@ int n_close(NotifyNotificationOpaque* h, void**) {
     notify().closed.push_back(h);
     return 1;
 }
-void n_unref(void* h) { notify().unrefed.push_back(h); }
+void n_unref(void* h) {
+    notify().unrefed.push_back(h);
+}
 
 std::unique_ptr<LibNotifyBackend> make_notify(int init_result) {
     notify() = FakeNotify{};
     notify().init_result = init_result;
-    return std::make_unique<LibNotifyBackend>(
-        pulp::runtime::DynamicLibrary{}, pulp::runtime::DynamicLibrary{}, n_init, n_new,
-        n_show, n_close, n_unref);
+    return std::make_unique<LibNotifyBackend>(pulp::runtime::DynamicLibrary{},
+                                              pulp::runtime::DynamicLibrary{}, n_init, n_new,
+                                              n_show, n_close, n_unref);
 }
 
 TEST_CASE("libnotify failed init is not available", "[platform][linux][backends]") {
@@ -264,7 +289,8 @@ TEST_CASE("libnotify failed init is not available", "[platform][linux][backends]
     CHECK(make_notify(1)->is_available());
 }
 
-TEST_CASE("libnotify repeated id replaces and releases the earlier notification", "[platform][linux][backends]") {
+TEST_CASE("libnotify repeated id replaces and releases the earlier notification",
+          "[platform][linux][backends]") {
     auto backend = make_notify(1);
     LocalNotification n;
     n.title = "t";
@@ -281,6 +307,6 @@ TEST_CASE("libnotify repeated id replaces and releases the earlier notification"
     CHECK(notify().unrefed.size() == 2);
 }
 
-}  // namespace
+} // namespace
 
-#endif  // __linux__
+#endif // __linux__

@@ -24,9 +24,9 @@ namespace pulp::view {
 
 bool begin_file_drag(void* native_view, const FileDragRequest& request) {
     if (!native_view || request.file_paths.empty()) return false;
-    const Window host_window =
-        static_cast<Window>(reinterpret_cast<uintptr_t>(native_view));
-    if (!host_window) return false;
+    const Window host_window = static_cast<Window>(reinterpret_cast<uintptr_t>(native_view));
+    if (!host_window)
+        return false;
 
     Display* display = XOpenDisplay(nullptr);
     if (!display) return false;
@@ -35,8 +35,8 @@ bool begin_file_drag(void* native_view, const FileDragRequest& request) {
     if (XGetWindowAttributes(display, host_window, &wa))
         screen = XScreenNumberOfScreen(wa.screen);
 
-    const bool ok = xdnd::run_drag_source(display, screen, request.file_paths,
-                                          std::chrono::seconds(60));
+    const bool ok =
+        xdnd::run_drag_source(display, screen, request.file_paths, std::chrono::seconds(60));
     XCloseDisplay(display);
     return ok;
 }

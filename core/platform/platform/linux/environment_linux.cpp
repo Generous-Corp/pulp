@@ -46,8 +46,8 @@ namespace pulp::platform {
 
 namespace {
 
-using linux_env::MeminfoField;
 using linux_env::classify_memory_pressure;
+using linux_env::MeminfoField;
 using linux_env::parse_meminfo_line;
 
 // ── Color scheme detection ────────────────────────────────────────────────

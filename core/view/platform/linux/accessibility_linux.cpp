@@ -411,7 +411,8 @@ struct AtspiProvider {
         if (m == "GetExtents") {
             // (u coord_type) -> (iiii x,y,w,h), in the requested coordinate space.
             uint32_t space = 0;
-            if (!coord_type_for_call(ctx, space)) return true;
+            if (!coord_type_for_call(ctx, space))
+                return true;
             const atspi::PixelRect r = extents_in(v, space);
             DBus::Writer rw = ctx.reply();
             auto s = rw.open_struct();
@@ -426,7 +427,8 @@ struct AtspiProvider {
         if (m == "GetPosition") {
             // (u coord_type) -> ii x,y, in the requested coordinate space.
             uint32_t space = 0;
-            if (!coord_type_for_call(ctx, space)) return true;
+            if (!coord_type_for_call(ctx, space))
+                return true;
             const atspi::PixelRect r = extents_in(v, space);
             DBus::Writer rw = ctx.reply();
             rw.append_int32(r.x);
@@ -447,7 +449,8 @@ struct AtspiProvider {
             ctx.args().read_int32(px);
             ctx.args().read_int32(py);
             uint32_t space = 0;
-            if (!coord_type_for_call(ctx, space)) return true;
+            if (!coord_type_for_call(ctx, space))
+                return true;
             const atspi::PixelRect r = extents_in(v, space);
             const bool inside = px >= r.x && px < r.x + r.width && py >= r.y && py < r.y + r.height;
             ctx.reply().append_bool(inside);
@@ -633,8 +636,8 @@ struct AtspiProvider {
             bool ok = false;
             if (AccessibilityTextInterface* tif = text_iface(index)) {
                 if (off >= 0 && off <= n) {
-                    const int byte_off = static_cast<int>(
-                        atspi_text::byte_offset_of_character(text, off));
+                    const int byte_off =
+                        static_cast<int>(atspi_text::byte_offset_of_character(text, off));
                     tif->set_selection(byte_off, byte_off);
                     ok = true;
                 }
@@ -709,8 +712,8 @@ struct AtspiProvider {
                 return variant_int32(w, atspi_text::character_count(text_for(index)));
             }
             if (prop == "CaretOffset") {
-                return variant_int32(w, atspi_text::character_index_of_byte(
-                                            text_for(index), caret_for(index)));
+                return variant_int32(
+                    w, atspi_text::character_index_of_byte(text_for(index), caret_for(index)));
             }
         }
         if (iface == kIfaceValue) {
@@ -1062,7 +1065,8 @@ void accessibility_set_window_geometry(void* handle, int screen_x, int screen_y,
 
 void accessibility_set_window_geometry(void* handle, int screen_x, int screen_y, float scale,
                                        float offset_x, float offset_y) {
-    if (handle == reinterpret_cast<void*>(static_cast<uintptr_t>(1)) || !handle) return;
+    if (handle == reinterpret_cast<void*>(static_cast<uintptr_t>(1)) || !handle)
+        return;
     auto* p = static_cast<AtspiProvider*>(handle);
     p->geometry.screen_origin_known = true;
     p->geometry.screen_x = screen_x;

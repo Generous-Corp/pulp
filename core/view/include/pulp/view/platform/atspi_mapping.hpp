@@ -261,7 +261,8 @@ struct PixelRect {
 /// coordinates always can; screen coordinates need the window's screen origin;
 /// parent coordinates are not offered.
 constexpr bool coord_type_available(uint32_t coord_type, const WindowGeometry& g) {
-    if (coord_type == kCoordWindow) return true;
+    if (coord_type == kCoordWindow)
+        return true;
     return coord_type == kCoordScreen && g.screen_origin_known;
 }
 

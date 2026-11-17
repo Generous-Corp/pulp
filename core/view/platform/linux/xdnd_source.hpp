@@ -32,10 +32,10 @@
 
 namespace pulp::view::xdnd {
 
-inline bool run_drag_source(Display* display, int screen,
-                            const std::vector<std::string>& paths,
+inline bool run_drag_source(Display* display, int screen, const std::vector<std::string>& paths,
                             std::chrono::milliseconds timeout) {
-    if (!display || paths.empty()) return false;
+    if (!display || paths.empty())
+        return false;
     const std::string uri_list = build_uri_list(paths);
     if (uri_list.empty()) return false;
 
@@ -67,19 +67,29 @@ inline bool run_drag_source(Display* display, int screen,
     // window, then walk up to the first XdndAware ancestor.
     auto target_at = [&](int rx, int ry, int* version_out) -> Window {
         Window top = RootWindow(display, screen);
-        Window cur = top, child = top; int wx = 0, wy = 0;
+        Window cur = top, child = top;
+        int wx = 0, wy = 0;
         while (child != None &&
                XTranslateCoordinates(display, top, cur, rx, ry, &wx, &wy, &child)) {
-            if (child == None) break;
+            if (child == None)
+                break;
             cur = child;
         }
         for (Window w = cur; w != None;) {
             const int ver = negotiated_version(aware_version(w));
-            if (ver > 0) { if (version_out) *version_out = ver; return w; }
-            Window r = 0, parent = 0, *kids = nullptr; unsigned int nk = 0;
-            if (!XQueryTree(display, w, &r, &parent, &kids, &nk)) break;
-            if (kids) XFree(kids);
-            if (w == r || parent == None) break;
+            if (ver > 0) {
+                if (version_out)
+                    *version_out = ver;
+                return w;
+            }
+            Window r = 0, parent = 0, *kids = nullptr;
+            unsigned int nk = 0;
+            if (!XQueryTree(display, w, &r, &parent, &kids, &nk))
+                break;
+            if (kids)
+                XFree(kids);
+            if (w == r || parent == None)
+                break;
             w = parent;
         }
         return None;
@@ -124,7 +134,8 @@ inline bool run_drag_source(Display* display, int screen,
     const Window root = RootWindow(display, screen);
     const Window source = XCreateWindow(display, root, -10, -10, 1, 1, 0, 0, InputOnly,
                                         CopyFromParent, CWOverrideRedirect, &source_attrs);
-    if (!source) return false;
+    if (!source)
+        return false;
     auto release = [&]() {
         // Relinquish XdndSelection ownership now the drag is over: the
         // timeout and cancel paths must not leak it.
@@ -165,23 +176,24 @@ inline bool run_drag_source(Display* display, int screen,
         if (t != target) {
             if (target != None)
                 send(target, xa_XdndLeave, static_cast<long>(source), 0, 0, 0, 0);
-            target = t; target_ver = ver; accepted = false;
+            target = t;
+            target_ver = ver;
+            accepted = false;
             if (target != None)
                 send(target, xa_XdndEnter, static_cast<long>(source),
-                     (static_cast<long>(target_ver) << 24),
-                     static_cast<long>(xa_text_uri_list), 0, 0);
+                     (static_cast<long>(target_ver) << 24), static_cast<long>(xa_text_uri_list), 0,
+                     0);
         }
         if (target != None)
-            send(target, xa_XdndPosition, static_cast<long>(source), 0,
-                 (rx << 16) | (ry & 0xFFFF), static_cast<long>(CurrentTime),
-                 static_cast<long>(xa_XdndActionCopy));
+            send(target, xa_XdndPosition, static_cast<long>(source), 0, (rx << 16) | (ry & 0xFFFF),
+                 static_cast<long>(CurrentTime), static_cast<long>(xa_XdndActionCopy));
     };
     // Returns true when the drag is over without a drop (no accepting target).
     auto released = [&]() {
         if (target != None && accepted) {
-            send(target, xa_XdndDrop, static_cast<long>(source), 0,
-                 static_cast<long>(CurrentTime), 0, 0);
-            dropped = true;  // keep pumping for the serve + XdndFinished
+            send(target, xa_XdndDrop, static_cast<long>(source), 0, static_cast<long>(CurrentTime),
+                 0, 0);
+            dropped = true; // keep pumping for the serve + XdndFinished
             return false;
         }
         if (target != None)
@@ -196,14 +208,17 @@ inline bool run_drag_source(Display* display, int screen,
             XNextEvent(display, &ev);
             if (ev.type == ClientMessage) {
                 const auto sender = static_cast<unsigned long>(ev.xclient.data.l[0]);
-                if (ev.xclient.window != source) continue;
+                if (ev.xclient.window != source)
+                    continue;
                 if (ev.xclient.message_type == xa_XdndStatus) {
-                    if (!status_is_from_target(sender, target)) continue;
+                    if (!status_is_from_target(sender, target))
+                        continue;
                     accepted = (ev.xclient.data.l[1] & 1L) != 0;
                 } else if (ev.xclient.message_type == xa_XdndFinished) {
-                    const auto outcome = finished_outcome(sender, target, dropped, target_ver,
-                                                          ev.xclient.data.l[1]);
-                    if (!outcome) continue;
+                    const auto outcome =
+                        finished_outcome(sender, target, dropped, target_ver, ev.xclient.data.l[1]);
+                    if (!outcome)
+                        continue;
                     result = *outcome;
                     done = true;
                     break;
@@ -213,13 +228,15 @@ inline bool run_drag_source(Display* display, int screen,
                     serve(ev.xselectionrequest);
             }
         }
-        if (done) break;
+        if (done)
+            break;
         if (!dropped) {
             const PointerSample now = read_pointer();
             const PointerChange change = pointer_change(last, now);
             last = now;
             if (change == PointerChange::released) {
-                if (released()) break;
+                if (released())
+                    break;
             } else if (change == PointerChange::moved) {
                 follow(now.x, now.y);
             }

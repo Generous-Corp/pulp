@@ -641,12 +641,13 @@ struct ComponentExtents {
     int x = 0, y = 0, w = 0, h = 0;
 };
 
-ComponentExtents component_extents(void* handle, const std::string& server,
-                                   const std::string& path, uint32_t coord_type) {
+ComponentExtents component_extents(void* handle, const std::string& server, const std::string& path,
+                                   uint32_t coord_type) {
     ComponentExtents out;
     out.ok = run_client_call(handle, [&] {
         DBus client;
-        if (!client.connect_session()) return false;
+        if (!client.connect_session())
+            return false;
         return client.call_method(
             server, path, kIfaceComponent, "GetExtents",
             [&](DBus::Writer& w) { w.append_uint32(coord_type); },
@@ -689,29 +690,32 @@ struct GainTree {
 bool find_gain_path(void* handle, const std::string& server, std::string& gain_path) {
     WireNode root_node, panel_node;
     return run_client_call(handle, [&] {
-               if (!read_node(server, kRootPath, root_node) || root_node.child_paths.size() != 1)
-                   return false;
-               if (!read_node(server, root_node.child_paths[0], panel_node) ||
-                   panel_node.child_paths.size() != 1)
-                   return false;
-               gain_path = panel_node.child_paths[0];
-               return true;
-           });
+        if (!read_node(server, kRootPath, root_node) || root_node.child_paths.size() != 1)
+            return false;
+        if (!read_node(server, root_node.child_paths[0], panel_node) ||
+            panel_node.child_paths.size() != 1)
+            return false;
+        gain_path = panel_node.child_paths[0];
+        return true;
+    });
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("Linux AT-SPI screen coordinates follow the window origin and viewport",
           "[view][accessibility][atspi][linux]") {
-    if (!DBus::library_available()) SKIP("libdbus not available");
+    if (!DBus::library_available())
+        SKIP("libdbus not available");
     {
         DBus probe;
-        if (!probe.connect_session()) SKIP("no session bus (run under dbus-run-session)");
+        if (!probe.connect_session())
+            SKIP("no session bus (run under dbus-run-session)");
     }
     GainTree tree;
     std::string server;
     void* handle = init_accessibility_on_session_bus_for_test(tree.root, &server);
-    if (!handle) SKIP("could not export on session bus");
+    if (!handle)
+        SKIP("could not export on session bus");
     std::string gain;
     REQUIRE(find_gain_path(handle, server, gain));
 
@@ -753,33 +757,40 @@ TEST_CASE("Linux AT-SPI screen coordinates follow the window origin and viewport
 
 TEST_CASE("Linux AT-SPI Properties.GetAll returns every property Get serves",
           "[view][accessibility][atspi][linux]") {
-    if (!DBus::library_available()) SKIP("libdbus not available");
+    if (!DBus::library_available())
+        SKIP("libdbus not available");
     {
         DBus probe;
-        if (!probe.connect_session()) SKIP("no session bus (run under dbus-run-session)");
+        if (!probe.connect_session())
+            SKIP("no session bus (run under dbus-run-session)");
     }
     GainTree tree;
     std::string server;
     void* handle = init_accessibility_on_session_bus_for_test(tree.root, &server);
-    if (!handle) SKIP("could not export on session bus");
+    if (!handle)
+        SKIP("could not export on session bus");
     std::string gain;
     REQUIRE(find_gain_path(handle, server, gain));
 
     std::vector<std::string> keys;
     const bool ok = run_client_call(handle, [&] {
         DBus client;
-        if (!client.connect_session()) return false;
+        if (!client.connect_session())
+            return false;
         return client.call_method(
             server, gain, kIfaceProperties, "GetAll",
             [](DBus::Writer& w) { w.append_string(kIfaceAccessible); },
             [&](DBus::Reader& r) {
                 DBus::Reader array;
-                if (!r.recurse(array)) return;
+                if (!r.recurse(array))
+                    return;
                 while (array.arg_type() != 0) {
                     DBus::Reader entry;
                     std::string key;
-                    if (array.recurse(entry) && entry.read_string(key)) keys.push_back(key);
-                    if (!array.next()) break;
+                    if (array.recurse(entry) && entry.read_string(key))
+                        keys.push_back(key);
+                    if (!array.next())
+                        break;
                 }
             });
     });

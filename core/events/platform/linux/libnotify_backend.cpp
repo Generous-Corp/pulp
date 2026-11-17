@@ -73,7 +73,9 @@ public:
         live_.clear();
     }
 
-    bool is_available() const override { return initialized_; }
+    bool is_available() const override {
+        return initialized_;
+    }
 
     std::string backend_id() const override { return "libnotify"; }
 
@@ -170,10 +172,11 @@ struct LibNotifyBootstrap {
         auto unref = reinterpret_cast<GObjectUnrefFn>(gobject.find_symbol("g_object_unref"));
         if (!init || !make || !show || !close || !unref) return;
 
-        auto backend = std::make_unique<LibNotifyBackend>(
-            std::move(lib), std::move(gobject), init, make, show, close, unref);
+        auto backend = std::make_unique<LibNotifyBackend>(std::move(lib), std::move(gobject), init,
+                                                          make, show, close, unref);
         // Leave the fallback in place when libnotify could not initialize.
-        if (!backend->is_available()) return;
+        if (!backend->is_available())
+            return;
         install_push_notifications_backend(std::move(backend));
     }
 };

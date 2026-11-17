@@ -188,13 +188,16 @@ enum class PointerChange { none, moved, released };
 /// for on any other connection fails. Release wins over movement, so the drop
 /// goes to the target the last position reached.
 inline PointerChange pointer_change(const PointerSample& previous, const PointerSample& now) {
-    if (previous.primary_down && !now.primary_down) return PointerChange::released;
-    if (now.x != previous.x || now.y != previous.y) return PointerChange::moved;
+    if (previous.primary_down && !now.primary_down)
+        return PointerChange::released;
+    if (now.x != previous.x || now.y != previous.y)
+        return PointerChange::moved;
     return PointerChange::none;
 }
 
 inline int negotiated_version(int advertised) {
-    if (advertised < kMinSourceVersion) return 0;
+    if (advertised < kMinSourceVersion)
+        return 0;
     return advertised < kMaxSourceVersion ? advertised : kMaxSourceVersion;
 }
 
@@ -209,8 +212,10 @@ inline bool status_is_from_target(unsigned long sender, unsigned long target) {
 // finishing the transfer is a success.
 inline std::optional<bool> finished_outcome(unsigned long sender, unsigned long target,
                                             bool dropped, int version, long flags) {
-    if (!dropped || !status_is_from_target(sender, target)) return std::nullopt;
-    if (version >= 5) return (flags & 1L) != 0;
+    if (!dropped || !status_is_from_target(sender, target))
+        return std::nullopt;
+    if (version >= 5)
+        return (flags & 1L) != 0;
     return true;
 }
 

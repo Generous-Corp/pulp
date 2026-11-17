@@ -20,7 +20,8 @@ struct MeminfoField {
 
 inline MeminfoField parse_meminfo_line(const std::string& line, std::string_view key) {
     MeminfoField field;
-    if (line.compare(0, key.size(), key) != 0) return field;
+    if (line.compare(0, key.size(), key) != 0)
+        return field;
     long value = 0;
     const std::string format = std::string(key) + " %ld kB";
     if (std::sscanf(line.c_str(), format.c_str(), &value) == 1 && value >= 0) {
@@ -35,11 +36,14 @@ inline MeminfoField parse_meminfo_line(const std::string& line, std::string_view
 // normal; a parsed MemAvailable of zero is the most critical reading.
 inline MemoryPressure classify_memory_pressure(const MeminfoField& total,
                                                const MeminfoField& available) {
-    if (!total.present || total.kb <= 0 || !available.present) return MemoryPressure::normal;
+    if (!total.present || total.kb <= 0 || !available.present)
+        return MemoryPressure::normal;
     const double frac = static_cast<double>(available.kb) / static_cast<double>(total.kb);
-    if (frac < 0.05) return MemoryPressure::critical;
-    if (frac < 0.15) return MemoryPressure::moderate;
+    if (frac < 0.05)
+        return MemoryPressure::critical;
+    if (frac < 0.15)
+        return MemoryPressure::moderate;
     return MemoryPressure::normal;
 }
 
-}  // namespace pulp::platform::linux_env
+} // namespace pulp::platform::linux_env

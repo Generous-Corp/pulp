@@ -21,7 +21,8 @@ namespace env = pulp::platform::linux_env;
 using pulp::platform::MemoryPressure;
 
 // "aé😀b": a 1-byte, a 2-byte, a 4-byte and a 1-byte character (8 bytes).
-const std::string kMixed = "a\xC3\xA9\xF0\x9F\x98\x80" "b";
+const std::string kMixed = "a\xC3\xA9\xF0\x9F\x98\x80"
+                           "b";
 
 TEST_CASE("text counts characters not bytes", "[view][linux][pure]") {
     CHECK(kMixed.size() == 8);
@@ -60,8 +61,8 @@ TEST_CASE("text converts between byte and character offsets", "[view][linux][pur
 }
 
 TEST_CASE("text treats malformed bytes as single characters", "[view][linux][pure]") {
-    const std::string stray = "a\x80z";           // lone continuation byte
-    const std::string cut = "a\xE2\x82";          // truncated 3-byte sequence
+    const std::string stray = "a\x80z";  // lone continuation byte
+    const std::string cut = "a\xE2\x82"; // truncated 3-byte sequence
     CHECK(text::character_count(stray) == 3);
     CHECK(text::character_count(cut) == 3);
     CHECK(text::code_point_at(stray, 1) == 0xFFFDu);
@@ -69,13 +70,13 @@ TEST_CASE("text treats malformed bytes as single characters", "[view][linux][pur
 
 TEST_CASE("xdnd replies apply only from the current target", "[view][linux][pure]") {
     CHECK(xdnd::status_is_from_target(42, 42));
-    CHECK(!xdnd::status_is_from_target(41, 42));   // delayed reply from an earlier target
-    CHECK(!xdnd::status_is_from_target(0, 0));     // no target yet
+    CHECK(!xdnd::status_is_from_target(41, 42)); // delayed reply from an earlier target
+    CHECK(!xdnd::status_is_from_target(0, 0));   // no target yet
 }
 
 TEST_CASE("xdnd finished needs a drop and the current target", "[view][linux][pure]") {
-    CHECK(!xdnd::finished_outcome(42, 42, false, 5, 1));  // premature
-    CHECK(!xdnd::finished_outcome(41, 42, true, 5, 1));   // wrong sender
+    CHECK(!xdnd::finished_outcome(42, 42, false, 5, 1)); // premature
+    CHECK(!xdnd::finished_outcome(41, 42, true, 5, 1));  // wrong sender
     CHECK(xdnd::finished_outcome(42, 42, true, 5, 1) == std::optional<bool>(true));
     CHECK(xdnd::finished_outcome(42, 42, true, 5, 0) == std::optional<bool>(false));
 }
@@ -118,7 +119,7 @@ TEST_CASE("meminfo lines parse with presence", "[view][linux][pure]") {
     CHECK(!env::parse_meminfo_line("MemAvailable: junk kB", "MemAvailable:").present);
 }
 
-}  // namespace
+} // namespace
 
 // ── UTF-8 well-formedness ────────────────────────────────────────────────────
 // Each ill-formed sequence below must count as one character per byte (so no
@@ -127,36 +128,39 @@ TEST_CASE("meminfo lines parse with presence", "[view][linux][pure]") {
 
 TEST_CASE("text rejects overlong surrogate and out-of-range sequences", "[view][linux][pure]") {
     const std::string bad[] = {
-        "\xE0\x80\x80",      // overlong U+0000
-        "\xE0\x9F\xBF",      // overlong U+07FF
-        "\xC0\x80",          // overlong 2-byte U+0000
-        "\xC1\xBF",          // overlong 2-byte U+007F
-        "\xED\xA0\x80",      // surrogate U+D800
-        "\xED\xBF\xBF",      // surrogate U+DFFF
-        "\xF0\x80\x80\x80",  // overlong 4-byte U+0000
-        "\xF0\x8F\xBF\xBF",  // overlong 4-byte U+FFFF
-        "\xF4\x90\x80\x80",  // above U+10FFFF
-        "\xF5\x80\x80\x80",  // lead byte beyond F4
+        "\xE0\x80\x80",     // overlong U+0000
+        "\xE0\x9F\xBF",     // overlong U+07FF
+        "\xC0\x80",         // overlong 2-byte U+0000
+        "\xC1\xBF",         // overlong 2-byte U+007F
+        "\xED\xA0\x80",     // surrogate U+D800
+        "\xED\xBF\xBF",     // surrogate U+DFFF
+        "\xF0\x80\x80\x80", // overlong 4-byte U+0000
+        "\xF0\x8F\xBF\xBF", // overlong 4-byte U+FFFF
+        "\xF4\x90\x80\x80", // above U+10FFFF
+        "\xF5\x80\x80\x80", // lead byte beyond F4
     };
     for (const std::string& sequence : bad) {
         INFO("sequence of " << sequence.size() << " bytes starting " << std::hex
-             << static_cast<unsigned>(static_cast<unsigned char>(sequence[0])));
+                            << static_cast<unsigned>(static_cast<unsigned char>(sequence[0])));
         CHECK(text::character_count(sequence) == static_cast<int>(sequence.size()));
         CHECK(text::code_point_at(sequence, 0) == 0xFFFDu);
     }
 }
 
 TEST_CASE("text accepts the boundary values of well-formed UTF-8", "[view][linux][pure]") {
-    struct Case { std::string bytes; uint32_t code_point; };
+    struct Case {
+        std::string bytes;
+        uint32_t code_point;
+    };
     const Case good[] = {
-        {"\xC2\x80", 0x80u},              // first 2-byte value
-        {"\xDF\xBF", 0x7FFu},             // last 2-byte value
-        {"\xE0\xA0\x80", 0x800u},         // first 3-byte value
-        {"\xED\x9F\xBF", 0xD7FFu},        // last before the surrogates
-        {"\xEE\x80\x80", 0xE000u},        // first after the surrogates
-        {"\xEF\xBF\xBF", 0xFFFFu},        // last 3-byte value
-        {"\xF0\x90\x80\x80", 0x10000u},   // first 4-byte value
-        {"\xF4\x8F\xBF\xBF", 0x10FFFFu},  // last scalar value
+        {"\xC2\x80", 0x80u},             // first 2-byte value
+        {"\xDF\xBF", 0x7FFu},            // last 2-byte value
+        {"\xE0\xA0\x80", 0x800u},        // first 3-byte value
+        {"\xED\x9F\xBF", 0xD7FFu},       // last before the surrogates
+        {"\xEE\x80\x80", 0xE000u},       // first after the surrogates
+        {"\xEF\xBF\xBF", 0xFFFFu},       // last 3-byte value
+        {"\xF0\x90\x80\x80", 0x10000u},  // first 4-byte value
+        {"\xF4\x8F\xBF\xBF", 0x10FFFFu}, // last scalar value
     };
     for (const Case& c : good) {
         INFO("code point " << std::hex << c.code_point);
@@ -165,7 +169,8 @@ TEST_CASE("text accepts the boundary values of well-formed UTF-8", "[view][linux
     }
 }
 
-TEST_CASE("text does not let a bad sequence swallow the character after it", "[view][linux][pure]") {
+TEST_CASE("text does not let a bad sequence swallow the character after it",
+          "[view][linux][pure]") {
     // The surrogate is three single bytes, then a well-formed 'e acute' follows.
     const std::string s = "\xED\xA0\x80\xC3\xA9";
     CHECK(text::character_count(s) == 4);
@@ -217,11 +222,12 @@ TEST_CASE("component geometry follows the viewport transform and the screen orig
     CHECK(atspi::root_rect_in(35, 75, 200, 24, atspi::kCoordScreen, letterboxed).x != 335);
 }
 
-TEST_CASE("component coordinate spaces need what they rely on", "[view][linux][pure][accessibility]") {
+TEST_CASE("component coordinate spaces need what they rely on",
+          "[view][linux][pure][accessibility]") {
     atspi::WindowGeometry g;
     CHECK(atspi::coord_type_available(atspi::kCoordWindow, g));
-    CHECK_FALSE(atspi::coord_type_available(atspi::kCoordScreen, g));  // origin not reported yet
-    CHECK_FALSE(atspi::coord_type_available(2, g));                    // parent coordinates
+    CHECK_FALSE(atspi::coord_type_available(atspi::kCoordScreen, g)); // origin not reported yet
+    CHECK_FALSE(atspi::coord_type_available(2, g));                   // parent coordinates
     g.screen_origin_known = true;
     CHECK(atspi::coord_type_available(atspi::kCoordScreen, g));
     CHECK_FALSE(atspi::coord_type_available(2, g));
@@ -230,5 +236,6 @@ TEST_CASE("component coordinate spaces need what they rely on", "[view][linux][p
 TEST_CASE("a non-positive scale is treated as 1", "[view][linux][pure][accessibility]") {
     atspi::WindowGeometry g;
     g.scale = 0.0f;
-    CHECK(atspi::root_rect_in(10, 10, 20, 20, atspi::kCoordWindow, g) == atspi::PixelRect{10, 10, 20, 20});
+    CHECK(atspi::root_rect_in(10, 10, 20, 20, atspi::kCoordWindow, g) ==
+          atspi::PixelRect{10, 10, 20, 20});
 }
