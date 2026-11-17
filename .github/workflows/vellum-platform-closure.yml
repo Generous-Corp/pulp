@@ -10,8 +10,10 @@
 #      locked Skia/Dawn asset for the platform);
 #   2. run tools/scripts/vellum_closure.py manifest once per unit, with
 #      tools/scripts/vellum_d3_units.json naming each unit's targets;
-#   3. upload the manifests and an export.json (platform, commit, runner image,
-#      renderer asset) as one artifact.
+#   3. upload the manifests and an export.json (platform, commit, runner image
+#      name and version, ImageOS, renderer asset) as one artifact. A runner
+#      that declares no ImageVersion (a self-hosted runner or a VM) fails this
+#      step instead of recording a blank image.
 #
 # The export runs at this workflow's own commit, so the commit it records is
 # the one the workflow definition and the exporter came from. Vellum's
@@ -212,23 +214,13 @@ jobs:
           IMAGE_NAME_INPUT: ${{ inputs.runner_image_name }}
         run: |
           set -euo pipefail
-          image_name="$IMAGE_NAME_INPUT"
-          if [ -z "$image_name" ] && [ -r /etc/os-release ]; then
-            # shellcheck disable=SC1091
-            image_name="$(. /etc/os-release && printf '%s-%s' "$ID" "$VERSION_ID")"
-          fi
-          python3 -I - "$image_name" "${ImageVersion:?the runner image declares no version}" <<'PY'
-          import json, os, sys
-          name, version = sys.argv[1:3]
-          if not name.strip():
-              raise SystemExit("the runner image has no name: pass runner_image_name")
-          json.dump({
-              "platform": os.environ["PLATFORM"],
-              "pulp_sha": os.environ["GITHUB_SHA"],
-              "runner_image": {"name": name, "version": version},
-              "renderer_asset_name": os.environ["RENDERER_ASSET"],
-          }, open(os.path.join(os.environ["RUNNER_TEMP"], "closure", "export.json"), "w"), indent=2)
-          PY
+          # Fails when the runner image is not fully named: a self-hosted
+          # runner or VM sets no ImageVersion, and a record must not carry a
+          # blank or placeholder image.
+          python3 tools/scripts/vellum_closure.py export-meta \
+            --platform "$PLATFORM" --renderer-asset "$RENDERER_ASSET" \
+            --image-name "$IMAGE_NAME_INPUT" \
+            --output "$RUNNER_TEMP/closure/export.json"
 
       - name: Upload the manifests
         uses: actions/upload-artifact@v7.0.2

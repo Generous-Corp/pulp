@@ -13801,6 +13801,7 @@ commit that is not on Pulp main.
 - The artifact is the input to Vellum's `tools/mirror/write_platform_record.py`;
   Vellum CI never re-runs this export, so a platform's record is only as
   reproducible as this workflow at the recorded commit.
-- It has the runner image name from `/etc/os-release` and the version from the
-  hosted runner's `ImageVersion`. A runner without that variable fails the
-  step on purpose rather than recording a blank image.
+- The runner image name comes from `/etc/os-release` and the version from the
+  hosted runner's `ImageVersion` (`vellum_closure.py export-meta`, which also
+  records `ImageOS`). A self-hosted runner or VM sets no `ImageVersion`; the
+  step then fails rather than recording a blank or placeholder image.
