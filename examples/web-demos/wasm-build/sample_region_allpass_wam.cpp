@@ -1,7 +1,6 @@
 #include "allpass_processor.hpp"
 
 #include <emscripten/emscripten.h>
-#include <pulp/host/signal_graph_runtime.hpp>
 
 #include <string>
 
