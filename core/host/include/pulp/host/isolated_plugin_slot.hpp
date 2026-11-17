@@ -88,8 +88,9 @@ struct IsolatedClapResult {
     }
 };
 
-/// MacClapStereo64V1: arm64 macOS, 48kHz, stereo, 64 frames, headless CLAP
-/// effect with zero reported latency/tail. Adds 64 samples of graph PDC latency.
+/// MacClapStereo64V1: arm64 macOS or x64 Windows, 48kHz, stereo, 64 frames,
+/// headless CLAP effect with zero reported latency/tail. Adds 64 samples of
+/// graph PDC latency.
 /// Refuses unsupported requests; never falls back to in-process loading.
 IsolatedClapResult load_isolated_clap(const IsolatedClapOptions&);
 

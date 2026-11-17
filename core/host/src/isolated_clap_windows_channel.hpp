@@ -126,17 +126,25 @@ class SharedSection {
         return true;
     }
 
-    /// Worker side: adopt a handle value received in the hello record. Mapping
-    /// kMappingBytes fails for a smaller section or a handle that is not one.
+    /// Worker side: map the section named by a handle value received in the
+    /// hello record. Mapping kMappingBytes fails for a smaller section or for a
+    /// value that is not a section handle. The value is owned here only once it
+    /// maps: it is then closed at once, because the view alone keeps the section
+    /// alive, so a later reset() never closes it again. A value that does not map
+    /// is never closed, since it may name an unrelated handle of this process
+    /// (its own control channel, for instance). The parent terminates a worker
+    /// whose hello fails, which releases a duplicated value it never adopted.
     bool adopt(std::uint64_t handle_value) {
         reset();
         if (handle_value == 0)
             return false;
-        section_ = reinterpret_cast<HANDLE>(static_cast<std::uintptr_t>(handle_value));
-        if (!map()) {
-            reset();
+        const auto handle = reinterpret_cast<HANDLE>(static_cast<std::uintptr_t>(handle_value));
+        void* const view =
+            MapViewOfFile(handle, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, kMappingBytes);
+        if (view == nullptr)
             return false;
-        }
+        CloseHandle(handle);
+        view_ = view;
         mapping_ = static_cast<Mapping*>(view_);
         return true;
     }
@@ -184,7 +192,10 @@ class SharedSection {
 /// Parent half of the hello exchange. `hello` carries the identity fields the
 /// caller binds (hashes, build); this fills generation, payload size and the
 /// worker-side section handle, then requires the worker to echo all of them
-/// together with its own process id.
+/// together with its own process id. The duplicated value belongs to the worker
+/// from the moment it is duplicated: the parent never closes it remotely, which
+/// could close a value the worker already adopted and closed, or one it has
+/// since reused. A failed exchange is always followed by terminating the worker.
 inline bool parent_hello(std::intptr_t channel, int process_id, const SharedSection& section,
                          ControlRecord hello, Deadline deadline) {
     if (section.mapping() == nullptr)
@@ -209,8 +220,7 @@ inline bool parent_hello(std::intptr_t channel, int process_id, const SharedSect
 /// fields (hashes, build) before calling reply_hello().
 inline bool worker_receive_hello(std::intptr_t channel, SharedSection& section,
                                  ControlRecord& hello, Deadline deadline) {
-    if (!receive_record(channel, hello, deadline) || hello.command != Command::hello ||
-        hello.generation == 0 || hello.payload_bytes != kMappingBytes || hello.volume != 0 ||
+    if (!receive_record(channel, hello, deadline) || !hello_header_ok(hello) || hello.volume != 0 ||
         hello.file_generation != 0 || !section.adopt(hello.file))
         return false;
     const auto* shared = section.mapping();
