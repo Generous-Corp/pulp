@@ -55,8 +55,7 @@ hosts today:
 | Hidden editor | trims GPU caches | keeps its renderer's resources |
 | Render thread | main thread | the surface's own render thread |
 | VST3 content scale | not implemented on `PulpPlugView` | `ContractPlugView` implements it |
-| AU v3 | `au_view_controller_*.mm` | none: the contract is not served |
-
+| AU v3 | `au_view_controller_*.mm` | `PulpAUv3ContractView` (`au_v3_contract_view.mm`), whenever `editor_factory()` is non-null |
 
 `pulp::native::MetalSurface` is for an editor that brings its own Metal
 renderer and does not go through `ViewBridge`. Two macOS behaviours shape both
@@ -76,6 +75,17 @@ it and its tests, and both look like bugs until you know them:
   stays prompt while a client is acquiring. Holding drawables to force a block
   will not fail the way you expect.
 
+- **One lifecycle check covers every format.** The
+  `pulp-test-native-surface-{clap,vst3,au-v2,au-v3}` tests open the
+  metal-probe editor through each adapter and share
+  `test/support/native_surface_format_checks.hpp`. A driver per format supplies
+  open, host resize, reported size and close; the shared function asserts
+  attach size, first-frame colour and drawable size at the window's scale, a
+  resize round trip and a close then reopen. A new format adapter gets the
+  same proof by writing one driver. The AU v3 driver sizes a container that
+  holds the controller's view, never the window: AppKit pins an AU view
+  controller's window to its `preferredContentSize`, so a `setContentSize:` is
+  ignored, and a root view resized behind the container's back snaps back.
 - **A headless Mac has no display link.** `CVDisplayLinkCreateWithActiveCGDisplays`
   fails on a host with no active display (m1, CI VMs), so a pump that relied
   on it would skip every test on exactly the hosts that run them.
@@ -100,6 +110,15 @@ it and its tests, and both look like bugs until you know them:
   leaves a host's key routing (Musical Typing) dead, as the plug-in host's
   key-focus etiquette below describes.
 
+- **An RmlUi editor forwards `offer_key` and `focus_changed` through
+  `pulp/rmlui_native/editor_keys.hpp`.** The default `offer_key` returns
+  `forward`, so a text field in an RmlUi editor loses Space to the host's
+  transport unless the editor answers; `offer_editor_key` applies the shared
+  policy (take the key only while a text field has focus) and types the key's
+  character. Repeats and releases keep the initial press disposition through
+  focus changes. A field needs an `id` to be refocused after the window regains
+  focus. It applies queued pointer input before deciding, so a click on a
+  field that has not landed yet still routes the next key into the field.
 - **RmlUi frames hold one process-wide lock; input does not wait for it.**
   `RmlUiSurface` takes `rmlui_mutex()` for a frame's update and render, and
   RmlUi permits no narrower scope. Pointer and wheel events that arrive during
@@ -109,6 +128,17 @@ it and its tests, and both look like bugs until you know them:
   wait for a frame by design. A test that needs to see the stall sets a
   per-draw delay in a counting renderer and times `with_context()` as the
   control.
+
+- **A hidden contract editor gets no `idle()`, and must stop drawing and give
+  memory back itself.** `ContractEditorSession::visibility_changed(false)` skips
+  `Editor::idle()` but keeps draining the parameter change queue (it is
+  bounded and the audio thread keeps writing); `visibility_changed(true)` ticks
+  once at once. An RmlUi editor forwards the call to
+  `RmlUiSurface::visibility_changed()`, which stops frames (an `idle()` cannot
+  restart them, and a frame already waiting for the lock returns early),
+  releases RmlUi's geometry and textures and calls `RendererHooks::trim`. A
+  test must prove the first frame after show is complete (geometry compiled
+  and drawn again) and that nothing recompiles while hidden.
 
 `pulp::native::GlSurface` is the OpenGL counterpart for Windows and X11. On
 macOS only its offscreen backend exists (CGL into a framebuffer object), for
@@ -241,7 +271,7 @@ error. Things that are easy to get wrong:
 - VST3, CLAP and the standalone app open a non-null `editor_factory()`
   through `ContractEditorSession` (`contract_editor_session.hpp`,
   `pulp-format-core`) before they consider `create_view()`. A UI-package AU v2
-  serves it from `au_v2_contract_view.mm`. The standalone window
+  serves it from `au_v2_contract_view.mm`, and the AU v3 controllers (macOS and iOS) open it in `au_v3_contract_view.mm` whenever `editor_factory()` is non-null. The standalone window
   (`standalone_contract_editor_mac.mm`) drives the tick from its own event loop
   (`IdleSource::host_driven`). Its headless run captures through
   `EditorAutomation::capture_png()` and fails when the editor offers no capture.
@@ -770,6 +800,7 @@ the `clap` skill's Parameters section for the complete transport contract.
 | CLAP | `gui_create` | Inside `gui_set_parent` on the matched window API |
 | AU v2 | `uiViewForAudioUnit` — after fetching context via `kPulpEditorContextProperty` | After `PluginViewHost::create` succeeds |
 | AU v3 | `viewDidLoad` | After `PluginViewHost::attach_to_parent` in `viewDidLoad` |
+| AU v3, processor with an `editor_factory()` | `rebuildEditorIfReady` opens a `ContractEditorSession` in `PulpAUv3ContractView` and never creates a ViewBridge | n/a: the contract editor's `attach()` is the attach point |
 | AAX | `AAX_CEffectGUI::CreateViewContainer()` — not `CreateViewContents()`, which runs before any window exists | After `try_attach_to_parent` succeeds |
 | Standalone | Before `WindowHost::create` | After `WindowHost::create` succeeds |
 

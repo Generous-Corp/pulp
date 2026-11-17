@@ -85,8 +85,9 @@ larger than a review repair. Findings fixed in the same change are not listed.
 - Still open: one `read_bounded_file(path, limit)` helper with a typed result,
   and a typed code on `GraphSerializer::LoadResult` so the CLI stops
   classifying `from_file` failures by message prefix. The 1 MiB notation bound
-  is named `max_graph_notation_bytes` in `graph_patch.hpp`; the CLI probe still
-  spells it out.
+  is named `max_graph_notation_bytes` in `graph_patch.hpp`, and the CLI probe
+  now reads it there and sizes its buffer from the file. The reload and
+  notation refusal messages still spell "1 MiB".
 
 ## Accepted as is
 

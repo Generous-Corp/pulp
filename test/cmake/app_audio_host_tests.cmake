@@ -687,6 +687,17 @@ target_include_directories(pulp-test-spectral-asset-geometry
 catch_discover_tests(pulp-test-spectral-asset-geometry
     PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
 
+# Single-stream spectral asset source at dividing and non-dividing hops,
+# checked against an independent analysis grid, inverse DFT/OLA oracle and
+# direct guarded synthesis of the stored frames.
+add_executable(pulp-test-spectral-asset-source test_spectral_asset_source.cpp
+    harness/rt_allocation_probe.cpp)
+target_link_libraries(pulp-test-spectral-asset-source PRIVATE pulp::host Catch2::Catch2WithMain)
+target_include_directories(pulp-test-spectral-asset-source
+    PRIVATE ${PULP_ROOT_DIR}/core/host/src)
+catch_discover_tests(pulp-test-spectral-asset-source
+    PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
+
 pulp_add_test_suite(pulp-test-oversampling-latency-contract
     GROUP pulp-test-group-app-audio-support
     LIBRARIES pulp-audio-test-support)

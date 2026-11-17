@@ -420,14 +420,7 @@ bool launch(const std::shared_ptr<Session>& session) {
             std::copy(build.begin(), build.end(), hello.build.begin());
             ControlRecord reply;
             if (!send_record(fd, hello, deadline) || !receive_record(fd, reply, deadline) ||
-                reply.command != Command::hello || reply.result != 1 ||
-                reply.generation != hello.generation ||
-                reply.process_id != static_cast<std::uint64_t>(pid) ||
-                reply.plugin_sha256 != hello.plugin_sha256 ||
-                reply.worker_sha256 != hello.worker_sha256 || reply.build != hello.build ||
-                reply.volume != hello.volume || reply.file != hello.file ||
-                reply.file_generation != hello.file_generation ||
-                reply.payload_bytes != kMappingBytes)
+                !hello_reply_matches(hello, reply, static_cast<std::uint64_t>(pid)))
                 return false;
             if (::unlink(session->mapping_path.c_str()) != 0)
                 return false;

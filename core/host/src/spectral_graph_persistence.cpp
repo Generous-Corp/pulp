@@ -94,12 +94,13 @@ std::optional<SpectralIdentity> identity(View v) {
     return id.value;
 }
 // The saved frame contract and original extent determine the finite stream:
-// the same rule the source factory and runtime use, so a saved asset carries
-// no geometry the runtime would derive differently.
+// the same rule and policy (dividing_hop_v1) the morph factory and runtime use,
+// so a saved asset carries no geometry the runtime would derive differently.
 SpectralFiniteStreamRule stream_rule(const SpectralIdentity& shape, std::uint64_t length) {
     return SpectralFiniteStreamRule::make(static_cast<std::uint64_t>(shape.fft_size()),
                                           static_cast<std::uint64_t>(shape.hop()),
-                                          static_cast<std::uint64_t>(shape.channels()), length);
+                                          static_cast<std::uint64_t>(shape.channels()), length,
+                                          SpectralFiniteStreamRule::Policy::dividing_hop_v1);
 }
 const char* type_name(NodeType type) {
     switch (type) {
@@ -143,11 +144,20 @@ int admission_block_for(const SignalGraph& graph) {
 }
 
 std::string write(const SignalGraph& graph,
-                  const std::unordered_map<NodeId, std::pair<float, float>>& layout) {
+                  const std::unordered_map<NodeId, std::pair<float, float>>& layout,
+                  std::string& reason) {
+    reason.clear();
+    const auto refuse = [&](std::string why) {
+        reason = std::move(why);
+        return std::string{};
+    };
     try {
-        if (!graph.sample_regions().empty() || graph.nodes().size() > 128 ||
-            graph.connections().size() > 512)
-            return {};
+        if (!graph.sample_regions().empty())
+            return refuse("a spectral graph cannot carry sample regions");
+        if (graph.nodes().size() > 128)
+            return refuse("a spectral graph holds at most 128 nodes");
+        if (graph.connections().size() > 512)
+            return refuse("a spectral graph holds at most 512 connections");
         auto root = choc::value::createObject("PulpGraph");
         root.addMember("format_version", int64_t(6));
         auto nodes = choc::value::createEmptyArray();
@@ -159,10 +169,10 @@ std::string write(const SignalGraph& graph,
                              const std::string& contract) -> std::string {
             const auto rule = stream_rule(shape, length);
             if (!rule || stream.frame_count != rule.frame_count)
-                return {};
+                return refuse("a spectral asset's frame count does not match its stream contract");
             const auto encoded = signal::encode_spectral_stream(stream, budget);
             if (!encoded || digest(encoded.value->view()) != hex(expected_hash))
-                return {};
+                return refuse("a spectral asset cannot be encoded or does not match its hash");
             const auto hash = hex(expected_hash);
             const auto key = asset_id(length, contract, hash);
             if (assets.contains(key))
@@ -170,7 +180,7 @@ std::string write(const SignalGraph& graph,
             // Include base64 expansion before allocating its encoded string.
             if (encoded.value->size > budget ||
                 !charge(encoded_charge, ((encoded.value->size + 2) / 3) * 4))
-                return {};
+                return refuse("spectral assets exceed the encoded byte budget");
             auto record = choc::value::createObject("SpectralAsset");
             record.addMember("id", key);
             record.addMember("schema", asset_schema);
@@ -191,8 +201,21 @@ std::string write(const SignalGraph& graph,
         for (const auto* ptr : ordered) {
             const auto& n = *ptr;
             const auto* type = type_name(n.type);
-            if (!type || n.gain != 1 || graph.is_processor_node(n.id))
-                return {};
+            if (graph.is_processor_node(n.id))
+                return refuse("node " + n.name + " is a Processor node");
+            if (n.type == NodeType::SpectralAssetSource)
+                return refuse("node " + n.name +
+                              " is a single-stream spectral asset source; its persistence is "
+                              "not admitted");
+            if (n.type == NodeType::SpectralAnalysis)
+                return refuse("node " + n.name +
+                              " is a SpectralAnalysis node; live analysis is not persisted, "
+                              "only the asset source is");
+            if (!type)
+                return refuse("node " + n.name +
+                              " is not an audio input, audio output or spectral node");
+            if (n.gain != 1)
+                return refuse("node " + n.name + " has a gain other than 1");
             auto node = choc::value::createObject("Node");
             node.addMember("id", int64_t(n.id));
             node.addMember("type", type);
@@ -206,21 +229,25 @@ std::string write(const SignalGraph& graph,
                 spectral.addMember("contract_hex", contract);
                 if (n.type == NodeType::SpectralAssetMorph) {
                     const auto& config = n.spectral_asset_morph;
-                    if (!config || !charge(retained_charge, config->retained_bytes()))
-                        return {};
+                    if (!config)
+                        return refuse("spectral asset morph node " + n.name + " has no config");
+                    if (!charge(retained_charge, config->retained_bytes()))
+                        return refuse("spectral assets exceed the retained byte budget");
                     const auto& shape = *n.spectral_identity;
                     const auto a = add_asset(config->a, config->source_samples, config->hash_a,
                                              shape, contract);
                     const auto b = add_asset(config->b, config->source_samples, config->hash_b,
                                              shape, contract);
                     if (a.empty() || b.empty())
-                        return {};
+                        return std::string{};
                     spectral.addMember("asset_a", a);
                     spectral.addMember("asset_b", b);
                 } else if (n.type == NodeType::SpectralStage) {
-                    if (!n.spectral_stage || n.spectral_stage->identity() != *n.spectral_identity ||
-                        !charge(retained_charge, n.spectral_stage->retained_config_bytes()))
-                        return {};
+                    if (!n.spectral_stage || n.spectral_stage->identity() != *n.spectral_identity)
+                        return refuse("spectral stage node " + n.name +
+                                      " has no stage or a stage of another frame contract");
+                    if (!charge(retained_charge, n.spectral_stage->retained_config_bytes()))
+                        return refuse("spectral stages exceed the retained byte budget");
                     const auto& stage = *n.spectral_stage;
                     spectral.addMember("stage",
                                        stage.kind() == QualifiedSpectralStage::Kind::IdentityV1
@@ -233,10 +260,10 @@ std::string write(const SignalGraph& graph,
                 }
                 node.addMember("spectral", spectral);
             } else if (n.type != NodeType::AudioInput && n.type != NodeType::AudioOutput)
-                return {};
+                return refuse("spectral node " + n.name + " has no spectral identity");
             if (const auto it = layout.find(n.id); it != layout.end()) {
                 if (!std::isfinite(it->second.first) || !std::isfinite(it->second.second))
-                    return {};
+                    return refuse("node " + n.name + " has a non-finite editor position");
                 auto position = choc::value::createObject("Pos");
                 position.addMember("x", double(it->second.first));
                 position.addMember("y", double(it->second.second));
@@ -259,7 +286,11 @@ std::string write(const SignalGraph& graph,
         for (const auto& c : ordered_edges) {
             if (c.feedback || c.midi || c.automation || c.audio_rate_modulation || c.sidechain ||
                 c.control_signal)
-                return {};
+                return refuse("connection " + std::to_string(c.source_node) + ":" +
+                              std::to_string(c.source_port) + " -> " + std::to_string(c.dest_node) +
+                              ":" + std::to_string(c.dest_port) +
+                              " is a feedback, MIDI, automation, modulation, sidechain or "
+                              "control edge");
             auto edge = choc::value::createObject("Conn");
             edge.addMember("source_node", int64_t(c.source_node));
             edge.addMember("source_port", int64_t(c.source_port));
@@ -274,14 +305,15 @@ std::string write(const SignalGraph& graph,
         root.addMember("connections", edges);
         auto json = choc::json::toString(root, true);
         if (json.size() > GraphSerializer::max_file_bytes)
-            return {};
+            return refuse("the spectral document exceeds the file size limit");
         // Saving must not publish a document that the strict typed reader
         // cannot reconstruct, including malformed edge-kind metadata.
-        if (!read(json, admission_block_for(graph)).result.ok)
-            return {};
+        if (const auto check = read(json, admission_block_for(graph)); !check.result.ok)
+            return refuse("the spectral reader refuses the written document: " +
+                          check.result.error);
         return json;
-    } catch (const std::exception&) {
-        return {};
+    } catch (const std::exception& error) {
+        return refuse(std::string("spectral serialization failed: ") + error.what());
     }
 }
 

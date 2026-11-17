@@ -117,14 +117,26 @@ remain subsequent work. Other rates/blocks, events, latency/tail shapes, Linux,
 Windows Job Objects, qualification of an installed saved configuration and the
 full paced realtime matrix remain unqualified.
 
-On Windows the slot still refuses. The transport it will use exists and is
-tested on its own: retained custody (a kill-on-close job object) now offers the
-private duplex channel, and `isolated_clap_windows_channel.hpp` carries the
-deadline-bounded control records, an unnamed section duplicated into the worker
-by handle, and the hello exchange that binds that section to one worker process
-and generation. The Windows `pulp-test-isolated-clap-protocol` cases drive that
+On Windows the slot still refuses. The transport it will use exists:
+retained custody (a kill-on-close job object) offers the private duplex
+channel, and `isolated_clap_windows_channel.hpp` carries the deadline-bounded
+control records, an unnamed section duplicated into the worker by handle, and
+the hello exchange that binds that section to one worker process and
+generation. The Windows `pulp-test-isolated-clap-protocol` cases drive that
 handshake against a peer executable that loads no vendor code. Slot launch, the
 worker loop, executable checks and the plugin fixture are not yet ported.
+
+No CI lane runs the Windows transport cases: the pull-request `windows` check
+does not build them and no scheduled Windows lane exists. They are owner-run on
+the Windows Server VM, from a git checkout, in a Visual Studio x64 developer
+prompt (VS 2022 Build Tools, Ninja, `cl`):
+
+```bat
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -DPULP_BUILD_EXAMPLES=OFF -DPULP_ENABLE_GPU=OFF -DPULP_BUILD_WEBVIEW=OFF
+cmake --build build -j 3 --target pulp-test-group-core-runtime-http pulp-test-isolated-clap-protocol
+build\test\pulp-test-group-core-runtime-http.exe "[retained-custody]"
+build\tools\clap-worker\pulp-test-isolated-clap-protocol.exe
+```
 
 ## Reproducing the controls
 

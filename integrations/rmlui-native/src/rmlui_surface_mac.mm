@@ -20,6 +20,9 @@
 #include <cstdio>
 #include <deque>
 #include <memory>
+#include <mutex>
+#include <set>
+#include <map>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -137,6 +140,18 @@ std::mutex& rmlui_mutex() {
     return m;
 }
 
+namespace {
+
+// Renderers an attached surface holds. Hiding releases geometry and textures
+// renderer-wide, so a renderer serves one attached surface at a time.
+// rmlui_mutex() held.
+std::set<const Rml::RenderInterface*>& claimed_renderers() {
+    static std::set<const Rml::RenderInterface*> claimed;
+    return claimed;
+}
+
+} // namespace
+
 struct RmlUiSurface::Impl {
     vellum::rmlui::AssetProvider& assets;
     Rml::RenderInterface& renderer;
@@ -150,6 +165,37 @@ struct RmlUiSurface::Impl {
     std::uint32_t height_px = 0;
     double scale = 1.0;
     bool text_focus = false;
+    // The host hid the editor: frames stay off whatever the window says.
+    std::atomic<bool> host_hidden{false};
+    // Held by a frame from its command buffer's creation until the commit,
+    // and by a trim while it waits for the last committed buffer, so a trim
+    // never frees what an encoded or still-executing frame uses.
+    std::mutex submit_mutex;
+    // The last command buffer a frame committed. submit_mutex held.
+    id<MTLCommandBuffer> last_committed = nil;
+    // This surface holds the claim on `renderer` (claimed_renderers()).
+    // rmlui_mutex() held.
+    bool claims_renderer = false;
+    // The disposition of each key press, so repeats and releases keep the
+    // original host/client owner even if focus changes while it is held. For
+    // contract-only printable keys, `characters` is the stable identity when
+    // there is no physical Key value.
+    struct PressIdentity {
+        Key key = Key::unknown;
+        std::uint16_t native_code = 0;
+        std::string characters;
+
+        bool operator<(const PressIdentity& other) const noexcept {
+            if (key != other.key)
+                return key < other.key;
+            if (native_code != other.native_code)
+                return native_code < other.native_code;
+            return characters < other.characters;
+        }
+    };
+    std::map<PressIdentity, bool> press_dispositions;
+    // The text field blurred when the window lost focus, by id.
+    std::string refocus_id;
 
     // Pointer and wheel events the main thread could not apply because the
     // render thread held rmlui_mutex(). Main thread only; they run, in order,
@@ -212,6 +258,25 @@ struct RmlUiSurface::Impl {
         }
     }
 
+    // Main thread: hand back what the GPU holds for a hidden editor. Waits
+    // for this surface's last committed frame to finish on the GPU (at most
+    // about one frame), so nothing released is still in use.
+    void trim_gpu_resources() {
+        std::lock_guard submit(submit_mutex);
+        if (last_committed)
+            [last_committed waitUntilCompleted];
+        last_committed = nil;
+        std::lock_guard lock(rmlui_mutex());
+        if (!context)
+            return;
+        vellum::rmlui::NativeContext::Scope scope(*context);
+        // RmlUi regenerates both on the next render that needs them.
+        Rml::ReleaseCompiledGeometry(&renderer);
+        Rml::ReleaseTextures(&renderer);
+        if (hooks.trim)
+            hooks.trim();
+    }
+
     // Render thread.
     void render_frame() {
         @autoreleasepool {
@@ -226,11 +291,16 @@ struct RmlUiSurface::Impl {
                 post_if_queued();
                 return;
             }
+            // Until the commit: a trim waits for this frame rather than
+            // freeing what it is encoding or about to submit.
+            std::unique_lock submit(submit_mutex);
             id<MTLCommandBuffer> cb =
                 [(__bridge id<MTLCommandQueue>)surface->command_queue() commandBuffer];
             {
                 std::lock_guard lock(rmlui_mutex());
-                if (!context || !context->is_open()) {
+                // A frame that was waiting for the lock while the host hid the
+                // editor must not rebuild what the trim just released.
+                if (!context || !context->is_open() || host_hidden.load()) {
                     post_if_queued();
                     return;
                 }
@@ -248,6 +318,8 @@ struct RmlUiSurface::Impl {
             post_if_queued();
             drawable.present((__bridge void*)cb);
             [cb commit];
+            last_committed = cb;
+            submit.unlock();
             frames.fetch_add(1);
         }
     }
@@ -435,6 +507,57 @@ struct RmlUiSurface::Impl {
         return consumed;
     }
 
+    PressIdentity press_identity(const KeyEvent& event) const {
+        // Characters distinguish simultaneous contract-only printable keys;
+        // physical keys already have a stable Key/native_code identity.
+        // A contract key carries its physical code in native_code; only when a
+        // host gave none do the characters stand in, case-folded so Shift does
+        // not change the identity.
+        std::string chars;
+        if (event.key == Key::unknown && event.native_code == 0) {
+            chars = event.characters;
+            for (auto& c : chars)
+                if (c >= 'A' && c <= 'Z')
+                    c = static_cast<char>(c - 'A' + 'a');
+        }
+        return {event.key, event.native_code, std::move(chars)};
+    }
+
+    auto find_press(const KeyEvent& event) {
+        const auto identity = press_identity(event);
+        auto it = press_dispositions.find(identity);
+        if (it != press_dispositions.end() ||
+            (event.key != Key::unknown || event.native_code != 0 || !event.characters.empty()))
+            return it;
+
+        // Some hosts omit characters on a release. If exactly one unknown
+        // press with this native code is active, it is still unambiguous.
+        auto candidate = press_dispositions.end();
+        for (auto current = press_dispositions.begin(); current != press_dispositions.end();
+             ++current) {
+            if (current->first.key == event.key &&
+                current->first.native_code == event.native_code) {
+                if (candidate != press_dispositions.end())
+                    return press_dispositions.end();
+                candidate = current;
+            }
+        }
+        return candidate;
+    }
+
+    bool deliver_taken_key(const KeyEvent& event) {
+        bool taken = on_key(event);
+        const bool command = (event.modifiers & (modifier_command | modifier_control)) != 0;
+        if (event.kind == KeyKind::down && !command && !event.characters.empty()) {
+            const auto lead = static_cast<unsigned char>(event.characters.front());
+            if (lead >= 0x20 && lead != 0x7f) {
+                on_text(event.characters);
+                taken = true;
+            }
+        }
+        return taken;
+    }
+
     void on_text(const std::string& text) {
         {
             std::lock_guard lock(rmlui_mutex());
@@ -466,10 +589,20 @@ struct RmlUiSurface::Impl {
             if (context)
                 context->close();
             context.reset();
+            if (claims_renderer)
+                claimed_renderers().erase(&renderer);
+            claims_renderer = false;
+        }
+        {
+            std::lock_guard submit(submit_mutex);
+            last_committed = nil;
         }
         pump.reset();
         surface.reset();
         text_focus = false;
+        host_hidden.store(false);
+        refocus_id.clear();
+        press_dispositions.clear();
         width_px = height_px = 0;
     }
 };
@@ -518,14 +651,18 @@ bool RmlUiSurface::attach(void* parent) {
         // Native captures the system interface when its first instance opens.
         if (vellum::rmlui::NativeContext::open_instances() == 0)
             Rml::SetSystemInterface(&system_interface());
-        d.context = std::make_unique<vellum::rmlui::NativeContext>(d.assets, d.renderer);
+        // One attached surface per renderer: another one's hide would release
+        // this one's geometry and textures.
+        d.claims_renderer = claimed_renderers().insert(&d.renderer).second;
+        if (d.claims_renderer)
+            d.context = std::make_unique<vellum::rmlui::NativeContext>(d.assets, d.renderer);
         const auto g = d.surface->geometry();
         const double s = g.scale > 0.0 ? g.scale : 1.0;
         const auto w =
             std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.width * s)));
         const auto h =
             std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(g.height * s)));
-        bool ok = d.context->open(w, h) == vellum::rmlui::Status::ok;
+        bool ok = d.context && d.context->open(w, h) == vellum::rmlui::Status::ok;
         if (ok) {
             vellum::rmlui::NativeContext::Scope scope(*d.context);
             for (std::size_t i = 0; i < d.options.font_faces.size() && ok; ++i)
@@ -585,7 +722,7 @@ void RmlUiSurface::idle() {
     if (!d.surface || !d.pump)
         return;
     d.surface->poll_visibility();
-    d.pump->set_on_screen(d.surface->on_screen().on_screen());
+    d.pump->set_on_screen(d.surface->on_screen().on_screen() && !d.host_hidden.load());
     // The tick never waits for a frame: a busy lock means this tick leaves
     // the size and any queued input for the next one.
     bool resized = false;
@@ -601,6 +738,101 @@ void RmlUiSurface::idle() {
     }
     if (resized || applied)
         d.pump->request_frame();
+}
+
+void RmlUiSurface::visibility_changed(bool visible) {
+    auto& d = *impl_;
+    if (!d.surface || !d.pump)
+        return;
+    d.host_hidden.store(!visible);
+    if (!visible) {
+        d.pump->set_on_screen(false);
+        d.trim_gpu_resources();
+        return;
+    }
+    // The host says it is shown: draw now. The next idle() tick narrows that to
+    // what the window reports (occluded, minimised).
+    d.surface->poll_visibility();
+    d.pump->set_on_screen(true);
+    d.pump->request_frame();
+}
+
+bool RmlUiSurface::text_field_focused() const noexcept {
+    return impl_->text_focus;
+}
+
+bool RmlUiSurface::offer_key(const KeyEvent& event) {
+    auto& d = *impl_;
+    if (!d.context)
+        return false;
+    // A click queued behind a frame may move focus: apply it before deciding,
+    // so the key goes where the user clicked. Only waits when input is queued.
+    // The queue is main-thread only, so it is read without a lock.
+    if (!d.queued.empty())
+        flush_input();
+    // Repeats and releases follow the initial disposition, wherever focus has
+    // gone since. This keeps a host-owned press from losing its key-up when a
+    // field gains focus, and keeps a field-owned press paired after a blur.
+    if (event.kind == KeyKind::up || event.repeat) {
+        if (auto it = d.find_press(event); it != d.press_dispositions.end()) {
+            const bool taken = it->second;
+            if (event.kind == KeyKind::up)
+                d.press_dispositions.erase(it);
+            if (taken && event.kind == KeyKind::down)
+                d.deliver_taken_key(event);
+            else if (taken && event.kind == KeyKind::up)
+                d.on_key(event);
+            return taken;
+        }
+        if (event.kind == KeyKind::up)
+            return false;
+    }
+    // The shared policy: with no text field focused the host goes first.
+    if (route_key(event, d.text_focus) == KeyRoute::host) {
+        d.press_dispositions.insert_or_assign(d.press_identity(event), false);
+        return false;
+    }
+    const bool taken = d.deliver_taken_key(event);
+    d.press_dispositions.insert_or_assign(d.press_identity(event), taken);
+    return taken;
+}
+
+void RmlUiSurface::set_window_focused(bool focused) {
+    auto& d = *impl_;
+    {
+        std::lock_guard lock(rmlui_mutex());
+        auto* ctx = d.context ? d.context->context() : nullptr;
+        if (!ctx)
+            return;
+        // Queued clicks land before the focus they would change is read.
+        d.drain_queued_locked();
+        // A focus change can swallow a key-up, so no press survives it: a held
+        // key's later repeat or release is routed afresh, and a lost release
+        // can never leave a stale owner for the next press of that key.
+        d.press_dispositions.clear();
+        vellum::rmlui::NativeContext::Scope scope(*d.context);
+        if (!focused) {
+            Rml::Element* field = ctx->GetFocusElement();
+            // Every text field blurs, so the caret stops and the host's keyboard
+            // is handed back; a field without an id cannot be found again, so
+            // only an id is remembered. A repeated loss, with nothing focused,
+            // keeps what the first one remembered.
+            if (takes_text(field)) {
+                d.refocus_id = field->GetId();
+                field->Blur();
+            }
+        } else if (!d.refocus_id.empty()) {
+            for (int i = 0; i < ctx->GetNumDocuments(); ++i) {
+                if (Rml::Element* field = ctx->GetDocument(i)->GetElementById(d.refocus_id)) {
+                    field->Focus();
+                    break;
+                }
+            }
+            d.refocus_id.clear();
+        }
+        d.sync_text_focus_locked();
+    }
+    request_frame();
 }
 
 double RmlUiSurface::density_ratio() const noexcept {

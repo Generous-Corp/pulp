@@ -24,7 +24,7 @@
     },
     {
       "path": "test/test_graph_history.cpp",
-      "needles": ["graph edit history refuses to undo over an unrecorded edit", "graph document diff compares by logical identity, not NodeId", "graph edit history refuses a restore that would leave a node unresolved"]
+      "needles": ["graph edit history refuses to undo over an unrecorded edit", "graph document diff compares by logical identity, not NodeId", "graph edit history refuses a restore that would leave a node unresolved", "saved document inspection rebuilds identities for every node kind", "saved document inspection refuses identities that name other nodes", "saved document inspection rebuilds identities the loader would assign"]
     },
     {
       "path": "docs/graph-program-status/G-3.md",
@@ -70,7 +70,8 @@
             "graph diff compares saved documents by logical identity",
             "graph CLI success code and fmt use the C++ spelling",
             "graph save and fmt keep the saved-identity envelope that diff reads",
-            "graph CLI file size and readability codes agree across subcommands"
+            "graph CLI file size and readability codes agree across subcommands",
+            "A file of exactly the bound is read and judged as a document instead."
           ]
         },
         {

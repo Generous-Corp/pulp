@@ -255,6 +255,9 @@ bool ContractEditorSession::attach(const NativeParent& parent) {
         runtime::log_error("editor host: the editor did not attach to the host window");
         return false;
     }
+    // A new attach starts visible: the surface a previous attach hid is gone,
+    // and a host that attaches a hidden editor says so with visibility_changed.
+    visible_ = true;
     attached_ = true;
     start_idle();
     return true;
@@ -270,6 +273,7 @@ void ContractEditorSession::detach() {
         port_->release_all();
     if (editor_ && attached_)
         editor_->detach();
+    visible_ = true;
     attached_ = false;
 }
 
@@ -285,6 +289,7 @@ void ContractEditorSession::invalidate() {
     cancel_snap_request();
     if (editor_)
         editor_->invalidate();
+    visible_ = true;
     attached_ = false;
     destroy_editor();
 }
@@ -309,7 +314,11 @@ void ContractEditorSession::tick() {
         store_.pump_listeners();
         store_.reconcile_restore_listeners();
     }
-    editor_->idle();
+    // A hidden editor draws nothing: the queue above still drains (the audio
+    // thread keeps writing and the queue is bounded), but the editor's own
+    // tick is skipped until the host shows it again.
+    if (visible_)
+        editor_->idle();
 }
 
 EditorSize ContractEditorSession::size() const {
@@ -479,8 +488,19 @@ void ContractEditorSession::visibility_changed(bool visible) {
     if (context_)
         context_->native_surface().set_visibility(visible ? NativeSurfaceVisibility::visible
                                                           : NativeSurfaceVisibility::hidden);
+    const bool changed = visible_ != visible;
+    // Hide first, so the editor stops drawing before its idle stops; show
+    // last, so the tick that follows finds the editor ready.
+    if (!visible)
+        visible_ = false;
     if (editor_)
         editor_->visibility_changed(visible);
+    if (visible)
+        visible_ = true;
+    // Showing ticks at once: whatever changed while hidden (parameters, size,
+    // scale) reaches the editor before the first visible frame.
+    if (changed && visible && attached_)
+        tick();
 }
 
 NativeSurfaceHostState* ContractEditorSession::native_surface_host() {

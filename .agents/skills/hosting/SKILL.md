@@ -39,8 +39,10 @@ A transport stream-history reset (and prepare) also resets every stateful
 Control node (integrator, slew, hysteresis) to its configured initial state, so
 a seek renders like a fresh graph; a negative reset position is `OutOfRange`,
 and a non-finite index is published as 0 rather than forwarded to a parameter.
-That seek reset calls `CustomNodeType::reset` on the AUDIO thread, from both the
-Control index path and the graph-event path, but only for a type that passes
+That seek reset calls `CustomNodeType::reset` on the AUDIO thread, from the
+Control index path, the graph-event path, and plain `process()` on a graph with
+no event lane (a Control chain fed by an ordinary audio source has no lane and
+no epoch, yet still resets), but only for a type that passes
 `custom_node_reset_runs_on_audio_thread()` (a declared `rt_contract` with an
 audio-callback safety class). A third-party Control-port type that leaves
 `rt_contract` undeclared keeps its state across a seek; declaring it promises
@@ -3344,17 +3346,34 @@ hangs until then. Do not register a second ctest entry for the same case under a
 shorter `TIMEOUT`: the duplicate-registration check refuses two budgets for one
 command.
 
-A finite spectral source's EOF values (frame count, routed cutoff, `N / H`
-drain, bin count, component stride) come from `SpectralFiniteStreamRule` in
+A finite spectral source's EOF values (frame count, drain, routed cutoff, bin
+count, component stride) come from `SpectralFiniteStreamRule` in
 `core/host/src/spectral_finite_stream_internal.hpp`; do not reintroduce 64,
-129, 258 or 320 literals in the asset-morph path. The closed form
-`ceil((L + N - H) / H)` matches the analysis grid only when the hop divides the
-FFT size (N=256, H=100, L=1 gives 2 against the grid's 3), even though the codec
-and `SpectralIdentity` accept such hops, so the rule refuses them. Test any EOF
-change against `spectral_frame_engine_first_frame_start` walking the grid, not
-against the formula itself. The rule's `static_assert` turns a broken rounding
-into a compile error, which `confirm_failure.sh` reports as INCONCLUSIVE; break
-a different term to exercise the runtime test.
+129, 258 or 320 literals in a source path. The rule is versioned.
+`analysis_grid_v2` (the default) counts `floor((L - 1) / H) + floor((N - 1) / H)
++ 1` frames, drains `ceil(N / H)` zero frames and derives the cutoff from L
+alone as `(N + H) + floor((L - 1) / H) * H + N`. `dividing_hop_v1` gives the
+same values but refuses a hop that does not divide N; the old closed form
+`ceil((L + N - H) / H)` with an `N / H` drain is only right there (N=256,
+H=100, L=1 gives 2 frames against the grid's 3). The guarded synthesis engine
+makes a sample final only once a frame starting after it has been synthesized,
+which is why the drain must reach the last window's end; the rule test proves
+that against the engine, not the formula. Test any EOF change against
+`spectral_frame_engine_first_frame_start` walking the grid. The rule's
+`static_assert` turns a broken rounding into a compile error, which
+`confirm_failure.sh` reports as INCONCLUSIVE; break a different term to
+exercise the runtime test.
+
+The two-asset morph stays on `dividing_hop_v1`, and so do its saved assets:
+frame f averages control hop f and is published at sample `(f + 1) * H`, while
+synthesis needs it at its window end `f * H + (N - floor((N - 1) / H) * H)`;
+the two agree only when H divides N. The single-stream source
+(`add_spectral_asset_source_v1`) has no input and publishes each frame in the
+block that reaches its window end, the analysis timeline, so it runs at every
+hop v2 admits. A graph with no audio input still needs an input `BufferView`
+that carries the block length (`BufferView<const float>(nullptr, 0, count)`):
+a default-constructed view has zero samples and the routed path renders
+nothing, silently.
 
 The asset-morph source builds its rule from the decoded stream's geometry, so it
 runs at any admitted (N, H, C). Its endpoint scratch is a per-node vector sized
@@ -3545,3 +3564,20 @@ indices, internal edges, parameter set and bounds), and any mismatch clears
 the graph. Bounds and Processor targets always come from the template, so a
 document cannot widen them. `inspect_document` refuses dangling or shared
 members and records outside the v6 envelope, without needing templates.
+
+Saved identity strictness: `inspect_document`, `diff_graph_documents` and
+`from_saved_document` rebuild each node's identity string from its saved record
+(numbered by persisted node id, as the writer does) and refuse a mismatch as
+`identity_binding_unknown`, so an edited identity string cannot bind a node it
+was not written for. A custom node's missing `version` means 1 and a value
+below 1 is refused; the writer records a version below 1 as 1. A spectral graph
+that cannot be saved reports the failing rule through `SaveResult::error`
+(`to_saved_file` refuses it with that reason); the older string-returning
+writer overloads keep returning an empty string. The writer and inspection
+build identity strings through one key function (`identity_key` in
+`graph_serializer.cpp`); change the format there, never in only one side, or
+every saved document is refused. The tolerant loader drops a node record it
+cannot add (a second Control index input, a plugin record without plugin info)
+and lists it in `LoadResult::unrestored_node_ids`; `from_saved_document` and
+the CLI rewrites (`save`, `fmt`, `canonicalize`) refuse such a document as
+`node_not_restored` rather than write a file that silently lost the node.

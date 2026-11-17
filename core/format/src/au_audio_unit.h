@@ -16,6 +16,7 @@
 
 namespace pulp {
 namespace format {
+class ContractSessionRegistry;
 class Processor;
 }
 namespace state {
@@ -35,6 +36,11 @@ class FactoryPresetTable;
 - (pulp::format::Processor *)pulpProcessor;
 - (pulp::state::StateStore *)pulpStore;
 - (pulp::runtime::AliveToken::Handle)pulpOwnerAlive;
+
+// The contract editors this instance's view controllers hold. A controller
+// registers each session so an audio unit released before its view closes the
+// editor in order.
+- (pulp::format::ContractSessionRegistry*)pulpContractSessions;
 
 // Bypass-wiring diagnostic. Returns the StateStore ParamID the adapter
 // chose to route the AUv3 `shouldBypassEffect` surface to, or 0 when no

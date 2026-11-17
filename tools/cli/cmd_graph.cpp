@@ -167,13 +167,21 @@ int probe_graph(const std::vector<std::string>& args) {
     std::ifstream graph_file(args[1], std::ios::binary);
     if (!graph_file)
         return fail(patch_code(Code::FileUnreadable), "graph file is unreadable: " + args[1]);
-    std::string text(1024 * 1024 + 1, '\0');
-    graph_file.read(text.data(), static_cast<std::streamsize>(text.size()));
-    text.resize(static_cast<std::size_t>(graph_file.gcount()));
-    if (graph_file.bad())
+    // The probe shares the reload and notation bound. The buffer is sized from
+    // the file, and the extra byte detects a file that grew while it was read.
+    constexpr auto limit = pulp::host::max_graph_notation_bytes;
+    std::error_code size_error;
+    const auto size = std::filesystem::file_size(args[1], size_error);
+    if (size_error)
         return fail(patch_code(Code::FileUnreadable), "graph file could not be read: " + args[1]);
-    if (text.size() > 1024 * 1024)
-        return fail("graph_file_limit", "probe admits graph files no larger than 1 MiB");
+    if (size > limit)
+        return fail("graph_file_limit",
+                    "probe admits graph files no larger than " + std::to_string(limit) + " bytes");
+    std::string text(static_cast<std::size_t>(size) + 1, '\0');
+    graph_file.read(text.data(), static_cast<std::streamsize>(text.size()));
+    if (graph_file.bad() || static_cast<std::uintmax_t>(graph_file.gcount()) != size)
+        return fail(patch_code(Code::FileUnreadable), "graph file could not be read: " + args[1]);
+    text.resize(static_cast<std::size_t>(size));
     try {
         const auto document = choc::json::parse(text);
         const auto nodes = document["nodes"];
@@ -960,16 +968,27 @@ int cmd_graph(const std::vector<std::string>& args) {
         loaded = saved_identity
                      ? pulp::host::GraphSerializer::from_saved_document(*graph_ptr, *text, opts)
                      : pulp::host::GraphSerializer::from_json(*graph_ptr, *text, opts);
+        // A rewrite writes back only the nodes the load created, so a node
+        // record the tolerant load could not add would vanish from the file.
+        if (loaded.ok && !loaded.unrestored_node_ids.empty()) {
+            loaded.ok = false;
+            loaded.error = "node_not_restored: node record " +
+                           std::to_string(loaded.unrestored_node_ids.front()) +
+                           " could not be added to the graph; rewriting the document would "
+                           "drop it";
+        }
         // Stamping an envelope on a plain document asserts that the written
         // graph is the document, so the tolerant load must not have dropped an
-        // edge. A spectral document is read strictly and has no envelope form.
+        // edge. A spectral document is read strictly and has no envelope form;
+        // it is recognised by the serializer's rule (a node with a spectral
+        // identity, which every spectral stage carries), and its save is
+        // refused by the writer with the reason.
         const bool adds_identity =
             loaded.ok && !saved_identity && op == "save" &&
             std::find(args.begin() + 2, args.end(), "--saved-identity") != args.end();
         const bool spectral =
-            std::any_of(graph_ptr->nodes().begin(), graph_ptr->nodes().end(), [](const auto& node) {
-                return node.spectral_identity.has_value() || node.spectral_stage.has_value();
-            });
+            std::any_of(graph_ptr->nodes().begin(), graph_ptr->nodes().end(),
+                        [](const auto& node) { return node.spectral_identity.has_value(); });
         if (adds_identity && !spectral) {
             if (auto missing = pulp::host::GraphSerializer::unrestored_connection(
                     *graph_ptr, *text, loaded.persisted_node_ids)) {

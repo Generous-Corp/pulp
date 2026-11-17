@@ -9,6 +9,37 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11472"></a>
+## [1.147.2] - 2026-11-17
+
+- release/version bump ([#12450](https://github.com/Generous-Corp/pulp/pull/12450))
+- fix/linux editor input recovery 20261116 ([#12441](https://github.com/Generous-Corp/pulp/pull/12441))
+
+<a id="v11471"></a>
+## [1.147.1] - 2026-11-16
+
+- release/version bump ([#12442](https://github.com/Generous-Corp/pulp/pull/12442))
+
+<a id="v11470"></a>
+## [1.147.0] - 2026-11-16
+
+- release/version bump ([#12439](https://github.com/Generous-Corp/pulp/pull/12439))
+- feature/rmlui native ci lane ([#12424](https://github.com/Generous-Corp/pulp/pull/12424))
+- feature/native surface format host tests ([#12376](https://github.com/Generous-Corp/pulp/pull/12376))
+- feature/rmlui hide trim ([#12401](https://github.com/Generous-Corp/pulp/pull/12401))
+- fix/sanitizer lanes consumer disk ([#12432](https://github.com/Generous-Corp/pulp/pull/12432))
+- release/version bump ([#12435](https://github.com/Generous-Corp/pulp/pull/12435))
+- feature/auv3 contract editor ([#12370](https://github.com/Generous-Corp/pulp/pull/12370))
+- graph/final fixes 20261116 ([#12431](https://github.com/Generous-Corp/pulp/pull/12431))
+- graph/swarm identity strict 20261116 ([#12428](https://github.com/Generous-Corp/pulp/pull/12428))
+- feature/rmlui key offer focus ([#12373](https://github.com/Generous-Corp/pulp/pull/12373))
+
+<a id="v11450"></a>
+## [1.145.0] - 2026-11-16
+
+- release/version bump ([#12430](https://github.com/Generous-Corp/pulp/pull/12430))
+- fix/au v2 contract resize transaction ([#12383](https://github.com/Generous-Corp/pulp/pull/12383))
+
 <a id="v11440"></a>
 ## [1.144.0] - 2026-11-16
 
@@ -13154,6 +13185,10 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.147.2]: https://github.com/Generous-Corp/pulp/releases/tag/v1.147.2
+[1.147.1]: https://github.com/Generous-Corp/pulp/releases/tag/v1.147.1
+[1.147.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.147.0
+[1.145.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.145.0
 [1.144.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.144.0
 [1.143.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.143.0
 [1.142.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.142.0

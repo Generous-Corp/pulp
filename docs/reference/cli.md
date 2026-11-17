@@ -1560,7 +1560,10 @@ Before it writes, every connection the plain input records must have been
 restored; an edge the tolerant loader skipped (a dangling node, an invalid
 port) is refused with `InvalidDocument` and a `connection_not_restored` message
 (exit 1), and no output is written. A plain `save` without the flag keeps the
-tolerant behaviour.
+tolerant behaviour for edges. Every rewrite refuses an input with a node record
+the loader could not add (for example a second Control index input, or a plugin
+record without plugin info), with `InvalidDocument` and a `node_not_restored`
+message (exit 1), because the written file would silently lose that node.
 A document carrying `subgraphs` records is refused with
 `subgraph_records_unsupported` (exit 1) and left unchanged, because restoring
 those records needs the authoring templates and a plain rewrite would drop every

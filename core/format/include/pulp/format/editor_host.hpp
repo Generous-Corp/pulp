@@ -371,6 +371,10 @@ struct EditorKeyEvent {
     std::uint8_t modifiers = 0; ///< `EditorKeyModifier` bits
     bool is_down = true;        ///< false for a key release
     bool is_repeat = false;     ///< an auto-repeat of a held key
+    /// Stable identity of the physical key, the same on its down, repeats and
+    /// up whatever the modifiers or layout do to `character`. 0 when the host
+    /// has none; the platform code plus one (so a code of 0 stays distinct).
+    std::uint32_t physical_key = 0;
 };
 
 /// The editor's answer to an offered key.

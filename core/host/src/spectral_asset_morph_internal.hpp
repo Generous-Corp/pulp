@@ -5,7 +5,7 @@
 #include <pulp/signal/spectral_frame_codec.hpp>
 #include <pulp/signal/spectral_morph.hpp>
 
-#include "spectral_finite_stream_internal.hpp"
+#include "spectral_asset_stream_internal.hpp"
 
 #include <algorithm>
 #include <array>
@@ -46,38 +46,16 @@ class SpectralAssetMorphConfig {
     make(std::span<const std::uint8_t> bytes_a, std::span<const std::uint8_t> bytes_b,
          std::uint64_t length, std::size_t budget,
          SpectralFiniteStreamRule::Status* refusal = nullptr) {
-        using Status = SpectralFiniteStreamRule::Status;
-        if (refusal)
-            *refusal = Status::unset;
-        // A codec resource limit is a capacity refusal, not a malformed asset.
-        const auto decode_error = [](signal::SpectralCodecError e) {
-            return e == signal::SpectralCodecError::ResourceLimit ? SpectralError::CapacityExceeded
-                                                                  : SpectralError::InvalidFrame;
-        };
-        auto first = signal::decode_spectral_stream(bytes_a, budget);
+        auto first = decode_finite_spectral_stream(
+            bytes_a, length, budget, SpectralFiniteStreamRule::Policy::dividing_hop_v1, refusal);
         if (!first)
-            return {std::nullopt, decode_error(first.error)};
-        if (first.memory.retained_bytes >= budget)
-            return {std::nullopt, SpectralError::CapacityExceeded};
-        const auto& ga = first.value->geometry;
-        // The geometry comes from the decoded stream; the finite-stream rule
-        // admits a subset of what the codec decodes and bounds every grid and
-        // cutoff value before it is used as signed runtime chronology.
-        const auto rule = SpectralFiniteStreamRule::make(ga.fft_size, ga.hop, ga.channels, length);
-        if (!rule && refusal)
-            *refusal = rule.status;
-        if (rule.geometry_refused())
-            return {std::nullopt, SpectralError::UnsupportedOperation};
-        if (rule.status == Status::capacity_exceeded)
-            return {std::nullopt, SpectralError::CapacityExceeded};
-        if (!rule)
-            return {std::nullopt, SpectralError::InvalidFrame};
+            return {std::nullopt, first.error};
+        const auto& ga = first.stream.geometry;
+        const auto& rule = first.rule;
         const auto frames = rule.frame_count;
-        if (ga.profile != 1 || first.value->frame_count != frames)
-            return {std::nullopt, SpectralError::IdentityMismatch};
-        auto second = signal::decode_spectral_stream(bytes_b, budget - first.memory.retained_bytes);
+        auto second = signal::decode_spectral_stream(bytes_b, budget - first.retained_bytes);
         if (!second)
-            return {std::nullopt, decode_error(second.error)};
+            return {std::nullopt, spectral_codec_refusal(second.error)};
         const auto& gb = second.value->geometry;
         if (gb.profile != ga.profile || gb.fft_size != ga.fft_size || gb.hop != ga.hop ||
             gb.channels != ga.channels ||
@@ -86,7 +64,7 @@ class SpectralAssetMorphConfig {
             second.value->frame_count != frames)
             return {std::nullopt, SpectralError::IdentityMismatch};
         auto config = std::make_shared<SpectralAssetMorphConfig>();
-        config->a = std::move(*first.value);
+        config->a = std::move(first.stream);
         config->b = std::move(*second.value);
         config->rule = rule;
         config->source_samples = length;
