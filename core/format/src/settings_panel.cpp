@@ -159,7 +159,7 @@ void SettingsPanel::build_audio_tab() {
     audio_tab->add_child(std::move(out_combo));
 
     // Input device
-    auto input_label = make_section_label("Input Device");
+    auto input_label = make_section_label(StandaloneSettingsModel::input_label());
     input_device_label_ = input_label.get();
     audio_tab->add_child(std::move(input_label));
     auto in_combo = std::make_unique<view::ComboBox>();
@@ -359,6 +359,8 @@ void SettingsPanel::sync_selectors() {
         output_device_combo_->set_items(model_.output_items());
         output_device_combo_->set_selected_silent(model_.output_selected());
     }
+    if (input_device_label_)
+        input_device_label_->set_text(model_.input_label());
     if (input_device_combo_) {
         input_device_combo_->set_items(model_.input_items());
         input_device_combo_->set_selected_silent(model_.input_selected());

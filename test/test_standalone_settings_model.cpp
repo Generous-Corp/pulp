@@ -4,6 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/format/detail/null_audio_device.hpp>
+#include <pulp/format/detail/standalone_settings_window.hpp>
 #include <pulp/format/standalone.hpp>
 #include <pulp/format/standalone_settings_model.hpp>
 
@@ -114,10 +115,12 @@ TEST_CASE("the model lists the enumerated devices and follows the default first"
     REQUIRE(out[0] == "System Default (follow)");
     REQUIRE(out[1] == "Speakers (Default)");
     REQUIRE(out[2] == "USB Interface");
-    // Only devices with inputs feed the input list.
+    // Audio input is an on/off choice over the system default input, not a
+    // device list.
     const auto& in = rig.model.input_items();
     REQUIRE(in.size() == 2);
-    REQUIRE(in[1] == "USB Interface (Default)");
+    REQUIRE(in[0].find("Off") == 0);
+    REQUIRE(in[1].find("default input device") != std::string::npos);
     REQUIRE(rig.model.midi_items() == std::vector<std::string>{"None", "Keys", "Pads"});
 }
 
@@ -380,4 +383,252 @@ TEST_CASE(
     REQUIRE(midi_ports_opened_by_start("m2") == std::vector<std::string>{"m2"});
     REQUIRE(midi_ports_opened_by_start("") == std::vector<std::string>{"m1"});
     REQUIRE(midi_ports_opened_by_start(StandaloneConfig::kNoMidiInput).empty());
+}
+
+// -- config() follows the rows the user sees ---------------------------------
+
+TEST_CASE("a pinned output that has gone applies the default, not the missing id",
+          "[standalone][settings-model][fallback]") {
+    Rig rig;
+    StandaloneConfig cfg;
+    cfg.audio_device_id = "usb";
+    rig.load(cfg);
+    REQUIRE(rig.model.output_selected() == 2);
+    REQUIRE(rig.model.config().audio_device_id == "usb");
+
+    rig.audio.devices.pop_back(); // the interface was unplugged
+    rig.model.refresh(&rig.audio, &rig.midi);
+    REQUIRE(rig.model.output_selected() == 0);
+    REQUIRE(rig.model.config().audio_device_id.empty());
+}
+
+TEST_CASE("input that has gone applies as off", "[standalone][settings-model][fallback]") {
+    Rig rig;
+    StandaloneConfig cfg;
+    cfg.input_channels = 2;
+    rig.load(cfg);
+    REQUIRE(rig.model.input_selected() == 1);
+    REQUIRE(rig.model.config().input_channels == 2);
+
+    rig.audio.devices = {device("spk", "Speakers", 0, 2, true)}; // no input device left
+    rig.model.refresh(&rig.audio, &rig.midi);
+    REQUIRE(rig.model.input_selected() == 0);
+    REQUIRE(rig.model.config().input_channels == 0);
+}
+
+TEST_CASE("a MIDI port that has gone applies the row shown",
+          "[standalone][settings-model][fallback]") {
+    Rig rig;
+    StandaloneConfig cfg;
+    cfg.midi_input_id = "m2";
+    rig.load(cfg);
+    REQUIRE(rig.model.config().midi_input_id == "m2");
+
+    rig.midi.ports = {port("m1", "Keys")};
+    rig.model.refresh(&rig.audio, &rig.midi);
+    REQUIRE(rig.model.midi_selected() == 0);
+    REQUIRE(rig.model.config().midi_input_id == StandaloneConfig::kNoMidiInput);
+
+    // The view panel's variant shows the first port instead.
+    StandaloneSettingsModel::Options options;
+    options.midi_includes_none = false;
+    StandaloneSettingsModel panel{options};
+    panel.set_config(cfg);
+    panel.refresh(&rig.audio, &rig.midi);
+    REQUIRE(panel.midi_selected() == 0);
+    REQUIRE(panel.config().midi_input_id == "m1");
+
+    // No ports and nothing chosen stays "nothing chosen", so a keyboard plugged
+    // in later is still picked up.
+    rig.midi.ports.clear();
+    rig.load({});
+    REQUIRE(rig.model.config().midi_input_id.empty());
+    panel.set_config({});
+    panel.refresh(&rig.audio, &rig.midi);
+    REQUIRE(panel.config().midi_input_id.empty());
+}
+
+TEST_CASE("two inputs with the same channel count offer one on/off control, not a picker",
+          "[standalone][settings-model][input]") {
+    Rig rig;
+    rig.audio.devices = {device("spk", "Speakers", 0, 2, true),
+                         device("in-a", "Mic A", 2, 0, false, true), device("in-b", "Mic B", 2, 0)};
+    rig.load();
+    // One row per state: nothing in the list names a device that could not be routed.
+    REQUIRE(rig.model.input_items().size() == 2);
+    REQUIRE(std::string(StandaloneSettingsModel::input_label()).find("default") !=
+            std::string::npos);
+    REQUIRE(rig.model.config().input_channels == 0);
+    rig.model.select_input(1);
+    REQUIRE(rig.model.config().input_channels == 2);
+
+    // The choice survives the config round trip instead of resetting.
+    const auto chosen = rig.model.config();
+    rig.load(chosen);
+    REQUIRE(rig.model.input_selected() == 1);
+    REQUIRE(rig.model.config().input_channels == 2);
+}
+
+TEST_CASE("devices and ports with equal names keep their own rows",
+          "[standalone][settings-model][duplicate-names]") {
+    Rig rig;
+    rig.audio.devices = {device("a", "Interface", 0, 2), device("b", "Interface", 0, 2)};
+    rig.midi.ports = {port("p1", "None"), port("p2", "None")};
+    rig.load();
+    REQUIRE(rig.model.output_items().size() == 3);
+    rig.model.select_output(2);
+    REQUIRE(rig.model.config().audio_device_id == "b");
+    rig.model.select_output(1);
+    REQUIRE(rig.model.config().audio_device_id == "a");
+
+    // A port literally named "None" is a port, not the None row.
+    REQUIRE(rig.model.midi_items() == std::vector<std::string>{"None", "None", "None"});
+    rig.model.select_midi(0);
+    REQUIRE(rig.model.config().midi_input_id == StandaloneConfig::kNoMidiInput);
+    rig.model.select_midi(1);
+    REQUIRE(rig.model.config().midi_input_id == "p1");
+    rig.model.select_midi(2);
+    REQUIRE(rig.model.config().midi_input_id == "p2");
+    rig.load(rig.model.config());
+    REQUIRE(rig.model.midi_selected() == 2);
+}
+
+// -- Apply and the app's lifetime --------------------------------------------
+
+namespace {
+
+// Wraps the null device so open() can be made to fail on demand.
+struct OpenGate {
+    bool fail = false;
+};
+
+class GatedDevice final : public audio::AudioDevice {
+  public:
+    GatedDevice(std::unique_ptr<audio::AudioDevice> inner, OpenGate& gate)
+        : inner_(std::move(inner)), gate_(gate) {}
+    bool open(const audio::DeviceConfig& c) override {
+        return !gate_.fail && inner_->open(c);
+    }
+    void close() override {
+        inner_->close();
+    }
+    bool start(audio::AudioCallback cb) override {
+        return inner_->start(std::move(cb));
+    }
+    void stop() override {
+        inner_->stop();
+    }
+    bool is_open() const override {
+        return inner_->is_open();
+    }
+    bool is_running() const override {
+        return inner_->is_running();
+    }
+    audio::DeviceInfo info() const override {
+        return inner_->info();
+    }
+    double sample_rate() const override {
+        return inner_->sample_rate();
+    }
+    int buffer_size() const override {
+        return inner_->buffer_size();
+    }
+
+  private:
+    std::unique_ptr<audio::AudioDevice> inner_;
+    OpenGate& gate_;
+};
+
+class GatedSystem final : public audio::AudioSystem {
+  public:
+    explicit GatedSystem(OpenGate& gate)
+        : inner_(format::detail::create_null_audio_system()), gate_(gate) {}
+    std::vector<audio::DeviceInfo> enumerate_devices() override {
+        return inner_->enumerate_devices();
+    }
+    std::unique_ptr<audio::AudioDevice> create_device(const std::string& id) override {
+        return std::make_unique<GatedDevice>(inner_->create_device(id), gate_);
+    }
+    audio::DeviceInfo default_output_device() override {
+        return inner_->default_output_device();
+    }
+    audio::DeviceInfo default_input_device() override {
+        return inner_->default_input_device();
+    }
+
+  private:
+    std::unique_ptr<audio::AudioSystem> inner_;
+    OpenGate& gate_;
+};
+
+StandaloneConfig apply_test_config() {
+    StandaloneConfig cfg;
+    cfg.persist_settings = false;
+    cfg.buffer_size = 256;
+    return cfg;
+}
+
+} // namespace
+
+TEST_CASE("a failed Apply keeps the last working config and audio running",
+          "[standalone][settings-model][apply]") {
+    OpenGate gate;
+    format::StandaloneApp app(&make_midi_processor);
+    format::StandaloneMidiTestAccess::install(
+        app, [] { return std::make_unique<FakeMidi>(); },
+        [&gate] { return std::make_unique<GatedSystem>(gate); });
+    app.set_config(apply_test_config());
+    REQUIRE(app.start());
+
+    auto bad = apply_test_config();
+    bad.buffer_size = 0; // the device refuses it
+    REQUIRE_FALSE(app.apply_config(bad));
+    REQUIRE(app.is_running());
+    REQUIRE(app.config().buffer_size == 256);
+    app.stop();
+}
+
+TEST_CASE("after a failed Apply that could not restore, the next valid Apply resumes audio",
+          "[standalone][settings-model][apply]") {
+    OpenGate gate;
+    format::StandaloneApp app(&make_midi_processor);
+    format::StandaloneMidiTestAccess::install(
+        app, [] { return std::make_unique<FakeMidi>(); },
+        [&gate] { return std::make_unique<GatedSystem>(gate); });
+    app.set_config(apply_test_config());
+    REQUIRE(app.start());
+
+    gate.fail = true; // every open fails, so neither the change nor the restore works
+    auto next = apply_test_config();
+    next.buffer_size = 512;
+    REQUIRE_FALSE(app.apply_config(next));
+    REQUIRE_FALSE(app.is_running());
+
+    gate.fail = false;
+    REQUIRE(app.apply_config(next));
+    REQUIRE(app.is_running());
+    REQUIRE(app.config().buffer_size == 512);
+    app.stop();
+}
+
+TEST_CASE("stop() and destruction close only this app's settings window",
+          "[standalone][settings-model][lifetime]") {
+    int closed_a = 0;
+    int closed_b = 0;
+    format::StandaloneApp app_b(&make_midi_processor);
+    format::detail::register_standalone_settings_window_closer(&app_b, [&] { ++closed_b; });
+    {
+        format::StandaloneApp app_a(&make_midi_processor);
+        format::detail::register_standalone_settings_window_closer(&app_a, [&] { ++closed_a; });
+        app_a.stop();
+        REQUIRE(closed_a == 1);
+        REQUIRE(closed_b == 0);
+
+        // Destruction closes a window registered after stop().
+        format::detail::register_standalone_settings_window_closer(&app_a, [&] { ++closed_a; });
+    }
+    REQUIRE(closed_a == 2);
+    REQUIRE(closed_b == 0);
+    app_b.stop();
+    REQUIRE(closed_b == 1);
 }

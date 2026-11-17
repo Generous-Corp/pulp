@@ -13,6 +13,4 @@ bool open_standalone_settings_window(StandaloneApp&) {
     return false;
 }
 
-void close_standalone_settings_window() {}
-
 } // namespace pulp::format::detail

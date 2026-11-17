@@ -12,7 +12,9 @@ namespace pulp::format {
 namespace {
 
 constexpr const char* kFollowDefaultText = "System Default (follow)";
-constexpr const char* kInputNoneText = "(None)";
+constexpr const char* kInputOffText = "Off (no audio input)";
+constexpr const char* kInputOnText = "On (system default input device)";
+constexpr const char* kInputUnavailableText = "Off (no input device available)";
 constexpr const char* kInputNotUsedText = "(Not used by this instrument)";
 constexpr const char* kMidiNoneText = "None";
 
@@ -110,21 +112,17 @@ void StandaloneSettingsModel::resolve() {
         }
     }
 
-    // Input device.
+    // Audio input. The backends open one device and the input is the system's
+    // default input device, so this is an on/off choice, not a device picker.
     input_items_.clear();
     input_selected_ = 0;
     if (config_.supports_audio_input) {
-        input_items_.push_back(kInputNoneText);
-        for (auto& d : inputs_)
-            input_items_.push_back(d.name + (d.is_default_input ? " (Default)" : ""));
-        if (config_.input_channels > 0) {
-            for (size_t i = 0; i < inputs_.size(); ++i) {
-                if (inputs_[i].is_default_input) {
-                    input_selected_ = static_cast<int>(i) + 1;
-                    break;
-                }
-            }
-            if (input_selected_ == 0 && !inputs_.empty())
+        if (inputs_.empty()) {
+            input_items_.push_back(kInputUnavailableText);
+        } else {
+            input_items_.push_back(kInputOffText);
+            input_items_.push_back(kInputOnText);
+            if (config_.input_channels > 0)
                 input_selected_ = 1;
         }
     } else {
@@ -140,10 +138,14 @@ void StandaloneSettingsModel::resolve() {
         midi_items_.push_back(kMidiNoneText);
     for (auto& p : midi_ports_)
         midi_items_.push_back(p.name);
+    midi_none_implicit_ = false;
     if (config_.midi_input_id == kNoMidiInputId) {
         midi_selected_ = options_.midi_includes_none ? 0 : -1;
     } else if (config_.midi_input_id.empty()) {
+        // Nothing chosen: the first port, or with no ports the None row shown as
+        // a placeholder that must not be written back as a choice.
         midi_selected_ = midi_ports_.empty() ? (options_.midi_includes_none ? 0 : -1) : offset;
+        midi_none_implicit_ = midi_ports_.empty();
     } else {
         midi_selected_ = options_.midi_includes_none ? 0 : (midi_ports_.empty() ? -1 : 0);
         for (size_t i = 0; i < midi_ports_.size(); ++i) {
@@ -227,6 +229,19 @@ void StandaloneSettingsModel::select_output(int index) {
     rebuild_rates_and_buffers();
 }
 
+int StandaloneSettingsModel::default_input_channels() const {
+    if (inputs_.empty())
+        return 0;
+    const audio::DeviceInfo* chosen = &inputs_.front();
+    for (const auto& d : inputs_) {
+        if (d.is_default_input) {
+            chosen = &d;
+            break;
+        }
+    }
+    return std::min(2, chosen->max_input_channels);
+}
+
 void StandaloneSettingsModel::select_input(int index) {
     if (!config_.supports_audio_input)
         return;
@@ -234,8 +249,7 @@ void StandaloneSettingsModel::select_input(int index) {
     if (index < 0)
         return;
     input_selected_ = index;
-    config_.input_channels =
-        index > 0 ? std::min(2, inputs_[static_cast<size_t>(index - 1)].max_input_channels) : 0;
+    config_.input_channels = index == 1 ? default_input_channels() : 0;
 }
 
 void StandaloneSettingsModel::select_sample_rate(int index) {
@@ -284,13 +298,37 @@ std::string StandaloneSettingsModel::latency_text() const {
 }
 
 StandaloneConfig StandaloneSettingsModel::config() const {
+    // Every field a row shows is derived from the row's selection, not copied
+    // from the config the model started with: when a device or port has gone,
+    // the row falls back and Apply must apply what the row shows.
     StandaloneConfig out = config_;
-    if (!out.supports_audio_input)
-        out.input_channels = 0;
+
+    out.audio_device_id.clear();
+    if (output_selected_ > 0 && output_selected_ <= static_cast<int>(outputs_.size())) {
+        const auto& id = outputs_[static_cast<size_t>(output_selected_ - 1)].id;
+        if (!is_null_device(id))
+            out.audio_device_id = id;
+    }
+
+    out.input_channels =
+        (config_.supports_audio_input && input_selected_ == 1) ? default_input_channels() : 0;
+
     if (rate_selected_ >= 0)
         out.sample_rate = rates_[static_cast<size_t>(rate_selected_)];
     if (buffer_selected_ >= 0)
         out.buffer_size = buffers_[static_cast<size_t>(buffer_selected_)];
+
+    out.midi_input_id.clear();
+    if (options_.midi_includes_none) {
+        if (midi_selected_ == 0) {
+            if (!midi_none_implicit_)
+                out.midi_input_id = kNoMidiInputId;
+        } else if (midi_selected_ > 0 && midi_selected_ <= static_cast<int>(midi_ports_.size())) {
+            out.midi_input_id = midi_ports_[static_cast<size_t>(midi_selected_ - 1)].id;
+        }
+    } else if (midi_selected_ >= 0 && midi_selected_ < static_cast<int>(midi_ports_.size())) {
+        out.midi_input_id = midi_ports_[static_cast<size_t>(midi_selected_)].id;
+    }
     return out;
 }
 

@@ -872,7 +872,10 @@ bool StandaloneApp::start() {
 }
 
 bool StandaloneApp::apply_config(const StandaloneConfig& new_config) {
-    bool was_running = running_.load();
+    // A failed earlier apply leaves audio stopped; the next apply still means
+    // "run with this config", not "just remember it".
+    const bool was_running = running_.load() || restart_pending_;
+    const StandaloneConfig previous_config = config_;
     // Soft restart: tear down only the audio/MIDI devices and rebuild them for
     // the new config, KEEPING the processor instance (start() reuses it and
     // re-prepare()s it). A full stop()+start() would recreate the processor and
@@ -882,6 +885,15 @@ bool StandaloneApp::apply_config(const StandaloneConfig& new_config) {
     constrain_audio_config(config_);
     bool ok = true;
     if (was_running) ok = start();
+    if (!ok) {
+        // Put the last working config back so audio keeps running. When even
+        // that fails, remember that a restart is owed.
+        stop_audio_keep_processor();
+        config_ = previous_config;
+        restart_pending_ = !start();
+        return false;
+    }
+    restart_pending_ = false;
     // Remember the user's device/rate/buffer selection across launches (default on),
     // but only after a successful (re)start — otherwise a failed apply would persist
     // a broken selection that the next launch restores.
@@ -927,9 +939,51 @@ bool StandaloneApp::run_contract_editor(EditorFactory& factory) {
             config_.test_on_editor_frame();
     };
     const bool ran = detail::run_standalone_contract_editor(*processor_, store_, factory, options);
-    detail::close_standalone_settings_window();
+    detail::close_standalone_settings_windows(this);
     return ran;
 }
+
+namespace detail {
+namespace {
+struct SettingsWindowCloser {
+    const StandaloneApp* owner;
+    std::function<void()> close;
+};
+// Main thread only, like every settings window call.
+std::vector<SettingsWindowCloser>& settings_window_closers() {
+    static std::vector<SettingsWindowCloser> closers;
+    return closers;
+}
+} // namespace
+
+void register_standalone_settings_window_closer(const StandaloneApp* owner,
+                                                std::function<void()> close) {
+    auto& closers = settings_window_closers();
+    for (auto& entry : closers) {
+        if (entry.owner == owner) {
+            entry.close = std::move(close);
+            return;
+        }
+    }
+    closers.push_back({owner, std::move(close)});
+}
+
+void close_standalone_settings_windows(const StandaloneApp* owner) {
+    auto& closers = settings_window_closers();
+    std::vector<std::function<void()>> to_run;
+    for (auto it = closers.begin(); it != closers.end();) {
+        if (it->owner == owner) {
+            to_run.push_back(std::move(it->close));
+            it = closers.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    for (auto& close : to_run)
+        if (close)
+            close();
+}
+} // namespace detail
 
 bool StandaloneApp::open_settings_window() {
     if (settings_window_opener_)
@@ -1009,6 +1063,8 @@ void StandaloneApp::stop_audio_keep_processor() {
 }
 
 void StandaloneApp::stop() {
+    // The settings window holds this app: close it before the app goes.
+    detail::close_standalone_settings_windows(this);
     shutdown_view_input();
     stop_audio_keep_processor();
 #if PULP_ENABLE_AUDIO_PROBES

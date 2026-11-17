@@ -350,6 +350,9 @@ public:
     bool run_view_editor(bool use_gpu, const StandaloneConfig& effective_config);
     std::function<void(const std::vector<std::string>&)> open_files_handler_;
     SettingsWindowOpener settings_window_opener_;
+    // An apply failed and could not restore the previous config, so audio is
+    // stopped; the next apply starts it again.
+    bool restart_pending_ = false;
 
     // Declared FIRST so it is destroyed LAST: the final detach cancels and
     // joins the tracing auto-flush timer and writes the .pftrace, which must

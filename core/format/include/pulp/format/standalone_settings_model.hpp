@@ -65,14 +65,22 @@ class StandaloneSettingsModel {
     const std::vector<std::string>& output_items() const {
         return output_items_;
     }
-    /// With `supports_audio_input`: "(None)" then the input devices. Without:
-    /// a single "not used" row, and `input_visible()` is false.
+    /// With `supports_audio_input`: "Off" and "On (system default input
+    /// device)", or one "no input device available" row when none is
+    /// enumerated. The standalone opens one audio device and reads the system's
+    /// default input, so this is an on/off choice, not a device picker. Without
+    /// `supports_audio_input`: a single "not used" row, and `input_visible()` is
+    /// false.
     const std::vector<std::string>& input_items() const {
         return input_items_;
     }
     /// Hidden when the processor has no audio input.
     bool input_visible() const {
         return config_.supports_audio_input;
+    }
+    /// The title of the input row.
+    static const char* input_label() {
+        return "Audio Input (default device)";
     }
     const std::vector<std::string>& sample_rate_items() const {
         return rate_items_;
@@ -126,8 +134,11 @@ class StandaloneSettingsModel {
     /// "Latency: 5.3 ms", or a placeholder in place of the number when unknown.
     std::string latency_text() const;
 
-    /// The config the selections describe: the base config with the chosen
-    /// device, input channel count, rate, buffer size and MIDI input applied.
+    /// The config the selections describe: the base config with the device,
+    /// input channel count, rate, buffer size and MIDI input each derived from
+    /// the selected row. A device or port that has disappeared is not carried
+    /// over: its row falls back (default output, input off, None or first port)
+    /// and so does the config.
     /// The null device is never written as a device id (it is a session choice,
     /// not a saved one); choosing it leaves the id empty.
     StandaloneConfig config() const;
@@ -137,6 +148,7 @@ class StandaloneSettingsModel {
 
   private:
     void resolve();
+    int default_input_channels() const;
     void rebuild_rates_and_buffers();
     void resolve_rate_and_buffer_selection();
 
@@ -156,6 +168,8 @@ class StandaloneSettingsModel {
     int rate_selected_ = -1;
     int buffer_selected_ = -1;
     int midi_selected_ = -1;
+    // The None row shows only because no port exists and nothing was chosen.
+    bool midi_none_implicit_ = false;
 };
 
 } // namespace pulp::format

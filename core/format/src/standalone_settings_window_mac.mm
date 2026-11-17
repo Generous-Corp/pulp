@@ -46,19 +46,35 @@ NSTextField* make_label(NSString* text, CGFloat width) {
     return label;
 }
 
+// Items are added to the menu directly, each tagged with its model index.
+// addItemWithTitle: would merge rows with equal titles (two devices or ports
+// with the same name), so the menu position would stop matching the model.
 void fill_popup(NSPopUpButton* popup, const std::vector<std::string>& items, int selected) {
     [popup removeAllItems];
-    for (const auto& item : items)
-        [popup addItemWithTitle:[NSString stringWithUTF8String:item.c_str()]];
+    for (size_t i = 0; i < items.size(); ++i) {
+        NSMenuItem* item =
+            [[NSMenuItem alloc] initWithTitle:[NSString stringWithUTF8String:items[i].c_str()]
+                                       action:nil
+                                keyEquivalent:@""];
+        item.tag = static_cast<NSInteger>(i);
+        [popup.menu addItem:item];
+        [item release];
+    }
     if (selected >= 0 && selected < static_cast<int>(items.size()))
         [popup selectItemAtIndex:selected];
+}
+
+// The model index of the popup's selected row.
+int selected_model_index(NSPopUpButton* popup) {
+    NSMenuItem* item = popup.selectedItem;
+    return item == nil ? -1 : static_cast<int>(item.tag);
 }
 } // namespace
 
 @implementation PulpSettingsWindowController
 
 - (NSStackView*)rowWithTitle:(NSString*)title control:(NSView*)control {
-    NSStackView* row = [NSStackView stackViewWithViews:@[ make_label(title, 120), control ]];
+    NSStackView* row = [NSStackView stackViewWithViews:@[ make_label(title, 190), control ]];
     row.orientation = NSUserInterfaceLayoutOrientationHorizontal;
     row.spacing = 10;
     row.alignment = NSLayoutAttributeCenterY;
@@ -88,7 +104,10 @@ void fill_popup(NSPopUpButton* popup, const std::vector<std::string>& items, int
         statusLabel = [NSTextField labelWithString:@""];
         statusLabel.textColor = NSColor.secondaryLabelColor;
 
-        inputRow = [self rowWithTitle:@"Input Device" control:inputPopup];
+        inputRow = [self
+            rowWithTitle:
+                [NSString stringWithUTF8String:pulp::format::StandaloneSettingsModel::input_label()]
+                 control:inputPopup];
         NSButton* apply = [NSButton buttonWithTitle:@"Apply" target:self action:@selector(apply:)];
         apply.keyEquivalent = @"\r";
         NSButton* close = [NSButton buttonWithTitle:@"Close"
@@ -111,7 +130,7 @@ void fill_popup(NSPopUpButton* popup, const std::vector<std::string>& items, int
         column.edgeInsets = NSEdgeInsetsMake(20, 20, 20, 20);
 
         window = [[NSWindow alloc]
-            initWithContentRect:NSMakeRect(0, 0, 450, 300)
+            initWithContentRect:NSMakeRect(0, 0, 520, 300)
                       styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
                         backing:NSBackingStoreBuffered
                           defer:NO];
@@ -163,27 +182,27 @@ void fill_popup(NSPopUpButton* popup, const std::vector<std::string>& items, int
 }
 
 - (void)outputChanged:(id)sender {
-    model->select_output(static_cast<int>(outputPopup.indexOfSelectedItem));
+    model->select_output(selected_model_index(outputPopup));
     statusLabel.stringValue = @"";
     [self reloadList];
 }
 - (void)inputChanged:(id)sender {
-    model->select_input(static_cast<int>(inputPopup.indexOfSelectedItem));
+    model->select_input(selected_model_index(inputPopup));
     statusLabel.stringValue = @"";
 }
 - (void)rateChanged:(id)sender {
-    model->select_sample_rate(static_cast<int>(ratePopup.indexOfSelectedItem));
+    model->select_sample_rate(selected_model_index(ratePopup));
     statusLabel.stringValue = @"";
     fill_popup(bufferPopup, model->buffer_size_items(), model->buffer_size_selected());
     [self reloadLatency];
 }
 - (void)bufferChanged:(id)sender {
-    model->select_buffer_size(static_cast<int>(bufferPopup.indexOfSelectedItem));
+    model->select_buffer_size(selected_model_index(bufferPopup));
     statusLabel.stringValue = @"";
     [self reloadLatency];
 }
 - (void)midiChanged:(id)sender {
-    model->select_midi(static_cast<int>(midiPopup.indexOfSelectedItem));
+    model->select_midi(selected_model_index(midiPopup));
     statusLabel.stringValue = @"";
 }
 
@@ -216,25 +235,30 @@ bool standalone_settings_window_supported() {
     return true;
 }
 
-bool open_standalone_settings_window(StandaloneApp& app) {
-    if (g_controller != nil && g_controller->app != &app)
-        close_standalone_settings_window();
-    if (g_controller == nil)
-        g_controller = [[PulpSettingsWindowController alloc] initWithApp:&app];
-    else
-        [g_controller reloadFromApp];
-    [g_controller show];
-    return true;
-}
-
-void close_standalone_settings_window() {
-    if (g_controller == nil)
+namespace {
+// Close the window if it shows `app`'s settings; another app's is left alone.
+void close_controller_of(const StandaloneApp* app) {
+    if (g_controller == nil || g_controller->app != app)
         return;
     PulpSettingsWindowController* controller = g_controller;
     g_controller = nil;
     controller->window.delegate = nil;
     [controller->window orderOut:nil];
     [controller release];
+}
+} // namespace
+
+bool open_standalone_settings_window(StandaloneApp& app) {
+    if (g_controller != nil && g_controller->app != &app)
+        close_standalone_settings_windows(g_controller->app);
+    if (g_controller == nil)
+        g_controller = [[PulpSettingsWindowController alloc] initWithApp:&app];
+    else
+        [g_controller reloadFromApp];
+    const StandaloneApp* owner = &app;
+    register_standalone_settings_window_closer(owner, [owner] { close_controller_of(owner); });
+    [g_controller show];
+    return true;
 }
 
 } // namespace pulp::format::detail
@@ -251,7 +275,6 @@ bool open_standalone_settings_window(StandaloneApp&) {
     runtime::log_warn("Standalone: this platform has no native Audio/MIDI settings window yet");
     return false;
 }
-void close_standalone_settings_window() {}
 } // namespace pulp::format::detail
 
 #endif
