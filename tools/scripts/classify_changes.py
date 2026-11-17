@@ -291,6 +291,7 @@ IOS_COMPILE_REQUIRED_PATTERNS = (
     "test/cmake/test_g9_isolated_clap_sdk_consumer.cmake",
     "test/test_isolated_clap_protocol.cpp",
     "test/test_isolated_clap_worker.cpp",
+    "test/test_isolated_clap_worker_windows.cpp",
     "test/cmake/pulp_state_link_closure.cmake.in",
     "docs/contracts/**",
     "docs/status/*.schema.json",

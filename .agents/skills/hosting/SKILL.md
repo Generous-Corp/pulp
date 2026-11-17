@@ -77,6 +77,22 @@ record's `file` field carries that child-side handle value instead of a file
 identity, so there is no path to unlink. And the Windows retained channel refuses
 output capture, because nothing drains a retained child's pipes.
 
+**The worker owns that section value only once it maps.** `SharedSection::adopt`
+closes the value right after a successful map (the view keeps the section alive)
+and never closes a value that does not map, because a hostile or stale hello can
+name another live worker handle such as its control pipe. Never close the
+duplicated value from the parent with `DUPLICATE_CLOSE_SOURCE`: it races the
+worker's own close and can hit a reused value. A failed hello is followed by
+terminating the job, which releases what the worker never adopted. Prove the
+Windows callback with the import-table traps in
+`test/fixtures/isolated_clap/windows_callback_traps.cpp` (Pulp and the static
+CRT resolve through the test executable's table), not with macOS interposer
+evidence, and keep their negative control beside any new kind. The traps are
+per process and `catch_discover_tests` runs every case in its own process, so a
+case that measures a callback must install them itself (the test's
+`CallbackProbe` does on construction); a case relying on an earlier case's
+install reports clean counts with no traps in place when run alone.
+
 **Graph code that calls an isolation helper must also link on the web.** The
 WAM / WebCLAP sample-region profile compiles a curated source list
 (`tools/cmake/PulpSampleRegionWebSources.cmake`), not `pulp-host`, and
@@ -589,6 +605,18 @@ and `signal_graph_reference_walk.cpp` remains the independent execution oracle.
 The authoring extraction changes source ownership, not the graph's public
 contract or real-time lock rules. Recheck the host graph and executor parity
 suites after moving a method across these translation units.
+
+### Edge probes publish once per block, from the calling thread
+
+Every edge probe kind observes into a per-block stage in the executor and is
+pushed to its ring only after the last node (serial) or the final level
+barrier (parallel), on the thread that called `process()`. Never push to a
+probe ring from inside a node gather: on the levelized walk that runs on a
+worker and gives the SPSC ring a second producer. Capture an audio source in
+the task that ran the source node, not after the barrier: a built-in gain's
+sole reader reads its output in place and may write through its input view.
+A hosted plug-in's output is retained across blocks and always copied to its
+reader, so a test that needs an in-place source must use a built-in node.
 
 ### A hosted device's latency is discovered once, on the control thread
 

@@ -135,7 +135,8 @@ int main(int argc, char** argv) try {
     require(graph.attach_audio_edge_probe(from, to) == Status::Attached &&
                 graph.audio_edge_probe_identity().connection != identity.connection,
             "new-connection-identity");
-    graph.set_parallel_routing_enabled(true);
+    // The levelized parallel walk now observes probes; anticipation does not.
+    graph.set_anticipation_enabled(true);
     require(graph.attach_audio_edge_probe(from, to) == Status::UnsupportedExecution,
             "execution-refusal");
     std::cout << "graph-edge-probe PASS checks=" << checks << '\n';
