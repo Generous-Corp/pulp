@@ -590,6 +590,18 @@ The authoring extraction changes source ownership, not the graph's public
 contract or real-time lock rules. Recheck the host graph and executor parity
 suites after moving a method across these translation units.
 
+### Edge probes publish once per block, from the calling thread
+
+Every edge probe kind observes into a per-block stage in the executor and is
+pushed to its ring only after the last node (serial) or the final level
+barrier (parallel), on the thread that called `process()`. Never push to a
+probe ring from inside a node gather: on the levelized walk that runs on a
+worker and gives the SPSC ring a second producer. Capture an audio source in
+the task that ran the source node, not after the barrier: a built-in gain's
+sole reader reads its output in place and may write through its input view.
+A hosted plug-in's output is retained across blocks and always copied to its
+reader, so a test that needs an in-place source must use a built-in node.
+
 ### A hosted device's latency is discovered once, on the control thread
 
 `PluginSlot::latency_query()` exists because `latency_samples()` returns an
