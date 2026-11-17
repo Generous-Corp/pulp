@@ -963,3 +963,10 @@ if(PULP_HAS_CLAP AND NOT IOS AND NOT ANDROID)
     catch_discover_tests(pulp-test-clap-identity
         PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_odr_violation=0:detect_leaks=0:halt_on_error=1")
 endif()
+
+if(PULP_HAS_SDL3)
+    add_executable(pulp-test-sdl-native-input test_sdl_native_input.cpp)
+    target_link_libraries(pulp-test-sdl-native-input PRIVATE pulp::view-core SDL3::SDL3-static)
+    add_test(NAME sdl-native-input COMMAND pulp-test-sdl-native-input)
+    set_tests_properties(sdl-native-input PROPERTIES LABELS "view;host;gate" TIMEOUT 30)
+endif()
