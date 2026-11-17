@@ -29,8 +29,8 @@ bool node_fields_match_type(const SubgraphNodeSpec& node) {
     const bool processor_fields = node.processor_factory || !node.processor_type_id.empty() ||
                                   !node.processor_descriptor_version.empty() ||
                                   node.processor_type_version != 0;
-    const bool custom_fields = !node.custom_type_id.empty() || node.custom_type_version != 0 ||
-                               !node.custom_state.empty();
+    const bool custom_fields =
+        !node.custom_type_id.empty() || node.custom_type_version != 0 || !node.custom_state.empty();
     switch (node.type) {
     case NodeType::Plugin:
         return !custom_fields && node.processor_factory && !node.processor_type_id.empty() &&

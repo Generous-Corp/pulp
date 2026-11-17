@@ -1122,10 +1122,9 @@ std::string base64(const std::vector<std::uint8_t>& bytes) {
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::string text;
     for (std::size_t i = 0; i < bytes.size(); i += 3) {
-        const std::uint32_t chunk =
-            (std::uint32_t(bytes[i]) << 16) |
-            (i + 1 < bytes.size() ? std::uint32_t(bytes[i + 1]) << 8 : 0u) |
-            (i + 2 < bytes.size() ? std::uint32_t(bytes[i + 2]) : 0u);
+        const std::uint32_t chunk = (std::uint32_t(bytes[i]) << 16) |
+                                    (i + 1 < bytes.size() ? std::uint32_t(bytes[i + 1]) << 8 : 0u) |
+                                    (i + 2 < bytes.size() ? std::uint32_t(bytes[i + 2]) : 0u);
         text += kTable[(chunk >> 18) & 63];
         text += kTable[(chunk >> 12) & 63];
         text += i + 1 < bytes.size() ? kTable[(chunk >> 6) & 63] : '=';
@@ -1291,7 +1290,8 @@ TEST_CASE("saved subgraph document round-trips a nested Custom member with its s
     CHECK(trim->type == NodeType::Custom);
     CHECK(trim->custom_type_id == "test.trim");
     CHECK(trim->custom_type_version == 1);
-    CHECK(trim->authored_id.str() == rack.graph.node(rack.instances[0].nodes.front())->authored_id.str());
+    CHECK(trim->authored_id.str() ==
+          rack.graph.node(rack.instances[0].nodes.front())->authored_id.str());
     CHECK(restored.custom_node_state(trim->id) == trim_state(kTrim));
     CHECK(instance.ports.at("input").kind == PortKind::Audio);
 
@@ -1412,16 +1412,15 @@ TEST_CASE("saved subgraph restore binds the exact Processor graph type") {
     // member even though the descriptor is the same.
     const auto restore = [&](const std::string& json, int version) {
         ProcessorRestoreRegistry registry;
-        REQUIRE(registry.register_type(
-                    {{"test.two-param", version},
-                     1,
-                     TwoParamProcessor{}.descriptor().default_input_channels(),
-                     TwoParamProcessor{}.descriptor().default_output_channels(),
-                     TwoParamProcessor{}.descriptor().node_capabilities,
-                     [] {
-                         return pulp::format::ProcessorNodeInstance::create(
-                             std::make_unique<TwoParamProcessor>());
-                     }}) == ProcessorRestoreCode::Restored);
+        REQUIRE(registry.register_type({{"test.two-param", version},
+                                        1,
+                                        TwoParamProcessor{}.descriptor().default_input_channels(),
+                                        TwoParamProcessor{}.descriptor().default_output_channels(),
+                                        TwoParamProcessor{}.descriptor().node_capabilities,
+                                        [] {
+                                            return pulp::format::ProcessorNodeInstance::create(
+                                                std::make_unique<TwoParamProcessor>());
+                                        }}) == ProcessorRestoreCode::Restored);
         GraphLoadOptions options;
         options.processor_registry = &registry;
         options.processor_allowlist = {{"test.two-param", version}};

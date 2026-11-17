@@ -307,10 +307,10 @@ int main(int argc, char** argv) {
         return detected("missing-custom-type",
                         refused_untouched(json, TrimTypes::None, "subgraph_instance_mismatch"));
     if (mode == "--planted-custom-version")
-        return detected("custom-version",
-                        refused_untouched(edited_after(json, kTrimType, "\"version\": 1",
-                                                       "\"version\": 2"),
-                                          TrimTypes::CurrentAndNext, "subgraph_instance_mismatch"));
+        return detected(
+            "custom-version",
+            refused_untouched(edited_after(json, kTrimType, "\"version\": 1", "\"version\": 2"),
+                              TrimTypes::CurrentAndNext, "subgraph_instance_mismatch"));
     if (mode == "--planted-custom-state")
         return detected("custom-state",
                         refused_untouched(edited_after(json, "\"nodes\"", "AAAAPw==", "AAAQQQ=="),

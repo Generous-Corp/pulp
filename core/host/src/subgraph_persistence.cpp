@@ -27,8 +27,8 @@ std::atomic<std::size_t> g_fail_rebind_countdown{0};
 // Every semantic field of a Connection, so an internal edge that changed role
 // (feedback, MIDI, sidechain, modulation, spectral, Control) or modulation
 // target is a different edge, not the same edge with other flags.
-using EdgeKey = std::tuple<NodeId, PortIndex, NodeId, PortIndex, bool, bool, bool, bool, bool,
-                           bool, bool, std::uint32_t, float, float, float, int>;
+using EdgeKey = std::tuple<NodeId, PortIndex, NodeId, PortIndex, bool, bool, bool, bool, bool, bool,
+                           bool, std::uint32_t, float, float, float, int>;
 
 EdgeKey edge_key(const Connection& edge, NodeId source, NodeId destination) {
     const bool modulation = edge.automation || edge.audio_rate_modulation;
