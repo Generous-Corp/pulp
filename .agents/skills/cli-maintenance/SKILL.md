@@ -502,6 +502,12 @@ real binaries in `test/test_graph_patch_tools.py`; argv forwarding and error
 mapping are in `MCP graph diff delegates to the matched CLI` in
 `test/test_mcp_server.cpp`.
 
+Every `GraphDocumentDiff` list must reach both output forms. A list the CLI
+does not print is a change `pulp graph diff` reports as equal-looking text
+while `equal` is false: when a field is added to the diff (for example
+`event_connections_added`, `_removed`, `_changed`), add it to the `--json`
+object and the text lines in `cmd_graph.cpp`, and to `docs/reference/cli.md`.
+
 ### `pulp graph render` must be driven by its input and report its level
 
 `render_graph()` in `tools/cli/cmd_graph.cpp` decodes `--input` through the
