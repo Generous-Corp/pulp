@@ -2727,8 +2727,14 @@ TEST_CASE("VST3 requests every process-context field its decoder consumes",
     // the decoder never reads stay unrequested so the host can skip them.
     CHECK((advertised & PCR::kNeedChord) == 0);
     CHECK((advertised & PCR::kNeedSamplesToNextClock) == 0);
-    CHECK((advertised & PCR::kNeedContinousTimeSamples) == 0);
     CHECK((advertised & PCR::kNeedBarPositionMusic) == 0);
+
+    // The continuous-time counter is not a TransportField: it feeds the
+    // neutral timing facts. The decoder consumed it here, so it must be asked
+    // for.
+    REQUIRE(decoded.timing.has_steady_sample);
+    REQUIRE(decoded.timing.steady_sample == 96000);
+    REQUIRE((advertised & PCR::kNeedContinousTimeSamples) == PCR::kNeedContinousTimeSamples);
 
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }
