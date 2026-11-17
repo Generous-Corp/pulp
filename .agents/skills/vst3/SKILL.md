@@ -716,14 +716,22 @@ passes, because nothing in the build can see it.
 `kProcessContextRequirements` (declared in `vst3_adapter.hpp`), covering exactly
 the bits the decoder reads: `kNeedTempo`, `kNeedTimeSignature`,
 `kNeedTransportState`, `kNeedProjectTimeMusic`, `kNeedCycleMusic`,
-`kNeedSystemTime`, `kNeedFrameRate`. It is assigned in the constructor rather
+`kNeedSystemTime`, `kNeedFrameRate`, `kNeedContinousTimeSamples`. It is assigned in the constructor rather
 than `initialize()` because the host latches the answer once before
 `setActive()` and, per the SDK, it "cannot be changed afterwards".
 
-Fields the decoder ignores stay unrequested on purpose — `kNeedChord`,
-`kNeedSamplesToNextClock`, `kNeedContinousTimeSamples`, and
-`kNeedBarPositionMusic` (the bar is derived) — because the point of the mask is
-to let the host skip work nobody consumes.
+Fields the decoder ignores stay unrequested on purpose (`kNeedChord`,
+`kNeedSamplesToNextClock`, and `kNeedBarPositionMusic`, since the bar is
+derived), because the point of the mask is to let the host skip work nobody
+consumes.
+
+`continousTimeSamples` is not a `TransportField`: it feeds
+`ctx.timing.steady_sample` (only while `kContTimeValid` is set), the monotonic
+counter the host event timeline needs to tell a seek from skipped blocks. That
+requirement test also checks it. `setActive(true)` and `setProcessing(true)`
+raise `ctx.timing.discontinuity` for the next observed block;
+`SingleComponentEffect::setProcessing` answers `kNotImplemented`, and the
+override keeps that answer. Coverage: `test_vst3_process_timing.cpp`.
 
 **If you teach `build_process_context` a new `kXxxValid` bit, add its
 `kNeed*` flag in the same change.** The test *VST3 requests every

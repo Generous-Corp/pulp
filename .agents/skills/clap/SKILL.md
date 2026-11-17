@@ -455,6 +455,18 @@ native-core processors forward it as `playhead_frames`, so leaving it at the
 default 0 makes CLAP-only playhead-sensitive processors think every block
 starts at the song origin.
 
+`ctx.timing` (`format::ProcessTiming`) carries the neutral timing facts the
+host event timeline projects: `clap_process_t::steady_time` when it is
+non-negative, the same seconds-derived transport sample (decoded once by
+`format::clap_sectime_to_samples()`, which divides by the 2^31 factor before
+the single rounding), and a discontinuity on the first block the Processor
+observes after `clap_activate()` / `clap_reset()`. The warm-up render inside
+`clap_activate()` must not consume that flag, so the pending flags clear only
+after `Processor::process()` ran. A bypassed, contended or layout-refused block
+sets `timing_block_skipped`, which marks the next block discontinuous only when
+the host sends no `steady_time` (with one, the projection measures the gap).
+Coverage: `test_clap_process_timing.cpp`.
+
 ### Render mode (`clap.render`)
 
 The adapter offers `CLAP_EXT_RENDER` from `clap_get_extension()`:

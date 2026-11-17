@@ -191,6 +191,18 @@ at `time:speed == 1`. Fill its `frame` with the block-start position, and
 convert event times through `lv2_event_block_time()`, which refuses a
 beat-time sequence instead of reading the `beats` double as frames.
 
+The adapter publishes the latched transport on `ctx.timing`
+(`format::lv2_process_timing()`): `time:speed == 1` is `PlaybackRate::Unit`,
+any other moving speed is `NonUnit`, which the projection never compares with
+the block length. There is never a steady counter. `activate()` marks the next
+`run()` as a discontinuity, because the latch survives deactivation.
+
+A `time:Position` event at frame `t > 0` describes the transport at `t`, not at
+the block start. `rewind_time_position_to_block_start()` moves it back by
+`t * speed` before latching; applying it unrewound shifts the playhead by `t`
+and reads as a seek. Event times outside `[0, sample_count)` are left alone
+rather than reinterpreted.
+
 ### The unit traps in `time:`
 
 - **`time:beat` counts beats of `time:beatUnit`, not quarter notes.** Pulp's

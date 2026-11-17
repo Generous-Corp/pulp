@@ -276,6 +276,15 @@ The AU v3 render block can't be driven in stock CI (needs a live host), so the
 bypass logic is covered by the shared `test_adapter_boundary_parity.cpp`
 `[bypass]` fixture the helper is exercised through.
 
+`ctx.timing` publishes the rounded `timestamp->mSampleTime` (when
+`kAudioTimeStampSampleTimeValid` is set) as the steady counter and the
+`transportStateBlock` position as the transport. `allocateRenderResources` and
+the `-reset` override raise `timing_discontinuity_pending` (an atomic: both run
+off the render thread). Every early return that skips the Processor (bypass,
+`failClosed`, state-restore contention) sets `timing_block_skipped`; keep that
+true for any new early return, or a host without a valid `mSampleTime` will
+see the skipped samples retimed onto a contiguous window.
+
 ### MPE routing
 
 When a `Processor` declares `supports_mpe`, AU v3 feeds per-note expression the
