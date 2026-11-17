@@ -4,6 +4,7 @@
 #include <pulp/format/lv2_adapter.hpp>
 #include <pulp/format/lv2_entry.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/host/host_event_timestamps.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
@@ -21,6 +22,7 @@
 
 #include <array>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <span>
 #include <string>
@@ -921,6 +923,7 @@ struct Lv2TimeCapture {
     int blocks = 0;
     int last_num_samples = 0;
     float tail_sample = -1.0f;
+    std::vector<ProcessContext> contexts;
 };
 
 Lv2TimeCapture g_lv2_time;
@@ -965,6 +968,7 @@ class Lv2TimeProbeProcessor final : public Processor {
         g_lv2_time.playing_valid = context.has_transport(TransportField::Playing);
         g_lv2_time.looping_valid = context.has_transport(TransportField::Looping);
         g_lv2_time.transport_jump = context.transport_jump;
+        g_lv2_time.contexts.push_back(context);
 
         for (size_t c = 0; c < audio_output.num_channels(); ++c) {
             auto* dst = audio_output.channel_ptr(c);
@@ -1369,6 +1373,421 @@ TEST_CASE("LV2 latched transport advances by the previous block's length",
     lv2_generic::run(handle.handle, 48);
     CHECK(g_lv2_time.position_samples == 1112);
     CHECK_FALSE(g_lv2_time.transport_jump);
+}
+
+TEST_CASE("LV2 run() publishes neutral timing facts and marks activation",
+          "[format][lv2][transport][process-timing]") {
+    Lv2FactoryGuard factory(&make_lv2_time_probe);
+    g_lv2_time = {};
+    Lv2FeatureBundle features;
+    Lv2HandleGuard handle{
+        lv2_generic::instantiate(&lv2_generic::g_lv2_descriptor, 48000.0, "", features.features)};
+    REQUIRE(handle.handle != nullptr);
+    auto* inst = static_cast<PulpLv2Instance*>(handle.handle);
+    const auto& urids = inst->time_urids;
+
+    std::array<float, 64> input{};
+    std::array<float, 64> output{};
+    LV2SequenceBuffer seq;
+    lv2_generic::connect_port(handle.handle, 0, input.data());
+    lv2_generic::connect_port(handle.handle, 1, output.data());
+    lv2_generic::connect_port(handle.handle, 2, seq.as_seq());
+
+    // No transport yet: nothing but the activation discontinuity.
+    lv2_generic::activate(handle.handle);
+    prepare_sequence(seq, inst->urid_atom_sequence);
+    lv2_generic::run(handle.handle, 32);
+    REQUIRE(g_lv2_time.contexts.back().timing == ProcessTiming{.discontinuity = true});
+
+    // Half-speed playback: time:frame moves half a block per block.
+    uint32_t capacity = prepare_sequence(seq, inst->urid_atom_sequence);
+    TimePositionEvent pos(urids.atom_object, urids.time_position, 0);
+    pos.add<float>(urids.time_speed, urids.atom_float, 0.5f);
+    pos.add<int64_t>(urids.time_frame, urids.atom_long, 1000);
+    REQUIRE(lv2_atom_sequence_append_event(seq.as_seq(), capacity, pos.header()));
+    lv2_generic::run(handle.handle, 32);
+    for (int i = 0; i < 3; ++i) {
+        prepare_sequence(seq, inst->urid_atom_sequence);
+        lv2_generic::run(handle.handle, 32);
+    }
+    REQUIRE(g_lv2_time.contexts.size() == 5);
+    const auto& half = g_lv2_time.contexts[1].timing;
+    REQUIRE_FALSE(half.discontinuity);
+    REQUIRE_FALSE(half.has_steady_sample);
+    REQUIRE(half.has_transport_sample);
+    REQUIRE(half.transport_sample == 1000);
+    REQUIRE(half.transport_moving);
+    REQUIRE(half.playback_rate == PlaybackRate::NonUnit);
+    REQUIRE(g_lv2_time.contexts[4].timing.transport_sample == 1048);
+
+    // The projection keeps every half-speed block in one epoch; without the
+    // rate fact each one would read as a seek.
+    auto boundaries = [&](bool keep_rate) {
+        host::HostBlockTimeline timeline;
+        host::HostBlockWindow window;
+        std::vector<host::HostBlockBoundary> out;
+        for (std::size_t i = 1; i < g_lv2_time.contexts.size(); ++i) {
+            auto ctx = g_lv2_time.contexts[i];
+            if (!keep_rate)
+                ctx.timing.playback_rate = PlaybackRate::Unknown;
+            REQUIRE(host::advance_from_context(timeline, ctx, window) ==
+                    host::HostEventResult::Accepted);
+            out.push_back(timeline.last_boundary());
+        }
+        return out;
+    };
+    const auto kept = boundaries(true);
+    REQUIRE(kept == std::vector<host::HostBlockBoundary>{
+                        host::HostBlockBoundary::First, host::HostBlockBoundary::Continuous,
+                        host::HostBlockBoundary::Continuous, host::HostBlockBoundary::Continuous});
+    const auto dropped = boundaries(false);
+    REQUIRE(dropped[1] == host::HostBlockBoundary::NewEpoch);
+
+    // Re-activation marks the next block again.
+    lv2_generic::activate(handle.handle);
+    prepare_sequence(seq, inst->urid_atom_sequence);
+    lv2_generic::run(handle.handle, 32);
+    REQUIRE(g_lv2_time.contexts.back().timing.discontinuity);
+}
+
+TEST_CASE("LV2 run() places a mid-block time:Position at the block start",
+          "[format][lv2][transport][process-timing]") {
+    Lv2FactoryGuard factory(&make_lv2_time_probe);
+    g_lv2_time = {};
+    Lv2FeatureBundle features;
+    Lv2HandleGuard handle{
+        lv2_generic::instantiate(&lv2_generic::g_lv2_descriptor, 48000.0, "", features.features)};
+    REQUIRE(handle.handle != nullptr);
+    auto* inst = static_cast<PulpLv2Instance*>(handle.handle);
+    const auto& urids = inst->time_urids;
+
+    std::array<float, 64> input{};
+    std::array<float, 64> output{};
+    LV2SequenceBuffer seq;
+    lv2_generic::connect_port(handle.handle, 0, input.data());
+    lv2_generic::connect_port(handle.handle, 1, output.data());
+    lv2_generic::connect_port(handle.handle, 2, seq.as_seq());
+
+    uint32_t capacity = prepare_sequence(seq, inst->urid_atom_sequence);
+    TimePositionEvent first(urids.atom_object, urids.time_position, 0);
+    first.add<float>(urids.time_speed, urids.atom_float, 1.0f);
+    first.add<int64_t>(urids.time_frame, urids.atom_long, 1968);
+    REQUIRE(lv2_atom_sequence_append_event(seq.as_seq(), capacity, first.header()));
+    lv2_generic::run(handle.handle, 32);
+
+    // The host reports the transport 16 frames into the next block, where it
+    // stands at 2016; the block itself starts at 2000.
+    capacity = prepare_sequence(seq, inst->urid_atom_sequence);
+    TimePositionEvent mid(urids.atom_object, urids.time_position, 16);
+    mid.add<float>(urids.time_speed, urids.atom_float, 1.0f);
+    mid.add<int64_t>(urids.time_frame, urids.atom_long, 2016);
+    REQUIRE(lv2_atom_sequence_append_event(seq.as_seq(), capacity, mid.header()));
+    lv2_generic::run(handle.handle, 32);
+
+    REQUIRE(g_lv2_time.contexts.size() == 2);
+    REQUIRE(g_lv2_time.position_samples == 2000);
+    REQUIRE(g_lv2_time.contexts[1].timing.transport_sample == 2000);
+    REQUIRE_FALSE(g_lv2_time.transport_jump);
+
+    host::HostBlockTimeline timeline;
+    host::HostBlockWindow window;
+    for (const auto& ctx : g_lv2_time.contexts)
+        REQUIRE(host::advance_from_context(timeline, ctx, window) ==
+                host::HostEventResult::Accepted);
+    REQUIRE(timeline.last_boundary() == host::HostBlockBoundary::Continuous);
+
+    // An event time outside the block is not a frame offset into it and is
+    // placed at the block start rather than reinterpreted.
+    for (const int64_t stray_frame : {int64_t{64}, int64_t{-3}}) {
+        lv2_generic::Lv2BlockTransport stray({}, 32, 48000.0);
+        lv2_adapter::Lv2TimePosition fresh{};
+        fresh.has_speed = true;
+        fresh.speed = 1.0f;
+        fresh.has_frame = true;
+        fresh.frame = 500;
+        stray.apply(fresh, stray_frame);
+        REQUIRE(stray.block_start().frame == 500);
+        REQUIRE(stray.next_block_start().frame == 532);
+    }
+}
+
+namespace {
+
+// One instantiated LV2 time probe plus a sequence port the test refills per
+// block with any number of time:Position events.
+struct Lv2TransportHarness {
+    Lv2FactoryGuard factory{&make_lv2_time_probe};
+    Lv2FeatureBundle features;
+    Lv2HandleGuard handle;
+    PulpLv2Instance* inst = nullptr;
+    std::array<float, 256> input{};
+    std::array<float, 256> output{};
+    LV2SequenceBuffer seq;
+
+    Lv2TransportHarness() {
+        g_lv2_time = {};
+        handle.handle = lv2_generic::instantiate(&lv2_generic::g_lv2_descriptor, 48000.0, "",
+                                                 features.features);
+        REQUIRE(handle.handle != nullptr);
+        inst = static_cast<PulpLv2Instance*>(handle.handle);
+        lv2_generic::connect_port(handle.handle, 0, input.data());
+        lv2_generic::connect_port(handle.handle, 1, output.data());
+        lv2_generic::connect_port(handle.handle, 2, seq.as_seq());
+    }
+
+    const lv2_adapter::Lv2TimeUrids& urids() const {
+        return inst->time_urids;
+    }
+
+    TimePositionEvent position(int64_t frame_offset) const {
+        return TimePositionEvent(urids().atom_object, urids().time_position, frame_offset);
+    }
+
+    const ProcessContext& run(uint32_t frames, std::vector<TimePositionEvent> events = {}) {
+        const uint32_t capacity = prepare_sequence(seq, inst->urid_atom_sequence);
+        for (auto& event : events)
+            REQUIRE(lv2_atom_sequence_append_event(seq.as_seq(), capacity, event.header()));
+        lv2_generic::run(handle.handle, frames);
+        REQUIRE_FALSE(g_lv2_time.contexts.empty());
+        return g_lv2_time.contexts.back();
+    }
+};
+
+} // namespace
+
+TEST_CASE("LV2 partial time:Positions keep the fields they omit",
+          "[format][lv2][transport][process-timing]") {
+    Lv2TransportHarness h;
+    const auto& u = h.urids();
+
+    // A full Position at the block start, then a tempo-only Position 16 frames
+    // in. The tempo-only event must not move the block-start frame or beat.
+    auto full = h.position(0);
+    full.add<float>(u.time_speed, u.atom_float, 1.0f);
+    full.add<int64_t>(u.time_frame, u.atom_long, 1000);
+    full.add<double>(u.time_beat, u.atom_double, 0.0);
+    full.add<float>(u.time_beats_per_minute, u.atom_float, 120.0f);
+    auto tempo = h.position(16);
+    tempo.add<float>(u.time_beats_per_minute, u.atom_float, 180.0f);
+    const auto first = h.run(32, {full, tempo});
+    REQUIRE(first.position_samples == 1000);
+    REQUIRE(first.timing.transport_sample == 1000);
+    REQUIRE(first.position_beats == 0.0);
+    REQUIRE(first.tempo_bpm == 180.0);
+    REQUIRE(first.timing.playback_rate == PlaybackRate::Unit);
+
+    // The next block starts one whole block later. Its beat moved 16 frames
+    // at 120 BPM and 16 at 180 BPM: the tempo applied from its own frame.
+    const auto second = h.run(32);
+    REQUIRE(second.position_samples == 1032);
+    REQUIRE(second.position_beats == Catch::Approx(16.0 / 48000.0 * 2.0 + 16.0 / 48000.0 * 3.0));
+    REQUIRE_FALSE(second.transport_jump);
+
+    // A block whose only Position omits the frame still advances the
+    // retained frame across the previous block.
+    auto tempo_only = h.position(0);
+    tempo_only.add<float>(u.time_beats_per_minute, u.atom_float, 180.0f);
+    const auto third = h.run(32, {tempo_only});
+    REQUIRE(third.position_samples == 1064);
+    REQUIRE(third.timing.transport_sample == 1064);
+    REQUIRE_FALSE(third.transport_jump);
+    REQUIRE(h.run(32).position_samples == 1096);
+}
+
+TEST_CASE("LV2 several time:Positions in one block resolve to the block start",
+          "[format][lv2][transport][process-timing]") {
+    Lv2TransportHarness h;
+    const auto& u = h.urids();
+
+    // A Position at frame 0, a tempo-only one at 8 and a seek at 20. The last
+    // position wins, moved back to the block's first frame along the path the
+    // transport took.
+    auto start = h.position(0);
+    start.add<float>(u.time_speed, u.atom_float, 1.0f);
+    start.add<int64_t>(u.time_frame, u.atom_long, 5000);
+    auto tempo = h.position(8);
+    tempo.add<float>(u.time_beats_per_minute, u.atom_float, 100.0f);
+    auto seek = h.position(20);
+    seek.add<int64_t>(u.time_frame, u.atom_long, 9020);
+    const auto block = h.run(32, {start, tempo, seek});
+    REQUIRE(block.timing.transport_sample == 9000);
+    REQUIRE(block.tempo_bpm == 100.0);
+    // The latch continues from the seek target, 12 frames after it.
+    REQUIRE(h.run(32).timing.transport_sample == 9032);
+}
+
+TEST_CASE("LV2 speed changes inside a block apply from their own frame",
+          "[format][lv2][transport][process-timing]") {
+    SECTION("a faster speed part way through") {
+        Lv2TransportHarness h;
+        const auto& u = h.urids();
+        auto start = h.position(0);
+        start.add<float>(u.time_speed, u.atom_float, 1.0f);
+        start.add<int64_t>(u.time_frame, u.atom_long, 1000);
+        auto faster = h.position(16);
+        faster.add<float>(u.time_speed, u.atom_float, 2.0f);
+        faster.add<int64_t>(u.time_frame, u.atom_long, 1016);
+        const auto block = h.run(32, {start, faster});
+        // The block began at 1000 at unit speed; the new speed is not
+        // applied before frame 16.
+        REQUIRE(block.timing.transport_sample == 1000);
+        REQUIRE(block.timing.transport_moving);
+        // It did not move at one rate, so its delta is not comparable with
+        // its length.
+        REQUIRE(block.timing.playback_rate == PlaybackRate::NonUnit);
+        // 16 frames at speed 2 after frame 1016.
+        const auto next = h.run(32);
+        REQUIRE(next.timing.transport_sample == 1048);
+        REQUIRE(next.timing.playback_rate == PlaybackRate::NonUnit);
+        REQUIRE(h.run(32).timing.transport_sample == 1112);
+    }
+    SECTION("a stop and a start inside blocks") {
+        Lv2TransportHarness h;
+        const auto& u = h.urids();
+        auto start = h.position(0);
+        start.add<float>(u.time_speed, u.atom_float, 1.0f);
+        start.add<int64_t>(u.time_frame, u.atom_long, 1000);
+        (void)h.run(32, {start});
+
+        // Stop 16 frames into the second block, where the transport stands at
+        // 1048. The block itself started rolling at 1032.
+        auto stop = h.position(16);
+        stop.add<float>(u.time_speed, u.atom_float, 0.0f);
+        stop.add<int64_t>(u.time_frame, u.atom_long, 1048);
+        const auto stopping = h.run(32, {stop});
+        REQUIRE(stopping.timing.transport_sample == 1032);
+        REQUIRE(stopping.timing.transport_moving);
+        REQUIRE(stopping.is_playing);
+
+        const auto stopped = h.run(32);
+        REQUIRE(stopped.timing.transport_sample == 1048);
+        REQUIRE_FALSE(stopped.timing.transport_moving);
+        REQUIRE_FALSE(stopped.is_playing);
+
+        // Start again 8 frames into a block: stopped at its first frame, then
+        // 24 frames of movement before the next block.
+        auto play = h.position(8);
+        play.add<float>(u.time_speed, u.atom_float, 1.0f);
+        const auto starting = h.run(32, {play});
+        REQUIRE(starting.timing.transport_sample == 1048);
+        REQUIRE_FALSE(starting.timing.transport_moving);
+        const auto rolling = h.run(32);
+        REQUIRE(rolling.timing.transport_sample == 1072);
+        REQUIRE(rolling.timing.playback_rate == PlaybackRate::Unit);
+    }
+    SECTION("a first Position mid block assumes its speed held from the start") {
+        Lv2TransportHarness h;
+        const auto& u = h.urids();
+        auto mid = h.position(16);
+        mid.add<float>(u.time_speed, u.atom_float, 0.5f);
+        mid.add<int64_t>(u.time_frame, u.atom_long, 1008);
+        REQUIRE(h.run(32, {mid}).timing.transport_sample == 1000);
+        REQUIRE(h.run(32).timing.transport_sample == 1016);
+    }
+}
+
+TEST_CASE("LV2 transport arithmetic refuses values it cannot represent",
+          "[format][lv2][transport][process-timing]") {
+    using lv2_adapter::Lv2TimePosition;
+    const auto moving = [](int64_t frame, float speed) {
+        Lv2TimePosition pos{};
+        pos.has_speed = true;
+        pos.speed = speed;
+        pos.has_frame = true;
+        pos.frame = frame;
+        return pos;
+    };
+    constexpr int64_t kMin = std::numeric_limits<int64_t>::min();
+    constexpr int64_t kMax = std::numeric_limits<int64_t>::max();
+
+    SECTION("rewinding a frame near the minimum underflows") {
+        lv2_generic::Lv2BlockTransport block({}, 32, 48000.0);
+        block.apply(moving(kMin, 1.0f), 16);
+        REQUIRE_FALSE(block.block_start().has_frame);
+        REQUIRE_FALSE(block.next_block_start().has_frame);
+        // Representable at the boundary: exactly the minimum after rewinding.
+        lv2_generic::Lv2BlockTransport edge({}, 32, 48000.0);
+        edge.apply(moving(kMin + 16, 1.0f), 16);
+        REQUIRE(edge.block_start().has_frame);
+        REQUIRE(edge.block_start().frame == kMin);
+    }
+    SECTION("advancing a frame near the maximum overflows") {
+        lv2_generic::Lv2BlockTransport block({}, 32, 48000.0);
+        block.apply(moving(kMax - 10, 1.0f), 0);
+        REQUIRE(block.block_start().frame == kMax - 10);
+        REQUIRE_FALSE(block.next_block_start().has_frame);
+        lv2_generic::Lv2BlockTransport edge({}, 32, 48000.0);
+        edge.apply(moving(kMax - 32, 1.0f), 0);
+        REQUIRE(edge.next_block_start().frame == kMax);
+    }
+    SECTION("a distance too large for int64_t is unavailable") {
+        lv2_generic::Lv2BlockTransport block({}, 32, 48000.0);
+        block.apply(moving(0, std::numeric_limits<float>::max()), 16);
+        REQUIRE_FALSE(block.block_start().has_frame);
+        REQUIRE(block.block_start().has_speed);
+    }
+    SECTION("the helpers bound every conversion") {
+        REQUIRE_FALSE(lv2_generic::lv2_checked_int64(std::numeric_limits<double>::quiet_NaN()));
+        REQUIRE_FALSE(lv2_generic::lv2_checked_int64(std::numeric_limits<double>::infinity()));
+        REQUIRE_FALSE(lv2_generic::lv2_checked_int64(9223372036854775808.0));
+        REQUIRE(lv2_generic::lv2_checked_int64(-9223372036854775808.0) == kMin);
+        REQUIRE(lv2_generic::lv2_checked_int64(-2.75) == -2);
+        REQUIRE_FALSE(lv2_generic::lv2_checked_sub(kMin, 1));
+        REQUIRE_FALSE(lv2_generic::lv2_checked_sub(kMax, -1));
+        REQUIRE_FALSE(lv2_generic::lv2_checked_add(kMax, 1));
+        REQUIRE_FALSE(lv2_generic::lv2_checked_add(kMin, -1));
+        REQUIRE(lv2_generic::lv2_checked_sub(0, kMax) == -kMax);
+    }
+    SECTION("a host value that is not finite or does not fit is not decoded") {
+        Lv2TransportHarness h;
+        const auto& u = h.urids();
+        auto bad = h.position(16);
+        bad.add<double>(u.time_speed, u.atom_double, std::numeric_limits<double>::quiet_NaN());
+        bad.add<double>(u.time_frame, u.atom_double, 1.0e30);
+        bad.add<double>(u.time_beat, u.atom_double, std::numeric_limits<double>::infinity());
+        bad.add<double>(u.time_beats_per_minute, u.atom_double, 1.0e300);
+        bad.add<double>(u.time_bar, u.atom_double, -std::numeric_limits<double>::infinity());
+        const auto block = h.run(32, {bad});
+        REQUIRE_FALSE(block.has_transport(TransportField::Playing));
+        REQUIRE_FALSE(block.has_transport(TransportField::SamplePosition));
+        REQUIRE_FALSE(block.has_transport(TransportField::BeatPosition));
+        REQUIRE_FALSE(block.has_transport(TransportField::Tempo));
+        REQUIRE_FALSE(block.timing.has_transport_sample);
+
+        // A huge but float-representable speed is decoded, and the frame it
+        // would rewind to is reported as unavailable.
+        auto fast = h.position(16);
+        fast.add<double>(u.time_speed, u.atom_double, 1.0e38);
+        fast.add<int64_t>(u.time_frame, u.atom_long, 0);
+        const auto fast_block = h.run(32, {fast});
+        REQUIRE(fast_block.timing.transport_moving == false);
+        REQUIRE_FALSE(fast_block.timing.has_transport_sample);
+    }
+}
+
+TEST_CASE("LV2 run() marks the block after a clamped tail discontinuous",
+          "[format][lv2][transport][process-timing][bufsize]") {
+    Lv2TransportHarness h;
+    const auto& u = h.urids();
+    h.inst->max_block_length = 16;
+
+    (void)h.run(16);
+    REQUIRE_FALSE(h.run(16).timing.discontinuity);
+
+    // A 32-frame host block renders only its first 16 frames.
+    auto pos = h.position(0);
+    pos.add<float>(u.time_speed, u.atom_float, 1.0f);
+    pos.add<int64_t>(u.time_frame, u.atom_long, 1000);
+    const auto clamped = h.run(32, {pos});
+    REQUIRE(clamped.num_samples == 16);
+    REQUIRE_FALSE(clamped.timing.discontinuity);
+
+    // The next block acknowledges the tail the Processor never saw, and the
+    // transport moved over the whole host block.
+    const auto after = h.run(16);
+    REQUIRE(after.timing.discontinuity);
+    REQUIRE(after.timing.transport_sample == 1032);
+    REQUIRE_FALSE(h.run(16).timing.discontinuity);
 }
 
 // ── Port-index cross-check + channel-ceiling admission ───────────────────

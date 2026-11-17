@@ -134,11 +134,10 @@ inline bool is_declared_note_expr_type(NoteExpressionTypeID id) {
 // advanced in place, so a first block after construction raises no spurious
 // change flags. A host that supplies no process context leaves every transport
 // field at its ProcessContext default; only the change-flag diff still runs.
-pulp::format::ProcessContext build_process_context(
-    const ProcessData& data,
-    const ProcessSetup& setup,
-    int32 num_samples,
-    pulp::format::detail::PlayheadSnapshot& playhead_prev) {
+pulp::format::ProcessContext
+build_process_context(const ProcessData& data, const ProcessSetup& setup, int32 num_samples,
+                      pulp::format::detail::PlayheadSnapshot& playhead_prev,
+                      bool timing_discontinuity, bool timing_block_skipped) {
     pulp::format::ProcessContext ctx;
     ctx.sample_rate = setup.sampleRate;
     ctx.num_samples = num_samples;
@@ -225,6 +224,17 @@ pulp::format::ProcessContext build_process_context(
     // Diff against the previous block to populate the transport change flags.
     pulp::format::detail::compute_playhead_changes(
         ctx, playhead_prev, pulp::format::detail::TransportDiffMode::FieldValidity);
+
+    // Neutral timing facts: continousTimeSamples (when kContTimeValid) is the
+    // steady clock and projectTimeSamples the transport. VST3 reports no
+    // playback rate. A skipped block is a discontinuity only when there is no
+    // steady clock to measure it.
+    const auto* pc = data.processContext;
+    ctx.timing = pulp::format::vst3_process_timing(pc != nullptr, pc ? pc->state : 0u,
+                                                   pc ? pc->projectTimeSamples : 0,
+                                                   pc ? pc->continousTimeSamples : 0, false, false);
+    ctx.timing.discontinuity =
+        timing_discontinuity || (timing_block_skipped && !ctx.timing.has_steady_sample);
     return ctx;
 }
 
@@ -1845,9 +1855,18 @@ void PulpVst3Processor::schedule_restart_poll_tick() {
         kRestartPollIntervalMs);
 }
 
+tresult PLUGIN_API PulpVst3Processor::setProcessing(TBool state) {
+    // A processing restart breaks the host timeline the Processor last saw.
+    if (state)
+        timing_discontinuity_pending_.store(true, std::memory_order_release);
+    return SingleComponentEffect::setProcessing(state);
+}
+
 tresult PLUGIN_API PulpVst3Processor::setActive(TBool state) {
     PULP_TRACE_SCOPE_NAMED("lifecycle", "vst3_set_active");
     StartupTraceScope trace{"setActive"};
+    if (state)
+        timing_discontinuity_pending_.store(true, std::memory_order_release);
     trace.mark(state ? "before_prepare" : "deactivate_entry");
     if (!state && processor_)
         param_events_monitor_.report(*processor_);
@@ -2839,6 +2858,8 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     const int32 original_num_samples = num_samples;
     num_samples = clamp_block_to_prepared_max(num_samples, max_block_size_);
     if (!process_validate_layout(data, host_f64, original_num_samples)) {
+        if (!warming_render_path_)
+            timing_block_skipped_ = true;
         return kResultOk;
     }
 
@@ -3046,6 +3067,8 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // before process(), leaving MIDI output and silenceFlags untouched.
     if (process_maybe_bypass(data, host_f64, in_channels, out_channels,
                              original_num_samples)) {
+        if (!warming_render_path_)
+            timing_block_skipped_ = true;
         return kResultOk;
     }
 
@@ -3053,8 +3076,9 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // onto midi_in_ and sort the combined controller+note stream.
     process_decode_input_events(data);
 
-    auto ctx = build_process_context(data, processSetup, num_samples,
-                                     playhead_prev_);
+    auto ctx = build_process_context(data, processSetup, num_samples, playhead_prev_,
+                                     timing_discontinuity_pending_.load(std::memory_order_acquire),
+                                     timing_block_skipped_);
 
     // Prove no state restore is installing underneath this block. setState may
     // arrive on the main thread while the host keeps calling process() —
@@ -3072,6 +3096,8 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         for (int32 b = 0; b < data.numOutputs; ++b) {
             data.outputs[b].silenceFlags = 0;
         }
+        if (!warming_render_path_)
+            timing_block_skipped_ = true;
         return kResultOk;
     }
 
@@ -3123,6 +3149,13 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         }
         if (!warming_render_path_ && panic_state_)
             panic_state_->observe_midi_out(midi_out_);
+    }
+    if (!warming_render_path_) {
+        // The Processor observed this block's timing facts. A host block
+        // longer than the prepared maximum rendered only its prefix; the tail
+        // is a skip the next block must acknowledge.
+        timing_discontinuity_pending_.store(false, std::memory_order_release);
+        timing_block_skipped_ = num_samples < original_num_samples;
     }
     // VST3 puts the obligation to declare output silence on the plugin, and a
     // host is free to propagate its input silenceFlags into the output buffers
