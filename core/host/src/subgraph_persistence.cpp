@@ -2,6 +2,7 @@
 #include <pulp/host/subgraph_persistence.hpp>
 
 #include "graph_load_refusal.hpp"
+#include "spectral_graph_persistence.hpp"
 
 #include <choc/text/choc_JSON.h>
 
@@ -252,6 +253,10 @@ std::string to_saved_subgraph_document(
             return {};
     }
 
+    // Spectral and subgraph families do not mix: the spectral document has a
+    // closed member set with no subgraph records.
+    if (!subgraphs.empty() && spectral_persistence::contains_spectral_nodes(graph))
+        return {};
     const auto document = GraphSerializer::to_saved_document(graph, editor_layout);
     if (document.empty())
         return {};

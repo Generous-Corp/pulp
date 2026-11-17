@@ -2,6 +2,8 @@
 #include <pulp/host/signal_graph_runtime.hpp>
 #include <pulp/runtime/crypto.hpp>
 
+#include "spectral_graph_persistence.hpp"
+
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
@@ -478,6 +480,11 @@ GraphEditHistory::GraphEditHistory(std::size_t capacity)
 GraphEditCheckpoint GraphEditHistory::checkpoint(const SignalGraph& graph,
                                                  const GraphEditorLayout& editor_layout) {
     GraphEditCheckpoint result;
+    // A spectral graph has a saved document, but its history needs a bound on
+    // the retained bytes its embedded assets add; until the history carries
+    // that bound, a spectral graph is not captured.
+    if (spectral_persistence::contains_spectral_nodes(graph))
+        return result;
     result.document = GraphSerializer::to_saved_document(graph, editor_layout);
     if (result.document.empty())
         return result;
