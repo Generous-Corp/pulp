@@ -98,8 +98,14 @@ through the public binding with a test voice whose output names its note:
 - No allocation across reset, drain, refuse and cut blocks
   (`RtAllocationProbe`, with its self-check).
 
-`tools/scripts/confirm_failure.sh` on the committed tree: see the commit
-message for the planted breaks and their verdicts.
+`tools/scripts/confirm_failure.sh` on the committed tree, each against
+`pulp-test-voice-bank-retirement`: CONFIRMED for five planted breaks (the
+retired-generation token refusal removed, CC121 no longer skipping retired
+voices, render no longer splitting at drain deadlines, the stolen-drain
+observer disabled, the capacity refusal disabled). A sixth break, removing a
+note-on drain observer, was NOT CONFIRMED because the per-slice observer and
+`retire_slot()`'s generation check already cover a steal; the redundant
+observer was removed rather than kept untested.
 
 Existing suites still pass: `pulp-test-voice-bank-binding` and
 `pulp-test-host-timeline-binding`.
