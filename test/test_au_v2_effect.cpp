@@ -2350,8 +2350,7 @@ TEST_CASE("AU v2 instrument state round trip keeps the program name without re-r
     CFRelease(current.presetName);
 }
 
-TEST_CASE("AU v2 effect publishes a code-declared program",
-          "[au][au-v2][presets][programs]") {
+TEST_CASE("AU v2 effect publishes a code-declared program", "[au][au-v2][presets][programs]") {
     ScopedPresetFactory factory;
     pulp::format::au::PulpAUEffect effect(nullptr);
     std::vector<std::size_t> selected;

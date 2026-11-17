@@ -99,8 +99,8 @@ void FactoryPresetTable::rebuild() {
     clear_entries();
 
     auto append = [this](const std::string& name) {
-        CFStringRef cf = CFStringCreateWithCString(kCFAllocatorDefault, name.c_str(),
-                                                   kCFStringEncodingUTF8);
+        CFStringRef cf =
+            CFStringCreateWithCString(kCFAllocatorDefault, name.c_str(), kCFStringEncodingUTF8);
         if (cf == nullptr)
             return false;
         AUPreset preset{};
