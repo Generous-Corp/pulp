@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "20261116-sdl-native-input-backport",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-16T21:50:00Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/view/src/sdl_window_host.cpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "framework-backport: bring SDL keyboard, text, modifier, pointer lifecycle and hover cursor delivery from immutable Vellum commit 4d9879f9d496578325255d66b856fdbacd05f3c2. Destination SDL event-loop regression tests cover dropdown navigation, Shift drag and focus-loss cancellation."
+}
