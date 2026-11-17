@@ -53,7 +53,7 @@
 
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
-#include <X11/Xresource.h> // Xrm* — Xft.dpi lookup for HiDPI scale (L9)
+#include <X11/Xresource.h> // Xrm*: Xft.dpi lookup for HiDPI scale (L9)
 #include <X11/Xutil.h>
 #include <X11/cursorfont.h>
 #include <X11/keysym.h>
