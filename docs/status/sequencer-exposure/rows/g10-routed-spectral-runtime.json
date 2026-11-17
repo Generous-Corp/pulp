@@ -64,7 +64,16 @@
       "needles": [
         "Finite stream rule matches the profile-one asset constants",
         "Finite stream frame count equals the analysis grid at every geometry",
-        "A hop that does not divide the FFT breaks the closed-form count"
+        "A hop that does not divide the FFT breaks the dividing-hop closed form",
+        "Finite stream drain is the least the synthesis engine needs to finish the stream",
+        "Both finite stream policies keep the dividing-hop results bit for bit"
+      ]
+    },
+    {
+      "path": "test/test_spectral_asset_source.cpp",
+      "needles": [
+        "Asset source reproduces the stored stream at hops that do not divide the FFT",
+        "Asset source end is exact at short lengths and hop and window boundaries"
       ]
     },
     {
