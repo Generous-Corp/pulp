@@ -10,8 +10,9 @@
 // forward on the next block, so the position is rounded to the nearest sample.
 // The same rounding places AUv3 render events within the block and stamps
 // AUv3 MIDI output, and bounds CLAP's seconds-to-samples conversion.
-// `au_event_raw_offset()` is the event placement both the legacy MIDI path
-// and the host event timeline share; each applies its own range policy.
+// `au_event_raw_offset()` is the event placement the AUv3 MIDI admission,
+// the parameter path and the host event timeline share; each applies its own
+// range policy.
 //
 // Header-only and SDK-free so it is unit-testable without the AU SDK.
 
@@ -49,8 +50,9 @@ inline constexpr std::int64_t kAuImmediateWindow = 4096;
 /// cannot be placed.
 ///
 /// The result is not range-checked. Each caller applies its own policy: the
-/// legacy MIDI path clamps (`au_event_block_offset`), while the host timeline
-/// refuses anything outside the block (`pulp::host::au_event_block_time`).
+/// parameter path clamps (`au_event_block_offset`), while MIDI admission
+/// (`pulp::format::admit_au_event_time`) and the host timeline
+/// (`pulp::host::au_event_block_time`) refuse anything outside the block.
 inline std::optional<std::int64_t>
 au_event_raw_offset(std::int64_t event_sample_time, std::int64_t immediate,
                     std::optional<double> block_sample_time) noexcept {
@@ -69,7 +71,7 @@ au_event_raw_offset(std::int64_t event_sample_time, std::int64_t immediate,
 /// An AUv3 render event's offset into the block, clamped to
 /// [0, frame_count - 1]. The offset is `au_event_raw_offset()`; when that
 /// cannot place the event, the event time itself is taken as the offset. This
-/// is the legacy MIDI delivery policy: an out-of-block time is moved to the
+/// is the parameter-event delivery policy: an out-of-block time is moved to the
 /// nearest block edge rather than dropped.
 inline std::int32_t au_event_block_offset(std::int64_t event_sample_time, std::int64_t immediate,
                                           std::optional<double> block_sample_time,

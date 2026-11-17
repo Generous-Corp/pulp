@@ -411,3 +411,84 @@ TEST_CASE("records built from adapter offsets refuse invalid offsets and stale w
             HostEventResult::Accepted);
     REQUIRE(ingress.publish(record) == HostEventResult::StaleEpoch);
 }
+
+TEST_CASE("event times are classified against the rendered frames",
+          "[process-timing][format][offsets]") {
+    using format::classify_event_time;
+    using format::EventTimePlacement;
+    constexpr std::int64_t kFrames = 64;
+    STATIC_REQUIRE(classify_event_time(0, kFrames) == EventTimePlacement::InBlock);
+    STATIC_REQUIRE(classify_event_time(kFrames - 1, kFrames) == EventTimePlacement::InBlock);
+    STATIC_REQUIRE(classify_event_time(kFrames, kFrames) == EventTimePlacement::AtOrPastEnd);
+    STATIC_REQUIRE(classify_event_time(-1, kFrames) == EventTimePlacement::BeforeBlock);
+    STATIC_REQUIRE(classify_event_time(std::numeric_limits<std::int64_t>::max(), kFrames) ==
+                   EventTimePlacement::AtOrPastEnd);
+    STATIC_REQUIRE(classify_event_time(std::numeric_limits<std::int64_t>::min(), kFrames) ==
+                   EventTimePlacement::BeforeBlock);
+    // A block of zero frames holds no event.
+    STATIC_REQUIRE(classify_event_time(0, 0) == EventTimePlacement::AtOrPastEnd);
+    // A time in another unit is never read as frames, even when its bytes
+    // would fall inside the block.
+    STATIC_REQUIRE(classify_event_time(false, 5, kFrames) == EventTimePlacement::WrongUnit);
+    STATIC_REQUIRE(classify_event_time(true, 5, kFrames) == EventTimePlacement::InBlock);
+}
+
+TEST_CASE("event-time admission delivers in-block offsets unchanged and counts the rest",
+          "[process-timing][format][offsets]") {
+    format::EventTimeAdmission admission{64};
+    REQUIRE(admission.admit(0) == std::optional<std::int32_t>{0});
+    REQUIRE(admission.admit(63) == std::optional<std::int32_t>{63});
+    REQUIRE(admission.refused == 0);
+    REQUIRE_FALSE(admission.admit(64));
+    REQUIRE_FALSE(admission.admit(-1));
+    REQUIRE_FALSE(admission.admit(std::int64_t{1} << 40));
+    REQUIRE_FALSE(admission.admit(false, 3));
+    REQUIRE(admission.refused == 4);
+
+    // An offset that is in the block but would not fit the delivered int32 is
+    // refused rather than truncated.
+    format::EventTimeAdmission huge{std::numeric_limits<std::int64_t>::max()};
+    REQUIRE(huge.admit(std::numeric_limits<std::int32_t>::max()) ==
+            std::optional<std::int32_t>{std::numeric_limits<std::int32_t>::max()});
+    REQUIRE_FALSE(huge.admit(std::int64_t{std::numeric_limits<std::int32_t>::max()} + 1));
+    REQUIRE(huge.refused == 1);
+
+    // The count saturates instead of wrapping to zero.
+    format::EventTimeAdmission full{8, std::numeric_limits<std::uint32_t>::max()};
+    REQUIRE_FALSE(full.admit(8));
+    REQUIRE(full.refused == std::numeric_limits<std::uint32_t>::max());
+}
+
+TEST_CASE("AU render event times are placed before they are admitted",
+          "[process-timing][au][offsets]") {
+    constexpr std::int64_t kImmediate = host::kAuEventSampleTimeImmediate;
+    constexpr std::uint32_t kFrames = 512;
+    format::EventTimeAdmission admission{kFrames};
+    // Immediate window: already an offset, with or without a block time.
+    REQUIRE(format::admit_au_event_time(admission, kImmediate + 7, kImmediate, std::nullopt) ==
+            std::optional<std::int32_t>{7});
+    // Absolute: placed against the rounded block time (REAPER-style 13823.9999).
+    REQUIRE(format::admit_au_event_time(admission, 13829, kImmediate, 13823.9999) ==
+            std::optional<std::int32_t>{5});
+    REQUIRE(format::admit_au_event_time(admission, 13824 + kFrames - 1, kImmediate, 13824.0) ==
+            std::optional<std::int32_t>{kFrames - 1});
+    REQUIRE(admission.refused == 0);
+    // Planted negatives: at the end, before the block, and absolute with no
+    // block time to place it against. None is clamped to an edge.
+    REQUIRE_FALSE(format::admit_au_event_time(admission, 13824 + kFrames, kImmediate, 13824.0));
+    REQUIRE_FALSE(format::admit_au_event_time(admission, 13800, kImmediate, 13824.0));
+    REQUIRE_FALSE(format::admit_au_event_time(admission, 9, kImmediate, std::nullopt));
+    REQUIRE(admission.refused == 3);
+}
+
+TEST_CASE("an LV2 sequence is read as frames only in frame units",
+          "[process-timing][lv2][offsets]") {
+    constexpr std::uint32_t kFrameTime = 17;
+    constexpr std::uint32_t kBeatTime = 18;
+    STATIC_REQUIRE(format::lv2_sequence_unit_is_frames(0, kFrameTime));
+    STATIC_REQUIRE(format::lv2_sequence_unit_is_frames(kFrameTime, kFrameTime));
+    STATIC_REQUIRE_FALSE(format::lv2_sequence_unit_is_frames(kBeatTime, kFrameTime));
+    // An unmapped frameTime URID matches only the unit 0.
+    STATIC_REQUIRE(format::lv2_sequence_unit_is_frames(0, 0));
+    STATIC_REQUIRE_FALSE(format::lv2_sequence_unit_is_frames(kBeatTime, 0));
+}

@@ -384,15 +384,33 @@ TEST_CASE("CLAP event offsets outside the block are refused, never clamped",
           "[process-timing][clap][offsets]") {
     ClapHost host;
     host.run(0, 64, HostTransport{0, true}, {0, 63, 64, 0xFFFFFFF0u});
-    REQUIRE(host.observed.size() == 1);
-    // The adapter forwards host times as delivered; the projection decides.
-    REQUIRE(host.observed[0].offsets.size() == 4);
+    // Positive control: every time inside the block, nothing refused.
+    host.run(64, 64, HostTransport{64, true}, {0, 32, 63});
+    REQUIRE(host.observed.size() == 2);
+    // The adapter delivers only in-block times, unchanged, and counts the two
+    // it refused: one at the end, one far past it (which a cast to int32
+    // would have turned negative). Nothing is moved to a block edge.
+    REQUIRE(host.observed[0].offsets == std::vector<std::int32_t>{0, 63});
+    REQUIRE(host.observed[0].ctx.timing.refused_events == 2);
+    REQUIRE(host.observed[1].offsets == std::vector<std::int32_t>{0, 32, 63});
+    REQUIRE(host.observed[1].ctx.timing.refused_events == 0);
     Binding binding;
     const auto trace = binding.feed(host.observed[0]);
     REQUIRE(trace.results ==
-            std::vector<HostEventResult>{HostEventResult::Accepted, HostEventResult::Accepted,
-                                         HostEventResult::OutOfRange, HostEventResult::OutOfRange});
+            std::vector<HostEventResult>{HostEventResult::Accepted, HostEventResult::Accepted});
     REQUIRE(trace.projected == std::vector<std::int64_t>{0, 63});
+}
+
+TEST_CASE("CLAP events in the unrendered tail of an oversized block are refused",
+          "[process-timing][clap][offsets]") {
+    ClapHost host;
+    host.run(0, 2 * kMaxFrames, HostTransport{0, true},
+             {kMaxFrames - 1, kMaxFrames, 2 * kMaxFrames - 1});
+    REQUIRE(host.observed.size() == 1);
+    REQUIRE(host.observed[0].ctx.num_samples == static_cast<int>(kMaxFrames));
+    REQUIRE(host.observed[0].offsets ==
+            std::vector<std::int32_t>{static_cast<std::int32_t>(kMaxFrames - 1)});
+    REQUIRE(host.observed[0].ctx.timing.refused_events == 2);
 }
 
 TEST_CASE("CLAP records timed against a retired epoch are refused",

@@ -258,6 +258,7 @@ struct PulpLv2Instance {
     LV2_URID urid_midi_event = 0;      // LV2_MIDI__MidiEvent
     LV2_URID urid_atom_sequence = 0;   // LV2_ATOM__Sequence
     LV2_URID urid_atom_chunk = 0;      // LV2_ATOM__Chunk
+    LV2_URID urid_atom_frame_time = 0; // LV2_ATOM__frameTime
     LV2_URID urid_state_blob = 0;      // kStateBlobUri
     Lv2TimeUrids time_urids{};
 
