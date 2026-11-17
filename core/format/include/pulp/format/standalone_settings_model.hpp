@@ -33,8 +33,7 @@ std::vector<double> constrain_sample_rates(std::vector<double> rates,
                                            const std::vector<double>& allowed);
 
 /// The same for buffer sizes.
-std::vector<int> constrain_buffer_sizes(std::vector<int> buffers,
-                                        const std::vector<int>& allowed);
+std::vector<int> constrain_buffer_sizes(std::vector<int> buffers, const std::vector<int>& allowed);
 
 /// Latency, in milliseconds, of one buffer of `buffer_size` frames at
 /// `sample_rate`. Zero when either is not positive.
@@ -63,27 +62,51 @@ class StandaloneSettingsModel {
 
     /// Item 0 is "System Default (follow)", an empty `audio_device_id`; real
     /// output devices follow.
-    const std::vector<std::string>& output_items() const { return output_items_; }
+    const std::vector<std::string>& output_items() const {
+        return output_items_;
+    }
     /// With `supports_audio_input`: "(None)" then the input devices. Without:
     /// a single "not used" row, and `input_visible()` is false.
-    const std::vector<std::string>& input_items() const { return input_items_; }
+    const std::vector<std::string>& input_items() const {
+        return input_items_;
+    }
     /// Hidden when the processor has no audio input.
-    bool input_visible() const { return config_.supports_audio_input; }
-    const std::vector<std::string>& sample_rate_items() const { return rate_items_; }
+    bool input_visible() const {
+        return config_.supports_audio_input;
+    }
+    const std::vector<std::string>& sample_rate_items() const {
+        return rate_items_;
+    }
     /// Each item carries the latency at the selected sample rate.
     std::vector<std::string> buffer_size_items() const;
-    const std::vector<std::string>& midi_items() const { return midi_items_; }
+    const std::vector<std::string>& midi_items() const {
+        return midi_items_;
+    }
 
-    int output_selected() const { return output_selected_; }
-    int input_selected() const { return input_selected_; }
-    int sample_rate_selected() const { return rate_selected_; }
-    int buffer_size_selected() const { return buffer_selected_; }
-    int midi_selected() const { return midi_selected_; }
+    int output_selected() const {
+        return output_selected_;
+    }
+    int input_selected() const {
+        return input_selected_;
+    }
+    int sample_rate_selected() const {
+        return rate_selected_;
+    }
+    int buffer_size_selected() const {
+        return buffer_selected_;
+    }
+    int midi_selected() const {
+        return midi_selected_;
+    }
 
     /// The sample rates / buffer sizes the lists offer, after the device's own
     /// support and `StandaloneConfig::allowed_*` are applied.
-    const std::vector<double>& sample_rates() const { return rates_; }
-    const std::vector<int>& buffer_sizes() const { return buffers_; }
+    const std::vector<double>& sample_rates() const {
+        return rates_;
+    }
+    const std::vector<int>& buffer_sizes() const {
+        return buffers_;
+    }
 
     // -- Selection ------------------------------------------------------------
 

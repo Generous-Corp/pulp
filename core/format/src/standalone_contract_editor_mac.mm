@@ -197,10 +197,9 @@ bool install_app_menu(PulpStandaloneContractMenuTarget* target, NSString* title)
     settings.target = target;
     [appMenu addItem:settings];
     [appMenu addItem:[NSMenuItem separatorItem]];
-    NSMenuItem* quit = [[[NSMenuItem alloc]
-        initWithTitle:[@"Quit " stringByAppendingString:title]
-               action:@selector(closeEditor:)
-        keyEquivalent:@"q"] autorelease];
+    NSMenuItem* quit = [[[NSMenuItem alloc] initWithTitle:[@"Quit " stringByAppendingString:title]
+                                                   action:@selector(closeEditor:)
+                                            keyEquivalent:@"q"] autorelease];
     quit.target = target;
     [appMenu addItem:quit];
     appItem.submenu = appMenu;

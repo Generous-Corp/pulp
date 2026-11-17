@@ -66,7 +66,8 @@ void fill_popup(NSPopUpButton* popup, const std::vector<std::string>& items, int
 }
 
 - (NSPopUpButton*)popupWithAction:(SEL)action {
-    NSPopUpButton* popup = [[[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO] autorelease];
+    NSPopUpButton* popup = [[[NSPopUpButton alloc] initWithFrame:NSZeroRect
+                                                       pullsDown:NO] autorelease];
     popup.target = self;
     popup.action = action;
     [popup.widthAnchor constraintEqualToConstant:280].active = YES;
@@ -90,7 +91,9 @@ void fill_popup(NSPopUpButton* popup, const std::vector<std::string>& items, int
         inputRow = [self rowWithTitle:@"Input Device" control:inputPopup];
         NSButton* apply = [NSButton buttonWithTitle:@"Apply" target:self action:@selector(apply:)];
         apply.keyEquivalent = @"\r";
-        NSButton* close = [NSButton buttonWithTitle:@"Close" target:self action:@selector(closeWindow:)];
+        NSButton* close = [NSButton buttonWithTitle:@"Close"
+                                             target:self
+                                             action:@selector(closeWindow:)];
         NSStackView* buttons = [NSStackView stackViewWithViews:@[ statusLabel, close, apply ]];
         buttons.orientation = NSUserInterfaceLayoutOrientationHorizontal;
         buttons.spacing = 10;
@@ -142,7 +145,8 @@ void fill_popup(NSPopUpButton* popup, const std::vector<std::string>& items, int
     // The text is "Latency: x ms"; the row's own label already names it.
     std::string text = model->latency_text();
     const std::string prefix = "Latency: ";
-    if (text.rfind(prefix, 0) == 0) text.erase(0, prefix.size());
+    if (text.rfind(prefix, 0) == 0)
+        text.erase(0, prefix.size());
     latencyLabel.stringValue = [NSString stringWithUTF8String:text.c_str()];
 }
 
@@ -198,10 +202,10 @@ void fill_popup(NSPopUpButton* popup, const std::vector<std::string>& items, int
     // Release after the close finishes unwinding.
     PulpSettingsWindowController* self_ = self;
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (g_controller == self_) {
-            g_controller = nil;
-            [self_ release];
-        }
+      if (g_controller == self_) {
+          g_controller = nil;
+          [self_ release];
+      }
     });
 }
 @end
@@ -240,7 +244,9 @@ void close_standalone_settings_window() {
 #include <pulp/runtime/log.hpp>
 
 namespace pulp::format::detail {
-bool standalone_settings_window_supported() { return false; }
+bool standalone_settings_window_supported() {
+    return false;
+}
 bool open_standalone_settings_window(StandaloneApp&) {
     runtime::log_warn("Standalone: this platform has no native Audio/MIDI settings window yet");
     return false;

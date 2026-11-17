@@ -926,8 +926,7 @@ bool StandaloneApp::run_contract_editor(EditorFactory& factory) {
         if (config_.test_on_editor_frame)
             config_.test_on_editor_frame();
     };
-    const bool ran =
-        detail::run_standalone_contract_editor(*processor_, store_, factory, options);
+    const bool ran = detail::run_standalone_contract_editor(*processor_, store_, factory, options);
     detail::close_standalone_settings_window();
     return ran;
 }

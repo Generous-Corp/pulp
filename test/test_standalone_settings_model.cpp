@@ -21,19 +21,35 @@ namespace {
 class FakeAudio final : public audio::AudioSystem {
   public:
     std::vector<audio::DeviceInfo> devices;
-    std::vector<audio::DeviceInfo> enumerate_devices() override { return devices; }
-    std::unique_ptr<audio::AudioDevice> create_device(const std::string&) override { return {}; }
-    audio::DeviceInfo default_output_device() override { return {}; }
-    audio::DeviceInfo default_input_device() override { return {}; }
+    std::vector<audio::DeviceInfo> enumerate_devices() override {
+        return devices;
+    }
+    std::unique_ptr<audio::AudioDevice> create_device(const std::string&) override {
+        return {};
+    }
+    audio::DeviceInfo default_output_device() override {
+        return {};
+    }
+    audio::DeviceInfo default_input_device() override {
+        return {};
+    }
 };
 
 class FakeMidi final : public midi::MidiSystem {
   public:
     std::vector<midi::MidiPortInfo> ports;
-    std::vector<midi::MidiPortInfo> enumerate_inputs() override { return ports; }
-    std::vector<midi::MidiPortInfo> enumerate_outputs() override { return {}; }
-    std::unique_ptr<midi::MidiInput> create_input() override { return {}; }
-    std::unique_ptr<midi::MidiOutput> create_output() override { return {}; }
+    std::vector<midi::MidiPortInfo> enumerate_inputs() override {
+        return ports;
+    }
+    std::vector<midi::MidiPortInfo> enumerate_outputs() override {
+        return {};
+    }
+    std::unique_ptr<midi::MidiInput> create_input() override {
+        return {};
+    }
+    std::unique_ptr<midi::MidiOutput> create_output() override {
+        return {};
+    }
 };
 
 audio::DeviceInfo device(std::string id, std::string name, int in, int out, bool def_out = false,
@@ -102,8 +118,7 @@ TEST_CASE("the model lists the enumerated devices and follows the default first"
     const auto& in = rig.model.input_items();
     REQUIRE(in.size() == 2);
     REQUIRE(in[1] == "USB Interface (Default)");
-    REQUIRE(rig.model.midi_items() ==
-            std::vector<std::string>{"None", "Keys", "Pads"});
+    REQUIRE(rig.model.midi_items() == std::vector<std::string>{"None", "Keys", "Pads"});
 }
 
 TEST_CASE("the input row is hidden when the processor has no audio input",
@@ -130,7 +145,7 @@ TEST_CASE("allowed sample rates and buffer sizes restrict what the lists offer",
     StandaloneConfig cfg;
     cfg.allowed_sample_rates = {48000, 96000};
     cfg.allowed_buffer_sizes = {128, 256};
-    cfg.sample_rate = 44100;  // outside the list: resolves to the first offered
+    cfg.sample_rate = 44100; // outside the list: resolves to the first offered
     cfg.buffer_size = 256;
     rig.load(cfg);
     REQUIRE(rig.model.sample_rates() == std::vector<double>{48000, 96000});
@@ -154,12 +169,12 @@ TEST_CASE("a device change carries the chosen rate and buffer when it still offe
     cfg.sample_rate = 48000;
     cfg.buffer_size = 128;
     rig.load(cfg);
-    rig.model.select_sample_rate(2);   // 88200 in the generic follow-default list
-    rig.model.select_output(2);        // USB: 44100/48000/96000
+    rig.model.select_sample_rate(2); // 88200 in the generic follow-default list
+    rig.model.select_output(2);      // USB: 44100/48000/96000
     // 88200 is not offered there: falls back to the first rate.
     REQUIRE(rig.model.config().sample_rate == 44100);
-    rig.model.select_sample_rate(2);   // 96000
-    rig.model.select_output(1);        // Speakers also offers 96000
+    rig.model.select_sample_rate(2); // 96000
+    rig.model.select_output(1);      // Speakers also offers 96000
     REQUIRE(rig.model.config().sample_rate == 96000);
 }
 
@@ -175,7 +190,7 @@ TEST_CASE("buffer items and the latency text track the selected rate",
     REQUIRE(rig.model.latency_ms() < 5.4);
     REQUIRE(rig.model.latency_text() == "Latency: 5.3 ms");
     REQUIRE(rig.model.buffer_size_items()[2] == "256 samples (5.3 ms)");
-    rig.model.select_sample_rate(0);  // 44100 Hz
+    rig.model.select_sample_rate(0); // 44100 Hz
     REQUIRE(rig.model.buffer_size_items()[2] == "256 samples (5.8 ms)");
     REQUIRE(format::buffer_latency_ms(0.0, 256) == 0.0);
 }

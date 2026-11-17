@@ -374,20 +374,24 @@ void SettingsPanel::sync_selectors() {
 }
 
 void SettingsPanel::sync_buffer_items() {
-    if (!buffer_size_combo_) return;
+    if (!buffer_size_combo_)
+        return;
     buffer_size_combo_->set_items(model_.buffer_size_items());
     if (model_.buffer_size_selected() >= 0)
         buffer_size_combo_->set_selected_silent(model_.buffer_size_selected());
 }
 
 void SettingsPanel::sync_midi_list() {
-    if (!midi_list_) return;
+    if (!midi_list_)
+        return;
     midi_list_->set_items(model_.midi_items());
-    if (model_.midi_selected() >= 0) midi_list_->set_selected(model_.midi_selected());
+    if (model_.midi_selected() >= 0)
+        midi_list_->set_selected(model_.midi_selected());
 }
 
 void SettingsPanel::update_latency_label() {
-    if (latency_label_) latency_label_->set_text(model_.latency_text());
+    if (latency_label_)
+        latency_label_->set_text(model_.latency_text());
 }
 
 void SettingsPanel::apply_config() {
