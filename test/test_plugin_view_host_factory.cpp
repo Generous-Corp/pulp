@@ -691,6 +691,8 @@ TEST_CASE("X11 popup keyboard navigation restores DAW focus and forwards transpo
                 unsetenv("PULP_TEST_X11_HOST_CPU_ONLY");
         }
     } cpu_only;
+    for (const float scale : {1.0f, 2.0f}) {
+    CAPTURE(scale);
     Display* daw = open_test_display("popup keyboard routing");
     class FixedRoot : public View {
         void layout_children() override {}
@@ -707,6 +709,7 @@ TEST_CASE("X11 popup keyboard navigation restores DAW focus and forwards transpo
     options.use_gpu = false;
     auto host = PluginViewHost::create(root, options);
     REQUIRE(host);
+    host->set_scale_factor(scale); // deliberate scale; pointer coords are physical
     const Window outer = XCreateSimpleWindow(daw, DefaultRootWindow(daw), 0, 0, 400, 300, 0, 0, 0);
     XSelectInput(daw, outer, KeyPressMask | KeyReleaseMask);
     XMapWindow(daw, outer);
@@ -731,8 +734,8 @@ TEST_CASE("X11 popup keyboard navigation restores DAW focus and forwards transpo
             event.xbutton.window = child;
             event.xbutton.root = DefaultRootWindow(daw);
             event.xbutton.button = Button1;
-            event.xbutton.x = 40;
-            event.xbutton.y = 35;
+            event.xbutton.x = static_cast<int>(40 * scale);
+            event.xbutton.y = static_cast<int>(35 * scale);
             event.xbutton.same_screen = True;
             REQUIRE(XSendEvent(daw, child, False,
                                type == ButtonPress ? ButtonPressMask : ButtonReleaseMask, &event));
@@ -790,9 +793,22 @@ TEST_CASE("X11 popup keyboard navigation restores DAW focus and forwards transpo
     XSync(daw, False);
     pump_until([&] { return !combo->is_open(); });
     CHECK(combo->selected() == 1);
+    // DAW already focused the editor window: nothing to borrow or restore,
+    // but an open popup must still receive its navigation keys.
+    XSetInputFocus(daw, child, RevertToParent, CurrentTime);
+    XSync(daw, False);
+    click();
+    pump_until([&] { return combo->is_open(); });
+    key(XK_Down);
+    pump_until([&] { return combo->hovered_index() == 2; });
+    key(XK_Escape);
+    pump_until([&] { return !combo->is_open(); });
+    XGetInputFocus(daw, &focus, &revert);
+    CHECK(focus == child);
     host.reset();
     XDestroyWindow(daw, outer);
     XCloseDisplay(daw);
+    }
 }
 
 #endif // PULP_TEST_HAS_X11

@@ -529,8 +529,35 @@ public:
         XFlush(display_);
     }
 
+    // Popup keyboard eligibility is separate from focus-restoration ownership:
+    // the DAW may already have focused child_ (nothing to restore), and keys
+    // still belong to an open popup.
+    bool popup_accepts_keys() {
+        if (!enabled_open_popup_in(root_))
+            return false;
+        if (keyboard_focus_owned_)
+            return true;
+        Window current = None;
+        int revert = 0;
+        XGetInputFocus(display_, &current, &revert);
+        return current == child_;
+    }
+
+    // Where declined keys go: the DAW window we borrowed focus from, else the
+    // parent of the editor window (child_ already focused, or PointerRoot).
+    Window key_forward_target() {
+        if (keyboard_focus_owned_ && previous_keyboard_focus_ != None &&
+            previous_keyboard_focus_ != PointerRoot && previous_keyboard_focus_ != child_)
+            return previous_keyboard_focus_;
+        Window root_ret = None, parent = None, *children = nullptr;
+        unsigned int count = 0;
+        if (XQueryTree(display_, child_, &root_ret, &parent, &children, &count) != 0 && children)
+            XFree(children);
+        return parent;
+    }
+
     void handle_popup_key(XKeyEvent event) {
-        if (!keyboard_focus_owned_)
+        if (!popup_accepts_keys())
             return;
         KeyCode key = KeyCode::unknown;
         switch (XLookupKeysym(&event, 0)) {
@@ -562,12 +589,12 @@ public:
         default:
             break;
         }
-        const Window previous = previous_keyboard_focus_;
+        const Window previous = key_forward_target();
         const auto disposition = route_plugin_key(
             root_,
             {{key, pointer_modifiers(event.state), event.type == KeyPress, false}, true, false});
         if (disposition == PluginKeyDisposition::forward_to_host && previous != None &&
-            previous != PointerRoot) {
+            previous != PointerRoot && previous != child_) {
             XEvent forwarded{};
             forwarded.xkey = event;
             forwarded.xkey.window = previous;
