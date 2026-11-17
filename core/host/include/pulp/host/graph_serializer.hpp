@@ -257,7 +257,7 @@ class GraphSerializer {
                                    MigrationFn migration);
 
     // Encode the entire graph as JSON. The `editor_layout` map (NodeId →
-    // (x,y)) is optional — pass an empty map if the graph has no UI. A graph
+    // (x,y)) is optional; pass an empty map if the graph has no UI. A graph
     // holding a graph event connection is refused (empty string): only the
     // saved-identity document names its endpoints, so this format would drop
     // the connection.
