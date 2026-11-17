@@ -326,6 +326,11 @@ required fixture's setup test even under `-LE`, so no ordinary test may require
 a gpu-proof fixture. With the proof ON the gate selects exactly the tests it
 selects with it OFF. `pulp_gpu_proof_begin()`/`pulp_gpu_proof_end()` bracket
 each proof block, and `end` is a configure error outside the proof option.
+Register proof binaries with `add_test`, never `pulp_add_test_suite` or
+`catch_discover_tests`: discovered cases come from a `TEST_INCLUDE_FILES`
+script after the build, so `end` cannot label them, the configure-time
+allowlist check cannot see them, and they run in the gate. `end` is a
+configure error when a proof block adds such a script.
 Hardware receipts stay owner-run on m3.
 
 ## A2T structural evidence is produced only by the required macOS PR job
