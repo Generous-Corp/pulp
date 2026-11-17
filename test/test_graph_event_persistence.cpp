@@ -120,7 +120,8 @@ choc::value::Value event_record(const std::string& producer, const std::string& 
 
 // The document with its event_connections replaced by `records` (removed
 // when `records` is empty).
-std::string with_events(const std::string& document, const std::vector<choc::value::Value>& records) {
+std::string with_events(const std::string& document,
+                        const std::vector<choc::value::Value>& records) {
     auto root = choc::json::parse(document);
     auto events = choc::value::createEmptyArray();
     for (const auto& record : records)
@@ -234,8 +235,8 @@ TEST_CASE("v6 and plain documents still load and cannot smuggle an event connect
 
     // A v6 identity names nodes structurally, not by authored ID.
     const auto identities = GraphSerializerTestAccess::legacy_v6_identities(source.graph);
-    const auto smuggled_v6 = with_events(legacy, {event_record(identities.at(source.producer),
-                                                               identities.at(source.consumer))});
+    const auto smuggled_v6 = with_events(
+        legacy, {event_record(identities.at(source.producer), identities.at(source.consumer))});
     const auto v6_inspection = GraphSerializer::inspect_document(smuggled_v6);
     CHECK(v6_inspection.refusal == GraphDocumentRefusal::EventConnectionInvalid);
     Sentinel v6_target;
@@ -374,11 +375,10 @@ TEST_CASE("the document diff and edit history track the event connection by auth
     CHECK(added.before_digest != added.after_digest);
     const auto removed = diff_graph_documents(after, before);
     CHECK(removed.event_connections_removed == std::vector<std::string>{key});
-    const auto changed =
-        diff_graph_documents(after, with_events(after, {event_record(
-                                                           authored(source.graph, source.producer),
-                                                           authored(source.graph, source.consumer),
-                                                           0, 0, 2)}));
+    const auto changed = diff_graph_documents(
+        after,
+        with_events(after, {event_record(authored(source.graph, source.producer),
+                                         authored(source.graph, source.consumer), 0, 0, 2)}));
     CHECK(changed.event_connections_changed == std::vector<std::string>{key});
 
     // NodeId renumbering alone is no change: reload into a graph whose ids
@@ -387,7 +387,8 @@ TEST_CASE("the document diff and edit history track the event connection by auth
     renumbered.graph.add_gain_node("Burn");
     renumbered.graph.clear();
     REQUIRE(GraphSerializer::from_saved_document(renumbered.graph, after).ok);
-    const auto reloaded = diff_graph_documents(after, GraphSerializer::to_saved_document(renumbered.graph));
+    const auto reloaded =
+        diff_graph_documents(after, GraphSerializer::to_saved_document(renumbered.graph));
     CHECK(reloaded.equal());
 
     GraphEditHistory history;
@@ -419,8 +420,11 @@ SubgraphNodeSpec event_member(std::string key) {
 SubgraphTemplate event_chain_template(bool declare_event = true) {
     SubgraphTemplate t;
     t.identity = "test.event-chain";
-    t.nodes = {{"in", NodeType::AudioInput, 1, 1.0f}, event_member("p"), event_member("m"),
-               event_member("c"), {"out", NodeType::AudioOutput, 1, 1.0f}};
+    t.nodes = {{"in", NodeType::AudioInput, 1, 1.0f},
+               event_member("p"),
+               event_member("m"),
+               event_member("c"),
+               {"out", NodeType::AudioOutput, 1, 1.0f}};
     t.edges = {{"in", 0, "p", 0}, {"p", 0, "m", 0}, {"m", 0, "c", 0}, {"c", 0, "out", 0}};
     if (declare_event)
         t.event_edge = SubgraphEventEdgeSpec{"p", "c"};
@@ -523,7 +527,8 @@ TEST_CASE("subgraph event connection declarations the graph cannot bind roll bac
         processor.processor_type_id = "test.silent-event";
         processor.processor_type_version = 1;
         processor.processor_descriptor_version = "1.0.0";
-        processor.processor_factory = [](std::uint32_t) -> std::unique_ptr<pulp::format::Processor> {
+        processor.processor_factory =
+            [](std::uint32_t) -> std::unique_ptr<pulp::format::Processor> {
             return std::make_unique<SilentProcessor>();
         };
         t.nodes.push_back(std::move(processor));
@@ -623,14 +628,14 @@ TEST_CASE("the subgraph writer refuses a document its restore would refuse",
         Target source;
         auto expansion = instantiate_subgraph(source.graph, event_chain_template(), "chain-a");
         REQUIRE(expansion);
-        REQUIRE(source.graph.disconnect(expansion.instance.nodes[2], 0, expansion.instance.nodes[3], 0));
+        REQUIRE(source.graph.disconnect(expansion.instance.nodes[2], 0, expansion.instance.nodes[3],
+                                        0));
         REQUIRE_FALSE(source.graph.graph_event_edge().has_value());
         CHECK(to_saved_subgraph_document(source.graph, std::span(&expansion.instance, 1)).empty());
     }
     SECTION("an undeclared connection joins two members") {
         Target source;
-        auto expansion =
-            instantiate_subgraph(source.graph, event_chain_template(false), "chain-a");
+        auto expansion = instantiate_subgraph(source.graph, event_chain_template(false), "chain-a");
         REQUIRE(expansion);
         REQUIRE_FALSE(
             to_saved_subgraph_document(source.graph, std::span(&expansion.instance, 1)).empty());

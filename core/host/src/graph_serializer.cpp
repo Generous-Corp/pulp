@@ -4322,8 +4322,8 @@ GraphSerializer::LoadResult GraphSerializer::load_json_(SignalGraph& graph, cons
             const auto p = live_by_authored.find(producer);
             const auto c = live_by_authored.find(consumer);
             if (p == live_by_authored.end() || c == live_by_authored.end()) {
-                result.error = "event_connection_not_restored: an endpoint of " + label +
-                               " was not restored";
+                result.error =
+                    "event_connection_not_restored: an endpoint of " + label + " was not restored";
                 return result;
             }
             GraphAuthoredEventEdge edge;

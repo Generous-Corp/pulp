@@ -297,8 +297,8 @@ bool expand_template(ExpansionContext& context, const SubgraphTemplate& definiti
             return false;
         }
         if (context.instance.event_edge) {
-            context.failure = "event connection " + label +
-                              " is a second event connection in one expansion";
+            context.failure =
+                "event connection " + label + " is a second event connection in one expansion";
             return false;
         }
         GraphAuthoredEventEdge edge;
@@ -311,9 +311,8 @@ bool expand_template(ExpansionContext& context, const SubgraphTemplate& definiti
             context.failure = "event connection " + label + " was refused by the graph";
             return false;
         }
-        context.instance.event_edge = SubgraphEventEdge{edge.producer, edge.consumer,
-                                                        edge.source_port, edge.destination_port,
-                                                        edge.kind};
+        context.instance.event_edge = SubgraphEventEdge{
+            edge.producer, edge.consumer, edge.source_port, edge.destination_port, edge.kind};
     }
     return depth <= kMaxNestedDepth;
 }
