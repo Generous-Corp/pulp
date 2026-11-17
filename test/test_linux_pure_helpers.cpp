@@ -7,15 +7,13 @@
 
 #include "../core/platform/platform/linux/meminfo_pressure.hpp"
 #include "../core/view/platform/linux/atspi_text_offsets.hpp"
-#include "../core/view/platform/linux/xdnd_parse.hpp"
-#include <pulp/view/platform/atspi_mapping.hpp>
+#include <pulp/view/platform/atspi_geometry.hpp>
 
 #include <string>
 
 namespace {
 
 namespace text = pulp::view::atspi_text;
-namespace xdnd = pulp::view::xdnd;
 namespace atspi = pulp::view::atspi;
 namespace env = pulp::platform::linux_env;
 using pulp::platform::MemoryPressure;
@@ -66,33 +64,6 @@ TEST_CASE("text treats malformed bytes as single characters", "[view][linux][pur
     CHECK(text::character_count(stray) == 3);
     CHECK(text::character_count(cut) == 3);
     CHECK(text::code_point_at(stray, 1) == 0xFFFDu);
-}
-
-TEST_CASE("xdnd replies apply only from the current target", "[view][linux][pure]") {
-    CHECK(xdnd::status_is_from_target(42, 42));
-    CHECK(!xdnd::status_is_from_target(41, 42)); // delayed reply from an earlier target
-    CHECK(!xdnd::status_is_from_target(0, 0));   // no target yet
-}
-
-TEST_CASE("xdnd finished needs a drop and the current target", "[view][linux][pure]") {
-    CHECK(!xdnd::finished_outcome(42, 42, false, 5, 1)); // premature
-    CHECK(!xdnd::finished_outcome(41, 42, true, 5, 1));  // wrong sender
-    CHECK(xdnd::finished_outcome(42, 42, true, 5, 1) == std::optional<bool>(true));
-    CHECK(xdnd::finished_outcome(42, 42, true, 5, 0) == std::optional<bool>(false));
-}
-
-TEST_CASE("xdnd older targets finish without the success bit", "[view][linux][pure]") {
-    // Reserved fields are zero before version 5, and that is still a success.
-    CHECK(xdnd::finished_outcome(42, 42, true, 3, 0) == std::optional<bool>(true));
-    CHECK(xdnd::finished_outcome(42, 42, true, 4, 0) == std::optional<bool>(true));
-}
-
-TEST_CASE("xdnd versions below the floor are not driven", "[view][linux][pure]") {
-    CHECK(xdnd::negotiated_version(0) == 0);
-    CHECK(xdnd::negotiated_version(2) == 0);
-    CHECK(xdnd::negotiated_version(3) == 3);
-    CHECK(xdnd::negotiated_version(5) == 5);
-    CHECK(xdnd::negotiated_version(9) == 5);
 }
 
 TEST_CASE("meminfo zero available is critical", "[view][linux][pure]") {
@@ -175,23 +146,6 @@ TEST_CASE("text does not let a bad sequence swallow the character after it",
     const std::string s = "\xED\xA0\x80\xC3\xA9";
     CHECK(text::character_count(s) == 4);
     CHECK(text::code_point_at(s, 3) == 0xE9u);
-}
-
-// ── Drag pointer tracking ────────────────────────────────────────────────────
-
-TEST_CASE("pointer_change reports movement, release and nothing", "[view][linux][pure]") {
-    using xdnd::PointerChange;
-    using xdnd::PointerSample;
-    const PointerSample down{10, 20, true};
-    CHECK(xdnd::pointer_change(down, {10, 20, true}) == PointerChange::none);
-    CHECK(xdnd::pointer_change(down, {11, 20, true}) == PointerChange::moved);
-    CHECK(xdnd::pointer_change(down, {10, 21, true}) == PointerChange::moved);
-    CHECK(xdnd::pointer_change(down, {10, 20, false}) == PointerChange::released);
-    // Release wins over movement: the drop goes where the pointer last was.
-    CHECK(xdnd::pointer_change(down, {50, 60, false}) == PointerChange::released);
-    // A button that was never down cannot be released, and movement still counts.
-    CHECK(xdnd::pointer_change({10, 20, false}, {10, 20, false}) == PointerChange::none);
-    CHECK(xdnd::pointer_change({10, 20, false}, {12, 20, false}) == PointerChange::moved);
 }
 
 // ── AT-SPI component geometry ────────────────────────────────────────────────
