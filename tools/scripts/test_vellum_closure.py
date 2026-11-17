@@ -19,6 +19,8 @@ from vellum_closure import (
     fetchcontent_pins,
     external_input_violations,
     edge_key,
+    export_metadata,
+    os_release_image_name,
     load_allowlist,
     policy_include_forbidden,
     policy_target_forbidden,
@@ -2716,6 +2718,56 @@ class EmsdkIdentityTests(unittest.TestCase):
         from vellum_closure import SYSTEM_PROVIDERS
         self.assertIn("emsdk", SYSTEM_PROVIDERS)
 
+
+
+class ExportMetadataTests(unittest.TestCase):
+    SHA = "a" * 40
+    ENV = {"GITHUB_SHA": SHA, "ImageVersion": "20261111.196.1", "ImageOS": "ubuntu26"}
+    OS_RELEASE = 'NAME="Ubuntu"\nID=ubuntu\nVERSION_ID="26.04"\n'
+
+    def meta(self, env=None, **kwargs):
+        return export_metadata(self.ENV if env is None else env, "linux-x64",
+                               "skia-build-linux-x64-gpu-release.zip",
+                               os_release=kwargs.pop("os_release", self.OS_RELEASE), **kwargs)
+
+    def test_a_hosted_image_is_recorded_with_its_os_and_version(self):
+        document = self.meta()
+        self.assertEqual(document["runner_image"], {"name": "ubuntu-26.04", "version": "20261111.196.1"})
+        self.assertEqual(document["image_os"], "ubuntu26")
+        self.assertEqual(document["pulp_sha"], self.SHA)
+
+    def test_an_empty_or_missing_image_version_fails_closed(self):
+        for label, env in (
+            ("missing", {k: v for k, v in self.ENV.items() if k != "ImageVersion"}),
+            ("empty", {**self.ENV, "ImageVersion": ""}),
+            ("blank", {**self.ENV, "ImageVersion": "  "}),
+            ("placeholder", {**self.ENV, "ImageVersion": "unknown"}),
+        ):
+            with self.subTest(version=label), self.assertRaises(SystemExit) as raised:
+                self.meta(env)
+            self.assertIn("ImageVersion", str(raised.exception))
+
+    def test_an_image_without_a_name_fails_closed(self):
+        with self.assertRaises(SystemExit):
+            self.meta(os_release="NAME=x\n")
+        with self.assertRaises(SystemExit):
+            self.meta(os_release=self.OS_RELEASE, image_name_input="unknown")
+        # Control: an explicit name stands in for an os-release that gives none.
+        self.assertEqual(self.meta(os_release="", image_name_input="macos-15")["runner_image"]["name"], "macos-15")
+
+    def test_a_missing_os_is_not_required_but_is_not_invented(self):
+        env = {k: v for k, v in self.ENV.items() if k != "ImageOS"}
+        self.assertNotIn("image_os", self.meta(env))
+
+    def test_a_bad_commit_or_platform_is_refused(self):
+        with self.assertRaises(SystemExit):
+            self.meta({**self.ENV, "GITHUB_SHA": "main"})
+        with self.assertRaises(SystemExit):
+            export_metadata(self.ENV, "Linux x64", "a.zip", os_release=self.OS_RELEASE)
+
+    def test_os_release_names_the_image(self):
+        self.assertEqual(os_release_image_name(self.OS_RELEASE), "ubuntu-26.04")
+        self.assertEqual(os_release_image_name("ID=ubuntu\n"), "")
 
 if __name__ == "__main__":
     unittest.main()
