@@ -50,6 +50,10 @@ class StandaloneMusicalTyping;
 }
 
 struct StandaloneConfig {
+    /// `midi_input_id` value that opens no MIDI input at all. An empty id opens
+    /// the first port.
+    static constexpr const char* kNoMidiInput = "pulp:no-midi-input";
+
     std::string audio_device_id;
     std::string midi_input_id;
     double sample_rate = 48000.0;
@@ -397,6 +401,25 @@ public:
     /// Restart audio with a new config (stop → reconfigure → start).
     bool apply_config(const StandaloneConfig& new_config);
 
+    /// Opens the app's Audio/MIDI settings UI. Returns true when a window is
+    /// now showing (or already was). Main thread.
+    using SettingsWindowOpener = std::function<bool(StandaloneApp&)>;
+
+    /// Register (or, with an empty function, restore the default of) the
+    /// opener `open_settings_window()` calls. The default is the native
+    /// Audio/MIDI window of a standalone without a view layer, built on
+    /// `StandaloneSettingsModel`; it is available on macOS and declines
+    /// elsewhere. An app with its own settings UI replaces it here, and the
+    /// contract editor's "Audio/MIDI Settings…" menu item (Cmd+,) and an
+    /// editor's `HostAction::open_settings` request both reach it.
+    void set_settings_window_opener(SettingsWindowOpener opener) {
+        settings_window_opener_ = std::move(opener);
+    }
+
+    /// Show the Audio/MIDI settings through the registered opener, or the
+    /// default one. False when nothing could be opened.
+    bool open_settings_window();
+
     Processor* processor() { return processor_.get(); }
     state::StateStore& state() { return store_; }
 
@@ -508,6 +531,7 @@ public:
     // create_view() editor in a Pulp window.
     bool run_view_editor(bool use_gpu, const StandaloneConfig& effective_config);
     std::function<void(const std::vector<std::string>&)> open_files_handler_;
+    SettingsWindowOpener settings_window_opener_;
 
     // Declared FIRST so it is destroyed LAST: the final detach cancels and
     // joins the tracing auto-flush timer and writes the .pftrace, which must

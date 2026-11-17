@@ -3,6 +3,7 @@
 #include <pulp/format/app_updates.hpp>
 #include <pulp/format/detail/standalone_environment.hpp>
 #include <pulp/format/detail/standalone_contract_editor.hpp>
+#include <pulp/format/detail/standalone_settings_window.hpp>
 #include <pulp/format/detail/standalone_key_driver.hpp>
 #include <pulp/format/detail/standalone_key_sequence.hpp>
 #include <pulp/format/detail/null_audio_device.hpp>
@@ -830,7 +831,7 @@ bool StandaloneApp::start() {
     if (desc.accepts_midi) {
         midi_system_ = midi::create_midi_system();
         auto inputs = midi_system_->enumerate_inputs();
-        if (!inputs.empty()) {
+        if (!inputs.empty() && config_.midi_input_id != StandaloneConfig::kNoMidiInput) {
             midi_input_ = midi_system_->create_input();
             auto midi_port_id = config_.midi_input_id.empty()
                 ? inputs[0].id : config_.midi_input_id;
@@ -918,13 +919,23 @@ bool StandaloneApp::run_contract_editor(EditorFactory& factory) {
         test_input_host_.set_playing(playing);
         config_.transport_playing = playing;
     };
+    options.on_open_settings = [this] { return open_settings_window(); };
     options.on_idle = [this] {
         service_state_persistence();
         service_program_changes();
         if (config_.test_on_editor_frame)
             config_.test_on_editor_frame();
     };
-    return detail::run_standalone_contract_editor(*processor_, store_, factory, options);
+    const bool ran =
+        detail::run_standalone_contract_editor(*processor_, store_, factory, options);
+    detail::close_standalone_settings_window();
+    return ran;
+}
+
+bool StandaloneApp::open_settings_window() {
+    if (settings_window_opener_)
+        return settings_window_opener_(*this);
+    return detail::open_standalone_settings_window(*this);
 }
 
 bool StandaloneApp::run_with_editor(bool use_gpu) {

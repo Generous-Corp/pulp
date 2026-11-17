@@ -1256,6 +1256,11 @@ if(APPLE AND NOT PULP_IOS)
     catch_discover_tests(pulp-test-standalone-contract-editor)
 endif()
 
+# Audio/MIDI settings model shared by the view SettingsPanel and the native
+# settings window (no device is opened).
+pulp_add_test_suite(pulp-test-standalone-settings-model GROUP pulp-test-group-core-standalone
+    LIBRARIES pulp::standalone)
+
 # Test signal source (sine tone, file playback)
 pulp_add_test_suite(pulp-test-test-signal GROUP pulp-test-group-core-standalone
     LIBRARIES pulp::standalone)

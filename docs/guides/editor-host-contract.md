@@ -30,6 +30,38 @@ choose at run time.
 Roles are `editor`, `inspector` and `settings`; several editors, of one role or
 several, can be alive at once over one processor.
 
+## Audio/MIDI settings in the standalone
+
+A standalone host has no DAW to own audio and MIDI routing, so it owns a
+settings surface. An editor asks for it with
+`EditorContext::host_action({HostAction::open_settings})`; a plug-in host (VST3,
+CLAP, AU) returns false, because the DAW does that job. The editor should hide
+its settings control when the request is declined.
+
+`pulp::standalone-contract` (the standalone of a UI package) opens a small
+native window on macOS, from the editor's request or from the app menu item
+"Audio/MIDI Settings…" (Cmd+,). It lists the output device, the input device
+(hidden when the processor has no audio input), the sample rate
+(`StandaloneConfig::allowed_sample_rates` when set), the buffer size
+(`allowed_buffer_sizes`), the MIDI input (with "None") and the output latency.
+Apply restarts audio through `StandaloneApp::apply_config()`, which saves the
+selection for the next launch. Device lists come from the audio and MIDI
+systems, so `PULP_AUDIO_DEVICE=null` shows the null device.
+
+An app with its own settings UI replaces the opener:
+
+```cpp
+app.set_settings_window_opener([](pulp::format::StandaloneApp& app) {
+    return my_settings_ui.show(app);   // true when a window is showing
+});
+```
+
+The rules behind both the native window and the view `SettingsPanel` are in the
+view-free `StandaloneSettingsModel` (`standalone_settings_model.hpp`): what each
+list offers, the input-hidden rule, how selections fold into a
+`StandaloneConfig`. A UI of your own can build on it. `StandaloneConfig::kNoMidiInput`
+is the `midi_input_id` that opens no MIDI input (an empty id opens the first port).
+
 ## Choosing a UI stack
 
 The contract is toolkit-neutral, but Pulp has one default answer:

@@ -155,9 +155,58 @@
 }
 @end
 
+// The target of the app menu's items.
+@interface PulpStandaloneContractMenuTarget : NSObject {
+  @public
+    std::function<bool()> openSettings;
+    NSWindow* editorWindow;
+}
+- (void)openSettings:(id)sender;
+- (void)closeEditor:(id)sender;
+@end
+
+@implementation PulpStandaloneContractMenuTarget
+- (void)openSettings:(id)sender {
+    (void)sender;
+    if (openSettings)
+        openSettings();
+}
+- (void)closeEditor:(id)sender {
+    (void)sender;
+    [editorWindow performClose:nil];
+}
+@end
+
 namespace pulp::format::detail {
 
 namespace {
+
+// The app menu a standalone with Audio/MIDI settings shows: "Audio/MIDI
+// Settings…" (Cmd+,) and a Quit that closes the editor window, so the editor
+// detaches in order. Skipped when the process already has a main menu.
+bool install_app_menu(PulpStandaloneContractMenuTarget* target, NSString* title) {
+    if ([NSApp mainMenu] != nil)
+        return false;
+    NSMenu* bar = [[[NSMenu alloc] init] autorelease];
+    NSMenuItem* appItem = [[[NSMenuItem alloc] init] autorelease];
+    [bar addItem:appItem];
+    NSMenu* appMenu = [[[NSMenu alloc] initWithTitle:title] autorelease];
+    NSMenuItem* settings = [[[NSMenuItem alloc] initWithTitle:@"Audio/MIDI Settings\u2026"
+                                                       action:@selector(openSettings:)
+                                                keyEquivalent:@","] autorelease];
+    settings.target = target;
+    [appMenu addItem:settings];
+    [appMenu addItem:[NSMenuItem separatorItem]];
+    NSMenuItem* quit = [[[NSMenuItem alloc]
+        initWithTitle:[@"Quit " stringByAppendingString:title]
+               action:@selector(closeEditor:)
+        keyEquivalent:@"q"] autorelease];
+    quit.target = target;
+    [appMenu addItem:quit];
+    appItem.submenu = appMenu;
+    [NSApp setMainMenu:bar];
+    return true;
+}
 
 bool write_file(const std::string& path, const std::vector<std::uint8_t>& bytes) {
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
@@ -211,7 +260,9 @@ bool run_standalone_contract_editor(Processor& processor, state::StateStore& sto
             return false;
         return [content applyEditorSize:NSMakeSize(size.width, size.height)];
     };
-    hooks.host_action = [&window](const HostActionRequest& request) {
+    hooks.host_action = [&window, &options](const HostActionRequest& request) {
+        if (request.action == HostAction::open_settings)
+            return options.on_open_settings ? options.on_open_settings() : false;
         if (request.action != HostAction::close_editor || window == nil)
             return false;
         [window performClose:nil];
@@ -291,6 +342,15 @@ bool run_standalone_contract_editor(Processor& processor, state::StateStore& sto
     [window makeFirstResponder:content];
     if (options.on_window_ready)
         options.on_window_ready((__bridge void*)window);
+    PulpStandaloneContractMenuTarget* menu_target = nil;
+    bool installed_menu = false;
+    if (!options.headless && options.on_open_settings) {
+        menu_target = [[PulpStandaloneContractMenuTarget alloc] init];
+        menu_target->openSettings = options.on_open_settings;
+        menu_target->editorWindow = window;
+        installed_menu = install_app_menu(
+            menu_target, [NSString stringWithUTF8String:processor.descriptor().name.c_str()]);
+    }
 
     if (!options.headless) {
         session->visibility_changed(true);
@@ -353,6 +413,12 @@ bool run_standalone_contract_editor(Processor& processor, state::StateStore& sto
     session.reset();
     window.delegate = nil;
     [delegate release];
+    if (menu_target != nil) {
+        if (installed_menu)
+            [NSApp setMainMenu:nil];
+        menu_target->editorWindow = nil;
+        [menu_target release];
+    }
     [window orderOut:nil];
     [window release];
     return ok;

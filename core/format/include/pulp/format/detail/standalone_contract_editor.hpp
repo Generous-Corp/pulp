@@ -48,6 +48,11 @@ struct StandaloneContractEditorOptions {
     std::function<void()> on_transport_key;
     /// Called once per frame of the window's loop, on the UI thread.
     std::function<void()> on_idle;
+    /// Open the host's Audio/MIDI settings. When set, a non-headless window
+    /// gets an app menu with "Audio/MIDI Settings…" (Cmd+,) that calls it, and
+    /// an editor's `HostAction::open_settings` request is answered by its
+    /// result. Unset: the action is declined and no menu item is added.
+    std::function<bool()> on_open_settings;
     /// The usable area, in points, the window must fit into when it is not
     /// zero. Zero reads the main screen's visible frame.
     double screen_visible_width = 0.0;
