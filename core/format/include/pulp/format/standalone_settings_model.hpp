@@ -123,7 +123,7 @@ class StandaloneSettingsModel {
     /// Latency of the selected buffer at the selected rate, in ms; zero when
     /// either selection is empty.
     double latency_ms() const;
-    /// "Latency: 5.3 ms", or "Latency: —" when unknown.
+    /// "Latency: 5.3 ms", or a placeholder in place of the number when unknown.
     std::string latency_text() const;
 
     /// The config the selections describe: the base config with the chosen
