@@ -452,6 +452,8 @@ OSStatus PulpAUInstrument::Initialize()
     midi_in_.set_realtime_capacity_limit(true);
     midi_out_.set_realtime_capacity_limit(true);
 
+    block_timing_.mark_discontinuity();
+
     runtime::log_info("AU v2 instrument: initialized at {} Hz, {} input element(s), "
                       "{} output bus(es)",
                       GetOutput(0)->GetStreamFormat().mSampleRate, Inputs().GetNumberOfElements(),
@@ -506,6 +508,12 @@ OSStatus PulpAUInstrument::ChangeStreamFormat(AudioUnitScope inScope, AudioUnitE
         }
     }
     return noErr;
+}
+
+OSStatus PulpAUInstrument::Reset(AudioUnitScope inScope, AudioUnitElement inElement) {
+    const auto result = MusicDeviceBase::Reset(inScope, inElement);
+    block_timing_.mark_discontinuity();
+    return result;
 }
 
 void PulpAUInstrument::Cleanup()
@@ -581,13 +589,15 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
                                   UInt32 inNumberFrames)
 {
     (void)ioActionFlags;
-    (void)inTimeStamp;
 
     // The observer completes a workgroup transition before it returns; this
     // idempotent guard makes every render verify the current publication
     // before any early exit, as the AUv3 render block does.
     render_context_.prepare_for_render();
 
+    // Every return below that does not reach Processor::process() marks this
+    // render skipped.
+    ScopedSkipMark skip_mark(block_timing_);
     if (!processor_) return noErr;
 
     // Flush denormals to zero for the whole audio-callback body so quiet tails
@@ -649,6 +659,7 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
         static_cast<int>(inNumberFrames), offline_render_.offline());
 
     apply_host_callbacks_to_process_context(ctx, *this, playhead_prev_);
+    block_timing_.publish(ctx, &inTimeStamp, 0);
 
     // Input bus views from the cached descriptor: the main input (index 0)
     // and, when declared, the side chain (index 1). A bus is active only when
@@ -740,6 +751,7 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
         if (panic_state_)
             panic_state_->observe_midi_out(midi_out_);
     }
+    skip_mark.observed();
 
     // Deliver the block's MIDI to the host's installed MIDI-output callback,
     // outside the no-allocation scope because the callback is host code. The

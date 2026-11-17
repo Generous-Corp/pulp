@@ -7,6 +7,7 @@
   "owned_paths": [
     "core/host/include/pulp/host/signal_graph_node.hpp",
     "core/host/src/signal_graph_authoring.cpp",
+    "core/host/src/signal_graph_authored_id_internal.hpp",
     "core/host/src/spectral_graph.cpp",
     "core/host/src/trigger_graph.cpp",
     "core/host/src/graph_serializer.cpp",
@@ -22,7 +23,11 @@
     },
     {
       "path": "core/host/src/signal_graph_authoring.cpp",
-      "needles": ["SignalGraph::mint_authored_id_locked_", "SignalGraph::push_node_locked_", "SignalGraph::rename_node"]
+      "needles": ["SignalGraph::mint_authored_id_locked_", "SignalGraph::push_node_locked_", "SignalGraph::rename_node", "authored_id_salt_without_entropy(address, diagnostic_graph_identity_)"]
+    },
+    {
+      "path": "core/host/src/signal_graph_authored_id_internal.hpp",
+      "needles": ["AuthoredIdSalt authored_id_salt_from(", "std::string authored_id_from_salt("]
     },
     {
       "path": "core/host/src/spectral_graph.cpp",
@@ -34,7 +39,7 @@
     },
     {
       "path": "test/test_graph_saved_identity_v7.cpp",
-      "needles": ["a rename keeps the authored ID and diffs as one changed node", "deleting either of two same-named nodes leaves the survivor's ID", "v7 inspection refuses planted identity defects", "v6 migration is deterministic and never guesses continuity"]
+      "needles": ["a rename keeps the authored ID and diffs as one changed node", "deleting either of two same-named nodes leaves the survivor's ID", "v7 inspection refuses planted identity defects", "v6 migration is deterministic and never guesses continuity", "the entropy-free authored-ID salt separates graphs deterministically"]
     },
     {
       "path": "docs/graph-program-status/G-3-v7-identity-design.md",
@@ -97,7 +102,7 @@
     },
     "live_product_control": {
       "disposition": "not_applicable",
-      "rationale": "IDs are minted on the control thread at node creation; no runtime operation, executor authority or audio-thread path is added."
+      "rationale": "IDs are minted on the control thread at node creation; no runtime operation, executor authority or audio-thread path is added. A WebAssembly AudioWorklet build seeds the per-graph salt without an entropy device, so minting works where crypto.getRandomValues is absent."
     },
     "design_time_agent_manifest": {
       "disposition": "not_applicable",

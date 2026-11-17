@@ -295,6 +295,10 @@ public:
     OSStatus Initialize() override;
     void Cleanup() override;
 
+    /// A host reset breaks the timeline the Processor last saw, so the next
+    /// observed block reports `ProcessContext::timing.discontinuity`.
+    OSStatus Reset(AudioUnitScope inScope, AudioUnitElement inElement) override;
+
     /// Adds the side-chain input element (element 1, named "Side Chain") when
     /// the descriptor declares a side-chain bus. AUEffectBase constructs a
     /// single input element; hosts discover a side-chain input purely from the
@@ -529,6 +533,13 @@ private:
     // `ProcessContext`. Default-constructed so the first process() call
     // after init reports no changes.
     detail::PlayheadSnapshot playhead_prev_{};
+    // Neutral timing facts for each Processor call. `render_time_` is the
+    // time stamp of the render on the stack (valid only while
+    // `has_render_time_`), so each scheduled-parameter slice publishes the
+    // render's mSampleTime plus `slice_frame_offset_`.
+    BlockTimingPublisher block_timing_;
+    AudioTimeStamp render_time_{};
+    bool has_render_time_ = false;
     // Set while Initialize() runs ProcessBufferLists() once on silence to fault
     // in the validation and buffer-wiring path. The render returns right after
     // wiring: before the bypass check, the MIDI queue drain, host callbacks and

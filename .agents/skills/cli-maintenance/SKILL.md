@@ -487,6 +487,21 @@ runs the sibling CLI, so these messages reach MCP unchanged. The shell-out test
 is `pulp graph probe refusals name the cause and the fix` in
 `test/test_cli_shellout.cpp`.
 
+### MCP `pulp_graph diff` is the CLI diff, not a second comparison
+
+`handle_graph_diff` in `tools/mcp/mcp_tools.cpp` runs the matched sibling
+`pulp-cpp graph diff BEFORE AFTER --json` through `ChildProcess` (no shell,
+30 s deadline, 2 MiB output cap) and returns its text unchanged. The operation
+takes `before` and `after`, never `path`, and refuses probe-only options. A
+comparison that finds differences exits 0 and is NOT `isError`; only a CLI
+refusal (exit 1 or 2) or a failed process is. Keep the CLI's default exit
+contract: a diff-style exit code, if ever wanted, must be opt-in. Parity
+(equality, semantic and layout-only change, side attribution, missing,
+oversized and malformed inputs, no input modified) is asserted against the
+real binaries in `test/test_graph_patch_tools.py`; argv forwarding and error
+mapping are in `MCP graph diff delegates to the matched CLI` in
+`test/test_mcp_server.cpp`.
+
 ### `pulp graph render` must be driven by its input and report its level
 
 `render_graph()` in `tools/cli/cmd_graph.cpp` decodes `--input` through the

@@ -159,8 +159,8 @@ pulp graph save patch.pat --output patch.pulpgraph
 pulp graph fmt patch.pulpgraph --notation
 ```
 
-MCP `pulp_graph` supports `validate`, `fmt` and `catalog` with the same CLI
-implementation; `catalog` needs no path. `fmt` is read-only. Diagnostics share
+MCP `pulp_graph` supports `validate`, `fmt`, `catalog` and `diff` with the same CLI
+implementation; `catalog` needs no path, and `diff` takes `before` and `after`. `fmt` is read-only. Diagnostics share
 `valid`, `code`, `line`, `node`, `port`, `rule`, `suggested_fix` and `message`
 across the public API and tools. Wrong port, wrong kind, instantaneous cycle,
 duplicate, invalid number/range and unsupported state failures are explicit.
