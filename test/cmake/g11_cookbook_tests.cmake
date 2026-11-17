@@ -52,4 +52,20 @@ if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU AND PROJECT_IS_TOP_LEVEL)
         set_tests_properties(${_example}-notation-refusal PROPERTIES
             LABELS "graph;g11;notation" TIMEOUT 60)
     endforeach()
+
+    foreach(_control OFF ON)
+        set(_name graph-guide-format-version)
+        if(_control)
+            set(_name graph-guide-format-version-stale-control)
+        endif()
+        add_test(NAME ${_name}
+            COMMAND ${CMAKE_COMMAND}
+                "-DPULP_CLI=${_g11_cli}"
+                "-DGUIDE=${CMAKE_SOURCE_DIR}/docs/guides/graph-first-steps.md"
+                "-DCOOKBOOK=${CMAKE_SOURCE_DIR}/docs/guides/graph-notation-cookbook.md"
+                "-DWORK_DIR=${CMAKE_BINARY_DIR}/graph-guide-format-version-${_control}"
+                -DSTALE_CONTROL=${_control}
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/graph_guide_format_version.cmake)
+        set_tests_properties(${_name} PROPERTIES LABELS "graph;docs" TIMEOUT 60)
+    endforeach()
 endif()
