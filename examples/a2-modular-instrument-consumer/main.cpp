@@ -6,6 +6,8 @@
 
 #include <array>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -71,7 +73,46 @@ class StripFilter final : public format::Processor {
     float previous_ = 0.0f;
 };
 
-// The declaration: filter -> level, with one persisted parameter.
+// A stateful Custom member: scales its input by a trim kept in 4 bytes of
+// opaque state. load_state accepts a finite trim in [0, 4] only.
+constexpr std::string_view kTrimType = "com.pulp.example.a2.trim";
+
+std::vector<std::uint8_t> trim_state(float value) {
+    std::vector<std::uint8_t> bytes(sizeof(float));
+    std::memcpy(bytes.data(), &value, sizeof(float));
+    return bytes;
+}
+
+CustomNodeType trim_type(int version) {
+    CustomNodeType type;
+    type.type_id = std::string(kTrimType);
+    type.version = version;
+    type.num_input_ports = 1;
+    type.num_output_ports = 1;
+    type.create = [] { return static_cast<void*>(new float(1.0f)); };
+    type.destroy = [](void* instance) { delete static_cast<float*>(instance); };
+    type.process_instance = [](void* instance, audio::BufferView<float>& out,
+                               const audio::BufferView<const float>& in, int frames) {
+        const float trim = *static_cast<float*>(instance);
+        for (int i = 0; i < frames; ++i)
+            out.channel_ptr(0)[i] = in.channel_ptr(0)[i] * trim;
+    };
+    type.save_state = [](void* instance) { return trim_state(*static_cast<float*>(instance)); };
+    type.load_state = [](void* instance, const std::vector<std::uint8_t>& bytes) {
+        float value = 0.0f;
+        if (bytes.size() != sizeof(float))
+            return false;
+        std::memcpy(&value, bytes.data(), sizeof(float));
+        if (!std::isfinite(value) || value < 0.0f || value > 4.0f)
+            return false;
+        *static_cast<float*>(instance) = value;
+        return true;
+    };
+    return type;
+}
+
+// The declaration: filter -> level -> trim, with one persisted parameter and
+// one Custom member whose opaque state persists with the document.
 SubgraphTemplate strip_template() {
     SubgraphTemplate t;
     t.identity = "com.pulp.example.a2.strip";
@@ -82,10 +123,16 @@ SubgraphTemplate strip_template() {
     filter.processor_type_version = kFilterType.type_version;
     filter.processor_descriptor_version = "1";
     filter.processor_factory = [](std::uint32_t) { return std::make_unique<StripFilter>(); };
-    t.nodes = {filter, {"level", NodeType::Gain, 1, 1.0f}};
-    t.edges = {{"filter", 0, "level", 0}};
+    SubgraphNodeSpec trim;
+    trim.key = "trim";
+    trim.type = NodeType::Custom;
+    trim.custom_type_id = std::string(kTrimType);
+    trim.custom_type_version = 1;
+    trim.custom_state = trim_state(1.0f);
+    t.nodes = {filter, {"level", NodeType::Gain, 1, 1.0f}, trim};
+    t.edges = {{"filter", 0, "level", 0}, {"level", 0, "trim", 0}};
     t.exposed_ports = {{"input", "filter", 0, false, PortKind::Audio},
-                       {"output", "level", 0, true, PortKind::Audio}};
+                       {"output", "trim", 0, true, PortKind::Audio}};
     t.parameters = {{"level", "level", 1.0f, 0.0f, 1.0f}};
     return t;
 }
@@ -94,12 +141,14 @@ constexpr std::array<float, 4> kCoefficients{0.0f, 0.25f, 0.5f, 1.0f};
 constexpr std::array<float, 16> kIndices{0, 1, 2, 3, 0, 2, 1, 3, 3, 1, 2, 0, 1, 3, 2, 0};
 constexpr float kLeadLevel = 0.5f;
 constexpr float kEchoLevel = 0.75f;
+constexpr float kEchoTrim = 0.5f;
 using Samples = std::array<float, 16>;
 
 // Two instances of one declaration in series, both driven by one Control lane.
 std::string author() {
     SignalGraph g;
-    if (!g.register_custom_node_type(make_control_indexed_table_type()))
+    if (!g.register_custom_node_type(make_control_indexed_table_type()) ||
+        !g.register_custom_node_type(trim_type(1)))
         return {};
     const auto t = strip_template();
     auto lead = instantiate_subgraph(g, t, "lead", 0);
@@ -112,7 +161,8 @@ std::string author() {
         !g.connect(g.node(index)->out("index"), g.node(table)->in("index")) ||
         !g.connect(in, 0, lead.instance.ports.at("input").node, 0) ||
         !connect_subgraph_ports(g, lead.instance, "output", echo.instance, "input") ||
-        !g.connect(echo.instance.ports.at("output").node, 0, out, 0))
+        !g.connect(echo.instance.ports.at("output").node, 0, out, 0) ||
+        !g.set_custom_node_state(echo.instance.nodes.back(), trim_state(kEchoTrim)))
         return {};
     for (auto* strip : {&lead.instance, &echo.instance}) {
         auto state = strip->save_state();
@@ -125,7 +175,11 @@ std::string author() {
     return to_saved_subgraph_document(g, std::array{lead.instance, echo.instance});
 }
 
-SubgraphDocumentLoad restore(SignalGraph& g, const std::string& json, bool with_template) {
+// Which Custom trim versions the restoring application registers.
+enum class TrimTypes { Current, None, CurrentAndNext };
+
+SubgraphDocumentLoad restore(SignalGraph& g, const std::string& json, bool with_template,
+                             TrimTypes trims = TrimTypes::Current) {
     static ProcessorRestoreRegistry registry;
     static const bool registered =
         registry.register_type(
@@ -133,6 +187,10 @@ SubgraphDocumentLoad restore(SignalGraph& g, const std::string& json, bool with_
                  return format::ProcessorNodeInstance::create(std::make_unique<StripFilter>());
              }}) == ProcessorRestoreCode::Restored;
     (void)g.register_custom_node_type(make_control_indexed_table_type());
+    if (trims != TrimTypes::None)
+        (void)g.register_custom_node_type(trim_type(1));
+    if (trims == TrimTypes::CurrentAndNext)
+        (void)g.register_custom_node_type(trim_type(2));
     GraphLoadOptions options;
     options.processor_registry = registered ? &registry : nullptr;
     options.processor_allowlist = {kFilterType};
@@ -176,7 +234,7 @@ bool matches_oracle(const Samples& samples) {
         const float c = kCoefficients[static_cast<std::size_t>(kIndices[i])];
         lead += c * (1.0f - lead);
         echo += c * (kLeadLevel * lead - echo);
-        if (std::abs(samples[i] - kEchoLevel * echo) > 1e-6f)
+        if (std::abs(samples[i] - kEchoLevel * kEchoTrim * echo) > 1e-6f)
             return false;
     }
     return true;
@@ -186,6 +244,24 @@ std::string with_edited_level(std::string json, std::string_view to) {
     const std::string_view from = "\"level\": 0.75";
     const auto at = json.find(from);
     return at == std::string::npos ? std::string{} : json.replace(at, from.size(), to);
+}
+
+// Replace the first occurrence of `from` at or after `after`.
+std::string edited_after(std::string json, std::string_view after, std::string_view from,
+                         std::string_view to) {
+    const auto anchor = json.find(after);
+    const auto at = anchor == std::string::npos ? anchor : json.find(from, anchor);
+    return at == std::string::npos ? std::string{} : json.replace(at, from.size(), to);
+}
+
+// A refused Custom restore leaves the application's graph as it was.
+bool refused_untouched(const std::string& edited, TrimTypes trims, std::string_view rule) {
+    SignalGraph g;
+    const auto existing = g.add_gain_node("existing");
+    const auto load = restore(g, edited, true, trims);
+    return !edited.empty() && existing != 0 && !load.ok() && load.subgraphs.empty() &&
+           g.nodes().size() == 1 && g.nodes().front().id == existing &&
+           load.load.error.starts_with(rule);
 }
 
 int detected(std::string_view defect, bool caught) {
@@ -226,6 +302,19 @@ int main(int argc, char** argv) {
         return detected("skewed-clock", !render(json, split, &refused, 1) &&
                                             refused == ControlProcessResult::WrongStart);
     }
+    // The echo trim's state is 0.5f; 9.0f is outside what the type accepts.
+    if (mode == "--planted-missing-custom-type")
+        return detected("missing-custom-type",
+                        refused_untouched(json, TrimTypes::None, "subgraph_instance_mismatch"));
+    if (mode == "--planted-custom-version")
+        return detected("custom-version",
+                        refused_untouched(edited_after(json, kTrimType, "\"version\": 1",
+                                                       "\"version\": 2"),
+                                          TrimTypes::CurrentAndNext, "subgraph_instance_mismatch"));
+    if (mode == "--planted-custom-state")
+        return detected("custom-state",
+                        refused_untouched(edited_after(json, "\"nodes\"", "AAAAPw==", "AAAQQQ=="),
+                                          TrimTypes::Current, "subgraph_state_rejected"));
     if (!mode.empty())
         return 2;
     const auto load = restore(g, json, true);
@@ -235,6 +324,14 @@ int main(int argc, char** argv) {
         load.subgraphs[0].parameters.at("level") != kEchoLevel ||
         load.subgraphs[1].parameters.at("level") != kLeadLevel)
         return 1;
+    // The Custom member keeps its exact type, version and opaque state.
+    for (const auto& strip : load.subgraphs) {
+        const auto* trim = g.node(strip.nodes.back());
+        const float want = strip.instance_identity == "echo" ? kEchoTrim : 1.0f;
+        if (!trim || trim->type != NodeType::Custom || trim->custom_type_id != kTrimType ||
+            trim->custom_type_version != 1 || g.custom_node_state(trim->id) != trim_state(want))
+            return 1;
+    }
     const auto a = GraphSerializer::inspect_document(json);
     const auto b = GraphSerializer::inspect_document(to_saved_subgraph_document(g, load.subgraphs));
     if (!a.ok() || !b.ok() || a.document.semantic_digest() != b.document.semantic_digest() ||
