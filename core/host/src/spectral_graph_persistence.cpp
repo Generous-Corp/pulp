@@ -94,12 +94,13 @@ std::optional<SpectralIdentity> identity(View v) {
     return id.value;
 }
 // The saved frame contract and original extent determine the finite stream:
-// the same rule the source factory and runtime use, so a saved asset carries
-// no geometry the runtime would derive differently.
+// the same rule and policy (dividing_hop_v1) the morph factory and runtime use,
+// so a saved asset carries no geometry the runtime would derive differently.
 SpectralFiniteStreamRule stream_rule(const SpectralIdentity& shape, std::uint64_t length) {
     return SpectralFiniteStreamRule::make(static_cast<std::uint64_t>(shape.fft_size()),
                                           static_cast<std::uint64_t>(shape.hop()),
-                                          static_cast<std::uint64_t>(shape.channels()), length);
+                                          static_cast<std::uint64_t>(shape.channels()), length,
+                                          SpectralFiniteStreamRule::Policy::dividing_hop_v1);
 }
 const char* type_name(NodeType type) {
     switch (type) {
@@ -202,6 +203,10 @@ std::string write(const SignalGraph& graph,
             const auto* type = type_name(n.type);
             if (graph.is_processor_node(n.id))
                 return refuse("node " + n.name + " is a Processor node");
+            if (n.type == NodeType::SpectralAssetSource)
+                return refuse("node " + n.name +
+                              " is a single-stream spectral asset source; its persistence is "
+                              "not admitted");
             if (n.type == NodeType::SpectralAnalysis)
                 return refuse("node " + n.name +
                               " is a SpectralAnalysis node; live analysis is not persisted, "
