@@ -161,6 +161,28 @@ inline void advance_time_position(lv2_adapter::Lv2TimePosition& pos, uint32_t n_
     }
 }
 
+/// Move a `time:Position` received at frame @p event_frame of a block back to
+/// the block's first frame. The position describes the transport at the event,
+/// so a rolling transport stood `event_frame * speed` frames earlier at the
+/// block start. A stopped transport, or one received at frame zero, is already
+/// a block-start position. An event time outside `[0, block_frames)` is not a
+/// frame offset into this block (for example a sequence in beat units) and is
+/// left alone rather than reinterpreted.
+inline void rewind_time_position_to_block_start(lv2_adapter::Lv2TimePosition& pos,
+                                                int64_t event_frame, uint32_t block_frames,
+                                                double sample_rate) noexcept {
+    if (event_frame <= 0 || event_frame >= static_cast<int64_t>(block_frames) ||
+        !pos.has_speed || pos.speed == 0.0f)
+        return;
+    const double frames = static_cast<double>(event_frame) * static_cast<double>(pos.speed);
+    if (pos.has_frame)
+        pos.frame -= static_cast<int64_t>(frames);
+    if (pos.has_beat && pos.has_beats_per_minute && sample_rate > 0.0 &&
+        pos.beats_per_minute > 0.0f) {
+        pos.beat -= (frames / sample_rate) * (static_cast<double>(pos.beats_per_minute) / 60.0);
+    }
+}
+
 /// Project a decoded `time:Position` onto the neutral transport every adapter
 /// hands the shared ProcessContext mapper.
 ///
@@ -385,8 +407,11 @@ inline void connect_port(LV2_Handle handle, uint32_t port, void* data) {
     }
 }
 
-inline void activate(LV2_Handle) {
-    // Nothing needed — processor is prepared at instantiation
+inline void activate(LV2_Handle handle) {
+    // The processor is prepared at instantiation. Activation only breaks the
+    // timeline: the first run() after it is a discontinuity.
+    if (auto* inst = static_cast<lv2_adapter::PulpLv2Instance*>(handle))
+        inst->timing_discontinuity_pending = true;
 }
 
 // Write a MidiBuffer into an LV2_Atom_Sequence output port. Uses the standard
@@ -591,6 +616,8 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
                         continue;
                     const auto* obj = reinterpret_cast<const LV2_Atom_Object*>(&ev->body);
                     if (decode_time_position(obj, time_urids, inst->transport)) {
+                        rewind_time_position_to_block_start(inst->transport, ev->time.frames,
+                                                            n_samples, inst->sample_rate);
                         inst->has_transport = true;
                         transport_received = true;
                     }
@@ -600,8 +627,8 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
 
         // Project the latched transport onto this block, then let the shared
         // mapper derive the bar and the change flags. Extrapolate only when the
-        // host sent nothing new this block — a Position that just arrived is
-        // already positioned at the block start. The latch sits at the previous
+        // host sent nothing new this block; a Position that just arrived was
+        // rewound to the block start above. The latch sits at the previous
         // block's start, so it advances by the previous block's length.
         if (inst->has_transport) {
             if (!transport_received) {
@@ -619,8 +646,19 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
 
         inst->previous_block_samples = n_samples;
 
+        // Neutral timing facts: LV2 has no monotonic counter, so only the
+        // latched time:frame and time:speed are published.
+        if (inst->has_transport) {
+            proc_ctx.timing = format::lv2_process_timing(
+                inst->transport.has_frame, inst->transport.frame, inst->transport.has_speed,
+                static_cast<double>(inst->transport.speed), inst->timing_discontinuity_pending);
+        } else {
+            proc_ctx.timing.discontinuity = inst->timing_discontinuity_pending;
+        }
+
         inst->processor->process(process_buffers, inst->midi_in, inst->midi_out,
                                  proc_ctx);
+        inst->timing_discontinuity_pending = false;
 
         // Serialize outgoing MIDI back to the LV2 atom output port.
         write_midi_out_to_sequence(

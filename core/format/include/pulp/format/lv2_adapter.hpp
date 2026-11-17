@@ -276,6 +276,11 @@ struct PulpLv2Instance {
     // position off by the difference whenever the host changes block size,
     // which the playhead diff reads as a transport jump.
     uint32_t previous_block_samples = 0;
+    // Raised at instantiation and by activate(): the next run() does not
+    // follow the last block the Processor saw, so its
+    // `ProcessContext::timing.discontinuity` is set. Cleared once a block has
+    // reached Processor::process().
+    bool timing_discontinuity_pending = true;
 
     // Previous-block transport snapshot backing the shared change-flag diff
     // (`tempo_changed` / `transport_jump` / ...), exactly as the other format

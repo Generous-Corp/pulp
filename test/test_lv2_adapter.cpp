@@ -4,6 +4,7 @@
 #include <pulp/format/lv2_adapter.hpp>
 #include <pulp/format/lv2_entry.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/host/host_event_timestamps.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
@@ -921,6 +922,7 @@ struct Lv2TimeCapture {
     int blocks = 0;
     int last_num_samples = 0;
     float tail_sample = -1.0f;
+    std::vector<ProcessContext> contexts;
 };
 
 Lv2TimeCapture g_lv2_time;
@@ -965,6 +967,7 @@ class Lv2TimeProbeProcessor final : public Processor {
         g_lv2_time.playing_valid = context.has_transport(TransportField::Playing);
         g_lv2_time.looping_valid = context.has_transport(TransportField::Looping);
         g_lv2_time.transport_jump = context.transport_jump;
+        g_lv2_time.contexts.push_back(context);
 
         for (size_t c = 0; c < audio_output.num_channels(); ++c) {
             auto* dst = audio_output.channel_ptr(c);
@@ -1369,6 +1372,142 @@ TEST_CASE("LV2 latched transport advances by the previous block's length",
     lv2_generic::run(handle.handle, 48);
     CHECK(g_lv2_time.position_samples == 1112);
     CHECK_FALSE(g_lv2_time.transport_jump);
+}
+
+TEST_CASE("LV2 run() publishes neutral timing facts and marks activation",
+          "[format][lv2][transport][process-timing]") {
+    Lv2FactoryGuard factory(&make_lv2_time_probe);
+    g_lv2_time = {};
+    Lv2FeatureBundle features;
+    Lv2HandleGuard handle{
+        lv2_generic::instantiate(&lv2_generic::g_lv2_descriptor, 48000.0, "", features.features)};
+    REQUIRE(handle.handle != nullptr);
+    auto* inst = static_cast<PulpLv2Instance*>(handle.handle);
+    const auto& urids = inst->time_urids;
+
+    std::array<float, 64> input{};
+    std::array<float, 64> output{};
+    LV2SequenceBuffer seq;
+    lv2_generic::connect_port(handle.handle, 0, input.data());
+    lv2_generic::connect_port(handle.handle, 1, output.data());
+    lv2_generic::connect_port(handle.handle, 2, seq.as_seq());
+
+    // No transport yet: nothing but the activation discontinuity.
+    lv2_generic::activate(handle.handle);
+    prepare_sequence(seq, inst->urid_atom_sequence);
+    lv2_generic::run(handle.handle, 32);
+    REQUIRE(g_lv2_time.contexts.back().timing ==
+            ProcessTiming{.discontinuity = true});
+
+    // Half-speed playback: time:frame moves half a block per block.
+    uint32_t capacity = prepare_sequence(seq, inst->urid_atom_sequence);
+    TimePositionEvent pos(urids.atom_object, urids.time_position, 0);
+    pos.add<float>(urids.time_speed, urids.atom_float, 0.5f);
+    pos.add<int64_t>(urids.time_frame, urids.atom_long, 1000);
+    REQUIRE(lv2_atom_sequence_append_event(seq.as_seq(), capacity, pos.header()));
+    lv2_generic::run(handle.handle, 32);
+    for (int i = 0; i < 3; ++i) {
+        prepare_sequence(seq, inst->urid_atom_sequence);
+        lv2_generic::run(handle.handle, 32);
+    }
+    REQUIRE(g_lv2_time.contexts.size() == 5);
+    const auto& half = g_lv2_time.contexts[1].timing;
+    REQUIRE_FALSE(half.discontinuity);
+    REQUIRE_FALSE(half.has_steady_sample);
+    REQUIRE(half.has_transport_sample);
+    REQUIRE(half.transport_sample == 1000);
+    REQUIRE(half.transport_moving);
+    REQUIRE(half.playback_rate == PlaybackRate::NonUnit);
+    REQUIRE(g_lv2_time.contexts[4].timing.transport_sample == 1048);
+
+    // The projection keeps every half-speed block in one epoch; without the
+    // rate fact each one would read as a seek.
+    auto boundaries = [&](bool keep_rate) {
+        host::HostBlockTimeline timeline;
+        host::HostBlockWindow window;
+        std::vector<host::HostBlockBoundary> out;
+        for (std::size_t i = 1; i < g_lv2_time.contexts.size(); ++i) {
+            auto ctx = g_lv2_time.contexts[i];
+            if (!keep_rate)
+                ctx.timing.playback_rate = PlaybackRate::Unknown;
+            REQUIRE(host::advance_from_context(timeline, ctx, window) ==
+                    host::HostEventResult::Accepted);
+            out.push_back(timeline.last_boundary());
+        }
+        return out;
+    };
+    const auto kept = boundaries(true);
+    REQUIRE(kept == std::vector<host::HostBlockBoundary>{
+                        host::HostBlockBoundary::First, host::HostBlockBoundary::Continuous,
+                        host::HostBlockBoundary::Continuous, host::HostBlockBoundary::Continuous});
+    const auto dropped = boundaries(false);
+    REQUIRE(dropped[1] == host::HostBlockBoundary::NewEpoch);
+
+    // Re-activation marks the next block again.
+    lv2_generic::activate(handle.handle);
+    prepare_sequence(seq, inst->urid_atom_sequence);
+    lv2_generic::run(handle.handle, 32);
+    REQUIRE(g_lv2_time.contexts.back().timing.discontinuity);
+}
+
+TEST_CASE("LV2 run() places a mid-block time:Position at the block start",
+          "[format][lv2][transport][process-timing]") {
+    Lv2FactoryGuard factory(&make_lv2_time_probe);
+    g_lv2_time = {};
+    Lv2FeatureBundle features;
+    Lv2HandleGuard handle{
+        lv2_generic::instantiate(&lv2_generic::g_lv2_descriptor, 48000.0, "", features.features)};
+    REQUIRE(handle.handle != nullptr);
+    auto* inst = static_cast<PulpLv2Instance*>(handle.handle);
+    const auto& urids = inst->time_urids;
+
+    std::array<float, 64> input{};
+    std::array<float, 64> output{};
+    LV2SequenceBuffer seq;
+    lv2_generic::connect_port(handle.handle, 0, input.data());
+    lv2_generic::connect_port(handle.handle, 1, output.data());
+    lv2_generic::connect_port(handle.handle, 2, seq.as_seq());
+
+    uint32_t capacity = prepare_sequence(seq, inst->urid_atom_sequence);
+    TimePositionEvent first(urids.atom_object, urids.time_position, 0);
+    first.add<float>(urids.time_speed, urids.atom_float, 1.0f);
+    first.add<int64_t>(urids.time_frame, urids.atom_long, 1968);
+    REQUIRE(lv2_atom_sequence_append_event(seq.as_seq(), capacity, first.header()));
+    lv2_generic::run(handle.handle, 32);
+
+    // The host reports the transport 16 frames into the next block, where it
+    // stands at 2016; the block itself starts at 2000.
+    capacity = prepare_sequence(seq, inst->urid_atom_sequence);
+    TimePositionEvent mid(urids.atom_object, urids.time_position, 16);
+    mid.add<float>(urids.time_speed, urids.atom_float, 1.0f);
+    mid.add<int64_t>(urids.time_frame, urids.atom_long, 2016);
+    REQUIRE(lv2_atom_sequence_append_event(seq.as_seq(), capacity, mid.header()));
+    lv2_generic::run(handle.handle, 32);
+
+    REQUIRE(g_lv2_time.contexts.size() == 2);
+    REQUIRE(g_lv2_time.position_samples == 2000);
+    REQUIRE(g_lv2_time.contexts[1].timing.transport_sample == 2000);
+    REQUIRE_FALSE(g_lv2_time.transport_jump);
+
+    host::HostBlockTimeline timeline;
+    host::HostBlockWindow window;
+    for (const auto& ctx : g_lv2_time.contexts)
+        REQUIRE(host::advance_from_context(timeline, ctx, window) ==
+                host::HostEventResult::Accepted);
+    REQUIRE(timeline.last_boundary() == host::HostBlockBoundary::Continuous);
+
+    // A rewind never applies to an event time outside the block.
+    lv2_adapter::Lv2TimePosition stray{};
+    stray.has_speed = true;
+    stray.speed = 1.0f;
+    stray.has_frame = true;
+    stray.frame = 500;
+    lv2_generic::rewind_time_position_to_block_start(stray, 64, 32, 48000.0);
+    lv2_generic::rewind_time_position_to_block_start(stray, -3, 32, 48000.0);
+    REQUIRE(stray.frame == 500);
+    stray.speed = 0.0f;
+    lv2_generic::rewind_time_position_to_block_start(stray, 8, 32, 48000.0);
+    REQUIRE(stray.frame == 500);
 }
 
 // ── Port-index cross-check + channel-ceiling admission ───────────────────
