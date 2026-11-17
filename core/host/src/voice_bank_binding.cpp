@@ -163,6 +163,7 @@ struct VoiceBankBinding::Impl {
     HostEventIngress<SignalGraph::kHostEventIngressCapacity> ingress;
     std::array<HostEventRecord, SignalGraph::kHostEventIngressCapacity> projected{};
     std::uint64_t epoch = 0;
+    std::uint64_t reserved_epoch = 0;
     std::size_t max_frames = 0;
     std::uint64_t block_start = 0;
     std::size_t block_frames = 0;
@@ -533,9 +534,43 @@ bool VoiceBankBinding::activate(VoiceBankBindingResult& result) noexcept {
     impl_->member_sustain.fill(false);
     impl_->zone_sustain.fill(false);
     impl_->epoch = next_epoch;
+    impl_->reserved_epoch = 0;
     impl_->ingress.reset(impl_->epoch);
     result = {};
     return true;
+}
+HostEventResult VoiceBankBinding::reserve_event_reset(std::uint64_t& epoch) noexcept {
+    if (impl_->block_open)
+        return HostEventResult::Busy;
+    std::uint64_t next_epoch = 0;
+    if (!claim_bank_epoch(next_epoch))
+        return HostEventResult::Overflow;
+    impl_->reserved_epoch = next_epoch;
+    epoch = next_epoch;
+    return HostEventResult::Accepted;
+}
+HostEventResult VoiceBankBinding::commit_event_reset(std::uint64_t epoch) noexcept {
+    if (impl_->block_open)
+        return HostEventResult::Busy;
+    if (epoch == 0 || epoch != impl_->reserved_epoch)
+        return HostEventResult::StaleEpoch;
+    impl_->reserved_epoch = 0;
+    reset_idle_confirmations();
+    impl_->tracker.reset();
+    impl_->owner->reset();
+    impl_->held.fill({});
+    impl_->member_sustain.fill(false);
+    impl_->zone_sustain.fill(false);
+    impl_->epoch = epoch;
+    impl_->ingress.reset(impl_->epoch);
+    return HostEventResult::Accepted;
+}
+HostEventResult VoiceBankBinding::abort_block() noexcept {
+    if (!impl_->block_open)
+        return HostEventResult::StaleEpoch;
+    (void)impl_->ingress.end_block();
+    impl_->block_open = false;
+    return HostEventResult::Accepted;
 }
 HostEventResult VoiceBankBinding::begin_block(std::uint64_t first_sample,
                                               std::size_t frames) noexcept {

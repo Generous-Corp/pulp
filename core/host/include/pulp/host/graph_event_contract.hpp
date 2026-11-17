@@ -253,9 +253,9 @@ template <std::size_t Capacity = 256> class HostEventIngress final {
 inline HostEventResult derive_mpe(std::span<const HostEventRecord> events,
                                   std::uint64_t block_start, midi::MpeVoiceTracker& tracker,
                                   midi::MpeBuffer& out) noexcept {
-    bool dropped = false;
-    int32_t offset = 0;
-    midi::bind_tracker_to_buffer(tracker, out, offset, &dropped);
+    // The one-pointer sink keeps the per-call rebinding allocation free.
+    midi::MpeTrackerSink sink{&out, 0, false};
+    midi::bind_tracker_to_sink(tracker, sink);
     // A bounded tracker can defer note-offs when the previous block's sidecar
     // was full. Flush that lifecycle queue at block start before consuming new
     // host records, matching the tracker/sidecar contract and preserving note
@@ -270,13 +270,13 @@ inline HostEventResult derive_mpe(std::span<const HostEventRecord> events,
             absolute - block_start >
                 static_cast<std::uint64_t>(std::numeric_limits<int32_t>::max()))
             return HostEventResult::OutOfRange;
-        offset = static_cast<int32_t>(absolute - block_start);
+        sink.sample_offset = static_cast<int32_t>(absolute - block_start);
         if (event.has_ump)
             (void)tracker.process(event.ump);
         else
             (void)tracker.process(event.midi);
     }
-    return dropped ? HostEventResult::Overflow : HostEventResult::Accepted;
+    return sink.expression_event_dropped ? HostEventResult::Overflow : HostEventResult::Accepted;
 }
 
 /// Project an already-sorted absolute host-event block into the fixed MIDI,

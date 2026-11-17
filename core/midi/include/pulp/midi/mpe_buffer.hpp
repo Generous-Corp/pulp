@@ -208,4 +208,51 @@ inline void bind_tracker_to_buffer(MpeVoiceTracker& tracker,
     };
 }
 
+/// Forwarding target for `bind_tracker_to_sink()`: the expression buffer, the
+/// sample offset stamped on each forwarded event, and the drop flag.
+struct MpeTrackerSink {
+    MpeBuffer* out = nullptr;
+    int32_t sample_offset = 0;
+    bool expression_event_dropped = false;
+};
+
+/// The forwarding of `bind_tracker_to_buffer()`, with every callback capturing
+/// only `sink`. A one-pointer capture fits `std::function`'s inline storage,
+/// so binding does not allocate and may be repeated on the audio thread, for
+/// example by a helper that binds a caller-owned tracker for one block.
+/// `sink.out` must be non-null, and `sink` must outlive every tracker call
+/// made through these callbacks.
+inline void bind_tracker_to_sink(MpeVoiceTracker& tracker, MpeTrackerSink& sink) {
+    using K = MpeExpressionEvent::Kind;
+    auto* target = &sink;
+    tracker.on_note_lifecycle = [target](const MpeNoteState* note_off,
+                                         const MpeNoteState* note_on) {
+        std::array<MpeExpressionEvent, 2> events{};
+        std::size_t count = 0;
+        if (note_off)
+            events[count++] = {target->sample_offset, K::NoteOff, *note_off};
+        if (note_on)
+            events[count++] = {target->sample_offset, K::NoteOn, *note_on};
+        const bool appended =
+            target->out->add_batch(std::span<const MpeExpressionEvent>{events.data(), count});
+        // Matches bind_tracker_to_buffer(): only a refused start or retrigger
+        // is a drop; a refused pure release stays in the tracker's queue.
+        if (!appended && note_on)
+            target->expression_event_dropped = true;
+        return appended;
+    };
+    tracker.on_pitch_bend = [target](const MpeNoteState& s) {
+        if (!target->out->add({target->sample_offset, K::PitchBend, s}))
+            target->expression_event_dropped = true;
+    };
+    tracker.on_pressure = [target](const MpeNoteState& s) {
+        if (!target->out->add({target->sample_offset, K::Pressure, s}))
+            target->expression_event_dropped = true;
+    };
+    tracker.on_timbre = [target](const MpeNoteState& s) {
+        if (!target->out->add({target->sample_offset, K::Timbre, s}))
+            target->expression_event_dropped = true;
+    };
+}
+
 } // namespace pulp::midi

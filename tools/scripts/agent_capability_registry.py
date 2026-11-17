@@ -245,7 +245,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         'include': 'pulp/host/graph_event_contract.hpp',
-        'fingerprint': 'sha256:1364609e77aee4e39fa3c1692e36c715ec9385856515dc3076d1de7ef0b0350a',
+        'fingerprint': 'sha256:a328217406e59ae7caa052f4a92fb622b9f63e5aada91f5a403a55a134444c48',
         'disposition': 'infrastructure',
         'capability_keys': [],
         'rationale': 'Bounded host and graph-authored event lane used by SignalGraph Custom-node callbacks; it is an infrastructure contract, not an independently advertised generator capability.',
@@ -259,7 +259,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         'include': 'pulp/host/voice_bank_binding.hpp',
-        'fingerprint': 'sha256:50a120b964cf044b640595f4b51d7302c345ea8e6c78a851345e8370669cedcc',
+        'fingerprint': 'sha256:362af2c4fdc765cb0467f42e2882c155204f7441163dc0b951b245670cd74b55',
         'disposition': 'infrastructure',
         'capability_keys': [],
         'rationale': 'Bounded eight-slot graph voice-bank runtime with sustain; saved activation and paced realtime qualification remain open.',
@@ -924,7 +924,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/midi/mpe_buffer.hpp",
-        "fingerprint": "sha256:9b08b7224b5ce9c5aa833547fccd1827d70b18445d0c14fc3775bc21eb072cfb",
+        "fingerprint": "sha256:a825ff13709cf5ec2e90ea577e1936f0eb70adcd3d0794b1d89bb18a8ac1a732",
         "disposition": "capability_support",
         "capability_keys": ["midi.mpe-voice-tracker"],
         "rationale": (
