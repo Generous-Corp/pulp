@@ -41,6 +41,7 @@ target_sources(pulp-host PRIVATE
     src/voice_identity.cpp
     src/voice_template.cpp
     src/voice_bank_binding.cpp
+    src/host_timeline_binding.cpp
     src/scan_blacklist.cpp
     src/scan_cache.cpp
     src/background_scanner.cpp
