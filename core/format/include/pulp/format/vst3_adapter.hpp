@@ -101,8 +101,9 @@ Steinberg::IPlugView* make_plug_view(Processor& processor,
 // no tempo, no time signature and no transport state.
 //
 // Each flag below is here because build_process_context() reads the
-// matching kXxxValid bit; fields the decoder ignores (continuous time
-// samples, bar position -- derived from beats + time signature instead --
+// matching kXxxValid bit. Continuous time samples feed the neutral
+// `ProcessContext::timing` steady clock. Fields the decoder ignores (bar
+// position -- derived from beats + time signature instead --
 // samples-to-next-clock, chord) are deliberately NOT requested, because
 // the point of the mask is to let the host skip work nobody consumes.
 // The host latches this once between initialize() and setActive().
@@ -113,7 +114,8 @@ inline constexpr Steinberg::uint32 kProcessContextRequirements =
     Steinberg::Vst::IProcessContextRequirements::kNeedProjectTimeMusic |
     Steinberg::Vst::IProcessContextRequirements::kNeedCycleMusic |
     Steinberg::Vst::IProcessContextRequirements::kNeedSystemTime |
-    Steinberg::Vst::IProcessContextRequirements::kNeedFrameRate;
+    Steinberg::Vst::IProcessContextRequirements::kNeedFrameRate |
+    Steinberg::Vst::IProcessContextRequirements::kNeedContinousTimeSamples;
 
 // The VST3 combined processor + controller
 // Wraps a pulp::format::Processor for the VST3 host
@@ -273,6 +275,7 @@ class PulpVst3Processor : public Steinberg::Vst::SingleComponentEffect,
         Steinberg::Vst::ProcessSetup& setup) override;
 
     Steinberg::tresult PLUGIN_API setActive(Steinberg::TBool state) override;
+    Steinberg::tresult PLUGIN_API setProcessing(Steinberg::TBool state) override;
 
     Steinberg::uint32 PLUGIN_API getLatencySamples() override;
     Steinberg::uint32 PLUGIN_API getTailSamples() override;
@@ -668,6 +671,17 @@ class PulpVst3Processor : public Steinberg::Vst::SingleComponentEffect,
     // on `ProcessContext`. Default-constructed so the first process()
     // call after construction reports no changes.
     detail::PlayheadSnapshot playhead_prev_{};
+
+    // Raised by setActive(true) and setProcessing(true): the next block the
+    // Processor observes does not follow the last one it saw, so its
+    // `ProcessContext::timing.discontinuity` is set. Written on the host's
+    // control thread, consumed on the audio thread once a block has reached
+    // Processor::process().
+    std::atomic<bool> timing_discontinuity_pending_{false};
+    // Audio thread only: a block skipped the Processor (bypass, layout refusal
+    // or state-restore contention). Without a continuous-time counter the next
+    // observed block cannot measure the skip, so it is marked discontinuous.
+    bool timing_block_skipped_ = false;
 
     // MainThreadDispatcher backend token. Acquired in initialize(),
     // released in terminate(). On macOS this lets adapter-side and

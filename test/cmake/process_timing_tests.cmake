@@ -12,6 +12,21 @@ if(TARGET pulp-host AND TARGET clap)
         COMPILE_DEFINITIONS PULP_CLAP_GUI=1)
 endif()
 
+# The same traces through the real VST3 adapter. Compiles vst3_plug_view.cpp for
+# the GUI symbols PulpVst3Processor::createView() references, like the other
+# adapter-driving VST3 tests.
+if(PULP_HAS_VST3 AND TARGET pulp-host)
+    add_executable(pulp-test-vst3-process-timing
+        test_vst3_process_timing.cpp
+        ${CMAKE_SOURCE_DIR}/core/format/src/vst3_plug_view.cpp)
+    target_link_libraries(pulp-test-vst3-process-timing
+        PRIVATE pulp::host Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-vst3-process-timing PRIVATE
+        PULP_VST3=1
+        PULP_VST3_GUI=1)
+    catch_discover_tests(pulp-test-vst3-process-timing)
+endif()
+
 # The installed-SDK timing consumer, built in-tree from the same source so the
 # required gate runs it on every change to the facts or the projection.
 if(TARGET pulp-host)
