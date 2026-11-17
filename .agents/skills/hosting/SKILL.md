@@ -606,6 +606,22 @@ The authoring extraction changes source ownership, not the graph's public
 contract or real-time lock rules. Recheck the host graph and executor parity
 suites after moving a method across these translation units.
 
+### Graph code runs inside a WebAssembly AudioWorklet
+
+`tools/cmake/PulpSampleRegionWebSources.cmake` compiles the graph sources,
+including `signal_graph_authoring.cpp`, into the sample-region WAM DSP, which
+runs in `AudioWorkletGlobalScope`. That scope has no `crypto` and no
+`performance`, so under Emscripten `std::random_device` throws a JavaScript
+`ReferenceError` from `crypto.getRandomValues` (it passes straight through a
+C++ `catch (...)`), and `steady_clock::now()` fails on the missing
+`performance.now()`. `system_clock` maps to `Date.now()` and is safe. Node
+creation mints an authored ID, so its per-graph salt comes from the
+entropy-free helpers in `signal_graph_authored_id_internal.hpp` under
+`__EMSCRIPTEN__`. Before adding an entropy or clock read to any source in that
+list, check the built worklet module for `getRandomValues`; the
+`test/sample_region_web` browser proof mints IDs inside a worklet and fails
+with the `ReferenceError` if one returns.
+
 ### Edge probes publish once per block, from the calling thread
 
 Every edge probe kind observes into a per-block stage in the executor and is
