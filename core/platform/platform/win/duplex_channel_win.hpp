@@ -95,6 +95,6 @@ struct DuplexChannel {
     }
 };
 
-}  // namespace pulp::platform
+} // namespace pulp::platform
 
-#endif  // _WIN32
+#endif // _WIN32

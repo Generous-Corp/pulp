@@ -3521,7 +3521,7 @@ bool handle_is_inheritable(HANDLE handle) {
     REQUIRE(GetHandleInformation(handle, &flags) != FALSE);
     return (flags & HANDLE_FLAG_INHERIT) != 0;
 }
-}  // namespace
+} // namespace
 
 TEST_CASE("The private duplex client end is inheritable only after it is marked for launch",
           "[runtime][child-process][retained-custody][duplex-inheritance]") {
