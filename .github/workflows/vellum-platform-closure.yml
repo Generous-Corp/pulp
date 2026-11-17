@@ -1,0 +1,231 @@
+# Vellum platform closure export.
+#
+# Vellum compiles the framework it took from Pulp through closure manifests:
+# the build graph Pulp's own configure produces, one manifest per unit, with no
+# file content. The manifests Vellum holds were exported from a Darwin arm64
+# configure. For every other platform they come from a configure of that
+# platform, and this workflow is the one place that produces them:
+#
+#   1. configure this checkout for the platform (Release, GPU and Skia on, the
+#      locked Skia/Dawn asset for the platform);
+#   2. run tools/scripts/vellum_closure.py manifest once per unit, with
+#      tools/scripts/vellum_d3_units.json naming each unit's targets;
+#   3. upload the manifests and an export.json (platform, commit, runner image
+#      name and version, ImageOS, renderer asset) as one artifact. A runner
+#      that declares no ImageVersion (a self-hosted runner or a VM) fails this
+#      step instead of recording a blank image.
+#
+# The export runs at this workflow's own commit, so the commit it records is
+# the one the workflow definition and the exporter came from. Vellum's
+# tools/mirror/write_platform_record.py turns the downloaded artifact into the
+# platform record Vellum commits; Vellum CI reads that record and never
+# re-runs this export.
+#
+# Run it by hand (workflow_dispatch) or call it from another workflow
+# (workflow_call). The defaults describe linux-x64. Another platform passes its
+# own platform key, runner, toolchain command, Skia platform and asset name.
+#
+# This workflow only reads the repository. It holds no credential beyond the
+# read-only default token and publishes nothing but the artifact.
+name: Vellum platform closure
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Platform key: linux-x64, linux-arm64, windows-x64, windows-arm64, ios-device-arm64, ios-simulator-arm64, android-arm64-v8a, android-x86_64 or wasm32'
+        required: false
+        type: string
+        default: linux-x64
+      runs_on_json:
+        description: 'Runner labels as a JSON array'
+        required: false
+        type: string
+        default: '["ubuntu-latest"]'
+      toolchain_command:
+        description: 'Run from the repository root before configure: installs the platform packages and bootstraps dependencies'
+        required: false
+        type: string
+        default: 'python3 tools/ci/install_linux_build_deps.py --profile native --extra-packages "libx11-dev libdbus-1-dev ccache" && ./setup.sh --ci --deps-only'
+      skia_platform:
+        description: 'The argument tools/scripts/fetch_skia_for_release.py takes'
+        required: false
+        type: string
+        default: linux-x64
+      renderer_asset:
+        description: 'File name of the locked Skia/Dawn asset, recorded in export.json'
+        required: false
+        type: string
+        default: skia-build-linux-x64-gpu-release.zip
+      configure_args:
+        description: 'Extra cmake arguments, one per line'
+        required: false
+        type: string
+        default: ''
+      units:
+        description: 'Unit names to export, space separated'
+        required: false
+        type: string
+        default: 'foundation gpu-device-api canvas render-2d state-core dataplane view-core design-import view-script'
+      runner_image_name:
+        description: 'The runner image name when /etc/os-release does not give it'
+        required: false
+        type: string
+        default: ''
+  workflow_call:
+    inputs:
+      platform:
+        type: string
+        required: true
+      runs_on_json:
+        type: string
+        default: '["ubuntu-latest"]'
+      toolchain_command:
+        type: string
+        default: ''
+      skia_platform:
+        type: string
+        required: true
+      renderer_asset:
+        type: string
+        required: true
+      configure_args:
+        type: string
+        default: ''
+      units:
+        type: string
+        default: 'foundation gpu-device-api canvas render-2d state-core dataplane view-core design-import view-script'
+      runner_image_name:
+        type: string
+        default: ''
+    outputs:
+      artifact:
+        description: Name of the uploaded artifact holding the manifests and export.json
+        value: ${{ jobs.export.outputs.artifact }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vellum-platform-closure-${{ inputs.platform }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  export:
+    name: export ${{ inputs.platform }} closure
+    runs-on: ${{ fromJSON(inputs.runs_on_json) }}
+    timeout-minutes: 120
+    outputs:
+      artifact: ${{ steps.inputs.outputs.artifact }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          lfs: false
+          persist-credentials: false
+
+      - name: Check the inputs
+        id: inputs
+        shell: bash
+        env:
+          PLATFORM: ${{ inputs.platform }}
+          SKIA_PLATFORM: ${{ inputs.skia_platform }}
+          RENDERER_ASSET: ${{ inputs.renderer_asset }}
+          UNITS: ${{ inputs.units }}
+        run: |
+          set -euo pipefail
+          python3 -I - <<'PY'
+          import json, os, re
+          platforms = {
+              "linux-x64", "linux-arm64", "windows-x64", "windows-arm64",
+              "ios-device-arm64", "ios-simulator-arm64",
+              "android-arm64-v8a", "android-x86_64", "wasm32",
+          }
+          platform = os.environ["PLATFORM"]
+          if platform not in platforms:
+              raise SystemExit(f"{platform!r} is not a platform a closure is exported for")
+          if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", os.environ["SKIA_PLATFORM"]) is None:
+              raise SystemExit("skia_platform must be a plain name")
+          if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*\.zip", os.environ["RENDERER_ASSET"]) is None:
+              raise SystemExit("renderer_asset must be a plain .zip file name")
+          units = os.environ["UNITS"].split()
+          if not units or any(re.fullmatch(r"[a-z0-9][a-z0-9-]*", u) is None for u in units):
+              raise SystemExit("units must be one or more lower-case unit names")
+          known = {u["name"] for u in json.load(open("tools/scripts/vellum_d3_units.json"))["units"]}
+          unknown = sorted(set(units) - known)
+          if unknown:
+              raise SystemExit(f"units not in tools/scripts/vellum_d3_units.json: {unknown}")
+          PY
+          echo "artifact=vellum-closure-${PLATFORM}" >> "$GITHUB_OUTPUT"
+
+      - name: Install the platform toolchain
+        if: inputs.toolchain_command != ''
+        shell: bash
+        env:
+          TOOLCHAIN_COMMAND: ${{ inputs.toolchain_command }}
+        run: |
+          set -euo pipefail
+          bash -c "$TOOLCHAIN_COMMAND"
+
+      - name: Fetch the locked Skia and Dawn
+        shell: bash
+        env:
+          SKIA_PLATFORM: ${{ inputs.skia_platform }}
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/fetch_skia_for_release.py "$SKIA_PLATFORM" \
+            --dest external/skia-build --cache-lock-timeout 300
+
+      - name: Configure
+        shell: bash
+        env:
+          CONFIGURE_ARGS: ${{ inputs.configure_args }}
+        run: |
+          set -euo pipefail
+          args=()
+          while IFS= read -r line; do
+            if [ -n "$line" ]; then args+=("$line"); fi
+          done <<< "$CONFIGURE_ARGS"
+          # The default configure with Skia and the GPU backend: the same
+          # shape the Darwin closures were exported from.
+          cmake -S . -B build-closure -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_BUILD_EXAMPLES=OFF -DPULP_ENABLE_GPU=ON \
+            -DSKIA_DIR="$GITHUB_WORKSPACE/external/skia-build" \
+            ${args[@]+"${args[@]}"}
+
+      - name: Export one closure manifest per unit
+        shell: bash
+        env:
+          UNITS: ${{ inputs.units }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/closure"
+          for unit in $UNITS; do
+            python3 tools/scripts/vellum_closure.py manifest \
+              --source-root . --build-dir build-closure \
+              --unit-manifest tools/scripts/vellum_d3_units.json --unit "$unit" \
+              --output "$RUNNER_TEMP/closure/$unit.json"
+          done
+
+      - name: Describe the export
+        shell: bash
+        env:
+          PLATFORM: ${{ inputs.platform }}
+          RENDERER_ASSET: ${{ inputs.renderer_asset }}
+          IMAGE_NAME_INPUT: ${{ inputs.runner_image_name }}
+        run: |
+          set -euo pipefail
+          # Fails when the runner image is not fully named: a self-hosted
+          # runner or VM sets no ImageVersion, and a record must not carry a
+          # blank or placeholder image.
+          python3 tools/scripts/vellum_closure.py export-meta \
+            --platform "$PLATFORM" --renderer-asset "$RENDERER_ASSET" \
+            --image-name "$IMAGE_NAME_INPUT" \
+            --output "$RUNNER_TEMP/closure/export.json"
+
+      - name: Upload the manifests
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: ${{ steps.inputs.outputs.artifact }}
+          path: ${{ runner.temp }}/closure
+          if-no-files-found: error
+          retention-days: 30

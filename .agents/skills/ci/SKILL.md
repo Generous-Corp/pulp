@@ -13784,3 +13784,24 @@ with `-k 0`, and uploads a JSON report grouped by capability-ledger row. Notes:
   whose head does not contain that commit (checked with Vellum's compare
   endpoint before anything is downloaded); the workflow sets it to the commit
   that introduced the `ParamModel` surface `integrations/pulp-vellum` builds on.
+
+## Exporting a platform's Vellum closure
+
+`vellum-platform-closure.yml` (`workflow_dispatch` and `workflow_call`) is the one
+place a non-Darwin closure is produced. It configures the checkout for the
+platform, runs `tools/scripts/vellum_closure.py manifest` per unit and uploads
+the manifests with an `export.json`. The commit it records is its own
+`GITHUB_SHA`, so dispatch it on `main`: Vellum's provenance lane refuses a
+commit that is not on Pulp main.
+
+- The defaults are linux-x64. Another platform passes `platform`,
+  `runs_on_json`, `toolchain_command`, `skia_platform` and `renderer_asset`.
+- The configure is the plain Release GPU Skia one the Darwin closures came
+  from. Adding options changes the closure and the record's options digest.
+- The artifact is the input to Vellum's `tools/mirror/write_platform_record.py`;
+  Vellum CI never re-runs this export, so a platform's record is only as
+  reproducible as this workflow at the recorded commit.
+- The runner image name comes from `/etc/os-release` and the version from the
+  hosted runner's `ImageVersion` (`vellum_closure.py export-meta`, which also
+  records `ImageOS`). A self-hosted runner or VM sets no `ImageVersion`; the
+  step then fails rather than recording a blank or placeholder image.
