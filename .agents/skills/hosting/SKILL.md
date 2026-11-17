@@ -3599,11 +3599,28 @@ loses which nodes form which instance. `to_saved_subgraph_document` and
 `from_saved_subgraph_document` (`subgraph_persistence.hpp`) add a `subgraphs`
 record list that names members by logical identity, never NodeId. Restore
 needs the caller's templates: each record is checked against a fresh scratch
-expansion of its template (member type and nested name, child identities and
-indices, internal edges, parameter set and bounds), and any mismatch clears
-the graph. Bounds and Processor targets always come from the template, so a
-document cannot widen them. `inspect_document` refuses dangling or shared
-members and records outside the v6 envelope, without needing templates.
+expansion of its template (member type and nested name, port kinds, exact
+Custom type and version, exact Processor graph type, child identities and
+indices, every semantic field of internal edges, parameter set and bounds, and
+Custom state its type accepts). Bounds and Processor targets always come from
+the template, so a document cannot widen them. `inspect_document` refuses
+dangling or shared members and records outside the v6 envelope, without
+needing templates.
+
+Gotchas for subgraph restore. The whole document is loaded and rebound on a
+candidate graph first, and only a passing candidate is loaded into the
+caller's graph, so a refusal normally leaves the caller's graph untouched;
+only a second pass that behaves differently clears it. Both passes need the
+custom node types: the candidate and every scratch expansion copy them from
+the caller's graph with `GraphSerializer::copy_custom_node_types`, so register
+Custom types on the graph BEFORE calling the restore, or every Custom member
+is refused as an expansion mismatch. Processor factories, restore registries
+and Custom `create`/`load_state`/`destroy` therefore run several times per
+restore on the control thread; they must be repeatable and side-effect free.
+A Custom member's state is checked by creating a probe instance, calling
+`load_state` and destroying it; a stateless type (no `create` or no
+`load_state`) must carry empty state. The writer applies the same check, so it
+returns an empty string for a member whose live state its type refuses.
 
 Saved identity strictness: `inspect_document`, `diff_graph_documents` and
 `from_saved_document` rebuild each node's identity string from its saved record
