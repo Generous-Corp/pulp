@@ -280,6 +280,9 @@ class GraphSerializer {
     // Result of a load attempt. Plugins that couldn't be re-resolved show
     // up in `missing_plugins` with their original identity tuple — the
     // graph still loads but those nodes have null PluginSlots.
+    // A refused load (ok == false) carries only its error: every list and
+    // map below is empty, and a load refused after it began replacing the
+    // caller's graph leaves that graph empty.
     struct LoadResult {
         bool ok = false;
         std::string error;                        // populated when ok == false
@@ -361,6 +364,12 @@ class GraphSerializer {
     /// document exactly as `from` would without touching `from`. Returns
     /// false when `to` refuses a registration.
     static bool copy_custom_node_types(const SignalGraph& from, SignalGraph& to);
+
+  private:
+    // The body of from_json. Sets `graph_touched` once it starts replacing
+    // the caller's graph; from_json routes every refusal through one cleanup.
+    static LoadResult load_json_(SignalGraph& graph, const std::string& json,
+                                 const GraphLoadOptions& options, bool& graph_touched);
 };
 
 } // namespace pulp::host

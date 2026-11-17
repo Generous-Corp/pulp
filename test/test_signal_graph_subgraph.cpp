@@ -542,6 +542,10 @@ void require_refused(const std::string& document, const std::string& rule) {
     CHECK(loaded.load.error.find(rule) != std::string::npos);
     CHECK(loaded.subgraphs.empty());
     CHECK(graph.nodes().empty());
+    CHECK(loaded.load.identity_node_ids.empty());
+    CHECK(loaded.load.persisted_node_ids.empty());
+    CHECK(loaded.load.editor_layout.empty());
+    CHECK(loaded.load.unrestored_node_ids.empty());
 }
 
 } // namespace
@@ -795,6 +799,42 @@ TEST_CASE("saved subgraph restore refuses records that do not match their templa
                     "subgraph_state_rejected");
     require_refused(replaced(rack.document, "\"gain\": 0.5", "\"gain\": 0.5,\n \"extra\": 1.0"),
                     "subgraph_state_rejected");
+}
+
+TEST_CASE("a template mismatch after the flattened load returns no graph, instances or maps") {
+    PersistedRack rack;
+    build_rack(rack);
+    // Lay out every node so a stale editor_layout entry would be visible.
+    std::unordered_map<NodeId, std::pair<float, float>> layout;
+    for (const auto& node : rack.graph.nodes())
+        layout.emplace(node.id, std::pair{static_cast<float>(node.id) * 10.0f, 5.0f});
+    const auto document = to_saved_subgraph_document(rack.graph, rack.instances, layout);
+    REQUIRE_FALSE(document.empty());
+    const auto mismatched = replaced(document, "\"template_identity\": \"test.rack\"",
+                                     "\"template_identity\": \"test.gain\"");
+
+    SignalGraph graph;
+    REQUIRE(graph.add_gain_node("existing") != 0);
+    const auto refused = from_saved_subgraph_document(graph, mismatched, rack_templates());
+    INFO(refused.load.error);
+    CHECK_FALSE(refused.ok());
+    CHECK(refused.load.error.find("subgraph_instance_mismatch") != std::string::npos);
+    CHECK(graph.nodes().empty());
+    CHECK(refused.subgraphs.empty());
+    CHECK(refused.load.identity_node_ids.empty());
+    CHECK(refused.load.persisted_node_ids.empty());
+    CHECK(refused.load.editor_layout.empty());
+    CHECK(refused.load.unrestored_node_ids.empty());
+    CHECK(refused.load.missing_plugins.empty());
+
+    // Control: the unedited document fills every map the refusal must empty.
+    SignalGraph control;
+    const auto loaded = from_saved_subgraph_document(control, document, rack_templates());
+    INFO(loaded.load.error);
+    REQUIRE(loaded.ok());
+    CHECK(loaded.load.identity_node_ids.size() == rack.graph.nodes().size());
+    CHECK(loaded.load.persisted_node_ids.size() == rack.graph.nodes().size());
+    CHECK(loaded.load.editor_layout.size() == rack.graph.nodes().size());
 }
 
 TEST_CASE("saved subgraph document restores a member whose display name changed") {

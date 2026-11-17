@@ -58,7 +58,8 @@ struct SubgraphDocumentLoad {
 /// `templates`. Template lookup, document inspection, and record shape are
 /// checked before the graph is touched, and those refusals leave `graph`
 /// unchanged; conformance to each template is checked after the flattened
-/// graph loads, and a refusal from then on clears `graph`. Every refusal
+/// graph loads, and a refusal from then on clears `graph` and empties every
+/// map and list `load` returned, as any refused LoadResult. Every refusal
 /// names its rule in load.error (`subgraph_template_unknown`,
 /// `subgraph_template_duplicate`, `subgraph_instance_mismatch`,
 /// `subgraph_state_rejected`, or a document inspection refusal).

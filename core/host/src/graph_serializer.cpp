@@ -9,6 +9,7 @@
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/detail/durable_file_replacement.hpp>
 
+#include "graph_load_refusal.hpp"
 #include "graph_serializer_test_access.hpp"
 #include "spectral_graph_persistence.hpp"
 
@@ -58,6 +59,7 @@ std::atomic<bool> g_fail_next_write{false};
 std::atomic<bool> g_fail_next_replace{false};
 std::atomic<bool> g_fail_next_authored_id_plan{false};
 std::atomic<bool> g_fail_next_identity_record{false};
+std::atomic<bool> g_fail_next_document_parse{false};
 
 // Bounds nesting depth and object member counts in one linear scan before the
 // document reaches the parser. Each member of an object has exactly one ':'
@@ -1391,6 +1393,10 @@ void GraphSerializerTestAccess::fail_next_authored_id_plan() noexcept {
 
 void GraphSerializerTestAccess::fail_next_identity_record() noexcept {
     g_fail_next_identity_record.store(true, std::memory_order_release);
+}
+
+void GraphSerializerTestAccess::fail_next_document_parse() noexcept {
+    g_fail_next_document_parse.store(true, std::memory_order_release);
 }
 
 const char* graph_document_refusal_name(GraphDocumentRefusal refusal) noexcept {
@@ -2768,13 +2774,7 @@ GraphSerializer::LoadResult GraphSerializer::from_saved_document(SignalGraph& gr
     }
     // A refusal after the load started leaves the graph and the result empty.
     const auto refuse = [&](std::string error) {
-        graph.clear();
-        result.ok = false;
-        result.persisted_node_ids.clear();
-        result.unrestored_node_ids.clear();
-        result.identity_node_ids.clear();
-        result.editor_layout.clear();
-        result.error = std::move(error);
+        detail::refuse_load(result, &graph, std::move(error));
         return result;
     };
     // Once from_json is called the caller's graph may already be replaced, so
@@ -2821,11 +2821,8 @@ GraphSerializer::LoadResult GraphSerializer::from_saved_document(SignalGraph& gr
             return refuse("connection_not_restored: " + *missing);
         return result;
     } catch (const std::exception& error) {
-        auto detail = std::string("identity_envelope_invalid: ") + error.what();
-        if (load_started)
-            return refuse(std::move(detail));
-        result = LoadResult{};
-        result.error = std::move(detail);
+        auto message = std::string("identity_envelope_invalid: ") + error.what();
+        detail::refuse_load(result, load_started ? &graph : nullptr, std::move(message));
         return result;
     }
 }
@@ -3000,6 +2997,22 @@ GraphSerializer::LoadResult GraphSerializer::from_file(SignalGraph& graph,
 
 GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const std::string& json,
                                                        const GraphLoadOptions& options) {
+    bool touched = false;
+    LoadResult result;
+    try {
+        result = load_json_(graph, json, options, touched);
+    } catch (const std::exception& error) {
+        result.error = std::string("graph load failed: ") + error.what();
+        result.ok = false;
+    }
+    if (!result.ok)
+        detail::refuse_load(result, touched ? &graph : nullptr);
+    return result;
+}
+
+GraphSerializer::LoadResult GraphSerializer::load_json_(SignalGraph& graph, const std::string& json,
+                                                        const GraphLoadOptions& options,
+                                                        bool& graph_touched) {
     LoadResult result;
     // Bound the document before any parse, so neither the spectral reader nor
     // the ordinary reader sees an oversized or quadratic-to-parse document.
@@ -3087,21 +3100,45 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
     std::unordered_map<NodeId, std::string> authored_ids;
     std::optional<std::string> authored_error;
     std::optional<choc::value::Value> original;
+    // The original document decides the format version, the v7 envelope check
+    // and the authored ID plan, so a failure to read it (including an
+    // allocation failure) refuses the load before the graph is touched rather
+    // than continuing as if the document had no version.
     try {
+        if (g_fail_next_document_parse.exchange(false, std::memory_order_acq_rel))
+            throw std::bad_alloc();
         original = choc::json::parse(json);
-    } catch (...) {
-        // migrate_graph_json reports the parser error below.
+    } catch (const std::exception& e) {
+        result.error = std::string("JSON parse failed: ") + e.what();
+        return result;
     }
-    if (original && original->isObject() && original->hasObjectMember("format_version"))
+    if (original->isObject() && original->hasObjectMember("format_version"))
         source_format_version = graph_format_version(*original).value_or(0);
     std::string readable_json = json;
     if (!migrate_graph_json(readable_json, result.error)) {
         return result;
     }
-    // Format 7 is written only as a complete saved-identity v7 document, so an
-    // original format 7 document must pass the same envelope rules as
-    // inspect_document before any of it loads.
-    if (source_format_version == kSavedIdentityV7FormatVersion) {
+    // Format 7 is written only as a complete saved-identity v7 document, and
+    // the v7 envelope is written only at format 7. A document that declares
+    // either (format_version 7, or the v7 identity_schema or profile at any
+    // format_version) must pass the same format and envelope rules as
+    // inspect_document before any of it loads; otherwise a v7 document
+    // relabelled as an older format would load as legacy input and restore
+    // under replacement identities.
+    const auto declares_v7 = [](const choc::value::Value& root) {
+        if (!root.isObject())
+            return false;
+        if (graph_format_version(root).value_or(0) == kSavedIdentityV7FormatVersion ||
+            identity_schema_of(root) == kSavedIdentityV7)
+            return true;
+        if (!root.hasObjectMember("logical_identities"))
+            return false;
+        const auto& identities = root["logical_identities"];
+        return identities.isObject() && identities.hasObjectMember("profile") &&
+               identities["profile"].isString() &&
+               identities["profile"].getString() == kSavedIdentityV7;
+    };
+    if (declares_v7(*original)) {
         const auto inspection = inspect_document(json);
         if (!inspection.ok()) {
             result.error = std::string(graph_document_refusal_name(inspection.refusal)) + ": " +
@@ -3114,7 +3151,7 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
             return result;
         }
     }
-    if (original && original->isObject()) {
+    if (original->isObject()) {
         // A planning failure (for example an allocation failure) must not
         // look like success with freshly minted IDs; refuse before the graph
         // is touched.
@@ -3144,7 +3181,9 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
         return result;
     }
     // Clear only once the document parses, so malformed input leaves the
-    // caller's graph as it was, as a refused spectral document does.
+    // caller's graph as it was, as a refused spectral document does. From
+    // here on from_json clears the graph again on any refusal.
+    graph_touched = true;
     graph.clear();
 
     struct ParsedRegion {
@@ -3533,7 +3572,6 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
             if (old_id_value <= 0 ||
                 static_cast<std::uint64_t>(old_id_value) > std::numeric_limits<NodeId>::max() ||
                 !seen_persisted_node_ids.insert(old_id).second) {
-                graph.clear();
                 result.error = "invalid or duplicate node id in sample region graph";
                 return result;
             }
@@ -3543,14 +3581,12 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
             NodeId new_id = 0;
             if (type_s == "processor") {
                 if (!root.hasObjectMember("processors")) {
-                    graph.clear();
                     result.error =
                         "Processor nodes are runtime-owned and unsupported by .pulpgraph v1";
                     return result;
                 }
                 const auto restored = restored_processors.find(old_id);
                 if (restored == restored_processors.end()) {
-                    graph.clear();
                     result.error = "Processor node missing restore record";
                     return result;
                 }
@@ -3561,13 +3597,11 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                 const auto persisted_outputs = nv["num_output_ports"].getInt64();
                 if (persisted_inputs != descriptor.default_input_channels() ||
                     persisted_outputs != descriptor.default_output_channels()) {
-                    graph.clear();
                     result.error = "Processor node port shape does not match restore descriptor";
                     return result;
                 }
                 new_id = graph.add_processor_node(std::move(instance), name);
                 if (new_id == 0) {
-                    graph.clear();
                     result.error = "failed to add restored Processor node";
                     return result;
                 }
@@ -3587,8 +3621,6 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
             std::string node_shape_error;
             if (!validate_generated_node_shape(
                     t, type_s, in_ch, out_ch, node_shape_error)) {
-                graph.clear();
-                result.ok = false;
                 result.error = node_shape_error;
                 return result;
             }
@@ -3664,14 +3696,12 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                         has_custom && nv["custom"].hasObjectMember("output_ports");
                     has_typed_custom_port_payload |= has_input_descriptors;
                     if (has_input_descriptors && source_format_version < 5) {
-                        graph.clear();
                         result.error = "typed Custom ports require graph format v5";
                         return result;
                     }
                     if (has_input_descriptors != has_output_descriptors ||
                         !parse_ports("input_ports", in_ch, false, input_ports) ||
                         !parse_ports("output_ports", out_ch, true, output_ports)) {
-                        graph.clear();
                         result.error = "invalid Custom port descriptors";
                         return result;
                     }
@@ -3686,7 +3716,6 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                             persisted_shape.output_ports.push_back(
                                 {0, 0, true, port.name, port.kind});
                         if (!registered->matches_ports(persisted_shape)) {
-                            graph.clear();
                             result.error =
                                 "registered Custom port descriptors differ from persisted graph";
                             return result;
@@ -3709,8 +3738,6 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                         if (cv2.hasObjectMember("state_b64")) {
                             auto blob = b64_decode(cv2["state_b64"].getString());
                             if (!blob) {
-                                graph.clear();
-                                result.ok = false;
                                 result.error = "invalid custom state_b64";
                                 return result;
                             }
@@ -3768,8 +3795,6 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                         if (pv.hasObjectMember("state_b64")) {
                             auto blob = b64_decode(pv["state_b64"].getString());
                             if (!blob) {
-                                graph.clear();
-                                result.ok = false;
                                 result.error = "invalid plugin state_b64";
                                 return result;
                             }
@@ -3799,7 +3824,6 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
         }
     }
     if (!restored_processors.empty()) {
-        graph.clear();
         result.error = "Processor restore record has no matching processor node";
         return result;
     }
@@ -3824,33 +3848,28 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
             auto definition = std::move(parsed.definition);
             for (auto& member : definition.members) {
                 if (!remap_node("member", member.node, member.node)) {
-                    graph.clear();
                     return result;
                 }
             }
             for (auto& id : definition.input_boundaries) {
                 if (!remap_node("input boundary", id, id)) {
-                    graph.clear();
                     return result;
                 }
             }
             for (auto& id : definition.output_boundaries) {
                 if (!remap_node("output boundary", id, id)) {
-                    graph.clear();
                     return result;
                 }
             }
             for (auto& parameter : definition.promoted_parameters) {
                 if (!remap_node("promoted parameter", parameter.bound_node_id,
                                 parameter.bound_node_id)) {
-                    graph.clear();
                     return result;
                 }
             }
             definitions.push_back(std::move(definition));
         }
         if (!validate_persisted_region_metadata(graph, definitions, result.error)) {
-            graph.clear();
             return result;
         }
         std::sort(definitions.begin(), definitions.end(),
@@ -3874,7 +3893,6 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
         for (auto& connection : parsed_connections) {
             if (!remap_node("connection source", connection.source_node, connection.source_node) ||
                 !remap_node("connection destination", connection.dest_node, connection.dest_node)) {
-                graph.clear();
                 return result;
             }
         }
@@ -3893,7 +3911,6 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
         if (connection_error.empty() &&
             !validate_persisted_region_topology(graph, definitions, parsed_connections,
                                                 connection_error)) {
-            graph.clear();
             result.error = std::move(connection_error);
             return result;
         }
@@ -4085,7 +4102,6 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
             graph.invalidate_live_locked_();
         }
         if (!connection_error.empty()) {
-            graph.clear();
             result.error = std::move(connection_error);
             return result;
         }
@@ -4154,8 +4170,6 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
     result.persisted_node_ids = std::move(id_map);
 
     } catch (const std::exception& e) {
-        graph.clear();
-        result.ok = false;
         result.error = std::string("field deserialization failed: ") + e.what();
         return result;
     }

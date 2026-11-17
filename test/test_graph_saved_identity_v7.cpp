@@ -10,6 +10,7 @@
 #include <pulp/host/signal_graph_runtime.hpp>
 
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -17,6 +18,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 using namespace pulp::host;
@@ -622,6 +624,116 @@ TEST_CASE("a failure planning authored IDs refuses the load and leaves the graph
     INFO(loaded.error);
     REQUIRE(loaded.ok);
     CHECK(id_of(target, "Input") == id_of(fixture.graph, "Input"));
+}
+
+TEST_CASE("a failure parsing the original document refuses the load and leaves the graph",
+          "[host][graph][identity][v7]") {
+    TwinGraph fixture;
+    build_twins(fixture);
+    const std::vector<std::pair<std::string, std::string>> documents = {
+        {"v7", GraphSerializer::to_saved_document(fixture.graph)},
+        {"legacy v6", GraphSerializerTestAccess::legacy_v6_saved_document(fixture.graph)},
+    };
+    for (const auto& [label, document] : documents) {
+        INFO(label);
+        REQUIRE_FALSE(document.empty());
+        SignalGraph target;
+        const auto keep = target.add_gain_node("Keep");
+        // The original parse is the first one; every later parse succeeds,
+        // so only a refusal at this parse keeps fresh IDs out of the graph.
+        GraphSerializerTestAccess::fail_next_document_parse();
+        const auto refused = GraphSerializer::from_json(target, document);
+        INFO(refused.error);
+        CHECK_FALSE(refused.ok);
+        CHECK(refused.error.starts_with("JSON parse failed:"));
+        CHECK(refused.persisted_node_ids.empty());
+        CHECK(target.nodes().size() == 1);
+        CHECK(target.node(keep) != nullptr);
+
+        // Control: without the injected failure the same load succeeds.
+        const auto loaded = GraphSerializer::from_json(target, document);
+        INFO(loaded.error);
+        REQUIRE(loaded.ok);
+        CHECK(target.nodes().size() == 4);
+    }
+    SignalGraph v7_target;
+    REQUIRE(GraphSerializer::from_json(v7_target, documents[0].second).ok);
+    CHECK(id_of(v7_target, "Input") == id_of(fixture.graph, "Input"));
+}
+
+TEST_CASE("an ordinary load refuses a v7 document relabelled as an older format",
+          "[host][graph][identity][v7]") {
+    TwinGraph fixture;
+    build_twins(fixture);
+    const auto saved = GraphSerializer::to_saved_document(fixture.graph);
+    // format_version 6 and no authored_id on any record, with the v7
+    // envelope and bindings kept, optionally declaring v7 only through the
+    // logical_identities profile.
+    const auto downgraded = [&](bool keep_schema) {
+        auto doc = choc::json::parse(saved);
+        doc.setMember("format_version", static_cast<std::int64_t>(6));
+        auto nodes = choc::value::createEmptyArray();
+        for (std::uint32_t i = 0; i < doc["nodes"].size(); ++i) {
+            const auto record = doc["nodes"][i];
+            auto rebuilt = choc::value::createObject("");
+            for (std::uint32_t m = 0; m < record.size(); ++m) {
+                const auto item = record.getObjectMemberAt(m);
+                if (std::string_view(item.name) != "authored_id")
+                    rebuilt.addMember(item.name, item.value);
+            }
+            nodes.addArrayElement(rebuilt);
+        }
+        doc.setMember("nodes", nodes);
+        if (!keep_schema) {
+            auto rebuilt = choc::value::createObject("");
+            for (std::uint32_t i = 0; i < doc.size(); ++i) {
+                const auto item = doc.getObjectMemberAt(i);
+                if (std::string_view(item.name) != "identity_schema")
+                    rebuilt.addMember(item.name, item.value);
+            }
+            doc = rebuilt;
+        }
+        return choc::json::toString(doc, true);
+    };
+    const std::vector<std::pair<std::string, std::string>> cases = {
+        {"v7 identity_schema at format 6", downgraded(true)},
+        {"v7 profile only at format 6", downgraded(false)},
+    };
+
+    const auto path = std::filesystem::temp_directory_path() / "pulp-graph-v7-downgraded.pulpgraph";
+    for (const auto& [label, document] : cases) {
+        INFO(label);
+        REQUIRE(document.find("authored_id") == std::string::npos);
+        REQUIRE(document.find("\"bindings\"") != std::string::npos);
+        // Control on the instrument: the inspector refuses each document.
+        CHECK_FALSE(GraphSerializer::inspect_document(document).ok());
+
+        SignalGraph target;
+        const auto keep = target.add_gain_node("Keep");
+        const auto from_json = GraphSerializer::from_json(target, document);
+        INFO(from_json.error);
+        CHECK_FALSE(from_json.ok);
+        CHECK(target.nodes().size() == 1);
+        CHECK(target.node(keep) != nullptr);
+
+        {
+            std::ofstream out(path, std::ios::binary | std::ios::trunc);
+            out << document;
+        }
+        const auto from_file = GraphSerializer::from_file(target, path);
+        INFO(from_file.error);
+        CHECK_FALSE(from_file.ok);
+        CHECK(target.nodes().size() == 1);
+        CHECK(target.node(keep) != nullptr);
+    }
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+
+    // Control: the same document at format 7 with its authored IDs loads and
+    // keeps them.
+    SignalGraph control;
+    REQUIRE(GraphSerializer::from_json(control, saved).ok);
+    CHECK(id_of(control, "Input") == id_of(fixture.graph, "Input"));
 }
 
 TEST_CASE("a failure after a saved document restored leaves no graph and no identity map",

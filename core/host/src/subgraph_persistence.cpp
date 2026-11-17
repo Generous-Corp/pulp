@@ -1,6 +1,8 @@
 #include <pulp/host/signal_graph_runtime.hpp>
 #include <pulp/host/subgraph_persistence.hpp>
 
+#include "graph_load_refusal.hpp"
+
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
@@ -326,6 +328,14 @@ SubgraphDocumentLoad from_saved_subgraph_document(SignalGraph& graph, const std:
         return out;
     }
 
+    // Every refusal after the flattened load starts goes through refuse(), so
+    // the graph, the instances and every map the load returned are empty.
+    bool load_started = false;
+    const auto refuse = [&](std::string error) {
+        detail::refuse_load(out.load, load_started ? &graph : nullptr, std::move(error));
+        out.subgraphs.clear();
+        return std::move(out);
+    };
     try {
         const auto root = choc::json::parse(json);
         const bool has_records = root.hasObjectMember("subgraphs");
@@ -340,6 +350,7 @@ SubgraphDocumentLoad from_saved_subgraph_document(SignalGraph& graph, const std:
             }
         }
 
+        load_started = true;
         out.load = GraphSerializer::from_saved_document(graph, json, options);
         if (!out.load.ok || !has_records)
             return out;
@@ -359,23 +370,15 @@ SubgraphDocumentLoad from_saved_subgraph_document(SignalGraph& graph, const std:
             SubgraphInstance instance;
             Refusal refusal;
             if (!rebind_instance(graph, definition, record, live_by_identity, match_names, instance,
-                                 refusal)) {
-                graph.clear();
-                out.load.ok = false;
-                out.load.error = std::move(refusal.error);
-                return out;
-            }
+                                 refusal))
+                return refuse(std::move(refusal.error));
             restored.emplace(instance.instance_identity, std::move(instance));
         }
         for (auto& [identity, instance] : restored)
             out.subgraphs.push_back(std::move(instance));
         return out;
     } catch (const std::exception& error) {
-        graph.clear();
-        out.subgraphs.clear();
-        out.load.ok = false;
-        out.load.error = std::string("subgraph_instance_mismatch: ") + error.what();
-        return out;
+        return refuse(std::string("subgraph_instance_mismatch: ") + error.what());
     }
 }
 
