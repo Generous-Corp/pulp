@@ -132,7 +132,6 @@ public:
         /// Read a byte ('y') at the cursor into `out` and advance. Needed to
         /// walk an 'ay' byte array such as BlueZ GattCharacteristic1.Value.
         bool read_byte(unsigned char& out);
-        bool read_bool(bool& out);
         /// Current argument's D-Bus type code, or 0 ('\0') when exhausted.
         int arg_type() const;
         /// Advance to the next argument. Returns false when there is no next.

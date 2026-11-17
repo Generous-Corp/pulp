@@ -1054,6 +1054,12 @@ void shutdown_accessibility(void* handle) {
 }
 
 // Pump the a11y connection so the registry's inbound method calls are serviced.
+// Declared here, not in accessibility_provider.hpp: that header is a transferred
+// file whose authoritative copy is Vellum's, so the host-facing declaration and
+// the window host's call to this function are made there.
+void accessibility_set_window_geometry(void* handle, int screen_x, int screen_y, float scale,
+                                       float offset_x, float offset_y);
+
 void accessibility_set_window_geometry(void* handle, int screen_x, int screen_y, float scale,
                                        float offset_x, float offset_y) {
     if (handle == reinterpret_cast<void*>(static_cast<uintptr_t>(1)) || !handle) return;

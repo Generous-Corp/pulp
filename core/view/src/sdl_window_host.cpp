@@ -337,18 +337,6 @@ class SdlWindowHostImpl : public SdlWindowHost {
             // Service inbound accessibility IPC (Linux AT-SPI registry / Orca
             // method calls on the exported View tree). Cheap when no assistive
             // tech is connected; a no-op on the sentinel handle.
-#if defined(__linux__) && !defined(__ANDROID__)
-            {
-                // Component calls report the geometry the user sees: where the
-                // window sits on screen and how the root view sits in it.
-                int origin_x = 0, origin_y = 0;
-                if (SDL_GetWindowPosition(window_, &origin_x, &origin_y)) {
-                    const ViewportTransform t = viewport_transform();
-                    accessibility_set_window_geometry(accessibility_handle_, origin_x, origin_y,
-                                                      t.scale, t.tx, t.ty);
-                }
-            }
-#endif
             accessibility_pump(accessibility_handle_);
 
             if (idle_callback_)
@@ -702,31 +690,19 @@ private:
     // today. When the SDL host gains a design-viewport or per-monitor scale
     // (W8/L9 HiDPI), apply that inverse transform HERE — and route mouse events
     // through the same helper — so drops keep landing under the cursor.
-    // How the root view sits in the window: window = root * scale + (tx, ty).
-    // The identity unless a design viewport is set, in which case the root is
-    // scaled uniformly to fit and centred (letterboxed).
-    struct ViewportTransform {
-        float scale = 1.0f;
-        float tx = 0.0f;
-        float ty = 0.0f;
-    };
-
-    ViewportTransform viewport_transform() const {
+    Point window_to_root(float window_x, float window_y) const {
         if (design_width_ > 0.0f && design_height_ > 0.0f && window_) {
             int w = 0, h = 0;
             SDL_GetWindowSize(window_, &w, &h);
             const float scale = std::min(static_cast<float>(w) / design_width_,
                                          static_cast<float>(h) / design_height_);
-            if (scale > 0.0f)
-                return {scale, (w - design_width_ * scale) * 0.5f,
-                        (h - design_height_ * scale) * 0.5f};
+            if (scale > 0.0f) {
+                const float tx = (w - design_width_ * scale) * 0.5f;
+                const float ty = (h - design_height_ * scale) * 0.5f;
+                return {(window_x - tx) / scale, (window_y - ty) / scale};
+            }
         }
-        return {};
-    }
-
-    Point window_to_root(float window_x, float window_y) const {
-        const ViewportTransform t = viewport_transform();
-        return {(window_x - t.tx) / t.scale, (window_y - t.ty) / t.scale};
+        return {window_x, window_y};
     }
 
     void register_dispatcher() {

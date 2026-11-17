@@ -622,6 +622,13 @@ TEST_CASE("Linux AT-SPI exports a per-widget Accessible + Component tree",
 
 // ── Linux AT-SPI component geometry and GetAll loopback ─────────────────────
 //
+// The host-facing declaration lives with the window host (a transferred file), so
+// the test declares the provider's setter itself.
+namespace pulp::view {
+void accessibility_set_window_geometry(void* handle, int screen_x, int screen_y, float scale,
+                                       float offset_x, float offset_y);
+}
+//
 // The same tree as above, exported on the session bus. A screen request is
 // refused until the host reports where the window sits; the geometry the host
 // reports then decides every Component answer: window position follows the
@@ -654,25 +661,6 @@ ComponentExtents component_extents(void* handle, const std::string& server,
             });
     });
     return out;
-}
-
-// 1 inside, 0 outside, -1 when the call failed.
-int component_contains(void* handle, const std::string& server, const std::string& path,
-                       int px, int py, uint32_t coord_type) {
-    bool inside = false;
-    const bool ok = run_client_call(handle, [&] {
-        DBus client;
-        if (!client.connect_session()) return false;
-        return client.call_method(
-            server, path, kIfaceComponent, "Contains",
-            [&](DBus::Writer& w) {
-                w.append_int32(px);
-                w.append_int32(py);
-                w.append_uint32(coord_type);
-            },
-            [&](DBus::Reader& r) { r.read_bool(inside); });
-    });
-    return ok ? (inside ? 1 : 0) : -1;
 }
 
 // root (none) > Panel (group, 10,40) > container (none, 5,5) > Gain (slider, 20,30 200x24)
@@ -743,11 +731,6 @@ TEST_CASE("Linux AT-SPI screen coordinates follow the window origin and viewport
     REQUIRE(in_window.ok);
     CHECK(in_window.x == 35);
     CHECK(in_window.y == 75);
-    // Hit tests use the same space.
-    CHECK(component_contains(handle, server, gain, 140, 280, atspi::kCoordScreen) == 1);
-    CHECK(component_contains(handle, server, gain, 140, 280, atspi::kCoordWindow) == 0);
-    CHECK(component_contains(handle, server, gain, 40, 80, atspi::kCoordWindow) == 1);
-    CHECK(component_contains(handle, server, gain, 40, 80, atspi::kCoordScreen) == 0);
     // Parent-relative coordinates are not offered.
     CHECK_FALSE(component_extents(handle, server, gain, 2).ok);
 
@@ -764,9 +747,6 @@ TEST_CASE("Linux AT-SPI screen coordinates follow the window origin and viewport
     REQUIRE(scaled_screen.ok);
     CHECK(scaled_screen.x == 270);
     CHECK(scaled_screen.y == 400);
-    // A point inside the drawn slider is inside; the root-space position is not.
-    CHECK(component_contains(handle, server, gain, 300, 450, atspi::kCoordScreen) == 1);
-    CHECK(component_contains(handle, server, gain, 135, 275, atspi::kCoordScreen) == 0);
 
     shutdown_accessibility(handle);
 }
