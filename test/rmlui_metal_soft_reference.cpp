@@ -83,9 +83,7 @@ int main(int argc, char** argv) {
                 std::fprintf(stderr, "open failed at %ux%u\n", width, height);
                 return 1;
             }
-#if defined(PULP_VELLUM_RMLUI_HAS_DENSITY_RATIO)
             backend.set_density_ratio(static_cast<float>(scale));
-#endif
             FontFaceOptions face;
             face.style = FontStyle::normal;
             face.weight = 400;
