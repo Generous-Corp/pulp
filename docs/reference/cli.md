@@ -1556,8 +1556,13 @@ CLI-only write operation; the MCP `pulp_graph` tool remains read-only.
 envelope: the input is restored through `GraphSerializer::from_saved_document`
 (which refuses a document whose identities or connections do not restore
 exactly) and written back with `GraphSerializer::to_saved_file`, so the result
-is still a valid `pulp graph diff` input. `save --saved-identity` writes the
-envelope for a plain input too, which is how a CLI user produces diff inputs.
+is still a valid `pulp graph diff` input. The written document is always
+saved-identity v7 (format 7, a persisted authored ID per node); a v6 input is
+written as its deterministic migration, the same IDs
+`GraphSerializer::migrate_saved_document` assigns, so rewriting the same v6
+file twice gives the same bytes. `save --saved-identity` writes the
+envelope for a plain input too, which is how a CLI user produces diff inputs;
+its IDs are derived from the input document, so they are deterministic too.
 Before it writes, every connection the plain input records must have been
 restored; an edge the tolerant loader skipped (a dangling node, an invalid
 port) is refused with `InvalidDocument` and a `connection_not_restored` message
@@ -1572,10 +1577,15 @@ those records needs the authoring templates and a plain rewrite would drop every
 subgraph instance. For these three subcommands a missing file is
 `FileUnreadable` and a file over the 64 MiB limit is `ResourceLimit`.
 
-`pulp graph diff BEFORE AFTER [--json]` compares two saved-identity v6
-documents (as written by `GraphSerializer::to_saved_document`) by logical node
-identity, read-only and without loading plugin code. NodeIds are lookup keys
-only, so two files that differ only in NodeId numbering compare equal. The JSON
+`pulp graph diff BEFORE AFTER [--json]` compares two saved-identity documents
+of the same schema (v7 as written by `GraphSerializer::to_saved_document`, or
+two legacy v6 files) by logical node identity, read-only and without loading
+plugin code. In v7 the identity is the node's persisted authored ID, so a
+renamed node is one changed node and deleting one of two same-named nodes
+leaves the other's identity alone. NodeIds are lookup keys only, so two files
+that differ only in NodeId numbering compare equal. A v6 file and a v7 file are
+refused (`InvalidDocument`, refusal `unsupported_document_profile`); rewrite
+the v6 file first. The JSON
 result reports `code` (`Ok`), `equal`, a numbering-independent digest of each
 compared document (`before_digest`, `after_digest`; equal documents have equal
 digests), `nodes`

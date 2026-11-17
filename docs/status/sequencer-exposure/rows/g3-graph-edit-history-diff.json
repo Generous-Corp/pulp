@@ -34,7 +34,7 @@
   "surfaces": {
     "installed_sdk": {
       "disposition": "exposed",
-      "rationale": "GraphEditHistory and diff_graph_documents are public host APIs over saved-identity v6 documents; they hold no pointer into a live graph and the diff is data-only.",
+      "rationale": "GraphEditHistory and diff_graph_documents are public host APIs over saved-identity documents (v7 written, v6 still read); they hold no pointer into a live graph and the diff is data-only.",
       "evidence": [
         {
           "kind": "sdk_header",
