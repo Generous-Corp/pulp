@@ -64,7 +64,13 @@ endforeach()
 set(_strict "${_root}/strict")
 _control_scalar_run("configure strict" "${CMAKE_COMMAND}" -S "${_fixture}" -B "${_strict}"
     ${_config_args} -DCONTROL_SCALAR_LEGACY_STRICT=ON)
-execute_process(COMMAND "${CMAKE_COMMAND}" --build "${_strict}" --config Release
+# The strict build goes through the governed-build wrapper like every other
+# build here. The wrapper passes the compiler's exit status and diagnostics
+# through, and reports "build failed rc=" only for a build it actually ran, so
+# requiring that line proves the expected failure is the governed compile and
+# not a pre-lease refusal or an ungoverned build.
+execute_process(COMMAND "${PULP_SOURCE_DIR}/tools/ci/governed-build.sh"
+        "${CMAKE_COMMAND}" --build "${_strict}" --config Release
         --target control_scalar_legacy_strict
     RESULT_VARIABLE _strict_rc OUTPUT_VARIABLE _strict_out ERROR_VARIABLE _strict_err)
 set(_strict_log "${_strict_out}${_strict_err}")
@@ -72,7 +78,8 @@ if(_strict_rc EQUAL 0)
     message(FATAL_ERROR "control scalar consumer: deprecated spellings built with deprecation "
         "as an error; the deprecation does not reach consumers")
 endif()
-foreach(_needle control_minimum control_maximum control_safe_divide finite_control_sample
+foreach(_needle "[governed-build] build failed rc="
+        control_minimum control_maximum control_safe_divide finite_control_sample
         "pulp/signal/control_math.hpp")
     string(FIND "${_strict_log}" "${_needle}" _at)
     if(_at EQUAL -1)
