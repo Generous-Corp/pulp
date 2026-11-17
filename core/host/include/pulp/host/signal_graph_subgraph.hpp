@@ -19,10 +19,11 @@ namespace pulp::host {
 class SignalGraph;
 
 // Declarative, immutable subgraph template. Nodes are built-in Input, Output,
-// and Gain nodes, or Processor nodes (NodeType::Plugin with processor_factory
-// and an exact descriptor identity); parameter targets are Gain or Processor
-// nodes. Templates are expanded into the ordinary SignalGraph plan and do not
-// introduce a second scheduler.
+// and Gain nodes, Processor nodes (NodeType::Plugin with processor_factory and
+// an exact descriptor identity), or Custom nodes (NodeType::Custom naming a
+// type registered on the graph at an exact version); parameter targets are
+// Gain or Processor nodes. Templates are expanded into the ordinary
+// SignalGraph plan and do not introduce a second scheduler.
 struct SubgraphNodeSpec {
     std::string key;
     NodeType type = NodeType::Gain;
@@ -34,6 +35,15 @@ struct SubgraphNodeSpec {
     std::string processor_type_id;
     std::string processor_descriptor_version;
     int processor_type_version = 0;
+    // A Custom node names a type registered on the graph at this exact
+    // version; expansion refuses before any graph change when it is not
+    // registered. `custom_state` is the member's initial opaque state. It
+    // must be empty for a type without create and load_state; otherwise it is
+    // accepted only when the type's load_state accepts it on a probe instance
+    // created and destroyed on the calling (control) thread.
+    std::string custom_type_id;
+    int custom_type_version = 0;
+    std::vector<std::uint8_t> custom_state;
 };
 
 struct SubgraphEdgeSpec {
