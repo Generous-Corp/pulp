@@ -872,8 +872,11 @@ refused. See "One same-head retry after a network ejection" in the same guide.
 
 Gotcha: since 2026-11-17 `[auto_merge] flake_requeue = "apply"` (a bounded
 trial) re-enqueues a same-head ejection once when the same failing test ejected
-another pull request's merge group within 24 hours. Do not push a no-op commit
-for such a head: the steward re-admits it within one tick. See "One flake
+another pull request's merge group within 24 hours (at most one per signature
+per window). Before pushing a no-op commit after an ejection, read the steward
+tick's `flake_requeue` decision for the head: `requeued` means it is back in the
+queue; anything else (`signature_capped`, `signature_tripped`, no decision)
+means it still needs a new head. See "One flake
 re-enqueue when the same test ejected two pull requests" in the same guide.
 
 ## Is `main` itself broken? Ask the base health detector
