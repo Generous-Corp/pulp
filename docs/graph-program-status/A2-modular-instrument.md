@@ -36,8 +36,8 @@ eight cases.
 
 `main.cpp` is 342 physical lines. The `StripFilter` Processor and the trim
 type are the instrument DSP; the rest (includes, declaration, authoring, save
-and restore, rendering, oracle, and the seven planted controls) is the glue. No test enforces the A2 budget, so it can drift
-unseen.
+and restore, rendering, oracle, and the seven planted controls) is the glue.
+No test enforces the A2 budget, so it can drift unseen.
 
 The installed-SDK gate `a2-modular-instrument-installed-sdk` is labelled `slow`:
 the required `macos` gate never runs it. The informational nightly full build
