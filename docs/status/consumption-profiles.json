@@ -377,6 +377,7 @@
       "pulp/format/preset_program_router.hpp",
       "pulp/format/process_block.hpp",
       "pulp/format/process_context.hpp",
+      "pulp/format/process_timing.hpp",
       "pulp/format/processor.hpp",
       "pulp/format/processor_block_adapter.hpp",
       "pulp/format/processor_node_adapter.hpp",
