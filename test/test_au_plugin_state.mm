@@ -1994,9 +1994,10 @@ TEST_CASE("AU v3 places MIDI event times and refuses those outside the block",
         REQUIRE(in_block.refused == 0);
 
         // Planted negatives: at the end, before the block, a huge offset, and
-        // a small time that is absolute on the render axis (it lies before a
-        // block that starts at 1000, so it is not offset 5). One in-block
-        // event survives; none is moved to a block edge.
+        // a small positive time that is absolute on the render axis (the AU
+        // immediate window is the separate negative sentinel range, so 5 lies
+        // before a block that starts at 1000 and is not offset 5). One
+        // in-block event survives; none is moved to a block edge.
         const auto out_of_block =
             render(1000.0, {1000 + kFrames, 999, 1000 + (AUEventSampleTime{1} << 40), 5, 1003});
         REQUIRE(out_of_block.offsets == std::vector<int32_t>{3});
@@ -2004,7 +2005,7 @@ TEST_CASE("AU v3 places MIDI event times and refuses those outside the block",
         REQUIRE(out_of_block.refused == 4);
 
         // Without a valid sample time an absolute time cannot be placed and
-        // is refused; an immediate time still is an offset.
+        // is refused; an AUEventSampleTimeImmediate time still is an offset.
         const auto unclocked = render(std::nullopt, {3, now + 2});
         REQUIRE(unclocked.offsets == std::vector<int32_t>{2});
         REQUIRE(unclocked.notes == std::vector<uint8_t>{1});

@@ -39,6 +39,8 @@ inline std::optional<std::int64_t> host_sample_position(double samples) noexcept
 
 /// Width of the `AUEventSampleTimeImmediate` window: event times in
 /// [immediate, immediate + kAuImmediateWindow) are already block offsets.
+/// Apple's sentinel is negative (`0xffffffff00000000`), so non-negative
+/// sample times remain absolute positions on the render axis.
 inline constexpr std::int64_t kAuImmediateWindow = 4096;
 
 /// The unbounded offset of an AUv3 render event from its block's first frame,

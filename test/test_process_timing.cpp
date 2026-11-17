@@ -467,18 +467,25 @@ TEST_CASE("AU render event times are placed before they are admitted",
     // Immediate window: already an offset, with or without a block time.
     REQUIRE(format::admit_au_event_time(admission, kImmediate + 7, kImmediate, std::nullopt) ==
             std::optional<std::int32_t>{7});
+    // Positive sample times are absolute on the render axis. Only the
+    // negative AUEventSampleTimeImmediate window is an offset without a
+    // block sample time, so the same numeric offset is refused here.
+    REQUIRE_FALSE(format::admit_au_event_time(admission, 9, kImmediate, std::nullopt));
+    REQUIRE(format::admit_au_event_time(admission, kImmediate + 9, kImmediate, std::nullopt) ==
+            std::optional<std::int32_t>{9});
+    REQUIRE(admission.refused == 1);
     // Absolute: placed against the rounded block time (REAPER-style 13823.9999).
     REQUIRE(format::admit_au_event_time(admission, 13829, kImmediate, 13823.9999) ==
             std::optional<std::int32_t>{5});
     REQUIRE(format::admit_au_event_time(admission, 13824 + kFrames - 1, kImmediate, 13824.0) ==
             std::optional<std::int32_t>{kFrames - 1});
-    REQUIRE(admission.refused == 0);
+    REQUIRE(admission.refused == 1);
     // Planted negatives: at the end, before the block, and absolute with no
     // block time to place it against. None is clamped to an edge.
     REQUIRE_FALSE(format::admit_au_event_time(admission, 13824 + kFrames, kImmediate, 13824.0));
     REQUIRE_FALSE(format::admit_au_event_time(admission, 13800, kImmediate, 13824.0));
     REQUIRE_FALSE(format::admit_au_event_time(admission, 9, kImmediate, std::nullopt));
-    REQUIRE(admission.refused == 3);
+    REQUIRE(admission.refused == 4);
 }
 
 TEST_CASE("an LV2 sequence is read as frames only in frame units",
