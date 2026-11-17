@@ -65,6 +65,14 @@ enum class GraphDocumentRefusal : std::uint8_t {
     // duplicate-key check is linear per member, so an unbounded object makes
     // parsing quadratic in the document size.
     MemberLimitExceeded,
+    // An `event_connections` record is malformed, appears outside the
+    // saved-identity v7 envelope, or names a port or kind outside 0..255.
+    EventConnectionInvalid,
+    // An event connection names a producer or consumer that is not a logical
+    // identity of the document.
+    EventConnectionDangling,
+    // Two event connection records are identical.
+    EventConnectionDuplicate,
 };
 
 const char* graph_document_refusal_name(GraphDocumentRefusal) noexcept;
@@ -199,7 +207,14 @@ class GraphSerializer {
 
     /// Write the saved-identity v7 document: the graph payload at
     /// format_version 7, each node record carrying its authored_id, and an
-    /// envelope binding those IDs to the persisted node ids.
+    /// envelope binding those IDs to the persisted node ids. A graph event
+    /// connection (SignalGraph::connect_graph_event) is written as an
+    /// `event_connections` record naming its producer and consumer by
+    /// authored ID with its ports and kind; only the authored binding is
+    /// saved, never published events, traces or queue contents. The record is
+    /// part of the semantic digest, and a load rebinds it through
+    /// connect_graph_event after every connection is restored, refusing the
+    /// document when the binding is refused.
     static std::string to_saved_document(
         const SignalGraph& graph,
         const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout = {});
@@ -242,7 +257,10 @@ class GraphSerializer {
                                    MigrationFn migration);
 
     // Encode the entire graph as JSON. The `editor_layout` map (NodeId →
-    // (x,y)) is optional — pass an empty map if the graph has no UI.
+    // (x,y)) is optional; pass an empty map if the graph has no UI. A graph
+    // holding a graph event connection is refused (empty string): only the
+    // saved-identity document names its endpoints, so this format would drop
+    // the connection.
     static std::string to_json(const SignalGraph& graph,
                                const std::unordered_map<NodeId, std::pair<float,float>>& editor_layout = {});
 

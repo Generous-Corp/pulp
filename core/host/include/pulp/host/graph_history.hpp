@@ -74,6 +74,14 @@ struct GraphDocumentDiff {
     std::vector<std::string> connections_added;
     std::vector<std::string> connections_removed;
     std::vector<std::string> connections_changed;
+    // Graph event connections (the document's event_connections records),
+    // keyed by the endpoints' authored identities and ports:
+    // "<producer identity>[<port>] => <consumer identity>[<port>]". A record
+    // whose endpoints and ports are unchanged but whose kind differs is
+    // reported as changed.
+    std::vector<std::string> event_connections_added;
+    std::vector<std::string> event_connections_removed;
+    std::vector<std::string> event_connections_changed;
     // Other top-level document members (for example format_version,
     // sample_regions, subgraphs) whose canonical values differ. NodeIds in
     // sample_regions are compared as the authored identities they bind; the
@@ -86,7 +94,9 @@ struct GraphDocumentDiff {
     bool equal() const noexcept {
         return ok() && nodes_added.empty() && nodes_removed.empty() && nodes_changed.empty() &&
                connections_added.empty() && connections_removed.empty() &&
-               connections_changed.empty() && sections_changed.empty();
+               connections_changed.empty() && event_connections_added.empty() &&
+               event_connections_removed.empty() && event_connections_changed.empty() &&
+               sections_changed.empty();
     }
 };
 

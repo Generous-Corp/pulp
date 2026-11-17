@@ -1592,6 +1592,9 @@ digests), `nodes`
 (`added`, `removed`, and `changed` with each node's differing `fields`),
 `connections` (`added`, `removed`, `changed`, keyed as
 `<source identity>[<port>] -> <destination identity>[<port>]`),
+`event_connections` (`added`, `removed`, `changed`, the graph event connection
+keyed as `<producer identity>[<port>] => <consumer identity>[<port>]`; a kind
+change is `changed`),
 `layout_changed` (editor layout only, never semantic), and `sections_changed`
 (other top-level members such as `format_version` or `sample_regions`; NodeIds
 in `sample_regions` are compared as the identities they bind, and the other

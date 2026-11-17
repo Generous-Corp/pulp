@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -53,6 +54,33 @@ struct SubgraphEdgeSpec {
     PortIndex destination_port = 0;
 };
 
+// A graph event connection a template declares between two of its members
+// (SignalGraph::connect_graph_event). `producer` and `consumer` are member
+// keys, or a child member spelled `child.key`. Expansion binds it after every
+// audio edge, so the feed-forward path the binding requires is present; the
+// graph's own rules apply unchanged: both members must be Custom nodes whose
+// registered types consume events and are not transport-aware, ports must
+// be 0 and kind 1, and a graph holds at most one such connection, so a
+// template that declares one expands at most once per graph. A Processor
+// member is refused as an endpoint.
+struct SubgraphEventEdgeSpec {
+    std::string producer;
+    std::string consumer;
+    std::uint8_t source_port = 0;
+    std::uint8_t destination_port = 0;
+    std::uint8_t kind = 1;
+};
+
+// The event connection an instance's expansion bound, by live NodeId.
+struct SubgraphEventEdge {
+    NodeId producer = 0;
+    NodeId consumer = 0;
+    std::uint8_t source_port = 0;
+    std::uint8_t destination_port = 0;
+    std::uint8_t kind = 1;
+    friend bool operator==(const SubgraphEventEdge&, const SubgraphEventEdge&) = default;
+};
+
 struct SubgraphPortSpec {
     std::string name;
     std::string node;
@@ -96,6 +124,10 @@ struct SubgraphTemplate {
     // Optional canonical G-4 path used when this template is bound as one
     // authored voice slot. Runtime NodeIds never enter this path.
     std::vector<std::string> binding_path;
+    // Optional event connection between two members (see
+    // SubgraphEventEdgeSpec). Across a template and its children at most one
+    // may be declared, since a graph binds only one.
+    std::optional<SubgraphEventEdgeSpec> event_edge;
 };
 
 struct SubgraphState {
@@ -124,6 +156,9 @@ struct SubgraphInstance {
     std::unordered_map<std::string, SubgraphParameterBounds> parameter_bounds;
     std::unordered_map<std::string, std::string> child_template_identities;
     std::unordered_map<std::string, std::uint32_t> child_instance_indices;
+    // The event connection this instance's template (or one of its
+    // children) declared, bound to member NodeIds; empty when none is.
+    std::optional<SubgraphEventEdge> event_edge;
 
     SubgraphState save_state() const;
 };
@@ -145,7 +180,11 @@ struct SubgraphExpansionResult {
 // every instance entry created by this call, so a failed result holds no
 // NodeIds. Exposed port names and parameter paths must be unique, parameter
 // bounds must be finite. Gain targets are one-to-one; Processor targets may
-// share a node only when they name distinct exact catalog IDs.
+// share a node only when they name distinct exact catalog IDs. A declared
+// event connection is bound after every edge; a refused binding (an
+// endpoint that is not an event-capable Custom member, no feed-forward path,
+// a port or kind the graph does not admit, or a graph that already holds an
+// event connection) rolls the expansion back like any other failure.
 // Diagnostics name the subgraph boundary.
 SubgraphExpansionResult instantiate_subgraph(SignalGraph& graph, const SubgraphTemplate& definition,
                                              std::string instance_identity,
