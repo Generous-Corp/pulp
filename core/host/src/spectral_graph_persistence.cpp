@@ -203,6 +203,10 @@ std::string write(const SignalGraph& graph,
             const auto* type = type_name(n.type);
             if (graph.is_processor_node(n.id))
                 return refuse("node " + n.name + " is a Processor node");
+            if (n.type == NodeType::SpectralAssetSource)
+                return refuse("node " + n.name +
+                              " is a single-stream spectral asset source; its persistence is "
+                              "not admitted");
             if (n.type == NodeType::SpectralAnalysis)
                 return refuse("node " + n.name +
                               " is a SpectralAnalysis node; live analysis is not persisted, "
