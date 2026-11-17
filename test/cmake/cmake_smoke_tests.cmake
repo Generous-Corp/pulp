@@ -575,8 +575,10 @@ if(TARGET pulp-host)
 endif()
 
 # Installed-SDK spectral resynthesis consumer: analysis -> stage -> synthesis
-# through the routed graph, with geometry, latency, tail, partition and
-# reconstruction checks plus planted geometry mutations that must fail.
+# and a single decoded stream -> synthesis at a non-dividing hop through the
+# routed graph, with geometry, latency, tail, stream end, partition and
+# reconstruction checks plus planted geometry and stream-end mutations that
+# must fail.
 if(TARGET pulp-host)
     add_test(NAME cmake-spectral-resynthesis-consumer
         COMMAND ${CMAKE_COMMAND}
