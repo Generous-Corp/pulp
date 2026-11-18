@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -1466,6 +1467,99 @@ TEST_CASE("AU v2 host callbacks distinguish an ordinary cycle wrap from a seek",
     REQUIRE(seek.transport_jump);
     REQUIRE_FALSE(seek.ordinary_loop_wrap);
     REQUIRE(seek.should_reset_stream_history());
+}
+
+TEST_CASE("AU v2 host callbacks leave a non-finite beat or tempo unknown",
+          "[au][auv2][transport][slice]") {
+    ScopedFactoryRegistration registration(create_effect_processor);
+    pulp::format::au::PulpAUEffect effect(nullptr);
+
+    AUv2TransportCallbackState transport;
+    HostCallbackInfo callbacks{};
+    callbacks.hostUserData = &transport;
+    callbacks.beatAndTempoProc = auv2_test_beat_and_tempo;
+    callbacks.musicalTimeLocationProc = auv2_test_musical_time;
+    callbacks.transportStateProc = auv2_test_transport_state;
+    REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_HostCallbacks, kAudioUnitScope_Global, 0,
+                                       &callbacks, sizeof(callbacks)) == noErr);
+    using pulp::format::TransportField;
+    constexpr UInt32 kFrames = 64, kSliceOffset = 32;
+    const double inf = std::numeric_limits<double>::infinity();
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+
+    // An infinite tempo with a slice offset: the beat advances by nothing it
+    // cannot represent, and the bar stays derivable.
+    transport.beat = 2.0;
+    for (const double tempo : {inf, -inf, nan}) {
+        CAPTURE(tempo);
+        transport.tempo = tempo;
+        pulp::format::detail::PlayheadSnapshot previous;
+        auto ctx = pulp::format::au::make_render_process_context(48000.0, kFrames);
+        pulp::format::au::apply_host_callbacks_to_process_context(ctx, effect, previous,
+                                                                  kSliceOffset);
+        REQUIRE_FALSE(ctx.has_transport(TransportField::Tempo));
+        REQUIRE(ctx.has_transport(TransportField::BeatPosition));
+        REQUIRE(ctx.position_beats == 2.0);
+        REQUIRE(ctx.bar == 0);
+    }
+
+    // A non-finite host beat is not a position.
+    transport.tempo = 120.0;
+    for (const double beat : {inf, nan}) {
+        CAPTURE(beat);
+        transport.beat = beat;
+        pulp::format::detail::PlayheadSnapshot previous;
+        auto ctx = pulp::format::au::make_render_process_context(48000.0, kFrames);
+        pulp::format::au::apply_host_callbacks_to_process_context(ctx, effect, previous,
+                                                                  kSliceOffset);
+        REQUIRE_FALSE(ctx.has_transport(TransportField::BeatPosition));
+        REQUIRE_FALSE(ctx.has_transport(TransportField::Bar));
+        REQUIRE(std::isfinite(ctx.position_beats));
+        REQUIRE(ctx.bar == 0);
+    }
+
+    // A finite beat and a finite tempo whose slice advance overflows to
+    // infinity leave the beat unknown, not a non-finite position.
+    transport.beat = 1.0e308;
+    transport.tempo = 1.0e308;
+    {
+        pulp::format::detail::PlayheadSnapshot overflow_previous;
+        auto overflow = pulp::format::au::make_render_process_context(48000.0, kFrames);
+        pulp::format::au::apply_host_callbacks_to_process_context(overflow, effect,
+                                                                  overflow_previous, kSliceOffset);
+        REQUIRE(std::isfinite(overflow.position_beats));
+        REQUIRE_FALSE(overflow.has_transport(TransportField::BeatPosition));
+        REQUIRE_FALSE(overflow.has_transport(TransportField::Bar));
+    }
+    // Same beat with an ordinary tempo is representable and stays valid.
+    transport.tempo = 120.0;
+    {
+        pulp::format::detail::PlayheadSnapshot ordinary_previous;
+        auto ordinary = pulp::format::au::make_render_process_context(48000.0, kFrames);
+        pulp::format::au::apply_host_callbacks_to_process_context(ordinary, effect,
+                                                                  ordinary_previous, kSliceOffset);
+        REQUIRE(ordinary.has_transport(TransportField::BeatPosition));
+    }
+
+    // A finite beat can still be outside the representable int64 bar range.
+    // It remains a valid beat position, but the derived bar must stay unknown.
+    transport.beat = 1.0e300;
+    transport.tempo = 120.0;
+    pulp::format::detail::PlayheadSnapshot previous_extreme;
+    auto extreme = pulp::format::au::make_render_process_context(48000.0, kFrames);
+    pulp::format::au::apply_host_callbacks_to_process_context(extreme, effect, previous_extreme,
+                                                              kSliceOffset);
+    REQUIRE(extreme.has_transport(TransportField::BeatPosition));
+    REQUIRE_FALSE(extreme.has_transport(TransportField::Bar));
+    REQUIRE(extreme.bar == 0);
+
+    // Control: a finite tempo advances the beat by the slice offset.
+    transport.beat = 2.0;
+    pulp::format::detail::PlayheadSnapshot previous;
+    auto ctx = pulp::format::au::make_render_process_context(48000.0, kFrames);
+    pulp::format::au::apply_host_callbacks_to_process_context(ctx, effect, previous, kSliceOffset);
+    REQUIRE(ctx.has_transport(TransportField::Tempo));
+    REQUIRE(ctx.position_beats == 2.0 + 32.0 * 120.0 / (60.0 * 48000.0));
 }
 
 TEST_CASE("AU v3 fullState round-trips plugin-owned payload",
