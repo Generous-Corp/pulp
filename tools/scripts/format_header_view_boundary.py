@@ -42,6 +42,14 @@ INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"]([^">]+)[">]')
 VIEW_PREFIXES = ("pulp/view/", "pulp/canvas/", "pulp/render/")
 FORBIDDEN_PREFIXES = ("vellum/",)
 
+# Some public headers are generated during the build.  The source template is
+# the authoritative include graph for this static check; generated output is
+# not present in a source checkout and must not make the boundary gate
+# inconclusive.
+GENERATED_TEMPLATES = {
+    "pulp/runtime/build_info.hpp": "core/runtime/include/pulp/runtime/build_info.hpp.in",
+}
+
 # Headers whose include closure legitimately reaches the view layer. These are
 # the pulp-format-view surface. Keep sorted.
 VIEW_HEADERS = {
@@ -98,12 +106,17 @@ def include_dirs(repo: str) -> list[str]:
     return dirs
 
 
-def build_walker(dirs: list[str]):
+def build_walker(dirs: list[str], repo: str):
     cache: dict[str, tuple[frozenset, frozenset, frozenset]] = {}
 
     def resolve(name: str) -> str | None:
         for d in dirs:
             path = os.path.join(d, name)
+            if os.path.isfile(path):
+                return path
+        template = GENERATED_TEMPLATES.get(name)
+        if template:
+            path = os.path.join(repo, template)
             if os.path.isfile(path):
                 return path
         return None
@@ -164,7 +177,7 @@ def main() -> int:
         return 2
 
     dirs = include_dirs(repo)
-    walk = build_walker(dirs)
+    walk = build_walker(dirs, repo)
 
     headers = []
     for dirpath, _dirnames, filenames in os.walk(fmt_include):

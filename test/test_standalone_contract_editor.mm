@@ -352,3 +352,55 @@ TEST_CASE("standalone editor requests supersede a pending host correction",
     }));
     REQUIRE(ran);
 }
+
+TEST_CASE("an editor's open_settings host action reaches the registered settings opener",
+          "[standalone][editor-host][standalone-contract][settings]") {
+    EditorEnvironment env;
+    reset_contract_recording();
+    const auto png = temp_png("pulp-standalone-settings-action");
+    std::filesystem::remove(png);
+
+    pulp::format::StandaloneApp app(create_contract_processor);
+    int opened = 0;
+    pulp::format::StandaloneApp* seen_app = nullptr;
+    app.set_settings_window_opener([&](pulp::format::StandaloneApp& a) {
+        ++opened;
+        seen_app = &a;
+        return true;
+    });
+
+    auto config = headless_config(png);
+    bool requested = false;
+    bool accepted = false;
+    config.test_on_editor_frame = [&] {
+        if (requested || contract_log().context == nullptr)
+            return;
+        requested = true;
+        pulp::format::HostActionRequest request;
+        request.action = pulp::format::HostAction::open_settings;
+        accepted = contract_log().context->host_action(request);
+    };
+    app.set_config(config);
+    REQUIRE(app.run_with_editor(false));
+
+    REQUIRE(requested);
+    REQUIRE(accepted);
+    REQUIRE(opened == 1);
+    REQUIRE(seen_app == &app);
+    std::filesystem::remove(png);
+}
+
+TEST_CASE("open_settings_window uses the registered opener and reports its result",
+          "[standalone][settings]") {
+    pulp::format::StandaloneApp app(create_contract_processor);
+    bool answer = false;
+    int calls = 0;
+    app.set_settings_window_opener([&](pulp::format::StandaloneApp&) {
+        ++calls;
+        return answer;
+    });
+    REQUIRE_FALSE(app.open_settings_window());
+    answer = true;
+    REQUIRE(app.open_settings_window());
+    REQUIRE(calls == 2);
+}

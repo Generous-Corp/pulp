@@ -5,6 +5,7 @@
 
 #include <pulp/format/processor.hpp>
 #include <pulp/runtime/system.hpp>
+#include <pulp/runtime/build_info.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/platform/platform.hpp>
 #include <string>
@@ -89,9 +90,32 @@ public:
         ss << "Generated: " << timestamp() << "\n\n";
 
         // System info
+        const auto& system = runtime::get_system_info();
         ss << "--- System ---\n";
-        ss << "Platform: " << os_name() << "\n";
-        ss << "Architecture: " << arch() << "\n\n";
+        ss << "Platform: " << (system.os_name.empty() ? os_name() : system.os_name);
+        if (!system.os_version.empty())
+            ss << " " << system.os_version;
+        ss << "\n";
+        ss << "Architecture: " << (system.arch.empty() ? arch() : system.arch) << "\n";
+        if (!system.cpu_model.empty())
+            ss << "CPU: " << system.cpu_model << "\n";
+        if (system.cpu_cores > 0)
+            ss << "CPU cores: " << system.cpu_cores << "\n";
+        if (system.cpu_threads > 0)
+            ss << "CPU threads: " << system.cpu_threads << "\n";
+        if (system.total_memory_mb > 0)
+            ss << "Memory: " << system.total_memory_mb << " MB\n";
+        const auto features = cpu_features(system);
+        if (!features.empty())
+            ss << "CPU features: " << features << "\n";
+        ss << "\n";
+
+        ss << "--- Pulp SDK ---\n";
+        ss << "Version: " << runtime::kSdkVersion << "\n";
+        if (!runtime::kGitSha.empty())
+            ss << "SHA: " << runtime::kGitSha << "\n";
+        ss << "Build: " << runtime::kBuildType << "\n";
+        ss << "Built: " << runtime::kBuildIso8601 << "\n\n";
 
         // Plugin info
         ss << "--- Plugin ---\n";
@@ -148,8 +172,25 @@ public:
 
         ss << "{\n";
         ss << "  \"timestamp\": \"" << json_escape(timestamp()) << "\",\n";
-        ss << "  \"platform\": \"" << json_escape(os_name()) << "\",\n";
-        ss << "  \"arch\": \"" << json_escape(arch()) << "\",\n";
+        const auto& system = runtime::get_system_info();
+        const auto platform_name = system.os_name.empty() ? os_name() : system.os_name;
+        const auto architecture = system.arch.empty() ? arch() : system.arch;
+        ss << "  \"platform\": \"" << json_escape(platform_name) << "\",\n";
+        ss << "  \"osVersion\": \"" << json_escape(system.os_version) << "\",\n";
+        ss << "  \"arch\": \"" << json_escape(architecture) << "\",\n";
+        ss << "  \"system\": {\n";
+        ss << "    \"cpuModel\": \"" << json_escape(system.cpu_model) << "\",\n";
+        ss << "    \"cpuCores\": " << system.cpu_cores << ",\n";
+        ss << "    \"cpuThreads\": " << system.cpu_threads << ",\n";
+        ss << "    \"memoryMb\": " << system.total_memory_mb << ",\n";
+        ss << "    \"cpuFeatures\": \"" << json_escape(cpu_features(system)) << "\"\n";
+        ss << "  },\n";
+        ss << "  \"sdk\": {\n";
+        ss << "    \"version\": \"" << json_escape(std::string(runtime::kSdkVersion)) << "\",\n";
+        ss << "    \"sha\": \"" << json_escape(std::string(runtime::kGitSha)) << "\",\n";
+        ss << "    \"build\": \"" << json_escape(std::string(runtime::kBuildType)) << "\",\n";
+        ss << "    \"built\": \"" << json_escape(std::string(runtime::kBuildIso8601)) << "\"\n";
+        ss << "  },\n";
         ss << "  \"plugin\": {\n";
         ss << "    \"name\": \"" << json_escape(plugin_name_) << "\",\n";
         ss << "    \"manufacturer\": \"" << json_escape(plugin_manufacturer_) << "\",\n";
@@ -261,6 +302,25 @@ private:
 #else
         return "unknown";
 #endif
+    }
+
+    static std::string cpu_features(const runtime::SystemInfo& system) {
+        std::string result;
+        const auto add = [&result](const char* feature, bool present) {
+            if (!present)
+                return;
+            if (!result.empty())
+                result += ",";
+            result += feature;
+        };
+        add("sse2", system.has_sse2);
+        add("sse4.1", system.has_sse4_1);
+        add("avx", system.has_avx);
+        add("avx2", system.has_avx2);
+        add("avx512", system.has_avx512);
+        add("fma", system.has_fma);
+        add("neon", system.has_neon);
+        return result;
     }
 };
 

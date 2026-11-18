@@ -2834,6 +2834,7 @@
       "claim_id": "standalone-key-sequence-driver-20260909",
       "owned_paths": [
         "core/format/include/pulp/format/standalone.hpp",
+        "core/format/include/pulp/format/standalone_config.hpp",
         "core/format/include/pulp/format/detail/standalone_environment.hpp",
         "core/format/include/pulp/format/detail/standalone_key_sequence.hpp",
         "core/format/include/pulp/format/detail/standalone_key_driver.hpp",
@@ -2845,7 +2846,7 @@
       ],
       "evidence": [
         {
-          "path": "core/format/include/pulp/format/standalone.hpp",
+          "path": "core/format/include/pulp/format/standalone_config.hpp",
           "needles": [
             "std::string test_key_sequence;",
             "int test_key_frame_delay"
@@ -2883,7 +2884,7 @@
           "evidence": [
             {
               "kind": "sdk_header",
-              "path": "core/format/include/pulp/format/standalone.hpp",
+              "path": "core/format/include/pulp/format/standalone_config.hpp",
               "needles": [
                 "std::string test_key_sequence;"
               ]

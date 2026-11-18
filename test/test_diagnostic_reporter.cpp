@@ -40,6 +40,9 @@ TEST_CASE("DiagnosticReporter generates text report", "[format][diagnostic]") {
     REQUIRE(report.find("512") != std::string::npos);
     REQUIRE(report.find("Gain") != std::string::npos);
     REQUIRE(report.find("Effect") != std::string::npos);
+    REQUIRE(report.find("--- System ---") != std::string::npos);
+    REQUIRE(report.find("Architecture:") != std::string::npos);
+    REQUIRE(report.find("--- Pulp SDK ---") != std::string::npos);
 }
 
 TEST_CASE("DiagnosticReporter generates JSON report", "[format][diagnostic]") {
@@ -57,6 +60,9 @@ TEST_CASE("DiagnosticReporter generates JSON report", "[format][diagnostic]") {
     REQUIRE(json.find("\"sampleRate\": 48000") != std::string::npos);
     REQUIRE(json.find("\"parameters\"") != std::string::npos);
     REQUIRE(json.find("\"Gain\"") != std::string::npos);
+    REQUIRE(json.find("\"system\": {") != std::string::npos);
+    REQUIRE(json.find("\"cpuModel\":") != std::string::npos);
+    REQUIRE(json.find("\"sdk\": {") != std::string::npos);
 }
 
 TEST_CASE("DiagnosticReporter includes format and host", "[format][diagnostic]") {
