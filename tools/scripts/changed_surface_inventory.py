@@ -17,6 +17,7 @@ projection through ``tools/scripts/affected_targets.py``.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import math
@@ -1360,22 +1361,23 @@ REGISTRATION_FRAGMENT_RE = re.compile(r"^test/cmake/(?:fragments/)?[^/]+\.cmake$
 # The aggregator that include()s every fragment: it sits on every fragment's
 # call stack, so a change to it reaches all of them.
 SHARED_FRAGMENT_NAMES = frozenset({"fragments.cmake"})
-_CMAKE_COMMENT = re.compile(r"#.*")
-_CMAKE_COMMAND_NAME = r"[A-Za-z_][A-Za-z0-9_.-]*"
+_CMAKE_COMMAND_NAME = r"[^\s()#\"\[\]\\;]+"
+_CMAKE_BRACKET_OPEN = re.compile(r"\[(=*)\[")
+_CMAKE_UNQUOTED_END = frozenset(' \t\r\n\f\v()#"')
 
 # Commands that only describe the registration owned by this file. Anything
 # else is conservatively treated as shared: an unrecognized command may be a
-# project macro that mutates a target, directory, or cache outside its stack.
+# project macro that mutates a target, directory, or cache outside its stack,
+# and list() or cmake_parse_arguments() can rewrite a variable a later fragment
+# reads, while cmake_minimum_required() resets policy for the whole directory.
 _CMAKE_LOCAL_COMMANDS = frozenset({
     "add_executable", "add_library", "add_test", "pulp_add_test_suite",
     "pulp_add_test_group", "pulp_dsp_series_catalog_suite", "pulp_dsp_series_signal_suite",
-    "catch_discover_tests", "message", "set", "unset", "list", "cmake_parse_arguments",
-    "cmake_minimum_required", "function", "macro", "endfunction", "endmacro",
+    "catch_discover_tests", "message", "set", "unset", "function", "macro",
+    "endfunction", "endmacro",
     "if", "elseif", "else", "endif", "foreach", "endforeach", "while", "endwhile",
     "break", "continue", "return",
 })
-_CMAKE_COMMAND_CALL = re.compile(
-    rf"(?<![A-Za-z0-9_.-])({_CMAKE_COMMAND_NAME})\s*\(", re.I)
 _CMAKE_GLOBAL_COMMANDS = frozenset({
     "include", "configure_file", "file", "execute_process", "add_subdirectory",
     "include_directories", "add_compile_options", "add_compile_definitions", "add_definitions",
@@ -1385,58 +1387,120 @@ _CMAKE_GLOBAL_COMMANDS = frozenset({
 })
 
 
-def _cmake_command_invocations(text: str) -> list[tuple[str, str]]:
-    """Return every command and its balanced argument text in a CMake file."""
-    invocations: list[tuple[str, str]] = []
-    for match in _CMAKE_COMMAND_CALL.finditer(text):
-        open_index = match.end() - 1
+class _CMakeSyntaxError(ValueError):
+    """CMake text this lexer cannot read with certainty."""
+
+
+def _cmake_skip_comment(text: str, index: int) -> int:
+    """Index after the comment starting at text[index] == '#'."""
+    bracket = _CMAKE_BRACKET_OPEN.match(text, index + 1)
+    if bracket:
+        close = "]" + bracket.group(1) + "]"
+        end = text.find(close, bracket.end())
+        if end < 0:
+            raise _CMakeSyntaxError("unterminated bracket comment")
+        return end + len(close)
+    end = text.find("\n", index)
+    return len(text) if end < 0 else end
+
+
+@functools.lru_cache(maxsize=1024)
+def _cmake_commands(text: str) -> list[tuple[str, list[str]]]:
+    """Lex CMake text into (lower-case command, arguments) invocations.
+
+    Comments are dropped only where CMake itself would drop them, quoted and
+    bracket arguments are returned without their delimiters, and any text the
+    lexer cannot read with certainty (an unterminated string, a stray token, an
+    apostrophe in an unquoted argument) raises _CMakeSyntaxError so callers
+    treat the file as shared."""
+    commands: list[tuple[str, list[str]]] = []
+    length = len(text)
+    index = 0
+    while index < length:
+        char = text[index]
+        if char.isspace():
+            index += 1
+            continue
+        if char == "#":
+            index = _cmake_skip_comment(text, index)
+            continue
+        name = re.compile(_CMAKE_COMMAND_NAME).match(text, index)
+        if not name:
+            raise _CMakeSyntaxError(f"unexpected {char!r}")
+        index = name.end()
+        while index < length and text[index].isspace():
+            index += 1
+        if index >= length or text[index] != "(":
+            raise _CMakeSyntaxError(f"{name.group(0)} is not followed by arguments")
+        index += 1
         depth = 1
-        quote: str | None = None
-        escaped = False
-        index = open_index + 1
-        while index < len(text) and depth:
+        args: list[str] = []
+        while depth:
+            if index >= length:
+                raise _CMakeSyntaxError("unterminated command")
             char = text[index]
-            if quote is not None:
-                if escaped:
-                    escaped = False
-                elif char == "\\":
-                    escaped = True
-                elif char == quote:
-                    quote = None
-            elif char in "\"'":
-                quote = char
+            if char.isspace() or char == ";":
+                index += 1
+            elif char == "#":
+                index = _cmake_skip_comment(text, index)
             elif char == "(":
                 depth += 1
+                args.append("(")
+                index += 1
             elif char == ")":
                 depth -= 1
-            index += 1
-        if depth == 0:
-            invocations.append((match.group(1).lower(), text[open_index + 1:index - 1]))
-    return invocations
+                args.append(")")
+                index += 1
+            elif char == '"':
+                index += 1
+                start = index
+                while index < length and text[index] != '"':
+                    index += 2 if text[index] == "\\" else 1
+                if index >= length:
+                    raise _CMakeSyntaxError("unterminated quoted argument")
+                args.append(text[start:index])
+                index += 1
+            elif char == "[" and _CMAKE_BRACKET_OPEN.match(text, index):
+                bracket = _CMAKE_BRACKET_OPEN.match(text, index)
+                close = "]" + bracket.group(1) + "]"
+                end = text.find(close, bracket.end())
+                if end < 0:
+                    raise _CMakeSyntaxError("unterminated bracket argument")
+                args.append(text[bracket.end():end])
+                index = end + len(close)
+            else:
+                start = index
+                while index < length and text[index] not in _CMAKE_UNQUOTED_END:
+                    if text[index] == "'":
+                        raise _CMakeSyntaxError("apostrophe in unquoted argument")
+                    index += 2 if text[index] == "\\" else 1
+                if index == start:
+                    raise _CMakeSyntaxError("unreadable argument")
+                args.append(text[start:index])
+        args.pop()  # the closing parenthesis
+        commands.append((name.group(0).lower(), args))
+    return commands
 
 
-def _cmake_command_arguments(body: str) -> list[str]:
-    """Return conservative whitespace-delimited command arguments."""
-    return re.findall(r'"(?:\\.|[^"\\])*"|\S+', body)
-
-
-def _cmake_scoped_set(body: str) -> bool:
+def _cmake_scoped_set(args: list[str]) -> bool:
     """Whether set/unset changes state outside this registration fragment."""
-    args = _cmake_command_arguments(body)
     if not args:
         return False
-    first = args[0].upper()
+    first = args[0]
+    upper = first.upper()
     options = {arg.upper() for arg in args[1:]}
     return (
-        first.startswith("CMAKE_")
-        or first.startswith("ENV{")
+        upper.startswith("CMAKE_")
+        or upper.startswith("ENV{")
+        or "${" in first
+        or "@" in first
         or "CACHE" in options
         or "PARENT_SCOPE" in options
     )
 
 
 def _test_cmake_texts(source_root: str, ref: str | None = None) -> dict[str, str]:
-    """Comment-stripped text of every CMake file under test/, by relative path."""
+    """Text of every CMake file under test/, by relative path."""
     root = Path(source_root) / "test"
     if ref is not None:
         try:
@@ -1461,7 +1525,7 @@ def _test_cmake_texts(source_root: str, ref: str | None = None) -> dict[str, str
                     ["git", "show", f"{ref}:{rel}"], cwd=source_root,
                     capture_output=True, text=True, encoding="utf-8", check=True,
                 ).stdout
-            texts[rel] = _CMAKE_COMMENT.sub("", text)
+            texts[rel] = text
         except OSError:
             continue
         except subprocess.CalledProcessError:
@@ -1477,37 +1541,43 @@ def _shared_fragment_reason_current(rel: str, texts: dict[str, str]) -> str | No
         return "unreadable"
     if os.path.basename(rel) in SHARED_FRAGMENT_NAMES:
         return "aggregates every fragment"
-    invocations = _cmake_command_invocations(text)
-    commands = {name for name, _body in invocations}
+    try:
+        invocations = _cmake_commands(text)
+        others = {name: _cmake_commands(body) for name, body in texts.items() if name != rel}
+    except _CMakeSyntaxError as error:
+        return f"CMake syntax not readable with certainty ({error})"
+    commands = {name for name, _args in invocations}
     if any(name in _CMAKE_GLOBAL_COMMANDS or name.startswith("target_")
            for name in commands):
         return "touches directory, cache or global state"
-    if any(name in {"set", "unset"} and _cmake_scoped_set(body)
-           for name, body in invocations):
+    if any(name in {"set", "unset"} and _cmake_scoped_set(args)
+           for name, args in invocations):
         return "touches directory, cache or global state"
     unknown = sorted(commands - _CMAKE_LOCAL_COMMANDS)
     if unknown:
         return f"uses unrecognized CMake command {unknown[0]}"
-    others = {name: body for name, body in texts.items() if name != rel}
     defined = {
         args[0].lower()
-        for name, body in invocations
-        for args in [_cmake_command_arguments(body)]
+        for name, args in invocations
         if name in {"function", "macro"} and args
     }
     for name in defined:
-        if any(name in {command for command, _body in _cmake_command_invocations(body)}
-               for body in others.values()):
+        if any(name in {command for command, _args in other} for other in others.values()):
             return f"defines {name}(), called from another file"
-    set_variables = {
+    # set() and unset() both change a variable the other fragments share the
+    # directory scope with, so either one is checked against every other file.
+    written_variables = {
         args[0]
-        for name, body in invocations
-        for args in [_cmake_command_arguments(body)]
-        if name == "set" and args and not args[0].upper().startswith("ENV{")
+        for name, args in invocations
+        if name in {"set", "unset"} and args
     }
-    for name in set_variables:
+    other_text = [
+        "\n".join(arg for _name, args in other for arg in args)
+        for other in others.values()
+    ]
+    for name in written_variables:
         word = re.compile(r"\b" + re.escape(name) + r"\b")
-        if any(word.search(body) for body in others.values()):
+        if any(word.search(body) for body in other_text):
             return f"sets {name}, read by another file"
     return None
 

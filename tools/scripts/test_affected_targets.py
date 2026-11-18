@@ -736,6 +736,73 @@ class RegistrationFragments(unittest.TestCase):
             sel = self.fx.select(["test/cmake/knob_tests.cmake"])
             self.assertEqual(sel.mode, "all", name)
 
+    def _assert_all(self, cases: dict[str, str]) -> None:
+        for name, text in cases.items():
+            self.fx.touch("test/cmake/knob_tests.cmake", text)
+            sel = self.fx.select(["test/cmake/knob_tests.cmake"])
+            self.assertEqual(sel.mode, "all", name)
+
+    def test_commands_that_rewrite_shared_variables_or_policy_stay_global(self) -> None:
+        self.fx.touch("test/cmake/label_tests.cmake", "message(${SHARED_FLAGS})\n")
+        self._assert_all({
+            "list-append": "list(APPEND SHARED_FLAGS -DX)\n",
+            "list-length": "list(LENGTH SHARED_FLAGS n)\n",
+            "parse-arguments": "cmake_parse_arguments(KNOB \"\" \"\" \"\" ${ARGN})\n",
+            "minimum-required": "cmake_minimum_required(VERSION 3.20)\n",
+        })
+
+    def test_unset_of_a_variable_another_file_reads_stays_global(self) -> None:
+        self.fx.touch("test/cmake/label_tests.cmake", "message(${KNOB_FLAGS})\n")
+        self._assert_all({
+            "unset": "unset(KNOB_FLAGS)\n",
+            "unset-quoted": "unset(\"KNOB_FLAGS\")\n",
+        })
+        self.fx.touch("test/cmake/knob_tests.cmake",
+                      "add_executable(pulp-test-knob test/test_knob.cpp)\nunset(KNOB_UNREAD)\n")
+        self.assertEqual(self.fx.select(["test/cmake/knob_tests.cmake"]).mode, "focused")
+
+    def test_comment_markers_inside_arguments_do_not_hide_commands(self) -> None:
+        self._assert_all({
+            "quoted": "message(\"URL #x\")\ninclude(shared-options.cmake)\n",
+            "bracket": "message([[URL #x]])\ninclude(shared-options.cmake)\n",
+            "bracket-level": "message([==[a ]] #x]==])\ninclude(shared-options.cmake)\n",
+            "apostrophe": "message('URL #x')\ninclude(shared-options.cmake)\n",
+            "unterminated": "message(\"URL #x)\ninclude(shared-options.cmake)\n",
+        })
+
+    def test_real_comments_are_still_ignored(self) -> None:
+        self.fx.touch(
+            "test/cmake/knob_tests.cmake",
+            "# include(shared-options.cmake)\n"
+            "#[[ target_compile_definitions(pulp-test-label PRIVATE X) ]]\n"
+            "add_executable(pulp-test-knob test/test_knob.cpp) # include(more.cmake)\n"
+            "add_test(NAME knob COMMAND pulp-test-knob)\n")
+        sel = self.fx.select(["test/cmake/knob_tests.cmake"])
+        self.assertEqual(sel.mode, "focused")
+        self.assertEqual(sel.tests, ["Knob sprite"])
+
+    def test_quoted_arguments_are_read_without_their_delimiters(self) -> None:
+        self.fx.touch("test/cmake/label_tests.cmake", "message(${KNOB_FLAGS})\n")
+        self._assert_all({
+            "quoted-cmake-variable": "set(\"CMAKE_CXX_FLAGS\" -DX)\n",
+            "quoted-environment": "set(\"ENV{KNOB_FLAGS}\" -DX)\n",
+            "quoted-parent-scope": "set(KNOB_OUT -DX \"PARENT_SCOPE\")\n",
+            "quoted-cache": "set(KNOB_OUT -DX \"CACHE\" STRING \"\")\n",
+            "quoted-shared-name": "set(\"KNOB_FLAGS\" -DX)\n",
+            "single-quoted": "set('CMAKE_CXX_FLAGS' -DX)\n",
+            "dynamic-name": "set(${KNOB_NAME} -DX)\n",
+        })
+        self.fx.touch("test/cmake/label_tests.cmake", "message(\"${KNOB_FLAGS}\")\n")
+        self._assert_all({"set-read-in-quotes": "set(KNOB_FLAGS -DX)\n"})
+
+    def test_namespaced_and_unparseable_commands_stay_global(self) -> None:
+        self._assert_all({
+            "namespaced": "project::mutate(pulp-test-label)\n",
+            "namespaced-after-local": "message(STATUS ok)\nproject::mutate()\n",
+            "stray-token": "message(STATUS ok)\n)\n",
+            "no-arguments": "message\n",
+        })
+
     def test_removed_shared_assignment_stays_global(self) -> None:
         self.fx.touch("test/cmake/label_tests.cmake", "message(${KNOB_FLAGS.with-dot})\n")
         self.fx.touch("test/cmake/knob_tests.cmake",
