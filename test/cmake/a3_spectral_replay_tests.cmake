@@ -4,6 +4,19 @@ pulp_test_spawns(pulp-test-spectral-graph-persistence NONE
     REASON "GraphSerializer inputs are generated in memory from closed built-in spectral and Audio nodes with no plugin or custom callback registered or loaded")
 catch_discover_tests(pulp-test-spectral-graph-persistence)
 
+# Spectral graphs in the saved-identity v7 document: authored IDs, analysis
+# declarations, the single-stream asset source, migration from format 6, the
+# common inspect/diff path and refusals that leave the caller's graph intact,
+# checked against the independent analysis grid and inverse DFT/OLA oracle.
+add_executable(pulp-test-spectral-graph-saved-identity test_spectral_graph_saved_identity.cpp
+    harness/rt_allocation_probe.cpp)
+target_link_libraries(pulp-test-spectral-graph-saved-identity PRIVATE
+    pulp::host Catch2::Catch2WithMain)
+pulp_test_spawns(pulp-test-spectral-graph-saved-identity NONE
+    REASON "GraphSerializer inputs are generated in memory from closed built-in spectral and Audio nodes with no plugin or custom callback registered or loaded")
+catch_discover_tests(pulp-test-spectral-graph-saved-identity
+    PROPERTIES RESOURCE_LOCK pulp_realtime_worker_pool)
+
 # This records the pinned fixture using the same public consumer source. The
 # installed-SDK gate separately builds it with find_package(Pulp), without
 # access to source-tree include directories or targets.

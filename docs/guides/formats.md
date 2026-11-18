@@ -94,6 +94,22 @@ Note port declaration is driven by `descriptor().accepts_midi` and `descriptor()
   `deserialize_plugin_state()`. Older blobs without a processor-owned payload
   call `deserialize_plugin_state()` with empty bytes.
 
+#### Audio Unit v2: programs declared in code
+
+A plug-in whose programs are not files (for example one that exposes a single
+"default" program) declares them on the adapter instead:
+
+```cpp
+unit.set_programs({"default"}, [](std::size_t index) { /* optional */ });
+```
+
+The names are published as factory presets numbered from 0 in the order given,
+ahead of any bundle preset files. The first one starts as the present preset, so
+a host shows its name rather than "No preset". Selecting program `n` runs the
+callback (which may be omitted) and makes `n` the present preset; a number
+outside the list is refused and leaves the present preset alone. `PulpAUEffect`,
+`PulpAUInstrument` and `PulpAUMidiProcessor` all offer it.
+
 ### Multi-Bus / Sidechain
 
 Audio port count and info come from `descriptor().input_buses` and `descriptor().output_buses`. Each bus is reported with:

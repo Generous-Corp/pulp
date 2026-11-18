@@ -539,6 +539,19 @@ struct SiblingRender {
 constexpr int kSiblingBlocks = 16;
 constexpr int kKillAfterBlock = 6;
 
+// The sibling's own oracle, independent of any second run: the gain applied
+// to the previous block's input (one block of plugin delay compensation),
+// zero for the first block. A sibling silenced or dropped in both runs fails it.
+std::vector<float> expected_sibling() {
+    std::vector<float> expected;
+    for (int block = 0; block < kSiblingBlocks; ++block)
+        for (std::size_t c = 0; c < 2; ++c)
+            for (std::size_t n = 0; n < 64; ++n)
+                expected.push_back(
+                    block == 0 ? 0.0f : static_cast<float>(block + n + 64 * c) / 256 * 0.25f);
+    return expected;
+}
+
 SiblingRender render_with_sibling(IsolatedClapResult& isolated, bool kill_worker) {
     REQUIRE(isolated);
     SignalGraph graph;
@@ -604,6 +617,13 @@ TEST_CASE("Windows isolated CLAP killed worker keeps in-process sibling bit-exac
     REQUIRE(killed.observed_reason == IsolationReason::worker_exited);
     REQUIRE(killed.before_release.reason == IsolationReason::worker_exited);
     REQUIRE(killed.before_release.lifecycle == IsolationLifecycle::terminal);
+    const auto oracle = expected_sibling();
+    REQUIRE(std::any_of(oracle.begin(), oracle.end(), [](float v) { return v != 0.0f; }));
+    REQUIRE(reference.sibling.size() == oracle.size());
+    for (std::size_t i = 0; i < oracle.size(); ++i) {
+        INFO("sample=" << i);
+        REQUIRE(reference.sibling[i] == oracle[i]);
+    }
     REQUIRE(killed.sibling.size() == reference.sibling.size());
     for (std::size_t i = 0; i < reference.sibling.size(); ++i) {
         INFO("sample=" << i);
