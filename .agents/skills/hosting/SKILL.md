@@ -1187,6 +1187,14 @@ save/reopen render proof beside the legacy caller-owned route controls.
   the domain gate that needs the private `CompiledGraph` in `prepare()`.
   `ExecutionSnapshot::export_prepared_description` still validates the same
   record separately.
+  The admission gates that run before the candidate compiles (stale base,
+  spectral and MIDI-output refusals, baseline removal, preflight, and the
+  processor, plugin and custom lifecycle checks that also prepare instances
+  minted inside the edit) live in `admission_result_` in
+  `core/host/src/signal_graph_prepared_edit_admission.cpp`. It acquires the
+  candidate lock into the caller's `std::optional<GraphMutationLock>` so the
+  lock stays held through compile and runtime adoption; a new gate belongs
+  there, not back in `prepare()`.
   `set_live_dsp_telemetry_enabled()` is a control-thread operation serialized
   by the graph mutation lock: a prepared commit re-seeds its snapshot from the
   owner's authoritative desired toggle immediately before publication. Do not
