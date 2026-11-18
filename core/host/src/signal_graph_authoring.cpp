@@ -42,14 +42,13 @@ SignalGraph::GraphMutationCheckpoint::~GraphMutationCheckpoint() {
 
 SignalGraph::GraphMutationCheckpoint::GraphMutationCheckpoint(
     GraphMutationCheckpoint&& other) noexcept
-    : graph_(std::exchange(other.graph_, nullptr)),
-      next_id_(other.next_id_),
+    : graph_(std::exchange(other.graph_, nullptr)), next_id_(other.next_id_),
       next_connection_identity_(other.next_connection_identity_),
       authored_id_counter_(other.authored_id_counter_),
       completed_(std::exchange(other.completed_, true)) {}
 
-SignalGraph::GraphMutationCheckpoint& SignalGraph::GraphMutationCheckpoint::operator=(
-    GraphMutationCheckpoint&& other) noexcept {
+SignalGraph::GraphMutationCheckpoint&
+SignalGraph::GraphMutationCheckpoint::operator=(GraphMutationCheckpoint&& other) noexcept {
     if (this == &other)
         return *this;
     rollback();
