@@ -42,6 +42,16 @@ inline bool test_windows_offscreen() {
 
 namespace pulp::platform {
 
+/// Under `test_windows_offscreen()`, makes `window` transparent and
+/// click-through so that ordering it in never shows anything.
+inline void make_window_invisible_for_test(NSWindow* window) {
+    if (!window || !test_windows_offscreen())
+        return;
+    window.alphaValue = 0.0;
+    window.ignoresMouseEvents = YES;
+    window.hidesOnDeactivate = NO;
+}
+
 /// Orders `window` in. Under `test_windows_offscreen()` the window is made
 /// transparent and click-through and ordered behind everything (key within
 /// the application when `make_key`, but the application is never activated), so it is "visible" to AppKit but never to the user.
@@ -51,9 +61,7 @@ inline void order_in_window(NSWindow* window, bool make_key = true) {
     if (!window)
         return;
     if (test_windows_offscreen()) {
-        window.alphaValue = 0.0;
-        window.ignoresMouseEvents = YES;
-        window.hidesOnDeactivate = NO;
+        make_window_invisible_for_test(window);
         [window orderBack:nil];
         if (make_key)
             [window makeKeyWindow];
@@ -63,6 +71,13 @@ inline void order_in_window(NSWindow* window, bool make_key = true) {
         [window makeKeyAndOrderFront:nil];
     else
         [window orderFrontRegardless];
+}
+
+/// Dock/menu-bar role for a foreground app: Accessory (no Dock icon, no menu
+/// bar, never activated) under offscreen test runs, Regular otherwise.
+inline NSApplicationActivationPolicy foreground_activation_policy() {
+    return test_windows_offscreen() ? NSApplicationActivationPolicyAccessory
+                                    : NSApplicationActivationPolicyRegular;
 }
 
 /// Activates the application unless windows are offscreen.

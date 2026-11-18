@@ -1,5 +1,4 @@
 // Per-binary-unique ObjC class names (see header).
-#include <pulp/platform/test_visibility.hpp>
 #include "pulp_mac_objc_names.h"
 #include "mac_gpu_host_config.h"
 #include <pulp/view/window_host.hpp>
@@ -1548,9 +1547,7 @@ public:
         root_.set_frame_clock(nullptr);
     }
 
-    void show() override {
-        pulp::platform::order_in_window(window_);
-    }
+    void show() override { [window_ makeKeyAndOrderFront:nil]; }
     void hide() override { [window_ orderOut:nil]; }
     bool is_visible() const override { return [window_ isVisible]; }
     void repaint() override { [view_ setNeedsDisplay:YES]; }
@@ -1858,11 +1855,7 @@ public:
     void adopt_foreground_role() {
         if (foreground_role_adopted_) return;
         foreground_role_adopted_ = true;
-        // Offscreen test runs stay Accessory: no Dock icon, no menu bar, no
-        // activation.
-        [NSApp setActivationPolicy:pulp::platform::test_windows_offscreen()
-                                       ? NSApplicationActivationPolicyAccessory
-                                       : NSApplicationActivationPolicyRegular];
+        [NSApp setActivationPolicy:pulp::platform::foreground_activation_policy()];
         mac_menu::install_application_menu(
             menu_commands_, [] { pulp::view::mac_lifecycle::request_cocoa_app_stop(); });
     }
@@ -1888,7 +1881,7 @@ public:
             tracker_.invalidate_all();
             render_frame();
         }
-        pulp::platform::order_in_window(window_);
+        [window_ makeKeyAndOrderFront:nil];
         // A SECONDARY GPU window is created via WindowHost::create and never
         // enters run_event_loop() (only the primary window does), so it would
         // otherwise have NO CVDisplayLink. Without one, needs_repaint_ set by

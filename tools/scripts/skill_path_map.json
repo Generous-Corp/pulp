@@ -648,7 +648,7 @@
         "core/view/src/screenshot*.cpp",
         "core/view/platform/mac/screenshot_mac.mm",
         "core/platform/include/pulp/platform/test_visibility.hpp",
-        "test/test_offscreen_windows.mm",
+        "test/test_foreign_framework_coexistence.mm",
         "core/view/include/pulp/view/screenshot.hpp",
         "docs/contracts/gpu-dpr-corpus-v2-template.json",
         "docs/contracts/gpu-dpr-experiment-v1.schema.json",

@@ -4112,4 +4112,4 @@ live-pointer run, a REAPER smoke run) opts in with `PULP_TEST_SHOW_WINDOWS=1`.
 New test code that needs an ordered-in `NSWindow` calls `order_in_window` and
 `activate_app_for_window` instead of `makeKeyAndOrderFront` /
 `activateIgnoringOtherApps`, or parks the window at a far-off-screen origin.
-`test_offscreen_windows.mm` proves the policy and that frames still present.
+`test_foreign_framework_coexistence.mm` proves the policy and that frames still present.
