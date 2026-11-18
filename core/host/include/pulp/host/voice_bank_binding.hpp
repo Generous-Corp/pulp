@@ -174,6 +174,79 @@ struct VoiceBankBindingResult {
 // declares an audio input, audio-rate modulation or an unbounded tail.
 enum class VoiceBankIdleSkip : std::uint8_t { Off, SkipInactiveSlots };
 
+// What happens to sounding voices when the bank moves to a new epoch
+// (activate() and commit_event_reset()).
+//
+// HardCut (the default): every voice is cut on the reset, through the owner's
+// reset(). Output from the next frame contains only the new epoch's notes.
+//
+// DrainRetired (opt-in): each sounding voice is retired instead of cut. A held
+// or pedal-held voice is released, an already releasing voice keeps releasing,
+// and each retired voice renders for at most `tail_frames` further frames,
+// after which it is cut on that exact frame whatever the block partition. At
+// most `capacity` voices drain at once, counting drains still running from an
+// earlier reset (each keeps its original deadline); every further sounding
+// voice is refused a drain and cut on the reset, scanning slots in ordinal
+// order. A retired voice belongs to no epoch: deferred tokens for it are
+// refused, sustain and CC121 of the new epoch do not touch it, and an All
+// Sound Off covering its channel, or a steal by a new note, ends it early. The
+// owner's reset() is called only when no voice is left draining. The
+// retirement table is preallocated with the bank and the audio path neither
+// allocates nor locks.
+//
+// Neither policy is persistent state: capture_state() never records retired
+// voices, their deadlines, active tokens, epochs or pedal holds, and
+// restore_state() never revives them.
+enum class VoiceBankRetirement : std::uint8_t { HardCut, DrainRetired };
+
+// Longest finite tail a retired voice may drain for (about 21.8 s at 48 kHz).
+inline constexpr std::uint32_t kVoiceBankMaxRetirementTailFrames = 1u << 20;
+
+struct VoiceBankRetirementPolicy {
+    VoiceBankRetirement mode = VoiceBankRetirement::HardCut;
+    // DrainRetired: voices that may drain at once, 1 to kVoiceBankSlots.
+    // HardCut: must be 0.
+    std::uint32_t capacity = 0;
+    // DrainRetired: frames a retired voice may still render, 1 to
+    // kVoiceBankMaxRetirementTailFrames. HardCut: must be 0.
+    std::uint32_t tail_frames = 0;
+};
+
+// Retirement counters since prepare(). Audio owner only, between blocks.
+struct VoiceBankRetirementStats {
+    std::uint32_t draining = 0;    // voices draining now
+    std::uint64_t drained = 0;     // voices moved into a drain
+    std::uint64_t refused = 0;     // voices cut on a reset because capacity was full
+    std::uint64_t finished = 0;    // drains whose voice ended before its tail ran out
+    std::uint64_t cut_at_tail = 0; // drains cut when their tail ran out
+    std::uint64_t interrupted = 0; // drains ended by All Sound Off or a steal
+};
+
+// Sustain and channel-mode semantics of the bank, applied on the audio thread
+// in event order at each event's exact sample:
+//
+// - CC64 at 64 or above is down, below 64 is up. On a member channel it covers
+//   that channel; on a zone's manager channel it covers every member channel of
+//   the zone. A note is sustained while either pedal covering its channel is
+//   down.
+// - A note-off (MIDI, CC123 or a deferred NoteOff token) for a sustained note
+//   holds that exact voice generation instead of releasing it. A pedal rise
+//   releases each held voice no pedal covers any more, once. A held voice that
+//   is stolen leaves the hold table, so a later rise never releases the note
+//   that replaced it.
+// - CC121 lifts the pedal of its own scope, resets that scope's expression
+//   (and, on a member channel, the expression of its held and releasing
+//   voices) and releases voices that are no longer held.
+// - CC120 cuts every voice in scope at once, sustained or not, and lifts the
+//   pedals in scope. CC123 sends note-offs for every tracked note in scope,
+//   which sustain still holds.
+// - CC120, CC121 and CC123 with a non-zero value, and any controller other than
+//   64, 74, 120, 121 and 123, are refused with UnsupportedControl before the
+//   block changes anything.
+// - A reset (activate() or commit_event_reset()) lifts every pedal and clears
+//   the hold table; what happens to the voices is VoiceBankRetirement's
+//   policy. Pedals and holds are never persistent state.
+
 // One prepared graph and one eight-voice allocator. Construction, activation,
 // and parameter edits are control-thread operations while audio is stopped.
 // begin_block/publish/render and deferred dispatch belong to one audio owner.
@@ -242,6 +315,15 @@ class VoiceBankBinding final {
     // current values. Sounding voices are not stopped. Control thread, between
     // blocks.
     bool restore_state(const VoiceBankState& state, VoiceBankBindingResult& result);
+    // Choose what a reset does to sounding voices (see VoiceBankRetirement).
+    // Control thread, between blocks. Refused with InvalidBlock inside an open
+    // block, and with InvalidState for capacity or tail_frames outside the
+    // documented ranges or while a drain is still running; a refusal leaves the
+    // current policy in place.
+    bool set_retirement_policy(const VoiceBankRetirementPolicy& policy,
+                               VoiceBankBindingResult& result) noexcept;
+    VoiceBankRetirementPolicy retirement_policy() const noexcept;
+    VoiceBankRetirementStats retirement_stats() const noexcept;
     // Voice-blocks not rendered because of VoiceBankIdleSkip, summed over the
     // eight slots. Always 0 when the option is Off. Counts since prepare().
     // Lock-free; safe to call from any thread, including the audio thread.
@@ -249,6 +331,7 @@ class VoiceBankBinding final {
 
   private:
     void reset_idle_confirmations() noexcept;
+    void retire_voices() noexcept;
     VoiceBankBinding();
     struct Impl;
     std::unique_ptr<Impl> impl_;

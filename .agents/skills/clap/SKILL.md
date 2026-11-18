@@ -475,6 +475,12 @@ Every note, MIDI, SysEx, note-expression and MIDI 2 time goes through
 turns a far-past time into a negative offset. An out-of-block time is refused
 and counted on `ctx.timing.refused_events`, never clamped; parameter and
 modulation event times are not admitted (refusing one would drop its value).
+A refused time may be a release, and the count cannot say which voice it was
+for, so after the block `clap_process()` sets `reset_requested` and
+`sidecar_reconcile_requested`: the next rendered block carries
+`ctx.reset_requested`, exactly like a dropped stateful event. Set them after the
+Processor call, not before `clap_phase_build_context()`, or the refusing block
+itself is reset and a note-on it delivered is never released.
 
 ### Render mode (`clap.render`)
 

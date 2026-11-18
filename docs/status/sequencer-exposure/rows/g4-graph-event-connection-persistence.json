@@ -3,7 +3,7 @@
   "title": "The saved-identity v7 document persists the graph event connection and subgraph event declarations",
   "classification": "public_sdk",
   "delivery_state": "pending",
-  "claim_id": "g4-graph-event-connection-persistence-20261117",
+  "claim_id": "g4-graph-event-connection-persistence-20261118",
   "owned_paths": [
     "core/host/include/pulp/host/graph_serializer.hpp",
     "core/host/include/pulp/host/graph_history.hpp",
@@ -30,7 +30,7 @@
     },
     {
       "path": "core/host/src/graph_history.cpp",
-      "needles": ["diff.event_connections_added"]
+      "needles": ["diff.event_connections_added", "\" event connection, \""]
     },
     {
       "path": "core/host/src/subgraph_persistence.cpp",
@@ -38,7 +38,7 @@
     },
     {
       "path": "test/test_graph_event_persistence.cpp",
-      "needles": ["a graph event connection round-trips through the saved-identity v7 document", "planted event connection negatives are refused and the positive control loads", "subgraph event connection restore refuses lost, re-pointed and undeclared connections"]
+      "needles": ["a graph event connection round-trips through the saved-identity v7 document", "planted event connection negatives are refused and the positive control loads", "subgraph event connection restore refuses lost, re-pointed and undeclared connections", "the document diff keeps event connection records that differ only by kind", "an event connection edited outside the history is named in the Diverged detail"]
     },
     {
       "path": "docs/graph-program-status/G-4.md",
