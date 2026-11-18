@@ -193,10 +193,13 @@ TEST_CASE("Spectral replay matches independent numeric audio without a serializa
                                           asset_oracle::expected(inputs().a, inputs().b, control)));
 }
 
-TEST_CASE("Saved-identity envelopes remain unsupported for spectral graphs",
+TEST_CASE("Spectral graphs write the saved-identity v7 document as well as format 6",
           "[host][spectral][replay][saved-identity]") {
     const auto graph = fixture();
-    CHECK(GraphSerializer::to_saved_document(*graph).empty());
+    const auto saved = GraphSerializer::to_saved_document(*graph);
+    REQUIRE_FALSE(saved.empty());
+    CHECK(saved.find("\"format_version\": 7") != std::string::npos);
+    CHECK(GraphSerializer::to_json(*graph).find("\"format_version\": 6") != std::string::npos);
 }
 
 TEST_CASE("Spectral asset corruption and unsupported contracts preserve the old prepared graph",
@@ -379,8 +382,8 @@ bool pre_spectral_reader_admits(const std::string& json) {
 
 TEST_CASE("Spectral saves use a graph format the pre-spectral reader refuses",
           "[host][spectral][replay][compat]") {
-    // Spectral documents stay at format 6; format 7 is the saved-identity v7
-    // document, which a spectral graph does not have.
+    // The plain spectral writer stays at format 6; format 7 is the
+    // saved-identity v7 document, written by to_saved_document.
     REQUIRE(GraphSerializer::current_format_version() == 7);
     for (bool stages : {false, true}) {
         const auto json = GraphSerializer::to_json(*fixture(stages));
@@ -535,8 +538,8 @@ TEST_CASE("Spectral save refusals name the rule the graph breaks",
     CHECK(off_canvas.error.find("non-finite editor position") != std::string::npos);
 
     const auto envelope = GraphSerializer::to_saved_file(*graph, path);
-    CHECK_FALSE(envelope.ok);
-    CHECK(envelope.error.find("no saved-identity envelope") != std::string::npos);
+    INFO(envelope.error);
+    CHECK(envelope.ok);
 
     graph->add_gain_node("unsupported_mix");
     const auto mixed = GraphSerializer::to_file(*graph, path);
@@ -546,7 +549,8 @@ TEST_CASE("Spectral save refusals name the rule the graph breaks",
     CHECK(mixed.error.find("not an audio input, audio output or spectral node") !=
           std::string::npos);
 
-    // A live analysis node has its own rule, not the generic node-type one.
+    // A live analysis node has its own rule, not the generic node-type one:
+    // only the saved-identity v7 document carries its declaration.
     auto analysed = fixture();
     const auto shape = *SpectralIdentity::make(256, 64, 1, 48000).value;
     REQUIRE(analysed->add_spectral_analysis(shape, "live_analysis"));
@@ -554,5 +558,5 @@ TEST_CASE("Spectral save refusals name the rule the graph breaks",
     CHECK_FALSE(analysis.ok);
     CHECK(analysis.code == GraphSerializer::SaveResult::Code::serialization_refused);
     CHECK(analysis.error.find("live_analysis is a SpectralAnalysis node") != std::string::npos);
-    CHECK(analysis.error.find("live analysis is not persisted") != std::string::npos);
+    CHECK(analysis.error.find("format 6 document cannot carry") != std::string::npos);
 }

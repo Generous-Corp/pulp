@@ -2,6 +2,7 @@
 #include <pulp/host/subgraph_persistence.hpp>
 
 #include "graph_load_refusal.hpp"
+#include "spectral_graph_persistence.hpp"
 #include "subgraph_custom_member.hpp"
 #include "subgraph_persistence_test_access.hpp"
 #include "subgraph_voice_records.hpp"
@@ -412,9 +413,17 @@ std::string to_saved_subgraph_document(
             return {};
     }
 
+    // Spectral and subgraph families do not mix: the spectral document has a
+    // closed member set with no subgraph records.
+    if (!subgraphs.empty() && spectral_persistence::contains_spectral_nodes(graph))
+        return {};
     const auto document = GraphSerializer::to_saved_document(graph, editor_layout);
     if (document.empty())
         return {};
+    // No records: the saved document is already complete. A spectral v7
+    // envelope is closed, so it must not gain an empty `subgraphs` member.
+    if (subgraphs.empty())
+        return document;
     try {
         auto root = choc::json::parse(document);
         auto records = choc::value::createEmptyArray();

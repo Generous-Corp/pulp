@@ -175,7 +175,7 @@ class GateTests(unittest.TestCase):
 class ApplicabilityTests(unittest.TestCase):
     def test_events(self) -> None:
         self.assertTrue(gate.applies("pull_request", "main", "")[0])
-        self.assertTrue(gate.applies("merge_group", "", "")[0])
+        self.assertFalse(gate.applies("merge_group", "", "")[0])  # the native leg in the queue does not wait
         self.assertTrue(gate.applies("workflow_dispatch", "", "123")[0])
         self.assertFalse(gate.applies("workflow_dispatch", "", "")[0])
         self.assertFalse(gate.applies("push", "", "")[0])
@@ -201,17 +201,22 @@ class MainTests(unittest.TestCase):
                                     "--sha", "a" * 40, "--mode", "off"),
                          (0, {"verdict": "pass", "reason": "PULP_CHEAP_FIRST_MODE=off"}))
 
+    def test_a_merge_group_passes_at_once_without_reading_checks(self) -> None:
+        rc, out = self._main("--event", "merge_group", "--sha", "a" * 40,
+                             "--deadline", "1", "--interval", "1", "--absent-grace", "0")
+        self.assertEqual((rc, out["verdict"]), (0, "pass"))  # an unreachable API is never read: not "unknown"
+
     def test_push_passes_at_once(self) -> None:
         rc, out = self._main("--event", "push", "--sha", "a" * 40)
         self.assertEqual((rc, out["verdict"]), (0, "pass"))
 
     def test_unreachable_api_fails_open_with_exit_zero(self) -> None:
-        rc, out = self._main("--event", "merge_group", "--sha", "a" * 40,
+        rc, out = self._main("--event", "pull_request", "--base-ref", "main", "--sha", "a" * 40,
                              "--deadline", "1", "--interval", "1", "--absent-grace", "0")
         self.assertEqual((rc, out["verdict"]), (0, "unknown"))
 
     def test_missing_sha_fails_open(self) -> None:
-        rc, out = self._main("--event", "merge_group", "--sha", "")
+        rc, out = self._main("--event", "pull_request", "--base-ref", "main", "--sha", "")
         self.assertEqual((rc, out["verdict"]), (0, "unknown"))
 
 

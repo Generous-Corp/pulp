@@ -22,6 +22,9 @@ struct GraphSerializerTestAccess {
     // The next ordinary load throws std::bad_alloc while parsing the original
     // document, before any migration or authored ID planning.
     static void fail_next_document_parse() noexcept;
+    // The next spectral load throws std::bad_alloc after building its
+    // isolated candidate's nodes, before restoring any connection.
+    static void fail_next_spectral_candidate_build() noexcept;
     // The next load of a document with event_connections throws
     // std::bad_alloc while rebinding them, after every node and connection
     // was restored.

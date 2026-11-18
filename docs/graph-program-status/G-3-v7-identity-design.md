@@ -113,7 +113,8 @@ old-binding to new-ID map (`v6 identity -> authored_id`).
 
 - A `SignalGraph::duplicate_node` that copies plugin, Processor and custom
   state into a new node (it would get a new ID by the rule above).
-- Spectral graphs: the spectral writer has its own closed envelope and still
-  writes no IDs (spectral persistence follow-up).
+- Spectral graphs now write the v7 envelope (see
+  `docs/graph-program-status/D6-spectral-persistence.md`); edit history over
+  them waits for a retained-byte bound.
 - MCP diff, a CLI migrate command, and the installed-consumer refresh beyond
   the existing consumers.
