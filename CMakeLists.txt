@@ -1028,7 +1028,7 @@ endif()
 
 # The pulp-native example plug-in, built with the tests so its host proof and
 # symbol census run, or on request with the examples.
-if(TARGET pulp-native AND (PULP_BUILD_TESTS OR PULP_BUILD_EXAMPLES))
+if(APPLE AND TARGET pulp-native AND (PULP_BUILD_TESTS OR PULP_BUILD_EXAMPLES))
     add_subdirectory(integrations/pulp-native/examples/metal-probe)
 endif()
 if(TARGET pulp-rmlui-native AND PULP_BUILD_TESTS)
