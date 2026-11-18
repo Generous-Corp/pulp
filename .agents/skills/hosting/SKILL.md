@@ -1169,6 +1169,15 @@ save/reopen render proof beside the legacy caller-owned route controls.
   allocator), move the authoring containers, and call the Slot's noexcept
   prepared publication. Never put an allocating `emplace` or ordinary
   `Slot::publish` after that boundary.
+  When the edit carries an authored prepared description, `prepare()` rebuilds
+  it from the compiled serial routed snapshot through
+  `detail::capture_prepared_description` in
+  `core/host/src/signal_graph_prepared_description_capture.cpp`. That function
+  reads the candidate only through its public accessors and returns nullptr
+  (mapped to `PreflightFailed`) on any plan, edge, port or slot mismatch; keep
+  the domain gate that needs the private `CompiledGraph` in `prepare()`.
+  `ExecutionSnapshot::export_prepared_description` still validates the same
+  record separately.
   `set_live_dsp_telemetry_enabled()` is a control-thread operation serialized
   by the graph mutation lock: a prepared commit re-seeds its snapshot from the
   owner's authoritative desired toggle immediately before publication. Do not
