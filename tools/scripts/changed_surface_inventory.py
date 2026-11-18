@@ -1664,7 +1664,9 @@ def fragment_projection(files: Iterable[str], model: "CodeModel",
             continue
         if not registered and not defined:
             if scripted:  # a `cmake -P` script: only the tests that run it read it
-                result[rel] = (scripted, set())
+                result[rel] = (scripted, set().union(*(
+                    command_owners(e.command, index) | declared_targets(e)
+                    for e in inventory if e.name in scripted)))
             continue
         if rev is None:
             rev = reverse_dependencies(model)
@@ -1675,7 +1677,7 @@ def fragment_projection(files: Iterable[str], model: "CodeModel",
                 if dependent not in targets:
                     targets.add(dependent)
                     pending.append(dependent)
-        for entry in same_name:
+        for entry in same_name + [e for e in inventory if e.name in scripted and e not in same_name]:
             targets |= command_owners(entry.command, index) | declared_targets(entry)
         result[rel] = (names | scripted, targets)
     return result

@@ -845,6 +845,15 @@ class RegistrationFragments(unittest.TestCase):
         self.assertIn("pulp-test-knob", sel.targets)
         self.assertIn("pulp-test-label", sel.targets)
 
+    def test_a_script_test_duplicate_selects_the_same_name_owner(self) -> None:
+        duplicate = at.CTestEntry(
+            "knob-script", [str(self.fx.build / "test/pulp-test-label")], {},
+            frozenset({str(self.fx.root / "test/cmake/label_tests.cmake")}))
+        sel = at.project_affected(self.fx.model, ["test/cmake/check_knob.cmake"], [], None,
+                                  self.fx.inventory + [duplicate], 1.0, [])
+        self.assertEqual(sel.mode, "focused")
+        self.assertIn("pulp-test-label", sel.targets)
+
     def test_scope_flow_commands_stay_global(self) -> None:
         for name, text in {
             "break": "foreach(x a b)\n  break()\nendforeach()\n",
