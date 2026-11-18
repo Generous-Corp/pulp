@@ -1372,8 +1372,32 @@ _CMAKE_UNQUOTED_END = frozenset(' \t\r\n\f\v()#"')
 # endforeach in the including scope), so each one makes the fragment global.
 _CMAKE_LOCAL_COMMANDS = frozenset({
     "add_executable", "add_library", "add_test", "pulp_add_test_suite",
-    "pulp_add_test_group", "pulp_dsp_series_catalog_suite", "pulp_dsp_series_signal_suite",
+    "pulp_dsp_series_catalog_suite", "pulp_dsp_series_signal_suite",
     "catch_discover_tests", "message", "set_tests_properties",
+})
+# Test properties that only describe the test they are set on. FIXTURES_*,
+# DEPENDS, RESOURCE_LOCK, RUN_SERIAL, DISABLED and the like decide which other
+# tests CTest runs or when, and an unknown name is assumed to be one of them.
+_CMAKE_SAFE_TEST_PROPERTIES = frozenset({
+    "LABELS", "TIMEOUT", "ENVIRONMENT", "WORKING_DIRECTORY", "SKIP_RETURN_CODE",
+    "WILL_FAIL", "PASS_REGULAR_EXPRESSION", "FAIL_REGULAR_EXPRESSION",
+})
+# message() modes that cannot stop configure or change its outcome.
+_CMAKE_SAFE_MESSAGE_MODES = frozenset({
+    "STATUS", "VERBOSE", "DEBUG", "TRACE", "NOTICE",
+    "CHECK_START", "CHECK_PASS", "CHECK_FAIL",
+})
+_CMAKE_ADD_TEST_KEYWORDS = frozenset({
+    "NAME", "COMMAND", "CONFIGURATIONS", "WORKING_DIRECTORY", "COMMAND_EXPAND_LISTS",
+})
+_CMAKE_SUITE_KEYWORDS = frozenset({
+    "NO_PCH", "MAY_BE_EMPTY", "TIMEOUT", "TEST_SPEC", "TEST_PREFIX", "GROUP", "SOURCES",
+    "LIBRARIES", "INCLUDE_DIRS", "COMPILE_DEFINITIONS", "PROPERTIES", "DISCOVERY_ARGS", "LABELS",
+})
+_CMAKE_DISCOVER_KEYWORDS = frozenset({
+    "SKIP_IS_FAILURE", "FAIL_IF_EMPTY", "TEST_PREFIX", "TEST_SUFFIX", "WORKING_DIRECTORY",
+    "TEST_LIST", "REPORTER", "OUTPUT_DIR", "OUTPUT_PREFIX", "OUTPUT_SUFFIX", "DISCOVERY_MODE",
+    "TEST_SPEC", "EXTRA_ARGS", "PROPERTIES", "LABELS", "DL_PATHS", "DL_FRAMEWORK_PATHS",
 })
 
 
@@ -1535,9 +1559,9 @@ def _shared_fragment_reason_current(rel: str, texts: dict[str, str]) -> str | No
         return f"uses {unknown[0]}(), which is not a pure registration command"
     owned_tests: set[str] = set()
     for name, args in invocations:
-        upper = [arg.upper() for arg in args[1:]]
-        if name in {"add_executable", "add_library"} and set(upper) & {"IMPORTED", "ALIAS", "GLOBAL"}:
-            return "declares an imported or alias target other files can name"
+        reason = _registration_call_reason(name, args)
+        if reason is not None:
+            return reason
         if name == "add_test" and len(args) > 1 and args[0].upper() == "NAME":
             owned_tests.add(args[1])
     for name, args in invocations:
@@ -1546,6 +1570,64 @@ def _shared_fragment_reason_current(rel: str, texts: dict[str, str]) -> str | No
         end = next((i for i, arg in enumerate(args) if arg.upper() == "PROPERTIES"), len(args))
         if end == 0 or any(arg not in owned_tests for arg in args[:end]):
             return "sets properties of a test this file does not register"
+        reason = _test_property_reason(args[end + 1:])
+        if reason is not None:
+            return reason
+    return None
+
+
+def _test_property_reason(pairs: list[str]) -> str | None:
+    """Why a `name value ...` property list may affect more than its own test."""
+    if any("${" in arg or "@" in arg for arg in pairs):
+        return "builds test properties from variables"
+    if len(pairs) % 2:
+        return "test properties are not name/value pairs"
+    for name in pairs[0::2]:
+        if name not in _CMAKE_SAFE_TEST_PROPERTIES:
+            return f"sets test property {name}, which can change what else runs"
+    return None
+
+
+def _keyword_regions(args: list[str], keywords: frozenset[str]) -> dict[str, list[str]]:
+    """Arguments after each keyword, up to the next keyword."""
+    regions: dict[str, list[str]] = {}
+    current: list[str] | None = None
+    for arg in args:
+        if arg in keywords:
+            current = regions.setdefault(arg, [])
+        elif current is not None:
+            current.append(arg)
+    return regions
+
+
+def _registration_call_reason(name: str, args: list[str]) -> str | None:
+    """Why an allowlisted call's options reach beyond its own target or test."""
+    upper = {arg.upper() for arg in args[1:]}
+    if name == "add_executable":
+        if upper & {"IMPORTED", "ALIAS", "GLOBAL"}:
+            return "declares an imported or alias target other files can name"
+    elif name == "add_library":
+        if upper & {"IMPORTED", "ALIAS", "GLOBAL"} or not (upper & {"STATIC", "SHARED"}):
+            return "declares an imported, alias, object or interface library"
+    elif name == "add_test":
+        if not args or args[0] != "NAME":
+            return "uses the legacy add_test signature"
+        if set(args) & {"CONFIGURATIONS", "COMMAND_EXPAND_LISTS"}:
+            return "add_test options change when or how the test is expanded"
+    elif name == "message":
+        mode = args[0] if args else ""
+        if re.fullmatch(r"[A-Z][A-Z_]*", mode) and mode not in _CMAKE_SAFE_MESSAGE_MODES:
+            return f"message({mode}) can stop or change the configure"
+    elif name == "pulp_add_test_suite":
+        regions = _keyword_regions(args, _CMAKE_SUITE_KEYWORDS)
+        if set(args) & {"GROUP", "MAY_BE_EMPTY", "DISCOVERY_ARGS"}:
+            return "adds to a shared test group or passes raw discovery arguments"
+        return _test_property_reason(regions.get("PROPERTIES", []))
+    elif name == "catch_discover_tests":
+        regions = _keyword_regions(args[1:], _CMAKE_DISCOVER_KEYWORDS)
+        if "TEST_LIST" in regions:
+            return "writes the discovered test list to a variable"
+        return _test_property_reason(regions.get("PROPERTIES", []))
     return None
 
 

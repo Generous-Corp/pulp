@@ -885,6 +885,65 @@ class RegistrationFragments(unittest.TestCase):
             "namespaced": "project::register()\n",
         })
 
+    def _assert_local(self, cases: dict[str, str]) -> None:
+        for name, text in cases.items():
+            self.fx.touch("test/cmake/knob_tests.cmake", text)
+            sel = self.fx.select(["test/cmake/knob_tests.cmake"])
+            self.assertEqual(sel.mode, "focused", name)
+
+    def test_only_safe_test_properties_stay_local(self) -> None:
+        reg = "add_executable(pulp-test-knob test/test_knob.cpp)\nadd_test(NAME knob COMMAND pulp-test-knob)\n"
+        safe = ("LABELS a TIMEOUT 5 ENVIRONMENT A=1 WORKING_DIRECTORY /x SKIP_RETURN_CODE 4 "
+                "WILL_FAIL TRUE PASS_REGULAR_EXPRESSION ok FAIL_REGULAR_EXPRESSION bad")
+        self._assert_local({"safe": f"{reg}set_tests_properties(knob PROPERTIES {safe})\n"})
+        self._assert_all({
+            name: f"{reg}set_tests_properties(knob PROPERTIES {name} x)\n"
+            for name in ("FIXTURES_SETUP", "FIXTURES_CLEANUP", "FIXTURES_REQUIRED", "DEPENDS",
+                         "RESOURCE_LOCK", "RUN_SERIAL", "DISABLED", "PROCESSORS", "NO_SUCH_PROPERTY")
+        } | {
+            "variable-value": f"{reg}set_tests_properties(knob PROPERTIES TIMEOUT ${{T}})\n",
+            "odd-pairs": f"{reg}set_tests_properties(knob PROPERTIES TIMEOUT)\n",
+            "mixed": f"{reg}set_tests_properties(knob PROPERTIES TIMEOUT 5 DEPENDS other)\n",
+        })
+
+    def test_only_non_fatal_message_modes_stay_local(self) -> None:
+        self._assert_local({mode: f"message({mode} hello)\n" for mode in
+                            ("STATUS", "VERBOSE", "DEBUG", "TRACE", "NOTICE", "CHECK_START",
+                             "CHECK_PASS", "CHECK_FAIL")} | {"no-mode": "message(hello)\n"})
+        self._assert_all({mode: f"message({mode} hello)\n" for mode in
+                          ("FATAL_ERROR", "SEND_ERROR", "WARNING", "AUTHOR_WARNING",
+                           "DEPRECATION", "CONFIGURE_LOG", "NO_SUCH_MODE")})
+
+    def test_registration_options_that_reach_beyond_the_target_stay_global(self) -> None:
+        self._assert_local({
+            "suite": "pulp_add_test_suite(pulp-test-knob SOURCES test/test_knob.cpp LIBRARIES a "
+                     "TIMEOUT 5 LABELS x PROPERTIES LABELS y TEST_PREFIX p NO_PCH)\n",
+            "discover": "add_executable(pulp-test-knob test/test_knob.cpp)\n"
+                        "catch_discover_tests(pulp-test-knob TEST_SPEC a PROPERTIES TIMEOUT 5 LABELS x)\n",
+            "library": "add_library(pulp-fixture-knob STATIC test/a.cpp)\n",
+            "legacy-free": "add_executable(pulp-test-knob WIN32 test/test_knob.cpp)\n"
+                           "add_test(NAME knob COMMAND pulp-test-knob WORKING_DIRECTORY /x)\n",
+        })
+        self._assert_all({
+            "suite-group": "pulp_add_test_suite(pulp-test-knob GROUP shared SOURCES test/a.cpp)\n",
+            "suite-may-be-empty": "pulp_add_test_suite(pulp-test-knob MAY_BE_EMPTY)\n",
+            "suite-discovery-args": "pulp_add_test_suite(pulp-test-knob DISCOVERY_ARGS EXTRA)\n",
+            "suite-fixture-property":
+                "pulp_add_test_suite(pulp-test-knob PROPERTIES FIXTURES_SETUP s)\n",
+            "suite-depends-before-timeout":
+                "pulp_add_test_suite(pulp-test-knob PROPERTIES DEPENDS x TIMEOUT 5)\n",
+            "discover-fixture": "catch_discover_tests(pulp-test-knob PROPERTIES FIXTURES_REQUIRED s)\n",
+            "discover-test-list": "catch_discover_tests(pulp-test-knob TEST_LIST SHARED_LIST)\n",
+            "test-group": "pulp_add_test_group(shared LIBRARIES a)\n",
+            "add-test-configurations":
+                "add_test(NAME knob COMMAND x CONFIGURATIONS Debug)\n",
+            "add-test-expand-lists": "add_test(NAME knob COMMAND x COMMAND_EXPAND_LISTS)\n",
+            "add-test-legacy": "add_test(knob x)\n",
+            "interface-library": "add_library(pulp-fixture-knob INTERFACE)\n",
+            "object-library": "add_library(pulp-fixture-knob OBJECT test/a.cpp)\n",
+            "untyped-library": "add_library(pulp-fixture-knob test/a.cpp)\n",
+        })
+
     def test_scope_flow_commands_stay_global(self) -> None:
         for name, text in {
             "break": "foreach(x a b)\n  break()\nendforeach()\n",
