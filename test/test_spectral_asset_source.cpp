@@ -22,7 +22,9 @@
 #include <complex>
 #include <cstdint>
 #include <cstring>
+#include <set>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace oracle = pulp::test::spectral_oracle;
@@ -356,6 +358,31 @@ TEST_CASE("Asset source refuses mismatched lengths, empty sources and inputs",
     // to save the source at all.
     REQUIRE_FALSE(graph.prepare(sample_rate, 512));
     REQUIRE(GraphSerializer::to_json(graph).empty());
+}
+
+TEST_CASE("Asset source and morph nodes carry a minted authored ID like every other node",
+          "[host][spectral-asset-source][authored-id]") {
+    // A dividing hop, so the morph control below is admitted too.
+    const Geometry g{256, 128, 2};
+    const std::uint64_t length = 300;
+    const auto bytes = oracle::zero_stream(g, oracle::grid_frames(g, length));
+    using namespace pulp::host;
+    SignalGraph graph;
+    const auto output = graph.add_output_node(g.channels);
+    const auto source = graph.add_spectral_asset_source_v1(bytes.view(), length, "a");
+    const auto second = graph.add_spectral_asset_source_v1(bytes.view(), length, "b");
+    // Control: a morph node goes through the shared minting path.
+    const auto morph = graph.add_spectral_asset_morph_v1(bytes.view(), bytes.view(), length, "m");
+    REQUIRE(source);
+    REQUIRE(second);
+    REQUIRE(morph);
+    std::set<std::string> ids;
+    for (const auto node : {output, source.value->node, second.value->node, morph.value->node}) {
+        CAPTURE(node);
+        const auto& id = graph.node(node)->authored_id;
+        REQUIRE_FALSE(id.empty());
+        REQUIRE(ids.insert(id.str()).second);
+    }
 }
 
 TEST_CASE("Asset morph keeps the dividing-hop policy its control clock needs",

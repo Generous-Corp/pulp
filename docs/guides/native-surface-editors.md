@@ -72,13 +72,13 @@ renderer's device. The `rmlui-metal-demo` example is a small plug-in using this
 path; it remains unavailable when the adapter option or the Vellum Metal
 component is off.
 
-When the Vellum RmlUi SDK provides `NativeContext::warm()`, `RmlUiSurface::attach()`
-calls it after the document loads, so textures, geometry and glyphs are ready
-before the first frame is requested. Older SDKs draw the first frame cold.
-`warm()` also renders once outside a frame, which is safe for Vellum's Metal and
-CPU renderers but not for a renderer that draws on every call (RmlUi's GL3
-backend): a custom `Rml::RenderInterface` must draw nothing between frames, or
-the product must build against an SDK without `warm()`.
+`RmlUiSurface::attach()` calls `NativeContext::warm()` after the document loads,
+so textures, geometry and glyphs are ready before the first frame is requested.
+The SDK is required to provide it: configure fails when it does not (see the
+SDK requirement below). `warm()` renders once outside a frame, which is safe for
+Vellum's Metal and CPU renderers but not for a renderer that draws on every call
+(RmlUi's GL3 backend): a custom `Rml::RenderInterface` must draw nothing between
+frames.
 
 The surface context is sized in drawable pixels, the Metal frame scale is 1,
 and the density ratio is the backing scale. Every `px` length, not only text,
@@ -88,12 +88,12 @@ testing agrees with layout in either unit. A `dp` length is one point
 (`density_ratio()` device pixels). Size anything that must keep its physical
 size across displays in `dp` (the example does this).
 
-The density ratio needs a Vellum RmlUi SDK that exports
-`NativeContext::set_density_ratio`. Without it `density_ratio_supported()` is
-false, `dp` equals `px`, and a `dp` document renders at 1/scale of its intended
-size on a 2x display. Configure warns about it, and the first `attach()` reports it
-through the diagnostic sink, once per process (standard error by default; `set_diagnostic_sink`
-redirects it).
+The adapter needs a Vellum RmlUi SDK from Vellum commit `37777f3` on, which
+defines `VELLUM_RMLUI_NATIVE_API_VERSION` and the feature bits for the density
+ratio, `NativeContext::warm()` and the renderer `trim()` in `native.hpp`. The
+configure checks the macros and fails with a message when the SDK is older, so
+`dp` can never silently draw at 1/scale of its size. The `vellum-rmlui-sdk` pin
+in `tools/deps/manifest.json` names the commit the CI lane builds.
 
 ### Hiding the editor
 
@@ -106,7 +106,8 @@ An RmlUi editor forwards the call to `RmlUiSurface::visibility_changed()`:
 frames stop at once, including one already waiting for the frame lock, RmlUi
 releases its compiled geometry and textures through the renderer, and
 `RendererHooks::trim` is called so the renderer can free the layer, filter and
-atlas textures it caches. The trim waits until no frame of the surface is
+atlas textures it caches. `metal_renderer_hooks()` fills it from
+`MetalRenderInterface::trim()`. The trim waits until no frame of the surface is
 being encoded or submitted and its last committed command buffer has completed
 on the GPU (about a frame at most), so nothing released is still in use.
 Showing resumes frames and draws one, which recompiles everything that was

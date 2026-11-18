@@ -50,16 +50,48 @@ nodes and dropping the embedded assets on re-save. Ordinary v5 files migrate to
 v6 in memory without changing their bytes.
 
 A spectral graph is saveable only when it is complete. The writer refuses, and
-`to_file` reports `serialization_refused`, when the graph holds a
-`SpectralAnalysis` node (live analysis is not persisted; only the asset source
-is), a node gain other than 1, a non-finite editor layout coordinate, or a
-chain the reader cannot prepare at the saved rate at its admission block (see
-below; for example a source with no synthesis or output yet). Repeated node
+`to_file` reports `serialization_refused`, when the graph holds a node gain
+other than 1, a non-finite editor layout coordinate, or a chain the reader
+cannot prepare at the saved rate at its admission block (see below; for example
+a source with no synthesis or output yet). The format 6 document (`to_json`,
+`to_file`) also refuses a `SpectralAnalysis` node or a single-stream
+`SpectralAssetSource` and names `to_saved_document` instead. Repeated node
 names are allowed. `SaveResult::error` names the rule that failed after the
-`graph serialization failed:` prefix. A spectral graph also has no saved-identity
-envelope: `to_saved_document` returns an empty string for it and
-`to_saved_file` refuses it with that reason, so `pulp graph diff` and
-`GraphEditHistory` do not cover spectral graphs.
+`graph serialization failed:` prefix.
+
+## The saved-identity v7 document
+
+`to_saved_document` and `to_saved_file` write a spectral graph as the
+saved-identity v7 document (format 7), the same envelope ordinary graphs use:
+each node record carries its authored ID, and `logical_identities` and
+`bindings` bind those IDs to the persisted node ids. `inspect_document`,
+`from_saved_document`, `diff_graph_documents` and `pulp graph diff` read it
+through the common path. The v7 document adds, beyond format 6:
+
+- a readable `identity` beside each `contract_hex` (`fft_size`, `hop`,
+  `channels`, and `sample_rate_bits`, the rate's IEEE-754 bits as 16 lowercase
+  hex digits); the reader refuses one that does not match the contract
+  exactly, and preparation refuses any rate whose bits differ;
+- `spectral_analysis` nodes, saved as their declaration (the identity) only:
+  never captured input audio or live frame history;
+- `spectral_asset_source` nodes (one embedded asset, any hop from 1 to N/2)
+  with `finite_policy: 2`, the finite-source policy the source factory
+  applies; asset morph nodes record `finite_policy: 1`. Any other recorded
+  version is refused;
+- every lane flag on each edge, including `control_signal`, so an edge's type
+  is explicit and compares like any other edge.
+
+A v7 asset row derives its frame count with the analysis-grid rule (policy 2),
+which agrees with the dividing-hop rule wherever that rule admits the geometry.
+Loading a format 6 spectral document assigns each node the authored ID
+`migrate_saved_document`'s rule derives from the whole document, so the same
+file always restores the same IDs; saving it with `to_saved_document` is its
+migration to v7. A v6 spectral document has no identity envelope, so
+`inspect_document` and `diff_graph_documents` refuse it as for any plain
+document. `GraphEditHistory` still declines spectral graphs: its retained
+history needs a byte bound for embedded assets first. Mixed graph families
+(hosted plugins, Processors, opaque Custom state, sample regions, subgraph
+records) stay refused in both formats.
 
 Before replacing a destination, the reader validates the complete envelope,
 asset digests and references, exact contracts and shapes, typed connections,

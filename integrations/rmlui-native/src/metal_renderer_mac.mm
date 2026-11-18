@@ -23,6 +23,9 @@ RendererHooks metal_renderer_hooks(vellum::rmlui::MetalRenderInterface& renderer
         renderer.begin_frame(metal_frame_target(frame));
     };
     hooks.end_frame = [&renderer] { renderer.end_frame(); };
+    // The surface hides an editor with no frame being encoded and after the last
+    // committed frame has completed, which is what trim() asks for.
+    hooks.trim = [&renderer] { renderer.trim(); };
     return hooks;
 }
 

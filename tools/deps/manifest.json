@@ -1682,13 +1682,13 @@
       "name": "vellum-rmlui-sdk",
       "category": "developer-tooling",
       "license": "MIT",
-      "version": "97bb7ad9",
+      "version": "58de2514",
       "source_kind": "external-clone",
       "repository": "https://github.com/Generous-Corp/vellum.git",
       "upstream": {
         "kind": "git-commit",
-        "ref": "97bb7ad9e90714cf37b33263d26392649ebdc48d",
-        "commit": "97bb7ad9e90714cf37b33263d26392649ebdc48d"
+        "ref": "58de2514d8b6bdb80f7938bcdf01b1523983de65",
+        "commit": "58de2514d8b6bdb80f7938bcdf01b1523983de65"
       },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": false,
