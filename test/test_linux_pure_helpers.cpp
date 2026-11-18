@@ -88,6 +88,10 @@ TEST_CASE("meminfo lines parse with presence", "[view][linux][pure]") {
     CHECK((value.present && value.kb == 16384));
     CHECK(!env::parse_meminfo_line("MemFree: 5 kB", "MemTotal:").present);
     CHECK(!env::parse_meminfo_line("MemAvailable: junk kB", "MemAvailable:").present);
+    CHECK(!env::parse_meminfo_line("MemAvailable: 100 MB", "MemAvailable:").present);
+    CHECK(!env::parse_meminfo_line("MemAvailable: 100", "MemAvailable:").present);
+    CHECK(!env::parse_meminfo_line("MemAvailable: 100 kB extra", "MemAvailable:").present);
+    CHECK(!env::parse_meminfo_line("MemAvailable: -5 kB", "MemAvailable:").present);
 }
 
 } // namespace

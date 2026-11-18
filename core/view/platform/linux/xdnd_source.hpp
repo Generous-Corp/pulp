@@ -141,8 +141,11 @@ inline bool run_drag_source(Display* display, int screen, const std::vector<std:
         return false;
     auto release = [&]() {
         // Relinquish XdndSelection ownership now the drag is over: the
-        // timeout and cancel paths must not leak it.
-        XSetSelectionOwner(display, xa_XdndSelection, None, CurrentTime);
+        // timeout and cancel paths must not leak it. Only clear it while this
+        // source still owns it: another client may have taken the selection
+        // during the drag, and clearing would drop their ownership.
+        if (XGetSelectionOwner(display, xa_XdndSelection) == source)
+            XSetSelectionOwner(display, xa_XdndSelection, None, CurrentTime);
         XDestroyWindow(display, source);
         XFlush(display);
     };
