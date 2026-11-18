@@ -61,6 +61,16 @@
       "note": "Prepared-description capture from one compiled serial routed snapshot, cross-checked against the authored candidate"
     },
     {
+      "path": "core/host/src/signal_graph_prepare.cpp",
+      "max_loc": 1664,
+      "note": "SignalGraph compile/prepare lifecycle; compile_ phases belong in focused signal_graph_compile_*.cpp units"
+    },
+    {
+      "path": "core/host/src/signal_graph_compile_routed.cpp",
+      "max_loc": 306,
+      "note": "Routed-executor snapshot build, PDC execution-domain choice and anticipation splice for one compiled snapshot"
+    },
+    {
       "path": "core/host/src/timeline_graph_binding.cpp",
       "max_loc": 424,
       "note": "Timeline binding lifecycle, realtime processing, and public query shell; candidate construction and route reconciliation belong in their focused units"
