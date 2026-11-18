@@ -7,6 +7,6 @@
   "paths": [
     "core/platform/include/pulp/platform/win/text_convert.hpp"
   ],
-  "vellum_inherits": true,
-  "rationale": "Adds the portable UTF-16 and COM apartment helper that the Windows file dialog, drag source and child launch fixes use; Vellum's transferred Windows files take it on the next re-transfer."
+  "vellum_inherits": false,
+  "rationale": "Pulp-only edit while Vellum's framework transfer is in effect: adds the portable UTF-16 and COM apartment helper used by the Windows backend fixes. Vellum's copies are brought level by a later transfer."
 }
