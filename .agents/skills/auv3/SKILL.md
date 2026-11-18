@@ -298,7 +298,10 @@ and admitted against `frameCount`. An out-of-block time, or an absolute time
 with no valid `mSampleTime`, is refused and counted on
 `ctx.timing.refused_events`, never clamped. Parameter events still clamp through
 `au_event_block_offset()`. A test that renders MIDI at `mSampleTime = 0` cannot
-tell an offset from an absolute time; use a non-zero block time.
+tell an offset from an absolute time; use a non-zero block time. A refused time
+may be a release the count cannot identify, so `refused_event_reset_pending`
+makes the next render the Processor observes carry `ctx.reset_requested` and a
+fresh MPE tracker; the bypass and state-restore returns keep the flag.
 
 ### MPE routing
 
