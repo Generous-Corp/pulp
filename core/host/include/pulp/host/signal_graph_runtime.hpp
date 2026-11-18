@@ -452,6 +452,8 @@ class SignalGraph : public format::AudioWorkgroupClient {
         NodeId next_id_ = 0;
         std::uint64_t next_connection_identity_ = 0;
         std::uint64_t authored_id_counter_ = 0;
+        std::uint64_t authored_id_salt_[2] = {0, 0};
+        bool authored_id_seeded_ = false;
         bool completed_ = false;
     };
 

@@ -34,6 +34,9 @@ SignalGraph::GraphMutationCheckpoint::GraphMutationCheckpoint(SignalGraph& graph
     next_id_ = graph.next_id_;
     next_connection_identity_ = graph.next_connection_identity_;
     authored_id_counter_ = graph.authored_id_counter_;
+    authored_id_salt_[0] = graph.authored_id_salt_[0];
+    authored_id_salt_[1] = graph.authored_id_salt_[1];
+    authored_id_seeded_ = graph.authored_id_seeded_;
 }
 
 SignalGraph::GraphMutationCheckpoint::~GraphMutationCheckpoint() {
@@ -45,6 +48,8 @@ SignalGraph::GraphMutationCheckpoint::GraphMutationCheckpoint(
     : graph_(std::exchange(other.graph_, nullptr)), next_id_(other.next_id_),
       next_connection_identity_(other.next_connection_identity_),
       authored_id_counter_(other.authored_id_counter_),
+      authored_id_salt_{other.authored_id_salt_[0], other.authored_id_salt_[1]},
+      authored_id_seeded_(other.authored_id_seeded_),
       completed_(std::exchange(other.completed_, true)) {}
 
 SignalGraph::GraphMutationCheckpoint&
@@ -56,6 +61,9 @@ SignalGraph::GraphMutationCheckpoint::operator=(GraphMutationCheckpoint&& other)
     next_id_ = other.next_id_;
     next_connection_identity_ = other.next_connection_identity_;
     authored_id_counter_ = other.authored_id_counter_;
+    authored_id_salt_[0] = other.authored_id_salt_[0];
+    authored_id_salt_[1] = other.authored_id_salt_[1];
+    authored_id_seeded_ = other.authored_id_seeded_;
     completed_ = std::exchange(other.completed_, true);
     return *this;
 }
@@ -71,6 +79,9 @@ void SignalGraph::GraphMutationCheckpoint::rollback() noexcept {
     graph_->next_id_ = next_id_;
     graph_->next_connection_identity_ = next_connection_identity_;
     graph_->authored_id_counter_ = authored_id_counter_;
+    graph_->authored_id_salt_[0] = authored_id_salt_[0];
+    graph_->authored_id_salt_[1] = authored_id_salt_[1];
+    graph_->authored_id_seeded_ = authored_id_seeded_;
     completed_ = true;
 }
 
