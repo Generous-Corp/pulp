@@ -1370,13 +1370,14 @@ _CMAKE_UNQUOTED_END = frozenset(' \t\r\n\f\v()#"')
 # project macro that mutates a target, directory, or cache outside its stack,
 # and list() or cmake_parse_arguments() can rewrite a variable a later fragment
 # reads, while cmake_minimum_required() resets policy for the whole directory.
+# break(), continue() and return() act on the enclosing scope or loop of the
+# including file, so they are not local either.
 _CMAKE_LOCAL_COMMANDS = frozenset({
     "add_executable", "add_library", "add_test", "pulp_add_test_suite",
     "pulp_add_test_group", "pulp_dsp_series_catalog_suite", "pulp_dsp_series_signal_suite",
     "catch_discover_tests", "message", "set", "unset", "function", "macro",
     "endfunction", "endmacro",
     "if", "elseif", "else", "endif", "foreach", "endforeach", "while", "endwhile",
-    "break", "continue", "return",
 })
 _CMAKE_GLOBAL_COMMANDS = frozenset({
     "include", "configure_file", "file", "execute_process", "add_subdirectory",
@@ -1499,37 +1500,61 @@ def _cmake_scoped_set(args: list[str]) -> bool:
     )
 
 
+_CMAKE_TEXT_SUFFIXES = (".cmake", ".cmake.in", "CMakeLists.txt")
+_CMAKE_TEXT_SKIP_DIRS = frozenset({"external", ".git", "node_modules"})
+
+
+def _is_cmake_text_path(rel: str) -> bool:
+    parts = rel.split("/")
+    if parts[0] in _CMAKE_TEXT_SKIP_DIRS or parts[0].startswith("build"):
+        return False
+    return rel.endswith(_CMAKE_TEXT_SUFFIXES)
+
+
 def _test_cmake_texts(source_root: str, ref: str | None = None) -> dict[str, str]:
-    """Text of every CMake file under test/, by relative path."""
-    root = Path(source_root) / "test"
+    """Text of every CMake file in the repository (vendored, build and git
+    directories excluded), by relative path. A registration macro or function
+    outside test/ can read or write the same variables a fragment sets, so the
+    shared-state analysis must see all of it."""
+    root = Path(source_root)
+    texts: dict[str, str] = {}
     if ref is not None:
         try:
             listed = subprocess.run(
-                ["git", "ls-tree", "-r", "--name-only", ref, "--", "test/CMakeLists.txt", "test/cmake"],
-                cwd=source_root, capture_output=True, text=True, encoding="utf-8", check=True,
+                ["git", "ls-tree", "-r", "--name-only", ref], cwd=source_root,
+                capture_output=True, text=True, encoding="utf-8", check=True,
             ).stdout.splitlines()
+            wanted = [rel for rel in listed if _is_cmake_text_path(rel)]
+            batch = subprocess.run(
+                ["git", "cat-file", "--batch"], cwd=source_root, check=True, capture_output=True,
+                input="".join(f"{ref}:{rel}\n" for rel in wanted).encode("utf-8"),
+            ).stdout
         except (OSError, subprocess.CalledProcessError):
             return {}
-        paths = [Path(source_root) / rel for rel in listed if rel.endswith(".cmake") or rel.endswith("CMakeLists.txt")]
-    else:
-        paths = [root / "CMakeLists.txt", *sorted(root.glob("cmake/*.cmake")),
-                 *sorted(root.glob("cmake/fragments/*.cmake"))]
-    texts: dict[str, str] = {}
-    for path in paths:
-        try:
-            rel = path.relative_to(source_root).as_posix()
-            if ref is None:
-                text = path.read_text(encoding="utf-8", errors="replace")
-            else:
-                text = subprocess.run(
-                    ["git", "show", f"{ref}:{rel}"], cwd=source_root,
-                    capture_output=True, text=True, encoding="utf-8", check=True,
-                ).stdout
-            texts[rel] = text
-        except OSError:
-            continue
-        except subprocess.CalledProcessError:
-            continue
+        position = 0
+        for rel in wanted:
+            end = batch.index(b"\n", position)
+            header = batch[position:end].split()
+            if len(header) != 3 or header[1] != b"blob":
+                position = end + 1  # "<object> missing"
+                continue
+            size = int(header[2])
+            texts[rel] = batch[end + 1:end + 1 + size].decode("utf-8", errors="replace")
+            position = end + 1 + size + 1
+        return texts
+    for dirpath, dirnames, filenames in os.walk(root):
+        reldir = os.path.relpath(dirpath, root).replace(os.sep, "/")
+        dirnames[:] = [d for d in dirnames
+                       if d not in {".git", "node_modules"}
+                       and not (reldir == "." and (d == "external" or d.startswith("build")))]
+        for name in filenames:
+            rel = name if reldir == "." else f"{reldir}/{name}"
+            if not _is_cmake_text_path(rel):
+                continue
+            try:
+                texts[rel] = (root / rel).read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
     return texts
 
 
@@ -1543,9 +1568,12 @@ def _shared_fragment_reason_current(rel: str, texts: dict[str, str]) -> str | No
         return "aggregates every fragment"
     try:
         invocations = _cmake_commands(text)
-        others = {name: _cmake_commands(body) for name, body in texts.items() if name != rel}
     except _CMakeSyntaxError as error:
         return f"CMake syntax not readable with certainty ({error})"
+    # Other files are searched as raw text (comments included): a false match
+    # only widens the selection, and a file this lexer cannot read must not be
+    # able to hide a dependency.
+    other_text = [body for name, body in texts.items() if name != rel]
     commands = {name for name, _args in invocations}
     if any(name in _CMAKE_GLOBAL_COMMANDS or name.startswith("target_")
            for name in commands):
@@ -1553,6 +1581,10 @@ def _shared_fragment_reason_current(rel: str, texts: dict[str, str]) -> str | No
     if any(name in {"set", "unset"} and _cmake_scoped_set(args)
            for name, args in invocations):
         return "touches directory, cache or global state"
+    if any(name in {"add_executable", "add_library"}
+           and {arg.upper() for arg in args[1:]} & {"IMPORTED", "ALIAS", "GLOBAL"}
+           for name, args in invocations):
+        return "declares an imported or alias target other files can name"
     unknown = sorted(commands - _CMAKE_LOCAL_COMMANDS)
     if unknown:
         return f"uses unrecognized CMake command {unknown[0]}"
@@ -1562,22 +1594,27 @@ def _shared_fragment_reason_current(rel: str, texts: dict[str, str]) -> str | No
         if name in {"function", "macro"} and args
     }
     for name in defined:
-        if any(name in {command for command, _args in other} for other in others.values()):
+        call = re.compile(r"(?<![\w.-])" + re.escape(name) + r"\s*\(", re.IGNORECASE)
+        if any(call.search(body) for body in other_text):
             return f"defines {name}(), called from another file"
-    # set() and unset() both change a variable the other fragments share the
-    # directory scope with, so either one is checked against every other file.
+    # set() and unset() both change a variable the other files share the
+    # directory scope with, so either one is checked against every other file,
+    # including a name another file assembles from a prefix or suffix.
     written_variables = {
         args[0]
         for name, args in invocations
         if name in {"set", "unset"} and args
     }
-    other_text = [
-        "\n".join(arg for _name, args in other for arg in args)
-        for other in others.values()
-    ]
+    tails: set[str] = set()
+    heads: set[str] = set()
+    for body in other_text:
+        tails.update(re.findall(r"\$\{[^}\n]*\}(_[A-Za-z0-9_]+)", body))
+        heads.update(re.findall(r"([A-Za-z0-9_]+_)\$\{", body))
     for name in written_variables:
-        word = re.compile(r"\b" + re.escape(name) + r"\b")
-        if any(word.search(body) for body in other_text):
+        word = re.compile(r"(?<![A-Za-z0-9_])" + re.escape(name) + r"(?![A-Za-z0-9_])")
+        if (any(word.search(body) for body in other_text)
+                or any(name.endswith(tail) for tail in tails)
+                or any(name.startswith(head) for head in heads)):
             return f"sets {name}, read by another file"
     return None
 
@@ -1615,6 +1652,10 @@ def fragment_projection(files: Iterable[str], model: "CodeModel",
             continue
         absolute = os.path.normpath(os.path.join(model.source_root, rel))
         registered = [e for e in inventory if absolute in e.registered_files]
+        # CTest allows several registrations under one name and a name filter
+        # runs every one, so each same-name registration's owners count too.
+        names = {e.name for e in registered}
+        same_name = [e for e in inventory if e.name in names]
         defined = {t.name for t in model.targets.values() if absolute in t.definition_files}
         scripted = {e.name for e in inventory if absolute in command_path_refs(e.command)}
         if texts is None:
@@ -1634,9 +1675,9 @@ def fragment_projection(files: Iterable[str], model: "CodeModel",
                 if dependent not in targets:
                     targets.add(dependent)
                     pending.append(dependent)
-        for entry in registered:
+        for entry in same_name:
             targets |= command_owners(entry.command, index) | declared_targets(entry)
-        result[rel] = ({e.name for e in registered} | scripted, targets)
+        result[rel] = (names | scripted, targets)
     return result
 
 

@@ -835,6 +835,54 @@ class RegistrationFragments(unittest.TestCase):
         sel = self.fx.select(["test/cmake/check_knob.cmake"])
         self.assertEqual(sel.mode, "all")
 
+    def test_a_duplicate_test_name_selects_every_same_name_owner(self) -> None:
+        duplicate = at.CTestEntry(
+            "Knob sprite", [str(self.fx.build / "test/pulp-test-label"), "Knob sprite"], {},
+            frozenset({str(self.fx.root / "test/cmake/label_tests.cmake")}))
+        sel = at.project_affected(self.fx.model, ["test/cmake/knob_tests.cmake"], [], None,
+                                  self.fx.inventory + [duplicate], 1.0, [])
+        self.assertEqual(sel.mode, "focused")
+        self.assertIn("pulp-test-knob", sel.targets)
+        self.assertIn("pulp-test-label", sel.targets)
+
+    def test_scope_flow_commands_stay_global(self) -> None:
+        for name, text in {
+            "break": "foreach(x a b)\n  break()\nendforeach()\n",
+            "continue": "foreach(x a b)\n  continue()\nendforeach()\n",
+            "return": "return()\n",
+            "return-propagate": "set(X 1)\nreturn(PROPAGATE X)\n",
+        }.items():
+            self.fx.touch("test/cmake/knob_tests.cmake", text)
+            sel = self.fx.select(["test/cmake/knob_tests.cmake"])
+            self.assertEqual(sel.mode, "all", name)
+
+    def test_state_read_by_a_cmake_file_outside_test_stays_global(self) -> None:
+        self.fx.touch("tools/cmake/PulpMacros.cmake", "macro(m)\n  message(${KNOB_FLAGS})\nendmacro()\n")
+        self.fx.touch("test/cmake/knob_tests.cmake", "set(KNOB_FLAGS -DX)\n")
+        self.assertEqual(self.fx.select(["test/cmake/knob_tests.cmake"]).mode, "all")
+        self.fx.touch("tools/cmake/PulpMacros.cmake", "function(helper_fn)\nendfunction()\n")
+        self.fx.touch("test/cmake/knob_tests.cmake", "helper_fn()\n")
+        self.assertEqual(self.fx.select(["test/cmake/knob_tests.cmake"]).mode, "all")
+
+    def test_a_function_defined_in_a_fragment_and_called_outside_test_stays_global(self) -> None:
+        self.fx.touch("tools/cmake/PulpMacros.cmake", "knob_helper()\n")
+        self.fx.touch("test/cmake/knob_tests.cmake", "function(knob_helper)\nendfunction()\n")
+        self.assertEqual(self.fx.select(["test/cmake/knob_tests.cmake"]).mode, "all")
+
+    def test_dynamically_named_variable_reads_stay_global(self) -> None:
+        self.fx.touch("test/cmake/label_tests.cmake", "message(${PREFIX}_KNOB_FLAGS ${A_${B}})\n")
+        self.fx.touch("test/cmake/knob_tests.cmake", "set(LIB_KNOB_FLAGS -DX)\n")
+        self.assertEqual(self.fx.select(["test/cmake/knob_tests.cmake"]).mode, "all")
+        self.fx.touch("test/cmake/label_tests.cmake", "message(${DYN_PREFIX_}${X})\nmessage(KNOB_${X})\n")
+        self.fx.touch("test/cmake/knob_tests.cmake", "set(KNOB_FLAGS -DX)\n")
+        self.assertEqual(self.fx.select(["test/cmake/knob_tests.cmake"]).mode, "all")
+
+    def test_imported_and_alias_targets_stay_global(self) -> None:
+        for text in ("add_library(knob_alias ALIAS pulp-test-knob)\n",
+                     "add_library(ext SHARED IMPORTED GLOBAL)\n"):
+            self.fx.touch("test/cmake/knob_tests.cmake", text)
+            self.assertEqual(self.fx.select(["test/cmake/knob_tests.cmake"]).mode, "all", text)
+
     def test_without_an_inventory_a_fragment_stays_global(self) -> None:
         sel = at.project_affected(self.fx.model, ["test/cmake/knob_tests.cmake"], [], None, None, 1.0)
         self.assertEqual(sel.mode, "all")
