@@ -50,6 +50,18 @@ Teardown is two-phase, as for `MetalSurface`: `make_current` and `swap_buffers`
 refuse, then the release handler runs on the UI thread and returns once the
 client has stopped using the context, and only then is it destroyed.
 
+### Windows input
+
+On Windows the surface's window procedure delivers the same `InputHandler`
+events from the host's own message loop (no `dispatch_events` call is needed):
+pointer (the pointer is captured while a button is held, so drags keep arriving
+outside the window), wheel (screen coordinates converted to the window's), key
+and text (`WM_CHAR`, UTF-16 to UTF-8, surrogate pairs joined), and focus.
+`set_keyboard_focus` calls `SetFocus` and gives it back; a key or wheel message
+the client does not take is posted to the host window. `set_cursor` answers
+`WM_SETCURSOR` with the matching system cursor. The virtual-key, button, wheel
+and cursor tables are pure functions (`key_for_win32_vk` and friends).
+
 ### X11
 
 The surface opens its own connection to the X server for the window and its
@@ -228,8 +240,12 @@ returns at once without touching RmlUi.
   server (`xvfb-run`) on a software renderer: child lifecycle and resize
   following, error containment, request fall-through, two-phase teardown, no
   leaked connections or windows, and input from synthesized X events and the X
-  test extension. `pulp-test-native-x11-translate` covers the keysym, modifier
-  and button tables on every platform.
+  test extension. `pulp-test-native-x11-translate` and
+  `pulp-test-native-win32-translate` cover the keysym, virtual-key, modifier,
+  button, wheel and cursor tables on every platform. The Win32 backend's
+  window-procedure tests (`pulp-test-native-gl-surface-win32`) send input,
+  focus and cursor messages to the child window and assert what the handler
+  sees.
 - `pulp-test-rmlui-native-surface` and `pulp-test-rmlui-native-metal` cover the
   RmlUi adapter, including the first-frame preparation. They need an installed
   Vellum RmlUi SDK. The advisory `rmlui-native` lane builds that SDK from

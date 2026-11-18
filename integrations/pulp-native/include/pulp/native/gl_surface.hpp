@@ -213,10 +213,13 @@ class GlSurface {
     /// The context the client renders with.
     GlContext& context() noexcept;
 
-    /// Where input goes (X11; elsewhere the handler is kept and never called).
+    /// Where input goes (X11 and Windows; elsewhere the handler is kept and never
+    /// called). On Windows it is called from the window procedure, so the host's
+    /// message loop delivers it and `dispatch_events` has nothing to do.
     /// Unset members drop their events. UI thread.
     void set_input_handler(InputHandler handler);
-    /// The cursor shown over the surface (X11; elsewhere kept and not shown). It
+    /// The cursor shown over the surface (X11 and Windows; elsewhere kept and not
+    /// shown). It
     /// stays until set again, and is applied again if the surface re-attaches.
     /// UI thread.
     void set_cursor(Cursor cursor);

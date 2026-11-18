@@ -18,6 +18,12 @@ if(TARGET pulp-native)
     target_link_libraries(pulp-test-native-x11-translate PRIVATE
         pulp::native Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-native-x11-translate)
+
+    # The Win32 translation tables are pure too.
+    add_executable(pulp-test-native-win32-translate test_native_win32_translate.cpp)
+    target_link_libraries(pulp-test-native-win32-translate PRIVATE
+        pulp::native Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-native-win32-translate)
 endif()
 
 if(NOT APPLE AND TARGET pulp-native)
