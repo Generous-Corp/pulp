@@ -170,6 +170,9 @@ class StandaloneSettingsModel {
     int midi_selected_ = -1;
     // The None row shows only because no port exists and nothing was chosen.
     bool midi_none_implicit_ = false;
+    // An empty id intentionally follows the first available port without
+    // pinning that port until the user explicitly chooses a row.
+    bool midi_first_implicit_ = false;
 };
 
 } // namespace pulp::format

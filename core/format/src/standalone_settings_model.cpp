@@ -139,6 +139,7 @@ void StandaloneSettingsModel::resolve() {
     for (auto& p : midi_ports_)
         midi_items_.push_back(p.name);
     midi_none_implicit_ = false;
+    midi_first_implicit_ = false;
     if (config_.midi_input_id == kNoMidiInputId) {
         midi_selected_ = options_.midi_includes_none ? 0 : -1;
     } else if (config_.midi_input_id.empty()) {
@@ -146,6 +147,7 @@ void StandaloneSettingsModel::resolve() {
         // a placeholder that must not be written back as a choice.
         midi_selected_ = midi_ports_.empty() ? (options_.midi_includes_none ? 0 : -1) : offset;
         midi_none_implicit_ = midi_ports_.empty();
+        midi_first_implicit_ = !midi_ports_.empty();
     } else {
         midi_selected_ = options_.midi_includes_none ? 0 : (midi_ports_.empty() ? -1 : 0);
         for (size_t i = 0; i < midi_ports_.size(); ++i) {
@@ -275,6 +277,7 @@ void StandaloneSettingsModel::select_midi(int index) {
     midi_selected_ = index;
     // An explicit choice, even of the None row, is no longer a placeholder.
     midi_none_implicit_ = false;
+    midi_first_implicit_ = false;
     if (options_.midi_includes_none) {
         config_.midi_input_id = index == 0 ? std::string(kNoMidiInputId)
                                            : midi_ports_[static_cast<size_t>(index - 1)].id;
@@ -326,10 +329,12 @@ StandaloneConfig StandaloneSettingsModel::config() const {
             if (!midi_none_implicit_)
                 out.midi_input_id = kNoMidiInputId;
         } else if (midi_selected_ > 0 && midi_selected_ <= static_cast<int>(midi_ports_.size())) {
-            out.midi_input_id = midi_ports_[static_cast<size_t>(midi_selected_ - 1)].id;
+            if (!midi_first_implicit_)
+                out.midi_input_id = midi_ports_[static_cast<size_t>(midi_selected_ - 1)].id;
         }
     } else if (midi_selected_ >= 0 && midi_selected_ < static_cast<int>(midi_ports_.size())) {
-        out.midi_input_id = midi_ports_[static_cast<size_t>(midi_selected_)].id;
+        if (!midi_first_implicit_)
+            out.midi_input_id = midi_ports_[static_cast<size_t>(midi_selected_)].id;
     } else if (midi_selected_ < 0 && config_.midi_input_id == kNoMidiInputId) {
         // The variant without a None row still keeps an existing "no MIDI" choice.
         out.midi_input_id = kNoMidiInputId;

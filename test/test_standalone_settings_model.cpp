@@ -448,6 +448,30 @@ TEST_CASE("a MIDI port that has gone applies the row shown",
     REQUIRE(panel.config().midi_input_id.empty());
 }
 
+TEST_CASE("an empty MIDI id follows the first port without pinning it",
+          "[standalone][settings-model][midi]") {
+    Rig rig;
+    StandaloneConfig cfg;
+    cfg.midi_input_id.clear();
+    rig.load(cfg);
+    REQUIRE(rig.model.midi_selected() == 1);
+    REQUIRE(rig.model.config().midi_input_id.empty());
+
+    // An explicit row selection changes the dynamic choice into a pinned id.
+    rig.model.select_midi(2);
+    REQUIRE(rig.model.config().midi_input_id == "m2");
+
+    StandaloneSettingsModel::Options options;
+    options.midi_includes_none = false;
+    StandaloneSettingsModel panel{options};
+    panel.set_config(cfg);
+    panel.refresh(&rig.audio, &rig.midi);
+    REQUIRE(panel.midi_selected() == 0);
+    REQUIRE(panel.config().midi_input_id.empty());
+    panel.select_midi(1);
+    REQUIRE(panel.config().midi_input_id == "m2");
+}
+
 TEST_CASE("two inputs with the same channel count offer one on/off control, not a picker",
           "[standalone][settings-model][input]") {
     Rig rig;
