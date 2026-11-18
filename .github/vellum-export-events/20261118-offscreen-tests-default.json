@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "event_id": "20261118-offscreen-tests-default",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-18T10:36:44Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/platform/include/pulp/platform/test_visibility.hpp",
+    "core/platform/platform/mac/popup_window_mac.mm",
+    "core/view/platform/mac/window_host_mac.mm",
+    "core/view/src/sdl_window_host.cpp"
+  ],
+  "vellum_inherits": true,
+  "rationale": "Adds an environment-gated test-only window policy to the exported window hosts and popup panel; behavior is unchanged when PULP_TEST_OFFSCREEN is unset, so a re-export can carry it."
+}
