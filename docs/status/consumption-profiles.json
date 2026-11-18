@@ -700,6 +700,7 @@
       "pulp/platform/reveal_in_file_manager.hpp",
       "pulp/platform/special_dir.hpp",
       "pulp/platform/win/registry.hpp",
+      "pulp/platform/win/text_convert.hpp",
       "pulp/platform/win32_sane.hpp"
     ],
     "core/playback/include": [
