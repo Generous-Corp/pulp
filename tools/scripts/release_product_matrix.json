@@ -151,6 +151,7 @@
         "linux": [
             "pulp-bundled-fonts",
             "pulp-bundled-noto-color-emoji",
+            "pulp-native",
             "pulp-signal-mufft"
         ],
         "windows": [

@@ -238,6 +238,55 @@ TEST_CASE("the AU raw offset is shared by the clamping and the refusing policy",
                                                       kImmediate, 1.0e18));
 }
 
+TEST_CASE("the host AU event timeline admits exactly what the AU adapter admits",
+          "[process-timing][format][au][parity]") {
+    constexpr std::int64_t kImmediate = host::kAuEventSampleTimeImmediate;
+    constexpr std::int64_t kInt32Max = std::numeric_limits<std::int32_t>::max();
+    constexpr std::uint32_t kMaxFrames = std::numeric_limits<std::uint32_t>::max();
+
+    struct Case {
+        std::int64_t event;
+        std::uint32_t frames;
+        bool sample_time_valid;
+        bool accepted;
+    };
+    // The block starts at sample 0, so an absolute time is its own offset.
+    const std::array<Case, 11> cases{{
+        {0, 64, true, true},                       // first frame
+        {63, 64, true, true},                      // last frame
+        {64, 64, true, false},                     // at the end
+        {-1, 64, true, false},                     // before the block
+        {kImmediate + 5, 64, true, true},          // immediate window
+        {kImmediate + 64, 64, true, false},        // immediate, past the end
+        {5, 64, false, false},                     // absolute, no block time
+        {0, 0, true, false},                       // empty block
+        {kInt32Max, kMaxFrames, true, true},       // largest deliverable offset
+        {kInt32Max + 1, kMaxFrames, true, false},  // in the block, not an int32
+        {kMaxFrames - 1, kMaxFrames, true, false}, // last frame, not an int32
+    }};
+    for (const auto& c : cases) {
+        INFO("event " << c.event << " frames " << c.frames << " valid " << c.sample_time_valid);
+        host::AuBlockTiming timing;
+        timing.timestamp_flags = c.sample_time_valid ? host::kAuTimeStampSampleTimeValid : 0u;
+        timing.sample_time = 0.0;
+        timing.frames = c.frames;
+
+        format::EventTimeAdmission admission{static_cast<std::int64_t>(c.frames)};
+        const auto adapter = format::admit_au_event_time(
+            admission, c.event, kImmediate,
+            c.sample_time_valid ? std::optional<double>{0.0} : std::nullopt);
+        REQUIRE(adapter.has_value() == c.accepted);
+
+        std::uint32_t block_time = 0xDEADBEEFu;
+        const auto result = host::au_event_block_time(c.event, timing, block_time);
+        REQUIRE((result == HostEventResult::Accepted) == c.accepted);
+        if (c.accepted)
+            REQUIRE(block_time == static_cast<std::uint32_t>(*adapter));
+        else
+            REQUIRE(block_time == 0xDEADBEEFu); // a refusal writes nothing
+    }
+}
+
 TEST_CASE("an oversized host block is refused whole and accepted in chunks",
           "[process-timing][host][chunk]") {
     constexpr std::size_t kHostFrames = 10000;
