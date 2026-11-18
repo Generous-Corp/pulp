@@ -215,7 +215,7 @@ def test_repository_workflows_ignore_retired_macpro_selectors() -> int:
         "vellum-freeze-check.yml": ["PULP_AUTO_LINUX_RUNS_ON_JSON"],
     }
     for filename, variables in direct_consumers.items():
-        blocks = _runs_on_blocks((WORKFLOWS / filename).read_text())
+        blocks = _runs_on_blocks((WORKFLOWS / filename).read_text(encoding="utf-8"))
         for variable in variables:
             matching = [block for block in blocks if f"vars.{variable}" in block]
             check(matching, f"{filename} no longer reads {variable} from runs-on")
@@ -225,7 +225,7 @@ def test_repository_workflows_ignore_retired_macpro_selectors() -> int:
                 f"{filename} routes {variable} without the retired-macpro guard",
             )
 
-    build = (WORKFLOWS / "build.yml").read_text()
+    build = (WORKFLOWS / "build.yml").read_text(encoding="utf-8")
     for variable, env_name in (
         ("PULP_LOCAL_LINUX_RUNS_ON_JSON", "CONFIGURED_LINUX_RUNNER_SELECTOR_JSON"),
         ("PULP_AUTO_LINUX_RUNS_ON_JSON", "AUTOMATIC_LINUX_RUNNER_SELECTOR_JSON"),
