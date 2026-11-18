@@ -1159,9 +1159,10 @@ if((PULP_HAS_VST3 OR PULP_HAS_CLAP) AND NOT (PULP_IOS OR ANDROID OR EMSCRIPTEN O
     if(PULP_HAS_VST3)
         add_dependencies(pulp-test-host-probe-bundles PulpHostProbe_VST3)
         # CMake's BUNDLE property is Apple-only: on macOS the VST3 is the
-        # .vst3 bundle directory, elsewhere the linker output is a plain module
-        # that PluginSlot's VST3 loader opens directly.
-        if(APPLE)
+        # .vst3 bundle directory, on Linux the build assembles the SDK-layout
+        # bundle, and PluginSlot's VST3 loader opens either.
+        if(APPLE OR UNIX)
+            # Linux loads the SDK-layout bundle the build assembles.
             set(_pulp_host_probe_vst3 "${CMAKE_BINARY_DIR}/VST3/Pulp Host Probe.vst3")
         else()
             set(_pulp_host_probe_vst3 "$<TARGET_FILE:PulpHostProbe_VST3>")
