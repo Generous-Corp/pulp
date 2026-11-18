@@ -34,7 +34,8 @@ bool begin_file_drag(void* native_view, const FileDragRequest& request) {
     const HRESULT oi = OleInitialize(nullptr);
     // RPC_E_CHANGED_MODE means this thread is in a multi-threaded apartment,
     // where DoDragDrop cannot run; refuse rather than attempt it.
-    if (!pulp::platform::win_text::sta_init_usable(oi)) return false;
+    if (!pulp::platform::win_text::sta_init_usable(oi))
+        return false;
     const bool ok = win_drag::win_run_file_drag(request);
     OleUninitialize();
     return ok;

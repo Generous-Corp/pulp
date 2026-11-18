@@ -427,8 +427,7 @@ TEST_CASE("run honors working directory",
     REQUIRE_FALSE(ec);
 }
 
-TEST_CASE("run honors a non-ASCII working directory",
-          "[child_process][edge][unicode]") {
+TEST_CASE("run honors a non-ASCII working directory", "[child_process][edge][unicode]") {
     // UTF-8 spelling of "pulp-cp-<e acute><CJK>"; ProcessOptions strings are UTF-8.
     const std::string name = "pulp-cp-\xC3\xA9\xE4\xB8\xAD";
     const auto u8 = std::u8string(name.begin(), name.end());

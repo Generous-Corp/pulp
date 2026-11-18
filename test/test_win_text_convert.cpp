@@ -28,7 +28,8 @@ TEST_CASE("utf16_to_utf8 replaces unpaired surrogates", "[win-text]") {
     const char16_t lone_high[] = {0xD83C, u'x'};
     const char16_t lone_low[] = {0xDC00};
     const char16_t trailing_high[] = {u'a', 0xD83C};
-    REQUIRE(utf16_to_utf8(lone_high, 2) == "\xEF\xBF\xBD" "x");
+    REQUIRE(utf16_to_utf8(lone_high, 2) == "\xEF\xBF\xBD"
+                                           "x");
     REQUIRE(utf16_to_utf8(lone_low, 1) == "\xEF\xBF\xBD");
     REQUIRE(utf16_to_utf8(trailing_high, 2) == "a\xEF\xBF\xBD");
 }
@@ -46,14 +47,14 @@ TEST_CASE("utf8_to_utf16 round-trips non-ASCII paths and arguments", "[win-text]
 
 TEST_CASE("utf8_to_utf16 replaces invalid UTF-8", "[win-text]") {
     REQUIRE(utf8_to_utf16("\xFF") == u"\uFFFD");
-    REQUIRE(utf8_to_utf16("a\xC3") == u"a\uFFFD");             // truncated sequence
-    REQUIRE(utf8_to_utf16("\xC0\x80") == u"\uFFFD\uFFFD");     // overlong
-    REQUIRE(utf8_to_utf16("\xED\xA0\x80") == u"\uFFFD\uFFFD\uFFFD");  // encoded surrogate
+    REQUIRE(utf8_to_utf16("a\xC3") == u"a\uFFFD");                   // truncated sequence
+    REQUIRE(utf8_to_utf16("\xC0\x80") == u"\uFFFD\uFFFD");           // overlong
+    REQUIRE(utf8_to_utf16("\xED\xA0\x80") == u"\uFFFD\uFFFD\uFFFD"); // encoded surrogate
 }
 
 TEST_CASE("sta_init_usable refuses a thread already in another apartment", "[win-text]") {
-    REQUIRE(sta_init_usable(0));                    // S_OK
-    REQUIRE(sta_init_usable(1));                    // S_FALSE: already an STA
-    REQUIRE_FALSE(sta_init_usable(kComChangedMode));  // RPC_E_CHANGED_MODE
-    REQUIRE_FALSE(sta_init_usable(static_cast<std::int32_t>(0x80004005u)));  // E_FAIL
+    REQUIRE(sta_init_usable(0));                     // S_OK
+    REQUIRE(sta_init_usable(1));                     // S_FALSE: already an STA
+    REQUIRE_FALSE(sta_init_usable(kComChangedMode)); // RPC_E_CHANGED_MODE
+    REQUIRE_FALSE(sta_init_usable(static_cast<std::int32_t>(0x80004005u))); // E_FAIL
 }

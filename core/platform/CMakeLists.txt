@@ -146,6 +146,7 @@ set(PULP_PLATFORM_UNIT_HEADERS
     include/pulp/platform/reveal_in_file_manager.hpp
     include/pulp/platform/special_dir.hpp
     include/pulp/platform/win/registry.hpp
+    include/pulp/platform/win/text_convert.hpp
     include/pulp/platform/win32_sane.hpp
 )
 set_property(TARGET pulp-platform PROPERTY PULP_UNIT_HEADERS ${PULP_PLATFORM_UNIT_HEADERS})

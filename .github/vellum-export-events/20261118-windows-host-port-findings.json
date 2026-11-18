@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "20261118-windows-host-port-findings",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-18T10:53:56Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/platform/include/pulp/platform/win/text_convert.hpp"
+  ],
+  "vellum_inherits": true,
+  "rationale": "Adds the portable UTF-16 and COM apartment helper that the Windows file dialog, drag source and child launch fixes use; Vellum's transferred Windows files take it on the next re-transfer."
+}

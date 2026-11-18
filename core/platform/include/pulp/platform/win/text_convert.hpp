@@ -34,13 +34,14 @@ inline void append_utf8(std::string& out, std::uint32_t cp) {
     }
 }
 
-}  // namespace detail
+} // namespace detail
 
 // UTF-16 code units -> UTF-8. The result has exactly the converted length: no
 // terminator is stored and nothing is written past it.
 inline std::string utf16_to_utf8(const char16_t* units, std::size_t count) {
     std::string out;
-    if (units == nullptr) return out;
+    if (units == nullptr)
+        return out;
     out.reserve(count);
     for (std::size_t i = 0; i < count; ++i) {
         const std::uint32_t u = units[i];
@@ -63,9 +64,11 @@ inline std::string utf16_to_utf8(const char16_t* units, std::size_t count) {
 
 // NUL-terminated variant; the terminator is not part of the result.
 inline std::string utf16_to_utf8(const char16_t* terminated) {
-    if (terminated == nullptr) return {};
+    if (terminated == nullptr)
+        return {};
     std::size_t n = 0;
-    while (terminated[n] != u'\0') ++n;
+    while (terminated[n] != u'\0')
+        ++n;
     return utf16_to_utf8(terminated, n);
 }
 
@@ -81,18 +84,26 @@ inline std::u16string utf8_to_utf16(std::string_view s) {
         if (b0 < 0x80) {
             cp = b0;
         } else if (b0 >= 0xC2 && b0 <= 0xDF) {
-            len = 2; cp = b0 & 0x1F; min = 0x80;
+            len = 2;
+            cp = b0 & 0x1F;
+            min = 0x80;
         } else if (b0 >= 0xE0 && b0 <= 0xEF) {
-            len = 3; cp = b0 & 0x0F; min = 0x800;
+            len = 3;
+            cp = b0 & 0x0F;
+            min = 0x800;
         } else if (b0 >= 0xF0 && b0 <= 0xF4) {
-            len = 4; cp = b0 & 0x07; min = 0x10000;
+            len = 4;
+            cp = b0 & 0x07;
+            min = 0x10000;
         }
         if (len > 1) {
             bool good = i + len <= s.size();
             for (std::size_t k = 1; good && k < len; ++k) {
                 const auto b = static_cast<unsigned char>(s[i + k]);
-                if ((b & 0xC0) != 0x80) good = false;
-                else cp = (cp << 6) | (b & 0x3F);
+                if ((b & 0xC0) != 0x80)
+                    good = false;
+                else
+                    cp = (cp << 6) | (b & 0x3F);
             }
             if (!good || cp < min || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
                 cp = 0xFFFD;
@@ -131,11 +142,12 @@ inline std::wstring to_wide(std::string_view s) {
 }
 
 inline std::string from_wide(const wchar_t* terminated) {
-    if (terminated == nullptr) return {};
+    if (terminated == nullptr)
+        return {};
     std::u16string u;
     for (std::size_t i = 0; terminated[i] != L'\0'; ++i)
         u.push_back(static_cast<char16_t>(terminated[i]));
     return utf16_to_utf8(u.data(), u.size());
 }
 
-}  // namespace pulp::platform::win_text
+} // namespace pulp::platform::win_text

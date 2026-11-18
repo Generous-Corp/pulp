@@ -45,12 +45,18 @@ struct ComInit {
     ~ComInit() {
         if (SUCCEEDED(hr)) CoUninitialize();
     }
-    bool usable() const { return win_text::sta_init_usable(hr); }
+    bool usable() const {
+        return win_text::sta_init_usable(hr);
+    }
 };
 
-std::wstring utf8_to_utf16(const std::string& s) { return win_text::to_wide(s); }
+std::wstring utf8_to_utf16(const std::string& s) {
+    return win_text::to_wide(s);
+}
 
-std::string utf16_to_utf8(const wchar_t* w) { return win_text::from_wide(w); }
+std::string utf16_to_utf8(const wchar_t* w) {
+    return win_text::from_wide(w);
+}
 
 // Filesystem path of a shell item, or nullopt for non-filesystem items.
 std::optional<std::string> item_path(IShellItem* item) {

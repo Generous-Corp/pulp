@@ -726,14 +726,12 @@ bool ChildProcess::start_impl(const std::string& command, const std::vector<std:
     const std::wstring wide_cwd = pulp::platform::win_text::to_wide(options.working_directory);
 
     PROCESS_INFORMATION pi{};
-    BOOL ok =
-        ((custody && retained_job == nullptr) || !duplex_ready)
-            ? FALSE
-            : CreateProcessW(nullptr, wide_cmdline.data(), nullptr, nullptr,
-                             TRUE, // inherit handles
-                             creation_flags, nullptr,
-                             wide_cwd.empty() ? nullptr : wide_cwd.c_str(),
-                             &si, &pi);
+    BOOL ok = ((custody && retained_job == nullptr) || !duplex_ready)
+                  ? FALSE
+                  : CreateProcessW(nullptr, wide_cmdline.data(), nullptr, nullptr,
+                                   TRUE, // inherit handles
+                                   creation_flags, nullptr,
+                                   wide_cwd.empty() ? nullptr : wide_cwd.c_str(), &si, &pi);
 
     if (attributes_initialized)
         DeleteProcThreadAttributeList(startup.lpAttributeList);
