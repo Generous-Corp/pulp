@@ -216,11 +216,13 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
     # from it). The linker output stays where it is, for the same staging
     # reasons as on Windows, and the assembled bundle is what a host scans.
     if(UNIX AND NOT APPLE AND NOT ANDROID)
-        set(_pulp_vst3_linux_machine "${CMAKE_SYSTEM_PROCESSOR}")
-        if(_pulp_vst3_linux_machine STREQUAL "arm64")
-            set(_pulp_vst3_linux_machine "aarch64")
-        elseif(_pulp_vst3_linux_machine STREQUAL "AMD64")
-            set(_pulp_vst3_linux_machine "x86_64")
+        execute_process(
+            COMMAND uname -m
+            OUTPUT_VARIABLE _pulp_vst3_linux_machine
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET)
+        if(NOT _pulp_vst3_linux_machine)
+            message(FATAL_ERROR "Unable to determine the Linux VST3 bundle architecture with uname -m")
         endif()
         set(_pulp_vst3_linux_bundle "${CMAKE_BINARY_DIR}/VST3/${name}.vst3")
         set(_pulp_vst3_linux_contents
