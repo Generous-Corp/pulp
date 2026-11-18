@@ -285,9 +285,18 @@ inline void apply_host_callbacks_to_process_context(ProcessContext& ctx, const a
                 ctx.transport_validity.set(TransportField::SamplePosition, false);
         }
         if (ctx.has_transport(TransportField::BeatPosition) &&
-            ctx.has_transport(TransportField::Tempo) && ctx.sample_rate > 0.0)
-            ctx.position_beats +=
+            ctx.has_transport(TransportField::Tempo) && ctx.sample_rate > 0.0) {
+            // A finite beat and tempo can still overflow the advance to
+            // infinity; the beat is then unknown rather than a non-finite
+            // value handed to playhead consumers.
+            const double advanced =
+                ctx.position_beats +
                 static_cast<double>(slice_offset) * ctx.tempo_bpm / (60.0 * ctx.sample_rate);
+            if (std::isfinite(advanced))
+                ctx.position_beats = advanced;
+            else
+                ctx.transport_validity.set(TransportField::BeatPosition, false);
+        }
     }
 
     static mach_timebase_info_data_t timebase = {0, 0};

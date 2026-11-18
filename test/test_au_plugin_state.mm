@@ -1516,6 +1516,29 @@ TEST_CASE("AU v2 host callbacks leave a non-finite beat or tempo unknown",
         REQUIRE(ctx.bar == 0);
     }
 
+    // A finite beat and a finite tempo whose slice advance overflows to
+    // infinity leave the beat unknown, not a non-finite position.
+    transport.beat = 1.0e308;
+    transport.tempo = 1.0e308;
+    {
+        pulp::format::detail::PlayheadSnapshot overflow_previous;
+        auto overflow = pulp::format::au::make_render_process_context(48000.0, kFrames);
+        pulp::format::au::apply_host_callbacks_to_process_context(overflow, effect,
+                                                                  overflow_previous, kSliceOffset);
+        REQUIRE(std::isfinite(overflow.position_beats));
+        REQUIRE_FALSE(overflow.has_transport(TransportField::BeatPosition));
+        REQUIRE_FALSE(overflow.has_transport(TransportField::Bar));
+    }
+    // Same beat with an ordinary tempo is representable and stays valid.
+    transport.tempo = 120.0;
+    {
+        pulp::format::detail::PlayheadSnapshot ordinary_previous;
+        auto ordinary = pulp::format::au::make_render_process_context(48000.0, kFrames);
+        pulp::format::au::apply_host_callbacks_to_process_context(ordinary, effect,
+                                                                  ordinary_previous, kSliceOffset);
+        REQUIRE(ordinary.has_transport(TransportField::BeatPosition));
+    }
+
     // Control: a finite tempo advances the beat by the slice offset.
     transport.beat = 2.0;
     pulp::format::detail::PlayheadSnapshot previous;
