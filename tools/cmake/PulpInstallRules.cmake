@@ -189,7 +189,8 @@ if(TARGET pulp-inspect-authoring)
 endif()
 
 # The native surface (integrations/pulp-native) for an editor that brings its
-# own renderer: MetalSurface, FramePump and input translation. macOS only.
+# own renderer: MetalSurface, FramePump and input translation on macOS, GlSurface
+# on Windows, and the shared input and surface types on every platform.
 if(TARGET pulp-native)
     list(APPEND PULP_SDK_TARGETS pulp-native)
 endif()

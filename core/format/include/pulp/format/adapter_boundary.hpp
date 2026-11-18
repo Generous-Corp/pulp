@@ -195,8 +195,7 @@ inline void apply_host_transport(ProcessContext& ctx, const HostTransport& trans
                transport.validity.has(TransportField::TimeSignature) &&
                std::isfinite(ctx.position_beats) &&
                ctx.time_sig_numerator > 0 && ctx.time_sig_denominator > 0) {
-        detail::derive_bar_from_beats(ctx);
-        ctx.transport_validity.set(TransportField::Bar);
+        ctx.transport_validity.set(TransportField::Bar, detail::derive_bar_from_beats(ctx));
     }
     detail::compute_playhead_changes(
         ctx, snapshot, detail::TransportDiffMode::FieldValidity);

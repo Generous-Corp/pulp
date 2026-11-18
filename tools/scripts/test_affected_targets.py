@@ -65,6 +65,14 @@ GRAPH = [
 ]
 
 
+def _stack(source_root: Path, files: list[str]) -> dict:
+    """A CMake backtraceGraph for one call stack, innermost file first."""
+    nodes = [{"file": i, **({"parent": i + 1} if i + 1 < len(files) else {})}
+             for i in range(len(files))]
+    return {"files": [str(source_root / f) for f in files], "nodes": nodes}
+
+
+# The file API records a target's call-stack files relative to the source root.
 def write_reply(build_dir: Path, source_root: Path, graph: list[dict]) -> None:
     reply = build_dir / at.CODEMODEL_REPLY_RELATIVE
     reply.mkdir(parents=True, exist_ok=True)
@@ -81,6 +89,8 @@ def write_reply(build_dir: Path, source_root: Path, graph: list[dict]) -> None:
             "sources": [{"path": s} for s in t["sources"]],
             "dependencies": [{"id": ids[d]} for d in t["deps"]],
             "artifacts": [{"path": a} for a in t["artifacts"]],
+            **({"backtrace": 0, "backtraceGraph": _stack(Path(), t["defined_in"])}
+               if t.get("defined_in") else {}),
         }))
     (reply / "codemodel-v2.json").write_text(json.dumps({
         "kind": "codemodel",
@@ -558,6 +568,456 @@ class CommandLine(unittest.TestCase):
         self.assertEqual(payload["mode"], "focused")
         self.assertEqual(payload["targets"],
                          ["pulp-test-knob", "pulp-test-widgets", "pulp-test-widgets-label", "pulp-view-core"])
+
+
+FRAGMENT_STACK = ["test/cmake/{}.cmake", "test/CMakeLists.txt"]
+
+
+class FragmentFixture:
+    """Two test programs, each defined and registered by its own test/cmake file."""
+
+    def __init__(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "src"
+        self.build = self.root / "build"
+        self.build.mkdir(parents=True)
+        graph = [
+            _target("pulp-runtime", "STATIC_LIBRARY", "core/runtime", ["core/runtime/src/log.cpp"]),
+            _target("pulp-test-knob", "EXECUTABLE", "test", ["test/test_knob.cpp"],
+                    ["pulp-runtime"], ["test/pulp-test-knob"]),
+            _target("pulp-test-label", "EXECUTABLE", "test", ["test/test_label.cpp"],
+                    ["pulp-runtime"], ["test/pulp-test-label"]),
+            _target("pulp-fixture-lib", "STATIC_LIBRARY", "test", ["test/harness/lib.cpp"]),
+            _target("pulp-test-uses-lib", "EXECUTABLE", "test", ["test/test_uses_lib.cpp"],
+                    ["pulp-fixture-lib"], ["test/pulp-test-uses-lib"]),
+        ]
+        for t in graph:
+            if t["name"] == "pulp-test-knob":
+                t["defined_in"] = [f.format("knob_tests") for f in FRAGMENT_STACK]
+            elif t["name"] == "pulp-test-label":
+                t["defined_in"] = [f.format("label_tests") for f in FRAGMENT_STACK]
+            elif t["name"] == "pulp-fixture-lib":
+                t["defined_in"] = [f.format("lib_tests") for f in FRAGMENT_STACK]
+        write_reply(self.build, self.root, graph)
+        self.model = at.load_codemodel_targets(self.build)
+
+        def exe(rel: str) -> str:
+            return str(self.build / rel)
+
+        nodes, files = [], []
+        for owner in ("knob_tests", "label_tests", "lib_tests"):
+            stack = _stack(self.root, [f.format(owner) for f in FRAGMENT_STACK])
+            base = len(files)
+            files += stack["files"]
+            nodes += [{"file": base + n["file"], **({"parent": len(nodes) + 1}
+                                                    if "parent" in n else {})}
+                      for n in stack["nodes"]]
+        self.tests = [
+            {"name": "Knob sprite", "backtrace": 0,
+             "command": [exe("test/pulp-test-knob"), "Knob sprite"]},
+            {"name": "Label wraps", "backtrace": 2,
+             "command": [exe("test/pulp-test-label"), "Label wraps"]},
+            {"name": "uses-lib", "backtrace": 4,
+             "command": [exe("test/pulp-test-uses-lib")]},
+            {"name": "knob-script", "command": [
+                "cmake", f"-DCHECK={self.root / 'test/cmake/check_knob.cmake'}", "-P",
+                str(self.root / "test/cmake/check_knob.cmake")]},
+        ]
+        # Each test stack is two nodes: the file that called add_test, then its includer.
+        self.inventory = at.projection_ctest_entries(
+            self.tests, {"files": files, "nodes": nodes})
+        for rel, text in {
+            "test/cmake/knob_tests.cmake": "add_executable(pulp-test-knob test/test_knob.cpp)\n"
+                                           "add_test(NAME knob COMMAND pulp-test-knob)\n",
+            "test/cmake/label_tests.cmake": "add_executable(pulp-test-label test/test_label.cpp)\n",
+            "test/cmake/lib_tests.cmake": "add_library(pulp-fixture-lib STATIC test/harness/lib.cpp)\n",
+            "test/cmake/check_knob.cmake": "message(STATUS ok)\n",
+            "test/CMakeLists.txt": "include(cmake/knob_tests.cmake)\n",
+        }.items():
+            self.touch(rel, text)
+
+    def touch(self, rel: str, content: str) -> None:
+        path = self.root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    @staticmethod
+    def stale_files(changed: list[str], deleted: list[str], stale: tuple[str, ...]) -> list[str]:
+        """The build files a real staleness check reports when the codemodel was
+        configured after every fragment: deleted ones, non-fragment ones, and
+        whatever the test declares stale."""
+        return [f for f in list(changed) + list(deleted) if at.is_build_system_file(f)
+                and (f in deleted or f in stale or not at.REGISTRATION_FRAGMENT_RE.match(f))]
+
+    def select(self, changed: list[str], deleted: list[str] = (),
+               base_texts: dict[str, str] | None = None,
+               stale: tuple[str, ...] = ()) -> at.Selection:
+        kwargs = {"base_texts": base_texts} if base_texts is not None else {}
+        return at.project_affected(self.model, changed, list(deleted), None, self.inventory, 1.0,
+                                   stale_build_system=self.stale_files(changed, deleted, stale),
+                                   **kwargs)
+
+
+class RegistrationFragments(unittest.TestCase):
+    def setUp(self) -> None:
+        self.fx = FragmentFixture()
+        self.addCleanup(self.fx.tmp.cleanup)
+
+    def test_a_fragment_selects_only_its_own_tests_and_targets(self) -> None:
+        sel = self.fx.select(["test/cmake/knob_tests.cmake"])
+        self.assertEqual(sel.mode, "focused")
+        self.assertEqual(sel.tests, ["Knob sprite"])
+        self.assertEqual(sel.targets, ["pulp-test-knob"])
+
+    def test_a_target_defined_in_a_fragment_selects_what_links_it(self) -> None:
+        sel = self.fx.select(["test/cmake/lib_tests.cmake"])
+        self.assertEqual(sel.mode, "focused")
+        self.assertEqual(sel.targets, ["pulp-fixture-lib", "pulp-test-uses-lib"])
+        self.assertEqual(sel.tests, ["uses-lib"])
+
+    def test_a_cmake_script_selects_the_tests_that_run_it(self) -> None:
+        sel = self.fx.select(["test/cmake/check_knob.cmake"])
+        self.assertEqual(sel.mode, "focused")
+        self.assertEqual(sel.tests, ["knob-script"])
+
+    def test_a_fragment_and_a_source_select_both(self) -> None:
+        sel = self.fx.select(["test/cmake/label_tests.cmake", "test/test_knob.cpp"])
+        self.assertEqual(sel.mode, "focused")
+        self.assertEqual(sel.tests, ["Knob sprite", "Label wraps"])
+
+    def test_shared_and_unknown_cmake_files_stay_global(self) -> None:
+        self.fx.touch("test/cmake/other.cmake", "message(STATUS x)\n")
+        for path in ("test/CMakeLists.txt", "test/cmake/fragments.cmake", "test/cmake/other.cmake",
+                     "tools/cmake/PulpTest.cmake", "CMakeLists.txt"):
+            sel = self.fx.select(["test/cmake/knob_tests.cmake", path])
+            self.assertEqual(sel.mode, "all", path)
+            self.assertIn("build system", sel.reason)
+
+    def test_a_deleted_fragment_stays_global(self) -> None:
+        sel = self.fx.select(["test/cmake/knob_tests.cmake"], deleted=["test/cmake/label_tests.cmake"])
+        self.assertEqual(sel.mode, "all")
+
+    def test_a_fragment_other_files_depend_on_stays_global(self) -> None:
+        cases = {
+            "function": "function(knob_helper)\nendfunction()\n",
+            "variable": "set(KNOB_FLAGS -DX)\n",
+            "cache": "set(KNOB_OPT ON CACHE BOOL \"\")\n",
+            "directory": "include_directories(test/include)\n",
+            "option": "option(KNOB_WIDE \"\" OFF)\n",
+        }
+        self.fx.touch("test/cmake/label_tests.cmake", "knob_helper()\nmessage(${KNOB_FLAGS})\n")
+        for name, text in cases.items():
+            self.fx.touch("test/cmake/knob_tests.cmake", text)
+            sel = self.fx.select(["test/cmake/knob_tests.cmake"])
+            self.assertEqual(sel.mode, "all", name)
+
+    def test_cross_target_mutations_and_includes_stay_global(self) -> None:
+        cases = {
+            "target": "target_compile_definitions(pulp-test-label PRIVATE FLAG)\n",
+            "test-properties": "set_tests_properties(Label wraps PROPERTIES TIMEOUT 5)\n",
+            "target-property": "set_property(TARGET pulp-test-label PROPERTY FOO bar)\n",
+            "include": "include(shared-options.cmake)\n",
+            "unknown": "custom-project-command.with-dot()\n",
+        }
+        for name, text in cases.items():
+            self.fx.touch("test/cmake/knob_tests.cmake", text)
+            sel = self.fx.select(["test/cmake/knob_tests.cmake"])
+            self.assertEqual(sel.mode, "all", name)
+
+    def test_scoped_set_and_unset_stay_global(self) -> None:
+        for name, text in {
+            "set-parent": "set(KNOB_FLAGS -DX PARENT_SCOPE)\n",
+            "set-environment": "set(ENV{KNOB_FLAGS} -DX)\n",
+            "set-cache": "set(KNOB_FLAGS -DX CACHE STRING \"\")\n",
+            "unset-parent": "unset(KNOB_FLAGS PARENT_SCOPE)\n",
+            "unset-environment": "unset(ENV{KNOB_FLAGS})\n",
+        }.items():
+            self.fx.touch("test/cmake/knob_tests.cmake", text)
+            sel = self.fx.select(["test/cmake/knob_tests.cmake"])
+            self.assertEqual(sel.mode, "all", name)
+
+    def test_same_line_command_stream_stays_global(self) -> None:
+        for name, text in {
+            "include": "message(STATUS local) include(shared-options.cmake)\n",
+            "target": "message(STATUS local) target_compile_definitions(pulp-test-label PRIVATE FLAG)\n",
+            "unknown": "message(STATUS local) custom-project-command()\n",
+        }.items():
+            self.fx.touch("test/cmake/knob_tests.cmake", text)
+            sel = self.fx.select(["test/cmake/knob_tests.cmake"])
+            self.assertEqual(sel.mode, "all", name)
+
+    def _assert_all(self, cases: dict[str, str]) -> None:
+        for name, text in cases.items():
+            self.fx.touch("test/cmake/knob_tests.cmake", text)
+            sel = self.fx.select(["test/cmake/knob_tests.cmake"])
+            self.assertEqual(sel.mode, "all", name)
+
+    def test_commands_that_rewrite_shared_variables_or_policy_stay_global(self) -> None:
+        self.fx.touch("test/cmake/label_tests.cmake", "message(${SHARED_FLAGS})\n")
+        self._assert_all({
+            "list-append": "list(APPEND SHARED_FLAGS -DX)\n",
+            "list-length": "list(LENGTH SHARED_FLAGS n)\n",
+            "parse-arguments": "cmake_parse_arguments(KNOB \"\" \"\" \"\" ${ARGN})\n",
+            "minimum-required": "cmake_minimum_required(VERSION 3.20)\n",
+        })
+
+    def test_unset_of_a_variable_another_file_reads_stays_global(self) -> None:
+        self.fx.touch("test/cmake/label_tests.cmake", "message(${KNOB_FLAGS})\n")
+        self._assert_all({
+            "unset": "unset(KNOB_FLAGS)\n",
+            "unset-quoted": "unset(\"KNOB_FLAGS\")\n",
+        })
+        self.fx.touch("test/cmake/knob_tests.cmake",
+                      "add_executable(pulp-test-knob test/test_knob.cpp)\nunset(KNOB_UNREAD)\n")
+        self.assertEqual(self.fx.select(["test/cmake/knob_tests.cmake"]).mode, "all")
+
+    def test_comment_markers_inside_arguments_do_not_hide_commands(self) -> None:
+        self._assert_all({
+            "quoted": "message(\"URL #x\")\ninclude(shared-options.cmake)\n",
+            "bracket": "message([[URL #x]])\ninclude(shared-options.cmake)\n",
+            "bracket-level": "message([==[a ]] #x]==])\ninclude(shared-options.cmake)\n",
+            "apostrophe": "message('URL #x')\ninclude(shared-options.cmake)\n",
+            "balanced-after-comment-strip":
+                "message([[a #]])\ninclude(shared-options.cmake)\nmessage([[b]])\n",
+            "unterminated": "message(\"URL #x)\ninclude(shared-options.cmake)\n",
+        })
+
+    def test_real_comments_are_still_ignored(self) -> None:
+        self.fx.touch(
+            "test/cmake/knob_tests.cmake",
+            "# include(shared-options.cmake)\n"
+            "#[[ target_compile_definitions(pulp-test-label PRIVATE X) ]]\n"
+            "add_executable(pulp-test-knob test/test_knob.cpp) # include(more.cmake)\n"
+            "add_test(NAME knob COMMAND pulp-test-knob)\n")
+        sel = self.fx.select(["test/cmake/knob_tests.cmake"])
+        self.assertEqual(sel.mode, "focused")
+        self.assertEqual(sel.tests, ["Knob sprite"])
+
+    def test_quoted_arguments_are_read_without_their_delimiters(self) -> None:
+        self.fx.touch("test/cmake/label_tests.cmake", "message(${KNOB_FLAGS})\n")
+        self._assert_all({
+            "quoted-cmake-variable": "set(\"CMAKE_CXX_FLAGS\" -DX)\n",
+            "quoted-environment": "set(\"ENV{KNOB_FLAGS}\" -DX)\n",
+            "quoted-parent-scope": "set(KNOB_OUT -DX \"PARENT_SCOPE\")\n",
+            "quoted-cache": "set(KNOB_OUT -DX \"CACHE\" STRING \"\")\n",
+            "quoted-shared-name": "set(\"KNOB_FLAGS\" -DX)\n",
+            "single-quoted": "set('CMAKE_CXX_FLAGS' -DX)\n",
+            "dynamic-name": "set(${KNOB_NAME} -DX)\n",
+        })
+        self.fx.touch("test/cmake/label_tests.cmake", "message(\"${KNOB_FLAGS}\")\n")
+        self._assert_all({"set-read-in-quotes": "set(KNOB_FLAGS -DX)\n"})
+
+    def test_namespaced_and_unparseable_commands_stay_global(self) -> None:
+        self._assert_all({
+            "namespaced": "project::mutate(pulp-test-label)\n",
+            "namespaced-after-local": "message(STATUS ok)\nproject::mutate()\n",
+            "stray-token": "message(STATUS ok)\n)\n",
+            "no-arguments": "message\n",
+        })
+
+    def test_removed_shared_assignment_stays_global(self) -> None:
+        self.fx.touch("test/cmake/label_tests.cmake", "message(${KNOB_FLAGS.with-dot})\n")
+        self.fx.touch("test/cmake/knob_tests.cmake",
+                      "add_executable(pulp-test-knob test/test_knob.cpp)\n")
+        base_texts = {
+            "test/cmake/knob_tests.cmake":
+                "set(KNOB_FLAGS.with-dot -DX)\n"
+                "add_executable(pulp-test-knob test/test_knob.cpp)\n",
+            "test/cmake/label_tests.cmake": "message(${KNOB_FLAGS.with-dot})\n",
+        }
+        sel = self.fx.select(["test/cmake/knob_tests.cmake"], base_texts=base_texts)
+        self.assertEqual(sel.mode, "all")
+
+    def test_dual_use_script_with_configure_side_effect_stays_global(self) -> None:
+        self.fx.touch("test/cmake/check_knob.cmake",
+                      "set(CMAKE_CXX_FLAGS \"${CMAKE_CXX_FLAGS} -DGLOBAL\")\n"
+                      "message(STATUS ok)\n")
+        sel = self.fx.select(["test/cmake/check_knob.cmake"])
+        self.assertEqual(sel.mode, "all")
+
+    def test_a_duplicate_test_name_selects_every_same_name_owner(self) -> None:
+        duplicate = at.CTestEntry(
+            "Knob sprite", [str(self.fx.build / "test/pulp-test-label"), "Knob sprite"], {},
+            frozenset({str(self.fx.root / "test/cmake/label_tests.cmake")}))
+        sel = at.project_affected(self.fx.model, ["test/cmake/knob_tests.cmake"], [], None,
+                                  self.fx.inventory + [duplicate], 1.0, [])
+        self.assertEqual(sel.mode, "focused")
+        self.assertIn("pulp-test-knob", sel.targets)
+        self.assertIn("pulp-test-label", sel.targets)
+
+    def test_a_script_test_duplicate_selects_the_same_name_owner(self) -> None:
+        duplicate = at.CTestEntry(
+            "knob-script", [str(self.fx.build / "test/pulp-test-label")], {},
+            frozenset({str(self.fx.root / "test/cmake/label_tests.cmake")}))
+        sel = at.project_affected(self.fx.model, ["test/cmake/check_knob.cmake"], [], None,
+                                  self.fx.inventory + [duplicate], 1.0, [])
+        self.assertEqual(sel.mode, "focused")
+        self.assertIn("pulp-test-label", sel.targets)
+
+    def test_a_foreach_loop_variable_stays_global(self) -> None:
+        # A foreach variable keeps its last value in the including scope after endforeach.
+        self.fx.touch("test/cmake/label_tests.cmake", "message(${item})\n")
+        self._assert_all({
+            "foreach": "foreach(item a b)\n  message(${item})\nendforeach()\n",
+            "foreach-in-lists": "foreach(item IN LISTS names)\nendforeach()\n",
+            "while": "while(FALSE)\nendwhile()\n",
+            "if": "if(TRUE)\n  message(STATUS x)\nendif()\n",
+        })
+
+    def test_only_pure_registration_commands_stay_local(self) -> None:
+        self.fx.touch(
+            "test/cmake/knob_tests.cmake",
+            "add_executable(pulp-test-knob test/test_knob.cpp)\n"
+            "add_test(NAME knob COMMAND pulp-test-knob)\n"
+            "set_tests_properties(knob PROPERTIES TIMEOUT 5)\n")
+        self.assertEqual(self.fx.select(["test/cmake/knob_tests.cmake"]).mode, "focused")
+        self._assert_all({
+            "foreign-test-properties": "set_tests_properties(\"Label wraps\" PROPERTIES TIMEOUT 5)\n",
+            "empty-test-list": "set_tests_properties(PROPERTIES TIMEOUT 5)\n",
+            "mixed-owned-and-foreign":
+                "add_test(NAME knob COMMAND x)\nset_tests_properties(knob other PROPERTIES TIMEOUT 5)\n",
+            "variable": "set(LOCAL_ONLY x)\n",
+            "function": "function(f)\nendfunction()\n",
+            "include": "include(x.cmake)\n",
+            "list": "list(APPEND X a)\n",
+            "unset": "unset(X)\n",
+            "unlisted-project-command": "pulp_test_data(knob data)\n",
+            "namespaced": "project::register()\n",
+        })
+
+    def _assert_local(self, cases: dict[str, str]) -> None:
+        for name, text in cases.items():
+            self.fx.touch("test/cmake/knob_tests.cmake", text)
+            sel = self.fx.select(["test/cmake/knob_tests.cmake"])
+            self.assertEqual(sel.mode, "focused", name)
+
+    def test_only_safe_test_properties_stay_local(self) -> None:
+        reg = "add_executable(pulp-test-knob test/test_knob.cpp)\nadd_test(NAME knob COMMAND pulp-test-knob)\n"
+        safe = ("LABELS a TIMEOUT 5 ENVIRONMENT A=1 WORKING_DIRECTORY /x SKIP_RETURN_CODE 4 "
+                "WILL_FAIL TRUE PASS_REGULAR_EXPRESSION ok FAIL_REGULAR_EXPRESSION bad")
+        self._assert_local({"safe": f"{reg}set_tests_properties(knob PROPERTIES {safe})\n"})
+        self._assert_all({
+            name: f"{reg}set_tests_properties(knob PROPERTIES {name} x)\n"
+            for name in ("FIXTURES_SETUP", "FIXTURES_CLEANUP", "FIXTURES_REQUIRED", "DEPENDS",
+                         "RESOURCE_LOCK", "RUN_SERIAL", "DISABLED", "PROCESSORS", "NO_SUCH_PROPERTY")
+        } | {
+            "variable-value": f"{reg}set_tests_properties(knob PROPERTIES TIMEOUT ${{T}})\n",
+            "odd-pairs": f"{reg}set_tests_properties(knob PROPERTIES TIMEOUT)\n",
+            "mixed": f"{reg}set_tests_properties(knob PROPERTIES TIMEOUT 5 DEPENDS other)\n",
+        })
+
+    def test_expanded_arguments_stay_global(self) -> None:
+        reg = "add_executable(pulp-test-knob test/test_knob.cpp)\n"
+        self._assert_local({"literal": reg})
+        self._assert_all({
+            "message-mode": "message(${MODE} oops)\n",
+            "message-env": "message($ENV{MODE} oops)\n",
+            "message-cache": "message($CACHE{MODE} oops)\n",
+            "message-generator": "message($<CONFIG> oops)\n",
+            "message-quoted": "message(\"${MODE}\" oops)\n",
+            "executable-options": "add_executable(pulp-test-knob ${OPTS} test/test_knob.cpp)\n",
+            "executable-sources": "add_executable(pulp-test-knob ${KNOB_SOURCES})\n",
+            "library-type": "add_library(pulp-fixture-knob ${TYPE} test/a.cpp)\n",
+            "test-command": "add_test(NAME knob COMMAND $<TARGET_FILE:pulp-test-knob>)\n",
+            "suite-options": "pulp_add_test_suite(pulp-test-knob ${SUITE_OPTS})\n",
+            "discover-options": "catch_discover_tests(pulp-test-knob ${DISCOVER_OPTS})\n",
+            "properties": "add_test(NAME knob COMMAND x)\nset_tests_properties(knob PROPERTIES ${P})\n",
+            "configure-substitution": "message(@MODE@ oops)\n",
+        })
+
+    def test_only_non_fatal_message_modes_stay_local(self) -> None:
+        self._assert_local({mode: f"message({mode} hello)\n" for mode in
+                            ("STATUS", "VERBOSE", "DEBUG", "TRACE", "NOTICE", "CHECK_START",
+                             "CHECK_PASS", "CHECK_FAIL")} | {"no-mode": "message(hello)\n"})
+        self._assert_all({mode: f"message({mode} hello)\n" for mode in
+                          ("FATAL_ERROR", "SEND_ERROR", "WARNING", "AUTHOR_WARNING",
+                           "DEPRECATION", "CONFIGURE_LOG", "NO_SUCH_MODE")})
+
+    def test_registration_options_that_reach_beyond_the_target_stay_global(self) -> None:
+        self._assert_local({
+            "suite": "pulp_add_test_suite(pulp-test-knob SOURCES test/test_knob.cpp LIBRARIES a "
+                     "TIMEOUT 5 LABELS x PROPERTIES LABELS y TEST_PREFIX p NO_PCH)\n",
+            "discover": "add_executable(pulp-test-knob test/test_knob.cpp)\n"
+                        "catch_discover_tests(pulp-test-knob TEST_SPEC a PROPERTIES TIMEOUT 5 LABELS x)\n",
+            "library": "add_library(pulp-fixture-knob STATIC test/a.cpp)\n",
+            "legacy-free": "add_executable(pulp-test-knob WIN32 test/test_knob.cpp)\n"
+                           "add_test(NAME knob COMMAND pulp-test-knob WORKING_DIRECTORY /x)\n",
+        })
+        self._assert_all({
+            "suite-group": "pulp_add_test_suite(pulp-test-knob GROUP shared SOURCES test/a.cpp)\n",
+            "suite-may-be-empty": "pulp_add_test_suite(pulp-test-knob MAY_BE_EMPTY)\n",
+            "suite-discovery-args": "pulp_add_test_suite(pulp-test-knob DISCOVERY_ARGS EXTRA)\n",
+            "suite-fixture-property":
+                "pulp_add_test_suite(pulp-test-knob PROPERTIES FIXTURES_SETUP s)\n",
+            "suite-depends-before-timeout":
+                "pulp_add_test_suite(pulp-test-knob PROPERTIES DEPENDS x TIMEOUT 5)\n",
+            "discover-fixture": "catch_discover_tests(pulp-test-knob PROPERTIES FIXTURES_REQUIRED s)\n",
+            "discover-test-list": "catch_discover_tests(pulp-test-knob TEST_LIST SHARED_LIST)\n",
+            "test-group": "pulp_add_test_group(shared LIBRARIES a)\n",
+            "add-test-configurations":
+                "add_test(NAME knob COMMAND x CONFIGURATIONS Debug)\n",
+            "add-test-expand-lists": "add_test(NAME knob COMMAND x COMMAND_EXPAND_LISTS)\n",
+            "add-test-legacy": "add_test(knob x)\n",
+            "interface-library": "add_library(pulp-fixture-knob INTERFACE)\n",
+            "object-library": "add_library(pulp-fixture-knob OBJECT test/a.cpp)\n",
+            "untyped-library": "add_library(pulp-fixture-knob test/a.cpp)\n",
+        })
+
+    def test_scope_flow_commands_stay_global(self) -> None:
+        for name, text in {
+            "break": "foreach(x a b)\n  break()\nendforeach()\n",
+            "continue": "foreach(x a b)\n  continue()\nendforeach()\n",
+            "return": "return()\n",
+            "return-propagate": "set(X 1)\nreturn(PROPAGATE X)\n",
+        }.items():
+            self.fx.touch("test/cmake/knob_tests.cmake", text)
+            sel = self.fx.select(["test/cmake/knob_tests.cmake"])
+            self.assertEqual(sel.mode, "all", name)
+
+    def test_state_read_by_a_cmake_file_outside_test_stays_global(self) -> None:
+        self.fx.touch("tools/cmake/PulpMacros.cmake", "macro(m)\n  message(${KNOB_FLAGS})\nendmacro()\n")
+        self.fx.touch("test/cmake/knob_tests.cmake", "set(KNOB_FLAGS -DX)\n")
+        self.assertEqual(self.fx.select(["test/cmake/knob_tests.cmake"]).mode, "all")
+        self.fx.touch("tools/cmake/PulpMacros.cmake", "function(helper_fn)\nendfunction()\n")
+        self.fx.touch("test/cmake/knob_tests.cmake", "helper_fn()\n")
+        self.assertEqual(self.fx.select(["test/cmake/knob_tests.cmake"]).mode, "all")
+
+    def test_a_function_defined_in_a_fragment_and_called_outside_test_stays_global(self) -> None:
+        self.fx.touch("tools/cmake/PulpMacros.cmake", "knob_helper()\n")
+        self.fx.touch("test/cmake/knob_tests.cmake", "function(knob_helper)\nendfunction()\n")
+        self.assertEqual(self.fx.select(["test/cmake/knob_tests.cmake"]).mode, "all")
+
+    def test_dynamically_named_variable_reads_stay_global(self) -> None:
+        self.fx.touch("test/cmake/label_tests.cmake", "message(${PREFIX}_KNOB_FLAGS ${A_${B}})\n")
+        self.fx.touch("test/cmake/knob_tests.cmake", "set(LIB_KNOB_FLAGS -DX)\n")
+        self.assertEqual(self.fx.select(["test/cmake/knob_tests.cmake"]).mode, "all")
+        self.fx.touch("test/cmake/label_tests.cmake", "message(${DYN_PREFIX_}${X})\nmessage(KNOB_${X})\n")
+        self.fx.touch("test/cmake/knob_tests.cmake", "set(KNOB_FLAGS -DX)\n")
+        self.assertEqual(self.fx.select(["test/cmake/knob_tests.cmake"]).mode, "all")
+
+    def test_imported_and_alias_targets_stay_global(self) -> None:
+        for text in ("add_library(knob_alias ALIAS pulp-test-knob)\n",
+                     "add_library(ext SHARED IMPORTED GLOBAL)\n"):
+            self.fx.touch("test/cmake/knob_tests.cmake", text)
+            self.assertEqual(self.fx.select(["test/cmake/knob_tests.cmake"]).mode, "all", text)
+
+    def test_without_an_inventory_a_fragment_stays_global(self) -> None:
+        sel = at.project_affected(self.fx.model, ["test/cmake/knob_tests.cmake"], [], None, None, 1.0)
+        self.assertEqual(sel.mode, "all")
+
+    def test_a_fragment_newer_than_the_codemodel_stays_global_with_an_inventory(self) -> None:
+        for stale in (["test/cmake/knob_tests.cmake"], None):
+            sel = at.project_affected(self.fx.model, ["test/cmake/knob_tests.cmake"], [], None,
+                                      self.fx.inventory, 1.0, stale)
+            self.assertEqual(sel.mode, "all", stale)
+            self.assertIn("build system", sel.reason)
+        fresh = self.fx.select(["test/cmake/knob_tests.cmake"])
+        self.assertEqual(fresh.mode, "focused")
+
+    def test_a_stale_fragment_is_not_trusted(self) -> None:
+        sel = at.project_affected(self.fx.model, ["test/cmake/knob_tests.cmake"], [], None, None,
+                                  1.0, ["test/cmake/knob_tests.cmake"])
+        self.assertEqual(sel.mode, "all")
 
 
 if __name__ == "__main__":

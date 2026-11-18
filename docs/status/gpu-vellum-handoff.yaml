@@ -3010,8 +3010,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".github/workflows/release-cli.yml",
           "state": "pulp-owned-retained",
-          "revision": "625967544e1f071b6ae7b580e023dd4efc788352",
-          "object_id": "345e3db78726bdedb99c5d6941352602975b3867",
+          "revision": "bb72a05b5f3b0cb92ae3a6a72cfe497cfe798aba",
+          "object_id": "e15070874192a2e0a54bbfb002624acde94d6758",
           "object_type": "blob"
         },
         {
