@@ -10,6 +10,6 @@
     "core/view/platform/mac/window_host_mac.mm",
     "core/view/src/sdl_window_host.cpp"
   ],
-  "vellum_inherits": true,
-  "rationale": "Adds an environment-gated test-only window policy to the exported window hosts and popup panel; behavior is unchanged when PULP_TEST_OFFSCREEN is unset, so a re-export can carry it."
+  "vellum_inherits": false,
+  "rationale": "Adds an environment-gated test-only window policy to the window hosts and popup panel; behavior is unchanged when PULP_TEST_OFFSCREEN is unset. A Pulp-only edit; Vellum's framework takes the same change separately if it wants it."
 }
