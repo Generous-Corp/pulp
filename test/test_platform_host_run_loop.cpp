@@ -165,7 +165,10 @@ TEST_CASE("without a host run loop nothing is supported and posts are refused",
     MainThreadScope scope;
     bool ran = false;
     REQUIRE_FALSE(scope.post([&] { ran = true; }));
-    REQUIRE_FALSE(scope.handle().alive());
+    // The scope exists, so a dialog opened under it finishes inline rather
+    // than being dropped as if its owner were gone.
+    REQUIRE(scope.handle().alive());
+    REQUIRE_FALSE(scope.handle().post([&] { ran = true; }));
     MainThreadTimer timer(scope, [&] { ran = true; });
     timer.fire_after(milliseconds(1));
     timer.fire_every(milliseconds(1));
@@ -442,7 +445,7 @@ TEST_CASE("unregistering the loop stops everything made under it first",
     REQUIRE(fires == 0);
     // Later posts are refused, visibly.
     REQUIRE_FALSE(scope.post([&] { ++ran; }));
-    REQUIRE_FALSE(scope.handle().alive());
+    REQUIRE(scope.handle().alive()); // it exists; it just takes no work
     REQUIRE_FALSE(timer.pending());
     REQUIRE_FALSE(main_thread_supported());
 }

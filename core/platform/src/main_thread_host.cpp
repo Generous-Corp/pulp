@@ -62,7 +62,12 @@ struct MainThreadTimerState;
 
 struct MainThreadScopeState : std::enable_shared_from_this<MainThreadScopeState> {
     std::mutex mutex;
+    // Whether the scope exists (false once it is destroyed), and whether it
+    // takes work: a scope made with no host loop, or whose loop was withdrawn,
+    // exists but refuses every post, which callers see as a refusal and answer
+    // by finishing inline rather than treating the scope as gone.
     bool alive = true;
+    bool accepting = true;
     std::deque<std::function<void()>> queue;
     std::shared_ptr<LoopBinding> binding;
     int wake_read = -1;
@@ -79,7 +84,7 @@ struct MainThreadScopeState : std::enable_shared_from_this<MainThreadScopeState>
         if (!fn)
             return false;
         std::lock_guard<std::mutex> lock(mutex);
-        if (!alive)
+        if (!accepting)
             return false;
         queue.push_back(std::move(fn));
 #if defined(PULP_MAIN_THREAD_HAS_WAKE_PIPE)
@@ -108,14 +113,14 @@ struct MainThreadScopeState : std::enable_shared_from_this<MainThreadScopeState>
         std::deque<std::function<void()>> batch;
         {
             std::lock_guard<std::mutex> lock(mutex);
-            if (!alive)
+            if (!accepting)
                 return;
             batch.swap(queue);
         }
         for (auto& task : batch) {
             {
                 std::lock_guard<std::mutex> lock(mutex);
-                if (!alive)
+                if (!accepting)
                     return; // the scope died during this pass: drop the rest
             }
             run_contained(task);
@@ -162,7 +167,7 @@ struct MainThreadTimerState : std::enable_shared_from_this<MainThreadTimerState>
             return;
         {
             std::lock_guard<std::mutex> lock(owner->mutex);
-            if (!owner->alive)
+            if (!owner->accepting)
                 return;
         }
         const std::uint64_t mine = ++generation;
@@ -197,7 +202,7 @@ struct MainThreadTimerState : std::enable_shared_from_this<MainThreadTimerState>
             return;
         {
             std::lock_guard<std::mutex> lock(owner->mutex);
-            if (!owner->alive)
+            if (!owner->accepting)
                 return;
         }
         if (period.count() > 0)
@@ -295,7 +300,7 @@ bool unregister_host_run_loop(HostRunLoopToken token) {
             timer->unhook();
         {
             std::lock_guard<std::mutex> lock(scope->mutex);
-            scope->alive = false;
+            scope->accepting = false;
             scope->queue.clear();
         }
         scope->release_host_resources();
@@ -320,7 +325,7 @@ MainThreadScope::MainThreadScope() : state_(std::make_shared<detail::MainThreadS
     auto binding = current_binding();
     HostRunLoop* loop = binding ? binding->loop : nullptr;
     if (loop == nullptr) {
-        state_->alive = false;
+        state_->accepting = false;
         return;
     }
     state_->binding = binding;
@@ -346,7 +351,7 @@ MainThreadScope::MainThreadScope() : state_(std::make_shared<detail::MainThreadS
         state_->poll_id = loop->add_timer(kPollPeriod, wake);
         if (state_->poll_id == 0) {
             state_->release_host_resources();
-            state_->alive = false;
+            state_->accepting = false;
             return;
         }
     }
@@ -357,6 +362,7 @@ MainThreadScope::~MainThreadScope() {
     {
         std::lock_guard<std::mutex> lock(state_->mutex);
         state_->alive = false;
+        state_->accepting = false;
         state_->queue.clear();
     }
     // Timers are bound on the UI thread, and so is this destructor.
@@ -426,7 +432,7 @@ MainThreadTimer::MainThreadTimer(MainThreadScope& scope, std::function<void()> o
     state_->scope = scope.state_;
     state_->on_fire = std::make_shared<std::function<void()>>(std::move(on_fire));
     std::lock_guard<std::mutex> lock(scope.state_->mutex);
-    if (scope.state_->alive)
+    if (scope.state_->accepting)
         scope.state_->timers.push_back(state_.get());
 }
 
