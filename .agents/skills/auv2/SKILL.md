@@ -761,6 +761,10 @@ Three traps it exists to avoid:
   the render's time stamp on every slice makes the second slice overlap the
   first, so the host timeline opens a new epoch mid-render (and the legacy
   `transport_jump` fires on every automated block).
+  The beat advance multiplies the offset by the host tempo, so a non-finite
+  host beat or tempo must stay unknown (`std::isfinite`, not `> 0.0`, which
+  admits +inf): an infinite beat reaches `derive_bar_from_beats`, whose
+  float-to-int bar conversion is undefined for it.
 - **`ProcessBufferLists` has no time stamp.** `PulpAUEffect::Render` stashes
   `inTimeStamp` for the duration of the render. Do not read
   `CurrentRenderTime()` instead: it is only set by `AUBase::DoRender`, and the
