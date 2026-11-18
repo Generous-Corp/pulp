@@ -318,6 +318,7 @@
    "core/host/src/signal_graph_prepare.cpp",
    "core/host/src/signal_graph_prepared_description_capture.cpp",
    "core/host/src/signal_graph_prepared_edit_admission.cpp",
+   "core/host/src/signal_graph_prepared_edit_adoption.cpp",
    "core/host/src/signal_graph_prepared_topology_edit.cpp",
    "core/host/src/signal_graph_reference_walk.cpp",
    "core/host/src/spectral_graph_persistence.cpp",

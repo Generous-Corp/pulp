@@ -30,6 +30,7 @@ target_sources(pulp-host PRIVATE
     src/signal_graph_live_swap_catalog.cpp
     src/signal_graph_prepared_description_capture.cpp
     src/signal_graph_prepared_edit_admission.cpp
+    src/signal_graph_prepared_edit_adoption.cpp
     src/signal_graph_prepared_topology_edit.cpp
     src/prepared_description.cpp
     src/resolved_identity_validation.cpp
