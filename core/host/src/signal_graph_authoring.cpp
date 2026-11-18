@@ -28,6 +28,53 @@
 
 namespace pulp::host {
 
+SignalGraph::GraphMutationCheckpoint::GraphMutationCheckpoint(SignalGraph& graph) noexcept
+    : graph_(&graph) {
+    std::lock_guard lock(graph.graph_mutation_mutex_);
+    next_id_ = graph.next_id_;
+    next_connection_identity_ = graph.next_connection_identity_;
+    authored_id_counter_ = graph.authored_id_counter_;
+}
+
+SignalGraph::GraphMutationCheckpoint::~GraphMutationCheckpoint() {
+    rollback();
+}
+
+SignalGraph::GraphMutationCheckpoint::GraphMutationCheckpoint(
+    GraphMutationCheckpoint&& other) noexcept
+    : graph_(std::exchange(other.graph_, nullptr)),
+      next_id_(other.next_id_),
+      next_connection_identity_(other.next_connection_identity_),
+      authored_id_counter_(other.authored_id_counter_),
+      completed_(std::exchange(other.completed_, true)) {}
+
+SignalGraph::GraphMutationCheckpoint& SignalGraph::GraphMutationCheckpoint::operator=(
+    GraphMutationCheckpoint&& other) noexcept {
+    if (this == &other)
+        return *this;
+    rollback();
+    graph_ = std::exchange(other.graph_, nullptr);
+    next_id_ = other.next_id_;
+    next_connection_identity_ = other.next_connection_identity_;
+    authored_id_counter_ = other.authored_id_counter_;
+    completed_ = std::exchange(other.completed_, true);
+    return *this;
+}
+
+void SignalGraph::GraphMutationCheckpoint::commit() noexcept {
+    completed_ = true;
+}
+
+void SignalGraph::GraphMutationCheckpoint::rollback() noexcept {
+    if (completed_ || graph_ == nullptr)
+        return;
+    std::lock_guard lock(graph_->graph_mutation_mutex_);
+    graph_->next_id_ = next_id_;
+    graph_->next_connection_identity_ = next_connection_identity_;
+    graph_->authored_id_counter_ = authored_id_counter_;
+    completed_ = true;
+}
+
 bool CustomNodeType::matches_ports(const GraphNode& node) const noexcept {
     if (num_input_ports != node.num_input_ports || num_output_ports != node.num_output_ports ||
         node.input_ports.size() != static_cast<std::size_t>(num_input_ports) ||

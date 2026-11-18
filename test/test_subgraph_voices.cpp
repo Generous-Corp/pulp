@@ -227,6 +227,11 @@ TEST_CASE("voice declaration expands a fixed count of voices with derived identi
     refused("pad", 2, anonymous);
     // A later voice that fails removes the voices already built.
     refused("pad", 3, processor_voice_template(2));
+    SignalGraph retry;
+    const auto keep_after_failure = retry.add_gain_node("keep");
+    const auto failed = instantiate_subgraph_voices(retry, processor_voice_template(2), "pad", 3);
+    REQUIRE_FALSE(failed);
+    CHECK(retry.add_gain_node("next") == keep_after_failure + 1);
 
     // Positive controls at both bounds and for the Processor voice.
     SignalGraph bounds;

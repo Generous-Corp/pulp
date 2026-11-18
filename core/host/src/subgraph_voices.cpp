@@ -35,6 +35,19 @@ bool is_nonempty_string(const choc::value::ValueView& value) {
     return value.isString() && !value.getString().empty();
 }
 
+bool template_declares_event(const SubgraphTemplate& definition,
+                             std::unordered_set<const SubgraphTemplate*>& active) {
+    if (!active.insert(&definition).second)
+        return false;
+    if (definition.event_edge)
+        return true;
+    for (const auto& child : definition.children)
+        if (child.definition && template_declares_event(*child.definition, active))
+            return true;
+    active.erase(&definition);
+    return false;
+}
+
 } // namespace
 
 GraphDocumentRefusal validate_voice_declarations(const choc::value::ValueView& root, bool saved_v7,
@@ -157,8 +170,14 @@ SubgraphVoiceExpansion instantiate_subgraph_voices(SignalGraph& graph,
                       "declare between one and kMaxSubgraphVoices voices");
     if (definition.identity.empty())
         return refuse(GraphResult::Code::UnknownNode, "voice template has no identity");
+    std::unordered_set<const SubgraphTemplate*> active;
+    if (detail::template_declares_event(definition, active))
+        return refuse(GraphResult::Code::Duplicate,
+                      "a voice template cannot declare an event connection; a graph holds one",
+                      "remove the template's event_edge or expand it once as a subgraph");
 
     out.bank.declaration = {identity, definition.identity, voice_count};
+    auto checkpoint = graph.mutation_checkpoint();
     const auto rollback = [&] {
         for (auto voice = out.bank.voices.rbegin(); voice != out.bank.voices.rend(); ++voice)
             for (auto node = voice->nodes.rbegin(); node != voice->nodes.rend(); ++node)
@@ -174,16 +193,8 @@ SubgraphVoiceExpansion instantiate_subgraph_voices(SignalGraph& graph,
             return std::move(out);
         }
         out.bank.voices.push_back(std::move(expansion.instance));
-        // A graph binds one event connection, so per-voice event wiring is
-        // not representable; refuse rather than wire only the first voice.
-        if (out.bank.voices.back().event_edge) {
-            rollback();
-            return refuse(GraphResult::Code::Duplicate,
-                          "a voice template cannot declare an event connection; a graph holds "
-                          "one",
-                          "remove the template's event_edge or expand it once as a subgraph");
-        }
     }
+    checkpoint.commit();
     return out;
 }
 
