@@ -415,14 +415,14 @@ std::string to_saved_subgraph_document(
 
     // Spectral and subgraph families do not mix: the spectral document has a
     // closed member set with no subgraph records.
-    if (!subgraphs.empty() && spectral_persistence::contains_spectral_nodes(graph))
+    if (!instances.empty() && spectral_persistence::contains_spectral_nodes(graph))
         return {};
     const auto document = GraphSerializer::to_saved_document(graph, editor_layout);
     if (document.empty())
         return {};
     // No records: the saved document is already complete. A spectral v7
     // envelope is closed, so it must not gain an empty `subgraphs` member.
-    if (subgraphs.empty())
+    if (instances.empty())
         return document;
     try {
         auto root = choc::json::parse(document);
