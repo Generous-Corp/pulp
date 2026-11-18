@@ -28,6 +28,8 @@
 
 #if defined(__linux__) && !defined(__ANDROID__)
 
+#include "meminfo_pressure.hpp"
+
 #include <pulp/platform/environment.hpp>
 
 #include <atomic>
@@ -43,6 +45,10 @@
 namespace pulp::platform {
 
 namespace {
+
+using linux_env::classify_memory_pressure;
+using linux_env::MeminfoField;
+using linux_env::parse_meminfo_line;
 
 // ── Color scheme detection ────────────────────────────────────────────────
 
@@ -150,22 +156,17 @@ DisplayInfo detect_display() {
 MemoryPressure detect_memory_pressure() {
     std::ifstream f("/proc/meminfo");
     if (!f) return MemoryPressure::normal;
-    long total_kb = 0;
-    long avail_kb = 0;
+    MeminfoField total;
+    MeminfoField available;
     std::string line;
     while (std::getline(f, line)) {
-        if (line.rfind("MemTotal:", 0) == 0) {
-            std::sscanf(line.c_str(), "MemTotal: %ld kB", &total_kb);
-        } else if (line.rfind("MemAvailable:", 0) == 0) {
-            std::sscanf(line.c_str(), "MemAvailable: %ld kB", &avail_kb);
+        if (const auto field = parse_meminfo_line(line, "MemTotal:"); field.present) {
+            total = field;
+        } else if (const auto field = parse_meminfo_line(line, "MemAvailable:"); field.present) {
+            available = field;
         }
     }
-    if (total_kb <= 0 || avail_kb <= 0) return MemoryPressure::normal;
-    const double frac = static_cast<double>(avail_kb)
-                      / static_cast<double>(total_kb);
-    if (frac < 0.05) return MemoryPressure::critical;
-    if (frac < 0.15) return MemoryPressure::moderate;
-    return MemoryPressure::normal;
+    return classify_memory_pressure(total, available);
 }
 
 // ── Poll thread ───────────────────────────────────────────────────────────
