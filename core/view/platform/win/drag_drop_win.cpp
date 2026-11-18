@@ -15,6 +15,7 @@
 
 #include "win_file_drag.hpp"
 
+#include <pulp/platform/win/text_convert.hpp>
 #include <pulp/view/drag_drop.hpp>
 
 #include <objbase.h>  // OleInitialize / OleUninitialize
