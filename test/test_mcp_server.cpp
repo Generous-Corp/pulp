@@ -815,6 +815,107 @@ TEST_CASE("MCP graph diff delegates to the matched CLI and maps only refusals to
 #endif
 }
 
+TEST_CASE("MCP graph diff hands the CLI the decoded before and after paths",
+          "[mcp][tools][graph][diff]") {
+#if defined(_WIN32)
+    SKIP("fake extensionless pulp-cpp is only executable on POSIX");
+#else
+    TempDir project;
+    const auto bin = project.path / "bin";
+    std::filesystem::create_directories(bin);
+    const auto sibling = bin / "pulp-cpp";
+    const auto argv_file = bin / "argv.txt";
+    {
+        // Writes each argument on its own line, byte for byte. A BEFORE
+        // argument containing "silent" exits 3 having printed nothing.
+        std::ofstream script(sibling);
+        script
+            << "#!/bin/sh\n"
+            << ": > \"$(dirname \"$0\")/argv.txt\"\n"
+            << "for arg in \"$@\"; do printf '%s\\n' \"$arg\" >> \"$(dirname \"$0\")/argv.txt\"; "
+               "done\n"
+            << "case \"$3\" in *silent*) exit 3;; esac\n"
+            << "printf '{}'\n"
+            << "exit 0\n";
+    }
+    std::filesystem::permissions(sibling,
+                                 std::filesystem::perms::owner_exec |
+                                     std::filesystem::perms::owner_read |
+                                     std::filesystem::perms::owner_write,
+                                 std::filesystem::perm_options::add);
+    ScopedGraphExecutable executable(bin / "pulp-mcp");
+    const auto argv_lines = [&] {
+        std::ifstream in(argv_file);
+        std::vector<std::string> lines;
+        for (std::string line; std::getline(in, line);)
+            lines.push_back(line);
+        return lines;
+    };
+
+    struct Case {
+        const char* arguments;
+        const char* before;
+        const char* after;
+    };
+    for (
+        const auto& item : {
+            // Control: a plain path is unchanged.
+            Case{R"JSON({"operation":"diff","before":"a.pulpgraph","after":"b.pulpgraph"})JSON",
+                 "a.pulpgraph", "b.pulpgraph"},
+            Case{
+                R"JSON({"operation":"diff","before":"C:\\work\\a.pulpgraph","after":"C:\\work\\"})JSON",
+                R"(C:\work\a.pulpgraph)", R"(C:\work\)"},
+            Case{
+                R"JSON({"operation":"diff","before":"say \"hi\".pulpgraph","after":"x\/caf\u00e9 \ud83c\udfb5.pulpgraph"})JSON",
+                R"(say "hi".pulpgraph)", "x/caf\xc3\xa9 \xf0\x9f\x8e\xb5.pulpgraph"},
+        }) {
+        CAPTURE(item.arguments);
+        std::filesystem::remove(argv_file);
+        const auto response = handle_request(tool_call("86", "pulp_graph", item.arguments));
+        REQUIRE(response.find("\"isError\":false") != std::string::npos);
+        const auto argv = argv_lines();
+        REQUIRE(argv ==
+                std::vector<std::string>{"graph", "diff", item.before, item.after, "--json"});
+    }
+
+    // A before or after that is not a string is refused here, without
+    // running the CLI.
+    for (const auto& arguments : {R"JSON({"operation":"diff","before":5,"after":"b"})JSON",
+                                  R"JSON({"operation":"diff","before":"a","after":true})JSON"}) {
+        CAPTURE(arguments);
+        std::filesystem::remove(argv_file);
+        const auto response = handle_request(tool_call("87", "pulp_graph", arguments));
+        require_contains(response, "invalid_option");
+        REQUIRE(response.find("\"isError\":true") != std::string::npos);
+        REQUIRE_FALSE(std::filesystem::exists(argv_file));
+    }
+
+    // A refusal that prints nothing still says why it failed.
+    const auto silent = handle_request(tool_call(
+        "88", "pulp_graph",
+        R"JSON({"operation":"diff","before":"silent.pulpgraph","after":"b.pulpgraph"})JSON"));
+    REQUIRE(silent.find("\"isError\":true") != std::string::npos);
+    require_contains(silent, "graph diff exited with code 3");
+#endif
+}
+
+TEST_CASE("MCP JSON string decoding resolves escapes and refuses what cannot be text",
+          "[mcp][json]") {
+    std::string out;
+    REQUIRE(extract_decoded_string(R"({"k": "a\\b\"c\/d\né🎵"})", "k", out));
+    REQUIRE(out == "a\\b\"c/d\n\xc3\xa9\xf0\x9f\x8e\xb5");
+    REQUIRE(extract_decoded_string(R"({"k":"ends\\"})", "k", out));
+    REQUIRE(out == "ends\\");
+    REQUIRE(extract_decoded_string(R"({"k":""})", "k", out));
+    REQUIRE(out.empty());
+    for (const char* json : {R"({"k":5})", R"({"other":"x"})", R"({"k":"open)", R"({"k":"bad\x"})",
+                             R"({"k":"\u0000"})", R"({"k":"\ud83c"})", R"({"k":"\udfb5"})",
+                             R"({"k":"\ud83cx"})", R"({"k":"\u12"})", "{\"k\":\"tab\there\"}"}) {
+        CAPTURE(json);
+        REQUIRE_FALSE(extract_decoded_string(json, "k", out));
+    }
+}
+
 TEST_CASE("pulp-mcp flag-only invocations do not enter the JSON-RPC loop", "[mcp][main]") {
     std::ostringstream out;
     std::ostringstream err;

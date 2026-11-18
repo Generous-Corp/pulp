@@ -30,6 +30,9 @@
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/format/processor.hpp>
 
+#include <cstdint>
+#include <limits>
+
 using pulp::format::FrameRate;
 using pulp::format::ProcessContext;
 using pulp::format::TransportField;
@@ -133,6 +136,30 @@ TEST_CASE("derive_bar_from_beats: degenerate time signatures stay at bar 0",
         derive_bar_from_beats(ctx);
         REQUIRE(ctx.bar == 0);
     }
+}
+
+TEST_CASE("derive_bar_from_beats: a position with no representable bar stays at bar 0",
+          "[format][playhead][derive-bar][edge]") {
+    ProcessContext ctx;
+    ctx.time_sig_numerator = 4;
+    ctx.time_sig_denominator = 4;
+    for (const double beats :
+         {std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity(),
+          std::numeric_limits<double>::quiet_NaN(), 1.0e300, -1.0e300,
+          4.0 * 9.2233720368547758e18}) {
+        CAPTURE(beats);
+        ctx.bar = 7;
+        ctx.position_beats = beats;
+        derive_bar_from_beats(ctx);
+        REQUIRE(ctx.bar == 0);
+    }
+    // Control: the largest representable range still converts.
+    ctx.position_beats = -4.0 * 9.2233720368547758e18;
+    derive_bar_from_beats(ctx);
+    REQUIRE(ctx.bar == std::numeric_limits<std::int64_t>::min());
+    ctx.position_beats = 4.0 * 1.0e18;
+    derive_bar_from_beats(ctx);
+    REQUIRE(ctx.bar == std::int64_t{1000000000000000000});
 }
 
 TEST_CASE("compute_playhead_changes: first call after construction reports no changes",
