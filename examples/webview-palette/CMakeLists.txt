@@ -10,6 +10,7 @@ if(PULP_BUILD_WEBVIEW AND NOT PULP_IOS)
     add_executable(pulp-webview-palette main.cpp)
     target_link_libraries(pulp-webview-palette PRIVATE
         pulp::view
+        pulp::view-webview
         pulp_webview_palette_assets
     )
     target_compile_features(pulp-webview-palette PRIVATE cxx_std_20)
