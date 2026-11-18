@@ -641,10 +641,20 @@ class FragmentFixture:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
 
+    @staticmethod
+    def stale_files(changed: list[str], deleted: list[str], stale: tuple[str, ...]) -> list[str]:
+        """The build files a real staleness check reports when the codemodel was
+        configured after every fragment: deleted ones, non-fragment ones, and
+        whatever the test declares stale."""
+        return [f for f in list(changed) + list(deleted) if at.is_build_system_file(f)
+                and (f in deleted or f in stale or not at.REGISTRATION_FRAGMENT_RE.match(f))]
+
     def select(self, changed: list[str], deleted: list[str] = (),
-               base_texts: dict[str, str] | None = None) -> at.Selection:
+               base_texts: dict[str, str] | None = None,
+               stale: tuple[str, ...] = ()) -> at.Selection:
         kwargs = {"base_texts": base_texts} if base_texts is not None else {}
         return at.project_affected(self.model, changed, list(deleted), None, self.inventory, 1.0,
+                                   stale_build_system=self.stale_files(changed, deleted, stale),
                                    **kwargs)
 
 
@@ -828,6 +838,15 @@ class RegistrationFragments(unittest.TestCase):
     def test_without_an_inventory_a_fragment_stays_global(self) -> None:
         sel = at.project_affected(self.fx.model, ["test/cmake/knob_tests.cmake"], [], None, None, 1.0)
         self.assertEqual(sel.mode, "all")
+
+    def test_a_fragment_newer_than_the_codemodel_stays_global_with_an_inventory(self) -> None:
+        for stale in (["test/cmake/knob_tests.cmake"], None):
+            sel = at.project_affected(self.fx.model, ["test/cmake/knob_tests.cmake"], [], None,
+                                      self.fx.inventory, 1.0, stale)
+            self.assertEqual(sel.mode, "all", stale)
+            self.assertIn("build system", sel.reason)
+        fresh = self.fx.select(["test/cmake/knob_tests.cmake"])
+        self.assertEqual(fresh.mode, "focused")
 
     def test_a_stale_fragment_is_not_trusted(self) -> None:
         sel = at.project_affected(self.fx.model, ["test/cmake/knob_tests.cmake"], [], None, None,

@@ -1710,11 +1710,19 @@ def project_affected(model: CodeModel, changed: list[str], deleted: list[str],
     # A registration fragment that provably reaches only its own tests and
     # targets is not a build-system change. Without an inventory nothing can
     # prove that, so the caller's staleness verdict stands.
+    # A fragment newer than the codemodel reply (or of unknown age) is not in
+    # the recorded call stacks, so its projection would read obsolete state.
     fragments: dict[str, tuple[set[str], set[str]]] = {}
     if inventory is not None:
+        stale_set = set(build_system)
         fragments = fragment_projection(
-            [f for f in changed if is_build_system_file(f)], model, inventory,
-            artifact_index(model), base_texts)
+            [f for f in changed if is_build_system_file(f) and f not in stale_set], model,
+            inventory, artifact_index(model), base_texts)
+    # A registration fragment projection did not accept (shared, or unprovable)
+    # stays a build-system change even when the codemodel already reflects it.
+    build_system = build_system + [
+        f for f in changed if f not in build_system and f not in fragments
+        and REGISTRATION_FRAGMENT_RE.match(f) and is_build_system_file(f)]
     build_system = [f for f in build_system if f not in fragments]
     if build_system:
         return all_selection(f"build system changed: {build_system[0]}", changed, total,
