@@ -145,6 +145,7 @@ set(PULP_PLATFORM_UNIT_HEADERS
     include/pulp/platform/progress_parser.hpp
     include/pulp/platform/reveal_in_file_manager.hpp
     include/pulp/platform/special_dir.hpp
+    include/pulp/platform/test_visibility.hpp
     include/pulp/platform/win/registry.hpp
     include/pulp/platform/win32_sane.hpp
 )
