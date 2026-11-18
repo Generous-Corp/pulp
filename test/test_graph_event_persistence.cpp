@@ -707,3 +707,64 @@ TEST_CASE("the subgraph writer refuses a document its restore would refuse",
         CHECK(to_saved_subgraph_document(source.graph, std::span(&expansion.instance, 1)).empty());
     }
 }
+
+TEST_CASE("a voice template cannot declare an event connection",
+          "[graph-events][persistence][subgraph][voices]") {
+    // Expansion: refused even for one voice, and the graph is unchanged.
+    {
+        Target target;
+        const auto keep = target.graph.add_gain_node("keep");
+        const auto expansion =
+            instantiate_subgraph_voices(target.graph, event_chain_template(), "chain", 1);
+        INFO(expansion.result.message());
+        CHECK_FALSE(expansion);
+        CHECK(expansion.result.rule.find("cannot declare an event connection") !=
+              std::string::npos);
+        REQUIRE(target.graph.nodes().size() == 1);
+        CHECK(target.graph.nodes().front().id == keep);
+        CHECK_FALSE(target.graph.graph_event_edge().has_value());
+        // Positive control: the same template without its event connection.
+        CHECK(instantiate_subgraph_voices(target.graph, event_chain_template(false), "chain", 2));
+    }
+
+    // Restore: a document whose declaration names an event template is
+    // refused on the candidate, and the caller's graph is untouched.
+    Target source;
+    const std::array templates{event_chain_template()};
+    auto expansion = instantiate_subgraph(source.graph, templates[0], "chain.voice.0", 0);
+    REQUIRE(expansion);
+    const auto document =
+        to_saved_subgraph_document(source.graph, std::span(&expansion.instance, 1));
+    REQUIRE_FALSE(document.empty());
+    auto root = choc::json::parse(document);
+    auto declaration = choc::value::createObject("VoiceDeclaration");
+    declaration.addMember("identity", std::string("chain"));
+    declaration.addMember("template_identity", std::string("test.event-chain"));
+    declaration.addMember("voice_count", std::int64_t{1});
+    auto voices = choc::value::createEmptyArray();
+    voices.addArrayElement(std::string("chain.voice.0"));
+    declaration.addMember("voices", voices);
+    auto declarations = choc::value::createEmptyArray();
+    declarations.addArrayElement(declaration);
+    root.addMember("voice_declarations", declarations);
+    const auto declared = choc::json::toString(root, true);
+    REQUIRE(GraphSerializer::inspect_document(declared).ok());
+
+    Target refused;
+    const auto keep = refused.graph.add_gain_node("keep");
+    const auto loaded = from_saved_subgraph_document(refused.graph, declared, templates);
+    INFO(loaded.load.error);
+    CHECK_FALSE(loaded.ok());
+    CHECK(loaded.load.error.find("a voice template cannot declare an event connection") !=
+          std::string::npos);
+    CHECK(loaded.voice_banks.empty());
+    REQUIRE(refused.graph.nodes().size() == 1);
+    CHECK(refused.graph.nodes().front().id == keep);
+
+    // Positive control: the same document without the declaration restores.
+    Target control;
+    CHECK(from_saved_subgraph_document(control.graph, document, templates).ok());
+    // The writer refuses a bank whose voice holds an event connection.
+    SubgraphVoiceBank bank{{"chain", "test.event-chain", 1}, {expansion.instance}};
+    CHECK(to_saved_subgraph_document(source.graph, {}, std::span(&bank, 1), {}).empty());
+}

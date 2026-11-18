@@ -1169,6 +1169,15 @@ save/reopen render proof beside the legacy caller-owned route controls.
   allocator), move the authoring containers, and call the Slot's noexcept
   prepared publication. Never put an allocating `emplace` or ordinary
   `Slot::publish` after that boundary.
+  When the edit carries an authored prepared description, `prepare()` rebuilds
+  it from the compiled serial routed snapshot through
+  `detail::capture_prepared_description` in
+  `core/host/src/signal_graph_prepared_description_capture.cpp`. That function
+  reads the candidate only through its public accessors and returns nullptr
+  (mapped to `PreflightFailed`) on any plan, edge, port or slot mismatch; keep
+  the domain gate that needs the private `CompiledGraph` in `prepare()`.
+  `ExecutionSnapshot::export_prepared_description` still validates the same
+  record separately.
   `set_live_dsp_telemetry_enabled()` is a control-thread operation serialized
   by the graph mutation lock: a prepared commit re-seeds its snapshot from the
   owner's authoritative desired toggle immediately before publication. Do not
@@ -3574,6 +3583,10 @@ across loops; round it like the adapters do). The AU "transport state
 changed" flags fire on play/stop too, so never map them to `discontinuity`.
 Convert AUv3 event times with `au_event_block_time()`, not the adapter's
 `au_event_block_offset()`, which clamps out-of-block times into the block.
+`au_event_block_time()` delegates its range rule to the adapter's
+`format::admit_au_event_time()`, so the host and an AU v3 adapter refuse the
+same times (including an in-block offset past `INT32_MAX`). Change the rule in
+`EventTimeAdmission`, never by adding a range check on the host side.
 
 LV2 enters through `clock_from_lv2()`. LV2 has no steady counter at all, so
 the clock is always counter-free: a skipped `run()` is indistinguishable from
@@ -3729,6 +3742,19 @@ A Custom member's state is checked by creating a probe instance, calling
 `load_state` and destroying it; a stateless type (no `create` or no
 `load_state`) must carry empty state. The writer applies the same check, so it
 returns an empty string for a member whose live state its type refuses.
+
+Fixed-count voice templates (`instantiate_subgraph_voices`, also in
+`subgraph_persistence.hpp`) expand one template as 1..`kMaxSubgraphVoices`
+voices whose instance identities are derived (`<declaration>.voice.<k>`, index
+k). Each voice saves as an ordinary `subgraphs` record plus one
+`voice_declarations` entry, and restores into
+`SubgraphDocumentLoad::voice_banks`, never into `subgraphs`; pass the banks to
+the four-argument `to_saved_subgraph_document` overload or a re-save drops the
+declaration. Watch out: a graph binds one event edge, so a template that
+declares `event_edge` (itself or in a child) is refused as a voice template
+even for one voice. The declaration is not the `VoiceBankBinding` runtime: no
+allocator state, token, epoch, pedal hold or tail is persisted, and the plain
+`from_saved_document` reader ignores the declaration as it ignores records.
 
 Saved identity strictness: `inspect_document`, `diff_graph_documents` and
 `from_saved_document` rebuild each node's identity string from its saved record

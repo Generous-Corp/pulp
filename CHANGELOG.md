@@ -9,6 +9,31 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v11620"></a>
+## [1.162.0] - 2026-11-18
+
+- release/version bump ([#12553](https://github.com/Generous-Corp/pulp/pull/12553))
+- feature/linux optional webview ([#12545](https://github.com/Generous-Corp/pulp/pull/12545))
+- ci/sandbox e2e rust toolchain ([#12532](https://github.com/Generous-Corp/pulp/pull/12532))
+- affected/test cmake fragments 20261117 ([#12488](https://github.com/Generous-Corp/pulp/pull/12488))
+
+<a id="v11610"></a>
+## [1.161.0] - 2026-11-18
+
+- graph/fix review mcp au 20261117 ([#12501](https://github.com/Generous-Corp/pulp/pull/12501))
+- release/version bump ([#12541](https://github.com/Generous-Corp/pulp/pull/12541))
+- feature/linux native surface ([#12531](https://github.com/Generous-Corp/pulp/pull/12531))
+- linux backend review fixes ([#12509](https://github.com/Generous-Corp/pulp/pull/12509))
+- graph/fix review2 20261118 ([#12530](https://github.com/Generous-Corp/pulp/pull/12530))
+- graph/d5 sustain 20261117 ([#12489](https://github.com/Generous-Corp/pulp/pull/12489))
+- ci/flake exoneration main lookback ([#12528](https://github.com/Generous-Corp/pulp/pull/12528))
+
+<a id="v11600"></a>
+## [1.160.0] - 2026-11-18
+
+- release/version bump ([#12525](https://github.com/Generous-Corp/pulp/pull/12525))
+- graph/s7 spectral history 20261117 ([#12514](https://github.com/Generous-Corp/pulp/pull/12514))
+
 <a id="v11590"></a>
 ## [1.159.0] - 2026-11-18
 
@@ -13273,6 +13298,9 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[1.162.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.162.0
+[1.161.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.161.0
+[1.160.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.160.0
 [1.159.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.159.0
 [1.158.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.158.0
 [1.156.0]: https://github.com/Generous-Corp/pulp/releases/tag/v1.156.0

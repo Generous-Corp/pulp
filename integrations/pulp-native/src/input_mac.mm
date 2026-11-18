@@ -18,133 +18,6 @@ namespace pulp::native {
 
 namespace {
 
-constexpr const char* kKeyNames[] = {
-    "unknown",
-    "a",
-    "b",
-    "c",
-    "d",
-    "e",
-    "f",
-    "g",
-    "h",
-    "i",
-    "j",
-    "k",
-    "l",
-    "m",
-    "n",
-    "o",
-    "p",
-    "q",
-    "r",
-    "s",
-    "t",
-    "u",
-    "v",
-    "w",
-    "x",
-    "y",
-    "z",
-    "digit_0",
-    "digit_1",
-    "digit_2",
-    "digit_3",
-    "digit_4",
-    "digit_5",
-    "digit_6",
-    "digit_7",
-    "digit_8",
-    "digit_9",
-    "space",
-    "enter",
-    "tab",
-    "backspace",
-    "escape",
-    "delete_forward",
-    "left",
-    "right",
-    "up",
-    "down",
-    "home",
-    "end",
-    "page_up",
-    "page_down",
-    "help",
-    "f1",
-    "f2",
-    "f3",
-    "f4",
-    "f5",
-    "f6",
-    "f7",
-    "f8",
-    "f9",
-    "f10",
-    "f11",
-    "f12",
-    "f13",
-    "f14",
-    "f15",
-    "f16",
-    "f17",
-    "f18",
-    "f19",
-    "f20",
-    "f21",
-    "f22",
-    "f23",
-    "f24",
-    "keypad_0",
-    "keypad_1",
-    "keypad_2",
-    "keypad_3",
-    "keypad_4",
-    "keypad_5",
-    "keypad_6",
-    "keypad_7",
-    "keypad_8",
-    "keypad_9",
-    "keypad_decimal",
-    "keypad_plus",
-    "keypad_minus",
-    "keypad_multiply",
-    "keypad_divide",
-    "keypad_equals",
-    "keypad_enter",
-    "keypad_clear",
-    "keypad_comma",
-    "minus",
-    "equal",
-    "left_bracket",
-    "right_bracket",
-    "backslash",
-    "semicolon",
-    "quote",
-    "grave",
-    "comma",
-    "period",
-    "slash",
-    "section",
-    "shift_left",
-    "shift_right",
-    "control_left",
-    "control_right",
-    "option_left",
-    "option_right",
-    "command_left",
-    "command_right",
-    "caps_lock",
-    "function",
-    "context_menu",
-    "volume_up",
-    "volume_down",
-    "mute",
-    "jis_yen",
-    "jis_underscore",
-    "jis_eisu",
-    "jis_kana",
-};
 
 const std::unordered_map<std::uint16_t, Key>& native_key_table() {
     static const std::unordered_map<std::uint16_t, Key> table = {
@@ -324,25 +197,10 @@ std::string utf8(NSString* s) {
 
 } // namespace
 
-KeyRoute route_key(const KeyEvent&, KeyboardFocus focus) noexcept {
-    return focus == KeyboardFocus::none ? KeyRoute::host : KeyRoute::client_first;
-}
-
-KeyRoute route_key(const KeyEvent& event, bool client_holds_text_focus) noexcept {
-    return route_key(event, client_holds_text_focus ? KeyboardFocus::text : KeyboardFocus::none);
-}
-
 Key key_for_native_code(std::uint16_t code) noexcept {
     const auto& table = native_key_table();
     const auto it = table.find(code);
     return it == table.end() ? Key::unknown : it->second;
-}
-
-std::string_view key_name(Key key) noexcept {
-    const auto index = static_cast<std::size_t>(key);
-    if (index >= std::size(kKeyNames))
-        return "unknown";
-    return kKeyNames[index];
 }
 
 std::uint32_t modifiers_from_ns_flags(std::uint64_t flags) noexcept {

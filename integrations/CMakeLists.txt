@@ -4,7 +4,8 @@
 # system frameworks, by default on the platforms it supports). Nothing in core
 # links a package.
 
-if((APPLE AND NOT IOS AND NOT PULP_IOS) OR WIN32)
+if((APPLE AND NOT IOS AND NOT PULP_IOS) OR WIN32 OR
+   (UNIX AND NOT APPLE AND NOT ANDROID AND NOT EMSCRIPTEN))
     set(_pulp_native_default ON)
 else()
     set(_pulp_native_default OFF)
@@ -15,9 +16,10 @@ option(PULP_ENABLE_PULP_NATIVE
 unset(_pulp_native_default)
 
 if(PULP_ENABLE_PULP_NATIVE)
-    if(NOT ((APPLE AND NOT IOS AND NOT PULP_IOS) OR WIN32))
+    if(NOT ((APPLE AND NOT IOS AND NOT PULP_IOS) OR WIN32 OR
+            (UNIX AND NOT APPLE AND NOT ANDROID AND NOT EMSCRIPTEN)))
         message(FATAL_ERROR
-            "PULP_ENABLE_PULP_NATIVE=ON: pulp-native supports macOS and Windows so far")
+            "PULP_ENABLE_PULP_NATIVE=ON: pulp-native supports macOS, Windows and Linux")
     endif()
     add_subdirectory(pulp-native)
 endif()

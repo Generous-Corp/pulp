@@ -17,6 +17,7 @@ target_sources(pulp-host PRIVATE
     src/spectral_graph.cpp
     src/signal_graph_subgraph.cpp
     src/subgraph_persistence.cpp
+    src/subgraph_voices.cpp
     src/signal_graph_process.cpp
     src/signal_graph_diagnostics.cpp
     src/signal_graph_control.cpp
@@ -27,6 +28,7 @@ target_sources(pulp-host PRIVATE
     src/signal_graph_reference_walk.cpp
     src/signal_graph_live_swap.cpp
     src/signal_graph_live_swap_catalog.cpp
+    src/signal_graph_prepared_description_capture.cpp
     src/signal_graph_prepared_topology_edit.cpp
     src/prepared_description.cpp
     src/resolved_identity_validation.cpp

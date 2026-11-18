@@ -14,6 +14,8 @@
 
 #include <array>
 #include <csignal>
+#include <ctime>
+#include <pthread.h>
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
@@ -76,14 +78,18 @@ bool pipe_to_command(const std::string& cmd, std::string_view data) {
     // A child that exits before draining stdin (e.g. xclip with no X display,
     // or a large binary payload to a tool that errors early) closes the pipe's
     // read end; the next fwrite would then raise SIGPIPE and kill the whole
-    // process. Ignore SIGPIPE for the duration of the write so fwrite instead
-    // fails with EPIPE and we report an honest false. Save/restore the prior
-    // disposition so we don't change process-global behavior beyond this call
-    // (the clipboard mutex already serializes writers).
-    struct sigaction ignore{}, prev{};
-    ignore.sa_handler = SIG_IGN;
-    sigemptyset(&ignore.sa_mask);
-    ::sigaction(SIGPIPE, &ignore, &prev);
+    // process. SIGPIPE from a write is delivered to the writing thread, so block
+    // it on this thread only: the write then fails with EPIPE and we report an
+    // honest false, and no other thread's handler or disposition is touched.
+    // A SIGPIPE this call generated is consumed before the mask is restored;
+    // one that was already pending is left for its owner.
+    sigset_t pipe_set, prev_mask, pending;
+    sigemptyset(&pipe_set);
+    sigaddset(&pipe_set, SIGPIPE);
+    ::pthread_sigmask(SIG_BLOCK, &pipe_set, &prev_mask);
+    sigemptyset(&pending);
+    ::sigpending(&pending);
+    const bool pipe_was_pending = sigismember(&pending, SIGPIPE) == 1;
 
     FILE* p = ::popen(cmd.c_str(), "w");
     bool ok = false;
@@ -93,7 +99,15 @@ bool pipe_to_command(const std::string& cmd, std::string_view data) {
         ok = (wrote == data.size()) && (rc == 0);
     }
 
-    ::sigaction(SIGPIPE, &prev, nullptr);
+    if (!pipe_was_pending) {
+        sigemptyset(&pending);
+        ::sigpending(&pending);
+        if (sigismember(&pending, SIGPIPE) == 1) {
+            const timespec no_wait{0, 0};
+            ::sigtimedwait(&pipe_set, nullptr, &no_wait);
+        }
+    }
+    ::pthread_sigmask(SIG_SETMASK, &prev_mask, nullptr);
     return ok;
 }
 

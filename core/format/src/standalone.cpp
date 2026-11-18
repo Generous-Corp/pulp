@@ -610,10 +610,10 @@ void StandaloneApp::render_audio_block(
         // exactly where those generators get developed. Shared with the VST3 /
         // AU / CLAP adapters so there is one definition of "the transport
         // started". Stateful; updates `playhead_prev_` in place.
-        detail::derive_bar_from_beats(proc_ctx);
         if (proc_ctx.has_transport(TransportField::BeatPosition) &&
             proc_ctx.has_transport(TransportField::TimeSignature)) {
-            proc_ctx.transport_validity.set(TransportField::Bar);
+            proc_ctx.transport_validity.set(TransportField::Bar,
+                                            detail::derive_bar_from_beats(proc_ctx));
         }
         detail::compute_playhead_changes(
             proc_ctx, playhead_prev_, detail::TransportDiffMode::FieldValidity);
