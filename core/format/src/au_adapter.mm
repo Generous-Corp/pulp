@@ -1949,10 +1949,10 @@ struct ScopedAuV3HostWriting {
         }
         // AUv3 has no host-supplied frame-rate; `ctx.frame_rate` stays
         // `FrameRate::unknown` per the documented sentinel.
-        pulp::format::detail::derive_bar_from_beats(ctx);
         if (ctx.has_transport(pulp::format::TransportField::BeatPosition) &&
             ctx.has_transport(pulp::format::TransportField::TimeSignature)) {
-            ctx.transport_validity.set(pulp::format::TransportField::Bar);
+            ctx.transport_validity.set(pulp::format::TransportField::Bar,
+                                       pulp::format::detail::derive_bar_from_beats(ctx));
         }
         pulp::format::detail::compute_playhead_changes(
             ctx, bridge->playhead_prev,
