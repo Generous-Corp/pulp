@@ -76,6 +76,38 @@ and sounding voices keep sounding. Like `set_slot_parameter`, it is a
 control-thread call made between blocks, and it makes each restored slot render
 again before idle skip can pass over it.
 
+## Voices on a reset: HardCut or DrainRetired
+
+A bank moves to a new epoch on `activate()` and on `commit_event_reset()`,
+which is how a host timeline seek, loop or requested reset reaches it. By
+default every sounding voice is cut on that frame (`HardCut`). To let them fade
+instead, opt in between blocks:
+
+```cpp
+VoiceBankBindingResult result;
+bank->set_retirement_policy(
+    {VoiceBankRetirement::DrainRetired, /*capacity=*/4, /*tail_frames=*/4800}, result);
+```
+
+Each sounding voice is then released (a pedal hold is not kept) and may render
+for at most `tail_frames` more frames, after which it is cut on that exact
+frame whatever the block size. At most `capacity` voices drain at once,
+including drains left over from an earlier reset; any further voice is cut on
+the reset and counted in `retirement_stats().refused`. A retired voice answers
+to no epoch: its deferred tokens are refused, and the new epoch's sustain and
+CC121 leave it alone, but All Sound Off or a steal ends it early. The policy is
+configuration, not state, and nothing about a draining voice is ever saved.
+
+### Sustain rules
+
+CC64 at 64 or above is down. A member-channel pedal covers that channel and a
+manager-channel pedal covers its zone. A note-off for a sustained note (MIDI,
+CC123 or a deferred NoteOff) holds that exact note generation until no pedal
+covers it; a stolen hold never releases the note that replaced it. CC121 lifts
+its scope's pedal and resets its expression; CC120 cuts its scope at once,
+pedal or not. A reset lifts every pedal and clears every hold. The full text
+is the comment above `VoiceBankBinding` in `voice_bank_binding.hpp`.
+
 ## Skipping idle voices
 
 An eight-voice bank renders every slot on every block, including the slots
