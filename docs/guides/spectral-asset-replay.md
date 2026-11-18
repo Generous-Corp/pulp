@@ -88,10 +88,41 @@ Loading a format 6 spectral document assigns each node the authored ID
 file always restores the same IDs; saving it with `to_saved_document` is its
 migration to v7. A v6 spectral document has no identity envelope, so
 `inspect_document` and `diff_graph_documents` refuse it as for any plain
-document. `GraphEditHistory` still declines spectral graphs: its retained
-history needs a byte bound for embedded assets first. Mixed graph families
+document. Mixed graph families
 (hosted plugins, Processors, opaque Custom state, sample regions, subgraph
 records) stay refused in both formats.
+
+## Diff and edit history
+
+`diff_graph_documents` and `pulp graph diff` compare spectral v7 documents by
+authored identity, with the rest of the common model:
+
+- each member of a node's `spectral` record is its own field, so a gain edit
+  is one changed node reporting `spectral.gains`, a stage kind change reports
+  `spectral.stage` (and its gains), and a node that reads a different asset
+  reports `spectral.asset` (or `spectral.asset_a` / `spectral.asset_b`);
+- typed spectral edges are connections keyed by the endpoints' authored
+  identities and ports; a moved edge is removed and added, and a changed lane
+  flag is a changed connection;
+- embedded assets are reported under `spectral_assets` (`added`, `removed`,
+  `changed`) by asset id. The id digests the asset schema, length, frame
+  contract and encoded bytes, so new bytes are one asset removed and one
+  added. The text output prints `+ spectral asset ID` and `- spectral asset
+  ID`, and the MCP `pulp_graph` `diff` operation returns the CLI JSON
+  unchanged.
+
+`GraphEditHistory` checkpoints spectral graphs like any other graph and
+restores undo and redo through the same v7 loader, trial-restoring into an
+isolated scratch graph with the live graph's limits first. Every checkpoint
+embeds the graph's assets, so the history bounds its total retained bytes:
+`GraphEditHistory(capacity, byte_budget)`, `retained_bytes()` (each entry's
+label plus both recorded documents, across undo and redo). A commit that would
+exceed the budget is refused with `ByteBudgetExceeded`; nothing is recorded
+and no entry is evicted, so every recorded step still undoes. The live graph
+keeps the unrecorded edit, which the next undo reports as `Diverged`. A
+running spectral graph refuses every load, so undo and redo report
+`RestoreFailed` with the graph unchanged until the host stops calling
+`process()` and calls `stop_spectral_controller()`.
 
 Before replacing a destination, the reader validates the complete envelope,
 asset digests and references, exact contracts and shapes, typed connections,

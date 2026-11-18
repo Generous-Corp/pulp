@@ -468,6 +468,65 @@ TEST_CASE("graph edit history is bounded by capacity", "[host][graph][history][g
     CHECK(node_named(graph, "Gain")->gain == 0.1f);
 }
 
+TEST_CASE("graph edit history bounds retained bytes for ordinary graphs too",
+          "[host][graph][history][budget]") {
+    SignalGraph graph;
+    build_chain(graph);
+    const auto gain = node_named(graph, "Gain")->id;
+    const auto first = GraphSerializer::to_saved_document(graph);
+    REQUIRE(graph.set_node_gain(gain, 0.5f));
+    const auto second = GraphSerializer::to_saved_document(graph);
+    REQUIRE(graph.set_node_gain(gain, 1.0f));
+    const auto one = std::string("edit").size() + first.size() + second.size();
+
+    // The default budget is far above any small graph's history.
+    GraphEditHistory defaults;
+    CHECK(defaults.byte_budget() == GraphEditHistory::default_byte_budget);
+    CHECK(defaults.retained_bytes() == 0);
+
+    // Exactly one entry's bytes records it; one byte less refuses it and
+    // leaves the history empty.
+    for (const bool fits : {true, false}) {
+        CAPTURE(fits);
+        GraphEditHistory history(8, fits ? one : one - 1);
+        auto before = GraphEditHistory::checkpoint(graph);
+        REQUIRE(graph.set_node_gain(gain, 0.5f));
+        const auto committed = history.commit(std::move(before), graph, "edit");
+        if (fits) {
+            REQUIRE(committed.ok());
+            CHECK(history.retained_bytes() == one);
+            REQUIRE(history.undo(graph).ok());
+            CHECK(history.retained_bytes() == one);
+            CHECK(node_named(graph, "Gain")->gain == 1.0f);
+        } else {
+            REQUIRE(committed.code == GraphHistoryCode::ByteBudgetExceeded);
+            CHECK_FALSE(history.can_undo());
+            CHECK(history.retained_bytes() == 0);
+            REQUIRE(graph.set_node_gain(node_named(graph, "Gain")->id, 1.0f));
+        }
+    }
+
+    // Ordinary documents report no spectral assets and keep their plain
+    // field names, in v7 and in the legacy v6 profile alike.
+    const auto diff = diff_graph_documents(first, second);
+    REQUIRE(diff.ok());
+    REQUIRE(diff.nodes_changed.size() == 1);
+    CHECK(diff.nodes_changed.front().fields == std::vector<std::string>{"gain"});
+    CHECK(diff.spectral_assets_added.empty());
+    CHECK(diff.spectral_assets_removed.empty());
+    CHECK(diff.spectral_assets_changed.empty());
+    CHECK(diff.sections_changed.empty());
+    const auto legacy_first = GraphSerializerTestAccess::legacy_v6_saved_document(graph);
+    REQUIRE(graph.set_node_gain(node_named(graph, "Gain")->id, 0.25f));
+    const auto legacy = diff_graph_documents(
+        legacy_first, GraphSerializerTestAccess::legacy_v6_saved_document(graph));
+    REQUIRE(legacy.ok());
+    REQUIRE(legacy.nodes_changed.size() == 1);
+    CHECK(legacy.nodes_changed.front().fields == std::vector<std::string>{"gain"});
+    CHECK(legacy.spectral_assets_added.empty());
+    CHECK(legacy.sections_changed.empty());
+}
+
 TEST_CASE("qualified port identities are independent of NodeId numbering",
           "[host][graph][history][g3]") {
     SignalGraph first;

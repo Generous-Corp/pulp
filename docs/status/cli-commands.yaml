@@ -407,7 +407,7 @@ commands:
       - name: after
         kind: positional
         required: false
-        description: "diff only: the AFTER saved-identity document (MCP pulp_graph diff takes before and after and runs this same command; differences are a successful result, only refusals are MCP errors). Read-only comparison by logical node identity; JSON reports code Ok, equal, nodes, connections, layout_changed and sections_changed, or InvalidDocument with refusal and side"
+        description: "diff only: the AFTER saved-identity document (MCP pulp_graph diff takes before and after and runs this same command; differences are a successful result, only refusals are MCP errors). Read-only comparison by logical node identity; JSON reports code Ok, equal, nodes, connections, event_connections, spectral_assets, layout_changed and sections_changed, or InvalidDocument with refusal and side"
       - name: --notation
         kind: flag
         description: Format a supported saved graph as canonical notation
