@@ -701,6 +701,7 @@
       "pulp/platform/special_dir.hpp",
       "pulp/platform/test_visibility.hpp",
       "pulp/platform/win/registry.hpp",
+      "pulp/platform/win/text_convert.hpp",
       "pulp/platform/win32_sane.hpp"
     ],
     "core/playback/include": [
