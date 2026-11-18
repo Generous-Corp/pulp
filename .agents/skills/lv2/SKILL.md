@@ -221,6 +221,13 @@ by the whole host block and marks the next `run()` discontinuous.
   frame rate, despite the name; there is nothing to map a `FrameRate` from.
 - **`time:speed` is a rate, not a boolean.** Zero is stopped, one is normal
   play, and anything else is a scrub or a varispeed.
+- **An event's `time` is frames only in a frame-unit sequence.**
+  `LV2_Atom_Sequence_Body::unit` is 0 or `atom:frameTime` for frames;
+  `atom:beatTime` stores a beat count in the same bytes, and beat 0 reads as
+  frame 0. `run()` checks `format::lv2_sequence_unit_is_frames()` and refuses
+  every MIDI event of another unit, counting it on `ctx.timing.refused_events`;
+  a frame time outside the rendered block is refused the same way, never
+  clamped.
 - **Every property is optional.** A bare sample transport sends `time:frame`
   and `time:speed` and nothing musical. Carry presence per field so a consumer
   can tell "the host did not say" from "the host said 120". LV2's time

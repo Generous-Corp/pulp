@@ -736,6 +736,11 @@ prepared maximum, sets `timing_block_skipped_`, which marks the next block
 discontinuous when no continuous-time counter can measure the unrendered
 samples. Coverage: `test_vst3_process_timing.cpp`.
 
+Note, poly pressure, note expression (MPE on), SysEx and `IMidiMapping`
+controller offsets all go through `event_admission_` (a
+`format::EventTimeAdmission`, reset per block after the max-block clamp) before
+they reach `midi_in_`. an out-of-block time is refused and counted on `ctx.timing.refused_events`, never clamped, and the bound is the rendered frame count, so an event in the unrendered tail of an oversized block is refused too.
+
 **If you teach `build_process_context` a new `kXxxValid` bit, add its
 `kNeed*` flag in the same change.** The test *VST3 requests every
 process-context field its decoder consumes* in `test_vst3_plugin_state.cpp`

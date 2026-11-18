@@ -290,6 +290,16 @@ multi-output cache compares before reusing a render: without it a host that
 resets and renders the same time stamp again gets pre-reset audio and the
 Processor never sees the reset.
 
+MIDI `eventSampleTime` is a render-axis time, not an offset: it is either in
+the `AUEventSampleTimeImmediate` window or absolute against `mSampleTime`.
+Short MIDI and each `AURenderEventMIDIEventList` are placed with
+`format::admit_au_event_time()` (the shared `au_event_raw_offset()` arithmetic)
+and admitted against `frameCount`. An out-of-block time, or an absolute time
+with no valid `mSampleTime`, is refused and counted on
+`ctx.timing.refused_events`, never clamped. Parameter events still clamp through
+`au_event_block_offset()`. A test that renders MIDI at `mSampleTime = 0` cannot
+tell an offset from an absolute time; use a non-zero block time.
+
 ### MPE routing
 
 When a `Processor` declares `supports_mpe`, AU v3 feeds per-note expression the
@@ -1809,3 +1819,12 @@ stack for the ViewBridge path, and the iOS path is compile-checked only.
 `_pulp_warn_ui_package_formats` (`tools/cmake/PulpEditorPackage.cmake`) does not
 name AUv3, because `AUv3` is in `_PULP_CONTRACT_EDITOR_FORMATS`; it still names
 the formats whose adapters serve no contract editor (LV2, AAX).
+
+## Declared programs are an AU v2 surface
+
+`FactoryPresetTable::set_programs` (`au_factory_presets.hpp`) is shared with the
+AU v2 adapters, which publish the declared programs and manage the present
+preset. The AUv3 adapter does not call it; its presets come from the parameter
+tree and `factoryPresets`. A change to the table's numbering or lifetime rules
+still reaches AUv3 if it starts reading the table, so keep the table's contract
+(entries rebuilt on every declaration, records owned by the table) in mind there.

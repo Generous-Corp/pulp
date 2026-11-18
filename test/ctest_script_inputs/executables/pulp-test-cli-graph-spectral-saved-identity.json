@@ -1,0 +1,19 @@
+{
+ "name": "pulp-test-cli-graph-spectral-saved-identity",
+ "record": {
+  "data": "none",
+  "inputs": [],
+  "kind": "compiled",
+  "runtime_targets": [
+   "pulp-cli",
+   "pulp-mcp"
+  ],
+  "sources": [],
+  "spawning_sources": [
+   "test/test_cli_shellout_helpers.hpp"
+  ],
+  "spawns": "declared",
+  "undeclared_sources": []
+ },
+ "scanned": true
+}
