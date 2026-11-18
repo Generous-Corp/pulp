@@ -441,7 +441,7 @@ class IosCompileRequiredTests(unittest.TestCase):
         )
         self.assertRegex(
             root_text,
-            r"if\(TARGET pulp-native[^\n]*\)\n\s*add_subdirectory\("
+            r"if\((APPLE AND )?TARGET pulp-native[^\n]*\)\n\s*add_subdirectory\("
             r"integrations/pulp-native/examples/metal-probe\)",
             "the metal-probe example is no longer gated on the pulp-native target",
         )
