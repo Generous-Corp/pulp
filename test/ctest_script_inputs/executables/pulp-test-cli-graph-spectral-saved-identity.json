@@ -5,7 +5,8 @@
   "inputs": [],
   "kind": "compiled",
   "runtime_targets": [
-   "pulp-cli"
+   "pulp-cli",
+   "pulp-mcp"
   ],
   "sources": [],
   "spawning_sources": [

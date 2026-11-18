@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 1.158.0
+    VERSION 1.160.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -569,6 +569,7 @@ set(_pulp_standalone_core_sources
     core/format/src/standalone.cpp
     core/format/src/standalone_control_host.cpp
     core/format/src/null_audio_device.cpp
+    core/format/src/standalone_settings_model.cpp
     core/format/src/test_signal.cpp)
 set(_pulp_standalone_view_sources
     core/format/src/standalone_view_layer.cpp
@@ -580,11 +581,13 @@ set(_pulp_standalone_view_sources
 if(APPLE)
     list(APPEND _pulp_standalone_core_sources
         core/format/src/standalone_key_driver_mac.mm
+        core/format/src/standalone_settings_window_mac.mm
         core/format/src/standalone_contract_editor_mac.mm)
     list(APPEND _pulp_standalone_view_sources core/format/src/standalone_updater_mac.mm)
 else()
     list(APPEND _pulp_standalone_core_sources
         core/format/src/standalone_key_driver_stub.cpp
+        core/format/src/standalone_settings_window_stub.cpp
         core/format/src/standalone_contract_editor_stub.cpp)
     list(APPEND _pulp_standalone_view_sources core/format/src/standalone_updater_stub.cpp)
 endif()

@@ -21,6 +21,7 @@
 #include <pulp/runtime/base64.hpp>
 #include <pulp/runtime/crypto.hpp>
 
+#include <algorithm>
 #include <bit>
 #include <cmath>
 #include <cstdint>
@@ -128,8 +129,8 @@ struct SourceGraph {
     std::unique_ptr<SignalGraph> graph = std::make_unique<SignalGraph>();
     SpectralAssetSourcePorts source;
 
-    SourceGraph(Geometry geometry, std::uint64_t samples)
-        : g(geometry), length(samples), input(oracle::stimulus(g, samples)),
+    SourceGraph(Geometry geometry, std::uint64_t samples, int seed = 0)
+        : g(geometry), length(samples), input(oracle::stimulus(g, samples, seed)),
           exact(oracle::analyze(g, input)), bytes(oracle::encode(g, exact)) {
         const auto output = graph->add_output_node(g.channels, "output");
         const auto made = graph->add_spectral_asset_source_v1(bytes.view(), length, "source");
@@ -776,7 +777,7 @@ TEST_CASE("Spectral v7 documents inspect and diff through the common path",
     REQUIRE(diff.nodes_changed[0].identity == node_authored_id(graph, "renamed"));
     REQUIRE(diff.nodes_changed[0].fields == std::vector<std::string>{"name"});
 
-    // A different mask is a change to the stage's spectral field.
+    // A different mask is a change to the stage's spectral gains.
     AnalysisGraph other(g, odd_rate, std::vector<float>(mask_gains(g).size(), 1.0f));
     const auto replaced = GraphSerializer::to_saved_document(*other.graph);
     diff = diff_graph_documents(before, replaced);
@@ -810,7 +811,7 @@ TEST_CASE("Spectral v7 documents inspect and diff through the common path",
     diff = diff_graph_documents(before, edited_json);
     REQUIRE(diff.ok());
     REQUIRE(diff.nodes_changed.size() == 1);
-    REQUIRE(diff.nodes_changed[0].fields == std::vector<std::string>{"spectral"});
+    REQUIRE(diff.nodes_changed[0].fields == std::vector<std::string>{"spectral.gains"});
 
     // A format 6 spectral document has no identity envelope, as for any
     // plain document; it must be migrated by loading and saving first.
@@ -819,15 +820,14 @@ TEST_CASE("Spectral v7 documents inspect and diff through the common path",
             GraphDocumentRefusal::LogicalIdentityMissing);
 }
 
-TEST_CASE("Spectral graph families stay closed to history and mixed nodes",
+TEST_CASE("Spectral graph families stay closed to subgraphs and mixed nodes",
           "[host][spectral][saved-identity][boundary]") {
     const Geometry g{256, 100, 2};
     AnalysisGraph fixture(g, odd_rate, mask_gains(g));
-    // History needs a retained-byte bound for embedded assets, so a spectral
-    // graph is not captured even though it has a saved document.
+    // Edit history captures a spectral graph as its saved document, like an
+    // ordinary graph.
     REQUIRE_FALSE(GraphSerializer::to_saved_document(*fixture.graph).empty());
-    REQUIRE_FALSE(GraphEditHistory::checkpoint(*fixture.graph).valid());
-    // Control: an ordinary graph is captured.
+    REQUIRE(GraphEditHistory::checkpoint(*fixture.graph).valid());
     SignalGraph plain;
     plain.add_input_node(1, "in");
     REQUIRE(GraphEditHistory::checkpoint(plain).valid());
@@ -858,4 +858,407 @@ TEST_CASE("Spectral graph families stay closed to history and mixed nodes",
     fixture.graph->add_gain_node("mixed");
     REQUIRE(GraphSerializer::to_saved_document(*fixture.graph).empty());
     REQUIRE(GraphSerializer::to_json(*fixture.graph).empty());
+}
+
+namespace {
+// `document` with the stage named `name` set to `kind`, every gain `gain`
+// (an identity stage has no gains).
+std::string with_stage(const std::string& document, const std::string& name,
+                       const std::string& kind, double gain) {
+    auto root = choc::json::parse(document);
+    auto nodes = choc::value::createEmptyArray();
+    bool found = false;
+    for (const auto n : root["nodes"]) {
+        auto record = choc::value::Value(n);
+        if (n["name"].getString() == name) {
+            found = true;
+            auto spectral = choc::value::Value(n["spectral"]);
+            auto gains = choc::value::createEmptyArray();
+            if (kind != "identity_v1")
+                for (std::uint32_t i = 0; i < n["spectral"]["gains"].size(); ++i)
+                    gains.addArrayElement(gain);
+            spectral.setMember("stage", kind);
+            spectral.setMember("gains", gains);
+            record.setMember("spectral", spectral);
+        }
+        nodes.addArrayElement(record);
+    }
+    REQUIRE(found);
+    root.setMember("nodes", nodes);
+    return choc::json::toString(root, true);
+}
+
+// `document` with its single asset row and the source node's reference
+// replaced by the asset of `other` (same geometry and length, other bytes).
+std::string with_asset_of(const std::string& document, const std::string& other) {
+    auto root = choc::json::parse(document);
+    const auto replacement = choc::json::parse(other);
+    REQUIRE(root["spectral_assets"].size() == 1);
+    REQUIRE(replacement["spectral_assets"].size() == 1);
+    const auto key = std::string(replacement["spectral_assets"][0]["id"].getString());
+    root.setMember("spectral_assets", choc::value::Value(replacement["spectral_assets"]));
+    auto nodes = choc::value::createEmptyArray();
+    for (const auto n : root["nodes"]) {
+        auto record = choc::value::Value(n);
+        if (n["type"].getString() == "spectral_asset_source") {
+            auto spectral = choc::value::Value(n["spectral"]);
+            spectral.setMember("asset", key);
+            record.setMember("spectral", spectral);
+        }
+        nodes.addArrayElement(record);
+    }
+    root.setMember("nodes", nodes);
+    return choc::json::toString(root, true);
+}
+
+// Loads `document` into `graph` as an edit and returns the saved result.
+std::string load_edit(SignalGraph& graph, const std::string& document) {
+    const auto loaded = GraphSerializer::from_saved_document(graph, document);
+    INFO(loaded.error);
+    REQUIRE(loaded.ok);
+    auto saved = GraphSerializer::to_saved_document(graph);
+    REQUIRE_FALSE(saved.empty());
+    return saved;
+}
+
+// Loading renumbers nodes, so tests find a node by name after an edit.
+NodeId node_named(const SignalGraph& graph, const std::string& name) {
+    for (const auto& n : graph.nodes())
+        if (n.name == name)
+            return n.id;
+    FAIL("no node named " << name);
+    return 0;
+}
+
+PortHandle frames_out(const SignalGraph& graph, NodeId node) {
+    REQUIRE(graph.node(node)->output_ports.size() == 1);
+    return graph.node(node)->output_ports[0];
+}
+PortHandle frames_in(const SignalGraph& graph, NodeId node) {
+    REQUIRE(graph.node(node)->input_ports.size() == 1);
+    return graph.node(node)->input_ports[0];
+}
+
+std::string edge_key(const SignalGraph& graph, NodeId source, const PortHandle& out, NodeId dest,
+                     const PortHandle& in) {
+    return graph.node(source)->authored_id.str() + "[" + std::to_string(out.index) + "] -> " +
+           graph.node(dest)->authored_id.str() + "[" + std::to_string(in.index) + "]";
+}
+} // namespace
+
+TEST_CASE("Spectral edits diff by logical identity: stage config, typed edges and assets",
+          "[host][spectral][history][diff]") {
+    const Geometry g{256, 100, 2};
+    AnalysisGraph fixture(g, odd_rate, mask_gains(g));
+    auto& graph = *fixture.graph;
+    const auto mask_id = node_authored_id(graph, "mask");
+    const auto before = GraphSerializer::to_saved_document(graph);
+
+    // A gain edit is one changed node, under the stage's identity, naming only
+    // its gains.
+    const auto gained = load_edit(graph, with_stage(before, "mask", "real_mask_v1", 0.5));
+    auto diff = diff_graph_documents(before, gained);
+    REQUIRE(diff.ok());
+    REQUIRE_FALSE(diff.equal());
+    REQUIRE(diff.nodes_added.empty());
+    REQUIRE(diff.nodes_removed.empty());
+    REQUIRE(diff.nodes_changed.size() == 1);
+    REQUIRE(diff.nodes_changed[0].identity == mask_id);
+    REQUIRE(diff.nodes_changed[0].fields == std::vector<std::string>{"spectral.gains"});
+    REQUIRE(diff.connections_added.empty());
+    REQUIRE(diff.connections_removed.empty());
+    REQUIRE(diff.connections_changed.empty());
+    REQUIRE(diff.spectral_assets_added.empty());
+    REQUIRE(diff.sections_changed.empty());
+    REQUIRE(diff.before_digest != diff.after_digest);
+    // Control: the same edit compared with itself is equal, digests included.
+    REQUIRE(diff_graph_documents(gained, gained).equal());
+
+    // A kind change names the stage kind and its gains.
+    const auto identity_stage = load_edit(graph, with_stage(before, "mask", "identity_v1", 0));
+    diff = diff_graph_documents(before, identity_stage);
+    REQUIRE(diff.ok());
+    REQUIRE(diff.nodes_changed.size() == 1);
+    REQUIRE(diff.nodes_changed[0].identity == mask_id);
+    REQUIRE(diff.nodes_changed[0].fields ==
+            std::vector<std::string>{"spectral.gains", "spectral.stage"});
+
+    // Retargeting typed spectral edges: insert a second stage after the mask,
+    // then swap the two stages' order. The nodes are unchanged; each moved
+    // edge is removed and added under keys spelled by authored identity.
+    load_edit(graph, before);
+    const auto shape = *SpectralIdentity::make(g.fft, g.hop, g.channels, odd_rate).value;
+    const auto alt =
+        graph.add_spectral_stage(shape, *QualifiedSpectralStage::identity_v1(shape).value, "alt");
+    REQUIRE(alt);
+    const auto analysis = node_named(graph, "analysis");
+    const auto mask = node_named(graph, "mask");
+    const auto synthesis = node_named(graph, "synthesis");
+    const auto alt_node = alt.value->node;
+    const auto link = [&](NodeId a, NodeId b) {
+        REQUIRE(graph.connect(frames_out(graph, a), frames_in(graph, b)));
+    };
+    const auto unlink = [&](NodeId a, NodeId b) {
+        REQUIRE(graph.disconnect(a, frames_out(graph, a).index, b, frames_in(graph, b).index));
+    };
+    const auto key = [&](NodeId a, NodeId b) {
+        return edge_key(graph, a, frames_out(graph, a), b, frames_in(graph, b));
+    };
+    unlink(mask, synthesis);
+    link(mask, alt_node);
+    link(alt_node, synthesis);
+    const auto fanned = GraphSerializer::to_saved_document(graph);
+    REQUIRE_FALSE(fanned.empty());
+    unlink(analysis, mask);
+    unlink(mask, alt_node);
+    unlink(alt_node, synthesis);
+    link(analysis, alt_node);
+    link(alt_node, mask);
+    link(mask, synthesis);
+    const auto retargeted = GraphSerializer::to_saved_document(graph);
+    REQUIRE_FALSE(retargeted.empty());
+    diff = diff_graph_documents(fanned, retargeted);
+    REQUIRE(diff.ok());
+    REQUIRE(diff.nodes_changed.empty());
+    REQUIRE(diff.nodes_added.empty());
+    REQUIRE(diff.nodes_removed.empty());
+    auto removed = std::vector<std::string>{key(analysis, mask), key(mask, alt_node),
+                                            key(alt_node, synthesis)};
+    auto added = std::vector<std::string>{key(analysis, alt_node), key(alt_node, mask),
+                                          key(mask, synthesis)};
+    std::sort(removed.begin(), removed.end());
+    std::sort(added.begin(), added.end());
+    REQUIRE(diff.connections_removed == removed);
+    REQUIRE(diff.connections_added == added);
+    REQUIRE(diff.connections_changed.empty());
+    const auto new_key = key(mask, synthesis);
+    // The edge record keeps its spectral lane: marking the new edge plain
+    // audio is a changed connection under the same key.
+    auto plain_edge = retargeted;
+    const auto root = choc::json::parse(retargeted);
+    std::size_t spectral_edges = 0;
+    for (const auto c : root["connections"])
+        spectral_edges += c["spectral"].getBool() ? 1 : 0;
+    REQUIRE(spectral_edges == 3);
+    {
+        auto edited = choc::json::parse(retargeted);
+        auto edges = choc::value::createEmptyArray();
+        for (const auto c : edited["connections"]) {
+            auto record = choc::value::Value(c);
+            if (c["source_node"].getInt64() == std::int64_t(mask) &&
+                c["dest_node"].getInt64() == std::int64_t(synthesis))
+                record.setMember("spectral", false);
+            edges.addArrayElement(record);
+        }
+        edited.setMember("connections", edges);
+        plain_edge = choc::json::toString(edited, true);
+    }
+    diff = diff_graph_documents(retargeted, plain_edge);
+    REQUIRE(diff.ok());
+    REQUIRE(diff.connections_changed == std::vector<std::string>{new_key});
+
+    // Asset bytes: same geometry and length, other stimulus. The asset id is
+    // content-addressed, so the row is replaced and the source node that reads
+    // it reports only its asset reference.
+    const Geometry sg{256, 96, 2};
+    SourceGraph source(sg, 700);
+    SourceGraph other(sg, 700, 1);
+    const auto source_before = GraphSerializer::to_saved_document(*source.graph);
+    const auto other_doc = GraphSerializer::to_saved_document(*other.graph);
+    REQUIRE(choc::json::parse(source_before)["spectral_assets"][0]["bytes_sha256"].getString() !=
+            choc::json::parse(other_doc)["spectral_assets"][0]["bytes_sha256"].getString());
+    const auto source_after = load_edit(*source.graph, with_asset_of(source_before, other_doc));
+    diff = diff_graph_documents(source_before, source_after);
+    REQUIRE(diff.ok());
+    const auto old_asset =
+        std::string(choc::json::parse(source_before)["spectral_assets"][0]["id"].getString());
+    const auto new_asset =
+        std::string(choc::json::parse(other_doc)["spectral_assets"][0]["id"].getString());
+    REQUIRE(diff.spectral_assets_removed == std::vector<std::string>{old_asset});
+    REQUIRE(diff.spectral_assets_added == std::vector<std::string>{new_asset});
+    REQUIRE(diff.spectral_assets_changed.empty());
+    REQUIRE(diff.nodes_changed.size() == 1);
+    REQUIRE(diff.nodes_changed[0].identity == node_authored_id(*source.graph, "source"));
+    REQUIRE(diff.nodes_changed[0].fields == std::vector<std::string>{"spectral.asset"});
+    REQUIRE(diff.sections_changed.empty());
+    // A row whose id is kept but whose members differ is a changed asset.
+    {
+        auto edited = choc::json::parse(source_before);
+        auto rows = choc::value::createEmptyArray();
+        auto row = choc::value::Value(edited["spectral_assets"][0]);
+        row.setMember("frame_count", std::int64_t(1));
+        rows.addArrayElement(row);
+        edited.setMember("spectral_assets", rows);
+        diff = diff_graph_documents(source_before, choc::json::toString(edited, true));
+        REQUIRE(diff.ok());
+        REQUIRE(diff.spectral_assets_changed == std::vector<std::string>{old_asset});
+        REQUIRE_FALSE(diff.equal());
+    }
+}
+
+TEST_CASE("Spectral graph undo and redo restore through the saved-identity loader",
+          "[host][spectral][history]") {
+    const Geometry g{256, 100, 2};
+    AnalysisGraph fixture(g, odd_rate, mask_gains(g));
+    auto& graph = *fixture.graph;
+    GraphEditHistory history;
+    const auto original = GraphSerializer::to_saved_document(graph);
+
+    auto checkpoint = GraphEditHistory::checkpoint(graph);
+    REQUIRE(checkpoint.valid());
+    const auto gained = load_edit(graph, with_stage(original, "mask", "real_mask_v1", 0.5));
+    REQUIRE(history.commit(std::move(checkpoint), graph, "gain").ok());
+
+    checkpoint = GraphEditHistory::checkpoint(graph);
+    REQUIRE(checkpoint.valid());
+    REQUIRE(graph.rename_node(node_named(graph, "synthesis"), "resynth"));
+    const auto renamed = GraphSerializer::to_saved_document(graph);
+    REQUIRE(history.commit(std::move(checkpoint), graph, "rename").ok());
+    REQUIRE(history.undo_depth() == 2);
+    REQUIRE(history.retained_bytes() == std::string("gain").size() + original.size() +
+                                            gained.size() + std::string("rename").size() +
+                                            gained.size() + renamed.size());
+
+    // Each step restores the recorded document exactly.
+    auto step = history.undo(graph);
+    INFO(step.detail);
+    REQUIRE(step.ok());
+    REQUIRE(step.label == "rename");
+    REQUIRE(GraphSerializer::to_saved_document(graph) == gained);
+    step = history.undo(graph);
+    REQUIRE(step.ok());
+    REQUIRE(GraphSerializer::to_saved_document(graph) == original);
+    REQUIRE(step.node_ids.at(node_authored_id(graph, "mask")) != 0);
+    REQUIRE(history.undo(graph).code == GraphHistoryCode::NothingToUndo);
+
+    // The undone graph prepares and sounds like a fresh build of the
+    // original; the gain edit sounds different (negative control).
+    const std::size_t length = 700, total = length + g.fft + g.hop + 2 * g.fft;
+    const auto input = oracle::stimulus(g, length);
+    REQUIRE(graph.prepare(odd_rate, 512));
+    const auto undone = render(graph, input, g.channels, total, 128);
+    clean_diagnostics(graph);
+    AnalysisGraph fresh(g, odd_rate, mask_gains(g));
+    REQUIRE(fresh.graph->prepare(odd_rate, 512));
+    REQUIRE(undone == render(*fresh.graph, input, g.channels, total, 128));
+    SignalGraph edited;
+    REQUIRE(GraphSerializer::from_saved_document(edited, gained).ok);
+    REQUIRE(edited.prepare(odd_rate, 512));
+    REQUIRE(undone != render(edited, input, g.channels, total, 128));
+
+    // A running spectral graph refuses every load, so redo is refused with
+    // the graph and the history as they were; stopping the controller first
+    // lets it through.
+    step = history.redo(graph);
+    REQUIRE(step.code == GraphHistoryCode::RestoreFailed);
+    REQUIRE(step.detail.find("active spectral controller") != std::string::npos);
+    REQUIRE(step.rolled_back);
+    REQUIRE(GraphSerializer::to_saved_document(graph) == original);
+    REQUIRE(history.redo_depth() == 2);
+    REQUIRE(graph.stop_spectral_controller() == SpectralError::None);
+    step = history.redo(graph);
+    INFO(step.detail);
+    REQUIRE(step.ok());
+    REQUIRE(GraphSerializer::to_saved_document(graph) == gained);
+    step = history.redo(graph);
+    REQUIRE(step.ok());
+    REQUIRE(GraphSerializer::to_saved_document(graph) == renamed);
+    REQUIRE(diff_graph_documents(GraphSerializer::to_saved_document(graph), renamed).equal());
+    REQUIRE(history.redo(graph).code == GraphHistoryCode::NothingToRedo);
+
+    // An edit made outside the history is not overwritten.
+    REQUIRE(graph.rename_node(node_named(graph, "analysis"), "outside"));
+    const auto outside = GraphSerializer::to_saved_document(graph);
+    step = history.undo(graph);
+    REQUIRE(step.code == GraphHistoryCode::Diverged);
+    REQUIRE(GraphSerializer::to_saved_document(graph) == outside);
+}
+
+TEST_CASE("Spectral asset history retains a bounded total of bytes and refuses past it",
+          "[host][spectral][history][budget]") {
+    const Geometry sg{256, 96, 2};
+    SourceGraph source(sg, 700);
+    SourceGraph other(sg, 700, 1);
+    auto& graph = *source.graph;
+    const auto first = GraphSerializer::to_saved_document(graph);
+    const auto second = with_asset_of(first, GraphSerializer::to_saved_document(*other.graph));
+    // Every checkpoint embeds the asset, so one entry retains two copies.
+    const auto entry_bytes = [](const std::string& label, const std::string& a,
+                                const std::string& b) {
+        return label.size() + a.size() + b.size();
+    };
+
+    // Probe the exact bytes of one entry with an unbounded history.
+    std::string swapped;
+    {
+        GraphEditHistory probe(8, std::numeric_limits<std::size_t>::max());
+        auto checkpoint = GraphEditHistory::checkpoint(graph);
+        swapped = load_edit(graph, second);
+        REQUIRE(probe.commit(std::move(checkpoint), graph, "asset").ok());
+        REQUIRE(probe.retained_bytes() == entry_bytes("asset", first, swapped));
+        load_edit(graph, first);
+    }
+    const auto one = entry_bytes("asset", first, swapped);
+
+    // Positive control: a budget of exactly one entry records it.
+    {
+        GraphEditHistory exact(8, one);
+        auto checkpoint = GraphEditHistory::checkpoint(graph);
+        load_edit(graph, second);
+        const auto committed = exact.commit(std::move(checkpoint), graph, "asset");
+        INFO(committed.detail);
+        REQUIRE(committed.ok());
+        REQUIRE(exact.retained_bytes() == one);
+        REQUIRE(exact.undo(graph).ok());
+        REQUIRE(GraphSerializer::to_saved_document(graph) == first);
+        // Moving an entry between undo and redo keeps the total.
+        REQUIRE(exact.retained_bytes() == one);
+        REQUIRE(exact.redo(graph).ok());
+        REQUIRE(GraphSerializer::to_saved_document(graph) == swapped);
+
+        // A second entry would exceed the budget: refused, nothing recorded or
+        // dropped, and the first entry still undoes once the unrecorded edit
+        // is reverted.
+        checkpoint = GraphEditHistory::checkpoint(graph);
+        load_edit(graph, first);
+        const auto refused = exact.commit(std::move(checkpoint), graph, "back");
+        REQUIRE(refused.code == GraphHistoryCode::ByteBudgetExceeded);
+        REQUIRE(std::string(graph_history_code_name(refused.code)) == "ByteBudgetExceeded");
+        REQUIRE(refused.detail.find(std::to_string(one)) != std::string::npos);
+        REQUIRE(exact.undo_depth() == 1);
+        REQUIRE(exact.undo_label() == "asset");
+        REQUIRE(exact.retained_bytes() == one);
+        REQUIRE(exact.undo(graph).code == GraphHistoryCode::Diverged);
+        load_edit(graph, second);
+        REQUIRE(exact.undo(graph).ok());
+        REQUIRE(GraphSerializer::to_saved_document(graph) == first);
+        exact.clear();
+        REQUIRE(exact.retained_bytes() == 0);
+    }
+
+    // One byte less refuses the first entry deterministically.
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        GraphEditHistory tight(8, one - 1);
+        auto checkpoint = GraphEditHistory::checkpoint(graph);
+        load_edit(graph, second);
+        const auto refused = tight.commit(std::move(checkpoint), graph, "asset");
+        REQUIRE(refused.code == GraphHistoryCode::ByteBudgetExceeded);
+        REQUIRE_FALSE(tight.can_undo());
+        REQUIRE(tight.retained_bytes() == 0);
+        load_edit(graph, first);
+    }
+
+    // The capacity drop counts toward the budget: with room for one entry,
+    // a second commit drops the first and fits.
+    {
+        GraphEditHistory single(1, one + 64);
+        auto checkpoint = GraphEditHistory::checkpoint(graph);
+        load_edit(graph, second);
+        REQUIRE(single.commit(std::move(checkpoint), graph, "asset").ok());
+        checkpoint = GraphEditHistory::checkpoint(graph);
+        load_edit(graph, first);
+        REQUIRE(single.commit(std::move(checkpoint), graph, "a").ok());
+        REQUIRE(single.undo_depth() == 1);
+        REQUIRE(single.retained_bytes() == entry_bytes("a", swapped, first));
+    }
 }

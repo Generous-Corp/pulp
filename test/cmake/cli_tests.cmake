@@ -237,7 +237,15 @@ if(TARGET pulp-host)
     target_link_libraries(pulp-test-cli-graph-spectral-saved-identity PRIVATE
         pulp::host pulp::platform Catch2::Catch2WithMain)
     pulp_bind_cli_shellout_target(pulp-test-cli-graph-spectral-saved-identity)
-    pulp_test_spawns(pulp-test-cli-graph-spectral-saved-identity pulp-cli)
+    # The MCP diff operation is checked against the same CLI binary. The MCP
+    # core is defined after test/, so this mirrors the root guard rather than
+    # testing for its target.
+    if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU AND PROJECT_IS_TOP_LEVEL)
+        target_link_libraries(pulp-test-cli-graph-spectral-saved-identity PRIVATE pulp-mcp-core)
+        target_compile_definitions(pulp-test-cli-graph-spectral-saved-identity PRIVATE
+            PULP_TEST_GRAPH_DIFF_MCP=1)
+    endif()
+    pulp_test_spawns(pulp-test-cli-graph-spectral-saved-identity pulp-cli pulp-mcp)
     catch_discover_tests(pulp-test-cli-graph-spectral-saved-identity)
 endif()
 

@@ -4082,3 +4082,17 @@ user-facing version.
 that wants a preset browser reads the library from the adapter's instance rather
 than building a second one: two libraries over one overlay file merge on write
 but each keeps its own in-memory index until `refresh()`.
+
+## The standalone's Audio/MIDI settings are one model with thin shells
+
+`StandaloneSettingsModel` (`standalone_settings_model.hpp`, in the view-free
+standalone core) owns every settings rule: device lists, the allowed rate/buffer
+filtering, the input-hidden rule for processors without audio input, the null
+device, MIDI "None" (`StandaloneConfig::kNoMidiInput`; an empty `midi_input_id`
+opens the FIRST port, not none). The view `SettingsPanel` and the macOS native
+window (`standalone_settings_window_mac.mm`, reached by `HostAction::open_settings`
+or Cmd+, in the contract editor) only draw it. Change a rule in the model, not in
+a shell. `StandaloneApp` recreates its audio system on every `start()`, so a
+settings UI must re-read `audio_system()` / `midi_system()` after an apply rather
+than cache them. Replace the default window with
+`StandaloneApp::set_settings_window_opener()`.
