@@ -35,6 +35,7 @@
 
 #include <clap/clap.h>
 #include <clap/ext/gui.h>
+#include <clap/ext/posix-fd-support.h>
 #include <clap/ext/timer-support.h>
 
 namespace pulp::format {
@@ -51,6 +52,11 @@ const clap_plugin_gui_t* contract_gui_extension(const clap_plugin_t* plugin);
 /// The timer-support extension that drives a contract editor's idle tick, or
 /// null when the contract GUI does not apply to `plugin`.
 const clap_plugin_timer_support_t* contract_timer_extension(const clap_plugin_t* plugin);
+
+/// The posix-fd-support extension through which the host reports a descriptor
+/// the editor's main-thread work waits on, or null when the contract GUI does
+/// not apply to `plugin` (and on Apple platforms, which have a main run loop).
+const clap_plugin_posix_fd_support_t* contract_posix_fd_extension(const clap_plugin_t* plugin);
 
 /// The session behind `plugin`'s open contract GUI, or null when none is open,
 /// so an in-process host (automation, tests) can reach the editor and its
