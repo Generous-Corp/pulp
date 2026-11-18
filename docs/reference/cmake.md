@@ -2,6 +2,16 @@
 
 Source: `tools/cmake/PulpUtils.cmake`
 
+## Rust CLI compiler selection
+
+When the source build enables `PULP_BUILD_RUST_CLI`, CMake validates the Rust
+compiler and passes that same executable to Cargo for builds and registered
+Cargo tests. Selection uses `RUSTC`, then `CARGO_BUILD_RUSTC`, then the
+`RUSTC_EXECUTABLE` CMake cache entry or compiler discovery. Set overrides before
+configuring and reconfigure when changing them. A later shell `PATH` change
+cannot substitute another compiler. Direct `cargo` commands retain Cargo's
+normal compiler selection.
+
 ## pulp_add_plugin
 
 **Status**: usable
