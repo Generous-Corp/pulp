@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 1.163.0
+    VERSION 1.162.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -1016,6 +1016,7 @@ if(PULP_BUILD_TESTS)
     add_subdirectory(test/fixtures/render_provider_floor)
     add_subdirectory(test/fixtures/native_ui_link_floor)
     add_subdirectory(test/fixtures/no_editor_link_floor)
+    add_subdirectory(test/fixtures/linux_vst3_bundle)
     add_subdirectory(test/fixtures/linux_webview_optional)
     add_subdirectory(test/fixtures/host_probe)
     add_subdirectory(test/fixtures/scale_probe)
