@@ -7,7 +7,7 @@
 
 #include "../core/platform/platform/linux/meminfo_pressure.hpp"
 #include "../core/view/platform/linux/atspi_text_offsets.hpp"
-#include "../core/view/platform/linux/xdnd_parse.hpp"
+#include "../core/view/platform/linux/xdnd_selection.hpp"
 #include <pulp/view/platform/atspi_geometry.hpp>
 
 #include <string>
@@ -98,9 +98,9 @@ TEST_CASE("meminfo lines parse with presence", "[view][linux][pure]") {
 TEST_CASE("xdnd teardown clears only a selection this source still owns", "[view][linux][pure]") {
     using pulp::view::xdnd::owns_selection;
     CHECK(owns_selection(0x42, 0x42));
-    CHECK(!owns_selection(0x99, 0x42));  // another client took it mid-drag
-    CHECK(!owns_selection(0, 0x42));     // already released
-    CHECK(!owns_selection(0, 0));        // no source window
+    CHECK(!owns_selection(0x99, 0x42)); // another client took it mid-drag
+    CHECK(!owns_selection(0, 0x42));    // already released
+    CHECK(!owns_selection(0, 0));       // no source window
 }
 
 } // namespace

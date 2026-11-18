@@ -20,6 +20,7 @@
 // delegate here. Keep the two in sync if the protocol changes.
 
 #include "xdnd_parse.hpp"  // build_uri_list
+#include "xdnd_selection.hpp"
 
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
