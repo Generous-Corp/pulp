@@ -880,19 +880,26 @@ jobs:
               # input gets, so a foreign-pool label never reaches runs-on.
               sys.path.insert(0, str(WORKSPACE / "tools" / "scripts"))
               import windows_runner_selector
-              try:
-                  lane_selector = windows_runner_selector.resolve(
-                      os.environ.get("LOCAL_WINDOWS_X64_RUNS_ON_JSON", "").strip()
-                      or json.dumps(windows_runner_selector.DEFAULT_SELF_HOSTED)
-                  )
-              except windows_runner_selector.SelectorError as exc:
-                  sys.exit(
-                      "PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON refused: " + str(exc)
-                  )
-              if lane_selector.startswith("["):
-                  os.environ["EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON"] = lane_selector
-              else:
+              lane_raw = os.environ.get("LOCAL_WINDOWS_X64_RUNS_ON_JSON", "").strip()
+              retired_macpro_lane = "pulp-host-macpro" in lane_raw.casefold()
+              if retired_macpro_lane:
+                  # macpro is retired. Treat its stale repository selector as
+                  # an opt-in to the hosted Windows fallback until settings
+                  # cleanup removes it.
                   os.environ["WORKFLOW_DISPATCH_ALLOW_HOSTED_WINDOWS"] = "true"
+              else:
+                  try:
+                      lane_selector = windows_runner_selector.resolve(
+                          lane_raw or json.dumps(windows_runner_selector.DEFAULT_SELF_HOSTED)
+                      )
+                  except windows_runner_selector.SelectorError as exc:
+                      sys.exit(
+                          "PULP_LOCAL_WINDOWS_X64_RUNS_ON_JSON refused: " + str(exc)
+                      )
+                  if lane_selector.startswith("["):
+                      os.environ["EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON"] = lane_selector
+                  else:
+                      os.environ["WORKFLOW_DISPATCH_ALLOW_HOSTED_WINDOWS"] = "true"
           windows_runs_on = run([
               "--target-name", "Windows (x64)",
               "--mode", "provider",
