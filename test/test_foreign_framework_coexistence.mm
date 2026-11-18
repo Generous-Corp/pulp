@@ -32,6 +32,8 @@
 // process. Construction alone gives a real NSWindow-backed host, and we pump
 // the run loop by hand exactly like an embedding host would.
 
+#include <pulp/platform/test_visibility.hpp>
+#import <CoreGraphics/CoreGraphics.h>
 #import <AppKit/AppKit.h>
 #import <Foundation/Foundation.h>
 
@@ -45,6 +47,7 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <string>
 #include <thread>
 
 namespace {
@@ -116,7 +119,7 @@ TEST_CASE("Pulp CPU-host idle pump fires under a foreign modal run-loop mode",
                   styleMask:NSWindowStyleMaskTitled
                     backing:NSBackingStoreBuffered
                       defer:YES];
-    [foreign orderFront:nil];
+    pulp::platform::order_in_window(foreign, false);
 
     // Sanity: the pump fires in the ordinary default mode.
     pump_run_loop(NSDefaultRunLoopMode, 200ms);
@@ -192,7 +195,7 @@ TEST_CASE("Pulp timers, UI, and audio stay live across a foreign window's lifecy
                   styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskResizable)
                     backing:NSBackingStoreBuffered
                       defer:YES];
-    [foreign orderFront:nil];
+    pulp::platform::order_in_window(foreign, false);
     pump_run_loop(NSDefaultRunLoopMode, 80ms);
 
     // Drive a Pulp UI interaction while the foreign window is up.
@@ -206,7 +209,7 @@ TEST_CASE("Pulp timers, UI, and audio stay live across a foreign window's lifecy
 
     // ── focus ─────────────────────────────────────────────────────────────
     [foreign makeFirstResponder:[foreign contentView]];
-    [foreign orderFront:nil];
+    pulp::platform::order_in_window(foreign, false);
     pump_run_loop(NSEventTrackingRunLoopMode, 80ms);
     root.set_bounds({0, 0, 320, 240});
     root.simulate_click({80, 60});
@@ -231,4 +234,139 @@ TEST_CASE("Pulp timers, UI, and audio stay live across a foreign window's lifecy
     REQUIRE(audio_ok.load(std::memory_order_relaxed));
     // UI interaction routed correctly both before and after the foreign churn.
     REQUIRE(root.clicks.load(std::memory_order_relaxed) == 2);
+}
+
+// ── Test-default window policy (PULP_TEST_OFFSCREEN) ──────────────────────────
+// Windows ordered in under the test default present for real but are
+// transparent, click-through and never activate the application.
+
+namespace {
+
+struct OffscreenEnvGuard {
+    std::string name;
+    std::string old;
+    bool had;
+    OffscreenEnvGuard(const char* n, const char* value) : name(n) {
+        const char* o = std::getenv(n);
+        had = o != nullptr;
+        if (had)
+            old = o;
+        if (value)
+            setenv(n, value, 1);
+        else
+            unsetenv(n);
+    }
+    ~OffscreenEnvGuard() {
+        if (had)
+            setenv(name.c_str(), old.c_str(), 1);
+        else
+            unsetenv(name.c_str());
+    }
+};
+
+void offscreen_pump(double seconds) {
+    [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:seconds]];
+}
+
+// Alpha of the on-screen window-server entry for `number`, or -1 when the
+// window server lists no on-screen entry for it.
+double offscreen_window_server_alpha(CGWindowID number) {
+    CFArrayRef list = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID);
+    double alpha = -1.0;
+    for (NSDictionary* info in (__bridge NSArray*)list) {
+        if ([info[(__bridge NSString*)kCGWindowNumber] unsignedIntValue] == number) {
+            alpha = [info[(__bridge NSString*)kCGWindowAlpha] doubleValue];
+            break;
+        }
+    }
+    if (list)
+        CFRelease(list);
+    return alpha;
+}
+
+} // namespace
+
+TEST_CASE("test_windows_offscreen follows the environment", "[offscreen][mac]") {
+    {
+        OffscreenEnvGuard off("PULP_TEST_OFFSCREEN", nullptr);
+        OffscreenEnvGuard show("PULP_TEST_SHOW_WINDOWS", nullptr);
+        CHECK_FALSE(pulp::platform::test_windows_offscreen());
+    }
+    {
+        OffscreenEnvGuard off("PULP_TEST_OFFSCREEN", "1");
+        OffscreenEnvGuard show("PULP_TEST_SHOW_WINDOWS", nullptr);
+        CHECK(pulp::platform::test_windows_offscreen());
+    }
+    {
+        OffscreenEnvGuard off("PULP_TEST_OFFSCREEN", "1");
+        OffscreenEnvGuard show("PULP_TEST_SHOW_WINDOWS", "1");
+        CHECK_FALSE(pulp::platform::test_windows_offscreen());
+    }
+    {
+        OffscreenEnvGuard off("PULP_TEST_OFFSCREEN", "0");
+        OffscreenEnvGuard show("PULP_TEST_SHOW_WINDOWS", nullptr);
+        CHECK_FALSE(pulp::platform::test_windows_offscreen());
+    }
+}
+
+TEST_CASE("an ordered-in test window is invisible to the user", "[offscreen][mac]") {
+    OffscreenEnvGuard off("PULP_TEST_OFFSCREEN", "1");
+    OffscreenEnvGuard show("PULP_TEST_SHOW_WINDOWS", nullptr);
+    [NSApplication sharedApplication];
+    [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+
+    NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(200, 200, 300, 200)
+                                                   styleMask:NSWindowStyleMaskTitled
+                                                     backing:NSBackingStoreBuffered
+                                                       defer:NO];
+    window.releasedWhenClosed = NO;
+    pulp::platform::order_in_window(window);
+    pulp::platform::activate_app_for_window();
+    offscreen_pump(0.2);
+
+    // Real: AppKit considers it ordered in.
+    CHECK(window.isVisible);
+    // Invisible: transparent and click-through, and the app never activated.
+    CHECK(window.alphaValue == 0.0);
+    CHECK(window.ignoresMouseEvents);
+    CHECK_FALSE(NSApp.isActive);
+    // Control: the window server lists it on screen, so the alpha reading
+    // below is about this window and not an empty result.
+    const double alpha = offscreen_window_server_alpha((CGWindowID)window.windowNumber);
+    if (alpha >= 0.0)
+        CHECK(alpha == 0.0);
+
+    [window orderOut:nil];
+}
+
+TEST_CASE("a window host under the test default still presents frames", "[offscreen][mac]") {
+    OffscreenEnvGuard off("PULP_TEST_OFFSCREEN", "1");
+    OffscreenEnvGuard show("PULP_TEST_SHOW_WINDOWS", nullptr);
+    (void)[NSApplication sharedApplication];
+
+    pulp::view::View root;
+    pulp::view::WindowOptions opts;
+    opts.width = 240;
+    opts.height = 160;
+    opts.use_gpu = false;
+    auto host = pulp::view::WindowHost::create(root, opts);
+    REQUIRE(host != nullptr);
+
+    std::atomic<int> ticks{0};
+    host->set_idle_callback([&ticks] { ticks.fetch_add(1, std::memory_order_relaxed); });
+    host->show();
+    host->repaint();
+    offscreen_pump(0.4);
+
+    NSWindow* window = (__bridge NSWindow*)host->native_window_handle();
+    REQUIRE(window != nil);
+    CHECK(host->is_visible());
+    CHECK(window.alphaValue == 0.0);
+    CHECK(window.ignoresMouseEvents);
+    CHECK_FALSE(NSApp.isActive);
+    // Presentation is real: the host's frame pump ticked and it can produce pixels.
+    CHECK(ticks.load() > 0);
+    CHECK_FALSE(host->capture_png().empty());
+
+    host->hide();
 }

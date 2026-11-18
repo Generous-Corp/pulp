@@ -1,3 +1,4 @@
+#include <pulp/platform/test_visibility.hpp>
 #include <pulp/view/sdl_window_host.hpp>
 
 #ifdef PULP_HAS_SDL3
@@ -130,7 +131,16 @@ class SdlWindowHostImpl : public SdlWindowHost {
     }
 
     void show() {
-        if (window_) SDL_ShowWindow(window_);
+        if (!window_)
+            return;
+        // Under a test run the window is shown but parked far outside any
+        // display and fully transparent where the platform supports it, so it
+        // presents without appearing on the user's screen.
+        if (pulp::platform::test_windows_offscreen()) {
+            SDL_SetWindowPosition(window_, -32000, -32000);
+            SDL_SetWindowOpacity(window_, 0.0f);
+        }
+        SDL_ShowWindow(window_);
     }
 
     void hide() {

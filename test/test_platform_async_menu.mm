@@ -8,6 +8,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/platform/test_visibility.hpp>
 #import <Cocoa/Cocoa.h>
 
 #include <chrono>
@@ -54,7 +55,7 @@ struct OffscreenWindow {
         window.releasedWhenClosed = NO;
         view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 480, 320)];
         window.contentView = view;
-        [window orderFrontRegardless];
+        pulp::platform::order_in_window(window, false);
     }
     ~OffscreenWindow() {
         [window orderOut:nil];
