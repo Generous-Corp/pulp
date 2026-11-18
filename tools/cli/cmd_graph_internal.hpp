@@ -1,10 +1,10 @@
 // cmd_graph_internal.hpp: private shared surface for the `pulp graph`
 // translation units.
 //
-//   cmd_graph.cpp          dispatcher plus the inspect, validate, fmt, save and
-//                          canonicalize handlers
-//   cmd_graph_common.cpp   code names, the JSON error envelope and the bounded
-//                          document reader shared by the handlers
+//   cmd_graph.cpp          dispatcher, the shared helpers declared below (code
+//                          names, JSON error envelope, bounded document reader)
+//                          and the inspect, validate, fmt, save and canonicalize
+//                          handlers
 //   cmd_graph_probe.cpp    `pulp graph probe`
 //   cmd_graph_render.cpp   `pulp graph render` and `pulp graph report`
 //   cmd_graph_diff.cpp     `pulp graph diff`

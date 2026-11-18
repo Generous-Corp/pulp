@@ -272,8 +272,8 @@ TEST_CASE("every CLI graph code the source emits is documented", "[cli][graph][d
     // `pulp graph` is split across these sources; the scan reads all of them.
     std::string source;
     std::string unreadable;
-    for (const char* file : {"cmd_graph.cpp", "cmd_graph_common.cpp", "cmd_graph_diff.cpp",
-                             "cmd_graph_probe.cpp", "cmd_graph_render.cpp"}) {
+    for (const char* file :
+         {"cmd_graph.cpp", "cmd_graph_diff.cpp", "cmd_graph_probe.cpp", "cmd_graph_render.cpp"}) {
         const auto text = read_text(root / "tools/cli" / file);
         if (text.empty())
             unreadable += std::string(file) + " ";

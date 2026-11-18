@@ -471,12 +471,15 @@ provide the required headless/CDP capture capabilities".
 
 ### `pulp graph` is split across `tools/cli/cmd_graph*.cpp`
 
-`cmd_graph.cpp` is the dispatcher plus the single-document handlers
-(inspect, explain, validate, fmt, canonicalize, save). `probe` lives in
-`cmd_graph_probe.cpp`, `render` and `report` in `cmd_graph_render.cpp`, `diff`
-in `cmd_graph_diff.cpp`, and the code names, JSON error envelope and bounded
-document reader they share in `cmd_graph_common.cpp`, declared by the private
-`cmd_graph_internal.hpp`. A new graph source file must be added to the
+`cmd_graph.cpp` is the dispatcher, the single-document handlers (inspect,
+explain, validate, fmt, canonicalize, save) and the code names, JSON error
+envelope and bounded document reader every subcommand shares. `probe` lives in
+`cmd_graph_probe.cpp`, `render` and `report` in `cmd_graph_render.cpp` and
+`diff` in `cmd_graph_diff.cpp`; the private `cmd_graph_internal.hpp` declares
+what crosses between them. Each new source is one more translation unit that
+reaches the host headers, so the header fan-out guard asks for a
+`Fanout-Grow:` trailer; fold a small helper into an existing file instead of
+adding a source for it. A new graph source file must be added to the
 `pulp-cli` source list in `tools/cli/CMakeLists.txt` and to the file list that
 `every CLI graph code the source emits is documented` in
 `test/test_cli_graph_code_parity.cpp` scans; that test finds emitted codes by
