@@ -459,6 +459,33 @@ TEST_CASE("All Sound Off and a steal end a drain early",
     }
 }
 
+TEST_CASE("CC121 after a same-sample steal resets the replacement's expression",
+          "[host][graph][voice-bank][retirement][pedal]") {
+    auto bank = make_bank();
+    set_policy(*bank, drain(kVoiceBankSlots, kTail));
+    std::vector<Timed> chord;
+    for (std::uint8_t i = 0; i < kVoiceBankSlots; ++i)
+        chord.push_back({0, midi::MidiEvent::note_on(static_cast<std::uint8_t>(1 + i),
+                                                     static_cast<std::uint8_t>(40 + i), 100)});
+    std::vector<float> left;
+    play(*bank, 0, 4, {4}, chord, left);
+    reset(*bank);
+    REQUIRE(bank->retirement_stats().draining == kVoiceBankSlots);
+    // Steal, bend, release and CC121 land on one sample, before any render
+    // slice reconciles the stolen drain.
+    play(*bank, 4, 6, {2},
+         {{4, midi::MidiEvent::note_on(9, 90, 100)},
+          {4, midi::MidiEvent::pitch_bend(9, 16000)},
+          {4, midi::MidiEvent::note_off(9, 90)},
+          {4, midi::MidiEvent::cc(9, 121, 0)}},
+         left);
+    const auto& voice = voices(*bank).allocator().voice(0);
+    REQUIRE(voice.note_number() == 90);
+    REQUIRE(voice.releasing());
+    CHECK(voice.pitch_bend() == 0.0f);
+    CHECK(bank->retirement_stats().interrupted == 1);
+}
+
 TEST_CASE("Activation retires voices under the same policy",
           "[host][graph][voice-bank][retirement]") {
     for (const bool drains : {false, true}) {

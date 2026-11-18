@@ -309,6 +309,9 @@ struct VoiceBankBinding::Impl {
         for (std::uint32_t slot = 0; slot < kVoiceBankSlots; ++slot) {
             midi::MpeNoteState note{};
             bool releasing = false;
+            // A steal earlier in the same slice leaves a stale drain entry on the
+            // replacement; reconcile it so only a voice still draining is skipped.
+            observe_drain(slot);
             if (drains[slot].active || !owner->slot_note(slot, note, releasing) ||
                 !covers(scope, note.channel) || (!releasing && !held[slot].active))
                 continue;
