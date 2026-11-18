@@ -328,6 +328,71 @@ class ExamplesValidationWorkflowTests(unittest.TestCase):
         )
 
 
+class _Ctx:
+    """Attribute bag for the tiny GitHub-expression evaluator below."""
+
+    def __init__(self, **values):
+        self._values = values
+
+    def __getattr__(self, name):
+        value = self._values.get(name, "")
+        return _Ctx(**value) if isinstance(value, dict) else value
+
+
+class PushLinuxTestsOptInTests(unittest.TestCase):
+    """`Test (non-Windows)` does not run on push unless PULP_PUSH_LINUX_TESTS is 1."""
+
+    def condition(self) -> str:
+        data = yaml.safe_load((ROOT / ".github" / "workflows" / "build.yml").read_text(encoding="utf-8"))
+        steps = data["jobs"]["build"]["steps"]
+        step = [x for x in steps if x.get("name") == "Test (non-Windows)"]
+        self.assertEqual(len(step), 1)
+        return step[0]["if"]
+
+    def evaluate(self, event: str, push_var: str, suite: str = "full") -> bool:
+        expr = " ".join(self.condition().split())
+        expr = expr.replace("&&", " and ").replace("||", " or ")
+        env = {
+            "runner": _Ctx(os="Linux"),
+            "github": _Ctx(event_name=event),
+            "matrix": _Ctx(lane="gate"),
+            "vars": _Ctx(PULP_PUSH_LINUX_TESTS=push_var),
+            "steps": _Ctx(
+                pr_suite={"outputs": {"suite": suite}},
+                clean_merge={"outputs": {"lane": ""}},
+            ),
+        }
+        return bool(eval(expr, {"__builtins__": {}}, env))  # noqa: S307 - fixed workflow text
+
+    def test_push_skips_the_tests_unless_the_variable_is_one(self) -> None:
+        self.assertFalse(self.evaluate("push", ""))
+        self.assertFalse(self.evaluate("push", "0"))
+        self.assertFalse(self.evaluate("push", "true"))
+        self.assertTrue(self.evaluate("push", "1"))
+
+    def test_other_events_are_unchanged_by_the_variable(self) -> None:
+        for var in ("", "1"):
+            self.assertTrue(self.evaluate("merge_group", var))
+            self.assertTrue(self.evaluate("workflow_dispatch", var))
+            self.assertTrue(self.evaluate("pull_request", var, suite="full"))
+            self.assertFalse(self.evaluate("pull_request", var, suite="fast"))
+
+    def test_push_keeps_feeding_the_a2t_headroom_issue(self) -> None:
+        data = yaml.safe_load((ROOT / ".github" / "workflows" / "build.yml").read_text(encoding="utf-8"))
+        steps = {x.get("id") or x.get("name"): x for x in data["jobs"]["build"]["steps"]}
+        measure = steps["a2t_push_measure"]
+        self.assertTrue(measure["continue-on-error"])
+        self.assertIn("vars.PULP_PUSH_LINUX_TESTS != '1'", measure["if"])
+        self.assertIn("-L '^pr-guard$'", measure["run"])
+        upload = steps["Upload A2T scope-history headroom"]
+        self.assertIn("steps.a2t_push_measure.outcome != 'skipped'", upload["if"])
+
+    def test_push_still_saves_the_caches(self) -> None:
+        text = (ROOT / ".github" / "workflows" / "build.yml").read_text(encoding="utf-8")
+        self.assertIn("Save ccache (main push, GitHub-hosted Linux/Windows)", text)
+        self.assertIn("Save FetchContent sources (main push, GitHub-hosted Linux/Windows)", text)
+
+
 class ExampleValidatorInventoryTests(unittest.TestCase):
     def test_enabled_formats_require_their_validators(self) -> None:
         cache = "PULP_HAS_CLAP:INTERNAL=TRUE\nPULP_HAS_AUSDK:INTERNAL=ON\n"
