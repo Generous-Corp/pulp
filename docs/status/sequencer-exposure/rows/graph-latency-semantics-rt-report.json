@@ -95,7 +95,7 @@
       "evidence": [
         {
           "kind": "cli_handler",
-          "path": "tools/cli/cmd_graph.cpp",
+          "path": "tools/cli/cmd_graph_render.cpp",
           "needles": [
             "int report_graph("
           ]

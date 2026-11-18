@@ -114,6 +114,10 @@ add_executable(pulp-cli
     inspector_shipping_report.cpp
     cmd_bake.cpp
     cmd_graph.cpp
+    cmd_graph_common.cpp
+    cmd_graph_diff.cpp
+    cmd_graph_probe.cpp
+    cmd_graph_render.cpp
     notary_env.cpp
     cmd_upgrade.cpp
     cmd_validate.cpp
