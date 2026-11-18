@@ -7119,8 +7119,8 @@ usually finished, so nothing is lost) rather than adding more.
 
 Every advisory hosted lane that runs on `pull_request` already groups per PR ref
 with `cancel-in-progress` on for PR events, so a new push retires the previous
-head's runs. That includes `codeql-advanced.yml` (six hosted jobs, one on macOS),
-pinned by `tools/scripts/test_codeql_workflow_concurrency.py`. A backlog of
+head's runs. That includes `codeql-advanced.yml` (five hosted jobs, one on macOS; C++ runs
+nightly in 15 shards, see `analyze-cpp`), pinned by `tools/scripts/test_codeql_workflow_concurrency.py`. A backlog of
 Coverage / Sanitizers / CodeQL runs is therefore one run per *open PR*, not
 superseded heads; check `head_branch` for duplicates before reaching for more
 concurrency settings. Required checks keep their own non-cancelling groups.
