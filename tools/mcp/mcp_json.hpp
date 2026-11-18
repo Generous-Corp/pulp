@@ -117,6 +117,126 @@ inline std::string extract_string(const std::string& json, const std::string& ke
     return json.substr(start + 1, end - start - 1);
 }
 
+// Decode the JSON string literal whose opening quote is at `start` into
+// `out`, resolving every escape (including \uXXXX and surrogate pairs) to
+// UTF-8. Returns false for an unterminated literal, a raw control character,
+// an unknown escape, a malformed or unpaired \u escape, or an escaped NUL,
+// which no file path or argv entry can carry.
+inline bool decode_json_string_at(const std::string& json, std::size_t start, std::string& out) {
+    if (start >= json.size() || json[start] != '"')
+        return false;
+    const auto hex4 = [&](std::size_t at, unsigned& value) {
+        if (at + 4 > json.size())
+            return false;
+        value = 0;
+        for (std::size_t i = at; i < at + 4; ++i) {
+            const auto c = static_cast<unsigned char>(json[i]);
+            if (!std::isxdigit(c))
+                return false;
+            value = value * 16 +
+                    static_cast<unsigned>(std::isdigit(c) ? c - '0' : std::tolower(c) - 'a' + 10);
+        }
+        return true;
+    };
+    std::string decoded;
+    for (std::size_t i = start + 1; i < json.size(); ++i) {
+        const auto c = static_cast<unsigned char>(json[i]);
+        if (c == '"') {
+            out = std::move(decoded);
+            return true;
+        }
+        if (c < 0x20)
+            return false;
+        if (c != '\\') {
+            decoded += static_cast<char>(c);
+            continue;
+        }
+        if (++i >= json.size())
+            return false;
+        switch (json[i]) {
+        case '"':
+            decoded += '"';
+            break;
+        case '\\':
+            decoded += '\\';
+            break;
+        case '/':
+            decoded += '/';
+            break;
+        case 'b':
+            decoded += '\b';
+            break;
+        case 'f':
+            decoded += '\f';
+            break;
+        case 'n':
+            decoded += '\n';
+            break;
+        case 'r':
+            decoded += '\r';
+            break;
+        case 't':
+            decoded += '\t';
+            break;
+        case 'u': {
+            unsigned cp = 0;
+            if (!hex4(i + 1, cp))
+                return false;
+            i += 4;
+            if (cp >= 0xDC00 && cp <= 0xDFFF)
+                return false;
+            if (cp >= 0xD800 && cp <= 0xDBFF) {
+                unsigned low = 0;
+                if (i + 2 >= json.size() || json[i + 1] != '\\' || json[i + 2] != 'u' ||
+                    !hex4(i + 3, low) || low < 0xDC00 || low > 0xDFFF)
+                    return false;
+                i += 6;
+                cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
+            }
+            if (cp == 0)
+                return false;
+            if (cp < 0x80) {
+                decoded += static_cast<char>(cp);
+            } else if (cp < 0x800) {
+                decoded += static_cast<char>(0xC0 | (cp >> 6));
+                decoded += static_cast<char>(0x80 | (cp & 0x3F));
+            } else if (cp < 0x10000) {
+                decoded += static_cast<char>(0xE0 | (cp >> 12));
+                decoded += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+                decoded += static_cast<char>(0x80 | (cp & 0x3F));
+            } else {
+                decoded += static_cast<char>(0xF0 | (cp >> 18));
+                decoded += static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
+                decoded += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+                decoded += static_cast<char>(0x80 | (cp & 0x3F));
+            }
+            break;
+        }
+        default:
+            return false;
+        }
+    }
+    return false;
+}
+
+// The decoded string value for `key` in a flat JSON object. Unlike
+// extract_string, escapes are resolved, so the result is the caller's actual
+// text (a Windows path keeps single backslashes). Returns false when `key` is
+// absent, is not a string, or its literal is malformed.
+inline bool extract_decoded_string(const std::string& json, const std::string& key,
+                                   std::string& out) {
+    auto key_pos = json.find("\"" + key + "\"");
+    if (key_pos == std::string::npos)
+        return false;
+    auto colon = json.find(':', key_pos + key.size() + 2);
+    if (colon == std::string::npos)
+        return false;
+    auto start = colon + 1;
+    while (start < json.size() && std::isspace(static_cast<unsigned char>(json[start])))
+        ++start;
+    return decode_json_string_at(json, start, out);
+}
+
 // Pull the raw token (string-with-quotes, number, or null) for `key`.
 inline std::string extract_raw(const std::string& json, const std::string& key) {
     auto key_pos = json.find("\"" + key + "\"");
