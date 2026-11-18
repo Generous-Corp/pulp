@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261118-linux-x11-gl-surface-watch",
+  "created_at": "2026-11-18T12:41:50Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "pulp-native gains an X11 GlSurface backend (GLX, input, resize following) and X11 translation tables, and the Linux SDK configure requires it to build. The touched paths are the pulp-native integration, the release workflow's Linux SDK configure flag, tests and docs; no design-import, Chromium, rendering, or packaging authority moves.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-native-gl-surface-x11",
+    "ctest --test-dir build -R pulp-test-native-x11-translate",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
