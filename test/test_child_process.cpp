@@ -438,7 +438,8 @@ TEST_CASE("run honors a non-ASCII working directory", "[child_process][edge][uni
 
     ProcessOptions opts;
     opts.timeout_ms = 5000;
-    opts.working_directory = std::string(dir.u8string().begin(), dir.u8string().end());
+    const auto dir_u8 = dir.u8string();
+    opts.working_directory = std::string(dir_u8.begin(), dir_u8.end());
 
 #ifdef _WIN32
     auto r = ChildProcess::run("cmd", {"/c", "type nul > marker.txt"}, opts);
