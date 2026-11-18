@@ -1162,6 +1162,12 @@ TEST_CASE("shared admission refuses each planted manifest or consumer defect",
     const auto good = reference_manifest(*rig.neural, *rig.convolution);
     // Positive control.
     REQUIRE(admit(good, observed).error == AdmissionError::None);
+    // Like every other case of this proof, it is evidence only from a host
+    // that executes the consumers on a GPU; elsewhere it skips, so a host
+    // without GPU execution skips the whole proof instead of passing it on
+    // this case alone.
+    rig.render(64 * 60, fixture.pattern);
+    skip_unless_gpu_executed(rig);
 
     SECTION("identity drift") {
         rig.neural->plant_weight_drift();

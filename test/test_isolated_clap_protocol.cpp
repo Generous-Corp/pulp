@@ -2,6 +2,7 @@
 #include "isolated_clap_endpoint.hpp"
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <catch2/catch_test_macros.hpp>
 #include <filesystem>
 #include <fstream>
@@ -162,6 +163,36 @@ TEST_CASE("Isolated CLAP worker hello checks are shared by every transport", "[h
     hello.build.fill('c');
     CHECK(record_text(hello.build).size() == hello.build.size());
     CHECK_FALSE(hello_identity_matches(hello, worker, plugin, build));
+}
+
+TEST_CASE("Isolated CLAP launch gives hello and the load report each a full budget",
+          "[host][isolation]") {
+    // Both transports derive their launch deadlines from these values: the
+    // child-process session deadline is start + kLaunchSessionBudget and is
+    // enforced again after the session callback returns.
+    using namespace host::isolation;
+    using std::chrono::milliseconds;
+    const std::chrono::steady_clock::time_point start{};
+    const auto session = start + kLaunchSessionBudget;
+    // A phase that finishes inside its own deadline must also finish before
+    // the session deadline, for every split of the two phases.
+    for (const auto hello_ms : {0, 1, 2999, 3000, 4999}) {
+        for (const auto load_ms : {0, 1, 2999, 3000, 4999}) {
+            CAPTURE(hello_ms, load_ms);
+            const auto hello_deadline = launch_exchange_deadline(start, session);
+            REQUIRE(hello_deadline - start == kLifecycleExchangeBudget);
+            const auto hello_done = start + milliseconds(hello_ms);
+            REQUIRE(hello_done < hello_deadline);
+            const auto load_deadline = launch_exchange_deadline(hello_done, session);
+            REQUIRE(load_deadline - hello_done == kLifecycleExchangeBudget);
+            const auto load_done = hello_done + milliseconds(load_ms);
+            REQUIRE(load_done < load_deadline);
+            REQUIRE(load_done < session);
+        }
+    }
+    // An exchange never extends past the session that carries it.
+    REQUIRE(launch_exchange_deadline(session - milliseconds(1), session) == session);
+    REQUIRE(launch_exchange_deadline(session + milliseconds(1), session) == session);
 }
 
 TEST_CASE("Isolated CLAP hashes a plain module file as itself", "[host][isolation]") {

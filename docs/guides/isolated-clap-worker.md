@@ -61,7 +61,9 @@ node.
 Retain both handles. Stop callbacks and drain graph readers before calling
 `pause`, `checkpoint`, `stop` or `cleanup`; these are control-thread operations.
 A slot may be prepared once. Load, prepare, restore, checkpoint and graceful
-destruction each have five-second control deadlines.
+destruction each have five-second control deadlines. The launch carries two of
+them, the hello exchange and then the load report, inside one ten-second
+session, so a slow hello does not shorten the vendor load's five seconds.
 
 Stopped checkpoint capture invokes native CLAP state saving through a writer
 capped at 1 MiB. Any failed or oversized write invalidates the attempt even if
