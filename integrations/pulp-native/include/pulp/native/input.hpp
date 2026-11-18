@@ -350,6 +350,11 @@ PointerButton pointer_button_for_x11(unsigned button, int& number) noexcept;
 /// button.
 bool wheel_delta_for_x11_button(unsigned button, double& dx, double& dy) noexcept;
 
+/// The X11 core cursor-font shape (`XC_*`) for `cursor`: `XC_left_ptr` for the
+/// arrow, `XC_hand2` for the pointing hand, `XC_xterm` for the I-beam, and so
+/// on. Pure; the X11 backend passes it to `XCreateFontCursor`.
+unsigned x11_cursor_shape(Cursor cursor) noexcept;
+
 /// The `NSCursor*` for `cursor`. A cursor the running system has no public
 /// equivalent for falls back to the arrow; `cursor_is_native` says which.
 void* ns_cursor_for(Cursor cursor);

@@ -80,7 +80,8 @@ Until it is pumped nothing follows the host window's size and no input arrives.
   keeps the keyboard unless the client holds it (`set_keyboard_focus`); a key the
   client declines, and a wheel event with no wheel handler, is sent on to the
   host window. Text covers ASCII and Latin-1 only, because a plug-in cannot set
-  the locale an input method needs. Drops and cursors are not provided.
+  the locale an input method needs. Drops are not provided.
+- **Cursor.** `set_cursor` takes the same `Cursor` set as `MetalSurface` and maps it to the X cursor font (`x11_cursor_shape`); the cursor stays until set again and is applied again on re-attach.
 - **Errors.** A window that vanishes under the surface, or a context request the
   server rejects, raises an X error. The surface contains the errors of its two
   connections and leaves every other connection's errors to the handler that was

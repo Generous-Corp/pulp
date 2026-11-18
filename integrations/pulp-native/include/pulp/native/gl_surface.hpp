@@ -216,6 +216,10 @@ class GlSurface {
     /// Where input goes (X11; elsewhere the handler is kept and never called).
     /// Unset members drop their events. UI thread.
     void set_input_handler(InputHandler handler);
+    /// The cursor shown over the surface (X11; elsewhere kept and not shown). It
+    /// stays until set again, and is applied again if the surface re-attaches.
+    /// UI thread.
+    void set_cursor(Cursor cursor);
     /// What the client holds the keyboard for. With `none` the surface never
     /// takes keyboard focus, so the host keeps every key; otherwise it takes
     /// focus and offers keys to the handler first (`route_key`), forwarding a

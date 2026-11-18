@@ -44,6 +44,7 @@
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
+#include <X11/cursorfont.h>
 #include <X11/keysym.h>
 
 namespace pulp::native {
@@ -54,6 +55,10 @@ namespace {
 static_assert(ShiftMask == 1u << 0 && LockMask == 1u << 1 && ControlMask == 1u << 2 &&
               Mod1Mask == 1u << 3 && Mod4Mask == 1u << 6);
 static_assert(Button1Mask == 1u << 8 && Button2Mask == 1u << 9 && Button3Mask == 1u << 10);
+static_assert(XC_left_ptr == 68 && XC_hand2 == 60 && XC_hand1 == 58 && XC_fleur == 52 &&
+              XC_xterm == 152 && XC_crosshair == 34 && XC_watch == 150 &&
+              XC_sb_h_double_arrow == 108 && XC_sb_v_double_arrow == 116 &&
+              XC_top_right_corner == 136 && XC_top_left_corner == 134 && XC_X_cursor == 0);
 static_assert(XK_a == 0x61 && XK_Return == 0xff0d && XK_Escape == 0xff1b && XK_F1 == 0xffbe &&
               XK_KP_0 == 0xffb0 && XK_KP_Home == 0xff95 && XK_Shift_L == 0xffe1 &&
               XK_Super_L == 0xffeb);
@@ -183,7 +188,8 @@ struct X11Window final : GlSurface::Impl {
     // Keyboard.
     Window previous_focus = 0;
     bool holding_focus = false;
-    std::unordered_map<unsigned, bool> keys_down; // keycode -> client went first
+    std::unordered_map<unsigned, ::Cursor> cursors; // by X cursor-font shape
+    std::unordered_map<unsigned, bool> keys_down;   // keycode -> client went first
     // Multi-click counting.
     Time last_press_time = 0;
     unsigned last_press_button = 0;
@@ -251,6 +257,17 @@ struct X11Window final : GlSurface::Impl {
         }
         event.visibility = visibility;
         listener(event);
+    }
+
+    void apply_cursor() override {
+        if (ui == nullptr || child == 0 || parent_gone)
+            return;
+        const unsigned shape = x11_cursor_shape(cursor);
+        auto it = cursors.find(shape);
+        if (it == cursors.end())
+            it = cursors.emplace(shape, XCreateFontCursor(ui, shape)).first;
+        XDefineCursor(ui, child, it->second);
+        XFlush(ui);
     }
 
     void apply_scale() override {
@@ -392,6 +409,7 @@ struct X11Window final : GlSurface::Impl {
         visibility.window_visible = true;
         update_geometry();
         apply_keyboard_focus();
+        apply_cursor();
         return true;
     }
 
@@ -403,6 +421,9 @@ struct X11Window final : GlSurface::Impl {
             XDestroyWindow(ui, child);
         if (parent != 0 && !parent_gone)
             XSelectInput(ui, parent, NoEventMask);
+        for (auto& entry : cursors)
+            XFreeCursor(ui, entry.second);
+        cursors.clear();
         if (colormap != 0)
             XFreeColormap(ui, colormap);
         sync_failed(ui); // errors from a window that is already gone

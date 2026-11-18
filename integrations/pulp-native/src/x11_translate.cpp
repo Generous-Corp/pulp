@@ -170,6 +170,36 @@ Key key_for_x11_keysym(std::uint32_t k) noexcept {
     }
 }
 
+unsigned x11_cursor_shape(Cursor cursor) noexcept {
+    switch (cursor) {
+    case Cursor::arrow:
+        return 68; // XC_left_ptr
+    case Cursor::pointing_hand:
+        return 60; // XC_hand2
+    case Cursor::open_hand:
+        return 58; // XC_hand1
+    case Cursor::closed_hand:
+        return 52; // XC_fleur
+    case Cursor::ibeam:
+        return 152; // XC_xterm
+    case Cursor::crosshair:
+        return 34; // XC_crosshair
+    case Cursor::busy:
+        return 150; // XC_watch
+    case Cursor::resize_horizontal:
+        return 108; // XC_sb_h_double_arrow
+    case Cursor::resize_vertical:
+        return 116; // XC_sb_v_double_arrow
+    case Cursor::resize_diagonal_nesw:
+        return 136; // XC_top_right_corner
+    case Cursor::resize_diagonal_nwse:
+        return 134; // XC_top_left_corner
+    case Cursor::not_allowed:
+        return 0; // XC_X_cursor
+    }
+    return 68;
+}
+
 std::uint32_t modifiers_from_x11_state(unsigned state) noexcept {
     std::uint32_t m = 0;
     if (state & kShiftMask)
