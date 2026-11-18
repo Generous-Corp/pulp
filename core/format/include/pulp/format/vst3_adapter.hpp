@@ -687,6 +687,11 @@ class PulpVst3Processor : public Steinberg::Vst::SingleComponentEffect,
     // rendered frames. Reset at the top of every process() that decodes
     // events; its refusal count is published on ProcessContext::timing.
     pulp::format::EventTimeAdmission event_admission_{};
+    // Audio thread only: a block refused a host event, which may have been a
+    // release the count cannot identify, so the next block the Processor
+    // observes carries `ProcessContext::reset_requested` and a fresh MPE
+    // tracker. Cleared once a Processor call has observed that reset.
+    bool refused_event_reset_pending_ = false;
 
     // MainThreadDispatcher backend token. Acquired in initialize(),
     // released in terminate(). On macOS this lets adapter-side and

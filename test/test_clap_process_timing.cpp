@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <set>
 #include <vector>
 
 using namespace pulp;
@@ -38,6 +39,9 @@ constexpr std::uint32_t kMaxFrames = 512;
 struct ObservedBlock {
     ProcessContext ctx;
     std::vector<std::int32_t> offsets;
+    // Notes the probe still holds after this block, applying a requested
+    // reset before the block's events as a voice-owning Processor would.
+    std::size_t held = 0;
 };
 
 std::vector<ObservedBlock>* g_sink = nullptr;
@@ -65,14 +69,26 @@ class TimingProbe final : public Processor {
             for (std::size_t i = 0; i < out.num_samples(); ++i)
                 oc[i] = 0.0f;
         }
+        if (ctx.reset_requested)
+            held_.clear();
+        for (const auto& event : midi_in) {
+            if (event.is_note_on())
+                held_.insert(event.note());
+            else if (event.is_note_off())
+                held_.erase(event.note());
+        }
         if (!g_sink)
             return;
         ObservedBlock block;
         block.ctx = ctx;
         for (const auto& event : midi_in)
             block.offsets.push_back(event.sample_offset);
+        block.held = held_.size();
         g_sink->push_back(block);
     }
+
+  private:
+    std::set<int> held_;
 };
 
 std::unique_ptr<Processor> make_probe() {
@@ -104,9 +120,11 @@ struct ClapHost {
 
     // Run one host block. `steady` < 0 means the host has no steady_time;
     // `transport` absent means no transport event. `event_times` are CLAP
-    // header times. `malformed` delivers a layout the adapter must refuse.
+    // header times of note-ons; `note_off_times` those of note-offs for the
+    // same key. `malformed` delivers a layout the adapter must refuse.
     void run(std::int64_t steady, std::uint32_t frames, std::optional<HostTransport> transport,
-             const std::vector<std::uint32_t>& event_times = {}, bool malformed = false) {
+             const std::vector<std::uint32_t>& event_times = {}, bool malformed = false,
+             const std::vector<std::uint32_t>& note_off_times = {}) {
         std::vector<float> in_l(frames), in_r(frames), out_l(frames), out_r(frames);
         float* in_ptrs[2] = {in_l.data(), in_r.data()};
         float* out_ptrs[2] = {out_l.data(), out_r.data()};
@@ -118,10 +136,15 @@ struct ClapHost {
         out_bus.data32 = out_ptrs;
 
         std::vector<clap_event_note_t> notes;
-        for (const auto t : event_times) {
+        std::vector<std::pair<std::uint32_t, std::uint16_t>> timed;
+        for (const auto t : event_times)
+            timed.emplace_back(t, CLAP_EVENT_NOTE_ON);
+        for (const auto t : note_off_times)
+            timed.emplace_back(t, CLAP_EVENT_NOTE_OFF);
+        for (const auto& [t, type] : timed) {
             clap_event_note_t note{};
             note.header.size = sizeof(note);
-            note.header.type = CLAP_EVENT_NOTE_ON;
+            note.header.type = type;
             note.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
             note.header.time = t;
             note.port_index = 0;
@@ -411,6 +434,45 @@ TEST_CASE("CLAP events in the unrendered tail of an oversized block are refused"
     REQUIRE(host.observed[0].offsets ==
             std::vector<std::int32_t>{static_cast<std::int32_t>(kMaxFrames - 1)});
     REQUIRE(host.observed[0].ctx.timing.refused_events == 2);
+}
+
+TEST_CASE("CLAP requests a reset after refusing a host event so no release is lost",
+          "[process-timing][clap][offsets][reset]") {
+    ClapHost host;
+    // A note-on in the block and its release exactly at the end: the release
+    // is refused, so this block leaves the note held.
+    host.run(0, 64, HostTransport{0, true}, {0}, false, {64});
+    host.run(64, 64, HostTransport{64, true});
+    host.run(128, 64, HostTransport{128, true});
+    // A release in the unrendered tail of an oversized block is refused too.
+    host.run(192, 64, HostTransport{192, true}, {0});
+    host.run(256, 2 * kMaxFrames, HostTransport{256, true}, {}, false, {kMaxFrames + 1});
+    host.run(256 + 2 * kMaxFrames, 64, HostTransport{256 + 2 * kMaxFrames, true});
+    // Negative control: an in-block release refuses nothing and requests no
+    // reset.
+    host.run(320 + 2 * kMaxFrames, 64, HostTransport{320 + 2 * kMaxFrames, true}, {0}, false, {63});
+    host.run(384 + 2 * kMaxFrames, 64, HostTransport{384 + 2 * kMaxFrames, true});
+    REQUIRE(host.observed.size() == 8);
+
+    // The refusing block itself is delivered as decoded, without a reset.
+    CHECK(host.observed[0].offsets == std::vector<std::int32_t>{0});
+    CHECK(host.observed[0].ctx.timing.refused_events == 1);
+    CHECK_FALSE(host.observed[0].ctx.reset_requested);
+    CHECK(host.observed[0].held == 1);
+    // The next block carries the reset once, so the note is released there.
+    CHECK(host.observed[1].ctx.reset_requested);
+    CHECK(host.observed[1].held == 0);
+    CHECK_FALSE(host.observed[2].ctx.reset_requested);
+
+    CHECK(host.observed[3].held == 1);
+    CHECK(host.observed[4].ctx.timing.refused_events == 1);
+    CHECK(host.observed[4].held == 1);
+    CHECK(host.observed[5].ctx.reset_requested);
+    CHECK(host.observed[5].held == 0);
+
+    CHECK(host.observed[6].ctx.timing.refused_events == 0);
+    CHECK(host.observed[6].held == 0);
+    CHECK_FALSE(host.observed[7].ctx.reset_requested);
 }
 
 TEST_CASE("CLAP records timed against a retired epoch are refused",

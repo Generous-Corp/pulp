@@ -364,6 +364,7 @@ class TestAUUmpInstrumentProcessor : public pulp::format::Processor {
                  pulp::midi::MidiBuffer&, const pulp::format::ProcessContext& context) override {
         ++process_count;
         last_refused_events = context.timing.refused_events;
+        last_reset_requested = context.reset_requested;
         captured_ump.clear();
         captured_midi1.clear();
         const pulp::midi::UmpBuffer* ump = ump_input();
@@ -388,6 +389,7 @@ class TestAUUmpInstrumentProcessor : public pulp::format::Processor {
 
     int process_count = 0;
     std::uint32_t last_refused_events = 0;
+    bool last_reset_requested = false;
     bool ump_input_present = false;
     std::vector<CapturedUmpPacket> captured_ump;
     std::vector<pulp::midi::MidiEvent> captured_midi1;
@@ -1956,6 +1958,7 @@ TEST_CASE("AU v3 places MIDI event times and refuses those outside the block",
             std::vector<int32_t> offsets;
             std::vector<uint8_t> notes;
             uint32_t refused = 0;
+            bool reset = false;
         };
         // Each event is a note-on whose key is its index, so the test can
         // tell which events were delivered.
@@ -1983,6 +1986,7 @@ TEST_CASE("AU v3 places MIDI event times and refuses those outside the block",
                 r.notes.push_back(e.note());
             }
             r.refused = processor->last_refused_events;
+            r.reset = processor->last_reset_requested;
             return r;
         };
 
@@ -2010,6 +2014,15 @@ TEST_CASE("AU v3 places MIDI event times and refuses those outside the block",
         REQUIRE(unclocked.offsets == std::vector<int32_t>{2});
         REQUIRE(unclocked.notes == std::vector<uint8_t>{1});
         REQUIRE(unclocked.refused == 1);
+
+        // A block that refused an event owes the next block a reset, since
+        // the refused event may have been a release: each refusing render
+        // above is followed by one, and a render after a clean block is not.
+        REQUIRE_FALSE(in_block.reset);
+        REQUIRE_FALSE(out_of_block.reset);
+        REQUIRE(unclocked.reset);
+        REQUIRE(render(1016.0, {}).reset);
+        REQUIRE_FALSE(render(1032.0, {}).reset);
 
         [unit deallocateRenderResources];
         [unit release];
