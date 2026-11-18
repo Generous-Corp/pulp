@@ -699,6 +699,7 @@
       "pulp/platform/progress_parser.hpp",
       "pulp/platform/reveal_in_file_manager.hpp",
       "pulp/platform/special_dir.hpp",
+      "pulp/platform/test_visibility.hpp",
       "pulp/platform/win/registry.hpp",
       "pulp/platform/win32_sane.hpp"
     ],
