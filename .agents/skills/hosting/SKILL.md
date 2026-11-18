@@ -115,11 +115,17 @@ web list a wasm-safe definition, as `isolated_plugin_slot_web.cpp` does for
 **A new serializer source joins the web list too.** `graph_serializer.cpp` is
 compiled into that same curated profile, so splitting it into a new
 `graph_serializer_*.cpp` (persisted sample-region validation lives in
-`graph_serializer_regions.cpp`) needs the new file in `pulp-host`, in
+`graph_serializer_regions.cpp`, plugin node resolution in
+`graph_serializer_plugin_resolver.cpp`) needs the new file in `pulp-host`, in
 `PulpSampleRegionWebSources.cmake`, and in the `COMPAT_INPUTS` of
 `tools/scripts/sample_region_compat_baseline.py` with its two
 `test/ctest_script_inputs` JSON copies. Missing it from the web list builds
-natively and fails only at `wasm-ld`.
+natively and fails only at `wasm-ld`. The plugin scanner is native-only:
+`PULP_GRAPH_SERIALIZER_WITHOUT_PLUGIN_SCANNER` and the scanner includes live
+in `graph_serializer_plugin_resolver.cpp` alone, behind the private
+`detail::PluginNodeResolver` whose web variant leaves every plugin node an
+unresolved placeholder; keep scanner types out of its header and out of
+`graph_serializer.cpp`.
 
 **Recover a terminal isolated node by republishing, never by re-preparing.**
 An isolated graph refuses a second eager `prepare()`, `begin_swap_edit()` and

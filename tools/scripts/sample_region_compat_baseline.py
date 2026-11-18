@@ -304,6 +304,7 @@ COMPAT_INPUTS = (
     'core/host/src/forge_lofi_catalog.cpp',
     'core/host/src/forge_space_catalog.cpp',
     'core/host/src/graph_serializer.cpp',
+    'core/host/src/graph_serializer_plugin_resolver.cpp',
     'core/host/src/graph_serializer_regions.cpp',
     'core/host/src/graph_timing_contract.cpp',
     'core/host/src/hosted_editor_container_mac.mm',
