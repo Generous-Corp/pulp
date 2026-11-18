@@ -20,6 +20,7 @@
 // below are from the freedesktop AT-SPI2 enumeration (xml/Accessible role list).
 
 #include <pulp/view/accessibility.hpp>
+#include <pulp/view/platform/atspi_geometry.hpp>
 #include <pulp/view/view.hpp>
 
 #include <cstdint>

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "event_id": "20261117-linux-backend-review-fixes",
+  "kind": "exported-path-change",
+  "created_at": "2026-11-17T22:25:55Z",
+  "receipt_export_id": "20261107-f0ac0a4ff392",
+  "paths": [
+    "core/view/include/pulp/view/platform/atspi_geometry.hpp"
+  ],
+  "vellum_inherits": false,
+  "rationale": "Adds the AT-SPI component geometry header used by the Linux provider. Vellum's framework transfer is in effect, so no re-export carries a Pulp edit; the header reaches Vellum through its ports ledger with the Linux backends."
+}
