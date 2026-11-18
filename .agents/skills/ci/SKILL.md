@@ -9425,6 +9425,14 @@ commissioned. Expected hosts match stable label subsets, never disposable runner
 names. Treat `expected_host_unavailable` as unfinished/offline fleet capacity,
 not an intentional absence.
 
+**macpro is retired (2026-11-18).** It is powered off and out of CI, and
+`.shipyard/config.toml` now lists it as `active = false`, so it stays in the
+inventory without an availability alert. `ssh macpro` timing out is expected.
+No self-hosted Linux x64 or Windows x64 runner exists, so a job routed to a
+`pulp-host-macpro` label queues forever; x64 Linux and Windows run on
+GitHub-hosted runners. The revive steps are in the fleet handbook
+(`docs/ssh.md`, "Retired hosts").
+
 **Do not "fix" the absence of m3/m5/m1 from `expected_host` — it is deliberate,
 and declaring them makes the view wrong.** The gap looks obvious and actionable
 (the three Macs that serve the required `macos` gate are not declared, so a dead
