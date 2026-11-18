@@ -817,6 +817,17 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             "PULP_SDK_TARGETS archives and release_product_matrix.json drifted",
         )
 
+    def test_native_surface_is_expected_on_every_sdk_platform(self) -> None:
+        # PulpInstallRules.cmake installs pulp-native wherever the target
+        # exists, and integrations/pulp-native builds on every platform. The
+        # union check above cannot see a platform that omits it.
+        for platform in rac.DEFAULT_MATRIX.platforms:
+            with self.subTest(platform=platform):
+                self.assertIn(
+                    "pulp-native",
+                    rac.expected_pulp_libraries(platform, rac.DEFAULT_MATRIX),
+                )
+
     def test_packaged_cli_products_match_release_matrix(self) -> None:
         runtime_members = {
             f"browser_capture/{line.strip()}"

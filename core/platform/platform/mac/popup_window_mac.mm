@@ -3,6 +3,7 @@
 // dismissed by outside clicks (consumed), Escape, focus loss or the parent
 // closing.
 
+#include <pulp/platform/test_visibility.hpp>
 #include <pulp/platform/objc_unique_class.hpp>
 #include <pulp/platform/popup_window.hpp>
 
@@ -281,10 +282,7 @@ std::unique_ptr<PopupWindow> PopupWindow::open(MainThreadScope& scope,
     // At least the parent's level, and above ordinary floating panels, as a
     // system popup menu is.
     panel.level = std::max<NSWindowLevel>(impl->parent.level, NSPopUpMenuWindowLevel);
-    if (options.takes_key_focus)
-        [panel makeKeyAndOrderFront:nil];
-    else
-        [panel orderFront:nil];
+    pulp::platform::order_in_window(panel, options.takes_key_focus);
     impl->open = true;
     impl->install_dismissal();
 

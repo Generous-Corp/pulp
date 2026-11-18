@@ -8,6 +8,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/platform/test_visibility.hpp>
 #import <Cocoa/Cocoa.h>
 #include <objc/runtime.h>
 
@@ -77,7 +78,7 @@ struct Editor {
             "PulpTestPopupProbeView", (__bridge void*)[NSView class], &add_probe_methods));
         view = [[probe alloc] initWithFrame:NSMakeRect(0, 0, 400, 300)];
         window.contentView = view;
-        [window orderFrontRegardless];
+        pulp::platform::order_in_window(window, false);
     }
     ~Editor() {
         [window orderOut:nil];

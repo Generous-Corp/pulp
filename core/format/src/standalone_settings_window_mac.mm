@@ -2,6 +2,7 @@
 // (detail/standalone_settings_window.hpp). Every rule about what the lists offer
 // lives in StandaloneSettingsModel; this file only places AppKit controls over it.
 
+#include <pulp/platform/test_visibility.hpp>
 #include <pulp/format/detail/standalone_settings_window.hpp>
 
 #include <TargetConditionals.h>
@@ -177,8 +178,8 @@ int selected_model_index(NSPopUpButton* popup) {
 
 - (void)show {
     [window center];
-    [window makeKeyAndOrderFront:nil];
-    [NSApp activateIgnoringOtherApps:YES];
+    pulp::platform::order_in_window(window);
+    pulp::platform::activate_app_for_window();
 }
 
 - (void)outputChanged:(id)sender {

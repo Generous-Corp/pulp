@@ -41,6 +41,16 @@
       "note": "SignalGraph runtime and mutation contract; node, connection, and custom registration declarations must remain outside this header"
     },
     {
+      "path": "core/host/src/signal_graph_prepared_topology_edit.cpp",
+      "max_loc": 2931,
+      "note": "Prepared-topology transaction lifecycle; prepared-description capture and other prepare() phases belong in focused signal_graph_prepared_*.cpp units"
+    },
+    {
+      "path": "core/host/src/signal_graph_prepared_description_capture.cpp",
+      "max_loc": 672,
+      "note": "Prepared-description capture from one compiled serial routed snapshot, cross-checked against the authored candidate"
+    },
+    {
       "path": "core/host/src/timeline_graph_binding.cpp",
       "max_loc": 424,
       "note": "Timeline binding lifecycle, realtime processing, and public query shell; candidate construction and route reconciliation belong in their focused units"

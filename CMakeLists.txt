@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 1.160.0
+    VERSION 1.163.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -707,6 +707,15 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
             "For a stripped build set -DPULP_PROFILE=release (tools/cmake/PulpProfiles.cmake).")
     endif()
     enable_testing()
+    # ctest runs every registered test with PULP_TEST_OFFSCREEN=1 unless the
+    # caller already set it, so window hosts present into a transparent,
+    # non-activating window instead of on the user's screen. A caller opts in
+    # to visible windows with PULP_TEST_SHOW_WINDOWS=1 (see
+    # pulp/platform/test_visibility.hpp).
+    file(WRITE "${CMAKE_BINARY_DIR}/pulp_test_offscreen.cmake"
+        "if(NOT DEFINED ENV{PULP_TEST_OFFSCREEN})\n    set(ENV{PULP_TEST_OFFSCREEN} 1)\nendif()\n")
+    set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES
+        "${CMAKE_BINARY_DIR}/pulp_test_offscreen.cmake")
     # The file-api query is retained in the build tree so the Vellum closure
     # receipt can be regenerated from the exact configured target graph. The
     # gate is enforcing; only explicitly pending P4/P12/P13/P17 debts remain
@@ -1016,6 +1025,7 @@ if(PULP_BUILD_TESTS)
     add_subdirectory(test/fixtures/render_provider_floor)
     add_subdirectory(test/fixtures/native_ui_link_floor)
     add_subdirectory(test/fixtures/no_editor_link_floor)
+    add_subdirectory(test/fixtures/linux_webview_optional)
     add_subdirectory(test/fixtures/host_probe)
     add_subdirectory(test/fixtures/scale_probe)
     add_subdirectory(test/fixtures/host_midi_probe)

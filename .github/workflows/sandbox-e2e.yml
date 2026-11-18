@@ -101,7 +101,12 @@ jobs:
       - name: Install Rust (only when experimental/pulp-rs/ is present)
         id: rust-toolchain
         if: hashFiles('experimental/pulp-rs/Cargo.toml') != ''
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        # Not dtolnay/rust-toolchain: its v1 ref has no default for the required
+        # `toolchain` input (the old @stable branch did), so the bump to the v1
+        # SHA failed this step on every run. The repo's own provider installs
+        # the Rust experimental/pulp-rs/rust-toolchain.toml names.
+        shell: bash
+        run: bash tools/ci/provide_pinned_rust.sh --fallback-to-default
 
       - name: Build C++ CLI (pulp-cli target only)
         id: cpp-build
