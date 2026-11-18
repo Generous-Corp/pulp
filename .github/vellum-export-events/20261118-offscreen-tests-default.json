@@ -8,6 +8,8 @@
     "core/platform/include/pulp/platform/test_visibility.hpp",
     "core/platform/platform/mac/popup_window_mac.mm",
     "core/view/platform/mac/window_host_mac.mm",
+    "core/view/platform/mac/window_host_mac_geometry.mm",
+    "core/view/platform/mac/window_host_mac_internal.hpp",
     "core/view/src/sdl_window_host.cpp"
   ],
   "vellum_inherits": false,
