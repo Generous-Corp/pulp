@@ -164,11 +164,11 @@ class HostTimelineBinding final {
     /// short buffers, and a graph refusal made before the graph touched the
     /// block (for example `Busy` while another thread holds its diagnostic
     /// gate). Any other result closes the block. A graph `ProcessingFailure`
-    /// closes it as a failed graph block: the graph rendered nothing it can
-    /// replay, so the binding drops the block's graph records (counted in
-    /// `graph_failed_blocks`), zeroes `graph_output` when the graph cursor did
-    /// not move, and still renders the voice bank. The next block maps onto
-    /// the unmoved graph cursor and carries only its own records.
+    /// closes it as a failed graph block: the binding drops the block's graph
+    /// records (counted in `graph_failed_blocks`), zeroes `graph_output`, and
+    /// still renders the voice bank. Routed execution consumes a partially
+    /// executed failed block so the next block maps onto the coherent graph
+    /// cursor; pre-projection failures leave that cursor unmoved.
     HostTimelineRenderResult render(audio::BufferView<float>* graph_output,
                                     const audio::BufferView<const float>* graph_input,
                                     audio::BufferView<float>* voice_stereo) noexcept;

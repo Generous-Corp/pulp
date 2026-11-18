@@ -310,15 +310,12 @@ HostTimelineBinding::render(audio::BufferView<float>* graph_output,
 
 void HostTimelineBinding::drop_failed_graph_block_(audio::BufferView<float>& output) noexcept {
     ++counters_.graph_failed_blocks;
-    // A refused projection restores the block's records and leaves the graph
-    // cursor where it was, so a cursor that has not moved means the graph
-    // rendered nothing: hand the caller silence instead of a stale buffer.
-    TriggerCounters clock;
-    if (graph_->trigger_counters(clock) == TriggerGraphResult::Accepted &&
-        clock.epoch == block_.graph_epoch && clock.cursor == block_.graph_sample_start) {
-        for (std::size_t channel = 0; channel < output.num_channels(); ++channel)
-            std::fill_n(output.channel_ptr(channel), block_.timeline.frames, 0.0f);
-    }
+    // ProcessingFailure is fail-closed for the complete block. Do not query
+    // trigger_counters() here: it uses the same try-lock gate as processing,
+    // so a concurrent diagnostic holder could leave stale output in the
+    // caller's buffer when the query returns Busy.
+    for (std::size_t channel = 0; channel < output.num_channels(); ++channel)
+        std::fill_n(output.channel_ptr(channel), block_.timeline.frames, 0.0f);
     // Retrying the restored records fails the same way, and the next block
     // maps onto the same graph cursor, so keeping them would replay them a
     // block late and stack them onto the next block's records. The binding
