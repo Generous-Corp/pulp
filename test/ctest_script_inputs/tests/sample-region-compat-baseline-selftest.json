@@ -830,8 +830,6 @@
    "external/pugixml/pugixml.cpp",
    "external/tweetnacl/tweetnacl.c",
    "inspect/src",
-   "test/CMakeLists.txt",
-   "test/cmake",
    "test/cmake/pr_fast_tests.cmake",
    "test/ctest_script_inputs",
    "test/fixtures",

@@ -14,7 +14,6 @@
    "docs/status/sequencer-exposure.json",
    "inspect/src",
    "test/CMakeLists.txt",
-   "test/cmake",
    "test/cmake/native_component_tests.cmake",
    "test/cmake/quality_tests.cmake",
    "test/ctest_script_inputs",

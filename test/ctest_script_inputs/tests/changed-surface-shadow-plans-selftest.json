@@ -20,7 +20,6 @@
    "docs/status/gpu-recipes.yaml",
    "inspect/src",
    "test/CMakeLists.txt",
-   "test/cmake",
    "test/cmake/check_bundle_build_info.cmake",
    "test/cmake/check_plugin_module_dead_strip.cmake",
    "test/cmake/check_plugin_module_editor_stack.cmake",

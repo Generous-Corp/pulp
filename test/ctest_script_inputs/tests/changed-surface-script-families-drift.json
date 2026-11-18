@@ -8,8 +8,6 @@
    "core/host/include",
    "docs/status",
    "inspect/src",
-   "test/CMakeLists.txt",
-   "test/cmake",
    "test/ctest_script_inputs",
    "test/fixtures",
    "test/support",
