@@ -769,6 +769,14 @@ HostEventResult SignalGraph::begin_host_event_block(std::uint64_t epoch, std::ui
     // ahead of its checked serial cursor.
     if (sample_start > cursor)
         return HostEventResult::OutOfRange;
+    // process_checked() refuses a block longer than the prepared generation
+    // with Frames before it projects, which would leave this ingress block
+    // open with no way to seal it. Refuse it here, before anything opens.
+    if (frames > pin->trigger_state->max_frames ||
+        frames > static_cast<std::size_t>(std::max(pin->max_block_size, 0))) {
+        ++trigger_controller_->host_counters.refused;
+        return HostEventResult::OutOfRange;
+    }
     const auto result = trigger_controller_->host_ingress.begin_block(epoch, sample_start, frames);
     if (result == HostEventResult::Accepted) {
         trigger_controller_->host_counters.epoch = epoch;
@@ -1034,6 +1042,7 @@ TriggerGraphResult SignalGraph::process_trigger_snapshot_(
     // All refusals above precede command draining, telemetry and output writes.
     state.trace_size = state.sample_begin = 0;
     const auto failures = routed_only_execution_failures_.load(std::memory_order_relaxed);
+    const auto consumed_frontier = state.consumed_frontier;
     HostEventResult host_event_result = HostEventResult::Accepted;
     graph->host_event_sample_start = state.counters.cursor;
     process_snapshot_impl(exact_output, exact_input, frames, transport, graph, true,
@@ -1042,9 +1051,19 @@ TriggerGraphResult SignalGraph::process_trigger_snapshot_(
         return host_event_result == HostEventResult::StaleEpoch
                    ? TriggerGraphResult::StaleGeneration
                    : TriggerGraphResult::ProcessingFailure;
-    state.counters.cursor += count;
-    if (routed_only_execution_failures_.load(std::memory_order_relaxed) != failures)
+    const bool routed_failure =
+        routed_only_execution_failures_.load(std::memory_order_relaxed) != failures;
+    if (routed_failure) {
+        // Routed execution may have run the trigger producer before a later
+        // node rejected the block. The trigger state has then advanced its
+        // consumed frontier while the graph cursor still names the block's
+        // start. Consume the failed block too, keeping the next block's
+        // current-sample admission coherent with that state.
+        if (state.consumed_frontier != consumed_frontier)
+            state.counters.cursor += count;
         return TriggerGraphResult::ProcessingFailure;
+    }
+    state.counters.cursor += count;
     return TriggerGraphResult::Accepted;
 }
 TriggerGraphResult SignalGraph::trigger_counters(TriggerCounters& counters) const noexcept {

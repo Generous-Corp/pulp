@@ -21,6 +21,7 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -348,16 +349,36 @@ TEST_CASE("VST3 timing projects identically for every block partition",
 TEST_CASE("VST3 event offsets outside the block are refused, never clamped",
           "[process-timing][vst3][offsets]") {
     Vst3Host host;
-    host.run({.continuous = 0, .project = 0, .frames = 32, .event_offsets = {-1, 0, 31, 32}});
-    REQUIRE(host.observed.size() == 1);
+    host.run({.continuous = 0,
+              .project = 0,
+              .frames = 32,
+              .event_offsets = {-1, 0, 31, 32, std::numeric_limits<std::int32_t>::max()}});
+    // Positive control: every offset in the block, nothing refused.
+    host.run({.continuous = 32, .project = 32, .frames = 32, .event_offsets = {0, 15, 31}});
+    REQUIRE(host.observed.size() == 2);
+    // The adapter delivers only in-block offsets, unchanged, and counts the
+    // three it refused. Nothing is moved to a block edge.
+    REQUIRE(host.observed[0].offsets == std::vector<std::int32_t>{0, 31});
+    REQUIRE(host.observed[0].ctx.timing.refused_events == 3);
+    REQUIRE(host.observed[1].offsets == std::vector<std::int32_t>{0, 15, 31});
+    REQUIRE(host.observed[1].ctx.timing.refused_events == 0);
     Binding binding;
     std::vector<HostEventResult> results;
     std::vector<std::int64_t> projected;
     (void)binding.feed(host.observed[0], &results, &projected);
-    // The adapter sorts the decoded stream by offset before the Processor
-    // sees it.
     REQUIRE(results ==
-            std::vector<HostEventResult>{HostEventResult::OutOfRange, HostEventResult::Accepted,
-                                         HostEventResult::Accepted, HostEventResult::OutOfRange});
+            std::vector<HostEventResult>{HostEventResult::Accepted, HostEventResult::Accepted});
     REQUIRE(projected == std::vector<std::int64_t>{0, 31});
+}
+
+TEST_CASE("VST3 events in the unrendered tail of an oversized block are refused",
+          "[process-timing][vst3][offsets]") {
+    Vst3Host host;
+    host.run({.has_context = false,
+              .frames = 2 * kMaxFrames,
+              .event_offsets = {kMaxFrames - 1, kMaxFrames, 2 * kMaxFrames - 1}});
+    REQUIRE(host.observed.size() == 1);
+    REQUIRE(host.observed[0].ctx.num_samples == kMaxFrames);
+    REQUIRE(host.observed[0].offsets == std::vector<std::int32_t>{kMaxFrames - 1});
+    REQUIRE(host.observed[0].ctx.timing.refused_events == 2);
 }

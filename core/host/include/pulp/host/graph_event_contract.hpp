@@ -256,6 +256,17 @@ inline HostEventResult derive_mpe(std::span<const HostEventRecord> events,
     // The one-pointer sink keeps the per-call rebinding allocation free.
     midi::MpeTrackerSink sink{&out, 0, false};
     midi::bind_tracker_to_sink(tracker, sink);
+    // The callbacks point at this stack sink, so unbind them on every return
+    // path; a later tracker call then cannot write through a dead frame.
+    struct Unbind {
+        midi::MpeVoiceTracker& tracker;
+        ~Unbind() {
+            tracker.on_note_lifecycle = nullptr;
+            tracker.on_pitch_bend = nullptr;
+            tracker.on_pressure = nullptr;
+            tracker.on_timbre = nullptr;
+        }
+    } unbind{tracker};
     // A bounded tracker can defer note-offs when the previous block's sidecar
     // was full. Flush that lifecycle queue at block start before consuming new
     // host records, matching the tracker/sidecar contract and preserving note

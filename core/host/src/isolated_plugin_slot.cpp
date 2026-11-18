@@ -56,7 +56,7 @@ NativeChannel native_channel(const platform::ChildProcessInputChannel& channel) 
 namespace {
 // One lifecycle exchange with the worker (prepare, checkpoint, restore,
 // destroy, and the load phase after hello).
-constexpr auto kLifecycleExchangeDeadline = std::chrono::seconds(5);
+constexpr auto kLifecycleExchangeDeadline = kLifecycleExchangeBudget;
 // Custody cleanup when the caller supplies no deadline of its own.
 constexpr auto kDefaultCleanupDeadline = std::chrono::seconds(2);
 // stop() waits for the supervisor's graceful destroy exchange followed by
@@ -415,10 +415,12 @@ ControlRecord bound_hello(const Session& session) {
 }
 
 // After hello the worker loads the vendor module; it reports the load with
-// result 2 under its own lifecycle deadline.
-bool receive_load_report(NativeChannel channel, const ControlRecord& hello) {
+// result 2 under its own lifecycle budget inside the launch session.
+bool receive_load_report(NativeChannel channel, const ControlRecord& hello,
+                         Clock::time_point session_deadline) {
     ControlRecord reply;
-    return receive_record(channel, reply, Clock::now() + kLifecycleExchangeDeadline) &&
+    return receive_record(channel, reply,
+                          launch_exchange_deadline(Clock::now(), session_deadline)) &&
            reply.result == 2 && reply.generation == hello.generation && reply.build == hello.build;
 }
 #endif
@@ -447,7 +449,7 @@ bool launch(const std::shared_ptr<Session>& session) {
         return false;
     platform::ProcessOptions options;
     options.capture_stdout = options.capture_stderr = false;
-    options.standard_input_timeout_ms = 5000;
+    options.standard_input_timeout_ms = static_cast<int>(kLaunchSessionBudget.count());
     return session->process.start_retained_with_standard_input_channel(
         session->custody, session->options.worker_path,
         {session->mapping_path, session->options.selection.path,
@@ -464,13 +466,15 @@ bool launch(const std::shared_ptr<Session>& session) {
             hello.file = identity.file;
             hello.file_generation = identity.generation;
             ControlRecord reply;
-            if (!send_record(fd, hello, deadline) || !receive_record(fd, reply, deadline) ||
+            const auto hello_deadline = launch_exchange_deadline(Clock::now(), deadline);
+            if (!send_record(fd, hello, hello_deadline) ||
+                !receive_record(fd, reply, hello_deadline) ||
                 !hello_reply_matches(hello, reply, static_cast<std::uint64_t>(pid)))
                 return false;
             if (::unlink(session->mapping_path.c_str()) != 0)
                 return false;
             session->mapping_path.clear();
-            if (!receive_load_report(fd, hello))
+            if (!receive_load_report(fd, hello, deadline))
                 return false;
             session->channel.emplace(std::move(channel));
             return true;
@@ -486,7 +490,7 @@ bool launch(const std::shared_ptr<Session>& session) {
     session->shared = session->section.mapping();
     platform::ProcessOptions options;
     options.capture_stdout = options.capture_stderr = false;
-    options.standard_input_timeout_ms = 5000;
+    options.standard_input_timeout_ms = static_cast<int>(kLaunchSessionBudget.count());
     return session->process.start_retained_with_standard_input_channel(
         session->custody, session->options.worker_path,
         {session->options.selection.path, session->options.selection.type.descriptor_id,
@@ -495,11 +499,12 @@ bool launch(const std::shared_ptr<Session>& session) {
             session->worker_pid = pid;
             const auto handle = native_channel(channel);
             const ControlRecord hello = bound_hello(*session);
-            if (!parent_hello(handle, pid, session->section, hello, deadline))
+            if (!parent_hello(handle, pid, session->section, hello,
+                              launch_exchange_deadline(Clock::now(), deadline)))
                 return false;
             // parent_hello sent the record with the duplicated section value; the
             // load report echoes its generation and build.
-            if (!receive_load_report(handle, hello))
+            if (!receive_load_report(handle, hello, deadline))
                 return false;
             session->channel.emplace(std::move(channel));
             return true;

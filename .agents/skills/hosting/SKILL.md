@@ -68,6 +68,15 @@ hostile-fixture, endpoint, sibling/PDC and production-mutation controls together
 Functional callback traps do not establish full realtime or A10 qualification;
 host death and deliberate group escape are outside first-mode custody.
 
+**The child-process session deadline is enforced again after the session
+callback returns.** `start_retained_with_standard_input_channel` rejects a
+session that completed after `standard_input_timeout_ms`, whatever deadlines the
+callback used inside it. The isolated launch carries two exchanges (hello, then
+the load report), so its session is `kLaunchSessionBudget` (two exchange
+budgets) and each exchange takes `launch_exchange_deadline(now, session)`. Give
+any new exchange inside a launch its own budget the same way and grow the session
+budget with it, or a slow earlier phase silently shortens the later one.
+
 **The Windows worker transport differs from the POSIX one in three places.**
 The control channel is an overlapped named pipe, so every transfer on either
 end must be overlapped and deadline-bounded (`isolated_clap_windows_channel.hpp`);
@@ -638,6 +647,17 @@ commit, because it is the one reset step another thread can make fail (`Busy`
 while the ingress block is open). `VoiceBankBinding::activate()` is a
 control-thread call; the audio owner resets a bank with
 `reserve_event_reset()` / `commit_event_reset()`.
+
+A graph `ProcessingFailure` is not retryable: a refused projection restores
+the block's records into the ingress and leaves the cursor in place, and the
+same records fail the same way again (the MPE fan-out preflight alone refuses
+any block with 8 or more MIDI records). Keeping the records would make the next
+block, which maps onto the same cursor, replay them a block late and stack its
+own on top. The binding therefore drops a failed block's graph records and
+zeroes the graph output; a direct ingress user must clear the ingress itself.
+`begin_host_event_block()` refuses a block longer than the prepared frame
+limit, because `process_checked()` would refuse it with `Frames` before
+projecting and nothing could seal the open ingress block afterwards.
 
 ### Edge probes publish once per block, from the calling thread
 
@@ -1230,6 +1250,21 @@ save/reopen render proof beside the legacy caller-owned route controls.
   codec round trips. The pinned live-control timeline and independent audio
   oracle are exercised by `examples/a3-spectral-replay-consumer`; full paced
   qualification and sanitizer evidence remain separate requirements.
+- `to_saved_document` writes a spectral graph as the saved-identity v7
+  document (format 7), which alone carries authored node IDs, a readable
+  `identity` (FFT, hop, channels, `sample_rate_bits` as 16 hex digits) beside
+  every `contract_hex`, `spectral_analysis` declarations (identity only, never
+  captured audio or frame history), `spectral_asset_source` with
+  `finite_policy` 2, and every lane flag on each edge. `to_json` stays format 6
+  and refuses analysis and source nodes by name. A v7 asset row derives its
+  frame count with `analysis_grid_v2`; a format 6 row with `dividing_hop_v1`.
+  Authored IDs are assigned in `GraphSerializer::load_json_` with
+  `plan_authored_ids` on the isolated candidate before the destination is
+  touched, so a format 6 load gets the same migrated IDs every time. Every
+  spectral node factory must go through `push_node_locked_` (a direct
+  `nodes_.push_back` leaves the node without an authored ID, and the v7
+  writer then refuses it). `GraphEditHistory::checkpoint` still declines
+  spectral graphs until history bounds retained asset bytes.
 - Use `connect_automation()` for sparse two-point-per-block control events.
   Use `connect_audio_rate_modulation()` only for continuous, automatable
   `HostParamInfo::rate == AudioRate` params; do not route dense CV into
@@ -3403,7 +3438,9 @@ Snapshot-bound access must use the controller-aware snapshot lease, and live
 processor-provider mutation must refuse in spectral mode even when the legacy
 `live_slot_` is empty. Query prepared geometry from the active snapshot.
 Keep arbitrary stage registration refused, and keep graph persistence limited
-to the format-6 spectral subset (no analysis nodes; the graph must prepare);
+to the closed spectral subset (format 6 without analysis or single-stream
+source nodes, or the saved-identity v7 document with them; the graph must
+prepare);
 PARTIAL status
 does not establish notation coverage or realtime timing qualification.
 

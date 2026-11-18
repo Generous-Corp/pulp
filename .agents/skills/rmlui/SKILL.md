@@ -76,9 +76,10 @@ drawable viewport and backing scale and clear each drawable before RmlUi draws.
 The `rmlui-metal-demo` example is the smoke path for this wiring.
 In this adapter every `px` length, not only text, is a device pixel, because the
 context is sized in drawable pixels; use `dp` (a point) for anything that must
-keep its physical size across backing scales. `dp` only differs from `px` when
-the Vellum RmlUi SDK exports `set_density_ratio` (`density_ratio_supported()`);
-without it the adapter warns at configure and at the first attach.
+keep its physical size across backing scales. The configure requires a Vellum
+RmlUi SDK that defines the API macros in `native.hpp` (density ratio, warm and
+renderer trim, from Vellum commit 37777f3) and fails on an older one, so the
+density ratio cannot silently switch off.
 
 ## Licence line
 

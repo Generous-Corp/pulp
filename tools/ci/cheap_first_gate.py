@@ -20,9 +20,10 @@ The `block` verdict is the only one that exits non-zero.
 
 The head is the commit the cheap checks report on: the pull request's head sha
 for pull_request, the dispatch commit for a `pr_number` dispatch, and the merge
-group's own commit for merge_group. Push runs and plain dispatches have no
-cheap checks to wait on and pass at once, and so does a pull request whose base
-is not `main` (the version & skill workflow does not run there).
+group's own commit for merge_group. Merge groups, push runs and plain
+dispatches pass at once, and so does a pull request whose base is not `main`
+(the version & skill workflow does not run there). In a merge group the wait
+cost every group about 8 minutes and spared a VM in about 2 of 83.
 """
 
 from __future__ import annotations
@@ -110,7 +111,11 @@ def decide(states: list[CheckState], *, elapsed: float, absent_grace: float) -> 
 def applies(event: str, base_ref: str, dispatch_pr: str) -> tuple[bool, str]:
     """Whether this event has cheap checks on its head to wait for."""
     if event == "merge_group":
-        return True, "merge group"
+        # Measured 2026-11-15..17 over 20 merge-group Build and Test runs: the
+        # wait held the native `macos` job back until 8.8 min after the run
+        # started (p50), every group, while a cheap check was red in only 2 of
+        # 83 groups. A group whose cheap check is red is ejected anyway.
+        return False, "merge group: the cheap checks rarely fail here, so the native leg does not wait for them"
     if event == "pull_request":
         if base_ref != "main":
             return False, f"pull request into {base_ref or 'an unknown base'}, not main"

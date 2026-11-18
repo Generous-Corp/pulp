@@ -1,0 +1,109 @@
+{
+  "id": "d6-spectral-saved-identity-v7",
+  "title": "Spectral graphs persist in the saved-identity v7 document",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "d6-spectral-saved-identity-v7-20261117",
+  "owned_paths": [
+    "core/host/src/spectral_graph_persistence.cpp",
+    "core/host/src/spectral_graph_persistence.hpp",
+    "core/host/src/graph_serializer.cpp",
+    "core/host/src/graph_serializer_test_access.hpp",
+    "core/host/src/graph_history.cpp",
+    "core/host/src/subgraph_persistence.cpp",
+    "core/host/src/spectral_graph.cpp",
+    "tools/cli/cmd_graph.cpp",
+    "test/test_spectral_graph_saved_identity.cpp",
+    "test/test_spectral_graph_persistence.cpp",
+    "test/test_cli_graph_spectral_saved_identity.cpp",
+    "docs/graph-program-status/D6-spectral-persistence.md",
+    "docs/graph-program-status/G-3-v7-identity-design.md",
+    "docs/guides/spectral-asset-replay.md",
+    "docs/status/sequencer-exposure/rows/d6-spectral-saved-identity-v7.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/host/src/spectral_graph_persistence.cpp",
+      "needles": ["identity_record(const SpectralIdentity& shape)", "\"finite_policy\"", "type == \"spectral_analysis\"", "type == \"spectral_asset_source\""]
+    },
+    {
+      "path": "core/host/src/graph_serializer.cpp",
+      "needles": ["spectral_persistence::write(graph, editor_layout, why, saved_identity)"]
+    },
+    {
+      "path": "core/host/src/graph_history.cpp",
+      "needles": ["spectral_persistence::contains_spectral_nodes(graph)"]
+    },
+    {
+      "path": "test/test_spectral_graph_saved_identity.cpp",
+      "needles": ["Analysis to stage to synthesis audio survives a saved and restored graph", "Single-stream asset source persists with its finite-source policy", "Malformed v7 spectral documents are refused before the caller's graph is touched"]
+    },
+    {
+      "path": "docs/graph-program-status/D6-spectral-persistence.md",
+      "needles": ["## Remainder"]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "GraphSerializer::to_saved_document, to_saved_file, from_saved_document, inspect_document and diff_graph_documents now admit spectral graphs, including analysis declarations and the single-stream asset source; no public signature changes.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/graph_serializer.hpp",
+          "needles": ["static std::string to_saved_document("]
+        },
+        {
+          "kind": "test",
+          "path": "test/test_spectral_graph_saved_identity.cpp",
+          "needles": ["Spectral graph saves and restores the saved-identity v7 document"]
+        }
+      ],
+      "authority": {
+        "admission": "read_only",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "exposed",
+      "rationale": "pulp graph save --saved-identity writes the spectral v7 document and checks that every saved edge, spectral lanes included, was restored. No new command or option is added.",
+      "evidence": [
+        {
+          "kind": "cli_handler",
+          "path": "tools/cli/cmd_graph.cpp",
+          "needles": ["spectral lanes included, so it passes the same check"]
+        },
+        {
+          "kind": "test",
+          "path": "test/test_cli_graph_spectral_saved_identity.cpp",
+          "needles": ["graph save --saved-identity writes the spectral v7 document"]
+        },
+        {
+          "kind": "cli_definition",
+          "path": "tools/cli/cmd_graph.cpp",
+          "needles": ["save: --output path [--saved-identity]"]
+        }
+      ],
+      "authority": {
+        "admission": "read_only",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation, schema, or handler is added."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "Saving and loading run on the control thread against an isolated candidate; no runtime operation or audio-thread path is added."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No design-time capability or agent manifest entry is added."
+    }
+  }
+}

@@ -32,6 +32,7 @@
 #include <string>
 #include <unistd.h>
 #include <cstring>
+#include <optional>
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
@@ -360,8 +361,9 @@ class TestAUUmpInstrumentProcessor : public pulp::format::Processor {
                  const pulp::format::ProcessContext&) override {}
 
     void process(pulp::format::ProcessBuffers&, pulp::midi::MidiBuffer& midi_in,
-                 pulp::midi::MidiBuffer&, const pulp::format::ProcessContext&) override {
+                 pulp::midi::MidiBuffer&, const pulp::format::ProcessContext& context) override {
         ++process_count;
+        last_refused_events = context.timing.refused_events;
         captured_ump.clear();
         captured_midi1.clear();
         const pulp::midi::UmpBuffer* ump = ump_input();
@@ -385,6 +387,7 @@ class TestAUUmpInstrumentProcessor : public pulp::format::Processor {
     }
 
     int process_count = 0;
+    std::uint32_t last_refused_events = 0;
     bool ump_input_present = false;
     std::vector<CapturedUmpPacket> captured_ump;
     std::vector<pulp::midi::MidiEvent> captured_midi1;
@@ -1909,6 +1912,108 @@ TEST_CASE("AU v3 promotes short MIDI into the UMP stream for an opted-in plugin"
         REQUIRE(midi1.size() == 1);
         REQUIRE(midi1[0].is_note_on());
         REQUIRE(midi1[0].note() == 64);
+    }
+}
+
+TEST_CASE("AU v3 places MIDI event times and refuses those outside the block",
+          "[au][auv3][midi][process-timing]") {
+    @autoreleasepool {
+        AudioComponentDescription desc{};
+        desc.componentType = kAudioUnitType_MusicDevice;
+        desc.componentSubType = 'TstU';
+        desc.componentManufacturer = 'Plup';
+
+        g_au_ump_declare = false;
+        ScopedFactoryRegistration registration(create_ump_instrument_processor);
+        NSError* error = nil;
+        PulpAudioUnit* unit = [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                                          options:0
+                                                                            error:&error];
+        REQUIRE(unit != nil);
+        auto* processor = g_last_ump_processor;
+        REQUIRE(processor != nullptr);
+        NSError* allocate_error = nil;
+        REQUIRE([unit allocateRenderResourcesAndReturnError:&allocate_error]);
+
+        constexpr UInt32 kFrames = 16;
+        float left[kFrames] = {};
+        float right[kFrames] = {};
+        struct StereoBufferList {
+            AudioBufferList list;
+            AudioBuffer extra[1];
+        } output{};
+        output.list.mNumberBuffers = 2;
+        output.list.mBuffers[0].mNumberChannels = 1;
+        output.list.mBuffers[0].mDataByteSize = kFrames * sizeof(float);
+        output.list.mBuffers[0].mData = left;
+        output.list.mBuffers[1].mNumberChannels = 1;
+        output.list.mBuffers[1].mDataByteSize = kFrames * sizeof(float);
+        output.list.mBuffers[1].mData = right;
+
+        AUInternalRenderBlock block = [unit internalRenderBlock];
+        REQUIRE(block != nil);
+        struct Rendered {
+            std::vector<int32_t> offsets;
+            std::vector<uint8_t> notes;
+            uint32_t refused = 0;
+        };
+        // Each event is a note-on whose key is its index, so the test can
+        // tell which events were delivered.
+        auto render = [&](std::optional<double> sample_time,
+                          const std::vector<AUEventSampleTime>& times) {
+            std::vector<AURenderEvent> events(times.size());
+            for (std::size_t i = 0; i < times.size(); ++i) {
+                events[i].MIDI.eventType = AURenderEventMIDI;
+                events[i].MIDI.eventSampleTime = times[i];
+                events[i].MIDI.length = 3;
+                events[i].MIDI.data[0] = 0x90;
+                events[i].MIDI.data[1] = static_cast<uint8_t>(i);
+                events[i].MIDI.data[2] = 100;
+                events[i].MIDI.next = i + 1 < times.size() ? &events[i + 1] : nullptr;
+            }
+            AudioUnitRenderActionFlags flags = 0;
+            AudioTimeStamp timestamp{};
+            timestamp.mFlags = sample_time ? kAudioTimeStampSampleTimeValid : 0;
+            timestamp.mSampleTime = sample_time.value_or(0.0);
+            REQUIRE(block(&flags, &timestamp, kFrames, 0, &output.list,
+                          events.empty() ? nullptr : &events[0], nil) == noErr);
+            Rendered r;
+            for (const auto& e : processor->captured_midi1) {
+                r.offsets.push_back(e.sample_offset);
+                r.notes.push_back(e.note());
+            }
+            r.refused = processor->last_refused_events;
+            return r;
+        };
+
+        const AUEventSampleTime now = AUEventSampleTimeImmediate;
+        // Positive control: absolute times inside the block, the last frame,
+        // and an immediate offset, each delivered at its offset into the block.
+        const auto in_block = render(1000.0, {1000, 1000 + kFrames - 1, now + 4});
+        REQUIRE(in_block.offsets == std::vector<int32_t>{0, kFrames - 1, 4});
+        REQUIRE(in_block.refused == 0);
+
+        // Planted negatives: at the end, before the block, a huge offset, and
+        // a small positive time that is absolute on the render axis (the AU
+        // immediate window is the separate negative sentinel range, so 5 lies
+        // before a block that starts at 1000 and is not offset 5). One
+        // in-block event survives; none is moved to a block edge.
+        const auto out_of_block =
+            render(1000.0, {1000 + kFrames, 999, 1000 + (AUEventSampleTime{1} << 40), 5, 1003});
+        REQUIRE(out_of_block.offsets == std::vector<int32_t>{3});
+        REQUIRE(out_of_block.notes == std::vector<uint8_t>{4});
+        REQUIRE(out_of_block.refused == 4);
+
+        // Without a valid sample time an absolute time cannot be placed and
+        // is refused; an AUEventSampleTimeImmediate time still is an offset.
+        const auto unclocked = render(std::nullopt, {3, now + 2});
+        REQUIRE(unclocked.offsets == std::vector<int32_t>{2});
+        REQUIRE(unclocked.notes == std::vector<uint8_t>{1});
+        REQUIRE(unclocked.refused == 1);
+
+        [unit deallocateRenderResources];
+        [unit release];
+        g_au_ump_declare = true;
     }
 }
 
