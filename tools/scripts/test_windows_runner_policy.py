@@ -517,7 +517,7 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         configured = [*self.LANE, "pulp-host-macpro"]
         self.assertEqual(self._windows_runs_on(
             "workflow_dispatch", LOCAL_WINDOWS_X64_RUNS_ON_JSON=json.dumps(configured)),
-            configured)
+            "windows-2022")
 
     def test_a_dispatch_reaches_hosted_windows_only_by_opting_in(self) -> None:
         self.assertEqual(self._windows_runs_on(

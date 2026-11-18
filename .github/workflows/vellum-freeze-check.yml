@@ -16,10 +16,11 @@ concurrency:
 jobs:
   freeze-check:
     name: Vellum freeze
-    # Automatic same-repository and merge-group validation uses the restricted
-    # organization pool. Fork PRs and an unset selector fall back to hosted
-    # Linux. Manual recovery is isolated in vellum-freeze-recovery.yml so this
-    # workflow never mixes a privileged event with an untrusted checkout.
+    # Automatic same-repository and merge-group validation may use the
+    # restricted organization pool. The retired MacPro selector is ignored;
+    # fork PRs and an unset selector fall back to hosted Linux. Manual recovery
+    # is isolated in vellum-freeze-recovery.yml so this workflow never mixes a
+    # privileged event with an untrusted checkout.
     # See version-skill-check.yml: these are *_RUNS_ON_JSON variables, so every
     # branch must stay JSON and be parsed. An unparsed array becomes one literal
     # label no runner carries, and GitHub queues that job forever rather than
@@ -30,7 +31,7 @@ jobs:
         (github.event_name == 'merge_group' ||
          (github.event_name == 'pull_request' &&
           github.event.pull_request.head.repo.full_name == github.repository)) &&
-        (vars.PULP_AUTO_LINUX_RUNS_ON_JSON || '"ubuntu-latest"') ||
+        (vars.PULP_AUTO_LINUX_RUNS_ON_JSON && !contains(vars.PULP_AUTO_LINUX_RUNS_ON_JSON, 'pulp-host-macpro') && vars.PULP_AUTO_LINUX_RUNS_ON_JSON || '"ubuntu-latest"') ||
         '"ubuntu-latest"'
       ) }}
     steps:

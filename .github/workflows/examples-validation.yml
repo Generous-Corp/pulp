@@ -206,10 +206,10 @@ jobs:
     name: Build examples (Linux x64)
     needs: changes
     if: github.head_ref != 'release/version-bump' && (needs.changes.outputs.examples == 'true')
-    # Public pull_request workflow code stays hosted. Private Mac Pro routing
-    # is allowed only for operator-dispatched runs until a runner group can
-    # enforce trusted-workflow access outside PR-controlled YAML.
-    runs-on: ${{ fromJSON(github.event_name == 'workflow_dispatch' && vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    # Public pull_request workflow code stays hosted. A stale local selector
+    # naming retired macpro is ignored, so dispatches use hosted Linux until a
+    # replacement pool is proven.
+    runs-on: ${{ fromJSON(github.event_name == 'workflow_dispatch' && !contains(vars.PULP_LOCAL_LINUX_RUNS_ON_JSON, 'pulp-host-macpro') && vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '"ubuntu-latest"') }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7.0.1
