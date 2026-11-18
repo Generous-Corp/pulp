@@ -64,6 +64,15 @@ A slot may be prepared once. Load, prepare, restore, checkpoint and graceful
 destruction each have five-second control deadlines. The launch carries two of
 them, the hello exchange and then the load report, inside one ten-second
 session, so a slow hello does not shorten the vendor load's five seconds.
+On arm64 macOS a real worker proves it: the test-only
+`pulp-test-clap-worker-delayed` build (the production worker source and
+fingerprint, plus a hello delay read from `PULP_G9_HELLO_DELAY_MS`) and the
+fixture plugin's `PULP_G9_LOAD_DELAY_MS` load delay launch with about 3 s each,
+while a 6 s hello fails at the hello budget and a 6 s load after a 3 s hello
+fails at the load's own budget (about 8 s, inside the session), and neither
+leaves a live child process (`test/test_isolated_clap_launch_budget.cpp`). The
+Windows launch shares the same deadlines but no real-process launch-budget case
+runs there yet; it needs the Windows Server VM.
 
 Stopped checkpoint capture invokes native CLAP state saving through a writer
 capped at 1 MiB. Any failed or oversized write invalidates the attempt even if
