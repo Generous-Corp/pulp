@@ -305,6 +305,11 @@ struct AUBridge {
     // state-restore contention). Without a valid mSampleTime the next observed
     // block cannot measure the skip, so it is marked discontinuous.
     bool timing_block_skipped = false;
+    // Render thread only: a block refused a host event, which may have been a
+    // release the count cannot identify, so the next block the Processor
+    // observes carries `ProcessContext::reset_requested` and a fresh MPE
+    // tracker. Cleared once a Processor call has observed that reset.
+    bool refused_event_reset_pending = false;
 
     // Host accommodations, resolved once at init via the runtime policy.
     HostQuirks host_quirks{};
@@ -1841,6 +1846,8 @@ struct ScopedAuV3HostWriting {
             // reflects the settled value on its next poll.
             bridge->store.reset_triggers_rt();
             bridge->timing_block_skipped = true;
+            bridge->refused_event_reset_pending =
+                bridge->refused_event_reset_pending || event_admission.refused != 0;
             return noErr;
         }
 
@@ -1962,6 +1969,11 @@ struct ScopedAuV3HostWriting {
             bridge->timing_discontinuity_pending.load(std::memory_order_acquire) ||
             (bridge->timing_block_skipped && !ctx.timing.has_steady_sample);
         ctx.timing.refused_events = event_admission.refused;
+        // A reset owed by an earlier block's refused event reaches the
+        // Processor in this block; this block's own refusals are owed to the
+        // next one. The flag survives a block the Processor does not observe.
+        const bool refusal_reset = bridge->refused_event_reset_pending;
+        bridge->refused_event_reset_pending = refusal_reset || event_admission.refused != 0;
 
         // One entry per declared bus, so ProcessBusBufferInfo::index equals the
         // descriptor index. Entries for a bus without channels stay empty and
@@ -2118,6 +2130,10 @@ struct ScopedAuV3HostWriting {
         // CLAP; the AU render path does not sort midi_in). No-op (detaches the
         // buffer) when the plug-in did not opt into MPE. Allocation-free: the
         // buffer was reserved + capacity-limited in allocateRenderResources.
+        if (refusal_reset) {
+            bridge->mpe.reset();
+            ctx.reset_requested = true;
+        }
         if (!bridge->mpe.run(*bridge->processor, midi_in)) {
             midi_in.clear();
             midi_in.clear_sysex();
@@ -2154,6 +2170,7 @@ struct ScopedAuV3HostWriting {
         // The Processor observed this block's timing facts.
         bridge->timing_discontinuity_pending.store(false, std::memory_order_release);
         bridge->timing_block_skipped = false;
+        bridge->refused_event_reset_pending = event_admission.refused != 0;
 
         // Return trigger / momentary params (panic, reset, tap) to their
         // default now that the Processor has observed this block, so the

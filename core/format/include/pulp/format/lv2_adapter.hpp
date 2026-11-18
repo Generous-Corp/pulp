@@ -278,6 +278,10 @@ struct PulpLv2Instance {
     // reached Processor::process(), unless part of that host block was past
     // the prepared maximum and never rendered.
     bool timing_discontinuity_pending = true;
+    // Set by a run() that refused a host event, which may have been a release
+    // the count cannot identify; the next run() then carries
+    // `ProcessContext::reset_requested`.
+    bool refused_event_reset_pending = false;
 
     // Previous-block transport snapshot backing the shared change-flag diff
     // (`tempo_changed` / `transport_jump` / ...), exactly as the other format

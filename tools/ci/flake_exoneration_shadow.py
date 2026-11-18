@@ -32,7 +32,14 @@ Two rules keep the verdict from resting on evidence it never read:
   which an advisory leg can turn red. A tip whose gate did not execute the
   suite, a red gate whose failing-test list cannot be downloaded, and a red
   gate that named no test are all "main unknown", and unknown never
-  exonerates.
+  exonerates. The one widening: when the tip's gate did not execute the suite,
+  `--main-lookback N` (default 10; 0 = tip only) walks first-parent back, within
+  24 h of the tip, to the newest commit whose gate did, and the annotation
+  records that commit (`main_read_sha`), its distance (`main_distance`) and
+  `main_source`. The skipped commits between were reuse or skip-safe groups, so
+  the gate's own contract is that they did not change what the suite reads;
+  this shadow does not re-verify that, and the annotation names the commit so
+  a reader can.
 - A deterministic test is never a flake. The `pr-fast` label is the static
   contract tier (tests that read the tree and must be deterministic to join
   it), and `tools/ci/drift_fast.json` names the other tree-reading drift
@@ -65,6 +72,7 @@ import base_poison_detector as bpd  # noqa: E402
 
 SCHEMA = "pulp-flake-exoneration-shadow/v1"
 MIN_OTHER_HEADS = 2
+MAIN_LOOKBACK = 10
 DETERMINISTIC_LABEL = "pr-fast"
 DRIFT_FAST_LIST = Path(__file__).resolve().parents[2] / "tools/ci/drift_fast.json"
 
@@ -168,30 +176,107 @@ class MainEvidence:
     conclusion: str  # "success" | "failure" | "unknown"
     failing: frozenset[str] = frozenset()
     reason: str = ""
+    # The commit whose gate was read, and how many first-parent steps back from
+    # main's tip it is (0 = the tip itself). Empty when nothing was read.
+    read_sha: str = ""
+    distance: int = 0
+    # "tip" (the tip's own gate), "tree-identity" (an earlier group that built
+    # the tip's tree; distance does not apply), or "first-parent-ancestor".
+    source: str = ""
 
     @property
     def read(self) -> bool:
         return self.conclusion in ("success", "failure")
 
 
-def main_evidence(repo: str, observe_fn=None, failing_fn=None) -> MainEvidence:
-    """main's tip judged by its required gate job; unknown unless actually read."""
+def _judge_failing(obs, failing, where) -> MainEvidence:
+    if failing is None:
+        return MainEvidence(obs.run_id, "unknown", reason="main's failing-test list could not be read", **where)
+    if not failing:
+        return MainEvidence(obs.run_id, "unknown", reason="main's gate failed without naming a test", **where)
+    return MainEvidence(obs.run_id, "failure", frozenset(failing), **where)
+
+
+def first_parent_step(repo: str, sha: str) -> tuple[str, dt.datetime | None] | None:
+    """(first parent sha, this commit's committer time), or None when unreadable."""
+    raw = bpd.gh(f"repos/{repo}/commits/{sha}",
+                 "[(.parents[0].sha // \"\"), .commit.committer.date]|@tsv")
+    if not raw or "\t" not in raw:
+        return None
+    parent, when = raw.split("\t", 1)
+    try:
+        stamp = dt.datetime.fromisoformat(when.strip().replace("Z", "+00:00"))
+    except ValueError:
+        stamp = None
+    return parent.strip(), stamp
+
+
+def main_evidence(repo: str, observe_fn=None, failing_fn=None, lookback: int = 0,
+                  lookback_hours: int = 24, tip_fn=None, step_fn=None, head_obs_fn=None) -> MainEvidence:
+    """main's tip judged by its required gate job; unknown unless actually read.
+
+    When the tip's gate did not execute the suite (a receipt reuse, a skip-safe
+    group) and `lookback` > 0, walk FIRST-PARENT back, at most `lookback`
+    commits and `lookback_hours` hours from the tip's commit time, to the
+    newest commit whose gate did execute it, and judge from that one. The
+    commit read and its distance are recorded. Every other unread case stays
+    unknown; a first-parent chain is followed one parent link at a time, so a
+    commit outside the tip's first-parent ancestry is never read.
+    """
     observe_fn = observe_fn or (lambda r: bpd.observe_main(r)[0])
     failing_fn = failing_fn or read_failing_tests
     obs = observe_fn(repo)
     if obs is None:
         return MainEvidence(None, "unknown", reason="no merge-group run observed main's tip")
-    if not obs.is_evidence:
-        return MainEvidence(obs.run_id, "unknown",
-                            reason=f"main's gate did not execute the suite ({obs.execution}, {obs.conclusion or 'running'})")
+    if obs.is_evidence:
+        return _judge_obs(repo, obs, failing_fn, "", 0)
+    reason = f"main's gate did not execute the suite ({obs.execution}, {obs.conclusion or 'running'})"
+    if lookback > 0 and obs.execution != bpd.EXECUTED:
+        found = _walk_first_parent(repo, lookback, lookback_hours, tip_fn, step_fn, head_obs_fn)
+        if found is None:
+            return MainEvidence(obs.run_id, "unknown",
+                                reason=f"{reason}; no commit within {lookback} first-parent commits / "
+                                       f"{lookback_hours} h ran it")
+        sha, distance, earlier = found
+        return _judge_obs(repo, earlier, failing_fn, sha, distance)
+    return MainEvidence(obs.run_id, "unknown", reason=reason)
+
+
+def _judge_obs(repo, obs, failing_fn, sha, distance) -> MainEvidence:
+    if sha:
+        source = "first-parent-ancestor"
+    else:
+        source = "tree-identity" if obs.source == bpd.SOURCE_TREE_IDENTITY else "tip"
+    where = {"read_sha": sha or obs.head_sha, "distance": distance, "source": source}
     if obs.passed:
-        return MainEvidence(obs.run_id, "success")
-    failing = failing_fn(repo, obs.run_id)
-    if failing is None:
-        return MainEvidence(obs.run_id, "unknown", reason="main's failing-test list could not be read")
-    if not failing:
-        return MainEvidence(obs.run_id, "unknown", reason="main's gate failed without naming a test")
-    return MainEvidence(obs.run_id, "failure", frozenset(failing))
+        return MainEvidence(obs.run_id, "success", **where)
+    return _judge_failing(obs, failing_fn(repo, obs.run_id), where)
+
+
+def _walk_first_parent(repo, lookback, hours, tip_fn, step_fn, head_obs_fn):
+    """(sha, distance, observation) of the newest first-parent ancestor of main's
+    tip whose gate executed the suite, within the bounds; None otherwise."""
+    tip_fn = tip_fn or (lambda r: bpd.main_head(r)[0])
+    step_fn = step_fn or first_parent_step
+    head_obs_fn = head_obs_fn or bpd.observe_main_by_head_sha
+    tip = tip_fn(repo)
+    first = step_fn(repo, tip) if tip else None
+    if first is None or first[1] is None:
+        return None
+    parent, tip_time = first
+    for distance in range(1, lookback + 1):
+        if not parent:
+            return None
+        # `parent` is the first parent of the commit before it, never any other
+        # ancestor; its own step supplies its time and the next first parent.
+        step = step_fn(repo, parent)
+        if step is None or step[1] is None or tip_time - step[1] > dt.timedelta(hours=hours):
+            return None
+        seen = head_obs_fn(repo, parent)
+        if seen is not None and seen.is_evidence:
+            return parent, distance, seen
+        parent = step[0]
+    return None
 
 
 def decide(failing: list[str], by_head: dict[str, set[str]], main: MainEvidence,
@@ -223,6 +308,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--head", default=os.environ.get("GITHUB_SHA", ""))
     ap.add_argument("--hours", type=int, default=24)
     ap.add_argument("--min-other-heads", type=int, default=MIN_OTHER_HEADS)
+    ap.add_argument("--main-lookback", type=int, default=MAIN_LOOKBACK,
+                    help="first-parent commits to walk back from main's tip when its gate did not "
+                         "execute the suite (0 = tip only)")
     a = ap.parse_args(argv[1:])
     try:
         labels = junit_failure_labels(Path(a.junit))
@@ -235,12 +323,13 @@ def main(argv: list[str]) -> int:
         return 0
     runs = recent_failed_runs(a.repo, a.hours, a.head)
     by_head = failures_by_head(a.repo, runs)
-    main = main_evidence(a.repo)
+    main = main_evidence(a.repo, lookback=max(0, a.main_lookback))
     result = decide(failing, by_head, main, deterministic_tests(labels, drift_fast_tests()),
                     a.min_other_heads)
     result.update({"schema": SCHEMA, "mode": "shadow", "failing": len(failing), "window_hours": a.hours,
                    "runs_scanned": len(runs), "main_run_id": main.run_id, "main_conclusion": main.conclusion,
-                   "main_evidence_read": main.read, "main_reason": main.reason, "head": a.head})
+                   "main_evidence_read": main.read, "main_read_sha": main.read_sha,
+                   "main_distance": main.distance, "main_source": main.source, "main_lookback": a.main_lookback, "main_reason": main.reason, "head": a.head})
     would = [n for n, v in result["tests"].items() if v["would_exonerate"]]
     print(f"flake-exoneration shadow: {len(failing)} failing test(s); would exonerate {len(would)} "
           f"(OCCURS_ON_OTHER_CLS: >= {a.min_other_heads} other heads in {a.hours} h and passing on main run "
