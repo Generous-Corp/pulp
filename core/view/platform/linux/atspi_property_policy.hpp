@@ -27,12 +27,10 @@ enum class Writable { no, int32, double_ };
 // True when Properties.Get can answer for this pair.
 inline bool is_readable(const NodeShape& n, std::string_view iface, std::string_view prop) {
     if (iface == "org.a11y.atspi.Accessible")
-        return prop == "Name" || prop == "Description" || prop == "Parent" ||
-               prop == "ChildCount";
+        return prop == "Name" || prop == "Description" || prop == "Parent" || prop == "ChildCount";
     if (iface == "org.a11y.atspi.Application")
-        return n.is_root &&
-               (prop == "ToolkitName" || prop == "Version" || prop == "AtspiVersion" ||
-                prop == "Id");
+        return n.is_root && (prop == "ToolkitName" || prop == "Version" || prop == "AtspiVersion" ||
+                             prop == "Id");
     if (iface == "org.a11y.atspi.Text")
         return n.has_text && (prop == "CharacterCount" || prop == "CaretOffset");
     if (iface == "org.a11y.atspi.Value")
@@ -43,9 +41,12 @@ inline bool is_readable(const NodeShape& n, std::string_view iface, std::string_
 
 // Writable properties: Application.Id (i, root only) and Value.CurrentValue (d).
 inline Writable writable_type(const NodeShape& n, std::string_view iface, std::string_view prop) {
-    if (!is_readable(n, iface, prop)) return Writable::no;
-    if (iface == "org.a11y.atspi.Application" && prop == "Id") return Writable::int32;
-    if (iface == "org.a11y.atspi.Value" && prop == "CurrentValue") return Writable::double_;
+    if (!is_readable(n, iface, prop))
+        return Writable::no;
+    if (iface == "org.a11y.atspi.Application" && prop == "Id")
+        return Writable::int32;
+    if (iface == "org.a11y.atspi.Value" && prop == "CurrentValue")
+        return Writable::double_;
     return Writable::no;
 }
 
@@ -55,9 +56,11 @@ enum class SetVerdict { apply, unknown_property, read_only, invalid_args };
 // the argument is missing or is not a variant.
 inline SetVerdict decide_set(const NodeShape& n, std::string_view iface, std::string_view prop,
                              int variant_type) {
-    if (!is_readable(n, iface, prop)) return SetVerdict::unknown_property;
+    if (!is_readable(n, iface, prop))
+        return SetVerdict::unknown_property;
     const Writable w = writable_type(n, iface, prop);
-    if (w == Writable::no) return SetVerdict::read_only;
+    if (w == Writable::no)
+        return SetVerdict::read_only;
     const int want = (w == Writable::int32) ? kTypeInt32 : kTypeDouble;
     return variant_type == want ? SetVerdict::apply : SetVerdict::invalid_args;
 }

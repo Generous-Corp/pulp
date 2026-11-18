@@ -542,14 +542,14 @@ struct AtspiProvider {
             }
             const auto verdict = atspi_props::decide_set(shape_for(index), iface, prop, var_type);
             if (verdict != atspi_props::SetVerdict::apply) {
-                ctx.error(atspi_props::error_name(verdict),
-                          "Cannot set " + iface + "." + prop);
+                ctx.error(atspi_props::error_name(verdict), "Cannot set " + iface + "." + prop);
                 return true;
             }
             // Application.Id (i) is writable: the registry sets it.
             if (iface == kIfaceApplication && prop == "Id") {
                 int v = 0;
-                if (var.read_int32(v)) app_id = v;
+                if (var.read_int32(v))
+                    app_id = v;
             }
             // Value.CurrentValue (d) is writable: an AT-driven adjust (Orca's
             // "increase/decrease") sets it; route to the View's value interface

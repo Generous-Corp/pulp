@@ -236,11 +236,14 @@ TEST_CASE("AT-SPI Properties.Set maps each rejection to its D-Bus error", "[view
     CHECK(props::decide_set(root, "org.a11y.atspi.Application", "Id", 0) == V::invalid_args);
     CHECK(props::decide_set(leaf, "org.a11y.atspi.Application", "Id", 'i') == V::unknown_property);
     CHECK(props::decide_set(slider, "org.a11y.atspi.Value", "CurrentValue", 'd') == V::apply);
-    CHECK(props::decide_set(slider, "org.a11y.atspi.Value", "CurrentValue", 's') == V::invalid_args);
-    CHECK(props::decide_set(leaf, "org.a11y.atspi.Value", "CurrentValue", 'd') == V::unknown_property);
+    CHECK(props::decide_set(slider, "org.a11y.atspi.Value", "CurrentValue", 's') ==
+          V::invalid_args);
+    CHECK(props::decide_set(leaf, "org.a11y.atspi.Value", "CurrentValue", 'd') ==
+          V::unknown_property);
     CHECK(props::decide_set(slider, "org.a11y.atspi.Value", "MaximumValue", 'd') == V::read_only);
     CHECK(props::decide_set(leaf, "org.a11y.atspi.Accessible", "Name", 's') == V::read_only);
-    CHECK(props::decide_set(leaf, "org.a11y.atspi.Accessible", "Bogus", 's') == V::unknown_property);
+    CHECK(props::decide_set(leaf, "org.a11y.atspi.Accessible", "Bogus", 's') ==
+          V::unknown_property);
     CHECK(props::decide_set(leaf, "org.example.Unknown", "X", 's') == V::unknown_property);
     CHECK(std::string(props::error_name(V::unknown_property)) ==
           "org.freedesktop.DBus.Error.UnknownProperty");
