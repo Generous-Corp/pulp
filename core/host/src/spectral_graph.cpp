@@ -530,7 +530,7 @@ SignalGraph::add_spectral_asset_source_v1(std::span<const std::uint8_t> asset,
                                     {n.output_ports.front()},
                                     {rule.policy_version(), rule.source_samples, rule.frame_count,
                                      rule.drain_frames, rule.render_cutoff}};
-    nodes_.push_back(std::move(n));
+    push_node_locked_(std::move(n));
     ++next_id_;
     invalidate_live_locked_();
     return {std::move(result)};

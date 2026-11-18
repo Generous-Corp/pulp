@@ -1483,6 +1483,10 @@ void GraphSerializerTestAccess::fail_next_document_parse() noexcept {
     g_fail_next_document_parse.store(true, std::memory_order_release);
 }
 
+void GraphSerializerTestAccess::fail_next_spectral_candidate_build() noexcept {
+    spectral_persistence::fail_next_candidate_build();
+}
+
 void GraphSerializerTestAccess::fail_next_event_rebind() noexcept {
     g_fail_next_event_rebind.store(true, std::memory_order_release);
 }
@@ -2526,11 +2530,11 @@ legacy_v6_document(const SignalGraph& graph,
 }
 
 // The one place that picks a writer: a graph holding spectral nodes is written
-// by the spectral writer, every other graph by the plain writer, optionally
-// wrapped in the saved-identity envelope. Spectral persistence has its own
-// closed envelope, which the saved-identity fields would break, so a spectral
-// graph has no saved-identity form. Returns an empty string on refusal and,
-// when `reason` is given and the writer names one, the rule the graph breaks.
+// by the spectral writer (format 6, or the saved-identity v7 document with its
+// closed spectral member set), every other graph by the plain writer,
+// optionally wrapped in the saved-identity envelope. Returns an empty string
+// on refusal and, when `reason` is given and the writer names one, the rule
+// the graph breaks.
 std::string serialize(const SignalGraph& graph,
                       const std::unordered_map<NodeId, std::pair<float, float>>& editor_layout,
                       bool saved_identity, std::string* reason) {
@@ -2544,13 +2548,8 @@ std::string serialize(const SignalGraph& graph,
         return {};
     }
     if (spectral_persistence::contains_spectral_nodes(graph)) {
-        if (saved_identity) {
-            if (reason)
-                *reason = "a spectral graph has no saved-identity envelope";
-            return {};
-        }
         std::string why;
-        auto json = spectral_persistence::write(graph, editor_layout, why);
+        auto json = spectral_persistence::write(graph, editor_layout, why, saved_identity);
         if (reason)
             *reason = std::move(why);
         return json;
@@ -2781,8 +2780,6 @@ find_unrestored_connection(const SignalGraph& graph, const V& root,
             !item.hasObjectMember("dest_node") || !item["source_node"].isInt() ||
             !item["dest_node"].isInt())
             return describe() + " is malformed";
-        if (flag(item, "spectral"))
-            return describe() + " uses the unsupported spectral lane";
         const auto source = persisted_ids.find(static_cast<NodeId>(item["source_node"].getInt64()));
         const auto dest = persisted_ids.find(static_cast<NodeId>(item["dest_node"].getInt64()));
         if (source == persisted_ids.end() || dest == persisted_ids.end())
@@ -3164,26 +3161,58 @@ GraphSerializer::LoadResult GraphSerializer::load_json_(SignalGraph& graph, cons
     if (spectral.handled) {
         if (!spectral.result.ok)
             return spectral.result;
-        SignalGraph::GraphMutationLock lock(graph);
-        if (graph.refuse_spectral_mutation_()) {
-            spectral.result.ok = false;
-            spectral.result.error =
-                "active spectral controller refuses graph loading; stop it first";
+        auto& prepared = *spectral.graph;
+        // Each candidate node takes the authored ID its record restores with:
+        // a v7 record's own, or the ID migrate_saved_document's rule derives
+        // for a format 6 document. Planned and assigned on the isolated
+        // candidate, so a failure here (including an allocation failure)
+        // refuses before the caller's graph is touched.
+        try {
+            if (g_fail_next_authored_id_plan.exchange(false, std::memory_order_acq_rel))
+                throw std::bad_alloc();
+            const auto root = choc::json::parse(json);
+            std::unordered_map<NodeId, std::string> authored;
+            if (auto error = plan_authored_ids(root, json, authored)) {
+                detail::refuse_load(spectral.result, nullptr, std::move(*error));
+                return spectral.result;
+            }
+            std::unordered_map<NodeId, NodeId> persisted_of;
+            for (const auto& [persisted, candidate] : spectral.result.persisted_node_ids)
+                persisted_of.emplace(candidate, persisted);
+            for (auto& n : prepared.nodes_) {
+                const auto persisted = persisted_of.find(n.id);
+                const auto id = persisted == persisted_of.end() ? authored.end()
+                                                                : authored.find(persisted->second);
+                if (id == authored.end()) {
+                    detail::refuse_load(spectral.result, nullptr,
+                                        "spectral node " + n.name + " has no planned authored_id");
+                    return spectral.result;
+                }
+                n.authored_id = AuthoredNodeId(id->second);
+            }
+        } catch (const std::exception& error) {
+            detail::refuse_load(spectral.result, nullptr,
+                                std::string("authored_id planning failed: ") + error.what());
             return spectral.result;
         }
-        auto& prepared = *spectral.graph;
+        SignalGraph::GraphMutationLock lock(graph);
+        if (graph.refuse_spectral_mutation_()) {
+            detail::refuse_load(spectral.result, nullptr,
+                                "active spectral controller refuses graph loading; stop it first");
+            return spectral.result;
+        }
         prepared.set_limits(graph.limits_);
         if (!prepared.validate_generated_graph(std::min(4096, graph.limits_.max_block_size))
                  .accepted) {
-            spectral.result.ok = false;
-            spectral.result.error = "spectral graph exceeds destination graph limits";
+            detail::refuse_load(spectral.result, nullptr,
+                                "spectral graph exceeds destination graph limits");
             return spectral.result;
         }
         if (prepared.connections_.size() >
                 std::numeric_limits<std::uint64_t>::max() - graph.next_connection_identity_ ||
             graph.authoring_generation_ == std::numeric_limits<std::uint64_t>::max()) {
-            spectral.result.ok = false;
-            spectral.result.error = "spectral graph authoring identity exhausted";
+            detail::refuse_load(spectral.result, nullptr,
+                                "spectral graph authoring identity exhausted");
             return spectral.result;
         }
         // No allocation or fallible construction remains after preflight.

@@ -683,6 +683,10 @@ class PulpVst3Processor : public Steinberg::Vst::SingleComponentEffect,
     // longer host block. Without a continuous-time counter the next observed
     // block cannot measure the skip, so it is marked discontinuous.
     bool timing_block_skipped_ = false;
+    // Audio thread only: admission of this block's event times against the
+    // rendered frames. Reset at the top of every process() that decodes
+    // events; its refusal count is published on ProcessContext::timing.
+    pulp::format::EventTimeAdmission event_admission_{};
 
     // MainThreadDispatcher backend token. Acquired in initialize(),
     // released in terminate(). On macOS this lets adapter-side and

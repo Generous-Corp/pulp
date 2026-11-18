@@ -469,6 +469,13 @@ discontinuous only when the host sends no `steady_time` (with one, the
 projection measures the gap).
 Coverage: `test_clap_process_timing.cpp`.
 
+Every note, MIDI, SysEx, note-expression and MIDI 2 time goes through
+`format::EventTimeAdmission` before it becomes a `sample_offset`. Widen
+`clap_event_header_t::time` (a `uint32_t`) to 64 bits; a cast to `int32_t`
+turns a far-past time into a negative offset. An out-of-block time is refused
+and counted on `ctx.timing.refused_events`, never clamped; parameter and
+modulation event times are not admitted (refusing one would drop its value).
+
 ### Render mode (`clap.render`)
 
 The adapter offers `CLAP_EXT_RENDER` from `clap_get_extension()`:

@@ -841,3 +841,167 @@ TEST_CASE("MPE derivation rebinds the tracker without allocating",
     }
     CHECK(control > 0);
 }
+
+namespace {
+// Publish `count` note-ons into the open block at consecutive offsets from
+// `first_offset`, each on its own key.
+void publish_chord(Rig& rig, const HostTimelineBlock& block, std::size_t count,
+                   std::int64_t first_offset, std::uint64_t first_sequence) {
+    for (std::size_t i = 0; i < count; ++i) {
+        const auto sample = static_cast<std::int64_t>(block.timeline.sample_start) + first_offset +
+                            static_cast<std::int64_t>(i % 4);
+        REQUIRE(rig.binding->publish_graph_event(
+                    rig.note(block.timeline.epoch, sample, first_sequence + i, 1,
+                             static_cast<std::uint8_t>(40 + i))) == HostEventResult::Accepted);
+    }
+}
+
+std::vector<std::pair<std::int32_t, std::uint8_t>> delivered_notes(Rig& rig) {
+    midi::MidiBuffer delivered;
+    delivered.reserve(32);
+    REQUIRE(rig.fixture.graph.extract_midi(rig.fixture.midi_out, delivered));
+    std::vector<std::pair<std::int32_t, std::uint8_t>> notes;
+    for (std::size_t i = 0; i < delivered.size(); ++i)
+        notes.emplace_back(delivered[i].sample_offset, delivered[i].note());
+    return notes;
+}
+} // namespace
+
+TEST_CASE("A graph processing failure drops its block instead of replaying it late",
+          "[host][timeline][refusal][mpe]") {
+    Rig rig;
+    HostTimelineBlock first;
+    REQUIRE(rig.begin(0, 8, false, first) == HostEventResult::Accepted);
+    REQUIRE(rig.render(8));
+    (void)delivered_notes(rig);
+
+    SECTION("seven projected records fit the MPE preflight") {
+        HostTimelineBlock block;
+        REQUIRE(rig.begin(8, 8, false, block) == HostEventResult::Accepted);
+        publish_chord(rig, block, 7, 1, 1);
+        const auto result = rig.render(8);
+        CHECK(result.graph == TriggerGraphResult::Accepted);
+        CHECK(delivered_notes(rig).size() == 7);
+        CHECK(trigger_clock(rig.fixture.graph).cursor == block.graph_sample_start + 8);
+        CHECK(rig.binding->counters().graph_failed_blocks == 0);
+    }
+
+    SECTION("eight projected records fail and the next block is clean") {
+        HostTimelineBlock failed;
+        REQUIRE(rig.begin(8, 8, false, failed) == HostEventResult::Accepted);
+        publish_chord(rig, failed, 8, 1, 1);
+        rig.output.fill(1.0f);
+        const auto result = rig.render(8);
+        CHECK(result.graph == TriggerGraphResult::ProcessingFailure);
+        // The graph rendered nothing, so its clock did not move and the
+        // binding hands the caller silence rather than a stale buffer.
+        CHECK(trigger_clock(rig.fixture.graph).cursor == failed.graph_sample_start);
+        CHECK(std::all_of(rig.output.begin(), rig.output.begin() + 8,
+                          [](float v) { return v == 0.0f; }));
+        CHECK_FALSE(rig.binding->block_open());
+        CHECK(rig.binding->counters().graph_failed_blocks == 1);
+
+        // The next host block maps onto the unmoved graph cursor and carries
+        // only its own record, at its own offset.
+        HostTimelineBlock next;
+        REQUIRE(rig.begin(16, 8, false, next) == HostEventResult::Accepted);
+        CHECK(next.boundary == HostBlockBoundary::Continuous);
+        CHECK(next.graph_sample_start == failed.graph_sample_start);
+        REQUIRE(rig.binding->publish_graph_event(rig.note(next.timeline.epoch, 19, 100, 1, 72)) ==
+                HostEventResult::Accepted);
+        CHECK(rig.render(8).graph == TriggerGraphResult::Accepted);
+        const auto notes = delivered_notes(rig);
+        REQUIRE(notes.size() == 1);
+        CHECK(notes[0] == std::make_pair(std::int32_t{3}, std::uint8_t{72}));
+        CHECK(trigger_clock(rig.fixture.graph).cursor == next.graph_sample_start + 8);
+
+        // The graph clock and the binding's mapping keep moving together.
+        HostTimelineBlock after;
+        REQUIRE(rig.begin(24, 8, false, after) == HostEventResult::Accepted);
+        CHECK(after.graph_sample_start == next.graph_sample_start + 8);
+        CHECK(rig.render(8).graph == TriggerGraphResult::Accepted);
+        CHECK(delivered_notes(rig).empty());
+    }
+}
+
+TEST_CASE("A block larger than the prepared graph is refused without wedging the binding",
+          "[host][timeline][refusal][frames]") {
+    Rig rig;
+    std::array<float, 2 * kGraphMaxFrames> input{};
+    std::array<float, 2 * kGraphMaxFrames> output{};
+    const float* ip = input.data();
+    float* op = output.data();
+    const auto oversized = static_cast<std::size_t>(2 * kGraphMaxFrames);
+
+    HostTimelineBlock block;
+    const auto opened = rig.begin(0, oversized, false, block);
+    CHECK(opened == HostEventResult::OutOfRange);
+    if (opened == HostEventResult::Accepted) {
+        audio::BufferView<const float> in(&ip, 1, oversized);
+        audio::BufferView<float> out(&op, 1, oversized);
+        auto stereo = rig.voice.view().slice(0, oversized);
+        CHECK(rig.binding->render(&out, &in, &stereo).graph == TriggerGraphResult::Frames);
+    }
+    CHECK_FALSE(rig.binding->block_open());
+    CHECK(rig.binding->counters().refused_blocks == 1);
+    CHECK(trigger_clock(rig.fixture.graph).cursor == 0);
+
+    // The refused block was consumed on the timeline; the next block in the
+    // graph's frame limit opens and renders normally.
+    HostTimelineBlock next;
+    REQUIRE(rig.begin(static_cast<std::int64_t>(oversized), kGraphMaxFrames, false, next) ==
+            HostEventResult::Accepted);
+    CHECK(next.boundary == HostBlockBoundary::Continuous);
+    CHECK(next.graph_sample_start == 0);
+    REQUIRE(rig.binding->publish_graph_event(
+                rig.note(next.timeline.epoch, static_cast<std::int64_t>(oversized) + 5, 1)) ==
+            HostEventResult::Accepted);
+    CHECK(rig.render(kGraphMaxFrames));
+    const auto notes = delivered_notes(rig);
+    REQUIRE(notes.size() == 1);
+    CHECK(notes[0].first == 5);
+    CHECK(trigger_clock(rig.fixture.graph).cursor == kGraphMaxFrames);
+
+    // Negative control: a block at exactly the prepared limit opens.
+    HostTimelineBlock exact;
+    CHECK(rig.begin(static_cast<std::int64_t>(oversized) + kGraphMaxFrames, kGraphMaxFrames, false,
+                    exact) == HostEventResult::Accepted);
+    CHECK(rig.render(kGraphMaxFrames));
+
+    // The graph itself refuses to open a host-event block it could never
+    // render, and one frame less opens.
+    const auto clock = trigger_clock(rig.fixture.graph);
+    CHECK(rig.fixture.graph.begin_host_event_block(
+              clock.epoch, clock.cursor, kGraphMaxFrames + 1) == HostEventResult::OutOfRange);
+    CHECK(rig.fixture.graph.begin_host_event_block(clock.epoch, clock.cursor, kGraphMaxFrames) ==
+          HostEventResult::Accepted);
+}
+
+TEST_CASE("MPE derivation leaves no tracker callback bound to its stack sink",
+          "[host][timeline][mpe]") {
+    midi::MpeVoiceTracker tracker;
+    midi::MpeBuffer sidecar;
+    sidecar.reserve(16);
+    sidecar.set_realtime_capacity_limit(true);
+    std::array<HostEventRecord, 1> records{};
+    records[0].epoch = 1;
+    records[0].absolute_sample = 10;
+    records[0].producer = 1;
+    records[0].midi = midi::MidiEvent::note_on(1, 60, 100);
+    REQUIRE(derive_mpe(records, 10, tracker, sidecar) == HostEventResult::Accepted);
+    REQUIRE(sidecar.size() == 1);
+    CHECK_FALSE(tracker.on_note_lifecycle);
+    CHECK_FALSE(tracker.on_pitch_bend);
+    CHECK_FALSE(tracker.on_pressure);
+    CHECK_FALSE(tracker.on_timbre);
+    // A tracker call made outside derive_mpe reaches no sink.
+    (void)tracker.process(midi::MidiEvent::pitch_bend(1, 12'000));
+    (void)tracker.process(midi::MidiEvent::note_on(1, 62, 100));
+    CHECK(sidecar.size() == 1);
+
+    // The refusal path unbinds too.
+    records[0].absolute_sample = 5;
+    CHECK(derive_mpe(records, 10, tracker, sidecar) == HostEventResult::OutOfRange);
+    CHECK_FALSE(tracker.on_note_lifecycle);
+    CHECK_FALSE(tracker.on_timbre);
+}

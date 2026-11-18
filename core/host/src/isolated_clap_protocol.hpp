@@ -2,7 +2,9 @@
 #pragma once
 
 #include <array>
+#include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -30,6 +32,22 @@ inline constexpr std::uint32_t kChannels = 2;
 // command line. The name is shared by every transport.
 inline constexpr const char* kProfileName = "MacClapStereo64V1";
 inline constexpr std::uint32_t kSlots = 3;
+
+// One lifecycle exchange with the worker (hello, the vendor load after it,
+// prepare, checkpoint, restore, destroy) has this budget.
+inline constexpr std::chrono::milliseconds kLifecycleExchangeBudget{5000};
+// The launch session carries two exchanges, hello and then the load report,
+// so it is bounded by their sum: a slow hello cannot spend the load's budget.
+inline constexpr std::chrono::milliseconds kLaunchSessionBudget = 2 * kLifecycleExchangeBudget;
+static_assert(kLaunchSessionBudget >= 2 * kLifecycleExchangeBudget);
+
+// The deadline of one launch exchange that starts at `now`: its own budget,
+// never past the deadline of the session that carries it.
+inline std::chrono::steady_clock::time_point
+launch_exchange_deadline(std::chrono::steady_clock::time_point now,
+                         std::chrono::steady_clock::time_point session_deadline) {
+    return std::min(now + kLifecycleExchangeBudget, session_deadline);
+}
 
 enum class BlockResult : std::uint32_t { ok = 1, plugin_error, invalid_audio };
 

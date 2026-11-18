@@ -3,10 +3,11 @@
   "title": "One audio-owner reset transaction maps the host block timeline onto graph, voice and parameter events",
   "classification": "public_sdk",
   "delivery_state": "pending",
-  "claim_id": "s4-host-timeline-reset-20261116",
+  "claim_id": "s4-host-timeline-reset-20261117",
   "owned_paths": [
     "core/host/include/pulp/host/host_timeline_binding.hpp",
     "core/host/src/host_timeline_binding.cpp",
+    "core/host/src/trigger_graph.cpp",
     "test/test_host_timeline_binding.cpp",
     "docs/graph-program-status/S4-reset-transaction.md",
     "docs/status/sequencer-exposure/rows/s4-host-timeline-reset.json"
@@ -18,15 +19,19 @@
     },
     {
       "path": "core/host/src/host_timeline_binding.cpp",
-      "needles": ["voices_->reserve_event_reset(voice_epoch)", "graph_->try_reset_events()", "block.graph_sample_start = graph_clock.cursor;"]
+      "needles": ["voices_->reserve_event_reset(voice_epoch)", "graph_->try_reset_events()", "block.graph_sample_start = graph_clock.cursor;", "drop_failed_graph_block_(*graph_output);"]
+    },
+    {
+      "path": "core/host/src/trigger_graph.cpp",
+      "needles": ["if (frames > pin->trigger_state->max_frames ||"]
     },
     {
       "path": "test/test_host_timeline_binding.cpp",
-      "needles": ["Host timeline binding keeps four families partition invariant across resets", "A refused reset leaves every family and the timeline unchanged", "Binding callbacks and resets do not allocate"]
+      "needles": ["Host timeline binding keeps four families partition invariant across resets", "A refused reset leaves every family and the timeline unchanged", "Binding callbacks and resets do not allocate", "A graph processing failure drops its block instead of replaying it late", "A block larger than the prepared graph is refused without wedging the binding"]
     },
     {
       "path": "docs/graph-program-status/S4-reset-transaction.md",
-      "needles": ["### Reset transaction", "## Remaining work"]
+      "needles": ["### Reset transaction", "### Failed and oversized graph blocks", "## Remaining work"]
     }
   ],
   "surfaces": {

@@ -24,8 +24,36 @@ Processor use a graph.
 | `transport_moving` | The host reports the transport as moving. |
 | `playback_rate` | `Unknown` (the host has no rate field), `Unit` (LV2 `time:speed` exactly 1) or `NonUnit`. A `NonUnit` transport is never compared with elapsed samples. |
 | `discontinuity` | The adapter knows this block does not follow the last one the Processor saw. |
+| `refused_events` | Host events (notes, MIDI, SysEx, UMP) the adapter refused this block because their time did not place them inside the frames the Processor renders. |
 
-The field is appended to `ProcessContext`, so existing offsets do not move.
+The field is appended to `ProcessContext`, so existing offsets do not move,
+and `refused_events` is appended to `ProcessTiming` for the same reason.
+
+## Event-time admission
+
+`format::classify_event_time()` places a host event time against the frames
+the Processor renders: `InBlock`, `BeforeBlock`, `AtOrPastEnd`, or `WrongUnit`
+(a time that is not a frame offset). `format::EventTimeAdmission` applies the
+one policy every adapter uses: an in-block time is delivered at its offset,
+unchanged; any other event is refused, counted on `refused_events`, and never
+clamped into the block. A time is never read through an out-of-range offset,
+and an in-block time that does not fit the delivered `int32` offset is refused
+rather than truncated. Admission is per block, allocation-free and lock-free.
+
+| Format | Events admitted | Time source and unit check |
+|---|---|---|
+| CLAP | note on/off/choke, MIDI, SysEx, note expression (MPE on), MIDI 2 (UMP on) | `clap_event_header_t::time`, widened from `uint32_t` rather than cast to `int32_t` |
+| VST3 | note on/off, poly pressure, note expression (MPE on), SysEx with a payload, `IMidiMapping` controller points | `Event::sampleOffset` and the controller point offset |
+| AU v3 | short MIDI and each MIDI event list (counted once) | `eventSampleTime` placed with `format::admit_au_event_time()`, the same `au_event_raw_offset()` arithmetic the host timeline uses; an absolute time with no valid `mSampleTime` is `WrongUnit` |
+| LV2 | MIDI events in the input sequence | `time.frames` only when `format::lv2_sequence_unit_is_frames()` holds for the sequence unit (0 or `atom:frameTime`); a `time:Position` in another unit is placed at the previous event's frame |
+
+The bound is the rendered frame count, so in an oversized host block whose
+prefix alone is rendered (CLAP, VST3, LV2) an event in the unrendered tail is
+refused too. Before this policy the AU v3 MIDI path copied `eventSampleTime`
+as an offset without placing it; with a valid block time it is now placed on
+the render axis, as AU v3 parameter events already were. Refusing a release
+can leave a note held; `refused_events` is the fact a Processor reads to
+reconcile its voices.
 
 ## Per-format sources
 
@@ -86,14 +114,19 @@ playing transport read as a jump on each sliced render.
 
 `format::detail::au_event_raw_offset()` is the one AU v3 event placement
 (immediate window, or absolute against the rounded block `mSampleTime`, with
-overflow refused). The legacy MIDI path (`au_event_block_offset()`) still
-clamps an out-of-block offset to the nearest edge and falls back to the event
-time when the block time is unusable; the host path (`au_event_block_time()`)
-refuses both. The policies stay separate; only the arithmetic is shared.
+overflow refused). The AU v3 MIDI path admits through it and refuses
+(`format::admit_au_event_time()`), as does the host path
+(`au_event_block_time()`). AU v3 parameter events still use
+`au_event_block_offset()`, which clamps an out-of-block offset to the nearest
+edge and falls back to the event time when the block time is unusable.
 
 ## Evidence
 
-- `test/test_process_timing.cpp`: builder semantics per format, SDK constant
+- `test/test_process_timing.cpp`: event-time classification at every boundary
+  (frames - 1 accepted, frames, negative and int64 extremes refused, a zero
+  frame block, a wrong unit), admission counting, int32 overflow and
+  saturation, AU placement before admission, and the LV2 unit rule. Builder
+  semantics per format, SDK constant
   mirrors, CLAP fixed-point round trip at 44.1/48/88.2/96 kHz across a day of
   audio (with a truncation negative control), unclocked default context, the
   shared AU raw offset under both policies, oversized-block refusal and
@@ -104,24 +137,32 @@ refuses both. The policies stay separate; only the arithmetic is shared.
   reset, five block partitions with identical absolute samples, playing seek,
   loop wrap, stopped transport and relocation, host gaps, adapter-skipped
   blocks with and without `steady_time` (with a stripped-fact negative
-  control), clock-source changes, out-of-block offsets refused, a
-  retired-epoch record refused.
+  control), clock-source changes, a retired-epoch record refused. The adapter
+  refuses out-of-block note times itself (at the end, and a time a cast to
+  `int32_t` would have turned negative) and events in the unrendered tail of
+  an oversized block, with an in-block positive control.
 - `test/test_vst3_process_timing.cpp`: the real `PulpVst3Processor` through
   activation, processing restart, seek, cycle wrap, stopped transport, gap,
   `kContTimeValid` dropping out, a missing context, four partitions, and
-  out-of-block offsets.
+  adapter refusal of negative, end, `INT32_MAX` and unrendered-tail offsets
+  with an in-block positive control.
 - `test/test_vst3_plugin_state.cpp`: the requirement mask now must include
   `kNeedContinousTimeSamples` because the decoder consumes it.
 - `test/test_au_plugin_state.mm`: the real AU v3 render block through
   activation, fractional transport, invalid sample time, stopped transport,
   reset, bypass with and without a counter, oversized and output-less renders,
-  and re-allocation. `test/test_au_multibus.mm` resets between two renders of
-  one time stamp and requires a fresh Processor call.
+  and re-allocation; MIDI placed against the block time (last frame and an
+  immediate offset accepted; end, before, huge and a small absolute time
+  refused; an absolute time without a sample time refused).
+  `test/test_au_multibus.mm` resets between two renders of one time stamp and
+  requires a fresh Processor call.
 - `test/test_lv2_adapter.cpp`: the real LV2 `run()` through activation and
   re-activation, half-speed playback projected in one epoch (and as a seek per
   block without the rate fact), a mid-block `time:Position`, partial and
   multiple Positions in one block, speed changes, stops and starts inside a
-  block, numeric boundaries, and a clamped tail.
+  block, numeric boundaries, a clamped tail, MIDI times refused outside the
+  block, and a beat-time sequence refused whole (beat 0 shares its bytes with
+  frame 0) beside an explicit `atom:frameTime` positive control.
 - `test/test_au_v2_process_timing.cpp`: the real AU v2 effect through
   `AUBase::DoRender` with a host input callback and host transport callbacks,
   and the instrument and MIDI processor through `Render()`: activation, invalid
@@ -147,11 +188,13 @@ refuses both. The policies stay separate; only the arithmetic is shared.
    each window onto the graph's own epoch and cursor. See
    `S4-reset-transaction.md`. Adapters still do not drive the binding
    themselves; a graph-owning Processor does.
-3. **Adapter event-time checks still owned by the legacy paths.** CLAP and
-   VST3 copy event times into `sample_offset` without a bound check, and the
-   AU v3 MIDI path still clamps. The projection refuses those offsets, but a
-   Processor that reads `MidiBuffer` directly still sees them. LV2 still reads
-   `time.frames` without checking the sequence unit.
+3. **Event times outside the MIDI paths.** CLAP, VST3, AU v3 and LV2 MIDI
+   event times now go through one admission (see "Event-time admission").
+   Not covered: parameter and modulation event offsets (CLAP and VST3 queue
+   them as delivered; AU v3 parameter events still clamp through
+   `au_event_block_offset()`), because refusing one would also drop its value
+   from the store; and AU v2 MIDI, whose `inStartFrame` arrives before the
+   render's frame count is known.
 4. **Varispeed.** VST3, AU and CLAP carry no playback rate, so `NonUnit` is
    never published for them; a varispeed host still reads as a seek per block
    unless the host also supplies a steady counter. An LV2 relocation at
