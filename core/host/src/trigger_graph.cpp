@@ -1058,7 +1058,12 @@ TriggerGraphResult SignalGraph::process_trigger_snapshot_(
         // node rejected the block. The trigger state has then advanced its
         // consumed frontier while the graph cursor still names the block's
         // start. Consume the failed block too, keeping the next block's
-        // current-sample admission coherent with that state.
+        // current-sample admission coherent with that state. A trigger plan
+        // admits only nodes whose routed bindings cannot fail once the
+        // producer has run (audio and MIDI I/O, gain, and the trigger and
+        // trigger-audio Custom nodes; Plugin and Processor nodes, spectral
+        // graphs and sample regions are refused with Mode), so this guards
+        // a future admission rather than a path a current graph reaches.
         if (state.consumed_frontier != consumed_frontier)
             state.counters.cursor += count;
         return TriggerGraphResult::ProcessingFailure;

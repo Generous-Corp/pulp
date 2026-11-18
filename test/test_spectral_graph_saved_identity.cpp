@@ -1228,7 +1228,20 @@ TEST_CASE("Spectral asset history retains a bounded total of bytes and refuses p
         REQUIRE(exact.undo_depth() == 1);
         REQUIRE(exact.undo_label() == "asset");
         REQUIRE(exact.retained_bytes() == one);
-        REQUIRE(exact.undo(graph).code == GraphHistoryCode::Diverged);
+        // The unrecorded edit swapped the asset, so the refusal names the
+        // asset differences rather than reporting only nodes and connections.
+        const auto asset_diff =
+            diff_graph_documents(GraphSerializer::to_saved_document(graph), swapped);
+        REQUIRE(asset_diff.ok());
+        const auto asset_count = asset_diff.spectral_assets_added.size() +
+                                 asset_diff.spectral_assets_removed.size() +
+                                 asset_diff.spectral_assets_changed.size();
+        REQUIRE(asset_count > 0);
+        const auto diverged = exact.undo(graph);
+        REQUIRE(diverged.code == GraphHistoryCode::Diverged);
+        INFO(diverged.detail);
+        REQUIRE(diverged.detail.find(std::to_string(asset_count) + " spectral asset") !=
+                std::string::npos);
         load_edit(graph, second);
         REQUIRE(exact.undo(graph).ok());
         REQUIRE(GraphSerializer::to_saved_document(graph) == first);
