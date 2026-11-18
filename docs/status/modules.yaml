@@ -4,7 +4,7 @@
 modules:
   - name: native
     path: integrations/pulp-native
-    summary: A native surface for an editor that brings its own renderer a child NSView backed by a CAMetalLayer with a display-linked frame pump and pointer and key input linking only the platform layer and system frameworks with no view canvas render GPU runtime Skia Dawn Vellum or RmlUi
+    summary: A native surface for an editor that brings its own renderer a child NSView backed by a CAMetalLayer with a display-linked frame pump on macOS and a child window with a GL context on Windows and X11 with pointer and key input linking only the platform layer and system libraries with no view canvas render GPU runtime Skia Dawn Vellum or RmlUi
     status: experimental
     dependencies: [platform]
     docs: reference/modules.md#native
