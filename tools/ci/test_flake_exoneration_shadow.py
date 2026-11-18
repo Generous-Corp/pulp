@@ -154,6 +154,7 @@ class MainLookbackTests(unittest.TestCase):
         ran = {"c2": obs("success"), "c5": obs("failure")}
         e, reads = self.evidence(ran)
         self.assertEqual((e.conclusion, e.read, e.read_sha, e.distance), ("success", True, "c2", 2))
+        self.assertEqual(e.source, "first-parent-ancestor")
         self.assertEqual(reads, ["c1", "c2"])
         r = fes.decide(["Flaky: a"], {"Flaky: a": {"h1", "h2"}}, e)
         self.assertTrue(r["tests"]["Flaky: a"]["would_exonerate"])
@@ -184,6 +185,17 @@ class MainLookbackTests(unittest.TestCase):
     def test_a_red_ancestor_with_an_unreadable_list_is_unknown(self) -> None:
         e, _ = self.evidence({"c1": obs("failure")}, failing=None)
         self.assertEqual((e.conclusion, e.read_sha, e.distance), ("unknown", "c1", 1))
+
+
+class MainSourceTests(unittest.TestCase):
+    def test_tree_identity_evidence_is_not_reported_as_the_tip(self) -> None:
+        o = bpd.SuiteObservation(run_id="5", lane="main", conclusion="success", execution=bpd.EXECUTED,
+                                 head_sha="old", source=bpd.SOURCE_TREE_IDENTITY)
+        e = fes.main_evidence("O/R", observe_fn=lambda r: o)
+        self.assertEqual((e.source, e.read_sha), ("tree-identity", "old"))
+        t = bpd.SuiteObservation(run_id="6", lane="main", conclusion="success", execution=bpd.EXECUTED,
+                                 head_sha="tip", source=bpd.SOURCE_HEAD_SHA)
+        self.assertEqual(fes.main_evidence("O/R", observe_fn=lambda r: t).source, "tip")
 
 
 class ReadFailingTestsTests(unittest.TestCase):

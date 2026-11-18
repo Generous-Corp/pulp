@@ -35,7 +35,11 @@ Two rules keep the verdict from resting on evidence it never read:
   exonerates. The one widening: when the tip's gate did not execute the suite,
   `--main-lookback N` (default 10; 0 = tip only) walks first-parent back, within
   24 h of the tip, to the newest commit whose gate did, and the annotation
-  records that commit (`main_read_sha`) and its distance (`main_distance`).
+  records that commit (`main_read_sha`), its distance (`main_distance`) and
+  `main_source`. The skipped commits between were reuse or skip-safe groups, so
+  the gate's own contract is that they did not change what the suite reads;
+  this shadow does not re-verify that, and the annotation names the commit so
+  a reader can.
 - A deterministic test is never a flake. The `pr-fast` label is the static
   contract tier (tests that read the tree and must be deterministic to join
   it), and `tools/ci/drift_fast.json` names the other tree-reading drift
@@ -176,6 +180,9 @@ class MainEvidence:
     # main's tip it is (0 = the tip itself). Empty when nothing was read.
     read_sha: str = ""
     distance: int = 0
+    # "tip" (the tip's own gate), "tree-identity" (an earlier group that built
+    # the tip's tree; distance does not apply), or "first-parent-ancestor".
+    source: str = ""
 
     @property
     def read(self) -> bool:
@@ -236,7 +243,11 @@ def main_evidence(repo: str, observe_fn=None, failing_fn=None, lookback: int = 0
 
 
 def _judge_obs(repo, obs, failing_fn, sha, distance) -> MainEvidence:
-    where = {"read_sha": sha or obs.head_sha, "distance": distance}
+    if sha:
+        source = "first-parent-ancestor"
+    else:
+        source = "tree-identity" if obs.source == bpd.SOURCE_TREE_IDENTITY else "tip"
+    where = {"read_sha": sha or obs.head_sha, "distance": distance, "source": source}
     if obs.passed:
         return MainEvidence(obs.run_id, "success", **where)
     return _judge_failing(obs, failing_fn(repo, obs.run_id), where)
@@ -318,7 +329,7 @@ def main(argv: list[str]) -> int:
     result.update({"schema": SCHEMA, "mode": "shadow", "failing": len(failing), "window_hours": a.hours,
                    "runs_scanned": len(runs), "main_run_id": main.run_id, "main_conclusion": main.conclusion,
                    "main_evidence_read": main.read, "main_read_sha": main.read_sha,
-                   "main_distance": main.distance, "main_lookback": a.main_lookback, "main_reason": main.reason, "head": a.head})
+                   "main_distance": main.distance, "main_source": main.source, "main_lookback": a.main_lookback, "main_reason": main.reason, "head": a.head})
     would = [n for n, v in result["tests"].items() if v["would_exonerate"]]
     print(f"flake-exoneration shadow: {len(failing)} failing test(s); would exonerate {len(would)} "
           f"(OCCURS_ON_OTHER_CLS: >= {a.min_other_heads} other heads in {a.hours} h and passing on main run "
