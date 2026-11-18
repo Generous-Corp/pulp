@@ -526,6 +526,53 @@ TEST_CASE("XDND root_to_child_local subtracts the child window origin",
     CHECK(q.y == 7.0f);
 }
 
+// ── XDND source: reply validation, version negotiation, pointer tracking ─────
+
+TEST_CASE("xdnd replies apply only from the current target", "[view][dnd][xdnd]") {
+    using namespace pulp::view::xdnd;
+    CHECK(status_is_from_target(42, 42));
+    CHECK(!status_is_from_target(41, 42)); // delayed reply from an earlier target
+    CHECK(!status_is_from_target(0, 0));   // no target yet
+}
+
+TEST_CASE("xdnd finished needs a drop and the current target", "[view][dnd][xdnd]") {
+    using namespace pulp::view::xdnd;
+    CHECK(!finished_outcome(42, 42, false, 5, 1)); // premature
+    CHECK(!finished_outcome(41, 42, true, 5, 1));  // wrong sender
+    CHECK(finished_outcome(42, 42, true, 5, 1) == std::optional<bool>(true));
+    CHECK(finished_outcome(42, 42, true, 5, 0) == std::optional<bool>(false));
+}
+
+TEST_CASE("xdnd older targets finish without the success bit", "[view][dnd][xdnd]") {
+    using namespace pulp::view::xdnd;
+    // Reserved fields are zero before version 5, and that is still a success.
+    CHECK(finished_outcome(42, 42, true, 3, 0) == std::optional<bool>(true));
+    CHECK(finished_outcome(42, 42, true, 4, 0) == std::optional<bool>(true));
+}
+
+TEST_CASE("xdnd versions below the floor are not driven", "[view][dnd][xdnd]") {
+    using namespace pulp::view::xdnd;
+    CHECK(negotiated_version(0) == 0);
+    CHECK(negotiated_version(2) == 0);
+    CHECK(negotiated_version(3) == 3);
+    CHECK(negotiated_version(5) == 5);
+    CHECK(negotiated_version(9) == 5);
+}
+
+TEST_CASE("pointer_change reports movement, release and nothing", "[view][dnd][xdnd]") {
+    using namespace pulp::view::xdnd;
+    const PointerSample down{10, 20, true};
+    CHECK(pointer_change(down, {10, 20, true}) == PointerChange::none);
+    CHECK(pointer_change(down, {11, 20, true}) == PointerChange::moved);
+    CHECK(pointer_change(down, {10, 21, true}) == PointerChange::moved);
+    CHECK(pointer_change(down, {10, 20, false}) == PointerChange::released);
+    // Release wins over movement: the drop goes where the pointer last was.
+    CHECK(pointer_change(down, {50, 60, false}) == PointerChange::released);
+    // A button that was never down cannot be released, and movement still counts.
+    CHECK(pointer_change({10, 20, false}, {10, 20, false}) == PointerChange::none);
+    CHECK(pointer_change({10, 20, false}, {12, 20, false}) == PointerChange::moved);
+}
+
 // ── FileDropZone click-to-browse (cross-platform via FileDialog) ──────────────
 
 namespace {
