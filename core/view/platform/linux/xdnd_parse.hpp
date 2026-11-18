@@ -195,6 +195,12 @@ inline PointerChange pointer_change(const PointerSample& previous, const Pointer
     return PointerChange::none;
 }
 
+// Whether the drag source may clear XdndSelection on teardown: only while it
+// is still the owner. Another client that took the selection mid-drag keeps it.
+inline bool owns_selection(unsigned long current_owner, unsigned long source) {
+    return source != 0 && current_owner == source;
+}
+
 inline int negotiated_version(int advertised) {
     if (advertised < kMinSourceVersion)
         return 0;
