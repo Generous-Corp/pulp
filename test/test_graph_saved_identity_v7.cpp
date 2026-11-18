@@ -810,3 +810,32 @@ TEST_CASE("a failure after a saved document restored leaves no graph and no iden
     REQUIRE(loaded.ok);
     CHECK(loaded.identity_node_ids.size() == 4);
 }
+
+TEST_CASE("a rolled-back first mutation does not reissue the identity it minted",
+          "[host][graph][saved-identity][checkpoint]") {
+    SignalGraph graph;
+    std::string rolled_back;
+    {
+        auto checkpoint = graph.mutation_checkpoint();
+        const auto node = graph.add_gain_node("transient");
+        rolled_back = graph.node(node)->authored_id.str();
+        REQUIRE_FALSE(rolled_back.empty());
+        REQUIRE(graph.remove_node(node));
+        // Released without commit: the checkpoint restores the allocators,
+        // including the per-graph salt that the first mint drew.
+    }
+    const auto next = graph.add_gain_node("kept");
+    CHECK(graph.node(next)->authored_id.str() != rolled_back);
+
+    // Control: a committed mutation keeps its salt, so the next identity is a
+    // different counter value under the same salt.
+    SignalGraph committed;
+    auto first = [&] {
+        auto checkpoint = committed.mutation_checkpoint();
+        const auto node = committed.add_gain_node("a");
+        checkpoint.commit();
+        return committed.node(node)->authored_id.str();
+    }();
+    const auto second = committed.node(committed.add_gain_node("b"))->authored_id.str();
+    CHECK(first != second);
+}

@@ -3,7 +3,7 @@
   "title": "Saved-identity v7 persists an immutable authored ID per graph node",
   "classification": "public_sdk",
   "delivery_state": "pending",
-  "claim_id": "g3-saved-identity-v7-20261116",
+  "claim_id": "g3-saved-identity-v7-20261118",
   "owned_paths": [
     "core/host/include/pulp/host/signal_graph_node.hpp",
     "core/host/src/signal_graph_authoring.cpp",
@@ -19,31 +19,65 @@
   "evidence": [
     {
       "path": "core/host/include/pulp/host/signal_graph_node.hpp",
-      "needles": ["class AuthoredNodeId", "AuthoredNodeId authored_id;"]
+      "needles": [
+        "class AuthoredNodeId",
+        "AuthoredNodeId authored_id;"
+      ]
     },
     {
       "path": "core/host/src/signal_graph_authoring.cpp",
-      "needles": ["SignalGraph::mint_authored_id_locked_", "SignalGraph::push_node_locked_", "SignalGraph::rename_node", "authored_id_salt_without_entropy(address, diagnostic_graph_identity_)"]
+      "needles": [
+        "SignalGraph::mint_authored_id_locked_",
+        "SignalGraph::push_node_locked_",
+        "SignalGraph::rename_node",
+        "authored_id_salt_without_entropy(address, diagnostic_graph_identity_)",
+        "graph_->authored_id_seeded_ = authored_id_seeded_;"
+      ]
     },
     {
       "path": "core/host/src/signal_graph_authored_id_internal.hpp",
-      "needles": ["AuthoredIdSalt authored_id_salt_from(", "std::string authored_id_from_salt("]
+      "needles": [
+        "AuthoredIdSalt authored_id_salt_from(",
+        "std::string authored_id_from_salt("
+      ]
     },
     {
       "path": "core/host/src/spectral_graph.cpp",
-      "needles": ["push_node_locked_(std::move(n));"]
+      "needles": [
+        "push_node_locked_(std::move(n));"
+      ]
     },
     {
       "path": "core/host/src/graph_serializer.cpp",
-      "needles": ["pulp.graph.saved-identity.v7", "GraphSerializer::migrate_saved_document", "plan_authored_ids", "migrated_authored_id"]
+      "needles": [
+        "pulp.graph.saved-identity.v7",
+        "GraphSerializer::migrate_saved_document",
+        "plan_authored_ids",
+        "migrated_authored_id"
+      ]
     },
     {
       "path": "test/test_graph_saved_identity_v7.cpp",
-      "needles": ["a rename keeps the authored ID and diffs as one changed node", "deleting either of two same-named nodes leaves the survivor's ID", "v7 inspection refuses planted identity defects", "v6 migration is deterministic and never guesses continuity", "the entropy-free authored-ID salt separates graphs deterministically"]
+      "needles": [
+        "a rename keeps the authored ID and diffs as one changed node",
+        "deleting either of two same-named nodes leaves the survivor's ID",
+        "v7 inspection refuses planted identity defects",
+        "v6 migration is deterministic and never guesses continuity",
+        "the entropy-free authored-ID salt separates graphs deterministically"
+      ]
     },
     {
       "path": "docs/graph-program-status/G-3-v7-identity-design.md",
-      "needles": ["## Migration v6 to v7", "## Version policy"]
+      "needles": [
+        "## Migration v6 to v7",
+        "## Version policy"
+      ]
+    },
+    {
+      "path": "test/test_graph_saved_identity_v7.cpp",
+      "needles": [
+        "a rolled-back first mutation does not reissue the identity it minted"
+      ]
     }
   ],
   "surfaces": {
@@ -54,12 +88,17 @@
         {
           "kind": "sdk_header",
           "path": "core/host/include/pulp/host/graph_serializer.hpp",
-          "needles": ["static SavedDocumentMigration migrate_saved_document(std::string_view json);", "identity_node_ids"]
+          "needles": [
+            "static SavedDocumentMigration migrate_saved_document(std::string_view json);",
+            "identity_node_ids"
+          ]
         },
         {
           "kind": "test",
           "path": "test/test_graph_saved_identity_v7.cpp",
-          "needles": ["authored IDs survive save, load, NodeId renumbering, undo and redo"]
+          "needles": [
+            "authored IDs survive save, load, NodeId renumbering, undo and redo"
+          ]
         }
       ],
       "authority": {
@@ -76,17 +115,23 @@
         {
           "kind": "cli_handler",
           "path": "tools/cli/cmd_graph.cpp",
-          "needles": ["GraphSerializer::from_saved_document(*graph_ptr, *text, opts)"]
+          "needles": [
+            "GraphSerializer::from_saved_document(*graph_ptr, *text, opts)"
+          ]
         },
         {
           "kind": "test",
           "path": "test/test_cli_graph_code_parity.cpp",
-          "needles": ["graph rewrites migrate a v6 document deterministically and keep v7 IDs"]
+          "needles": [
+            "graph rewrites migrate a v6 document deterministically and keep v7 IDs"
+          ]
         },
         {
           "kind": "cli_definition",
           "path": "tools/cli/cmd_graph.cpp",
-          "needles": ["save: --output path [--saved-identity]"]
+          "needles": [
+            "save: --output path [--saved-identity]"
+          ]
         }
       ],
       "authority": {

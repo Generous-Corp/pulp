@@ -520,18 +520,22 @@ inline HostBlockClock clock_from_au(const AuBlockTiming& timing) noexcept {
 /// A time inside the `AUEventSampleTimeImmediate` window is already an
 /// offset. Any other time is absolute on the `mSampleTime` axis and is placed
 /// relative to the block's rounded `mSampleTime`; without a valid block
-/// sample time such an event cannot be placed and is refused. Offsets before
-/// the block or at/after its frame count are refused with `OutOfRange`,
-/// never clamped.
+/// sample time such an event cannot be placed and is refused. The range rule
+/// is the adapter's own `format::admit_au_event_time()`, so the host accepts
+/// exactly what an AU v3 adapter delivers: offsets before the block, at or
+/// after its frame count, or past the `int32` offset the adapter delivers are
+/// refused with `OutOfRange`, never clamped. `block_time` is written only on
+/// acceptance.
 inline HostEventResult au_event_block_time(std::int64_t event_sample_time,
                                            const AuBlockTiming& timing,
                                            std::uint32_t& block_time) noexcept {
     std::optional<double> block_sample_time;
     if ((timing.timestamp_flags & kAuTimeStampSampleTimeValid) != 0)
         block_sample_time = timing.sample_time;
-    const auto offset = format::detail::au_event_raw_offset(
-        event_sample_time, kAuEventSampleTimeImmediate, block_sample_time);
-    if (!offset || *offset < 0 || *offset >= static_cast<std::int64_t>(timing.frames))
+    format::EventTimeAdmission admission{static_cast<std::int64_t>(timing.frames)};
+    const auto offset = format::admit_au_event_time(admission, event_sample_time,
+                                                    kAuEventSampleTimeImmediate, block_sample_time);
+    if (!offset)
         return HostEventResult::OutOfRange;
     block_time = static_cast<std::uint32_t>(*offset);
     return HostEventResult::Accepted;

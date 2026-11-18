@@ -223,6 +223,9 @@ void descendants() {
 }
 bool init(const clap_plugin_t* p) {
     witness("load");
+    // Holds the vendor load, and so the worker's load report, for this long.
+    if (const char* delay = std::getenv("PULP_G9_LOAD_DELAY_MS"))
+        std::this_thread::sleep_for(std::chrono::milliseconds(std::atoi(delay)));
     if (std::getenv("PULP_G9_CONSTRUCTION_EXIT"))
         std::thread([] {
             std::this_thread::sleep_for(std::chrono::milliseconds(1000));

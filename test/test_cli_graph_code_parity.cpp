@@ -269,9 +269,19 @@ std::string read_text(const std::filesystem::path& path) {
 
 TEST_CASE("every CLI graph code the source emits is documented", "[cli][graph][docs]") {
     const std::filesystem::path root = PULP_CLI_SOURCE_ROOT;
-    const auto source = read_text(root / "tools/cli/cmd_graph.cpp");
+    // `pulp graph` is split across these sources; the scan reads all of them.
+    std::string source;
+    std::string unreadable;
+    for (const char* file :
+         {"cmd_graph.cpp", "cmd_graph_diff.cpp", "cmd_graph_probe.cpp", "cmd_graph_render.cpp"}) {
+        const auto text = read_text(root / "tools/cli" / file);
+        if (text.empty())
+            unreadable += std::string(file) + " ";
+        source += text;
+    }
     const auto doc = read_text(root / "docs/reference/cli.md");
-    REQUIRE_FALSE(source.empty());
+    INFO("unreadable graph sources: " << unreadable);
+    REQUIRE(unreadable.empty());
     REQUIRE_FALSE(doc.empty());
 
     // Only the graph section counts: a generic code such as `saved` must not
