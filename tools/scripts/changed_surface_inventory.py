@@ -1557,6 +1557,13 @@ def _shared_fragment_reason_current(rel: str, texts: dict[str, str]) -> str | No
     unknown = sorted({name for name, _args in invocations} - _CMAKE_LOCAL_COMMANDS)
     if unknown:
         return f"uses {unknown[0]}(), which is not a pure registration command"
+    # An expanded argument can carry any option (message(${MODE}) becoming
+    # FATAL_ERROR, add_executable(x ${OPTS}) becoming IMPORTED GLOBAL), so a
+    # focused fragment names everything literally: no ${...}, $ENV{...},
+    # $CACHE{...}, generator expression or @VAR@ anywhere.
+    for name, args in invocations:
+        if any("$" in arg or re.search(r"@\w+@", arg) for arg in args):
+            return f"{name}() expands a variable, environment value or generator expression"
     owned_tests: set[str] = set()
     for name, args in invocations:
         reason = _registration_call_reason(name, args)
@@ -1578,8 +1585,6 @@ def _shared_fragment_reason_current(rel: str, texts: dict[str, str]) -> str | No
 
 def _test_property_reason(pairs: list[str]) -> str | None:
     """Why a `name value ...` property list may affect more than its own test."""
-    if any("${" in arg or "@" in arg for arg in pairs):
-        return "builds test properties from variables"
     if len(pairs) % 2:
         return "test properties are not name/value pairs"
     for name in pairs[0::2]:

@@ -906,6 +906,25 @@ class RegistrationFragments(unittest.TestCase):
             "mixed": f"{reg}set_tests_properties(knob PROPERTIES TIMEOUT 5 DEPENDS other)\n",
         })
 
+    def test_expanded_arguments_stay_global(self) -> None:
+        reg = "add_executable(pulp-test-knob test/test_knob.cpp)\n"
+        self._assert_local({"literal": reg})
+        self._assert_all({
+            "message-mode": "message(${MODE} oops)\n",
+            "message-env": "message($ENV{MODE} oops)\n",
+            "message-cache": "message($CACHE{MODE} oops)\n",
+            "message-generator": "message($<CONFIG> oops)\n",
+            "message-quoted": "message(\"${MODE}\" oops)\n",
+            "executable-options": "add_executable(pulp-test-knob ${OPTS} test/test_knob.cpp)\n",
+            "executable-sources": "add_executable(pulp-test-knob ${KNOB_SOURCES})\n",
+            "library-type": "add_library(pulp-fixture-knob ${TYPE} test/a.cpp)\n",
+            "test-command": "add_test(NAME knob COMMAND $<TARGET_FILE:pulp-test-knob>)\n",
+            "suite-options": "pulp_add_test_suite(pulp-test-knob ${SUITE_OPTS})\n",
+            "discover-options": "catch_discover_tests(pulp-test-knob ${DISCOVER_OPTS})\n",
+            "properties": "add_test(NAME knob COMMAND x)\nset_tests_properties(knob PROPERTIES ${P})\n",
+            "configure-substitution": "message(@MODE@ oops)\n",
+        })
+
     def test_only_non_fatal_message_modes_stay_local(self) -> None:
         self._assert_local({mode: f"message({mode} hello)\n" for mode in
                             ("STATUS", "VERBOSE", "DEBUG", "TRACE", "NOTICE", "CHECK_START",
