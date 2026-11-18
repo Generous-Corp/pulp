@@ -1520,6 +1520,7 @@
       "pulp/view/param_subscription.hpp",
       "pulp/view/parameter_binding.hpp",
       "pulp/view/pending_damage.hpp",
+      "pulp/view/platform/atspi_geometry.hpp",
       "pulp/view/platform/atspi_mapping.hpp",
       "pulp/view/platform/ns_role_mapping.hpp",
       "pulp/view/platform/uia_mapping.hpp",
