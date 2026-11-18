@@ -227,7 +227,9 @@ by the whole host block and marks the next `run()` discontinuous.
   frame 0. `run()` checks `format::lv2_sequence_unit_is_frames()` and refuses
   every MIDI event of another unit, counting it on `ctx.timing.refused_events`;
   a frame time outside the rendered block is refused the same way, never
-  clamped.
+  clamped. A refused time may be a release the count cannot identify, so
+  `refused_event_reset_pending` makes the next `run()` carry
+  `ctx.reset_requested`, as the other adapters do.
 - **Every property is optional.** A bare sample transport sends `time:frame`
   and `time:speed` and nothing musical. Carry presence per field so a consumer
   can tell "the host did not say" from "the host said 120". LV2's time

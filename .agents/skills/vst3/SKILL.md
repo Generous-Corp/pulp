@@ -739,7 +739,7 @@ samples. Coverage: `test_vst3_process_timing.cpp`.
 Note, poly pressure, note expression (MPE on), SysEx and `IMidiMapping`
 controller offsets all go through `event_admission_` (a
 `format::EventTimeAdmission`, reset per block after the max-block clamp) before
-they reach `midi_in_`. an out-of-block time is refused and counted on `ctx.timing.refused_events`, never clamped, and the bound is the rendered frame count, so an event in the unrendered tail of an oversized block is refused too.
+they reach `midi_in_`. an out-of-block time is refused and counted on `ctx.timing.refused_events`, never clamped, and the bound is the rendered frame count, so an event in the unrendered tail of an oversized block is refused too. A refused time may be a release the count cannot identify, so `refused_event_reset_pending_` makes the next block the Processor observes carry `ctx.reset_requested` and a fresh `mpe_` tracker. The pending flag is ORed in before the state-restore gate (a contended block keeps it) and replaced with this block's refusal only after a Processor call; the MPE reset sits before `mpe_.run()`, never before decode, so the next block's own notes are still tracked.
 
 **If you teach `build_process_context` a new `kXxxValid` bit, add its
 `kNeed*` flag in the same change.** The test *VST3 requests every
