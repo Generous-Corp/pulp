@@ -24,7 +24,9 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <span>
+#include <utility>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -300,6 +302,7 @@ struct Lv2ProbeCapture {
     std::array<std::int32_t, 16> midi_offsets{};
     std::size_t midi_offset_count = 0;
     std::uint32_t refused_events = 0;
+    bool reset_requested = false;
 
     void reset() { *this = {}; }
 };
@@ -358,6 +361,7 @@ public:
         g_lv2_probe.gain_seen_in_process =
             state().get_value(kLv2ProbeGainParam);
         g_lv2_probe.refused_events = context.timing.refused_events;
+        g_lv2_probe.reset_requested = context.reset_requested;
         g_lv2_probe.midi_offset_count = 0;
         for (const auto& ev : midi_in)
             if (g_lv2_probe.midi_offset_count < g_lv2_probe.midi_offsets.size())
@@ -2301,6 +2305,64 @@ TEST_CASE("LV2 run() refuses MIDI times outside the block, never clamping them",
     REQUIRE(run_lv2_midi_block({-1, 0, 63, 64, std::int64_t{1} << 40}, nullptr, 64) ==
             std::vector<std::int32_t>{0, 63});
     REQUIRE(g_lv2_probe.refused_events == 3);
+}
+
+TEST_CASE("LV2 run() requests a reset after refusing a MIDI time so no release is lost",
+          "[format][lv2][offsets][reset]") {
+    Lv2FactoryGuard factory(&make_lv2_entry_probe);
+    Lv2FeatureBundle features;
+    Lv2HandleGuard handle{
+        lv2_generic::instantiate(&lv2_generic::g_lv2_descriptor, 44100.0, "", features.features)};
+    REQUIRE(handle.handle != nullptr);
+    auto* inst = static_cast<PulpLv2Instance*>(handle.handle);
+    constexpr std::uint32_t frames = 64;
+    std::vector<float> input(frames), output(frames);
+    float gain = 1.0f;
+    LV2SequenceBuffer midi_in;
+    LV2SequenceBuffer midi_out;
+    lv2_generic::connect_port(handle.handle, 0, input.data());
+    lv2_generic::connect_port(handle.handle, 1, output.data());
+    lv2_generic::connect_port(handle.handle, 2, &gain);
+    lv2_generic::connect_port(handle.handle, 3, midi_in.as_seq());
+    lv2_generic::connect_port(handle.handle, 4, midi_out.as_seq());
+    lv2_generic::activate(handle.handle);
+    // One block: a note-on in the block, then its release at `off_time`.
+    const auto run_block = [&](std::optional<std::int64_t> off_time) {
+        const uint32_t capacity = prepare_sequence(midi_in, inst->urid_atom_sequence);
+        midi_out.prepare_as_output_port();
+        if (off_time) {
+            for (const auto& [time, status] :
+                 {std::pair<std::int64_t, std::uint8_t>{0, 0x90}, {*off_time, 0x80}}) {
+                struct alignas(8) {
+                    LV2_Atom_Event hdr;
+                    uint8_t payload[3];
+                } pkt{};
+                pkt.hdr.time.frames = time;
+                pkt.hdr.body.type = inst->urid_midi_event;
+                pkt.hdr.body.size = 3;
+                pkt.payload[0] = status;
+                pkt.payload[1] = 60;
+                pkt.payload[2] = status == 0x90 ? 100 : 0;
+                REQUIRE(lv2_atom_sequence_append_event(midi_in.as_seq(), capacity, &pkt.hdr));
+            }
+        }
+        lv2_generic::run(handle.handle, frames);
+    };
+
+    run_block(frames);
+    CHECK(g_lv2_probe.refused_events == 1);
+    CHECK_FALSE(g_lv2_probe.reset_requested);
+    // The next block carries the reset once.
+    run_block(std::nullopt);
+    CHECK(g_lv2_probe.reset_requested);
+    run_block(std::nullopt);
+    CHECK_FALSE(g_lv2_probe.reset_requested);
+    // Negative control: an in-block release requests no reset.
+    run_block(frames - 1);
+    CHECK(g_lv2_probe.refused_events == 0);
+    run_block(std::nullopt);
+    CHECK_FALSE(g_lv2_probe.reset_requested);
+    lv2_generic::deactivate(handle.handle);
 }
 
 TEST_CASE("LV2 run() reads event times as frames only in a frame-unit sequence",

@@ -2203,6 +2203,14 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         // prefix: the tail is a skip the next block must acknowledge.
         self->timing_block_skipped = num_samples < original_num_samples;
     }
+    if (event_admission.refused != 0) {
+        // A refused event may have been a release (a note-off at or past the
+        // end, or in the unrendered tail), and the count cannot say which
+        // voice it was for. Reset both owners on the next rendered block, as
+        // for a dropped stateful event, so no voice stays held beyond it.
+        self->sidecar_reconcile_requested = true;
+        self->reset_requested = true;
+    }
 
     clap_phase_clear_constant_mask(process);
 

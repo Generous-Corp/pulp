@@ -59,7 +59,9 @@ public:
           show_(show),
           close_(close),
           unref_(unref) {
-        init_("pulp");
+        // notify_init returns FALSE when it cannot reach a notification
+        // service; the backend then reports itself unavailable.
+        initialized_ = init_("pulp") != 0;
     }
 
     ~LibNotifyBackend() override {
@@ -71,7 +73,9 @@ public:
         live_.clear();
     }
 
-    bool is_available() const override { return true; }
+    bool is_available() const override {
+        return initialized_;
+    }
 
     std::string backend_id() const override { return "libnotify"; }
 
@@ -102,7 +106,15 @@ public:
         const auto string_id = notification.id.empty()
                                    ? "pulp-notif-" + std::to_string(numeric_id)
                                    : notification.id;
-        live_.emplace(string_id, handle);
+        // A repeated id replaces the earlier notification: the earlier one is
+        // closed and released, so every shown notification stays reachable
+        // through cancel_notification / cancel_all until it is replaced.
+        auto [it, inserted] = live_.try_emplace(string_id, handle);
+        if (!inserted) {
+            close_(it->second, nullptr);
+            unref_(it->second);
+            it->second = handle;
+        }
         return numeric_id;
     }
 
@@ -142,6 +154,7 @@ private:
     std::unordered_map<std::string, NotifyNotificationOpaque*> live_;
     std::atomic<uint64_t> next_id_{1};
     NotificationHandler handler_;
+    bool initialized_ = false;
 };
 
 struct LibNotifyBootstrap {
@@ -159,8 +172,12 @@ struct LibNotifyBootstrap {
         auto unref = reinterpret_cast<GObjectUnrefFn>(gobject.find_symbol("g_object_unref"));
         if (!init || !make || !show || !close || !unref) return;
 
-        install_push_notifications_backend(std::make_unique<LibNotifyBackend>(
-            std::move(lib), std::move(gobject), init, make, show, close, unref));
+        auto backend = std::make_unique<LibNotifyBackend>(std::move(lib), std::move(gobject), init,
+                                                          make, show, close, unref);
+        // Leave the fallback in place when libnotify could not initialize.
+        if (!backend->is_available())
+            return;
+        install_push_notifications_backend(std::move(backend));
     }
 };
 

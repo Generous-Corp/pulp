@@ -131,6 +131,73 @@ class MainEvidenceTests(unittest.TestCase):
         self.assertEqual(self.evidence(None).conclusion, "unknown")
 
 
+class MainLookbackTests(unittest.TestCase):
+    """The tip's gate was a reuse: read the newest first-parent ancestor that ran the suite."""
+
+    # tip c0 -> c1 -> c2 -> c3 ... first-parent chain, one hour apart
+    CHAIN = {f"c{i}": (f"c{i + 1}", NOW - dt.timedelta(hours=i)) for i in range(0, 30)}
+
+    def evidence(self, ran: dict, lookback: int = 10, hours: int = 24, failing=None):
+        reads: list[str] = []
+
+        def head_obs(repo, sha):
+            reads.append(sha)
+            return ran.get(sha)
+
+        e = fes.main_evidence("O/R", observe_fn=lambda r: obs("success", execution=bpd.NOT_EXECUTED),
+                              failing_fn=lambda r, rid: failing, lookback=lookback, lookback_hours=hours,
+                              tip_fn=lambda r: "c0", step_fn=lambda r, sha: self.CHAIN.get(sha),
+                              head_obs_fn=head_obs)
+        return e, reads
+
+    def test_reuse_tip_reads_the_newest_ancestor_that_ran_the_suite(self) -> None:
+        ran = {"c2": obs("success"), "c5": obs("failure")}
+        e, reads = self.evidence(ran)
+        self.assertEqual((e.conclusion, e.read, e.read_sha, e.distance), ("success", True, "c2", 2))
+        self.assertEqual(e.source, "first-parent-ancestor")
+        self.assertEqual(reads, ["c1", "c2"])
+        r = fes.decide(["Flaky: a"], {"Flaky: a": {"h1", "h2"}}, e)
+        self.assertTrue(r["tests"]["Flaky: a"]["would_exonerate"])
+
+    def test_no_commit_in_bounds_that_ran_the_suite_is_unknown(self) -> None:
+        # beyond 10 commits, beyond 24 h, and with lookback 0 nothing is read
+        e, _ = self.evidence({"c11": obs("success")})
+        self.assertEqual(e.conclusion, "unknown")
+        self.assertIn("no commit within 10", e.reason)
+        e, _ = self.evidence({"c8": obs("success")}, hours=5)
+        self.assertEqual(e.conclusion, "unknown")
+        e, reads = self.evidence({"c1": obs("success")}, lookback=0)
+        self.assertEqual((e.conclusion, reads), ("unknown", []))
+
+    def test_walk_follows_only_first_parent_links(self) -> None:
+        e, reads = self.evidence({"c9": obs("success")})
+        self.assertEqual(reads, [f"c{i}" for i in range(1, 10)])
+        self.assertEqual(e.read_sha, "c9")
+
+    def test_an_executed_but_unfinished_tip_is_not_walked(self) -> None:
+        reads: list[str] = []
+        e = fes.main_evidence("O/R", observe_fn=lambda r: obs("", execution=bpd.EXECUTED),
+                              lookback=10, tip_fn=lambda r: "c0",
+                              step_fn=lambda r, sha: self.CHAIN.get(sha),
+                              head_obs_fn=lambda r, sha: reads.append(sha))
+        self.assertEqual((e.conclusion, reads), ("unknown", []))
+
+    def test_a_red_ancestor_with_an_unreadable_list_is_unknown(self) -> None:
+        e, _ = self.evidence({"c1": obs("failure")}, failing=None)
+        self.assertEqual((e.conclusion, e.read_sha, e.distance), ("unknown", "c1", 1))
+
+
+class MainSourceTests(unittest.TestCase):
+    def test_tree_identity_evidence_is_not_reported_as_the_tip(self) -> None:
+        o = bpd.SuiteObservation(run_id="5", lane="main", conclusion="success", execution=bpd.EXECUTED,
+                                 head_sha="old", source=bpd.SOURCE_TREE_IDENTITY)
+        e = fes.main_evidence("O/R", observe_fn=lambda r: o)
+        self.assertEqual((e.source, e.read_sha), ("tree-identity", "old"))
+        t = bpd.SuiteObservation(run_id="6", lane="main", conclusion="success", execution=bpd.EXECUTED,
+                                 head_sha="tip", source=bpd.SOURCE_HEAD_SHA)
+        self.assertEqual(fes.main_evidence("O/R", observe_fn=lambda r: t).source, "tip")
+
+
 class ReadFailingTestsTests(unittest.TestCase):
     def patch(self, listing, blob):
         saved = (bpd.gh, bpd.gh_bytes)
