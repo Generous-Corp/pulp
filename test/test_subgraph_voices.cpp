@@ -489,7 +489,8 @@ TEST_CASE("planted voice declaration refusals leave the graph untouched",
         SignalGraph graph;
         auto expansion = instantiate_subgraph_voices(graph, with_extra, "pad", 2);
         REQUIRE(expansion);
-        const auto document = to_saved_subgraph_document(graph, {}, std::span(&expansion.bank, 1), {});
+        const auto document =
+            to_saved_subgraph_document(graph, {}, std::span(&expansion.bank, 1), {});
         REQUIRE_FALSE(document.empty());
         const auto shortened = edit_records(document, [](choc::value::Value& r) {
             auto copy = choc::value::createEmptyArray();
@@ -564,8 +565,8 @@ TEST_CASE("voice banks diff and undo by authored identity", "[subgraph][voices][
     auto state = voice.save_state();
     state.parameters.at("gain") = 1.5f;
     REQUIRE(restore_subgraph_state(restored, voice, state));
-    const auto edited =
-        diff_graph_documents(resaved, to_saved_subgraph_document(restored, {}, loaded.voice_banks, {}));
+    const auto edited = diff_graph_documents(
+        resaved, to_saved_subgraph_document(restored, {}, loaded.voice_banks, {}));
     REQUIRE(edited.ok());
     REQUIRE(edited.nodes_changed.size() == 1);
     CHECK(edited.nodes_changed[0].identity == restored.node(voice.nodes[0])->authored_id.str());
