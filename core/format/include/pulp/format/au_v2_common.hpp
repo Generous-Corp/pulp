@@ -289,9 +289,9 @@ inline void apply_host_callbacks_to_process_context(ProcessContext& ctx, const a
             // A finite beat and tempo can still overflow the advance to
             // infinity; the beat is then unknown rather than a non-finite
             // value handed to playhead consumers.
-            const double advanced =
-                ctx.position_beats +
-                static_cast<double>(slice_offset) * ctx.tempo_bpm / (60.0 * ctx.sample_rate);
+            const double advanced = ctx.position_beats + static_cast<double>(slice_offset) *
+                                                             ctx.tempo_bpm /
+                                                             (60.0 * ctx.sample_rate);
             if (std::isfinite(advanced))
                 ctx.position_beats = advanced;
             else
